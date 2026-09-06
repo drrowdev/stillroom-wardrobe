@@ -4,16 +4,20 @@ instructions and the root file must not be replaced by historical templates.
 The root instructions now include the active cloud handoff; do not overwrite
 them with older templates. Continue in a feature branch/PR using the prepared
 Copilot cloud environment. Read `docs/cloud-development.md`, finish the
-approved Phase 0 I01–I05 packet on existing PR #1 and do not open another PR,
-push to main, auto-merge or start later phases.
+approved Phase 0 hosted-readiness packet on PR #2
+(`copilot/phase0-hosted-backend-deployment`). Updated 6 September 2026:
+PR #1 is merged; do not reopen it. Do not push to main, auto-merge or start
+later phases.
 
 Follow the root context/planning gate: read current instructions, phase/backend
 evidence, relevant blueprint/work packets, actual schema/source/tests and PR
 discussion/diff/reviews/CI logs; record exact base/head, files read and gates.
 Plan before edits. Obtain actual different-provider critique and record its
 reviewer/provider/model, findings and amendments; coordinator approval precedes
-implementation. Material amendments repeat that gate. PR comments `5558504250`
-and `5558542193` record the current plan and Anthropic Claude Opus 5 prereview.
+implementation. Material amendments repeat that gate. PR #2 comment
+`5559949209` records the current approved plan and actual Anthropic Claude
+Opus 5 critique; `5559976584` records hosted structural results. PR #1 comments
+`5558504250` and `5558542193` remain historical evidence, not the active target.
 
 Implementation must explicitly select GPT-6 Astra (`gpt-6-astra`); the
 coordinator verifies the actual runtime/platform model, not merely the prompt.

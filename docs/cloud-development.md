@@ -28,7 +28,24 @@ state, test results or logs into a commit. These are ignored. The test wrapper
 passes ordinary fictional credentials to its child processes and strips
 privileged/GitHub credentials.
 
-## Active cloud task: finish Phase 0 on PR #1
+## Active cloud task: Phase 0 hosted readiness on PR #2
+
+Updated 6 September 2026: PR #1 was merged with the user's approval at
+`f696ee45e5dfe46be90cbc295a9811ec1d34a298`. The user subsequently requested
+autonomous continuation toward the complete app and authorized the dedicated
+Stockholm backend. Continue the reviewed source/document packet on PR #2,
+`copilot/phase0-hosted-backend-deployment`, under plan approval comment
+`5559949209` after actual Anthropic Claude Opus 5 critique.
+
+The coordinator installed the exact reviewed base SQL in the approved project;
+comment `5559976584` records the migration/hash and structural observations.
+The cloud agent does not receive hosted credentials or run hosted writes.
+Hosted Auth configuration, private owner admission, website deployment,
+ordinary-session hosted smoke and physical-device checks are separate gates.
+No paid app AI, later phase or merge is authorized. Cloudflare access is now
+connected to the coordinator, not inherited by the cloud worker.
+
+## Historical foundation and PR #1 continuation
 
 The initial push is **work in progress**, not a completed Phase 0 release.
 Read `docs/phase-0-result.md`, the root agent instructions and the blueprint.
@@ -43,13 +60,13 @@ Supabase job `101466868242` (start/reset, ordinary integration/security, actual
 type generation and tracked-file/diff parity). Earlier sandbox workarounds are
 historical, not a current failed CI gate; retain them in the result document.
 
-The focused continuation follows [plan comment 5558504250](https://github.com/drrowdev/stillroom-wardrobe/pull/1#issuecomment-5558504250)
+The completed PR #1 continuation followed [plan comment 5558504250](https://github.com/drrowdev/stillroom-wardrobe/pull/1#issuecomment-5558504250)
 and [approval/amendments 5558542193](https://github.com/drrowdev/stillroom-wardrobe/pull/1#issuecomment-5558542193):
 different-owner SDK broadcast regressions, bounded exact-token correction,
 unapproved email admission checks, accurate provider/evidence documentation,
-and persistent coordination rules. No schema, Auth configuration values,
-setup workflow or phase expansion is authorized. Require fresh full CI for the
-new head; baseline success is not transferable evidence or merge approval.
+and persistent coordination rules. That historical packet did not authorize
+schema, Auth configuration values, setup workflow or phase expansion. Its
+baseline success is not transferable evidence or merge approval for PR #2.
 
 Prepared setup in agent run `34026811034`, job `101469132212`, completed the
 locked install, Chromium, standard local start/reset/provision and actual type
@@ -79,10 +96,13 @@ and scan. It is a leak-detection fixture, never a production credential.
 
 ## Delivery rules
 
-Continue the existing feature branch/PR #1, not a new PR or direct pushes to
+Continue the current feature branch/PR #2; do not reopen merged PR #1 or push to
 `main`. **Every merge needs explicit user approval**, separately from plan,
 code-review and CI approval. Never auto-merge. Finish Phase 0 only; do not start Phase 1, AI tagging, outfits,
-calendar, production provisioning or paid services in the same task.
+calendar, unapproved production provisioning or paid services in the same task.
+Only the coordinator's explicitly approved initialization of the dedicated
+AI Wardrobe project is allowed; the source worker must not access hosted
+credentials or run the local fixture/reset tools against that project.
 
 Each later phase is a separately scoped cloud task after its predecessor's
 exit evidence is reviewed. Keep the photo-first, editable draft and explicit
@@ -97,7 +117,7 @@ Before every implementation packet:
 2. Write a focused plan before edits. Obtain an actual different-provider,
    read-only critique; record provider/model, findings and amendments. The
    current plan was reviewed by **Anthropic Claude Opus 5**, as recorded by the
-   coordinator in comment `5558542193`. Automated validation/self-review is
+   coordinator in PR #2 comment `5559949209`. Automated validation/self-review is
    supplemental, not that prereview; do not invent a native review tool.
 3. Coordinator approval of the amended plan precedes code. Explicitly select
    **GPT-6 Astra (`gpt-6-astra`)** and verify the actual implementation model

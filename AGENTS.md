@@ -1,9 +1,11 @@
 # Stillroom Wardrobe coding-agent rules
 
 Development continues in GitHub Copilot cloud sessions. Read
-`docs/cloud-development.md` and `docs/phase-0-result.md` first. Continue Phase 0
-I01–I05 on existing PR #1, `copilot/finish-phase-0-stillroom-wardrobe`; do not
-open another PR, push directly to main, merge or begin the next phase. The setup workflow may leave
+`docs/cloud-development.md` and `docs/phase-0-result.md` first. Updated
+6 September 2026: PR #1 is merged. The current user-approved packet is Phase 0
+hosted readiness on PR #2, `copilot/phase0-hosted-backend-deployment`.
+Do not reopen PR #1, push directly to main, merge or begin the next phase.
+The setup workflow may leave
 generated schema types untracked; review/commit those deliberately, never
 local credentials, service state or test artifacts.
 
@@ -34,9 +36,13 @@ Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `
    plan/code/CI approval. Never auto-merge or push directly to main. Complete
    fresh-head validation and report blocked/pending checks honestly.
 
-The approved Phase 0 continuation is PR comments `5558504250` (plan) and
-`5558542193` (coordinator approval after Anthropic Claude Opus 5 critique).
-Read both before continuing that packet. This approval is not merge approval.
+The former PR #1 plan/approval comments `5558504250` and `5558542193` are
+historical evidence. The current PR #2 packet is approved in comment
+`5559949209`, after actual Anthropic Claude Opus 5 critique; hosted structural
+results are recorded in `5559976584`. Read these before work. The coordinator
+may initialize only the approved AI Wardrobe backend; the cloud agent receives
+no hosted credentials and implements only the reviewed source/document packet.
+This approval is not merge approval or permission for paid AI/later phases.
 
 * Latest user instruction: accounts are completely independent. No household, partner relation, sharing, recipient columns, user directory, cross-account references or mixed recommendations. Do not implement these as deferred work.
 * One TypeScript/React/Vite PWA, Supabase Auth/Postgres/private Storage and static hosting. Automatic paid photo tagging is first-release I29 scope; outfits remain deterministic. No native app, AI stylist, SSR or unrelated service/package.
