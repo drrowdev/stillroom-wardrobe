@@ -27,7 +27,8 @@ enabled = false
 enabled = false
 
 [inbucket]
-enabled = false
+enabled = true
+port = 54324
 
 [storage]
 enabled = true
@@ -48,7 +49,8 @@ minimum_password_length = 24
 # including password sign-in and recovery/OTP/magic links subject to configuration
 # and delivery prerequisites, not a password-only switch. Phase 0 has password UI
 # only; detectSessionInUrl=false does not disable backend email endpoints.
-# Inbucket is disabled: no mail delivery or completed recovery is claimed.
+# Inbucket is configured for approved local recovery validation.
+# Enabling it does not prove mail delivery or completed recovery.
 # [auth] enable_signup=false, anonymous-sign-in denial and admission/RLS remain.
 enable_signup = true
 double_confirm_changes = true
