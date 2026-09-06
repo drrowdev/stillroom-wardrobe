@@ -19,7 +19,7 @@ describe('per-tab stored session guard', () => {
   it('preserves the unparseable JSON policy', () => {
     expect(holdsStoredSession('unparseable', 'own-token')).toBe(true);
   });
-  it.each(['null', '{}', '[]', '{"access_token":42}'])('preserves the missing/non-string access_token policy: %s', (stored) => {
+  it.each(['null', '{}', '[]', '"text"', '42', 'true', '{"access_token":42}'])('preserves the missing/non-string access_token policy: %s', (stored) => {
     expect(holdsStoredSession(stored, 'own-token')).toBe(true);
   });
 });

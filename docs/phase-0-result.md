@@ -68,8 +68,10 @@ These successes apply to their recorded heads, not automatically to later code.
 
 ## Approved continuation and current results
 
-Implementation commit: `46f61805d46a6622a50c41b32cc6aa31d953f2f8`; subsequent
-review-only test-label/type annotations do not change runtime behavior.
+Initial implementation commit: `46f61805d46a6622a50c41b32cc6aa31d953f2f8`;
+evidence/review clarification commit: `bfe3bd124c939977cf438d29bec3ca26ab34e425`.
+Subsequent explicit `unknown` narrowing preserves the same parsed-token policy
+and adds primitive-JSON regression cases. Final head is recorded in PR replies.
 Scope: I01–I05; R01/R02/R04/R11/R12/R19/R23/R26/R27.
 The implementation agent was explicitly selected and its runtime reported
 `gpt-6-astra`; this does not attest the coordinator's model. Both
@@ -118,10 +120,10 @@ Commands ran from the repository root; outcomes are not mock/live equivalents:
 | `npm run lint` | Exit 0 |
 | `npm run typecheck` | Exit 0 after correcting new fixture types for the existing compiler target |
 | `npm run check:translations` | Exit 0; 299 keys, en/fi/sv, 23 UI source files |
-| `npm run test:unit` | Exit 0; 120 tests, seven files |
+| `npm run test:unit` | Exit 0; initially 120, finally **123 tests**, seven files, including all 15 guard cases |
 | `npm run test:browser` | First full run exit 1 (43 passed, accessibility failed); isolated rerun exit 0, 44 passed without retries |
-| `npm run test:a11y` | Exit 0 only after retries; **two flaky cases**, not clean accessibility acceptance |
-| `npm run build` | Exit 0; compressed JavaScript 140.88 kB |
+| `npm run test:a11y` | Initial exit 0 only after retries (**two flaky cases**); final sequential run exit 0, two passed without retries; earlier finding remains |
+| `npm run build` | Exit 0; compressed JavaScript initially 140.88 kB, finally 140.89 kB |
 | `npm run scan:secrets` | Exit 0; 126 text files, ephemeral canary checked |
 | `npm run check:dependencies` | Exit 0; 12 production / 220 development packages, no reported production vulnerabilities |
 | `npm run db:start` | Exit 0, before and after the reset attempt |
@@ -160,7 +162,12 @@ completion replies; any later documentation commit also requires its own CI.
 Automated parallel validation reported **zero CodeQL alerts**. Its two
 non-behavioral review suggestions (separate missing-token test labels and
 explicit held-request array type) were incorporated; static typing had already
-passed. No finding justified a broader authentication rewrite.
+passed. A subsequent review requested explicit `unknown` narrowing of parsed
+JSON; that preserves the same policy and is covered by three additional
+primitive-JSON cases. Afterward the complete static/unit/build/canary/dependency,
+44-browser and two-a11y gates were run sequentially, all exit 0. No finding
+justified a broader authentication rewrite, and later passes do not erase the
+recorded loading-state issue or blocked live-backend gates.
 
 Context actually consulted included active instructions and all three handoff
 documents; blueprint `00`, `02`, `03`, `05`, full `07`, `08`, `10`, `12`, `13`,
