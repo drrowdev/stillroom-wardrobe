@@ -70,8 +70,9 @@ These successes apply to their recorded heads, not automatically to later code.
 
 Initial implementation commit: `46f61805d46a6622a50c41b32cc6aa31d953f2f8`;
 evidence/review clarification commit: `bfe3bd124c939977cf438d29bec3ca26ab34e425`.
-Subsequent explicit `unknown` narrowing preserves the same parsed-token policy
-and adds primitive-JSON regression cases. Final head is recorded in PR replies.
+Code head `29ad6f0475b4facab9754f7732792f790f2d4f40` adds explicit `unknown`
+narrowing and primitive-JSON regression cases while preserving the same
+parsed-token policy. The final documentation head is recorded in PR replies.
 Scope: I01–I05; R01/R02/R04/R11/R12/R19/R23/R26/R27.
 The implementation agent was explicitly selected and its runtime reported
 `gpt-6-astra`; this does not attest the coordinator's model. Both
@@ -168,6 +169,15 @@ primitive-JSON cases. Afterward the complete static/unit/build/canary/dependency
 44-browser and two-a11y gates were run sequentially, all exit 0. No finding
 justified a broader authentication rewrite, and later passes do not erase the
 recorded loading-state issue or blocked live-backend gates.
+
+Final automated validation of code head `29ad6f0` again found zero CodeQL
+alerts. Its remaining review comment recommends denying malformed/non-string
+token payloads instead of preserving their fallback policy. This conflicts
+with explicit amendment 2 in approval `5558542193`; it was **not implemented**.
+Absent/empty storage already returns false and is tested separately. Changing
+the other fallback cases needs renewed different-provider critique and
+coordinator approval, not an unapproved authentication change or a claim of
+a proven RLS leak. This review disposition remains visible for the coordinator.
 
 Context actually consulted included active instructions and all three handoff
 documents; blueprint `00`, `02`, `03`, `05`, full `07`, `08`, `10`, `12`, `13`,
