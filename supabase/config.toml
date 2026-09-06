@@ -44,7 +44,10 @@ enable_manual_linking = false
 minimum_password_length = 24
 
 [auth.email]
-enable_signup = false
+# The CLI maps this flag to GOTRUE_EXTERNAL_EMAIL_ENABLED, which governs email
+# password sign-in as well as sign-up. Self-service registration stays closed
+# through [auth] enable_signup = false and the database admission trigger.
+enable_signup = true
 double_confirm_changes = true
 enable_confirmations = true
 secure_password_change = true
