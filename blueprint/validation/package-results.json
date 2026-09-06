@@ -1,0 +1,115 @@
+{
+  "scope": "Static package consistency only",
+  "checks": [
+    {
+      "name": "All 21 requested files exist, including the Copilot instruction template",
+      "result": "PASS"
+    },
+    {
+      "name": "Markdown fences and named blueprint file references are valid",
+      "result": "PASS"
+    },
+    {
+      "name": "28 issue packets have complete fields, acyclic ordering and an explicit optional Phase 8 boundary",
+      "result": "PASS"
+    },
+    {
+      "name": "All 27 requirements map through screens/data/operations to an issue and an assigned test path",
+      "result": "PASS"
+    },
+    {
+      "name": "The standalone first prompt is exact; all nine phases have a prompt",
+      "result": "PASS"
+    },
+    {
+      "name": "Research ledger contains exactly 12 unique public sources and its access date",
+      "result": "PASS"
+    },
+    {
+      "name": "Product/SQL/agent templates and reference code contain no reference-product brand",
+      "result": "PASS"
+    },
+    {
+      "name": "Twelve specified text/action/focus/input colour pairings meet their contrast thresholds",
+      "result": "PASS"
+    },
+    {
+      "name": "The 12-factor platform comparison totals are correct",
+      "result": "PASS"
+    }
+  ],
+  "contrast": [
+    {
+      "foreground": "#24332E",
+      "background": "#F6F3ED",
+      "ratio": 11.94,
+      "minimum": 4.5
+    },
+    {
+      "foreground": "#59665F",
+      "background": "#F6F3ED",
+      "ratio": 5.43,
+      "minimum": 4.5
+    },
+    {
+      "foreground": "#24332E",
+      "background": "#FFFFFF",
+      "ratio": 13.22,
+      "minimum": 4.5
+    },
+    {
+      "foreground": "#59665F",
+      "background": "#FFFFFF",
+      "ratio": 6.02,
+      "minimum": 4.5
+    },
+    {
+      "foreground": "#FFFFFF",
+      "background": "#355D4E",
+      "ratio": 7.43,
+      "minimum": 4.5
+    },
+    {
+      "foreground": "#FFFFFF",
+      "background": "#294B3E",
+      "ratio": 9.68,
+      "minimum": 4.5
+    },
+    {
+      "foreground": "#FFFFFF",
+      "background": "#A45E45",
+      "ratio": 4.92,
+      "minimum": 4.5
+    },
+    {
+      "foreground": "#A33232",
+      "background": "#F6F3ED",
+      "ratio": 6.2,
+      "minimum": 4.5
+    },
+    {
+      "foreground": "#176B73",
+      "background": "#F6F3ED",
+      "ratio": 5.6,
+      "minimum": 3
+    },
+    {
+      "foreground": "#176B73",
+      "background": "#FFFFFF",
+      "ratio": 6.2,
+      "minimum": 3
+    },
+    {
+      "foreground": "#78877D",
+      "background": "#F6F3ED",
+      "ratio": 3.41,
+      "minimum": 3
+    },
+    {
+      "foreground": "#78877D",
+      "background": "#FFFFFF",
+      "ratio": 3.78,
+      "minimum": 3
+    }
+  ]
+}

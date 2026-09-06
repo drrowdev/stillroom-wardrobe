@@ -1,0 +1,45 @@
+{
+  "executedOn": "2026-09-05",
+  "runtime": "v24.19.0",
+  "scope": "Translation references only; no implemented app or native-speaker review",
+  "languages": [
+    "en",
+    "fi",
+    "sv"
+  ],
+  "keys": 234,
+  "checks": [
+    {
+      "name": "Every catalog key has nonempty EN/FI/SV values, matching parameters and valid plural pairs",
+      "result": "PASS"
+    },
+    {
+      "name": "Critical navigation, form, privacy, recovery and accessibility message families are present",
+      "result": "PASS"
+    },
+    {
+      "name": "Saved-owner, sign-in selection, browser preference and English fallback precedence",
+      "result": "PASS"
+    },
+    {
+      "name": "Text interpolation, literal user content and strict/runtime fallback behaviour",
+      "result": "PASS"
+    },
+    {
+      "name": "Localized cardinal count messages for zero, one and multiple records",
+      "result": "PASS"
+    },
+    {
+      "name": "Finnish/Swedish decimal input and EUR formatting preserve SQL decimals and reject ambiguity",
+      "result": "PASS"
+    },
+    {
+      "name": "Locale presentation preserves date-only calendar values and validates real dates",
+      "result": "PASS"
+    },
+    {
+      "name": "Nordic text keeps diacritics, NFC normalization and locale-aware display ordering",
+      "result": "PASS"
+    }
+  ]
+}

@@ -1,0 +1,259 @@
+{
+  "requirements": [
+    {
+      "id": "R01",
+      "screen": "S01/S04",
+      "data": "approved_accounts, profiles, items",
+      "operation": "Auth admission; own SELECT",
+      "issues": "I02 I03 I05 I25",
+      "test": "tests/security/rls.sessions.mjs"
+    },
+    {
+      "id": "R02",
+      "screen": "S02",
+      "data": "profiles, style_preferences",
+      "operation": "Version-checked PATCH",
+      "issues": "I06",
+      "test": "tests/browser/profile.spec.ts"
+    },
+    {
+      "id": "R03",
+      "screen": "S04\u2013S06/S13",
+      "data": "items, item_images",
+      "operation": "Item CRUD/lifecycle",
+      "issues": "I04 I08",
+      "test": "tests/browser/items.spec.ts"
+    },
+    {
+      "id": "R04",
+      "screen": "S05/S06",
+      "data": "item_images; storage.objects",
+      "operation": "Prepare/reserve/upload/commit",
+      "issues": "I04 I07 I10",
+      "test": "tests/browser/images.spec.ts"
+    },
+    {
+      "id": "R05",
+      "screen": "S04",
+      "data": "items",
+      "operation": "Owner query; local filters",
+      "issues": "I09",
+      "test": "tests/unit/search.test.ts"
+    },
+    {
+      "id": "R06",
+      "screen": "S07\u2013S09",
+      "data": "outfits, outfit_items",
+      "operation": "save_outfit",
+      "issues": "I11",
+      "test": "tests/integration/outfit-rpc.test.ts"
+    },
+    {
+      "id": "R07",
+      "screen": "S10",
+      "data": "wear_events, wear_event_items",
+      "operation": "save_wear_event",
+      "issues": "I12",
+      "test": "tests/integration/wear-rpc.test.ts"
+    },
+    {
+      "id": "R08",
+      "screen": "S11",
+      "data": "items, wear_events, wear_event_items",
+      "operation": "Own counts/currency reducer",
+      "issues": "I13",
+      "test": "tests/unit/statistics.test.ts"
+    },
+    {
+      "id": "R09",
+      "screen": "S03",
+      "data": "Own catalog/history, preferences",
+      "operation": "Pure rules-v1",
+      "issues": "I14 I15 I16",
+      "test": "tests/unit/recommendations.test.ts"
+    },
+    {
+      "id": "R10",
+      "screen": "S03/S12",
+      "data": "profiles; memory weather cache",
+      "operation": "Opt-in weather adapter",
+      "issues": "I16",
+      "test": "tests/browser/weather.spec.ts"
+    },
+    {
+      "id": "R11",
+      "screen": "All protected screens",
+      "data": "All tables; absence of relationship entities",
+      "operation": "No user directory/foreign input",
+      "issues": "I02 I05 I17 I25",
+      "test": "tests/security/no-connections.test.ts"
+    },
+    {
+      "id": "R12",
+      "screen": "S04\u2013S09",
+      "data": "item_images; storage.objects",
+      "operation": "Authenticated Storage operations",
+      "issues": "I04 I10 I17",
+      "test": "tests/security/rls.sessions.mjs"
+    },
+    {
+      "id": "R13",
+      "screen": "S12",
+      "data": "All owner export tables",
+      "operation": "export_manifest + encrypted parts",
+      "issues": "I18 I19",
+      "test": "tests/integration/full-export.test.ts"
+    },
+    {
+      "id": "R14",
+      "screen": "S12",
+      "data": "Owner graph; import_id on history",
+      "operation": "Dry-run/map/restore_history_entry",
+      "issues": "I20 I21",
+      "test": "tests/integration/restore-roundtrip.test.ts"
+    },
+    {
+      "id": "R15",
+      "screen": "S12",
+      "data": "deletion_jobs; own rows/Auth/files",
+      "operation": "delete-account; deletion_control",
+      "issues": "I22",
+      "test": "tests/security/delete-account.test.ts"
+    },
+    {
+      "id": "R16",
+      "screen": "S01\u2013S13",
+      "data": "Session memory only",
+      "operation": "Static service worker/install",
+      "issues": "I01 I23",
+      "test": "tests/browser/pwa.spec.ts"
+    },
+    {
+      "id": "R17",
+      "screen": "S01\u2013S13",
+      "data": "Private alt_text; semantic forms",
+      "operation": "Keyboard/screen-reader/contrast",
+      "issues": "I07 I24",
+      "test": "tests/browser/accessibility.spec.ts"
+    },
+    {
+      "id": "R18",
+      "screen": "S12/operator runbook",
+      "data": "Own sizes; provider dashboard",
+      "operation": "Quotas/build/budget checks",
+      "issues": "I01 I19 I26",
+      "test": "tests/unit/budget.test.ts"
+    },
+    {
+      "id": "R19",
+      "screen": "All boundaries",
+      "data": "No secrets in public tables/logs",
+      "operation": "Env allowlist/log redaction/scan",
+      "issues": "I01 I05 I18 I22 I25",
+      "test": "scripts/scan-secrets.mjs"
+    },
+    {
+      "id": "R20",
+      "screen": "S12/S13",
+      "data": "Owner records/images; deletion receipts",
+      "operation": "Backup/cleanup/restore drill",
+      "issues": "I10 I19 I21 I26",
+      "test": "tests/integration/restore-roundtrip.test.ts"
+    },
+    {
+      "id": "R21",
+      "screen": "S03/S04/S11",
+      "data": "Owner indexes and bounded catalog",
+      "operation": "Lazy grid/bounded beam",
+      "issues": "I09 I13 I25",
+      "test": "tests/browser/performance.spec.ts"
+    },
+    {
+      "id": "R22",
+      "screen": "S01\u2013S13",
+      "data": "Original static taxonomy/assets",
+      "operation": "Source/asset review",
+      "issues": "I01 I24",
+      "test": "tests/unit/original-assets.test.ts"
+    },
+    {
+      "id": "R23",
+      "screen": "S05/S08/S10/S12",
+      "data": "UUIDs, versions, immutable paths",
+      "operation": "RPC atomic writes/idempotent retries",
+      "issues": "I04 I08 I10 I11 I12 I20 I21",
+      "test": "tests/integration/idempotency.test.ts"
+    },
+    {
+      "id": "R24",
+      "screen": "S03/S05",
+      "data": "No provider data table",
+      "operation": "Disabled provider interfaces",
+      "issues": "I07 I14",
+      "test": "tests/unit/provider-disabled.test.ts"
+    },
+    {
+      "id": "R25",
+      "screen": "S02/S03",
+      "data": "preferences, combination_rules, feedback",
+      "operation": "Own feedback actions",
+      "issues": "I06 I14 I15",
+      "test": "tests/integration/feedback.test.ts"
+    },
+    {
+      "id": "R26",
+      "screen": "S01/all protected",
+      "data": "approved_accounts; session memory",
+      "operation": "Current approval and logout",
+      "issues": "I02 I03 I17 I22 I23",
+      "test": "tests/security/session-cache.spec.ts"
+    },
+    {
+      "id": "R27",
+      "screen": "S01\u2013S13",
+      "data": "profiles.ui_language; static translation catalog",
+      "operation": "Owner language PATCH; translation/Intl formatting",
+      "issues": "I01 I03 I06 I24 I25",
+      "test": "tests/unit/i18n.test.ts"
+    },
+    {
+      "id": "R28",
+      "screen": "S05/S06/S12",
+      "data": "profiles consent; saved provenance; private ai_requests/ai_usage",
+      "operation": "Analyze draft; edit all fields; explicit Save/discard",
+      "issues": "I29",
+      "test": "tests/integration/automatic-tagging.test.ts"
+    }
+  ],
+  "issue_ids": [
+    "I01",
+    "I02",
+    "I03",
+    "I04",
+    "I05",
+    "I06",
+    "I07",
+    "I29",
+    "I08",
+    "I09",
+    "I10",
+    "I11",
+    "I12",
+    "I13",
+    "I14",
+    "I15",
+    "I16",
+    "I17",
+    "I18",
+    "I19",
+    "I20",
+    "I21",
+    "I22",
+    "I23",
+    "I24",
+    "I25",
+    "I26",
+    "I27",
+    "I28"
+  ]
+}

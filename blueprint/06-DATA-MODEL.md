@@ -1,0 +1,96 @@
+# Data model
+
+`07-DATABASE-AND-RLS.sql` is the executable **revision 1.1 base schema**, with twelve application tables. Revision 1.3 requires I29's planned pre-save analysis/provenance migration below and in `20`; it is not implemented in the supplied SQL. Auth/Storage remain provider-managed; profiles have no account relationship.
+
+## Planned AI schema extension - I29
+
+Implement `supabase/migrations/20260906000000_automatic_tagging.sql` after the base. Add owner-specific analysis consent, typed pattern/length and per-field provenance/revisions, plus private `ai_requests`/`ai_usage` receipts. There is no `ai_jobs` table or scheduled inference. Protect receipts/results with owner-scoped APIs and server-only table grants. Checked Save/edit operations validate provenance; analysis cannot write inventory. Add owner/version-checked `alt_text` editing without altering media paths/bytes.
+
+Unentered physical properties remain unknown. Preserve old values but mark provenance-less values unverified. Manual empty values retain user provenance. AI fills only untouched fields in the current draft; persist the reviewed values/provenance on explicit Save, not on analysis completion.
+
+Analysis creates no item/image records: photo/title/category are checked only on Save. Failed explicit saves may leave incomplete upload reservations, excluded from completed inventory/derived data. Image commit never enqueues analysis. Discard removes temporary results; expiration purges remaining bounded results. Account deletion cascades request/usage data. Metadata-v2 export contains saved fields/provenance, not drafts/results/usage or active consent. The base diagram below predates these additions.
+
+## Entities
+
+| Table | Meaning and lifecycle |
+|---|---|
+| `private.approved_accounts` | Independent approval rows, admission numbers 1 and 2 for capacity only, lower-case email, Auth UUID and enabled flag. RLS enabled with no client table rights. Insert/update Auth triggers enforce admission and fixed emails. |
+| `private.deletion_jobs` | Minimal resumable deletion receipt, keyed by owner. No Auth FK because it must survive Auth deletion. Server-only, purge seven days after completion; no content or raw error strings. |
+| `profiles` | Own display name, nullable initial `ui_language` (`en`, `fi`, `sv`), timezone, currency and optional rounded weather city coordinates. Created during admission, not by self-registration UI. Language does not change timezone/currency or connect profiles. |
+| `style_preferences` | Own colour/style/exclusion/coverage/repeat preferences. One row per owner. Never shared. |
+| `items` | Manual wardrobe metadata, availability, lifecycle, feedback flags, soft deletion and version. Price stays in recorded currency. |
+| `item_images` | Immutable main/thumb paths, hashes, sizes, alt text and pending/ready/retired state for one item image version. Server `retired_at` starts its recovery window; at most one ready image per item. |
+| `outfits` | Owned name, occasion, notes and favourite status, with soft deletion/version. No stored collage bitmap. |
+| `outfit_items` | Ordered 1–12 item references when saved via RPC. Composite owner FKs prevent cross-owner links. Same item may appear in many outfits. |
+| `wear_events` | A planned or worn look on a local date in a stored timezone. Multiple looks/day allowed; future dates cannot be marked worn. Optional source outfit. |
+| `wear_event_items` | Items actually planned/worn, with immutable title/category snapshots. A permanently deleted item becomes a null link while its history text survives. |
+| `combination_rules` | Canonical pair of owned item UUIDs which must never be suggested together. Lower UUID first; pair is unique. |
+| `suggestion_feedback` | Vote on a canonical array of 1–12 owned item IDs, with a server-derived SHA-256 signature. IDs make feedback portable during restore. No photo, prompt or copied preference state. Exact dislike suppresses that combination; permanent item deletion removes now-impossible combination feedback. |
+
+## Relationship diagram
+
+```mermaid
+erDiagram
+  AUTH_USERS ||--o| APPROVED_ACCOUNTS : admitted
+  APPROVED_ACCOUNTS ||--o| PROFILES : owns
+  PROFILES ||--|| STYLE_PREFERENCES : configures
+  PROFILES ||--o{ ITEMS : owns
+  ITEMS ||--o{ ITEM_IMAGES : versions
+  PROFILES ||--o{ OUTFITS : owns
+  OUTFITS ||--o{ OUTFIT_ITEMS : contains
+  ITEMS ||--o{ OUTFIT_ITEMS : reused
+  PROFILES ||--o{ WEAR_EVENTS : records
+  OUTFITS o|--o{ WEAR_EVENTS : source
+  WEAR_EVENTS ||--o{ WEAR_EVENT_ITEMS : contains
+  ITEMS o|--o{ WEAR_EVENT_ITEMS : historical
+  PROFILES ||--o{ COMBINATION_RULES : excludes
+  PROFILES ||--o{ SUGGESTION_FEEDBACK : rates
+```
+
+The deletion receipt deliberately has no relationship edge to a deleted identity. The diagram is explanatory; the SQL, foreign keys and tests establish the actual rules.
+
+## Ownership and admission
+
+Independent approved-account rows enforce a maximum of two logins and immediate account freeze. Application users cannot query the admissions, enumerate users, address another profile or see another account's name/email. There is no pair record, peer RPC or user-level administrator role.
+
+All relationships capable of linking private records use `(owner_id, id)` FKs. A guessed foreign UUID cannot make an owned outfit or wear event refer to the spouse's original data. The original tables' four DML policies always require both `private.is_approved()` and `owner_id=auth.uid()`. Profile creation/deletion, image state, account admission and restore imports have narrower privileges documented in SQL.
+
+## History and counts
+
+* A wear count is the number of **distinct `local_date` values** on non-deleted `worn` events containing that item. A shirt in two looks on Tuesday counts once. Last worn is the maximum such date.
+* Plans do not count until explicitly marked worn. Changing a timezone later does not move existing local-date records. DST never changes the date string.
+* Cost per wear = stored item purchase price / counted wear days, rounded for display only. Unknown price or zero days displays an em dash; a known zero price with wear displays 0. Totals group by currency, never add EUR and USD together.
+* Archiving/donating/selling changes future eligibility, not historical counts. Trash hides normal views and suggestions without affecting any other account.
+* Permanent item deletion removes current outfit links. Wear snapshots keep their own historical title/category and null `item_id`. Statistics for a deleted item are no longer shown as current inventory; historical looks remain understandable.
+* A whole account deletion removes that owner's history as well. “Keep historical snapshots” is not an exception to account deletion.
+
+Outfit and wear multi-row writes use `save_outfit` / `save_wear_event`. Unchanged wear-event links retain original snapshots. Editing only date/state/label can PATCH the event with a version predicate, preserving all links, including historical null-link entries. A historical null-link entry may be explicitly removed by its owner.
+
+## Images and deletion
+
+One image version represents two files. New versions receive new UUIDs; storage upsert is disabled. `commit_image` serializes versions, checks that both object records exist, retires the previous ready version and makes the new one ready atomically. Size/hash validation is also required in the client image pipeline; SQL existence is not proof of valid image bytes.
+
+Retired versions remain for seven days from server `retired_at`, regardless of their original upload date. Pending age uses `created_at`; retired age uses `retired_at`. `retire_image` can register an imported historical image without changing the current ready version. Recovering an old photo creates a new version from its saved bytes. Storage removal must precede forgetting metadata. Item deletion can leave storage orphans after an interrupted job; compare actual bucket keys against image rows, not just SQL foreign keys. See `08` and `17`.
+
+## Data intentionally not stored
+
+Categories and standard colours are a versioned TypeScript taxonomy plus SQL category constraints; no mutable global taxonomy table. Per-item tags are bounded arrays. Suggestions are short-lived browser results; no suggestions table. Weather is a three-hour memory cache keyed by rounded city, date and units; no weather table. No detailed behaviour/audit table is needed; retain minimal deletion receipts and provider security logs. No user activity from one account is exposed to another.
+
+Trips/packing are `D01`, deferred Phase 8. Its later migration will add `trips(id,owner_id,title,start_date,end_date,timezone,city,latitude,longitude)` and `packing_items(owner_id,trip_id,item_id,packed,quantity)` with owner-only RLS, composite FKs and `quantity` 1–20. Do not add these tables to the MVP migration or expose a trips screen in Phases 0–7.
+
+## Fictional example records
+
+| Entity | Example |
+|---|---|
+| Profile A | `display_name="Alex"`, `timezone="Europe/Helsinki"`, `currency="EUR"`, weather disabled |
+| Profile B | `display_name="Robin"`, own independent preferences, weather disabled |
+| A item | Olive cotton overshirt, `top`, `casual` formality 1, price EUR 75, ready/active |
+| B item | Blue trousers, `bottom`, price unknown, laundry/active |
+| A outfit | “Weekend errands”, ordered overshirt/trousers/trainers, three owned IDs |
+| A history | One worn event dated `2026-09-04`, each item linked once |
+
+Fixture UUIDs and executable inserts are in `validation/check-sql.mjs` and the normal-session harness. No real identity or wardrobe data belongs in seeds.
+
+## Index/performance rationale
+
+Owner/category/date indexes bound ordinary item views; owner/date indexes bound calendar history. Owner/foreign-key indexes avoid scans on cleanup and account deletion. The partial unique ready-image index establishes the one-current-image rule. Owner/title supports sorting; free-text matching remains local because each wardrobe is about 500 rows. No global full-text index, cross-user materialized statistic or recommendation cache is warranted. Revisit only if measured owner-scoped query latency exceeds 200 ms or the wardrobe grows above 5,000 items.

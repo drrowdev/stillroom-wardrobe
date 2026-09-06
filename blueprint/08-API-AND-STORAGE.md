@@ -1,0 +1,148 @@
+# API and private storage contracts
+
+Use generated Supabase TypeScript database types from committed migrations, including the planned I29 AI extension before its features ship. Domain adapters convert SQL snake_case into UI camelCase. Every operation below uses the current user's session unless explicitly marked server-only. An explicit owner filter improves clarity and export safety; **RLS remains the security boundary**. No operation names, accepts or reveals a second user.
+
+Revision 1.3 adds photo-first pre-save analysis in `20`. The base API remains; I29 adds authenticated draft analysis, checked Save/provenance, description editing and exports. Analysis creates no item/image; image commit never triggers AI. The supplied SQL does not yet implement these additions.
+
+## Common contract types
+
+```ts
+type UUID = string;
+type UiLanguage = 'en' | 'fi' | 'sv'; // profiles.ui_language is null until first owner choice
+type ISODate = string; // YYYY-MM-DD, validated as a real calendar date
+type ImageVariant = 'main' | 'thumb';
+type AppError = {
+  code: 'INVALID_INPUT' | 'UNAUTHENTICATED' | 'NOT_AVAILABLE' |
+        'CONFLICT' | 'UPLOAD_INCOMPLETE' | 'QUOTA_REACHED' |
+        'UPSTREAM_UNAVAILABLE' | 'UNSUPPORTED_IMAGE' | 'INCOMPLETE_EXPORT';
+  message: string; // allowlisted UI copy; never raw upstream body
+  requestId: UUID;
+  retryable: boolean;
+  field?: string;
+};
+type Result<T> = { ok: true; data: T } | { ok: false; error: AppError };
+type PreparedImage = {
+  main: Blob; thumb: Blob; mainSha256: string; thumbSha256: string;
+  width: number; height: number; altText: string;
+};
+type ImageRequest = { imageId: UUID; variant: ImageVariant };
+type SaveOutfit = {
+  id: UUID; expectedVersion: number | null; title: string; occasion: string;
+  notes: string; favourite: boolean; itemIds: UUID[];
+};
+type SaveWear = {
+  id: UUID; expectedVersion: number | null; localDate: ISODate;
+  timezone: string; state: 'planned' | 'worn'; label: string;
+  outfitId: UUID | null; itemIds: UUID[];
+};
+```
+
+The SQL column constraints are the validation maxima. Add runtime parsers at boundaries using small explicit type guards; TypeScript types alone do not validate network/file data. UUIDs, real dates, finite numbers, string lengths and enumerations must be checked.
+
+## Operations
+
+REST below means `/rest/v1/…` with the publishable key and user bearer token. Query only explicitly needed columns. Private original tables never use “owner OR household” filters.
+
+| Operation | Contract and response | Error/retry behaviour |
+|---|---|---|
+| Sign in/out | SDK `signInWithPassword`, `signOut`; validate membership by fetching own profile | Generic sign-in failure; no email enumeration. One refresh attempt on expired token. |
+| Profile/preferences | SELECT own singleton; PATCH allowed fields with `owner_id` and `version` predicates, returning updated row | Zero returned rows → conflict/unavailable; reload, do not overwrite silently. |
+| UI language | PATCH own profile `{ui_language:'en'|'fi'|'sv'}` with current version; null is only an unset initial/import value | Use saved-owner/sign-in/browser/English precedence; a failed save does not claim persistence. No other profile or locale is queried; see `19`. |
+| Item create | Only after explicit Save: checked create with fixed draft values, client-generated ID and owned analysis provenance where available | Required title/category are checked here, not before analysis. Retry identical Save without another AI call. Hide incomplete image saves from completed inventory. |
+| Item list/search | Owner-scoped compact metadata, stable `(created_at,id)` cursor; local search/filter; 40 visible thumbnails/page | Abort stale searches; only owned results in the wardrobe. Retry read up to twice. |
+| Item edit/trash/restore | PATCH `id`, `owner_id`, expected `version`; set fields or `deleted_at`; return row | 409-style conflict on zero-row version match. Trash affects only the current owner. |
+| Permanent item removal | Confirm, remove owned image objects, forget metadata, DELETE own item; resume remaining keys on failure | Do not claim success if bytes remain. A second DELETE of already absent content succeeds logically. |
+| Image reserve | INSERT permitted `item_images` columns; state defaults pending; paths are generated in DB | Reuse reservation UUID only for identical prepared hashes. Incomplete reservation is recoverable. |
+| Image upload | SDK Storage `.upload(path,blob,{contentType:'image/jpeg',upsert:false,cacheControl:'0'})` | 409 existing object → authenticated download and compare SHA-256; equal means success, unequal means conflict. |
+| Commit/retire/forget image | RPC `commit_image(p_image_id)` / `retire_image(p_image_id)` / `forget_image(p_image_id)` → void | Incomplete upload → keep old ready version; retiring an imported version leaves the active photo unchanged; existing object bytes block forgetting. |
+| Outfit save | RPC `save_outfit(p_id,p_title,p_occasion,p_notes,p_favourite,p_item_ids,p_expected_version)` → version | Atomic parent + ordered links; same create payload/ID is idempotent; stale version fails. |
+| Calendar save | RPC `save_wear_event(p_id,p_local_date,p_timezone,p_state,p_label,p_outfit_id,p_item_ids,p_expected_version)` → version | Atomic event/links; preserves unchanged history snapshots. Future worn date fails. |
+| Calendar date/state only | Version-checked PATCH of the event | Retains historical null-link items. Delete/trash and undo operate on the owner event. |
+| Statistics | SELECT owner events/links/items; reduce in browser using rules in `06` | Empty is valid. Never request an administrator aggregate. |
+| Feedback | Own item flags; INSERT canonical `combination_rules`; upsert own `suggestion_feedback` with `item_ids`, vote and owner by `(owner_id,signature)` conflict target | SQL validates each item owner, sorts IDs and derives the signature; duplicate identical rule is success. |
+| Export snapshot | RPC `export_manifest(p_export_id)` → versioned JSON metadata snapshot | Single statement for consistent metadata; null for no membership; failed image download makes full export incomplete. |
+| Delete own account | POST `/functions/v1/delete-account` with `{confirmation:'DELETE',reauthPassword:string}` → 204 or `{status:'pending'}` | TLS only; never log body. Function derives owner, reauthenticates, then drives server-only deletion control. |
+| AI consent/status | Checked owner-only settings/result/status/allowance operations | No direct private request/usage tables, peer totals or provider keys. Withdrawn consent blocks new analysis/results. |
+| Analyze draft photo | POST `/functions/v1/analyze-clothing` with user token, request UUID, draft generation and bounded sanitized JPEG bytes -> validated attributes/image hash/status | No saved-item/owner target or external URL. No inventory writes. Identical request replay returns existing result/status; conflicting hash/config is an error. |
+| Discard analysis | Owner-only discard operation removes bounded result; retain only necessary coarse charge receipt | No item/image deletion needed before Save because none was created. Cannot recall already-sent provider data/charges. |
+| Save/edit description | Checked owner/version operation updates image `alt_text` only; new-image Save stores edited text at reservation | No image re-upload, path/hash/byte mutation or unrestricted image UPDATE. |
+
+`deletion_control(p_owner_id,p_action,p_code)` is server-only, never granted to normal/anonymous users. The deletion endpoint derives the verified owner. The separate analysis endpoint is callable by an approved user with consent/budget, not anonymously or with only a publishable key; its provider credentials and private receipt operations remain server-only.
+
+## Authenticated image access
+
+Owner views use `storage.from('wardrobe').download(path)` through the current user's SDK client, with a custom fetch adapter setting `cache:'no-store'` for data/storage/auth requests. Convert returned JPEG bytes to a Blob URL and revoke it on unmount/logout/account change. Coalesce identical in-flight `(ownerUid,imageId,variant)` downloads and cap concurrency at four. No Edge media function, public image endpoint or sharing URL is implemented. RLS checks current approved-account status and the reserved owner path on every new Storage request.
+
+Never persist private images in Cache Storage, IndexedDB or the service worker. An owner may keep already loaded images in memory during a temporarily disconnected session, visibly marked stale. New access still requires an authenticated owner. Already delivered bytes cannot be remotely recalled; logout clears application-held bytes and aborts late responses.
+
+## Complete image flow
+
+| Step | Implementation contract |
+|---|---|
+| 1. Select | Separate camera and library controls. Cancellation is not an error. Keep the original Blob in memory only. |
+| 2. Validate | Accept decoded JPEG/PNG/WebP; treat MIME as a hint and inspect signatures. Reject SVG/HTML/animated formats, >20 MiB source, invalid image, or >40 megapixels before allocating a full canvas where header parsing permits. |
+| 3. Decode/orient | Use a tested `createImageBitmap` path with orientation handling; fallback to a decoded HTMLImageElement. Test all eight orientations to avoid double rotation. Decode one image at a time and release resources. |
+| 4. Crop | Accessible crop rectangle, fit/rotate/reset buttons, keyboard nudging and numeric aspect options. Do not require pinch or drag. Default preserves the full garment with a warm neutral background. |
+| 5. Strip metadata | Draw only oriented/cropped pixels onto a new canvas. Do not copy JPEG APP/EXIF/XMP/IPTC chunks or original filenames. Re-encode output pixels. Reject the output if metadata test finds EXIF/GPS/XMP. |
+| 6. Resize | Longest side ≤1,600 px, never upscale; preserve aspect ratio. Avoid retaining multiple full-size canvases on phones. |
+| 7. Compress | JPEG quality 0.82 initially; iterate downward to 0.55. If still >500 KiB, reduce longest side by 15% and repeat to 800 px. If still too large, require a different crop/photo. Do not silently upload a larger file. |
+| 8. Thumbnail | Create ≤320 px longest side, JPEG ≤60 KiB, target 25 KiB; derive from the same sanitized image. |
+| 9. Background removal | Disabled provider for MVP. If later enabled, run locally on decoded pixels before final encoding, then pass through all byte/metadata checks again. |
+| 10. Reserve/upload | Hash both outputs with SHA-256, insert image metadata, use generated paths and private uploads. Upload thumbnail and main with max two concurrent requests. |
+| 11. Retry/deduplicate | Retry transport failures after 1/2/4 s plus jitter, max three tries. Same UUID + same hashes retries safely. Compare own ready-image main hashes for a possible duplicate and ask before adding; no cross-owner hash lookup. |
+| 12. Commit/display | Call `commit_image` after both successful uploads. Owner views use authenticated Storage download into a Blob. |
+| 13. Replace | New image UUID and files; atomically commit; retire prior image. Retain the prior version for the owner’s seven-day recovery window. |
+| 14. Remove | Delete both owned objects with Storage API, then `forget_image`. Never manipulate Storage's metadata table instead of deleting bytes. |
+| 15. Cleanup | Pending `created_at` >24 h, retired `retired_at` >7 days, and trash `deleted_at` >7 days are candidates. Cross-check current image metadata before deletion; operate only within the owning UID prefix. |
+| 16. Export/restore | Export sanitized stored files, not camera originals. Verify bytes against manifest hashes. Restore with new owner-bound paths and the same validation; never trust archive paths. |
+
+Before the persistent image flow reaches reserve/upload, I29 sends the prepared main JPEG inline for analysis and fills the draft. No library object is created for analysis alone. **Reserve/upload/commit starts only on explicit Save**, using the exact reviewed snapshot and generated immutable IDs. Incomplete saves remain hidden and retry without inference. Photo changes/manual edits invalidate stale analysis; late results never change saved items. Restore and image commit have no analysis side effect.
+
+If the browser cannot decode a selected HEIC/HEIF photo, explain how to select/export a JPEG or take a compatible camera photo; do not add a server converter or upload the unsupported original. Compatibility with the actual iPhone photo-library conversion is a Phase 0/2 test. This limitation is visible before any failed save.
+
+Paths: `wardrobe/{owner_uuid}/{item_uuid}/{image_uuid}/main.jpg` and `thumb.jpg`. All IDs come from UUID validation; no user filenames, email addresses or city names. Database-generated paths are authoritative. Ownership cannot change during replacement/restore.
+
+### Signed URL policy
+
+There is no share/link-generation feature. The app uses authenticated downloads. For a temporary operator diagnostic only, an owner-generated signed URL should request a 60-second lifetime and must not be logged or cached. An authorized owner can technically issue a longer bearer URL to their own file through the underlying Storage API; RLS does not impose that TTL. Assume such a deliberately issued URL remains usable until expiry unless the immutable object path is deleted/rotated. Signing out or freezing the account does not retroactively invalidate a previously minted bearer capability. New authenticated requests are blocked by the current approval state. Never promise revocation of downloaded copies.
+
+## Export format and restore
+
+The delivered **version-1 reference** uses encrypted, independently downloadable JSON parts, avoiding a large ZIP dependency or a 500 MB allocation on a phone. Metadata-only export is a plain `.json` download after an explicit “contains personal information” label. Full backups are encrypted by default and contain sanitized photos.
+
+**Revised MVP compatibility:** metadata/part schema v2 covers saved attributes/provenance; Phase 6 reads v1/v2, keeping encryption envelope v1. Supplied references are not yet v2-capable. Verify original hashes before conversion. Exclude drafts, analysis requests/results and usage; never import active consent or trigger analysis. Remap source-image IDs, preserve clears and mark old provenance-less values unverified. V2 mapping uses `stillroom/restore/v2|targetUid|exportId|table|sourceId`; keep v1 mapping unchanged for v1 resumes.
+
+Each decrypted part is UTF-8 JSON:
+
+```ts
+type ExportPartV1 = {
+  format: 'stillroom-export'; schemaVersion: 1; exportId: UUID;
+  partIndex: number; partCount: number;
+  manifestSha256: string;
+  manifest?: { /* exact export_manifest result; present in part 0 */ };
+  files: { imageId: UUID; variant: ImageVariant; sha256: string;
+           byteLength: number; mime: 'image/jpeg'; base64: string }[];
+};
+```
+
+Canonical manifest serialization sorts object keys lexicographically and table rows by their primary-key tuple; arrays representing ordered links stay ordered. Hash that exact UTF-8 serialization. Files are sorted by image UUID and then `main`,`thumb`; greedily form parts with **at most 12 MiB decoded file bytes** each. Photo base64 makes about 16 MiB plaintext; part 0 can add up to 8 MiB metadata, and the ciphertext's outer base64 makes about 32 MiB on disk in that worst case, plus JSON overhead. Reject any encrypted input part above 40 MiB before parsing. Part 0 may be metadata-only. V1 refuses metadata >8 MiB with an explicit unsupported-size error; both browser and reference CLI have this limit. Each intended wardrobe is expected below it; larger metadata needs a later versioned format, not silent truncation.
+
+Encrypt each part with browser/Node Web Crypto: random 16-byte salt, PBKDF2-HMAC-SHA256 **600,000** iterations, 256-bit AES-GCM key, random 12-byte IV, 128-bit authentication tag. The envelope contains `{format:'stillroom-encrypted',version:1,kdf:'PBKDF2-SHA256',iterations:600000,salt,iv,aad,ciphertext}` with binary fields base64. `aad` is the exact UTF-8 string `stillroom:1:{exportId}:{partIndex}:{partCount}`. Each part uses a new salt/IV; never reuse them. Filename `stillroom-{exportId}-{partIndex}.json.enc`. Passphrase is not stored or sent to the server; recommend a password-manager-generated passphrase and explain that a lost passphrase cannot be recovered.
+
+The CLI uses Node crypto/streams and the same format; it does not require a runtime package. File transfer within each part is sequential; multipart mobile downloads require a user action per part where browsers restrict automatic multiple downloads. Show total parts and confirm completion only after all files/hashes have been included. Wrong password, tampering, missing parts or deleted files is a failed/incomplete backup, not a successful export.
+
+Restore order: decrypt and validate → dry-run summary → obtain current user UID → profile/preferences by explicit merge choice (default preserve current preferences) → items → images and commit → outfits/links → wear/events links → feedback/rules. Restore historical null-item wear snapshots through owner writes preserving their exported text only in the approved restore path; see the dedicated restore RPC requirement below. Exports contain only the current owner’s records. Restore never creates a user relationship or contacts another account.
+
+For each restored image, reserve/upload normally, then call `commit_image` for the source ready version or `retire_image` for a source retired version. A full backup refuses pending versions. Restored retired versions get a fresh seven-day recovery window. Database-generated paths and image lifecycle timestamps are regenerated, not injected by an import; idempotent comparisons use mapped identity, intended state, hashes, dimensions and alt text. Recovery of a retired photo in normal use copies its stored bytes into a new version and commits that version.
+
+Map IDs deterministically using the first 16 bytes of SHA-256 of `stillroom/restore/v1|targetUid|exportId|table|sourceId`, setting RFC UUID variant and version **8** bits. For tables without an ID, use the canonical primary-key tuple as sourceId. Recompute image paths from target owner and remapped IDs; reject any unrecognized table/column or foreign owner in the source snapshot. Rerun with the same export ID: equal existing content is skipped; differing content is a conflict requiring review, never an automatic overwrite. Reorder canonical pair UUIDs after mapping. The imported data remains distinguishable by this deterministic namespace without a separate import-jobs table.
+
+Remap `suggestion_feedback.item_ids` and sort them before insertion. The database derives the new signature from those target IDs; do not restore the old signature literally. This preserves exact likes/dislikes after UUID remapping. A permanently deleted item removes feedback for combinations containing it, so an export cannot contain dangling feedback item IDs.
+
+**Phase 6 restore operations:** the supplied `restore_history_entry(p_id,p_event_id,p_item_id,p_title,p_category,p_import_id)` RPC preserves exported text for both existing and permanently deleted item links. It accepts only the caller's event and optional owned item, bounded title/category, deterministic entry UUID and import ID. Ordinary INSERT cannot set `import_id`; ordinary history text is derived from the current owned item. Restore creates event parents with owner-scoped INSERT, then invokes this RPC for each snapshot. `save_outfit` accepts owned archived/trashed references for recovery; the ordinary outfit picker offers active items only and renders unavailable historical components explicitly. Both behaviours are intentional and covered by tests.
+
+## General errors, cancellation and idempotency
+
+Map allowlisted `AppError.code` values to localized messages; never display raw SQL/HTTP errors in any language. Keep protocol values such as deletion confirmation `DELETE`, RPC names, stable codes, filenames and JSON keys unchanged. `19-LOCALIZATION.md` defines the optional v1 profile export field `ui_language` and safe import of older backups without it; hashes are verified before normalization.
+
+PostgREST may return 200 with an empty array for a denied SELECT/UPDATE/DELETE; tests must assert absence and unchanged owner data, not only HTTP status. Normalize raw SQL errors before showing them. 401 → sign in; unauthorized/missing objects → same 404-style copy; stale edit → conflict; 413/unsupported → edit photo; 429 → bounded backoff; 5xx/network → retry with same UUID. No retry of password failures or confirmation-dependent deletion. Abort fetches when changing accounts; stale responses whose captured UID no longer matches the session are discarded.

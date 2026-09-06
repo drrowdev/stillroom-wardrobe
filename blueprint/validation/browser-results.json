@@ -1,0 +1,162 @@
+{
+  "browser": "Chromium 149.0.7827.0",
+  "scope": "Prototype contracts; no production app or physical phone tested",
+  "checks": [
+    {
+      "name": "Mermaid syntax: 04-USER-FLOWS-AND-SCREENS.md",
+      "result": "PASS"
+    },
+    {
+      "name": "Mermaid syntax: 05-ARCHITECTURE.md",
+      "result": "PASS"
+    },
+    {
+      "name": "Mermaid syntax: 06-DATA-MODEL.md",
+      "result": "PASS"
+    },
+    {
+      "name": "Canvas contract: orientation-1.jpg",
+      "result": "PASS",
+      "mainBytes": 14251,
+      "thumbBytes": 1558,
+      "mainSize": [
+        1600,
+        1200
+      ],
+      "quality": 0.82
+    },
+    {
+      "name": "Canvas contract: orientation-2.jpg",
+      "result": "PASS",
+      "mainBytes": 14295,
+      "thumbBytes": 1571,
+      "mainSize": [
+        1600,
+        1200
+      ],
+      "quality": 0.82
+    },
+    {
+      "name": "Canvas contract: orientation-3.jpg",
+      "result": "PASS",
+      "mainBytes": 14284,
+      "thumbBytes": 1570,
+      "mainSize": [
+        1600,
+        1200
+      ],
+      "quality": 0.82
+    },
+    {
+      "name": "Canvas contract: orientation-4.jpg",
+      "result": "PASS",
+      "mainBytes": 14248,
+      "thumbBytes": 1558,
+      "mainSize": [
+        1600,
+        1200
+      ],
+      "quality": 0.82
+    },
+    {
+      "name": "Canvas contract: orientation-5.jpg",
+      "result": "PASS",
+      "mainBytes": 14412,
+      "thumbBytes": 1619,
+      "mainSize": [
+        1200,
+        1600
+      ],
+      "quality": 0.82
+    },
+    {
+      "name": "Canvas contract: orientation-6.jpg",
+      "result": "PASS",
+      "mainBytes": 14378,
+      "thumbBytes": 1621,
+      "mainSize": [
+        1200,
+        1600
+      ],
+      "quality": 0.82
+    },
+    {
+      "name": "Canvas contract: orientation-7.jpg",
+      "result": "PASS",
+      "mainBytes": 14380,
+      "thumbBytes": 1619,
+      "mainSize": [
+        1200,
+        1600
+      ],
+      "quality": 0.82
+    },
+    {
+      "name": "Canvas contract: orientation-8.jpg",
+      "result": "PASS",
+      "mainBytes": 14412,
+      "thumbBytes": 1620,
+      "mainSize": [
+        1200,
+        1600
+      ],
+      "quality": 0.82
+    },
+    {
+      "name": "Canvas contract: quadrants.png",
+      "result": "PASS",
+      "mainBytes": 13462,
+      "thumbBytes": 1510,
+      "mainSize": [
+        1600,
+        1200
+      ],
+      "quality": 0.82
+    },
+    {
+      "name": "Canvas contract: quadrants.webp",
+      "result": "PASS",
+      "mainBytes": 14659,
+      "thumbBytes": 1565,
+      "mainSize": [
+        1600,
+        1200
+      ],
+      "quality": 0.82
+    },
+    {
+      "name": "Canvas contract: noise.jpg",
+      "result": "PASS",
+      "mainBytes": 506962,
+      "thumbBytes": 20386,
+      "mainSize": [
+        1600,
+        1067
+      ],
+      "quality": 0.55
+    },
+    {
+      "name": "Canvas contract: dense-noise.jpg",
+      "result": "PASS",
+      "mainBytes": 507863,
+      "thumbBytes": 29222,
+      "mainSize": [
+        1156,
+        1156
+      ],
+      "quality": 0.68
+    },
+    {
+      "name": "Canvas contract: small.png",
+      "result": "PASS",
+      "mainBytes": 935,
+      "thumbBytes": 933,
+      "mainSize": [
+        24,
+        18
+      ],
+      "quality": 0.82
+    }
+  ],
+  "executedOn": "2026-09-05"
+}

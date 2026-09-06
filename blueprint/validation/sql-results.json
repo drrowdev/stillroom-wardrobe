@@ -1,0 +1,82 @@
+{
+  "executedOn": "2026-09-05",
+  "engine": "PGlite PostgreSQL",
+  "authentication": "authenticated role; simulated JWT identity claims",
+  "migrationSha256": "4f2d44603707cb823527c80d8384c2a6390f99ead2ba294435db83403a7eead5",
+  "languageUpgradeSha256": "8cb42489f1b33975ef90c3c81704f1075adff02412a3152da3c87c53eb505737",
+  "checks": [
+    {
+      "name": "Complete migration executes on PostgreSQL with minimal Supabase schema stubs",
+      "result": "PASS"
+    },
+    {
+      "name": "Two independent approvals admit their accounts; an unapproved third account is rejected",
+      "result": "PASS"
+    },
+    {
+      "name": "Additive language upgrade preserves existing profile values and leaves each preference independently unset",
+      "result": "PASS"
+    },
+    {
+      "name": "Finnish/Swedish preferences remain owner-only, reject unsupported codes, preserve timezone/currency and export correctly",
+      "result": "PASS"
+    },
+    {
+      "name": "Owner operations create images, outfits, wear history and feedback with real constraints",
+      "result": "PASS"
+    },
+    {
+      "name": "A/B cannot read, change or delete each other across all ten private public tables; own records remain",
+      "result": "PASS"
+    },
+    {
+      "name": "Forged ownership, foreign FKs/RPCs/images/admission access and service-only deletion are denied in both directions",
+      "result": "PASS"
+    },
+    {
+      "name": "Consistent export snapshots contain only the authenticated owner across every exported table",
+      "result": "PASS"
+    },
+    {
+      "name": "Atomic writes reject stale versions; identical retry succeeds; restored history uses a restricted import path",
+      "result": "PASS"
+    },
+    {
+      "name": "Image-state edits/overwrites, invalid timezone and future worn events are rejected",
+      "result": "PASS"
+    },
+    {
+      "name": "Feedback signatures are derived from owned item IDs; retired photo recovery starts at retirement and retries do not reset it",
+      "result": "PASS"
+    },
+    {
+      "name": "Permanent item deletion preserves owner history text with a null item link and removes current outfit references",
+      "result": "PASS"
+    },
+    {
+      "name": "Anonymous role cannot read any private table or export RPC",
+      "result": "PASS"
+    },
+    {
+      "name": "All twelve application tables have RLS enabled",
+      "result": "PASS"
+    },
+    {
+      "name": "No relationship tables, recipient/household/peer columns or peer-discovery RPC exist",
+      "result": "PASS"
+    },
+    {
+      "name": "Disabling A blocks its old user context immediately and leaves B unaffected",
+      "result": "PASS"
+    },
+    {
+      "name": "Deletion controller enforces file-before-row-before-Auth stages, removes only A and safely retries completion (Storage metadata stub only)",
+      "result": "PASS"
+    },
+    {
+      "name": "Live Supabase Auth/REST/Storage and implemented browser/deletion function",
+      "result": "NOT RUN",
+      "reason": "No configured Supabase project or normal test credentials supplied. Run security-sessions.mjs in Phase 0 and later feature gates."
+    }
+  ]
+}

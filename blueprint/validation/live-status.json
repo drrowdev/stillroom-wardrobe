@@ -1,0 +1,8 @@
+{
+  "status": "NOT RUN",
+  "scope": "Real Supabase Auth, REST and Storage normal-session security tests",
+  "reason": "No configured project or two test logins supplied. The harness exits 2 before any network call when configuration is missing.",
+  "syntaxCheck": "PASS",
+  "deletionEdgeFunction": "NOT IMPLEMENTED; later Phase 6 work",
+  "productionApp": "NOT BUILT, as requested"
+}

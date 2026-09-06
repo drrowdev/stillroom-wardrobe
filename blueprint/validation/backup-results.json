@@ -1,0 +1,36 @@
+{
+  "runtime": "v24.19.0",
+  "scope": "Reference encryption/serialization only; live export and restore not run",
+  "goldenCanonicalSha256": "77e17a7a7c45c844523719ce7738d654b9c0a824229fd0be43d2cab58cd335f1",
+  "checks": [
+    {
+      "name": "Canonical object ordering and known SHA-256 vector",
+      "result": "PASS"
+    },
+    {
+      "name": "AES-GCM round trip and specified KDF parameters",
+      "result": "PASS"
+    },
+    {
+      "name": "Wrong passphrase rejected",
+      "result": "PASS"
+    },
+    {
+      "name": "Ciphertext tampering rejected",
+      "result": "PASS"
+    },
+    {
+      "name": "Part identity tampering rejected",
+      "result": "PASS"
+    },
+    {
+      "name": "Unsupported KDF rejected",
+      "result": "PASS"
+    },
+    {
+      "name": "Independent parts use distinct salt/IV and round trip",
+      "result": "PASS"
+    }
+  ],
+  "executedOn": "2026-09-05"
+}

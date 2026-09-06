@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: App and browser contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run check:translations
+      - run: npm run test:unit
+      - name: Set a build-only secret canary
+        run: echo "STILLROOM_SECRET_CANARY=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+      - run: npm run build
+      - run: npm run scan:secrets
+      - run: npm run check:dependencies
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+
+  database:
+    name: Real local Supabase
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ALLOW_SECURITY_TESTS: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-fund
+      - run: npm run db:start
+      - run: npm run db:reset
+      - run: npm run test:integration
+      - run: npm run test:security
+      - run: npm run db:types
+      - name: Preserve generated schema types, never account fixtures
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: database-types
+          path: src/data/database.types.ts
+          if-no-files-found: error
+          retention-days: 1
+      - name: Require the generated types to match the repository
+        run: |
+          git ls-files --error-unmatch src/data/database.types.ts
+          git diff --exit-code -- src/data/database.types.ts

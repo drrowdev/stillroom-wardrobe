@@ -1,0 +1,50 @@
+{
+  "name": "stillroom-wardrobe",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=24.0.0 <25" },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "test:browser": "playwright test",
+    "test:a11y": "playwright test --grep accessibility",
+    "db:start": "node scripts/db.mjs start",
+    "db:reset": "node scripts/db.mjs reset",
+    "db:types": "node scripts/db.mjs types",
+    "test:integration": "node scripts/run-local-tests.mjs integration",
+    "test:security": "node scripts/run-local-tests.mjs security",
+    "check:translations": "node scripts/check-translations.mjs",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "check:dependencies": "node scripts/check-dependencies.mjs",
+    "dependencies:record": "node scripts/check-dependencies.mjs --write"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.115.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.13.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "@vitejs/plugin-react": "6.1.1",
+    "eslint": "10.10.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.6",
+    "globals": "17.12.0",
+    "supabase": "2.116.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.69.0",
+    "vite": "8.2.2",
+    "vitest": "5.0.0"
+  }
+}

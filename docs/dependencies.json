@@ -1,0 +1,2654 @@
+{
+  "schemaVersion": 1,
+  "lockfileSha256": "782126657c724fa11f6a85736cc60d52f38c6807d53fc882574fc047c65cc53a",
+  "licencePolicy": "Reviewed SPDX identifiers; new identifiers require review rather than an invented licence. Every production notice is copied from the installed exact-version package.",
+  "developmentPolicy": "Build/test packages are not browser runtime additions. Optional platform packages absent on this host are inventoried from their pinned lockfile metadata; installed manifests must match.",
+  "production": [
+    {
+      "name": "@supabase/auth-js",
+      "version": "2.115.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/auth-js",
+      "direct": false,
+      "introducingParents": [
+        "@supabase/supabase-js@2.115.0 (node_modules/@supabase/supabase-js)"
+      ],
+      "upstream": "https://github.com/supabase/supabase-js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "4fab5fb12a3fd1bc7855517fb6867d0b0d4c368249f45ddda1e03c4dcd2e6d4a"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40supabase%2Fauth-js",
+        "checkedOn": "2026-09-06",
+        "releasedAt": "2026-09-03T16:18:49.701Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@supabase/functions-js",
+      "version": "2.115.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/functions-js",
+      "direct": false,
+      "introducingParents": [
+        "@supabase/supabase-js@2.115.0 (node_modules/@supabase/supabase-js)"
+      ],
+      "upstream": "https://github.com/supabase/supabase-js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "4fab5fb12a3fd1bc7855517fb6867d0b0d4c368249f45ddda1e03c4dcd2e6d4a"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40supabase%2Ffunctions-js",
+        "checkedOn": "2026-09-06",
+        "releasedAt": "2026-09-03T16:19:35.502Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@supabase/phoenix",
+      "version": "0.4.5",
+      "license": "MIT",
+      "location": "node_modules/@supabase/phoenix",
+      "direct": false,
+      "introducingParents": [
+        "@supabase/realtime-js@2.115.0 (node_modules/@supabase/realtime-js)"
+      ],
+      "upstream": "https://github.com/supabase/phoenix",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "Realtime is not enabled by the app. This is resolved by the approved Supabase SDK; remove only when upstream no longer requires it or after an approved SDK replacement.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE.md",
+          "sha256": "99251c0f01385d169dd5b1b748b09400ff969f7b629e3589b1a3a0a99864eb66"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40supabase%2Fphoenix",
+        "checkedOn": "2026-09-06",
+        "releasedAt": "2026-07-15T23:46:26.947Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@supabase/postgrest-js",
+      "version": "2.115.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/postgrest-js",
+      "direct": false,
+      "introducingParents": [
+        "@supabase/supabase-js@2.115.0 (node_modules/@supabase/supabase-js)"
+      ],
+      "upstream": "https://github.com/supabase/supabase-js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "4fab5fb12a3fd1bc7855517fb6867d0b0d4c368249f45ddda1e03c4dcd2e6d4a"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40supabase%2Fpostgrest-js",
+        "checkedOn": "2026-09-06",
+        "releasedAt": "2026-09-03T16:19:34.582Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@supabase/realtime-js",
+      "version": "2.115.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/realtime-js",
+      "direct": false,
+      "introducingParents": [
+        "@supabase/supabase-js@2.115.0 (node_modules/@supabase/supabase-js)"
+      ],
+      "upstream": "https://github.com/supabase/supabase-js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "Realtime is not enabled by the app. This is resolved by the approved Supabase SDK; remove only when upstream no longer requires it or after an approved SDK replacement.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "4fab5fb12a3fd1bc7855517fb6867d0b0d4c368249f45ddda1e03c4dcd2e6d4a"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40supabase%2Frealtime-js",
+        "checkedOn": "2026-09-06",
+        "releasedAt": "2026-09-03T16:19:33.543Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@supabase/storage-js",
+      "version": "2.115.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/storage-js",
+      "direct": false,
+      "introducingParents": [
+        "@supabase/supabase-js@2.115.0 (node_modules/@supabase/supabase-js)"
+      ],
+      "upstream": "https://github.com/supabase/supabase-js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "4fab5fb12a3fd1bc7855517fb6867d0b0d4c368249f45ddda1e03c4dcd2e6d4a"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40supabase%2Fstorage-js",
+        "checkedOn": "2026-09-06",
+        "releasedAt": "2026-09-03T16:21:41.712Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@supabase/supabase-js",
+      "version": "2.115.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/supabase-js",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ],
+      "upstream": "https://github.com/supabase/supabase-js",
+      "purpose": "Authenticated owner-scoped Auth, REST/RPC, private Storage and function access.",
+      "alternativeOrRemoval": "Direct fetch avoids the SDK but requires custom session refresh and recovery; retain the supported SDK authentication lifecycle.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "4fab5fb12a3fd1bc7855517fb6867d0b0d4c368249f45ddda1e03c4dcd2e6d4a"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40supabase%2Fsupabase-js",
+        "checkedOn": "2026-09-06",
+        "releasedAt": "2026-09-03T16:21:48.106Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "iceberg-js",
+      "version": "0.8.1",
+      "license": "MIT",
+      "location": "node_modules/iceberg-js",
+      "direct": false,
+      "introducingParents": [
+        "@supabase/storage-js@2.115.0 (node_modules/@supabase/storage-js)"
+      ],
+      "upstream": "https://github.com/supabase/iceberg-js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "The app does not use Iceberg catalog operations. This is resolved by the approved Storage SDK; remove only when upstream drops it or after an approved SDK replacement.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "271acff9d8ba240503e69e48367aae277919ed196635deeca763fe1dbaa1935c"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/iceberg-js",
+        "checkedOn": "2026-09-06",
+        "releasedAt": "2025-12-05T11:44:09.133Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "react",
+      "version": "19.2.8",
+      "license": "MIT",
+      "location": "node_modules/react",
+      "direct": true,
+      "introducingParents": [
+        "application",
+        "react-dom@19.2.8 (node_modules/react-dom)"
+      ],
+      "upstream": "https://github.com/react/react",
+      "purpose": "Component and state model for the browser UI.",
+      "alternativeOrRemoval": "Plain DOM removes React but increases manual form, async-state and accessibility coordination; retain the approved component model.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "cf9b17822d1fcd4ff32ccbe14183386fb3adf6f2ff92dc184130823f7fc28173"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/react",
+        "checkedOn": "2026-09-06",
+        "releasedAt": "2026-07-21T15:41:28.716Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "react-dom",
+      "version": "19.2.8",
+      "license": "MIT",
+      "location": "node_modules/react-dom",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ],
+      "upstream": "https://github.com/react/react",
+      "purpose": "Browser rendering of React components; kept at the same version as React.",
+      "alternativeOrRemoval": "Native DOM rendering requires replacing the approved React UI; retain while React is used.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "cf9b17822d1fcd4ff32ccbe14183386fb3adf6f2ff92dc184130823f7fc28173"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/react-dom",
+        "checkedOn": "2026-09-06",
+        "releasedAt": "2026-07-21T15:41:41.267Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "scheduler",
+      "version": "0.27.0",
+      "license": "MIT",
+      "location": "node_modules/scheduler",
+      "direct": false,
+      "introducingParents": [
+        "react-dom@19.2.8 (node_modules/react-dom)"
+      ],
+      "upstream": "https://github.com/facebook/react",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "cf9b17822d1fcd4ff32ccbe14183386fb3adf6f2ff92dc184130823f7fc28173"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/scheduler",
+        "checkedOn": "2026-09-06",
+        "releasedAt": "2025-10-01T21:39:15.208Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "tslib",
+      "version": "2.8.1",
+      "license": "0BSD",
+      "location": "node_modules/tslib",
+      "direct": false,
+      "introducingParents": [
+        "@supabase/auth-js@2.115.0 (node_modules/@supabase/auth-js)",
+        "@supabase/functions-js@2.115.0 (node_modules/@supabase/functions-js)",
+        "@supabase/postgrest-js@2.115.0 (node_modules/@supabase/postgrest-js)",
+        "@supabase/realtime-js@2.115.0 (node_modules/@supabase/realtime-js)",
+        "@supabase/storage-js@2.115.0 (node_modules/@supabase/storage-js)"
+      ],
+      "upstream": "https://github.com/Microsoft/tslib",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "CopyrightNotice.txt",
+          "sha256": "7932ec89afeb0991d60e50b13194a73eeefba8976f37a03d3e6b64670f833855"
+        },
+        {
+          "file": "LICENSE.txt",
+          "sha256": "0e8d2550baea17eb3072c4f919b36fbf9852bb49dba948549872e713863c0834"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/tslib",
+        "checkedOn": "2026-09-06",
+        "releasedAt": "2024-10-31T22:42:48.624Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    }
+  ],
+  "development": [
+    {
+      "name": "@axe-core/playwright",
+      "version": "4.13.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/@axe-core/playwright",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ]
+    },
+    {
+      "name": "@babel/code-frame",
+      "version": "7.29.7",
+      "license": "MIT",
+      "location": "node_modules/@babel/code-frame",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)",
+        "@babel/template@7.29.7 (node_modules/@babel/template)",
+        "@babel/traverse@7.29.8 (node_modules/@babel/traverse)"
+      ]
+    },
+    {
+      "name": "@babel/compat-data",
+      "version": "7.29.7",
+      "license": "MIT",
+      "location": "node_modules/@babel/compat-data",
+      "direct": false,
+      "introducingParents": [
+        "@babel/helper-compilation-targets@7.29.7 (node_modules/@babel/helper-compilation-targets)"
+      ]
+    },
+    {
+      "name": "@babel/core",
+      "version": "7.29.7",
+      "license": "MIT",
+      "location": "node_modules/@babel/core",
+      "direct": false,
+      "introducingParents": [
+        "@babel/helper-module-transforms@7.29.7 (node_modules/@babel/helper-module-transforms)",
+        "eslint-plugin-react-hooks@7.1.1 (node_modules/eslint-plugin-react-hooks)"
+      ]
+    },
+    {
+      "name": "@babel/generator",
+      "version": "7.29.8",
+      "license": "MIT",
+      "location": "node_modules/@babel/generator",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)",
+        "@babel/traverse@7.29.8 (node_modules/@babel/traverse)"
+      ]
+    },
+    {
+      "name": "@babel/helper-compilation-targets",
+      "version": "7.29.7",
+      "license": "MIT",
+      "location": "node_modules/@babel/helper-compilation-targets",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)"
+      ]
+    },
+    {
+      "name": "@babel/helper-globals",
+      "version": "7.29.7",
+      "license": "MIT",
+      "location": "node_modules/@babel/helper-globals",
+      "direct": false,
+      "introducingParents": [
+        "@babel/traverse@7.29.8 (node_modules/@babel/traverse)"
+      ]
+    },
+    {
+      "name": "@babel/helper-module-imports",
+      "version": "7.29.7",
+      "license": "MIT",
+      "location": "node_modules/@babel/helper-module-imports",
+      "direct": false,
+      "introducingParents": [
+        "@babel/helper-module-transforms@7.29.7 (node_modules/@babel/helper-module-transforms)"
+      ]
+    },
+    {
+      "name": "@babel/helper-module-transforms",
+      "version": "7.29.7",
+      "license": "MIT",
+      "location": "node_modules/@babel/helper-module-transforms",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)"
+      ]
+    },
+    {
+      "name": "@babel/helper-string-parser",
+      "version": "7.29.7",
+      "license": "MIT",
+      "location": "node_modules/@babel/helper-string-parser",
+      "direct": false,
+      "introducingParents": [
+        "@babel/types@7.29.8 (node_modules/@babel/types)"
+      ]
+    },
+    {
+      "name": "@babel/helper-validator-identifier",
+      "version": "7.29.7",
+      "license": "MIT",
+      "location": "node_modules/@babel/helper-validator-identifier",
+      "direct": false,
+      "introducingParents": [
+        "@babel/code-frame@7.29.7 (node_modules/@babel/code-frame)",
+        "@babel/helper-module-transforms@7.29.7 (node_modules/@babel/helper-module-transforms)",
+        "@babel/types@7.29.8 (node_modules/@babel/types)"
+      ]
+    },
+    {
+      "name": "@babel/helper-validator-option",
+      "version": "7.29.7",
+      "license": "MIT",
+      "location": "node_modules/@babel/helper-validator-option",
+      "direct": false,
+      "introducingParents": [
+        "@babel/helper-compilation-targets@7.29.7 (node_modules/@babel/helper-compilation-targets)"
+      ]
+    },
+    {
+      "name": "@babel/helpers",
+      "version": "7.29.7",
+      "license": "MIT",
+      "location": "node_modules/@babel/helpers",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)"
+      ]
+    },
+    {
+      "name": "@babel/parser",
+      "version": "7.29.8",
+      "license": "MIT",
+      "location": "node_modules/@babel/parser",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)",
+        "@babel/generator@7.29.8 (node_modules/@babel/generator)",
+        "@babel/template@7.29.7 (node_modules/@babel/template)",
+        "@babel/traverse@7.29.8 (node_modules/@babel/traverse)",
+        "eslint-plugin-react-hooks@7.1.1 (node_modules/eslint-plugin-react-hooks)"
+      ]
+    },
+    {
+      "name": "@babel/template",
+      "version": "7.29.7",
+      "license": "MIT",
+      "location": "node_modules/@babel/template",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)",
+        "@babel/helpers@7.29.7 (node_modules/@babel/helpers)",
+        "@babel/traverse@7.29.8 (node_modules/@babel/traverse)"
+      ]
+    },
+    {
+      "name": "@babel/traverse",
+      "version": "7.29.8",
+      "license": "MIT",
+      "location": "node_modules/@babel/traverse",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)",
+        "@babel/helper-module-imports@7.29.7 (node_modules/@babel/helper-module-imports)",
+        "@babel/helper-module-transforms@7.29.7 (node_modules/@babel/helper-module-transforms)"
+      ]
+    },
+    {
+      "name": "@babel/types",
+      "version": "7.29.8",
+      "license": "MIT",
+      "location": "node_modules/@babel/types",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)",
+        "@babel/generator@7.29.8 (node_modules/@babel/generator)",
+        "@babel/helper-module-imports@7.29.7 (node_modules/@babel/helper-module-imports)",
+        "@babel/helpers@7.29.7 (node_modules/@babel/helpers)",
+        "@babel/parser@7.29.8 (node_modules/@babel/parser)",
+        "@babel/template@7.29.7 (node_modules/@babel/template)",
+        "@babel/traverse@7.29.8 (node_modules/@babel/traverse)"
+      ]
+    },
+    {
+      "name": "@cacheable/memory",
+      "version": "2.2.0",
+      "license": "MIT",
+      "location": "node_modules/@cacheable/memory",
+      "direct": false,
+      "introducingParents": [
+        "cacheable@2.5.0 (node_modules/cacheable)"
+      ]
+    },
+    {
+      "name": "@cacheable/utils",
+      "version": "2.5.0",
+      "license": "MIT",
+      "location": "node_modules/@cacheable/utils",
+      "direct": false,
+      "introducingParents": [
+        "@cacheable/memory@2.2.0 (node_modules/@cacheable/memory)",
+        "cacheable@2.5.0 (node_modules/cacheable)"
+      ]
+    },
+    {
+      "name": "@ecies/ciphers",
+      "version": "0.2.6",
+      "license": "MIT",
+      "location": "node_modules/@ecies/ciphers",
+      "direct": false,
+      "introducingParents": [
+        "eciesjs@0.5.0 (node_modules/eciesjs)"
+      ]
+    },
+    {
+      "name": "@eslint-community/eslint-utils",
+      "version": "4.10.1",
+      "license": "MIT",
+      "location": "node_modules/@eslint-community/eslint-utils",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/utils@8.69.0 (node_modules/@typescript-eslint/utils)",
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "eslint-visitor-keys",
+      "version": "3.4.3",
+      "license": "Apache-2.0",
+      "location": "node_modules/@eslint-community/eslint-utils/node_modules/eslint-visitor-keys",
+      "direct": false,
+      "introducingParents": [
+        "@eslint-community/eslint-utils@4.10.1 (node_modules/@eslint-community/eslint-utils)"
+      ]
+    },
+    {
+      "name": "@eslint-community/regexpp",
+      "version": "4.12.2",
+      "license": "MIT",
+      "location": "node_modules/@eslint-community/regexpp",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/eslint-plugin@8.69.0 (node_modules/@typescript-eslint/eslint-plugin)",
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "@eslint/config-array",
+      "version": "0.23.5",
+      "license": "Apache-2.0",
+      "location": "node_modules/@eslint/config-array",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "@eslint/config-helpers",
+      "version": "0.7.0",
+      "license": "Apache-2.0",
+      "location": "node_modules/@eslint/config-helpers",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "@eslint/core",
+      "version": "1.2.1",
+      "license": "Apache-2.0",
+      "location": "node_modules/@eslint/core",
+      "direct": false,
+      "introducingParents": [
+        "@eslint/config-helpers@0.7.0 (node_modules/@eslint/config-helpers)",
+        "@eslint/plugin-kit@0.7.3 (node_modules/@eslint/plugin-kit)",
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "@eslint/js",
+      "version": "10.0.1",
+      "license": "MIT",
+      "location": "node_modules/@eslint/js",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ]
+    },
+    {
+      "name": "@eslint/object-schema",
+      "version": "3.0.5",
+      "license": "Apache-2.0",
+      "location": "node_modules/@eslint/object-schema",
+      "direct": false,
+      "introducingParents": [
+        "@eslint/config-array@0.23.5 (node_modules/@eslint/config-array)"
+      ]
+    },
+    {
+      "name": "@eslint/plugin-kit",
+      "version": "0.7.3",
+      "license": "Apache-2.0",
+      "location": "node_modules/@eslint/plugin-kit",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "@humanfs/core",
+      "version": "0.19.2",
+      "license": "Apache-2.0",
+      "location": "node_modules/@humanfs/core",
+      "direct": false,
+      "introducingParents": [
+        "@humanfs/node@0.16.8 (node_modules/@humanfs/node)"
+      ]
+    },
+    {
+      "name": "@humanfs/node",
+      "version": "0.16.8",
+      "license": "Apache-2.0",
+      "location": "node_modules/@humanfs/node",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "@humanfs/types",
+      "version": "0.15.0",
+      "license": "Apache-2.0",
+      "location": "node_modules/@humanfs/types",
+      "direct": false,
+      "introducingParents": [
+        "@humanfs/core@0.19.2 (node_modules/@humanfs/core)",
+        "@humanfs/node@0.16.8 (node_modules/@humanfs/node)"
+      ]
+    },
+    {
+      "name": "@humanwhocodes/module-importer",
+      "version": "1.0.1",
+      "license": "Apache-2.0",
+      "location": "node_modules/@humanwhocodes/module-importer",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "@humanwhocodes/retry",
+      "version": "0.4.3",
+      "license": "Apache-2.0",
+      "location": "node_modules/@humanwhocodes/retry",
+      "direct": false,
+      "introducingParents": [
+        "@humanfs/node@0.16.8 (node_modules/@humanfs/node)",
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "@jridgewell/gen-mapping",
+      "version": "0.3.13",
+      "license": "MIT",
+      "location": "node_modules/@jridgewell/gen-mapping",
+      "direct": false,
+      "introducingParents": [
+        "@babel/generator@7.29.8 (node_modules/@babel/generator)",
+        "@jridgewell/remapping@2.3.5 (node_modules/@jridgewell/remapping)"
+      ]
+    },
+    {
+      "name": "@jridgewell/remapping",
+      "version": "2.3.5",
+      "license": "MIT",
+      "location": "node_modules/@jridgewell/remapping",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)"
+      ]
+    },
+    {
+      "name": "@jridgewell/resolve-uri",
+      "version": "3.1.2",
+      "license": "MIT",
+      "location": "node_modules/@jridgewell/resolve-uri",
+      "direct": false,
+      "introducingParents": [
+        "@jridgewell/trace-mapping@0.3.31 (node_modules/@jridgewell/trace-mapping)"
+      ]
+    },
+    {
+      "name": "@jridgewell/sourcemap-codec",
+      "version": "1.6.0",
+      "license": "MIT",
+      "location": "node_modules/@jridgewell/sourcemap-codec",
+      "direct": false,
+      "introducingParents": [
+        "@jridgewell/gen-mapping@0.3.13 (node_modules/@jridgewell/gen-mapping)",
+        "@jridgewell/trace-mapping@0.3.31 (node_modules/@jridgewell/trace-mapping)",
+        "magic-string@1.2.3 (node_modules/magic-string)"
+      ]
+    },
+    {
+      "name": "@jridgewell/trace-mapping",
+      "version": "0.3.31",
+      "license": "MIT",
+      "location": "node_modules/@jridgewell/trace-mapping",
+      "direct": false,
+      "introducingParents": [
+        "@babel/generator@7.29.8 (node_modules/@babel/generator)",
+        "@jridgewell/gen-mapping@0.3.13 (node_modules/@jridgewell/gen-mapping)",
+        "@jridgewell/remapping@2.3.5 (node_modules/@jridgewell/remapping)",
+        "@vitest/mocker@5.0.0 (node_modules/@vitest/mocker)"
+      ]
+    },
+    {
+      "name": "@keyv/bigmap",
+      "version": "1.3.1",
+      "license": "MIT",
+      "location": "node_modules/@keyv/bigmap",
+      "direct": false,
+      "introducingParents": [
+        "@cacheable/memory@2.2.0 (node_modules/@cacheable/memory)"
+      ]
+    },
+    {
+      "name": "@keyv/serialize",
+      "version": "1.1.1",
+      "license": "MIT",
+      "location": "node_modules/@keyv/serialize",
+      "direct": false,
+      "introducingParents": [
+        "keyv@5.6.0 (node_modules/keyv)"
+      ]
+    },
+    {
+      "name": "@noble/ciphers",
+      "version": "1.3.0",
+      "license": "MIT",
+      "location": "node_modules/@noble/ciphers",
+      "direct": false,
+      "introducingParents": [
+        "@ecies/ciphers@0.2.6 (node_modules/@ecies/ciphers)",
+        "eciesjs@0.5.0 (node_modules/eciesjs)"
+      ]
+    },
+    {
+      "name": "@noble/curves",
+      "version": "1.9.7",
+      "license": "MIT",
+      "location": "node_modules/@noble/curves",
+      "direct": false,
+      "introducingParents": [
+        "eciesjs@0.5.0 (node_modules/eciesjs)"
+      ]
+    },
+    {
+      "name": "@noble/hashes",
+      "version": "1.8.0",
+      "license": "MIT",
+      "location": "node_modules/@noble/hashes",
+      "direct": false,
+      "introducingParents": [
+        "@noble/curves@1.9.7 (node_modules/@noble/curves)",
+        "eciesjs@0.5.0 (node_modules/eciesjs)"
+      ]
+    },
+    {
+      "name": "@oxc-project/types",
+      "version": "0.148.0",
+      "license": "MIT",
+      "location": "node_modules/@oxc-project/types",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@playwright/test",
+      "version": "1.63.0",
+      "license": "Apache-2.0",
+      "location": "node_modules/@playwright/test",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-android-arm-eabi",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-android-arm-eabi",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-android-arm64",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-android-arm64",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-darwin-arm64",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-darwin-arm64",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-darwin-x64",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-darwin-x64",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-freebsd-x64",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-freebsd-x64",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-linux-arm-gnueabihf",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-linux-arm-gnueabihf",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-linux-arm64-gnu",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-linux-arm64-gnu",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-linux-arm64-musl",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-linux-arm64-musl",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-linux-ppc64-gnu",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-linux-ppc64-gnu",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-linux-s390x-gnu",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-linux-s390x-gnu",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-linux-x64-gnu",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-linux-x64-gnu",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-linux-x64-musl",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-linux-x64-musl",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-openharmony-arm64",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-openharmony-arm64",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-win32-arm64-msvc",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-win32-arm64-msvc",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/binding-win32-x64-msvc",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/binding-win32-x64-msvc",
+      "direct": false,
+      "introducingParents": [
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@rolldown/pluginutils",
+      "version": "1.0.1",
+      "license": "MIT",
+      "location": "node_modules/@rolldown/pluginutils",
+      "direct": false,
+      "introducingParents": [
+        "@vitejs/plugin-react@6.1.1 (node_modules/@vitejs/plugin-react)",
+        "rolldown@1.2.7 (node_modules/rolldown)"
+      ]
+    },
+    {
+      "name": "@supabase/cli-darwin-arm64",
+      "version": "2.116.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/cli-darwin-arm64",
+      "direct": false,
+      "introducingParents": [
+        "supabase@2.116.0 (node_modules/supabase)"
+      ]
+    },
+    {
+      "name": "@supabase/cli-darwin-x64",
+      "version": "2.116.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/cli-darwin-x64",
+      "direct": false,
+      "introducingParents": [
+        "supabase@2.116.0 (node_modules/supabase)"
+      ]
+    },
+    {
+      "name": "@supabase/cli-linux-arm64",
+      "version": "2.116.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/cli-linux-arm64",
+      "direct": false,
+      "introducingParents": [
+        "supabase@2.116.0 (node_modules/supabase)"
+      ]
+    },
+    {
+      "name": "@supabase/cli-linux-arm64-musl",
+      "version": "2.116.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/cli-linux-arm64-musl",
+      "direct": false,
+      "introducingParents": [
+        "supabase@2.116.0 (node_modules/supabase)"
+      ]
+    },
+    {
+      "name": "@supabase/cli-linux-x64",
+      "version": "2.116.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/cli-linux-x64",
+      "direct": false,
+      "introducingParents": [
+        "supabase@2.116.0 (node_modules/supabase)"
+      ]
+    },
+    {
+      "name": "@supabase/cli-linux-x64-musl",
+      "version": "2.116.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/cli-linux-x64-musl",
+      "direct": false,
+      "introducingParents": [
+        "supabase@2.116.0 (node_modules/supabase)"
+      ]
+    },
+    {
+      "name": "@supabase/cli-windows-arm64",
+      "version": "2.116.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/cli-windows-arm64",
+      "direct": false,
+      "introducingParents": [
+        "supabase@2.116.0 (node_modules/supabase)"
+      ]
+    },
+    {
+      "name": "@supabase/cli-windows-x64",
+      "version": "2.116.0",
+      "license": "MIT",
+      "location": "node_modules/@supabase/cli-windows-x64",
+      "direct": false,
+      "introducingParents": [
+        "supabase@2.116.0 (node_modules/supabase)"
+      ]
+    },
+    {
+      "name": "@types/chai",
+      "version": "5.2.3",
+      "license": "MIT",
+      "location": "node_modules/@types/chai",
+      "direct": false,
+      "introducingParents": [
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "@types/deep-eql",
+      "version": "4.0.2",
+      "license": "MIT",
+      "location": "node_modules/@types/deep-eql",
+      "direct": false,
+      "introducingParents": [
+        "@types/chai@5.2.3 (node_modules/@types/chai)"
+      ]
+    },
+    {
+      "name": "@types/esrecurse",
+      "version": "4.3.1",
+      "license": "MIT",
+      "location": "node_modules/@types/esrecurse",
+      "direct": false,
+      "introducingParents": [
+        "eslint-scope@9.1.2 (node_modules/eslint-scope)"
+      ]
+    },
+    {
+      "name": "@types/estree",
+      "version": "1.0.9",
+      "license": "MIT",
+      "location": "node_modules/@types/estree",
+      "direct": false,
+      "introducingParents": [
+        "eslint-scope@9.1.2 (node_modules/eslint-scope)",
+        "eslint@10.10.0 (node_modules/eslint)",
+        "estree-walker@3.0.3 (node_modules/estree-walker)"
+      ]
+    },
+    {
+      "name": "@types/json-schema",
+      "version": "7.0.15",
+      "license": "MIT",
+      "location": "node_modules/@types/json-schema",
+      "direct": false,
+      "introducingParents": [
+        "@eslint/core@1.2.1 (node_modules/@eslint/core)"
+      ]
+    },
+    {
+      "name": "@types/node",
+      "version": "24.13.3",
+      "license": "MIT",
+      "location": "node_modules/@types/node",
+      "direct": true,
+      "introducingParents": [
+        "application",
+        "vite@8.2.2 (node_modules/vite)",
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "@types/react",
+      "version": "19.2.18",
+      "license": "MIT",
+      "location": "node_modules/@types/react",
+      "direct": true,
+      "introducingParents": [
+        "@types/react-dom@19.2.7 (node_modules/@types/react-dom)",
+        "application"
+      ]
+    },
+    {
+      "name": "@types/react-dom",
+      "version": "19.2.7",
+      "license": "MIT",
+      "location": "node_modules/@types/react-dom",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ]
+    },
+    {
+      "name": "@typescript-eslint/eslint-plugin",
+      "version": "8.69.0",
+      "license": "MIT",
+      "location": "node_modules/@typescript-eslint/eslint-plugin",
+      "direct": false,
+      "introducingParents": [
+        "typescript-eslint@8.69.0 (node_modules/typescript-eslint)"
+      ]
+    },
+    {
+      "name": "ignore",
+      "version": "7.0.8",
+      "license": "MIT",
+      "location": "node_modules/@typescript-eslint/eslint-plugin/node_modules/ignore",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/eslint-plugin@8.69.0 (node_modules/@typescript-eslint/eslint-plugin)"
+      ]
+    },
+    {
+      "name": "@typescript-eslint/parser",
+      "version": "8.69.0",
+      "license": "MIT",
+      "location": "node_modules/@typescript-eslint/parser",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/eslint-plugin@8.69.0 (node_modules/@typescript-eslint/eslint-plugin)",
+        "typescript-eslint@8.69.0 (node_modules/typescript-eslint)"
+      ]
+    },
+    {
+      "name": "@typescript-eslint/project-service",
+      "version": "8.69.0",
+      "license": "MIT",
+      "location": "node_modules/@typescript-eslint/project-service",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/typescript-estree@8.69.0 (node_modules/@typescript-eslint/typescript-estree)"
+      ]
+    },
+    {
+      "name": "@typescript-eslint/scope-manager",
+      "version": "8.69.0",
+      "license": "MIT",
+      "location": "node_modules/@typescript-eslint/scope-manager",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/eslint-plugin@8.69.0 (node_modules/@typescript-eslint/eslint-plugin)",
+        "@typescript-eslint/parser@8.69.0 (node_modules/@typescript-eslint/parser)",
+        "@typescript-eslint/utils@8.69.0 (node_modules/@typescript-eslint/utils)"
+      ]
+    },
+    {
+      "name": "@typescript-eslint/tsconfig-utils",
+      "version": "8.69.0",
+      "license": "MIT",
+      "location": "node_modules/@typescript-eslint/tsconfig-utils",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/project-service@8.69.0 (node_modules/@typescript-eslint/project-service)",
+        "@typescript-eslint/typescript-estree@8.69.0 (node_modules/@typescript-eslint/typescript-estree)"
+      ]
+    },
+    {
+      "name": "@typescript-eslint/type-utils",
+      "version": "8.69.0",
+      "license": "MIT",
+      "location": "node_modules/@typescript-eslint/type-utils",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/eslint-plugin@8.69.0 (node_modules/@typescript-eslint/eslint-plugin)"
+      ]
+    },
+    {
+      "name": "@typescript-eslint/types",
+      "version": "8.69.0",
+      "license": "MIT",
+      "location": "node_modules/@typescript-eslint/types",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/parser@8.69.0 (node_modules/@typescript-eslint/parser)",
+        "@typescript-eslint/project-service@8.69.0 (node_modules/@typescript-eslint/project-service)",
+        "@typescript-eslint/scope-manager@8.69.0 (node_modules/@typescript-eslint/scope-manager)",
+        "@typescript-eslint/type-utils@8.69.0 (node_modules/@typescript-eslint/type-utils)",
+        "@typescript-eslint/typescript-estree@8.69.0 (node_modules/@typescript-eslint/typescript-estree)",
+        "@typescript-eslint/utils@8.69.0 (node_modules/@typescript-eslint/utils)",
+        "@typescript-eslint/visitor-keys@8.69.0 (node_modules/@typescript-eslint/visitor-keys)"
+      ]
+    },
+    {
+      "name": "@typescript-eslint/typescript-estree",
+      "version": "8.69.0",
+      "license": "MIT",
+      "location": "node_modules/@typescript-eslint/typescript-estree",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/parser@8.69.0 (node_modules/@typescript-eslint/parser)",
+        "@typescript-eslint/type-utils@8.69.0 (node_modules/@typescript-eslint/type-utils)",
+        "@typescript-eslint/utils@8.69.0 (node_modules/@typescript-eslint/utils)",
+        "typescript-eslint@8.69.0 (node_modules/typescript-eslint)"
+      ]
+    },
+    {
+      "name": "semver",
+      "version": "7.8.5",
+      "license": "ISC",
+      "location": "node_modules/@typescript-eslint/typescript-estree/node_modules/semver",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/typescript-estree@8.69.0 (node_modules/@typescript-eslint/typescript-estree)"
+      ]
+    },
+    {
+      "name": "@typescript-eslint/utils",
+      "version": "8.69.0",
+      "license": "MIT",
+      "location": "node_modules/@typescript-eslint/utils",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/eslint-plugin@8.69.0 (node_modules/@typescript-eslint/eslint-plugin)",
+        "@typescript-eslint/type-utils@8.69.0 (node_modules/@typescript-eslint/type-utils)",
+        "typescript-eslint@8.69.0 (node_modules/typescript-eslint)"
+      ]
+    },
+    {
+      "name": "@typescript-eslint/visitor-keys",
+      "version": "8.69.0",
+      "license": "MIT",
+      "location": "node_modules/@typescript-eslint/visitor-keys",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/eslint-plugin@8.69.0 (node_modules/@typescript-eslint/eslint-plugin)",
+        "@typescript-eslint/parser@8.69.0 (node_modules/@typescript-eslint/parser)",
+        "@typescript-eslint/scope-manager@8.69.0 (node_modules/@typescript-eslint/scope-manager)",
+        "@typescript-eslint/typescript-estree@8.69.0 (node_modules/@typescript-eslint/typescript-estree)"
+      ]
+    },
+    {
+      "name": "@vitejs/plugin-react",
+      "version": "6.1.1",
+      "license": "MIT",
+      "location": "node_modules/@vitejs/plugin-react",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ]
+    },
+    {
+      "name": "@vitest/mocker",
+      "version": "5.0.0",
+      "license": "MIT",
+      "location": "node_modules/@vitest/mocker",
+      "direct": false,
+      "introducingParents": [
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "@vitest/spy",
+      "version": "5.0.0",
+      "license": "MIT",
+      "location": "node_modules/@vitest/spy",
+      "direct": false,
+      "introducingParents": [
+        "@vitest/mocker@5.0.0 (node_modules/@vitest/mocker)"
+      ]
+    },
+    {
+      "name": "acorn",
+      "version": "8.18.0",
+      "license": "MIT",
+      "location": "node_modules/acorn",
+      "direct": false,
+      "introducingParents": [
+        "acorn-jsx@5.3.2 (node_modules/acorn-jsx)",
+        "espree@11.2.0 (node_modules/espree)"
+      ]
+    },
+    {
+      "name": "acorn-jsx",
+      "version": "5.3.2",
+      "license": "MIT",
+      "location": "node_modules/acorn-jsx",
+      "direct": false,
+      "introducingParents": [
+        "espree@11.2.0 (node_modules/espree)"
+      ]
+    },
+    {
+      "name": "ajv",
+      "version": "6.15.0",
+      "license": "MIT",
+      "location": "node_modules/ajv",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "assertion-error",
+      "version": "2.0.1",
+      "license": "MIT",
+      "location": "node_modules/assertion-error",
+      "direct": false,
+      "introducingParents": [
+        "@types/chai@5.2.3 (node_modules/@types/chai)"
+      ]
+    },
+    {
+      "name": "axe-core",
+      "version": "4.13.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/axe-core",
+      "direct": false,
+      "introducingParents": [
+        "@axe-core/playwright@4.13.0 (node_modules/@axe-core/playwright)"
+      ]
+    },
+    {
+      "name": "balanced-match",
+      "version": "4.0.4",
+      "license": "MIT",
+      "location": "node_modules/balanced-match",
+      "direct": false,
+      "introducingParents": [
+        "brace-expansion@5.0.9 (node_modules/brace-expansion)"
+      ]
+    },
+    {
+      "name": "baseline-browser-mapping",
+      "version": "2.11.21",
+      "license": "Apache-2.0",
+      "location": "node_modules/baseline-browser-mapping",
+      "direct": false,
+      "introducingParents": [
+        "browserslist@4.28.9 (node_modules/browserslist)"
+      ]
+    },
+    {
+      "name": "brace-expansion",
+      "version": "5.0.9",
+      "license": "MIT",
+      "location": "node_modules/brace-expansion",
+      "direct": false,
+      "introducingParents": [
+        "minimatch@10.2.6 (node_modules/minimatch)"
+      ]
+    },
+    {
+      "name": "browserslist",
+      "version": "4.28.9",
+      "license": "MIT",
+      "location": "node_modules/browserslist",
+      "direct": false,
+      "introducingParents": [
+        "@babel/helper-compilation-targets@7.29.7 (node_modules/@babel/helper-compilation-targets)",
+        "update-browserslist-db@1.3.2 (node_modules/update-browserslist-db)"
+      ]
+    },
+    {
+      "name": "cacheable",
+      "version": "2.5.0",
+      "license": "MIT",
+      "location": "node_modules/cacheable",
+      "direct": false,
+      "introducingParents": [
+        "flat-cache@6.1.23 (node_modules/flat-cache)"
+      ]
+    },
+    {
+      "name": "caniuse-lite",
+      "version": "1.0.30001810",
+      "license": "CC-BY-4.0",
+      "location": "node_modules/caniuse-lite",
+      "direct": false,
+      "introducingParents": [
+        "browserslist@4.28.9 (node_modules/browserslist)"
+      ]
+    },
+    {
+      "name": "chai",
+      "version": "6.2.2",
+      "license": "MIT",
+      "location": "node_modules/chai",
+      "direct": false,
+      "introducingParents": [
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "convert-source-map",
+      "version": "2.0.0",
+      "license": "MIT",
+      "location": "node_modules/convert-source-map",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)"
+      ]
+    },
+    {
+      "name": "cross-spawn",
+      "version": "7.0.6",
+      "license": "MIT",
+      "location": "node_modules/cross-spawn",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "csstype",
+      "version": "3.2.3",
+      "license": "MIT",
+      "location": "node_modules/csstype",
+      "direct": false,
+      "introducingParents": [
+        "@types/react@19.2.18 (node_modules/@types/react)"
+      ]
+    },
+    {
+      "name": "debug",
+      "version": "4.4.3",
+      "license": "MIT",
+      "location": "node_modules/debug",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)",
+        "@babel/traverse@7.29.8 (node_modules/@babel/traverse)",
+        "@eslint/config-array@0.23.5 (node_modules/@eslint/config-array)",
+        "@typescript-eslint/parser@8.69.0 (node_modules/@typescript-eslint/parser)",
+        "@typescript-eslint/project-service@8.69.0 (node_modules/@typescript-eslint/project-service)",
+        "@typescript-eslint/type-utils@8.69.0 (node_modules/@typescript-eslint/type-utils)",
+        "@typescript-eslint/typescript-estree@8.69.0 (node_modules/@typescript-eslint/typescript-estree)",
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "deep-is",
+      "version": "0.1.4",
+      "license": "MIT",
+      "location": "node_modules/deep-is",
+      "direct": false,
+      "introducingParents": [
+        "optionator@0.9.4 (node_modules/optionator)"
+      ]
+    },
+    {
+      "name": "detect-libc",
+      "version": "2.1.2",
+      "license": "Apache-2.0",
+      "location": "node_modules/detect-libc",
+      "direct": false,
+      "introducingParents": [
+        "lightningcss@1.33.0 (node_modules/lightningcss)"
+      ]
+    },
+    {
+      "name": "eciesjs",
+      "version": "0.5.0",
+      "license": "MIT",
+      "location": "node_modules/eciesjs",
+      "direct": false,
+      "introducingParents": [
+        "supabase@2.116.0 (node_modules/supabase)"
+      ]
+    },
+    {
+      "name": "electron-to-chromium",
+      "version": "1.5.422",
+      "license": "ISC",
+      "location": "node_modules/electron-to-chromium",
+      "direct": false,
+      "introducingParents": [
+        "browserslist@4.28.9 (node_modules/browserslist)"
+      ]
+    },
+    {
+      "name": "es-module-lexer",
+      "version": "2.3.2",
+      "license": "MIT",
+      "location": "node_modules/es-module-lexer",
+      "direct": false,
+      "introducingParents": [
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "escalade",
+      "version": "3.2.0",
+      "license": "MIT",
+      "location": "node_modules/escalade",
+      "direct": false,
+      "introducingParents": [
+        "update-browserslist-db@1.3.2 (node_modules/update-browserslist-db)"
+      ]
+    },
+    {
+      "name": "escape-string-regexp",
+      "version": "4.0.0",
+      "license": "MIT",
+      "location": "node_modules/escape-string-regexp",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "eslint",
+      "version": "10.10.0",
+      "license": "MIT",
+      "location": "node_modules/eslint",
+      "direct": true,
+      "introducingParents": [
+        "@eslint-community/eslint-utils@4.10.1 (node_modules/@eslint-community/eslint-utils)",
+        "@eslint/js@10.0.1 (node_modules/@eslint/js)",
+        "@typescript-eslint/eslint-plugin@8.69.0 (node_modules/@typescript-eslint/eslint-plugin)",
+        "@typescript-eslint/parser@8.69.0 (node_modules/@typescript-eslint/parser)",
+        "@typescript-eslint/type-utils@8.69.0 (node_modules/@typescript-eslint/type-utils)",
+        "@typescript-eslint/utils@8.69.0 (node_modules/@typescript-eslint/utils)",
+        "application",
+        "eslint-plugin-react-hooks@7.1.1 (node_modules/eslint-plugin-react-hooks)",
+        "eslint-plugin-react-refresh@0.5.6 (node_modules/eslint-plugin-react-refresh)",
+        "typescript-eslint@8.69.0 (node_modules/typescript-eslint)"
+      ]
+    },
+    {
+      "name": "eslint-plugin-react-hooks",
+      "version": "7.1.1",
+      "license": "MIT",
+      "location": "node_modules/eslint-plugin-react-hooks",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ]
+    },
+    {
+      "name": "eslint-plugin-react-refresh",
+      "version": "0.5.6",
+      "license": "MIT",
+      "location": "node_modules/eslint-plugin-react-refresh",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ]
+    },
+    {
+      "name": "eslint-scope",
+      "version": "9.1.2",
+      "license": "BSD-2-Clause",
+      "location": "node_modules/eslint-scope",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "eslint-visitor-keys",
+      "version": "5.0.1",
+      "license": "Apache-2.0",
+      "location": "node_modules/eslint-visitor-keys",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/visitor-keys@8.69.0 (node_modules/@typescript-eslint/visitor-keys)",
+        "eslint@10.10.0 (node_modules/eslint)",
+        "espree@11.2.0 (node_modules/espree)"
+      ]
+    },
+    {
+      "name": "espree",
+      "version": "11.2.0",
+      "license": "BSD-2-Clause",
+      "location": "node_modules/espree",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "esquery",
+      "version": "1.7.0",
+      "license": "BSD-3-Clause",
+      "location": "node_modules/esquery",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "esrecurse",
+      "version": "4.3.0",
+      "license": "BSD-2-Clause",
+      "location": "node_modules/esrecurse",
+      "direct": false,
+      "introducingParents": [
+        "eslint-scope@9.1.2 (node_modules/eslint-scope)"
+      ]
+    },
+    {
+      "name": "estraverse",
+      "version": "5.3.0",
+      "license": "BSD-2-Clause",
+      "location": "node_modules/estraverse",
+      "direct": false,
+      "introducingParents": [
+        "eslint-scope@9.1.2 (node_modules/eslint-scope)",
+        "esquery@1.7.0 (node_modules/esquery)",
+        "esrecurse@4.3.0 (node_modules/esrecurse)"
+      ]
+    },
+    {
+      "name": "estree-walker",
+      "version": "3.0.3",
+      "license": "MIT",
+      "location": "node_modules/estree-walker",
+      "direct": false,
+      "introducingParents": [
+        "@vitest/mocker@5.0.0 (node_modules/@vitest/mocker)"
+      ]
+    },
+    {
+      "name": "esutils",
+      "version": "2.0.3",
+      "license": "BSD-2-Clause",
+      "location": "node_modules/esutils",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "expect-type",
+      "version": "1.4.0",
+      "license": "Apache-2.0",
+      "location": "node_modules/expect-type",
+      "direct": false,
+      "introducingParents": [
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "fast-deep-equal",
+      "version": "3.1.3",
+      "license": "MIT",
+      "location": "node_modules/fast-deep-equal",
+      "direct": false,
+      "introducingParents": [
+        "ajv@6.15.0 (node_modules/ajv)",
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "fast-json-stable-stringify",
+      "version": "2.1.0",
+      "license": "MIT",
+      "location": "node_modules/fast-json-stable-stringify",
+      "direct": false,
+      "introducingParents": [
+        "ajv@6.15.0 (node_modules/ajv)"
+      ]
+    },
+    {
+      "name": "fast-levenshtein",
+      "version": "2.0.6",
+      "license": "MIT",
+      "location": "node_modules/fast-levenshtein",
+      "direct": false,
+      "introducingParents": [
+        "optionator@0.9.4 (node_modules/optionator)"
+      ]
+    },
+    {
+      "name": "fdir",
+      "version": "6.5.0",
+      "license": "MIT",
+      "location": "node_modules/fdir",
+      "direct": false,
+      "introducingParents": [
+        "tinyglobby@0.2.17 (node_modules/tinyglobby)"
+      ]
+    },
+    {
+      "name": "file-entry-cache",
+      "version": "11.1.5",
+      "license": "MIT",
+      "location": "node_modules/file-entry-cache",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "find-up",
+      "version": "5.0.0",
+      "license": "MIT",
+      "location": "node_modules/find-up",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "flat-cache",
+      "version": "6.1.23",
+      "license": "MIT",
+      "location": "node_modules/flat-cache",
+      "direct": false,
+      "introducingParents": [
+        "file-entry-cache@11.1.5 (node_modules/file-entry-cache)"
+      ]
+    },
+    {
+      "name": "flatted",
+      "version": "3.4.4",
+      "license": "ISC",
+      "location": "node_modules/flatted",
+      "direct": false,
+      "introducingParents": [
+        "flat-cache@6.1.23 (node_modules/flat-cache)"
+      ]
+    },
+    {
+      "name": "fsevents",
+      "version": "2.3.3",
+      "license": "MIT",
+      "location": "node_modules/fsevents",
+      "direct": false,
+      "introducingParents": [
+        "vite@8.2.2 (node_modules/vite)"
+      ]
+    },
+    {
+      "name": "gensync",
+      "version": "1.0.0-beta.2",
+      "license": "MIT",
+      "location": "node_modules/gensync",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)"
+      ]
+    },
+    {
+      "name": "glob-parent",
+      "version": "6.0.2",
+      "license": "ISC",
+      "location": "node_modules/glob-parent",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "globals",
+      "version": "17.12.0",
+      "license": "MIT",
+      "location": "node_modules/globals",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ]
+    },
+    {
+      "name": "hashery",
+      "version": "1.5.1",
+      "license": "MIT",
+      "location": "node_modules/hashery",
+      "direct": false,
+      "introducingParents": [
+        "@cacheable/utils@2.5.0 (node_modules/@cacheable/utils)",
+        "@keyv/bigmap@1.3.1 (node_modules/@keyv/bigmap)"
+      ]
+    },
+    {
+      "name": "hermes-estree",
+      "version": "0.25.1",
+      "license": "MIT",
+      "location": "node_modules/hermes-estree",
+      "direct": false,
+      "introducingParents": [
+        "hermes-parser@0.25.1 (node_modules/hermes-parser)"
+      ]
+    },
+    {
+      "name": "hermes-parser",
+      "version": "0.25.1",
+      "license": "MIT",
+      "location": "node_modules/hermes-parser",
+      "direct": false,
+      "introducingParents": [
+        "eslint-plugin-react-hooks@7.1.1 (node_modules/eslint-plugin-react-hooks)"
+      ]
+    },
+    {
+      "name": "hookified",
+      "version": "1.15.1",
+      "license": "MIT",
+      "location": "node_modules/hookified",
+      "direct": false,
+      "introducingParents": [
+        "@cacheable/memory@2.2.0 (node_modules/@cacheable/memory)",
+        "@keyv/bigmap@1.3.1 (node_modules/@keyv/bigmap)",
+        "cacheable@2.5.0 (node_modules/cacheable)",
+        "flat-cache@6.1.23 (node_modules/flat-cache)",
+        "hashery@1.5.1 (node_modules/hashery)"
+      ]
+    },
+    {
+      "name": "ignore",
+      "version": "5.3.2",
+      "license": "MIT",
+      "location": "node_modules/ignore",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "imurmurhash",
+      "version": "0.1.4",
+      "license": "MIT",
+      "location": "node_modules/imurmurhash",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "is-extglob",
+      "version": "2.1.1",
+      "license": "MIT",
+      "location": "node_modules/is-extglob",
+      "direct": false,
+      "introducingParents": [
+        "is-glob@4.0.3 (node_modules/is-glob)"
+      ]
+    },
+    {
+      "name": "is-glob",
+      "version": "4.0.3",
+      "license": "MIT",
+      "location": "node_modules/is-glob",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)",
+        "glob-parent@6.0.2 (node_modules/glob-parent)"
+      ]
+    },
+    {
+      "name": "isexe",
+      "version": "2.0.0",
+      "license": "ISC",
+      "location": "node_modules/isexe",
+      "direct": false,
+      "introducingParents": [
+        "which@2.0.2 (node_modules/which)"
+      ]
+    },
+    {
+      "name": "jose",
+      "version": "6.2.12",
+      "license": "MIT",
+      "location": "node_modules/jose",
+      "direct": false,
+      "introducingParents": [
+        "supabase@2.116.0 (node_modules/supabase)"
+      ]
+    },
+    {
+      "name": "js-tokens",
+      "version": "4.0.0",
+      "license": "MIT",
+      "location": "node_modules/js-tokens",
+      "direct": false,
+      "introducingParents": [
+        "@babel/code-frame@7.29.7 (node_modules/@babel/code-frame)"
+      ]
+    },
+    {
+      "name": "jsesc",
+      "version": "3.1.0",
+      "license": "MIT",
+      "location": "node_modules/jsesc",
+      "direct": false,
+      "introducingParents": [
+        "@babel/generator@7.29.8 (node_modules/@babel/generator)"
+      ]
+    },
+    {
+      "name": "json-schema-traverse",
+      "version": "0.4.1",
+      "license": "MIT",
+      "location": "node_modules/json-schema-traverse",
+      "direct": false,
+      "introducingParents": [
+        "ajv@6.15.0 (node_modules/ajv)"
+      ]
+    },
+    {
+      "name": "json-stable-stringify-without-jsonify",
+      "version": "1.0.1",
+      "license": "MIT",
+      "location": "node_modules/json-stable-stringify-without-jsonify",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "json5",
+      "version": "2.2.3",
+      "license": "MIT",
+      "location": "node_modules/json5",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)"
+      ]
+    },
+    {
+      "name": "keyv",
+      "version": "5.6.0",
+      "license": "MIT",
+      "location": "node_modules/keyv",
+      "direct": false,
+      "introducingParents": [
+        "@cacheable/memory@2.2.0 (node_modules/@cacheable/memory)",
+        "@cacheable/utils@2.5.0 (node_modules/@cacheable/utils)",
+        "@keyv/bigmap@1.3.1 (node_modules/@keyv/bigmap)",
+        "cacheable@2.5.0 (node_modules/cacheable)"
+      ]
+    },
+    {
+      "name": "levn",
+      "version": "0.4.1",
+      "license": "MIT",
+      "location": "node_modules/levn",
+      "direct": false,
+      "introducingParents": [
+        "@eslint/plugin-kit@0.7.3 (node_modules/@eslint/plugin-kit)",
+        "optionator@0.9.4 (node_modules/optionator)"
+      ]
+    },
+    {
+      "name": "lightningcss",
+      "version": "1.33.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/lightningcss",
+      "direct": false,
+      "introducingParents": [
+        "vite@8.2.2 (node_modules/vite)"
+      ]
+    },
+    {
+      "name": "lightningcss-android-arm64",
+      "version": "1.33.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/lightningcss-android-arm64",
+      "direct": false,
+      "introducingParents": [
+        "lightningcss@1.33.0 (node_modules/lightningcss)"
+      ]
+    },
+    {
+      "name": "lightningcss-darwin-arm64",
+      "version": "1.33.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/lightningcss-darwin-arm64",
+      "direct": false,
+      "introducingParents": [
+        "lightningcss@1.33.0 (node_modules/lightningcss)"
+      ]
+    },
+    {
+      "name": "lightningcss-darwin-x64",
+      "version": "1.33.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/lightningcss-darwin-x64",
+      "direct": false,
+      "introducingParents": [
+        "lightningcss@1.33.0 (node_modules/lightningcss)"
+      ]
+    },
+    {
+      "name": "lightningcss-freebsd-x64",
+      "version": "1.33.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/lightningcss-freebsd-x64",
+      "direct": false,
+      "introducingParents": [
+        "lightningcss@1.33.0 (node_modules/lightningcss)"
+      ]
+    },
+    {
+      "name": "lightningcss-linux-arm-gnueabihf",
+      "version": "1.33.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/lightningcss-linux-arm-gnueabihf",
+      "direct": false,
+      "introducingParents": [
+        "lightningcss@1.33.0 (node_modules/lightningcss)"
+      ]
+    },
+    {
+      "name": "lightningcss-linux-arm64-gnu",
+      "version": "1.33.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/lightningcss-linux-arm64-gnu",
+      "direct": false,
+      "introducingParents": [
+        "lightningcss@1.33.0 (node_modules/lightningcss)"
+      ]
+    },
+    {
+      "name": "lightningcss-linux-arm64-musl",
+      "version": "1.33.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/lightningcss-linux-arm64-musl",
+      "direct": false,
+      "introducingParents": [
+        "lightningcss@1.33.0 (node_modules/lightningcss)"
+      ]
+    },
+    {
+      "name": "lightningcss-linux-x64-gnu",
+      "version": "1.33.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/lightningcss-linux-x64-gnu",
+      "direct": false,
+      "introducingParents": [
+        "lightningcss@1.33.0 (node_modules/lightningcss)"
+      ]
+    },
+    {
+      "name": "lightningcss-linux-x64-musl",
+      "version": "1.33.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/lightningcss-linux-x64-musl",
+      "direct": false,
+      "introducingParents": [
+        "lightningcss@1.33.0 (node_modules/lightningcss)"
+      ]
+    },
+    {
+      "name": "lightningcss-win32-arm64-msvc",
+      "version": "1.33.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/lightningcss-win32-arm64-msvc",
+      "direct": false,
+      "introducingParents": [
+        "lightningcss@1.33.0 (node_modules/lightningcss)"
+      ]
+    },
+    {
+      "name": "lightningcss-win32-x64-msvc",
+      "version": "1.33.0",
+      "license": "MPL-2.0",
+      "location": "node_modules/lightningcss-win32-x64-msvc",
+      "direct": false,
+      "introducingParents": [
+        "lightningcss@1.33.0 (node_modules/lightningcss)"
+      ]
+    },
+    {
+      "name": "locate-path",
+      "version": "6.0.0",
+      "license": "MIT",
+      "location": "node_modules/locate-path",
+      "direct": false,
+      "introducingParents": [
+        "find-up@5.0.0 (node_modules/find-up)"
+      ]
+    },
+    {
+      "name": "lru-cache",
+      "version": "5.1.1",
+      "license": "ISC",
+      "location": "node_modules/lru-cache",
+      "direct": false,
+      "introducingParents": [
+        "@babel/helper-compilation-targets@7.29.7 (node_modules/@babel/helper-compilation-targets)"
+      ]
+    },
+    {
+      "name": "magic-string",
+      "version": "1.2.3",
+      "license": "MIT",
+      "location": "node_modules/magic-string",
+      "direct": false,
+      "introducingParents": [
+        "@vitest/mocker@5.0.0 (node_modules/@vitest/mocker)",
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "minimatch",
+      "version": "10.2.6",
+      "license": "BlueOak-1.0.0",
+      "location": "node_modules/minimatch",
+      "direct": false,
+      "introducingParents": [
+        "@eslint/config-array@0.23.5 (node_modules/@eslint/config-array)",
+        "@typescript-eslint/typescript-estree@8.69.0 (node_modules/@typescript-eslint/typescript-estree)",
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "ms",
+      "version": "2.1.3",
+      "license": "MIT",
+      "location": "node_modules/ms",
+      "direct": false,
+      "introducingParents": [
+        "debug@4.4.3 (node_modules/debug)"
+      ]
+    },
+    {
+      "name": "nanoid",
+      "version": "3.3.18",
+      "license": "MIT",
+      "location": "node_modules/nanoid",
+      "direct": false,
+      "introducingParents": [
+        "postcss@8.5.28 (node_modules/postcss)"
+      ]
+    },
+    {
+      "name": "natural-compare",
+      "version": "1.4.0",
+      "license": "MIT",
+      "location": "node_modules/natural-compare",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/eslint-plugin@8.69.0 (node_modules/@typescript-eslint/eslint-plugin)",
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "node-releases",
+      "version": "2.0.54",
+      "license": "MIT",
+      "location": "node_modules/node-releases",
+      "direct": false,
+      "introducingParents": [
+        "browserslist@4.28.9 (node_modules/browserslist)"
+      ]
+    },
+    {
+      "name": "obug",
+      "version": "2.1.4",
+      "license": "MIT",
+      "location": "node_modules/obug",
+      "direct": false,
+      "introducingParents": [
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "optionator",
+      "version": "0.9.4",
+      "license": "MIT",
+      "location": "node_modules/optionator",
+      "direct": false,
+      "introducingParents": [
+        "eslint@10.10.0 (node_modules/eslint)"
+      ]
+    },
+    {
+      "name": "p-limit",
+      "version": "3.1.0",
+      "license": "MIT",
+      "location": "node_modules/p-limit",
+      "direct": false,
+      "introducingParents": [
+        "p-locate@5.0.0 (node_modules/p-locate)"
+      ]
+    },
+    {
+      "name": "p-locate",
+      "version": "5.0.0",
+      "license": "MIT",
+      "location": "node_modules/p-locate",
+      "direct": false,
+      "introducingParents": [
+        "locate-path@6.0.0 (node_modules/locate-path)"
+      ]
+    },
+    {
+      "name": "path-exists",
+      "version": "4.0.0",
+      "license": "MIT",
+      "location": "node_modules/path-exists",
+      "direct": false,
+      "introducingParents": [
+        "find-up@5.0.0 (node_modules/find-up)"
+      ]
+    },
+    {
+      "name": "path-key",
+      "version": "3.1.1",
+      "license": "MIT",
+      "location": "node_modules/path-key",
+      "direct": false,
+      "introducingParents": [
+        "cross-spawn@7.0.6 (node_modules/cross-spawn)"
+      ]
+    },
+    {
+      "name": "picocolors",
+      "version": "1.1.1",
+      "license": "ISC",
+      "location": "node_modules/picocolors",
+      "direct": false,
+      "introducingParents": [
+        "@babel/code-frame@7.29.7 (node_modules/@babel/code-frame)",
+        "postcss@8.5.28 (node_modules/postcss)",
+        "update-browserslist-db@1.3.2 (node_modules/update-browserslist-db)"
+      ]
+    },
+    {
+      "name": "picomatch",
+      "version": "4.0.7",
+      "license": "MIT",
+      "location": "node_modules/picomatch",
+      "direct": false,
+      "introducingParents": [
+        "fdir@6.5.0 (node_modules/fdir)",
+        "tinyglobby@0.2.17 (node_modules/tinyglobby)",
+        "vite@8.2.2 (node_modules/vite)",
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "playwright",
+      "version": "1.63.0",
+      "license": "Apache-2.0",
+      "location": "node_modules/playwright",
+      "direct": false,
+      "introducingParents": [
+        "@playwright/test@1.63.0 (node_modules/@playwright/test)"
+      ]
+    },
+    {
+      "name": "playwright-core",
+      "version": "1.63.0",
+      "license": "Apache-2.0",
+      "location": "node_modules/playwright-core",
+      "direct": false,
+      "introducingParents": [
+        "@axe-core/playwright@4.13.0 (node_modules/@axe-core/playwright)",
+        "playwright@1.63.0 (node_modules/playwright)"
+      ]
+    },
+    {
+      "name": "postcss",
+      "version": "8.5.28",
+      "license": "MIT",
+      "location": "node_modules/postcss",
+      "direct": false,
+      "introducingParents": [
+        "vite@8.2.2 (node_modules/vite)"
+      ]
+    },
+    {
+      "name": "prelude-ls",
+      "version": "1.2.1",
+      "license": "MIT",
+      "location": "node_modules/prelude-ls",
+      "direct": false,
+      "introducingParents": [
+        "levn@0.4.1 (node_modules/levn)",
+        "optionator@0.9.4 (node_modules/optionator)",
+        "type-check@0.4.0 (node_modules/type-check)"
+      ]
+    },
+    {
+      "name": "punycode",
+      "version": "2.3.1",
+      "license": "MIT",
+      "location": "node_modules/punycode",
+      "direct": false,
+      "introducingParents": [
+        "uri-js@4.4.1 (node_modules/uri-js)"
+      ]
+    },
+    {
+      "name": "qified",
+      "version": "0.10.1",
+      "license": "MIT",
+      "location": "node_modules/qified",
+      "direct": false,
+      "introducingParents": [
+        "cacheable@2.5.0 (node_modules/cacheable)"
+      ]
+    },
+    {
+      "name": "hookified",
+      "version": "2.2.0",
+      "license": "MIT",
+      "location": "node_modules/qified/node_modules/hookified",
+      "direct": false,
+      "introducingParents": [
+        "qified@0.10.1 (node_modules/qified)"
+      ]
+    },
+    {
+      "name": "rolldown",
+      "version": "1.2.7",
+      "license": "MIT",
+      "location": "node_modules/rolldown",
+      "direct": false,
+      "introducingParents": [
+        "vite@8.2.2 (node_modules/vite)"
+      ]
+    },
+    {
+      "name": "semver",
+      "version": "6.3.1",
+      "license": "ISC",
+      "location": "node_modules/semver",
+      "direct": false,
+      "introducingParents": [
+        "@babel/core@7.29.7 (node_modules/@babel/core)",
+        "@babel/helper-compilation-targets@7.29.7 (node_modules/@babel/helper-compilation-targets)"
+      ]
+    },
+    {
+      "name": "shebang-command",
+      "version": "2.0.0",
+      "license": "MIT",
+      "location": "node_modules/shebang-command",
+      "direct": false,
+      "introducingParents": [
+        "cross-spawn@7.0.6 (node_modules/cross-spawn)"
+      ]
+    },
+    {
+      "name": "shebang-regex",
+      "version": "3.0.0",
+      "license": "MIT",
+      "location": "node_modules/shebang-regex",
+      "direct": false,
+      "introducingParents": [
+        "shebang-command@2.0.0 (node_modules/shebang-command)"
+      ]
+    },
+    {
+      "name": "siginfo",
+      "version": "2.0.0",
+      "license": "ISC",
+      "location": "node_modules/siginfo",
+      "direct": false,
+      "introducingParents": [
+        "why-is-node-running@2.3.0 (node_modules/why-is-node-running)"
+      ]
+    },
+    {
+      "name": "source-map-js",
+      "version": "1.2.1",
+      "license": "BSD-3-Clause",
+      "location": "node_modules/source-map-js",
+      "direct": false,
+      "introducingParents": [
+        "postcss@8.5.28 (node_modules/postcss)"
+      ]
+    },
+    {
+      "name": "stackback",
+      "version": "0.0.2",
+      "license": "MIT",
+      "location": "node_modules/stackback",
+      "direct": false,
+      "introducingParents": [
+        "why-is-node-running@2.3.0 (node_modules/why-is-node-running)"
+      ]
+    },
+    {
+      "name": "std-env",
+      "version": "4.2.0",
+      "license": "MIT",
+      "location": "node_modules/std-env",
+      "direct": false,
+      "introducingParents": [
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "supabase",
+      "version": "2.116.0",
+      "license": "MIT",
+      "location": "node_modules/supabase",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ]
+    },
+    {
+      "name": "tinybench",
+      "version": "6.1.4",
+      "license": "MIT",
+      "location": "node_modules/tinybench",
+      "direct": false,
+      "introducingParents": [
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "tinyexec",
+      "version": "1.3.0",
+      "license": "MIT",
+      "location": "node_modules/tinyexec",
+      "direct": false,
+      "introducingParents": [
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "tinyglobby",
+      "version": "0.2.17",
+      "license": "MIT",
+      "location": "node_modules/tinyglobby",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/typescript-estree@8.69.0 (node_modules/@typescript-eslint/typescript-estree)",
+        "vite@8.2.2 (node_modules/vite)",
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "ts-api-utils",
+      "version": "2.5.0",
+      "license": "MIT",
+      "location": "node_modules/ts-api-utils",
+      "direct": false,
+      "introducingParents": [
+        "@typescript-eslint/eslint-plugin@8.69.0 (node_modules/@typescript-eslint/eslint-plugin)",
+        "@typescript-eslint/type-utils@8.69.0 (node_modules/@typescript-eslint/type-utils)",
+        "@typescript-eslint/typescript-estree@8.69.0 (node_modules/@typescript-eslint/typescript-estree)"
+      ]
+    },
+    {
+      "name": "type-check",
+      "version": "0.4.0",
+      "license": "MIT",
+      "location": "node_modules/type-check",
+      "direct": false,
+      "introducingParents": [
+        "levn@0.4.1 (node_modules/levn)",
+        "optionator@0.9.4 (node_modules/optionator)"
+      ]
+    },
+    {
+      "name": "typescript",
+      "version": "6.0.3",
+      "license": "Apache-2.0",
+      "location": "node_modules/typescript",
+      "direct": true,
+      "introducingParents": [
+        "@typescript-eslint/eslint-plugin@8.69.0 (node_modules/@typescript-eslint/eslint-plugin)",
+        "@typescript-eslint/parser@8.69.0 (node_modules/@typescript-eslint/parser)",
+        "@typescript-eslint/project-service@8.69.0 (node_modules/@typescript-eslint/project-service)",
+        "@typescript-eslint/tsconfig-utils@8.69.0 (node_modules/@typescript-eslint/tsconfig-utils)",
+        "@typescript-eslint/type-utils@8.69.0 (node_modules/@typescript-eslint/type-utils)",
+        "@typescript-eslint/typescript-estree@8.69.0 (node_modules/@typescript-eslint/typescript-estree)",
+        "@typescript-eslint/utils@8.69.0 (node_modules/@typescript-eslint/utils)",
+        "application",
+        "ts-api-utils@2.5.0 (node_modules/ts-api-utils)",
+        "typescript-eslint@8.69.0 (node_modules/typescript-eslint)"
+      ]
+    },
+    {
+      "name": "typescript-eslint",
+      "version": "8.69.0",
+      "license": "MIT",
+      "location": "node_modules/typescript-eslint",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ]
+    },
+    {
+      "name": "undici-types",
+      "version": "7.18.2",
+      "license": "MIT",
+      "location": "node_modules/undici-types",
+      "direct": false,
+      "introducingParents": [
+        "@types/node@24.13.3 (node_modules/@types/node)"
+      ]
+    },
+    {
+      "name": "update-browserslist-db",
+      "version": "1.3.2",
+      "license": "MIT",
+      "location": "node_modules/update-browserslist-db",
+      "direct": false,
+      "introducingParents": [
+        "browserslist@4.28.9 (node_modules/browserslist)"
+      ]
+    },
+    {
+      "name": "uri-js",
+      "version": "4.4.1",
+      "license": "BSD-2-Clause",
+      "location": "node_modules/uri-js",
+      "direct": false,
+      "introducingParents": [
+        "ajv@6.15.0 (node_modules/ajv)"
+      ]
+    },
+    {
+      "name": "vite",
+      "version": "8.2.2",
+      "license": "MIT",
+      "location": "node_modules/vite",
+      "direct": true,
+      "introducingParents": [
+        "@vitejs/plugin-react@6.1.1 (node_modules/@vitejs/plugin-react)",
+        "@vitest/mocker@5.0.0 (node_modules/@vitest/mocker)",
+        "application",
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "vitest",
+      "version": "5.0.0",
+      "license": "MIT",
+      "location": "node_modules/vitest",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ]
+    },
+    {
+      "name": "which",
+      "version": "2.0.2",
+      "license": "ISC",
+      "location": "node_modules/which",
+      "direct": false,
+      "introducingParents": [
+        "cross-spawn@7.0.6 (node_modules/cross-spawn)"
+      ]
+    },
+    {
+      "name": "why-is-node-running",
+      "version": "2.3.0",
+      "license": "MIT",
+      "location": "node_modules/why-is-node-running",
+      "direct": false,
+      "introducingParents": [
+        "vitest@5.0.0 (node_modules/vitest)"
+      ]
+    },
+    {
+      "name": "word-wrap",
+      "version": "1.2.5",
+      "license": "MIT",
+      "location": "node_modules/word-wrap",
+      "direct": false,
+      "introducingParents": [
+        "optionator@0.9.4 (node_modules/optionator)"
+      ]
+    },
+    {
+      "name": "yallist",
+      "version": "3.1.1",
+      "license": "ISC",
+      "location": "node_modules/yallist",
+      "direct": false,
+      "introducingParents": [
+        "lru-cache@5.1.1 (node_modules/lru-cache)"
+      ]
+    },
+    {
+      "name": "yocto-queue",
+      "version": "0.1.0",
+      "license": "MIT",
+      "location": "node_modules/yocto-queue",
+      "direct": false,
+      "introducingParents": [
+        "p-limit@3.1.0 (node_modules/p-limit)"
+      ]
+    },
+    {
+      "name": "zod",
+      "version": "4.5.4",
+      "license": "MIT",
+      "location": "node_modules/zod",
+      "direct": false,
+      "introducingParents": [
+        "eslint-plugin-react-hooks@7.1.1 (node_modules/eslint-plugin-react-hooks)",
+        "zod-validation-error@4.0.2 (node_modules/zod-validation-error)"
+      ]
+    },
+    {
+      "name": "zod-validation-error",
+      "version": "4.0.2",
+      "license": "MIT",
+      "location": "node_modules/zod-validation-error",
+      "direct": false,
+      "introducingParents": [
+        "eslint-plugin-react-hooks@7.1.1 (node_modules/eslint-plugin-react-hooks)"
+      ]
+    }
+  ]
+}

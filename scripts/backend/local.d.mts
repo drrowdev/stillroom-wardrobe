@@ -1,0 +1,28 @@
+export const ROOT: string;
+export const PROJECT_ID: string;
+export const DB_CONTAINER: string;
+export const LOCAL_API: string;
+export const CACHE_PATH: string;
+export const MIGRATION_HASH: string;
+export const TEST_EMAILS: string[];
+export class LocalBackendError extends Error { exitCode: number; constructor(message: string, exitCode?: number); }
+export function fail(message: string, exitCode?: number): never;
+export function reportError(error: unknown): void;
+export function assertLoopbackUrl(value: string): string;
+export function assertLocalApi(value: string): string;
+export function jwtClaims(token: string): Record<string, unknown>;
+export function assertPublishableKey(key: string): string;
+export function assertNoServiceSecrets(env: Record<string, string | undefined>): void;
+export function validateSessionEnvironment(env: Record<string, string | undefined>): void;
+export function normalSessionEnvironment(source: Record<string, string | undefined>, credentials: Record<string, string | undefined>): Record<string, string>;
+export function commandEnvironment(source?: Record<string, string | undefined>): Record<string, string>;
+export type CommandResult = { code: number; stdout: string; stderr: string };
+export type CommandRunner = (command: string, args: string[]) => Promise<CommandResult>;
+export function runCommand(command: string, args: string[], options?: { input?: string; env?: Record<string, string>; timeout?: number }): Promise<CommandResult>;
+export function assertProjectConfig(): Promise<void>;
+export function requireDocker(run?: CommandRunner): Promise<void>;
+export function requireLocalContainer(run?: CommandRunner): Promise<void>;
+export function cli(args: string[], timeout?: number): Promise<CommandResult>;
+export function localStatus(): Promise<{ url: string; key: string; serviceKey: string }>;
+export function privilegedLocalSql(sql: string): Promise<string>;
+export function readCredentialCache(): Promise<Record<string, string>>;

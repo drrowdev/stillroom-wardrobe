@@ -1,0 +1,45 @@
+name: Copilot setup steps
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the working branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up the pinned Node version
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Install the locked dependencies
+        run: npm ci --no-fund
+      - name: Install the browser and Linux dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Enable disposable local tests and an ephemeral leak canary
+        run: |
+          echo "ALLOW_SECURITY_TESTS=1" >> "$GITHUB_ENV"
+          canary="$(openssl rand -hex 24)"
+          echo "::add-mask::$canary"
+          echo "STILLROOM_SECRET_CANARY=$canary" >> "$GITHUB_ENV"
+      - name: Confirm local Docker is available
+        run: docker info --format '{{.ServerVersion}}'
+      - name: Download images and start disposable Supabase
+        run: npm run db:start
+      - name: Apply the local migration and provision fictional accounts
+        run: npm run db:reset
+      - name: Generate actual schema types
+        run: npm run db:types
