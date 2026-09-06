@@ -93,7 +93,7 @@ async function readBounded(response, maximum) {
 }
 
 function json(response) {
-  requireEvidence(response.type.split(';')[0] === 'application/json');
+  requireEvidence(response.type.split(';')[0].trim().toLowerCase() === 'application/json');
   try { return JSON.parse(response.bytes.toString('utf8')); }
   catch { throw new SmokeError('BLOCKED'); }
 }
@@ -152,7 +152,7 @@ export async function runHostedSmoke(env, fetcher = fetch) {
           && size > 0 && size <= (variant === 'main' ? 512_000 : 61_440)
           && /^[0-9a-f]{64}$/.test(image[`${variant}_sha256`]));
         const response = await get(owner, `/storage/v1/object/authenticated/wardrobe/${path}`, true);
-        requireEvidence(response.status === 200 && response.type.split(';')[0] === 'image/jpeg'
+        requireEvidence(response.status === 200 && response.type.split(';')[0].trim().toLowerCase() === 'image/jpeg'
           && response.bytes.length === size
           && createHash('sha256').update(response.bytes).digest('hex') === image[`${variant}_sha256`]);
       }

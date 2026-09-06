@@ -120,6 +120,24 @@ hosted execution. Final immutable head and automated review/CI status are
 recorded in the PR completion reply; fresh-head CI, independent coordinator
 read-only Claude review and explicit user merge approval are distinct gates.
 
+Automated validation of `ed624a84b00f2f98dd5e7d0b56ab020a5e8f31f5` found zero
+CodeQL alerts. Its MIME-whitespace compatibility finding was addressed for
+JSON/JPEG, with a case/parameter regression. The claimed HTTP 300 acceptance
+was incorrect (`status < 300 || status >= 400` rejects it); an explicit 300
+case now verifies refusal. The third comment acknowledged existing malformed
+Storage-body coverage and no concrete defect. No authorization rule was weakened.
+Follow-up exact targeted command above passed **108 tests**, and
+`npm run test:unit` passed **199 tests**. Lint, typecheck, translations, build,
+canary secret scan, dependency check and `git diff --check` were repeated,
+all exit 0. Browser/a11y/real-local results in the table remain from their
+recorded code state, not claimed as repeated for this MIME-only follow-up.
+
+Fresh PR CI run `34041749524` for `ed624a8` is **action_required**; both the jobs
+and failed-job logs endpoints report zero jobs. Coordinator approval is needed
+for the final head's App/browser and Real local Supabase jobs. No approval/rerun
+was bypassed and no absent/neutral result was counted as passing. Final head
+and follow-up automated validation are reported in the PR, not self-approved.
+
 Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`,
 `README.md`, `docs/{cloud-development,phase-0-result,local-backend}.md`;
 blueprint `00/03/05/08/10/12/13/18/19`, deployment portions of `17`,

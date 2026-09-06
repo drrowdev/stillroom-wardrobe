@@ -156,6 +156,16 @@ describe('hosted read-only smoke guards (mock contracts, not hosted RLS proof)',
     expect(requests.slice(22).every((r) => !r.foreign)).toBe(true);
     expect(requests.filter((r) => r.url.pathname === '/auth/v1/user')).toHaveLength(4);
   });
+  it('accepts case-insensitive MIME types with whitespace before parameters', async () => {
+    const env = environment();
+    const fetcher = service(env);
+    const withParameters: typeof fetch = async (input, init) => {
+      const response = await fetcher(input, init);
+      response.headers.set('content-type', response.headers.get('content-type')!.toUpperCase() + ' ; charset=utf-8');
+      return response;
+    };
+    expect(await runHostedSmoke(env, withParameters)).toEqual({ status: 'PASS', exitCode: 0 });
+  });
   it.each(['/rest/v1/profiles', '/rest/v1/items', '/rest/v1/item_images'])('blocks missing own fixtures: %s', async (route) => {
     const env = environment();
     const fetcher = service(env, ({ url }) => url.pathname === route ? json([]) : undefined);
@@ -172,7 +182,7 @@ describe('hosted read-only smoke guards (mock contracts, not hosted RLS proof)',
       expect(await runHostedSmoke(env, fetcher)).toEqual({ status: 'FAIL', exitCode: 1 });
     }
   });
-  it.each([301, 302, 307, 401, 403, 404, 429, 500, 503])('does not accept arbitrary HTTP %s as denial', async (status) => {
+  it.each([300, 301, 302, 307, 401, 403, 404, 429, 500, 503])('does not accept arbitrary HTTP %s as denial', async (status) => {
     const env = environment();
     const fetcher = service(env, ({ foreign }) => foreign ? json({}, status) : undefined);
     expect((await runHostedSmoke(env, fetcher)).exitCode).toBe(2);
