@@ -49,6 +49,87 @@ test('verified target, explicit confirmation, reset and normal Login without war
   expect(backend.requests.every(request => ['/auth/v1/user', '/auth/v1/logout', '/rest/v1/profiles'].includes(request.path))).toBe(true);
   expect(await page.evaluate(() => !sessionStorage.getItem('stillroom.auth') && !localStorage.getItem('stillroom.auth'))).toBe(true);
 });
+for (const logoutStatus of [204, 403]) {
+  test(`return notice survives StrictMode only for the initial signed-out episode: ${logoutStatus}`, async ({ page }) => {
+    await mockBackend(page, { logoutStatus, initialLanguage: 'fi' });
+    await page.goto('/' + recoveryHash());
+    await confirm(page); await fillPasswords(page);
+    await page.getByRole('button', { name: 'Change password', exact: true }).click();
+    await expect(page.locator('#login-title')).toBeVisible();
+    const notice = translate('en', logoutStatus === 204 ? 'recovery.success' : 'recovery.revocationUncertain');
+    await expect(page.getByText(notice, { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'English', exact: true }).click();
+    await expect(page.getByText(notice, { exact: true })).toBeVisible();
+    for (const account of ['a', 'b'] as const) {
+      await signIn(page, account);
+      await expect(page.locator('#wardrobe-title')).toBeVisible();
+      const language = account === 'a' ? 'fi' : 'sv';
+      await expect(page.locator('html')).toHaveAttribute('lang', language);
+      await expect(page.locator('.workspace-identity')).toContainText(account === 'a' ? 'Alex' : 'Robin');
+      await page.getByRole('button', { name: translate(language, 'account.menu') }).click();
+      await page.getByRole('button', { name: translate(language, 'auth.signOut'), exact: true }).click();
+      await expect(page.locator('#login-title')).toBeVisible();
+      await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+      await expect(page.getByText(notice, { exact: true })).toHaveCount(0);
+    }
+    await page.getByRole('button', { name: translate('en', 'recovery.forgot') }).click();
+    await page.getByRole('button', { name: translate('en', 'recovery.return') }).click();
+    await page.evaluate(() => { location.hash = '#section'; });
+    await expect(page.locator('#login-title')).toBeVisible();
+    await expect(page.getByText(notice, { exact: true })).toHaveCount(0);
+  });
+}
+test('normal failed sign-in, new request and explicit cross-tab logout clear initial return notices', async ({ page }) => {
+  await mockBackend(page);
+  for (const activity of ['failed-sign-in', 'request', 'logout'] as const) {
+    await page.goto('about:blank');
+    await page.goto('/' + recoveryHash());
+    await confirm(page); await fillPasswords(page);
+    await page.getByRole('button', { name: 'Change password', exact: true }).click();
+    const notice = page.getByText(translate('en', 'recovery.success'), { exact: true });
+    await expect(notice).toBeVisible();
+    if (activity === 'failed-sign-in') {
+      await page.locator('#email').fill('user-a@example.test');
+      await page.locator('#password').fill('wrong fictional password');
+      await page.locator('button[type="submit"]').click();
+      await expect(page.getByRole('alert')).toBeVisible();
+    } else if (activity === 'request') {
+      await page.getByRole('button', { name: translate('en', 'recovery.forgot') }).click();
+      await page.getByRole('button', { name: translate('en', 'recovery.return') }).click();
+    } else {
+      await page.evaluate(() => {
+        const channel = new BroadcastChannel('stillroom.logout');
+        channel.postMessage('sign-out'); channel.close();
+      });
+    }
+    await expect(notice).toHaveCount(0);
+    await page.evaluate(() => { location.hash = '#section'; });
+    await expect(page.locator('#login-title')).toBeVisible();
+    await expect(notice).toHaveCount(0);
+  }
+});
+for (const occupied of [false, true]) {
+  test(`benign URL bootstrap and later navigation never enter recovery: occupied=${occupied}`, async ({ page }) => {
+    const backend = await mockBackend(page, { initialLanguage: 'en' });
+    if (occupied) {
+      await page.goto('/'); await signIn(page);
+      await expect(page.locator('#wardrobe-title')).toBeVisible();
+    }
+    for (const suffix of ['', '?utm_source=x', '#section', '#/wardrobe', '#/items/new', '#main']) {
+      await page.goto('about:blank');
+      await page.goto('/' + suffix);
+      await expect(page.locator(occupied ? suffix === '#/items/new' ? '#capture-title' : '#wardrobe-title' : '#login-title')).toBeVisible();
+      expect(await page.evaluate(() => location.search + location.hash)).toBe(suffix);
+      await expect(page.locator('.recovery-card')).toHaveCount(0);
+      for (const hash of ['#section', '#/wardrobe', '#/items/new']) {
+        await page.evaluate(value => { location.hash = value; }, hash);
+        await expect(page.locator(occupied ? hash === '#/items/new' ? '#capture-title' : '#wardrobe-title' : '#login-title')).toBeVisible();
+        await expect(page.getByRole('alert')).toHaveCount(0);
+      }
+    }
+    expect(backend.requests.some(request => request.method === 'PUT' || request.path === '/auth/v1/recover')).toBe(false);
+  });
+}
 test('not-my-account cancellation makes no password update or server logout', async ({ page }) => {
   const backend = await mockBackend(page);
   await page.goto('/' + recoveryHash());
@@ -165,8 +246,11 @@ test('late callback refuses after normal initialization even with empty storage'
   const backend = await mockBackend(page);
   await page.goto('/');
   await expect(page.locator('#login-title')).toBeVisible();
-  await page.evaluate(hash => { location.hash = hash; }, recoveryHash());
-  await expect(page.getByRole('alert')).toContainText('already holds or has started');
+  for (const hash of [recoveryHash(), '#provider_token', '#/wardrobe?code_verifier', '#error_description', '#sb']) {
+    await page.evaluate(value => { location.hash = value; }, hash);
+    await expect(page.getByRole('alert')).toContainText('already holds or has started');
+    expect(await page.evaluate(() => location.hash === '#/recovery')).toBe(true);
+  }
   expect(backend.requests.filter(request => request.path === '/auth/v1/user')).toHaveLength(0);
   expect(await page.evaluate(() => location.hash === '#/recovery')).toBe(true);
 });
@@ -194,6 +278,9 @@ test('malformed, non-recovery, expired, query and reload callbacks scrub and fai
   for (const suffix of [
     '#code=unsupported', '#type=magiclink&access_token=private', '?access_token=private&type=recovery',
     '#%61ccess_token%3Dprivate', recoveryHash(owners.a, 149), recoveryHash() + '&type=recovery',
+    '#provider_refresh_token', '?code_verifier', '#sb', '#/wardrobe?code=unsupported',
+    '#/items/new?%70rovider_token=private', recoveryHash() + '&%74ype=recovery',
+    '?utm_source=x' + recoveryHash(),
   ]) {
     await page.goto('/' + suffix);
     await expect(page.getByRole('alert')).toContainText('could not be verified');

@@ -164,7 +164,7 @@ export class RecoveryAttempt {
       this.requireActive();
       if (error || data.user?.id !== link.subject) {
         const mapped = recoveryError(transport.errorDetails ?? error);
-        throw new AppError(mapped === 'recovery.unavailable' ? 'recovery.uncertain' : mapped);
+        throw new AppError(mapped === 'recovery.unavailable' && transport.updateSent ? 'recovery.uncertain' : mapped);
       }
       transport.confirmSuccess();
       this.passwordChanged = true;

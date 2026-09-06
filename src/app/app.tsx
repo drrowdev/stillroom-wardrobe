@@ -16,7 +16,7 @@ import type { WardrobeItem } from '../domain/wardrobe';
 import { PrivateImages } from '../images/private-images';
 import { PasswordRecovery, RecoveryRequest } from '../auth/password-recovery';
 import {
-  leaveRecovery, markNormalAuthStarted, normalAuthStarted, recoveryReturnNotice,
+  clearRecoveryNotice, leaveRecovery, markNormalAuthStarted, normalAuthStarted,
   recoverySnapshot, subscribeRecovery, type RecoveryCallback,
 } from '../auth/recovery-callback';
 
@@ -118,6 +118,9 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   const [menu, setMenu] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
   const [requestPassword, setRequestPassword] = useState(false);
+  const refusal = callback.kind === 'none' ? null
+    : callback.kind === 'link' ? { kind: 'conflict' as const, notice: undefined }
+      : { kind: callback.kind, notice: callback.notice };
   const returnFromRequest = useCallback(() => {
     setRequestPassword(false);
     requestAnimationFrame(() => document.getElementById('login-title')?.focus());
@@ -125,27 +128,34 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   const online = useOnline();
   const t = useCallback<Translate>((key, parameters) => translate(state.language, key, parameters), [state.language]);
   useEffect(() => controller.start(), [controller]);
+  useEffect(() => {
+    const { data } = client.auth.onAuthStateChange((event, session) => {
+      if (event !== 'INITIAL_SESSION' || session) clearRecoveryNotice();
+    });
+    return () => data.subscription.unsubscribe();
+  }, [client]);
   useEffect(() => { document.documentElement.lang = state.language; }, [state.language]);
   useEffect(() => {
     if (state.phase === 'signed-out' && !requestPassword && callback.kind === 'none') document.getElementById('login-title')?.focus();
   }, [state.phase, requestPassword, callback.kind]);
   const signOut = async () => {
+    clearRecoveryNotice();
     setMenu(false);
     setSignOutError(false);
     try { await controller.signOut(); } catch { setSignOutError(true); }
   };
   if (state.phase !== 'ready' || !state.profile || !state.scope) {
     return <EntryLayout language={state.language} onLanguage={(language) => controller.chooseLanguage(language)} t={t}>
-      {callback.kind !== 'none' ? <RecoveryRefusal kind="conflict" t={t} />
+      {refusal ? <RecoveryRefusal kind={refusal.kind} notice={refusal.notice} t={t} />
         : state.phase === 'signed-out' && requestPassword ? <RecoveryRequest config={config} online={online} t={t} language={state.language} onReturn={returnFromRequest} />
         : state.phase === 'loading' ? <section className="entry-card connecting" aria-busy="true"><span className="spinner" /><p role="status">{t('common.loading')}</p></section>
         : state.phase === 'locked' ? <section className="entry-card"><h1>{t('common.errorTitle')}</h1><p className="muted">{t('account.locked')}</p><div className="stack"><button className="button button-primary" onClick={() => { void controller.retry(); }} disabled={!online}>{t('common.retry')}</button><button className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div></section>
-          : <div>{recoveryReturnNotice && <p role="status" className="notice">{t(recoveryReturnNotice)}</p>}{!online && <p role="status" className="notice notice-offline">{t('common.offline')}</p>}{(signOutError || state.notice) && <p className="notice notice-error" role="alert">{t(state.notice ?? 'auth.localSignOut')}</p>}<Login controller={controller} online={online} t={t} onRecovery={() => setRequestPassword(true)} /></div>}
+          : <div>{callback.kind === 'none' && callback.notice && <p role="status" className="notice">{t(callback.notice)}</p>}{!online && <p role="status" className="notice notice-offline">{t('common.offline')}</p>}{(signOutError || state.notice) && <p className="notice notice-error" role="alert">{t(state.notice ?? 'auth.localSignOut')}</p>}<Login controller={controller} online={online} t={t} onAuthActivity={clearRecoveryNotice} onRecovery={() => { clearRecoveryNotice(); setRequestPassword(true); }} /></div>}
     </EntryLayout>;
   }
   return (
     <div className="workspace">
-      {callback.kind !== 'none' && <aside className="notice" role="alert"><p>{t('recovery.conflict')}</p><button type="button" className="text-button" onClick={() => leaveRecovery()}>{t('common.close')}</button></aside>}
+      {refusal && <aside className="notice" role="alert"><p>{t(refusal.notice ?? (refusal.kind === 'conflict' ? 'recovery.conflict' : 'recovery.invalid'))}</p><button type="button" className="text-button" onClick={() => leaveRecovery()}>{t('common.close')}</button></aside>}
       <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); document.getElementById('main')?.focus(); }}>{t('common.skipContent')}</a>
       <header className="workspace-header"><Brand /><nav aria-label={t('nav.wardrobe')}><a className="active-nav" href="#/wardrobe"><Icon name="wardrobe" />{t('nav.wardrobe')}</a></nav><div className="account-controls"><button type="button" className="account-button" aria-expanded={menu} aria-label={t('account.menu')} onClick={() => setMenu(!menu)}><span className="avatar">{state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)}</span><span>{state.profile.display_name}</span><Icon name="chevron" /></button>{menu && <div className="account-popover"><button className="text-button" type="button" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div>}</div></header>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}

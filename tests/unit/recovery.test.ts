@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { freshRecoveryLink, parseRecoveryCallback, type RecoveryLink } from '../../src/auth/recovery-callback';
-import { passwordProblem, recoveryError, recoveryPasswordMaximumBytes, recoveryPasswordMinimum } from '../../src/auth/recovery';
+import { passwordProblem, RecoveryAttempt, recoveryError, recoveryPasswordMaximumBytes, recoveryPasswordMinimum } from '../../src/auth/recovery';
 import { makeRecoveryClient } from '../../src/data/client';
+import * as clients from '../../src/data/client';
 import { fetchProfile } from '../../src/data/profile';
 
 const origin = 'http://127.0.0.1:5173';
@@ -36,8 +37,10 @@ describe('bounded recovery callback intent, not cryptographic provenance', () =>
     expect(parseRecoveryCallback(callback() + '&sb=unexpected', origin, false).kind).toBe('invalid');
     expect(parseRecoveryCallback(callback() + '&sb=&sb=', origin, false).kind).toBe('invalid');
   });
-  it.each(['', '#/wardrobe', '#/items/new', '#main'])('ignores normal route %s', hash => {
-    expect(parseRecoveryCallback(`${origin}/${hash}`, origin, false)).toEqual({ kind: 'none' });
+  it.each(['', '?utm_source=x', '#section', '#/wardrobe', '#/items/new', '#main', '?utm_source=x#section', '#/wardrobe?sort=new'])('ignores normal navigation with empty or occupied storage: %s', suffix => {
+    for (const occupied of [false, true]) {
+      expect(parseRecoveryCallback(`${origin}/${suffix}`, origin, occupied)).toEqual({ kind: 'none' });
+    }
   });
   it.each(['code=x', 'token_hash=x&type=recovery', 'error=bad&error_description=private', '%61ccess_token%3Dprivate', '/recovery'])('rejects unsupported callbacks', fragment => {
     expect(parseRecoveryCallback(`${origin}/#${fragment}`, origin, false).kind).toBe('invalid');
@@ -47,6 +50,23 @@ describe('bounded recovery callback intent, not cryptographic provenance', () =>
   });
   it.each(['&type=recovery', '&provider_token=private', '&code=x', '&access_token=x', '&unknown=x'])('rejects duplicates and unexpected fields', suffix => {
     expect(parseRecoveryCallback(callback() + suffix, origin, false).kind).toBe('invalid');
+  });
+  it.each([
+    'access_token', 'refresh_token', 'provider_token', 'provider_refresh_token', 'code', 'token', 'token_hash',
+    'code_verifier', 'code_challenge', 'code_challenge_method', 'type', 'token_type', 'expires_in',
+    'expires_at', 'error', 'error_code', 'error_description', 'error_uri', 'sb',
+  ])('detects key-only auth input and unsupported route-query fragments: %s', key => {
+    for (const prefix of ['?', '#', '#/wardrobe?', '#/items/new?ordinary=x&']) {
+      expect(parseRecoveryCallback(`${origin}/${prefix}${key}`, origin, false).kind).toBe('invalid');
+      expect(parseRecoveryCallback(`${origin}/${prefix}${key}`, origin, true).kind).toBe('conflict');
+    }
+  });
+  it('rejects encoded duplicate keys and benign queries mixed with real callbacks', () => {
+    for (const address of [
+      callback() + '&%74ype=recovery', callback() + '&%61ccess_token=x',
+      callback().replace('/#', '/?utm_source=x#'),
+      `${origin}/#/wardrobe?%70rovider_token=private`,
+    ]) expect(parseRecoveryCallback(address, origin, false).kind).toBe('invalid');
   });
   it('rejects mixed query/fragment, nonroot paths, foreign origins, oversized and absent fields', () => {
     for (const address of [
@@ -63,6 +83,42 @@ describe('bounded recovery callback intent, not cryptographic provenance', () =>
   });
   it('refuses any occupied or initialized normal page before identity lookup', () => {
     expect(parseRecoveryCallback(callback(), origin, true)).toEqual({ kind: 'conflict' });
+  });
+});
+
+describe('password outcome follows actual guarded dispatch state', () => {
+  it.each([false, true])('reports unavailable before dispatch and uncertain after dispatch: %s', async dispatched => {
+    vi.stubGlobal('location', { origin });
+    vi.stubGlobal('window', new EventTarget());
+    vi.stubGlobal('BroadcastChannel', undefined);
+    const methods: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      methods.push(request.method);
+      if (request.method === 'PUT') throw new Error('Synthetic network failure; delivery unknown.');
+      return new Response(JSON.stringify(new URL(request.url).pathname === '/rest/v1/profiles' ? [profile] : user));
+    }));
+    const link = capability();
+    const transport = makeRecoveryClient(config, link, `${origin}/`);
+    vi.spyOn(clients, 'makeRecoveryClient').mockReturnValueOnce(transport);
+    const attempt = new RecoveryAttempt(config, link);
+    const release = attempt.retain();
+    try {
+      await vi.waitFor(() => expect(attempt.getSnapshot().phase).toBe('confirm'));
+      attempt.confirm();
+      // Keep the actual transport's write gate closed to exercise a pre-send refusal.
+      if (!dispatched) vi.spyOn(transport, 'allowUpdate').mockImplementation(() => {});
+      const confirmed = vi.fn();
+      await attempt.update('x'.repeat(24), 'x'.repeat(24), confirmed);
+      expect(transport.updateSent).toBe(dispatched);
+      expect(attempt.getSnapshot()).toMatchObject({
+        phase: 'failed', notice: dispatched ? 'recovery.uncertain' : 'recovery.unavailable',
+      });
+      await attempt.update('x'.repeat(24), 'x'.repeat(24), confirmed);
+      expect(methods.filter(method => method === 'PUT')).toHaveLength(dispatched ? 1 : 0);
+      expect(methods.every(method => method === 'GET' || method === 'PUT')).toBe(true);
+      expect(confirmed).not.toHaveBeenCalled();
+    } finally { release(); attempt.dispose(); }
   });
 });
 
