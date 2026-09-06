@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { messages, type Language } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
@@ -225,7 +225,7 @@ for (const firstOwner of ['a', 'b'] as const) {
     }
 
     // Hold actual owner-profile replies across logout; cancellation must prevent restoration.
-    const held = [];
+    const held: Array<{ release: ReturnType<typeof latch>; finished: ReturnType<typeof latch>; cancelled: Promise<Request> }> = [];
     for (const owner of ['a', 'b'] as const) {
       const started = latch(), release = latch(), finished = latch();
       const cancelled = tabs[owner].waitForEvent('requestfailed', {

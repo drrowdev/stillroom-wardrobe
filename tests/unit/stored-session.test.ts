@@ -16,7 +16,10 @@ describe('per-tab stored session guard', () => {
   it.each([null, ''])('rejects a missing stored session: %s', (stored) => {
     expect(holdsStoredSession(stored, 'own-token')).toBe(false);
   });
-  it.each(['unparseable', 'null', '{}', '[]', '{"access_token":42}'])('preserves the unreadable-token policy: %s', (stored) => {
+  it('preserves the unparseable JSON policy', () => {
+    expect(holdsStoredSession('unparseable', 'own-token')).toBe(true);
+  });
+  it.each(['null', '{}', '[]', '{"access_token":42}'])('preserves the missing/non-string access_token policy: %s', (stored) => {
     expect(holdsStoredSession(stored, 'own-token')).toBe(true);
   });
 });
