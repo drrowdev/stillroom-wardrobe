@@ -92,13 +92,14 @@ export class SessionController {
   // Sessions live in this tab's sessionStorage. The SDK also broadcasts sign-ins
   // and refreshes between tabs; a tab must ignore any session it does not hold.
   private holdsSession(session: Session): boolean {
+    const stored = window.sessionStorage.getItem(authStorageKey);
+    if (!stored) return false;
+    if (stored.includes(session.access_token)) return true;
     try {
-      const stored = window.sessionStorage.getItem(authStorageKey);
-      if (!stored) return false;
-      const value: unknown = JSON.parse(stored);
-      return typeof value === 'object' && value !== null && 'access_token' in value
-        && (value as { access_token: unknown }).access_token === session.access_token;
-    } catch { return false; }
+      const value = JSON.parse(stored) as { access_token?: unknown } | null;
+      // An unreadable payload still belongs to this tab; only a different token is foreign.
+      return typeof value?.access_token !== 'string';
+    } catch { return true; }
   }
   private async open(session: Session): Promise<void> {
     this.invalidate();
