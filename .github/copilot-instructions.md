@@ -9,6 +9,14 @@ approved Phase 0 hosted-readiness packet on PR #2
 PR #1 is merged; do not reopen it. Do not push to main, auto-merge or start
 later phases.
 
+Use `docs/cloud-development.md` for the exact hosted migration mapping,
+read-only smoke inputs and coordinator/human gates. Local fixture tools must
+never target hosted. The cloud receives no hosted credentials and runs no
+hosted smoke, Auth setup or deployment. Cloudflare Pages is connected only to
+the coordinator; automatic production/preview deployments are off. The queued
+main deployment is not verified live evidence. Preserve comment `5560093343`
+and do not replay the already-installed base migration or repair history.
+
 Follow the root context/planning gate: read current instructions, phase/backend
 evidence, relevant blueprint/work packets, actual schema/source/tests and PR
 discussion/diff/reviews/CI logs; record exact base/head, files read and gates.

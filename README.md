@@ -11,8 +11,10 @@ disposable Supabase stack without production secrets. Continue through feature
 branches and pull requests; no automatic merge or paid-service activation.
 See [cloud development and handoff](docs/cloud-development.md).
 
-**Phase 0 is still in progress.** The cloud continuation first resolves the
-recorded browser issues and real backend/type-generation gates before moving on.
+**Phase 0 is still in progress.** PR #1 is merged; PR #2 contains the bounded
+hosted-readiness packet. Hosted Auth, private owner setup, ordinary-session
+hosted smoke, verified live deployment and physical-device acceptance remain
+separate gates. No later phase or automatic merge is authorized.
 
 ## Current implementation
 
@@ -79,9 +81,29 @@ application relies on.
 
 ## Deployment and privacy
 
-The planned hosted Supabase region is **Stockholm (`eu-north-1`)**. Edge Functions
-and AI processing have separate location controls. No hosted Supabase or AI service
-is provisioned by installing this repository.
+The coordinator installed the exact base schema once in the approved **AI
+Wardrobe** Supabase project, `xwrdrugastphdiihzuia`, **Stockholm (`eu-north-1`)**.
+This is structural evidence, not working hosted login or ordinary-user RLS proof.
+The source-to-remote migration versions differ: see the
+[mapping and actor/gate handoff](docs/cloud-development.md#hosted-state-and-responsible-actors).
+Do not run hosted `db push`, replay/reset, history repair or local fictional
+provisioning. Edge Functions and AI processing have separate location controls;
+no AI service is activated.
+
+The coordinator created git-backed Cloudflare Pages project `stillroom-wardrobe`
+with automatic production and preview deployments disabled. Manual deployment
+of merged main `f696ee45e5dfe46be90cbc295a9811ec1d34a298` was queued at the last
+observation; `https://stillroom-wardrobe.pages.dev` is **not yet verified live
+here**. No PR #2 deployment, deployment workflow, Functions or paid hosting.
+Production uses only the three public VITE settings and build-only Node version.
+A reachable shell would not complete hosted login, Storage/RLS or phone gates.
+
+The separate `node scripts/hosted-smoke.mjs` command is for an approved private
+operator only, with explicit opt-in, the exact hosted URL, two ordinary sessions
+and pre-existing non-personal fixtures. It makes no writes and logs no private
+details. Missing evidence exits BLOCKED/nonzero; unit mocks are not live proof.
+See [private smoke inputs and outcomes](docs/cloud-development.md#private-read-only-hosted-smoke).
+Do not supply hosted credentials to the cloud agent, repository or public CI.
 
 Only static build files go to Cloudflare Pages. Database and Storage policies enforce
 owner access. Session tokens use sessionStorage; private wardrobe content and images

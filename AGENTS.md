@@ -44,6 +44,19 @@ may initialize only the approved AI Wardrobe backend; the cloud agent receives
 no hosted credentials and implements only the reviewed source/document packet.
 This approval is not merge approval or permission for paid AI/later phases.
 
+Hosted source packet: use only the separate read-only `scripts/hosted-smoke.mjs`
+through an approved private operator channel, never this cloud environment.
+It requires `ALLOW_HOSTED_SMOKE=1`, the exact approved project URL and two
+server-verified ordinary sessions with prepared non-personal fixtures. Missing
+evidence is BLOCKED/nonzero, not a pass. Local reset/provision/test guards stay
+local-only. The initial SQL is already installed: source version `20260905000000`
+maps by exact hash to remote `20260906144202_initial_wardrobe`; no hosted
+`db push`, replay or history repair is authorized. See the actor/gate table in
+`docs/cloud-development.md` and preserved evidence in `docs/phase-0-result.md`.
+Comment `5560093343` records reviewed instruction repair and coordinator-only
+Cloudflare setup; queued deployment of merged main is not verified live
+readiness, working Auth or completion of Phase 0.
+
 * Latest user instruction: accounts are completely independent. No household, partner relation, sharing, recipient columns, user directory, cross-account references or mixed recommendations. Do not implement these as deferred work.
 * One TypeScript/React/Vite PWA, Supabase Auth/Postgres/private Storage and static hosting. Automatic paid photo tagging is first-release I29 scope; outfits remain deterministic. No native app, AI stylist, SSR or unrelated service/package.
 * Hosted Supabase project region: Stockholm (`eu-north-1`), explicitly selected. Do not infer the Edge Function or AI inference region from that. Read `21-AI-MODEL-COMPARISON.md` before choosing a model; compare eligible candidates and never silently fail over private photos to a different processor.

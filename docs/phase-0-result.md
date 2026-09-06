@@ -1,10 +1,139 @@
 # Phase 0 - result
 
-Date: 6 September 2026. Phase 0 I01–I05 remains under review on existing PR #1.
-The approved narrow amendment below passes current local validation, including
-real backend/type parity and the corrected loading-state accessibility case.
-Earlier reset failures and accessibility findings remain as historical evidence.
-The exit gate is **not self-approved**; no merge or next phase is authorized.
+Date: 6 September 2026. PR #1 was merged with explicit user approval into
+`f696ee45e5dfe46be90cbc295a9811ec1d34a298`. Phase 0 I01–I05 hosted readiness
+continues only on PR #2; full Phase 0 is **not complete**. Earlier reset failures,
+accessibility findings and their later repairs remain below as historical
+evidence. No new merge or next phase is authorized.
+
+## Current PR #2 hosted-readiness packet
+
+Starting base: `f696ee45e5dfe46be90cbc295a9811ec1d34a298`; exact starting head:
+`5a61a942289d7c7a296fab2237d4d7938b1f641c`,
+`copilot/phase0-hosted-backend-deployment`. Scope: I01–I05, principally I02/I05
+and R01/R11/R12/R19/R23/R26/R27. The clean starting diff changed only the three
+reviewed instruction/handoff files. No merged foundation re-audit or new plan
+scope was introduced.
+
+Read before edits: PR #2 approval `5559949209`, installed-backend evidence
+`5559976584`, previous blocker `5559977267`, and reviewed control-plane repair/
+hosting update `5560093343`. The coordinator records genuine read-only
+**Anthropic Claude Opus 5** critique before approval, including exact-host
+isolation, server identity verification, two-sided positives/denials/liveness,
+nonzero incomplete evidence, no hosted mutations and separate actor gates.
+This is the coordinator's published refinement, not a claim to possess the
+planning task's unavailable full transcript. No material scope amendment.
+
+GPT-6 Astra was explicitly selected. Local runtime `assistant_usage_events`
+records report `gpt-6-astra` for this session
+`11bf777c-5a39-46d0-8675-4a162ede1284`, whose repository working directory and
+creation time (2026-09-06 15:07:45 UTC) match this retry. Coordinator platform
+verification remains independently reviewable; this does not attest any other
+session's model. One writer, no Auto/fallback or additional implementation task.
+Active root/session instructions now permit PR #2, resolving the prior blocker.
+
+Added only `scripts/hosted-smoke.mjs`, its `.d.mts` and
+`tests/unit/hosted-smoke.test.ts`; updated only the five approved active
+documents. The runner uses privately provided existing ordinary access tokens,
+expected UIDs and prepared item/image IDs. GET-only server identity, owner
+profile/item/image/main/thumb positives, both foreign read/download denials and
+repeated own identity/positives are mandatory. No login/refresh/logout, email,
+account/row/object/policy/schema writes, privileged credential, arbitrary URL,
+redirect, local-guard modification, dependency, UI, migration or CI change.
+Private response content and inputs never enter output.
+
+### Hosted evidence and unresolved gates
+
+Coordinator installed the base SQL **once**, not this cloud worker:
+`supabase/migrations/20260905000000_initial.sql`, **35214 bytes**, SHA-256
+`4f2d44603707cb823527c80d8384c2a6390f99ead2ba294435db83403a7eead5`,
+maps to remote **`20260906144202_initial_wardrobe`** with matching stored SQL.
+Project **AI Wardrobe**, `xwrdrugastphdiihzuia`, organization
+`murdxzxflzlbyrnpwbqg`, Stockholm `eu-north-1`. No automatic hosted `db push`,
+replay, reset or history repair; future reconciliation requires separate review.
+
+Installation observations: 12 RLS-enabled tables, private JPEG-only `wardrobe`
+bucket limited to 512000 bytes, three owner Storage policies (no UPDATE), three
+admission/email triggers, zero approval rows/Auth users. Advisors: two
+informational deny-all private-table notices and four authenticated checked
+SECURITY DEFINER image/restore warnings. Preserve those notices without broader
+grants. Admin structure/advisors are not ordinary-user hosted RLS evidence.
+
+Coordinator also created only the git-backed Pages project
+`stillroom-wardrobe`, automatic production OFF/previews NONE, with no production
+backend in previews. Deployment `91462a90-2f8c-40bf-a828-6a800ce19f33` of reviewed
+CI-green main `f696ee45e5dfe46be90cbc295a9811ec1d34a298` was queued, **not verified
+live here**. URL: `https://stillroom-wardrobe.pages.dev`. Public VITE URL/key/
+version plus build-only `NODE_VERSION=24.19.0`; no privileged secrets,
+Functions/bindings, paid hosting, PR #2 deployment or automatic workflow.
+
+The [actor/gate table and private smoke contract](cloud-development.md#hosted-state-and-responsible-actors)
+assign remaining work: coordinator verifies actual dashboard/management Auth
+settings (global/anonymous signup off, password/email provider on, exact site/
+redirect URLs and no phone/OAuth), live HTTPS/assets/headers and private owner
+admission; user supplies actual identities privately; approved private operator
+runs read-only smoke after prepared non-personal fixtures exist; humans verify
+actual phone/Safari camera/library, VoiceOver/TalkBack and three-language journeys.
+No hosted credentials were requested/read and no hosted test or operation ran.
+Reachable static HTML would not prove login, storage isolation or full Phase 0.
+
+### Fresh-head validation
+
+Starting-head [CI 34041029288](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34041029288)
+passed: App/browser `101507694900` (46 cases), Real local Supabase
+`101507695054` (standard start/reset, ordinary integration/11 security stages,
+actual generation and tracked diff parity). Job logs were read. These results
+apply to `5a61a942`, not automatically to this packet's new head.
+
+Initial targeted run caught malformed new authorization-header syntax before
+executing hosted unit cases; all 50 existing local guards passed. After repair:
+`npm run test:unit -- tests/unit/hosted-smoke.test.ts tests/unit/local-backend.test.ts`
+exited 0 (**106 tests**); `npm run typecheck` and `npm run lint` exited 0.
+These hosted mocks prove guard/outcome contracts only, not live hosted access.
+Full packet validation on code commit
+`5004ef4ee638e9e710ca1a096f70ff7c1b71ab7e` plus the five documentation updates:
+
+| Exact command | Actual result |
+|---|---|
+| `npm run lint` | Exit 0 |
+| `npm run typecheck` | Exit 0 |
+| `npm run check:translations` | Exit 0; 299 keys, en/fi/sv, 23 source files |
+| `npm run test:unit` | Exit 0; 197 tests, eight files |
+| `npm run test:browser` | Exit 0; 46 desktop/emulated-mobile cases, no retries |
+| `npm run test:a11y` | Exit 0; four cases, no retries |
+| `npm run build` | Exit 0; compressed JavaScript 140.90 kB |
+| `npm run scan:secrets` | Exit 0; 129 text files, fresh unprinted build canary checked |
+| `npm run check:dependencies` | Exit 0; 12 production / 220 development packages; zero reported production vulnerabilities |
+| `npm run db:start` | Exit 0; prepared disposable local stack healthy, no additional reset |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Exit 0; real ordinary A/B schema/item/JPEG/version/RPC checks |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | Exit 0; all 11 real ordinary-session stages, cleanup completed |
+| `npm run db:types` | Exit 0; actual local schema generation |
+| `npm run db:types -- --check` | Exit 0; exact parity with another actual generation |
+| `git ls-files --error-unmatch src/data/database.types.ts` | Exit 0; tracked |
+| `git diff --exit-code -- src/data/database.types.ts` | Exit 0; no generated drift |
+| `git diff --check` | Exit 0 |
+
+Integration/security ran sequentially. Build/scan used the same process-local
+`STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`, exported without printing.
+No dependency install, manual service workaround, local guard weakening or
+hosted execution. Final immutable head and automated review/CI status are
+recorded in the PR completion reply; fresh-head CI, independent coordinator
+read-only Claude review and explicit user merge approval are distinct gates.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`,
+`README.md`, `docs/{cloud-development,phase-0-result,local-backend}.md`;
+blueprint `00/03/05/08/10/12/13/18/19`, deployment portions of `17`,
+Phase 0 and I01–I05 in `14/15`, workflow/model portions of `20/21`,
+base `07`/byte-identical actual migration profile/item/image/admission/grant
+contracts; `src/data/{items,config,client,database.types}.ts`,
+`src/images/private-images.ts`, `scripts/backend/local.{mjs,d.mts}`,
+`scripts/{run-local-tests,scan-secrets}.mjs`, local-backend unit and ordinary
+security/integration harness excerpts, package/TypeScript/ESLint/Vite/CI
+configuration; merged PR #1 metadata and retained result evidence; current
+PR #2 body/comments/diff/empty reviews/threads and required CI job logs.
+No historical instruction template replaced active rules.
+
+## Historical merged foundation evidence
 
 ## Implemented foundation
 
@@ -191,7 +320,7 @@ browser slice/backend, ordinary integration/security, backend/media unit tests;
 configuration, CI/setup workflows, relevant SDK broadcast/recovery source,
 PR body/comments/reviews/diff and baseline/setup job evidence.
 
-## Approved narrow amendment — current local results
+## Historical approved narrow amendment — local results
 
 Starting clean head: `1d1c961ac9c3b61ddf760debbf5f1d32fde6d5c7`; base `main`:
 `d20457a82bca6e8d505d20b38dc07b4c930900cd`. Work stays on PR #1,
@@ -327,7 +456,7 @@ fallback change, later phase, hosted service, deployment or paid AI.
   baseline CI subsequently passed clean reset and actual type parity, as
   recorded above. The continuation did not repeat those workarounds.
 
-## Remaining limits
+## Historical PR #1 remaining limits
 
 * Fresh-head full CI approval/run and coordinator review remain gates. The
   narrow amendment above corrects loading accessibility and passes current
@@ -344,10 +473,17 @@ continuation does not claim a persistent preview server. Without Supabase
 settings the app displays an honest setup screen, not simulated private data.
 See `cloud-development.md` for the cloud continuation task.
 
-## Publication and rollback
+## Historical publication and rollback
 
 This is an initial WIP source snapshot, not a deployed release. No prior
 production application or data is changed. Stop the preview or revert the
 new source commit to roll back; never reset a live database. Subsequent
 cloud work must use a pull request and update this report with actual
 commands, results, commit and remaining limits.
+
+Current PR #2 rollback is a reviewed source revert only. Do not reset or replay
+the installed hosted schema; Pages remains on the separately reviewed main
+deployment until coordinator verification/authorization. Independent accounts,
+EN/FI/SV and the manual editable draft/explicit Save are preserved. Phase 2's
+photo-first AI-filled title/category and all-field editing remain unimplemented;
+no automatic library save, post-save worker, outfit AI or paid activation.
