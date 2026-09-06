@@ -55,6 +55,7 @@ describe('disposable local backend boundaries', () => {
 
   it('restricts tests to the fixed disposable API port even on loopback', () => {
     expect(() => assertLocalApi('http://localhost:443')).toThrow(/port 54321/);
+    expect(() => assertLocalApi('http://127.0.0.1:54324')).toThrow(/port 54321/);
     expect(() => validateSessionEnvironment({ ...credentials, SUPABASE_URL: 'https://example.supabase.co', ALLOW_REMOTE_TEST_PROJECT: '1' })).toThrow(/REFUSED/);
   });
 

@@ -28,14 +28,64 @@ state, test results or logs into a commit. These are ignored. The test wrapper
 passes ordinary fictional credentials to its child processes and strips
 privileged/GitHub credentials.
 
-## Active cloud task: Phase 0 hosted readiness on PR #2
+## Active cloud task: approved Phase 0 password recovery on PR #3
+
+The separately approved follow-up is PR #3,
+`copilot/approved-phase0-password-recovery`, based on merged main
+`20ec93041f1d90d9a9f684b7358ea2b9715527e1`. This continuation started at
+`56102303d84b20d53c2b15f024330f434d4e154e`. It implements only the Phase 0
+Auth unblocker (I03/I05; R01/R11/R17/R19/R22/R26/R27), not Phase 1, backup
+restoration, hosted setup or deployment.
+
+[Full plan 5561361106](https://github.com/drrowdev/stillroom-wardrobe/pull/2#issuecomment-5561361106)
+and [controlling approval 5561846573](https://github.com/drrowdev/stillroom-wardrobe/pull/2#issuecomment-5561846573)
+record actual two-turn **Anthropic Claude Opus 5** read-only prereview and
+precision corrections before Auth edits, including the user-approved raw
+24-character floor and recovered-owner global sign-out. The coordinator's
+[current-session receipt 5562454517](https://github.com/drrowdev/stillroom-wardrobe/pull/3#issuecomment-5562454517)
+records native `sweagent-capi:gpt-6-astra`, task
+`7323967d-08f3-4082-b964-6c7d129beeeb`, session
+`6bb9e497-8cd7-4f2a-acb0-29fc716cba62`, observed
+`2026-09-06T21:56:57.7963482Z`, against that exact base/head. It is not a
+self-attestation or evidence for another session.
+
+[Amendment 5562318484](https://github.com/drrowdev/stillroom-wardrobe/pull/3#issuecomment-5562318484)
+was actually critiqued by Anthropic Claude Opus 5 before the config-only
+`56102303` commit. It only enables local Inbucket on explicit port 54324.
+[Cold gate 5562445077](https://github.com/drrowdev/stillroom-wardrobe/pull/3#issuecomment-5562445077)
+records CI `34061709323` attempt 2, both jobs successful. This proves cold
+baseline readiness, not mail/recovery/UI. The earlier warm-restart REST/DB 503
+cause remains unproven; no firewall/image diagnosis is inferred. This session
+used the prepared services without restart, reset, config changes or repair.
+
+Normal sessionStorage/PKCE remains unchanged. Recovery uses the existing SDK
+with isolated memory-only implicit Auth and an actual Auth/profile fetch guard;
+no refresh grant, private wardrobe request, automatic login or normal Auth
+broadcast is allowed. Links are scrubbed before Auth/render. Nonempty normal
+storage or already-started normal Auth refuses a callback before target lookup;
+late callbacks cannot replace an in-flight/active owner. Cancellation only
+aborts/clears memory, while a transmitted password update has an explicitly
+uncertain outcome. Confirmed updates clear the fields and request isolated
+global logout for the recovered owner; HTTP affirmation is required and existing
+access JWTs may last until expiry.
+
+See [real local protocol/UI proof and cleanup](local-backend.md#real-local-password-recovery)
+and [dated validation](phase-0-result.md#pr-3-password-recovery-continuation).
+No hosted email/Auth/password call, credentials, account repair, new provider,
+SMTP, paid AI, schema/guard weakening, merge or deployment occurs here.
+The coordinator alone inspects/authorizes fresh-head `action_required` CI;
+independent final review, required automated gates and separate release/merge
+authorization remain external gates. This worker never approves, reruns,
+merges or deploys. The dated hosted actor table below remains unchanged.
+
+## Historical approved Phase 0 hosted-readiness packet on PR #2
 
 Updated 6 September 2026: PR #1 was merged with the user's approval at
 `f696ee45e5dfe46be90cbc295a9811ec1d34a298`. The user subsequently requested
 autonomous continuation toward the complete app and authorized the dedicated
 Stockholm backend. Comment `5559949209` approved the completed source packet
-after actual Anthropic Claude Opus 5 critique. The current assignment, dated
-6 September 2026, is only the five-document handoff amendment on PR #2,
+after actual Anthropic Claude Opus 5 critique. That assignment, dated
+6 September 2026, was only the five-document handoff amendment on PR #2,
 `copilot/phase0-hosted-backend-deployment`, following
 [plan 5560449572](https://github.com/drrowdev/stillroom-wardrobe/pull/2#issuecomment-5560449572)
 and [approval 5560847183](https://github.com/drrowdev/stillroom-wardrobe/pull/2#issuecomment-5560847183).
@@ -123,9 +173,10 @@ Pages production configuration contains only public `VITE_SUPABASE_URL`,
 or automatic deployment workflow. Other sites, DNS and billing are untouched.
 A reachable shell does not prove login, owner setup, Storage/RLS or full Phase 0.
 
-Proper password recovery is a separately user-approved focused Phase 0 follow-up,
-not implemented or authorized for code changes by this documentation packet.
-It needs its own plan/prereview. Preserve both accounts: no one-time admin-reset,
+At that PR #2 handoff, proper password recovery was a separately user-approved
+focused Phase 0 follow-up, not implemented or authorized by that documentation
+packet. Its subsequent plan/prereview and PR #3 implementation are above.
+Preserve both accounts: no one-time admin-reset,
 deletion/recreation, raw Auth SQL password update, credential capture or magic-login
 workaround. An isolated main-based read-only recovery planner has no code authority
 and must not write here; no second implementation builder before the common-base gate.

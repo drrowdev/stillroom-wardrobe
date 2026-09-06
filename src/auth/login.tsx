@@ -3,7 +3,7 @@ import type { SessionController } from './session';
 import type { Translate } from '../i18n';
 import { Icon } from '../app/icon';
 
-export function Login({ controller, online, t }: { controller: SessionController; online: boolean; t: Translate }) {
+export function Login({ controller, online, t, onRecovery }: { controller: SessionController; online: boolean; t: Translate; onRecovery: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [visible, setVisible] = useState(false);
@@ -21,7 +21,7 @@ export function Login({ controller, online, t }: { controller: SessionController
   return (
     <section className="entry-card" aria-labelledby="login-title">
       <div className="small-mark"><Icon name="wardrobe" /></div>
-      <h1 id="login-title">{t('auth.welcome')}</h1>
+      <h1 id="login-title" tabIndex={-1}>{t('auth.welcome')}</h1>
       <p className="muted">{t('auth.subtitle')}</p>
       <form className="stack login-form" onSubmit={(event) => { void submit(event); }}>
         <div className="field">
@@ -40,6 +40,7 @@ export function Login({ controller, online, t }: { controller: SessionController
           {busy ? <span className="spinner" /> : null}{t(busy ? 'auth.signingIn' : 'auth.signIn')}
         </button>
       </form>
+      <button type="button" className="text-button" disabled={busy} onClick={onRecovery}>{t('recovery.forgot')}</button>
       <p className="fine muted">{t('auth.passwordHelp')}</p>
       <div className="entry-footer"><Icon name="lock" /><span>{t('auth.invited')}</span></div>
     </section>

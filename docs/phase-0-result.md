@@ -2,11 +2,113 @@
 
 Date: 6 September 2026. PR #1 was merged with explicit user approval into
 `f696ee45e5dfe46be90cbc295a9811ec1d34a298`. Phase 0 I01–I05 hosted readiness
-continues only on PR #2; full Phase 0 is **not complete**. Earlier reset failures,
+continued on now-merged PR #2; the approved password-recovery follow-up is PR #3.
+Full Phase 0 is **not complete**. Earlier reset failures,
 accessibility findings and their later repairs remain below as historical
 evidence. No new merge or next phase is authorized.
 
-## Current PR #2 hosted-readiness packet
+## PR #3 password-recovery continuation
+
+6 September 2026. Starting head
+`56102303d84b20d53c2b15f024330f434d4e154e`, branch
+`copilot/approved-phase0-password-recovery`; base main
+`20ec93041f1d90d9a9f684b7358ea2b9715527e1`. Scope: approved Phase 0
+I03/I05 Auth unblocker, preserving R01/R11/R17/R19/R22/R26/R27. No later phase,
+new dependency, schema/type hand-edit, profile-helper change or hosted operation.
+The source/test/docs changes stay inside the approved 25-path packet.
+
+Read full PR #2 plan `5561361106` and controlling approval `5561846573`:
+actual read-only **Anthropic Claude Opus 5**, two turns before implementation,
+with original-access transport enforcement, opaque-refresh refusal, unselected
+server target confirmation, early scrub/in-flight normal-mode isolation, honest
+update/revocation uncertainty, privacy-safe real mail/context separation and
+ordinary cleanup corrections. User choices: raw 24-character floor and
+recovered-owner global sign-out. No new scope decision or replacement review.
+PR #3 amendment `5562318484` and cold gate `5562445077` were also read.
+Coordinator receipt `5562454517`, re-read before edits, verifies this session's
+actual native model; exact task/session/time/base/head are in the
+[cloud handoff](cloud-development.md#active-cloud-task-approved-phase-0-password-recovery-on-pr-3).
+Historical receipts were not reused.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`,
+README and cloud/Phase-0/local-backend docs; blueprint `00/03/05`, relevant
+admission/RLS `07`, Auth/error `08`, `10/12/13`, Phase 0 in `14`, I01–I05 in
+`15`, relevant `17/18/19/20/21`; actual migration/generated schema excerpts;
+Auth/session/stored-session/Login, app/bootstrap, client/config/profile, i18n,
+styles, unit/browser/integration/security/local tools and CI; package/pinned
+SDK implementation; PR history, comments/diff/reviews/checks and cold CI job
+logs. No credential cache or privileged service key was printed.
+
+### Protocol and UI evidence are distinct
+
+Cold CI `34061709323` attempt 2 at `56102303` passed Real Supabase
+`101564798717` and App/browser `101564798990`. It established fresh-stack
+readiness only. This session did not restart/reset services, change configuration
+or reproduce the earlier warm-restart 503; that cause remains unproven.
+
+Protocol-only local SDK/Auth feasibility passed first, committed as
+`ba40ad6b8c6361c6c6925da63fc674362b98be75`. It accepted a raw 72-byte password
+under unchanged `secure_password_change=true`, without nonce/current-password/
+MFA workaround, and verified affirmative global logout, new/old login behavior,
+B's pre-existing refresh and ordinary restoration. It was not UI acceptance.
+
+Initial harness attempts failed on Mailpit-vs-old-Inbucket endpoint/ID assumptions
+and serving the actual redirect; no Auth setting was weakened. The first real
+UI run failed before password entry because the parser omitted pinned Auth's
+standard empty `sb` marker. Both original accounts were verified; no password
+update occurred in that UI failure. The corrected parser accepts only a single
+empty optional marker, not another callback flow. The subsequent **real UI
+journey passed**, then all 11 real security stages passed sequentially.
+
+That journey closes requester R, consumes the actual link in new no-opener A
+in context C with B's ordinary tab, explicitly confirms the server target,
+resets once, affirmatively revokes globally on the isolated session, returns to
+normal Login, verifies new-password UI login/old-password refusal, checks B's
+pre-existing ordinary Node refresh/browser data and both owners' synthetic
+item/image/profile preservation, then self-restores/cleans up and verifies both
+original ordinary logins. See the [local test contract](local-backend.md#real-local-password-recovery).
+Mocked negatives/races and emulation are not live or physical-device proof.
+
+Initial targeted checks passed. A full browser run then found one new
+keyboard-focus test failing in both projects (96/98 passed); Continue's focus
+transition was repaired, and targeted keyboard/paste tests passed in both.
+Final complete command run, after those repairs (all exit 0):
+
+| Exact command | Result |
+|---|---|
+| `npm run lint` | Pass |
+| `npm run typecheck` | Pass |
+| `npm run check:translations` | 336 keys, EN/FI/SV, 26 source files |
+| `npm run test:unit` | 238 tests, nine files |
+| `npm run test:browser -- --retries=0` | 98 cases, desktop/emulated mobile |
+| `npm run test:a11y -- --retries=0` | 10 cases |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Existing real ordinary suite plus actual recovery UI journey; originals/cleanup verified |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | All 11 real stages, run after integration |
+| `npm run db:types -- --check` | Actual local generation, exact committed parity |
+| `git ls-files --error-unmatch src/data/database.types.ts` | Tracked |
+| `git diff --exit-code -- src/data/database.types.ts` | No drift |
+| `npm run build` | Pass; JS 149.76 kB gzip; non-failing 500 kB uncompressed chunk warning |
+| `npm run scan:secrets` | 136 text files; fresh unprinted canary checked |
+| `npm run check:dependencies` | 12 production/220 development packages; zero reported production vulnerabilities |
+| `git diff --check` | Pass |
+
+Build/scan used the same process-local
+`STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`, exported without printing.
+No new tools/dependencies or warning-threshold changes. The immutable code head,
+scope/secret checks and automated review are recorded in the PR report;
+fresh-head CI and independent final review remain separate gates.
+
+After that full run, a final UI-only cleanup clears in-memory password fields
+on external cancellation/admission loss/expiry. Repeated lint, typecheck,
+`git diff --check` and
+`npm run test:browser -- tests/browser/recovery.spec.ts --grep 'logout cancels|lost own-profile|expiry margin|confirmed password success' --retries=0`
+passed (eight cases). The full/live suites were not repeated for that cleanup.
+
+No hosted access or password policy was measured. The existing hosted account,
+shell, ordinary-session RLS/Save/smoke and human-device gates below remain open.
+No merge/deployment or paid activation was performed or authorized to this worker.
+
+## Historical PR #2 hosted-readiness packet
 
 Starting base: `f696ee45e5dfe46be90cbc295a9811ec1d34a298`; exact starting head:
 `5a61a942289d7c7a296fab2237d4d7938b1f641c`,
