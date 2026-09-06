@@ -1,7 +1,7 @@
 import type { Session } from '@supabase/supabase-js';
 import { authStorageKey, bindDataRequests, type AppClient } from '../data/client';
 import { fetchProfile, saveInitialLanguage } from '../data/profile';
-import type { ProfileRow } from '../data/database-projection';
+import type { ProfileRow } from '../data/rows';
 import { isUuid } from '../domain/wardrobe';
 import { resolveLanguage, type Language, type MessageKey } from '../i18n';
 import { AppError, isAborted } from '../data/errors';

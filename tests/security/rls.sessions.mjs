@@ -34,7 +34,7 @@ async function fixture(c){
   const x={item:randomUUID(),second:randomUUID(),image:randomUUID(),outfit:randomUUID(),event:randomUUID()};
   x.paths=[`${c.uid}/${x.item}/${x.image}/main.jpg`,`${c.uid}/${x.item}/${x.image}/thumb.jpg`];
   cleanups.push({c,x});
-  let r=await call(c.token,'/rest/v1/items',{method:'POST',body:[{id:x.item,owner_id:c.uid,title:'Test overshirt',category:'top',notes:'Fictional private fixture',purchase_price:75},{id:x.second,owner_id:c.uid,title:'Test trousers',category:'bottom'}]});assert.ok(r.ok);
+  let r=await call(c.token,'/rest/v1/items',{method:'POST',body:[{id:x.item,owner_id:c.uid,title:'Test overshirt',category:'top',notes:'Fictional private fixture',purchase_price:75},{id:x.second,owner_id:c.uid,title:'Test trousers',category:'bottom',notes:'',purchase_price:null}]});assert.ok(r.ok);
   r=await call(c.token,'/rest/v1/item_images',{method:'POST',body:{id:x.image,owner_id:c.uid,item_id:x.item,main_bytes:jpg.length,thumb_bytes:jpg.length,main_sha256:sha,thumb_sha256:sha,width:2,height:2,alt_text:'Fictional green image'}});assert.ok(r.ok);
   for(const path of x.paths){r=await call(c.token,`/storage/v1/object/wardrobe/${path}`,{method:'POST',bytes:true,body:jpg});assert.ok(r.ok);}
   await rpc(c,'commit_image',{p_image_id:x.image});
