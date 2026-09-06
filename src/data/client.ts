@@ -116,10 +116,10 @@ export function makeRecoveryClient(config: PublicConfig, link: RecoveryLink | nu
             'reauthentication_needed', 'reauthentication_not_valid', 'insufficient_aal'].includes(code)) {
             errorDetails.code = code;
             if (code === 'weak_password') {
-             const message = 'msg' in value && typeof value.msg === 'string' ? value.msg
-               : 'message' in value && typeof value.message === 'string' ? value.message : '';
-             const minimum = Number(/^Password should be at least (\d{1,2}) characters\.$/.exec(message)?.[1]);
-             if (Number.isSafeInteger(minimum) && minimum >= 24 && minimum <= 72) errorDetails.minimum = minimum;
+              const message = 'msg' in value && typeof value.msg === 'string' ? value.msg
+                : 'message' in value && typeof value.message === 'string' ? value.message : '';
+              const minimum = Number(/^Password should be at least (\d{1,2}) characters\.$/.exec(message)?.[1]);
+              if (Number.isSafeInteger(minimum) && minimum >= 24 && minimum <= 72) errorDetails.minimum = minimum;
             }
           }
         }

@@ -633,3 +633,74 @@ deployment; any replacement requires coordinator authorization and fresh evidenc
 EN/FI/SV and the manual editable draft/explicit Save are preserved. Phase 2's
 photo-first AI-filled title/category and all-field editing remain unimplemented;
 no automatic library save, post-save worker, outfit AI or paid activation.
+
+## PR #3 bounded review corrections — 6 September 2026
+
+Starting head `7356c9b3f88acd948b4387609943816ca955a112`, base
+`20ec93041f1d90d9a9f684b7358ea2b9715527e1`; same PR/branch, one writer.
+Full review [5126939876](https://github.com/drrowdev/stillroom-wardrobe/pull/3#pullrequestreview-5126939876)
+records actual read-only **Anthropic Claude Opus 5** critique and coordinator
+approval of these three corrections under plan `5561361106`, controlling
+approval `5561846573` and cold amendment `5562318484`. No material scope change.
+Public receipt [5562961986](https://github.com/drrowdev/stillroom-wardrobe/pull/3#issuecomment-5562961986),
+read before edits, records native `sweagent-capi:gpt-6-astra`, task
+`2f79ee32-fa44-46b2-9d61-455d7ec0a804`, session
+`9fded7d7-f377-42ed-862e-490060d7224c`, observed
+`2026-09-06T23:24:33.2885891Z`, against that exact base/head.
+
+Context read: active root/Copilot instructions; README/cloud/phase/local-backend
+evidence; relevant blueprint `00/03/05/07/08/10/12/13/14/15/17/18/19/20/21`;
+actual schema/profile types, Auth/bootstrap/UI/transport, pinned SDK, unit/browser
+and real-mail tests, wrappers/configuration, PR diff/discussion/reviews and
+available CI logs. Starting-head CI `34064501007` was `action_required` with
+zero jobs, not passing.
+
+Corrective code/tests commit `29d8f037a51219d8a7d0d6e14a806be919bfa9a2`:
+
+* **I03/I05; R01/R19/R26:** bounded decoded auth-key detection leaves benign
+  query/hash navigation alone with empty or occupied storage. Strict accepted
+  fragment grammar, scrubbing, replay/expiry checks and late-adoption refusal
+  remain. Refusal rendering uses the narrowed actual kind/notice.
+* **I03/I05; R11/R26/R27:** the initial return notice belongs to the reactive
+  `none` snapshot, not a separate global. Auth activity/events, explicit logout,
+  a new request and leaving the episode clear it without render consumption.
+  StrictMode browser tests retain the genuine initial success/unconfirmed
+  revocation notice, then verify no replay after same-page A and B login/logout,
+  preserving their independent Finnish/Swedish preferences and logout reset.
+* **I03/I05; R19/R26:** unavailable becomes uncertain only with `updateSent`.
+  Actual guarded-SDK unit tests assert zero underlying PUTs on pre-send refusal,
+  one fetch attempt on dispatched network failure, no retry and no success/logout.
+  Dispatch is not proof of network delivery.
+
+Validation performed here (commands from the repository root):
+
+| Command | Result |
+|---|---|
+| `npm run test:unit -- tests/unit/recovery.test.ts tests/unit/stored-session.test.ts` | Exit 0; 80 tests |
+| `npm run test:browser -- tests/browser/recovery.spec.ts tests/browser/slice.spec.ts --retries=0` | Exit 0; 88 cases together |
+| `npm run lint` / `npm run typecheck` / `npm run check:translations` | Each exit 0; 336 EN/FI/SV keys |
+| `npm run test:unit` | Exit 0; 264 tests, nine files |
+| `npm run test:browser -- --retries=0` | Separate rerun exit 0; 108 cases |
+| `npm run test:a11y -- --retries=0` | Exit 0; 10 cases |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Exit 0 at `29d8f03`; ordinary suite plus one real-local mail/UI recovery journey, originals/cleanup verified |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | Exit 0 afterward; all 11 stages |
+| `npm run db:types -- --check` | Exit 0; actual generation parity |
+| `git ls-files --error-unmatch src/data/database.types.ts` / `git diff --exit-code -- src/data/database.types.ts` | Each exit 0; tracked, unchanged |
+| `npm run build` / `npm run scan:secrets` / `npm run check:dependencies` | Each exit 0; unprinted ephemeral canary checked, zero reported production vulnerabilities |
+| `git diff --check 7356c9b3f88acd948b4387609943816ca955a112 HEAD` | Exit 0 |
+
+Before fixes, new tests reproduced five unit and four targeted browser failures.
+An intermediate type-narrowing error and test fresh-page setup error were corrected.
+The first full browser run returned exit 1 (107/108): an invalid-link refusal
+appeared before the competing-callback test's trigger. Its cause is unproven;
+no assertion/guard was weakened. The full separate rerun above passed.
+Build retained the non-failing 500 kB chunk warning (150.09 kB gzip JavaScript).
+
+Supplemental automated validation reported zero CodeQL alerts and only the
+previously approved `weak_password` indentation issue, subsequently normalized.
+That whitespace-only change and this appended evidence do not repeat the real
+mail call or replace final-head CI. The real harness/config/wrapper, schema/types,
+dependencies, root instructions and hosted surfaces remain unchanged.
+No extra agent, service restart/reset, protocol spike, hosted operation, merge
+or deployment. PR remains draft pending coordinator **final-head CI and independent
+follow-up review**; physical-device and hosted acceptance remain separate gates.
