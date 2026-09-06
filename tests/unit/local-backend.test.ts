@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { AssertionError } from 'node:assert';
 import path from 'node:path';
 import {
   ROOT, DB_CONTAINER, PROJECT_ID, MIGRATION_HASH, assertLoopbackUrl, assertLocalApi, assertPublishableKey,
   normalSessionEnvironment, validateSessionEnvironment, commandEnvironment, requireDocker, requireLocalContainer,
+  LocalBackendError, securityFailureExitCode,
 } from '../../scripts/backend/local.mjs';
 
 const credentials = {
@@ -15,6 +17,27 @@ const credentials = {
   TEST_B_EMAIL: 'user-b@example.test', TEST_B_PASSWORD: 'b'.repeat(32),
   ALLOW_SECURITY_TESTS: '1',
 };
+
+describe('security failure classification', () => {
+  const outage = new LocalBackendError('BLOCKED: fictional outage.');
+  const assertion = new AssertionError({ message: 'Fictional assertion failure.' });
+
+  it.each([undefined, 0, 1, 2])('preserves primary %s across cleanup outages and assertion failures', (primary) => {
+    expect(securityFailureExitCode(primary, outage)).toBe(primary === 1 ? 1 : 2);
+    expect(securityFailureExitCode(primary, assertion)).toBe(primary === 2 ? 2 : 1);
+  });
+
+  it.each([undefined, null, false, 0, 'BLOCKED', { name: 'LocalBackendError', exitCode: 2 }])('never treats an unknown error as success: %j', (error) => {
+    for (const primary of [undefined, 0, 1, 2]) {
+      expect(securityFailureExitCode(primary, error)).toBe(primary === 2 ? 2 : 1);
+    }
+  });
+
+  it.each([null, -1, 3, Number.NaN, '0', '1', '2', {}])('does not propagate an unrecognized primary value: %j', (primary) => {
+    expect(securityFailureExitCode(primary, outage)).toBe(2);
+    expect(securityFailureExitCode(primary, assertion)).toBe(1);
+  });
+});
 
 describe('disposable local backend boundaries', () => {
   it.each(['http://127.0.0.1:54321', 'http://localhost:54321/', 'http://[::1]:54321'])('accepts literal loopback origin %s', (url) => {

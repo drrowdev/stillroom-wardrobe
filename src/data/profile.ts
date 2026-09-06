@@ -2,7 +2,7 @@ import type { AppClient } from './client';
 import { isLanguage, type Language } from '../i18n';
 import { isRecord, isUuid } from '../domain/wardrobe';
 import { AppError, requireSuccess, throwIfAborted } from './errors';
-import type { ProfileRow } from './database-projection';
+import type { ProfileRow } from './rows';
 
 export function parseProfile(value: unknown, ownerId: string): ProfileRow {
   if (!isRecord(value) || value.owner_id !== ownerId || !isUuid(ownerId)

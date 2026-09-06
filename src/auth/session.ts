@@ -1,10 +1,11 @@
 import type { Session } from '@supabase/supabase-js';
 import { authStorageKey, bindDataRequests, type AppClient } from '../data/client';
 import { fetchProfile, saveInitialLanguage } from '../data/profile';
-import type { ProfileRow } from '../data/database-projection';
+import type { ProfileRow } from '../data/rows';
 import { isUuid } from '../domain/wardrobe';
 import { resolveLanguage, type Language, type MessageKey } from '../i18n';
 import { AppError, isAborted } from '../data/errors';
+import { holdsStoredSession } from './stored-session';
 
 export type OwnerScope = { ownerId: string; epoch: number; signal: AbortSignal };
 export type SessionState = {
@@ -70,7 +71,7 @@ export class SessionController {
     window.addEventListener('focus', onFocus);
     const { data } = this.client.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || !session) { this.signedOut(); return; }
-      if (!this.allowSession) return;
+      if (!this.allowSession || !this.holdsSession(session)) return;
       if (this.state.scope?.ownerId === session.user.id && !this.state.scope.signal.aborted && this.state.phase === 'ready') return;
       // Supabase holds its auth lock during this callback; data requests must run after it returns.
       const epoch = this.epoch;
@@ -88,6 +89,11 @@ export class SessionController {
       window.removeEventListener('focus', onFocus);
       this.invalidate();
     };
+  }
+  // Sessions live in this tab's sessionStorage. The SDK also broadcasts sign-ins
+  // and refreshes between tabs; a tab must ignore any session it does not hold.
+  private holdsSession(session: Session): boolean {
+    return holdsStoredSession(window.sessionStorage.getItem(authStorageKey), session.access_token);
   }
   private async open(session: Session): Promise<void> {
     this.invalidate();

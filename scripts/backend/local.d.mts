@@ -6,6 +6,7 @@ export const CACHE_PATH: string;
 export const MIGRATION_HASH: string;
 export const TEST_EMAILS: string[];
 export class LocalBackendError extends Error { exitCode: number; constructor(message: string, exitCode?: number); }
+export function securityFailureExitCode(primary: unknown, error: unknown): 1 | 2;
 export function fail(message: string, exitCode?: number): never;
 export function reportError(error: unknown): void;
 export function assertLoopbackUrl(value: string): string;

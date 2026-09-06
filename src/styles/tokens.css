@@ -7,7 +7,7 @@
   --secondary: #59665F;
   --primary: #355D4E;
   --primary-hover: #294B3E;
-  --accent: #A45E45;
+  --accent: #9C5840; /* Meets 4.5:1 small-text contrast on the warm page background. */
   --error: #A33232;
   --focus: #176B73;
   --border: #D8DED7;

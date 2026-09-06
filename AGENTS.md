@@ -1,13 +1,42 @@
 # Stillroom Wardrobe coding-agent rules
 
-Development now continues in GitHub Copilot cloud sessions. Read
-`docs/cloud-development.md` and `docs/phase-0-result.md` first. The initial
-snapshot is WIP: finish Phase 0 and open a pull request; do not push directly
-to main, auto-merge or begin the next phase. The setup workflow may leave
+Development continues in GitHub Copilot cloud sessions. Read
+`docs/cloud-development.md` and `docs/phase-0-result.md` first. Continue Phase 0
+I01–I05 on existing PR #1, `copilot/finish-phase-0-stillroom-wardrobe`; do not
+open another PR, push directly to main, merge or begin the next phase. The setup workflow may leave
 generated schema types untracked; review/commit those deliberately, never
 local credentials, service state or test artifacts.
 
-Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `07-DATABASE-AND-RLS.sql`, `08-API-AND-STORAGE.md`, `10-SECURITY-AND-PRIVACY.md`, `20-AI-MODELS-AND-WORKFLOWS.md` and the current phase in `14-IMPLEMENTATION-PLAN.md` before editing. This file is a template to copy to repository root.
+Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `07-DATABASE-AND-RLS.sql`, `08-API-AND-STORAGE.md`, `10-SECURITY-AND-PRIVACY.md`, `20-AI-MODELS-AND-WORKFLOWS.md` and the current phase in `14-IMPLEMENTATION-PLAN.md` before editing. These are active root instructions: never overwrite them with historical blueprint templates.
+
+## Context, planning and coordination gate
+
+1. Before edits, read this file, `.github/copilot-instructions.md`, the cloud
+   guide, current phase/backend evidence, relevant blueprint requirements/work
+   packets, actual migrations/generated schema/source/tests, and the current PR
+   discussion, diff, reviews and CI job logs. Record exact base/head hashes,
+   files actually read, approved scope and remaining gates; do not assume the
+   previous session's evidence applies to a new head.
+2. Produce a focused plan before code. Obtain an actual read-only critique from
+   a different model provider; record reviewer/provider/model, findings and
+   amendments in the PR. Self-review and automated code checks do not replace
+   this prerequisite. If the required reviewer is unavailable, stop.
+3. The coordinator approves the amended plan and explicitly selects **GPT-6
+   Astra (`gpt-6-astra`)** for implementation, verifying the actual model from
+   runtime/platform evidence. A model name in a prompt is not verification.
+   No Auto, silent fallback or unverified model claim; stop if unavailable.
+   Material scope changes require renewed different-provider critique and
+   coordinator approval before implementation.
+4. One implementation writer at a time. The coordinator handles routine
+   in-scope findings/fixes; consequential product, security, cost or scope
+   decisions go to the user. Do not launch parallel writers or expand phases.
+5. **Explicit user approval is required before every merge**, separately from
+   plan/code/CI approval. Never auto-merge or push directly to main. Complete
+   fresh-head validation and report blocked/pending checks honestly.
+
+The approved Phase 0 continuation is PR comments `5558504250` (plan) and
+`5558542193` (coordinator approval after Anthropic Claude Opus 5 critique).
+Read both before continuing that packet. This approval is not merge approval.
 
 * Latest user instruction: accounts are completely independent. No household, partner relation, sharing, recipient columns, user directory, cross-account references or mixed recommendations. Do not implement these as deferred work.
 * One TypeScript/React/Vite PWA, Supabase Auth/Postgres/private Storage and static hosting. Automatic paid photo tagging is first-release I29 scope; outfits remain deterministic. No native app, AI stylist, SSR or unrelated service/package.

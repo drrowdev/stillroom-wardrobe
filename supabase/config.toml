@@ -44,7 +44,13 @@ enable_manual_linking = false
 minimum_password_length = 24
 
 [auth.email]
-enable_signup = false
+# The CLI maps this to GOTRUE_EXTERNAL_EMAIL_ENABLED: the whole email provider,
+# including password sign-in and recovery/OTP/magic links subject to configuration
+# and delivery prerequisites, not a password-only switch. Phase 0 has password UI
+# only; detectSessionInUrl=false does not disable backend email endpoints.
+# Inbucket is disabled: no mail delivery or completed recovery is claimed.
+# [auth] enable_signup=false, anonymous-sign-in denial and admission/RLS remain.
+enable_signup = true
 double_confirm_changes = true
 enable_confirmations = true
 secure_password_change = true

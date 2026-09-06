@@ -1,14 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 import { describe, expect, it, vi } from 'vitest';
 import { PrivateImages } from '../../src/images/private-images';
-import type { PhaseZeroDatabase } from '../../src/data/database-projection';
+import type { Database } from '../../src/data/database.types';
 
 const owner = '10000000-0000-4000-8000-000000000001';
 const path = (number: number) => `${owner}/20000000-0000-4000-8000-000000000001/30000000-0000-4000-8000-${String(number).padStart(12, '0')}/thumb.jpg`;
 function makePool() {
   const pending: Array<(response: Response) => void> = [];
   const download = vi.fn(() => new Promise<Response>((resolve) => pending.push(resolve)));
-  const client = createClient<PhaseZeroDatabase>('http://127.0.0.1:54321', 'public-fixture', {
+  const client = createClient<Database>('http://127.0.0.1:54321', 'public-fixture', {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     global: { fetch: download },
   });
