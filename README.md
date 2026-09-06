@@ -72,9 +72,10 @@ Supabase authorization. The separate real-stack CI job signs in using ordinary
 test accounts and must pass before Phase 0 is considered complete. Missing Docker
 or credentials are reported as unavailable gates, not successful tests.
 
-Full database types come from the real local Supabase schema. Until that generation
-is completed, `database-projection.ts` supplies explicit Phase 0 projections plus
-runtime validation; it is not represented as a generated full-schema file.
+Database types in `src/data/database.types.ts` are generated from the real local
+Supabase schema with `npm run db:types`; `npm run db:types -- --check` fails if the
+committed file drifts. `src/data/rows.ts` narrows the generated rows the
+application relies on.
 
 ## Deployment and privacy
 

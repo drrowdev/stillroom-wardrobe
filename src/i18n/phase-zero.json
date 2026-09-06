@@ -27,6 +27,7 @@
   "wardrobe.refresh": { "en": "Refresh wardrobe", "fi": "Päivitä vaatekaappi", "sv": "Uppdatera garderoben" },
   "wardrobe.more": { "en": "Show more pieces", "fi": "Näytä lisää vaatteita", "sv": "Visa fler plagg" },
   "wardrobe.back": { "en": "Back to wardrobe", "fi": "Takaisin vaatekaappiin", "sv": "Tillbaka till garderoben" },
+  "account.identity": { "en": "Account and privacy status", "fi": "Tilin ja yksityisyyden tila", "sv": "Konto- och integritetsstatus" },
   "account.menu": { "en": "Account menu", "fi": "Tilivalikko", "sv": "Kontomeny" },
   "account.signingOut": { "en": "Signing out…", "fi": "Kirjaudutaan ulos…", "sv": "Loggar ut…" },
   "account.locked": { "en": "Your wardrobe could not be opened. Reconnect and try again, or sign out.", "fi": "Vaatekaappia ei voitu avata. Tarkista yhteys ja yritä uudelleen tai kirjaudu ulos.", "sv": "Garderoben kunde inte öppnas. Kontrollera anslutningen och försök igen, eller logga ut." },

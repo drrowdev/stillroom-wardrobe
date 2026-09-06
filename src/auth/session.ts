@@ -70,7 +70,7 @@ export class SessionController {
     window.addEventListener('focus', onFocus);
     const { data } = this.client.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || !session) { this.signedOut(); return; }
-      if (!this.allowSession) return;
+      if (!this.allowSession || !this.holdsSession(session)) return;
       if (this.state.scope?.ownerId === session.user.id && !this.state.scope.signal.aborted && this.state.phase === 'ready') return;
       // Supabase holds its auth lock during this callback; data requests must run after it returns.
       const epoch = this.epoch;
@@ -88,6 +88,17 @@ export class SessionController {
       window.removeEventListener('focus', onFocus);
       this.invalidate();
     };
+  }
+  // Sessions live in this tab's sessionStorage. The SDK also broadcasts sign-ins
+  // and refreshes between tabs; a tab must ignore any session it does not hold.
+  private holdsSession(session: Session): boolean {
+    try {
+      const stored = window.sessionStorage.getItem(authStorageKey);
+      if (!stored) return false;
+      const value: unknown = JSON.parse(stored);
+      return typeof value === 'object' && value !== null && 'access_token' in value
+        && (value as { access_token: unknown }).access_token === session.access_token;
+    } catch { return false; }
   }
   private async open(session: Session): Promise<void> {
     this.invalidate();

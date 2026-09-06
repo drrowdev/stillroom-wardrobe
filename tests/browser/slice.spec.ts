@@ -115,6 +115,8 @@ test('sign-out is broadcast across tabs without sending account data', async ({ 
   await page.goto('/');
   await second.goto('/');
   await signIn(page);
+  // A session belongs to the tab that signed in; the SDK's cross-tab broadcast must not adopt it.
+  await expect(second.locator('#email')).toBeVisible();
   await signIn(second);
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   await expect(second.locator('#wardrobe-title')).toBeVisible();

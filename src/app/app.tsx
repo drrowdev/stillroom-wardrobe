@@ -94,7 +94,7 @@ function OwnedWardrobe({ client, scope, profileName, currency, t, language, onli
   }
   return (
     <>
-      <div className="workspace-identity"><span className="identity-dot" />{profileName}<span className="identity-separator" />{t('common.private')}</div>
+      <aside className="workspace-identity" aria-label={t('account.identity')}><span className="identity-dot" />{profileName}<span className="identity-separator" />{t('common.private')}</aside>
       <main id="main" className="workspace-main" tabIndex={-1}>
         {!online && <div className="notice notice-offline" role="status">{t('common.offline')} {t('common.stale')}</div>}
         {notice && route === 'wardrobe' && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('item.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setNotice(false)}><Icon name="close" /></button></div>}

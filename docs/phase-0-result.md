@@ -1,7 +1,9 @@
-# Phase 0 - work in progress
+# Phase 0 - result
 
-Date: 6 September 2026. Initial local implementation handed to GitHub Copilot
-cloud development. **The Phase 0 exit gate has not passed.**
+Date: 6 September 2026. Initial local implementation continued in GitHub
+Copilot cloud development. The recorded blockers are fixed and the gates below
+were re-run for real, with the sandbox limits stated under "Remaining limits".
+The exit gate is proposed for review, not self-approved.
 
 ## Implemented foundation
 
@@ -20,34 +22,71 @@ been enabled. The source repository is public at the user's request.
 
 ## Recorded local commands and outcomes
 
+Re-run in the GitHub Copilot cloud session against the disposable local
+Supabase stack (Docker) on 6 September 2026.
+
 | Command / scope | Outcome |
 |---|---|
 | `npm run typecheck` | Exit 0 |
 | `npm run lint` | Exit 0 |
-| `npm run check:translations` | Exit 0; 298 keys in three languages |
+| `npm run check:translations` | Exit 0; 299 keys in three languages |
 | `npm run test:unit` | Exit 0; 108 tests across six files |
-| `npm run build` | Exit 0; initial compressed JavaScript approximately 140.60 kB |
-| `npm run scan:secrets` with ephemeral canary | Exit 0; no reported finding |
+| `npm run test:browser` (slice suite, chromium and mobile) | Exit 0; 20 passed |
+| JPEG browser module suite | Exit 0; 20 desktop/mobile cases |
+| `npm run build` | Exit 0; initial compressed JavaScript approximately 140.87 kB |
+| `npm run scan:secrets` with ephemeral canary | Exit 0; 124 text files checked, canary checked |
 | `npm run check:dependencies` | Exit 0; 12 production / 220 development packages; production audit reported no vulnerabilities |
-| JPEG browser module suite | Agent-reported 20 passing desktop/mobile Chromium cases |
-| `npm run test:browser -- slice.spec.ts --project=chromium` | Exit 1; 8 passed, 2 failed |
-| Local `db:start`, `db:reset`, `db:types`, `db:types --check` | NOT RUN / exit 2 because Docker is unavailable on this machine |
-| Real Auth/Storage integration and security | Not executed locally; no pass claimed |
+| `node scripts/provision-test-users.mjs` | Exit 0 after the Auth configuration repair |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | PASS; normal password sessions only, no service key |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | PASS; nine stages, normal password sessions only |
+| `npm run db:types` and `npm run db:types -- --check` | Exit 0; committed types exactly match actual local generation |
+| `npm run db:start` / `npm run db:reset` | Not completed end to end in this sandbox; see limits below |
 
-The successful browser fixtures are UI/request-contract evidence only. They
-are not real Supabase authentication or RLS evidence. No actual phone,
-VoiceOver or TalkBack acceptance is claimed.
+## Repaired defects
 
-## Remaining blockers
+* Local sign-in failed with `FAIL: a provisioned local identity could not sign
+  in`. The Supabase CLI maps `[auth.email].enable_signup` to GoTrue's
+  `GOTRUE_EXTERNAL_EMAIL_ENABLED`, which disables the whole email provider,
+  including password sign-in for administratively created identities. The
+  option is now enabled in `supabase/config.toml`. Self-service signup stays
+  closed by `[auth] enable_signup = false` and by the database admission
+  trigger; both anonymous signup denials are still asserted by the security
+  suite.
+* `src/data/database.types.ts` is now generated from the actual local schema
+  and committed; the temporary `database-projection.ts` was removed and the
+  client, profile access and tests use the generated types through
+  `src/data/rows.ts`.
+* The security fixture inserted rows with non-uniform keys, which PostgREST
+  rejects (`PGRST102`), and omitted the non-null `items.notes` column. The
+  fixture now sends uniform rows; no policy or assertion was weakened.
+* `.workspace-identity` is now an `aside` landmark with a translated label, so
+  all page content sits inside landmarks.
+* The accent colour was darkened to `#9C5840` to reach the 4.5:1 contrast ratio
+  for small text on the application background.
+* A tab adopted another tab's sign-in because the Supabase SDK broadcasts
+  session events between tabs. Sessions are per-tab `sessionStorage`, so the
+  session controller now ignores any session this tab does not hold. The
+  explicit logout broadcast and its assertions are unchanged, and the browser
+  test additionally asserts that the second tab still shows its own sign-in
+  form.
 
-* Cross-tab browser case timed out looking for the second sign-in form after
-  signing into the first tab. Investigate SDK session synchronization and
-  keep the intended logout assertion; do not simply skip the test.
-* Accessibility case reports `.workspace-identity` outside a landmark.
-* Real local Supabase gates and full generated schema types are pending.
-  `database-projection.ts` is explicitly a temporary typed projection, not
-  generated-schema evidence.
-* Physical-device behavior remains unverified.
+## Remaining limits
+
+* This agent sandbox blocks name resolution for Docker containers created after
+  the session started, so `supabase start` and `supabase db reset` (and
+  therefore `npm run db:reset` end to end) could not run here. The schema was
+  applied to the existing local database and the Auth, REST and Storage
+  containers were recreated manually with host mappings so that the real gates
+  above could run against normal sessions. Image pulls from the CloudFront
+  backed registry are blocked as well, so the `postgres-meta` image used by
+  type generation was pulled from Docker Hub and re-tagged locally. These are
+  environment workarounds only; nothing about them is committed, and
+  `npm run db:reset` still needs one clean run on the CI runner.
+* Physical-device behaviour remains unverified: no real phone, VoiceOver or
+  TalkBack acceptance is claimed. Browser evidence is Chromium desktop and
+  emulated mobile only.
+* No paid AI, later-phase feature, production backend or hosted Supabase
+  project has been enabled. AI prefill remains Phase 2 scope.
 
 The local preview responds at `http://127.0.0.1:5173`. Without Supabase settings
 it displays an honest setup screen, not simulated private wardrobe data.
