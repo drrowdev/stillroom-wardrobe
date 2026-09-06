@@ -12,9 +12,72 @@ The initial migration is a byte-for-byte copy of `blueprint/07-DATABASE-AND-RLS.
 
 Supabase retains management of the Auth and Storage schemas. No stubs, embedded database, additional migration, AI endpoint or paid generation is substituted for them.
 
-**This environment has no Docker installation/daemon. Real Auth, Storage, migration execution, generated database types, security and integration passes are blocked, not completed.** Unit tests cover safety guards and refusal paths only. No placeholder `database.types.ts` is generated.
+### Historical initial-local evidence (5–6 September 2026)
+
+The initial local environment had no Docker installation/daemon. Real Auth,
+Storage, migration execution, generated types and live security/integration
+were blocked there, not completed. Unit tests covered safety/refusal paths
+only; no placeholder `database.types.ts` was generated.
 
 Local verification: **32 backend unit tests passed**, scoped ESLint passed, backend unit TypeScript checks passed, and all owned `.mjs` files passed `node --check`. Installed CLI version/command help were inspected; its status command failed on missing Docker with no reported configuration parsing error. `start`, `reset`, `types`, and `types --check` each returned exit 2 / `NOT RUN`. Real-test commands also returned exit 2 for missing consent/credentials. These are refusal-path results, not live authorization evidence.
+
+### Current standard-stack evidence (6 September 2026)
+
+[CI 34025264676 attempt 2](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34025264676)
+passed at `f20c745eec9084cc900770cb2b206100ad94b784`. Real local Supabase job
+`101466868242` completed standard start/reset, ordinary integration/security,
+actual `npm run db:types`, tracked-file verification and zero generated diff.
+App/browser job `101466868103` passed all gates and 40 Chromium cases.
+The current prepared cloud setup also completed standard start/reset/provision
+and actual generation (agent run `34026811034`, job `101469132212`).
+See `phase-0-result.md` for continuation commands/results and remaining gates;
+baseline CI does not validate a later implementation head.
+
+## Email-provider semantics and admission
+
+`[auth.email].enable_signup = true` maps to `GOTRUE_EXTERNAL_EMAIL_ENABLED`,
+the whole email provider, not just password grants. Backend recovery and
+OTP/magic-link capabilities remain subject to their configuration and delivery
+prerequisites. Phase 0 exposes password login only. Client
+`detectSessionInUrl: false` does not disable backend endpoints, and legitimate
+approved-account email authentication is not an admission defect.
+
+Public signup remains disabled globally, anonymous sign-in is disabled, and
+the admission trigger plus enabled-owner RLS remain unchanged. Inbucket is
+disabled; no SMTP configuration, delivered message, or completed recovery
+is claimed. The live security harness sends email requests only for one
+fresh unapproved fictional address, never either approved account.
+
+With pinned CLI 2.116.0 / Auth **v2.196.0**, the harness requires:
+
+| Request | Observed/required result |
+|---|---|
+| OTP `create_user: true` | 422, `signup_disabled`, no usable session |
+| OTP `create_user: false` | 422, `otp_disabled`, no usable session |
+| Recovery | 200 with empty JSON, no usable session |
+| Invalid email and recovery verification | 403, `otp_expired`, no usable session |
+| Approved A/B afterward | Normal password login and own-profile access still work |
+
+Recovery's anti-enumeration 200 is not admission or proof that an Auth row is
+absent. Wrong-password failure would not prove absence either. These checks
+verify real global creation denial, not independent execution of the SQL
+admission trigger behind that gate. Any 5xx/transport outage is BLOCKED and
+nonzero, never passing authorization evidence; unexpected 4xx fails too.
+
+Confirmation settings are not a blanket requirement to email on every password
+change. Pinned Auth's
+[password-update code](https://github.com/supabase/auth/blob/v2.196.0/internal/api/user.go)
+requires reauthentication under secure-password-change policy when the session
+is absent or older than 24 hours; a recent session does not require that nonce.
+Password-change notification is a separate setting. Email confirmation and
+double-confirmed address changes are distinct flows; see
+[signup](https://github.com/supabase/auth/blob/v2.196.0/internal/api/signup.go)
+and [verification](https://github.com/supabase/auth/blob/v2.196.0/internal/api/verify.go).
+These are source-verified semantics, not live password-change/mail tests.
+No approved passwords or addresses were changed. OTP/recovery source:
+[OTP](https://github.com/supabase/auth/blob/v2.196.0/internal/api/otp.go),
+[magic link](https://github.com/supabase/auth/blob/v2.196.0/internal/api/magic_link.go),
+[recovery](https://github.com/supabase/auth/blob/v2.196.0/internal/api/recover.go).
 
 ## First local run
 
@@ -88,7 +151,10 @@ This Phase 0 harness does not claim physical-device behavior, account-freeze orc
 
 `npm run db:types` requires the real running local container and invokes the pinned CLI `gen types typescript --local --schema public`. Only successful plausible generator output is atomically written to `src/data/database.types.ts`. `--check` compares the exact output, including line endings, and fails on a missing or differing file. Nothing is hand-generated from the SQL and failures never replace a previous file.
 
-While Docker remains unavailable, explicitly named Phase 0 frontend projections/runtime guards are not a substitute for full generated schema types. Run and review actual generation before declaring Phase 0 complete.
+The actual generated file is now committed and used by `AppClient` and the
+`src/data/rows.ts` projections. Runtime guards remain, but are not schema
+generation evidence. `--check` invokes real generation and compares exact
+bytes; it is not a visual inspection of a generated-looking file.
 
 A Docker-capable Ubuntu CI runner can execute the same real-stack commands. Its first type-generation run must use `npm run db:types`; `--check` intentionally fails until the generated file is present. If retrieving generation from CI, upload **only** `src/data/database.types.ts`, never `.supabase`, `.env.local`, CLI status output, test credentials or session state. An artifact alone is not an integration pass: retain the actual job outcomes separately. Subsequent CI runs can use `--check` against the reviewed committed file.
 
@@ -101,4 +167,6 @@ node .\scripts\db.mjs reset
 node .\scripts\db.mjs types --check
 ```
 
-The last three commands correctly report `NOT RUN` and nonzero status without Docker. Do not reinterpret that refusal as a passing live backend test.
+Without Docker, the last three commands report `NOT RUN` and nonzero status.
+That historical refusal is not a passing live backend test, nor does it negate
+the later successful standard-stack CI evidence above.

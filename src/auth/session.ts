@@ -5,6 +5,7 @@ import type { ProfileRow } from '../data/rows';
 import { isUuid } from '../domain/wardrobe';
 import { resolveLanguage, type Language, type MessageKey } from '../i18n';
 import { AppError, isAborted } from '../data/errors';
+import { holdsStoredSession } from './stored-session';
 
 export type OwnerScope = { ownerId: string; epoch: number; signal: AbortSignal };
 export type SessionState = {
@@ -92,14 +93,7 @@ export class SessionController {
   // Sessions live in this tab's sessionStorage. The SDK also broadcasts sign-ins
   // and refreshes between tabs; a tab must ignore any session it does not hold.
   private holdsSession(session: Session): boolean {
-    const stored = window.sessionStorage.getItem(authStorageKey);
-    if (!stored) return false;
-    if (stored.includes(session.access_token)) return true;
-    try {
-      const value = JSON.parse(stored) as { access_token?: unknown } | null;
-      // An unreadable payload still belongs to this tab; only a different token is foreign.
-      return typeof value?.access_token !== 'string';
-    } catch { return true; }
+    return holdsStoredSession(window.sessionStorage.getItem(authStorageKey), session.access_token);
   }
   private async open(session: Session): Promise<void> {
     this.invalidate();

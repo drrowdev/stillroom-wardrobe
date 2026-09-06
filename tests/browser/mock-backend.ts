@@ -1,6 +1,7 @@
 // Browser contract fixtures only. Real Auth/Storage authorization is a separate blocking suite.
 import type { Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import type { Language } from '../../src/i18n';
 
 export const owners = {
@@ -17,7 +18,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   const items: JsonRow[] = [];
   const images: JsonRow[] = [];
   const files = new Map<string, Buffer>();
-  const requests: Array<{ method: string; path: string; owner: string | null }> = [];
+  const requests: Array<{ method: string; path: string; owner: string | null; ownerFilter: string | null }> = [];
   let commitFailed = false;
   const fixture = await readFile(new URL('../../blueprint/validation/fixture.jpg', import.meta.url));
   await page.route('http://127.0.0.1:54321/**', async (route) => {
@@ -30,14 +31,14 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       try { const value: unknown = JSON.parse(Buffer.from(token, 'base64url').toString()); if (typeof value === 'object' && value && 'sub' in value && typeof value.sub === 'string') owner = value.sub; }
       catch { /* The mocked anonymous key carries no owner. */ }
     }
-    requests.push({ method, path: url.pathname, owner });
+    requests.push({ method, path: url.pathname, owner, ownerFilter: url.searchParams.get('owner_id') });
     const json = (body: unknown, status = 200) => route.fulfill({ status, json: body });
     if (method === 'OPTIONS') { await route.fulfill({ status: 204 }); return; }
     if (url.pathname === '/auth/v1/token') {
       const body = request.postDataJSON() as { email?: string; password?: string };
       const id = body.email === 'user-a@example.test' ? owners.a : body.email === 'user-b@example.test' ? owners.b : null;
       if (!id || body.password !== 'fictional-test-password') { await json({ error: 'invalid_grant', error_description: 'Invalid login credentials' }, 400); return; }
-      const claims = { sub: id, role: 'authenticated', aud: 'authenticated', exp: Math.floor(Date.now() / 1000) + 3600 };
+      const claims = { sub: id, role: 'authenticated', aud: 'authenticated', exp: Math.floor(Date.now() / 1000) + 3600, jti: randomUUID() };
       const accessToken = `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.browser-fixture`;
       await json({ access_token: accessToken, refresh_token: `fixture-${id}`, expires_in: 3600, token_type: 'bearer', user: { id, email: body.email, aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: '2026-09-06T00:00:00Z' } });
       return;

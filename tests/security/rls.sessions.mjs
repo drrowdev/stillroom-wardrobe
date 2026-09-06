@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
-import { assertLocalApi, validateSessionEnvironment, reportError } from '../../scripts/backend/local.mjs';
+import { assertLocalApi, validateSessionEnvironment, reportError, LocalBackendError } from '../../scripts/backend/local.mjs';
 
 try { validateSessionEnvironment(process.env); } catch (error) { reportError(error); process.exit(2); }
 const base=assertLocalApi(process.env.SUPABASE_URL);
@@ -11,11 +11,38 @@ function claims(token){try{return JSON.parse(Buffer.from(token.split('.')[1],'ba
 const passed=[];let stage='configuration';const cleanups=[],profileCleanups=[];
 async function call(token,path,{method='GET',body,bytes=false,returnRepresentation=false}={}) {
   const r=await fetch(base+path,{method,headers:{apikey:key,...(token?{Authorization:`Bearer ${token}`}:{ }),'Content-Type':bytes?'image/jpeg':'application/json',...(returnRepresentation?{Prefer:'return=representation'}:{})},
-    ...(body!==undefined?{body:bytes?body:JSON.stringify(body)}:{}),cache:'no-store',redirect:'error',signal:AbortSignal.timeout(15000)});
-  assert.ok(r.status<500);
-  const raw=Buffer.from(await r.arrayBuffer());let data;
+    ...(body!==undefined?{body:bytes?body:JSON.stringify(body)}:{}),cache:'no-store',redirect:'error',signal:AbortSignal.timeout(15000)})
+    .catch(()=>{throw new LocalBackendError('BLOCKED: local service transport unavailable.');});
+  if(r.status>=500)throw new LocalBackendError('BLOCKED: local service returned a server error.');
+  const raw=Buffer.from(await r.arrayBuffer().catch(()=>{throw new LocalBackendError('BLOCKED: local response unavailable.');}));let data;
   try{data=JSON.parse(raw.toString());}catch{data=raw;}
   return {ok:r.ok,status:r.status,data,headers:r.headers};
+}
+function noSession(result){
+  assert.ok(result.data && typeof result.data==='object' && !Buffer.isBuffer(result.data));
+  assert.ok(!result.data.access_token && !result.data.refresh_token && !result.data.session);
+}
+async function emailAdmission(){
+  const email=`unapproved-${randomUUID()}@example.test`;
+  stage='unapproved OTP create_user=true';
+  let r=await call(null,'/auth/v1/otp',{method:'POST',body:{email,create_user:true}});
+  stage=`unapproved OTP create_user=true (HTTP ${r.status})`;
+  assert.equal(r.status,422);assert.equal(r.data.error_code,'signup_disabled');noSession(r);
+  stage='unapproved OTP create_user=false';
+  r=await call(null,'/auth/v1/otp',{method:'POST',body:{email,create_user:false}});
+  stage=`unapproved OTP create_user=false (HTTP ${r.status})`;
+  assert.equal(r.status,422);assert.equal(r.data.error_code,'otp_disabled');noSession(r);
+  stage='unapproved recovery';
+  r=await call(null,'/auth/v1/recover',{method:'POST',body:{email}});
+  stage=`unapproved recovery (HTTP ${r.status})`;
+  // Anti-enumeration success is neither admission nor proof that no Auth row exists.
+  assert.equal(r.status,200);assert.deepEqual(r.data,{});noSession(r);
+  for(const type of ['email','recovery']){
+    stage=`unapproved invalid ${type} verification`;
+    r=await call(null,'/auth/v1/verify',{method:'POST',body:{email,type,token:'000000'}});
+    stage=`unapproved invalid ${type} verification (HTTP ${r.status})`;
+    assert.equal(r.status,403);assert.equal(r.data.error_code,'otp_expired');noSession(r);
+  }
 }
 async function login(email,password){
   const r=await call(null,'/auth/v1/token?grant_type=password',{method:'POST',body:{email,password}});
@@ -125,8 +152,18 @@ try {
     r=await call(c.token,`/storage/v1/object/authenticated/wardrobe/${f.paths[0]}`);assert.ok(r.ok);assert.equal(createHash('sha256').update(r.data).digest('hex'),sha);
   }
   passed.push('Anonymous tables/export/Storage, public signup and anonymous signup denied');
-} catch {
-  console.error(`FAIL at ${stage}. Details intentionally omit credentials and response content.`);process.exitCode=1;
+  stage='unapproved email OTP creation/no-create, recovery and invalid verification';
+  await emailAdmission();
+  passed.push('Unapproved OTP creation 422/signup_disabled; no-create 422/otp_disabled; recovery 200 without session; invalid email/recovery verification 403/otp_expired');
+  stage='approved password access remains intact after email admission checks';
+  for(const [label,owner] of [['A',a],['B',b]]){
+    const current=await login(process.env[`TEST_${label}_EMAIL`],process.env[`TEST_${label}_PASSWORD`]);
+    assert.equal(current.uid,owner.uid);assert.deepEqual(await profile(current),await profile(owner));
+  }
+  passed.push(stage);
+} catch(error) {
+  const blocked=error instanceof LocalBackendError;
+  console.error(`${blocked?'BLOCKED':'FAIL'} at ${stage}. Details intentionally omit credentials and response content.`);process.exitCode=blocked?2:1;
 } finally {
   for(const {c,x} of cleanups){
     try{
@@ -144,4 +181,4 @@ try {
     }catch{console.error('Test language preference cleanup incomplete; review the disposable owner profile.');process.exitCode=1;}
   }
 }
-console.log(JSON.stringify({tests:passed,result:process.exitCode?'FAIL':'PASS',credentials:'normal password sessions only; no service key'},null,2));
+console.log(JSON.stringify({tests:passed,result:process.exitCode===2?'BLOCKED':process.exitCode?'FAIL':'PASS',credentials:'normal password sessions only; no service key'},null,2));
