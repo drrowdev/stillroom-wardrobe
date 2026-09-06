@@ -265,6 +265,36 @@ for (const firstOwner of ['a', 'b'] as const) {
   });
 }
 
+test('accessibility while wardrobe items are loading', async ({ page }) => {
+  const backend = await mockBackend(page, { initialLanguage: 'en' });
+  const started = latch(), release = latch();
+  await page.route('**/rest/v1/items?**', async (route) => {
+    if (route.request().method() !== 'GET') { await route.fallback(); return; }
+    started.resolve();
+    await release.promise;
+    await route.fallback();
+  });
+  const loading = page.locator('.item-grid[aria-busy="true"]');
+  try {
+    await page.goto('/');
+    await signIn(page);
+    await started.promise;
+    await expect(loading).toBeVisible();
+    await expect(loading).toHaveAttribute('aria-label', messages['common.loading'].en);
+    await expect(loading.locator('.loading-card')).toHaveCount(4);
+    const results = await new AxeBuilder({ page }).analyze();
+    await expect(loading).toBeVisible();
+    expect(results.violations).toEqual([]);
+    await expect(page.getByRole('region', { name: messages['common.loading'].en, exact: true })).toHaveAttribute('aria-busy', 'true');
+  } finally {
+    release.resolve();
+  }
+  await expect(loading).toHaveCount(0);
+  await expect(page.locator('#wardrobe-title')).toHaveText(messages['wardrobe.title'].en);
+  await expect(page.getByRole('button', { name: messages['wardrobe.firstItem'].en })).toBeVisible();
+  expect(backend.requests).toContainEqual({ method: 'GET', path: '/rest/v1/items', owner: owners.a, ownerFilter: `eq.${owners.a}` });
+});
+
 test('accessibility and 320px layout across login, empty wardrobe and draft', async ({ page }) => {
   await mockBackend(page, { initialLanguage: 'en' });
   await page.setViewportSize({ width: 320, height: 800 });

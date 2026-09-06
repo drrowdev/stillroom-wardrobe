@@ -1,9 +1,9 @@
 # Phase 0 - result
 
 Date: 6 September 2026. Phase 0 I01–I05 remains under review on existing PR #1.
-The original defects were repaired and baseline CI passed. The approved
-continuation adds bounded regression coverage; current validation below also
-records a later local reset failure and an inherited accessibility finding.
+The approved narrow amendment below passes current local validation, including
+real backend/type parity and the corrected loading-state accessibility case.
+Earlier reset failures and accessibility findings remain as historical evidence.
 The exit gate is **not self-approved**; no merge or next phase is authorized.
 
 ## Implemented foundation
@@ -66,7 +66,7 @@ type generation (10:13–10:15 UTC). Dependencies were already installed; no
 gratuitous `npm ci`, separate setup rerun or setup-workflow edit was needed.
 These successes apply to their recorded heads, not automatically to later code.
 
-## Approved continuation and current results
+## Earlier approved continuation and historical results
 
 Initial implementation commit: `46f61805d46a6622a50c41b32cc6aa31d953f2f8`;
 evidence/review clarification commit: `bfe3bd124c939977cf438d29bec3ca26ab34e425`.
@@ -191,6 +191,100 @@ browser slice/backend, ordinary integration/security, backend/media unit tests;
 configuration, CI/setup workflows, relevant SDK broadcast/recovery source,
 PR body/comments/reviews/diff and baseline/setup job evidence.
 
+## Approved narrow amendment — current local results
+
+Starting clean head: `1d1c961ac9c3b61ddf760debbf5f1d32fde6d5c7`; base `main`:
+`d20457a82bca6e8d505d20b38dc07b4c930900cd`. Work stays on PR #1,
+`copilot/finish-phase-0-stillroom-wardrobe`, within Phase 0 I01–I05.
+[CI 34027852509 attempt 2](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34027852509)
+passed at that starting head: App/browser job `101472581269` (44 cases) and
+real Supabase job `101472581391` (standard start/reset, ordinary-session
+integration/11 security stages, actual generation and tracked-file/diff parity).
+That supersedes the earlier blocked CI/backend state **for that head only**,
+not the reproducible loading finding or fresh-head CI requirement.
+Prepared agent setup `34028594776` / `101473915563` completed
+start/reset/provision/types; the healthy stack was not reset again.
+
+[Amendment 5558727273](https://github.com/drrowdev/stillroom-wardrobe/pull/1#issuecomment-5558727273)
+records the GPT-6 Astra coordinator's plan, actual **Anthropic Claude Opus 5**
+read-only prereview and approval before implementation. It was read alongside
+comments `5558504250` and `5558542193`. This cloud writer did not perform or
+claim a new independent prereview. Runtime agent-registry evidence reports
+`astra-narrow-amendment`, model **`gpt-6-astra`**, matching explicit selection;
+one implementation writer, no fallback or material scope amendment.
+
+* **I02/I05; R01/R11/R19/R26:** one pure `securityFailureExitCode` helper is
+  used in the outer security catch and both cleanup catches. Coarse warnings
+  and all HTTP/ownership assertions remain intact. The 18 new unit cases cover:
+
+  | Primary status | Cleanup `LocalBackendError` | Cleanup assertion/unknown error |
+  |---|---|---|
+  | Absent or 0 | 2 / BLOCKED | 1 / FAIL |
+  | 1 / FAIL | 1 / FAIL | 1 / FAIL |
+  | 2 / BLOCKED | 2 / BLOCKED | 2 / BLOCKED |
+
+  Unknown error values, including a lookalike error object/string, cannot
+  produce success. Unrecognized primary values cannot propagate as success.
+  Tradeoff: a primary BLOCKED plus secondary cleanup assertion remains BLOCKED;
+  the secondary warning is retained and CI is still non-passing.
+* **I03/I05; R17/R27:** the loading grid is a named `section` with unchanged
+  class, `aria-busy` and existing translated label. All grid/responsive/skeleton
+  styles are class-driven; no CSS or catalog change was needed. The regression
+  holds the actual item-list request, checks visible busy skeletons before and
+  after full-page axe, asserts the named region, releases in `finally` on every
+  path and confirms the resolved owner wardrobe through the existing fixture.
+  No sleeps, static JSX mock, axe exclusions or cross-account test changes.
+
+All commands below were executed by this writer on the amendment working tree:
+
+| Exact command | Result |
+|---|---|
+| `npm run test:unit -- tests/unit/local-backend.test.ts` | Red: exit 1, 18 new cases failed because helper was not yet implemented; 32 existing passed. Green: exit 0, 50 passed. This is unit coverage, not a live outage/cleanup simulation. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --grep 'accessibility while wardrobe items are loading' --retries=0` | Red: exit 1, both projects failed specifically on axe `aria-prohibited-attr` at the generic loading div, not a role timeout. Green: exit 0, both passed while response remained held. |
+| `npm run lint` | Exit 0 |
+| `npm run typecheck` | Exit 0 |
+| `npm run check:translations` | Exit 0; 299 keys, en/fi/sv, 23 source files |
+| `npm run test:unit` | Exit 0; 141 tests, seven files |
+| `npm run test:browser` | Exit 0; 46 desktop/emulated-mobile cases, no retries |
+| `npm run test:a11y` | Exit 0; four cases, no retries, including held loading in both projects |
+| `npm run build` | Exit 0; compressed JavaScript 140.90 kB |
+| `npm run scan:secrets` | Exit 0; 126 text files, fresh ephemeral canary checked |
+| `npm run check:dependencies` | Exit 0; 12 production / 220 development packages, zero reported production vulnerabilities |
+| `npm run db:start` | Exit 0; prepared local stack confirmed healthy, no additional reset |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Exit 0 / PASS; real ordinary A/B sessions, schema/JPEG/retry/version/RPC checks |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | Exit 0 / PASS; all 11 stages, ordinary sessions, cleanup completed |
+| `npm run db:types` | Exit 0; actual local generation |
+| `npm run db:types -- --check` | Exit 0; exact comparison with another actual generation |
+| `git ls-files --error-unmatch src/data/database.types.ts` | Exit 0; tracked |
+| `git diff --exit-code -- src/data/database.types.ts` | Exit 0; no generated drift |
+| `git diff --check` | Exit 0 |
+
+Live integration/security ran sequentially. Build and scan used the same shell
+with fresh `STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"` and
+`export STILLROOM_SECRET_CANARY`; its value was never printed. No dependency
+install, schema/config/workflow change, credentials or raw service logs.
+
+Context actually read: `AGENTS.md`, `.github/copilot-instructions.md`;
+`docs/{cloud-development,phase-0-result,local-backend}.md`; blueprint
+`00/02/03/05/10/12/13/18/19`, Phase 0 in `14/15`, relevant `07/08/20`
+sections; actual migration RLS/storage excerpts and generated
+`src/data/database.types.ts` item/image/profile excerpts;
+`scripts/backend/local.{mjs,d.mts}`, `scripts/{db,run-local-tests,scan-secrets}.mjs`;
+`tests/unit/local-backend.test.ts`, `tests/security/rls.sessions.mjs`,
+`tests/integration/local.sessions.mjs` opening contracts,
+`tests/browser/{slice.spec,mock-backend}.ts`;
+`src/features/wardrobe/wardrobe-screen.tsx`, `src/app/app.tsx`,
+`src/data/items.ts`, `src/styles/{app,tokens}.css` (relevant style selectors);
+`package.json`, `playwright.config.ts`, `.github/workflows/ci.yml`;
+PR body, approved comments, review/empty inline threads, scoped baseline diff
+and baseline CI job logs. No credential/service-state files were inspected.
+
+The final code/evidence head is linked in the coordinator's PR completion
+reply. Automated review, fresh full CI on that head and explicit user merge
+approval remain coordinator gates. Physical phone/Safari, camera/library,
+VoiceOver and TalkBack acceptance remains unperformed. No broader Auth
+fallback change, later phase, hosted service, deployment or paid AI.
+
 ## Repaired defects
 
 * Local sign-in failed with `FAIL: a provisioned local identity could not sign
@@ -235,8 +329,9 @@ PR body/comments/reviews/diff and baseline/setup job evidence.
 
 ## Remaining limits
 
-* Fresh-head full CI approval/run, current clean-stack integration/type parity
-  and the loading-state accessibility finding remain review gates.
+* Fresh-head full CI approval/run and coordinator review remain gates. The
+  narrow amendment above corrects loading accessibility and passes current
+  local integration/type parity; neither substitutes for fresh-head CI.
 * Physical-device behaviour remains unverified: no real phone, VoiceOver or
   TalkBack acceptance is claimed. Browser evidence is Chromium desktop and
   emulated mobile only. Actual iPhone/Safari camera/library behavior and

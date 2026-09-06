@@ -37,9 +37,9 @@ export function WardrobeScreen({ items, images, loading, error, onAdd, onRefresh
       </div>
       {error && <div className="notice notice-error" role="alert"><span>{t(error)}</span><button className="text-button" onClick={onRefresh} disabled={!online}>{t('common.retry')}</button></div>}
       {loading ? (
-        <div className="item-grid" aria-busy="true" aria-label={t('common.loading')}>
+        <section className="item-grid" aria-busy="true" aria-label={t('common.loading')}>
           {Array.from({ length: 4 }, (_, index) => <div key={index} className="loading-card"><div className="loading-photo skeleton" /><div className="loading-line skeleton" /></div>)}
-        </div>
+        </section>
       ) : items.length ? (
         <>
           <div className="collection-bar"><span>{itemCount(language, items.length)}</span><button type="button" className="text-button" onClick={onRefresh} disabled={!online} aria-label={t('wardrobe.refresh')}><Icon name="refresh" />{t('common.refresh')}</button></div>

@@ -20,6 +20,11 @@ export class LocalBackendError extends Error {
   }
 }
 
+export function securityFailureExitCode(primary, error) {
+  if (primary === 1 || primary === 2) return primary;
+  return error instanceof LocalBackendError ? 2 : 1;
+}
+
 export function fail(message, exitCode = 2) {
   throw new LocalBackendError(message, exitCode);
 }

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
-import { assertLocalApi, validateSessionEnvironment, reportError, LocalBackendError } from '../../scripts/backend/local.mjs';
+import { assertLocalApi, validateSessionEnvironment, reportError, LocalBackendError, securityFailureExitCode } from '../../scripts/backend/local.mjs';
 
 try { validateSessionEnvironment(process.env); } catch (error) { reportError(error); process.exit(2); }
 const base=assertLocalApi(process.env.SUPABASE_URL);
@@ -162,8 +162,8 @@ try {
   }
   passed.push(stage);
 } catch(error) {
-  const blocked=error instanceof LocalBackendError;
-  console.error(`${blocked?'BLOCKED':'FAIL'} at ${stage}. Details intentionally omit credentials and response content.`);process.exitCode=blocked?2:1;
+  process.exitCode=securityFailureExitCode(process.exitCode,error);
+  console.error(`${process.exitCode===2?'BLOCKED':'FAIL'} at ${stage}. Details intentionally omit credentials and response content.`);
 } finally {
   for(const {c,x} of cleanups){
     try{
@@ -171,14 +171,14 @@ try {
       for(const [table,id] of [['wear_events',x.event],['outfits',x.outfit],['items',x.item],['items',x.second]]){
         const d=await call(c.token,`/rest/v1/${table}?id=eq.${id}`,{method:'DELETE'});assert.ok(d.ok);
       }
-    }catch{console.error('Fixture cleanup incomplete; rerun owner-scoped cleanup in the disposable test project.');process.exitCode=1;}
+    }catch(error){console.error('Fixture cleanup incomplete; rerun owner-scoped cleanup in the disposable test project.');process.exitCode=securityFailureExitCode(process.exitCode,error);}
   }
   for(const {c,previous,assigned} of profileCleanups){
     try{
       const current=await profile(c);assert.equal(current.ui_language,assigned);
       const restored=await call(c.token,`/rest/v1/profiles?owner_id=eq.${c.uid}&version=eq.${current.version}`,{method:'PATCH',body:{ui_language:previous},returnRepresentation:true});
       assert.ok(restored.ok);assert.equal(restored.data.length,1);assert.equal(restored.data[0].ui_language,previous);
-    }catch{console.error('Test language preference cleanup incomplete; review the disposable owner profile.');process.exitCode=1;}
+    }catch(error){console.error('Test language preference cleanup incomplete; review the disposable owner profile.');process.exitCode=securityFailureExitCode(process.exitCode,error);}
   }
 }
 console.log(JSON.stringify({tests:passed,result:process.exitCode===2?'BLOCKED':process.exitCode?'FAIL':'PASS',credentials:'normal password sessions only; no service key'},null,2));
