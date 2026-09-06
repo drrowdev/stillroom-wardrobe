@@ -67,15 +67,41 @@ live here**. URL: `https://stillroom-wardrobe.pages.dev`. Public VITE URL/key/
 version plus build-only `NODE_VERSION=24.19.0`; no privileged secrets,
 Functions/bindings, paid hosting, PR #2 deployment or automatic workflow.
 
+**Coordinator live-shell update, 6 September 2026:**
+[review 5125863611](https://github.com/drrowdev/stillroom-wardrobe/pull/2#pullrequestreview-5125863611)
+records successful deployment `91462a90-2f8c-40bf-a828-6a800ce19f33` of reviewed
+main `f696ee45e5dfe46be90cbc295a9811ec1d34a298`, not PR #2. At
+`2026-09-06T15:09:25Z`, root, JavaScript, CSS and SPA fallback at
+`https://stillroom-wardrobe.pages.dev` returned HTTP 200. Main JS contained the
+approved Supabase URL; CSP, no-referrer and nosniff were observed. A later
+coordinator read confirmed the same successful deployment, automatic production
+OFF/previews NONE. This supersedes queued as current status without rewriting the
+earlier worker observation above. Evidence covers only this reachable static
+shell; a replacement needs fresh proof. No cloud-worker hosted check occurred.
+
+**Dashboard/provisioning snapshot, 6 September 2026:**
+[approval 5560847183](https://github.com/drrowdev/stillroom-wardrobe/pull/2#issuecomment-5560847183)
+records user dashboard confirmation of public signup OFF, anonymous sign-in OFF,
+Email enabled, Phone/all social providers disabled, and Site URL plus sole
+Redirect URL `https://stillroom-wardrobe.pages.dev`. The user privately reserved
+the intended emails and created both accounts through Auth Create User.
+Coordinator aggregate administrative reads observed **2 reserved, 2 bound/enabled,
+2 Auth users, 2 email-confirmed users, 2 profiles and 2 preference records**.
+No private email, UID or password was supplied to the coordinator/cloud. The
+installation zero-count remains history, not current account status. This dated
+snapshot is not API verification of every Auth setting or ordinary-session RLS
+proof; administrative email confirmation does not prove email delivery.
+
 The [actor/gate table and private smoke contract](cloud-development.md#hosted-state-and-responsible-actors)
-assign remaining work: coordinator verifies actual dashboard/management Auth
-settings (global/anonymous signup off, password/email provider on, exact site/
-redirect URLs and no phone/OAuth), live HTTPS/assets/headers and private owner
-admission; user supplies actual identities privately; approved private operator
-runs read-only smoke after prepared non-personal fixtures exist; humans verify
-actual phone/Safari camera/library, VoiceOver/TalkBack and three-language journeys.
-No hosted credentials were requested/read and no hosted test or operation ran.
-Reachable static HTML would not prove login, storage isolation or full Phase 0.
+assign remaining work: ordinary password login, own Save/reload, negative
+RLS/Storage, prepared non-personal fixtures and actual private-operator hosted
+smoke remain **OPEN**, as do human phone/Safari camera/library, rotation/
+compatible-photo fallback, login/logout, explicit Save/Discard, VoiceOver/TalkBack,
+EN/FI/SV and narrow/zoomed journeys. No hosted credentials were requested/read
+and no hosted test or operation ran in this cloud task. Shell/dashboard/admin
+observations do not complete these gates or full Phase 0. Proper password recovery
+is a separately user-approved focused Phase 0 follow-up with its own plan/prereview,
+not implemented here; no admin-reset, account deletion/recreation or magic-login workaround.
 
 ### Fresh-head validation
 
@@ -500,8 +526,8 @@ cloud work must use a pull request and update this report with actual
 commands, results, commit and remaining limits.
 
 Current PR #2 rollback is a reviewed source revert only. Do not reset or replay
-the installed hosted schema; Pages remains on the separately reviewed main
-deployment until coordinator verification/authorization. Independent accounts,
+the installed hosted schema; Pages remains on the separately authorized reviewed-main
+deployment; any replacement requires coordinator authorization and fresh evidence. Independent accounts,
 EN/FI/SV and the manual editable draft/explicit Save are preserved. Phase 2's
 photo-first AI-filled title/category and all-field editing remain unimplemented;
 no automatic library save, post-save worker, outfit AI or paid activation.

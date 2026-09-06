@@ -11,10 +11,12 @@ disposable Supabase stack without production secrets. Continue through feature
 branches and pull requests; no automatic merge or paid-service activation.
 See [cloud development and handoff](docs/cloud-development.md).
 
-**Phase 0 is still in progress.** PR #1 is merged; PR #2 contains the bounded
-hosted-readiness packet. Hosted Auth, private owner setup, ordinary-session
-hosted smoke, verified live deployment and physical-device acceptance remain
-separate gates. No later phase or automatic merge is authorized.
+**Phase 0 is still in progress.** As of 6 September 2026, PR #1 is merged and
+PR #2 contains the bounded hosted-readiness packet and documentation amendment.
+See the [dated shell/dashboard evidence and remaining gates](docs/cloud-development.md#hosted-state-and-responsible-actors).
+Ordinary password login, own Save/reload, negative RLS/Storage, prepared fixtures,
+live hosted smoke and physical-device acceptance remain open. No later phase or
+automatic merge is authorized.
 
 ## Current implementation
 
@@ -91,12 +93,15 @@ provisioning. Edge Functions and AI processing have separate location controls;
 no AI service is activated.
 
 The coordinator created git-backed Cloudflare Pages project `stillroom-wardrobe`
-with automatic production and preview deployments disabled. Manual deployment
-of merged main `f696ee45e5dfe46be90cbc295a9811ec1d34a298` was queued at the last
-observation; `https://stillroom-wardrobe.pages.dev` is **not yet verified live
-here**. No PR #2 deployment, deployment workflow, Functions or paid hosting.
+with automatic production and preview deployments disabled. Coordinator review
+`5125863611` records the reviewed-main shell at `https://stillroom-wardrobe.pages.dev`
+reachable on 6 September 2026, 15:09 UTC; see the
+[deployment-specific evidence](docs/cloud-development.md#hosted-state-and-responsible-actors).
+This supersedes queued as current status, not the historical worker observation.
+Any replacement needs fresh evidence. No PR #2 deployment, deployment workflow,
+Functions or paid hosting.
 Production uses only the three public VITE settings and build-only Node version.
-A reachable shell would not complete hosted login, Storage/RLS or phone gates.
+A reachable shell does not complete hosted login, Save, Storage/RLS or phone gates.
 
 The separate `node scripts/hosted-smoke.mjs` command is for an approved private
 operator only, with explicit opt-in, the exact hosted URL, two ordinary sessions
