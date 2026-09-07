@@ -12,7 +12,8 @@ branches and pull requests; no automatic merge or paid-service activation.
 See [cloud development and handoff](docs/cloud-development.md).
 
 **Phase 0 is still in progress.** As of 6 September 2026, PR #1 is merged and
-PR #2 contains the bounded hosted-readiness packet and documentation amendment.
+PR #2's bounded hosted-readiness packet is merged. PR #3 adds only the approved
+password-recovery Auth unblocker, not Phase 1 or hosted acceptance.
 See the [dated shell/dashboard evidence and remaining gates](docs/cloud-development.md#hosted-state-and-responsible-actors).
 Ordinary password login, own Save/reload, negative RLS/Storage, prepared fixtures,
 live hosted smoke and physical-device acceptance remain open. No later phase or
@@ -24,8 +25,17 @@ Phase 0 builds the foundation: invited-account sign-in, an owner-only wardrobe,
 English/Finnish/Swedish, local JPEG preparation and an editable draft that is saved
 only when the owner chooses **Save to my wardrobe**.
 
+Password recovery requests an email without promising eligibility or delivery.
+Open its link in a fresh page with no opener or existing sign-in, confirm the
+server-verified account explicitly, then choose a new password (at least 24
+characters, at most 72 UTF-8 bytes). Passwords are not trimmed or normalized.
+The isolated recovery session never becomes a wardrobe session. After success,
+the app requests global sign-out for the recovered owner and returns to ordinary
+Login; existing access JWTs may remain valid until expiry. Cancellation cannot
+undo an already-transmitted update. See the [local-only proof and limits](docs/local-backend.md#real-local-password-recovery).
+
 The first slice uses manual names/categories. Automatic AI form filling belongs
-to Phase 2 and is not simulated here. Outfits, calendar, statistics, full recovery
+to Phase 2 and is not simulated here. Outfits, calendar, statistics, full backup restoration
 and account deletion are later phases; no unfinished screen is presented as working.
 The app has an initial manifest, but complete installation/offline acceptance remains
 a later release gate.
@@ -75,6 +85,10 @@ Browser fixtures exercise UI and request contracts; they are not evidence of
 Supabase authorization. The separate real-stack CI job signs in using ordinary
 test accounts and must pass before Phase 0 is considered complete. Missing Docker
 or credentials are reported as unavailable gates, not successful tests.
+`test:integration` now also runs the real local mail/reset/browser journey with
+ordinary fictional accounts and mandatory password/data cleanup. Do not run it
+concurrently with security tests or against hosted; missing mail or uncertain
+cleanup is nonzero, not a skipped pass.
 
 Database types in `src/data/database.types.ts` are generated from the real local
 Supabase schema with `npm run db:types`; `npm run db:types -- --check` fails if the

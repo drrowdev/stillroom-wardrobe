@@ -16,7 +16,7 @@ export type SessionState = {
   languageUnsaved: boolean;
   notice?: MessageKey;
 };
-const logoutKey = 'stillroom.logout';
+export const logoutKey = 'stillroom.logout';
 
 export class SessionController {
   private state: SessionState;

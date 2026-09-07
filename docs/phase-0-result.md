@@ -2,11 +2,113 @@
 
 Date: 6 September 2026. PR #1 was merged with explicit user approval into
 `f696ee45e5dfe46be90cbc295a9811ec1d34a298`. Phase 0 I01–I05 hosted readiness
-continues only on PR #2; full Phase 0 is **not complete**. Earlier reset failures,
+continued on now-merged PR #2; the approved password-recovery follow-up is PR #3.
+Full Phase 0 is **not complete**. Earlier reset failures,
 accessibility findings and their later repairs remain below as historical
 evidence. No new merge or next phase is authorized.
 
-## Current PR #2 hosted-readiness packet
+## PR #3 password-recovery continuation
+
+6 September 2026. Starting head
+`56102303d84b20d53c2b15f024330f434d4e154e`, branch
+`copilot/approved-phase0-password-recovery`; base main
+`20ec93041f1d90d9a9f684b7358ea2b9715527e1`. Scope: approved Phase 0
+I03/I05 Auth unblocker, preserving R01/R11/R17/R19/R22/R26/R27. No later phase,
+new dependency, schema/type hand-edit, profile-helper change or hosted operation.
+The source/test/docs changes stay inside the approved 25-path packet.
+
+Read full PR #2 plan `5561361106` and controlling approval `5561846573`:
+actual read-only **Anthropic Claude Opus 5**, two turns before implementation,
+with original-access transport enforcement, opaque-refresh refusal, unselected
+server target confirmation, early scrub/in-flight normal-mode isolation, honest
+update/revocation uncertainty, privacy-safe real mail/context separation and
+ordinary cleanup corrections. User choices: raw 24-character floor and
+recovered-owner global sign-out. No new scope decision or replacement review.
+PR #3 amendment `5562318484` and cold gate `5562445077` were also read.
+Coordinator receipt `5562454517`, re-read before edits, verifies this session's
+actual native model; exact task/session/time/base/head are in the
+[cloud handoff](cloud-development.md#active-cloud-task-approved-phase-0-password-recovery-on-pr-3).
+Historical receipts were not reused.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`,
+README and cloud/Phase-0/local-backend docs; blueprint `00/03/05`, relevant
+admission/RLS `07`, Auth/error `08`, `10/12/13`, Phase 0 in `14`, I01–I05 in
+`15`, relevant `17/18/19/20/21`; actual migration/generated schema excerpts;
+Auth/session/stored-session/Login, app/bootstrap, client/config/profile, i18n,
+styles, unit/browser/integration/security/local tools and CI; package/pinned
+SDK implementation; PR history, comments/diff/reviews/checks and cold CI job
+logs. No credential cache or privileged service key was printed.
+
+### Protocol and UI evidence are distinct
+
+Cold CI `34061709323` attempt 2 at `56102303` passed Real Supabase
+`101564798717` and App/browser `101564798990`. It established fresh-stack
+readiness only. This session did not restart/reset services, change configuration
+or reproduce the earlier warm-restart 503; that cause remains unproven.
+
+Protocol-only local SDK/Auth feasibility passed first, committed as
+`ba40ad6b8c6361c6c6925da63fc674362b98be75`. It accepted a raw 72-byte password
+under unchanged `secure_password_change=true`, without nonce/current-password/
+MFA workaround, and verified affirmative global logout, new/old login behavior,
+B's pre-existing refresh and ordinary restoration. It was not UI acceptance.
+
+Initial harness attempts failed on Mailpit-vs-old-Inbucket endpoint/ID assumptions
+and serving the actual redirect; no Auth setting was weakened. The first real
+UI run failed before password entry because the parser omitted pinned Auth's
+standard empty `sb` marker. Both original accounts were verified; no password
+update occurred in that UI failure. The corrected parser accepts only a single
+empty optional marker, not another callback flow. The subsequent **real UI
+journey passed**, then all 11 real security stages passed sequentially.
+
+That journey closes requester R, consumes the actual link in new no-opener A
+in context C with B's ordinary tab, explicitly confirms the server target,
+resets once, affirmatively revokes globally on the isolated session, returns to
+normal Login, verifies new-password UI login/old-password refusal, checks B's
+pre-existing ordinary Node refresh/browser data and both owners' synthetic
+item/image/profile preservation, then self-restores/cleans up and verifies both
+original ordinary logins. See the [local test contract](local-backend.md#real-local-password-recovery).
+Mocked negatives/races and emulation are not live or physical-device proof.
+
+Initial targeted checks passed. A full browser run then found one new
+keyboard-focus test failing in both projects (96/98 passed); Continue's focus
+transition was repaired, and targeted keyboard/paste tests passed in both.
+Final complete command run, after those repairs (all exit 0):
+
+| Exact command | Result |
+|---|---|
+| `npm run lint` | Pass |
+| `npm run typecheck` | Pass |
+| `npm run check:translations` | 336 keys, EN/FI/SV, 26 source files |
+| `npm run test:unit` | 238 tests, nine files |
+| `npm run test:browser -- --retries=0` | 98 cases, desktop/emulated mobile |
+| `npm run test:a11y -- --retries=0` | 10 cases |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Existing real ordinary suite plus actual recovery UI journey; originals/cleanup verified |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | All 11 real stages, run after integration |
+| `npm run db:types -- --check` | Actual local generation, exact committed parity |
+| `git ls-files --error-unmatch src/data/database.types.ts` | Tracked |
+| `git diff --exit-code -- src/data/database.types.ts` | No drift |
+| `npm run build` | Pass; JS 149.76 kB gzip; non-failing 500 kB uncompressed chunk warning |
+| `npm run scan:secrets` | 136 text files; fresh unprinted canary checked |
+| `npm run check:dependencies` | 12 production/220 development packages; zero reported production vulnerabilities |
+| `git diff --check` | Pass |
+
+Build/scan used the same process-local
+`STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`, exported without printing.
+No new tools/dependencies or warning-threshold changes. The immutable code head,
+scope/secret checks and automated review are recorded in the PR report;
+fresh-head CI and independent final review remain separate gates.
+
+After that full run, a final UI-only cleanup clears in-memory password fields
+on external cancellation/admission loss/expiry. Repeated lint, typecheck,
+`git diff --check` and
+`npm run test:browser -- tests/browser/recovery.spec.ts --grep 'logout cancels|lost own-profile|expiry margin|confirmed password success' --retries=0`
+passed (eight cases). The full/live suites were not repeated for that cleanup.
+
+No hosted access or password policy was measured. The existing hosted account,
+shell, ordinary-session RLS/Save/smoke and human-device gates below remain open.
+No merge/deployment or paid activation was performed or authorized to this worker.
+
+## Historical PR #2 hosted-readiness packet
 
 Starting base: `f696ee45e5dfe46be90cbc295a9811ec1d34a298`; exact starting head:
 `5a61a942289d7c7a296fab2237d4d7938b1f641c`,
@@ -531,3 +633,74 @@ deployment; any replacement requires coordinator authorization and fresh evidenc
 EN/FI/SV and the manual editable draft/explicit Save are preserved. Phase 2's
 photo-first AI-filled title/category and all-field editing remain unimplemented;
 no automatic library save, post-save worker, outfit AI or paid activation.
+
+## PR #3 bounded review corrections — 6 September 2026
+
+Starting head `7356c9b3f88acd948b4387609943816ca955a112`, base
+`20ec93041f1d90d9a9f684b7358ea2b9715527e1`; same PR/branch, one writer.
+Full review [5126939876](https://github.com/drrowdev/stillroom-wardrobe/pull/3#pullrequestreview-5126939876)
+records actual read-only **Anthropic Claude Opus 5** critique and coordinator
+approval of these three corrections under plan `5561361106`, controlling
+approval `5561846573` and cold amendment `5562318484`. No material scope change.
+Public receipt [5562961986](https://github.com/drrowdev/stillroom-wardrobe/pull/3#issuecomment-5562961986),
+read before edits, records native `sweagent-capi:gpt-6-astra`, task
+`2f79ee32-fa44-46b2-9d61-455d7ec0a804`, session
+`9fded7d7-f377-42ed-862e-490060d7224c`, observed
+`2026-09-06T23:24:33.2885891Z`, against that exact base/head.
+
+Context read: active root/Copilot instructions; README/cloud/phase/local-backend
+evidence; relevant blueprint `00/03/05/07/08/10/12/13/14/15/17/18/19/20/21`;
+actual schema/profile types, Auth/bootstrap/UI/transport, pinned SDK, unit/browser
+and real-mail tests, wrappers/configuration, PR diff/discussion/reviews and
+available CI logs. Starting-head CI `34064501007` was `action_required` with
+zero jobs, not passing.
+
+Corrective code/tests commit `29d8f037a51219d8a7d0d6e14a806be919bfa9a2`:
+
+* **I03/I05; R01/R19/R26:** bounded decoded auth-key detection leaves benign
+  query/hash navigation alone with empty or occupied storage. Strict accepted
+  fragment grammar, scrubbing, replay/expiry checks and late-adoption refusal
+  remain. Refusal rendering uses the narrowed actual kind/notice.
+* **I03/I05; R11/R26/R27:** the initial return notice belongs to the reactive
+  `none` snapshot, not a separate global. Auth activity/events, explicit logout,
+  a new request and leaving the episode clear it without render consumption.
+  StrictMode browser tests retain the genuine initial success/unconfirmed
+  revocation notice, then verify no replay after same-page A and B login/logout,
+  preserving their independent Finnish/Swedish preferences and logout reset.
+* **I03/I05; R19/R26:** unavailable becomes uncertain only with `updateSent`.
+  Actual guarded-SDK unit tests assert zero underlying PUTs on pre-send refusal,
+  one fetch attempt on dispatched network failure, no retry and no success/logout.
+  Dispatch is not proof of network delivery.
+
+Validation performed here (commands from the repository root):
+
+| Command | Result |
+|---|---|
+| `npm run test:unit -- tests/unit/recovery.test.ts tests/unit/stored-session.test.ts` | Exit 0; 80 tests |
+| `npm run test:browser -- tests/browser/recovery.spec.ts tests/browser/slice.spec.ts --retries=0` | Exit 0; 88 cases together |
+| `npm run lint` / `npm run typecheck` / `npm run check:translations` | Each exit 0; 336 EN/FI/SV keys |
+| `npm run test:unit` | Exit 0; 264 tests, nine files |
+| `npm run test:browser -- --retries=0` | Separate rerun exit 0; 108 cases |
+| `npm run test:a11y -- --retries=0` | Exit 0; 10 cases |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Exit 0 at `29d8f03`; ordinary suite plus one real-local mail/UI recovery journey, originals/cleanup verified |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | Exit 0 afterward; all 11 stages |
+| `npm run db:types -- --check` | Exit 0; actual generation parity |
+| `git ls-files --error-unmatch src/data/database.types.ts` / `git diff --exit-code -- src/data/database.types.ts` | Each exit 0; tracked, unchanged |
+| `npm run build` / `npm run scan:secrets` / `npm run check:dependencies` | Each exit 0; unprinted ephemeral canary checked, zero reported production vulnerabilities |
+| `git diff --check 7356c9b3f88acd948b4387609943816ca955a112 HEAD` | Exit 0 |
+
+Before fixes, new tests reproduced five unit and four targeted browser failures.
+An intermediate type-narrowing error and test fresh-page setup error were corrected.
+The first full browser run returned exit 1 (107/108): an invalid-link refusal
+appeared before the competing-callback test's trigger. Its cause is unproven;
+no assertion/guard was weakened. The full separate rerun above passed.
+Build retained the non-failing 500 kB chunk warning (150.09 kB gzip JavaScript).
+
+Supplemental automated validation reported zero CodeQL alerts and only the
+previously approved `weak_password` indentation issue, subsequently normalized.
+That whitespace-only change and this appended evidence do not repeat the real
+mail call or replace final-head CI. The real harness/config/wrapper, schema/types,
+dependencies, root instructions and hosted surfaces remain unchanged.
+No extra agent, service restart/reset, protocol spike, hosted operation, merge
+or deployment. PR remains draft pending coordinator **final-head CI and independent
+follow-up review**; physical-device and hosted acceptance remain separate gates.

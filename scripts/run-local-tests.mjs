@@ -32,7 +32,18 @@ async function main() {
     child.on('error', () => resolve(2));
     child.on('close', (value) => resolve(value ?? 2));
   });
-  if (code !== 0) process.exitCode = code;
+  if (code !== 0) { process.exitCode = code; return; }
+  if (suite === 'integration') {
+    const recoveryCode = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [
+        path.join(ROOT, 'node_modules', '@playwright', 'test', 'cli.js'),
+        'test', '--config', path.join(ROOT, 'playwright.local.config.ts'),
+      ], { cwd: ROOT, env, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'] });
+      child.on('error', () => resolve(2));
+      child.on('close', (value) => resolve(value ?? 2));
+    });
+    if (recoveryCode !== 0) process.exitCode = recoveryCode;
+  }
 }
 
 main().catch(reportError);

@@ -9,7 +9,17 @@ export const owners = {
   b: '10000000-0000-4000-8000-000000000002',
 };
 type JsonRow = Record<string, unknown>;
-export type MockOptions = { initialLanguage?: Language | null; failCommitOnce?: boolean; failLanguageSave?: boolean };
+export type MockOptions = {
+  initialLanguage?: Language | null; failCommitOnce?: boolean; failLanguageSave?: boolean;
+  recoverStatus?: number; updateStatus?: number; logoutStatus?: number; recoveryUser?: string;
+};
+export function recoveryHash(owner = owners.a, seconds = 3600): string {
+  const expires = Math.floor(Date.now() / 1000) + seconds;
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const token = [encode({ alg: 'HS256', typ: 'JWT' }), encode({ sub: owner, aud: 'authenticated', role: 'authenticated', exp: expires }), 'c2lnbmF0dXJl'].join('.');
+  return '#' + new URLSearchParams({ access_token: token, refresh_token: 'unused-opaque-fixture',
+    expires_at: String(expires), expires_in: String(Math.max(1, seconds)), token_type: 'bearer', type: 'recovery', sb: '' });
+}
 export async function mockBackend(page: Page, options: MockOptions = {}) {
   const profiles: Record<string, JsonRow> = {
     [owners.a]: { owner_id: owners.a, display_name: 'Alex', ui_language: options.initialLanguage ?? null, timezone: 'Europe/Helsinki', currency: 'EUR', version: 1 },
@@ -32,7 +42,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       catch { /* The mocked anonymous key carries no owner. */ }
     }
     requests.push({ method, path: url.pathname, owner, ownerFilter: url.searchParams.get('owner_id') });
-    const json = (body: unknown, status = 200) => route.fulfill({ status, json: body });
+    const json = (body: unknown, status = 200) => route.fulfill({ status, json: body, headers: { 'x-supabase-api-version': '2024-01-01' } });
     if (method === 'OPTIONS') { await route.fulfill({ status: 204 }); return; }
     if (url.pathname === '/auth/v1/token') {
       const body = request.postDataJSON() as { email?: string; password?: string };
@@ -43,8 +53,15 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       await json({ access_token: accessToken, refresh_token: `fixture-${id}`, expires_in: 3600, token_type: 'bearer', user: { id, email: body.email, aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: '2026-09-06T00:00:00Z' } });
       return;
     }
-    if (url.pathname === '/auth/v1/logout') { await route.fulfill({ status: 204 }); return; }
+    if (url.pathname === '/auth/v1/recover') { await json({}, options.recoverStatus ?? 200); return; }
+    if (url.pathname === '/auth/v1/logout') { await route.fulfill({ status: options.logoutStatus ?? 204 }); return; }
     if (!owner || !profiles[owner]) { await json({ message: 'Unauthorized' }, 401); return; }
+    if (url.pathname === '/auth/v1/user') {
+      if (method === 'PUT' && options.updateStatus) { await json({ code: 'reauthentication_needed', message: 'Private upstream text' }, options.updateStatus); return; }
+      const id = options.recoveryUser ?? owner;
+      await json({ id, email: id === owners.a ? 'user-a@example.test' : 'user-b@example.test', aud: 'authenticated', role: 'authenticated', is_anonymous: false });
+      return;
+    }
     if (url.pathname === '/rest/v1/profiles') {
       if (url.searchParams.get('owner_id') !== `eq.${owner}`) { await json(null); return; }
       const profile = profiles[owner]!;

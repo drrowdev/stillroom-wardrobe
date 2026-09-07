@@ -54,6 +54,7 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --no-fund
+      - run: npx playwright install --with-deps chromium
       - run: npm run db:start
       - run: npm run db:reset
       - run: npm run test:integration

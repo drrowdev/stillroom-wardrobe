@@ -51,6 +51,10 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .entry-card { border: 1px solid var(--border); background: var(--surface); border-radius: 16px; padding: 36px; box-shadow: 0 8px 30px #24332E03; width: 100%; }
 .entry-card h1 { font-size: 1.5rem; margin-bottom: 10px; }
 .entry-card > .muted { font-size: .9375rem; }
+.recovery-card { overflow-wrap: anywhere; min-width: 0; }
+.entry-main:has(.recovery-card) .intro { min-width: 0; overflow-wrap: anywhere; }
+.recovery-confirm { display: flex; align-items: flex-start; gap: 12px; }
+.recovery-confirm input { min-width: 24px; min-height: 24px; }
 .small-mark { width: 42px; height: 42px; display: grid; place-items: center; background: #EFF1EA; border-radius: 11px; color: var(--primary); margin-bottom: 25px; }
 .small-mark .icon { width: 25px; height: 25px; }
 .stack { display: flex; flex-direction: column; gap: 20px; }

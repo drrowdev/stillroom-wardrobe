@@ -38,14 +38,15 @@ baseline CI does not validate a later implementation head.
 `[auth.email].enable_signup = true` maps to `GOTRUE_EXTERNAL_EMAIL_ENABLED`,
 the whole email provider, not just password grants. Backend recovery and
 OTP/magic-link capabilities remain subject to their configuration and delivery
-prerequisites. Phase 0 exposes password login only. Client
+prerequisites. The historical baseline exposed password login only; PR #3 adds
+the isolated password-recovery flow described below, not generic email login. Client
 `detectSessionInUrl: false` does not disable backend endpoints, and legitimate
 approved-account email authentication is not an admission defect.
 
 Public signup remains disabled globally, anonymous sign-in is disabled, and
-the admission trigger plus enabled-owner RLS remain unchanged. Inbucket is
-disabled; no SMTP configuration, delivered message, or completed recovery
-is claimed. The live security harness sends email requests only for one
+the admission trigger plus enabled-owner RLS remain unchanged. Inbucket was
+disabled in that baseline; its cold-prepared PR #3 enablement is recorded below.
+The existing live security harness sends email requests only for one
 fresh unapproved fictional address, never either approved account.
 
 With pinned CLI 2.116.0 / Auth **v2.196.0**, the harness requires:
@@ -73,15 +74,75 @@ Password-change notification is a separate setting. Email confirmation and
 double-confirmed address changes are distinct flows; see
 [signup](https://github.com/supabase/auth/blob/v2.196.0/internal/api/signup.go)
 and [verification](https://github.com/supabase/auth/blob/v2.196.0/internal/api/verify.go).
-These are source-verified semantics, not live password-change/mail tests.
-No approved passwords or addresses were changed. OTP/recovery source:
+Those baseline observations were source-verified semantics, not live
+password-change/mail tests; that security harness changed no approved passwords
+or addresses. The separate current recovery proof is below. OTP/recovery source:
 [OTP](https://github.com/supabase/auth/blob/v2.196.0/internal/api/otp.go),
 [magic link](https://github.com/supabase/auth/blob/v2.196.0/internal/api/magic_link.go),
 [recovery](https://github.com/supabase/auth/blob/v2.196.0/internal/api/recover.go).
 
+## Real local password recovery
+
+PR #3 follows approved plan `5561361106`, controlling approval `5561846573`
+(merged PR #2), and config-only amendment `5562318484`. The committed Inbucket
+setting is enabled on fixed port **54324** before cold setup. Cold CI
+`34061709323`, attempt 2, passed at `56102303d84b20d53c2b15f024330f434d4e154e`;
+comment `5562445077` records baseline readiness, not recovery proof. Do not
+toggle/restart an old stack, weaken Auth settings, or reset uncertain fixtures.
+Unexpected cold-service failure is a coarse blocked stage requiring review.
+
+`ALLOW_SECURITY_TESTS=1 npm run test:integration` first runs ordinary backend
+integration, then `tests/integration/recovery.spec.ts` via
+`playwright.local.config.ts`. Existing Chromium is required. Vite serves
+**127.0.0.1:5173**, `--strictPort`, `reuseExistingServer: false`; an occupied port
+fails rather than reusing another server. The existing redirect allowlist and
+`secure_password_change=true` are unchanged.
+
+The separate mail guard accepts only fixed **http://127.0.0.1:54324**, no
+authentication/apikey headers, redirects or environment override. The pinned
+CLI's Inbucket-named container serves Mailpit: `/api/v1/messages?limit=1000`
+and bounded `/api/v1/message/{id}` reads. The original API **54321** guards are
+unchanged. One actual `/recover` is sent per recovery-test run; the prior-ID
+cursor, intended fictional recipient, received time and hard deadline must
+identify a new message. The real security suite's separate unapproved-address
+request remains unchanged.
+
+The requester context R is closed before the actual Auth link is consumed,
+without prefetching, in a new no-opener page in context C alongside ordinary B.
+The test checks early URL scrubbing, explicit unselected server-email
+confirmation before password fields, original-bearer-only recovery traffic,
+one password update, affirmative HTTP global logout, new-password UI login,
+old-password refusal, B's pre-existing ordinary Node-client refresh and browser
+liveness, and unchanged owned synthetic item/image bytes and profile fields.
+Finally, ordinary login/self-update restores A's original password, versioned
+language restoration and owned fixture cleanup run, and both original logins
+and own profiles are verified. Cleanup preserves the primary failure; any
+unreconciled state is nonzero and **stops shared suites**, never admin repair,
+cache rewriting, account recreation or a reset.
+
+Actual local SDK protocol-only feasibility passed first at commit `ba40ad6`.
+The completed real UI journey subsequently passed under the same secure policy.
+Both accepted a raw **72-byte** password; pinned Auth's
+[bcrypt implementation](https://github.com/supabase/auth/blob/v2.196.0/internal/crypto/password.go)
+corroborates the compatibility cap. This is not a measured hosted policy.
+The standard successful redirect includes an empty `sb` marker
+([pinned source](https://github.com/supabase/auth/blob/v2.196.0/internal/tokens/service.go));
+the parser accepts it only once and empty, alongside the bounded recovery
+fragment. It still rejects code/token-hash/generic magic-link/OAuth flows.
+`type=recovery` is intent, not cryptographic recovery provenance: server
+original-access identity plus own-profile RLS establish the admitted target.
+Opaque refresh tokens are never exchanged; all token grants are denied and the
+150-second expiry margin is a precaution, not a refresh strategy.
+
+Real-fixture runs disable trace, video, screenshots, page snapshots and server
+stdout/stderr. No mail body, reset URL, password, bearer or raw SDK error is
+printed. Only coarse stages/booleans are reported. Mocked browser/unit variants
+cover cancellation, races, expiry, errors, bounds, EN/FI/SV, keyboard/paste and
+accessibility; mocks and emulated devices are not hosted or physical-phone proof.
+
 ## First local run
 
-Install/start Docker separately, using a local Unix socket or Docker Desktop Windows named pipe. Ensure ports 54320–54322 are free. Docker contexts pointing to SSH/TCP daemons and `DOCKER_HOST`/`DOCKER_CONTEXT` overrides are deliberately refused. Use the Docker CLI's selected local context.
+Install/start Docker separately, using a local Unix socket or Docker Desktop Windows named pipe. Ensure ports 54320–54322 and 54324 are free. Docker contexts pointing to SSH/TCP daemons and `DOCKER_HOST`/`DOCKER_CONTEXT` overrides are deliberately refused. Use the Docker CLI's selected local context.
 
 On Windows, use `npm.cmd` if PowerShell script execution blocks `npm.ps1`:
 
@@ -145,7 +206,7 @@ The child process receives only those six settings, `ALLOW_SECURITY_TESTS`, and 
 * `tests/integration/local.sessions.mjs`: distinct real normal-session checks for schema/profile access, explicit item creation, duplicate IDs, stale versions, image reservations and authoritative paths, incomplete commits, JPEG upload/hash retries, no overwrite, owner listing/signing, idempotent commit, interrupted replacement, and atomic outfit RPC retries.
 * Both clean up only generated fixture IDs through normal owner sessions; security restores each previous language with version checks. No bulk privileged cleanup runs inside assertions. Do not run suites concurrently against the same fixture accounts.
 
-This Phase 0 harness does not claim physical-device behavior, account-freeze orchestration, paid inference, full recovery or deletion Edge Function coverage. Those remain later phase gates.
+This Phase 0 harness does not claim physical-device behavior, account-freeze orchestration, paid inference, full backup restoration or deletion Edge Function coverage. Those remain separate gates; password recovery is covered only by the dedicated local journey above.
 
 ## Actual database type generation
 
