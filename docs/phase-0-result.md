@@ -1551,3 +1551,88 @@ authorization/rerun, merge, deployment, hosted operation or later-phase work.
 Every merge still needs fresh explicit user approval; deployment needs separate
 approval. Physical-iPhone preparation → explicit Save → reload and remaining
 hosted acceptance stay open; live app remains on `bf0ad74`.
+
+### PR #6 local-generator phase evidence — 7 September 2026
+
+I04/I05 validation tooling only; PR #5 is merged, not reopened. Base main
+`904f4442e12d0f2cb55c6c85b057b49ff14431d5`, initial head
+`21f69043d2df8606f0327a7740a3bcfd783e97d6`, native allocated draft PR #6 branch
+`copilot/requestedbranchcopilotlocal-generator-phase-eviden`; initial tree diff
+was empty. [Full approval 5574907013](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5574907013)
+records actual **Anthropic / Claude Opus 5** reviewer `52574706`, turns 10/11,
+and coordinator approval before this task. Incorporated controls include
+installed-dispatch verification, exact substring precedence, LF-separator
+semantics and no causal inference from absent literals. No new plan or agent.
+
+After context and before edits, the writer reread
+[public native receipt 5574923302](https://github.com/drrowdev/stillroom-wardrobe/pull/6#issuecomment-5574923302):
+coordinator explicitly selected and GET-verified actual `sweagent-capi:gpt-6-astra`,
+task `0e53d051-a923-4250-91f9-2d44eebe692c`, session
+`1f82ef48-0172-401f-88f5-334893131f79`, at
+`2026-09-07T19:32:36.2021171Z`, matching this PR/base/initial head.
+Context read: root `AGENTS.md`, `.github/copilot-instructions.md`,
+`docs/cloud-development.md`, latest result sections and `docs/local-backend.md`;
+blueprint 00/03/05/10/14 Phase 0/15 I04–I05, relevant 07/08/13/20 excerpts;
+base migration and generated-type owner/image boundaries, `src/data/client.ts`,
+`src/images/upload.ts`, hosted guard excerpt, `scripts/backend/local.mjs`,
+`scripts/db.mjs`, `tests/unit/local-backend.test.ts`, `scripts/scan-secrets.mjs`,
+`package.json`, `tsconfig.json`, PR body/discussion/diff/reviews and MCP CI logs.
+
+**Dispatch prerequisite:** installed `node_modules/supabase/package.json`
+version 2.116.0 has `bin.supabase = dist/supabase.js`. That Node shim resolves
+`@supabase/cli-linux-x64/bin/supabase`, the compiled TypeScript/Bun legacy shell,
+not the accompanying `supabase-go` sidecar. Read the shim/platform package and
+binary's fixed handler markers; the repository's unchanged environment allowlist
+does not forward a binary override. Upstream tag v2.116.0 resolves to
+`997a1e69a4a83466964ed874d3a604c88a7b3866`. Read its build scripts and legacy
+main/root → `gen.command.ts` → `types.command.ts` dispatch. The actual
+[TypeScript handler](https://github.com/supabase/cli/blob/997a1e69a4a83466964ed874d3a604c88a7b3866/apps/cli/src/legacy/commands/gen/types/types.handler.ts#L407)
+emits the same literal `Connecting to`; local lines 584–631 call that `runPgMeta`
+path, and line 499 emits `error running container:`. All eight approved Docker
+literals were verified in pinned `apps/cli-go/internal/utils/docker.go`; this
+does not claim the TypeScript path emits all eight.
+
+Only the pure report, its unit tests and this append change. The seven existing
+fields/tag rules remain intact. Four added fields are populated **only** for
+`nonzero-with-stderr`: `stderrMentionsConnectPhase` is literal presence;
+`stderrLines` counts LF separators (not logical lines or stack depth);
+`stderrFirstLineBytes` counts UTF-8 bytes before the first LF, or the whole
+retained string without LF (a preceding CR counts); `stderrDockerOperation`
+uses the approved eight exact `includes` matches in fixed first-match order,
+ending with `run-container`. Otherwise they are false/null/null/`none`.
+`none` means no listed literal observed, not failure before Docker; connection
+text does not prove control flow. No raw content, input properties, error
+fingerprint, SQL, URI, token, path or exception is returned/logged.
+
+Commands from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`:
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/local-backend.test.ts` | Exit 0, **120/120**. Every exact literal, embedded matches, precedence, near misses, inactive fields, LF/CRLF/empty/multibyte, fixed schema, nonmutation and private-shaped/canary/throwing-input cases. |
+| `npm run test:unit` | Exit 0, **352/352**, 9 files. |
+| `npm run lint` / `npm run typecheck` / `git diff --check` | Each exit 0. |
+| `npm run scan:secrets` | Exit 0, **131 text files**, ephemeral setup canary checked. |
+| `npm run db:types -- --check` | **One invocation**, exit 0; actual prepared-disposable-stack generation exactly matched committed types. |
+| `git diff --exit-code 904f4442e12d0f2cb55c6c85b057b49ff14431d5 -- src/data/database.types.ts` | Exit 0, no generated-file change. |
+
+Setup job `101847621832` reports successful standard preparation and generation;
+its in-progress log download returned HTTP 404. No worker reset/reprovision,
+generation retry, DB/mail rebuild or browser run occurred. Main
+[CI 34153474499](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34153474499)
+had App success and real integration/security passes, then generation exit 1,
+stdout 0 bytes, stderr 312 bytes, elapsed 1544 ms, `nonzero-with-stderr`.
+The underlying cause remains **unknown**; no raw generator stderr was retrieved.
+This local pass proves compatibility, not a historical cause fix or runner pass.
+
+`scripts/db.mjs`, CLI/runCommand/environment/guards, failure exit codes,
+success predicate, TypeScript parsing, atomic write, exact parity, schema/types,
+app/JPEG/browser/workflow/package bytes remain unchanged. No new provider,
+dependency, phase, private input or hosted operation. Required fresh-head CI
+and independent final review remain coordinator gates; this worker does not
+authorize/rerun Actions, merge or deploy. Any causal
+behavior change needs its own reviewed scope, not extra experiment cycles.
+Historical photo/cap/native proof remains preserved. Every merge still requires
+fresh explicit user approval; the already conditional photo-deployment approval
+still requires main CI success and restored Cloudflare authorization, and grants
+this worker no deployment authority. Physical-iPhone and hosted acceptance remain
+open; this evidence packet does not establish full Phase 0 completion.

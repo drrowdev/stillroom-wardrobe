@@ -43,6 +43,10 @@ export function describeGenerationResult(result, elapsedMs) {
     stderrBytes: null,
     hasDatabaseOutput: false,
     hasImagesOutput: false,
+    stderrMentionsConnectPhase: false,
+    stderrLines: null,
+    stderrFirstLineBytes: null,
+    stderrDockerOperation: 'none',
   };
   try {
     if (!result || typeof result !== 'object' || Array.isArray(result)) return report;
@@ -64,6 +68,30 @@ export function describeGenerationResult(result, elapsedMs) {
     } else {
       report.tag = !report.hasDatabaseOutput ? 'missing-database-output'
         : !report.hasImagesOutput ? 'missing-images-output' : 'success';
+    }
+    if (report.tag === 'nonzero-with-stderr') {
+      report.stderrMentionsConnectPhase = stderr.includes('Connecting to');
+      const firstLf = stderr.indexOf('\n');
+      report.stderrFirstLineBytes = Buffer.byteLength(firstLf === -1 ? stderr : stderr.slice(0, firstLf), 'utf8');
+      // Count LF separators, not logical lines; a CR before LF remains a first-line byte.
+      report.stderrLines = 0;
+      for (let index = firstLf; index !== -1; index = stderr.indexOf('\n', index + 1)) report.stderrLines += 1;
+      const operations = [
+        ['failed to inspect docker image', 'inspect-image'],
+        ['failed to pull docker image', 'pull-image'],
+        ['failed to create docker container:', 'create-container'],
+        ['failed to start docker container ', 'start-container'],
+        ['failed to inspect docker container:', 'inspect-container'],
+        ['failed to read docker logs:', 'read-logs'],
+        ['failed to copy docker logs:', 'copy-logs'],
+        ['error running container:', 'run-container'],
+      ];
+      for (const [literal, operation] of operations) {
+        if (stderr.includes(literal)) {
+          report.stderrDockerOperation = operation;
+          break;
+        }
+      }
     }
   } catch {
     // Even malformed objects must yield only the fixed observational fields.

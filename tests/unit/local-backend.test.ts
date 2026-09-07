@@ -20,6 +20,11 @@ declare module '../../scripts/backend/local.mjs' {
     stderrBytes: number | null;
     hasDatabaseOutput: boolean;
     hasImagesOutput: boolean;
+    stderrMentionsConnectPhase: boolean;
+    stderrLines: number | null;
+    stderrFirstLineBytes: number | null;
+    stderrDockerOperation: 'none' | 'inspect-image' | 'pull-image' | 'create-container' | 'start-container'
+      | 'inspect-container' | 'read-logs' | 'copy-logs' | 'run-container';
   };
 }
 
@@ -33,21 +38,38 @@ const credentials = {
 
 describe('safe local type-generation description', () => {
   const stdout = 'export type Database = { item_images: {} }';
-  const keys = ['tag', 'exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes', 'hasDatabaseOutput', 'hasImagesOutput'];
+  const keys = ['tag', 'exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes', 'hasDatabaseOutput', 'hasImagesOutput',
+    'stderrMentionsConnectPhase', 'stderrLines', 'stderrFirstLineBytes', 'stderrDockerOperation'];
   const tags = ['success', 'nonzero-empty-output', 'nonzero-with-stderr', 'nonzero-with-stdout',
     'missing-database-output', 'missing-images-output', 'invalid-result'];
+  const operations = [
+    ['failed to inspect docker image', 'inspect-image'],
+    ['failed to pull docker image', 'pull-image'],
+    ['failed to create docker container:', 'create-container'],
+    ['failed to start docker container ', 'start-container'],
+    ['failed to inspect docker container:', 'inspect-container'],
+    ['failed to read docker logs:', 'read-logs'],
+    ['failed to copy docker logs:', 'copy-logs'],
+    ['error running container:', 'run-container'],
+  ] as const;
+  const inactive = {
+    stderrMentionsConnectPhase: false, stderrLines: null, stderrFirstLineBytes: null, stderrDockerOperation: 'none',
+  };
 
   function expectFixedReport(report: ReturnType<typeof describeGenerationResult>) {
     expect(Object.keys(report)).toEqual(keys);
     expect(tags).toContain(report.tag);
-    for (const field of ['exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes'] as const) {
+    for (const field of ['exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes', 'stderrLines', 'stderrFirstLineBytes'] as const) {
       const value = report[field];
       expect(value === null || typeof value === 'number' && Number.isSafeInteger(value)).toBe(true);
       if (field !== 'exitCode' && value !== null) expect(value).toBeGreaterThanOrEqual(0);
     }
     expect(typeof report.hasDatabaseOutput).toBe('boolean');
     expect(typeof report.hasImagesOutput).toBe('boolean');
-    expect(JSON.stringify(report).length).toBeLessThan(400);
+    expect(typeof report.stderrMentionsConnectPhase).toBe('boolean');
+    expect(['none', ...operations.map(([, operation]) => operation)]).toContain(report.stderrDockerOperation);
+    if (report.tag !== 'nonzero-with-stderr') expect(report).toMatchObject(inactive);
+    expect(JSON.stringify(report).length).toBeLessThan(512);
   }
 
   it('describes the exact successful tuple without changing or returning it', () => {
@@ -56,6 +78,7 @@ describe('safe local type-generation description', () => {
     expect(report).toEqual({
       tag: 'success', exitCode: 0, elapsedMs: 12, stdoutBytes: 42, stderrBytes: 0,
       hasDatabaseOutput: true, hasImagesOutput: true,
+      ...inactive,
     });
     expectFixedReport(report);
     expect(result).toEqual({ code: 0, stdout, stderr: '' });
@@ -88,7 +111,68 @@ describe('safe local type-generation description', () => {
     expect(report).toEqual({
       tag: 'nonzero-with-stderr', exitCode: 1, elapsedMs: 0, stdoutBytes: 6, stderrBytes: 4,
       hasDatabaseOutput: false, hasImagesOutput: false,
+      stderrMentionsConnectPhase: false, stderrLines: 0, stderrFirstLineBytes: 4, stderrDockerOperation: 'none',
     });
+  });
+
+  it.each(operations)('observes the exact embedded CLI literal %s', (literal, operation) => {
+    const stderr = `prior announcement\nCLI: ${literal} synthetic detail`;
+    const result = Object.freeze({ code: 1, stdout: '', stderr });
+    const report = describeGenerationResult(result, 1);
+    expectFixedReport(report);
+    expect(report.stderrDockerOperation).toBe(operation);
+    expect(result).toEqual({ code: 1, stdout: '', stderr });
+    const nearMiss = describeGenerationResult({ code: 1, stdout: '', stderr: literal.slice(0, -1) }, 1);
+    expectFixedReport(nearMiss);
+    expect(nearMiss.stderrDockerOperation).toBe('none');
+  });
+
+  it.each(operations)('uses fixed precedence rather than text position for %s', (literal, operation) => {
+    const index = operations.findIndex(([candidate]) => candidate === literal);
+    const later = operations.slice(index + 1).map(([candidate]) => candidate);
+    for (const sequence of [[literal, ...later], [...later].reverse().concat(literal)]) {
+      const report = describeGenerationResult({ code: 1, stdout: '', stderr: sequence.join('\nCLI: ') }, 1);
+      expectFixedReport(report);
+      expect(report.stderrDockerOperation).toBe(operation);
+    }
+  });
+
+  it.each([
+    ['Connecting to', true], ['prior\nCLI: Connecting to fictional target', true],
+    ['connecting to', false], ['Connecting', false], ['unknown Docker failure', false],
+  ])('observes only the case-sensitive connection literal for case %#', (stderr, expected) => {
+    const report = describeGenerationResult({ code: 1, stdout: '', stderr }, 1);
+    expectFixedReport(report);
+    expect(report.stderrMentionsConnectPhase).toBe(expected);
+    expect(report.stderrDockerOperation).toBe('none');
+  });
+
+  it.each([
+    ['', null, null], ['plain', 0, 5], ['\n', 1, 0], ['\n\n', 2, 0],
+    ['a\nb\n', 2, 1], ['a\r\nb\r\n', 2, 2], ['\r\n', 1, 1], ['a\rb', 0, 3],
+    ['ä🙂', 0, 6], ['ä🙂\r\n漢\n', 2, 7], ['漢\u0000\n', 1, 4],
+  ])('counts LF separators and UTF-8 bytes before LF for case %#', (stderr, lines, bytes) => {
+    const report = describeGenerationResult({ code: 1, stdout: '', stderr }, 1);
+    expectFixedReport(report);
+    expect(report).toMatchObject({ stderrLines: lines, stderrFirstLineBytes: bytes });
+  });
+
+  it('keeps observations inactive for every other tag even with matching text', () => {
+    const stderr = `Connecting to\n${operations.map(([literal]) => literal).join('\r\n')}`;
+    const cases = [
+      { code: 0, stdout, stderr }, { code: 0, stdout: '', stderr },
+      { code: 0, stdout: 'export type Database = {}', stderr },
+      { code: null, stdout, stderr }, { code: 1, stdout: null, stderr },
+      { code: 1, stdout: stderr, stderr: '' }, { code: 1, stdout: '', stderr: '' },
+    ];
+    for (const result of cases) {
+      const report = describeGenerationResult(result, 1);
+      expectFixedReport(report);
+      expect(report).toMatchObject(inactive);
+    }
+    const invalidElapsed = describeGenerationResult({ code: 1, stdout, stderr }, Infinity);
+    expectFixedReport(invalidElapsed);
+    expect(invalidElapsed).toMatchObject({ tag: 'invalid-result', ...inactive });
   });
 
   it.each([undefined, null, false, '0', 1n, NaN, Infinity, -Infinity, 0.5,
@@ -138,6 +222,13 @@ describe('safe local type-generation description', () => {
       { code: 0, stdout: `export type Database = {}\n${text}`, stderr: text },
       { code: text, stdout: text, stderr: text }, { code: 0, stdout: { toString: accessor }, stderr: text },
       { code: 0, stdout: text, stderr: null }, Object.defineProperty({}, 'code', { get: accessor }),
+      ...operations.map(([literal]) => ({
+        code: 1, stdout: text, stderr: `${text}\nConnecting to ${text}\nCLI: ${literal} ${text}`,
+        stderrMentionsConnectPhase: text, stderrLines: text, stderrFirstLineBytes: text, stderrDockerOperation: text,
+      })),
+      { code: 1, stdout, stderr: 'unknown', stderrMentionsConnectPhase: true,
+        stderrLines: 999, stderrFirstLineBytes: 999, stderrDockerOperation: 'inspect-image' },
+      Object.defineProperty({ code: 1, stdout }, 'stderr', { get: accessor }),
       new Proxy({}, { getOwnPropertyDescriptor: accessor }), revoked.proxy, unknown,
     ];
     for (const result of cases) {
