@@ -1,6 +1,8 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { createHash } from 'node:crypto';
 import { messages, type Language } from '../../src/i18n';
+import { inspectJpegSegments } from '../fixtures/jpeg-helpers';
 import { mockBackend, owners, signIn } from './mock-backend';
 
 for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
@@ -35,11 +37,161 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
   });
 }
 
+for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
+  test(`accessibility of private preparation details, cancel and same-file reselection in ${language}`, async ({ page }) => {
+    const backend = await mockBackend(page, { initialLanguage: language });
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.goto('/');
+    await signIn(page);
+    await page.getByRole('button', { name: messages['wardrobe.firstItem'][language] }).click();
+    await page.locator('#item-title').fill('Manual synthetic title');
+    await page.locator('#item-category').selectOption('top');
+    await page.locator('details.optional-details summary').click();
+    await page.locator('#item-alt').fill('Manual synthetic description');
+    await page.locator('#item-alt').fill('');
+    const input = page.locator('input[type="file"]').first();
+    const show = page.getByRole('button', { name: messages['photo.showDetails'][language] });
+    await expect(show).toHaveCount(0);
+    const before = backend.requests.length;
+    const invalid = { name: 'PRIVATE_FILENAME_FIXTURE.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) };
+    await input.setInputFiles(invalid);
+    await expect(page.getByRole('alert')).toHaveText(messages['photo.invalid'][language]);
+    await expect(show).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#preparation-details')).toBeHidden();
+    await show.focus();
+    await page.keyboard.press('Enter');
+    const details = page.getByRole('region', { name: messages['photo.details'][language] });
+    await expect(details).toBeVisible();
+    await expect(details).toHaveText(messages['photo.stageSource'][language] + messages['photo.reasonInvalid'][language]);
+    await expect(details).not.toHaveAttribute('aria-live');
+    await expect(page.getByRole('alert')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: messages['photo.hideDetails'][language] })).toBeFocused();
+    await expect(page.locator('body')).not.toContainText('PRIVATE_FILENAME_FIXTURE');
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await input.setInputFiles([]);
+    await expect(details).toBeVisible();
+    await expect(page.getByRole('alert')).toHaveText(messages['photo.invalid'][language]);
+    await input.setInputFiles(invalid);
+    await expect(show).toHaveAttribute('aria-expanded', 'false');
+    await expect(details).toBeHidden();
+    // A mislabeled synthetic JPEG proves byte admission, not native HEIC picker conversion.
+    await input.setInputFiles({ name: 'synthetic.heic', mimeType: 'application/octet-stream', buffer: backend.fixture });
+    await expect(page.locator('.capture-photo img')).toBeVisible();
+    await expect(show).toHaveCount(0);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    const preview = await page.locator('.capture-photo img').getAttribute('src');
+    await input.setInputFiles([]);
+    await expect(page.locator('.capture-photo img')).toHaveAttribute('src', preview!);
+    await expect(page.locator('#item-title')).toHaveValue('Manual synthetic title');
+    await expect(page.locator('#item-category')).toHaveValue('top');
+    await expect(page.locator('#item-alt')).toHaveValue('');
+    expect(backend.requests.slice(before)).toEqual([]);
+    expect(backend.items).toHaveLength(0);
+    expect(backend.files.size).toBe(0);
+    expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
+    expect(await page.evaluate(() => caches.keys())).toEqual([]);
+    await page.getByRole('button', { name: messages['common.cancel'][language], exact: true }).click();
+    await page.getByRole('button', { name: messages['common.discard'][language], exact: true }).click();
+    await page.getByRole('button', { name: messages['wardrobe.firstItem'][language] }).click();
+    await expect(show).toHaveCount(0);
+    await expect(page.locator('#item-title')).toHaveValue('');
+    await expect(page.locator('.capture-photo img')).toHaveCount(0);
+  });
+}
+
+type PhotoReadProbe = Window & { photoReadStarted?: boolean; releasePhotoRead?: () => void };
+async function holdNextPhotoRead(page: Page) {
+  await page.evaluate(() => {
+    const probe = window as PhotoReadProbe;
+    probe.photoReadStarted = false;
+    const native = Blob.prototype.arrayBuffer;
+    Blob.prototype.arrayBuffer = function () {
+      Blob.prototype.arrayBuffer = native;
+      probe.photoReadStarted = true;
+      return new Promise<ArrayBuffer>((resolve, reject) => {
+        probe.releasePhotoRead = () => {
+          delete probe.releasePhotoRead;
+          void native.call(this).then(resolve, reject);
+        };
+      });
+    };
+  });
+}
+
+test('late selection cannot overwrite a replacement or manual edits and clears no-file cancellation correctly', async ({ page }) => {
+  const backend = await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto('/');
+  await signIn(page);
+  await page.getByRole('button', { name: 'Add your first piece' }).click();
+  const before = backend.requests.length;
+  await holdNextPhotoRead(page);
+  const input = page.locator('input[type="file"]').first();
+  await input.setInputFiles({ name: 'old.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
+  await expect.poll(() => page.evaluate(() => (window as PhotoReadProbe).photoReadStarted)).toBe(true);
+  await expect(page.getByRole('button', { name: 'Save to my wardrobe' })).toBeDisabled();
+  await page.locator('#item-title').fill('Edited while preparing');
+  await page.locator('#item-category').selectOption('bottom');
+  const replacement = { name: 'same.jpg', mimeType: 'image/jpeg', buffer: backend.fixture };
+  await input.setInputFiles(replacement);
+  await expect(page.locator('.capture-photo img')).toBeVisible();
+  const preview = await page.locator('.capture-photo img').getAttribute('src');
+  await page.evaluate(() => (window as PhotoReadProbe).releasePhotoRead?.());
+  await expect(page.locator('.capture-photo img')).toHaveAttribute('src', preview!);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.locator('#item-title')).toHaveValue('Edited while preparing');
+  await expect(page.locator('#item-category')).toHaveValue('bottom');
+  await input.setInputFiles(replacement);
+  await expect(page.locator('.capture-photo img')).toBeVisible();
+  await expect(page.locator('.capture-photo img')).not.toHaveAttribute('src', preview!);
+  expect(backend.requests.slice(before)).toEqual([]);
+});
+
+test('discard and owner logout clear preparation details and ignore late photo reads', async ({ page }) => {
+  const backend = await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto('/');
+  await signIn(page);
+  await page.getByRole('button', { name: 'Add your first piece' }).click();
+  const input = page.locator('input[type="file"]').first();
+  await input.setInputFiles({ name: 'invalid.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
+  await page.getByRole('button', { name: 'Show preparation details' }).click();
+  await page.locator('#item-title').fill('Unsaved synthetic');
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('button', { name: 'Discard changes' }).click();
+  await page.getByRole('button', { name: 'Add your first piece' }).click();
+  await expect(page.locator('#preparation-details')).toHaveCount(0);
+  await input.setInputFiles({ name: 'invalid.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
+  await page.getByRole('button', { name: 'Show preparation details' }).click();
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.locator('#email')).toBeVisible();
+  await expect(page.locator('#preparation-details')).toHaveCount(0);
+  await signIn(page, 'b');
+  await expect(page.locator('#capture-title')).toHaveText(messages['capture.title'].sv);
+  await expect(page.locator('#item-title')).toHaveValue('');
+  await expect(page.locator('#preparation-details')).toHaveCount(0);
+  await holdNextPhotoRead(page);
+  await input.setInputFiles({ name: 'late.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
+  await expect.poll(() => page.evaluate(() => (window as PhotoReadProbe).photoReadStarted)).toBe(true);
+  await page.getByRole('button', { name: messages['account.menu'].sv }).click();
+  await page.getByRole('button', { name: messages['auth.signOut'].sv, exact: true }).click();
+  await expect(page.locator('#email')).toBeVisible();
+  await page.evaluate(() => (window as PhotoReadProbe).releasePhotoRead?.());
+  await expect(page.locator('.capture-photo img')).toHaveCount(0);
+  await expect(page.locator('#preparation-details')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(backend.items).toHaveLength(0);
+  expect(backend.files.size).toBe(0);
+});
+
 test('discarding a prepared draft creates no library records', async ({ page }) => {
   const backend = await mockBackend(page, { initialLanguage: 'en' });
   await page.goto('/');
   await signIn(page);
   await page.getByRole('button', { name: 'Add your first piece' }).click();
+  const before = backend.requests.length;
+  await page.locator('input[type="file"]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
+  await expect(page.locator('.capture-photo img')).toBeVisible();
   await page.locator('#item-title').fill('Unsaved');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -50,6 +202,7 @@ test('discarding a prepared draft creates no library records', async ({ page }) 
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   expect(backend.items).toHaveLength(0);
   expect(backend.files.size).toBe(0);
+  expect(backend.requests.slice(before)).toEqual([]);
 });
 
 test('retrying a failed commit reuses the same records and image bytes', async ({ page }) => {
@@ -63,11 +216,34 @@ test('retrying a failed commit reuses the same records and image bytes', async (
   await page.locator('#item-category').selectOption('top');
   await page.getByRole('button', { name: 'Save to my wardrobe' }).click();
   await expect(page.getByRole('alert')).toBeVisible();
+  const image = { ...backend.images[0] };
+  const item = { ...backend.items[0] };
+  const files = new Map([...backend.files].map(([path, bytes]) => [path, Buffer.from(bytes)]));
+  for (const variant of ['main', 'thumb']) {
+    const bytes = files.get(`${owners.a}/${item.id}/${image.id}/${variant}.jpg`)!;
+    expect(bytes.length).toBe(image[`${variant}_bytes`]);
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(image[`${variant}_sha256`]);
+  }
+  await expect(page.locator('#item-title')).toHaveAttribute('readonly');
+  await expect(page.locator('#item-category')).toBeDisabled();
+  await expect(page.locator('input[type="file"]').first()).toBeDisabled();
   await page.getByRole('button', { name: 'Try again', exact: true }).click();
   await expect(page.locator('.item-caption h2')).toHaveText('A retryable shirt');
   expect(backend.items).toHaveLength(1);
   expect(backend.images).toHaveLength(1);
   expect(backend.files.size).toBe(2);
+  expect(backend.items[0]).toEqual(item);
+  expect(backend.images[0]).toEqual({ ...image, state: 'ready' });
+  expect(backend.files).toEqual(files);
+  for (const variant of ['main', 'thumb']) {
+    const path = `${owners.a}/${item.id}/${image.id}/${variant}.jpg`;
+    const bytes = backend.files.get(path)!;
+    expect(bytes).toEqual(files.get(path));
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(image[`${variant}_sha256`]);
+    expect(bytes.length).toBe(image[`${variant}_bytes`]);
+    expect(inspectJpegSegments(bytes).some((segment) => segment.marker === 0xfe ||
+      (segment.marker >= 0xe1 && segment.marker <= 0xef))).toBe(false);
+  }
 });
 
 test('logout clears private state before another owner signs in', async ({ page }) => {

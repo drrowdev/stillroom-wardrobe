@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { assertSanitizedJpeg, fitDimensions, JPEG_LIMITS, readJpegHeader, stripEncoderColorProfile } from '../../src/images/jpeg';
+import { assertSanitizedJpeg, fitDimensions, JPEG_LIMITS, readJpegHeader, stripEncoderMetadata } from '../../src/images/jpeg';
 import { ImagePreparationError, prepareJpeg } from '../../src/images/process-jpeg';
-import { exifSegment, insertSegments, joinBytes, jpegHeaderFixture, jpegSegment } from '../fixtures/jpeg-helpers';
+import { exifSegment, insertSegments, inspectJpegSegments, joinBytes, jpegHeaderFixture, jpegSegment } from '../fixtures/jpeg-helpers';
 
 function expectCode(action: () => unknown, code: ImagePreparationError['code']): void {
   expect(action).toThrowError(expect.objectContaining({ name: 'ImagePreparationError', code }));
@@ -108,14 +108,113 @@ describe('JPEG headers without a decoder or canvas', () => {
 });
 
 describe('fresh JPEG output validation', () => {
+  it('removes complete fresh Exif segments with absent or identity orientation, including duplicates', () => {
+    const bytes = jpegHeaderFixture();
+    const absent = exifSegment(1);
+    new DataView(absent.buffer).setUint16(20, 0x010e, true);
+    const segments = [absent, exifSegment(1), exifSegment(1, false)];
+    const generated = insertSegments(bytes, ...segments);
+    const result = stripEncoderMetadata(generated);
+    expect(inspectJpegSegments(generated).filter((segment) => segment.kind === 'exif')).toHaveLength(3);
+    expect(inspectJpegSegments(result).filter((segment) => segment.kind === 'exif')).toHaveLength(0);
+    expect(result).toEqual(bytes);
+    expect(generated.length - result.length).toBe(segments.reduce((sum, segment) => sum + segment.length, 0));
+    expect(stripEncoderMetadata(result)).toEqual(result);
+    expect(() => assertSanitizedJpeg(result, 120, 80)).not.toThrow();
+    expectCode(() => readJpegHeader(insertSegments(bytes, exifSegment(1), exifSegment(1))), 'invalid');
+  });
+
+  it.each([true, false])('refuses nonidentity or malformed generated orientation, little-endian=%s', (littleEndian) => {
+    for (const orientation of [0, 2, 3, 4, 5, 6, 7, 8, 9]) {
+      expectCode(() => stripEncoderMetadata(insertSegments(jpegHeaderFixture(), exifSegment(orientation, littleEndian))), 'invalid');
+    }
+    for (const edit of [
+      (view: DataView) => view.setUint32(14, 0xfffffff0, littleEndian),
+      (view: DataView) => view.setUint16(18, 65535, littleEndian),
+      (view: DataView) => view.setUint16(22, 4, littleEndian),
+      (view: DataView) => view.setUint32(24, 2, littleEndian),
+      (view: DataView) => view.setUint16(32, 0x0112, littleEndian),
+      (view: DataView) => view.setUint32(44, 8, littleEndian),
+      (view: DataView) => view.setUint32(44, 0xfffffff0, littleEndian),
+    ]) {
+      const exif = exifSegment(1, littleEndian);
+      edit(new DataView(exif.buffer));
+      expectCode(() => stripEncoderMetadata(insertSegments(jpegHeaderFixture(), exif)), 'invalid');
+    }
+    expectCode(() => stripEncoderMetadata(insertSegments(
+      jpegHeaderFixture(), exifSegment(1), exifSegment(6, littleEndian),
+    )), 'invalid');
+  });
+
+  it('retains all scan/entropy/structural bytes except the exact approved segment ranges', () => {
+    const source = jpegHeaderFixture(120, 80, 0xc2);
+    const exif = exifSegment(1);
+    const profile = jpegSegment(0xe2, new TextEncoder().encode('ICC_PROFILE\0synthetic profile'));
+    const scans = joinBytes(
+      source.subarray(0, -2), new Uint8Array([0xff, 0xd0, 0xff, 0x00, 0x01]),
+      jpegSegment(0xda, new Uint8Array([1, 1, 0, 1, 63, 0])),
+      new Uint8Array([0x12, 0xff, 0x00, 0x34, 0xff, 0xd9]),
+    );
+    const generated = insertSegments(joinBytes(
+      scans.subarray(0, -2), exif, profile, scans.subarray(-2),
+    ), exif, profile, exif);
+    const ranges = inspectJpegSegments(generated).filter((segment) => segment.kind !== 'other');
+    expect(ranges.map((segment) => segment.marker)).toEqual([0xe1, 0xe2, 0xe1, 0xe1, 0xe2]);
+    const retained: Uint8Array[] = [];
+    let start = 0;
+    for (const range of ranges) {
+      retained.push(generated.subarray(start, range.start));
+      start = range.end;
+    }
+    retained.push(generated.subarray(start));
+    const result = stripEncoderMetadata(generated);
+    expect(result).toEqual(joinBytes(...retained));
+    expect(result).toEqual(scans);
+    expect(generated.length - result.length).toBe(ranges.reduce((total, range) => total + range.end - range.start, 0));
+    expect(inspectJpegSegments(result).map((segment) => segment.marker)).toEqual([0xc2, 0xda, 0xda, 0xd9]);
+    expect(() => assertSanitizedJpeg(result, 120, 80)).not.toThrow();
+    expect(stripEncoderMetadata(result)).toEqual(result);
+  });
+
+  it('refuses every truncation, malformed segment and post-EOI payload during normalization', () => {
+    const bytes = insertSegments(jpegHeaderFixture(), exifSegment(1));
+    for (let end = 0; end < bytes.length; end += 1) {
+      expectCode(() => stripEncoderMetadata(bytes.subarray(0, end)), 'invalid');
+    }
+    for (const extra of [new Uint8Array([0]), jpegHeaderFixture()]) {
+      expectCode(() => stripEncoderMetadata(joinBytes(bytes, extra)), 'invalid');
+    }
+    for (const length of [0, 1, 65535]) {
+      const malformed = bytes.slice();
+      new DataView(malformed.buffer).setUint16(4, length);
+      expectCode(() => stripEncoderMetadata(malformed), 'invalid');
+    }
+    expectCode(() => stripEncoderMetadata(insertSegments(
+      jpegHeaderFixture(), jpegSegment(0xe1, new TextEncoder().encode('Exif\0\0bad')),
+    )), 'invalid');
+  });
+
+  it('never hides XMP, IPTC, COM, unknown APP or near-Exif signatures from the strict validator', () => {
+    for (const [marker, payload] of [
+      [0xe1, 'http://ns.adobe.com/xap/1.0/\0synthetic'],
+      [0xed, 'Photoshop 3.0\0synthetic'], [0xfe, 'synthetic comment'],
+      [0xe3, 'synthetic APP'], [0xe1, 'Exif\0x'], [0xe1, 'Exif\0'],
+    ] as const) {
+      const unknown = jpegSegment(marker, new TextEncoder().encode(payload));
+      const bytes = insertSegments(jpegHeaderFixture(), unknown);
+      expect(stripEncoderMetadata(insertSegments(bytes, exifSegment(1)))).toEqual(bytes);
+      expectCode(() => assertSanitizedJpeg(bytes, 120, 80), 'invalid');
+    }
+  });
+
   it('omits only generated ICC profiles from fresh encoder bytes, never other metadata', () => {
     const bytes = jpegHeaderFixture();
     const profile = jpegSegment(0xe2, new TextEncoder().encode('ICC_PROFILE\0synthetic profile'));
-    expect(stripEncoderColorProfile(insertSegments(bytes, profile, profile))).toEqual(bytes);
+    expect(stripEncoderMetadata(insertSegments(bytes, profile, profile))).toEqual(bytes);
     for (const marker of [0xe1, 0xe2, 0xed, 0xfe]) {
       const metadata = jpegSegment(marker, new TextEncoder().encode('private metadata'));
       expectCode(() => assertSanitizedJpeg(
-        stripEncoderColorProfile(insertSegments(bytes, profile, metadata)), 120, 80,
+        stripEncoderMetadata(insertSegments(bytes, profile, metadata)), 120, 80,
       ), 'invalid');
     }
   });
@@ -175,6 +274,29 @@ describe('bounded dimensions', () => {
 });
 
 describe('public preparation preflight in Node without canvas', () => {
+  it('preserves exact source byte/pixel boundaries and rejects 48 MP before allocation', async () => {
+    const bitmap = vi.fn();
+    const canvas = vi.fn();
+    vi.stubGlobal('createImageBitmap', bitmap);
+    vi.stubGlobal('document', { createElement: canvas });
+    vi.stubGlobal('crypto', undefined);
+    const header = jpegHeaderFixture(8000, 5000);
+    const exact = new Blob([header.subarray(0, -2), new Uint8Array(JPEG_LIMITS.sourceBytes - header.length), header.subarray(-2)]);
+    await expect(prepareJpeg(exact)).rejects.toMatchObject({ code: 'unavailable', stage: 'source' });
+    for (const bytes of [
+      jpegHeaderFixture(8000, 6000),
+      insertSegments(jpegHeaderFixture(), ...Array.from({ length: 17 }, () => jpegSegment(0xe2, new Uint8Array(65533)))),
+      insertSegments(jpegHeaderFixture(), ...Array.from({ length: 4096 }, () => jpegSegment(0xe2, new Uint8Array()))),
+    ]) {
+      await expect(prepareJpeg(new Blob([bytes]))).rejects.toMatchObject({ code: 'tooLarge', stage: 'source' });
+    }
+    for (const bytes of [new Uint8Array([0, 1]), header.subarray(0, -2), joinBytes(header, new Uint8Array([1]))]) {
+      await expect(prepareJpeg(new Blob([bytes]))).rejects.toMatchObject({ stage: 'source' });
+    }
+    expect(bitmap).not.toHaveBeenCalled();
+    expect(canvas).not.toHaveBeenCalled();
+  });
+
   it('has a stable coarse public error code', () => {
     const error = new ImagePreparationError('tooLarge');
     expect(error).toBeInstanceOf(Error);

@@ -1,12 +1,16 @@
 export type ImagePreparationErrorCode = 'unsupported' | 'tooLarge' | 'invalid' | 'unavailable';
+export type ImagePreparationStage = 'source' | 'decode' | 'mainEncode' | 'thumbEncode' | 'outputCheck' | 'hash';
+export type ImagePreparationDetails = { stage: ImagePreparationStage; reason: ImagePreparationErrorCode };
 
 export class ImagePreparationError extends Error {
   readonly code: ImagePreparationErrorCode;
+  readonly stage?: ImagePreparationStage;
 
-  constructor(code: ImagePreparationErrorCode) {
+  constructor(code: ImagePreparationErrorCode, stage?: ImagePreparationStage) {
     super(code);
     this.name = 'ImagePreparationError';
     this.code = code;
+    this.stage = stage;
   }
 }
 
@@ -157,22 +161,83 @@ export function readJpegHeader(bytes: Uint8Array): JpegHeader {
   return { width, height, orientation };
 }
 
-/** Only for fresh sRGB canvas encodings: omit the browser's generated ICC profile. */
-export function stripEncoderColorProfile(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
-  parseHeader(bytes);
+function assertEncoderExif(bytes: Uint8Array, segment: Segment): void {
+  const orientation = exifOrientation(bytes, segment);
+  if (orientation !== undefined && orientation !== 1) invalid();
+  const start = segment.start + 6;
+  const view = new DataView(bytes.buffer, bytes.byteOffset + start, segment.end - start);
+  const littleEndian = view.getUint16(0) === 0x4949;
+  let offset = view.getUint32(4, littleEndian);
+  const directories: { start: number; end: number }[] = [];
+  // Linked thumbnail directories must not conceal conflicting orientation or malformed bounds.
+  while (offset !== 0) {
+    if (offset < 8 || offset + 2 > view.byteLength) invalid();
+    const count = view.getUint16(offset, littleEndian);
+    const end = offset + 2 + count * 12 + 4;
+    if (end > view.byteLength || directories.some((entry) => offset < entry.end && end > entry.start)) invalid();
+    directories.push({ start: offset, end });
+    let found = false;
+    for (let index = 0; index < count; index += 1) {
+      const entry = offset + 2 + index * 12;
+      if (view.getUint16(entry, littleEndian) !== 0x0112) continue;
+      if (found || view.getUint16(entry + 2, littleEndian) !== 3 ||
+          view.getUint32(entry + 4, littleEndian) !== 1 ||
+          view.getUint16(entry + 8, littleEndian) !== 1) invalid();
+      found = true;
+    }
+    offset = view.getUint32(end - 4, littleEndian);
+  }
+}
+
+/** Only for fresh sRGB canvas pixels, never source admission: omit generated Exif/ICC. */
+export function stripEncoderMetadata(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) invalid();
   const parts: Uint8Array[] = [];
   let offset = 2;
   let retainedStart = 0;
+  let inScan = false;
+  let sawScan = false;
+  let sawEnd = false;
+  let headerSegments = 0;
   while (offset < bytes.length) {
-    const segment = readSegment(bytes, offset, true);
-    if (segment.marker === 0xda) break;
-    if (segment.marker === 0xe2 &&
-        startsWith(bytes.subarray(0, segment.end), segment.start, [73, 67, 67, 95, 80, 82, 79, 70, 73, 76, 69, 0])) {
+    if (inScan) {
+      while (offset < bytes.length) {
+        if (bytes[offset] !== 0xff) { offset += 1; continue; }
+        const start = offset;
+        do { offset += 1; } while (bytes[offset] === 0xff);
+        if (offset >= bytes.length) invalid();
+        const marker = bytes[offset]!;
+        if (marker === 0 || (marker >= 0xd0 && marker <= 0xd7)) { offset += 1; continue; }
+        offset = start;
+        break;
+      }
+      inScan = false;
+    }
+    if (!sawScan && headerSegments++ >= JPEG_LIMITS.headerSegments) {
+      throw new ImagePreparationError('tooLarge');
+    }
+    const segment = readSegment(bytes, offset, !sawScan);
+    if (segment.marker === 0xd9) {
+      if (!sawScan || segment.end !== bytes.length) invalid();
+      sawEnd = true;
+      break;
+    }
+    const payload = bytes.subarray(segment.start, segment.end);
+    const exif = segment.marker === 0xe1 && startsWith(payload, 0, [69, 120, 105, 102, 0, 0]);
+    if (exif) assertEncoderExif(bytes, segment);
+    const icc = segment.marker === 0xe2 &&
+      startsWith(payload, 0, [73, 67, 67, 95, 80, 82, 79, 70, 73, 76, 69, 0]);
+    if (exif || icc) {
       parts.push(bytes.subarray(retainedStart, offset));
       retainedStart = segment.end;
     }
+    if (segment.marker === 0xda) {
+      sawScan = true;
+      inScan = true;
+    }
     offset = segment.end;
   }
+  if (!sawEnd) invalid();
   parts.push(bytes.subarray(retainedStart));
   const result = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
   let position = 0;
@@ -180,6 +245,7 @@ export function stripEncoderColorProfile(bytes: Uint8Array): Uint8Array<ArrayBuf
     result.set(part, position);
     position += part.length;
   }
+  parseHeader(result);
   return result;
 }
 

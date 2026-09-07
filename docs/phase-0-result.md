@@ -704,3 +704,114 @@ dependencies, root instructions and hosted surfaces remain unchanged.
 No extra agent, service restart/reset, protocol spike, hosted operation, merge
 or deployment. PR remains draft pending coordinator **final-head CI and independent
 follow-up review**; physical-device and hosted acceptance remain separate gates.
+
+## PR #4 bounded JPEG compatibility — 7 September 2026
+
+Base `0545cf3b679fe29a373929d6188e9953e352d8ec`; starting head
+`51c9adc6f6b0f96d75b5ab9829a208fe33e8d60e` had the same tree.
+Branch `copilot/phase0-iphone-photo-capture-fix`, one writer. I04/I05, principally
+R04, preserving R03/R11/R12/R17/R19/R23/R26/R27; not Phase 1, full I07 or AI.
+Full [plan 5567450856](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5567450856)
+was read and its SHA-256 matched
+`a2931f3f92160c017d893471205f243a4b4cdd14863ca632fcf95abf49a3a57e`.
+[Controlling approval 5567639838](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5567639838)
+records actual read-only **Anthropic Claude Opus 5** AMEND-AND-APPROVE critique:
+defensive Gate B, fresh-output-only identity/absent-orientation removal, independent
+byte/pixel oracles, fixture metadata accounting, private disclosure and narrow WebKit.
+Those amendments, not the plan's earlier conditional stop, govern this implementation.
+
+Before edits, [coordinator receipt 5567680245](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5567680245)
+was read: native `sweagent-capi:gpt-6-astra`, task
+`b671ab8a-8939-4569-9c34-0e2fd66f5eda`, session
+`e92350e1-13d2-42b3-a970-efa1af556e92`, observed
+`2026-09-07T08:27:00.8481680Z`, matching this PR/base/head. No historical
+receipt substitution or additional agent. Context actually read: root/Copilot
+instructions, README, cloud/local-backend and relevant Phase-0 history; blueprint
+00/03/05, image/owner excerpts of 07/08, 10/12/13, Phase 0 in 14, I04/I05/I07
+boundaries in 15, relevant 17/18/19/20/21; actual image schema/types, image
+preparation/upload/private-download/item adapters, AddItem/owner lifetime,
+catalog/helper, JPEG unit/fixture/browser/slice tests, mock/local-session contracts,
+local/hosted guard excerpts, package commands, Playwright/CI, and PR discussion,
+empty starting diff/reviews/checks and CI job-log lookup.
+
+### Implementation and evidence limits
+
+**Gate B, not a reproduced iPhone root cause.** Before production edits, tiny
+four-colour native-canvas probes passed in Linux Chromium 153.0.8010.12
+(revision 1243) and WebKit 26.6 (revision 2359), Node 24.19.0. WebKit first failed
+to launch because its executable was absent; the existing pinned
+`./node_modules/.bin/playwright install --with-deps webkit` succeeded, then both
+probes passed. No npm/dependency/lockfile changes. Linux WebKit is not Apple
+ImageIO, native HEIC, Vivaldi camera or physical-iPhone evidence.
+
+Fresh sRGB encoder output now removes only complete exact-signature Exif APP1
+and existing ICC APP2 segments. Absent/1 orientation is eligible, including
+consistent duplicate segments; malformed/nonidentity/conflicting orientation and
+linked-directory ambiguity fail closed. All scans/EOI are checked. Source parser,
+source trailer/admission, strict final validator and all resource limits remain
+unchanged. Independent test-only segment ranges verify exact removals, retained
+bytes, idempotence and terminal EOI; same-engine decoded-pixel hashes remain equal,
+including native colour-profile removal. Final JPEG byte hashes, both TIFF orders,
+all eight orientations and three decoder paths are covered. Native byte budgets
+are distinct from injected quality-loop/floor assertions.
+
+The photo panel has default-off, non-live, EN/FI/SV preparation details containing
+only typed static stage/reason labels. The existing `photo.invalid` key no longer
+asserts that a different JPEG is the diagnosis. Actual selection/reselection,
+discard and owner lifecycle clear details; no-file cancellation preserves them.
+No filenames, metadata, measurements, hashes, identifiers, raw exceptions,
+telemetry, persistent diagnostics or uploads are added. Manual edits/clears,
+explicit Save and frozen retry adapters remain unchanged.
+
+### Commands and unresolved gates
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/jpeg.test.ts` | First: exit 1, 42 existing passed/3 new failed. Final: exit 0, 49 passed. |
+| `npm run test:browser -- tests/browser/image-processing.spec.ts --grep 'fresh native four-colour' --project=chromium --project=webkit-photo --retries=0` | Before production edits: initially missing WebKit; after pinned installer, exit 0, 2 passed. |
+| `npm run test:browser -- tests/browser/image-processing.spec.ts tests/browser/slice.spec.ts --project=chromium --project=webkit-photo --retries=0` | Latest: exit 1, 70/72 passed; all image-processing cases passed in both engines. Failures below remain visible. |
+| `npm run lint` / `npm run typecheck` / `npm run check:translations` | Each exit 0; 350 keys, EN/FI/SV, 26 source files. |
+| `npm run test:unit` | Exit 0; 271 tests, nine files. |
+| `npm run test:browser -- --retries=0` | Exit 1; 169/170 passed across Chromium, Chromium-mobile and narrow WebKit. Only WebKit's empty mocked-upload byte assertion failed. |
+| `npm run test:a11y -- --retries=0` | Exit 0; 21 passed, including EN/FI/SV photo details in all three projects. |
+| `npm run build` / `npm run scan:secrets` / `npm run check:dependencies` | Each exit 0; 136 scanned text files, same unprinted process-local random canary; 12 production/220 development packages, no reported production vulnerabilities. Existing non-failing chunk warning retained (151.45 kB gzip JS). |
+| `git diff --check` and exact allowlist/source-validator/limits/database-job comparison | Exit 0; only approved existing paths, no source-guard or database-job changes. |
+
+The first expanded run exposed test-authoring errors (loop brace, a decoder-accepted
+synthetic header, and an incorrect post-login route expectation); those were
+corrected without changing source admission, decoding or navigation. The known
+corrupt-table fixture now proves the decode error stage.
+
+**Required browser gate is NOT green.** WebKit's mock upload stores zero bytes
+where prepared metadata declares 287; the strengthened byte/hash assertion fails
+before retry, and the unchanged Save adapter correctly rejects mismatching bytes.
+This does not establish a real network upload defect. Existing owner-tab tests
+intermittently time out waiting for Playwright `requestfailed` after signed-out UI
+appears. The latest targeted run also encountered a Chromium discard-dialog
+detachment/navigation timeout. No skip, browser exclusion, timeout increase,
+weakened assertion, Auth/Save change or excluded mock-backend edit was used.
+Those timing failures did not recur in the subsequent full run; their causes
+remain unproven. The repeatable empty mocked-upload failure is still blocking.
+Coordinator review/actual different-provider critique and approval are needed
+before any material harness/evidence amendment, including adding the excluded
+`tests/browser/mock-backend.ts` path if investigation requires it.
+
+Fresh-head App and unchanged real-local integration/security/types-parity CI remain
+required. Starting-head CI `34097907908` was `action_required`, zero jobs; detailed
+log lookup reported no failed jobs, not a pass. No CI authorization/rerun, local
+fixture reset, hosted operation, merge or deployment occurred here.
+
+Physical-phone acceptance remains **OPEN**: record actual iOS/Safari/Vivaldi
+versions and separate camera preview, returned capture, artificial camera-roll
+JPEG/HEIC picker conversion, prepared preview/orientation, explicit Save/reload,
+cancel/reselect/discard, accessibility and safe high-resolution refusal. Safari's
+working camera preview and the two apps' shared Apple platform prove neither
+independent engines nor completed photo Save. Raw HEIC remains unsupported and
+requires a separately reviewed bounded packet if actual picker conversion is
+insufficient; manual conversion forever is not completion. No private photo was
+requested or inspected. Every merge needs fresh explicit user approval;
+deployment is separately authorized. Rollback is the coordinator's separately
+authorized previous reviewed static build based on `0545cf3`, never a DB rollback
+or a change to the working recovery flow.

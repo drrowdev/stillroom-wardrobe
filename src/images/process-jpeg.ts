@@ -4,7 +4,8 @@ import {
   ImagePreparationError,
   JPEG_LIMITS,
   readJpegHeader,
-  stripEncoderColorProfile,
+  stripEncoderMetadata,
+  type ImagePreparationStage,
 } from './jpeg';
 
 export { ImagePreparationError } from './jpeg';
@@ -182,15 +183,23 @@ async function encode(
 }
 
 async function verifyAndHash(image: EncodedImage, signal?: AbortSignal): Promise<string> {
-  checkAbort(signal);
-  const buffer = await abortable(image.blob.arrayBuffer(), signal);
-  checkAbort(signal);
-  const bytes = stripEncoderColorProfile(new Uint8Array(buffer));
-  assertSanitizedJpeg(bytes, image.canvas.width, image.canvas.height);
-  image.blob = new Blob([bytes], { type: 'image/jpeg' });
-  const hash = await abortable(crypto.subtle.digest('SHA-256', bytes), signal);
-  checkAbort(signal);
-  return Array.from(new Uint8Array(hash), (value) => value.toString(16).padStart(2, '0')).join('');
+  let stage: ImagePreparationStage = 'outputCheck';
+  try {
+    checkAbort(signal);
+    const buffer = await abortable(image.blob.arrayBuffer(), signal);
+    checkAbort(signal);
+    const bytes = stripEncoderMetadata(new Uint8Array(buffer));
+    assertSanitizedJpeg(bytes, image.canvas.width, image.canvas.height);
+    image.blob = new Blob([bytes], { type: 'image/jpeg' });
+    stage = 'hash';
+    const hash = await abortable(crypto.subtle.digest('SHA-256', bytes), signal);
+    checkAbort(signal);
+    return Array.from(new Uint8Array(hash), (value) => value.toString(16).padStart(2, '0')).join('');
+  } catch (error) {
+    checkAbort(signal);
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    throw new ImagePreparationError(error instanceof ImagePreparationError ? error.code : 'invalid', stage);
+  }
 }
 
 /** Phase 0: JPEG pixels only, prepared locally; no source upload or persistent storage. */
@@ -198,6 +207,7 @@ export async function prepareJpeg(file: Blob, signal?: AbortSignal): Promise<Pre
   let decoded: DecodedImage | undefined;
   let main: EncodedImage | undefined;
   let thumb: EncodedImage | undefined;
+  let stage: ImagePreparationStage = 'source';
   try {
     checkAbort(signal);
     if (file.size > JPEG_LIMITS.sourceBytes) throw new ImagePreparationError('tooLarge');
@@ -211,6 +221,7 @@ export async function prepareJpeg(file: Blob, signal?: AbortSignal): Promise<Pre
       throw new ImagePreparationError('unavailable');
     }
     // Normalizing MIME locally also makes the HTMLImageElement fallback signature-driven.
+    stage = 'decode';
     decoded = await decode(new Blob([file], { type: 'image/jpeg' }), signal);
     checkAbort(signal);
     const swapped = header.orientation >= 5;
@@ -218,12 +229,14 @@ export async function prepareJpeg(file: Blob, signal?: AbortSignal): Promise<Pre
         decoded.height !== (swapped ? header.width : header.height)) {
       throw new ImagePreparationError('unsupported');
     }
+    stage = 'mainEncode';
     main = await encode(
       decoded.source, decoded.width, decoded.height,
       JPEG_LIMITS.mainSide, JPEG_LIMITS.mainBytes, 800, signal,
     );
     decoded.release();
     decoded = undefined;
+    stage = 'thumbEncode';
     thumb = await encode(
       main.canvas, main.canvas.width, main.canvas.height,
       JPEG_LIMITS.thumbSide, JPEG_LIMITS.thumbBytes, 160, signal,
@@ -238,9 +251,11 @@ export async function prepareJpeg(file: Blob, signal?: AbortSignal): Promise<Pre
     };
   } catch (error) {
     checkAbort(signal);
-    if (error instanceof ImagePreparationError ||
-        (error instanceof DOMException && error.name === 'AbortError')) throw error;
-    throw new ImagePreparationError('invalid');
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    throw new ImagePreparationError(
+      error instanceof ImagePreparationError ? error.code : 'invalid',
+      error instanceof ImagePreparationError ? error.stage ?? stage : stage,
+    );
   } finally {
     decoded?.release();
     if (main) releaseCanvas(main.canvas);

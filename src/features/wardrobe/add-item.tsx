@@ -5,6 +5,7 @@ import { categories, categoryKeys, validateDetails } from '../../domain/wardrobe
 import { Icon } from '../../app/icon';
 import type { MessageKey, Translate } from '../../i18n';
 import { ImagePreparationError, prepareJpeg, type PreparedPhoto } from '../../images/process-jpeg';
+import type { ImagePreparationDetails, ImagePreparationStage } from '../../images/jpeg';
 import { newSaveAttempt, saveItem, type SaveAttempt, type SaveStage } from '../../images/upload';
 import { errorKey, isAborted } from '../../data/errors';
 
@@ -13,6 +14,14 @@ const preparationErrors: Record<ImagePreparationError['code'], MessageKey> = {
   tooLarge: 'photo.prepareTooLarge',
   invalid: 'photo.invalid',
   unavailable: 'photo.prepareUnavailable',
+};
+const preparationStages: Record<ImagePreparationStage, MessageKey> = {
+  source: 'photo.stageSource', decode: 'photo.stageDecode', mainEncode: 'photo.stageMainEncode',
+  thumbEncode: 'photo.stageThumbEncode', outputCheck: 'photo.stageOutputCheck', hash: 'photo.stageHash',
+};
+const preparationReasons: Record<ImagePreparationDetails['reason'], MessageKey> = {
+  unsupported: 'photo.reasonUnsupported', tooLarge: 'photo.reasonTooLarge',
+  invalid: 'photo.reasonInvalid', unavailable: 'photo.reasonUnavailable',
 };
 type Props = {
   client: AppClient; scope: OwnerScope; currency: string; online: boolean; t: Translate;
@@ -27,6 +36,8 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
   const [preparing, setPreparing] = useState(false);
   const [stage, setStage] = useState<SaveStage | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
+  const [preparationDetails, setPreparationDetails] = useState<ImagePreparationDetails | null>(null);
+  const [showPreparationDetails, setShowPreparationDetails] = useState(false);
   const [invalid, setInvalid] = useState(false);
   const [attempt, setAttempt] = useState<SaveAttempt | null>(null);
   const library = useRef<HTMLInputElement>(null);
@@ -58,6 +69,8 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
     const signal = AbortSignal.any([controller.signal, scope.signal]);
     setPreparing(true);
     setError(null);
+    setPreparationDetails(null);
+    setShowPreparationDetails(false);
     setPhoto(null);
     try {
       const prepared = await prepareJpeg(file, signal);
@@ -65,6 +78,9 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
     } catch (problem) {
       if (!signal.aborted && !isAborted(problem)) {
         setError(problem instanceof ImagePreparationError ? preparationErrors[problem.code] : 'photo.invalid');
+        if (problem instanceof ImagePreparationError && problem.stage) {
+          setPreparationDetails({ stage: problem.stage, reason: problem.code });
+        }
       }
     } finally { if (!signal.aborted) setPreparing(false); }
   }
@@ -102,6 +118,14 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
           <div className="photo-actions"><button id="choose-photo" className="button button-secondary" type="button" disabled={frozen || preparing} onClick={() => library.current?.click()}><Icon name="photo" />{t(photo ? 'capture.replace' : 'capture.library')}</button><button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => camera.current?.click()}><Icon name="camera" />{t('capture.camera')}</button></div>
           {invalid && !photo && <p className="field-error">{t('common.required')}</p>}
           <p className="privacy-note"><Icon name="lock" />{t('capture.local')}</p>
+          <p className="fine muted">{t('photo.cameraFallback')}</p>
+          {preparationDetails && <>
+            <button className="text-button" type="button" aria-expanded={showPreparationDetails} aria-controls="preparation-details" onClick={() => setShowPreparationDetails(!showPreparationDetails)}>{t(showPreparationDetails ? 'photo.hideDetails' : 'photo.showDetails')}</button>
+            <section id="preparation-details" aria-label={t('photo.details')} hidden={!showPreparationDetails}>
+              <p>{t(preparationStages[preparationDetails.stage])}</p>
+              <p>{t(preparationReasons[preparationDetails.reason])}</p>
+            </section>
+          </>}
         </div>
         <div className="details-panel">
           <div className="details-heading"><span className="section-number" aria-hidden="true">01</span><h2>{t('capture.detailsTitle')}</h2></div>
