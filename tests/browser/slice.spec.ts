@@ -519,6 +519,8 @@ test('sign-out is broadcast across tabs without sending account data', async ({ 
 });
 
 type AuthMarkers = Window & { authEvents?: Array<{ event: string; owner: string | null }> };
+type ProfileSignal = { sequence: number; present: boolean; aborted: boolean; reason: 'AbortError' | 'TimeoutError' | 'other' };
+type ProfileProbe = Window & typeof globalThis & { profileProbe: { armed: boolean; count: number; snapshot: () => ProfileSignal[] } };
 function latch() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => { resolve = done; });
@@ -554,6 +556,35 @@ for (const firstOwner of ['a', 'b'] as const) {
       b: { name: 'Robin', language: 'sv', title: 'Fictional ochre trousers', alt: 'Ochre trousers front view' },
     } as const;
     const other = (owner: 'a' | 'b') => owner === 'a' ? 'b' : 'a';
+    for (const owner of ['a', 'b'] as const) {
+      await tabs[owner].addInitScript(({ ownerId }) => {
+        const nativeFetch = globalThis.fetch;
+        const signals: Array<AbortSignal | null> = [];
+        const probe = {
+          armed: false, count: 0,
+          snapshot: (): ProfileSignal[] => signals.map((signal, index) => {
+            const name = signal?.aborted && signal.reason instanceof DOMException ? signal.reason.name : null;
+            return { sequence: index + 1, present: signal !== null, aborted: signal?.aborted ?? false,
+              reason: name === 'AbortError' || name === 'TimeoutError' ? name : 'other' };
+          }),
+        };
+        (window as ProfileProbe).profileProbe = probe;
+        globalThis.fetch = function (this: typeof globalThis | undefined, ...args: Parameters<typeof fetch>) {
+          if (probe.armed) {
+            const [input, init] = args;
+            const address = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
+            const url = typeof address === 'string' ? URL.parse(address, location.origin) : null;
+            const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+            if (method === 'GET' && url?.origin === 'http://127.0.0.1:54321'
+              && url.pathname === '/rest/v1/profiles' && url.searchParams.get('owner_id') === `eq.${ownerId}`) {
+              probe.count++;
+              if (signals.length < 2) signals.push(init?.signal ?? (input instanceof Request ? input.signal : null));
+            }
+          }
+          return Reflect.apply(nativeFetch, this ?? globalThis, args);
+        };
+      }, { ownerId: owners[owner] });
+    }
     for (const backend of Object.values(backends)) {
       for (const owner of ['a', 'b'] as const) {
         const itemId = `20000000-0000-4000-8000-${owner === 'a' ? '000000000001' : '000000000002'}`;
@@ -586,6 +617,10 @@ for (const firstOwner of ['a', 'b'] as const) {
     for (const tab of Object.values(tabs)) {
       await tab.goto('/');
       await expect(tab.locator('#email')).toBeVisible();
+      expect(await tab.evaluate(async () => {
+        const ordinaryFetch = fetch;
+        return (await ordinaryFetch('/')).ok;
+      })).toBe(true);
       await observeSdkEvents(tab);
     }
     await signIn(tabs[firstOwner], firstOwner);
@@ -616,36 +651,83 @@ for (const firstOwner of ['a', 'b'] as const) {
     }
 
     // Hold actual owner-profile replies across logout; cancellation must prevent restoration.
-    const held: Array<{ release: ReturnType<typeof latch>; finished: ReturnType<typeof latch>; cancelled: Promise<Request> }> = [];
-    const clock = Date.now();
-    const profileTiming: Array<{ heldMs: number; failedMs: number | null; signedOutMs: number | null; request: Request }> = [];
+    type Settlement = 'fulfilled' | 'known-aborted' | 'page-closed' | 'error' | 'unsettled';
+    const deadlineMs = 5_000;
+    const bounded = async <T,>(promise: Promise<T>) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          promise.then(value => ({ kind: 'done' as const, value }), error => ({ kind: 'error' as const, error: error as unknown })),
+          new Promise<{ kind: 'unsettled' }>(resolve => { timer = setTimeout(() => resolve({ kind: 'unsettled' }), deadlineMs); }),
+        ]);
+      } finally { clearTimeout(timer); }
+    };
+    const held: Array<{ owner: 'a' | 'b'; release: ReturnType<typeof latch>; finished: ReturnType<typeof latch>;
+      count: number; outcome: Settlement; observed?: { count: number; signals: ProfileSignal[] } }> = [];
+    const failures = new Map<Request, { owner: 'A' | 'B'; reported: boolean }>();
+    const listeners = new Map<Page, (request: Request) => void>();
     for (const owner of ['a', 'b'] as const) {
-      const started = latch(), release = latch(), finished = latch();
-      const cancelled = tabs[owner].waitForEvent('requestfailed', {
-        predicate: (request) => new URL(request.url()).pathname === '/rest/v1/profiles',
-      });
-      await tabs[owner].route('**/rest/v1/profiles?**', async (route) => {
-        const timing = { heldMs: Date.now() - clock, failedMs: null as number | null, signedOutMs: null as number | null, request: route.request() };
-        profileTiming.push(timing);
-        tabs[owner].on('requestfailed', (request) => { if (request === timing.request) timing.failedMs = Date.now() - clock; });
-        started.resolve();
-        await release.promise;
-        await route.fulfill({ json: backends[owner].profiles[owners[owner]] });
-        finished.resolve();
-      });
-      await tabs[owner].evaluate(() => window.dispatchEvent(new Event('focus')));
-      await started.promise;
-      held.push({ release, finished, cancelled });
+      const listener = (request: Request) => {
+        const record = failures.get(request);
+        if (record) record.reported = true;
+      };
+      listeners.set(tabs[owner], listener);
+      tabs[owner].on('requestfailed', listener);
     }
+    const settle = async () => {
+      for (const pending of held) {
+        pending.release.resolve();
+        if (pending.count === 0) pending.finished.resolve();
+      }
+      const result = await bounded(Promise.all(held.map(pending => pending.finished.promise)));
+      return result.kind === 'done' && held.every(pending => pending.outcome === 'fulfilled' || pending.outcome === 'known-aborted');
+    };
+    let cleanupFailed: boolean;
     try {
+      for (const owner of ['a', 'b'] as const) {
+        const tab = tabs[owner], started = latch();
+        const pending: typeof held[number] = { owner, release: latch(), finished: latch(), count: 0, outcome: 'unsettled' };
+        held.push(pending);
+        await tab.route('**/rest/v1/profiles?**', async (route) => {
+          const request = route.request(), url = new URL(request.url());
+          if (pending.count !== 0 || request.method() !== 'GET' || url.origin !== 'http://127.0.0.1:54321'
+            || url.pathname !== '/rest/v1/profiles' || url.searchParams.get('owner_id') !== `eq.${owners[owner]}`) {
+            await route.fallback(); return;
+          }
+          pending.count++;
+          failures.set(request, { owner: owner === 'a' ? 'A' : 'B', reported: false });
+          started.resolve();
+          try {
+            await pending.release.promise;
+            const result = await bounded(route.fulfill({ json: backends[owner].profiles[owners[owner]] }));
+            pending.outcome = result.kind === 'done' ? 'fulfilled' : result.kind === 'unsettled' ? 'unsettled' :
+              result.error instanceof Error && result.error.name === 'AbortError' ? 'known-aborted' :
+                tab.isClosed() && result.error instanceof Error && result.error.name === 'TargetClosedError' ? 'page-closed' : 'error';
+          } finally { pending.finished.resolve(); }
+        });
+        await tab.evaluate(() => {
+          (window as ProfileProbe).profileProbe.armed = true;
+          window.dispatchEvent(new Event('focus'));
+        });
+        expect((await bounded(started.promise)).kind, 'PROFILE_START_UNSETTLED').toBe('done');
+        expect(await tab.evaluate(() => (window as ProfileProbe).profileProbe.snapshot()))
+          .toEqual([{ sequence: 1, present: true, aborted: false, reason: 'other' }]);
+      }
       const logoutTab = tabs[firstOwner], language = content[firstOwner].language;
       await logoutTab.getByRole('button', { name: messages['account.menu'][language] }).click();
       await logoutTab.getByRole('button', { name: messages['auth.signOut'][language], exact: true }).click();
       for (const tab of Object.values(tabs)) await expect(tab.locator('#email')).toBeVisible();
-      for (const timing of profileTiming) timing.signedOutMs = Date.now() - clock;
-      await Promise.all(held.map((pending) => pending.cancelled));
-      for (const pending of held) pending.release.resolve();
-      await Promise.all(held.map((pending) => pending.finished.promise));
+      for (const pending of held) {
+        pending.observed = await tabs[pending.owner].evaluate(() => {
+          const probe = (window as ProfileProbe).profileProbe;
+          probe.armed = false;
+          return { count: probe.count, signals: probe.snapshot() };
+        });
+        expect(pending.count).toBe(1);
+        expect(pending.observed).toEqual({ count: pending.count,
+          signals: [{ sequence: 1, present: true, aborted: true, reason: 'AbortError' }] });
+      }
+      expect(await settle(), 'PROFILE_SETTLEMENT_FAILED').toBe(true);
       for (const tab of Object.values(tabs)) {
         await expect(tab.locator('.workspace')).toHaveCount(0);
         await expect(tab.locator('html')).toHaveAttribute('lang', 'en');
@@ -660,18 +742,48 @@ for (const firstOwner of ['a', 'b'] as const) {
           await expect(tab.getByText(value.title, { exact: true })).toHaveCount(0);
         }
       }
+      for (const backend of Object.values(backends)) {
+        expect(backend.uploadWire.posts).toBe(0);
+        expect(backend.uploadWire.payloadBytes).toBe(0);
+      }
     } finally {
+      const settled = await settle();
+      const disarmed = await bounded(Promise.all(Object.values(tabs).map(tab => tab.evaluate(() => {
+        (window as ProfileProbe).profileProbe.armed = false;
+      }))));
+      for (const [tab, listener] of listeners) tab.off('requestfailed', listener);
       testInfo.annotations.push({ type: 'synthetic-profile-timing', description: JSON.stringify({
-        elapsedMs: Date.now() - clock,
-        requests: profileTiming.map(({ heldMs, failedMs, signedOutMs, request }) =>
-          ({ heldMs, failedMs, signedOutMs, failureReported: request.failure() !== null })),
-        socketPosts: Object.values(backends).map((backend) => backend.uploadWire.posts),
+        requests: held.map(pending => ({ owner: pending.owner === 'a' ? 'A' : 'B', held: pending.count,
+          observed: pending.observed ?? null, outcome: pending.outcome })),
+        protocolFailures: [...failures.values()], settled, disarmed: disarmed.kind,
+        uploads: Object.values(backends).map(backend => ({ posts: backend.uploadWire.posts, payloadBytes: backend.uploadWire.payloadBytes })),
       }) });
+      cleanupFailed = !settled || disarmed.kind !== 'done';
     }
+    if (cleanupFailed) throw new Error('PROFILE_CLEANUP_FAILED');
   });
 }
 
-test('accessibility while wardrobe items are loading', async ({ page }) => {
+test('accessibility while wardrobe items are loading', async ({ page }, testInfo) => {
+  const errorNames = { Error: 0, TypeError: 0, ReferenceError: 0, SyntaxError: 0, RangeError: 0, AbortError: 0, TimeoutError: 0, other: 0 };
+  const requests = { document: 0, script: 0, stylesheet: 0, image: 0, font: 0, fetch: 0, xhr: 0, other: 0, finished: 0, failed: 0 };
+  const onError = (error: Error) => {
+    const name = Object.hasOwn(errorNames, error.name) ? error.name as keyof typeof errorNames : 'other';
+    errorNames[name]++;
+  };
+  const onRequest = (request: Request) => {
+    const type = request.resourceType();
+    const category = ['document', 'script', 'stylesheet', 'image', 'font', 'fetch', 'xhr'].includes(type) ? type as keyof typeof requests : 'other';
+    requests[category]++;
+  };
+  const onFinished = () => { requests.finished++; };
+  const onFailed = () => { requests.failed++; };
+  page.on('pageerror', onError);
+  page.on('request', onRequest);
+  page.on('requestfinished', onFinished);
+  page.on('requestfailed', onFailed);
+  let navigationCompleted = false;
+  let statusBucket = 'none';
   const backend = await mockBackend(page, { initialLanguage: 'en' });
   const started = latch(), release = latch();
   await page.route('**/rest/v1/items?**', async (route) => {
@@ -682,7 +794,10 @@ test('accessibility while wardrobe items are loading', async ({ page }) => {
   });
   const loading = page.locator('.item-grid[aria-busy="true"]');
   try {
-    await page.goto('/');
+    const response = await page.goto('/');
+    navigationCompleted = true;
+    const status = response?.status() ?? 0;
+    statusBucket = status >= 100 && status < 600 ? `${Math.floor(status / 100)}xx` : 'none';
     await signIn(page);
     await started.promise;
     await expect(loading).toBeVisible();
@@ -692,13 +807,36 @@ test('accessibility while wardrobe items are loading', async ({ page }) => {
     await expect(loading).toBeVisible();
     expect(results.violations).toEqual([]);
     await expect(page.getByRole('region', { name: messages['common.loading'].en, exact: true })).toHaveAttribute('aria-busy', 'true');
+    release.resolve();
+    await expect(loading).toHaveCount(0);
+    await expect(page.locator('#wardrobe-title')).toHaveText(messages['wardrobe.title'].en);
+    await expect(page.getByRole('button', { name: messages['wardrobe.firstItem'].en })).toBeVisible();
+    expect(backend.requests).toContainEqual({ method: 'GET', path: '/rest/v1/items', owner: owners.a, ownerFilter: `eq.${owners.a}` });
   } finally {
     release.resolve();
+    let boot: object;
+    try {
+      boot = await page.evaluate(() => {
+        const email = document.querySelector('#email'), rect = email?.getBoundingClientRect();
+        const style = email ? getComputedStyle(email) : null;
+        const lang = document.documentElement.lang;
+        return { readyState: document.readyState, emailPresent: email !== null,
+          emailVisible: Boolean(rect?.width && rect.height && style?.visibility !== 'hidden' && style?.display !== 'none'),
+          login: Boolean(document.querySelector('#login-title')),
+          loading: Boolean(document.querySelector('.item-grid[aria-busy="true"]')),
+          workspace: Boolean(document.querySelector('.workspace')),
+          fatal: Boolean(document.querySelector('.fatal-error')),
+          lang: ['en', 'fi', 'sv'].includes(lang) ? lang : 'other' };
+      });
+    } catch { boot = { state: page.isClosed() ? 'page-closed' : 'unavailable' }; }
+    page.off('pageerror', onError);
+    page.off('request', onRequest);
+    page.off('requestfinished', onFinished);
+    page.off('requestfailed', onFailed);
+    testInfo.annotations.push({ type: 'synthetic-loading-boot', description: JSON.stringify({
+      owner: 'A', navigationCompleted, statusBucket, boot, errorNames, requests,
+    }) });
   }
-  await expect(loading).toHaveCount(0);
-  await expect(page.locator('#wardrobe-title')).toHaveText(messages['wardrobe.title'].en);
-  await expect(page.getByRole('button', { name: messages['wardrobe.firstItem'].en })).toBeVisible();
-  expect(backend.requests).toContainEqual({ method: 'GET', path: '/rest/v1/items', owner: owners.a, ownerFilter: `eq.${owners.a}` });
 });
 
 test('accessibility and 320px layout across login, empty wardrobe and draft', async ({ page }) => {

@@ -918,3 +918,88 @@ not real hosted RLS/Storage, Apple HEIC, personal-photo or completed iPhone
 acceptance. Physical Safari/Vivaldi camera/library/Save/accessibility gates remain
 open. No hosted calls, new agent, merge or deployment; every merge still requires
 fresh explicit user approval. Preserve the previously recorded rollback boundary.
+
+### PR #4 approved test-timing correction — 7 September 2026
+
+Base `0545cf3b679fe29a373929d6188e9953e352d8ec`; starting head
+`d32dfdc8c251a6714421dc05bbc5bbedd207eba2`, existing
+`copilot/phase0-iphone-photo-capture-fix`, one writer. I04/I05 test support,
+preserving R04/R11/R12/R17/R19/R26/R27. Only `tests/browser/slice.spec.ts`
+and this result document change in this follow-up.
+
+Read the full controlling [amendment 5569237411](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5569237411)
+before edits. The coordinator records actual read-only reviewer `c4a35485`,
+**Anthropic / Claude Opus 5**: clean seven-file runtime review, clean upload-wire
+review, then approval of the refined timing fixture. The review identified a
+held-route/protocol-notification ordering hazard; it did not recover the original
+failing trace. Controlling corrections reject strict failure-before-release
+timestamps, blanket cancellation catches and raw HTML/URL diagnostics. This
+implementation follows that approved plan, not a new material amendment.
+
+The matching [native-model receipt 5569268531](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5569268531)
+was read before edits: coordinator explicitly selected `gpt-6-astra` and verified
+native `sweagent-capi:gpt-6-astra` at `2026-09-07T10:29:50.9567124Z`, task
+`73ce339d-3e53-4760-a581-b46548779a87`, session
+`7bea9293-01f0-4ae8-a93c-8bf0aeee3659`, matching this PR/base/head.
+No old-session receipt or additional implementation agent was substituted.
+Context actually read: root/Copilot instructions; cloud guide and current
+Phase-0 PR #4 evidence; local-backend evidence; blueprint 00/03/05/10/20,
+Phase 0 in 14, relevant 07/08/12/13 and I03–I05 in 15; actual profile migration/
+generated-type excerpts, `src/auth/session.ts`, `src/data/client.ts` and
+`src/data/profile.ts`; affected slice tests, mock-backend contracts, local/hosted
+guard excerpts, package/Playwright/CI configuration; PR discussion, diff,
+reviews/threads and CI job-log lookup.
+
+The two-owner test installs a test-local, bounded profile-GET signal observer.
+It forwards unchanged native fetch arguments/results with the correct receiver,
+checks a bare same-origin GET before arming, and never reads bodies, headers,
+credentials or upload content. One matching synthetic owner/profile GET is held
+per tab; other requests retain normal fixture routing. Both signed-out screens,
+one held/observed request each and real `AbortError` signals are required before
+either reply is released. Protocol failure events are diagnostic only.
+Finally cleanup releases both routes, bounds fulfillment/settlement to five
+seconds, settles latches and removes listeners. Coarse unexpected/unsettled
+outcomes fail without replacing a primary assertion failure. Existing owner,
+late-response, language, storage/cache and reload assertions remain intact.
+
+Loading-a11y now retains finally diagnostics limited to navigation completion/
+HTTP bucket, ready state, separate email-present/visible flags, known selectors,
+allowlisted language/error names and request category counts with synthetic A.
+No raw URL, HTML, exception/message, header/body, screenshot or trace is added.
+Selectors, acceptance, production code, upload receiver and timeouts are unchanged.
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+Browser commands below used `--reporter=list,json`, with
+`PLAYWRIGHT_JSON_OUTPUT_FILE` set respectively to `/tmp/pr4-timing-targeted.json`,
+`/tmp/pr4-timing-browser.json` and `/tmp/pr4-timing-a11y.json`. Reports are not committed.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run typecheck` / `npm run lint` / `git diff --check` | Test-authoring type/cleanup-initializer errors corrected before browser execution; final checks each exit 0. |
+| `./node_modules/.bin/playwright install --with-deps webkit` | Exit 0 after confirming WebKit absent; existing pinned browser, no dependency/configuration change. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --grep 'different-account tabs\|accessibility while wardrobe items are loading' --project=chromium --project=mobile --project=webkit-photo --retries=0 --reporter=list,json` | Exit 0, **9/9**: A-first/B-first and loading-a11y in all three projects. |
+| `npm run test:browser -- --retries=0 --reporter=list,json` | One fresh full run, exit 0, **215/215**, zero skips/flaky/retries; started `2026-09-07T10:39:10.612Z`. |
+| `npm run test:a11y -- --retries=0 --reporter=list,json` | One fresh run after browser success, exit 0, **21/21**, zero skips/flaky/retries; started `2026-09-07T10:41:08.696Z`. |
+| `npm run check:translations` / `npm run test:unit` | Exit 0; 350 EN/FI/SV keys and **272 tests** in nine files. |
+| `npm run db:start` | Exit 0; prepared disposable local stack, no reset or service repair. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Exit 0; ordinary-session suite and one real local recovery UI journey. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | Exit 0; all 11 ordinary-session stages, after integration. |
+| `npm run db:types -- --check` / `git ls-files --error-unmatch src/data/database.types.ts` / `git diff --exit-code -- src/data/database.types.ts` | Each exit 0; tracked types match actual local generation and remain unchanged. |
+| `npm run build` / `npm run scan:secrets` / `npm run check:dependencies` | Each exit 0; same unprinted process-local random canary, 136 scanned text files, no reported production vulnerabilities. Existing chunk warning remains (151.45 kB gzip JS). |
+
+Full-run coarse diagnostics show each owner's observed count = held count = 1,
+signal present and aborted with `AbortError` before release, both outcomes
+`fulfilled`, completed cleanup and zero receiver POSTs/payload bytes. Loading
+diagnostics show completed 2xx navigation, complete document, English workspace,
+no fatal selector, no page errors and no failed requests. These successful end
+states do not explain the earlier Chromium startup failure.
+
+**Ordering hazard removed; original WebKit trace unavailable; earlier a11y cause
+unproven.** Preserve the preceding failed-run history. The fresh local browser/
+a11y gates above now pass, not by skipping cases or weakening ownership assertions.
+Starting-head CI `34108385173` is `action_required`; MCP failed-job lookup returned
+zero jobs, not a pass. Fresh committed-head CI authorization/results and independent
+follow-up review remain coordinator gates before the user's separate merge decision.
+Physical iPhone Safari/Vivaldi, native HEIC and hosted-owner acceptance remain
+OPEN. No hosted call, production change, merge, deployment or later phase is
+authorized or performed; preserve the existing rollback boundary.
