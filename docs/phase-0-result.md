@@ -1208,3 +1208,90 @@ final review and merge approval remain separate gates. No worker Actions
 approval/rerun, second agent, hosted operation, merge, deployment, HEIC/codec,
 provider or later-phase work occurred. Live app is unchanged. Mac success
 will still not prove physical-iPhone preparation/Save/reload or hosted acceptance.
+
+### PR #5 bounded wire-failure localization — 7 September 2026
+
+I04/I05 evidence only (R03/R04/R12/R23). Base main
+`bf0ad74dddc4bbc4a3db312dc376edd9495de439`, starting head
+`6bf493f83ac9a8e303aeaf759ff9e7fd720e985a`, same
+`copilot/copilotphase0-apple-jpeg-probe` branch. Full
+[approval 5572333761](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5572333761)
+records actual **Anthropic / Claude Opus 5**, reviewer `b5395860` turn 5:
+closed route/receiver stages, response attribution and nonmasking final evidence;
+coordinator approval incorporated those refinements before this task.
+After context and before edits, the writer reread
+[public receipt 5572366187](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5572366187):
+explicitly selected actual `sweagent-capi:gpt-6-astra`, task
+`6b7aae1c-6cda-45e5-8eb5-2a93130f9c99`, session
+`f270d613-0040-47cb-ae02-8064ae2ef780`, coordinator observation
+`2026-09-07T14:49:59.2101404Z`, matching PR/base/starting head.
+Context read: root/Copilot instructions, cloud guide, relevant Phase-0 evidence;
+blueprint 00/03/05/08/10/14, 15 I04/I05 and relevant 07/13/20 sections;
+base migration/generated-type references, client/upload source, both wire-test
+files' affected paths, package/Playwright/TypeScript/ESLint/secret-scan contracts,
+and current PR discussion/diff/reviews plus MCP Actions runs/job logs.
+
+**APP13 is already implemented**, not merely proposed: actual native Mac
+[34133072394 attempt 2](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34133072394)
+passed **4/4** at the starting head. Logs confirm all six generated cases'
+actual preparation and source/main/thumb pixel comparisons `ok`, with no capture
+errors. Coordinator approval records the independently CLEAN APP13 correction;
+required CI `34133072378` also passed both jobs. These supersede the prior pending
+status, not the historical red native run or **158/159** affected-suite wire result.
+
+Only `tests/browser/mock-backend.ts`, `tests/browser/slice.spec.ts` and this append
+change in this packet. Optional `first`/`second` diagnostics are enabled only by
+the existing parallel-page case: fixed route/receiver guard stages, fixed-size
+counters and closed-enum response echoes alongside unchanged original JSON/status.
+Default helper/HTTP responses, native requests, URL-only forwarding, guard
+conditions, byte/hash oracles, CORS, limits, timers and cleanup assertions remain.
+Individually guarded final annotations/stdout precede the final cleanup; no raw
+request/response/header/token/path/error or event history is emitted.
+
+Commands from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`, against the
+two test-file changes in the accompanying commit:
+
+| Exact command | Actual result |
+|---|---|
+| `./node_modules/.bin/playwright install --with-deps webkit` | Exit 0, after checking that the pinned executable was absent; no package/lock/config change. |
+| `./node_modules/.bin/eslint tests/browser/mock-backend.ts tests/browser/slice.spec.ts` / `npm run typecheck` / `git diff --check` | Each exit 0. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --project=webkit-photo --grep 'actual upload wire' --grep-invert 'isolates parallel pages' --workers=2 --retries=0` | Exit 0, **14/14** default-mode wire tests, including binary/corruption, all multipart negatives, reservations/credentials and listener cleanup. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --project=webkit-photo --grep 'actual upload wire isolates parallel pages and closes accepted keepalive connections' --repeat-each=20 --workers=2 --retries=0` | Executed **once**, exit 0, **20/20**, 33.9 seconds, no retries/skips. Pipefail preserved the exit code while retaining the log only in `/tmp`. |
+
+All zero-based repeat outcomes are retained here, not just the last green:
+
+| Repeat | Outcome | Repeat | Outcome |
+|---|---|---|---|
+| 0 | PASS | 10 | PASS |
+| 1 | PASS | 11 | PASS |
+| 2 | PASS | 12 | PASS |
+| 3 | PASS | 13 | PASS |
+| 4 | PASS | 14 | PASS |
+| 5 | PASS | 15 | PASS |
+| 6 | PASS | 16 | PASS |
+| 7 | PASS | 17 | PASS |
+| 8 | PASS | 18 | PASS |
+| 9 | PASS | 19 | PASS |
+
+All **40** fixed backend records were inspected; every repeat had the identical
+following profile, all parse statuses `ok`, all capture-error flags false:
+
+| Expected backend | Client-observed response attribution | Final server counters: route POST / receiver POST / success / route rejection / receiver rejection | Received / stored file bytes |
+|---|---|---|---|
+| `first` | Parallel: **200**, `first` / `none` | **1 / 1 / 1 / 0 / 0** | **387 / 2** |
+| `second` | Unreserved: **403**, `second` / `route-reservation-credentials`; parallel and after-first-close: **200**, `second` / `none` | **3 / 2 / 2 / 1 / 0** | **777 / 7** |
+
+Both last-stage fields were `none`. Every rejection-stage count was zero except
+`second.route-reservation-credentials = 1`; the rejected route did not arrive at
+the receiver. The two parallel files retained their exact independent two-byte
+length/hash assertions; the later existing five-byte upload accounts for the
+second backend's seven total stored bytes. No receiver 400 occurred.
+
+**STOP: non-reproduction, cause still unproven.** This sweep does not retire or
+waive the earlier failure. No second sweep, variant, retry/wait, timeout increase,
+serialization, validation relaxation or behavioral fix followed. No JPEG/classifier,
+UI/Auth/Save, workflow/config/package/schema or hosted changes. PR stays draft;
+fresh final-head required CI, coordinator impact/independent review and separate
+merge approval remain gates. No worker Actions authorization/rerun, extra agent,
+database/mail reconstruction, merge or deployment. Physical-iPhone and hosted
+acceptance remain separate; the live app is unchanged.
