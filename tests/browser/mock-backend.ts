@@ -16,7 +16,23 @@ const fixtureKey = 'sb_publishable_browser_fixture_only';
 const uploadHeaders = ['authorization', 'apikey', 'content-type', 'x-upsert', 'x-client-info'];
 const uploadLimit = 1024 * 1024;
 
-async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], files: Map<string, Buffer>, tokens: Map<string, string>) {
+export const wireStages = [
+  'none', 'route-auth', 'route-owner', 'route-existing', 'route-reservation-credentials',
+  'receiver-reservation-origin', 'receiver-preflight', 'receiver-method-credentials',
+  'receiver-content-type', 'receiver-body-read', 'receiver-body-limit', 'receiver-envelope',
+  'receiver-form-parse', 'receiver-form-fields', 'receiver-file-read', 'receiver-store',
+  'receiver-timeout', 'receiver-client-error',
+] as const;
+export type WireStage = typeof wireStages[number];
+export type WireBackend = 'first' | 'second';
+type WireDiagnostic = {
+  backend: WireBackend; routePosts: number; receiverPosts: number; success: number;
+  routeRejected: number; receiverRejected: number; routeStage: WireStage; receiverStage: WireStage;
+  rejections: Record<WireStage, number>;
+};
+
+async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], files: Map<string, Buffer>, tokens: Map<string, string>,
+  diagnostic?: WireDiagnostic) {
   const port = Number(process.env.PLAYWRIGHT_PORT ?? 5181);
   if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid browser test port.');
   const origin = `http://127.0.0.1:${port}`;
@@ -50,11 +66,21 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     headers['access-control-request-headers'].split(',').every((name) => uploadHeaders.includes(name.trim().toLowerCase()));
   const credentialsAllowed = (headers: IncomingHttpHeaders, owner: string) => headers.origin === origin && !headers.cookie &&
     headers.apikey === fixtureKey && tokens.get(headers.authorization ?? '') === owner && headers['x-upsert'] === 'false';
+  const recordRejection = (stage: WireStage) => {
+    if (diagnostic) {
+      diagnostic.receiverRejected++;
+      diagnostic.receiverStage = stage;
+      diagnostic.rejections[stage]++;
+    }
+  };
   const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, connectionsCheckingInterval: 1000 }, (request, response) => {
-    const timer = setTimeout(() => { state.rejected++; void close(); }, 5000);
-    const finish = (body: unknown, status = 200) => {
+    if (diagnostic && request.method === 'POST') diagnostic.receiverPosts++;
+    let stage: WireStage = 'receiver-reservation-origin';
+    const timer = setTimeout(() => { state.rejected++; recordRejection('receiver-timeout'); void close(); }, 5000);
+    const finish = (body: JsonRow, status = 200, responseStage: WireStage = 'none') => {
       response.writeHead(status, { ...cors, 'content-type': 'application/json', ...(status >= 400 ? { connection: 'close' } : {}) });
-      response.end(JSON.stringify(body), () => { if (status >= 400) void close(); });
+      response.end(JSON.stringify(diagnostic ? { ...body, wireBackend: diagnostic.backend, wireStage: responseStage } : body),
+        () => { if (status >= 400) void close(); });
     };
     response.once('close', () => clearTimeout(timer));
     void (async () => {
@@ -62,24 +88,28 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
       const owner = reservedOwner(pathname);
       if (!owner || request.headers.origin !== origin || request.headers.cookie) throw new Error('Fixture upload rejected.');
       if (request.method === 'OPTIONS') {
+        stage = 'receiver-preflight';
         if (!preflightAllowed(request.headers)) throw new Error('Fixture upload rejected.');
         state.preflights++;
         response.writeHead(204, cors).end();
         return;
       }
+      stage = 'receiver-method-credentials';
       if (request.method !== 'POST' || !credentialsAllowed(request.headers, owner)) {
         throw new Error('Fixture upload rejected.');
       }
       state.posts++;
       const contentType = request.headers['content-type'] ?? '';
       const boundary = /^multipart\/form-data;\s*boundary=(?:"([A-Za-z0-9'-]{1,70})"|([A-Za-z0-9'-]{1,70}))$/i.exec(contentType);
+      stage = 'receiver-content-type';
       if (!boundary) throw new Error('Fixture upload rejected.');
       const chunks: Buffer[] = [];
       let length = 0;
+      stage = 'receiver-body-read';
       for await (const chunk of request) {
         const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         state.receivedBytes += bytes.length;
-        if (bytes.length > uploadLimit - length) throw new Error('Fixture upload rejected.');
+        if (bytes.length > uploadLimit - length) { stage = 'receiver-body-limit'; throw new Error('Fixture upload rejected.'); }
         length += bytes.length;
         chunks.push(bytes);
         state.peakBufferedBytes = Math.max(state.peakBufferedBytes, length);
@@ -87,25 +117,32 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
       const body = Buffer.concat(chunks, length);
       const delimiter = `--${boundary[1] ?? boundary[2]}`;
       const ending = Buffer.from(`\r\n${delimiter}--`);
+      stage = 'receiver-envelope';
       if (!body.subarray(0, delimiter.length + 2).equals(Buffer.from(`${delimiter}\r\n`)) ||
         !(body.subarray(-ending.length).equals(ending) || body.subarray(-ending.length - 2).equals(Buffer.concat([ending, Buffer.from('\r\n')])))) {
         throw new Error('Fixture upload rejected.');
       }
+      stage = 'receiver-form-parse';
       const form = await new Response(new Uint8Array(body), { headers: { 'content-type': contentType } }).formData();
       const file = form.get('');
+      stage = 'receiver-form-fields';
       if (form.getAll('').length !== 1 || !(file instanceof Blob) || file.type !== 'image/jpeg' || !file.size ||
         form.getAll('cacheControl').length !== 1 || form.get('cacheControl') !== '0' ||
         form.getAll('metadata').length > 1 || (form.has('metadata') && typeof form.get('metadata') !== 'string') ||
         [...form.keys()].some((key) => !['', 'cacheControl', 'metadata'].includes(key))) throw new Error('Fixture upload rejected.');
+      stage = 'receiver-file-read';
       const bytes = Buffer.from(await file.arrayBuffer());
       const path = pathname.slice(storagePrefix.length);
+      stage = 'receiver-store';
       if (closing || files.has(path)) throw new Error('Fixture upload rejected.');
       files.set(path, bytes);
       state.payloadBytes += bytes.length;
+      if (diagnostic) { diagnostic.success++; diagnostic.receiverStage = 'none'; }
       finish({ Id: 'fixture', Key: `wardrobe/${path}` });
     })().catch(() => {
       state.rejected++;
-      if (!response.destroyed && !response.headersSent) finish({ message: 'Fixture upload rejected.' }, 400);
+      recordRejection(stage);
+      if (!response.destroyed && !response.headersSent) finish({ message: 'Fixture upload rejected.' }, 400, stage);
       else void close();
     });
   });
@@ -124,7 +161,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     if (closing) socket.destroy();
   });
   server.on('error', onPageClose);
-  server.on('clientError', (_error, socket) => { state.rejected++; socket.destroy(); void close(); });
+  server.on('clientError', (_error, socket) => { state.rejected++; recordRejection('receiver-client-error'); socket.destroy(); void close(); });
   page.once('close', onPageClose);
   try {
     if (page.isClosed()) throw new Error('Fixture page closed.');
@@ -150,6 +187,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
 export type MockOptions = {
   initialLanguage?: Language | null; failCommitOnce?: boolean; failLanguageSave?: boolean;
   recoverStatus?: number; updateStatus?: number; logoutStatus?: number; recoveryUser?: string;
+  wireDiagnostic?: WireBackend;
 };
 export function recoveryHash(owner = owners.a, seconds = 3600): string {
   const expires = Math.floor(Date.now() / 1000) + seconds;
@@ -170,11 +208,18 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   let commitFailed = false;
   const fixture = await readFile(new URL('../../blueprint/validation/fixture.jpg', import.meta.url));
   const tokens = new Map<string, string>();
-  const receiver = await uploadReceiver(page, items, images, files, tokens);
+  const wireDiagnostic: WireDiagnostic | undefined = options.wireDiagnostic ? {
+    backend: options.wireDiagnostic, routePosts: 0, receiverPosts: 0, success: 0, routeRejected: 0, receiverRejected: 0,
+    routeStage: 'none', receiverStage: 'none',
+    rejections: Object.fromEntries(wireStages.map((stage) => [stage, 0])) as Record<WireStage, number>,
+  } : undefined;
+  const receiver = await uploadReceiver(page, items, images, files, tokens, wireDiagnostic);
   await page.route('http://127.0.0.1:54321/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
+    const wirePost = method === 'POST' && url.pathname.startsWith(storagePrefix);
+    if (wireDiagnostic && wirePost) { wireDiagnostic.routePosts++; wireDiagnostic.routeStage = 'none'; }
     let owner: string | null = null;
     const token = request.headers().authorization?.split(' ')[1]?.split('.')[1];
     if (token) {
@@ -182,7 +227,14 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       catch { /* The mocked anonymous key carries no owner. */ }
     }
     requests.push({ method, path: url.pathname, owner, ownerFilter: url.searchParams.get('owner_id') });
-    const json = (body: unknown, status = 200) => route.fulfill({ status, json: body, headers: { 'x-supabase-api-version': '2024-01-01' } });
+    const json = (body: unknown, status = 200, stage: WireStage = 'none') => {
+      if (wireDiagnostic && wirePost) {
+        wireDiagnostic.routeStage = stage;
+        if (status >= 400) { wireDiagnostic.routeRejected++; wireDiagnostic.rejections[stage]++; }
+        body = { ...body as JsonRow, wireBackend: wireDiagnostic.backend, wireStage: stage };
+      }
+      return route.fulfill({ status, json: body, headers: { 'x-supabase-api-version': '2024-01-01' } });
+    };
     if (method === 'OPTIONS') {
       if (url.pathname.startsWith(storagePrefix)) {
         const allowed = !url.search && receiver.reservedOwner(url.pathname) && receiver.preflightAllowed(request.headers());
@@ -202,7 +254,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     if (url.pathname === '/auth/v1/recover') { await json({}, options.recoverStatus ?? 200); return; }
     if (url.pathname === '/auth/v1/logout') { await route.fulfill({ status: options.logoutStatus ?? 204 }); return; }
-    if (!owner || !profiles[owner]) { await json({ message: 'Unauthorized' }, 401); return; }
+    if (!owner || !profiles[owner]) { await json({ message: 'Unauthorized' }, 401, 'route-auth'); return; }
     if (url.pathname === '/auth/v1/user') {
       if (method === 'PUT' && options.updateStatus) { await json({ code: 'reauthentication_needed', message: 'Private upstream text' }, options.updateStatus); return; }
       const id = options.recoveryUser ?? owner;
@@ -249,11 +301,11 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     const prefix = '/storage/v1/object/wardrobe/';
     if (url.pathname.startsWith(prefix)) {
       const path = url.pathname.slice(prefix.length);
-      if (!path.startsWith(`${owner}/`)) { await json({ statusCode: '403', message: 'Denied' }, 403); return; }
+      if (!path.startsWith(`${owner}/`)) { await json({ statusCode: '403', message: 'Denied' }, 403, 'route-owner'); return; }
       if (method === 'POST') {
-        if (files.has(path)) { await json({ statusCode: '409', message: 'The resource already exists' }, 409); return; }
+        if (files.has(path)) { await json({ statusCode: '409', message: 'The resource already exists' }, 409, 'route-existing'); return; }
         if (url.search || receiver.reservedOwner(url.pathname) !== owner || !receiver.credentialsAllowed(request.headers(), owner)) {
-          await json({ message: 'Fixture upload rejected.' }, 403); return;
+          await json({ message: 'Fixture upload rejected.' }, 403, 'route-reservation-credentials'); return;
         }
         try { await route.continue({ url: receiver.url + url.pathname }); }
         catch { await receiver.close(); throw new Error('Fixture continuation failed.'); }
@@ -265,7 +317,14 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { profiles, items, images, files, requests, fixture, uploadWire: receiver.state };
+  return { profiles, items, images, files, requests, fixture, uploadWire: receiver.state, wireDiagnostic,
+    uploadWireUrl: receiver.url,
+    issuedWireAuthorization(account: 'a' | 'b') {
+      const authorization = [...tokens].find(([, owner]) => owner === owners[account])?.[0];
+      if (!authorization) throw new Error('Fixture owner authorization unavailable.');
+      return authorization;
+    },
+  };
 }
 
 export async function signIn(page: Page, account: 'a' | 'b' = 'a') {

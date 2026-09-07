@@ -1,8 +1,242 @@
 import { expect, test } from '@playwright/test';
+import type { TestInfo } from '@playwright/test';
+import { appendFile } from 'node:fs/promises';
 import { CORNER_COLOURS, ORIENTATION_CORNERS } from '../fixtures/jpeg-helpers';
 import type { summarizeJpeg } from '../fixtures/jpeg-helpers';
 
 type Summary = Awaited<ReturnType<typeof summarizeJpeg>>;
+
+// Runs wholly in the synthetic page: never install hooks in the application.
+async function probeGeneratedJpeg({ width, height, dense = false }: {
+  width: number; height: number; dense?: boolean;
+}) {
+  const modulePath = '/src/images/process-jpeg.ts';
+  const jpegPath = '/src/images/jpeg.ts';
+  const helperPath = '/tests/fixtures/jpeg-helpers.ts';
+  const { prepareJpeg } = await import(modulePath) as typeof import('../../src/images/process-jpeg');
+  const { assertSanitizedJpeg, stripEncoderMetadata, ImagePreparationError } =
+    await import(jpegPath) as typeof import('../../src/images/jpeg');
+  const helpers = await import(helperPath) as typeof import('../fixtures/jpeg-helpers');
+  type Outcome = 'not-run' | 'ok' | 'error' | 'invalid' | 'unsupported' | 'tooLarge' | 'unavailable';
+  const rejection = (error: unknown): Outcome =>
+    error instanceof ImagePreparationError && ['invalid', 'unsupported', 'tooLarge', 'unavailable'].includes(error.code)
+      ? error.code : 'error';
+  function classify(bytes: Uint8Array, { marker, start, end }: { marker: number; start: number; end: number }) {
+    type Family = 'jfif' | 'photoshop-3.0' | 'adobe-photoshop-2.5' | 'other' | 'not-app';
+    const result = { family: 'other' as Family, canonicalJfif: false };
+    if (!Number.isInteger(marker) || marker < 0xe0 || marker > 0xef) return { ...result, family: 'not-app' as const };
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
+        start < 0 || end > bytes.length || start >= end || bytes[start] !== 0xff) return result;
+    let offset = start;
+    while (offset < end && bytes[offset] === 0xff) offset += 1;
+    if (offset + 3 > end || bytes[offset] !== marker) return result;
+    const lengthField = bytes[offset + 1]! * 256 + bytes[offset + 2]!;
+    const payloadStart = end - (lengthField - 2);
+    if (lengthField < 2 || payloadStart !== offset + 3 || payloadStart > end) return result;
+    const matches = (signature: string) => signature.length <= end - payloadStart &&
+      [...signature].every((char, index) => bytes[payloadStart + index] === char.charCodeAt(0));
+    if (marker === 0xe0 && matches('JFIF\0')) {
+      result.family = 'jfif';
+      result.canonicalJfif = end - payloadStart === 14 && bytes[end - 2] === 0 && bytes[end - 1] === 0;
+    } else if (marker === 0xed && matches('Photoshop 3.0\0')) result.family = 'photoshop-3.0';
+    else if (marker === 0xed && matches('Adobe Photoshop 2.5\0')) result.family = 'adobe-photoshop-2.5';
+    return result;
+  }
+  // Tiny generated-only classifier checks also run in the existing native cases.
+  const jfif = new Uint8Array([74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]);
+  const classifierChecked = [
+    [0xe0, jfif, 'jfif', true],
+    [0xe0, jfif.subarray(0, 5), 'jfif', false],
+    [0xe0, helpers.joinBytes(jfif.subarray(0, -1), new Uint8Array([1])), 'jfif', false],
+    [0xed, new TextEncoder().encode('Photoshop 3.0\0synthetic'), 'photoshop-3.0', false],
+    [0xed, new TextEncoder().encode('Adobe Photoshop 2.5\0synthetic'), 'adobe-photoshop-2.5', false],
+    [0xed, new TextEncoder().encode('photoshop 3.0\0'), 'other', false],
+    [0xed, new TextEncoder().encode('Photoshop 3.0'), 'other', false],
+    [0xe0, new TextEncoder().encode('JFIF'), 'other', false],
+    [0xe0, new TextEncoder().encode('jfif\0'), 'other', false],
+    [0xe2, new TextEncoder().encode('Photoshop 3.0\0'), 'other', false],
+    [0xed, new Uint8Array(), 'other', false],
+    [0xee, new Uint8Array([255]), 'other', false],
+    [0xfe, jfif, 'not-app', false],
+  ].every(([marker, payload, family, canonicalJfif]) => [0, 1, 5].every((fill) => {
+    const bytes = helpers.joinBytes(new Uint8Array(fill).fill(0xff), helpers.jpegSegment(marker as number, payload as Uint8Array));
+    const observed = classify(bytes, { marker: marker as number, start: 0, end: bytes.length });
+    return observed.family === family && observed.canonicalJfif === canonicalJfif;
+  })) && [
+    { marker: 0xed, start: 0, end: 1 },
+    { marker: 0xed, start: -1, end: 2 },
+    { marker: 0xed, start: 0, end: 3 },
+    { marker: 0xed, start: NaN, end: 2 },
+  ].every((segment) => {
+    const result = classify(new Uint8Array([0xff, 0xff]), segment);
+    return result.family === 'other' && !result.canonicalJfif;
+  }) && classify(new Uint8Array([0xff, 0xd9]), { marker: 0xd9, start: 0, end: 2 }).family === 'not-app';
+  function inventory(bytes?: Uint8Array) {
+    const result = {
+      scope: 'validated-prefix' as const, outcome: 'not-run' as 'not-run' | 'ok' | 'error',
+      callbackErrored: false, total: 0, truncated: false,
+      records: [] as ({ marker: number; kind: 'exif' | 'icc' | 'other'; length: number } & ReturnType<typeof classify>)[],
+    };
+    if (!bytes) return result;
+    try {
+      helpers.inspectJpegSegments(bytes, (segment) => {
+        // A collector failure is not a walker rejection; the observer is total.
+        try {
+          result.total += 1;
+          if (result.records.length < 64) {
+            result.records.push({
+              marker: segment.marker, kind: segment.kind, length: segment.end - segment.start,
+              ...classify(bytes, segment),
+            });
+          } else result.truncated = true;
+        } catch { result.callbackErrored = true; }
+      });
+      result.outcome = 'ok';
+    } catch { result.outcome = 'error'; }
+    return result;
+  }
+  async function checkOutput(blob?: Blob, dimensions?: { width: number; height: number }) {
+    const outcomes = {
+      read: 'not-run' as Outcome, normalization: 'not-run' as Outcome,
+      strictValidation: 'not-run' as Outcome, replacement: 'not-run' as Outcome,
+      summary: 'not-run' as Outcome, nativeSummary: 'not-run' as Outcome, pixelComparison: 'not-run' as Outcome,
+    };
+    let bytes: Uint8Array<ArrayBuffer> | undefined;
+    let normalized: Uint8Array<ArrayBuffer> | undefined;
+    let replacement: Blob | undefined;
+    let summary: Summary | undefined;
+    if (blob) {
+      try { bytes = new Uint8Array(await blob.arrayBuffer()); outcomes.read = 'ok'; }
+      catch { outcomes.read = 'error'; }
+    }
+    const before = inventory(bytes);
+    if (bytes) {
+      try { normalized = stripEncoderMetadata(bytes); outcomes.normalization = 'ok'; }
+      catch (error) { outcomes.normalization = rejection(error); }
+    }
+    const after = inventory(normalized);
+    if (normalized && dimensions) {
+      try {
+        assertSanitizedJpeg(normalized, dimensions.width, dimensions.height);
+        outcomes.strictValidation = 'ok';
+      } catch (error) { outcomes.strictValidation = rejection(error); }
+      if (outcomes.strictValidation === 'ok') {
+        try { replacement = new Blob([normalized], { type: 'image/jpeg' }); outcomes.replacement = 'ok'; }
+        catch { outcomes.replacement = 'error'; }
+      }
+    }
+    if (replacement) {
+      try { summary = await helpers.summarizeJpeg(replacement); outcomes.summary = 'ok'; }
+      catch { outcomes.summary = 'error'; }
+    }
+    if (blob) {
+      try {
+        const before = await helpers.summarizeJpeg(blob);
+        outcomes.nativeSummary = 'ok';
+        if (summary) outcomes.pixelComparison = before.pixelHash === summary.pixelHash ? 'ok' : 'error';
+      } catch { outcomes.nativeSummary = 'error'; }
+    }
+    return { evidence: { outcomes, before, after }, summary };
+  }
+  let source: Blob | undefined;
+  let native: Summary | undefined;
+  let sourceCreation: Outcome;
+  let nativeSummary: Outcome = 'not-run';
+  try { source = await helpers.makeCanvasJpeg(width, height, dense); sourceCreation = 'ok'; }
+  catch { sourceCreation = 'error'; }
+  if (source) {
+    try { native = await helpers.summarizeJpeg(source); nativeSummary = 'ok'; }
+    catch { nativeSummary = 'error'; }
+  }
+  const sourceCheck = await checkOutput(source, { width, height });
+  const prepare = { outcome: 'not-run' as Outcome, stage: 'not-run' as string, code: 'not-run' as Outcome };
+  const nativeEncode = HTMLCanvasElement.prototype.toBlob;
+  const outputs: { canvas: HTMLCanvasElement; blob: Blob | null; width: number; height: number }[] = [];
+  const attempts: { side: number; quality: number | undefined }[] = [];
+  let captureErrored = false;
+  let prepared: import('../../src/images/process-jpeg').PreparedPhoto | undefined;
+  if (source) {
+    HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
+      const width = this.width;
+      const height = this.height;
+      attempts.push({ side: Math.max(width, height), quality: typeof quality === 'number' ? quality : undefined });
+      nativeEncode.call(this, (blob) => {
+        try {
+          const index = outputs.findIndex((output) => output.canvas === this);
+          const output = { canvas: this, blob, width, height };
+          if (index >= 0) outputs[index] = output;
+          else if (outputs.length < 2) outputs.push(output);
+          else captureErrored = true;
+        } catch { captureErrored = true; }
+        callback(blob);
+      }, type, quality);
+    };
+    try {
+      prepared = await prepareJpeg(source);
+      prepare.outcome = 'ok';
+    } catch (error) {
+      prepare.outcome = rejection(error);
+      if (error instanceof ImagePreparationError) {
+        prepare.code = rejection(error);
+        prepare.stage = error.stage && ['source', 'decode', 'mainEncode', 'thumbEncode', 'outputCheck', 'hash'].includes(error.stage)
+          ? error.stage : 'error';
+      } else { prepare.stage = 'error'; prepare.code = 'error'; }
+    } finally { HTMLCanvasElement.prototype.toBlob = nativeEncode; }
+  }
+  // These are independent rechecks of the actual last native output per canvas,
+  // not observations of private verifyAndHash internals or inferred failing markers.
+  const mainCheck = await checkOutput(outputs[0]?.blob ?? undefined, outputs[0]);
+  const thumbCheck = await checkOutput(outputs[1]?.blob ?? undefined, outputs[1]);
+  const summaries: { main?: Summary; thumb?: Summary } = {};
+  const preparedSummary = { main: 'not-run' as Outcome, thumb: 'not-run' as Outcome };
+  for (const variant of ['main', 'thumb'] as const) {
+    if (!prepared) continue;
+    try { summaries[variant] = await helpers.summarizeJpeg(prepared[variant]); preparedSummary[variant] = 'ok'; }
+    catch { preparedSummary[variant] = 'error'; }
+  }
+  return {
+    evidence: {
+      sourceCreation, nativeSummary, source: sourceCheck.evidence, prepare, captureErrored, classifierChecked,
+      boundary: 'captured-output-independent-recheck' as const,
+      main: mainCheck.evidence, thumb: thumbCheck.evidence, preparedSummary,
+    },
+    native, normalized: sourceCheck.summary, ...summaries, attempts,
+    hashes: prepared ? [prepared.mainSha256, prepared.thumbSha256] : undefined,
+    reported: prepared ? [prepared.width, prepared.height] : undefined,
+  };
+}
+
+async function publishProbe(testInfo: TestInfo, label: string, browserVersion: string, evidence: unknown) {
+  const text = JSON.stringify({ case: label, browserVersion, evidence });
+  console.log(`synthetic-jpeg-probe ${text}`);
+  await testInfo.attach('synthetic-jpeg-probe', { body: text, contentType: 'application/json' });
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    await appendFile(process.env.GITHUB_STEP_SUMMARY, `\n\`\`\`json\n${text}\n\`\`\`\n`);
+  }
+}
+
+function expectProbeSuccess(result: Awaited<ReturnType<typeof probeGeneratedJpeg>>) {
+  expect(result.evidence.sourceCreation).toBe('ok');
+  expect(result.evidence.nativeSummary).toBe('ok');
+  expect(result.evidence.prepare.outcome).toBe('ok');
+  expect(result.evidence.captureErrored).toBe(false);
+  expect(result.evidence.classifierChecked).toBe(true);
+  expect(result.evidence.preparedSummary).toEqual({ main: 'ok', thumb: 'ok' });
+  expect(result.hashes).toEqual([result.main?.hash, result.thumb?.hash]);
+  for (const output of [result.evidence.source, result.evidence.main, result.evidence.thumb]) {
+    expect(Object.values(output.outcomes)).toEqual(['ok', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok']);
+    for (const inventory of [output.before, output.after]) {
+      expect(inventory.outcome).toBe('ok');
+      expect(inventory.callbackErrored).toBe(false);
+      expect(inventory.truncated).toBe(false);
+    }
+    expect(output.after.records.some((segment) => segment.marker === 0xed)).toBe(false);
+    for (const segment of output.after.records.filter((segment) => segment.marker === 0xe0)) {
+      expect(segment.family).toBe('jfif');
+      expect(segment.canonicalJfif).toBe(true);
+    }
+  }
+}
 
 function expectSanitized(image: Summary, maxSide: number, maxBytes: number): void {
   expect(image.type).toBe('image/jpeg');
@@ -27,26 +261,11 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/__image-processing-test');
 });
 
-test('fresh native four-colour JPEG baseline has independently checked outputs', async ({ page }, testInfo) => {
-  const result = await page.evaluate(async () => {
-    const modulePath = '/src/images/process-jpeg.ts';
-    const jpegPath = '/src/images/jpeg.ts';
-    const helperPath = '/tests/fixtures/jpeg-helpers.ts';
-    const { prepareJpeg } = await import(modulePath) as typeof import('../../src/images/process-jpeg');
-    const { assertSanitizedJpeg, stripEncoderMetadata } = await import(jpegPath) as typeof import('../../src/images/jpeg');
-    const helpers = await import(helperPath) as typeof import('../fixtures/jpeg-helpers');
-    const source = await helpers.makeCanvasJpeg();
-    const native = await helpers.summarizeJpeg(source);
-    const bytes = stripEncoderMetadata(new Uint8Array(await source.arrayBuffer()));
-    assertSanitizedJpeg(bytes, 120, 80);
-    const normalized = await helpers.summarizeJpeg(new Blob([bytes], { type: 'image/jpeg' }));
-    const prepared = await prepareJpeg(source);
-    return {
-      native, normalized, main: await helpers.summarizeJpeg(prepared.main),
-      thumb: await helpers.summarizeJpeg(prepared.thumb),
-      hashes: [prepared.mainSha256, prepared.thumbSha256],
-    };
-  });
+test('fresh native four-colour JPEG baseline has independently checked outputs', async ({ page, browser }, testInfo) => {
+  const probe = await page.evaluate(probeGeneratedJpeg, { width: 120, height: 80 });
+  await publishProbe(testInfo, 'native-four-colour', browser.version(), probe.evidence);
+  expectProbeSuccess(probe);
+  const result = { ...probe, native: probe.native!, normalized: probe.normalized!, main: probe.main!, thumb: probe.thumb! };
   testInfo.annotations.push({ type: 'synthetic-native-markers', description: JSON.stringify(result.native.markers) });
   expect([result.native.width, result.native.height]).toEqual([120, 80]);
   expect(result.normalized.pixelHash).toBe(result.native.pixelHash);
@@ -58,6 +277,54 @@ test('fresh native four-colour JPEG baseline has independently checked outputs',
     }));
   }
   expect(result.hashes).toEqual([result.main.hash, result.thumb.hash]);
+});
+
+test('generated JPEG observer retains validated prefix without changing strict failure', async ({ page, browser }, testInfo) => {
+  const result = await page.evaluate(async () => {
+    const helperPath = '/tests/fixtures/jpeg-helpers.ts';
+    const { inspectJpegSegments, jpegHeaderFixture } =
+      await import(helperPath) as typeof import('../fixtures/jpeg-helpers');
+    const bytes = jpegHeaderFixture();
+    const ordinary = inspectJpegSegments(bytes);
+    const explicitUndefined = inspectJpegSegments(bytes, undefined);
+    const observed: typeof ordinary = [];
+    const returned = inspectJpegSegments(bytes, (segment) => {
+      observed.push({ ...segment });
+      Object.assign(segment, { marker: 0, start: 0, end: 0, kind: 'exif' });
+    });
+    const prefix: typeof ordinary = [];
+    const truncated = bytes.subarray(0, -1);
+    const outcomes = [];
+    for (const mode of ['default', 'undefined', 'observer'] as const) {
+      try {
+        if (mode === 'default') inspectJpegSegments(truncated);
+        else inspectJpegSegments(truncated, mode === 'undefined' ? undefined : (segment) => { prefix.push({ ...segment }); });
+        outcomes.push('unexpected-success');
+      } catch (error) {
+        outcomes.push(error instanceof Error && error.message === 'fixture truncated marker' ? 'strict-rejection' : 'error');
+      }
+    }
+    const sentinel = new Error();
+    let callbackFailure = 'unexpected-success';
+    try { inspectJpegSegments(bytes, () => { throw sentinel; }); }
+    catch (error) { callbackFailure = error === sentinel ? 'callback-error' : 'error'; }
+    return {
+      ordinary, explicitUndefined, observed, returned, prefix, outcomes, callbackFailure,
+      evidence: {
+        scope: 'validated-prefix', outcomes, callbackFailure,
+        total: prefix.length, truncated: false,
+        records: prefix.map(({ marker, kind, start, end }) => ({ marker, kind, length: end - start })),
+      },
+    };
+  });
+  await publishProbe(testInfo, 'generated-truncated-tail', browser.version(), result.evidence);
+  expect(result.explicitUndefined).toEqual(result.ordinary);
+  expect(result.observed).toEqual(result.ordinary);
+  expect(result.returned).toEqual(result.ordinary);
+  expect(result.outcomes).toEqual(['strict-rejection', 'strict-rejection', 'strict-rejection']);
+  expect(result.prefix).toEqual(result.ordinary.slice(0, -1));
+  expect(result.prefix).toHaveLength(2);
+  expect(result.callbackFailure).toBe('callback-error');
 });
 
 test('fresh generated Exif normalization preserves every retained byte and decoded pixel', async ({ page }) => {
@@ -72,7 +339,7 @@ test('fresh generated Exif normalization preserves every retained byte and decod
     new DataView(absent.buffer).setUint16(20, 0x010e, true);
     const generated = helpers.insertSegments(native, absent, helpers.exifSegment(1), helpers.exifSegment(1, false));
     const segments = helpers.inspectJpegSegments(generated);
-    const removed = segments.filter((segment) => segment.kind !== 'other');
+    const removed = segments.filter((segment) => segment.kind !== 'other' || segment.marker === 0xed);
     const retained: Uint8Array[] = [];
     let start = 0;
     for (const segment of removed) {
@@ -132,7 +399,7 @@ test('fresh encoder Exif is removed before final bytes are hashed without reenco
       for (const [index, blob] of [prepared.main, prepared.thumb].entries()) {
         const before = emitted[index]!;
         const after = new Uint8Array(await blob.arrayBuffer());
-        const ranges = helpers.inspectJpegSegments(before).filter((segment) => segment.kind !== 'other');
+        const ranges = helpers.inspectJpegSegments(before).filter((segment) => segment.kind !== 'other' || segment.marker === 0xed);
         const expected = [];
         let start = 0;
         for (const range of ranges) {
@@ -154,6 +421,81 @@ test('fresh encoder Exif is removed before final bytes are hashed without reenco
   expectSanitized(result.main, 1600, 512_000);
   expectSanitized(result.thumb, 320, 61_440);
   expect(result.hashes).toEqual([result.main.hash, result.thumb.hash]);
+});
+
+test('fresh encoder APP13 removal preserves exact bytes, same-engine pixels and final main/thumb hashes', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const modulePath = '/src/images/process-jpeg.ts';
+    const jpegPath = '/src/images/jpeg.ts';
+    const helperPath = '/tests/fixtures/jpeg-helpers.ts';
+    const { prepareJpeg } = await import(modulePath) as typeof import('../../src/images/process-jpeg');
+    const { assertSanitizedJpeg, stripEncoderMetadata, ImagePreparationError } =
+      await import(jpegPath) as typeof import('../../src/images/jpeg');
+    const helpers = await import(helperPath) as typeof import('../fixtures/jpeg-helpers');
+    const source = await helpers.makeCanvasJpeg(640, 480);
+    const native = HTMLCanvasElement.prototype.toBlob;
+    const emitted: Uint8Array<ArrayBuffer>[] = [];
+    HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
+      native.call(this, (blob) => {
+        if (!blob) { callback(null); return; }
+        void blob.arrayBuffer().then((buffer) => {
+          const app13 = helpers.jpegSegment(0xed, new TextEncoder().encode('Photoshop 3.0\0synthetic'));
+          const bytes = helpers.insertSegments(new Uint8Array(buffer), app13, helpers.jpegSegment(0xed, new Uint8Array([1, 2, 3])));
+          emitted.push(bytes);
+          callback(new Blob([bytes], { type: 'image/jpeg' }));
+        });
+      }, type, quality);
+    };
+    try {
+      const prepared = await prepareJpeg(source);
+      const outputs = [];
+      for (const [index, blob] of [prepared.main, prepared.thumb].entries()) {
+        const before = emitted[index]!;
+        const after = new Uint8Array(await blob.arrayBuffer());
+        const ranges = helpers.inspectJpegSegments(before).filter((segment) => segment.kind !== 'other' || segment.marker === 0xed);
+        const retained = [];
+        let start = 0;
+        for (const range of ranges) {
+          retained.push(before.subarray(start, range.start));
+          start = range.end;
+        }
+        retained.push(before.subarray(start));
+        const expected = helpers.joinBytes(...retained);
+        const summary = await helpers.summarizeJpeg(blob);
+        const nativeSummary = await helpers.summarizeJpeg(new Blob([before], { type: 'image/jpeg' }));
+        const again = stripEncoderMetadata(after);
+        const app13Only = helpers.insertSegments(after, helpers.jpegSegment(0xed, new Uint8Array([1])));
+        let rawRejection = 'unexpected-success';
+        try { assertSanitizedJpeg(app13Only, summary.width, summary.height); }
+        catch (error) { rawRejection = error instanceof ImagePreparationError ? error.code : 'error'; }
+        const stripped = stripEncoderMetadata(app13Only);
+        assertSanitizedJpeg(stripped, summary.width, summary.height);
+        outputs.push({
+          summary, pixelHashBefore: nativeSummary.pixelHash, rawRejection,
+          rawStrippedExact: stripped.length === after.length && stripped.every((byte, offset) => byte === after[offset]),
+          exact: expected.length === after.length && expected.every((byte, offset) => byte === after[offset]),
+          idempotent: again.length === after.length && again.every((byte, offset) => byte === after[offset]),
+          delta: before.length - after.length,
+          expectedDelta: ranges.reduce((total, range) => total + range.end - range.start, 0),
+          app13Before: ranges.filter((segment) => segment.marker === 0xed).length,
+        });
+      }
+      return { outputs, calls: emitted.length, hashes: [prepared.mainSha256, prepared.thumbSha256] };
+    } finally { HTMLCanvasElement.prototype.toBlob = native; }
+  });
+  expect(result.calls).toBe(2);
+  expect(result.outputs).toHaveLength(2);
+  for (const [index, output] of result.outputs.entries()) {
+    expect(output.rawRejection).toBe('invalid');
+    expect(output.rawStrippedExact).toBe(true);
+    expect(output.exact).toBe(true);
+    expect(output.idempotent).toBe(true);
+    expect(output.app13Before).toBeGreaterThanOrEqual(2);
+    expect(output.delta).toBe(output.expectedDelta);
+    expect(output.summary.pixelHash).toBe(output.pixelHashBefore);
+    expectSanitized(output.summary, index === 0 ? 1600 : 320, index === 0 ? 512_000 : 61_440);
+    expect(result.hashes[index]).toBe(output.summary.hash);
+  }
 });
 
 test('preparation failures expose only allowlisted stage and reason, never exception details', async ({ page }) => {
@@ -317,25 +659,21 @@ for (const path of ['bitmap', 'fallback', 'unsupported-bitmap'] as const) {
   }
 }
 
-test('resizes without upscaling, preserving portrait and landscape aspect ratios', async ({ page }) => {
-  const results = await page.evaluate(async () => {
-    const modulePath = '/src/images/process-jpeg.ts';
-    const helperPath = '/tests/fixtures/jpeg-helpers.ts';
-    const { prepareJpeg } = await import(modulePath) as typeof import('../../src/images/process-jpeg');
-    const helpers = await import(helperPath) as typeof import('../fixtures/jpeg-helpers');
-    const results = [];
-    for (const [width, height] of [[2400, 1800], [1800, 2400], [31, 19], [1, 97]]) {
-      const result = await prepareJpeg(await helpers.makeCanvasJpeg(width!, height!));
-      results.push({
-        input: [width!, height!],
-        main: await helpers.summarizeJpeg(result.main),
-        thumb: await helpers.summarizeJpeg(result.thumb),
-        reported: [result.width, result.height],
-      });
-    }
-    return results;
-  });
-  for (const { input, main, thumb, reported } of results) {
+test('resizes without upscaling, preserving portrait and landscape aspect ratios', async ({ page, browser }, testInfo) => {
+  const results = [];
+  for (const [width, height, label] of [
+    [2400, 1800, 'resize-landscape'], [1800, 2400, 'resize-portrait'],
+    [31, 19, 'resize-small'], [1, 97, 'resize-narrow'],
+  ] as const) {
+    const probe = await page.evaluate(probeGeneratedJpeg, { width, height });
+    await publishProbe(testInfo, label, browser.version(), probe.evidence);
+    results.push({ input: [width, height], probe });
+  }
+  for (const { probe } of results) expectProbeSuccess(probe);
+  const summaries = results.map(({ input, probe }) => ({
+    input, main: probe.main!, thumb: probe.thumb!, reported: probe.reported,
+  }));
+  for (const { input, main, thumb, reported } of summaries) {
     expectSanitized(main, 1600, 512_000);
     expectSanitized(thumb, 320, 61_440);
     expect(reported).toEqual([main.width, main.height]);
@@ -350,29 +688,11 @@ test('resizes without upscaling, preserving portrait and landscape aspect ratios
   }
 });
 
-test('dense native synthetic pixels meet both budgets without cross-engine reduction assumptions', async ({ page }) => {
-  const result = await page.evaluate(async () => {
-    const modulePath = '/src/images/process-jpeg.ts';
-    const helperPath = '/tests/fixtures/jpeg-helpers.ts';
-    const { prepareJpeg } = await import(modulePath) as typeof import('../../src/images/process-jpeg');
-    const helpers = await import(helperPath) as typeof import('../fixtures/jpeg-helpers');
-    const source = await helpers.makeCanvasJpeg(1600, 1600, true);
-    const native = HTMLCanvasElement.prototype.toBlob;
-    const attempts: { side: number; quality: number | undefined }[] = [];
-    HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
-      attempts.push({ side: Math.max(this.width, this.height), quality: typeof quality === 'number' ? quality : undefined });
-      native.call(this, callback, type, quality);
-    };
-    try {
-      const result = await prepareJpeg(source);
-      return {
-        main: await helpers.summarizeJpeg(result.main),
-        thumb: await helpers.summarizeJpeg(result.thumb), attempts,
-      };
-    } finally {
-      HTMLCanvasElement.prototype.toBlob = native;
-    }
-  });
+test('dense native synthetic pixels meet both budgets without cross-engine reduction assumptions', async ({ page, browser }, testInfo) => {
+  const probe = await page.evaluate(probeGeneratedJpeg, { width: 1600, height: 1600, dense: true });
+  await publishProbe(testInfo, 'native-dense', browser.version(), probe.evidence);
+  expectProbeSuccess(probe);
+  const result = { ...probe, main: probe.main!, thumb: probe.thumb! };
   expectSanitized(result.main, 1600, 512_000);
   expectSanitized(result.thumb, 320, 61_440);
   expect(result.main.width).toBeLessThanOrEqual(1600);

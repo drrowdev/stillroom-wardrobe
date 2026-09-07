@@ -119,7 +119,9 @@ export async function makeCanvasJpeg(width = 120, height = 80, dense = false): P
   }
 }
 
-export function inspectJpegSegments(bytes: Uint8Array) {
+export function inspectJpegSegments(bytes: Uint8Array, observe?: (segment: Readonly<{
+  marker: number; start: number; end: number; kind: 'exif' | 'icc' | 'other';
+}>) => void) {
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new Error('fixture SOI expected');
   const segments: { marker: number; start: number; end: number; kind: 'exif' | 'icc' | 'other' }[] = [];
   let offset = 2;
@@ -139,6 +141,7 @@ export function inspectJpegSegments(bytes: Uint8Array) {
     if (marker === 0xd9) {
       if (!sawScan || offset !== bytes.length) throw new Error('fixture EOI or tail invalid');
       segments.push({ marker, start, end: offset, kind: 'other' });
+      observe?.({ marker, start, end: offset, kind: 'other' });
       return segments;
     }
     if (marker === 0 || marker === 1 || marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) ||
@@ -151,6 +154,7 @@ export function inspectJpegSegments(bytes: Uint8Array) {
       : marker === 0xe2 && signature('ICC_PROFILE\0') ? 'icc' : 'other';
     offset += length;
     segments.push({ marker, start, end: offset, kind });
+    observe?.({ marker, start, end: offset, kind });
     entropy = marker === 0xda;
     sawScan ||= entropy;
   }

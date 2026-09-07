@@ -7,8 +7,21 @@ import path from 'node:path';
 import {
   ROOT, DB_CONTAINER, PROJECT_ID, MIGRATION_HASH, assertLoopbackUrl, assertLocalApi, assertPublishableKey,
   normalSessionEnvironment, validateSessionEnvironment, commandEnvironment, requireDocker, requireLocalContainer,
-  LocalBackendError, securityFailureExitCode,
+  LocalBackendError, securityFailureExitCode, describeGenerationResult,
 } from '../../scripts/backend/local.mjs';
+
+declare module '../../scripts/backend/local.mjs' {
+  export function describeGenerationResult(result: unknown, elapsedMs: unknown): {
+    tag: 'success' | 'nonzero-empty-output' | 'nonzero-with-stderr' | 'nonzero-with-stdout'
+      | 'missing-database-output' | 'missing-images-output' | 'invalid-result';
+    exitCode: number | null;
+    elapsedMs: number | null;
+    stdoutBytes: number | null;
+    stderrBytes: number | null;
+    hasDatabaseOutput: boolean;
+    hasImagesOutput: boolean;
+  };
+}
 
 const credentials = {
   SUPABASE_URL: 'http://127.0.0.1:54321',
@@ -17,6 +30,129 @@ const credentials = {
   TEST_B_EMAIL: 'user-b@example.test', TEST_B_PASSWORD: 'b'.repeat(32),
   ALLOW_SECURITY_TESTS: '1',
 };
+
+describe('safe local type-generation description', () => {
+  const stdout = 'export type Database = { item_images: {} }';
+  const keys = ['tag', 'exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes', 'hasDatabaseOutput', 'hasImagesOutput'];
+  const tags = ['success', 'nonzero-empty-output', 'nonzero-with-stderr', 'nonzero-with-stdout',
+    'missing-database-output', 'missing-images-output', 'invalid-result'];
+
+  function expectFixedReport(report: ReturnType<typeof describeGenerationResult>) {
+    expect(Object.keys(report)).toEqual(keys);
+    expect(tags).toContain(report.tag);
+    for (const field of ['exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes'] as const) {
+      const value = report[field];
+      expect(value === null || typeof value === 'number' && Number.isSafeInteger(value)).toBe(true);
+      if (field !== 'exitCode' && value !== null) expect(value).toBeGreaterThanOrEqual(0);
+    }
+    expect(typeof report.hasDatabaseOutput).toBe('boolean');
+    expect(typeof report.hasImagesOutput).toBe('boolean');
+    expect(JSON.stringify(report).length).toBeLessThan(400);
+  }
+
+  it('describes the exact successful tuple without changing or returning it', () => {
+    const result = Object.freeze({ code: 0, stdout, stderr: '' });
+    const report = describeGenerationResult(result, 12.75);
+    expect(report).toEqual({
+      tag: 'success', exitCode: 0, elapsedMs: 12, stdoutBytes: 42, stderrBytes: 0,
+      hasDatabaseOutput: true, hasImagesOutput: true,
+    });
+    expectFixedReport(report);
+    expect(result).toEqual({ code: 0, stdout, stderr: '' });
+  });
+
+  it.each([
+    [2, '', '', 'nonzero-empty-output', false, false],
+    [1, '', 'synthetic error', 'nonzero-with-stderr', false, false],
+    [1, stdout, 'synthetic error', 'nonzero-with-stderr', true, true],
+    [-1, stdout, '', 'nonzero-with-stdout', true, true],
+    [0, '', '', 'missing-database-output', false, false],
+    [0, 'item_images:', '', 'missing-database-output', false, true],
+    [0, 'export type Database = {}', '', 'missing-images-output', true, false],
+    [0, stdout, 'synthetic warning', 'success', true, true],
+    [0, 'export type Database= { item_images : {} }', '', 'missing-database-output', false, false],
+  ])('uses observational precedence for case %#', (code, output, error, tag, database, images) => {
+    const report = describeGenerationResult({ code, stdout: output, stderr: error }, 180_001);
+    expectFixedReport(report);
+    expect(report).toMatchObject({ tag, exitCode: code, hasDatabaseOutput: database, hasImagesOutput: images });
+    expect(report.stdoutBytes).toBe(Buffer.byteLength(output as string, 'utf8'));
+    expect(report.stderrBytes).toBe(Buffer.byteLength(error as string, 'utf8'));
+  });
+
+  it('counts UTF-8 bytes of retained strings, not characters or supplied counters', () => {
+    const report = describeGenerationResult({
+      code: 1, stdout: 'ä🙂', stderr: '漢\u0000', stdoutBytes: 999, stderrBytes: 999,
+      tag: 'success', hasDatabaseOutput: true, hasImagesOutput: true,
+    }, 0);
+    expectFixedReport(report);
+    expect(report).toEqual({
+      tag: 'nonzero-with-stderr', exitCode: 1, elapsedMs: 0, stdoutBytes: 6, stderrBytes: 4,
+      hasDatabaseOutput: false, hasImagesOutput: false,
+    });
+  });
+
+  it.each([undefined, null, false, '0', 1n, NaN, Infinity, -Infinity, 0.5,
+    Number.MAX_SAFE_INTEGER + 1, Number.MIN_SAFE_INTEGER - 1])('rejects invalid exit code case %#', (code) => {
+    const report = describeGenerationResult({ code, stdout, stderr: '' }, 1);
+    expectFixedReport(report);
+    expect(report).toMatchObject({ tag: 'invalid-result', exitCode: null, hasDatabaseOutput: true, hasImagesOutput: true });
+  });
+
+  it.each([undefined, null, '1', false, 1n, NaN, Infinity, -Infinity, -0.1, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid elapsed case %#', (elapsed) => {
+      const report = describeGenerationResult({ code: 0, stdout, stderr: '' }, elapsed);
+      expectFixedReport(report);
+      expect(report).toMatchObject({ tag: 'invalid-result', elapsedMs: null });
+    },
+  );
+
+  it.each([Number.MIN_SAFE_INTEGER, -1, 0, Number.MAX_SAFE_INTEGER])('preserves bounded exit code %s', (code) => {
+    const report = describeGenerationResult({ code, stdout, stderr: '' }, Number.MAX_SAFE_INTEGER);
+    expectFixedReport(report);
+    expect(report).toMatchObject({ exitCode: code, elapsedMs: Number.MAX_SAFE_INTEGER,
+      tag: code === 0 ? 'success' : 'nonzero-with-stdout' });
+  });
+
+  it('never serializes synthetic private text, including malformed and unknown inputs', () => {
+    const canary = 'generation-report-canary-8f42c6e9';
+    const privateParts = [
+      canary, ['sb', 'secret', 'fictional-only-0123456789'].join('_'),
+      ['ghp', 'x'.repeat(36)].join('_'),
+      [Buffer.from('{}').toString('base64url'),
+        Buffer.from(JSON.stringify({ role: ['service', 'role'].join('_') })).toString('base64url'), 'signature'].join('.'),
+      ['postgresql:', '//fictional:never-a-password@example.test/db'].join(''),
+      '/private/fictional.sql', 'SELECT fictional_private_value;',
+    ];
+    const text = privateParts.join('\n');
+    const accessor = vi.fn(() => { throw new Error(text); });
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    const unknown = { code: 0, stdout, stderr: '', toJSON: accessor, message: text, path: text, payload: text };
+    Object.defineProperty(unknown, 'unrelated', { get: accessor });
+    const cases = [
+      undefined, null, true, 0, text, Symbol(text), [], new Error(text), {},
+      Object.create({ code: 0, stdout, stderr: '' }),
+      { code: 0, stdout: text, stderr: text }, { code: 1, stdout: text, stderr: text },
+      { code: 1, stdout: text, stderr: '' }, { code: 2, stdout: '', stderr: '' },
+      { code: 0, stdout: `${stdout}\n${text}`, stderr: text },
+      { code: 0, stdout: `export type Database = {}\n${text}`, stderr: text },
+      { code: text, stdout: text, stderr: text }, { code: 0, stdout: { toString: accessor }, stderr: text },
+      { code: 0, stdout: text, stderr: null }, Object.defineProperty({}, 'code', { get: accessor }),
+      new Proxy({}, { getOwnPropertyDescriptor: accessor }), revoked.proxy, unknown,
+    ];
+    for (const result of cases) {
+      const report = describeGenerationResult(result, 1);
+      expectFixedReport(report);
+      for (const part of privateParts) expect(JSON.stringify(report).includes(part)).toBe(false);
+    }
+    for (const result of [null, {}, new Error(text), revoked.proxy,
+      { code: 0, stdout: null, stderr: '' }, { code: 0, stdout, stderr: [] }]) {
+      expect(describeGenerationResult(result, 1).tag).toBe('invalid-result');
+    }
+    expect(accessor).toHaveBeenCalledTimes(1); // Only the throwing Proxy trap, never an accessor/coercion/toJSON.
+    expect(describeGenerationResult(unknown, text)).toMatchObject({ tag: 'invalid-result', elapsedMs: null });
+  });
+});
 
 describe('security failure classification', () => {
   const outage = new LocalBackendError('BLOCKED: fictional outage.');
