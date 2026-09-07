@@ -815,3 +815,16 @@ requested or inspected. Every merge needs fresh explicit user approval;
 deployment is separately authorized. Rollback is the coordinator's separately
 authorized previous reviewed static build based on `0545cf3`, never a DB rollback
 or a change to the working recovery flow.
+
+Supplemental automated review of code commit `2204dd7` returned zero CodeQL
+alerts (JavaScript/Actions). Its two suggestions were not adopted: a collapsed
+`hidden` section remains a valid DOM target for `aria-controls`, and the
+zero-based post-increment counter already accepts exactly 4096 header segments
+and rejects segment 4097. An independent exact-boundary unit regression was added
+for the latter; no production guard/accessibility change was needed. These
+automated checks do not replace coordinator independent final review.
+After this test-only addition, `npm run test:unit -- tests/unit/jpeg.test.ts`
+passed 50 tests and `npm run test:unit` passed 272 tests; lint, typecheck and
+`git diff --check` each returned exit 0. Browser/build results above apply to
+unchanged production code at `2204dd7`, not a new browser rerun. CI `34102995096`
+on that code commit is also `action_required`; no required job pass is claimed.

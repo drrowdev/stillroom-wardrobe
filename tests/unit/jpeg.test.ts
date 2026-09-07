@@ -194,6 +194,15 @@ describe('fresh JPEG output validation', () => {
     )), 'invalid');
   });
 
+  it('allows exactly 4096 generated header segments and rejects segment 4097', () => {
+    const profile = jpegSegment(0xe2, new TextEncoder().encode('ICC_PROFILE\0synthetic'));
+    const headers = Array.from({ length: JPEG_LIMITS.headerSegments - 2 }, () => profile);
+    const exact = insertSegments(jpegHeaderFixture(), ...headers);
+    expect(inspectJpegSegments(exact).filter((segment) => segment.marker !== 0xd9)).toHaveLength(4096);
+    expect(stripEncoderMetadata(exact)).toEqual(jpegHeaderFixture());
+    expectCode(() => stripEncoderMetadata(insertSegments(exact, profile)), 'tooLarge');
+  });
+
   it('never hides XMP, IPTC, COM, unknown APP or near-Exif signatures from the strict validator', () => {
     for (const [marker, payload] of [
       [0xe1, 'http://ns.adobe.com/xap/1.0/\0synthetic'],
