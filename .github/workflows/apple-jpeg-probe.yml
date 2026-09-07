@@ -1,0 +1,51 @@
+name: Apple JPEG diagnostic
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-jpeg-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-jpeg:
+    name: Generated JPEG on native Apple WebKit
+    if: github.event.repository.private == false
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Record native runner
+        shell: bash
+        run: |
+          {
+            printf 'ImageOS: %s\nImageVersion: %s\n' "$ImageOS" "$ImageVersion"
+            printf 'macOS: %s\nBuild: %s\nArchitecture: %s\n' \
+              "$(sw_vers -productVersion)" "$(sw_vers -buildVersion)" "$(uname -m)"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$(uname -m)" = arm64
+      - run: npm ci --no-fund
+      - run: ./node_modules/.bin/playwright install webkit
+      - name: Probe only generated JPEG cases
+        shell: bash
+        run: |
+          set +e
+          npm run test:browser -- tests/browser/image-processing.spec.ts \
+            --project=webkit-photo --workers=1 --retries=0 \
+            --grep '(?:^| )(fresh native four-colour JPEG baseline has independently checked outputs|resizes without upscaling, preserving portrait and landscape aspect ratios|dense native synthetic pixels meet both budgets without cross-engine reduction assumptions|generated JPEG observer retains validated prefix without changing strict failure)$'
+          status=$?
+          printf '\nNative JPEG test exit code: %s\n' "$status" >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: Record diagnostic boundary
+        if: always()
+        run: |
+          printf '\nJob outcome: %s. Generated Mac WebKit evidence only; not physical iPhone, Save, RLS or HEIC acceptance. Missing records are not a pass. Stop after reproduction or non-reproduction; no runtime correction or deployment is authorized.\n' \
+            '${{ job.status }}' | tee -a "$GITHUB_STEP_SUMMARY"

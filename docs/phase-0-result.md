@@ -1015,3 +1015,79 @@ coordinator disposition, not treated as a production transport defect.
 Fresh-code-head CI `34112928196` is `action_required`; MCP log lookup returned
 zero jobs, not a passing CI result. Automated validation is supplemental and
 does not replace the required independent final review.
+### PR #5 Apple-native JPEG diagnostic — 7 September 2026
+
+I04/I05 diagnostic support only, preserving R03/R04/R12/R23, private images,
+independent owners and explicit Save. Base main
+`bf0ad74dddc4bbc4a3db312dc376edd9495de439`; starting head
+`4057679375939b304b213dcdbc8c9ddfe485f92d` (empty platform plan commit).
+The coordinator's [current-session receipt 5571425820](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5571425820)
+was read before edits: actual `sweagent-capi:gpt-6-astra`, task
+`71689469-7d3e-4b5a-adad-2e71e98284a7`, session
+`136b1f57-d7a4-4b8b-934b-45478e904415`, observed
+`2026-09-07T13:34:08.9224964Z`. It explicitly accepts the platform-created
+`copilot/copilotphase0-apple-jpeg-probe` branch spelling.
+
+The full [controlling plan 5571393492](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5571393492)
+records completed different-provider prereview: **Anthropic / Claude Opus 5**,
+`c4a35485` turns 5/6 and replacement `apple-probe-plan-check`. The approved
+observer amendment selects option (b): existing exif/icc/other kind and primitive
+marker/length only, no payload-signature classifier. No new plan or runtime fix.
+Context consulted: root/Copilot instructions, cloud guide and current Phase-0
+evidence; blueprint 00/03/05/07/08/10/14 Phase 0/15 I04–I05/20; image migration/
+generated-type references; both JPEG source modules, image spec/fixture helper,
+package/lock, Node/TypeScript/ESLint/Playwright config and existing CI; approved
+PR discussion, current diff/reviews and CI job-log lookup.
+
+The reported physical-iPhone `outputCheck / invalid` follows source admission,
+decode and both encodes; its particular Blob/normalization/validation failure is
+still **unknown**. No private image or metadata was supplied. This packet adds
+only the separate workflow, existing image spec, optional fixture observer and
+this evidence entry. The runtime, validator/normalizer/limits, Save/Auth, schema,
+upload receiver, dependencies, existing CI/config and root instructions are unchanged.
+
+Generated opaque sRGB native-four-colour/resize/dense cases retain the last
+actual native Blob and dimensions per main/thumb canvas, forwarding callbacks
+unchanged. Browser-side independent rechecks separately record Blob read,
+normalization, strict validation and replacement, with truthful not-run
+prerequisites. These are explicitly **captured-output independent rechecks**,
+not instrumentation of private `verifyAndHash` internals; actual `prepareJpeg`
+reports only allowlisted stage/code. No unseen thumbnail is inferred.
+The strict helper's optional callback gets fresh primitive copies only after
+validated collection. Inventories retain the first 64 validated-prefix records,
+total/truncated and separate callback-error status; the last record does not
+identify a rejecting guard or marker. Node emits generated-only JSON/attachments
+and job-summary records before the unchanged success/pixel/hash/size/privacy
+assertions. Rejection or unknown error remains failure. The small truncated-tail
+regression checks default/undefined parity, prefix retention, copied-record
+isolation and unchanged callback-error propagation.
+
+Commands from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`:
+
+| Exact command | Actual result |
+|---|---|
+| `npm run lint -- tests/browser/image-processing.spec.ts tests/fixtures/jpeg-helpers.ts` | Initial exit 1: redundant initializer and `this` alias; corrected. |
+| `./node_modules/.bin/eslint tests/browser/image-processing.spec.ts tests/fixtures/jpeg-helpers.ts` / `npm run typecheck` / `git diff --check` | Each exit 0. |
+| `npm run test:browser -- tests/browser/image-processing.spec.ts --project=chromium --workers=1 --retries=0 --grep '(?:^\| )(fresh native four-colour JPEG baseline has independently checked outputs\|resizes without upscaling, preserving portrait and landscape aspect ratios\|dense native synthetic pixels meet both budgets without cross-engine reduction assumptions\|generated JPEG observer retains validated prefix without changing strict failure)$'` | Exit 0, **4/4**. Initial start-anchored grep selected no tests (exit 1); corrected for Playwright's full-title prefix, not widened. |
+| Same exact selection with `--project=webkit-photo --list` | Exit 0: exactly four cases in the image spec, no wardrobe suite; listing is not execution. |
+| `npm run test:browser -- tests/browser/image-processing.spec.ts --project=chromium --project=webkit-photo --workers=1 --retries=0` | Exit 1: **19 Chromium passed**, 19 WebKit launch failures (missing pinned executable), no skips/retries. |
+| `./node_modules/.bin/playwright install webkit` | Download exit 0, existing WebKit 2359/26.6; host validation reports missing Linux libraries. No system packages installed; Linux WebKit remains BLOCKED. |
+
+GitHub API confirmed repository `private: false`. The isolated PR-only workflow
+uses one standard `macos-26` arm64 job, 15-minute timeout, existing pinned actions,
+read-only contents, no persisted checkout credentials/cache/artifact upload,
+and locked npm/Playwright. It records only runner image/macOS versions and
+architecture, uses the exact four-case selection above with zero retries and
+preserves the test exit code. Trace/video/screenshots remain off. No backend,
+hosted inputs or service mutation is needed. The approved plan records standard
+public macOS runner cost eligibility; no larger runner or paid service is added.
+
+**Native execution and fresh-head required CI remain external gates.**
+Starting-head CI `34128003202` is `action_required`; detailed log lookup found
+zero jobs, not a pass. The coordinator reviews the executable diff before trust
+authorization; this writer never approves/reruns workflows or waits idle for a
+native job. Linux results are not Apple proof. Reproduction and non-reproduction
+both end this diagnostic without a runtime correction, platform/quality search,
+UI telemetry, merge or deployment. A failing probe stays draft/unmerged.
+Mac WebKit is not physical iPhone/Safari, HEIC admission, Save/reload or hosted
+RLS acceptance. All earlier evidence and remaining device/privacy gates stand.
