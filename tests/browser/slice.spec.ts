@@ -1,9 +1,214 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { messages, type Language } from '../../src/i18n';
 import { inspectJpegSegments } from '../fixtures/jpeg-helpers';
 import { mockBackend, owners, signIn } from './mock-backend';
+
+function reserveWireImage(backend: Awaited<ReturnType<typeof mockBackend>>, owner = owners.a) {
+  const item = randomUUID(), image = randomUUID();
+  const prefix = `${owner}/${item}/${image}`;
+  backend.items.push({ id: item, owner_id: owner });
+  backend.images.push({ id: image, item_id: item, owner_id: owner, main_path: `${prefix}/main.jpg`, thumb_path: `${prefix}/thumb.jpg` });
+  return `${prefix}/main.jpg`;
+}
+
+function assertWireBytes(actual: Buffer, expected: Buffer) {
+  expect(actual.length).toBeGreaterThan(0);
+  expect(actual.length).toBe(expected.length);
+  expect(createHash('sha256').update(actual).digest('hex')).toBe(createHash('sha256').update(expected).digest('hex'));
+}
+
+test('actual upload wire preserves binary bytes and the oracle detects corruption', async ({ page }, testInfo) => {
+  const backend = await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto('/');
+  await signIn(page);
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  const path = reserveWireImage(backend);
+  const sent = Buffer.from(Array.from({ length: 4096 }, (_, index) => index % 256));
+  const observed = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith(path));
+  const responsePromise = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith(path));
+  const result = await page.evaluate(async ({ path, bytes }) => {
+    const modulePath = '/src/data/client.ts';
+    const { makeClient } = await import(modulePath) as typeof import('../../src/data/client');
+    const client = makeClient({ url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_browser_fixture_only', version: 'browser-fixture' });
+    const result = await client.storage.from('wardrobe').upload(path, new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' }),
+      { contentType: 'image/jpeg', upsert: false, cacheControl: '0' });
+    return { ok: !result.error, data: result.data };
+  }, { path, bytes: [...sent] });
+  expect(result).toEqual({ ok: true, data: { path, id: 'fixture', fullPath: `wardrobe/${path}` } });
+  const actual = backend.files.get(path)!;
+  assertWireBytes(actual, sent);
+  expect(backend.uploadWire.posts).toBe(1);
+  expect(backend.uploadWire.payloadBytes).toBe(4096);
+  expect(backend.uploadWire.receivedBytes).toBeGreaterThan(4096);
+  const headers = (await responsePromise).headers();
+  expect(headers['access-control-allow-origin']).toBe(new URL(page.url()).origin);
+  expect(headers['access-control-allow-methods']).toBe('POST, OPTIONS');
+  expect(headers['access-control-allow-headers']).toBe('authorization, apikey, content-type, x-upsert, x-client-info');
+  expect(headers['access-control-allow-credentials']).toBeUndefined();
+  const perturbed = Buffer.from(sent);
+  perturbed[100] = perturbed[100]! ^ 1;
+  expect(() => assertWireBytes(actual, perturbed)).toThrow();
+  expect(() => assertWireBytes(actual, sent.subarray(1))).toThrow();
+  // Inspector data is only a comparison, never the receiver's input or an upload oracle.
+  const request = await observed;
+  const inspector = request.postDataBuffer();
+  let inspectedFileBytes: number | null = null;
+  if (inspector) {
+    try {
+      const form = await new Response(new Uint8Array(inspector), { headers: { 'content-type': request.headers()['content-type']! } }).formData();
+      const file = form.get('');
+      if (file instanceof Blob) inspectedFileBytes = file.size;
+    } catch { /* Some engines expose an incomplete multipart representation. */ }
+  }
+  testInfo.annotations.push({ type: 'synthetic-wire', description: JSON.stringify({
+    payloadBytes: actual.length, sha256: createHash('sha256').update(actual).digest('hex'),
+    inspectedFileBytes, receiverPreflights: backend.uploadWire.preflights,
+    interceptedPreflights: backend.requests.filter((request) => request.method === 'OPTIONS').length,
+  }) });
+  await page.close();
+  await expect.poll(() => ({ listening: backend.uploadWire.listening, connections: backend.uploadWire.connections }))
+    .toEqual({ listening: false, connections: 0 });
+});
+
+type WireForm = 'valid' | 'missing' | 'empty' | 'ambiguous' | 'multiple' | 'wrong-name' | 'wrong-type' |
+  'duplicate-cache' | 'metadata-file' | 'malformed' | 'truncated' | 'oversized' | 'wrong-key' | 'wrong-bearer' | 'upsert';
+async function sendWireForm(page: Page, path: string, formKind: WireForm, bytes = [0, 128, 255, 13, 10]) {
+  return page.evaluate(async ({ path, formKind, bytes }) => {
+    const modulePath = '/src/data/client.ts';
+    const { makeClient } = await import(modulePath) as typeof import('../../src/data/client');
+    const client = makeClient({ url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_browser_fixture_only', version: 'browser-fixture' });
+    const { data } = await client.auth.getSession();
+    const headers: Record<string, string> = {
+      authorization: 'Bearer ' + (formKind === 'wrong-bearer' ? 'not-an-issued-fixture' : data.session!.access_token),
+      apikey: formKind === 'wrong-key' ? 'sb_publishable_wrong_fixture' : 'sb_publishable_browser_fixture_only',
+      'x-upsert': formKind === 'upsert' ? 'true' : 'false',
+      'x-client-info': 'synthetic-wire-test',
+    };
+    const form = new FormData();
+    form.append('cacheControl', '0');
+    if (formKind === 'duplicate-cache') form.append('cacheControl', '0');
+    if (formKind !== 'missing') {
+      const payload = formKind === 'empty' ? new Uint8Array() :
+        formKind === 'oversized' ? new Uint8Array(1024 * 1024) : new Uint8Array(bytes);
+      const file = new Blob([payload], { type: formKind === 'wrong-type' ? 'text/plain' : 'image/jpeg' });
+      form.append(formKind === 'wrong-name' ? 'file' : '', file);
+      if (formKind === 'ambiguous') form.append('', file);
+      if (formKind === 'multiple') form.append('other', file);
+      if (formKind === 'metadata-file') form.append('metadata', file);
+    }
+    if (formKind === 'valid') form.append('metadata', '{"fixture":true}');
+    let body: FormData | string = form;
+    if (formKind === 'malformed' || formKind === 'truncated') {
+      headers['content-type'] = 'multipart/form-data; boundary=fixture-boundary';
+      body = formKind === 'malformed' ? '--fixture-boundary\r\nnot-a-header\r\n\r\nbytes\r\n--fixture-boundary--\r\n' :
+        '--fixture-boundary\r\nContent-Disposition: form-data; name="cacheControl"\r\n\r\n0';
+    }
+    try {
+      const response = await fetch('http://127.0.0.1:54321/storage/v1/object/wardrobe/' + path,
+        { method: 'POST', headers, body, credentials: 'omit' });
+      return { status: response.status, ok: response.ok };
+    } catch { return { status: null, ok: false }; }
+  }, { path, formKind, bytes });
+}
+
+for (const formKind of ['missing', 'empty', 'ambiguous', 'multiple', 'wrong-name', 'wrong-type',
+  'duplicate-cache', 'metadata-file', 'malformed', 'truncated', 'oversized'] satisfies WireForm[]) {
+  test(`actual upload wire rejects ${formKind} multipart without storing a file`, async ({ page }) => {
+    const backend = await mockBackend(page, { initialLanguage: 'en' });
+    await page.goto('/');
+    await signIn(page);
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    const path = reserveWireImage(backend);
+    const result = await sendWireForm(page, path, formKind);
+    expect(result.ok).toBe(false);
+    if (formKind !== 'oversized') expect(result.status).toBe(400);
+    expect(backend.uploadWire.posts).toBe(1);
+    expect(backend.uploadWire.rejected).toBeGreaterThan(0);
+    expect(backend.uploadWire.peakBufferedBytes).toBeLessThanOrEqual(1024 * 1024);
+    if (formKind === 'oversized') expect(backend.uploadWire.receivedBytes).toBeGreaterThan(1024 * 1024);
+    expect(backend.files.size).toBe(0);
+    expect(backend.uploadWire.payloadBytes).toBe(0);
+    await expect.poll(() => ({ closed: backend.uploadWire.closed, listening: backend.uploadWire.listening, connections: backend.uploadWire.connections }))
+      .toEqual({ closed: true, listening: false, connections: 0 });
+  });
+}
+
+test('actual upload wire restricts reservations and synthetic credentials without forwarding other requests', async ({ page }) => {
+  const backend = await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto('/');
+  await signIn(page);
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  const own = reserveWireImage(backend), foreign = reserveWireImage(backend, owners.b);
+  for (const path of [foreign, own.replace('/main.jpg', '/other.jpg'), own + '?unexpected=1',
+    `${owners.a}/${randomUUID()}/${randomUUID()}/main.jpg`]) {
+    expect(await sendWireForm(page, path, 'valid')).toEqual({ ok: false, status: 403 });
+  }
+  for (const kind of ['wrong-key', 'wrong-bearer', 'upsert'] satisfies WireForm[]) {
+    expect(await sendWireForm(page, own, kind)).toEqual({ ok: false, status: kind === 'wrong-bearer' ? 401 : 403 });
+  }
+  expect(backend.uploadWire.posts).toBe(0);
+  expect(backend.files.size).toBe(0);
+  let scriptedFailure = true;
+  await page.route('**/storage/v1/object/wardrobe/' + own, async (route) => {
+    if (scriptedFailure && route.request().method() === 'POST') {
+      scriptedFailure = false;
+      await route.fulfill({ status: 503, json: { message: 'Unavailable' } });
+    } else await route.fallback();
+  });
+  expect(await sendWireForm(page, own, 'valid')).toEqual({ ok: false, status: 503 });
+  expect(backend.uploadWire.posts).toBe(0);
+  expect(await sendWireForm(page, own, 'valid')).toEqual({ ok: true, status: 200 });
+  assertWireBytes(backend.files.get(own)!, Buffer.from([0, 128, 255, 13, 10]));
+  expect(await sendWireForm(page, own, 'valid')).toEqual({ ok: false, status: 409 });
+  expect(backend.uploadWire.posts).toBe(1);
+});
+
+test('actual upload wire isolates parallel pages and closes accepted keepalive connections', async ({ page, browser }) => {
+  const second = await browser.newPage();
+  try {
+    const firstBackend = await mockBackend(page, { initialLanguage: 'en' });
+    const secondBackend = await mockBackend(second, { initialLanguage: 'en' });
+    for (const tab of [page, second]) {
+      await tab.goto('/');
+      await signIn(tab);
+      await expect(tab.locator('#wardrobe-title')).toBeVisible();
+    }
+    const path = reserveWireImage(firstBackend);
+    expect(await sendWireForm(second, path, 'valid')).toEqual({ ok: false, status: 403 });
+    secondBackend.items.push({ ...firstBackend.items[0] });
+    secondBackend.images.push({ ...firstBackend.images[0] });
+    expect(await Promise.all([sendWireForm(page, path, 'valid', [0, 255]), sendWireForm(second, path, 'valid', [128, 1])]))
+      .toEqual([{ ok: true, status: 200 }, { ok: true, status: 200 }]);
+    assertWireBytes(firstBackend.files.get(path)!, Buffer.from([0, 255]));
+    assertWireBytes(secondBackend.files.get(path)!, Buffer.from([128, 1]));
+    expect(firstBackend.uploadWire.connections).toBeGreaterThan(0);
+    expect(secondBackend.uploadWire.connections).toBeGreaterThan(0);
+    await page.close();
+    await expect.poll(() => ({ closed: firstBackend.uploadWire.closed, listening: firstBackend.uploadWire.listening, connections: firstBackend.uploadWire.connections }))
+      .toEqual({ closed: true, listening: false, connections: 0 });
+    expect(secondBackend.uploadWire.listening).toBe(true);
+    const next = reserveWireImage(secondBackend);
+    expect(await sendWireForm(second, next, 'valid')).toEqual({ ok: true, status: 200 });
+    await second.close();
+    await expect.poll(() => ({ closed: secondBackend.uploadWire.closed, listening: secondBackend.uploadWire.listening, connections: secondBackend.uploadWire.connections }))
+      .toEqual({ closed: true, listening: false, connections: 0 });
+  } finally { await second.close(); }
+});
+
+test('actual upload wire leaves no listener when fixture setup loses its page', async ({ page, context }) => {
+  const listeners = () => process.getActiveResourcesInfo().filter((resource) => resource === 'TCPServerWrap').length;
+  const before = listeners();
+  await page.close();
+  await expect(mockBackend(page)).rejects.toThrow('Fixture receiver unavailable.');
+  const second = await context.newPage();
+  const setup = mockBackend(second);
+  const outcome = setup.then(() => 'ready', () => 'closed');
+  await second.close();
+  await outcome;
+  await expect.poll(listeners).toBe(before);
+});
 
 for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
   test(`photo, editable draft and explicit save in ${language}`, async ({ page }) => {
@@ -205,7 +410,7 @@ test('discarding a prepared draft creates no library records', async ({ page }) 
   expect(backend.requests.slice(before)).toEqual([]);
 });
 
-test('retrying a failed commit reuses the same records and image bytes', async ({ page }) => {
+test('retrying a failed commit reuses the same records and image bytes', async ({ page }, testInfo) => {
   const backend = await mockBackend(page, { initialLanguage: 'en', failCommitOnce: true });
   await page.goto('/');
   await signIn(page);
@@ -218,9 +423,15 @@ test('retrying a failed commit reuses the same records and image bytes', async (
   await expect(page.getByRole('alert')).toBeVisible();
   const image = { ...backend.images[0] };
   const item = { ...backend.items[0] };
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  expect(item.id).toMatch(uuid);
+  expect(image.id).toMatch(uuid);
+  expect(image.item_id).toBe(item.id);
+  expect(backend.uploadWire.posts).toBe(2);
   const files = new Map([...backend.files].map(([path, bytes]) => [path, Buffer.from(bytes)]));
   for (const variant of ['main', 'thumb']) {
     const bytes = files.get(`${owners.a}/${item.id}/${image.id}/${variant}.jpg`)!;
+    expect(bytes.length).toBeGreaterThan(0);
     expect(bytes.length).toBe(image[`${variant}_bytes`]);
     expect(createHash('sha256').update(bytes).digest('hex')).toBe(image[`${variant}_sha256`]);
   }
@@ -235,6 +446,7 @@ test('retrying a failed commit reuses the same records and image bytes', async (
   expect(backend.items[0]).toEqual(item);
   expect(backend.images[0]).toEqual({ ...image, state: 'ready' });
   expect(backend.files).toEqual(files);
+  expect(backend.uploadWire.posts).toBe(2);
   for (const variant of ['main', 'thumb']) {
     const path = `${owners.a}/${item.id}/${image.id}/${variant}.jpg`;
     const bytes = backend.files.get(path)!;
@@ -244,6 +456,9 @@ test('retrying a failed commit reuses the same records and image bytes', async (
     expect(inspectJpegSegments(bytes).some((segment) => segment.marker === 0xfe ||
       (segment.marker >= 0xe1 && segment.marker <= 0xef))).toBe(false);
   }
+  testInfo.annotations.push({ type: 'synthetic-prepared-wire', description: JSON.stringify({
+    mainBytes: image.main_bytes, thumbBytes: image.thumb_bytes, mainSha256: image.main_sha256, thumbSha256: image.thumb_sha256,
+  }) });
 });
 
 test('logout clears private state before another owner signs in', async ({ page }) => {
@@ -327,7 +542,7 @@ async function observeSdkEvents(page: Page) {
 }
 
 for (const firstOwner of ['a', 'b'] as const) {
-  test(`different-account tabs retain their owner when ${firstOwner} signs in first, and logout clears both`, async ({ page, context }) => {
+  test(`different-account tabs retain their owner when ${firstOwner} signs in first, and logout clears both`, async ({ page, context }, testInfo) => {
     const second = await context.newPage();
     const tabs = { a: page, b: second };
     const backends = {
@@ -402,12 +617,17 @@ for (const firstOwner of ['a', 'b'] as const) {
 
     // Hold actual owner-profile replies across logout; cancellation must prevent restoration.
     const held: Array<{ release: ReturnType<typeof latch>; finished: ReturnType<typeof latch>; cancelled: Promise<Request> }> = [];
+    const clock = Date.now();
+    const profileTiming: Array<{ heldMs: number; failedMs: number | null; signedOutMs: number | null; request: Request }> = [];
     for (const owner of ['a', 'b'] as const) {
       const started = latch(), release = latch(), finished = latch();
       const cancelled = tabs[owner].waitForEvent('requestfailed', {
         predicate: (request) => new URL(request.url()).pathname === '/rest/v1/profiles',
       });
       await tabs[owner].route('**/rest/v1/profiles?**', async (route) => {
+        const timing = { heldMs: Date.now() - clock, failedMs: null as number | null, signedOutMs: null as number | null, request: route.request() };
+        profileTiming.push(timing);
+        tabs[owner].on('requestfailed', (request) => { if (request === timing.request) timing.failedMs = Date.now() - clock; });
         started.resolve();
         await release.promise;
         await route.fulfill({ json: backends[owner].profiles[owners[owner]] });
@@ -417,26 +637,36 @@ for (const firstOwner of ['a', 'b'] as const) {
       await started.promise;
       held.push({ release, finished, cancelled });
     }
-    const logoutTab = tabs[firstOwner], language = content[firstOwner].language;
-    await logoutTab.getByRole('button', { name: messages['account.menu'][language] }).click();
-    await logoutTab.getByRole('button', { name: messages['auth.signOut'][language], exact: true }).click();
-    for (const tab of Object.values(tabs)) await expect(tab.locator('#email')).toBeVisible();
-    await Promise.all(held.map((pending) => pending.cancelled));
-    for (const pending of held) pending.release.resolve();
-    await Promise.all(held.map((pending) => pending.finished.promise));
-    for (const tab of Object.values(tabs)) {
-      await expect(tab.locator('.workspace')).toHaveCount(0);
-      await expect(tab.locator('html')).toHaveAttribute('lang', 'en');
-      expect(await tab.evaluate(() => [sessionStorage, localStorage].flatMap((store) => Object.keys(store).filter((key) => key.startsWith('stillroom'))))).toEqual([]);
-      expect(await tab.evaluate(() => caches.keys())).toEqual([]);
-      expect(await tab.evaluate(() => indexedDB.databases())).toEqual([]);
-      await tab.reload();
-      await expect(tab.locator('#email')).toBeVisible();
-      await expect(tab.locator('.item-photo img')).toHaveCount(0);
-      for (const value of Object.values(content)) {
-        await expect(tab.getByText(value.name, { exact: true })).toHaveCount(0);
-        await expect(tab.getByText(value.title, { exact: true })).toHaveCount(0);
+    try {
+      const logoutTab = tabs[firstOwner], language = content[firstOwner].language;
+      await logoutTab.getByRole('button', { name: messages['account.menu'][language] }).click();
+      await logoutTab.getByRole('button', { name: messages['auth.signOut'][language], exact: true }).click();
+      for (const tab of Object.values(tabs)) await expect(tab.locator('#email')).toBeVisible();
+      for (const timing of profileTiming) timing.signedOutMs = Date.now() - clock;
+      await Promise.all(held.map((pending) => pending.cancelled));
+      for (const pending of held) pending.release.resolve();
+      await Promise.all(held.map((pending) => pending.finished.promise));
+      for (const tab of Object.values(tabs)) {
+        await expect(tab.locator('.workspace')).toHaveCount(0);
+        await expect(tab.locator('html')).toHaveAttribute('lang', 'en');
+        expect(await tab.evaluate(() => [sessionStorage, localStorage].flatMap((store) => Object.keys(store).filter((key) => key.startsWith('stillroom'))))).toEqual([]);
+        expect(await tab.evaluate(() => caches.keys())).toEqual([]);
+        expect(await tab.evaluate(() => indexedDB.databases())).toEqual([]);
+        await tab.reload();
+        await expect(tab.locator('#email')).toBeVisible();
+        await expect(tab.locator('.item-photo img')).toHaveCount(0);
+        for (const value of Object.values(content)) {
+          await expect(tab.getByText(value.name, { exact: true })).toHaveCount(0);
+          await expect(tab.getByText(value.title, { exact: true })).toHaveCount(0);
+        }
       }
+    } finally {
+      testInfo.annotations.push({ type: 'synthetic-profile-timing', description: JSON.stringify({
+        elapsedMs: Date.now() - clock,
+        requests: profileTiming.map(({ heldMs, failedMs, signedOutMs, request }) =>
+          ({ heldMs, failedMs, signedOutMs, failureReported: request.failure() !== null })),
+        socketPosts: Object.values(backends).map((backend) => backend.uploadWire.posts),
+      }) });
     }
   });
 }
