@@ -1472,3 +1472,82 @@ deployment or later-phase work. Coordinator owns release disposition after all
 gates; every merge still requires fresh explicit user approval and deployment
 separate approval. Physical-iPhone preparation → explicit Save → reload and
 remaining hosted acceptance stay open; the live app is unchanged.
+
+### PR #5 safe local type-generation diagnostic — 7 September 2026
+
+I04/I05 validation tooling only; base main
+`bf0ad74dddc4bbc4a3db312dc376edd9495de439`, starting head
+`560971deea4e9a3b7cbd74dc6e2cf6dbe9a70a55`, existing
+`copilot/copilotphase0-apple-jpeg-probe` branch.
+[Controlling approval 5573670578](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5573670578)
+records actual **Anthropic / Claude Opus 5**, reviewer `52574706`, turn 6,
+and the coordinator's stricter factual-tag corrections. No new plan or agent.
+After context and before edits, the writer read
+[native receipt 5573687164](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5573687164):
+coordinator explicitly selected and verified actual `sweagent-capi:gpt-6-astra`,
+task `a237c10d-6b8c-416e-901d-4b37d408d980`, session
+`94403511-b961-481d-9f06-d4bdd6746402`, observed
+`2026-09-07T16:57:35.7201713Z`, matching this PR/base/starting head.
+
+Context read: `AGENTS.md`, `.github/copilot-instructions.md`,
+`docs/cloud-development.md`, latest sections of this result, local-tooling
+sections of `docs/local-backend.md`; blueprint 00/03/05/10, relevant 07/08/13/20,
+14 Phase 0 and 15 I04/I05; base-migration/generated-type image boundaries,
+`src/data/client.ts` and `src/images/upload.ts` excerpts; `scripts/backend/local.mjs`,
+`scripts/db.mjs`, `tests/unit/local-backend.test.ts`, hosted guard excerpt,
+`scripts/scan-secrets.mjs`, `package.json`, `tsconfig.json`, PR discussion,
+diff scope, reviews and MCP Actions job logs. The fetched exact base is available;
+the shallow checkout lacks a merge base, so the scope comparison used exact
+base/head trees, not an assumed merge base.
+
+Only four files change: `scripts/backend/local.mjs`, `scripts/db.mjs`,
+`tests/unit/local-backend.test.ts` and this append. The pure helper returns exactly
+`tag`, `exitCode`, `elapsedMs`, `stdoutBytes`, `stderrBytes`,
+`hasDatabaseOutput`, `hasImagesOutput`. Numeric values are safe integers or null;
+elapsed time is nonnegative, floored and bounded by `Number.MAX_SAFE_INTEGER`.
+Byte counts measure UTF-8 encoding of retained strings, not original process
+bytes. Invalid fields take precedence; otherwise nonzero/stderr precedes
+nonzero/stdout or empty output, then zero-exit missing Database/images literals,
+then success. Input accessors/coercions are not invoked; throwing Proxy traps
+produce a fixed invalid report. Tests keep the export's TypeScript module
+augmentation in the allowed test file.
+
+Monotonic elapsed measurement surrounds the unchanged generation call. Only the
+existing failure message gains JSON: the failure predicate is byte-identical,
+exit status remains 2, and CLI/version/arguments, environment, Docker/project
+guards, TypeScript parsing, atomic write/rename and exact `--check` parity are
+unchanged. No stdout/stderr text, SQL, URI, token, path or exception is reported.
+Tags do not assert spawn failure, deadline, truncation or absent database tables.
+
+Commands from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`, against
+this diagnostic working tree:
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/local-backend.test.ts` | Final exit 0, **87/87**; initial **86/87** exposed a synthetic expected-byte-count typo (41 instead of 42), corrected before completion. |
+| `npm run test:unit` | Exit 0, **319/319**, 9 files. All seven tags, malformed/conflicting input, finite bounds, multibyte counts, fixed field types/keys and synthetic credential/canary non-disclosure covered. |
+| `npm run lint` / `npm run typecheck` | Final exit 0 each. Initial typecheck identified the undeclared new export; corrected by test-local module augmentation without a fifth file. |
+| `npm run scan:secrets` / `git diff --check` | Exit 0 each; **131 text files**, existing ephemeral canary checked. |
+| `npm run db:types -- --check` | **One invocation**, exit 0 on the already prepared disposable stack; actual generation exactly matched committed types. Success-path preservation, not a root-cause fix. |
+| `git diff --exit-code 560971deea4e9a3b7cbd74dc6e2cf6dbe9a70a55 -- src/data/database.types.ts` | Exit 0, no generated-file change. |
+
+Setup run `34145542370`, job `101816682968`, reports successful standard
+preparation and type generation before this task; its in-progress raw-log
+download returned HTTP 404. No worker reset/reprovision or browser/DB rebuild.
+At starting head `560971d`, CI `34144182514` attempt 2, backend job
+`101814070350`, passed integration/security then failed opaque type generation
+with exit 2; generation/parity did not pass. The previously observed browser
+installation progressed to App/browser tests running at this inspection, not a
+claimed pass. Native Apple `34144182504` attempt 2 passed. The coordinator's
+actor-cap CLEAN review, prior **227/227** local browser proof and earlier
+intermittent failures remain historical evidence, not this diagnostic's results.
+
+The recurring generation failure remains an **undiagnosed tooling risk**.
+Required final-head App/browser, Real local Supabase including generation/parity,
+native Apple and independent impact review remain coordinator gates. A classified
+failure needs an evidence-based next decision, not blind reruns; if all required
+gates pass, approval requires no extra two-run experiment. No worker Actions
+authorization/rerun, merge, deployment, hosted operation or later-phase work.
+Every merge still needs fresh explicit user approval; deployment needs separate
+approval. Physical-iPhone preparation → explicit Save → reload and remaining
+hosted acceptance stay open; live app remains on `bf0ad74`.

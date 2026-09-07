@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import {
   ROOT, MIGRATION_HASH, assertProjectConfig, requireDocker, requireLocalContainer,
-  cli, localStatus, fail, reportError, runCommand,
+  cli, localStatus, fail, reportError, runCommand, describeGenerationResult,
 } from './backend/local.mjs';
 
 async function main() {
@@ -46,9 +46,11 @@ async function main() {
     console.log('PASS: local migration reset and separate fixture provisioning completed.');
     return;
   }
+  const generationStarted = performance.now();
   const generated = await cli(['gen', 'types', 'typescript', '--local', '--schema', 'public'], 180_000);
+  const generationElapsedMs = performance.now() - generationStarted;
   if (generated.code !== 0 || !generated.stdout.includes('export type Database =') || !generated.stdout.includes('item_images:')) {
-    fail('NOT RUN: actual local schema type generation failed; the existing type file was not changed.');
+    fail('NOT RUN: actual local schema type generation failed; the existing type file was not changed. ' + JSON.stringify(describeGenerationResult(generated, generationElapsedMs)));
   }
   const ts = await import('typescript');
   const parsed = ts.createSourceFile('database.types.ts', generated.stdout, ts.ScriptTarget.Latest, true);

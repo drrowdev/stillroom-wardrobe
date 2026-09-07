@@ -34,6 +34,43 @@ export function reportError(error) {
   process.exitCode = error instanceof LocalBackendError ? error.exitCode : 1;
 }
 
+export function describeGenerationResult(result, elapsedMs) {
+  const report = {
+    tag: 'invalid-result',
+    exitCode: null,
+    elapsedMs: Number.isFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs <= Number.MAX_SAFE_INTEGER ? Math.floor(elapsedMs) : null,
+    stdoutBytes: null,
+    stderrBytes: null,
+    hasDatabaseOutput: false,
+    hasImagesOutput: false,
+  };
+  try {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return report;
+    // Read only data properties; never invoke input accessors or stringify input.
+    const code = Object.getOwnPropertyDescriptor(result, 'code')?.value;
+    const stdout = Object.getOwnPropertyDescriptor(result, 'stdout')?.value;
+    const stderr = Object.getOwnPropertyDescriptor(result, 'stderr')?.value;
+    report.exitCode = Number.isSafeInteger(code) ? code : null;
+    if (typeof stdout === 'string') {
+      report.stdoutBytes = Buffer.byteLength(stdout, 'utf8');
+      report.hasDatabaseOutput = stdout.includes('export type Database =');
+      report.hasImagesOutput = stdout.includes('item_images:');
+    }
+    if (typeof stderr === 'string') report.stderrBytes = Buffer.byteLength(stderr, 'utf8');
+    if (report.exitCode === null || report.elapsedMs === null || report.stdoutBytes === null || report.stderrBytes === null) return report;
+    if (code !== 0) {
+      report.tag = report.stderrBytes > 0 ? 'nonzero-with-stderr'
+        : report.stdoutBytes > 0 ? 'nonzero-with-stdout' : 'nonzero-empty-output';
+    } else {
+      report.tag = !report.hasDatabaseOutput ? 'missing-database-output'
+        : !report.hasImagesOutput ? 'missing-images-output' : 'success';
+    }
+  } catch {
+    // Even malformed objects must yield only the fixed observational fields.
+  }
+  return report;
+}
+
 export function assertLoopbackUrl(value) {
   let url;
   try { url = new URL(value); } catch { fail('REFUSED: a valid loopback HTTP URL is required.'); }
