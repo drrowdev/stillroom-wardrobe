@@ -189,7 +189,7 @@ function assertEncoderExif(bytes: Uint8Array, segment: Segment): void {
   }
 }
 
-/** Only for fresh sRGB canvas pixels, never source admission: omit generated Exif/ICC. */
+/** Only for fresh sRGB canvas pixels, never source admission: omit generated Exif/ICC/APP13. */
 export function stripEncoderMetadata(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) invalid();
   const parts: Uint8Array[] = [];
@@ -227,7 +227,7 @@ export function stripEncoderMetadata(bytes: Uint8Array): Uint8Array<ArrayBuffer>
     if (exif) assertEncoderExif(bytes, segment);
     const icc = segment.marker === 0xe2 &&
       startsWith(payload, 0, [73, 67, 67, 95, 80, 82, 79, 70, 73, 76, 69, 0]);
-    if (exif || icc) {
+    if (exif || icc || segment.marker === 0xed) {
       parts.push(bytes.subarray(retainedStart, offset));
       retainedStart = segment.end;
     }

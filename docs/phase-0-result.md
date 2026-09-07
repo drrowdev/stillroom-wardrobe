@@ -1091,3 +1091,120 @@ both end this diagnostic without a runtime correction, platform/quality search,
 UI telemetry, merge or deployment. A failing probe stays draft/unmerged.
 Mac WebKit is not physical iPhone/Safari, HEIC admission, Save/reload or hosted
 RLS acceptance. All earlier evidence and remaining device/privacy gates stand.
+
+### PR #5 approved fresh-encoder APP13 correction — 7 September 2026
+
+This bounded I04/I05 correction preserves R03/R04/R12/R23 and supersedes only
+the diagnostic's no-runtime-change stop gate, not its historical observations.
+Base main `bf0ad74dddc4bbc4a3db312dc376edd9495de439`; starting head
+`e1a8b26f648529563ac957b4c32bfd644d0f2c2e`, branch
+`copilot/copilotphase0-apple-jpeg-probe`. The full
+[approval 5571889903](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5571889903)
+records actual **Anthropic / Claude Opus 5**, reviewer `b5395860`, turns 1/2:
+stronger raw-rejection, neighboring-marker, bounds and exact-byte/pixel/hash
+oracles, then acceptance of the safer fixed-enum diagnostic amendment.
+Coordinator approval preceded this implementation; no new plan or scope was added.
+
+After context review and before edits, the writer reread
+[matching native-session receipt 5571919563](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5571919563):
+explicitly selected actual `sweagent-capi:gpt-6-astra`, task
+`8e082ea3-b110-47b5-bd04-442b5835596b`, session
+`72ee9a12-5d5e-4c57-b29c-4ab0ce50561f`, coordinator observation
+`2026-09-07T14:14:55.9693217Z`, matching this PR/base/starting head.
+The former diagnostic session's receipt is not this task's model evidence.
+Context read: `AGENTS.md`, `.github/copilot-instructions.md`,
+`docs/cloud-development.md`, latest sections of this result; blueprint
+00/03/05/08/10/20, 14 Phase 0, 15 I04/I05 and 13 command contracts; relevant
+07/base-migration/generated-type image boundaries; both `src/images/jpeg.ts`
+and `src/images/process-jpeg.ts`; JPEG unit/browser/fixture files;
+`package.json`, `playwright.config.ts`, existing CI and Apple workflows;
+PR #5 discussion/diff/reviews and MCP Actions runs/failed-job logs. The later
+wire-failure inspection read the relevant `tests/browser/slice.spec.ts` and
+`tests/browser/mock-backend.ts` paths without changing them. Local validation
+also used the existing `scripts/db.mjs`, `scripts/run-local-tests.mjs` and
+`scripts/backend/local.mjs` contracts; separate hosted guards were read, not run.
+
+**Preserved native failure:** [run 34129040724 attempt 2](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34129040724),
+job `101767033286`, macos-26 image `20260831.0337.3`, macOS 26.6.2/build
+25G83/arm64, WebKit 26.6: **3 failed, 1 passed** at the starting head.
+All six generated inputs reproduced actual `prepareJpeg` `outputCheck / invalid`.
+Actual main/thumb reads and normalization were `ok`; strict validation was
+`invalid`. Complete inventories had 13 segments before (Exif marker 225,
+78 bytes; APP13 marker 237, 58 bytes) and 12 afterward: Exif removed, APP13
+retained. No observer/capture error or truncation was reported. This agrees
+with [coordinator evidence 5571787062](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5571787062).
+Required CI `34129040577` attempt 2 passed at that head, but does not waive
+native failure. Neither observation establishes an exact iPhone root cause.
+
+The only production changes are the directly related comment and adding
+`segment.marker === 0xed` to `stripEncoderMetadata`'s existing range-removal
+condition. Bounds are checked before removal; APP13 payload signatures grant
+no permission. Its only runtime call remains after fresh sRGB canvas encoding
+in `verifyAndHash`. `assertSanitizedJpeg`, `parseHeader`, `assertEncoderExif`,
+all `JPEG_LIMITS`, source admission, orientation and `process-jpeg.ts` remain
+byte-unchanged. No blanket APP removal: APP11/12/14, XMP and COM remain retained
+and rejected. Raw APP13 still fails the strict validator.
+
+New regressions cover empty/known/unknown APP13 payloads, multiple removals,
+inter-scan/post-SOS/pre-EOI positions, variable FF fill, entropy/stuffing/restarts,
+exact retained bytes/deltas/idempotence, malformed/truncated lengths, missing
+EOI/trailing data and original header byte/4096-segment caps. Generated native
+main/thumb injection checks independently constructed expected ranges, same-engine
+decoded pixel hashes and independently recomputed final SHA-256 values. Existing
+orientation and combined private-metadata rejection tests remain; only applicable
+Exif/ICC expected-removal filters now include APP13.
+
+The generated-only probe adds fixed `jfif`, `photoshop-3.0`,
+`adobe-photoshop-2.5`, `other`, `not-app` observations and canonical-JFIF boolean.
+The bounds-checked classifier skips FF fill, validates the length field and
+derives payload start from the validated end; short/unknown/case-mismatched
+prefixes, fill and invalid bounds have small checks inside the existing probe.
+No raw prefix/payload/error/URL leaves the page. Classifications never gate
+runtime removal. Every captured source/main/thumb now also compares decoded
+pixels before/after normalization, and all prepared hashes are independently
+checked. The fixture observer's primitive kind/API and the four-case Apple
+workflow are byte-unchanged; no additional native variant was added.
+
+Commands below ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`
+against this correction's working tree based on `e1a8b26`; the accompanying
+commit identifies the resulting source. Logs/artifacts remain ignored or in
+`/tmp`, never committed.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/jpeg.test.ts` | Exit 0, **60/60**, including after browser edits. |
+| `npm run typecheck` / `npm run lint` / `git diff --check` | Each exit 0. |
+| `npm run test:browser -- tests/browser/image-processing.spec.ts --project=chromium --project=webkit-photo --workers=1 --retries=0 --grep 'fresh encoder APP13 removal'` | Exit 1: Chromium passed; WebKit failed to launch because the pinned executable was missing. Not a pass. |
+| `./node_modules/.bin/playwright install --with-deps webkit` | Exit 0; existing pinned WebKit 2359/26.6 and required disposable Linux libraries installed. No package/lock/config change. |
+| `npm run test:unit` | Exit 0, **282/282**, 9 files. |
+| `npm run check:translations` | Exit 0; 350 EN/FI/SV keys, 26 source files. |
+| `npm run build` | Exit 0; existing >500 kB chunk warning remains. |
+| `npm run scan:secrets` | Exit 0; 137 text files and canary checked. |
+| `npm run check:dependencies` | Exit 0; 12 production/220 development packages, zero unverified release dates; production audit zero critical/high/moderate/low advisories. |
+| `npm run test:browser -- tests/browser/image-processing.spec.ts tests/browser/slice.spec.ts --project=chromium --project=mobile --project=webkit-photo --retries=0` | Exit 1: **158 passed, 1 failed**, zero retries/skips. All **60 image tests passed**. Linux WebKit parallel-page actual-wire test failed at `slice.spec.ts:183`: second valid two-byte upload returned 400 rather than 200. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --project=webkit-photo --workers=1 --retries=0 --grep 'actual upload wire isolates parallel pages'` | One isolated diagnostic run, exit 0, **1/1**. Does **not** convert the failed suite into a pass or establish its cause. No receiver/assertion change. |
+| `npm run test:a11y -- --retries=0` | Exit 0, **21/21**, all configured projects. |
+| `npm run db:start` | Exit 0; reused prepared disposable local stack, no reset/restart or account reprovisioning. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Exit 0; both ordinary fictional owners' real local image/RPC lifecycle plus **1/1 real recovery browser test**. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | Exit 0; actual ordinary A/B/anonymous isolation, language, Storage, export and admission checks. No service key in assertions. |
+| `npm run db:types -- --check` | Exit 0; committed types exactly match actual local generation, no type-file write. |
+
+All 18 generated probe cases across Chromium/mobile/Linux WebKit reported
+378/378 operations `ok`, successful classifier checks and zero APP13 after
+normalization. Linux native encoders emitted JFIF/ICC, not Apple's APP13;
+the injected APP13 tests therefore remain distinct from the pending Mac proof.
+No cross-engine hardcoded pixel hash is used.
+
+**Outstanding gates:** the full affected browser run is not green. The failed
+parallel-wire case sends synthetic two-byte Blobs without JPEG preparation;
+its unchanged receiver uses coarse 400 for several guards, so the precise
+failure remains unproved and needs coordinator disposition, not a scope
+expansion or flaky-as-pass claim. Fresh exact-head required CI (including real
+Supabase/recovery/security/types) and the unchanged four-case macOS26 workflow
+remain PENDING coordinator trust inspection/authorization. Native main/thumb
+operations, pixels, APP13 before/absent after, family/JFIF observations and
+absence of observer/capture errors must pass on the new head. Independent
+final review and merge approval remain separate gates. No worker Actions
+approval/rerun, second agent, hosted operation, merge, deployment, HEIC/codec,
+provider or later-phase work occurred. Live app is unchanged. Mac success
+will still not prove physical-iPhone preparation/Save/reload or hosted acceptance.

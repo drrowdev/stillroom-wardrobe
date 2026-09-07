@@ -108,6 +108,91 @@ describe('JPEG headers without a decoder or canvas', () => {
 });
 
 describe('fresh JPEG output validation', () => {
+  it.each(['', 'Photoshop 3.0\0synthetic', 'Adobe Photoshop 2.5\0synthetic', 'unknown APP13'])(
+    'rejects raw APP13 but removes its complete range without a payload permission gate: %s', (payload) => {
+      const base = jpegHeaderFixture();
+      const segment = jpegSegment(0xed, new TextEncoder().encode(payload));
+      const bytes = insertSegments(base, segment);
+      const original = bytes.slice();
+      expectCode(() => assertSanitizedJpeg(bytes, 120, 80), 'invalid');
+      const result = stripEncoderMetadata(bytes);
+      expect(result).toEqual(base);
+      expect(bytes).toEqual(original);
+      expect(bytes.length - result.length).toBe(segment.length);
+      expect(stripEncoderMetadata(result)).toEqual(result);
+      expect(() => assertSanitizedJpeg(result, 120, 80)).not.toThrow();
+    },
+  );
+
+  it.each([0, 1, 3, 17])('removes multiple APP13 spans across scans with %i extra FF fill bytes', (fill) => {
+    const source = jpegHeaderFixture(120, 80, 0xc2);
+    const padding = new Uint8Array(fill).fill(0xff);
+    const app13 = joinBytes(padding, jpegSegment(0xed, new Uint8Array([0xff, 0xd9, 0xff, 0xda, 0])));
+    const firstScan = joinBytes(
+      padding, source.subarray(2, 15), padding, source.subarray(15, -2),
+      new Uint8Array([0xff, 0xff, 0x00, 0xed, 0xff, 0xff, 0xd0, 0x12]),
+    );
+    const secondScan = joinBytes(
+      padding, jpegSegment(0xda, new Uint8Array([1, 1, 0, 1, 63, 0])),
+      new Uint8Array([0x12, 0xff, 0x00, 0x34]),
+    );
+    const end = joinBytes(padding, source.subarray(-2));
+    const expected = joinBytes(source.subarray(0, 2), firstScan, secondScan, end);
+    const generated = joinBytes(
+      source.subarray(0, 2), app13, app13, firstScan, app13, secondScan, app13, end,
+    );
+    const ranges = inspectJpegSegments(generated).filter((segment) => segment.marker === 0xed);
+    expect(ranges).toHaveLength(4);
+    for (const range of ranges) expect(generated.subarray(range.start, range.end)).toEqual(app13);
+    expectCode(() => assertSanitizedJpeg(generated, 120, 80), 'invalid');
+    const result = stripEncoderMetadata(generated);
+    expect(result).toEqual(expected);
+    expect(generated.length - result.length).toBe(4 * app13.length);
+    expect(stripEncoderMetadata(result)).toEqual(result);
+    expect(inspectJpegSegments(result).map((segment) => segment.marker)).toEqual([0xc2, 0xda, 0xda, 0xd9]);
+    expect(() => assertSanitizedJpeg(result, 120, 80)).not.toThrow();
+  });
+
+  it('fails closed on APP13 truncation, malformed lengths, missing EOI and trailing data', () => {
+    const base = jpegHeaderFixture();
+    const app13 = jpegSegment(0xed, new Uint8Array([1, 2, 3]));
+    for (const bytes of [
+      insertSegments(base, app13),
+      joinBytes(base.subarray(0, -2), app13, base.subarray(-2)),
+    ]) {
+      for (let end = 0; end < bytes.length; end += 1) {
+        expectCode(() => stripEncoderMetadata(bytes.subarray(0, end)), 'invalid');
+      }
+      for (const extra of [new Uint8Array([0]), app13, base]) {
+        expectCode(() => stripEncoderMetadata(joinBytes(bytes, extra)), 'invalid');
+      }
+      const range = inspectJpegSegments(bytes).find((segment) => segment.marker === 0xed)!;
+      for (const length of [0, 1, 65535]) {
+        const malformed = bytes.slice();
+        new DataView(malformed.buffer).setUint16(range.start + 2, length);
+        expectCode(() => stripEncoderMetadata(malformed), 'invalid');
+      }
+    }
+  });
+
+  it('counts removable APP13 toward the original header segment and byte limits', () => {
+    const app13 = jpegSegment(0xed, new Uint8Array());
+    const exact = insertSegments(
+      jpegHeaderFixture(), ...Array.from({ length: JPEG_LIMITS.headerSegments - 2 }, () => app13),
+    );
+    expect(stripEncoderMetadata(exact)).toEqual(jpegHeaderFixture());
+    expectCode(() => stripEncoderMetadata(insertSegments(exact, app13)), 'tooLarge');
+    const flood = insertSegments(
+      jpegHeaderFixture(), ...Array.from({ length: 4096 }, () => app13),
+    );
+    expectCode(() => stripEncoderMetadata(flood), 'tooLarge');
+    expectCode(() => readJpegHeader(flood), 'tooLarge');
+    const large = jpegSegment(0xed, new Uint8Array(65533));
+    expectCode(() => stripEncoderMetadata(insertSegments(
+      jpegHeaderFixture(), ...Array.from({ length: 17 }, () => large),
+    )), 'tooLarge');
+  });
+
   it('removes complete fresh Exif segments with absent or identity orientation, including duplicates', () => {
     const bytes = jpegHeaderFixture();
     const absent = exifSegment(1);
@@ -203,24 +288,31 @@ describe('fresh JPEG output validation', () => {
     expectCode(() => stripEncoderMetadata(insertSegments(exact, profile)), 'tooLarge');
   });
 
-  it('never hides XMP, IPTC, COM, unknown APP or near-Exif signatures from the strict validator', () => {
+  it('never hides XMP, COM, neighboring APP or near-Exif signatures from the strict validator', () => {
     for (const [marker, payload] of [
       [0xe1, 'http://ns.adobe.com/xap/1.0/\0synthetic'],
-      [0xed, 'Photoshop 3.0\0synthetic'], [0xfe, 'synthetic comment'],
+      [0xeb, 'synthetic APP11'], [0xec, 'synthetic APP12'], [0xee, 'synthetic APP14'],
+      [0xfe, 'synthetic comment'],
       [0xe3, 'synthetic APP'], [0xe1, 'Exif\0x'], [0xe1, 'Exif\0'],
     ] as const) {
       const unknown = jpegSegment(marker, new TextEncoder().encode(payload));
       const bytes = insertSegments(jpegHeaderFixture(), unknown);
-      expect(stripEncoderMetadata(insertSegments(bytes, exifSegment(1)))).toEqual(bytes);
+      const result = stripEncoderMetadata(insertSegments(
+        bytes, exifSegment(1), jpegSegment(0xed, new TextEncoder().encode('Photoshop 3.0\0synthetic')),
+      ));
+      expect(result).toEqual(bytes);
+      expectCode(() => assertSanitizedJpeg(result, 120, 80), 'invalid');
       expectCode(() => assertSanitizedJpeg(bytes, 120, 80), 'invalid');
     }
   });
 
-  it('omits only generated ICC profiles from fresh encoder bytes, never other metadata', () => {
+  it('omits generated ICC and APP13 from fresh encoder bytes, retaining other metadata', () => {
     const bytes = jpegHeaderFixture();
     const profile = jpegSegment(0xe2, new TextEncoder().encode('ICC_PROFILE\0synthetic profile'));
     expect(stripEncoderMetadata(insertSegments(bytes, profile, profile))).toEqual(bytes);
-    for (const marker of [0xe1, 0xe2, 0xed, 0xfe]) {
+    const app13 = jpegSegment(0xed, new TextEncoder().encode('private metadata'));
+    expect(stripEncoderMetadata(insertSegments(bytes, profile, app13))).toEqual(bytes);
+    for (const marker of [0xe1, 0xe2, 0xeb, 0xec, 0xee, 0xfe]) {
       const metadata = jpegSegment(marker, new TextEncoder().encode('private metadata'));
       expectCode(() => assertSanitizedJpeg(
         stripEncoderMetadata(insertSegments(bytes, profile, metadata)), 120, 80,
