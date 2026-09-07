@@ -1385,3 +1385,90 @@ extra agent, deployment or hosted operation. Every merge still needs fresh
 explicit user approval; deployment needs separate approval. Physical-iPhone
 preparation → explicit Save → reload and remaining Phase-0 hosted/device gates
 remain open. Live app stays at `bf0ad74`; no later phase starts here.
+
+### PR #5 actor-specific upload-cap test correction — 7 September 2026
+
+I04/I05, preserving R03/R04/R12/R23. Base main
+`bf0ad74dddc4bbc4a3db312dc376edd9495de439`; starting head
+`8bf30fca1aa45cf74b6a9f38fd5553a6e80a2b8a`, existing
+`copilot/copilotphase0-apple-jpeg-probe` branch. Controlling
+[approval 5573397108](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5573397108)
+records actual **Anthropic / Claude Opus 5**, reviewer `52574706`, turns 3/4.
+The coordinator incorporated the actor-specific oracle and precision correction:
+the old WebKit failure did not reach assertions after `receivedBytes`.
+No replacement plan or additional agent was launched.
+
+Before edits, after scoped context, the writer read
+[public native receipt 5573412697](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5573412697):
+coordinator explicitly selected and verified actual `sweagent-capi:gpt-6-astra`,
+task `a78098cf-9738-4177-940a-65d6c4b4c932`, session
+`7150efdd-9c41-4c46-9190-2945391b5be0`, observation
+`2026-09-07T16:27:36.3165406Z`, matching this PR/base/starting head.
+Context consulted: `AGENTS.md`, `.github/copilot-instructions.md`,
+`docs/cloud-development.md`, latest sections of this result and
+`docs/local-backend.md`; blueprint 00/03/05/08/10, 14 Phase 0, 15 I04/I05,
+relevant 07/13/20 sections and base-migration/generated-type image references;
+`src/data/client.ts`, `src/images/upload.ts`, affected paths in both browser
+test files, `package.json`, `playwright.config.ts`, `tsconfig.json`,
+`scripts/scan-secrets.mjs`, PR discussion/diff/reviews and MCP Actions job logs.
+
+At the starting head, [CI 34141476424 attempt 2](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34141476424)
+passed **223 browser cases**; only WebKit's oversized delivery expectation
+failed: **274 received bytes**, expected **>1048576**, initial **846 ms** and
+retry **1.0 s**. Neither duration establishes a five-second deadline failure.
+Subsequent storage/payload/cleanup assertions were **not reached** in that
+failed case. Restored OFF/ON parallel cases passed. Real local Supabase job
+`101806738775` passed all integration/recovery/security/generation/type-parity
+steps; [native Apple 34141476351 attempt 2](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34141476351)
+passed its unchanged four-case job. These are starting-head, not final-head gates.
+
+Only the two approved test files and this append change. The helper exposes
+its existing loopback receiver URL and issued fictional-owner authorization;
+receiver guards, parsing/counting, cap, CORS, statuses, deadlines and closing
+behavior are unchanged. Browser oversized diagnostics remain OFF; only its
+delivery-volume expectation is removed. One Node-actor case uses built-in
+`node:http`, a validated exact loopback target, existing login/reservation and
+issued authorization, exact fixture Origin/apikey/x-upsert, no cookies/proxy/
+redirects or browser interception. A finite well-formed multipart contains a
+1 MiB synthetic file plus envelope, written in at most 16 KiB chunks with
+backpressure. Client settlement is deadline-bounded, drains no output to logs,
+and destroys the request on errors; EPIPE/reset is acceptable only after the
+server cap-stage proof. Unexpected errors, timeout and incomplete close fail
+coarsely. Cleanup is asserted on success and in `finally`.
+
+Commands from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`, against
+the accompanying correction:
+
+| Exact command | Actual result |
+|---|---|
+| `./node_modules/.bin/playwright install --with-deps webkit` | Exit 0, after `existsSync(webkit.executablePath())` returned false; installed pinned WebKit 2359/26.6 and disposable Linux libraries, no package/config change. |
+| `npm run lint` / `npm run typecheck` / `git diff --check` | Each exit 0; lint/typecheck also passed after mutation restoration. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --project=chromium --grep 'direct Node actor' --retries=0` | Intact baseline: exit 0, **1/1**. Single authorized mutation: exit **1**, **1 failed** at the cap-stage assertion: receiver rejection/cap counts **0**, stage `none`, success **1**, versus expected **1/1**, `receiver-body-limit`, success **0**. No other suite ran while mutated. |
+| `cmp -s /tmp/pr5-mock-backend-before-mutation.ts tests/browser/mock-backend.ts` | Exit 0 immediately after restoration and again before subsequent suites/diff review. Only the existing limit-check line was temporarily commented. The test invocation installed an EXIT trap restoring the saved exact file (INT/TERM exit through that trap), explicitly restored it immediately after the negative run, and required test exit 1. No mutation is retained. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --project=chromium --project=mobile --project=webkit-photo --grep 'actual upload wire' --retries=0` | One invocation after restoration: exit 0, **51/51**, two existing workers, **42.8 s**, zero retries/skips. |
+| `npm run test:browser -- --retries=0` | **One full concurrent invocation**, exit 0, **227/227**, two existing workers, **2.3 min**, zero retries/skips. |
+| `npm run test:a11y -- --retries=0` | Exit 0, **21/21**, **26.9 s**. |
+| `npm run check:translations` / `npm run test:unit` | Exit 0; **350 EN/FI/SV keys**, 26 source files; **282/282 units**, 9 files. |
+| `npm run build` / `npm run scan:secrets` | Exit 0 with an unprinted random build-only `STILLROOM_SECRET_CANARY`; **137 text files**, canary checked. Existing >500 kB bundle warning remains. |
+| `npm run check:dependencies` | Exit 0; 12 production/220 development packages, zero unverified release dates or production advisories. |
+
+All three projects passed the Node oracle: exactly one accepted POST, exactly
+one receiver rejection and one `receiver-body-limit`, zero timeout/client-error
+rejections, actual received bytes **>1 MiB**, peak buffer **<=1 MiB**, no stored
+file/payload, closed listener and zero connections. All retained browser
+oversized refusal/buffer/storage/payload/cleanup assertions passed in the full
+run. Node proves the cap reason; browser proves actual refusal, **not why only
+274 bytes arrived historically**. No phantom byte accounting, smaller payload,
+retry sweep, new telemetry or speculative transport/product fix was introduced.
+
+The prior synthetic two-byte 400, **158/159**, old tooling/type-generation
+failure history, **282 units** and native four-case evidence remain preserved;
+non-reproduction does not diagnose or retire historical test-infrastructure risk.
+Fresh final-head required App/browser, Real local Supabase (ordinary recovery/
+security and actual type parity), unchanged native Apple and independent review
+remain coordinator gates, not replaced by these local mocks or older passes.
+No local DB rebuild, hosted calls, Actions approval/rerun, extra agent, merge,
+deployment or later-phase work. Coordinator owns release disposition after all
+gates; every merge still requires fresh explicit user approval and deployment
+separate approval. Physical-iPhone preparation → explicit Save → reload and
+remaining hosted acceptance stay open; the live app is unchanged.

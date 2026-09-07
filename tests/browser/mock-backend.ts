@@ -317,7 +317,14 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { profiles, items, images, files, requests, fixture, uploadWire: receiver.state, wireDiagnostic };
+  return { profiles, items, images, files, requests, fixture, uploadWire: receiver.state, wireDiagnostic,
+    uploadWireUrl: receiver.url,
+    issuedWireAuthorization(account: 'a' | 'b') {
+      const authorization = [...tokens].find(([, owner]) => owner === owners[account])?.[0];
+      if (!authorization) throw new Error('Fixture owner authorization unavailable.');
+      return authorization;
+    },
+  };
 }
 
 export async function signIn(page: Page, account: 'a' | 'b' = 'a') {

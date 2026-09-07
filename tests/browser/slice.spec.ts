@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { createHash, randomUUID } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
 import { messages, type Language } from '../../src/i18n';
 import { inspectJpegSegments } from '../fixtures/jpeg-helpers';
 import { mockBackend, owners, signIn, wireStages, type WireBackend, type WireStage } from './mock-backend';
@@ -143,13 +144,100 @@ for (const formKind of ['missing', 'empty', 'ambiguous', 'multiple', 'wrong-name
     expect(backend.uploadWire.posts).toBe(1);
     expect(backend.uploadWire.rejected).toBeGreaterThan(0);
     expect(backend.uploadWire.peakBufferedBytes).toBeLessThanOrEqual(1024 * 1024);
-    if (formKind === 'oversized') expect(backend.uploadWire.receivedBytes).toBeGreaterThan(1024 * 1024);
     expect(backend.files.size).toBe(0);
     expect(backend.uploadWire.payloadBytes).toBe(0);
     await expect.poll(() => ({ closed: backend.uploadWire.closed, listening: backend.uploadWire.listening, connections: backend.uploadWire.connections }))
       .toEqual({ closed: true, listening: false, connections: 0 });
   });
 }
+
+test('actual upload wire enforces the receiver byte cap for a direct Node actor', async ({ page }) => {
+  const backend = await mockBackend(page, { initialLanguage: 'en', wireDiagnostic: 'first' });
+  try {
+    await page.goto('/');
+    await signIn(page);
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    const path = reserveWireImage(backend);
+    const target = new URL(backend.uploadWireUrl);
+    const origin = new URL(page.url()).origin;
+    if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1' || !target.port ||
+      target.username || target.password || target.pathname !== '/' || target.search || target.hash ||
+      origin !== `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5181}`) {
+      throw new Error('Fixture HTTP target refused.');
+    }
+    target.pathname = '/storage/v1/object/wardrobe/' + path;
+    const limit = 1024 * 1024;
+    const boundary = 'fixture-node-cap';
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="cacheControl"\r\n\r\n0\r\n` +
+        `--${boundary}\r\nContent-Disposition: form-data; name=""; filename="blob"\r\nContent-Type: image/jpeg\r\n\r\n`),
+      Buffer.alloc(limit),
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    type ClientOutcome = 'response' | 'reset' | 'unexpected-error' | 'timeout' | 'incomplete';
+    const outcome = await new Promise<ClientOutcome>((resolve) => {
+      let result: ClientOutcome = 'incomplete';
+      const request = httpRequest(target, { method: 'POST', agent: false, headers: {
+        origin, authorization: backend.issuedWireAuthorization('a'),
+        apikey: 'sb_publishable_browser_fixture_only', 'x-upsert': 'false',
+        'content-type': `multipart/form-data; boundary=${boundary}`, 'content-length': body.length,
+      } });
+      const fail = (error: NodeJS.ErrnoException) => {
+        if (result !== 'timeout' && result !== 'unexpected-error') {
+          result = ['EPIPE', 'ECONNRESET'].includes(error.code ?? '') ? 'reset' : 'unexpected-error';
+        }
+        request.destroy();
+      };
+      const timer = setTimeout(() => { result = 'timeout'; request.destroy(); }, 5000);
+      let offset = 0;
+      const write = () => {
+        try {
+          while (offset < body.length && !request.destroyed) {
+            const end = Math.min(offset + 16 * 1024, body.length);
+            const ready = request.write(body.subarray(offset, end));
+            offset = end;
+            if (!ready) return;
+          }
+          if (!request.destroyed) request.end();
+        } catch { result = 'unexpected-error'; request.destroy(); }
+      };
+      request.on('error', fail);
+      request.on('drain', write);
+      request.on('response', (response) => {
+        response.on('error', fail);
+        response.once('end', () => {
+          if (result === 'incomplete') result = 'response';
+          request.destroy();
+        });
+        response.resume();
+      });
+      request.once('close', () => {
+        clearTimeout(timer);
+        request.off('drain', write);
+        resolve(result);
+      });
+      write();
+    });
+    expect(backend.wireDiagnostic).toMatchObject({
+      backend: 'first', routePosts: 0, routeRejected: 0, receiverPosts: 1, receiverRejected: 1, success: 0,
+      receiverStage: 'receiver-body-limit',
+      rejections: { 'receiver-body-limit': 1, 'receiver-timeout': 0, 'receiver-client-error': 0 },
+    });
+    expect(['response', 'reset']).toContain(outcome);
+    expect(backend.uploadWire.posts).toBe(1);
+    expect(backend.uploadWire.rejected).toBe(1);
+    expect(backend.uploadWire.receivedBytes).toBeGreaterThan(limit);
+    expect(backend.uploadWire.peakBufferedBytes).toBeLessThanOrEqual(limit);
+    expect(backend.files.size).toBe(0);
+    expect(backend.uploadWire.payloadBytes).toBe(0);
+    await expect.poll(() => ({ closed: backend.uploadWire.closed, listening: backend.uploadWire.listening, connections: backend.uploadWire.connections }))
+      .toEqual({ closed: true, listening: false, connections: 0 });
+  } finally {
+    await page.close();
+    await expect.poll(() => ({ closed: backend.uploadWire.closed, listening: backend.uploadWire.listening, connections: backend.uploadWire.connections }))
+      .toEqual({ closed: true, listening: false, connections: 0 });
+  }
+});
 
 test('actual upload wire restricts reservations and synthetic credentials without forwarding other requests', async ({ page }) => {
   const backend = await mockBackend(page, { initialLanguage: 'en' });
