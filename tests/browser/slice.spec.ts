@@ -181,77 +181,84 @@ test('actual upload wire restricts reservations and synthetic credentials withou
   expect(backend.uploadWire.posts).toBe(1);
 });
 
-test('actual upload wire isolates parallel pages and closes accepted keepalive connections', async ({ page, browser }, testInfo) => {
-  const second = await browser.newPage();
-  let firstBackend: Awaited<ReturnType<typeof mockBackend>> | undefined;
-  let secondBackend: Awaited<ReturnType<typeof mockBackend>> | undefined;
-  const observed: { unreserved: WireResult | null; first: WireResult | null; second: WireResult | null; afterFirstClose: WireResult | null } =
-    { unreserved: null, first: null, second: null, afterFirstClose: null };
-  try {
-    firstBackend = await mockBackend(page, { initialLanguage: 'en', wireDiagnostic: 'first' });
-    secondBackend = await mockBackend(second, { initialLanguage: 'en', wireDiagnostic: 'second' });
-    for (const tab of [page, second]) {
-      await tab.goto('/');
-      await signIn(tab);
-      await expect(tab.locator('#wardrobe-title')).toBeVisible();
+for (const diagnostic of [false, true]) {
+  test(`actual upload wire isolates parallel pages and closes accepted keepalive connections (diagnostics ${diagnostic ? 'ON' : 'OFF'})`, async ({ page, browser }, testInfo) => {
+    const second = await browser.newPage();
+    let firstBackend: Awaited<ReturnType<typeof mockBackend>> | undefined;
+    let secondBackend: Awaited<ReturnType<typeof mockBackend>> | undefined;
+    const observed: { unreserved: WireResult | null; first: WireResult | null; second: WireResult | null; afterFirstClose: WireResult | null } =
+      { unreserved: null, first: null, second: null, afterFirstClose: null };
+    try {
+      firstBackend = await mockBackend(page, { initialLanguage: 'en', ...(diagnostic ? { wireDiagnostic: 'first' as const } : {}) });
+      secondBackend = await mockBackend(second, { initialLanguage: 'en', ...(diagnostic ? { wireDiagnostic: 'second' as const } : {}) });
+      for (const tab of [page, second]) {
+        await tab.goto('/');
+        await signIn(tab);
+        await expect(tab.locator('#wardrobe-title')).toBeVisible();
+      }
+      const path = reserveWireImage(firstBackend);
+      observed.unreserved = await sendWireForm(second, path, 'valid', undefined, diagnostic ? true : undefined);
+      expect(observed.unreserved).toEqual({ ok: false, status: 403,
+        ...(diagnostic ? { diagnostic: { backend: 'second', stage: 'route-reservation-credentials', parse: 'ok' } } : {}) });
+      secondBackend.items.push({ ...firstBackend.items[0] });
+      secondBackend.images.push({ ...firstBackend.images[0] });
+      [observed.first, observed.second] = await Promise.all([
+        sendWireForm(page, path, 'valid', [0, 255], diagnostic ? true : undefined),
+        sendWireForm(second, path, 'valid', [128, 1], diagnostic ? true : undefined),
+      ]);
+      expect([observed.first, observed.second]).toEqual([
+        { ok: true, status: 200, ...(diagnostic ? { diagnostic: { backend: 'first', stage: 'none', parse: 'ok' } } : {}) },
+        { ok: true, status: 200, ...(diagnostic ? { diagnostic: { backend: 'second', stage: 'none', parse: 'ok' } } : {}) },
+      ]);
+      assertWireBytes(firstBackend.files.get(path)!, Buffer.from([0, 255]));
+      assertWireBytes(secondBackend.files.get(path)!, Buffer.from([128, 1]));
+      if (diagnostic) {
+        expect(firstBackend.wireDiagnostic).toMatchObject({ backend: 'first', routePosts: 1, receiverPosts: 1, success: 1,
+          routeRejected: 0, receiverRejected: 0, routeStage: 'none', receiverStage: 'none' });
+        expect(secondBackend.wireDiagnostic).toMatchObject({ backend: 'second', routePosts: 2, receiverPosts: 1, success: 1,
+          routeRejected: 1, receiverRejected: 0, routeStage: 'none', receiverStage: 'none',
+          rejections: { 'route-reservation-credentials': 1 } });
+      }
+      expect(firstBackend.uploadWire.connections).toBeGreaterThan(0);
+      expect(secondBackend.uploadWire.connections).toBeGreaterThan(0);
+      await page.close();
+      await expect.poll(() => ({ closed: firstBackend!.uploadWire.closed, listening: firstBackend!.uploadWire.listening, connections: firstBackend!.uploadWire.connections }))
+        .toEqual({ closed: true, listening: false, connections: 0 });
+      expect(secondBackend.uploadWire.listening).toBe(true);
+      const next = reserveWireImage(secondBackend);
+      observed.afterFirstClose = await sendWireForm(second, next, 'valid', undefined, diagnostic ? true : undefined);
+      expect(observed.afterFirstClose).toEqual({ ok: true, status: 200,
+        ...(diagnostic ? { diagnostic: { backend: 'second', stage: 'none', parse: 'ok' } } : {}) });
+      if (diagnostic) {
+        expect(secondBackend.wireDiagnostic).toMatchObject({ routePosts: 3, receiverPosts: 2, success: 2, routeRejected: 1, receiverRejected: 0 });
+      }
+      await second.close();
+      await expect.poll(() => ({ closed: secondBackend!.uploadWire.closed, listening: secondBackend!.uploadWire.listening, connections: secondBackend!.uploadWire.connections }))
+        .toEqual({ closed: true, listening: false, connections: 0 });
+    } finally {
+      for (const expectedBackend of ['first', 'second'] as const) {
+        const evidence: {
+          mode: 'ON' | 'OFF'; repeat: number; expectedBackend: WireBackend; client: Record<string, WireResult | null>;
+          server: object | null; captureError: boolean;
+        } = { mode: diagnostic ? 'ON' : 'OFF', repeat: testInfo.repeatEachIndex, expectedBackend, client: {}, server: null, captureError: false };
+        try {
+          const backend = expectedBackend === 'first' ? firstBackend : secondBackend;
+          evidence.client = expectedBackend === 'first' ? { parallel: observed.first } :
+            { unreserved: observed.unreserved, parallel: observed.second, afterFirstClose: observed.afterFirstClose };
+          if (backend?.wireDiagnostic) evidence.server = {
+            ...backend.wireDiagnostic, rejections: { ...backend.wireDiagnostic.rejections },
+            receivedBytes: backend.uploadWire.receivedBytes, payloadBytes: backend.uploadWire.payloadBytes,
+          };
+        } catch { evidence.captureError = true; }
+        try { testInfo.annotations.push({ type: 'synthetic-wire-localization', description: JSON.stringify(evidence) }); }
+        catch { evidence.captureError = true; }
+        try { console.log('synthetic-wire-localization', JSON.stringify(evidence)); }
+        catch { /* Evidence must not replace the test outcome or prevent cleanup. */ }
+      }
+      await second.close();
     }
-    const path = reserveWireImage(firstBackend);
-    observed.unreserved = await sendWireForm(second, path, 'valid', undefined, true);
-    expect(observed.unreserved).toEqual({ ok: false, status: 403,
-      diagnostic: { backend: 'second', stage: 'route-reservation-credentials', parse: 'ok' } });
-    secondBackend.items.push({ ...firstBackend.items[0] });
-    secondBackend.images.push({ ...firstBackend.images[0] });
-    [observed.first, observed.second] = await Promise.all([
-      sendWireForm(page, path, 'valid', [0, 255], true), sendWireForm(second, path, 'valid', [128, 1], true),
-    ]);
-    expect([observed.first, observed.second]).toEqual([
-      { ok: true, status: 200, diagnostic: { backend: 'first', stage: 'none', parse: 'ok' } },
-      { ok: true, status: 200, diagnostic: { backend: 'second', stage: 'none', parse: 'ok' } },
-    ]);
-    assertWireBytes(firstBackend.files.get(path)!, Buffer.from([0, 255]));
-    assertWireBytes(secondBackend.files.get(path)!, Buffer.from([128, 1]));
-    expect(firstBackend.wireDiagnostic).toMatchObject({ backend: 'first', routePosts: 1, receiverPosts: 1, success: 1,
-      routeRejected: 0, receiverRejected: 0, routeStage: 'none', receiverStage: 'none' });
-    expect(secondBackend.wireDiagnostic).toMatchObject({ backend: 'second', routePosts: 2, receiverPosts: 1, success: 1,
-      routeRejected: 1, receiverRejected: 0, routeStage: 'none', receiverStage: 'none',
-      rejections: { 'route-reservation-credentials': 1 } });
-    expect(firstBackend.uploadWire.connections).toBeGreaterThan(0);
-    expect(secondBackend.uploadWire.connections).toBeGreaterThan(0);
-    await page.close();
-    await expect.poll(() => ({ closed: firstBackend!.uploadWire.closed, listening: firstBackend!.uploadWire.listening, connections: firstBackend!.uploadWire.connections }))
-      .toEqual({ closed: true, listening: false, connections: 0 });
-    expect(secondBackend.uploadWire.listening).toBe(true);
-    const next = reserveWireImage(secondBackend);
-    observed.afterFirstClose = await sendWireForm(second, next, 'valid', undefined, true);
-    expect(observed.afterFirstClose).toEqual({ ok: true, status: 200,
-      diagnostic: { backend: 'second', stage: 'none', parse: 'ok' } });
-    expect(secondBackend.wireDiagnostic).toMatchObject({ routePosts: 3, receiverPosts: 2, success: 2, routeRejected: 1, receiverRejected: 0 });
-    await second.close();
-    await expect.poll(() => ({ closed: secondBackend!.uploadWire.closed, listening: secondBackend!.uploadWire.listening, connections: secondBackend!.uploadWire.connections }))
-      .toEqual({ closed: true, listening: false, connections: 0 });
-  } finally {
-    for (const expectedBackend of ['first', 'second'] as const) {
-      const evidence: {
-        repeat: number; expectedBackend: WireBackend; client: Record<string, WireResult | null>;
-        server: object | null; captureError: boolean;
-      } = { repeat: testInfo.repeatEachIndex, expectedBackend, client: {}, server: null, captureError: false };
-      try {
-        const backend = expectedBackend === 'first' ? firstBackend : secondBackend;
-        evidence.client = expectedBackend === 'first' ? { parallel: observed.first } :
-          { unreserved: observed.unreserved, parallel: observed.second, afterFirstClose: observed.afterFirstClose };
-        if (backend?.wireDiagnostic) evidence.server = {
-          ...backend.wireDiagnostic, rejections: { ...backend.wireDiagnostic.rejections },
-          receivedBytes: backend.uploadWire.receivedBytes, payloadBytes: backend.uploadWire.payloadBytes,
-        };
-      } catch { evidence.captureError = true; }
-      try { testInfo.annotations.push({ type: 'synthetic-wire-localization', description: JSON.stringify(evidence) }); }
-      catch { evidence.captureError = true; }
-      try { console.log('synthetic-wire-localization', JSON.stringify(evidence)); }
-      catch { /* Evidence must not replace the test outcome or prevent cleanup. */ }
-    }
-    await second.close();
-  }
-});
+  });
+}
 
 test('actual upload wire leaves no listener when fixture setup loses its page', async ({ page, context }) => {
   const listeners = () => process.getActiveResourcesInfo().filter((resource) => resource === 'TCPServerWrap').length;

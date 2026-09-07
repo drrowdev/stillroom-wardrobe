@@ -1295,3 +1295,93 @@ fresh final-head required CI, coordinator impact/independent review and separate
 merge approval remain gates. No worker Actions authorization/rerun, extra agent,
 database/mail reconstruction, merge or deployment. Physical-iPhone and hosted
 acceptance remain separate; the live app is unchanged.
+
+### PR #5 release-completion coverage correction — 7 September 2026
+
+I04/I05, preserving R03/R04/R12/R23. Base main
+`bf0ad74dddc4bbc4a3db312dc376edd9495de439`; starting head
+`777634eee97199614520b290aa8cd072eb4bf306`, existing branch
+`copilot/copilotphase0-apple-jpeg-probe`. Full
+[approval 5573075997](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5573075997)
+records actual **Anthropic / Claude Opus 5**, reviewer `52574706`, critique
+of this correction and forward release criteria. Its finding: the 20-pass
+diagnostic sweep drained `response.json()`, unlike the original unread-body
+mode, so it did **not** establish original-mode timing/keepalive stability.
+The approved amendment selects both modes, not documentation alone.
+
+After context and before edits, the writer reread
+[matching public receipt 5573093230](https://github.com/drrowdev/stillroom-wardrobe/pull/5#issuecomment-5573093230):
+coordinator explicitly selected and verified actual `sweagent-capi:gpt-6-astra`,
+task `d7cbe78c-d672-40c5-ae29-6dd843366b5d`, session
+`abdedd0c-3959-4c75-bb54-522b5d8219b3`, observed
+`2026-09-07T15:55:49.4209535Z`, matching this PR/base/starting head.
+Context read: `AGENTS.md`, `.github/copilot-instructions.md`,
+`docs/cloud-development.md`, current sections of this result and
+`docs/local-backend.md`; blueprint 00/03/05, relevant 07/08/10/13/20 sections,
+14 Phase 0 and 15 I04/I05; base-migration/generated-type image boundaries,
+`src/data/client.ts`, `src/images/upload.ts`, the affected Slice/helper
+paths and original parallel test; `package.json`, `playwright.config.ts`,
+`scripts/scan-secrets.mjs`, PR discussion/diff/reviews and MCP Actions job logs.
+
+Only `tests/browser/slice.spec.ts` and this append change. The parallel-page
+case now has distinct **diagnostics OFF** and **diagnostics ON** names.
+OFF uses the original fixture options and `sendWireForm`'s default false,
+returning without reading the response body. ON retains closed enum/counter
+attribution. Both preserve exact 403/200 results, `Promise.all`, independent
+two-byte length/hash checks, live connections, listener isolation and close
+assertions. Only diagnostic expectations are conditional. Existing bounded
+final evidence adds a fixed ON/OFF label; no private identifiers. No new wait,
+drain/clone, retry, serialization, timeout, input or receiver change.
+
+Commands from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`, against
+the correction working tree based on `777634e`:
+
+| Exact command | Actual result |
+|---|---|
+| `./node_modules/.bin/playwright install --with-deps webkit` | Exit 0 after checking pinned WebKit was absent; WebKit 2359/26.6 and disposable Linux libraries installed. No package/config change. |
+| `npm run lint` / `npm run typecheck` / `git diff --check` | Each exit 0. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --project=chromium --project=mobile --project=webkit-photo --grep 'actual upload wire' --retries=0` | **One invocation**, exit 0, **48/48**, two existing workers, 38.9 seconds, no retries/skips/repeat sweep. Each project passed OFF, ON and all 14 existing wire cases. |
+| `npm run check:translations` | Exit 0; 350 EN/FI/SV keys, 26 source files. |
+| `npm run test:unit` | Exit 0, **282/282**, 9 files. |
+| `npm run check:dependencies` | Exit 0; 12 production/220 development packages; zero unverified release dates or production advisories. |
+| `npm run build` / `npm run scan:secrets` | Each exit 0 with an unprinted ephemeral build-only canary; 137 text files scanned. Existing >500 kB chunk warning remains. |
+
+All 12 bounded backend evidence records had `captureError: false`. OFF retained
+only status/ok client results and `server: null`, not invented attribution.
+For ON in every project, first route/receiver/success counters were **1/1/1**,
+second **3/2/2**, with one expected route-reservation-credentials 403 and zero
+receiver rejections; client backend/stage/parse matched. Received/stored bytes
+were first **387/2**, second **777/7**. Both independent two-byte hash assertions
+passed in each mode. This restores coverage, not a fix for the historical cause.
+
+**Preserved risk and release disposition:** the earlier **158/159**, pure
+two-byte fixture 400 remains unlocalized. The independent reviewer classifies it
+as an **unresolved synthetic test-infrastructure risk, not an evidenced product
+defect**: raw FormData reaches a Node fixture without JPEG preparation or the
+product SDK upload path. It is not “fixed by 20 passes” or by this passing run.
+The APP13 product correction is already independently CLEAN, with native Mac
+**4/4** at `6bf493f` and at `777634e`
+([34136009378 attempt 2](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34136009378),
+job `101798596129`). Runtime and exact-byte/negative wire contracts are unchanged.
+
+At `777634e`, [CI 34136009440](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34136009440)
+App/browser passed. Real local Supabase attempt 2 job `101798590140` passed
+integration/security then failed `db:types` (exit 2); type parity did not pass
+that attempt. The coordinator's one unchanged-head failed-job-only confirmation,
+attempt 3 job `101801628770`, subsequently passed integration/security,
+actual generation and tracked-type parity. Both logs were read; the first
+failure is preserved, its cause not inferred. No DB script edit, CLI stderr
+publication, worker rerun or local DB/mail reconstruction occurred.
+
+The reviewed release criteria supersede only the prior arbitrary diagnostic
+stop, not its evidence. Any new OFF/default or required final-head test failure
+**blocks release**: preserve its concrete result/available bounded evidence and
+have the coordinator select the next action, not a blind rerun or indefinite
+pause. Fresh-head App/browser, native Apple, real local recovery/security/type
+parity, relevant accessibility/translations/build/secret/dependency gates and
+independent final review remain coordinator prerequisites; older-head passes
+do not replace them. PR remains draft. No worker merge, Actions authorization,
+extra agent, deployment or hosted operation. Every merge still needs fresh
+explicit user approval; deployment needs separate approval. Physical-iPhone
+preparation → explicit Save → reload and remaining Phase-0 hosted/device gates
+remain open. Live app stays at `bf0ad74`; no later phase starts here.
