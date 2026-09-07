@@ -1003,3 +1003,15 @@ follow-up review remain coordinator gates before the user's separate merge decis
 Physical iPhone Safari/Vivaldi, native HEIC and hosted-owner acceptance remain
 OPEN. No hosted call, production change, merge, deployment or later phase is
 authorized or performed; preserve the existing rollback boundary.
+
+Supplemental automated validation of correction commit
+`2e732c12bc1976a856798d8e04ae1738389bbb4a` returned zero JavaScript/Actions CodeQL
+alerts. Its suggested removal of the loading test's finally release was not
+adopted: that idempotent release is required if an earlier assertion fails.
+The other suggestion concerns the unchanged upload receiver's duplicate-race
+400 versus route-level 409; no receiver change is authorized here, and removing
+its duplicate guard would weaken rejection. That observation is left for
+coordinator disposition, not treated as a production transport defect.
+Fresh-code-head CI `34112928196` is `action_required`; MCP log lookup returned
+zero jobs, not a passing CI result. Automated validation is supplemental and
+does not replace the required independent final review.
