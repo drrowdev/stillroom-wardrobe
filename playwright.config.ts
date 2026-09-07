@@ -19,6 +19,11 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
     { name: 'mobile', use: { ...devices['iPhone 13'], defaultBrowserType: 'chromium' } },
+    {
+      name: 'webkit-photo',
+      testMatch: ['image-processing.spec.ts', 'slice.spec.ts'],
+      use: { ...devices['Desktop Safari'] },
+    },
   ],
   webServer: {
     command: `npm run dev -- --mode browser-test --port ${port} --strictPort`,

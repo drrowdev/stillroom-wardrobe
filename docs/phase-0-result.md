@@ -704,3 +704,314 @@ dependencies, root instructions and hosted surfaces remain unchanged.
 No extra agent, service restart/reset, protocol spike, hosted operation, merge
 or deployment. PR remains draft pending coordinator **final-head CI and independent
 follow-up review**; physical-device and hosted acceptance remain separate gates.
+
+## PR #4 bounded JPEG compatibility — 7 September 2026
+
+Base `0545cf3b679fe29a373929d6188e9953e352d8ec`; starting head
+`51c9adc6f6b0f96d75b5ab9829a208fe33e8d60e` had the same tree.
+Branch `copilot/phase0-iphone-photo-capture-fix`, one writer. I04/I05, principally
+R04, preserving R03/R11/R12/R17/R19/R23/R26/R27; not Phase 1, full I07 or AI.
+Full [plan 5567450856](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5567450856)
+was read and its SHA-256 matched
+`a2931f3f92160c017d893471205f243a4b4cdd14863ca632fcf95abf49a3a57e`.
+[Controlling approval 5567639838](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5567639838)
+records actual read-only **Anthropic Claude Opus 5** AMEND-AND-APPROVE critique:
+defensive Gate B, fresh-output-only identity/absent-orientation removal, independent
+byte/pixel oracles, fixture metadata accounting, private disclosure and narrow WebKit.
+Those amendments, not the plan's earlier conditional stop, govern this implementation.
+
+Before edits, [coordinator receipt 5567680245](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5567680245)
+was read: native `sweagent-capi:gpt-6-astra`, task
+`b671ab8a-8939-4569-9c34-0e2fd66f5eda`, session
+`e92350e1-13d2-42b3-a970-efa1af556e92`, observed
+`2026-09-07T08:27:00.8481680Z`, matching this PR/base/head. No historical
+receipt substitution or additional agent. Context actually read: root/Copilot
+instructions, README, cloud/local-backend and relevant Phase-0 history; blueprint
+00/03/05, image/owner excerpts of 07/08, 10/12/13, Phase 0 in 14, I04/I05/I07
+boundaries in 15, relevant 17/18/19/20/21; actual image schema/types, image
+preparation/upload/private-download/item adapters, AddItem/owner lifetime,
+catalog/helper, JPEG unit/fixture/browser/slice tests, mock/local-session contracts,
+local/hosted guard excerpts, package commands, Playwright/CI, and PR discussion,
+empty starting diff/reviews/checks and CI job-log lookup.
+
+### Implementation and evidence limits
+
+**Gate B, not a reproduced iPhone root cause.** Before production edits, tiny
+four-colour native-canvas probes passed in Linux Chromium 153.0.8010.12
+(revision 1243) and WebKit 26.6 (revision 2359), Node 24.19.0. WebKit first failed
+to launch because its executable was absent; the existing pinned
+`./node_modules/.bin/playwright install --with-deps webkit` succeeded, then both
+probes passed. No npm/dependency/lockfile changes. Linux WebKit is not Apple
+ImageIO, native HEIC, Vivaldi camera or physical-iPhone evidence.
+
+Fresh sRGB encoder output now removes only complete exact-signature Exif APP1
+and existing ICC APP2 segments. Absent/1 orientation is eligible, including
+consistent duplicate segments; malformed/nonidentity/conflicting orientation and
+linked-directory ambiguity fail closed. All scans/EOI are checked. Source parser,
+source trailer/admission, strict final validator and all resource limits remain
+unchanged. Independent test-only segment ranges verify exact removals, retained
+bytes, idempotence and terminal EOI; same-engine decoded-pixel hashes remain equal,
+including native colour-profile removal. Final JPEG byte hashes, both TIFF orders,
+all eight orientations and three decoder paths are covered. Native byte budgets
+are distinct from injected quality-loop/floor assertions.
+
+The photo panel has default-off, non-live, EN/FI/SV preparation details containing
+only typed static stage/reason labels. The existing `photo.invalid` key no longer
+asserts that a different JPEG is the diagnosis. Actual selection/reselection,
+discard and owner lifecycle clear details; no-file cancellation preserves them.
+No filenames, metadata, measurements, hashes, identifiers, raw exceptions,
+telemetry, persistent diagnostics or uploads are added. Manual edits/clears,
+explicit Save and frozen retry adapters remain unchanged.
+
+### Commands and unresolved gates
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/jpeg.test.ts` | First: exit 1, 42 existing passed/3 new failed. Final: exit 0, 49 passed. |
+| `npm run test:browser -- tests/browser/image-processing.spec.ts --grep 'fresh native four-colour' --project=chromium --project=webkit-photo --retries=0` | Before production edits: initially missing WebKit; after pinned installer, exit 0, 2 passed. |
+| `npm run test:browser -- tests/browser/image-processing.spec.ts tests/browser/slice.spec.ts --project=chromium --project=webkit-photo --retries=0` | Latest: exit 1, 70/72 passed; all image-processing cases passed in both engines. Failures below remain visible. |
+| `npm run lint` / `npm run typecheck` / `npm run check:translations` | Each exit 0; 350 keys, EN/FI/SV, 26 source files. |
+| `npm run test:unit` | Exit 0; 271 tests, nine files. |
+| `npm run test:browser -- --retries=0` | Exit 1; 169/170 passed across Chromium, Chromium-mobile and narrow WebKit. Only WebKit's empty mocked-upload byte assertion failed. |
+| `npm run test:a11y -- --retries=0` | Exit 0; 21 passed, including EN/FI/SV photo details in all three projects. |
+| `npm run build` / `npm run scan:secrets` / `npm run check:dependencies` | Each exit 0; 136 scanned text files, same unprinted process-local random canary; 12 production/220 development packages, no reported production vulnerabilities. Existing non-failing chunk warning retained (151.45 kB gzip JS). |
+| `git diff --check` and exact allowlist/source-validator/limits/database-job comparison | Exit 0; only approved existing paths, no source-guard or database-job changes. |
+
+The first expanded run exposed test-authoring errors (loop brace, a decoder-accepted
+synthetic header, and an incorrect post-login route expectation); those were
+corrected without changing source admission, decoding or navigation. The known
+corrupt-table fixture now proves the decode error stage.
+
+**Required browser gate is NOT green.** WebKit's mock upload stores zero bytes
+where prepared metadata declares 287; the strengthened byte/hash assertion fails
+before retry, and the unchanged Save adapter correctly rejects mismatching bytes.
+This does not establish a real network upload defect. Existing owner-tab tests
+intermittently time out waiting for Playwright `requestfailed` after signed-out UI
+appears. The latest targeted run also encountered a Chromium discard-dialog
+detachment/navigation timeout. No skip, browser exclusion, timeout increase,
+weakened assertion, Auth/Save change or excluded mock-backend edit was used.
+Those timing failures did not recur in the subsequent full run; their causes
+remain unproven. The repeatable empty mocked-upload failure is still blocking.
+Coordinator review/actual different-provider critique and approval are needed
+before any material harness/evidence amendment, including adding the excluded
+`tests/browser/mock-backend.ts` path if investigation requires it.
+
+Fresh-head App and unchanged real-local integration/security/types-parity CI remain
+required. Starting-head CI `34097907908` was `action_required`, zero jobs; detailed
+log lookup reported no failed jobs, not a pass. No CI authorization/rerun, local
+fixture reset, hosted operation, merge or deployment occurred here.
+
+Physical-phone acceptance remains **OPEN**: record actual iOS/Safari/Vivaldi
+versions and separate camera preview, returned capture, artificial camera-roll
+JPEG/HEIC picker conversion, prepared preview/orientation, explicit Save/reload,
+cancel/reselect/discard, accessibility and safe high-resolution refusal. Safari's
+working camera preview and the two apps' shared Apple platform prove neither
+independent engines nor completed photo Save. Raw HEIC remains unsupported and
+requires a separately reviewed bounded packet if actual picker conversion is
+insufficient; manual conversion forever is not completion. No private photo was
+requested or inspected. Every merge needs fresh explicit user approval;
+deployment is separately authorized. Rollback is the coordinator's separately
+authorized previous reviewed static build based on `0545cf3`, never a DB rollback
+or a change to the working recovery flow.
+
+Supplemental automated review of code commit `2204dd7` returned zero CodeQL
+alerts (JavaScript/Actions). Its two suggestions were not adopted: a collapsed
+`hidden` section remains a valid DOM target for `aria-controls`, and the
+zero-based post-increment counter already accepts exactly 4096 header segments
+and rejects segment 4097. An independent exact-boundary unit regression was added
+for the latter; no production guard/accessibility change was needed. These
+automated checks do not replace coordinator independent final review.
+After this test-only addition, `npm run test:unit -- tests/unit/jpeg.test.ts`
+passed 50 tests and `npm run test:unit` passed 272 tests; lint, typecheck and
+`git diff --check` each returned exit 0. Browser/build results above apply to
+unchanged production code at `2204dd7`, not a new browser rerun. CI `34102995096`
+on that code commit is also `action_required`; no required job pass is claimed.
+
+### PR #4 approved upload-wire harness correction — 7 September 2026
+
+Base `0545cf3b679fe29a373929d6188e9953e352d8ec`; starting head
+`38eef7cc2589d8b44ebc20030f063d7a61db2a64`, same branch/PR, one writer.
+I04/I05/R04/R12 test support only. Read full plan `5567450856`, approval
+`5567639838`, controlling [amendment 5568270851](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5568270851)
+and [review 5130236784](https://github.com/drrowdev/stillroom-wardrobe/pull/4#pullrequestreview-5130236784).
+The coordinator records actual read-only **Anthropic Claude Opus 5** harness
+prereview (`4e125`) and clean seven-file runtime review (`c4a35485`).
+No runtime correction was requested or made.
+
+Before edits, re-read [current-session native receipt 5568495884](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5568495884):
+task `cdfea63a-edb9-47a1-987c-d357abf9e13c`, session
+`01e1f8c3-c5d5-4c2e-80c5-5374b57ea691`, observed
+`2026-09-07T09:26:35.4628900Z`, actual `sweagent-capi:gpt-6-astra`, matching
+PR/base/head. Historical receipts were not substituted.
+Context read: root/Copilot instructions; README and cloud/local-backend/Phase-0
+evidence; relevant blueprint 00/03/05/07/08/10/12/13/14 Phase 0/15 I04–I05 and
+I07 boundary/17/18/19/20/21; actual image migration/type excerpts, Save,
+private-image/item/client source, mock/slice, installed Storage SDK, package,
+Playwright/ESLint/TypeScript/CI configuration; PR discussion/review/diff and CI
+job-log lookup. No credential cache or hosted inputs were read.
+
+Only `tests/browser/mock-backend.ts`, `tests/browser/slice.spec.ts` and this
+document change. The page-owned Node receiver binds `127.0.0.1:0`, accepts only
+reserved synthetic owner/item/image paths and issued fixture credentials, and
+receives URL-only continued browser POSTs. It checks the actual multipart stream
+before storing a positive JPEG file part; no inspector replay or expected-byte
+backfill. The 1 MiB streamed-body bound, five-second request/header deadlines,
+explicit local-origin/header CORS and listener/all-socket cleanup cover failure
+and page/setup closure. Existing scripted errors, duplicate 409, commit failure,
+Auth/profile/REST/download behavior remain. Negative tests cover missing/empty/
+ambiguous/multiple/wrong-name/wrong-type/malformed/truncated/oversized parts,
+metadata/cache-field ambiguity, scope/credentials, independent pages and cleanup.
+
+**Measured synthetic transport, not an application upload diagnosis:** pinned
+Playwright 1.63.0, WebKit 2359, Node 24.19.0. The first WebKit socket proof
+received **4096 payload bytes**, SHA-256
+`c8f5d0341d54d951a71b136e6e2afcb14d11ed8489a7ae126a8fee0df6ecf193`;
+the observed inspector file part was **0 bytes**. One preflight reached the
+receiver, zero the original OPTIONS route. Chromium/mobile delivered the same
+known bytes/hash and exposed 4096 inspector file bytes, with neither preflight
+observed. No engine-specific fallback or exclusion. Intentional same-length
+corruption and wrong-length comparisons both throw, proving a non-vacuous oracle.
+Actual app-prepared main/thumb were each **287 bytes**, SHA-256
+`84f279ce939b14f724a91e543bbd9726b1f67b08828f1700868b6a0a463790f2`
+in all three projects. Existing exact-byte/hash/retry assertions remain, with
+positive length, UUID and no-additional-socket-upload checks.
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+JSON reports used existing `--reporter=list,json` with
+`PLAYWRIGHT_JSON_OUTPUT_FILE` under `/tmp`, never committed.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run typecheck` / `npm run lint` | Initial token-registration syntax error corrected; subsequently both exit 0. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --grep 'actual upload wire' --project=webkit-photo --retries=0` | Initially blocked by syntax, then missing executable; after pinned installation, socket proof exit 0. |
+| `./node_modules/.bin/playwright install --with-deps webkit` | Exit 0, only after actual missing-browser failure; no dependency/configuration edit. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --grep 'retrying a failed commit' --project=webkit-photo --retries=0` | Exit 0, unchanged strong app assertion first. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --grep 'actual upload wire\|retrying a failed commit' --project=webkit-photo --retries=0` | Initial expanded run 15/16; corrected test expectation to existing unauthenticated 401, not an Auth change. |
+| `npm run test:browser -- tests/browser/image-processing.spec.ts tests/browser/slice.spec.ts --project=chromium --project=mobile --project=webkit-photo --retries=0 --reporter=list,json` | Exit 0, **153/153**, no skips/retries. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --grep 'actual upload wire\|retrying a failed commit' --project=chromium --project=mobile --project=webkit-photo --retries=0` | Final scoped run exit 0, **48/48**, after diagnostic instrumentation; no skips/retries. |
+| `npm run test:unit` / `npm run check:translations` | Exit 0; **272 tests**, 350 EN/FI/SV keys. |
+| `npm run test:browser -- --retries=0` | Exit 1, **214/215**; all wire/Save cases pass, existing WebKit B-first owner-tab profile `requestfailed` wait times out at 30 seconds. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --grep 'different-account tabs.*b signs in first' --project=webkit-photo --retries=0 --reporter=list,json` | One diagnostic run, exit 0; not a replacement full-suite pass. |
+| `npm run test:a11y -- --retries=0` | Exit 1, **20/21**; Chromium loading-state test waits 30 seconds for the sign-in email input. No retry or Auth correction. |
+| `npm run db:start` | Exit 0; prepared local stack, no reset or manual service repair. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Exit 0; ordinary local suite and unchanged real recovery UI journey. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | Exit 0; all 11 ordinary-session stages, sequentially after integration. |
+| `npm run db:types -- --check` | Exit 0; actual local generation matches committed bytes. |
+| `git ls-files --error-unmatch src/data/database.types.ts` / `git diff --exit-code -- src/data/database.types.ts` | Exit 0; tracked, unchanged. |
+| `npm run build` / `npm run scan:secrets` / `npm run check:dependencies` | Exit 0; existing chunk warning, 136 scanned text files with same unprinted process-local canary, no reported production vulnerabilities. |
+| `git diff --check` | Exit 0. |
+
+The profile diagnostic adds only coarse synthetic event timing: requests held
+at 6/9 ms, failure events at 154/138 ms, both signed-out screens observed at
+178 ms; both receiver POST counts zero. It did not reproduce or explain the
+full-run timeout. The accessibility startup failure is also unexplained. No
+timeout increase, assertion relaxation, Auth rewrite or full rerun-to-green;
+**full browser and accessibility gates remain OPEN**. The combined 153-case
+result predates this diagnostic-only instrumentation; no production code changed.
+
+CI `34103319777` on the starting head is `action_required`; detailed failed-job
+lookup returned zero jobs, not a pass. Final-head CI trust authorization and
+independent follow-up review remain coordinator gates. This fixture proof is
+not real hosted RLS/Storage, Apple HEIC, personal-photo or completed iPhone
+acceptance. Physical Safari/Vivaldi camera/library/Save/accessibility gates remain
+open. No hosted calls, new agent, merge or deployment; every merge still requires
+fresh explicit user approval. Preserve the previously recorded rollback boundary.
+
+### PR #4 approved test-timing correction — 7 September 2026
+
+Base `0545cf3b679fe29a373929d6188e9953e352d8ec`; starting head
+`d32dfdc8c251a6714421dc05bbc5bbedd207eba2`, existing
+`copilot/phase0-iphone-photo-capture-fix`, one writer. I04/I05 test support,
+preserving R04/R11/R12/R17/R19/R26/R27. Only `tests/browser/slice.spec.ts`
+and this result document change in this follow-up.
+
+Read the full controlling [amendment 5569237411](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5569237411)
+before edits. The coordinator records actual read-only reviewer `c4a35485`,
+**Anthropic / Claude Opus 5**: clean seven-file runtime review, clean upload-wire
+review, then approval of the refined timing fixture. The review identified a
+held-route/protocol-notification ordering hazard; it did not recover the original
+failing trace. Controlling corrections reject strict failure-before-release
+timestamps, blanket cancellation catches and raw HTML/URL diagnostics. This
+implementation follows that approved plan, not a new material amendment.
+
+The matching [native-model receipt 5569268531](https://github.com/drrowdev/stillroom-wardrobe/pull/4#issuecomment-5569268531)
+was read before edits: coordinator explicitly selected `gpt-6-astra` and verified
+native `sweagent-capi:gpt-6-astra` at `2026-09-07T10:29:50.9567124Z`, task
+`73ce339d-3e53-4760-a581-b46548779a87`, session
+`7bea9293-01f0-4ae8-a93c-8bf0aeee3659`, matching this PR/base/head.
+No old-session receipt or additional implementation agent was substituted.
+Context actually read: root/Copilot instructions; cloud guide and current
+Phase-0 PR #4 evidence; local-backend evidence; blueprint 00/03/05/10/20,
+Phase 0 in 14, relevant 07/08/12/13 and I03–I05 in 15; actual profile migration/
+generated-type excerpts, `src/auth/session.ts`, `src/data/client.ts` and
+`src/data/profile.ts`; affected slice tests, mock-backend contracts, local/hosted
+guard excerpts, package/Playwright/CI configuration; PR discussion, diff,
+reviews/threads and CI job-log lookup.
+
+The two-owner test installs a test-local, bounded profile-GET signal observer.
+It forwards unchanged native fetch arguments/results with the correct receiver,
+checks a bare same-origin GET before arming, and never reads bodies, headers,
+credentials or upload content. One matching synthetic owner/profile GET is held
+per tab; other requests retain normal fixture routing. Both signed-out screens,
+one held/observed request each and real `AbortError` signals are required before
+either reply is released. Protocol failure events are diagnostic only.
+Finally cleanup releases both routes, bounds fulfillment/settlement to five
+seconds, settles latches and removes listeners. Coarse unexpected/unsettled
+outcomes fail without replacing a primary assertion failure. Existing owner,
+late-response, language, storage/cache and reload assertions remain intact.
+
+Loading-a11y now retains finally diagnostics limited to navigation completion/
+HTTP bucket, ready state, separate email-present/visible flags, known selectors,
+allowlisted language/error names and request category counts with synthetic A.
+No raw URL, HTML, exception/message, header/body, screenshot or trace is added.
+Selectors, acceptance, production code, upload receiver and timeouts are unchanged.
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+Browser commands below used `--reporter=list,json`, with
+`PLAYWRIGHT_JSON_OUTPUT_FILE` set respectively to `/tmp/pr4-timing-targeted.json`,
+`/tmp/pr4-timing-browser.json` and `/tmp/pr4-timing-a11y.json`. Reports are not committed.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run typecheck` / `npm run lint` / `git diff --check` | Test-authoring type/cleanup-initializer errors corrected before browser execution; final checks each exit 0. |
+| `./node_modules/.bin/playwright install --with-deps webkit` | Exit 0 after confirming WebKit absent; existing pinned browser, no dependency/configuration change. |
+| `npm run test:browser -- tests/browser/slice.spec.ts --grep 'different-account tabs\|accessibility while wardrobe items are loading' --project=chromium --project=mobile --project=webkit-photo --retries=0 --reporter=list,json` | Exit 0, **9/9**: A-first/B-first and loading-a11y in all three projects. |
+| `npm run test:browser -- --retries=0 --reporter=list,json` | One fresh full run, exit 0, **215/215**, zero skips/flaky/retries; started `2026-09-07T10:39:10.612Z`. |
+| `npm run test:a11y -- --retries=0 --reporter=list,json` | One fresh run after browser success, exit 0, **21/21**, zero skips/flaky/retries; started `2026-09-07T10:41:08.696Z`. |
+| `npm run check:translations` / `npm run test:unit` | Exit 0; 350 EN/FI/SV keys and **272 tests** in nine files. |
+| `npm run db:start` | Exit 0; prepared disposable local stack, no reset or service repair. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Exit 0; ordinary-session suite and one real local recovery UI journey. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | Exit 0; all 11 ordinary-session stages, after integration. |
+| `npm run db:types -- --check` / `git ls-files --error-unmatch src/data/database.types.ts` / `git diff --exit-code -- src/data/database.types.ts` | Each exit 0; tracked types match actual local generation and remain unchanged. |
+| `npm run build` / `npm run scan:secrets` / `npm run check:dependencies` | Each exit 0; same unprinted process-local random canary, 136 scanned text files, no reported production vulnerabilities. Existing chunk warning remains (151.45 kB gzip JS). |
+
+Full-run coarse diagnostics show each owner's observed count = held count = 1,
+signal present and aborted with `AbortError` before release, both outcomes
+`fulfilled`, completed cleanup and zero receiver POSTs/payload bytes. Loading
+diagnostics show completed 2xx navigation, complete document, English workspace,
+no fatal selector, no page errors and no failed requests. These successful end
+states do not explain the earlier Chromium startup failure.
+
+**Ordering hazard removed; original WebKit trace unavailable; earlier a11y cause
+unproven.** Preserve the preceding failed-run history. The fresh local browser/
+a11y gates above now pass, not by skipping cases or weakening ownership assertions.
+Starting-head CI `34108385173` is `action_required`; MCP failed-job lookup returned
+zero jobs, not a pass. Fresh committed-head CI authorization/results and independent
+follow-up review remain coordinator gates before the user's separate merge decision.
+Physical iPhone Safari/Vivaldi, native HEIC and hosted-owner acceptance remain
+OPEN. No hosted call, production change, merge, deployment or later phase is
+authorized or performed; preserve the existing rollback boundary.
+
+Supplemental automated validation of correction commit
+`2e732c12bc1976a856798d8e04ae1738389bbb4a` returned zero JavaScript/Actions CodeQL
+alerts. Its suggested removal of the loading test's finally release was not
+adopted: that idempotent release is required if an earlier assertion fails.
+The other suggestion concerns the unchanged upload receiver's duplicate-race
+400 versus route-level 409; no receiver change is authorized here, and removing
+its duplicate guard would weaken rejection. That observation is left for
+coordinator disposition, not treated as a production transport defect.
+Fresh-code-head CI `34112928196` is `action_required`; MCP log lookup returned
+zero jobs, not a passing CI result. Automated validation is supplemental and
+does not replace the required independent final review.

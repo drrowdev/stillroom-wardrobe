@@ -54,8 +54,20 @@ export function insertSegments(jpeg: Uint8Array, ...segments: Uint8Array[]): Uin
 
 export async function addPrivateMetadata(jpeg: Blob, orientation: number, littleEndian = true): Promise<Blob> {
   const encoder = new TextEncoder();
+  const native = new Uint8Array(await jpeg.arrayBuffer());
+  // Fixture-only removal prevents native encoder Exif from duplicating our injected orientation.
+  const ranges = inspectJpegSegments(native).filter((segment) => segment.kind === 'exif');
+  const parts: Uint8Array[] = [];
+  let start = 0;
+  for (const segment of ranges) {
+    parts.push(native.subarray(start, segment.start));
+    start = segment.end;
+  }
+  parts.push(native.subarray(start));
+  const base = joinBytes(...parts);
+  if (inspectJpegSegments(base).some((segment) => segment.kind === 'exif')) throw new Error('fixture Exif remains');
   return new Blob([insertSegments(
-    new Uint8Array(await jpeg.arrayBuffer()),
+    base,
     exifSegment(orientation, littleEndian),
     jpegSegment(0xe1, encoder.encode('http://ns.adobe.com/xap/1.0/\0<x:xmpmeta>GPS_PRIVATE_FIXTURE</x:xmpmeta>')),
     jpegSegment(0xed, encoder.encode('Photoshop 3.0\0IPTC_PRIVATE_FIXTURE')),
@@ -77,7 +89,7 @@ export async function makeCanvasJpeg(width = 120, height = 80, dense = false): P
   canvas.width = width;
   canvas.height = height;
   try {
-    const context = canvas.getContext('2d');
+    const context = canvas.getContext('2d', { colorSpace: 'srgb' });
     if (!context) throw new Error('fixture canvas unavailable');
     if (dense) {
       const image = context.createImageData(width, height);
@@ -107,28 +119,46 @@ export async function makeCanvasJpeg(width = 120, height = 80, dense = false): P
   }
 }
 
-export function listJpegMarkers(bytes: Uint8Array): number[] {
-  const markers: number[] = [];
+export function inspectJpegSegments(bytes: Uint8Array) {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new Error('fixture SOI expected');
+  const segments: { marker: number; start: number; end: number; kind: 'exif' | 'icc' | 'other' }[] = [];
   let offset = 2;
   let entropy = false;
+  let sawScan = false;
   while (offset < bytes.length) {
     if (entropy && bytes[offset] !== 0xff) {
       offset += 1;
       continue;
     }
+    const start = offset;
     if (bytes[offset++] !== 0xff) throw new Error('fixture marker expected');
     while (bytes[offset] === 0xff) offset += 1;
     const marker = bytes[offset++];
     if (marker === undefined) throw new Error('fixture truncated marker');
     if (entropy && (marker === 0 || (marker >= 0xd0 && marker <= 0xd7))) continue;
-    markers.push(marker);
-    if (marker === 0xd9) break;
+    if (marker === 0xd9) {
+      if (!sawScan || offset !== bytes.length) throw new Error('fixture EOI or tail invalid');
+      segments.push({ marker, start, end: offset, kind: 'other' });
+      return segments;
+    }
+    if (marker === 0 || marker === 1 || marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) ||
+        offset + 2 > bytes.length) throw new Error('fixture invalid segment');
     const length = bytes[offset]! * 256 + bytes[offset + 1]!;
     if (length < 2 || offset + length > bytes.length) throw new Error('fixture truncated segment');
+    const payload = bytes.subarray(offset + 2, offset + length);
+    const signature = (text: string) => [...text].every((char, index) => payload[index] === char.charCodeAt(0));
+    const kind = marker === 0xe1 && signature('Exif\0\0') ? 'exif'
+      : marker === 0xe2 && signature('ICC_PROFILE\0') ? 'icc' : 'other';
     offset += length;
+    segments.push({ marker, start, end: offset, kind });
     entropy = marker === 0xda;
+    sawScan ||= entropy;
   }
-  return markers;
+  throw new Error('fixture missing EOI');
+}
+
+export function listJpegMarkers(bytes: Uint8Array): number[] {
+  return inspectJpegSegments(bytes).map((segment) => segment.marker);
 }
 
 export async function summarizeJpeg(blob: Blob) {
@@ -141,7 +171,7 @@ export async function summarizeJpeg(blob: Blob) {
     await image.decode();
     canvas.width = image.naturalWidth;
     canvas.height = image.naturalHeight;
-    const context = canvas.getContext('2d');
+    const context = canvas.getContext('2d', { colorSpace: 'srgb' });
     if (!context) throw new Error('fixture canvas unavailable');
     context.drawImage(image, 0, 0);
     const corners = [[0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9]].map(([x, y]) =>
@@ -149,11 +179,14 @@ export async function summarizeJpeg(blob: Blob) {
     );
     const text = new TextDecoder('latin1').decode(bytes);
     const hash = await crypto.subtle.digest('SHA-256', bytes);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const pixelHash = await crypto.subtle.digest('SHA-256', pixels);
     return {
       width: canvas.width, height: canvas.height, corners, size: blob.size, type: blob.type,
       markers: listJpegMarkers(bytes),
       hasPrivateText: ['Exif', 'xap/1.0', 'GPS_PRIVATE', 'IPTC_PRIVATE', 'COMMENT_PRIVATE'].some((textPart) => text.includes(textPart)),
       hash: Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join(''),
+      pixelHash: Array.from(new Uint8Array(pixelHash), (byte) => byte.toString(16).padStart(2, '0')).join(''),
       hasFilename: 'name' in blob,
     };
   } finally {
