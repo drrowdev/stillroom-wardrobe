@@ -16,6 +16,7 @@
     "test:a11y": "playwright test --grep accessibility",
     "db:start": "node scripts/db.mjs start",
     "db:reset": "node scripts/db.mjs reset",
+    "db:rehearse": "node scripts/preservation-rehearsal.mjs",
     "db:types": "node scripts/db.mjs types",
     "test:integration": "node scripts/run-local-tests.mjs integration",
     "test:security": "node scripts/run-local-tests.mjs security",

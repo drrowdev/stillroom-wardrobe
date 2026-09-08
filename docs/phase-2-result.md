@@ -779,3 +779,174 @@ predecessors' partial scans, and does not establish live SQL correctness.
 Only this evidence append follows the validated executable candidate.
 Native changed-file secret scanning found no secrets before the candidate commit.
 Append-only verification preserved both files' complete starting contents.
+
+## PR #12 — populated-base preservation rehearsal source packet
+
+8 September 2026. **Native unit/static checks complete; actual preservation
+rehearsal UNRUN, pending authorized fresh CI.** This is the current-release
+preservation prerequisite for I29a / R18 R19 R23 R26 R27 R28, retaining R01/R11
+owner isolation. It is not I29b, full I29/Phase 2, B3 resolution or release approval.
+
+### Authority and context
+
+Existing PR #12, node `PR_kwDOUP-Oyc8AAAABCvKWmw`, branch
+`copilot/modelgpt-6-astra`; base `3c84cfb07e569dab416ccd1b5d19c7c6e251010c`,
+clean starting head `9b8ac6fa82aa10258f0bf1d1c44dd4eaaab5a039`.
+Read the full [six-path plan 5591979149](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5591979149)
+and [controlling clarification 5592284908](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592284908).
+Actual read-only **Anthropic / Claude Opus 5** reviewer
+`bc532454-fce2-4417-8b53-d69c1f44cc46`, turns 5–6, and coordinator approval
+control this packet. The clarification permits source-derived parser units
+before real CI observation; it adds no native DB authority or new architecture.
+
+After context, before edits, read this continuation's own
+[public receipt 5592308899](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592308899).
+It records explicitly selected, authenticated-GET verified actual
+`sweagent-capi:gpt-6-astra`, task `e2bd10ff-b531-4b32-a18d-a062b33e1375`,
+session `0551f3a9-c9db-4eee-97bf-66c819936e03`, observed
+`2026-09-08T21:46:05.1716489Z` and rechecked
+`2026-09-08T21:46:55.8417820Z`, with matching repository/PR/branch/base/head and
+one writer. The predecessor's receipt was not reused. Its fixture-provenance
+question was an instruction-clarification hold, not a code/DB/CAPI/authorization
+failure or an authorization workaround.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`,
+cloud guide, Phase 0 and current Phase 2 evidence, local-backend guide;
+blueprint 00/03/05/08/10/14/20 and relevant 15/I29; actual base SQL (hash-identical
+to blueprint 07), target migration and generated schema excerpts; backend
+local/CLI/environment helpers, db/provision/run-local wrappers, quality `isMain`,
+normal integration fixture/RPC contracts, hosted guard separation, quality-gate
+unit import pattern, package/CI/lint/Vite configuration. PR #12 discussion,
+empty diff/reviews and MCP workflow/job evidence were read. Starting CI
+`34279530027` was `action_required`, zero jobs; failed-log query found no failed
+jobs, **not a passing CI run**. No Actions authorization or rerun occurred.
+
+### Six-file implementation
+
+Only `scripts/preservation-rehearsal.mjs`,
+`tests/integration/preservation.sessions.mjs`, `tests/unit/preservation.test.ts`,
+the new `package.json` `db:rehearse` entry, one step in `.github/workflows/ci.yml`
+and this append change. Existing app/SQL/types/lockfile/helpers/other tests and
+workflows remain unchanged.
+
+The zero-argument orchestrator requires the literal rehearsal/CI/Actions flags,
+existing no-service-secret/project/local-Docker/known-container checks and pinned
+CLI 2.116.0. Mutable flags prevent accidents, not hostile-code execution.
+It checks exactly two regular, non-symlink migrations before reset and again
+before upgrade:
+
+| Source version | Bytes | SHA-256 |
+|---|---:|---|
+| `20260905000000` | 35214 | `4f2d44603707cb823527c80d8384c2a6390f99ead2ba294435db83403a7eead5` |
+| `20260906000000` | 5923 | `4060e963bc5a986857f31bc9b528dd6d7ea8caee720336de8499d59e8f8c3f92` |
+
+The fixed CI sequence is:
+
+1. **S1:** pinned help checks; `db reset --local --no-seed --yes --version
+   20260905000000`; `migration list --local` must show applied base and pending
+   target; unchanged `scripts/provision-test-users.mjs` provisions the fictional
+   owners.
+2. **S2:** absolute Node child `tests/integration/preservation.sessions.mjs
+   capture <runUUID>` uses exactly
+   `normalSessionEnvironment(process.env, await readCredentialCache())`.
+   Server-verified ordinary A/B identities, absent base provenance column and
+   empty pre-seed application sets precede fixture creation. Both owners get
+   implicit/explicit/imageless items, ready/retired images from the existing
+   632-byte fictional JPEG, preferences/profile saves, repeated outfit/history
+   saves, links, rules and feedback.
+3. **S3:** repeat source/history checks; only `migration up --local`; history must
+   show exactly both versions applied and none pending. No intervening reset,
+   provisioning, reseeding or repair.
+4. **S4:** the same normal child in `verify <runUUID>` first compares all ten
+   complete table sets (30 total rows), old values, versions and full timestamp
+   strings, and eight actual object downloads against stored lengths/hashes and
+   before-download evidence. Only the four new item columns are excluded from
+   old-value equality; they must separately be null/null/null/`{}`. Old physical
+   values remain intact and unverified. Only after this complete comparison run
+   bounded range, A/B/anonymous ownership and each owner's raw v2 export probes.
+
+Closed, owner/run/project/source/stage-bound snapshots have exact old column
+inventories, correct table identities, no credential/auth-response fields,
+exclusive `wx`/0600 creation, regular non-symlink reads and a 512 KiB bound.
+They stay ignored at the single derived run path. Finally cleans only that
+run's regular snapshot; no directory/wildcard deletion or snapshot artifact.
+Output is fixed stages/codes, source inventory and synthetic counts, never
+rows, object paths/bytes, credentials or arbitrary error text.
+
+The single CI opt-in step sits between existing `db:start` and `db:reset`.
+The 30-minute job, runner, permissions and all later reset/integration/security/
+recovery/type-generation/parity checks remain. Failures stop subsequent steps;
+skipped checks are not passes.
+
+### Source-derived format/body evidence, not execution
+
+Parser fixtures derive from pinned CLI v2.116.0
+`apps/cli-go/internal/migration/list/list.go` (`makeTable`),
+`internal/utils/output.go` (`RenderTable`) and `render.go` timestamp formatting,
+plus its pinned Glamour v1.0.0 ASCII/table rendering. They are **source-derived,
+not observed CLI output and not preservation proof**. Unknown format/version,
+duplicates, missing rows, wrong applied/pending columns and empty output fail
+closed. First authorized fresh CI must validate the real table and transition;
+any actual mismatch remains a failed stage, not a fallback or invented inventory.
+The predecessor's [5592028965](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592028965)
+records all three real read-only help checks, exit 0, required flags present:
+capability evidence only, not rerun or relabelled as this session's execution.
+
+Unit extraction retains the **untrimmed** SQL dollar-body newlines:
+base 1452 bytes / MD5 `a8188b771786538ec7ef031d9d974fce`;
+target 1452 bytes / MD5 `cb47b75d41751df15813773388c062cf`.
+These are source-derived `export_manifest` bodies, not new hosted observations.
+The SQL and transaction markers are unchanged; no server-atomicity guarantee.
+
+### Actual native validation
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/preservation.test.ts` | Final 36/36, exit 0; includes import side-effect tripwires, source column/body parity and malformed/history/snapshot/value/byte negatives. |
+| `node --check scripts/preservation-rehearsal.mjs` | Final exit 0. |
+| `node --check tests/integration/preservation.sessions.mjs` | Final exit 0. |
+| `npm run lint` | Final exit 0. |
+| `npm run typecheck` | Final exit 0. |
+| `npm run test:unit` | Final 516/516 in 13 files, exit 0. |
+| `npm run check:translations` | 402 EN/FI/SV keys, 37 source files, exit 0. |
+| `npm run build` | Exit 0; JS 164.26 kB gzip, CSS 4.97 kB gzip; existing non-failing >500 kB chunk warning retained. |
+| `npm run scan:secrets` | Exit 0; 160 text files and fresh unprinted build canary checked before this documentation append. |
+| `git diff --check` | Exit 0. |
+
+Initial checks caught a malformed new authorization-header string, one unused
+fixture assignment, strict indexed-access typing in unit fixtures, and a
+test-only SQL-column regex that missed digits in SHA column names. All were
+corrected before the final passing checks. No unrelated test, configuration,
+dependency or compiler setting was weakened. Binary fixture bytes were handled
+inside programs only, never viewed, encoded or emitted to the native model.
+
+### UNRUN stages and retained handoff gates
+
+This writer ran **no native** rehearsal opt-in, migration list/reset/up,
+provisioning, psql, type generation, backend mutation, integration/security/
+recovery/browser/a11y suite, hosted smoke or live operation. S1–S4 and actual
+preservation remain **UNRUN/PENDING**, not inferred from 516 unit tests.
+
+After candidate processes finish and changes are committed, the existing native
+final validator is called once; its actual components and unavailable tools are
+reported on the PR, not inferred from the wrapper heading. Coordinator owns
+executable/privacy/egress/workflow trust and fresh exact-head CI authorization,
+actual preservation evidence, independent Claude affected review, all existing
+App/normal-owner/recovery/types/native Apple gates and actual four-PNG review
+with run/head/hashes/verdict. Source tests or artifact existence waive none.
+
+Historical B3 cause remains open despite merged observational PR #11 and clean
+current observations. Full saved-only export/every-field editing and I29b stay
+parked. Conditional live I29a DDL/runtime approval still requires preservation,
+B3/release readiness and fresh metadata; operator-method decision `5592161566`
+grants this writer no live authority. No PUT/DELETE/history repair/replay,
+transaction-marker removal, privilege change, hosted probe, merge or deployment.
+Phase 0 stays engineering complete, acceptance open; only the second hosted
+account test was user-deferred. All earlier evidence and holds above remain.
+
+Rollback is source-only removal of this six-file packet, preserving its dated
+evidence, through coordinator review. No hosted rollback/reset/history repair is
+implied. The writer publishes head/files/results and stops editing for parent
+CI/independent review; no extra agent/branch/PR or next packet.
