@@ -114,7 +114,15 @@ test('external focus refresh cannot advance a dirty baseline; explicit conflict 
   await page.getByRole('button', { name: 'Save profile', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Keep my edits for a new save' })).toBeVisible();
   expect(api.profiles[owners.a]!.display_name).toBe('External saved name');
+  let reload: Route | undefined;
+  await page.route(profileUrl, async (route) => {
+    if (route.request().method() === 'GET') reload = route; else await route.fallback();
+  });
   await page.getByRole('button', { name: 'Keep my edits for a new save' }).click();
+  await expect.poll(() => Boolean(reload)).toBe(true);
+  await expect(page.locator('#profile-display_name')).toHaveValue('My draft');
+  await reload!.fulfill({ json: structuredClone(api.profiles[owners.a]) });
+  await expect(page.locator('#profile-display_name')).toHaveValue('My draft');
   await expect(page.getByRole('button', { name: 'Save profile', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Save profile', exact: true }).click();
   await expect(page.getByText('Profile saved.', { exact: true })).toBeVisible();

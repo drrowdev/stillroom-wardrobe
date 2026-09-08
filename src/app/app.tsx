@@ -95,7 +95,7 @@ function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, la
     setRoute(next);
   }, []);
   useEffect(() => {
-    history.replaceState({ ...history.state, wardrobePosition: navigation.current.position }, '', routeHash[navigation.current.route]);
+    history.replaceState({ ...history.state, wardrobePosition: navigation.current.position }, '', location.href);
     const onHash = () => {
       const current = navigation.current;
       if (current.restoring) {
