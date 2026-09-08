@@ -58,15 +58,20 @@ Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `
    fixes, reviews and CI; consequential product/security/cost/scope decisions go
    to the user. Concurrency itself authorizes no new packet/PR, phase, dependency,
    provider or hosted operation; existing scope and prerequisite gates still apply.
-5. Standing ordered-development authority permits the coordinator to bring
-   forward the next eligible agreed packet and recommend ordinary merges after
-   prerequisite code, automated and real normal-owner checks pass, without
-   another phase-start question. **Every merge still requires fresh explicit
-   user approval**, separately from plan/code/CI approval. Workers never merge,
-   authorize/rerun Actions, deploy or push directly to main. Deployments, paid
-   AI/providers/dependencies/codecs, hosted schema/account mutations and private
-   input capture retain separate approvals. Report blocked/pending checks honestly
-   and bring back a manual gate when it genuinely blocks a feature.
+5. Standing ordered-development authority permits agreed Phase 0–7 development
+   after prerequisite engineering, automated and real normal-owner gates, without
+   another phase-start/continue question. Under
+   [H1 clarification 5580579847](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5580579847),
+   the **coordinator may execute a recommended ordinary merge without another
+   user question**, only after genuine independent review, all required exact-head
+   gates, no blockers or overlapping writers, and normal repository protections.
+   Record the recommendation/evidence and guard the exact head. No `--auto`,
+   `--admin`, self-approval or protection bypass. Workers never merge, deploy,
+   approve/authorize/rerun Actions, push directly to main or start another agent
+   or packet. Deployments, paid AI/provider/dependency/codec changes, hosted
+   schema/account/data mutations and private-input capture retain separate
+   approvals. Report blocked/pending checks honestly and bring back a manual
+   gate when it genuinely blocks a feature.
 
 I06 uses the already completed actual **Anthropic Claude Opus 5** critiques
 `personal-settings-plan-critique` and `i06-visual-transport-critique`, with

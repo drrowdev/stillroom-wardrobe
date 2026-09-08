@@ -1670,10 +1670,15 @@ feature or acceptance. Neither local mocked browsers nor Linux WebKit/axe
 constitutes physical-phone or hosted acceptance. Static shell reachability is
 not proof of Auth/Save/RLS. No new deployment claim is made here.
 
-Standing ordered-development authority lets the coordinator recommend an
-ordinary merge after fresh-head engineering/ownership, independent review and
-applicable visual gates, and prepare the next eligible agreed packet without
-another phase-start question. Every merge still requires fresh explicit user
-approval; the worker never merges, deploys, approves/reruns Actions, creates
-another agent or accesses hosted credentials. Paid/provider/dependency/codec,
-hosted schema/account changes and private-input capture keep separate approvals.
+Standing ordered-development authority permits agreed Phase 0–7 development after
+prerequisite engineering, automated and real normal-owner gates without another
+phase-start/continue question. Under
+[H1 clarification 5580579847](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5580579847),
+the **coordinator may execute a recommended ordinary merge without another user
+question**, only after genuine independent review, all required exact-head gates
+(including applicable visual gates), no blockers or overlapping writers, and normal
+repository protections. Record the recommendation/evidence and guard the exact head.
+No `--auto`, `--admin`, self-approval or protection bypass. Workers never merge,
+deploy, approve/authorize/rerun Actions, create another agent, start another packet
+or access hosted credentials. Deployments, paid AI/provider/dependency/codec changes,
+hosted schema/account/data mutations and private-input capture keep separate approvals.

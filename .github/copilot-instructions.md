@@ -78,13 +78,18 @@ Session SQL/notes do not replace repository authority. Merges, hosted DDL and
 deployments remain serialized and separately authorized. Concurrency itself grants
 no new packet/PR, phase, dependency, provider or hosted authority. The coordinator
 handles routine scoped fixes/reviews/CI; consequential decisions go to the user.
-Standing ordered-development authority lets the coordinator bring forward the
-next eligible agreed packet and recommend ordinary merges after engineering and
-normal-owner gates, without another phase-start question. **Every merge requires
-fresh explicit user approval**, regardless of plan approval or green CI.
-Workers never authorize/rerun Actions or merge/deploy. Fresh-head validation and
-independent review remain required. Deployments, paid/provider/dependency/codec
-changes, hosted mutations and private input capture retain separate approval.
+Standing ordered-development authority permits agreed Phase 0–7 development after
+prerequisite engineering, automated and real normal-owner gates, without another
+phase-start/continue question. Under
+[H1 clarification 5580579847](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5580579847),
+the **coordinator may execute a recommended ordinary merge without another user
+question**, only after genuine independent review, all required exact-head gates,
+no blockers or overlapping writers, and normal repository protections. Record the
+recommendation/evidence and guard the exact head. No `--auto`, `--admin`,
+self-approval or protection bypass. Workers never merge, deploy, approve/authorize/
+rerun Actions or start another agent or packet. Deployments, paid AI/provider/
+dependency/codec changes, hosted schema/account/data mutations and private-input
+capture retain separate approval.
 
 For GitHub Copilot: work on the requested issue/phase, cite its blueprint requirement IDs in the PR, and report exact validation commands/results. Keep one focused work packet per PR. Do not auto-implement a suggested deferred feature or another phase. Accounts must have no relationship or sharing; the later user clarification in `blueprint/18-DECISIONS-ASSUMPTIONS-QUESTIONS.md` overrides the original attachment.
 

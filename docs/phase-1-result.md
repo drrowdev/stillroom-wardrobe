@@ -8,6 +8,30 @@ no executable input. Local engineering checks pass. **Fresh-head CI, independent
 final review and coordinator visual acceptance remain pending**, not Phase-1
 acceptance passes. No merge or deployment occurred.
 
+## H1 documentation correction — 8 September 2026
+
+[Approval 5580579847](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5580579847)
+authorizes only the active authority correction in the four handoff guides and
+this result note, starting at `efb96aa1cca195c196815aa708663e909c3f53bf`, with
+the same PR/branch/base. After context and before edits, the writer read its own
+[coordinator native Astra receipt 5580603905](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5580603905),
+for task `e899b9ea-7785-4608-9e26-b4ddd0b6eb90`, session
+`7b622749-63b2-4029-ad9a-246cae6a7709`, observed `2026-09-08T06:51:36.8859162Z`.
+No old receipt was reused. Historical decisions and failed-run evidence remain
+unchanged; the original worker handoff above and below remains dated evidence.
+
+For that starting head, CI `34194039775` and native Apple `34194039797` passed.
+[Parent review 5138212823](https://github.com/drrowdev/stillroom-wardrobe/pull/7#pullrequestreview-5138212823)
+records actual review of both synthetic PNGs, their hashes and a visual PASS.
+The H1 approval records actual Anthropic Claude Opus 5 reviewer
+`20666849-c59d-4948-93cf-0067af8f3454` finding no significant functional issues.
+These predecessor results do not validate the new documentation head.
+The coordinator owns required new-head CI and actual artifact review, recorded
+on PR #7 rather than in a source commit merely recording its own hash. No local
+app/browser/database suites or image generation/viewing ran for this correction.
+Phase 0 remains engineering complete, acceptance open; only the second hosted
+account test is user-deferred, and other manual checks remain pending, not waived.
+
 ## Authority and context
 
 Read both full approvals before edits:

@@ -243,7 +243,7 @@ prove neither ordinary login nor RLS/Storage isolation.
 | Live deployment | Reviewed-main shell verified in the dated observation above; no PR #2 deployment. Replacement requires separate authorization and fresh evidence; shell reachability is not hosted acceptance. | Coordinator |
 | Hosted smoke | BLOCKED until both intended ordinary sessions and prepared non-personal item/main/thumb fixtures exist. Run the separate read-only command below privately and report only coarse result plus reviewed code head. | Approved private operator, not cloud agent or public CI |
 | Phone/accessibility | Actual iPhone/Safari and Android camera/library, rotation/compatible-photo fallback, explicit Save/Discard, own login/logout, EN/FI/SV, VoiceOver/TalkBack and narrow/zoomed layout checks remain open. Emulation/axe is insufficient. | Human owners/testers |
-| Code/merge | Fresh-head App/browser and Real local Supabase CI including actual types parity, independent review and I06 artifact visual verdict. Standing ordered-development authority allows coordinator recommendations, not a worker merge; fresh explicit user approval remains required before every merge. | Cloud worker reports checks; coordinator reviews/recommends; user approves merge |
+| Code/merge | All required exact-head gates, including App/browser, Real local Supabase/type parity, native Apple and I06 artifact visual review, plus genuine independent review, no blockers/overlapping writers and normal protections. Under [H1 clarification 5580579847](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5580579847), the coordinator may execute a recommended ordinary merge without another user question; record recommendation/evidence and guard the exact head. No `--auto`, `--admin`, self-approval or protection bypass. | Cloud worker reports checks, never merges; coordinator reviews, records recommendation/evidence and executes the exact-head ordinary merge |
 
 Pages production configuration contains only public `VITE_SUPABASE_URL`,
 `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_APP_VERSION` and build-only
@@ -358,13 +358,17 @@ and scan. It is a leak-detection fixture, never a production credential.
 The dated 6 September PR #2 handoff and subsequent PR #3 recovery restrictions
 remain historical evidence. Current ordered development follows the approved I06
 packet above, not a permanent Phase-0-only pin. Do not reopen merged PRs or push
-to `main`. After prerequisite engineering, automated and real normal-owner checks,
-the coordinator may recommend an ordinary merge and bring forward the next eligible
-agreed packet without another phase-start question. **Every merge still needs fresh
-explicit user approval**, separately from plan/code/CI approval. Workers never
-merge, authorize/rerun Actions, deploy or start another packet.
+to `main`. Agreed Phase 0–7 development proceeds after prerequisite engineering,
+automated and real normal-owner gates without another phase-start/continue question.
+Under [H1 clarification 5580579847](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5580579847),
+the **coordinator may execute a recommended ordinary merge without another user
+question**, only after genuine independent review, all required exact-head gates,
+no blockers or overlapping writers, and normal repository protections. Record the
+recommendation/evidence and guard the exact head. No `--auto`, `--admin`,
+self-approval or protection bypass. Workers never merge, deploy, approve/authorize/
+rerun Actions or start another agent or packet.
 
-Deployments, paid AI/providers/dependencies/codecs, hosted schema/account mutations
+Deployments, paid AI/provider/dependency/codec changes, hosted schema/account/data mutations
 and private input capture retain separate approvals. The source worker receives no
 hosted credentials and never runs local fixture/reset tools against hosted.
 Keep pending/deferred manual acceptance distinct from engineering completion and
