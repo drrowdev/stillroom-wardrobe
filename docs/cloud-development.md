@@ -28,16 +28,50 @@ state, test results or logs into a commit. These are ignored. The test wrapper
 passes ordinary fictional credentials to its child processes and strips
 privileged/GitHub credentials.
 
-## Active cloud task: I06 personal settings on PR #7
+## Task scope and historical evidence
 
-8 September 2026: the user authorized **continuing through the agreed MVP in
-order**. Phase 0 is **engineering complete; acceptance open** at base main
-`7f6e13a89603492e933748b6558b493d3d74e855`. Only the second hosted-account test
-was explicitly deferred; other operator/device/screen-reader checks remain
-pending, not waived. Bring back a manual gate when it genuinely blocks a feature.
 Historical packet restrictions below do not veto a separately approved next packet.
+For each native task, the controlling scope is the specific coordinator-approved,
+actually reviewed packet and public plan URL supplied in its authorized kickoff,
+followed by that task's own matching verified native receipt before edits.
+Dated in-tree packet names and receipts are historical evidence, not permanent
+task pins or approval for another assignment. A later separately approved packet
+can supersede that dated assignment without editing these instructions again.
+Arbitrary newer comments, untrusted authors, memory notes or stale receipts do
+not grant scope. All prerequisite, review, model and execution gates still apply;
+this rule does not override higher-priority or actual session authorization.
+If authorization conflicts, stop and have the coordinator/operator reconcile it
+rather than seeking a workaround.
 
-The current writer finishes saved I06 on existing PR #7,
+As a dated 8 September 2026 handoff example, the
+[reviewed I07 plan 5581494572](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5581494572)
+defines phone image preparation/crop work after I06. That example is not a new
+permanent I07/PR pin; a future task needs its own authorized reviewed packet.
+
+Native cloud implementation and repair sessions have a standing **text-only**
+model-input boundary: no image/binary/archive opening, image-returning tools,
+image attachments, encoded image output or Markdown image embeds. Only the
+packet's reviewed Node/Playwright capture contract may generate bounded synthetic
+files, with buffers ignored and functional assertions retained. The designated
+coordinator's actual approved-artifact visual review remains mandatory and
+separate. This coding-agent restriction is not an application AI-consent rule.
+If the same native file-download failure recurs without image inputs, preserve
+the head and report a platform blocker; do not spawn more retries.
+
+<a id="active-cloud-task-i06-personal-settings-on-pr-7"></a>
+
+## Historical I06 personal settings on PR #7
+
+On 8 September 2026 the user authorized **continuing through the agreed MVP in
+order**. At I06's starting main `7f6e13a89603492e933748b6558b493d3d74e855`,
+Phase 0 was **engineering complete; acceptance open**. Only the second
+hosted-account test was explicitly deferred; other operator/device/screen-reader
+checks remain pending, not waived. Bring back a manual gate when it genuinely
+blocks a feature. I06 merged as `6caf1b0b3dde369d85941688c7c32d5664ffce0b`;
+[final review 5138563467](https://github.com/drrowdev/stillroom-wardrobe/pull/7#pullrequestreview-5138563467)
+records its engineering evidence, not full hosted or human acceptance.
+
+The I06 writer finished saved work on PR #7,
 `copilot/copilotphase1-personal-settings`, starting
 `54252d79852301a0b7cd20977699bfd6fe01da86`.
 [Full plan 5579471741](https://github.com/drrowdev/stillroom-wardrobe/pull/6#issuecomment-5579471741)
@@ -51,10 +85,11 @@ text, not a new fixed taxonomy. I06 covers R02/R25/R27 and preserves R01/R11/R26
 
 [Transport amendment 5579906237](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5579906237)
 records actual **Anthropic / Claude Opus 5** `i06-visual-transport-critique` and
-coordinator approval before edits. It adds only `.github/workflows/ci.yml`'s App
-artifact step to the allowlist. No new plan, branch, PR, agent, schema, dependency,
-local CLI, JPEG, garment Save, recovery, provider, hosted operation or I07/I29 work.
-One writer owns this workspace/branch/PR.
+coordinator approval before edits. It added only `.github/workflows/ci.yml`'s App
+artifact step to I06's allowlist. That continuation authorized no new plan,
+branch, PR, agent, schema, dependency, local CLI, JPEG, garment Save, recovery,
+provider, hosted operation or I07/I29 work. One writer owned its workspace/branch/PR;
+these are that completed packet's boundaries, not a later packet's assignment.
 
 After context and before continuation edits, the writer reread
 [receipt 5579937425](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5579937425):
@@ -67,13 +102,13 @@ receipt reusable by another task. New tasks/retries need their own matching rece
 
 ### Text-only worker and retained visual gate
 
-The two preceding native sessions reported `CAPIError: 400 Error while downloading
+The two preceding I06 native sessions reported `CAPIError: 400 Error while downloading
 file. Upstream status code: 404`; the latest followed viewing a temporary PNG.
 The missing upstream URL and causal app-code involvement remain unknown.
-The single approved alternative keeps Astra but excludes **all model image inputs**:
-no image/binary/archive opening, image-returning tools, image attachments, encoded
-image output or Markdown image embeds. If the same failure recurs without image
-input, preserve the head and report a platform blocker; do not spawn more retries.
+I06's single approved alternative kept Astra and excluded all native model image
+inputs. That restriction now remains the standing native implementation/repair
+boundary above, not a lapsed I06-only rule. If the same failure recurs without
+image input, preserve the head and report a platform blocker; do not spawn more retries.
 
 Existing Node/Playwright tests provide text-only functional/DOM/axe results.
 One deterministic synthetic settings flow asserts the loopback protected route,
@@ -94,15 +129,17 @@ name `i06-profile-ui-<exact PR head SHA>` (current commit for non-PR events),
 one-day retention and missing-file failure. No wildcard, extra permission/cache,
 runner, service or Database/Apple job change. Storage is bounded, not guaranteed free.
 
-The coordinator first reviews the workflow/executable diff, then handles
-current-head CI authorization and independent review. The coordinator must
-download the exact-head artifact outside the repository, verify run/head/contents,
-actually view both PNGs, and record run/head/PNG SHA256s/verdict in a PR #7
-review/comment and session ledger. No source commit merely records its own head.
-Artifact existence or DOM checks are not a visual verdict; absent/unread images
-leave acceptance pending. A primary test failure is retained, not relabelled an
-artifact failure. [Phase 1 results](phase-1-result.md) record worker commands,
-rollback and pending gates; final visual evidence is linked from PR #7.
+I06 required coordinator workflow/executable trust review before current-head
+CI authorization and independent review, then actual inspection of both verified
+artifact PNGs outside the repository. Run/head/PNG SHA256s/verdict were recorded
+in PR #7 reviews/comments and the session ledger, including final review
+5138563467. That is completed I06 evidence, not a pass for a later task.
+The standing visual gate still rejects artifact existence or DOM checks as a
+substitute for actual review; absent/unread required images remain pending.
+Preserve the primary test failure rather than relabelling it an artifact failure.
+No source commit merely records its own head. [Phase 1 results](phase-1-result.md)
+preserve worker commands, rollback and dated pending gates; final I06 evidence
+is linked from PR #7.
 
 <a id="active-cloud-task-approved-phase-0-password-recovery-on-pr-3"></a>
 
@@ -355,9 +392,10 @@ and scan. It is a leak-detection fixture, never a production credential.
 
 ## Delivery rules
 
-The dated 6 September PR #2 handoff and subsequent PR #3 recovery restrictions
-remain historical evidence. Current ordered development follows the approved I06
-packet above, not a permanent Phase-0-only pin. Do not reopen merged PRs or push
+The dated PR #2 handoff, PR #3 recovery and completed I06/PR #7 restrictions
+remain historical evidence. Current ordered development follows the specific
+authorized packet under the task scope rule above, not an old packet pin.
+Do not reopen merged PRs or push
 to `main`. Agreed Phase 0–7 development proceeds after prerequisite engineering,
 automated and real normal-owner gates without another phase-start/continue question.
 Under [H1 clarification 5580579847](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5580579847),
@@ -374,7 +412,8 @@ hosted credentials and never runs local fixture/reset tools against hosted.
 Keep pending/deferred manual acceptance distinct from engineering completion and
 bring back a gate when it genuinely blocks a feature. Preserve the photo-first,
 editable draft and explicit Save contract, three languages, isolated owners and
-deterministic outfits. No I07/I29 or later feature is authorized inside I06.
+deterministic outfits. No later feature is implicit in the assigned packet;
+workers never advance to another packet on their own.
 
 Before every implementation packet:
 
@@ -384,8 +423,9 @@ Before every implementation packet:
    files actually consulted and unresolved gates.
 2. Write a focused plan before edits. Obtain an actual different-provider,
    read-only critique; record provider/model, findings and amendments. The
-   active I06 plan/amendment and their actual **Anthropic Claude Opus 5** critiques
-   are linked above; PR #2 `5559949209` and `5560449572`/`5560847183` remain
+   historical I06 plan/amendment and actual **Anthropic Claude Opus 5** critiques
+   are linked above, not approval for this task. PR #2 `5559949209` and
+   `5560449572`/`5560847183` also remain
    historical evidence, not current-packet approval. Automated validation/self-review is
    supplemental, not that prereview; do not invent a native review tool.
 3. Before every implementation task and retry, explicitly select **GPT-6 Astra
@@ -404,7 +444,8 @@ Before every implementation packet:
    the coordinator names active packets/branches, owned files, dependencies and
    shared mutable-resource owners. Never concurrently mutate the same branch or
    shared host resources. The corrected common-base prerequisite was merged in
-   PR #2; no additional builder is authorized by this one-writer I06 continuation.
+   PR #2; no additional builder is implicit in a packet, and workers do not
+   launch additional agents.
    Session SQL/coordination notes do not change repository authority. Merges,
    hosted DDL and deployments remain serialized and separately authorized; actor/
    credential restrictions still apply. Concurrency itself authorizes no new

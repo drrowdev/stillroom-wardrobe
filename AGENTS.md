@@ -4,16 +4,24 @@ Development continues in GitHub Copilot cloud sessions. Read
 `docs/cloud-development.md`, `docs/phase-0-result.md` and the current phase result
 first. Updated 8 September 2026: Phase 0 is **engineering complete; acceptance
 open**. The user authorized continuing through the agreed MVP in order.
-The active packet is I06 personal settings on existing PR #7,
-`copilot/copilotphase1-personal-settings`, based on
-`7f6e13a89603492e933748b6558b493d3d74e855`. Its
+Use the [task scope rule](docs/cloud-development.md#task-scope-and-historical-evidence)
+to identify the specific reviewed packet in the authorized kickoff and its own
+matching verified native receipt. Dated in-tree assignments are evidence, not
+permanent task pins or permission for an unsolicited later packet. Existing
+prerequisites and actual session authorization still apply. Workers must stay
+within their assigned packet; they never reopen merged PRs, push directly to
+main, merge or deploy. Only the second hosted-account test was user-deferred;
+other manual/operator/device checks remain pending, not waived.
+
+Historical I06 personal settings ran on PR #7,
+`copilot/copilotphase1-personal-settings`, from
+`7f6e13a89603492e933748b6558b493d3d74e855` and merged as
+`6caf1b0b3dde369d85941688c7c32d5664ffce0b`. Its
 [approved plan](https://github.com/drrowdev/stillroom-wardrobe/pull/6#issuecomment-5579471741)
 and [text-only amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5579906237)
-control the 23-path scope. Resume saved work, not a new implementation.
-The dated PR #2/#3 assignments below are history, not permanent task pins.
-Do not reopen merged PRs, push directly to main, merge, deploy or begin I07/I29
-in this task. Only the second hosted-account test was user-deferred; other
-manual/operator/device checks remain pending, not waived.
+defined that packet's 23-path scope; [final review 5138563467](https://github.com/drrowdev/stillroom-wardrobe/pull/7#pullrequestreview-5138563467)
+records its engineering evidence. I06 and the dated PR #2/#3 assignments below
+are completed history, not the current task's assignment.
 The setup workflow may leave
 generated schema types untracked; review/commit those deliberately, never
 local credentials, service state or test artifacts.
@@ -50,8 +58,8 @@ Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `
    active packets/branches, owned files, dependencies and the owner of each shared
    mutable resource. No concurrent same-branch edits or shared-host mutations.
    The corrected common-base amendment was the now-merged PR #2 prerequisite,
-   not new permission to launch another builder. This I06 continuation has one
-   writer and launches no additional agents. Session SQL/coordination
+   not new permission to launch another builder. Each approved packet has one
+   writer; workers launch no additional agents. Session SQL/coordination
    notes do not change repository authority. Merges, hosted DDL and deployments
    remain serialized and separately authorized through their responsible actor;
    cloud workers gain no hosted access. The coordinator handles routine scoped
@@ -73,23 +81,26 @@ Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `
    approvals. Report blocked/pending checks honestly and bring back a manual
    gate when it genuinely blocks a feature.
 
-I06 uses the already completed actual **Anthropic Claude Opus 5** critiques
+Historical I06 used actual **Anthropic Claude Opus 5** critiques
 `personal-settings-plan-critique` and `i06-visual-transport-critique`, with
-coordinator amendments in the linked approvals. A continuation reads its own
-matching public runtime receipt after context and before edits, never an old
-session receipt. Preserve shared owner/epoch profile freshness, serialized
+coordinator amendments in the linked approvals. Each new native session reads
+its own matching public runtime receipt after context and before edits, never
+an old session receipt. Preserve shared owner/epoch profile freshness, serialized
 profile/language writes, original dirty baselines and explicit per-section saves.
-No schema, dependency, local tooling, JPEG, recovery, garment Save or provider
-changes are authorized by I06.
+That I06 approval did not cover schema, dependency, local tooling, JPEG, recovery,
+garment Save or provider changes; it is not approval for a later packet.
 
-The approved transport alternative is **text-only**: no image/binary opening,
-image-returning MCP/browser tools, attachments, encoded image output or image
-embeds into the worker model. Existing Node/Playwright tests alone generate two
-guarded synthetic-profile PNGs; only Chromium writes the fixed paths, and every
-project retains functional checks. The coordinator actually reviews the exact-head
-CI artifacts and records run/head/hashes/verdict in PR #7, not a self-invalidating
-source commit. Missing/unread images leave visual acceptance pending. See the
-cloud guide for capture bounds and the platform-failure stop rule.
+Native cloud implementation and repair sessions are **text-only**: no
+image/binary/archive opening, image-returning MCP/browser tools, attachments,
+encoded image output or image embeds into the worker model. Only packet-approved
+Node/Playwright tests may generate bounded synthetic evidence, with buffers
+ignored and functional checks retained. The designated coordinator actually
+reviews the approved exact-head artifacts and records run/head/hashes/verdict in
+the relevant PR, not a self-invalidating source commit. Missing/unread images
+leave visual acceptance pending. This coding-agent boundary is separate from
+the coordinator's required visual review and any separately approved application
+AI processing. See the cloud guide for the standing boundary, historical I06
+capture bounds and platform-failure stop rule.
 
 The former PR #1 plan/approval comments `5558504250` and `5558542193` are
 historical evidence. Comment `5559949209` approved the completed PR #2 source
@@ -131,7 +142,7 @@ automatic production/previews remain off.
 * Images: validate/decode/crop/re-encode pixels locally; strip EXIF/GPS; immutable private paths; no raw source upload or public bucket. Authenticated Blob downloads only in the UI.
 * Multi-row outfit/history writes use the specified RPCs. Version-check edits. Imports rebind IDs to the current owner and preserve historical text through the checked restore RPC.
 * Keep private data out of persistent caches/service-worker assets. Clear all state on UID change and logout. Do not log personal fields or tokens.
-* Each agent works on one approved issue/PR at a time. Advance in the agreed order after prerequisite engineering/normal-owner evidence is reviewed; track deferred/pending acceptance separately, never as a pass. No later packet is implicit in I06. Trips are optional Phase 8 only after a later request.
+* Each agent works on one approved issue/PR at a time. Advance in the agreed order after prerequisite engineering/normal-owner evidence is reviewed; track deferred/pending acceptance separately, never as a pass. No later packet is implicit in the current assignment. Trips are optional Phase 8 only after a later request.
 * Support English, Finnish and Swedish from Phase 0. Read `blueprint/19-LOCALIZATION.md`; use typed catalog keys/parameters and native Intl. Every new UI/error/aria string needs all three languages. Keep profile language owner-only, clear it on UID changes, and never translate identifiers or private user content. Run `npm run check:translations` in CI and with affected tests.
 * Commands: `npm ci`, `npm run lint`, `npm run typecheck`, `npm run test:unit`, `npm run db:reset`, `npm run test:integration`, `npm run test:security`, `npm run test:browser`, `npm run test:a11y`, `npm run build`, `npm run scan:secrets`, `npm run check:dependencies`. Exact contracts are in `13`.
 
