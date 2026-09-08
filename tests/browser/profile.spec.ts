@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { mkdir, open, readdir, lstat } from 'node:fs/promises';
+import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
 
@@ -204,6 +206,49 @@ test('language change preserves unsaved garment draft and owner epoch', async ({
   await expect(page.locator('#item-category')).toHaveValue('top');
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
+test('reload and same-route history entries cannot bypass the dirty settings guard', async ({ page }) => {
+  await setup(page);
+  await page.reload();
+  await expect(page.locator('#profile-display_name')).toHaveValue('Alex');
+  await page.locator('#profile-display_name').fill('Retain after reload');
+  await page.evaluate(() => history.back());
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', { name: 'Continue editing', exact: true }).click();
+  await expect(page.locator('#profile-display_name')).toHaveValue('Retain after reload');
+  await page.evaluate(() => {
+    history.pushState({ ...history.state, wardrobePosition: Number(history.state.wardrobePosition) + 1 }, '', '#/settings');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    history.go(-2);
+  });
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', { name: 'Continue editing', exact: true }).click();
+  await page.evaluate(() => { location.hash = '#/settings?unused'; });
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', { name: 'Continue editing', exact: true }).click();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+});
+test('preferences conflict preserves selections until explicit reload or re-submit', async ({ page }) => {
+  const api = await setup(page);
+  await page.getByRole('button', { name: 'Green', exact: true }).click();
+  Object.assign(api.preferences[owners.a]!, { preferred_colours: ['blue'], version: 2 });
+  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
+  await expect(page.locator('.settings-preferences [role="alert"]')).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Green', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Keep my edits for a new save' }).click();
+  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
+  await expect(page.getByText('Style preferences saved.', { exact: true })).toBeVisible();
+  expect(api.preferences[owners.a]?.preferred_colours).toEqual(['green']);
+  await page.getByRole('button', { name: 'Red', exact: true }).click();
+  Object.assign(api.preferences[owners.a]!, { preferred_colours: ['blue'], version: 4 });
+  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
+  await page.getByRole('button', { name: messages['settings.reload'].en }).click();
+  await expect(page.getByRole('button', { name: 'Blue', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Red', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: 'Save preferences', exact: true })).toBeDisabled();
+});
 test('logout drops dirty settings; lower-version owner and late replies cannot mix', async ({ page }) => {
   const api = await mockBackend(page, { initialLanguage: 'en' }); api.profiles[owners.a]!.version = 90;
   await page.goto('/'); await signIn(page); await settings(page);
@@ -247,7 +292,78 @@ test('settings accessibility: 320px, keyboard, long text and 200% text', async (
   await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 2rem; }' });
   expect(await page.evaluate(() => ({
     viewport: innerWidth, width: document.documentElement.scrollWidth,
-    overflowing: [...document.querySelectorAll('body *')].filter((element) => element.getBoundingClientRect().right > innerWidth)
-      .map((element) => element.tagName + '.' + element.className),
-  })))).toEqual({ viewport: 320, width: 320, overflowing: [] });
+    overflowing: [...document.querySelectorAll('body *')].filter((element) => element.getBoundingClientRect().right > 320
+      || getComputedStyle(element).overflowX === 'visible' && [...element.childNodes].some((node) => {
+        if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) return false;
+        const range = document.createRange(); range.selectNodeContents(node);
+        return range.getBoundingClientRect().right > 320;
+      }))
+      .map((element) => element.parentElement?.className + ' > ' + element.tagName + '.' + element.className),
+  }))).toEqual({ viewport: 320, width: 320, overflowing: [] });
+});
+
+test('synthetic settings visual evidence retains functional assertions in every project', async ({ page }, testInfo) => {
+  const api = await setup(page);
+  const origin = new URL(testInfo.project.use.baseURL!).origin;
+  const directory = path.resolve('test-results/i06-visual');
+  const captures = [
+    { language: 'en', width: 1280, file: 'profile-en-desktop.png' },
+    { language: 'fi', width: 320, file: 'profile-fi-mobile.png' },
+  ] as const;
+  await page.locator('#style-tag').fill('oma 🌿 / egen');
+  await page.getByRole('button', { name: messages['settings.addTag'].en, exact: true }).click();
+  await page.getByRole('button', { name: 'Green', exact: true }).click();
+  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
+  await expect(page.getByText('Style preferences saved.', { exact: true })).toBeVisible();
+  for (const capture of captures) {
+    if (capture.language === 'fi') {
+      await page.getByRole('button', { name: 'Suomi', exact: true }).click();
+      await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
+    }
+    await page.setViewportSize({ width: capture.width, height: 900 });
+    expect(api.profiles[owners.a]?.owner_id === owners.a
+      && api.profiles[owners.a]?.ui_language === capture.language
+      && api.requests.filter((request) => request.path.startsWith('/rest/'))
+        .every((request) => request.owner === owners.a && request.ownerFilter === `eq.${owners.a}`)).toBe(true);
+    expect(await page.evaluate(({ origin, language }) => {
+      const visible = (element: Element) => element.getClientRects().length > 0
+        && getComputedStyle(element).visibility === 'visible';
+      const values = [...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea')]
+        .filter(visible).map((element) => element.value).join('\n');
+      const credentialLike = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
+      return location.origin === origin && location.hostname === '127.0.0.1'
+        && location.hash === '#/settings' && document.documentElement.lang === language
+        && Boolean(document.querySelector('#settings-title'))
+        && document.querySelector('.workspace-identity')?.textContent?.includes('Alex') === true
+        && document.querySelector<HTMLInputElement>('#profile-display_name')?.value === 'Alex'
+        && document.querySelector<HTMLInputElement>('#profile-timezone')?.value === 'Europe/Helsinki'
+        && document.querySelector<HTMLInputElement>('#profile-currency')?.value === 'EUR'
+        && !document.querySelector('input[type="password"], #email, #password')
+        && !credentialLike.test(document.body.innerText) && !credentialLike.test(values);
+    }, { origin, language: capture.language }), 'Synthetic settings capture guard').toBe(true);
+    await expect(page.getByRole('button', { name: messages['colour.green'][capture.language], exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: messages['settings.saveProfile'][capture.language], exact: true })).toBeDisabled();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    if (testInfo.project.name === 'chromium') {
+      await mkdir(directory, { recursive: true });
+      await page.screenshot({ path: path.join(directory, capture.file), fullPage: true });
+    }
+  }
+  if (testInfo.project.name === 'chromium') {
+    expect((await readdir(directory)).sort()).toEqual(captures.map((capture) => capture.file).sort());
+    for (const capture of captures) {
+      const file = path.join(directory, capture.file);
+      const metadata = await lstat(file);
+      expect(metadata.isFile() && metadata.size > 24 && metadata.size <= 1024 * 1024, 'Bounded PNG file').toBe(true);
+      const handle = await open(file, 'r');
+      try {
+        const header = Buffer.alloc(24);
+        const { bytesRead } = await handle.read(header, 0, header.length, 0);
+        expect(bytesRead === 24 && header.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+          && header.toString('ascii', 12, 16) === 'IHDR' && header.readUInt32BE(16) === capture.width,
+        'PNG type and viewport width').toBe(true);
+      } finally { await handle.close(); }
+    }
+  }
 });

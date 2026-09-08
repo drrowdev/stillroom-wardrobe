@@ -38,6 +38,15 @@ jobs:
       - run: npm run check:dependencies
       - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:browser
+      - name: Preserve bounded synthetic I06 visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: i06-profile-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/i06-visual/profile-en-desktop.png
+            test-results/i06-visual/profile-fi-mobile.png
+          if-no-files-found: error
+          retention-days: 1
 
   database:
     name: Real local Supabase

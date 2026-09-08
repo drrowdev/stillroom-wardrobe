@@ -66,7 +66,7 @@ function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, la
   const [error, setError] = useState<MessageKey | null>(null);
   const [notice, setNotice] = useState(false);
   const [discard, setDiscard] = useState<{ next: WorkspaceRoute; position?: number } | null>(null);
-  const navigation = useRef({ route: currentRoute(), position: 0, restoring: false });
+  const navigation = useRef({ route: currentRoute(), position: Number.isSafeInteger(history.state?.wardrobePosition) ? Number(history.state.wardrobePosition) : 0, restoring: false });
   const dirty = useRef({ dirty: false, incomplete: false, busy: false });
   const loadSequence = useRef(0);
   const images = useMemo(() => new PrivateImages(client, scope), [client, scope]);
@@ -95,7 +95,7 @@ function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, la
     setRoute(next);
   }, []);
   useEffect(() => {
-    history.replaceState({ ...history.state, wardrobePosition: 0 }, '', routeHash[navigation.current.route]);
+    history.replaceState({ ...history.state, wardrobePosition: navigation.current.position }, '', routeHash[navigation.current.route]);
     const onHash = () => {
       const current = navigation.current;
       if (current.restoring) {
@@ -105,7 +105,7 @@ function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, la
       const next = currentRoute();
       const position = typeof history.state?.wardrobePosition === 'number' ? history.state.wardrobePosition : current.position + 1;
       if (history.state?.wardrobePosition !== position) history.replaceState({ ...history.state, wardrobePosition: position }, '', location.href);
-      if (next === current.route && position === current.position) return;
+      if (next === current.route) { current.position = position; return; }
       if ((dirty.current.dirty || dirty.current.busy) && next !== current.route && position !== current.position) {
         current.restoring = true;
         if (!dirty.current.busy) setDiscard({ next, position });
