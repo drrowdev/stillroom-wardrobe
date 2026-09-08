@@ -1,0 +1,251 @@
+import { expect, test, type Page, type Route } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
+import { messages, type Language } from '../../src/i18n';
+import { mockBackend, owners, signIn } from './mock-backend';
+
+async function settings(page: Page, language: Language = 'en') {
+  await page.getByRole('button', { name: messages['account.menu'][language] }).click();
+  await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
+  await expect(page.locator('#settings-title')).toBeVisible();
+  await expect(page.locator('#repeat_gap_days')).toBeVisible();
+}
+async function setup(page: Page, language: Language = 'en') {
+  const api = await mockBackend(page, { initialLanguage: language });
+  await page.goto('/'); await signIn(page); await settings(page, language);
+  return api;
+}
+const profileUrl = 'http://127.0.0.1:54321/rest/v1/profiles*';
+const preferenceUrl = 'http://127.0.0.1:54321/rest/v1/style_preferences*';
+for (const language of ['en', 'fi', 'sv'] as const) {
+  test(`settings ${language}: private fields, preferences, clearing and persistence`, async ({ page }) => {
+    const api = await setup(page, language);
+    const beforeB = structuredClone(api.profiles[owners.b]);
+    const patches: Record<string, unknown>[] = [];
+    page.on('request', (request) => { if (request.method() === 'PATCH') patches.push(request.postDataJSON() as Record<string, unknown>); });
+    await page.locator('#profile-display_name').fill('Åsa oma stil 🌿');
+    await page.locator('#profile-timezone').fill('Europe/Stockholm');
+    await page.locator('#profile-currency').fill('SEK');
+    await page.getByRole('button', { name: messages['settings.saveProfile'][language] }).click();
+    await expect(page.getByText(messages['settings.profileSaved'][language], { exact: true })).toBeVisible();
+    await expect(page.locator('.workspace-identity')).toContainText('Åsa oma stil 🌿');
+    await page.locator('#style-tag').fill('oma 🌿 / egen');
+    await page.getByRole('button', { name: messages['settings.addTag'][language], exact: true }).click();
+    await page.getByRole('button', { name: messages['colour.green'][language], exact: true }).click();
+    await page.getByRole('button', { name: messages['category.footwear'][language], exact: true }).click();
+    await page.locator('#minimum_upper_coverage').selectOption('2');
+    await page.locator('#cold_sensitivity').selectOption('-2');
+    await page.locator('#repeat_gap_days').selectOption('14');
+    await page.getByRole('button', { name: messages['settings.savePreferences'][language] }).click();
+    await expect(page.getByText(messages['settings.preferencesSaved'][language], { exact: true })).toBeVisible();
+    expect(api.preferences[owners.a]).toMatchObject({ style_tags: ['oma 🌿 / egen'], preferred_colours: ['green'], excluded_categories: ['footwear'], minimum_upper_coverage: 2, cold_sensitivity: -2, repeat_gap_days: 14 });
+    await page.reload();
+    await expect(page.locator('#profile-display_name')).toHaveValue('Åsa oma stil 🌿');
+    await expect(page.getByRole('button', { name: messages['colour.green'][language], exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: messages['colour.green'][language], exact: true }).click();
+    await page.getByRole('button', { name: messages['category.footwear'][language], exact: true }).click();
+    await page.getByRole('button', { name: messages['settings.removeTag'][language].replace('{tag}', 'oma 🌿 / egen') }).click();
+    await page.getByRole('button', { name: messages['settings.savePreferences'][language] }).click();
+    await expect(page.getByText(messages['settings.preferencesSaved'][language], { exact: true })).toBeVisible();
+    expect(api.preferences[owners.a]).toMatchObject({ style_tags: [], preferred_colours: [], excluded_categories: [] });
+    expect(api.profiles[owners.b]).toEqual(beforeB);
+    expect(patches[0]).toEqual({ display_name: 'Åsa oma stil 🌿', timezone: 'Europe/Stockholm', currency: 'SEK' });
+    expect(patches.every((body) => !('owner_id' in body || 'version' in body))).toBe(true);
+  });
+}
+test('consecutive profile/language saves preserve dirty inputs and do not remount', async ({ page }) => {
+  const api = await setup(page);
+  await page.locator('#profile-display_name').fill('Unsaved private name');
+  await page.getByRole('button', { name: 'Suomi', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
+  await expect(page.locator('#profile-display_name')).toHaveValue('Unsaved private name');
+  await page.getByRole('button', { name: messages['settings.saveProfile'].fi }).click();
+  await expect(page.getByText(messages['settings.profileSaved'].fi, { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Svenska', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
+  await page.locator('#profile-display_name').fill('Nästa');
+  await page.getByRole('button', { name: messages['settings.saveProfile'].sv }).click();
+  await expect(page.getByText(messages['settings.profileSaved'].sv, { exact: true })).toBeVisible();
+  expect(api.profiles[owners.a]).toMatchObject({ display_name: 'Nästa', ui_language: 'sv', version: 5, timezone: 'Europe/Helsinki', currency: 'EUR' });
+});
+test('serializes profile and language writes; success retains keyboard focus', async ({ page }) => {
+  await setup(page);
+  let held: Route | undefined;
+  await page.route(profileUrl, async (route) => { if (route.request().method() === 'PATCH') held = route; else await route.fallback(); });
+  await page.locator('#profile-display_name').fill('Changed');
+  const save = page.getByRole('button', { name: 'Save profile', exact: true });
+  await save.focus(); await page.keyboard.press('Enter');
+  await expect.poll(() => Boolean(held)).toBe(true);
+  await expect(page.getByRole('button', { name: 'Suomi', exact: true })).toBeDisabled();
+  await expect(page.locator('#profile-display_name')).toBeDisabled();
+  await held!.fallback();
+  await expect(page.getByText('Profile saved.', { exact: true })).toBeVisible();
+  await expect(page.locator('#settings-title')).not.toBeFocused();
+});
+test('offline preserves inputs and each section reports only its own save', async ({ page, context }) => {
+  await setup(page);
+  await page.locator('#profile-display_name').fill('Offline name');
+  await page.getByRole('button', { name: 'Green', exact: true }).click();
+  await context.setOffline(true);
+  await expect(page.getByRole('button', { name: 'Save profile', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Save preferences', exact: true })).toBeDisabled();
+  await expect(page.locator('#profile-display_name')).toHaveValue('Offline name');
+  await context.setOffline(false);
+  await page.route(preferenceUrl, async (route) => {
+    if (route.request().method() === 'PATCH') await route.fulfill({ status: 400, json: { message: 'PRIVATE UPSTREAM TEXT' } });
+    else await route.fallback();
+  });
+  await page.getByRole('button', { name: 'Save profile', exact: true }).click();
+  await expect(page.getByText('Profile saved.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
+  await expect(page.locator('.settings-preferences [role="alert"]')).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Green', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('Style preferences saved.', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('PRIVATE UPSTREAM TEXT')).toHaveCount(0);
+});
+test('external focus refresh cannot advance a dirty baseline; explicit conflict re-submit', async ({ page }) => {
+  const api = await setup(page);
+  await page.locator('#profile-display_name').fill('My draft');
+  Object.assign(api.profiles[owners.a]!, { display_name: 'External saved name', currency: 'SEK', version: 2 });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.locator('.workspace-identity')).toContainText('External saved name');
+  await expect(page.locator('#profile-display_name')).toHaveValue('My draft');
+  await page.getByRole('button', { name: 'Save profile', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Keep my edits for a new save' })).toBeVisible();
+  expect(api.profiles[owners.a]!.display_name).toBe('External saved name');
+  await page.getByRole('button', { name: 'Keep my edits for a new save' }).click();
+  await expect(page.getByRole('button', { name: 'Save profile', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Save profile', exact: true }).click();
+  await expect(page.getByText('Profile saved.', { exact: true })).toBeVisible();
+  expect(api.profiles[owners.a]!.display_name).toBe('My draft');
+});
+test('older focus response cannot replace a newer profile save', async ({ page }) => {
+  const api = await setup(page);
+  const old = structuredClone(api.profiles[owners.a]);
+  let held: Route | undefined;
+  await page.route(profileUrl, async (route) => {
+    if (route.request().method() === 'GET' && !held) held = route; else await route.fallback();
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect.poll(() => Boolean(held)).toBe(true);
+  await page.locator('#profile-display_name').fill('Newer saved name');
+  await page.getByRole('button', { name: 'Save profile', exact: true }).click();
+  await expect(page.getByText('Profile saved.', { exact: true })).toBeVisible();
+  await held!.fulfill({ json: old });
+  await expect(page.locator('.workspace-identity')).toContainText('Newer saved name');
+  await expect(page.locator('#profile-display_name')).toHaveValue('Newer saved name');
+});
+test('empty missing preferences are unavailable, not defaults or an upsert', async ({ page }) => {
+  const api = await mockBackend(page, { initialLanguage: 'en' }); delete api.preferences[owners.a];
+  await page.goto('/'); await signIn(page);
+  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.locator('#profile-display_name')).toHaveValue('Alex');
+  await expect(page.getByText(messages['settings.preferencesUnavailable'].en)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save preferences', exact: true })).toHaveCount(0);
+  expect(api.requests.filter((request) => request.path === '/rest/v1/style_preferences').every((request) => request.method === 'GET')).toBe(true);
+});
+test('unknown persisted selections and long private tags remain visible and preserved', async ({ page }) => {
+  const api = await mockBackend(page, { initialLanguage: 'en' });
+  const privateTag = 'Private🌿'.repeat(10);
+  Object.assign(api.preferences[owners.a]!, { preferred_colours: ['custom-colour'], style_tags: [privateTag] });
+  await page.goto('/'); await signIn(page); await settings(page);
+  await expect(page.getByText('custom-colour', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: `Remove ${privateTag}`, exact: true })).toBeVisible();
+  await page.locator('#cold_sensitivity').selectOption('1');
+  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
+  await expect(page.getByText('Style preferences saved.', { exact: true })).toBeVisible();
+  expect(api.preferences[owners.a]).toMatchObject({ preferred_colours: ['custom-colour'], style_tags: [privateTag] });
+});
+test('localized timezone validation and known server rejection preserve input', async ({ page }) => {
+  await setup(page);
+  await page.locator('#profile-timezone').fill('Mars/Olympus');
+  await page.getByRole('button', { name: 'Save profile', exact: true }).click();
+  await expect(page.getByText(messages['settings.invalidTimezone'].en)).toBeVisible();
+  await page.locator('#profile-timezone').fill('Europe/Stockholm');
+  await page.route(profileUrl, async (route) => {
+    if (route.request().method() === 'PATCH') await route.fulfill({ status: 400, json: { code: 'P0001', message: 'Invalid timezone' } });
+    else await route.fallback();
+  });
+  await page.getByRole('button', { name: 'Save profile', exact: true }).click();
+  await expect(page.getByText(messages['settings.serverTimezone'].en)).toBeVisible();
+  await expect(page.locator('#profile-timezone')).toHaveValue('Europe/Stockholm');
+  await expect(page.locator('#profile-timezone')).toHaveAttribute('aria-invalid', 'true');
+});
+test('dirty settings Back and Forward use one guard without losing history', async ({ page }) => {
+  await setup(page);
+  await page.locator('#profile-display_name').fill('Unsaved settings');
+  await page.evaluate(() => history.back());
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page).toHaveURL(/#\/settings$/);
+  await page.getByRole('button', { name: 'Continue editing', exact: true }).click();
+  await expect(page.locator('#profile-display_name')).toHaveValue('Unsaved settings');
+  await page.evaluate(() => history.back());
+  await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  await page.evaluate(() => history.forward());
+  await expect(page.locator('#profile-display_name')).toHaveValue('Alex');
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.getByRole('button', { name: 'Add item', exact: true }).first().click();
+  await page.locator('#item-title').fill('Unsaved garment');
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', { name: 'Continue editing', exact: true }).click();
+  await expect(page.locator('#item-title')).toHaveValue('Unsaved garment');
+});
+test('language change preserves unsaved garment draft and owner epoch', async ({ page }) => {
+  await mockBackend(page, { initialLanguage: 'en' }); await page.goto('/'); await signIn(page);
+  await page.getByRole('button', { name: 'Add item', exact: true }).first().click();
+  await page.locator('#item-title').fill('My private garment');
+  await page.locator('#item-category').selectOption('top');
+  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await page.getByRole('button', { name: 'Suomi', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
+  await expect(page.locator('#item-title')).toHaveValue('My private garment');
+  await expect(page.locator('#item-category')).toHaveValue('top');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+test('logout drops dirty settings; lower-version owner and late replies cannot mix', async ({ page }) => {
+  const api = await mockBackend(page, { initialLanguage: 'en' }); api.profiles[owners.a]!.version = 90;
+  await page.goto('/'); await signIn(page); await settings(page);
+  let held: Route | undefined;
+  const old = structuredClone(api.profiles[owners.a]);
+  await page.route(profileUrl, async (route) => {
+    if (route.request().method() === 'GET' && route.request().url().includes(owners.a)) held = route;
+    else await route.fallback();
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect.poll(() => Boolean(held)).toBe(true);
+  await page.locator('#profile-display_name').fill('Never show to Robin');
+  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.locator('#email')).toBeVisible();
+  await signIn(page, 'b');
+  await expect(page.locator('.workspace-identity')).toContainText('Robin');
+  await held!.fulfill({ json: old }).catch(() => {});
+  await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
+  await expect(page.locator('#profile-display_name')).toHaveValue('Robin');
+  await page.locator('#profile-display_name').fill('Robin ändrad');
+  await page.getByRole('button', { name: messages['settings.saveProfile'].sv }).click();
+  await expect(page.getByText(messages['settings.profileSaved'].sv, { exact: true })).toBeVisible();
+  expect(api.profiles[owners.b]!.version).toBe(2);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+test('settings accessibility: 320px, keyboard, long text and 200% text', async ({ page }) => {
+  await setup(page, 'fi');
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.locator('#profile-display_name').fill('Å'.repeat(60));
+  await page.getByRole('button', { name: messages['settings.saveProfile'].fi }).click();
+  await expect(page.getByText(messages['settings.profileSaved'].fi, { exact: true })).toBeVisible();
+  await page.locator('#profile-display_name').focus();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('#profile-timezone')).toBeFocused();
+  await page.getByRole('button', { name: 'Vihreä', exact: true }).focus();
+  await page.keyboard.press('Space');
+  await expect(page.getByRole('button', { name: 'Vihreä', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+  await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 2rem; }' });
+  console.log(await page.evaluate(() => [...document.querySelectorAll('body *')].filter((el) => el.getBoundingClientRect().right > innerWidth).map((el) => ({ tag: el.tagName, class: el.className, width: el.getBoundingClientRect().width, right: el.getBoundingClientRect().right }))));
+  await page.screenshot({ path: '/tmp/i06-settings-zoom-before.png', fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

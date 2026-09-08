@@ -1,6 +1,6 @@
 import type { Session } from '@supabase/supabase-js';
 import { authStorageKey, bindDataRequests, type AppClient } from '../data/client';
-import { fetchProfile, saveInitialLanguage } from '../data/profile';
+import { fetchProfile, saveInitialLanguage, updateProfile, type ProfileUpdate } from '../data/profile';
 import type { ProfileRow } from '../data/rows';
 import { isUuid } from '../domain/wardrobe';
 import { resolveLanguage, type Language, type MessageKey } from '../i18n';
@@ -15,6 +15,8 @@ export type SessionState = {
   scope: OwnerScope | null;
   languageUnsaved: boolean;
   notice?: MessageKey;
+  profileSaving?: boolean;
+  profileChange?: { kind: 'profile' | 'language' | 'refresh'; previous: ProfileRow };
 };
 export const logoutKey = 'stillroom.logout';
 
@@ -130,12 +132,37 @@ export class SessionController {
     try {
       const profile = await fetchProfile(this.client, scope.ownerId, scope.signal);
       if (scope.epoch !== this.epoch || scope.signal.aborted) return;
-      this.publish({ ...this.state, profile, language: profile.ui_language ?? this.state.language });
+      this.publishProfile(scope, profile, 'refresh');
     } catch (error) {
       if (scope.signal.aborted || isAborted(error)) return;
       this.invalidate();
       this.publish({ phase: 'locked', language: resolveLanguage(this.browserLanguages), profile: null, scope: null, languageUnsaved: false });
     }
+  }
+  private publishProfile(scope: OwnerScope, profile: ProfileRow, kind: 'profile' | 'language' | 'refresh'): void {
+    const current = this.state;
+    if (scope.signal.aborted || current.phase !== 'ready' || current.scope?.epoch !== scope.epoch
+      || current.scope.ownerId !== scope.ownerId || profile.owner_id !== scope.ownerId || !current.profile
+      || profile.version < current.profile.version) return;
+    this.publish({ ...current, profile, language: profile.ui_language ?? current.language,
+      languageUnsaved: profile.ui_language === null, profileChange: { kind, previous: current.profile } });
+  }
+  async saveProfile(scope: OwnerScope, baseline: ProfileRow, update: ProfileUpdate): Promise<ProfileRow> {
+    if (scope.signal.aborted || this.state.scope?.epoch !== scope.epoch || this.state.scope.ownerId !== scope.ownerId) throw new AppError('account.locked');
+    if (this.state.profileSaving) throw new AppError('error.unavailable');
+    this.publish({ ...this.state, profileSaving: true });
+    try {
+      const profile = await updateProfile(this.client, scope, baseline, update);
+      this.publishProfile(scope, profile, update.kind);
+      return profile;
+    } finally {
+      if (!scope.signal.aborted && this.state.scope?.epoch === scope.epoch && this.state.scope.ownerId === scope.ownerId) this.publish({ ...this.state, profileSaving: false });
+    }
+  }
+  async reloadProfile(scope: OwnerScope): Promise<ProfileRow> {
+    const profile = await fetchProfile(this.client, scope.ownerId, scope.signal);
+    this.publishProfile(scope, profile, 'refresh');
+    return this.state.scope?.epoch === scope.epoch && this.state.profile ? this.state.profile : profile;
   }
   chooseLanguage(language: Language): void {
     if (this.state.phase !== 'signed-out') return;
@@ -156,14 +183,17 @@ export class SessionController {
   }
   async retryLanguage(): Promise<void> {
     const { scope, profile, language } = this.state;
-    if (!scope || !profile) return;
+    if (!scope || !profile || this.state.profileSaving) return;
+    this.publish({ ...this.state, profileSaving: true });
     try {
       const updated = await saveInitialLanguage(this.client, profile, language, scope.signal);
       if (scope.signal.aborted || scope.epoch !== this.epoch) return;
-      this.publish({ ...this.state, profile: updated, language: updated.ui_language ?? language, languageUnsaved: updated.ui_language === null });
+      this.publishProfile(scope, updated, 'language');
     } catch (error) {
       if (scope.signal.aborted || isAborted(error)) return;
       this.publish({ ...this.state, languageUnsaved: true });
+    } finally {
+      if (!scope.signal.aborted && this.state.scope?.epoch === scope.epoch) this.publish({ ...this.state, profileSaving: false });
     }
   }
   async signOut(broadcast = true): Promise<void> {
