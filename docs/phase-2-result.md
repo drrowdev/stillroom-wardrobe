@@ -1,17 +1,21 @@
 # Phase 2 — I07 image preparation and crop controls
 
-8 September 2026. **I07 implementation and local functional checks complete;
-final review/security/CI/visual gates remain open.** This is not completion of
+8 September 2026. **Reviewed I07 corrections and local checks complete;
+corrected-candidate CodeQL passed; coordinator review/CI/native/visual gates
+remain open.** The native Mac PNG cause remains unknown; see the
+[correction checkpoint](#reviewed-correction-checkpoint). This is not completion of
 Phase 2, I29, I08 or I10, and not deployment or human/device acceptance.
 
 PR [#9](https://github.com/drrowdev/stillroom-wardrobe/pull/9), branch
 `copilot/drrowdevstillroom-wardrobe`. Repaired base:
 `cf90288f99a6d5c791923d3bd0bf5d138b4ea72f`; initial empty-commit head:
-`ccfb92c835a90dc711c5fb19519175e428cc030a`. Final executable/test/workflow head:
-`f06f5a54dbc2a43f33af2f8dc22d092c9c5019db`. This subsequent result document
-does not change executable inputs.
+`ccfb92c835a90dc711c5fb19519175e428cc030a`. Original executable/test/workflow head:
+`f06f5a54dbc2a43f33af2f8dc22d092c9c5019db`; correction starting head:
+`ef7fb5d7da7ae1a8e6e9f2dd112ecfd8bc490889`. Corrected executable/test head:
+`25a268712dc9158259608f5a4f17d11d9b9ad279`. This result update changes no
+executable inputs.
 
-## Authority and context
+## Original implementation authority and context
 
 Before edits, read the full controlling
 [approval 5584049483](https://github.com/drrowdev/stillroom-wardrobe/pull/8#issuecomment-5584049483)
@@ -95,7 +99,7 @@ JPEG parser/helpers, existing browser tests/mock, upload/data/Auth/app/profile,
 schema/types, packages/lock, local tools, Vite config, gitignore and dated result
 files were verified unchanged against repaired main.
 
-## Actual local validation
+## Original implementation local validation
 
 Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
 Units/static builds completed before Vite-backed suites. Browser runs explicitly
@@ -158,7 +162,7 @@ is no final-head CodeQL pass. Both calls reported the code-review executable
 unavailable despite their wrapper's success heading: **not a code-review pass**.
 The timed-out validator was not blindly retried.
 
-## Evidence and remaining gates
+## Original implementation evidence and remaining gates (historical)
 
 Existing I06 captures/upload remain unchanged. I07 adds only:
 
@@ -193,6 +197,155 @@ the existing Chromium install and the approved anchored three-title invocation.
 Phase 0 remains engineering complete, acceptance open. No extra agent/branch/PR,
 Actions authorization/rerun, merge, deployment, paid activation, hosted/private
 input or later packet was performed. No native image-download failure recurred.
+
+## Reviewed correction checkpoint
+
+The ordinary R1–R4 correction follows the full
+[approval 5585335336](https://github.com/drrowdev/stillroom-wardrobe/pull/9#issuecomment-5585335336)
+and original full plan `5584111022`, not a new phase or operator exception.
+Approval records actual independent **Anthropic / Claude Opus 5** reviewer
+`449c548d-d84c-470a-b5c4-3072b0bf0bbb`: one reproduced generated-percentage defect,
+no other confirmed runtime bug in its reviewed scope. Parent
+[review 5141457289](https://github.com/drrowdev/stillroom-wardrobe/pull/9#pullrequestreview-5141457289)
+records actual four-PNG inspection and narrow crop polish requirements.
+It also records prior-head CI `34221659967` passing App/real-local gates, and
+native `34221659968` passing old JPEG4/new WebP1 but failing PNG orientation
+and composition2 with `invalid`. These are historical results, not current-head passes.
+
+After context and before edits, reread this correction and the matching public
+[receipt 5585387167](https://github.com/drrowdev/stillroom-wardrobe/pull/9#issuecomment-5585387167).
+It records coordinator-requested `gpt-6-astra`, authenticated platform confirmation
+of actual `sweagent-capi:gpt-6-astra`, task `32f82761-c0ae-42fa-9ca3-6a14345e4904`,
+session `19561f2a-8fdf-4415-8ed0-b5b97c131b4b`, observed
+`2026-09-08T12:48:57.8571017Z`, on this PR/branch and exact base/starting head.
+The preceding session's receipt was not reused. No new agent or material scope
+amendment was introduced.
+
+Context actually read includes root/Copilot instructions, full cloud guide,
+Phase 0/1 evidence excerpts and full Phase 2 report, local-backend evidence;
+blueprint 00/03/05/10/14, relevant image/schema/command/I07/localization/AI sections
+of 07/08/13/15/19/20; actual item/image migration and generated type excerpts;
+crop/editor/AddItem/validation/preparation source, preparation compatibility diff,
+catalog merge/rotation translations, capture CSS, complete I07 units/helper/browser
+tests, quality-fixture/local/hosted guards, package commands and Playwright config.
+PR discussion/approvals/receipt/reviews/threads/diff, current base/head, recent
+MCP workflow runs and failed native job `102049829916` logs were consulted.
+
+### Changes and bounded native observations
+
+* R1: shared strict decimal parser plus paired integer-grid generated formatting,
+  at `1e-12` fractional precision (ten percentage decimals). Positive dimensions
+  retain at least one grid tick, finer than a pixel even at the 40 MP source bound.
+  Pairing prevents rounding positions and sizes into an invalid sum. No exponent
+  input, fake validity or forced full-frame replacement. Original ratio remains
+  the unrotated width/height ratio after rotation. Units cover both axes, boundary
+  fractions, tiny positives, tolerated geometry and invalid/cleared input; UI
+  covers 3200x1214 → 1600x607 and 1600x530, nudges and Apply without reset/retyping.
+* R2: generated PNG fixtures replace encoder eXIf with one intended TIFF block
+  before IEND (or after IHDR for the existing alternate fixture position);
+  all other chunks stay byte-identical. Generated WebP fixtures likewise replace
+  existing EXIF. Raw validation and preparation happen before fixture injection,
+  so a raw production failure cannot be hidden by fixture replacement.
+  In-page failure records expose only fixed format/path/orientation/phase/code/stage
+  and bounded PNG structure fields; the outer test throws on every failure record.
+  No original exception text, metadata payload, image bytes or URLs reach logs.
+  Positive contiguous multi-IDAT admission/exact normalization and pre-existing
+  encoder-Exif replacement units were added; interleaved/duplicate/malformed
+  production rejection remains unchanged.
+* R3: only the editing preview is shown while open; the accepted photo/data/URL
+  survive Cancel unchanged. The redundant Edit trigger is hidden, with focus
+  restored after Apply/Cancel. Fields use a two-column grid, one column when
+  narrow, with spacing before actions; clockwise text uses existing EN/FI/SV
+  `photo.rotateRight`. Existing shrink/wrap rules also match the open editor.
+
+Full-run Linux observations: PNG 120x80, depth 8, colour type 6, raw eXIf count
+**0** in all engines; contiguous IDAT count **2** in Chromium/mobile and **1**
+in Linux WebKit. Injected eXIf count **1**, with IDAT counts unchanged;
+bounded-structure, CRC and unique-header/end flags true. Raw pixels/preparation,
+all eight injected orientations in both decode paths, and composition passed.
+These observations do **not** establish why native Mac failed. Encoder eXIf
+duplication remains a hypothesis, not an observed cause. The old helper inserted
+before terminal IEND, not after the first IDAT; the old test validated only the
+injected source, not a separate raw baseline. Multi-IDAT coverage is not a
+root-cause claim. Production admission/normalization/JPEG code was not changed.
+
+### Correction validation
+
+All commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+Final executable candidate is `25a268712dc9158259608f5a4f17d11d9b9ad279`.
+Units/static processes finished before Vite browser suites; no retry, timeout,
+concurrency or existing-test relaxation. Prepared local fixtures were reused
+without worker reset/reprovision. All final rows below exited 0.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/crop.test.ts` | Targeted 41/41. |
+| `npm run test:unit -- tests/unit/image-headers.test.ts tests/unit/crop.test.ts` | Targeted 93/93. |
+| `npm run test:browser -- tests/browser/images.spec.ts --grep 'Original ratio\|cancel, reset\|crop accessibility\|synthetic crop visual' --project=chromium --retries=0` | Targeted 5/5. |
+| `npx playwright install --with-deps webkit` | Installed existing pinned browser/system libraries; no dependency/config change. |
+| `npm run test:browser -- tests/browser/images.spec.ts --grep 'crop accessibility\|synthetic crop visual' --retries=0` | Targeted final layout checks 6/6, all projects. |
+| `npm run lint` / `npm run typecheck` / `npm run check:translations` | Final pass; 402 EN/FI/SV keys, 36 source files. |
+| `npm run test:unit` | Final 473/473, 12 files. |
+| `npm run test:browser -- --retries=0` | Final 320/320 in 3.5 minutes, no retries/skips; includes all 39 focused I07 cases and unchanged suites. |
+| `npm run test:a11y -- --retries=0` | Final 27/27, no retries/skips. |
+| `npm run db:start` | Prepared disposable stack healthy; no reset performed. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Normal-owner contracts and recovery UI 1/1; fixture restoration verified. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | All 12 real-local normal A/B/anonymous stages passed. |
+| `npm run db:types -- --check` | Actual local generation matches committed types. |
+| `npm run build` | JS 163.75 kB gzip, CSS 4.97 kB gzip; existing non-failing >500 kB chunk warning retained. |
+| `npm run scan:secrets` | 155 text files and canary checked; changed-file scans also clear before commits. |
+| `npm run check:dependencies` | 12 production/220 development, zero unverified dates; completed production audit reported zero alerts at every severity. |
+| `git diff --check` | Pass; frozen-file comparison against correction starting head also passed. |
+
+Retained correction failures: first static checks caught a diagnostic variable
+inferred as null and lint's caught-error requirement. Explicit typed failure
+records fixed both without exposing raw causes. Initial full focused browser
+command (`npm run test:browser -- tests/browser/images.spec.ts --retries=0`)
+passed 26 Chromium/mobile cases; 13 WebKit cases failed before execution because
+the pinned browser was absent. After installation, the focused
+`--project=webkit-photo --retries=0` run passed 12/13; enlarged-text overflow
+occurred because hiding `#edit-photo` disabled the existing `:has(#edit-photo)`
+shrink/wrap CSS. Extending those same selectors to `.crop-editor` fixed it.
+The targeted six cases and final complete suites then passed. These failures
+were not skipped or claimed as native Mac results.
+
+R4: after all other checks completed and code was committed, invoked the existing
+`parallel_validation` **once** on the final candidate. Its actual schema has no
+CodeQL-only selector. CodeQL completed **Actions and JavaScript, zero alerts**.
+Wall-clock observation bracket: `2026-09-08T13:07:14Z` to
+`2026-09-08T13:08:34Z` (80 seconds including call/observation overhead); the tool
+provided no internal duration. This was not a timeout or a predecessor result.
+The automated review executable `autofind` was still unavailable: the wrapper's
+“Success / no comments” is **not a code-review pass**. No repeat call, new
+package/tool/workflow, permission or identity change.
+
+### Coordinator handoff and exact remaining question
+
+This is one frozen useful correction checkpoint, not an unchanged native rerun.
+Coordinator owns executable/workflow trust review and exact-head CI authorization,
+the preserved native old4/new3 selection, actual independent affected-code
+rereview, and actual review of all four approved current-head PNGs with
+run/head/hashes/verdict. Capture bounds/privacy guards remain unchanged;
+worker functional checks are not visual acceptance. No worker viewed an image
+or archive. Later a11y/recovery runs reuse disposable test output, so local
+captures are not claimed as retained final CI artifacts.
+
+**Native question:** does raw Apple-canvas PNG pass admission and preparation
+in both decoder paths, and then do the single-intended-Exif fixtures pass
+orientation/composition? If not, use the fixed failure phase/code/stage and
+raw/injected counts/structure flags to distinguish raw-source admission,
+decode/output, fixture injection or composed preparation. A failure still fails
+the job; obtain evidence before proposing any production parser correction.
+The Linux results cannot settle that question.
+
+Only eight executable/test files plus this report changed for the correction,
+all within the original 21 paths. Generic guides, all workflows/runner budgets,
+production image parser/encoder, frozen JPEG helpers/tests/mock, upload/data/Auth/
+session/router/profile, schema/types, packages/lock and local tooling remain
+unchanged. Current-head CI/native/independent rereview/actual visual gates remain
+open; CodeQL is complete for the corrected executable candidate. No merge,
+deployment, hosted/private-input operation, additional agent/branch/PR or later
+packet was performed. Phase 0/human/device acceptance remains open as above.
 
 ## Rollback
 
