@@ -261,7 +261,7 @@ export async function cleanupSnapshot(run) {
   await unlink(filename);
 }
 
-function normalClient(env) {
+export function normalClient(env) {
   validateSessionEnvironment(env);
   const base = assertLocalApi(env.SUPABASE_URL), key = env.SUPABASE_PUBLISHABLE_KEY;
   async function request(token, route, { method = 'GET', body, binary = false, headers = {} } = {}) {
@@ -271,7 +271,12 @@ function normalClient(env) {
         'Content-Type': binary ? 'image/jpeg' : 'application/json', ...headers },
       ...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) }),
     });
-    requireEvidence(response.status < 500 && response.body);
+    requireEvidence(response.status < 500);
+    if (response.status === 204) {
+      requireEvidence(response.body === null);
+      return { ok: response.ok, status: response.status, data: null, range: response.headers.get('content-range') };
+    }
+    requireEvidence(response.body !== null);
     const reader = response.body.getReader(), chunks = [];
     let length = 0;
     try {
@@ -292,7 +297,9 @@ function normalClient(env) {
   }
   const rpc = async (owner, name, body) => {
     const result = await request(owner.token, `/rest/v1/rpc/${name}`, { method: 'POST', body });
-    requireEvidence(result.ok);
+    requireEvidence(result.ok && (name === 'commit_image'
+      ? result.status === 204 && result.data === null
+      : result.status === 200 && result.data !== null));
     return result.data;
   };
   const rows = async (owner, table) => {
@@ -311,6 +318,8 @@ function normalClient(env) {
       method: 'POST', body: { ...body, owner_id: owner.uid }, headers: { Prefer: 'return=representation' },
     });
     requireEvidence(result.ok && Array.isArray(result.data) && result.data.length === 1);
+    rowIdentity(table, result.data[0]);
+    requireEvidence(result.data[0].owner_id === owner.uid);
     return result.data[0];
   };
   const patch = async (owner, table, row, body) => request(owner.token,
@@ -318,7 +327,8 @@ function normalClient(env) {
     { method: 'PATCH', body, headers: { Prefer: 'return=representation' } });
   const save = async (owner, table, row, body) => {
     const result = await patch(owner, table, row, body);
-    requireEvidence(result.ok && result.data.length === 1 && result.data[0].version === row.version + 1
+    requireEvidence(result.ok && Array.isArray(result.data) && result.data.length === 1
+      && record(result.data[0]) && result.data[0].version === row.version + 1
       && result.data[0].created_at === row.created_at);
     for (const [field, value] of Object.entries(body)) requireEvidence(isDeepStrictEqual(result.data[0][field], value));
     return result.data[0];
@@ -331,7 +341,7 @@ function normalClient(env) {
     const token = login.data.access_token;
     const user = await request(token, '/auth/v1/user');
     const claims = jwtClaims(token);
-    requireEvidence(user.ok && uuid.test(user.data.id) && user.data.email === TEST_EMAILS[['A', 'B'].indexOf(label)]
+    requireEvidence(user.ok && record(user.data) && uuid.test(user.data.id) && user.data.email === TEST_EMAILS[['A', 'B'].indexOf(label)]
       && user.data.is_anonymous === false && claims.role === 'authenticated' && claims.sub === user.data.id);
     return { label, uid: user.data.id, token };
   };
@@ -392,7 +402,7 @@ async function seed(client, owner) {
   await insert(owner, 'suggestion_feedback', { id: randomUUID(), item_ids: [explicit.id, implicit.id], vote: -1 });
 }
 
-async function captureData(client, owners, run) {
+export async function captureData(client, owners, run) {
   const data = [];
   for (const owner of owners) {
     const tables = {};
@@ -414,7 +424,7 @@ async function captureData(client, owners, run) {
   return { schemaVersion: 1, projectId: PROJECT_ID, stage: 'base', run, sources: SOURCE_HASHES, owners: owners.map((owner) => owner.uid), data };
 }
 
-async function functionalProbes(client, owners, after) {
+export async function functionalProbes(client, owners, after) {
   for (const [index, owner] of owners.entries()) {
     const other = owners[1 - index], tables = after.data[index].tables, row = tables.items[0];
     for (const body of [{ warmth: 5 }, { rain_rating: -1 }, { pattern: 'invalid' }]) {

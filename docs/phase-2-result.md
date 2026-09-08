@@ -962,3 +962,129 @@ changed-file secret scan passed before that commit, and its required Copilot App
 co-author trailer was verified. Only this actual validation-result append follows
 the checked executable candidate; fresh CI preservation and all parent-owned
 review/release gates above remain pending.
+
+## PR #12 bounded preservation HTTP/history correction — 8 September 2026
+
+Same PR #12 / `copilot/modelgpt-6-astra`, base
+`3c84cfb07e569dab416ccd1b5d19c7c6e251010c`, clean starting head
+`10927d92bd403fcc51e0cfb130e65e535b90a79e`. This is the routine four-path
+correction approved in [5592756899](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592756899),
+not a new packet or material planning amendment. Actual independent
+**Anthropic / Claude Opus 5** reviewer `01e4035d-ee11-4b4e-bdb3-df15c4b55689`,
+turn 6, identified the blocking void-response bug and medium history-stage
+misreporting on that exact six-file head; the coordinator accepted both.
+The full [six-file plan 5591979149](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5591979149)
+and [source-derived formatter clarification 5592284908](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592284908)
+were read, including their complete bodies.
+
+Before edits, read this correction's own
+[public receipt 5592775939](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592775939):
+explicitly requested `gpt-6-astra`, authenticated allocation
+`sweagent-capi:gpt-6-astra`, task `3febe5b2-94de-4e00-a799-fbf7b3973df0`,
+session `70b69022-5ad8-4aed-895f-a3f1766f1bbb`, authenticated GET
+`2026-09-08T22:31:45.2103663Z`, reverified
+`2026-09-08T22:32:12.8270644Z`. The local session ID matched the receipt,
+as did repository/PR/base/head/branch. No old session receipt was reused.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`,
+cloud guide; relevant Phase 0/Phase 2/local-backend evidence; blueprint
+00/03/05/10/13/14/20 and relevant 08 API, 15/I29 contracts; base SQL's
+`commit_image` and target migration, generated void return type, exact base
+SQL/blueprint-07 hash parity; backend local environment/request guards,
+existing normal-session reader, recovery-unit fetch-stub conventions, the
+preservation modules/tests, package/CI diff and secret checker. PR discussion,
+diff, reviews/review threads and MCP workflow/log evidence were read.
+CI `34283894600` and Apple `34283894610` remained `action_required`; the CI
+failed-log query returned zero jobs, not a passing execution.
+
+### Correction and focused regression coverage
+
+Only `tests/integration/preservation.sessions.mjs`,
+`tests/unit/preservation.test.ts`, `scripts/preservation-rehearsal.mjs` and
+this appended evidence change. The existing package script and CI opt-in step
+are unchanged; app/schema/types/dependencies/other helpers and suites remain
+frozen.
+
+The HTTP reader now accepts null bodies only for HTTP 204, without attempting
+to read a nonexistent stream. It still refuses 5xx, missing non-204 streams,
+oversized streams and malformed nonempty JSON, and cancels streamed readers.
+`commit_image` explicitly requires successful 204/null. Other RPCs require
+200/non-null JSON and retain their downstream version/export checks. Required
+row/insert/versioned-save/auth consumers reject missing or invalid shapes;
+insert responses also require the actual table identity and current owner.
+Capture still verifies downloaded bytes against stored lengths/hashes, and
+export probes still compare the full closed owner-bound manifest/table sets.
+
+Eight new focused HTTP tests use restored Vitest fetch stubs and standard
+`Response` objects, with no sockets or database calls. Coverage includes:
+204/null success; rejected 200/null, empty/malformed required JSON and wrong
+commit responses; row/insert/save/auth/export negatives and positives; the
+512 KiB limit and cancellation; 5xx refusal; mismatched binary downloads and
+actual fixture-byte hash comparison inside programs only. The invalid
+204-with-stream case starts with a valid 200 `Response` and narrowly overrides
+its status getter, so the guard—not response construction—is tested. Existing
+import-side-effect tripwires and the two narrow documented JS-import
+`@ts-expect-error` boundaries remain intact.
+
+The orchestrator assigns `S1-base-history`, `S3-base-history` and
+`S3-target-history` immediately before the respective history calls. A source
+assertion covers all three placements. History/parser failures no longer inherit
+reset/up stage labels; output stays fixed and non-sensitive. No history/parser,
+snapshot, owner, source-hash, cleanup or preservation oracle was weakened.
+
+### Actual correction-session validation
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Exact command | Actual final result |
+|---|---|
+| `npm run test:unit -- tests/unit/preservation.test.ts` | 44/44 passed, exit 0; includes import-safety and stubbed HTTP boundary tests. |
+| `npm run test:unit` | 524/524 passed in 13 files, exit 0. |
+| `npm run lint` | Exit 0. |
+| `npm run typecheck` | Exit 0. |
+| `node --check scripts/preservation-rehearsal.mjs` | Exit 0. |
+| `node --check tests/integration/preservation.sessions.mjs` | Exit 0. |
+| `npm run check:translations` | 402 EN/FI/SV keys, 37 source files, exit 0. |
+| `npm run build` | Exit 0; JS 164.26 kB gzip, CSS 4.97 kB gzip; existing non-failing >500 kB chunk warning. |
+| `npm run scan:secrets` | Exit 0; 160 text files and fresh unprinted build canary checked before this append. |
+| `git diff --check` | Exit 0. |
+| `git diff --exit-code 10927d92bd403fcc51e0cfb130e65e535b90a79e -- package.json .github/workflows/ci.yml` | Exit 0; both frozen files unchanged. |
+
+Build and scan shared `export STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`
+without printing the value. Initial checks caught a malformed authorization-header
+comparison in the new test stub (focused suite parse/lint failure), then an inferred
+optional-property type mismatch in the negative manifest fixture list (typecheck
+failure). Both ordinary implementation errors were corrected before the final
+passing runs, with no compiler/configuration exception or unrelated test change.
+Context lookup also encountered an incorrect testing-document filename and absent
+shell `rg`; the actual blueprint index and provided search tool resolved those
+read-only lookups. No tool installation or environment workaround occurred.
+
+### Explicitly UNRUN and coordinator-owned gates
+
+Real **S1–S4**, actual pinned CLI migration-list format compatibility, populated
+base-to-target preservation and all live gates remain **UNRUN/PENDING**.
+Source-derived parser fixtures and mocked HTTP responses are not their proof.
+The three prior help probes remain historical capability evidence, not commands
+rerun by this correction writer. No native migration list/reset/up, provisioning,
+psql, rehearsal/opt-in, type generation, integration/security/recovery/browser/
+a11y/native Apple/hosted/network test or service mutation ran here.
+
+After the executable candidate is committed and its processes finish, invoke
+the existing native final validator once and record actual components/languages
+and unavailable tools separately. An unavailable automated reviewer is not a
+review pass. Coordinator still owns affected independent review, exact-head
+execution/privacy/egress/workflow trust and authorization of the first fresh CI
+rehearsal. Normal A/B/anonymous/RLS/private-image/recovery/type-parity, App/unit/
+translations/browser/a11y/build/secrets/dependencies, native four plus I07 three,
+and actual four-PNG visual gates all remain required. No skipped/mock/admin
+result substitutes for those gates.
+
+B3 remains open; clean observational suites were non-reproduction, not a fix or
+waiver. No I29b/next feature, live DDL/Cloudflare/account/private-photo/provider/
+paid-AI operation, history repair/replay/ledger mutation, Actions approval/rerun,
+agent, branch, PR, merge or deployment was authorized or performed. Conditional
+approval `5590736782` and operator method `5592161566` are not live authority now.
+Native model input remained text-only; fixture bytes were never opened or emitted
+to the model. Historical sections above remain unchanged. Publish the final
+head/files/results and stop editing for coordinator review.

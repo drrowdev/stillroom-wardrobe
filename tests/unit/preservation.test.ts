@@ -3,11 +3,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
 import { MIGRATIONS, assertRehearsalEnvironment, validateInventory, assertMigrationInventory, assertCapabilities, parseMigrationHistory, assertHistory, exportBodyEvidence } from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
-import { SOURCE_HASHES, MAX_SNAPSHOT_BYTES, COLUMNS, TABLES, COUNTS, IMPLICIT_FACTS, EXPLICIT_FACTS, NEW_COLUMNS, parsePhaseArguments, snapshotPath, assertSnapshotPath, validateSnapshotStat, rowIdentity, canonicalRows, validateSnapshot, comparePreservation } from '../integration/preservation.sessions.mjs';
+import { SOURCE_HASHES, MAX_SNAPSHOT_BYTES, COLUMNS, TABLES, COUNTS, IMPLICIT_FACTS, EXPLICIT_FACTS, NEW_COLUMNS, parsePhaseArguments, snapshotPath, assertSnapshotPath, validateSnapshotStat, rowIdentity, canonicalRows, validateSnapshot, comparePreservation, normalClient, captureData, functionalProbes } from '../integration/preservation.sessions.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const run = randomUUID(), owners = [randomUUID(), randomUUID()] as const;
@@ -195,6 +195,183 @@ describe('CI-only preservation guards', () => {
   });
 });
 
+describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
+  const env = {
+    ALLOW_SECURITY_TESTS: '1', SUPABASE_URL: 'http://127.0.0.1:54321',
+    SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_unit_fixture',
+    TEST_A_EMAIL: 'user-a@example.test', TEST_B_EMAIL: 'user-b@example.test',
+    TEST_A_PASSWORD: 'a'.repeat(24), TEST_B_PASSWORD: 'b'.repeat(24),
+  };
+  const owner = { label: 'A', uid: owners[0], token: 'fictional-a' };
+  const other = { label: 'B', uid: owners[1], token: 'fictional-b' };
+  const client = () => normalClient(env);
+  const respond = (response: Response) => vi.stubGlobal('fetch', vi.fn(async () => response));
+  const json = (value: Value, status = 200) => new Response(JSON.stringify(value), { status });
+  const empty = () => new Response(null, { status: 204 });
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it('accepts bodyless 204 without reading a nonexistent stream and requires it for commit_image', async () => {
+    const response = empty();
+    const read = vi.spyOn(response, 'arrayBuffer');
+    respond(response);
+    await expect(client().rpc(owner, 'commit_image', { p_image_id: run })).resolves.toBeNull();
+    expect(read).not.toHaveBeenCalled();
+    for (const response of [new Response(null), new Response(''), json(null), json({}), json(1), json({}, 400)]) {
+      respond(response);
+      await expect(client().rpc(owner, 'commit_image', { p_image_id: run })).rejects.toThrow('EVIDENCE_REQUIRED');
+    }
+  });
+  it('rejects a noncompliant 204 stream using a valid Response with a narrowly overridden status', async () => {
+    const response = json({});
+    vi.spyOn(response, 'status', 'get').mockReturnValue(204);
+    respond(response);
+    await expect(client().rpc(owner, 'commit_image', {})).rejects.toThrow('EVIDENCE_REQUIRED');
+  });
+  it('keeps required JSON RPCs distinct from void responses', async () => {
+    for (const name of ['save_outfit', 'save_wear_event', 'export_manifest']) {
+      for (const response of [empty(), new Response(null), new Response(''), new Response(' '), json(null), new Response('{'), new Response('not JSON')]) {
+        respond(response);
+        await expect(client().rpc(owner, name, {})).rejects.toThrow('EVIDENCE_REQUIRED');
+      }
+    }
+    for (const name of ['save_outfit', 'save_wear_event']) {
+      respond(json(2));
+      await expect(client().rpc(owner, name, {})).resolves.toBe(2);
+    }
+  });
+  it('retains row, insert and versioned-save response requirements', async () => {
+    const row = fixture().data[0].tables.items[0];
+    for (const call of [
+      () => client().rows(owner, 'items'),
+      () => client().insert(owner, 'items', {}),
+      () => client().save(owner, 'items', row, {}),
+    ]) {
+      for (const response of [empty(), new Response(null), new Response(''), new Response('{'), json(null), json({}), json([null])]) {
+        respond(response);
+        await expect(call()).rejects.toThrow('EVIDENCE_REQUIRED');
+      }
+    }
+    for (const value of [[], [{ id: 'invalid', owner_id: owner.uid }], [{ ...row, owner_id: other.uid }]]) {
+      respond(json(value));
+      await expect(client().insert(owner, 'items', {})).rejects.toThrow('EVIDENCE_REQUIRED');
+    }
+    respond(json([row], 201));
+    await expect(client().insert(owner, 'items', {})).resolves.toEqual(row);
+    respond(new Response(JSON.stringify([row]), { headers: { 'content-range': '0-0/1' } }));
+    await expect(client().rows(owner, 'items')).resolves.toEqual([row]);
+    respond(new Response(JSON.stringify([row]), { headers: { 'content-range': '0-0/2' } }));
+    await expect(client().rows(owner, 'items')).rejects.toThrow('EVIDENCE_REQUIRED');
+    respond(json([{ ...row, version: Number(row.version) + 1 }]));
+    await expect(client().save(owner, 'items', row, {})).resolves.toMatchObject({ version: Number(row.version) + 1 });
+  });
+  it('requires both login JSON and the verified ordinary user shape', async () => {
+    const token = ['unit', Buffer.from(JSON.stringify({ sub: owner.uid, role: 'authenticated' })).toString('base64url'), 'unit'].join('.');
+    const user = { id: owner.uid, email: env.TEST_A_EMAIL, is_anonymous: false };
+    for (const response of [empty(), new Response(null), new Response(''), new Response('{'), json(null), json({}), json([])]) {
+      respond(response);
+      await expect(client().signIn('A')).rejects.toThrow('EVIDENCE_REQUIRED');
+    }
+    for (const response of [empty(), new Response(null), new Response(''), new Response('{'), json(null), json({}),
+      json({ ...user, id: other.uid }), json({ ...user, email: env.TEST_B_EMAIL }), json({ ...user, is_anonymous: true })]) {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({ access_token: token })).mockResolvedValueOnce(response));
+      await expect(client().signIn('A')).rejects.toThrow('EVIDENCE_REQUIRED');
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({ access_token: token })).mockResolvedValueOnce(json(user)));
+    await expect(client().signIn('A')).resolves.toEqual({ ...owner, token });
+  });
+  it('retains the streaming byte ceiling, cancellation and server-error refusal', async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_SNAPSHOT_BYTES));
+        controller.enqueue(new Uint8Array(1));
+      },
+      cancel,
+    });
+    respond(new Response(stream));
+    await expect(client().request(null, '/rest/v1/items')).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(cancel).toHaveBeenCalledOnce();
+    for (const status of [500, 503]) {
+      const response = json({}, status);
+      const reader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+      respond(response);
+      await expect(client().request(null, '/rest/v1/items')).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(reader).not.toHaveBeenCalled();
+    }
+    const response = json({ code: '42703' }, 400);
+    const reader = present(response.body ?? undefined).getReader();
+    const cancelled = vi.spyOn(reader, 'cancel');
+    vi.spyOn(present(response.body ?? undefined), 'getReader').mockReturnValue(reader);
+    respond(response);
+    await expect(client().request(null, '/rest/v1/items')).resolves.toMatchObject({ ok: false, status: 400, data: { code: '42703' } });
+    expect(cancelled).toHaveBeenCalledOnce();
+    respond(new Response(' '.repeat(MAX_SNAPSHOT_BYTES - 2) + '{}'));
+    await expect(client().request(null, '/rest/v1/items')).resolves.toMatchObject({ ok: true, data: {} });
+  });
+  it('requires actual downloaded bytes to match the stored fixture, including on 204', async () => {
+    const snapshot = fixture();
+    const bytes = await readFile(path.join(root, 'tests/security/fixture.jpg'));
+    for (const data of snapshot.data) for (const image of data.tables.item_images) {
+      image.main_sha256 = image.thumb_sha256 = createHash('sha256').update(bytes).digest('hex');
+    }
+    const downloads = vi.fn<() => Response>();
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname.startsWith('/storage/v1/object/authenticated/')) return downloads();
+      const table = tables.find((table) => url.pathname === `/rest/v1/${table}`);
+      if (!table) throw new Error('UNEXPECTED_REQUEST');
+      const data = present(snapshot.data.find((data) => `eq.${data.ownerId}` === url.searchParams.get('owner_id')));
+      return new Response(JSON.stringify(data.tables[table]), { headers: { 'content-range': `0-0/${data.tables[table].length}` } });
+    }));
+    for (const response of [empty(), new Response(null), new Response(''), json({}), new Response(new Uint8Array(632))]) {
+      downloads.mockReturnValueOnce(response);
+      await expect(captureData(client(), [owner, other], run)).rejects.toThrow('EVIDENCE_REQUIRED');
+    }
+    downloads.mockImplementation(() => new Response(bytes));
+    await expect(captureData(client(), [owner, other], run)).resolves.toMatchObject({ owners: [...owners] });
+  });
+  it('keeps full export shape, owner and table equality assertions after the HTTP reader', async () => {
+    const after = upgraded(fixture());
+    const manifest = vi.fn<(id: string, uid: string) => Response>();
+    const validManifest = (id: string, uid: string) => ({
+      schema_version: 2, export_id: id, owner_id: uid, created_at: time,
+      tables: present(after.data.find((data) => data.ownerId === uid)).tables,
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string, init: RequestInit) => {
+      const url = new URL(input);
+      const token = new Headers(init.headers).get('Authorization');
+      const current = token === 'Bearer ' + owner.token ? owner : token === 'Bearer ' + other.token ? other : null;
+      if (url.pathname === '/rest/v1/rpc/export_manifest') {
+        const body = JSON.parse(String(init.body)) as { p_export_id: string };
+        return manifest(body.p_export_id, present(current?.uid));
+      }
+      if (url.pathname.startsWith('/storage/')) return json({}, 404);
+      if (!current) return json({}, 401);
+      if (url.searchParams.get('owner_id') !== `eq.${current.uid}`) return json([]);
+      if (init.method === 'PATCH') return json({}, 400);
+      const table = tables.find((table) => url.pathname === `/rest/v1/${table}`);
+      if (!table) throw new Error('UNEXPECTED_REQUEST');
+      const rows = validManifest(run, current.uid).tables[table];
+      return new Response(JSON.stringify(rows), { headers: { 'content-range': `0-0/${rows.length}` } });
+    }));
+    for (const response of [empty(), new Response(null), new Response(''), new Response('{'), json(null), json({}), json([])]) {
+      manifest.mockReturnValueOnce(response);
+      await expect(functionalProbes(client(), [owner, other], after)).rejects.toThrow('EVIDENCE_REQUIRED');
+    }
+    const changes: Record<string, Value>[] = [
+      { schema_version: 1 }, { owner_id: randomUUID() }, { export_id: randomUUID() },
+      { created_at: 'invalid' }, { tables: {} }, { extra: true },
+      { tables: { ...after.data[0].tables, items: [] } },
+    ];
+    for (const change of changes) {
+      manifest.mockImplementationOnce((id, uid) => json({ ...validManifest(id, uid), ...change }));
+      await expect(functionalProbes(client(), [owner, other], after)).rejects.toThrow('EVIDENCE_REQUIRED');
+    }
+    manifest.mockImplementation((id, uid) => json(validManifest(id, uid)));
+    await expect(functionalProbes(client(), [owner, other], after)).resolves.toBeUndefined();
+  });
+});
+
 describe('strict bounded base snapshots', () => {
   it('binds exact mode, UUID and derived path with no arbitrary target', () => {
     for (const phase of ['capture', 'verify']) expect(parsePhaseArguments([phase, run])).toEqual({ phase, run });
@@ -378,6 +555,9 @@ describe('import safety and frozen integration boundary', () => {
     expect(orchestrator).toContain('validateSessionEnvironment(env)');
     expect(orchestrator.match(/provision-test-users\.mjs/g)).toHaveLength(1);
     expect(orchestrator.match(/\['db', 'reset'/g)).toHaveLength(2); // One help probe, one fixed base reset.
+    for (const [stage, target] of [['S1-base-history', 'base'], ['S3-base-history', 'base'], ['S3-target-history', 'target']]) {
+      expect(orchestrator).toContain(`stage = '${stage}';\n    await history('${target}');`);
+    }
     expect(orchestrator).not.toMatch(/--(?:linked|db-url)|migration.*repair/);
     const fixtureBytes = await readFile(path.join(root, 'tests/security/fixture.jpg'));
     expect(fixtureBytes.length).toBe(632);

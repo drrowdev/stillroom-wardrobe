@@ -130,6 +130,7 @@ async function main() {
     for (const entry of MIGRATIONS) console.log(`PASS: source ${entry.version} bytes=${entry.bytes} sha256=${entry.sha256}`);
     stage = 'S1-base-reset';
     requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', MIGRATIONS[0].version], 10 * 60_000)).code === 0);
+    stage = 'S1-base-history';
     await history('base');
     stage = 'S1-provision';
     requireEvidence((await runCommand(process.execPath, [path.join(ROOT, 'scripts', 'provision-test-users.mjs')])).code === 0);
@@ -150,9 +151,11 @@ async function main() {
     await child('capture');
     stage = 'S3-inventory';
     await assertMigrationInventory();
+    stage = 'S3-base-history';
     await history('base');
     stage = 'S3-migration-up';
     requireEvidence((await cli(['migration', 'up', '--local'])).code === 0);
+    stage = 'S3-target-history';
     await history('target');
     stage = 'S4-verify';
     await child('verify');
