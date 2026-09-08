@@ -44,6 +44,12 @@ jobs:
           status=$?
           printf '\nNative JPEG test exit code: %s\n' "$status" >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
+      - run: ./node_modules/.bin/playwright install chromium
+      - name: Check only approved I07 native orientation and composition cases
+        run: |
+          npm run test:browser -- tests/browser/images.spec.ts \
+            --project=webkit-photo --workers=1 --retries=0 \
+            --grep '(?:^| )(I07 native PNG orientation normalization preserves pixels and privacy|I07 native WebP orientation normalization preserves pixels and privacy|I07 native crop and rotation compose once)$'
       - name: Record diagnostic boundary
         if: always()
         run: |

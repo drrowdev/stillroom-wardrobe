@@ -7,6 +7,7 @@ import {
   stripEncoderMetadata,
   type ImagePreparationStage,
 } from './jpeg';
+import { cropGeometry, ORIGINAL_EDIT } from './crop';
 
 export { ImagePreparationError } from './jpeg';
 
@@ -33,7 +34,7 @@ function checkAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 }
 
-function abortable<T>(
+export function abortable<T>(
   operation: Promise<T>,
   signal?: AbortSignal,
   releaseLate?: (value: T) => void,
@@ -107,16 +108,15 @@ async function decodeWithImage(blob: Blob, signal?: AbortSignal): Promise<Decode
   }
 }
 
-async function decode(blob: Blob, signal?: AbortSignal): Promise<DecodedImage> {
+async function decode(blob: Blob, signal?: AbortSignal, waitForRelease = false): Promise<DecodedImage> {
   checkAbort(signal);
   if (typeof createImageBitmap === 'function') {
     try {
       // Both browser paths already apply EXIF: never rotate these pixels a second time.
-      const bitmap = await abortable(
-        createImageBitmap(blob, { imageOrientation: 'from-image' }),
-        signal,
-        (late) => late.close(),
-      );
+      // Wait for native work to release even after cancellation, before another source starts.
+      const pending = createImageBitmap(blob, { imageOrientation: 'from-image' });
+      const bitmap = await (waitForRelease ? pending : abortable(pending, signal, (late) => late.close()));
+      if (signal?.aborted) { bitmap.close(); checkAbort(signal); }
       return {
         source: bitmap, width: bitmap.width, height: bitmap.height,
         release: () => bitmap.close(),
@@ -143,6 +143,8 @@ async function encode(
   maxBytes: number,
   minSide: number,
   signal?: AbortSignal,
+  geometry?: ReturnType<typeof cropGeometry>,
+  waitForRelease = false,
 ): Promise<EncodedImage> {
   const canvas = document.createElement('canvas');
   let side = Math.min(Math.max(width, height), maxSide);
@@ -159,16 +161,26 @@ async function encode(
       }
       context.fillStyle = '#f6f3ed';
       context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(source, 0, 0, canvas.width, canvas.height);
+      if (!geometry || geometry.identity) {
+        context.drawImage(source, 0, 0, canvas.width, canvas.height);
+      } else {
+        const [a, b, c, d, e, f] = geometry.matrix;
+        const scaleX = canvas.width / geometry.width, scaleY = canvas.height / geometry.height;
+        context.setTransform(a * scaleX, b * scaleY, c * scaleX, d * scaleY,
+          (e - geometry.x) * scaleX, (f - geometry.y) * scaleY);
+        const rect = geometry.source;
+        context.drawImage(source, rect.x, rect.y, rect.width, rect.height, rect.x, rect.y, rect.width, rect.height);
+      }
       for (const quality of QUALITIES) {
         checkAbort(signal);
-        const blob = await abortable(new Promise<Blob>((resolve, reject) => {
+        const pending = new Promise<Blob>((resolve, reject) => {
           canvas.toBlob((result) => {
             if (!result || result.type !== 'image/jpeg' || !result.size) {
               reject(new ImagePreparationError('unavailable'));
             } else resolve(result);
           }, 'image/jpeg', quality);
-        }), signal);
+        });
+        const blob = await (waitForRelease ? pending : abortable(pending, signal));
         checkAbort(signal);
         if (blob.size <= maxBytes) return { blob, canvas };
       }
@@ -204,6 +216,30 @@ async function verifyAndHash(image: EncodedImage, signal?: AbortSignal): Promise
 
 /** Phase 0: JPEG pixels only, prepared locally; no source upload or persistent storage. */
 export async function prepareJpeg(file: Blob, signal?: AbortSignal): Promise<PreparedPhoto> {
+  return prepareSource(file, () => admitJpeg(file, signal), ORIGINAL_EDIT, signal);
+}
+
+export async function admitJpeg(file: Blob, signal?: AbortSignal): Promise<AdmittedSource> {
+  const headerBytes = await abortable(file.slice(0, JPEG_LIMITS.headerBytes).arrayBuffer(), signal);
+  checkAbort(signal);
+  const header = readJpegHeader(new Uint8Array(headerBytes));
+  const trailer = new Uint8Array(await abortable(file.slice(-2).arrayBuffer(), signal));
+  checkAbort(signal);
+  if (trailer[0] !== 0xff || trailer[1] !== 0xd9) throw new ImagePreparationError('invalid');
+  const swapped = header.orientation >= 5;
+  return {
+    blob: new Blob([file], { type: 'image/jpeg' }),
+    width: swapped ? header.height : header.width, height: swapped ? header.width : header.height,
+    orientation: 1,
+  };
+}
+
+export type AdmittedSource = { blob: Blob; width: number; height: number; orientation: number };
+
+/** One decoder/encoder/verifier for every admitted format; no source upload. */
+export async function prepareSource(
+  file: Blob, admit: () => Promise<AdmittedSource>, edit = ORIGINAL_EDIT, signal?: AbortSignal, waitForRelease = false,
+): Promise<PreparedPhoto> {
   let decoded: DecodedImage | undefined;
   let main: EncodedImage | undefined;
   let thumb: EncodedImage | undefined;
@@ -211,35 +247,30 @@ export async function prepareJpeg(file: Blob, signal?: AbortSignal): Promise<Pre
   try {
     checkAbort(signal);
     if (file.size > JPEG_LIMITS.sourceBytes) throw new ImagePreparationError('tooLarge');
-    const headerBytes = await abortable(file.slice(0, JPEG_LIMITS.headerBytes).arrayBuffer(), signal);
+    const header = await admit();
     checkAbort(signal);
-    const header = readJpegHeader(new Uint8Array(headerBytes));
-    const trailer = new Uint8Array(await abortable(file.slice(-2).arrayBuffer(), signal));
-    checkAbort(signal);
-    if (trailer[0] !== 0xff || trailer[1] !== 0xd9) throw new ImagePreparationError('invalid');
+    const geometry = cropGeometry(header.width, header.height, header.orientation, edit);
     if (typeof document === 'undefined' || !globalThis.crypto?.subtle) {
       throw new ImagePreparationError('unavailable');
     }
     // Normalizing MIME locally also makes the HTMLImageElement fallback signature-driven.
     stage = 'decode';
-    decoded = await decode(new Blob([file], { type: 'image/jpeg' }), signal);
+    decoded = await decode(header.blob, signal, waitForRelease);
     checkAbort(signal);
-    const swapped = header.orientation >= 5;
-    if (decoded.width !== (swapped ? header.height : header.width) ||
-        decoded.height !== (swapped ? header.width : header.height)) {
+    if (decoded.width !== header.width || decoded.height !== header.height) {
       throw new ImagePreparationError('unsupported');
     }
     stage = 'mainEncode';
     main = await encode(
-      decoded.source, decoded.width, decoded.height,
-      JPEG_LIMITS.mainSide, JPEG_LIMITS.mainBytes, 800, signal,
+      decoded.source, geometry.width, geometry.height,
+      JPEG_LIMITS.mainSide, JPEG_LIMITS.mainBytes, 800, signal, geometry, waitForRelease,
     );
     decoded.release();
     decoded = undefined;
     stage = 'thumbEncode';
     thumb = await encode(
       main.canvas, main.canvas.width, main.canvas.height,
-      JPEG_LIMITS.thumbSide, JPEG_LIMITS.thumbBytes, 160, signal,
+      JPEG_LIMITS.thumbSide, JPEG_LIMITS.thumbBytes, 160, signal, undefined, waitForRelease,
     );
     const mainSha256 = await verifyAndHash(main, signal);
     const thumbSha256 = await verifyAndHash(thumb, signal);
