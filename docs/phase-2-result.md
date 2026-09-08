@@ -436,6 +436,15 @@ and real integration/security gates have not run for this partial candidate.
 Native final validation and changed-file secret scanning outcomes belong in the
 public checkpoint report; absent or unavailable checks are not passes.
 
+After committing the partial source and finishing other candidate processes,
+the existing native `parallel_validation` ran **once**. JavaScript CodeQL
+completed with **zero alerts**; no Actions or SQL analysis result was reported.
+Automated code review was **unavailable** because `autofind` was missing;
+the wrapper's success heading is not a review pass. Changed-file native secret
+scans reported no secrets before commits. These limited results do not close
+the failed typecheck, unexecuted database migration, unfinished tests or actual
+independent-review gates. No validation retry or new checker was introduced.
+
 ### Contract limits and next gates
 
 Per-field revisions do not replace expected row-version predicates. Identical
