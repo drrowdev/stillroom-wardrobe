@@ -354,3 +354,122 @@ reviewed change to repaired base `cf90288f99a6d5c791923d3bd0bf5d138b4ea72f`,
 preserving generic handoff instructions and historical evidence. No database
 migration, hosted history replay, fixture reset or account repair is needed.
 Previously saved sanitized JPEGs and immutable Save records remain compatible.
+
+## I29a partial checkpoint — local environment blocked
+
+8 September 2026. **Incomplete implementation; not ready for review acceptance,
+CI authorization or merge.** I29 / R18 R19 R23 R26 R27 R28, on PR #10,
+`copilot/i29a-saved-item-facts`, from approved main
+`04b71e1e21e25119ccf5486d618cda8f0a10760b`; starting head
+`31a62c3d8d346d2da5d904a8930959211ae99df8`. The initial head's sole parent
+is that base and both trees are `127398771c174280dd814b1359ad0d7d1c4321ca`.
+I07's later merged engineering evidence supersedes its dated pending status
+above; none of that evidence validates this I29a checkpoint.
+
+After context and before source edits, read the full
+[plan mirror 5587190952](https://github.com/drrowdev/stillroom-wardrobe/pull/10#issuecomment-5587190952)
+and matching [native receipt 5587191372](https://github.com/drrowdev/stillroom-wardrobe/pull/10#issuecomment-5587191372).
+The mirror's UTF-8 SHA256 is
+`8d6c4af6d6468d47186f7bb4322babec78d877da54e9543ed32a71701c33916a`.
+The coordinator verified actual `sweagent-capi:gpt-6-astra`, task
+`70e5fb6d-37f0-4b25-b71d-da6737b44e5c`, session
+`30e817ad-850f-47f9-aafe-59d139505881`, at
+`2026-09-08T14:58:37.1696224Z`, for this PR/branch/base/head.
+The plan records actual Anthropic Claude Opus 5 reviewer
+`bc532454-fce2-4417-8b53-d69c1f44cc46`, turns 0–2: narrowed foundation,
+literal manual-intent transitions and explicit intermediate export/clear
+boundaries, with coordinator approval and final no-blocker verdict.
+No historical receipt or worker self-attestation substituted for this gate.
+
+Context actually consulted: root/Copilot instructions; full cloud guide and
+Phase 2 report; Phase 0 current/ordered-handoff and recovery evidence; local
+backend guide; blueprint 00/03/05/10/13/14/20/21, relevant 07/08/15/19 sections;
+actual initial migration item/trigger/RLS/export definitions and generated item
+types; wardrobe domain, error mapping and upload source; domain, integration,
+security and image browser tests and existing mutable mock; local/hosted
+guards, quality-gate fixture tests, Playwright configuration, package commands
+and Phase 1 sequential-test evidence. PR #10 discussion/diff/reviews/threads,
+recent workflow runs and setup job metadata were read. Initial PR CI run
+`34241654414` was `action_required`, with no jobs/failure logs. Running setup
+job `102113069276` reported successful preparation steps, but its log download
+returned HTTP 404. This is not a CAPI model-input failure or a CI pass.
+
+### Partial source and actual commands
+
+Five approved paths change at this checkpoint:
+
+* `supabase/migrations/20260906000000_item_field_provenance.sql`: proposed
+  nullable facts, bounded private provenance trigger and raw export version 2.
+  No backfill or existing-row data statements. **Not successfully applied.**
+* `src/domain/attribute-provenance.ts`: finite codes, read parser, missing-entry
+  unknown/0 semantics, explicit manual insert map and semantic comparison.
+* `src/images/upload.ts`: title/category user/1 insert map and bounded duplicate
+  comparison only; image protocol and frozen attempt remain unchanged.
+* `tests/unit/domain.test.ts`: focused domain/source-consistency tests.
+* This appended result. No actual regenerated types or new integration,
+  security or browser tests have been completed yet.
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`:
+
+| Exact command | Actual result |
+|---|---|
+| `npm run db:start` | Exit 0; prepared local stack reported healthy. |
+| `npm run test:unit -- tests/unit/domain.test.ts` | Exit 0; 11/11, including five new I29a tests. Not database or Save-path proof. |
+| `npm run lint` | Exit 0 on partial source. |
+| `npm run db:reset` | Exit 1; local reset failed, no fixture provisioning ran. Raw CLI output withheld by existing wrapper. |
+| `npm run db:types` | Exit 2; `missing-images-output`, generator exit 0, stdout 4827 bytes, stderr 22 bytes. Existing types preserved. |
+| `npm exec -- supabase db reset --local --no-seed --yes` | One diagnostic invocation, exit 1; only lines matching `^ERROR:` were selected for output, none matched. No further reset loop. |
+| `npm run typecheck` | Standalone invocation exit 2; two errors in `upload.ts` because preserved base types lack `field_provenance`. Not build-ready. |
+| `git diff --check` | Exit 0 including the appended report. |
+
+The chained typecheck commands did **not** run after reset/generation failures;
+the subsequent standalone invocation failed as recorded above.
+Existing database log inspection found
+`FATAL: role "postgres" does not exist`. This does not establish the reset's
+cause or implicate the new migration. No account repair, role repair, harness
+change, alternate runner, configuration change or handwritten schema types
+were used. The coordinator was notified on the receipt thread. Local database
+recovery requires coordinator guidance before further implementation/testing.
+
+The remaining required full/static/browser/a11y/build/translation/dependency
+and real integration/security gates have not run for this partial candidate.
+Native final validation and changed-file secret scanning outcomes belong in the
+public checkpoint report; absent or unavailable checks are not passes.
+
+### Contract limits and next gates
+
+Per-field revisions do not replace expected row-version predicates. Identical
+PATCH repetition without a row-version predicate is not detectable as new
+intent. The existing touch trigger, grants, RLS and image operations are
+unchanged. The initial SQL hash remains
+`4f2d44603707cb823527c80d8384c2a6390f99ead2ba294435db83403a7eead5`.
+
+The proposed raw export-v2 snapshot still includes pending/imageless rows and
+is **not** a complete saved-only backup. A durable saved-only boundary and
+every-field clearing, including seasons/colours, must finish with later I29
+consumers **before I29 closes or backups activate**, not as a Phase 6 waiver.
+No naive ready-image filter is added. Historical upgrade/preservation has no
+approved automated runner in this packet; no-backfill review and future
+post-migration legacy-shaped fixtures cannot establish that proof. Actual
+operator-approved upgrade evidence remains required before any hosted migration.
+
+Remaining I29 includes bounded owned receipts, consent/cost reservations/finite
+allowances, provider eligibility/setup/evaluation, checked current-photo Save,
+same-item source binding and retained provenance history, owner/version-only
+description editing, all-field draft/saved editing/clearing, saved-only exports,
+stale-result/timeout/manual fallback and expiry/discard behavior, with no
+inference on Save/restore. This foundation completes none of those consumers.
+
+Coordinator retains exact-head CI/Apple authorization, independent actual Claude
+affected-impact review, actual review of the existing four bounded synthetic
+artifacts and any ordinary SHA-guarded merge. No worker image/archive/binary
+viewing, extra agent, dependency, Actions approval/rerun, merge, deployment,
+hosted access or paid/provider/private-photo operation occurred. Phase 0 remains
+engineering complete with manual acceptance open; only the second hosted-account
+journey was user-deferred.
+
+Local-only rollback: discard/revert these partial source additions through the
+coordinator's reviewed continuation. The failed disposable reset is not a
+recoverable production migration or proof of data preservation; obtain guidance
+before another local recovery attempt. Never apply this rollback, replay the
+base migration or repair migration history on hosted.

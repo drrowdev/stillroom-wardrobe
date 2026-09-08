@@ -2,6 +2,7 @@ import type { AppClient } from '../data/client';
 import type { OwnerScope } from '../auth/session';
 import type { DraftDetails } from '../domain/wardrobe';
 import { isRecord } from '../domain/wardrobe';
+import { manualSaveProvenance, sameFieldProvenance } from '../domain/attribute-provenance';
 import type { PreparedPhoto } from './process-jpeg';
 import { AppError, requireSuccess, throwIfAborted } from '../data/errors';
 
@@ -42,15 +43,17 @@ export async function saveItem(
   throwIfAborted(scope.signal);
   const { details, photo } = attempt;
   const item = { id: attempt.itemId, owner_id: scope.ownerId, title: details.title, category: details.category, currency: attempt.currency };
+  const fieldProvenance = manualSaveProvenance();
   onStage('capture.reserving');
-  const created = await client.from('items').insert(item).abortSignal(scope.signal);
+  const created = await client.from('items').insert({ ...item, field_provenance: fieldProvenance }).abortSignal(scope.signal);
   throwIfAborted(scope.signal);
   if (created.error) {
     if (!duplicate(created.error)) requireSuccess(created.error);
-    const existing = await client.from('items').select('id,owner_id,title,category,currency,deleted_at')
+    const existing = await client.from('items').select('id,owner_id,title,category,currency,deleted_at,field_provenance')
       .eq('id', attempt.itemId).eq('owner_id', scope.ownerId).abortSignal(scope.signal).maybeSingle();
     requireSuccess(existing.error);
-    if (!matches(existing.data, { ...item, deleted_at: null })) throw new AppError('error.conflict');
+    if (!matches(existing.data, { ...item, deleted_at: null })
+      || !sameFieldProvenance(existing.data?.field_provenance, fieldProvenance)) throw new AppError('error.conflict');
   }
   const metadata = {
     id: attempt.imageId, owner_id: scope.ownerId, item_id: attempt.itemId,
