@@ -59,21 +59,54 @@ export function assertCapabilities(results) {
   }
 }
 
-// Source-derived from CLI v2.116.0 makeTable/RenderTable (Glamour ASCII).
-// Only the first authorized fresh CI run can establish actual CLI compatibility.
+const HISTORY_REASONS = Object.freeze([
+  'history-command', 'length-cap', 'charset', 'line-count', 'header', 'separator',
+  'cell-count', 'cell-quoting', 'cell-content', 'version-mismatch', 'remote-mismatch',
+  'time-mismatch', 'inventory-mismatch',
+]);
+
+class HistoryError extends Error {
+  constructor(reason) {
+    super('EVIDENCE_REQUIRED');
+    this.reason = reason;
+  }
+}
+
+function requireHistory(condition, reason) {
+  if (!condition) throw new HistoryError(reason);
+}
+
+export function historyFailureDetail(error) {
+  const reason = error instanceof HistoryError
+    ? HISTORY_REASONS.find((label) => label === error.reason) : undefined;
+  return reason ? `; reason=${reason}` : '';
+}
+
+// SOURCE-DERIVED: CLI v2.116.0 makeTable/RenderTable preserves body backticks.
+// Actual compatibility still requires a successful authorized fresh CI history gate.
 export function parseMigrationHistory(output) {
-  requireEvidence(typeof output === 'string' && output.length <= 4096 && /^[\x20-\x7e\r\n]*$/.test(output));
+  requireHistory(typeof output === 'string', 'cell-content');
+  requireHistory(output.length <= 4096, 'length-cap');
+  requireHistory(/^[\x20-\x7e\r\n]*$/.test(output), 'charset');
   const lines = output.trim().split(/\r?\n/).map((line) => line.trim());
-  requireEvidence(lines.length === 4);
+  requireHistory(lines.length === 4, 'line-count');
   const cells = (line) => line.split('|').map((cell) => cell.trim());
-  requireEvidence(JSON.stringify(cells(lines[0])) === JSON.stringify(['Local', 'Remote', 'Time (UTC)']));
-  requireEvidence(/^-+\|-+\|-+$/.test(lines[1]));
+  requireHistory(JSON.stringify(cells(lines[0])) === JSON.stringify(['Local', 'Remote', 'Time (UTC)']), 'header');
+  requireHistory(/^-+\|-+\|-+$/.test(lines[1]), 'separator');
   const rows = lines.slice(2).map((line, index) => {
-    const row = cells(line);
+    const quoted = cells(line);
+    requireHistory(quoted.length === 3, 'cell-count');
+    const row = quoted.map((cell) => {
+      requireHistory(/^`[^`]*`$/.test(cell), 'cell-quoting');
+      const inner = cell.slice(1, -1);
+      requireHistory(inner.length > 0 && (inner === ' ' || inner.trim() === inner), 'cell-content');
+      return inner === ' ' ? '' : inner;
+    });
     const version = MIGRATIONS[index].version;
     const time = index === 0 ? '2026-09-05 00:00:00' : '2026-09-06 00:00:00';
-    requireEvidence(row.length === 3 && row[0] === version
-      && (row[1] === '' || row[1] === version) && row[2] === time);
+    requireHistory(row[0] === version, 'version-mismatch');
+    requireHistory(row[1] === '' || row[1] === version, 'remote-mismatch');
+    requireHistory(row[2] === time, 'time-mismatch');
     return { local: row[0], applied: row[1] };
   });
   return {
@@ -83,13 +116,18 @@ export function parseMigrationHistory(output) {
 }
 
 export function assertHistory(output, stage) {
-  requireEvidence(stage === 'base' || stage === 'target');
+  requireHistory(stage === 'base' || stage === 'target', 'inventory-mismatch');
   const inventory = parseMigrationHistory(output);
   const expected = stage === 'base'
     ? { applied: [MIGRATIONS[0].version], pending: [MIGRATIONS[1].version] }
     : { applied: MIGRATIONS.map((entry) => entry.version), pending: [] };
-  requireEvidence(JSON.stringify(inventory) === JSON.stringify(expected));
+  requireHistory(JSON.stringify(inventory) === JSON.stringify(expected), 'inventory-mismatch');
   return inventory;
+}
+
+export function assertHistoryResult(result, stage) {
+  requireHistory(result?.code === 0, 'history-command');
+  return assertHistory(result.stdout, stage);
 }
 
 export function exportBodyEvidence(sql) {
@@ -107,8 +145,7 @@ export function exportBodyEvidence(sql) {
 
 async function history(stage) {
   const result = await cli(['migration', 'list', '--local']);
-  requireEvidence(result.code === 0);
-  const inventory = assertHistory(result.stdout, stage);
+  const inventory = assertHistoryResult(result, stage);
   console.log(`PASS: history ${stage} applied=${inventory.applied.join(',')} pending=${inventory.pending.join(',') || 'none'}`);
 }
 
@@ -160,8 +197,8 @@ async function main() {
     stage = 'S4-verify';
     await child('verify');
     console.log('PASS: populated base-to-target preservation and bounded post-comparison probes');
-  } catch {
-    console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED; subsequent stages NOT RUN`);
+  } catch (error) {
+    console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}; subsequent stages NOT RUN`);
     process.exitCode = 1;
   } finally {
     if (ownsSnapshot) {

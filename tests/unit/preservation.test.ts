@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
-import { MIGRATIONS, assertRehearsalEnvironment, validateInventory, assertMigrationInventory, assertCapabilities, parseMigrationHistory, assertHistory, exportBodyEvidence } from '../../scripts/preservation-rehearsal.mjs';
+import { MIGRATIONS, assertRehearsalEnvironment, validateInventory, assertMigrationInventory, assertCapabilities, parseMigrationHistory, assertHistory, assertHistoryResult, historyFailureDetail, exportBodyEvidence } from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
 import { SOURCE_HASHES, MAX_SNAPSHOT_BYTES, COLUMNS, TABLES, COUNTS, IMPLICIT_FACTS, EXPLICIT_FACTS, NEW_COLUMNS, parsePhaseArguments, snapshotPath, assertSnapshotPath, validateSnapshotStat, rowIdentity, canonicalRows, validateSnapshot, comparePreservation, normalClient, captureData, functionalProbes } from '../integration/preservation.sessions.mjs';
 
@@ -90,16 +90,29 @@ function upgraded(before: Snapshot): Snapshot {
   return after;
 }
 
-// Source-derived only: CLI v2.116.0 internal/migration/list/list.go makeTable,
-// utils/output.go RenderTable and Glamour v1.0.0 ASCII/table cell rendering.
+// SOURCE-DERIVED: CLI 2.116.0 commit 997a1e69a4a83466964ed874d3a604c88a7b3866,
+// list.format.ts (5d1d0d8) and legacy-glamour-table.ts (29c6778).
 // Not observed CLI execution, database state or preservation proof.
-const baseTable = `
-  Local          | Remote         | Time (UTC)
- ----------------|----------------|---------------------
-  20260905000000 | 20260905000000 | 2026-09-05 00:00:00
-  20260906000000 |                | 2026-09-06 00:00:00
-`;
-const targetTable = baseTable.replace('20260906000000 |                |', '20260906000000 | 20260906000000 |');
+const baseTable = [
+  '',
+  '  ',
+  '   Local            | Remote           | Time (UTC)            ',
+  '  ------------------|------------------|-----------------------',
+  '   `20260905000000` | `20260905000000` | `2026-09-05 00:00:00` ',
+  '   `20260906000000` | ` `              | `2026-09-06 00:00:00` ',
+  '',
+  '',
+].join('\n');
+const targetTable = [
+  '',
+  '  ',
+  '   Local            | Remote           | Time (UTC)            ',
+  '  ------------------|------------------|-----------------------',
+  '   `20260905000000` | `20260905000000` | `2026-09-05 00:00:00` ',
+  '   `20260906000000` | `20260906000000` | `2026-09-06 00:00:00` ',
+  '',
+  '',
+].join('\n');
 const validEnv = { ALLOW_PRESERVATION_REHEARSAL: '1', CI: 'true', GITHUB_ACTIONS: 'true' };
 const inventory = () => (MIGRATIONS as { name: string; version: string; bytes: number; sha256: string }[])
   .map((entry) => ({ ...entry, regular: true, symlink: false }));
@@ -163,22 +176,95 @@ describe('CI-only preservation guards', () => {
     expect(() => assertHistory(baseTable, 'target')).toThrow();
     expect(() => assertHistory(baseTable, 'other')).toThrow();
     expect(assertHistory(baseTable.replaceAll('\n', '\r\n'), 'base')).toEqual(parseMigrationHistory(baseTable));
+    expect(assertHistory(targetTable.replaceAll('\n', '\r\n'), 'target')).toEqual(parseMigrationHistory(targetTable));
+    expect(assertHistoryResult({ code: 0, stdout: baseTable }, 'base')).toEqual(parseMigrationHistory(baseTable));
+  });
+  it('retains SOURCE-DERIVED renderer padding, widths and decorative blank lines', () => {
+    for (const table of [baseTable, targetTable]) {
+      const lines = table.split('\n');
+      expect(lines).toHaveLength(8);
+      expect(lines.slice(0, 2)).toEqual(['', '  ']);
+      expect(lines.slice(-2)).toEqual(['', '']);
+      for (const line of lines.slice(2, 6)) {
+        expect(line.startsWith('  ')).toBe(true);
+        expect(line.slice(2).split('|').map((cell) => cell.length)).toEqual([18, 18, 23]);
+      }
+    }
   });
   it.each([
     '', '[]', 'PASS', baseTable + 'unexpected', baseTable.replace('Local', 'LOCAL'),
     baseTable.replaceAll('|', '│'), baseTable.replace('----------------', '-----+----------'),
     baseTable.replace('20260906000000', '20260907000000'),
     baseTable.replace('20260906000000', '20260905000000'),
-    baseTable.replace('20260905000000 | 20260905000000', '               | 20260905000000'),
-    baseTable.replace('20260906000000 |                |', '20260906000000 | 20260907000000 |'),
+    baseTable.replace('`20260905000000` | `20260905000000`', '` ` | `20260905000000`'),
+    baseTable.replace('`20260906000000` | ` `', '`20260906000000` | `20260907000000`'),
     baseTable.replace('2026-09-06 00:00:00', '2026-09-07 00:00:00'),
     baseTable.replace('20260906000000', '`20260906000000`'),
     baseTable.replace('20260905000000', '\x1b[0m20260905000000'),
-    baseTable.split('\n').slice(0, -2).join('\n'),
-    baseTable + baseTable.split('\n')[3] + '\n',
-    baseTable.replace('20260905000000 | 20260905000000', '20260905000000 |               '),
+    baseTable.split('\n').slice(0, -3).join('\n'),
+    baseTable + baseTable.split('\n')[4] + '\n',
+    baseTable.replace('`20260905000000` | `20260905000000`', '`20260905000000` | ` `'),
+    baseTable.replace('`20260905000000` | `20260905000000`', '`20260905000000` | `20260906000000`'),
+    baseTable.replace('`20260905000000` | `20260905000000`', '`20260905000000`'),
+    baseTable.replace('`20260905000000` | `20260905000000`', '`20260905000000` | `20260905000000` | ` `'),
+    baseTable.replace('Local', '`Local`'),
+    baseTable.replace('2026-09-06 00:00:00', '2026-09-06T00:00:00'),
+    baseTable.replace('2026-09-06 00:00:00', '2026-09-06  00:00:00'),
+    baseTable.replace('2026-09-06 00:00:00', '2026-09-06 00:00:01'),
+    baseTable.replaceAll('`', ''),
+    baseTable.replace('\n   `20260906000000`', '\n\n   `20260906000000`'),
+    baseTable.split('\n').map((line, index, lines) => index === 4 ? lines[5] : index === 5 ? lines[4] : line).join('\n'),
+    ' '.repeat(4097),
+    baseTable.replace('Local', '\tLocal'),
+    baseTable.replace('Local', '\0Local'),
   ])('rejects malformed, missing, duplicate or unknown history %#', (value) => {
     expect(() => assertHistory(value, 'base')).toThrow();
+    expect(() => assertHistory(value.replaceAll('\n', '\r\n'), 'base')).toThrow();
+  });
+  it.each(['`20260905000000`', '` `', '`2026-09-05 00:00:00`'])('strictly validates quoted source-derived body cell %s', (cell) => {
+    for (const replacement of [
+      cell.slice(1, -1), cell.slice(1), cell.slice(0, -1), '`' + cell + '`',
+      cell.slice(0, 2) + '`' + cell.slice(2), '``', '`  `', '`   `',
+      '` ' + cell.slice(1), cell.slice(0, -1) + ' `',
+    ]) {
+      expect(() => assertHistory(baseTable.replace(cell, replacement), 'base')).toThrow('EVIDENCE_REQUIRED');
+    }
+  });
+  it.each([
+    ['length-cap', ' '.repeat(4097)],
+    ['charset', baseTable.replace('Local', '\x1bLocal')],
+    ['line-count', ''],
+    ['header', baseTable.replace('Local', 'LOCAL')],
+    ['separator', baseTable.replace('----------------', '-----+----------')],
+    ['cell-count', baseTable.replace('`20260905000000` |', '')],
+    ['cell-quoting', baseTable.replace('`20260905000000`', '20260905000000')],
+    ['cell-content', baseTable.replace('` `', '``')],
+    ['version-mismatch', baseTable.replace('20260906000000', '20260907000000')],
+    ['remote-mismatch', baseTable.replace('` `', '`20260907000000`')],
+    ['time-mismatch', baseTable.replace('2026-09-06', '2026-09-07')],
+    ['inventory-mismatch', targetTable],
+  ])('reports only the closed history reason %s', (reason, stdout) => {
+    let failure: unknown;
+    try { assertHistoryResult({ code: 0, stdout }, 'base'); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe('EVIDENCE_REQUIRED');
+    expect(historyFailureDetail(failure)).toBe(`; reason=${reason}`);
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000'] });
+  });
+  it('distinguishes history command failure without forwarding command output or arbitrary errors', () => {
+    const privateText = 'arbitrary upstream text /private/fixture-path';
+    for (const code of [1, 2, null, undefined, '0']) {
+      let failure: unknown;
+      try { assertHistoryResult({ code, stdout: privateText, stderr: privateText }, 'base'); } catch (error) { failure = error; }
+      expect(historyFailureDetail(failure)).toBe('; reason=history-command');
+      expect((failure as Error).message).toBe('EVIDENCE_REQUIRED');
+      Object.assign(failure as Error, { reason: privateText });
+      expect(historyFailureDetail(failure)).toBe('');
+    }
+    for (const failure of [new Error(privateText), new Error('cell-quoting'), privateText,
+      { reason: 'history-command', message: privateText }, null, undefined]) {
+      expect(historyFailureDetail(failure)).toBe('');
+    }
   });
   it('derives untrimmed source export bodies; this is not a database observation', async () => {
     for (const [name, md5] of [
