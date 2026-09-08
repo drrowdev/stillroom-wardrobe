@@ -611,3 +611,159 @@ success/no-comments heading is not a review pass. There was no retry, alternate
 checker or permission/tool change. Native changed-file secret scans passed
 before the generated-types and partial-source commits. These results describe
 this incomplete checkpoint only, not final I29a security or feature acceptance.
+
+## I29a DB-independent completion — fresh CI database gate pending
+
+8 September 2026. **Remaining browser regressions and DB-free checks complete;
+I29a acceptance remains open.** I29 / R18 R19 R23 R26 R27 R28 only, existing
+PR #10 (`PR_kwDOUP-Oyc8AAAABCsPJTg`), branch `copilot/i29a-saved-item-facts`.
+Starting head `6218be54d26c22148248702bdcc395b3cbb3a127`; base
+`04b71e1e21e25119ccf5486d618cda8f0a10760b`. The eight predecessor paths remain;
+this continuation adds the ninth path's tests and appends this evidence only.
+
+### Current authority and context
+
+Read the full [nine-path plan 5587190952](https://github.com/drrowdev/stillroom-wardrobe/pull/10#issuecomment-5587190952),
+[controlling routing amendment 5588456115](https://github.com/drrowdev/stillroom-wardrobe/pull/10#issuecomment-5588456115)
+and partial report `5588249694`. The amendment supersedes the old reset/testing
+sequence, not the product contract or final gates. It records actual
+**Anthropic / Claude Opus 5**, reviewer `bc532454-fce2-4417-8b53-d69c1f44cc46`,
+turn 3, following core turns 0–2: the normal-session wrapper has no implicit
+reset; regular browser/a11y/static work is database-independent; existing fresh
+CI can provide the mandatory real-DB proof. The coordinator approved that route,
+with final-head Database success required before independent code acceptance.
+No new architecture round, reviewer agent or scope amendment was introduced.
+
+After context and before edits, read the full amendment and this task's own
+[receipt 5588484305](https://github.com/drrowdev/stillroom-wardrobe/pull/10#issuecomment-5588484305).
+The coordinator explicitly selected and authenticated-GET verified
+`sweagent-capi:gpt-6-astra`, task `d416f706-019c-4504-b6ab-0e429fe071aa`,
+session `dc627fb2-a508-4d88-895d-25415f2bc814`, at
+`2026-09-08T16:29:29.5570097Z`, rechecking refs/identity/one-writer status at
+`2026-09-08T16:30:26.2090051Z`. Repository, PR node, branch and base/starting head
+match above. Neither predecessor receipt nor worker self-attestation was reused.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`,
+cloud guide, Phase 0/2 evidence and relevant local-backend history; blueprint
+00/03/05/10/13/14/20/21 and relevant 07/08/15/19 contracts; initial item/image,
+touch/RLS/export SQL, I29a migration, generated item types, provenance/domain
+tests, upload/error/AddItem source, new ordinary integration/security cases,
+existing image browser tests/mutable mock, quality-gate fixtures, package scripts,
+Playwright config, normal-session wrapper and unchanged CI/setup workflows.
+PR #10 body/discussion/diff/reviews/threads and MCP workflow/job evidence were
+consulted. No existing review or review thread was present.
+
+### Preparation is not final database proof
+
+Current native run `34251367887`, job `102146353052`, at starting head `6218be54`
+reports successful locked dependency/Chromium setup, Supabase startup
+(16:30:47–16:31:54 UTC), migration/reset/provision step (16:31:55–16:32:22 UTC),
+and actual type generation (16:32:23–16:32:34 UTC). The running-job log download
+returned HTTP 404; these are successful step metadata, not inspected command
+logs or a passing owner/security suite. This is not a CAPI model-input failure.
+The starting working tree was clean, including the generated types already
+committed in `febc57a`; no new type output or schema change was committed.
+`git diff --exit-code -- src/data/database.types.ts` returned 0.
+
+Both earlier native warm-reset failures remain preserved above; their cause is
+unknown, not declared repaired or permanently unknowable. No old-container
+inspection, classifier, raw stderr/credential inspection, reset or repair was
+performed. Older fresh CI `34244525058`, attempt 2 at `fa127b6`, remains a
+separate successful DB-sequence comparison with an overall failed result.
+MCP failure logs confirm committed-type parity failure and App TS2322/TS2339.
+That older run cannot validate the corrected numeric casts or new I29 DB cases.
+Starting-head CI `34249547377` was `action_required`; this worker did not
+authorize or rerun it.
+
+### Appended actual Save regressions
+
+Only `tests/browser/images.spec.ts` and this report change in this continuation.
+All existing I07/native/Slice cases, helpers, mock/WIRE, runtime source, schema,
+types, workflows, configuration and dependencies remain unchanged.
+
+Three appended cases use the existing `setup`/mutable mock and synthetic fixture:
+
+* Explicit UI Save reaches actual `saveItem` and inserts exactly title/category
+  `user` revision 1, with owner/currency and one pending image after commit failure.
+  Reordering both map and entry properties then succeeds on Retry with the same
+  item/image IDs, prepared-main hash, both stored hashes/sizes and byte-identical
+  files. Existing duplicate POST/download checks remain; the receiver accepts
+  exactly two original file uploads and no additional payload bytes.
+* Separate controlled stored-kind and stored-revision mismatches return the
+  existing localized conflict plus retry guidance. The draft stays visible,
+  frozen and unsaved; item/image/file state and bytes remain unchanged.
+  After Retry, exactly item POST and GET occur, with no subsequent image,
+  Storage or commit request.
+
+These are synthetic browser contracts, **not live SQL/RLS/owner proof**.
+No production defect or schema-shaped type change was needed.
+
+### Exact native DB-free validation
+
+All commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+Unit/static checks finished before Vite-backed browser runs; browser and a11y
+ran sequentially. No timeout, worker, retry or harness setting changed.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/domain.test.ts` | 13/13, exit 0. |
+| `npm run test:browser -- tests/browser/images.spec.ts --grep 'I29a manual Save' --retries=0` | Initial 0/9: six new assertions expected only the first of two existing alert paragraphs; three WebKit cases could not launch the absent pinned browser. After the corrections below, 9/9, exit 0. |
+| `npx playwright install --with-deps webkit` | Exit 0, only after the missing-browser failure; restored the existing pinned browser/system libraries without repository dependency changes. |
+| `npm run lint` | Final exit 0. |
+| `npm run typecheck` | Final exit 0. |
+| `npm run test:unit` | Final 480/480 in 12 files, exit 0. |
+| `npm run check:translations` | 402 EN/FI/SV keys, 37 source files, exit 0. |
+| `npm run test:browser -- --retries=0` | Final 329/329 in 3.7 minutes, exit 0; no retries/skips. |
+| `npm run test:a11y -- --retries=0` | Final 27/27, exit 0; no retries/skips. |
+| `npm run build` | Exit 0; JS 164.26 kB gzip, CSS 4.97 kB gzip. Existing non-failing >500 kB chunk warning retained. |
+| `npm run scan:secrets` | Exit 0; 157 text files and fresh unprinted canary checked. |
+| `npm run check:dependencies` | Exit 0; 12 production/220 development packages, zero unverified dates, completed production audit with zero alerts at all severities. |
+| `git diff --check` | Exit 0. |
+
+The new alert assertions now check the two exact localized paragraphs rather
+than changing existing UI. Final full suites also cover tightened exact-map and
+initial-commit-count assertions. No unrelated test was edited or weakened.
+Build and repository secret scan shared a process-local
+`STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`, exported without printing.
+Existing approved screenshot buffers/files stayed inside tests, ignored and
+unopened. No artifact/image/archive was viewed or sent to the worker model.
+The subsequent a11y run reuses disposable test output; local captures are not
+claimed as retained or visually approved final CI artifacts.
+
+### Native commands deliberately UNRUN / mandatory handoff
+
+Outside the unchanged preparation workflow, this writer ran **none** of:
+`npm run db:start`, `npm run db:reset`, `npm run db:types`,
+`npm run db:types -- --check`,
+`ALLOW_SECURITY_TESTS=1 npm run test:integration`, or
+`ALLOW_SECURITY_TESTS=1 npm run test:security`.
+These native DB gates are **UNRUN/PENDING** under the routing amendment, not
+passes. No direct CLI reset/psql, provisioning, role/account/permission repair,
+hosted smoke or hosted SQL occurred. There is no new recovery experiment.
+
+After the final candidate is committed and other processes finish, the existing
+native checker is invoked once; its actual result and any unavailable component
+are recorded in the PR, never inferred from its wrapper heading.
+The coordinator then owns exact-head/model/actor/no-writer and executable/privacy/
+egress/workflow trust checks, followed by the **existing fresh CI Database job**:
+startup, guarded reset/provision, new I29 ordinary-owner integration/security
+cases, real recovery, actual type generation and committed parity must all pass
+on the final head **before independent code acceptance**. Final App/native Apple,
+actual independent Claude affected-impact review and actual review of all four
+approved I06/I07 artifacts with run/head/hashes/verdict remain required.
+Old CI, setup/types, mocks, skipped tests and artifact existence waive none.
+
+Saved-only exports and every-field clearing (including colours/seasons) remain
+mandatory later I29 consumer gates before I29 closes, not a Phase 6 waiver.
+Raw v2 still includes pending/imageless rows. Receipt/consent/finite-budget,
+checked current-photo Save, description edits, provider setup/evaluation and
+other full-I29 gates above remain open. Historical upgrade preservation still
+needs operator-approved evidence before any hosted migration.
+No I29a acceptance/full I29/Phase 2/hosted/release completion is claimed.
+
+Local-only rollback: a separately reviewed change can remove these appended
+browser cases back to starting `6218be54` while preserving evidence and the
+predecessor source/types. No database reset, hosted replay or history repair is
+part of this rollback. This worker stops editing after publishing the final
+head/results; no additional agent/branch/PR, Actions authorization/rerun, merge,
+deployment, provider/private-photo/paid operation or later packet.
