@@ -3,7 +3,7 @@ import { prepareImage } from '../../src/images/process-image';
 import { readTiffOrientation, validateImage, WEBP_FLAGS } from '../../src/images/validate';
 import { JPEG_LIMITS } from '../../src/images/jpeg';
 import { joinBytes } from '../fixtures/jpeg-helpers';
-import { PNG_SIGNATURE, pngChunk, pngHeader, riff, tiff, vp8l, vp8x, webpChunk } from '../fixtures/image-helpers';
+import { fixtureFailure, PNG_SIGNATURE, pngChunk, pngHeader, pngStructure, riff, tiff, vp8l, vp8x, webpChunk, withExif } from '../fixtures/image-helpers';
 
 const data = pngChunk('IDAT', new Uint8Array([1]));
 const end = pngChunk('IEND');
@@ -55,6 +55,48 @@ describe('I07 bounded admission and deletion-only normalization', () => {
       const animation = pngChunk(kind);
       await expect(validateImage(before ? png(animation, data) : png(data, animation))).rejects.toMatchObject({ code: 'unsupported' });
     }
+  });
+  it('admits contiguous multiple IDATs and removes only Exif with exact retained bytes', async () => {
+    const retained = [pngChunk('gAMA', new Uint8Array([0, 0, 177, 143])), data,
+      pngChunk('IDAT', new Uint8Array([2, 3])), pngChunk('IDAT'),
+      pngChunk('tEXt', new TextEncoder().encode('Comment\0synthetic'))];
+    const base = png(...retained);
+    expect((await validateImage(base)).blob).toBe(base);
+    for (const source of [png(exif(6), ...retained), png(...retained, exif(6))]) {
+      const admitted = await validateImage(source);
+      expect(admitted.orientation).toBe(6);
+      expect(new Uint8Array(await admitted.blob.arrayBuffer())).toEqual(new Uint8Array(await base.arrayBuffer()));
+    }
+  });
+  it('replaces generated encoder Exif once without altering other PNG or WebP chunks', async () => {
+    const retained = [pngChunk('sRGB', new Uint8Array([0])), data, pngChunk('IDAT', new Uint8Array([2])),
+      pngChunk('tEXt', new TextEncoder().encode('Comment\0synthetic'))];
+    for (const before of [true, false]) {
+      const raw = before ? png(exif(1), ...retained) : png(...retained, exif(1));
+      expect((await validateImage(raw)).blob).toBe(raw);
+      for (const after of [true, false]) {
+        const injected = await withExif(raw, 'png', 6, after);
+        expect(await pngStructure(injected)).toEqual({
+          width: 120, height: 80, bitDepth: 8, colourType: 6, exifCount: 1, idatCount: 2,
+          boundedStructure: true, idatContiguous: true, crcValid: true, uniqueHeaderEnd: true,
+        });
+        const admitted = await validateImage(injected);
+        expect(admitted.orientation).toBe(6);
+        expect(new Uint8Array(await admitted.blob.arrayBuffer())).toEqual(new Uint8Array(await png(...retained).arrayBuffer()));
+      }
+    }
+    const chunks = [vp8l(120, 80, true), webpChunk('XMP ', new Uint8Array([1]))];
+    const raw = new Blob([riff(vp8x(120, 80, 0x1c), ...chunks, webpChunk('EXIF', tiff(1)))]);
+    expect((await validateImage(raw)).blob).toBe(raw);
+    const admitted = await validateImage(await withExif(raw, 'webp', 8));
+    expect(admitted.orientation).toBe(8);
+    expect(new Uint8Array(await admitted.blob.arrayBuffer())).toEqual(riff(vp8x(120, 80, 0x14), ...chunks));
+  });
+  it('limits fixture failure observations to fixed codes and stages', async () => {
+    expect(fixtureFailure({ code: 'invalid', stage: 'decode', message: 'arbitrary' })).toEqual({ code: 'invalid', stage: 'decode' });
+    expect(fixtureFailure({ code: 'arbitrary', stage: 'arbitrary' })).toEqual({ code: 'unexpected', stage: 'none' });
+    expect(fixtureFailure(null)).toEqual({ code: 'unexpected', stage: 'none' });
+    expect((await pngStructure(new Blob(['not a PNG']))).boundedStructure).toBe(false);
   });
   it('walks past large pixel data using slices, never the entire source array', async () => {
     const bigData = pngChunk('IDAT', new Uint8Array(JPEG_LIMITS.headerBytes + 1));

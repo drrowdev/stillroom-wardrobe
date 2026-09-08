@@ -10,15 +10,15 @@ import { mockBackend, owners, signIn } from './mock-backend';
 type Format = 'png' | 'webp' | 'jpeg';
 
 // Image bytes stay inside the test process/browser; only assertions reach the text reporter.
-async function nativeFixture({ format, alpha = false }: { format: Format; alpha?: boolean }) {
+async function nativeFixture({ format, alpha = false, width = 120, height = 80 }: { format: Format; alpha?: boolean; width?: number; height?: number }) {
   const canvas = document.createElement('canvas');
-  canvas.width = 120; canvas.height = 80;
+  canvas.width = width; canvas.height = height;
   try {
     const context = canvas.getContext('2d')!;
     ['rgb(240,30,30)', 'rgb(30,210,50)', 'rgb(30,70,230)', 'rgb(230,200,20)'].forEach((colour, index) => {
       if (alpha && index === 0) return;
       context.fillStyle = colour;
-      context.fillRect(index % 2 * 60, Math.floor(index / 2) * 40, 60, 40);
+      context.fillRect(index % 2 * width / 2, Math.floor(index / 2) * height / 2, width / 2, height / 2);
     });
     const blob = await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Fixture encoding failed')), `image/${format}`, 1));
@@ -26,8 +26,8 @@ async function nativeFixture({ format, alpha = false }: { format: Format; alpha?
   } finally { canvas.width = 1; canvas.height = 1; }
 }
 
-async function fixture(page: Page, format: Format, alpha = false): Promise<number[]> {
-  let bytes = await page.evaluate(nativeFixture, { format, alpha });
+async function fixture(page: Page, format: Format, alpha = false, size = { width: 120, height: 80 }): Promise<number[]> {
+  let bytes = await page.evaluate(nativeFixture, { format, alpha, ...size });
   if (format === 'webp') {
     const isWebp = (value: number[]) => String.fromCharCode(...value.slice(0, 4)) === 'RIFF'
       && String.fromCharCode(...value.slice(8, 12)) === 'WEBP';
@@ -35,7 +35,7 @@ async function fixture(page: Page, format: Format, alpha = false): Promise<numbe
       const browser = await chromium.launch();
       try {
         const generator = await browser.newPage();
-        bytes = await generator.evaluate(nativeFixture, { format, alpha });
+        bytes = await generator.evaluate(nativeFixture, { format, alpha, ...size });
       } finally { await browser.close(); }
     }
     expect(isWebp(bytes), 'Native fixture must be actual RIFF/WEBP, never a PNG fallback').toBe(true);
@@ -56,18 +56,33 @@ for (const format of ['png', 'webp'] as const) {
       const imagePath = '/src/images/process-image.ts', helperPath = '/tests/fixtures/image-helpers.ts';
       const jpegHelperPath = '/tests/fixtures/jpeg-helpers.ts', validatorPath = '/src/images/validate.ts';
       const { prepareImage } = await import(imagePath) as typeof import('../../src/images/process-image');
-      const { withExif } = await import(helperPath) as typeof import('../fixtures/image-helpers');
+      const { withExif, pngStructure, fixtureFailure } = await import(helperPath) as typeof import('../fixtures/image-helpers');
       const { summarizeJpeg } = await import(jpegHelperPath) as typeof import('../fixtures/jpeg-helpers');
       const { validateImage } = await import(validatorPath) as typeof import('../../src/images/validate');
       const nativeBitmap = globalThis.createImageBitmap;
       const results = [];
+      const baseline = [];
+      const raw = new Blob([new Uint8Array(bytes)]);
+      const rawStructure = format === 'png' ? await pngStructure(raw) : null;
+      let structure = rawStructure, phase = 'raw-validation', fallback = false, orientation = 0;
       try {
-        for (const fallback of [false, true]) {
+        const rawAdmission = await validateImage(raw);
+        for (fallback of [false, true]) {
           Object.defineProperty(globalThis, 'createImageBitmap', { configurable: true, value: fallback ? undefined : nativeBitmap });
-          for (let orientation = 1; orientation <= 8; orientation++) {
-            const source = await withExif(new Blob([new Uint8Array(bytes)]), format, orientation);
+          phase = 'raw-prepare'; orientation = 0; structure = rawStructure;
+          const rawPhoto = await prepareImage(raw);
+          phase = 'raw-output';
+          baseline.push({ fallback, orientation: rawAdmission.orientation, main: await summarizeJpeg(rawPhoto.main) });
+          for (orientation = 1; orientation <= 8; orientation++) {
+            phase = 'injection';
+            const source = await withExif(raw, format, orientation);
+            structure = format === 'png' ? await pngStructure(source) : null;
+            phase = 'injected-validation';
             const admitted = await validateImage(source);
+            if (admitted.orientation !== orientation || structure && structure.exifCount !== 1) throw new Error('Fixture orientation mismatch');
+            phase = 'injected-prepare';
             const photo = await prepareImage(source);
+            phase = 'injected-output';
             results.push({
               fallback, orientation, raw: [admitted.width, admitted.height],
               main: await summarizeJpeg(photo.main), thumb: await summarizeJpeg(photo.thumb),
@@ -75,11 +90,21 @@ for (const format of ['png', 'webp'] as const) {
             });
           }
         }
+      } catch (error) {
+        return { ok: false as const, failure: { format, fallback, orientation, phase, ...fixtureFailure(error), rawStructure, structure } };
       } finally { Object.defineProperty(globalThis, 'createImageBitmap', { configurable: true, value: nativeBitmap }); }
-      return results;
+      return { ok: true as const, results, baseline, rawStructure, injectedStructure: structure };
     }, { bytes, format });
-    expect(results).toHaveLength(16);
-    for (const result of results) {
+    if (!results.ok) throw new Error(JSON.stringify(results.failure));
+    console.log(JSON.stringify({ format, phase: 'raw-and-injected-complete', rawStructure: results.rawStructure, injectedStructure: results.injectedStructure }));
+    expect(results.baseline).toHaveLength(2);
+    for (const result of results.baseline) {
+      expect(result.orientation).toBe(1);
+      expect([result.main.width, result.main.height]).toEqual([120, 80]);
+      expect(cornersMatch(result.main.corners, [0, 1, 2, 3]), 'Raw generated source pixels').toBe(true);
+    }
+    expect(results.results).toHaveLength(16);
+    for (const result of results.results) {
       expect(result.raw).toEqual([120, 80]);
       for (const [index, output] of [result.main, result.thumb].entries()) {
         expect([output.width, output.height]).toEqual(result.orientation >= 5 ? [80, 120] : [120, 80]);
@@ -99,24 +124,47 @@ test('I07 native crop and rotation compose once', async ({ page }) => {
   const results = await page.evaluate(async ({ png, webp, jpeg }) => {
     const imagePath = '/src/images/process-image.ts', helperPath = '/tests/fixtures/image-helpers.ts', jpegPath = '/tests/fixtures/jpeg-helpers.ts';
     const { prepareImage } = await import(imagePath) as typeof import('../../src/images/process-image');
-    const { withExif } = await import(helperPath) as typeof import('../fixtures/image-helpers');
+    const { withExif, pngStructure, fixtureFailure } = await import(helperPath) as typeof import('../fixtures/image-helpers');
     const { addPrivateMetadata, summarizeJpeg } = await import(jpegPath) as typeof import('../fixtures/jpeg-helpers');
+    const validatorPath = '/src/images/validate.ts';
+    const { validateImage } = await import(validatorPath) as typeof import('../../src/images/validate');
     const native = globalThis.createImageBitmap;
     const results = [];
+    let format: Format = 'png', fallback = false, phase = 'raw-validation', orientation = 0;
+    type Structure = Awaited<ReturnType<typeof pngStructure>> | null;
+    let rawStructure: Structure = null, structure: Structure = null;
     try {
-      for (const fallback of [false, true]) {
+      for (fallback of [false, true]) {
         Object.defineProperty(globalThis, 'createImageBitmap', { configurable: true, value: fallback ? undefined : native });
-        for (const format of ['png', 'webp', 'jpeg'] as const) {
+        for (format of ['png', 'webp', 'jpeg'] as const) {
           const blob = new Blob([new Uint8Array({ png, webp, jpeg }[format])]);
+          phase = 'raw-validation'; orientation = 0;
+          rawStructure = format === 'png' ? await pngStructure(blob) : null;
+          structure = rawStructure;
+          if (format !== 'jpeg') await validateImage(blob);
+          phase = 'raw-prepare';
+          await prepareImage(blob);
+          phase = 'injection'; orientation = 6;
           const source = format === 'jpeg' ? await addPrivateMetadata(blob, 6) : await withExif(blob, format, 6);
+          structure = format === 'png' ? await pngStructure(source) : null;
+          phase = 'injected-validation';
+          if (format !== 'jpeg') {
+            const admitted = await validateImage(source);
+            if (admitted.orientation !== orientation || structure && structure.exifCount !== 1) throw new Error('Fixture orientation mismatch');
+          }
+          phase = 'injected-prepare';
           const photo = await prepareImage(source, undefined, { turns: 1, crop: { x: 0, y: 0, width: 0.5, height: 1 } });
+          phase = 'injected-output';
           results.push({ format, fallback, main: await summarizeJpeg(photo.main), thumb: await summarizeJpeg(photo.thumb) });
         }
       }
+    } catch (error) {
+      return { ok: false as const, failure: { format, fallback, orientation, phase, ...fixtureFailure(error), rawStructure, structure } };
     } finally { Object.defineProperty(globalThis, 'createImageBitmap', { configurable: true, value: native }); }
-    return results;
+    return { ok: true as const, results };
   }, { png, webp, jpeg });
-  for (const result of results) for (const output of [result.main, result.thumb]) {
+  if (!results.ok) throw new Error(JSON.stringify(results.failure));
+  for (const result of results.results) for (const output of [result.main, result.thumb]) {
     expect([output.width, output.height]).toEqual([60, 80]);
     expect(cornersMatch(output.corners, [3, 3, 1, 1]), `${result.format} composed once`).toBe(true);
     expect(output.hasPrivateText).toBe(false);
@@ -166,16 +214,59 @@ test('I07 default JPEG is byte-identical and transparency uses the warm neutral 
   }
 });
 
-async function setup(page: Page, language: Language = 'en', failCommitOnce = false) {
+async function setup(page: Page, language: Language = 'en', failCommitOnce = false, size = { width: 120, height: 80 }) {
   const api = await mockBackend(page, { initialLanguage: language, failCommitOnce });
   await page.goto('/');
   await signIn(page);
   await page.getByRole('button', { name: messages['wardrobe.firstItem'][language] }).click();
-  const bytes = await fixture(page, 'png');
+  const bytes = await fixture(page, 'png', false, size);
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: Buffer.from(bytes) });
   await expect(page.locator('.capture-photo img')).toBeVisible();
   await expect(page.locator('#edit-photo')).toBeEnabled();
   return api;
+}
+
+for (const size of [{ width: 3200, height: 1214 }, { width: 1600, height: 530 }]) {
+  test(`I07 Original ratio and edge nudges apply ordinary decimals for ${size.width}x${size.height}`, async ({ page }) => {
+    await setup(page, 'en', false, size);
+    await page.locator('#item-title').fill('Synthetic ratio garment');
+    await page.locator('#item-category').selectOption('top');
+    const previewSize = await page.locator('.capture-photo img').evaluate((image: HTMLImageElement) =>
+      ({ width: image.naturalWidth, height: image.naturalHeight }));
+    expect(previewSize).toEqual({ width: 1600, height: size.height === 1214 ? 607 : 530 });
+    await page.locator('#edit-photo').click();
+    await page.locator('#crop-aspect').selectOption('original');
+    await expect(page.locator('#crop-x')).toHaveValue('0');
+    await expect(page.locator('#crop-y')).toHaveValue('0');
+    await expect(page.locator('#apply-crop')).toBeEnabled();
+    await page.locator('#apply-crop').click();
+    await expect(page.locator('#edit-photo')).toBeFocused();
+    for (const field of ['width', 'height']) {
+      await page.locator('#edit-photo').click();
+      await page.locator(`#crop-${field}`).fill('99.99999999999999');
+      await page.locator('#crop-rectangle').focus();
+      for (const key of ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Shift+ArrowRight', 'Shift+ArrowDown']) {
+        await page.keyboard.press(key);
+        expect(await page.locator('.crop-fields input').evaluateAll((inputs) =>
+          inputs.every((input) => /^\d+(?:\.\d+)?$/.test((input as HTMLInputElement).value)))).toBe(true);
+        await expect(page.locator('#apply-crop')).toBeEnabled();
+      }
+      await page.locator('#apply-crop').click();
+      await expect(page.locator('#edit-photo')).toBeFocused();
+      await expect(page.locator('button[type="submit"]')).toBeEnabled();
+    }
+    await page.locator('#edit-photo').click();
+    await page.getByRole('button', { name: messages['photo.rotateRight'].en, exact: true }).click();
+    await page.locator('#crop-aspect').selectOption('original');
+    const crop = await page.locator('.crop-fields input').evaluateAll((inputs) =>
+      inputs.map((input) => Number((input as HTMLInputElement).value) / 100));
+    expect(crop[2]! * previewSize.height / (crop[3]! * previewSize.width)).toBeCloseTo(previewSize.width / previewSize.height, 9);
+    expect(crop[2]! < 1 || crop[3]! < 1).toBe(true);
+    await expect(page.locator('#apply-crop')).toBeEnabled();
+    await page.locator('#apply-crop').click();
+    await expect(page.locator('#edit-photo')).toBeFocused();
+    await expect(page.locator('button[type="submit"]')).toBeEnabled();
+  });
 }
 
 test('I07 accepted crop alone enters immutable Save and retry', async ({ page }) => {
@@ -217,12 +308,15 @@ test('I07 cancel, reset, fit, language and owner cleanup retain only accepted dr
   const initial = await page.locator('.capture-photo img').getAttribute('src');
   await page.locator('#item-title').fill('Oma synthetic text');
   await page.locator('#edit-photo').click();
+  await expect(page.locator('.photo-panel img')).toHaveCount(1);
+  await expect(page.locator('.capture-photo, #edit-photo')).toHaveCount(0);
   await page.locator('#crop-width').fill('');
   await expect(page.locator('#apply-crop')).toBeDisabled();
   await page.locator('form').evaluate((form: HTMLFormElement) => form.requestSubmit());
   await expect(page.locator('#crop-editor-title')).toBeFocused();
   await page.getByRole('button', { name: messages['photo.cancelCrop'].en }).click();
   await expect(page.locator('.capture-photo img')).toHaveAttribute('src', initial!);
+  await expect(page.locator('#edit-photo')).toBeFocused();
   await page.locator('#edit-photo').click();
   await page.getByRole('button', { name: messages['photo.rotateRight'].en }).click();
   await page.locator('#crop-aspect').selectOption('1');
@@ -264,6 +358,12 @@ test('I07 crop accessibility supports three languages, keyboard, narrow and enla
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('ArrowDown');
     await expect(page.locator('#crop-x')).toHaveValue(String((['en', 'fi', 'sv'].indexOf(language) + 1)));
+    await expect(page.getByRole('button', { name: messages['photo.rotateRight'][language], exact: true }))
+      .toHaveText(messages['photo.rotateRight'][language]);
+    expect(await page.locator('.crop-fields .field').evaluateAll((fields) => {
+      const boxes = fields.map((field) => field.getBoundingClientRect());
+      return boxes.every((box, index) => box.left === boxes[0]!.left && (!index || box.top > boxes[index - 1]!.bottom));
+    })).toBe(true);
     expect(await page.evaluate(() => {
       if (document.documentElement.scrollWidth <= innerWidth) return [];
       return [...document.querySelectorAll('.capture-page *')].map((element) => {
@@ -407,6 +507,15 @@ test('I07 synthetic crop visual evidence retains functional assertions in every 
       await page.getByRole('button', { name: messages['account.menu'].fi }).click();
     }
     await page.setViewportSize({ width: capture.width, height: 900 });
+    await expect(page.locator('.photo-panel img')).toHaveCount(1);
+    await expect(page.locator('#edit-photo, .capture-photo')).toHaveCount(0);
+    expect(await page.locator('.crop-fields .field').evaluateAll((fields) => {
+      const boxes = fields.map((field) => field.getBoundingClientRect());
+      const apply = document.querySelector('#apply-crop')!.getBoundingClientRect();
+      return apply.top >= boxes[3]!.bottom + 12 && (innerWidth === 1280
+        ? boxes[0]!.top === boxes[1]!.top && boxes[2]!.top === boxes[3]!.top && boxes[2]!.top > boxes[0]!.bottom
+        : boxes.every((box, index) => !index || box.top > boxes[index - 1]!.bottom));
+    }), 'Coherent crop grid and action spacing').toBe(true);
     expect(api.profiles[owners.a]?.ui_language === capture.language && api.items.length === 0
       && api.images.length === 0 && api.files.size === 0).toBe(true);
     expect(await page.evaluate(({ origin, language }) => {

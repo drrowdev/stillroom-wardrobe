@@ -167,13 +167,13 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
       <div className="page-heading"><div><p className="eyebrow">{t('capture.eyebrow')}</p><h1 id="capture-title" tabIndex={-1}>{t('capture.title')}</h1><p className="muted">{t('capture.subtitle')}</p></div></div>
       <form className="capture-layout" onSubmit={(event) => { void submit(event); }} noValidate>
         <div className="photo-panel">
-          <div className={`capture-photo ${preview ? 'has-photo' : ''}`} aria-busy={preparing}>
+          {!editing && <div className={`capture-photo ${preview ? 'has-photo' : ''}`} aria-busy={preparing}>
             {preview ? <img src={preview} alt={altText || title || t('capture.photo')} /> : preparing ? <div className="photo-prompt"><span className="spinner" /><p role="status">{t('capture.preparing')}</p></div> : <div className="photo-prompt"><span className="photo-prompt-icon"><Icon name="photo" /></span><h2>{t('capture.photo')}</h2><p>{t('capture.photoHint')}</p></div>}
-          </div>
+          </div>}
           <input ref={library} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1} aria-label={t('capture.library')} disabled={frozen} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
           <input ref={camera} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" tabIndex={-1} aria-label={t('capture.camera')} disabled={frozen} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
           <div className="photo-actions"><button id="choose-photo" className="button button-secondary" type="button" disabled={frozen || preparing} onClick={() => library.current?.click()}><Icon name="photo" />{t(photo ? 'capture.replace' : 'capture.library')}</button><button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => camera.current?.click()}><Icon name="camera" />{t('capture.camera')}</button></div>
-          {fullPhoto && fullPreview && <button id="edit-photo" className="button button-secondary" type="button"
+          {!editing && fullPhoto && fullPreview && <button id="edit-photo" className="button button-secondary" type="button"
             disabled={frozen || preparing} aria-expanded={editing} onClick={() => setEditing(true)}>{t('photo.edit')}</button>}
           {editing && fullPhoto && fullPreview && <CropEditor preview={fullPreview} width={fullPhoto.width} height={fullPhoto.height}
             accepted={acceptedEdit} preparing={preparing} t={t}

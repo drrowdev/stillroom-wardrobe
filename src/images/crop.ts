@@ -12,6 +12,25 @@ export function validCrop(crop: Crop): boolean {
     && crop.x + crop.width <= 1 + 1e-10 && crop.y + crop.height <= 1 + 1e-10;
 }
 
+export function cropValues(crop: Crop): Record<keyof Crop, string> {
+  if (!validCrop(crop)) throw new ImagePreparationError('invalid');
+  // Paired integer edges avoid sum-over-one rounding; one tick is below a source pixel.
+  const scale = 1e12;
+  const axis = (start: number, size: number) => {
+    const length = Math.min(scale, Math.max(1, Math.round(size * scale)));
+    const position = Math.min(scale - length, Math.round(start * scale));
+    return [position, length].map((ticks) => (ticks / 1e10).toFixed(10).replace(/\.?0+$/, ''));
+  };
+  const [x, width] = axis(crop.x, crop.width), [y, height] = axis(crop.y, crop.height);
+  return { x: x!, y: y!, width: width!, height: height! };
+}
+
+export function parseCropValues(values: Record<keyof Crop, string>): Crop {
+  const parse = (value: string) => /^(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(value.trim())
+    ? Number(value.replace(',', '.')) / 100 : NaN;
+  return { x: parse(values.x), y: parse(values.y), width: parse(values.width), height: parse(values.height) };
+}
+
 export function mapPoint(m: Matrix, x: number, y: number): [number, number] {
   return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
 }
