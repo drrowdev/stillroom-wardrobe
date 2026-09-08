@@ -767,3 +767,15 @@ predecessor source/types. No database reset, hosted replay or history repair is
 part of this rollback. This worker stops editing after publishing the final
 head/results; no additional agent/branch/PR, Actions authorization/rerun, merge,
 deployment, provider/private-photo/paid operation or later packet.
+
+Final native validation: after the completed executable/test candidate `cd9740d`
+was committed and all other processes finished, invoked existing
+`parallel_validation` **once**. Actual **JavaScript CodeQL completed with zero
+alerts**; no SQL or Actions analysis result was reported. Automated code review
+was **unavailable** because `autofind` was missing, despite the wrapper's
+success/no-comments heading. No checker retry, substitute reviewer or tool/
+permission change occurred. This result is current candidate evidence, not the
+predecessors' partial scans, and does not establish live SQL correctness.
+Only this evidence append follows the validated executable candidate.
+Native changed-file secret scanning found no secrets before the candidate commit.
+Append-only verification preserved both files' complete starting contents.
