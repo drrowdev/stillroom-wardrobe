@@ -108,13 +108,14 @@ async function decodeWithImage(blob: Blob, signal?: AbortSignal): Promise<Decode
   }
 }
 
-async function decode(blob: Blob, signal?: AbortSignal): Promise<DecodedImage> {
+async function decode(blob: Blob, signal?: AbortSignal, waitForRelease = false): Promise<DecodedImage> {
   checkAbort(signal);
   if (typeof createImageBitmap === 'function') {
     try {
       // Both browser paths already apply EXIF: never rotate these pixels a second time.
       // Wait for native work to release even after cancellation, before another source starts.
-      const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+      const pending = createImageBitmap(blob, { imageOrientation: 'from-image' });
+      const bitmap = await (waitForRelease ? pending : abortable(pending, signal, (late) => late.close()));
       if (signal?.aborted) { bitmap.close(); checkAbort(signal); }
       return {
         source: bitmap, width: bitmap.width, height: bitmap.height,
@@ -143,6 +144,7 @@ async function encode(
   minSide: number,
   signal?: AbortSignal,
   geometry?: ReturnType<typeof cropGeometry>,
+  waitForRelease = false,
 ): Promise<EncodedImage> {
   const canvas = document.createElement('canvas');
   let side = Math.min(Math.max(width, height), maxSide);
@@ -171,13 +173,14 @@ async function encode(
       }
       for (const quality of QUALITIES) {
         checkAbort(signal);
-        const blob = await new Promise<Blob>((resolve, reject) => {
+        const pending = new Promise<Blob>((resolve, reject) => {
           canvas.toBlob((result) => {
             if (!result || result.type !== 'image/jpeg' || !result.size) {
               reject(new ImagePreparationError('unavailable'));
             } else resolve(result);
           }, 'image/jpeg', quality);
         });
+        const blob = await (waitForRelease ? pending : abortable(pending, signal));
         checkAbort(signal);
         if (blob.size <= maxBytes) return { blob, canvas };
       }
@@ -213,27 +216,29 @@ async function verifyAndHash(image: EncodedImage, signal?: AbortSignal): Promise
 
 /** Phase 0: JPEG pixels only, prepared locally; no source upload or persistent storage. */
 export async function prepareJpeg(file: Blob, signal?: AbortSignal): Promise<PreparedPhoto> {
-  return prepareSource(file, async () => {
-    const headerBytes = await abortable(file.slice(0, JPEG_LIMITS.headerBytes).arrayBuffer(), signal);
-    checkAbort(signal);
-    const header = readJpegHeader(new Uint8Array(headerBytes));
-    const trailer = new Uint8Array(await abortable(file.slice(-2).arrayBuffer(), signal));
-    checkAbort(signal);
-    if (trailer[0] !== 0xff || trailer[1] !== 0xd9) throw new ImagePreparationError('invalid');
-    const swapped = header.orientation >= 5;
-    return {
-      blob: new Blob([file], { type: 'image/jpeg' }),
-      width: swapped ? header.height : header.width, height: swapped ? header.width : header.height,
-      orientation: 1,
-    };
-  }, ORIGINAL_EDIT, signal);
+  return prepareSource(file, () => admitJpeg(file, signal), ORIGINAL_EDIT, signal);
+}
+
+export async function admitJpeg(file: Blob, signal?: AbortSignal): Promise<AdmittedSource> {
+  const headerBytes = await abortable(file.slice(0, JPEG_LIMITS.headerBytes).arrayBuffer(), signal);
+  checkAbort(signal);
+  const header = readJpegHeader(new Uint8Array(headerBytes));
+  const trailer = new Uint8Array(await abortable(file.slice(-2).arrayBuffer(), signal));
+  checkAbort(signal);
+  if (trailer[0] !== 0xff || trailer[1] !== 0xd9) throw new ImagePreparationError('invalid');
+  const swapped = header.orientation >= 5;
+  return {
+    blob: new Blob([file], { type: 'image/jpeg' }),
+    width: swapped ? header.height : header.width, height: swapped ? header.width : header.height,
+    orientation: 1,
+  };
 }
 
 export type AdmittedSource = { blob: Blob; width: number; height: number; orientation: number };
 
 /** One decoder/encoder/verifier for every admitted format; no source upload. */
 export async function prepareSource(
-  file: Blob, admit: () => Promise<AdmittedSource>, edit = ORIGINAL_EDIT, signal?: AbortSignal,
+  file: Blob, admit: () => Promise<AdmittedSource>, edit = ORIGINAL_EDIT, signal?: AbortSignal, waitForRelease = false,
 ): Promise<PreparedPhoto> {
   let decoded: DecodedImage | undefined;
   let main: EncodedImage | undefined;
@@ -250,7 +255,7 @@ export async function prepareSource(
     }
     // Normalizing MIME locally also makes the HTMLImageElement fallback signature-driven.
     stage = 'decode';
-    decoded = await decode(header.blob, signal);
+    decoded = await decode(header.blob, signal, waitForRelease);
     checkAbort(signal);
     if (decoded.width !== header.width || decoded.height !== header.height) {
       throw new ImagePreparationError('unsupported');
@@ -258,14 +263,14 @@ export async function prepareSource(
     stage = 'mainEncode';
     main = await encode(
       decoded.source, geometry.width, geometry.height,
-      JPEG_LIMITS.mainSide, JPEG_LIMITS.mainBytes, 800, signal, geometry,
+      JPEG_LIMITS.mainSide, JPEG_LIMITS.mainBytes, 800, signal, geometry, waitForRelease,
     );
     decoded.release();
     decoded = undefined;
     stage = 'thumbEncode';
     thumb = await encode(
       main.canvas, main.canvas.width, main.canvas.height,
-      JPEG_LIMITS.thumbSide, JPEG_LIMITS.thumbBytes, 160, signal,
+      JPEG_LIMITS.thumbSide, JPEG_LIMITS.thumbBytes, 160, signal, undefined, waitForRelease,
     );
     const mainSha256 = await verifyAndHash(main, signal);
     const thumbSha256 = await verifyAndHash(thumb, signal);

@@ -4,7 +4,10 @@ import type { OwnerScope } from '../../auth/session';
 import { categories, categoryKeys, validateDetails } from '../../domain/wardrobe';
 import { Icon } from '../../app/icon';
 import type { MessageKey, Translate } from '../../i18n';
-import { ImagePreparationError, prepareJpeg, type PreparedPhoto } from '../../images/process-jpeg';
+import { ImagePreparationError, type PreparedPhoto } from '../../images/process-jpeg';
+import { prepareImage } from '../../images/process-image';
+import { CropEditor } from '../../images/crop-editor';
+import { ORIGINAL_EDIT, type PhotoEdit } from '../../images/crop';
 import type { ImagePreparationDetails, ImagePreparationStage } from '../../images/jpeg';
 import { newSaveAttempt, saveItem, type SaveAttempt, type SaveStage } from '../../images/upload';
 import { errorKey, isAborted } from '../../data/errors';
@@ -30,6 +33,10 @@ type Props = {
 export function AddItem({ client, scope, currency, online, t, onSaved, onBack, onDirty }: Props) {
   const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [fullPhoto, setFullPhoto] = useState<PreparedPhoto | null>(null);
+  const [fullPreview, setFullPreview] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [acceptedEdit, setAcceptedEdit] = useState<PhotoEdit>(ORIGINAL_EDIT);
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
   const [altText, setAltText] = useState('');
@@ -43,17 +50,36 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
   const library = useRef<HTMLInputElement>(null);
   const camera = useRef<HTMLInputElement>(null);
   const preparation = useRef<AbortController | null>(null);
+  const preparationWork = useRef<Promise<void>>(Promise.resolve());
+  const original = useRef<Blob | null>(null);
+  const focusEditorButton = useRef(false);
   const busy = stage !== null;
   const frozen = attempt !== null;
   const dirty = preparing || photo !== null || Boolean(title || category || altText);
   useEffect(() => { onDirty(dirty, frozen, busy); }, [dirty, frozen, busy, onDirty]);
-  useEffect(() => () => preparation.current?.abort(), []);
+  useEffect(() => {
+    if (focusEditorButton.current && !editing && !preparing) {
+      focusEditorButton.current = false;
+      document.getElementById('edit-photo')?.focus();
+    }
+  }, [editing, preparing]);
+  useEffect(() => {
+    const clear = () => { preparation.current?.abort(); original.current = null; };
+    scope.signal.addEventListener('abort', clear, { once: true });
+    return () => { clear(); scope.signal.removeEventListener('abort', clear); };
+  }, [scope]);
   useEffect(() => {
     if (!photo) { setPreview(null); return; }
     const url = URL.createObjectURL(photo.main);
     setPreview(url);
     return () => URL.revokeObjectURL(url);
   }, [photo]);
+  useEffect(() => {
+    if (!fullPhoto) { setFullPreview(null); return; }
+    const url = URL.createObjectURL(fullPhoto.main);
+    setFullPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [fullPhoto]);
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
@@ -62,7 +88,16 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
   }, [dirty]);
 
   async function choose(file: File | undefined): Promise<void> {
-    if (!file || frozen) return;
+    if (!file || frozen || scope.signal.aborted) return;
+    original.current = file;
+    setEditing(false);
+    setFullPhoto(null);
+    setAcceptedEdit(ORIGINAL_EDIT);
+    setPhoto(null);
+    await prepare(file, ORIGINAL_EDIT, true);
+  }
+  async function prepare(file: Blob, edit: PhotoEdit, replacing = false): Promise<void> {
+    if (frozen || scope.signal.aborted) return;
     preparation.current?.abort();
     const controller = new AbortController();
     preparation.current = controller;
@@ -71,22 +106,39 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
     setError(null);
     setPreparationDetails(null);
     setShowPreparationDetails(false);
-    setPhoto(null);
-    try {
-      const prepared = await prepareJpeg(file, signal);
-      if (!signal.aborted) setPhoto(prepared);
-    } catch (problem) {
-      if (!signal.aborted && !isAborted(problem)) {
-        setError(problem instanceof ImagePreparationError ? preparationErrors[problem.code] : 'photo.invalid');
-        if (problem instanceof ImagePreparationError && problem.stage) {
-          setPreparationDetails({ stage: problem.stage, reason: problem.code });
+    const previous = preparationWork.current;
+    const work = (async () => {
+      await previous;
+      if (signal.aborted) return;
+      try {
+        const prepared = await prepareImage(file, signal, edit);
+        if (!signal.aborted) {
+          setPhoto(prepared);
+          if (replacing) setFullPhoto(prepared);
+          setAcceptedEdit(edit);
+          setEditing(false);
+          if (!replacing) focusEditorButton.current = true;
         }
-      }
-    } finally { if (!signal.aborted) setPreparing(false); }
+      } catch (problem) {
+        if (!signal.aborted && !isAborted(problem)) {
+          if (replacing) original.current = null;
+          setError(problem instanceof ImagePreparationError ? preparationErrors[problem.code] : 'photo.invalid');
+          if (problem instanceof ImagePreparationError && problem.stage) {
+            setPreparationDetails({ stage: problem.stage, reason: problem.code });
+          }
+        }
+      } finally { if (!signal.aborted) setPreparing(false); }
+    })();
+    preparationWork.current = work;
+    await work;
   }
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
-    if (busy || preparing || !online) return;
+    if (editing || preparing) {
+      document.getElementById(editing ? 'crop-editor-title' : 'photo-pending')?.focus();
+      return;
+    }
+    if (busy || !online) return;
     const details = validateDetails(title, category, altText);
     if (!photo || !details) {
       setInvalid(true);
@@ -99,7 +151,12 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
     setError(null);
     try {
       await saveItem(client, scope, current, setStage);
-      if (!scope.signal.aborted) onSaved();
+      if (!scope.signal.aborted) {
+        original.current = null;
+        setPhoto(null);
+        setFullPhoto(null);
+        onSaved();
+      }
     } catch (problem) {
       if (!scope.signal.aborted && !isAborted(problem)) setError(errorKey(problem));
     } finally { if (!scope.signal.aborted) setStage(null); }
@@ -113,9 +170,22 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
           <div className={`capture-photo ${preview ? 'has-photo' : ''}`} aria-busy={preparing}>
             {preview ? <img src={preview} alt={altText || title || t('capture.photo')} /> : preparing ? <div className="photo-prompt"><span className="spinner" /><p role="status">{t('capture.preparing')}</p></div> : <div className="photo-prompt"><span className="photo-prompt-icon"><Icon name="photo" /></span><h2>{t('capture.photo')}</h2><p>{t('capture.photoHint')}</p></div>}
           </div>
-          <input ref={library} className="sr-only" type="file" accept="image/jpeg" tabIndex={-1} aria-label={t('capture.library')} disabled={frozen} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
-          <input ref={camera} className="sr-only" type="file" accept="image/jpeg" capture="environment" tabIndex={-1} aria-label={t('capture.camera')} disabled={frozen} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
+          <input ref={library} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1} aria-label={t('capture.library')} disabled={frozen} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
+          <input ref={camera} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" tabIndex={-1} aria-label={t('capture.camera')} disabled={frozen} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
           <div className="photo-actions"><button id="choose-photo" className="button button-secondary" type="button" disabled={frozen || preparing} onClick={() => library.current?.click()}><Icon name="photo" />{t(photo ? 'capture.replace' : 'capture.library')}</button><button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => camera.current?.click()}><Icon name="camera" />{t('capture.camera')}</button></div>
+          {fullPhoto && fullPreview && <button id="edit-photo" className="button button-secondary" type="button"
+            disabled={frozen || preparing} aria-expanded={editing} onClick={() => setEditing(true)}>{t('photo.edit')}</button>}
+          {editing && fullPhoto && fullPreview && <CropEditor preview={fullPreview} width={fullPhoto.width} height={fullPhoto.height}
+            accepted={acceptedEdit} preparing={preparing} t={t}
+            onApply={(edit) => { if (original.current) void prepare(original.current, edit); }}
+            onCancel={() => {
+              preparation.current?.abort();
+              setPreparing(false);
+              setEditing(false);
+              setError(null);
+              focusEditorButton.current = true;
+            }} />}
+          {(editing || preparing) && <p id="photo-pending" tabIndex={-1} role="status" className="notice">{t(preparing ? 'photo.pendingPreparation' : 'photo.pendingCrop')}</p>}
           {invalid && !photo && <p className="field-error">{t('common.required')}</p>}
           <p className="privacy-note"><Icon name="lock" />{t('capture.local')}</p>
           <p className="fine muted">{t('photo.cameraFallback')}</p>
@@ -146,7 +216,7 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
           <details className="optional-details"><summary>{t('item.details')}<span>{t('common.optional')}</span></summary><div className="field"><label htmlFor="item-alt">{t('item.altText')}</label><textarea id="item-alt" rows={3} value={altText} maxLength={240} readOnly={frozen} onChange={(event) => setAltText(event.target.value)} aria-describedby="alt-help" /><p className="fine muted" id="alt-help">{t('capture.descriptionHelp')}</p></div></details>
           {error && <div className="notice notice-error" role="alert"><p>{t(error)}</p>{attempt && <p>{t('capture.retryNote')}</p>}</div>}
           {frozen && !busy && <p className="fine muted">{t('capture.frozen')}</p>}
-          <div className="save-actions"><button className="button button-primary button-wide" type="submit" disabled={!online || busy || preparing}>{busy ? <span className="spinner" /> : <Icon name="check" />}{t(stage ?? (attempt ? 'common.retry' : 'capture.save'))}</button><button className="button button-quiet" type="button" onClick={onBack} disabled={busy}>{t('common.cancel')}</button></div>
+          <div className="save-actions"><button className="button button-primary button-wide" type="submit" disabled={!online || busy || preparing || editing}>{busy ? <span className="spinner" /> : <Icon name="check" />}{t(stage ?? (attempt ? 'common.retry' : 'capture.save'))}</button><button className="button button-quiet" type="button" onClick={onBack} disabled={busy}>{t('common.cancel')}</button></div>
           {stage && <p className="sr-only" role="status">{t(stage)}</p>}
         </div>
       </form>

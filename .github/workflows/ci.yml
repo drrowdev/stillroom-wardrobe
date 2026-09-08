@@ -48,6 +48,16 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Preserve bounded synthetic I07 visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: i07-capture-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/i07-visual/crop-en-desktop.png
+            test-results/i07-visual/crop-fi-mobile.png
+          if-no-files-found: error
+          retention-days: 1
+
   database:
     name: Real local Supabase
     runs-on: ubuntu-latest

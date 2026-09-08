@@ -258,3 +258,17 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+.crop-editor { min-width: 0; margin-block: 20px; padding: 16px; border: 1px solid var(--border); border-radius: 16px; overflow-wrap: anywhere; }
+.crop-editor h2 { font-size: 1.25rem; }
+.crop-editor fieldset { min-width: 0; padding: 0; margin: 0; border: 0; }
+.crop-stage { position: relative; overflow: hidden; width: 100%; background: #f6f3ed; margin-block: 16px; }
+.crop-stage img { position: absolute; top: 50%; left: 50%; max-width: none; object-fit: contain; }
+.crop-rectangle { position: absolute; border: 3px solid #245742; box-shadow: 0 0 0 1000px #152c2459; min-width: 1px; min-height: 1px; }
+.crop-rectangle:focus-visible { outline: 3px solid #fff; outline-offset: -6px; }
+.crop-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.crop-editor button { min-height: 44px; white-space: normal; max-width: 100%; overflow-wrap: anywhere; }
+.crop-editor input, .crop-editor select { min-height: 44px; min-width: 0; width: 100%; }
+.crop-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: 12px; }
+.capture-page:has(#edit-photo) .capture-layout > * { min-width: 0; overflow-wrap: anywhere; }
+.capture-page:has(#edit-photo) .button { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.capture-page:has(#edit-photo) select { min-width: 0; max-width: 100%; }
