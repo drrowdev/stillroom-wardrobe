@@ -22,6 +22,7 @@ export function ProfileScreen({ client, controller, scope, profile, change, busy
   const [preferencesDirty, setPreferencesDirty] = useState(false);
   const [preferencesBusy, setPreferencesBusy] = useState(false);
   const summary = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (error) summary.current?.focus(); }, [error]);
   const [timezones] = useState(() => intlOptions('timeZone'));
   const [currencies] = useState(() => intlOptions('currency'));
   const dirty = !sameProfileFields(fields, base);
@@ -38,7 +39,7 @@ export function ProfileScreen({ client, controller, scope, profile, change, busy
   function fail(problem: unknown) {
     if (scope.signal.aborted || isAborted(problem)) return;
     setError(errorKey(problem));
-    requestAnimationFrame(() => summary.current?.focus());
+    summary.current?.focus();
   }
   async function save() {
     setError(null); setSaved(false);

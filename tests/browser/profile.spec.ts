@@ -245,7 +245,9 @@ test('settings accessibility: 320px, keyboard, long text and 200% text', async (
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);
   await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 2rem; }' });
-  console.log(await page.evaluate(() => [...document.querySelectorAll('body *')].filter((el) => el.getBoundingClientRect().right > innerWidth).map((el) => ({ tag: el.tagName, class: el.className, width: el.getBoundingClientRect().width, right: el.getBoundingClientRect().right }))));
-  await page.screenshot({ path: '/tmp/i06-settings-zoom-before.png', fullPage: true });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(await page.evaluate(() => ({
+    viewport: innerWidth, width: document.documentElement.scrollWidth,
+    overflowing: [...document.querySelectorAll('body *')].filter((element) => element.getBoundingClientRect().right > innerWidth)
+      .map((element) => element.tagName + '.' + element.className),
+  })))).toEqual({ viewport: 320, width: 320, overflowing: [] });
 });

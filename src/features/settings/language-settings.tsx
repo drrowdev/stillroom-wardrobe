@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SessionController, OwnerScope } from '../../auth/session';
 import type { ProfileRow } from '../../data/rows';
 import { errorKey, isAborted } from '../../data/errors';
@@ -10,6 +10,7 @@ export function LanguageSettings({ controller, scope, profile, language, busy, o
   const [error, setError] = useState<MessageKey | null>(null);
   const [saved, setSaved] = useState(false);
   const summary = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (error) summary.current?.focus(); }, [error]);
   async function save(next: Language) {
     setError(null); setSaved(false);
     try {
@@ -18,7 +19,7 @@ export function LanguageSettings({ controller, scope, profile, language, busy, o
     } catch (problem) {
       if (scope.signal.aborted || isAborted(problem)) return;
       setError(errorKey(problem));
-      requestAnimationFrame(() => summary.current?.focus());
+      summary.current?.focus();
     }
   }
   return <div className="settings-language">

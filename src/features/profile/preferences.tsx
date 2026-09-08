@@ -18,6 +18,7 @@ export function Preferences({ client, scope, t, language, online, onDirty, onBus
   const [error, setError] = useState<MessageKey | null>(null);
   const [saved, setSaved] = useState(false);
   const summary = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (error) summary.current?.focus(); }, [error]);
   const dirty = Boolean(tag || fields && base && JSON.stringify(fields) !== JSON.stringify(preferenceFields(base)));
   useEffect(() => {
     let active = true;
@@ -33,7 +34,7 @@ export function Preferences({ client, scope, t, language, online, onDirty, onBus
   function fail(problem: unknown) {
     if (scope.signal.aborted || isAborted(problem)) return;
     setError(errorKey(problem));
-    requestAnimationFrame(() => summary.current?.focus());
+    summary.current?.focus();
   }
   function change(next: PreferenceFields) { setFields(next); setSaved(false); }
   async function reload(preserve: boolean) {
@@ -47,7 +48,7 @@ export function Preferences({ client, scope, t, language, online, onDirty, onBus
   }
   async function save() {
     if (!base || !fields) return;
-    if (tag) { setError('settings.addTagFirst'); requestAnimationFrame(() => summary.current?.focus()); return; }
+    if (tag) { setError('settings.addTagFirst'); summary.current?.focus(); return; }
     setBusy(true); setError(null); setSaved(false);
     try {
       const row = await savePreferences(client, scope, base, fields);
@@ -59,7 +60,7 @@ export function Preferences({ client, scope, t, language, online, onDirty, onBus
   function addTag() {
     if (!fields) return;
     if (!tag.trim() || [...tag].length > styleTagLimit || fields.style_tags.length >= 8 || fields.style_tags.includes(tag)) {
-      setError('settings.invalidTag'); requestAnimationFrame(() => summary.current?.focus()); return;
+      setError('settings.invalidTag'); summary.current?.focus(); return;
     }
     change({ ...fields, style_tags: [...fields.style_tags, tag] }); setTag(''); setError(null);
   }
