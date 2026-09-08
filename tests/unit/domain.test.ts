@@ -63,8 +63,7 @@ describe('public configuration', () => {
   describe('I29a saved field provenance', () => {
     const migration = readFileSync(new URL('../../supabase/migrations/20260906000000_item_field_provenance.sql', import.meta.url), 'utf8');
     it('keeps the exact bounded field and finite code contracts aligned with SQL', () => {
-      const fields = migration.match(/fields constant text\[\] := array\[([\s\S]*?)\];/)?.[1];
-      expect(fields?.match(/'[^']+'/g)?.map((field) => field.slice(1, -1))).toEqual(provenanceFields);
+      expect(migration.replace(/\s+/g, '')).toContain(`fieldsconstanttext[]:=array['${provenanceFields.join("','")}'];`);
       expect(new Set(provenanceFields).size).toBe(24);
       for (const [field, codes] of [['pattern', patterns], ['sleeve_length', sleeveLengths], ['garment_length', garmentLengths]] as const) {
         expect(migration).toContain(`check (${field} in (${codes.map((code) => `'${code}'`).join(',')}))`);
@@ -74,6 +73,30 @@ describe('public configuration', () => {
       expect(garmentLengths).toEqual(['cropped', 'short', 'regular', 'long']);
       expect(migration).toContain('previous_revision=2147483647');
       expect(migration).toContain('>4096');
+    });
+    it('retains maximum revisions only when no increment is needed and keeps the migration additive', () => {
+      expect(migration).toContain(`if entry is distinct from previous then
+      if entry is null or previous_revision=2147483647 then
+        raise exception using errcode='22023',message='Request conflict';
+      end if;
+      if (entry->'revision')::integer<>previous_revision+1 then
+        raise exception using errcode='22023',message='Request conflict';
+      end if;
+    elsif new_values->field is distinct from old_values->field then
+      if previous_revision=2147483647 then
+        raise exception using errcode='22023',message='Request conflict';
+      end if;`);
+      for (const field of ['formality', 'warmth', 'rain_rating', 'windproof', 'upper_coverage', 'lower_coverage']) {
+        expect(migration).toContain(`alter column ${field} drop not null`);
+        expect(migration).toContain(`alter column ${field} drop default`);
+      }
+      expect(migration).not.toMatch(/\b(?:update|insert into|delete from)\s+public\.items\b/i);
+      expect(migration).toContain("language plpgsql set search_path = ''");
+      expect(migration).not.toMatch(/security definer|create policy|grant |touch_record/i);
+      const initial = readFileSync(new URL('../../supabase/migrations/20260905000000_initial.sql', import.meta.url), 'utf8');
+      const exportStart = 'function public.export_manifest(';
+      const exportBody = (source: string) => source.slice(source.indexOf(exportStart), source.indexOf('$$;', source.indexOf(exportStart)) + 3);
+      expect(exportBody(migration)).toBe(exportBody(initial).replace("'schema_version',1", "'schema_version',2"));
     });
     it('reads all four kinds without treating absent or unknown provenance as a null value', () => {
       for (const kind of provenanceKinds) {
@@ -116,6 +139,12 @@ describe('public configuration', () => {
         { ...expected, title: { kind: 'user', revision: 2 } },
       ]) expect(sameFieldProvenance(mismatch, expected)).toBe(false);
       expect(sameFieldProvenance(expected, null)).toBe(false);
+    });
+    it('does not silently classify unexpected programming errors as provenance conflicts', () => {
+      const failure = new Error('Invalid input');
+      const broken = Object.defineProperty({}, 'title', { enumerable: true, get() { throw failure; } });
+      expect(() => sameFieldProvenance(broken, {})).toThrow(failure);
+      expect(() => sameFieldProvenance({}, broken)).toThrow(failure);
     });
   });
 });

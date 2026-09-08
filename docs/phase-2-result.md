@@ -482,3 +482,123 @@ coordinator's reviewed continuation. The failed disposable reset is not a
 recoverable production migration or proof of data preservation; obtain guidance
 before another local recovery attempt. Never apply this rollback, replay the
 base migration or repair migration history on hosted.
+
+## I29a completion attempt — reset failure recurred
+
+8 September 2026. **Still incomplete and blocked, not a merge candidate.**
+I29 / R18 R19 R23 R26 R27 R28 only. This continuation started at
+`fa127b6ab606c3ee5d9a439228b167526f1071be`, base
+`04b71e1e21e25119ccf5486d618cda8f0a10760b`, on the same PR #10 and
+`copilot/i29a-saved-item-facts` branch. No new packet or planning round.
+
+Read the complete [approved nine-path plan 5587190952](https://github.com/drrowdev/stillroom-wardrobe/pull/10#issuecomment-5587190952)
+and [completion direction 5588042786](https://github.com/drrowdev/stillroom-wardrobe/pull/10#issuecomment-5588042786).
+Their actual Anthropic Claude Opus 5 critic
+`bc532454-fce2-4417-8b53-d69c1f44cc46`, turns 0–2, remains the approved planning
+review, not a completed code review. After context and before edits/commits,
+reread the new [receipt 5588067930](https://github.com/drrowdev/stillroom-wardrobe/pull/10#issuecomment-5588067930):
+coordinator-selected and authenticated-GET-verified
+`sweagent-capi:gpt-6-astra`, task `1828fc25-fabb-4685-b991-14568ecf4dca`,
+session `cbb85e40-e6bb-493d-890d-f0a34533dca0`, checked
+`2026-09-08T15:58:57.8167936Z`, matching repository/PR node/branch/base/starting
+head. The predecessor's receipt was not reused.
+
+Context read: root `AGENTS.md`, `.github/copilot-instructions.md`; relevant
+cloud, Phase 0/1/2 and local-backend evidence; blueprint 00/03/05/10/14/20/21
+and relevant 07/08/13/15/19 contracts; actual initial and I29a migrations,
+generated item types, wardrobe/provenance/error/upload modules, domain tests,
+normal integration/security tests, image browser tests and mutable mock;
+local and hosted guards, quality-gate fixture tests, Playwright configuration,
+package commands and existing setup workflow. PR #10 body/comments/diff/reviews/
+threads and MCP workflow/job evidence were inspected. No instruction, harness,
+workflow, dependency, image-processing or old browser test file was changed.
+
+### Three distinct environment observations
+
+1. The predecessor's failed reset/type generation/typecheck above remain
+   unchanged evidence. Its missing-`postgres`-role cause is still unknown.
+2. Fresh CI `34244525058`, attempt 2 at `fa127b6`, is a separate comparison.
+   Coordinator direction records successful start/reset/provision, existing
+   integration/security/recovery (1 passed), and actual types in Database job
+   `102127670620`; it failed types parity only. MCP logs confirmed that parity
+   diff and App job `102127671021`'s TS2322/TS2339 failure after successful lint.
+   Later App checks were skipped, not passes. No Apple execution was authorized
+   for that comparison, and no artifact was downloaded here.
+3. This session's setup job `102135394547`, run `34248151824`, at `fa127b6`
+   reports successful start, reset/provision (16:00:37–16:01:04 UTC), and type
+   generation (16:01:05–16:01:16 UTC). Its running-job log download returned
+   HTTP 404; step metadata is available. This is not a CAPI model-input refusal.
+   The working tree already contained generated types. Local health, actual
+   generation parity and typecheck then passed; only those verified types were
+   committed as `febc57ae2d591a38cb468c7b4921800d2b079e41`.
+
+The subsequent **single** guarded reset was justified by an in-scope SQL
+correction: integral JSON numbers such as `1.0` pass validation, but the old
+text-to-integer casts cannot reuse them. The two casts now use JSONB numeric
+conversion; new ordinary-owner cases exercise insert/confirmation/unchanged
+updates with integral decimal representations. This correction has **not**
+passed live database validation.
+
+`npm run db:reset` failed before provisioning. Its chained generation,
+integration and security commands did not execute. No second reset, direct CLI
+retry, provisioning/role/account repair, permission change, harness change or
+alternate runner was attempted. Bounded read-only diagnostics reported:
+database container running/health healthy; a ready message in its last 40 log
+lines; missing-`postgres`-role message **not observed in that bounded window**.
+Raw logs were withheld. Neither health nor absence in that window proves valid
+fixtures or explains the reset failure. The worker stopped implementation under
+the completion direction's recurrent-environment-failure gate.
+
+### Partial changes and actual validation
+
+Beyond actual types, the checkpoint narrows provenance comparison to catch only
+its own static validation error (unexpected exceptions propagate), adds literal
+source-contract/error-propagation units, corrects the two numeric casts, and
+adds **unexecuted** normal-owner integration/security cases. These cover nullable
+facts and post-migration legacy-shaped rows, all 24 manual fields, confirmation/
+clearing/invalidation, row CAS, finite codes, invalid/AI maps, atomic rollback,
+foreign/anonymous denials and the intermediate owner-only v2 snapshot.
+They are source additions, **not passing live evidence**.
+
+All commands below ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`:
+
+| Exact command | Actual result |
+|---|---|
+| `npm run db:start` | Exit 0; prepared stack health check, before SQL correction. |
+| `npm run db:types -- --check` | Exit 0; actual local generation matched setup-generated working types, before SQL correction. |
+| `npm run typecheck` | Exit 0 with actual types; also passed after the checkpoint correction. |
+| `npm run test:unit -- tests/unit/domain.test.ts` | 13/13, exit 0, before and after the checkpoint correction. Not live SQL proof. |
+| `npm run lint` | Initial exit 1: new integration function accidentally nested/undefined at its call site. Placement corrected without changing existing I06 behavior; subsequent exit 0. |
+| `npm run db:reset` | Exit 1; reset failed, no provisioning. One invocation only. |
+| `npm run db:types` | Not run after reset failure; successful setup generation remains distinct. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Not run: reset failure halted the command chain. New cases and recovery remain unverified on this checkpoint. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | Not run for the same reason. |
+| `git diff --check` | Exit 0 after correcting the test placement. |
+
+No I29a browser tests were appended before the stop gate. Required actual Save/
+retry tests, full unit/translation/browser/a11y/build/secrets/dependency commands,
+post-correction live integration/security/recovery and final type parity remain
+open. Maximum-revision overflow branches have literal source assertions only,
+not a live fixture advanced through 2,147,483,647 revisions. A post-migration
+legacy-shaped fixture is not a historical upgrade/preservation test.
+
+The final native checker and changed-file secret scan results are reported
+separately on this partial checkpoint; a partial CodeQL result cannot close
+these unfinished gates or establish SQL correctness. Coordinator retains
+independent actual Claude affected review, exact-head CI/native/actual four-PNG
+review and merge authority. The worker opens no images/archives, creates no
+agent/branch/PR, authorizes no Actions, and performs no hosted/provider/paid/
+private-photo/deployment operations.
+
+All earlier I07 and failure evidence is preserved. Full field clearing (including
+seasons/colours) and a durable saved-only export boundary remain mandatory later
+I29 consumer gates **before I29 closes**, not a Phase 6 waiver. The raw v2
+snapshot still includes pending/imageless rows. No full I29/Phase 2, hosted,
+physical-device or acceptance completion is claimed.
+
+Local-only rollback: the coordinator may review reverting this continuation's
+source/test changes to `fa127b6` while preserving the historical failure report.
+Generated types reflect the earlier successful local setup, not successful
+application of the corrected migration. Obtain coordinator environment guidance
+before another recovery attempt; never apply local rollback/reset/history repair
+to hosted services.

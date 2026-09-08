@@ -110,6 +110,72 @@ async function settingsIsolation(c,other){
     }
   }
 }
+async function provenanceIsolation(c,own,other,foreign){
+  const attempted=[];
+  const read=async(actor,id)=>{
+    const result=await call(actor.token,`/rest/v1/items?owner_id=eq.${actor.uid}&id=eq.${id}&select=*`);
+    assert.ok(result.ok);return result.data;
+  };
+  const patch=(actor,row,body)=>call(actor?.token??null,`/rest/v1/items?owner_id=eq.${row.owner_id}&id=eq.${row.id}&version=eq.${row.version}`,{
+    method:'PATCH',body,returnRepresentation:true,
+  });
+  const denied=result=>assert.ok(!result.ok||Array.isArray(result.data)&&result.data.length===0);
+  try{
+    stage='I29a normal owner can confirm its own retained title';
+    let before=(await read(c,own.item))[0];
+    const sibling=(await read(other,foreign.item))[0];
+    assert.ok(before&&sibling);
+    const revision=(before.field_provenance.title?.revision??0)+1;
+    const saved=await patch(c,before,{field_provenance:{...before.field_provenance,title:{kind:'user',revision}}});
+    assert.ok(saved.ok);assert.equal(saved.data.length,1);
+    assert.equal(saved.data[0].version,before.version+1);
+    assert.equal(saved.data[0].title,before.title);
+    assert.deepEqual(saved.data[0].field_provenance.title,{kind:'user',revision});
+    before=saved.data[0];
+    stage='I29a foreign and anonymous provenance reads and CAS writes denied';
+    for(const actor of [c,null]){
+      const target=actor?sibling:before;
+      const result=await call(actor?.token??null,`/rest/v1/items?owner_id=eq.${target.owner_id}&id=eq.${target.id}&select=field_provenance`);
+      denied(result);
+      denied(await patch(actor,target,{notes:'Must not write',field_provenance:{
+        ...target.field_provenance,title:{kind:'user',revision:(target.field_provenance.title?.revision??0)+1},
+      }}));
+      assert.deepEqual(await read(c,own.item),[before]);
+      assert.deepEqual(await read(other,foreign.item),[sibling]);
+    }
+    stage='I29a both AI assertion kinds denied on own INSERT and UPDATE';
+    for(const kind of ['ai_observed','ai_estimated']){
+      const update=await patch(c,before,{notes:'Must roll back',field_provenance:{
+        ...before.field_provenance,title:{kind,revision:revision+1},
+      }});
+      assert.ok(!update.ok);assert.equal(update.data.code,'22023');assert.equal(update.data.message,'Invalid input');
+      assert.deepEqual(await read(c,own.item),[before]);
+      const id=randomUUID();attempted.push(id);
+      const insert=await call(c.token,'/rest/v1/items',{method:'POST',body:{
+        id,owner_id:c.uid,title:'Forbidden AI fixture',category:'top',field_provenance:{title:{kind,revision:1}},
+      }});
+      assert.ok(!insert.ok);assert.equal(insert.data.code,'22023');assert.equal(insert.data.message,'Invalid input');
+      assert.deepEqual(await read(c,id),[]);
+    }
+    stage='I29a foreign-owner and anonymous manual provenance INSERT denied';
+    for(const [actor,target] of [[c,other],[null,c]]){
+      const id=randomUUID();attempted.push(id);
+      const result=await call(actor?.token??null,'/rest/v1/items',{method:'POST',body:{
+        id,owner_id:target.uid,title:'Forbidden owner fixture',category:'top',field_provenance:{title:{kind:'user',revision:1}},
+      }});
+      assert.ok(!result.ok);
+      assert.deepEqual(await read(c,id),[]);assert.deepEqual(await read(other,id),[]);
+    }
+    assert.deepEqual(await read(c,own.item),[before]);
+    assert.deepEqual(await read(other,foreign.item),[sibling]);
+  }finally{
+    for(const id of attempted)for(const actor of [c,other]){
+      const result=await call(actor.token,`/rest/v1/items?owner_id=eq.${actor.uid}&id=eq.${id}`,{method:'DELETE'});
+      assert.ok(result.ok);assert.deepEqual(await read(actor,id),[]);
+    }
+  }
+}
+
 try {
   stage='normal password sign-ins';const a=await login(process.env.TEST_A_EMAIL,process.env.TEST_A_PASSWORD),b=await login(process.env.TEST_B_EMAIL,process.env.TEST_B_PASSWORD);
   assert.notEqual(a.uid,b.uid);passed.push(stage);
@@ -124,6 +190,8 @@ try {
   }
   passed.push(stage);
   stage='own fixture creation';const af=await fixture(a),bf=await fixture(b);passed.push(stage);
+  await provenanceIsolation(a,af,b,bf);await provenanceIsolation(b,bf,a,af);
+  passed.push('I29a both directions: own manual provenance allowed; foreign/anonymous reads and writes and own AI INSERT/UPDATE denied; complete rows unchanged after denials');
   await settingsIsolation(a,b);await settingsIsolation(b,a);
   passed.push('I06 both directions: actual identity immutability, server version control, stale/foreign/anonymous field writes, unchanged sibling and fresh-version restoration');
   stage='independent Finnish and Swedish preferences';

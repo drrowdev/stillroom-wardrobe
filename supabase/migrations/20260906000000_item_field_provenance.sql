@@ -63,13 +63,13 @@ begin
   foreach field in array fields loop
     entry := new.field_provenance->field;
     previous := old.field_provenance->field;
-    previous_revision := coalesce((previous->>'revision')::integer,0);
+    previous_revision := coalesce((previous->'revision')::integer,0);
     -- Explicit changed intent takes precedence over value-only invalidation.
     if entry is distinct from previous then
       if entry is null or previous_revision=2147483647 then
         raise exception using errcode='22023',message='Request conflict';
       end if;
-      if (entry->>'revision')::integer<>previous_revision+1 then
+      if (entry->'revision')::integer<>previous_revision+1 then
         raise exception using errcode='22023',message='Request conflict';
       end if;
     elsif new_values->field is distinct from old_values->field then

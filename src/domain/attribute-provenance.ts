@@ -21,18 +21,22 @@ export type ProvenanceKind = typeof provenanceKinds[number];
 export type FieldAssertion = { kind: ProvenanceKind; revision: number };
 export type FieldProvenance = Partial<Record<ProvenanceField, FieldAssertion>>;
 
+class InvalidFieldProvenance extends Error {
+  constructor() { super('Invalid input'); }
+}
+
 export function parseFieldProvenance(value: unknown): FieldProvenance {
-  if (!isRecord(value) || Object.keys(value).length > provenanceFields.length) throw new Error('Invalid input');
+  if (!isRecord(value) || Object.keys(value).length > provenanceFields.length) throw new InvalidFieldProvenance();
   const parsed: FieldProvenance = {};
   for (const [field, entry] of Object.entries(value)) {
     if (!provenanceFields.some((known) => known === field) || !isRecord(entry)
       || Object.keys(entry).length !== 2 || !Object.hasOwn(entry, 'kind') || !Object.hasOwn(entry, 'revision')
       || !provenanceKinds.some((kind) => kind === entry.kind)
       || typeof entry.revision !== 'number' || !Number.isInteger(entry.revision)
-      || entry.revision < 1 || entry.revision > maximumFieldRevision) throw new Error('Invalid input');
+      || entry.revision < 1 || entry.revision > maximumFieldRevision) throw new InvalidFieldProvenance();
     parsed[field as ProvenanceField] = { kind: entry.kind as ProvenanceKind, revision: entry.revision };
   }
-  if (new TextEncoder().encode(JSON.stringify(parsed)).byteLength > maximumProvenanceBytes) throw new Error('Invalid input');
+  if (new TextEncoder().encode(JSON.stringify(parsed)).byteLength > maximumProvenanceBytes) throw new InvalidFieldProvenance();
   return parsed;
 }
 
@@ -50,7 +54,8 @@ export function sameFieldProvenance(actual: unknown, expected: unknown): boolean
     const left = parseFieldProvenance(actual), right = parseFieldProvenance(expected);
     return provenanceFields.every((field) => left[field]?.kind === right[field]?.kind
       && left[field]?.revision === right[field]?.revision);
-  } catch {
-    return false;
+  } catch (error) {
+    if (error instanceof InvalidFieldProvenance) return false;
+    throw error;
   }
 }
