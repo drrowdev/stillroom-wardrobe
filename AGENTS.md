@@ -1,11 +1,19 @@
 # Stillroom Wardrobe coding-agent rules
 
 Development continues in GitHub Copilot cloud sessions. Read
-`docs/cloud-development.md` and `docs/phase-0-result.md` first. Updated
-6 September 2026: PR #1 is merged. This assignment is the approved five-document
-Phase 0 handoff amendment on PR #2, `copilot/phase0-hosted-backend-deployment`.
-This dated assignment does not pin separately approved future work to PR #2.
-Do not reopen PR #1, push directly to main, merge or begin the next phase in this task.
+`docs/cloud-development.md`, `docs/phase-0-result.md` and the current phase result
+first. Updated 8 September 2026: Phase 0 is **engineering complete; acceptance
+open**. The user authorized continuing through the agreed MVP in order.
+The active packet is I06 personal settings on existing PR #7,
+`copilot/copilotphase1-personal-settings`, based on
+`7f6e13a89603492e933748b6558b493d3d74e855`. Its
+[approved plan](https://github.com/drrowdev/stillroom-wardrobe/pull/6#issuecomment-5579471741)
+and [text-only amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5579906237)
+control the 23-path scope. Resume saved work, not a new implementation.
+The dated PR #2/#3 assignments below are history, not permanent task pins.
+Do not reopen merged PRs, push directly to main, merge, deploy or begin I07/I29
+in this task. Only the second hosted-account test was user-deferred; other
+manual/operator/device checks remain pending, not waived.
 The setup workflow may leave
 generated schema types untracked; review/commit those deliberately, never
 local credentials, service state or test artifacts.
@@ -41,17 +49,47 @@ Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `
    one focused approved packet per agent. Before launch, the coordinator names
    active packets/branches, owned files, dependencies and the owner of each shared
    mutable resource. No concurrent same-branch edits or shared-host mutations.
-   A second builder waits until this corrected common-base amendment is reviewed
-   and merged into main with explicit user approval. Session SQL/coordination
+   The corrected common-base amendment was the now-merged PR #2 prerequisite,
+   not new permission to launch another builder. This I06 continuation has one
+   writer and launches no additional agents. Session SQL/coordination
    notes do not change repository authority. Merges, hosted DDL and deployments
    remain serialized and separately authorized through their responsible actor;
    cloud workers gain no hosted access. The coordinator handles routine scoped
    fixes, reviews and CI; consequential product/security/cost/scope decisions go
    to the user. Concurrency itself authorizes no new packet/PR, phase, dependency,
    provider or hosted operation; existing scope and prerequisite gates still apply.
-5. **Explicit user approval is required before every merge**, separately from
-   plan/code/CI approval. Never auto-merge or push directly to main. Complete
-   fresh-head validation and report blocked/pending checks honestly.
+5. Standing ordered-development authority permits agreed Phase 0–7 development
+   after prerequisite engineering, automated and real normal-owner gates, without
+   another phase-start/continue question. Under
+   [H1 clarification 5580579847](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5580579847),
+   the **coordinator may execute a recommended ordinary merge without another
+   user question**, only after genuine independent review, all required exact-head
+   gates, no blockers or overlapping writers, and normal repository protections.
+   Record the recommendation/evidence and guard the exact head. No `--auto`,
+   `--admin`, self-approval or protection bypass. Workers never merge, deploy,
+   approve/authorize/rerun Actions, push directly to main or start another agent
+   or packet. Deployments, paid AI/provider/dependency/codec changes, hosted
+   schema/account/data mutations and private-input capture retain separate
+   approvals. Report blocked/pending checks honestly and bring back a manual
+   gate when it genuinely blocks a feature.
+
+I06 uses the already completed actual **Anthropic Claude Opus 5** critiques
+`personal-settings-plan-critique` and `i06-visual-transport-critique`, with
+coordinator amendments in the linked approvals. A continuation reads its own
+matching public runtime receipt after context and before edits, never an old
+session receipt. Preserve shared owner/epoch profile freshness, serialized
+profile/language writes, original dirty baselines and explicit per-section saves.
+No schema, dependency, local tooling, JPEG, recovery, garment Save or provider
+changes are authorized by I06.
+
+The approved transport alternative is **text-only**: no image/binary opening,
+image-returning MCP/browser tools, attachments, encoded image output or image
+embeds into the worker model. Existing Node/Playwright tests alone generate two
+guarded synthetic-profile PNGs; only Chromium writes the fixed paths, and every
+project retains functional checks. The coordinator actually reviews the exact-head
+CI artifacts and records run/head/hashes/verdict in PR #7, not a self-invalidating
+source commit. Missing/unread images leave visual acceptance pending. See the
+cloud guide for capture bounds and the platform-failure stop rule.
 
 The former PR #1 plan/approval comments `5558504250` and `5558542193` are
 historical evidence. Comment `5559949209` approved the completed PR #2 source
@@ -60,7 +98,7 @@ are recorded in `5559976584`. The 6 September documentation amendment follows
 [plan 5560449572](https://github.com/drrowdev/stillroom-wardrobe/pull/2#issuecomment-5560449572)
 and [approval 5560847183](https://github.com/drrowdev/stillroom-wardrobe/pull/2#issuecomment-5560847183),
 which records actual Anthropic Claude Opus 5 prereview and controlling amendments.
-Read these before work. Only the approved AI Wardrobe backend was authorized
+Preserve these historical approvals. Only the approved AI Wardrobe backend was authorized
 for coordinator initialization; the cloud agent receives
 no hosted credentials and implements only the reviewed source/document packet.
 This approval is not merge approval or permission for paid AI/later phases.
@@ -93,7 +131,7 @@ automatic production/previews remain off.
 * Images: validate/decode/crop/re-encode pixels locally; strip EXIF/GPS; immutable private paths; no raw source upload or public bucket. Authenticated Blob downloads only in the UI.
 * Multi-row outfit/history writes use the specified RPCs. Version-check edits. Imports rebind IDs to the current owner and preserve historical text through the checked restore RPC.
 * Keep private data out of persistent caches/service-worker assets. Clear all state on UID change and logout. Do not log personal fields or tokens.
-* Each agent works on one approved issue/PR at a time. Finish each phase's exit gate before starting the next. Trips are optional Phase 8 only after a later request.
+* Each agent works on one approved issue/PR at a time. Advance in the agreed order after prerequisite engineering/normal-owner evidence is reviewed; track deferred/pending acceptance separately, never as a pass. No later packet is implicit in I06. Trips are optional Phase 8 only after a later request.
 * Support English, Finnish and Swedish from Phase 0. Read `blueprint/19-LOCALIZATION.md`; use typed catalog keys/parameters and native Intl. Every new UI/error/aria string needs all three languages. Keep profile language owner-only, clear it on UID changes, and never translate identifiers or private user content. Run `npm run check:translations` in CI and with affected tests.
 * Commands: `npm ci`, `npm run lint`, `npm run typecheck`, `npm run test:unit`, `npm run db:reset`, `npm run test:integration`, `npm run test:security`, `npm run test:browser`, `npm run test:a11y`, `npm run build`, `npm run scan:secrets`, `npm run check:dependencies`. Exact contracts are in `13`.
 

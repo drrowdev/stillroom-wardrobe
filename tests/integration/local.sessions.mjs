@@ -48,6 +48,68 @@ async function signIn(label) {
   return { token: result.data.access_token, uid: result.data.user.id };
 }
 
+async function personalSettings(owner, other, itemId) {
+  const profileFields = ['display_name', 'timezone', 'currency', 'ui_language'];
+  const preferenceFields = ['preferred_colours', 'style_tags', 'excluded_categories', 'minimum_upper_coverage', 'minimum_lower_coverage', 'cold_sensitivity', 'repeat_gap_days'];
+  const original = {};
+  const sibling = {};
+  for (const table of ['profiles', 'style_preferences']) {
+    original[table] = (await rows(owner, table, 'select=*'))[0];
+    sibling[table] = await rows(other, table, 'select=*');
+    assert.ok(original[table]);
+  }
+  const itemBefore = await rows(owner, 'items', `id=eq.${itemId}&select=purchase_price,currency,version`);
+  async function patch(table, version, body) {
+    return request(owner.token, `/rest/v1/${table}?owner_id=eq.${owner.uid}&version=eq.${version}`, {
+      method: 'PATCH', body, headers: { Prefer: 'return=representation' },
+    });
+  }
+  try {
+    stage = 'I06 normal owner profile and consecutive language version saves';
+    const saved = await patch('profiles', original.profiles.version, { display_name: 'Fictional Nordic 🌿', timezone: 'Europe/Stockholm', currency: 'SEK' });
+    assert.ok(saved.ok); assert.equal(saved.data.length, 1);
+    assert.equal(saved.data[0].version, original.profiles.version + 1);
+    assert.equal(saved.data[0].ui_language, original.profiles.ui_language);
+    const language = await patch('profiles', saved.data[0].version, { ui_language: 'fi' });
+    assert.ok(language.ok); assert.equal(language.data.length, 1);
+    assert.equal(language.data[0].version, saved.data[0].version + 1);
+    assert.equal(language.data[0].timezone, 'Europe/Stockholm'); assert.equal(language.data[0].currency, 'SEK');
+    const stale = await patch('profiles', original.profiles.version, { display_name: 'Must not overwrite' });
+    assert.ok(stale.ok); assert.deepEqual(stale.data, []);
+    assert.deepEqual((await rows(owner, 'profiles', 'select=*'))[0], language.data[0]);
+    stage = 'I06 optional preferences boundaries and explicit array clears';
+    const selected = {
+      preferred_colours: ['black', 'white', 'grey', 'navy', 'blue', 'green', 'olive', 'beige'],
+      style_tags: ['oma 🌿', 'egen', 'minimal', 'relaxed', 'classic', 'soft', 'layered', 'quiet'],
+      excluded_categories: ['top', 'bottom', 'one_piece', 'footwear', 'layer', 'outerwear', 'accessory'],
+      minimum_upper_coverage: 2, minimum_lower_coverage: 2, cold_sensitivity: -2, repeat_gap_days: 14,
+    };
+    const preferences = await patch('style_preferences', original.style_preferences.version, selected);
+    assert.ok(preferences.ok); assert.equal(preferences.data.length, 1);
+    assert.equal(preferences.data[0].version, original.style_preferences.version + 1);
+    for (const field of preferenceFields) assert.deepEqual(preferences.data[0][field], selected[field]);
+    const stalePreferences = await patch('style_preferences', original.style_preferences.version, { repeat_gap_days: 0 });
+    assert.ok(stalePreferences.ok); assert.deepEqual(stalePreferences.data, []);
+    const invalid = await patch('style_preferences', preferences.data[0].version, { repeat_gap_days: 15 });
+    assert.ok(!invalid.ok);
+    const cleared = await patch('style_preferences', preferences.data[0].version, { preferred_colours: [], style_tags: [], excluded_categories: [], minimum_upper_coverage: 0, minimum_lower_coverage: 0, cold_sensitivity: 2, repeat_gap_days: 0 });
+    assert.ok(cleared.ok); assert.equal(cleared.data.length, 1);
+    for (const field of ['preferred_colours', 'style_tags', 'excluded_categories']) assert.deepEqual(cleared.data[0][field], []);
+    stage = 'I06 sibling records and existing item money unchanged';
+    assert.deepEqual(await rows(owner, 'items', `id=eq.${itemId}&select=purchase_price,currency,version`), itemBefore);
+    for (const table of ['profiles', 'style_preferences']) assert.deepEqual(await rows(other, table, 'select=*'), sibling[table]);
+  } finally {
+    for (const [table, fields] of [['profiles', profileFields], ['style_preferences', preferenceFields]]) {
+      const current = (await rows(owner, table, 'select=*'))[0];
+      const body = Object.fromEntries(fields.map((field) => [field, original[table][field]]));
+      const restored = await patch(table, current.version, body);
+      assert.ok(restored.ok); assert.equal(restored.data.length, 1);
+      assert.equal(restored.data[0].version, current.version + 1);
+      for (const field of fields) assert.deepEqual(restored.data[0][field], original[table][field]);
+    }
+  }
+}
+
 try {
   stage = 'normal Auth and schema availability';
   const a = await signIn('A'), b = await signIn('B');
@@ -62,7 +124,7 @@ try {
     const fixture = { owner, item: randomUUID(), image: randomUUID(), replacement: randomUUID(), outfit: randomUUID(), paths: [] };
     cleanups.push(fixture);
     stage = 'explicit owner item creation and version conflict';
-    const item = { id: fixture.item, owner_id: owner.uid, title: 'Fictional integration top', category: 'top' };
+    const item = { id: fixture.item, owner_id: owner.uid, title: 'Fictional integration top', category: 'top', purchase_price: 75, currency: 'EUR' };
     let result = await request(owner.token, '/rest/v1/items', { method: 'POST', body: item });
     assert.ok(result.ok);
     result = await request(owner.token, '/rest/v1/items', { method: 'POST', body: item });
@@ -77,6 +139,7 @@ try {
     });
     assert.ok(result.ok); assert.deepEqual(result.data, []);
     assert.equal((await rows(owner, 'items', `id=eq.${fixture.item}&select=favourite`))[0].favourite, true);
+    await personalSettings(owner, owner === a ? b : a, fixture.item);
     stage = 'reserved private JPEG upload and idempotent commit';
     const reservation = {
       id: fixture.image, owner_id: owner.uid, item_id: fixture.item, main_bytes: jpg.length, thumb_bytes: jpg.length,
@@ -130,6 +193,7 @@ try {
     assert.equal((await rows(owner, 'outfit_items', `outfit_id=eq.${fixture.outfit}&select=item_id`))[0].item_id, fixture.item);
   }
   passed.push('Both normal users: schema, item retry/version conflict, private JPEG lifecycle, immutable bytes, interrupted upload and atomic RPC idempotency');
+  passed.push('I06 both normal owners: profile/language and optional preferences version saves, conflicts, clears, unchanged sibling and existing item money; fields restored with fresh versions');
 } catch {
   console.error(`FAIL at ${stage}. Credentials and response contents are not logged.`);
   process.exitCode = 1;

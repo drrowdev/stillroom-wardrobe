@@ -67,6 +67,32 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .field [aria-invalid="true"] { border-color: var(--error); }
 .field [readonly] { color: var(--secondary); background: var(--canvas); }
 .field select { padding-right: 30px; }
+.settings-page { max-width: 980px; margin-inline: auto; overflow-wrap: anywhere; }
+.settings-heading { margin: 24px 0 32px; max-width: 620px; }
+.settings-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.settings-card { min-width: 0; padding: 28px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow-wrap: anywhere; }
+.settings-card h2 { color: var(--primary); }
+.settings-preferences { grid-column: 1 / -1; }
+.settings-group { border: 0; border-top: 1px solid var(--border); padding: 20px 0 0; margin: 0; min-width: 0; }
+.settings-group legend { padding: 0 12px 0 0; font-weight: 550; }
+.settings-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.settings-chip { min-width: 44px; min-height: 44px; padding: 9px 14px; border: 1px solid var(--input-border); border-radius: 24px; color: var(--ink); background: var(--surface); max-width: 100%; overflow-wrap: anywhere; }
+.settings-chip[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: white; }
+.settings-tag-entry { display: flex; gap: 12px; align-items: end; margin-top: 16px; }
+.settings-tag-entry .field { flex: 1; }
+.settings-numbers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 16px; }
+.settings-success { color: var(--primary); margin-bottom: 0; }
+.settings-language { min-width: 0; }
+.settings-language > .fine { margin-top: 12px; }
+.workspace .account-popover { width: min(300px, calc(100vw - 32px)); }
+.workspace .account-button > span:not(.avatar) { overflow-wrap: anywhere; min-width: 0; }
+.workspace .skip-link { max-width: calc(100% - 32px); overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .settings-grid, .settings-numbers { grid-template-columns: minmax(0, 1fr); }
+  .settings-card { padding: 20px; }
+  .settings-tag-entry { align-items: stretch; flex-direction: column; }
+}
 .password-input { position: relative; }
 .password-input input { padding-right: 126px; }
 .password-input button { position: absolute; top: 2px; right: 5px; min-height: 44px; padding: 7px; color: var(--primary); background: transparent; border: 0; font-size: .75rem; max-width: 118px; line-height: 1.2; }

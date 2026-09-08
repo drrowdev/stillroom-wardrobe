@@ -202,6 +202,10 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     [owners.b]: { owner_id: owners.b, display_name: 'Robin', ui_language: 'sv', timezone: 'Europe/Helsinki', currency: 'EUR', version: 1 },
   };
   const items: JsonRow[] = [];
+  const preferences: Record<string, JsonRow> = Object.fromEntries(Object.values(owners).map((owner) => [owner, {
+    owner_id: owner, version: 1, preferred_colours: [], style_tags: [], excluded_categories: [],
+    minimum_upper_coverage: 0, minimum_lower_coverage: 0, cold_sensitivity: 0, repeat_gap_days: 2,
+  }]));
   const images: JsonRow[] = [];
   const files = new Map<string, Buffer>();
   const requests: Array<{ method: string; path: string; owner: string | null; ownerFilter: string | null }> = [];
@@ -261,14 +265,18 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       await json({ id, email: id === owners.a ? 'user-a@example.test' : 'user-b@example.test', aud: 'authenticated', role: 'authenticated', is_anonymous: false });
       return;
     }
-    if (url.pathname === '/rest/v1/profiles') {
+    if (url.pathname === '/rest/v1/profiles' || url.pathname === '/rest/v1/style_preferences') {
       if (url.searchParams.get('owner_id') !== `eq.${owner}`) { await json(null); return; }
-      const profile = profiles[owner]!;
+      const profile = (url.pathname === '/rest/v1/profiles' ? profiles : preferences)[owner];
+      if (!profile) { await json(null); return; }
       if (method === 'PATCH') {
-        if (options.failLanguageSave) { await json({ message: 'Unavailable' }, 503); return; }
-        if (url.searchParams.get('version') !== `eq.${profile.version}` || profile.ui_language !== null) { await json(null); return; }
         const body = request.postDataJSON() as JsonRow;
-        profile.ui_language = body.ui_language;
+        if (options.failLanguageSave && 'ui_language' in body) { await json({ message: 'Unavailable' }, 503); return; }
+        if (url.searchParams.get('version') !== `eq.${profile.version}` || url.searchParams.get('ui_language') === 'is.null' && profile.ui_language !== null) { await json(null); return; }
+        const allowed = url.pathname === '/rest/v1/profiles' ? ['display_name', 'timezone', 'currency', 'ui_language']
+          : ['preferred_colours', 'style_tags', 'excluded_categories', 'minimum_upper_coverage', 'minimum_lower_coverage', 'cold_sensitivity', 'repeat_gap_days'];
+        if (Object.keys(body).some((key) => !allowed.includes(key))) { await json({ code: '42501' }, 403); return; }
+        Object.assign(profile, body);
         profile.version = Number(profile.version) + 1;
       }
       await json(profile); return;
@@ -317,7 +325,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { profiles, items, images, files, requests, fixture, uploadWire: receiver.state, wireDiagnostic,
+  return { profiles, preferences, items, images, files, requests, fixture, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     issuedWireAuthorization(account: 'a' | 'b') {
       const authorization = [...tokens].find(([, owner]) => owner === owners[account])?.[0];

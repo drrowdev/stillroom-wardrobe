@@ -1,11 +1,19 @@
 # Phase 0 - result
 
-Date: 6 September 2026. PR #1 was merged with explicit user approval into
+Current status, 8 September 2026: **Phase 0 engineering complete; acceptance
+open**, under [ordered-development approval 5579471741](https://github.com/drrowdev/stillroom-wardrobe/pull/6#issuecomment-5579471741).
+The active I06 packet and its separate gates are in
+[the cloud guide](cloud-development.md#active-cloud-task-i06-personal-settings-on-pr-7)
+and [Phase 1 results](phase-1-result.md). Only the second hosted-account test was
+user-deferred; other manual/operator/device/screen-reader checks remain pending,
+not waived. This status does not claim full hosted or human acceptance.
+
+Historical status, 6 September 2026: PR #1 was merged with explicit user approval into
 `f696ee45e5dfe46be90cbc295a9811ec1d34a298`. Phase 0 I01–I05 hosted readiness
 continued on now-merged PR #2; the approved password-recovery follow-up is PR #3.
 Full Phase 0 is **not complete**. Earlier reset failures,
 accessibility findings and their later repairs remain below as historical
-evidence. No new merge or next phase is authorized.
+evidence. That dated packet authorized no new merge or next phase.
 
 ## PR #3 password-recovery continuation
 
@@ -1636,3 +1644,41 @@ fresh explicit user approval; the already conditional photo-deployment approval
 still requires main CI success and restored Cloudflare authorization, and grants
 this worker no deployment authority. Physical-iPhone and hosted acceptance remain
 open; this evidence packet does not establish full Phase 0 completion.
+
+## Ordered-development handoff — 8 September 2026
+
+The user explicitly selected **Continue through the agreed MVP in order** after
+the coordinator's actual Claude Opus 5 development-gate review.
+[Approval 5579471741](https://github.com/drrowdev/stillroom-wardrobe/pull/6#issuecomment-5579471741)
+separates engineering readiness from acceptance: prerequisite code, automated
+checks and real normal-session ownership tests permit ordered development.
+It authorizes I06 on PR #7, not I07/I29 inside that worker or an automatic
+deployment, paid activation, hosted mutation or merge.
+
+At the I06 base `7f6e13a89603492e933748b6558b493d3d74e855`, main
+[CI 34157559544](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34157559544)
+is successful. This is base evidence, not a pass for PR #7. Historical generator,
+JPEG, recovery, structural and ordinary-session results above remain dated and
+unmodified; the I06 continuation does not replay the hosted migration or repair
+history. Its own exact commands/results and rollback belong in
+[Phase 1 results](phase-1-result.md).
+
+Only the second hosted-account test was explicitly user-deferred. Other hosted
+operator, actual-phone, camera/library, screen-reader and native-language review
+checks remain pending and must be brought back when they genuinely block a
+feature or acceptance. Neither local mocked browsers nor Linux WebKit/axe
+constitutes physical-phone or hosted acceptance. Static shell reachability is
+not proof of Auth/Save/RLS. No new deployment claim is made here.
+
+Standing ordered-development authority permits agreed Phase 0–7 development after
+prerequisite engineering, automated and real normal-owner gates without another
+phase-start/continue question. Under
+[H1 clarification 5580579847](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5580579847),
+the **coordinator may execute a recommended ordinary merge without another user
+question**, only after genuine independent review, all required exact-head gates
+(including applicable visual gates), no blockers or overlapping writers, and normal
+repository protections. Record the recommendation/evidence and guard the exact head.
+No `--auto`, `--admin`, self-approval or protection bypass. Workers never merge,
+deploy, approve/authorize/rerun Actions, create another agent, start another packet
+or access hosted credentials. Deployments, paid AI/provider/dependency/codec changes,
+hosted schema/account/data mutations and private-input capture keep separate approvals.

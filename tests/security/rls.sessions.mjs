@@ -73,6 +73,43 @@ async function fixture(c){
   return x;
 }
 const tables=['profiles','style_preferences','items','item_images','outfits','outfit_items','wear_events','wear_event_items','combination_rules','suggestion_feedback'];
+async function settingsIsolation(c,other){
+  for(const [table,fields] of [
+    ['profiles',{display_name:'Fictional settings security',timezone:'Europe/Stockholm',currency:'SEK',ui_language:'en'}],
+    ['style_preferences',{preferred_colours:['green'],style_tags:['Oma 🌿'],excluded_categories:['footwear'],minimum_upper_coverage:2,minimum_lower_coverage:1,cold_sensitivity:-1,repeat_gap_days:14}],
+  ]){
+    const read=async(owner)=>{
+      const r=await call(owner.token,`/rest/v1/${table}?owner_id=eq.${owner.uid}&select=*`);
+      assert.ok(r.ok);assert.equal(r.data.length,1);return r.data[0];
+    };
+    const before=await read(c),sibling=await read(other);
+    const patch=(actor,uid,version,body)=>call(actor?.token??null,`/rest/v1/${table}?owner_id=eq.${uid}&version=eq.${version}`,{method:'PATCH',body,returnRepresentation:true});
+    try{
+      stage='I06 owner identity immutability and server-controlled versions';
+      const identity=await patch(c,c.uid,before.version,{owner_id:other.uid});
+      assert.ok(!identity.ok);assert.deepEqual(await read(c),before);assert.deepEqual(await read(other),sibling);
+      const saved=await patch(c,c.uid,before.version,{...fields,version:999999,created_at:'2000-01-01T00:00:00Z'});
+      assert.ok(saved.ok);assert.equal(saved.data.length,1);
+      assert.equal(saved.data[0].owner_id,c.uid);assert.equal(saved.data[0].version,before.version+1);
+      assert.equal(saved.data[0].created_at,before.created_at);
+      for(const [field,value] of Object.entries(fields))assert.deepEqual(saved.data[0][field],value);
+      const stale=await patch(c,c.uid,before.version,fields);assert.ok(stale.ok);assert.deepEqual(stale.data,[]);
+      stage='I06 foreign and anonymous field mutations leave both owners unchanged';
+      const foreign=await patch(c,other.uid,sibling.version,fields);
+      assert.ok(!foreign.ok||Array.isArray(foreign.data)&&foreign.data.length===0);
+      const anonymous=await patch(null,c.uid,saved.data[0].version,fields);
+      assert.ok(!anonymous.ok||Array.isArray(anonymous.data)&&anonymous.data.length===0);
+      assert.deepEqual(await read(c),saved.data[0]);assert.deepEqual(await read(other),sibling);
+    }finally{
+      const current=await read(c);
+      const restore=Object.fromEntries(Object.keys(fields).map(field=>[field,before[field]]));
+      const restored=await patch(c,c.uid,current.version,restore);
+      assert.ok(restored.ok);assert.equal(restored.data.length,1);
+      assert.equal(restored.data[0].version,current.version+1);
+      for(const field of Object.keys(fields))assert.deepEqual(restored.data[0][field],before[field]);
+    }
+  }
+}
 try {
   stage='normal password sign-ins';const a=await login(process.env.TEST_A_EMAIL,process.env.TEST_A_PASSWORD),b=await login(process.env.TEST_B_EMAIL,process.env.TEST_B_PASSWORD);
   assert.notEqual(a.uid,b.uid);passed.push(stage);
@@ -87,6 +124,8 @@ try {
   }
   passed.push(stage);
   stage='own fixture creation';const af=await fixture(a),bf=await fixture(b);passed.push(stage);
+  await settingsIsolation(a,b);await settingsIsolation(b,a);
+  passed.push('I06 both directions: actual identity immutability, server version control, stale/foreign/anonymous field writes, unchanged sibling and fresh-version restoration');
   stage='independent Finnish and Swedish preferences';
   for(const [c,language] of [[a,'fi'],[b,'sv']]){
     const before=await profile(c);
