@@ -602,3 +602,12 @@ Generated types reflect the earlier successful local setup, not successful
 application of the corrected migration. Obtain coordinator environment guidance
 before another recovery attempt; never apply local rollback/reset/history repair
 to hosted services.
+
+After all checkpoint processes finished and executable changes were committed,
+the existing native `parallel_validation` was invoked **once**. Actual result:
+**JavaScript CodeQL, zero alerts**; no SQL or Actions analysis was reported.
+Automated code review was **unavailable** (`autofind` absent); the wrapper's
+success/no-comments heading is not a review pass. There was no retry, alternate
+checker or permission/tool change. Native changed-file secret scans passed
+before the generated-types and partial-source commits. These results describe
+this incomplete checkpoint only, not final I29a security or feature acceptance.
