@@ -556,3 +556,104 @@ test('I07 synthetic crop visual evidence retains functional assertions in every 
     }
   }
 });
+
+test('I29a manual Save retries semantically reordered provenance without duplicate uploads', async ({ page }) => {
+  const api = await setup(page, 'en', true);
+  await page.locator('#item-title').fill('Synthetic provenance garment');
+  await page.locator('#item-category').selectOption('top');
+  const acceptedHash = await page.locator('.capture-photo img').evaluate(async (element: HTMLImageElement) => {
+    const bytes = await (await fetch(element.src)).arrayBuffer();
+    const hash = await crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  });
+  expect(api.items.length === 0 && api.images.length === 0 && api.files.size === 0).toBe(true);
+  await page.locator('button[type="submit"]').click();
+  await expect(page.getByRole('alert').locator('p')).toHaveText([messages['error.unavailable'].en, messages['capture.retryNote'].en]);
+  expect(api.items).toHaveLength(1);
+  expect(api.images).toHaveLength(1);
+  expect(api.items[0]).toMatchObject({
+    owner_id: owners.a, title: 'Synthetic provenance garment', category: 'top', currency: 'EUR',
+  });
+  expect(api.items[0]!.field_provenance).toEqual({
+    title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 },
+  });
+  const image = { ...api.images[0] };
+  expect(image).toMatchObject({ owner_id: owners.a, item_id: api.items[0]!.id, state: 'pending', main_sha256: acceptedHash });
+  expect(api.files.size).toBe(2);
+  for (const variant of ['main', 'thumb']) {
+    const bytes = api.files.get(String(image[`${variant}_path`]))!;
+    expect(bytes.length).toBe(image[`${variant}_bytes`]);
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(image[`${variant}_sha256`]);
+  }
+  const files = new Map([...api.files].map(([name, bytes]) => [name, Buffer.from(bytes)]));
+  const payloadBytes = api.uploadWire.payloadBytes;
+  expect(api.uploadWire.posts).toBe(2);
+  const originalMap = JSON.stringify(api.items[0]!.field_provenance);
+  api.items[0]!.field_provenance = {
+    category: { revision: 1, kind: 'user' }, title: { revision: 1, kind: 'user' },
+  };
+  expect(JSON.stringify(api.items[0]!.field_provenance) === originalMap).toBe(false);
+  const item = structuredClone(api.items[0]);
+  await expect(page.locator('#item-title')).toHaveAttribute('readonly', '');
+  await expect(page.locator('#item-category')).toBeDisabled();
+  await expect(page.locator('#edit-photo')).toBeDisabled();
+  await page.getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
+  await expect(page.locator('.item-caption h2')).toHaveText('Synthetic provenance garment');
+  await expect(page.locator('#capture-title')).toHaveCount(0);
+  expect(api.items).toEqual([item]);
+  expect(api.images).toEqual([{ ...image, state: 'ready' }]);
+  expect(api.files.size).toBe(2);
+  expect([...files].every(([name, bytes]) => api.files.get(name)?.equals(bytes))).toBe(true);
+  expect(api.uploadWire.posts).toBe(2);
+  expect(api.uploadWire.payloadBytes).toBe(payloadBytes);
+  expect(api.requests.filter((request) => request.method === 'POST' && request.path === '/rest/v1/items')).toHaveLength(2);
+  expect(api.requests.filter((request) => request.method === 'POST' && request.path === '/rest/v1/item_images')).toHaveLength(2);
+  expect(api.requests.filter((request) => request.method === 'POST' && request.path === '/rest/v1/rpc/commit_image')).toHaveLength(2);
+});
+
+for (const mismatch of [
+  { name: 'kind', entry: { kind: 'unknown', revision: 1 } },
+  { name: 'revision', entry: { kind: 'user', revision: 2 } },
+]) {
+  test(`I29a manual Save rejects a stored provenance ${mismatch.name} mismatch before image retry`, async ({ page }) => {
+    const api = await setup(page, 'en', true);
+    await page.locator('#item-title').fill('Synthetic unsaved garment');
+    await page.locator('#item-category').selectOption('top');
+    await page.locator('button[type="submit"]').click();
+    await expect(page.getByRole('alert').locator('p')).toHaveText([messages['error.unavailable'].en, messages['capture.retryNote'].en]);
+    expect(api.items).toHaveLength(1);
+    expect(api.images).toHaveLength(1);
+    expect(api.items[0]!.field_provenance).toEqual({
+      title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 },
+    });
+    expect(api.images[0]!.state).toBe('pending');
+    expect(api.files.size).toBe(2);
+    expect(api.uploadWire.posts).toBe(2);
+    expect(api.requests.filter((request) => request.method === 'POST' && request.path === '/rest/v1/rpc/commit_image')).toHaveLength(1);
+    api.items[0]!.field_provenance = {
+      title: { ...mismatch.entry }, category: { kind: 'user', revision: 1 },
+    };
+    const item = structuredClone(api.items[0]), image = { ...api.images[0] };
+    const files = new Map([...api.files].map(([name, bytes]) => [name, Buffer.from(bytes)]));
+    const payloadBytes = api.uploadWire.payloadBytes, requestCount = api.requests.length;
+    await page.getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
+    await expect(page.getByRole('alert').locator('p')).toHaveText([messages['error.conflict'].en, messages['capture.retryNote'].en]);
+    await expect(page.locator('#capture-title')).toBeVisible();
+    await expect(page.locator('.item-caption h2')).toHaveCount(0);
+    await expect(page.locator('#item-title')).toHaveValue('Synthetic unsaved garment');
+    await expect(page.locator('#item-title')).toHaveAttribute('readonly', '');
+    await expect(page.locator('#item-category')).toBeDisabled();
+    await expect(page.locator('#edit-photo')).toBeDisabled();
+    await expect(page.locator('.capture-photo img')).toBeVisible();
+    expect(api.items).toEqual([item]);
+    expect(api.images).toEqual([image]);
+    expect(api.files.size).toBe(2);
+    expect([...files].every(([name, bytes]) => api.files.get(name)?.equals(bytes))).toBe(true);
+    expect(api.uploadWire.posts).toBe(2);
+    expect(api.uploadWire.payloadBytes).toBe(payloadBytes);
+    expect(api.requests.slice(requestCount).filter((request) => request.method !== 'OPTIONS')
+      .map(({ method, path }) => ({ method, path }))).toEqual([
+      { method: 'POST', path: '/rest/v1/items' }, { method: 'GET', path: '/rest/v1/items' },
+    ]);
+  });
+}

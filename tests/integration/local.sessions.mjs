@@ -48,6 +48,169 @@ async function signIn(label) {
   return { token: result.data.access_token, uid: result.data.user.id };
 }
 
+async function itemProvenance(owner) {
+    const ids = [];
+    const fields = [
+      'title', 'category', 'subcategory', 'colours', 'pattern', 'sleeve_length', 'garment_length',
+      'brand', 'size_label', 'material', 'seasons', 'formality', 'warmth', 'min_temp', 'max_temp',
+      'rain_rating', 'windproof', 'upper_coverage', 'lower_coverage', 'style_tags', 'tags',
+      'purchase_date', 'purchase_price', 'notes',
+    ];
+    const physical = ['formality', 'warmth', 'rain_rating', 'windproof', 'upper_coverage', 'lower_coverage'];
+    const read = (id) => rows(owner, 'items', `id=eq.${id}&select=*`);
+    const patch = (row, body) => request(owner.token, `/rest/v1/items?owner_id=eq.${owner.uid}&id=eq.${row.id}&version=eq.${row.version}`, {
+      method: 'PATCH', body, headers: { Prefer: 'return=representation' },
+    });
+    const insert = async (body) => {
+      const id = randomUUID();
+      ids.push(id);
+      const result = await request(owner.token, '/rest/v1/items', {
+        method: 'POST', body: { id, title: 'Fictional provenance garment', category: 'top', ...body },
+        headers: { Prefer: 'return=representation' },
+      });
+      assert.ok(result.ok); assert.equal(result.data.length, 1);
+      assert.equal(result.data[0].owner_id, owner.uid);
+      assert.deepEqual(await read(id), result.data);
+      return result.data[0];
+    };
+    const save = async (row, body) => {
+      const result = await patch(row, body);
+      assert.ok(result.ok); assert.equal(result.data.length, 1);
+      assert.equal(result.data[0].version, row.version + 1);
+      assert.equal(result.data[0].created_at, row.created_at);
+      assert.deepEqual(await read(row.id), result.data);
+      return result.data[0];
+    };
+    try {
+      stage = 'I29a owner insert defaults and post-migration legacy-shaped unverified fixture';
+      const omitted = await insert({});
+      assert.deepEqual(omitted.field_provenance, {});
+      for (const field of [...physical, 'pattern', 'sleeve_length', 'garment_length']) assert.equal(omitted[field], null);
+      assert.deepEqual(omitted.colours, ['unknown']);
+      assert.deepEqual(omitted.seasons, ['spring', 'summer', 'autumn', 'winter']);
+      const retained = { formality: 1, warmth: 1, rain_rating: 0, windproof: false, upper_coverage: 0, lower_coverage: 0 };
+      const legacyShaped = await insert(retained);
+      for (const field of physical) assert.equal(legacyShaped[field], retained[field]);
+      assert.deepEqual(legacyShaped.field_provenance, {});
+
+      stage = 'I29a explicit manual insert covers all 24 fields and integral numeric JSON';
+      const values = {
+        title: 'Fictional confirmed garment', category: 'top', subcategory: 'shirt', colours: ['green'],
+        pattern: 'solid', sleeve_length: 'long', garment_length: 'regular', brand: 'Fictional',
+        size_label: 'M', material: 'Owner supplied', seasons: ['summer'], formality: 2, warmth: 2,
+        min_temp: -5, max_temp: 25, rain_rating: 1, windproof: true, upper_coverage: 2,
+        lower_coverage: 1, style_tags: ['relaxed'], tags: ['fictional'], purchase_date: '2026-01-01',
+        purchase_price: 25, notes: 'Fictional owner note',
+      };
+      const assertions = Object.fromEntries(fields.map((field) => [field, { kind: 'user', revision: 1 }]));
+      let row = await insert({ ...values, field_provenance: { ...assertions, title: { kind: 'user', revision: JSON.rawJSON('1.0') } } });
+      assert.deepEqual(row.field_provenance, assertions);
+      for (const field of fields) assert.deepEqual(row[field], values[field]);
+      const unchanged = row.field_provenance;
+      row = await save(row, { favourite: true, version: 999999, created_at: '2000-01-01T00:00:00Z' });
+      assert.deepEqual(row.field_provenance, unchanged);
+
+      stage = 'I29a same-value confirmation and permitted manual null and empty clears';
+      const cleared = {
+        ...values, subcategory: null, colours: ['unknown'], pattern: null, sleeve_length: null,
+        garment_length: null, brand: null, size_label: null, material: null, formality: null,
+        warmth: null, min_temp: null, max_temp: null, rain_rating: null, windproof: null,
+        upper_coverage: null, lower_coverage: null, style_tags: [], tags: [], purchase_date: null,
+        purchase_price: null, notes: '',
+      };
+      const confirmed = Object.fromEntries(fields.map((field) => [field, { kind: 'user', revision: 2 }]));
+      const stale = row;
+      row = await save(row, { ...cleared, field_provenance: { ...confirmed, title: { kind: 'user', revision: JSON.rawJSON('2.0') } } });
+      assert.deepEqual(row.field_provenance, confirmed);
+      for (const field of fields) assert.deepEqual(row[field], cleared[field]);
+      const staleResult = await patch(stale, { ...cleared, field_provenance: confirmed });
+      assert.ok(staleResult.ok); assert.deepEqual(staleResult.data, []);
+      assert.deepEqual(await read(row.id), [row]);
+
+      stage = 'I29a values-only invalidation, mixed intent and explicit withdrawal';
+      row = await save(row, { title: 'Fictional unverified change' });
+      assert.deepEqual(row.field_provenance, { ...confirmed, title: { kind: 'unknown', revision: 3 } });
+      row = await save(row, {
+        title: 'Fictional manually revised', warmth: 3,
+        field_provenance: { ...row.field_provenance, title: { kind: 'user', revision: 4 }, notes: { kind: 'unknown', revision: 3 } },
+      });
+      assert.deepEqual(row.field_provenance, {
+        ...confirmed, title: { kind: 'user', revision: 4 }, warmth: { kind: 'unknown', revision: 3 }, notes: { kind: 'unknown', revision: 3 },
+      });
+      const newlyUnknown = await save(omitted, { brand: 'Unverified value-only brand' });
+      assert.deepEqual(newlyUnknown.field_provenance, { brand: { kind: 'unknown', revision: 1 } });
+
+      stage = 'I29a finite code values and original physical ranges';
+      for (const [field, codes] of [
+        ['pattern', ['solid', 'striped', 'checked', 'dotted', 'floral', 'graphic', 'abstract', 'animal', 'other']],
+        ['sleeve_length', ['sleeveless', 'short', 'elbow', 'three_quarter', 'long']],
+        ['garment_length', ['cropped', 'short', 'regular', 'long']],
+      ]) {
+        for (const value of codes) {
+          const revision = row.field_provenance[field].revision + 1;
+          row = await save(row, { [field]: value, field_provenance: { ...row.field_provenance, [field]: { kind: 'user', revision } } });
+          assert.equal(row[field], value);
+          assert.deepEqual(row.field_provenance[field], { kind: 'user', revision });
+        }
+      }
+      stage = 'I29a malformed maps and invalid transitions roll back every column and version';
+      const invalidMaps = [
+        null, [], 'invalid', 1, { currency: { kind: 'user', revision: 1 } },
+        { title: null }, { title: [] }, { title: {} }, { title: { kind: 'user' } },
+        { title: { revision: 5 } }, { title: { kind: 'user', revision: 5, extra: true } },
+        { title: { kind: null, revision: 5 } }, { title: { kind: 'invented', revision: 5 } },
+        { title: { kind: 'å'.repeat(4096), revision: 5 } },
+        Object.fromEntries(Array.from({ length: 25 }, (_, index) => [`field${index}`, { kind: 'user', revision: 1 }])),
+        ...[0, -1, 1.5, 2147483648, '5', null, true].map((revision) => ({ title: { kind: 'user', revision } })),
+      ];
+      const removed = { ...row.field_provenance };
+      delete removed.title;
+      const invalidUpdates = [
+        ...invalidMaps.map((field_provenance) => ({ field_provenance })),
+        { field_provenance: removed },
+        ...[3, 4, 6, 2147483647].map((revision) => ({ field_provenance: { ...row.field_provenance, title: { kind: 'unknown', revision } } })),
+        ...['ai_observed', 'ai_estimated'].map((kind) => ({ field_provenance: { ...row.field_provenance, title: { kind, revision: 5 } } })),
+        ...['pattern', 'sleeve_length', 'garment_length'].map((field) => ({ [field]: 'invalid' })),
+        ...['formality', 'warmth'].flatMap((field) => [-1, 5].map((value) => ({ [field]: value }))),
+        ...['rain_rating', 'upper_coverage', 'lower_coverage'].flatMap((field) => [-1, 3].map((value) => ({ [field]: value }))),
+        { colours: [] }, { seasons: [] }, { title: '' }, { category: 'invalid' },
+      ];
+      for (const body of invalidUpdates) {
+        const result = await patch(row, { favourite: false, notes: 'Must roll back', ...body });
+        assert.ok(!result.ok);
+        assert.deepEqual(await read(row.id), [row]);
+      }
+      stage = 'I29a invalid insert leaves no row';
+      for (const field_provenance of [
+        ...invalidMaps, { title: { kind: 'unknown', revision: 1 } },
+        ...[2, 2147483647].map((revision) => ({ title: { kind: 'user', revision } })),
+        ...['ai_observed', 'ai_estimated'].map((kind) => ({ title: { kind, revision: 1 } })),
+      ]) {
+        const id = randomUUID();
+        ids.push(id);
+        const result = await request(owner.token, '/rest/v1/items', {
+          method: 'POST', body: { id, title: 'Must not insert', category: 'top', field_provenance },
+        });
+        assert.ok(!result.ok); assert.deepEqual(await read(id), []);
+      }
+      stage = 'I29a raw v2 snapshot contains only owned facts including intermediate imageless rows';
+      const exportId = randomUUID();
+      const manifest = await rpc(owner, 'export_manifest', { p_export_id: exportId });
+      assert.equal(manifest.schema_version, 2); assert.equal(manifest.export_id, exportId);
+      assert.equal(manifest.owner_id, owner.uid);
+      for (const table of Object.values(manifest.tables)) assert.ok(table.every((entry) => entry.owner_id === owner.uid));
+      for (const expected of [row, legacyShaped, newlyUnknown]) {
+        assert.deepEqual(manifest.tables.items.find((entry) => entry.id === expected.id), expected);
+      }
+      assert.ok(!manifest.tables.item_images.some((image) => ids.includes(image.item_id)));
+    } finally {
+      for (const id of ids) {
+        const result = await request(owner.token, `/rest/v1/items?owner_id=eq.${owner.uid}&id=eq.${id}`, { method: 'DELETE' });
+        assert.ok(result.ok); assert.deepEqual(await read(id), []);
+      }
+    }
+  }
+
 async function personalSettings(owner, other, itemId) {
   const profileFields = ['display_name', 'timezone', 'currency', 'ui_language'];
   const preferenceFields = ['preferred_colours', 'style_tags', 'excluded_categories', 'minimum_upper_coverage', 'minimum_lower_coverage', 'cold_sensitivity', 'repeat_gap_days'];
@@ -140,6 +303,7 @@ try {
     assert.ok(result.ok); assert.deepEqual(result.data, []);
     assert.equal((await rows(owner, 'items', `id=eq.${fixture.item}&select=favourite`))[0].favourite, true);
     await personalSettings(owner, owner === a ? b : a, fixture.item);
+    await itemProvenance(owner);
     stage = 'reserved private JPEG upload and idempotent commit';
     const reservation = {
       id: fixture.image, owner_id: owner.uid, item_id: fixture.item, main_bytes: jpg.length, thumb_bytes: jpg.length,
@@ -194,6 +358,7 @@ try {
   }
   passed.push('Both normal users: schema, item retry/version conflict, private JPEG lifecycle, immutable bytes, interrupted upload and atomic RPC idempotency');
   passed.push('I06 both normal owners: profile/language and optional preferences version saves, conflicts, clears, unchanged sibling and existing item money; fields restored with fresh versions');
+  passed.push('I29a both normal owners: nullable/legacy-shaped facts, all 24 manual fields, numeric revisions, confirmations/clears/invalidation, CAS, code lists, atomic invalid writes and owned intermediate v2 export');
 } catch {
   console.error(`FAIL at ${stage}. Credentials and response contents are not logged.`);
   process.exitCode = 1;

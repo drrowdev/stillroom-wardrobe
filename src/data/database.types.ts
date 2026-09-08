@@ -128,30 +128,34 @@ export type Database = {
           deleted_at: string | null
           exclude_suggestions: boolean
           favourite: boolean
-          formality: number
+          field_provenance: Json
+          formality: number | null
+          garment_length: string | null
           id: string
           lifecycle: string
-          lower_coverage: number
+          lower_coverage: number | null
           material: string | null
           max_temp: number | null
           min_temp: number | null
           notes: string
           owner_id: string
+          pattern: string | null
           purchase_date: string | null
           purchase_price: number | null
-          rain_rating: number
+          rain_rating: number | null
           seasons: string[]
           size_label: string | null
+          sleeve_length: string | null
           style_tags: string[]
           subcategory: string | null
           tags: string[]
           title: string
           updated_at: string
-          upper_coverage: number
+          upper_coverage: number | null
           version: number
-          warmth: number
+          warmth: number | null
           wear_more: boolean
-          windproof: boolean
+          windproof: boolean | null
         }
         Insert: {
           availability?: string
@@ -163,30 +167,34 @@ export type Database = {
           deleted_at?: string | null
           exclude_suggestions?: boolean
           favourite?: boolean
-          formality?: number
+          field_provenance?: Json
+          formality?: number | null
+          garment_length?: string | null
           id?: string
           lifecycle?: string
-          lower_coverage?: number
+          lower_coverage?: number | null
           material?: string | null
           max_temp?: number | null
           min_temp?: number | null
           notes?: string
           owner_id?: string
+          pattern?: string | null
           purchase_date?: string | null
           purchase_price?: number | null
-          rain_rating?: number
+          rain_rating?: number | null
           seasons?: string[]
           size_label?: string | null
+          sleeve_length?: string | null
           style_tags?: string[]
           subcategory?: string | null
           tags?: string[]
           title: string
           updated_at?: string
-          upper_coverage?: number
+          upper_coverage?: number | null
           version?: number
-          warmth?: number
+          warmth?: number | null
           wear_more?: boolean
-          windproof?: boolean
+          windproof?: boolean | null
         }
         Update: {
           availability?: string
@@ -198,30 +206,34 @@ export type Database = {
           deleted_at?: string | null
           exclude_suggestions?: boolean
           favourite?: boolean
-          formality?: number
+          field_provenance?: Json
+          formality?: number | null
+          garment_length?: string | null
           id?: string
           lifecycle?: string
-          lower_coverage?: number
+          lower_coverage?: number | null
           material?: string | null
           max_temp?: number | null
           min_temp?: number | null
           notes?: string
           owner_id?: string
+          pattern?: string | null
           purchase_date?: string | null
           purchase_price?: number | null
-          rain_rating?: number
+          rain_rating?: number | null
           seasons?: string[]
           size_label?: string | null
+          sleeve_length?: string | null
           style_tags?: string[]
           subcategory?: string | null
           tags?: string[]
           title?: string
           updated_at?: string
-          upper_coverage?: number
+          upper_coverage?: number | null
           version?: number
-          warmth?: number
+          warmth?: number | null
           wear_more?: boolean
-          windproof?: boolean
+          windproof?: boolean | null
         }
         Relationships: [
           {
