@@ -28,7 +28,85 @@ state, test results or logs into a commit. These are ignored. The test wrapper
 passes ordinary fictional credentials to its child processes and strips
 privileged/GitHub credentials.
 
-## Active cloud task: approved Phase 0 password recovery on PR #3
+## Active cloud task: I06 personal settings on PR #7
+
+8 September 2026: the user authorized **continuing through the agreed MVP in
+order**. Phase 0 is **engineering complete; acceptance open** at base main
+`7f6e13a89603492e933748b6558b493d3d74e855`. Only the second hosted-account test
+was explicitly deferred; other operator/device/screen-reader checks remain
+pending, not waived. Bring back a manual gate when it genuinely blocks a feature.
+Historical packet restrictions below do not veto a separately approved next packet.
+
+The current writer finishes saved I06 on existing PR #7,
+`copilot/copilotphase1-personal-settings`, starting
+`54252d79852301a0b7cd20977699bfd6fe01da86`.
+[Full plan 5579471741](https://github.com/drrowdev/stillroom-wardrobe/pull/6#issuecomment-5579471741)
+records actual **Anthropic / Claude Opus 5** reviewer
+`personal-settings-plan-critique`, coordinator approval and the original 22 paths.
+Corrections require shared profile/language version serialization, owner/epoch
+freshness, retained dirty baselines, one owner read after a null PATCH, accessible
+dirty routing and real normal-owner evidence. SQL allows owner INSERT and
+server-controls versions; tests must not invent a denial. Style tags are private
+text, not a new fixed taxonomy. I06 covers R02/R25/R27 and preserves R01/R11/R26.
+
+[Transport amendment 5579906237](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5579906237)
+records actual **Anthropic / Claude Opus 5** `i06-visual-transport-critique` and
+coordinator approval before edits. It adds only `.github/workflows/ci.yml`'s App
+artifact step to the allowlist. No new plan, branch, PR, agent, schema, dependency,
+local CLI, JPEG, garment Save, recovery, provider, hosted operation or I07/I29 work.
+One writer owns this workspace/branch/PR.
+
+After context and before continuation edits, the writer reread
+[receipt 5579937425](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5579937425):
+coordinator explicitly selected and authenticated-GET verified actual
+`sweagent-capi:gpt-6-astra`, task `210fb893-7617-4dc1-88ef-eae5272e2ab6`,
+session `c40a8a6b-551d-4831-8703-691b138c980a`, observed
+`2026-09-08T05:47:29.6473139Z`, against this exact PR/base/saved head.
+This is the coordinator's runtime evidence, not a worker self-attestation or a
+receipt reusable by another task. New tasks/retries need their own matching receipt.
+
+### Text-only worker and retained visual gate
+
+The two preceding native sessions reported `CAPIError: 400 Error while downloading
+file. Upstream status code: 404`; the latest followed viewing a temporary PNG.
+The missing upstream URL and causal app-code involvement remain unknown.
+The single approved alternative keeps Astra but excludes **all model image inputs**:
+no image/binary/archive opening, image-returning tools, image attachments, encoded
+image output or Markdown image embeds. If the same failure recurs without image
+input, preserve the head and report a platform blocker; do not spawn more retries.
+
+Existing Node/Playwright tests provide text-only functional/DOM/axe results.
+One deterministic synthetic settings flow asserts the loopback protected route,
+known fake owner/language and absence of login/password UI, then scans visible
+body text and rendered form values in-page for credential-like patterns, returning
+only a boolean. Only Chromium writes these full-page captures, ignoring returned
+buffers; functional assertions still run in every configured project:
+
+* `test-results/i06-visual/profile-en-desktop.png`: English, 1280px.
+* `test-results/i06-visual/profile-fi-mobile.png`: Finnish, 320px.
+
+The test requires exactly two regular PNG files, correct headers/widths and at
+most 1 MiB each. No real sessions, photos, wardrobe content, browser storage,
+raw headers or offending text enter evidence. Files stay ignored and unopened
+by the worker. After a successful **full** browser run, the single non-matrix App
+job uploads only those explicit paths using the already pinned upload action,
+name `i06-profile-ui-<exact PR head SHA>` (current commit for non-PR events),
+one-day retention and missing-file failure. No wildcard, extra permission/cache,
+runner, service or Database/Apple job change. Storage is bounded, not guaranteed free.
+
+The coordinator first reviews the workflow/executable diff, then handles
+current-head CI authorization and independent review. The coordinator must
+download the exact-head artifact outside the repository, verify run/head/contents,
+actually view both PNGs, and record run/head/PNG SHA256s/verdict in a PR #7
+review/comment and session ledger. No source commit merely records its own head.
+Artifact existence or DOM checks are not a visual verdict; absent/unread images
+leave acceptance pending. A primary test failure is retained, not relabelled an
+artifact failure. [Phase 1 results](phase-1-result.md) record worker commands,
+rollback and pending gates; final visual evidence is linked from PR #7.
+
+<a id="active-cloud-task-approved-phase-0-password-recovery-on-pr-3"></a>
+
+## Historical approved Phase 0 password recovery on PR #3
 
 The separately approved follow-up is PR #3,
 `copilot/approved-phase0-password-recovery`, based on merged main
@@ -99,7 +177,7 @@ Installed structure, coordinator-observed static shell and the dated user-dashbo
 administrative account snapshot below are distinct evidence. Ordinary password
 login, own Save/reload, negative RLS/Storage, fixtures, live hosted smoke and
 physical-device acceptance remain open.
-No paid app AI, later phase or merge is authorized. Cloudflare access is now
+That historical packet authorized no paid app AI, later phase or merge. Cloudflare access is
 connected to the coordinator, not inherited by the cloud worker.
 
 ### Hosted state and responsible actors
@@ -165,7 +243,7 @@ prove neither ordinary login nor RLS/Storage isolation.
 | Live deployment | Reviewed-main shell verified in the dated observation above; no PR #2 deployment. Replacement requires separate authorization and fresh evidence; shell reachability is not hosted acceptance. | Coordinator |
 | Hosted smoke | BLOCKED until both intended ordinary sessions and prepared non-personal item/main/thumb fixtures exist. Run the separate read-only command below privately and report only coarse result plus reviewed code head. | Approved private operator, not cloud agent or public CI |
 | Phone/accessibility | Actual iPhone/Safari and Android camera/library, rotation/compatible-photo fallback, explicit Save/Discard, own login/logout, EN/FI/SV, VoiceOver/TalkBack and narrow/zoomed layout checks remain open. Emulation/axe is insufficient. | Human owners/testers |
-| Code/merge | Fresh-head App/browser and Real local Supabase CI including actual types parity; coordinator's independent read-only Claude review; explicit user approval before every merge. | Cloud worker reports code checks; coordinator reviews; user approves merge |
+| Code/merge | Fresh-head App/browser and Real local Supabase CI including actual types parity, independent review and I06 artifact visual verdict. Standing ordered-development authority allows coordinator recommendations, not a worker merge; fresh explicit user approval remains required before every merge. | Cloud worker reports checks; coordinator reviews/recommends; user approves merge |
 
 Pages production configuration contains only public `VITE_SUPABASE_URL`,
 `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_APP_VERSION` and build-only
@@ -277,19 +355,22 @@ and scan. It is a leak-detection fixture, never a production credential.
 
 ## Delivery rules
 
-For the assignment dated 6 September 2026, continue only the five-document
-amendment on feature branch/PR #2; this is not a permanent pin of future approved
-packets. Do not reopen merged PR #1 or push to `main`.
-**Every merge needs explicit user approval**, separately from plan,
-code-review and CI approval. Never auto-merge. Finish Phase 0 only; do not start Phase 1, AI tagging, outfits,
-calendar, unapproved production provisioning or paid services in the same task.
-Only the coordinator's explicitly approved initialization of the dedicated
-AI Wardrobe project is allowed; the source worker must not access hosted
-credentials or run the local fixture/reset tools against that project.
+The dated 6 September PR #2 handoff and subsequent PR #3 recovery restrictions
+remain historical evidence. Current ordered development follows the approved I06
+packet above, not a permanent Phase-0-only pin. Do not reopen merged PRs or push
+to `main`. After prerequisite engineering, automated and real normal-owner checks,
+the coordinator may recommend an ordinary merge and bring forward the next eligible
+agreed packet without another phase-start question. **Every merge still needs fresh
+explicit user approval**, separately from plan/code/CI approval. Workers never
+merge, authorize/rerun Actions, deploy or start another packet.
 
-Each later phase is a separately scoped cloud task after its predecessor's
-exit evidence is reviewed. Keep the photo-first, editable draft and explicit
-Save contract, three languages, isolated owners and deterministic outfits.
+Deployments, paid AI/providers/dependencies/codecs, hosted schema/account mutations
+and private input capture retain separate approvals. The source worker receives no
+hosted credentials and never runs local fixture/reset tools against hosted.
+Keep pending/deferred manual acceptance distinct from engineering completion and
+bring back a gate when it genuinely blocks a feature. Preserve the photo-first,
+editable draft and explicit Save contract, three languages, isolated owners and
+deterministic outfits. No I07/I29 or later feature is authorized inside I06.
 
 Before every implementation packet:
 
@@ -299,9 +380,9 @@ Before every implementation packet:
    files actually consulted and unresolved gates.
 2. Write a focused plan before edits. Obtain an actual different-provider,
    read-only critique; record provider/model, findings and amendments. The
-   completed source packet was reviewed by **Anthropic Claude Opus 5**, as recorded
-   in PR #2 comment `5559949209`; this documentation amendment has its own plan/
-   approval `5560449572`/`5560847183`. Automated validation/self-review is
+   active I06 plan/amendment and their actual **Anthropic Claude Opus 5** critiques
+   are linked above; PR #2 `5559949209` and `5560449572`/`5560847183` remain
+   historical evidence, not current-packet approval. Automated validation/self-review is
    supplemental, not that prereview; do not invent a native review tool.
 3. Before every implementation task and retry, explicitly select **GPT-6 Astra
    (`gpt-6-astra`)**. The coordinator verifies and records the actual runtime/platform
@@ -318,8 +399,8 @@ Before every implementation packet:
    workspace/branch/PR and one focused approved packet per agent. Before launch,
    the coordinator names active packets/branches, owned files, dependencies and
    shared mutable-resource owners. Never concurrently mutate the same branch or
-   shared host resources. No second builder until this corrected common-base
-   amendment is reviewed and merged into main with explicit user approval.
+   shared host resources. The corrected common-base prerequisite was merged in
+   PR #2; no additional builder is authorized by this one-writer I06 continuation.
    Session SQL/coordination notes do not change repository authority. Merges,
    hosted DDL and deployments remain serialized and separately authorized; actor/
    credential restrictions still apply. Concurrency itself authorizes no new
