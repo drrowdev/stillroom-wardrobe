@@ -1088,3 +1088,19 @@ approval `5590736782` and operator method `5592161566` are not live authority no
 Native model input remained text-only; fixture bytes were never opened or emitted
 to the model. Historical sections above remain unchanged. Publish the final
 head/files/results and stop editing for coordinator review.
+
+Final native validator for this correction: after executable candidate
+`c1045eb2b29ab0b73e00dde00018fd4a7038070b` was committed and candidate
+processes finished, invoked existing `parallel_validation` **once**.
+**Actions and JavaScript CodeQL completed with zero alerts**; no SQL analysis
+was reported. Automated code review was **unavailable: `autofind` missing**,
+not a review pass despite the wrapper heading. No alternate checker, new agent
+or repeated invocation was used. Only this evidence append follows the checked
+executable candidate; independent affected review and all real gates remain
+pending. The changed-file secret scan passed before the candidate commit.
+
+Commit metadata exception: the progress tool's candidate commit omitted the
+requested Copilot App co-author trailer. History was not amended. This final
+validation-evidence commit explicitly includes
+`Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com>`;
+that does not retroactively change the candidate commit's metadata.
