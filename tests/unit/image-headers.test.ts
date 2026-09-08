@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { prepareImage } from '../../src/images/process-image';
 import { readTiffOrientation, validateImage, WEBP_FLAGS } from '../../src/images/validate';
 import { JPEG_LIMITS } from '../../src/images/jpeg';
 import { joinBytes } from '../fixtures/jpeg-helpers';
@@ -112,5 +113,27 @@ describe('I07 bounded admission and deletion-only normalization', () => {
       await expect(validateImage(new Blob([value]))).rejects.toMatchObject({ code: 'unsupported' });
     }
     await expect(validateImage(png(data), AbortSignal.abort())).rejects.toMatchObject({ name: 'AbortError' });
+  });
+  it('maps a failed signature read to the existing invalid/source taxonomy', async () => {
+    const read = vi.spyOn(Blob.prototype, 'arrayBuffer').mockRejectedValueOnce(new Error('synthetic read failure'));
+    try {
+      await expect(prepareImage(png(data))).rejects.toMatchObject({ code: 'invalid', stage: 'source' });
+    } finally { read.mockRestore(); }
+  });
+  it('removes odd-length WebP EXIF and its pad, retaining every other byte', async () => {
+    const metadata = webpChunk('EXIF', joinBytes(tiff(6), new Uint8Array([7])));
+    const source = new Blob([riff(vp8x(120, 80, 8), vp8l(), metadata)]);
+    const result = await validateImage(source);
+    expect(result.orientation).toBe(6);
+    expect(new Uint8Array(await result.blob.arrayBuffer())).toEqual(riff(vp8x(120, 80), vp8l()));
+    expect(source.size - result.blob.size).toBe(36);
+  });
+  it('retains PNG colour and transparency metadata bytes while removing only eXIf', async () => {
+    const gamma = new Uint8Array(4);
+    new DataView(gamma.buffer).setUint32(0, 45455);
+    const retained = [pngChunk('gAMA', gamma), pngChunk('sRGB', new Uint8Array([0])),
+      pngChunk('iTXt', new TextEncoder().encode('XML:com.adobe.xmp\0\0\0\0\0synthetic')), data];
+    const result = await validateImage(png(...retained, exif(6)));
+    expect(new Uint8Array(await result.blob.arrayBuffer())).toEqual(new Uint8Array(await png(...retained).arrayBuffer()));
   });
 });

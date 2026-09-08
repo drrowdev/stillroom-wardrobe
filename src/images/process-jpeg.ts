@@ -34,7 +34,7 @@ function checkAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 }
 
-function abortable<T>(
+export function abortable<T>(
   operation: Promise<T>,
   signal?: AbortSignal,
   releaseLate?: (value: T) => void,
