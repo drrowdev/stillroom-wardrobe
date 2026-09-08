@@ -335,6 +335,8 @@ for (const diagnostic of [false, true]) {
             { unreserved: observed.unreserved, parallel: observed.second, afterFirstClose: observed.afterFirstClose };
           if (backend?.wireDiagnostic) evidence.server = {
             ...backend.wireDiagnostic, rejections: { ...backend.wireDiagnostic.rejections },
+            receiverFacts: backend.wireDiagnostic.receiverFacts ? { ...backend.wireDiagnostic.receiverFacts } : null,
+            counterScope: 'cumulative', receiverFactsScope: 'last-completed-or-rejected-receiver-request',
             receivedBytes: backend.uploadWire.receivedBytes, payloadBytes: backend.uploadWire.payloadBytes,
           };
         } catch { evidence.captureError = true; }

@@ -25,10 +25,19 @@ export const wireStages = [
 ] as const;
 export type WireStage = typeof wireStages[number];
 export type WireBackend = 'first' | 'second';
+type WireFieldFailure = 'none' | 'file-count' | 'file-kind' | 'file-type' | 'file-empty' |
+  'cache-count' | 'cache-value' | 'metadata-count' | 'metadata-kind' | 'extra-key';
+type WireReceiverFacts = {
+  fieldFailure: WireFieldFailure | null;
+  boundaryLength: number | null; bodyTrailer: 'crlf' | 'bare' | 'other' | null;
+  parsedFileSize: number | null; bodyHighByte: 'present' | 'absent' | null;
+};
 type WireDiagnostic = {
   backend: WireBackend; routePosts: number; receiverPosts: number; success: number;
   routeRejected: number; receiverRejected: number; routeStage: WireStage; receiverStage: WireStage;
   rejections: Record<WireStage, number>;
+  // Facts describe the last completed/rejected receiver request; counters remain cumulative.
+  receiverFacts: WireReceiverFacts | null;
 };
 
 async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], files: Map<string, Buffer>, tokens: Map<string, string>,
@@ -66,17 +75,21 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     headers['access-control-request-headers'].split(',').every((name) => uploadHeaders.includes(name.trim().toLowerCase()));
   const credentialsAllowed = (headers: IncomingHttpHeaders, owner: string) => headers.origin === origin && !headers.cookie &&
     headers.apikey === fixtureKey && tokens.get(headers.authorization ?? '') === owner && headers['x-upsert'] === 'false';
-  const recordRejection = (stage: WireStage) => {
+  const recordRejection = (stage: WireStage, facts: WireReceiverFacts | null = null) => {
     if (diagnostic) {
       diagnostic.receiverRejected++;
       diagnostic.receiverStage = stage;
       diagnostic.rejections[stage]++;
+      diagnostic.receiverFacts = facts ? { ...facts } : null;
     }
   };
   const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, connectionsCheckingInterval: 1000 }, (request, response) => {
     if (diagnostic && request.method === 'POST') diagnostic.receiverPosts++;
+    const facts: WireReceiverFacts | null = diagnostic ? {
+      fieldFailure: null, boundaryLength: null, bodyTrailer: null, parsedFileSize: null, bodyHighByte: null,
+    } : null;
     let stage: WireStage = 'receiver-reservation-origin';
-    const timer = setTimeout(() => { state.rejected++; recordRejection('receiver-timeout'); void close(); }, 5000);
+    const timer = setTimeout(() => { state.rejected++; recordRejection('receiver-timeout', facts); void close(); }, 5000);
     const finish = (body: JsonRow, status = 200, responseStage: WireStage = 'none') => {
       response.writeHead(status, { ...cors, 'content-type': 'application/json', ...(status >= 400 ? { connection: 'close' } : {}) });
       response.end(JSON.stringify(diagnostic ? { ...body, wireBackend: diagnostic.backend, wireStage: responseStage } : body),
@@ -91,6 +104,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
         stage = 'receiver-preflight';
         if (!preflightAllowed(request.headers)) throw new Error('Fixture upload rejected.');
         state.preflights++;
+        if (diagnostic) { diagnostic.receiverStage = 'none'; diagnostic.receiverFacts = facts ? { ...facts } : null; }
         response.writeHead(204, cors).end();
         return;
       }
@@ -103,6 +117,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
       const boundary = /^multipart\/form-data;\s*boundary=(?:"([A-Za-z0-9'-]{1,70})"|([A-Za-z0-9'-]{1,70}))$/i.exec(contentType);
       stage = 'receiver-content-type';
       if (!boundary) throw new Error('Fixture upload rejected.');
+      if (facts) facts.boundaryLength = (boundary[1] ?? boundary[2])!.length;
       const chunks: Buffer[] = [];
       let length = 0;
       stage = 'receiver-body-read';
@@ -118,6 +133,11 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
       const delimiter = `--${boundary[1] ?? boundary[2]}`;
       const ending = Buffer.from(`\r\n${delimiter}--`);
       stage = 'receiver-envelope';
+      if (facts) {
+        facts.bodyTrailer = body.subarray(-ending.length).equals(ending) ? 'bare' :
+          body.subarray(-ending.length - 2).equals(Buffer.concat([ending, Buffer.from('\r\n')])) ? 'crlf' : 'other';
+        facts.bodyHighByte = body.some((byte) => byte >= 0x80) ? 'present' : 'absent';
+      }
       if (!body.subarray(0, delimiter.length + 2).equals(Buffer.from(`${delimiter}\r\n`)) ||
         !(body.subarray(-ending.length).equals(ending) || body.subarray(-ending.length - 2).equals(Buffer.concat([ending, Buffer.from('\r\n')])))) {
         throw new Error('Fixture upload rejected.');
@@ -125,11 +145,22 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
       stage = 'receiver-form-parse';
       const form = await new Response(new Uint8Array(body), { headers: { 'content-type': contentType } }).formData();
       const file = form.get('');
+      if (facts) facts.parsedFileSize = file instanceof Blob ? file.size : -1;
       stage = 'receiver-form-fields';
-      if (form.getAll('').length !== 1 || !(file instanceof Blob) || file.type !== 'image/jpeg' || !file.size ||
-        form.getAll('cacheControl').length !== 1 || form.get('cacheControl') !== '0' ||
-        form.getAll('metadata').length > 1 || (form.has('metadata') && typeof form.get('metadata') !== 'string') ||
-        [...form.keys()].some((key) => !['', 'cacheControl', 'metadata'].includes(key))) throw new Error('Fixture upload rejected.');
+      function rejectField(reason: WireFieldFailure): never {
+        if (facts) facts.fieldFailure = reason;
+        throw new Error('Fixture upload rejected.');
+      }
+      if (form.getAll('').length !== 1) rejectField('file-count');
+      if (!(file instanceof Blob)) rejectField('file-kind');
+      if (file.type !== 'image/jpeg') rejectField('file-type');
+      if (!file.size) rejectField('file-empty');
+      if (form.getAll('cacheControl').length !== 1) rejectField('cache-count');
+      if (form.get('cacheControl') !== '0') rejectField('cache-value');
+      if (form.getAll('metadata').length > 1) rejectField('metadata-count');
+      if (form.has('metadata') && typeof form.get('metadata') !== 'string') rejectField('metadata-kind');
+      if ([...form.keys()].some((key) => !['', 'cacheControl', 'metadata'].includes(key))) rejectField('extra-key');
+      if (facts) facts.fieldFailure = 'none';
       stage = 'receiver-file-read';
       const bytes = Buffer.from(await file.arrayBuffer());
       const path = pathname.slice(storagePrefix.length);
@@ -137,11 +168,14 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
       if (closing || files.has(path)) throw new Error('Fixture upload rejected.');
       files.set(path, bytes);
       state.payloadBytes += bytes.length;
-      if (diagnostic) { diagnostic.success++; diagnostic.receiverStage = 'none'; }
+      if (diagnostic) {
+        diagnostic.success++; diagnostic.receiverStage = 'none';
+        diagnostic.receiverFacts = facts ? { ...facts } : null;
+      }
       finish({ Id: 'fixture', Key: `wardrobe/${path}` });
     })().catch(() => {
       state.rejected++;
-      recordRejection(stage);
+      recordRejection(stage, facts);
       if (!response.destroyed && !response.headersSent) finish({ message: 'Fixture upload rejected.' }, 400, stage);
       else void close();
     });
@@ -216,6 +250,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     backend: options.wireDiagnostic, routePosts: 0, receiverPosts: 0, success: 0, routeRejected: 0, receiverRejected: 0,
     routeStage: 'none', receiverStage: 'none',
     rejections: Object.fromEntries(wireStages.map((stage) => [stage, 0])) as Record<WireStage, number>,
+    receiverFacts: null,
   } : undefined;
   const receiver = await uploadReceiver(page, items, images, files, tokens, wireDiagnostic);
   await page.route('http://127.0.0.1:54321/**', async (route) => {
