@@ -950,3 +950,15 @@ Rollback is source-only removal of this six-file packet, preserving its dated
 evidence, through coordinator review. No hosted rollback/reset/history repair is
 implied. The writer publishes head/files/results and stops editing for parent
 CI/independent review; no extra agent/branch/PR or next packet.
+
+Final native validator: after executable candidate
+`b81c155ff696f3fb8667809a7407076ebd4d095f` was committed and all candidate
+processes finished, invoked existing `parallel_validation` **once**.
+**Actions and JavaScript CodeQL completed with zero alerts.** No SQL analysis
+was reported. Automated code review was **unavailable: `autofind` missing**;
+the wrapper's success/no-comments heading is not a review pass. No alternate
+checker, additional agent, permission change or retry occurred. The six-path
+changed-file secret scan passed before that commit, and its required Copilot App
+co-author trailer was verified. Only this actual validation-result append follows
+the checked executable candidate; fresh CI preservation and all parent-owned
+review/release gates above remain pending.
