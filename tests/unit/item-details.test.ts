@@ -51,16 +51,33 @@ describe('saved detail domain boundaries', () => {
     }
     expect(detailRouteId('/items/' + id)).toBeNull();
   });
-  it('validates the three saved fields without creation fallback', () => {
+  it.each(['a', '🌿'])('validates the three saved fields in code points (%s) without creation fallback', (character) => {
     expect(validItemFields('  Å name 🌿  ', 'layer')).toEqual({ title: 'Å name 🌿', category: 'layer' });
-    expect(validItemFields('a'.repeat(100), 'top')).not.toBeNull();
-    for (const name of ['', '  ', 'a'.repeat(101), 'a\0']) expect(validItemFields(name, 'top')).toBeNull();
+    expect(validItemFields(character.repeat(100), 'top')).toEqual({ title: character.repeat(100), category: 'top' });
+    for (const name of ['', '  ', character.repeat(101), 'a\0']) expect(validItemFields(name, 'top')).toBeNull();
     expect(validItemFields('Name', 'unknown')).toBeNull();
     expect(validDescription('  ')).toBe('');
     expect(validDescription('  Å 🌿 ')).toBe('Å 🌿');
-    expect(validDescription('a'.repeat(240))).not.toBeNull();
-    expect(validDescription('a'.repeat(241))).toBeNull();
+    expect(validDescription(character.repeat(240))).toBe(character.repeat(240));
+    expect(validDescription(character.repeat(241))).toBeNull();
     expect(validDescription('\0')).toBeNull();
+  });
+  it.each([60, 100])('accepts a stored %i-astral-character title and confirms an exact-limit edit', (length) => {
+    const base = parseItemBaseline(item({ title: '🌿'.repeat(length) }), owner, id);
+    expect(base.title).toBe('🌿'.repeat(length));
+    const attempt = prepareItemAttempt(base, '🍂'.repeat(100), 'top', 4);
+    expect(attempt.fields.title).toBe('🍂'.repeat(100));
+    expect(confirmsItem(parseItemBaseline(item({ ...attempt.patch, version: 8 }), owner, id), attempt)).toBe(true);
+    expect(() => prepareItemAttempt(base, '🍂'.repeat(101), 'top', 4)).toThrow('detail.invalidFields');
+  });
+  it('edits a valid stored 240-astral-character description without losing text', () => {
+    const base = parseImageBaseline(image({ alt_text: '🌿'.repeat(240) }), owner, id);
+    expect(base.altText).toBe('🌿'.repeat(240));
+    const attempt = prepareDescriptionAttempt(base, '🌿'.repeat(239) + '🍂', 4);
+    expect(attempt.text).toBe('🌿'.repeat(239) + '🍂');
+    expect(confirmsDescription(parseImageBaseline(image({ alt_text: attempt.text, description_version: 4 }), owner, id), attempt)).toBe(true);
+    expect(base.altText).toBe('🌿'.repeat(240));
+    expect(() => prepareDescriptionAttempt(base, '🌿'.repeat(241), 4)).toThrow('detail.invalidDescription');
   });
   it('freezes exact changed fields and preserves untouched values and provenance', () => {
     const base = baseline(), attempt = prepareItemAttempt(base, ' New name ', 'top', 4);
@@ -85,7 +102,8 @@ describe('saved detail domain boundaries', () => {
   });
   it.each([
     { owner_id: other }, { id: other }, { deleted_at: '2026-09-09' }, { version: 0 }, { version: 1.5 },
-    { version: Number.MAX_SAFE_INTEGER + 1 }, { title: '' }, { category: 'bad' }, { field_provenance: null },
+    { version: Number.MAX_SAFE_INTEGER + 1 }, { title: '' }, { title: 'a'.repeat(101) }, { title: '🌿'.repeat(101) },
+    { category: 'bad' }, { field_provenance: null },
     { colours: undefined }, { warmth: Infinity },
   ])('rejects malformed/unowned item baseline %j', (overrides) => {
     expect(() => parseItemBaseline(item(overrides), owner, id)).toThrow('detail.unavailable');

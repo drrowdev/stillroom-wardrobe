@@ -33,12 +33,12 @@ export function detailRouteId(hash: string): string | null {
 }
 export function validItemFields(title: string, category: string): ItemFields | null {
   const text = title.trim();
-  return text.length > 0 && text.length <= 100 && !text.includes('\0') && isCategory(category)
+  return text.length > 0 && [...text].length <= 100 && !text.includes('\0') && isCategory(category)
     ? { title: text, category } : null;
 }
 export function validDescription(text: string): string | null {
   const value = text.trim();
-  return value.length <= 240 && !value.includes('\0') ? value : null;
+  return [...value].length <= 240 && !value.includes('\0') ? value : null;
 }
 function version(value: unknown, maximum: number): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= maximum;
@@ -65,7 +65,7 @@ function frozen<T>(value: T): T {
 export function parseItemBaseline(value: unknown, ownerId: string, itemId: string): ItemBaseline {
   if (!isUuid(ownerId) || !isUuid(itemId) || !isRecord(value) || value.owner_id !== ownerId || value.id !== itemId
     || value.deleted_at !== null || !version(value.version, Number.MAX_SAFE_INTEGER)
-    || typeof value.title !== 'string' || !value.title || value.title.length > 100 || !isCategory(value.category)
+    || typeof value.title !== 'string' || !value.title || [...value.title].length > 100 || !isCategory(value.category)
     || typeof value.updated_at !== 'string' || itemFactColumns.some((key) => !Object.hasOwn(value, key) || !jsonValue(value[key]))) {
     throw new AppError('detail.unavailable');
   }

@@ -80,6 +80,94 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(api.requests.some((call) => call.path.startsWith('/functions/') || call.path.startsWith('/storage/') && call.method !== 'GET')).toBe(false);
     expect(api.uploadWire.posts).toBe(0);
   });
+  test(`saved editor ${language}: Unicode limits preserve input, sibling drafts and saved reload`, async ({ page }) => {
+    const api = await mockBackend(page, { initialLanguage: language });
+    const { item, image } = api.seedSavedItem('a', '🌿'.repeat(100));
+    image.alt_text = '🌿'.repeat(240);
+    await page.goto('/'); await signIn(page);
+    await page.locator(`a[href="#/items/${item.id}"]`).click();
+    const title = page.locator('#detail-title'), description = page.locator('#detail-description');
+    const titleError = page.locator('#detail-title-error'), descriptionError = page.locator('#detail-description-error');
+    const calls = writes(page);
+    await expect(title).toHaveValue('🌿'.repeat(100));
+    await expect(description).toHaveValue('🌿'.repeat(240));
+    await expect(nameSave(page, language)).toBeDisabled();
+    await expect(descriptionSave(page, language)).toBeDisabled();
+    await expect(title).toHaveAttribute('aria-invalid', 'false');
+    await expect(description).toHaveAttribute('aria-invalid', 'false');
+
+    await title.fill('🍂'.repeat(100));
+    await expect(title).toHaveValue('🍂'.repeat(100));
+    await expect(nameSave(page, language)).toBeEnabled();
+    await page.keyboard.insertText('🍂');
+    await expect(title).toHaveValue('🍂'.repeat(101));
+    await expect(titleError).toHaveText(messages['detail.invalidFields'][language]);
+    await expect(titleError).toBeVisible();
+    await expect(title).toHaveAttribute('aria-invalid', 'true');
+    await expect(title).toHaveAttribute('aria-describedby', 'detail-title-error');
+    await expect(nameSave(page, language)).toBeDisabled();
+
+    await description.fill('🍂'.repeat(240));
+    await expect(description).toHaveValue('🍂'.repeat(240));
+    await expect(descriptionSave(page, language)).toBeEnabled();
+    await page.keyboard.insertText('🍂');
+    await expect(description).toHaveValue('🍂'.repeat(241));
+    await expect(descriptionError).toHaveText(messages['detail.invalidDescription'][language]);
+    await expect(descriptionError).toBeVisible();
+    await expect(description).toHaveAttribute('aria-invalid', 'true');
+    await expect(description).toHaveAttribute('aria-describedby', 'detail-description-error');
+    await expect(descriptionSave(page, language)).toBeDisabled();
+    expect(calls).toHaveLength(0);
+
+    await title.fill('');
+    await page.keyboard.insertText('🍂'.repeat(100));
+    await expect(title).toHaveValue('🍂'.repeat(100));
+    await expect(titleError).toHaveCount(0);
+    await expect(title).toHaveAttribute('aria-invalid', 'false');
+    await expect(title).not.toHaveAttribute('aria-describedby');
+    await expect(nameSave(page, language)).toBeEnabled();
+    await nameSave(page, language).click();
+    await expect(page.getByText(messages['detail.nameSaved'][language], { exact: true })).toBeVisible();
+    expect(item.title).toBe('🍂'.repeat(100));
+    await expect(description).toHaveValue('🍂'.repeat(241));
+    await expect(descriptionSave(page, language)).toBeDisabled();
+
+    await title.fill('');
+    await page.keyboard.insertText('🌿'.repeat(101));
+    await expect(title).toHaveValue('🌿'.repeat(101));
+    await expect(titleError).toBeVisible();
+    await expect(nameSave(page, language)).toBeDisabled();
+    await description.fill('');
+    await page.keyboard.insertText('🌿'.repeat(241));
+    await expect(description).toHaveValue('🌿'.repeat(241));
+    await expect(descriptionError).toBeVisible();
+    await expect(descriptionSave(page, language)).toBeDisabled();
+    await description.fill('');
+    await page.keyboard.insertText('🍂'.repeat(240));
+    await expect(description).toHaveValue('🍂'.repeat(240));
+    await expect(descriptionError).toHaveCount(0);
+    await expect(description).toHaveAttribute('aria-invalid', 'false');
+    await expect(description).not.toHaveAttribute('aria-describedby');
+    await expect(descriptionSave(page, language)).toBeEnabled();
+    await descriptionSave(page, language).click();
+    await expect(page.getByText(messages['detail.descriptionSaved'][language], { exact: true })).toBeVisible();
+    expect(image.alt_text).toBe('🍂'.repeat(240));
+    await expect(title).toHaveValue('🌿'.repeat(101));
+    await expect(nameSave(page, language)).toBeDisabled();
+    expect(calls).toHaveLength(2);
+
+    await title.fill('🍂'.repeat(100));
+    await expect(nameSave(page, language)).toBeDisabled();
+    await expect(descriptionSave(page, language)).toBeDisabled();
+    await page.reload();
+    await expect(title).toHaveValue('🍂'.repeat(100));
+    await expect(description).toHaveValue('🍂'.repeat(240));
+    await expect(nameSave(page, language)).toBeDisabled();
+    await expect(descriptionSave(page, language)).toBeDisabled();
+    await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
+    await expect(page.locator('.item-card h2')).toHaveText('🍂'.repeat(100));
+    expect(calls).toHaveLength(2);
+  });
 }
 test('saved editor keeps required validation, literal XSS text and no implicit writes', async ({ page }) => {
   const { item } = await setup(page);
@@ -87,7 +175,9 @@ test('saved editor keeps required validation, literal XSS text and no implicit w
   await page.locator('#detail-title').fill('   ');
   await expect(nameSave(page)).toBeDisabled();
   await page.locator('#detail-title').fill('x'.repeat(101));
-  await expect(page.locator('#detail-title')).toHaveValue('x'.repeat(100));
+  await expect(page.locator('#detail-title')).toHaveValue('x'.repeat(101));
+  await expect(page.getByText(messages['detail.invalidFields'].en, { exact: true })).toBeVisible();
+  await expect(nameSave(page)).toBeDisabled();
   await page.locator('#detail-title').fill('<img src=x onerror=alert(1)>');
   await nameSave(page).click();
   await expect(page.getByText(messages['detail.nameSaved'].en, { exact: true })).toBeVisible();

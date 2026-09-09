@@ -4,7 +4,7 @@ import type { AppClient } from '../../data/client';
 import { loadItemDetail, saveImageDescription, saveItemFields } from '../../data/item-details';
 import { errorKey, isAborted } from '../../data/errors';
 import {
-  confirmsDescription, confirmsItem, prepareDescriptionAttempt, prepareItemAttempt,
+  confirmsDescription, confirmsItem, prepareDescriptionAttempt, prepareItemAttempt, validDescription, validItemFields,
   type DescriptionAttempt, type ImageBaseline, type ItemAttempt, type ItemBaseline, type ItemDetail as Detail,
 } from '../../domain/item-details';
 import { categories, categoryKeys } from '../../domain/wardrobe';
@@ -106,14 +106,17 @@ const readImage = (detail: Detail) => detail.image;
 function NameSection(props: Shared & { base: ItemBaseline; onState: (state: Dirty) => void }) {
   const section = useSection<ItemBaseline, ReturnType<typeof itemDraft>, ItemAttempt>(
     props.base, itemDraft, prepareFields, saveItemFields, readItem, confirmsItem, props.base.id, props, props.onState);
+  const invalid = validItemFields(section.draft.title, section.draft.category) === null;
   const { t } = props;
   return <section className="settings-card detail-name" aria-labelledby="detail-name-heading">
     <h2 id="detail-name-heading">{t('detail.nameSection')}</h2>
     <p className="muted fine">{t('detail.provenance')}</p>
     <form className="stack" onSubmit={(event) => { event.preventDefault(); section.save(); }}>
       <div className="field"><label htmlFor="detail-title">{t('item.title')}</label>
-        <input id="detail-title" value={section.draft.title} maxLength={100} required disabled={section.locked}
+        <input id="detail-title" value={section.draft.title} required disabled={section.locked}
+          aria-invalid={invalid} aria-describedby={invalid ? 'detail-title-error' : undefined}
           onChange={(event) => section.setDraft({ ...section.draft, title: event.target.value })} />
+        {invalid && <p id="detail-title-error" role="alert" className="notice notice-error">{t('detail.invalidFields')}</p>}
         {fieldAssertion(section.base.provenance, 'title').kind !== 'user' && <span className="muted fine">{t('detail.unverified')}</span>}
       </div>
       <div className="field"><label htmlFor="detail-category">{t('item.category')}</label>
@@ -132,6 +135,7 @@ function NameSection(props: Shared & { base: ItemBaseline; onState: (state: Dirt
 function DescriptionSection(props: Shared & { base: ImageBaseline; onState: (state: Dirty) => void; onImage: (image: ImageBaseline) => void }) {
   const section = useSection<ImageBaseline, string, DescriptionAttempt>(
     props.base, descriptionDraft, prepareDescriptionAttempt, saveImageDescription, readImage, confirmsDescription, props.base.itemId, props, props.onState);
+  const invalid = validDescription(section.draft) === null;
   const { onImage } = props;
   useEffect(() => { onImage(section.base); }, [section.base, onImage]);
   const { t } = props;
@@ -140,8 +144,10 @@ function DescriptionSection(props: Shared & { base: ImageBaseline; onState: (sta
     <p className="muted fine">{t('detail.descriptionHint')}</p>
     <form className="stack" onSubmit={(event) => { event.preventDefault(); section.save(); }}>
       <div className="field"><label htmlFor="detail-description">{t('item.altText')}</label>
-        <textarea id="detail-description" value={section.draft} maxLength={240} rows={4} disabled={section.locked}
+        <textarea id="detail-description" value={section.draft} rows={4} disabled={section.locked}
+          aria-invalid={invalid} aria-describedby={invalid ? 'detail-description-error' : undefined}
           onChange={(event) => section.setDraft(event.target.value)} />
+        {invalid && <p id="detail-description-error" role="alert" className="notice notice-error">{t('detail.invalidDescription')}</p>}
         <button className="text-button" type="button" disabled={section.locked || !section.draft} onClick={() => section.setDraft('')}>{t('detail.clearDescription')}</button>
       </div>
       {section.controls}

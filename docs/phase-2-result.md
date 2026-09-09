@@ -1787,3 +1787,127 @@ migration, paid/provider action or private input is authorized. Rollback is a
 separately reviewed source revert, never hosted replay/reset/history repair.
 Hand off this same PR and stop for coordinator review; no merge/deploy,
 new agent/branch/PR or next packet.
+
+## PR #13 — I29b routine Unicode correction — 9 September 2026
+
+U1/U2 source corrections and native deterministic regressions pass. This is only
+the saved-input correction within I29b (R18/R19/R23/R26/R27/R28), not full I29,
+Phase 2, hosted or manual acceptance. All preceding result bytes are preserved.
+
+### Authority, context and correction
+
+Same repository `drrowdev/stillroom-wardrobe`, PR #13 and branch
+`copilot/copiloti29b-saved-item-corrections`; base/main
+`9d1858236309436b3144a3f45fcef581faff8630`, starting head
+`0be199f262604ea6a7686d84cebed3ef2482c407`. Read the full approved
+[plan 5597695316](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5597695316):
+21849 bytes, SHA-256
+`c9ba45adf377cf1001ba29d025f4b6f8a2c8e5967c4baea1e9a2bae7d267ce6e`.
+The full [finished-code review and correction 5599395681](https://github.com/drrowdev/stillroom-wardrobe/pull/13#issuecomment-5599395681)
+records actual read-only Anthropic Claude Opus 5
+`i29b-final-correctness-review`, U1/U2 and coordinator approval for this routine
+five-path correction. No new design, reviewer/agent or scope was introduced.
+
+After context and before any edit, reread this task's own public
+[receipt 5599419864](https://github.com/drrowdev/stillroom-wardrobe/pull/13#issuecomment-5599419864):
+task `bbebde60-60fd-4787-b4e6-f72994ce365e`, session
+`8235c8b0-a88f-49ab-9c48-e9f8cf23787f`, explicitly selected `gpt-6-astra`;
+coordinator authenticated actual allocation `sweagent-capi:gpt-6-astra`,
+observed `2026-09-09T09:13:18.4025812Z`, reverified
+`2026-09-09T09:13:51.2831051Z` against this repository/PR/base/head/branch and sole
+writer. No historical session receipt was reused.
+
+Context read included root `AGENTS.md`, `.github/copilot-instructions.md`,
+relevant cloud/Phase 0/1/2 evidence, blueprint 00/03/05/07/08/10/13/14/19/20
+sections, actual migration/generated RPC text, domain/data/editor source,
+unit/browser tests, mock fixture contracts, catalog messages, package scripts,
+Playwright configuration and quality-gate fixture isolation. Inspected PR #13
+discussion/diff/reviews and GitHub MCP workflow runs/job logs. Historical
+`34324963356` Database failure is the old type-parity diff, not a new failure
+or permission to regenerate types. Held `34331216204`/`34331216190` remain
+unexecuted `action_required`; no Actions authorization or rerun was performed.
+
+U1 counted description UTF-16 code units and capped HTML entry at 240 units,
+although SQL and the image baseline accept 240 Unicode code points. The old
+stored baseline was not truncated or corrupted; valid astral text was blocked
+from editing at its legitimate length. U2 similarly rejected legitimate
+saved titles above 100 UTF-16 units, making the whole detail unavailable.
+
+The three domain checks now use the existing `[...value].length` style for
+100-code-point title validation/read baselines and 240-code-point descriptions.
+Only the two saved fields lose their incompatible HTML `maxLength` attributes.
+Raw entered text, including over-limit bulk insertion, remains visible.
+Existing EN/FI/SV `detail.invalidFields` / `detail.invalidDescription` messages,
+notice classes and linked `aria-invalid` / `aria-describedby` explain invalid
+fields. Save stays disabled until correction; a valid sibling section can still
+save without discarding the invalid draft. Trimming, required name/category,
+NUL rejection, intentional description clear, unchanged-save disabling,
+owner/version/provenance/frozen-attempt guards and all write paths are unchanged.
+Creation remains frozen, including its narrower input limit and fallback.
+
+Exactly five paths changed: `src/domain/item-details.ts`,
+`src/features/wardrobe/item-detail.tsx`, `tests/unit/item-details.test.ts`,
+`tests/browser/item-details.spec.ts` and this append. The full PR remains 22
+paths. All other paths, SQL/types, ordinary DB/preservation tests, mock backend,
+catalog/CSS, workflows/config, dependencies, routing/Auth/settings and image
+primitives remain unchanged. Existing six-capture guards/paths/counts are intact;
+Unicode cases add no screenshots or artifacts.
+
+### Actual native validation
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+Units and Vite browser suites ran sequentially; no source changed during the
+final full checks. These browser/data fixtures are synthetic, not live RLS.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/item-details.test.ts` | 59/59, exit 0. ASCII/astral 100/101 and 240/241 bounds; valid stored 60/100-astral titles; exact-limit description edits and strict confirmation. |
+| `npm run typecheck` | Exit 0, targeted and final. |
+| `npm run lint` | Exit 0, targeted and final. |
+| `npm run check:translations` | Exit 0, targeted and final; 423 EN/FI/SV keys, 40 source files. |
+| `npm run test:browser -- tests/browser/item-details.spec.ts --retries=0` | First run: 54 passed, 27 failed solely because WebKit executable was absent. After the restoration below: 81/81, exit 0, all three configured projects. |
+| `npx playwright install --with-deps webkit` | Exit 0, only after the missing-engine failure; restored existing pinned WebKit/system libraries, no repository dependency/config change. |
+| `npm run test:unit` | 683/683 in 14 files, exit 0. |
+| `npm run build` | Exit 0; JS 168.91 kB gzip, CSS 5.12 kB gzip. Existing non-failing >500 kB chunk warning remains. |
+| `npm run scan:secrets` | Exit 0; 166 text files and unprinted build canary checked. |
+| `npm run check:dependencies` | Exit 0; 12 production/220 development packages, zero unverified release dates and zero reported production vulnerabilities. |
+| `npm run test:browser -- --retries=0` | 410/410, 5.0 minutes, exit 0; unchanged suites and approved capture guards retained. |
+| `npm run test:a11y -- --retries=0` | 30/30, 40.3 seconds, exit 0, after full browsers. |
+| `git diff --check` | Exit 0. |
+
+Build and secret scan shared process-local
+`STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`, never printed.
+New browser cases in EN/FI/SV use `fill` plus single/bulk `keyboard.insertText`
+to exercise browser input and paste-style insertion, not an OS clipboard test.
+They load exact-limit stored astral text, retain complete 101/241-character
+input, verify visible localized errors and ARIA links, recover in bounds,
+save each valid section while the sibling is invalid, and preserve exact text
+through read-back/reload and library refresh. No implicit writes occur.
+
+The existing final native checker is reserved for one invocation after this
+candidate commit and finished processes. Its actual components, language counts
+and unavailable/unreported analysis are to be reported on PR #13, not inferred
+from a wrapper status or recorded through an extra self-hash-only source commit.
+
+### Remaining gates and unchanged authority
+
+Coordinator still owns exact-final-head CI (normal-owner preservation,
+integration/security/recovery/type parity and native 4+3), narrow U1/U2 closure,
+and actual provenance-verified visual inspection of six current-head PNGs.
+No image/archive/binary was opened by this worker; DOM/axe/capture results
+are not visual acceptance. Missing/unread visual evidence remains pending.
+
+**Stored-at-counter-ceiling runtime coverage remains OPEN / NOT RUN.** Actual
+Opus review found no permitted nonprivileged seeding route and no overflow
+source bug. Expected-ceiling mismatch, denied injection and static guards are
+not an actual stored-at-2147483647 RPC execution. No privilege/helper/schema
+change, administrator assertion or huge loop was used; the coordinator must
+resolve that separate authority/acceptance gate before whole-packet completion.
+
+No native DB start/reset/list/up/provision/psql/typegen/rehearsal/ordinary DB
+tests, hosted operation, Actions approval/rerun, new agent/branch/PR, merge or
+deployment occurred. Current release/hosted I29a, B3's released-runtime-only
+acceptance, automatic deployments off and pending manual/device checks remain
+unchanged. I29b hosted SQL/deployment is not approved. Full I29/all-field edits,
+AI consent/receipts/allowances/expiry and saved-only export remain unfinished MVP
+work, not implicitly authorized here. Hand off this same PR and stop editing.
