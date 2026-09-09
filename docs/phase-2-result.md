@@ -2359,3 +2359,152 @@ No provider eligibility or proposed spending figure is approved here. Live
 unchanged. Dated B3/counter/device/operator limitations remain pending, not waived.
 This finishes only the bounded unwired foundation, not automatic tagging or the
 MVP. Stop after the final candidate/checker report for parent review and current CI.
+
+## I29e Stage 1 — persistent request controls, 9 September 2026
+
+**Source-only staging, not completed database/AI acceptance.** This append
+preserves the preceding 155139 bytes. The packet is I29/R18/R19/R23/R26/R27/R28,
+on existing PR #16, branch `copilot/newpr-15-stage1-only`, approved base
+`0d27eb0e3ea9730ae641d915b28375d7b8435ede`, reviewed tree
+`89afde0a3b27c25b6079cf5b50c78692a2ea159e`, starting head
+`4f2fe11bec1d03bb97fb21fcfb357f5bd7b4b937`. The initial head has no source diff.
+
+### Authority and context
+
+The full accepted plan is `5607052777`; fixture clarification
+`5607520616` permits finite named normal children inside S4, not privileged
+owner impersonation. The coordinator records actual different-provider
+**Anthropic / Claude Opus 5**, reviewer
+`ddfa71a0-2487-4281-9203-09f42ee62785`, accepting the original mechanical
+corrections and this clarification. Controlling corrections include preserved
+twelve old profile UPDATE grants, per-request tombstones, profile-first mutex
+across periods, post-lock clock, fixed original expiry, separate financial/
+content decisions, explicit target-owner admission and genuine two-owner fixtures.
+No new planning authority, agents or provider choice was invented by this worker.
+
+After context and before edits, this continuation reread its **own**
+[public receipt 5607561177](https://github.com/drrowdev/stillroom-wardrobe/pull/16#issuecomment-5607561177):
+task `bf4e0849-36a0-4f17-9051-76287ce12d1b`, session
+`3ad49710-1c51-4e81-97b8-c72c569604c1`, explicitly selected `gpt-6-astra`,
+coordinator-authenticated actual `sweagent-capi:gpt-6-astra`, immediate observation
+19:30:04.1159871Z and full model/ref/sole-writer verification 19:31:26.6157664Z.
+PR/base/head/branch match this checkout. Receipt `5607099391` is historical,
+not this session's attestation.
+
+Read root/Copilot instructions, cloud guidance, Phase 0/current Phase 2 evidence,
+local-backend guidance, relevant blueprint/phase/AI requirements and current
+I29 issue/API/data-model sections; actual base and provenance migration excerpts,
+shared AI/garment/provenance/preferences/UUID contracts, generated-type state,
+reset/local guards/provisioner/normal runner, existing normal-session modules,
+preservation implementation/tests and CI/Playwright/package validation contracts.
+PR #16 discussion, empty initial diff, reviews and review threads were read.
+Initial CI `34391750557` was `action_required`: job-log lookup returned zero
+jobs, not a failed assertion or a pass. No Actions approval/rerun occurred.
+
+### Delivered source boundary
+
+Fifteen approved Stage 1 paths change. Generated types remain exactly 22312 bytes,
+SHA-256 `6787f9a2a776db922d0e424d7bfb11746854dd896bbabeec3fd2f359cd5dd759`.
+All four historical migrations, production domain/UI/Auth/image implementations,
+old ordinary integration/security modules, core provisioner, backend helpers,
+packages, CI and setup configuration remain unchanged.
+
+The additive `20260909180000_ai_request_controls.sql` is 28579 bytes, SHA-256
+`f3c263ef16035a1ac07afe9911faf2ab27ed3a72b730f5db0168a0180df02ade`.
+It adds protected profile consent, private operator controls, minimal per-request
+usage/tombstones, temporary full requests and seven bounded RPCs. There is no
+default operator policy, provider/Edge endpoint, photo transfer, inventory write,
+saved marker, item AI authority, checked Save or scheduler.
+
+Reservations/replays/dispatch/billing/discard/expiry serialize on the owned
+profile first. The server derives time and period after the lock; exact arithmetic
+counts current settled cost plus all outstanding holds, including prior periods.
+NULL cost is unknown, zero is known, and overruns/late anomalous charges are
+recorded without content resurrection. Only one eligible dispatch claim exists.
+The validated fourteen-field result keeps its original expiry. Export v2 excludes
+active consent, not old imageless/pending library rows; saved-only remains open.
+`blueprint/08` documents exact parameter, JSON and denial/status contracts.
+
+The new setup seeder runs only after full-reset core provisioning. It forwards
+the existing opt-in through the stripped command environment, never manufactures
+one, fetches an admin key or changes a core guard. P1/P3/P5 and named S4 children
+use strict normal-session environments and real A/B HTTP. S2/S4/S6 privileged
+work is operator/server/timestamp/structural only. Both policies share fictional
+model/prompt/notice; A's 15000 allowance/rate 20 and B's 100000 allowance/rate 3
+isolate cap/rate races. Scratch cost/counts are retained without policy resets.
+Final expected state is two distinct ready results, fourteen ledger rows, twelve
+explained closures, no unknown holds and accounted A/B totals 16001/0.
+These are **test assertions awaiting real CI execution**, not observed DB results.
+
+P3 includes populated ordinary-owned item/image/outfit/history preservation,
+actual authenticated downloads of the existing synthetic fixture bytes, and
+exact cleanup. Other named phases exercise the required server financial/content
+guards; the limit-one purge removes one of two expired full requests, leaving
+the second for normal owner cleanup. Named paired timestamps are fixture-seeded,
+not elapsed real-time retention. Later full integration/security suites are
+non-consuming/re-runnable, with both-direction real ready-data isolation,
+anonymous and server-RPC denials, SQL grant/RLS versus Data API refusal separation,
+profile column protection, tombstones and export exclusion.
+
+Preservation now pins five sources and checks base-only/four pending → one
+existing migration-up → five applied/none pending. It keeps original COLUMNS,
+two owners/ten tables/thirty rows/eight objects, raw values/timestamps/versions,
+downloaded byte comparisons and the bounded run-owned snapshot. Normal reads
+assert the three new profile defaults separately, without changing the old-row
+oracle. The final export source body is 1511 bytes,
+MD5 `689a81770938d05caa3a3f800ae3ecef`; base expectation remains unchanged.
+The seeder structurally checks the actual final executable body/attributes.
+No seeder runs in the base rehearsal.
+
+### Actual native validation
+
+No native database startup/reset/up/list/provision/psql/type generation/rehearsal
+was run. The new SQL, normal-session tests and server fixtures have **not** been
+executed against a database in this session.
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run test:unit -- tests/unit/ai-schema.test.ts` | Initial 60/60; expanded SQL/shared-contract cases 62/62, exit 0. |
+| `npm run test:unit -- tests/unit/preservation.test.ts tests/unit/ai-schema.test.ts` | Final 144/144, exit 0. One earlier negative test targeted the wrong SQL declaration; corrected to exact export declaration. |
+| `node --check` on the seven changed `.mjs` files | Exit 0 for db, runner, rehearsal, new seeder, preservation integration and both new normal suites. |
+| `npm run test:unit` | 970/970, 17 files, exit 0. |
+| `npm run lint` | Final exit 0 after correcting a misplaced fixture-helper scope. |
+| `npm run typecheck` | Exit 0. |
+| `npm run check:translations` | 471 EN/FI/SV keys, 45 source files, exit 0. No UI strings added. |
+| `npm run build` | Exit 0; JS 174.80 kB gzip/CSS 5.33 kB gzip; existing non-failing large-chunk warning. |
+| `npm run scan:secrets` | 180 text files and unprinted process-local build canary checked, exit 0. |
+| `npm run check:dependencies` | 12 production/220 development packages, zero unverified release dates; production audit zero vulnerabilities, exit 0. |
+| `npm run test:browser -- --retries=0` | First run: 320 passed, 129 WebKit launch failures because pinned `webkit-2359/pw_run.sh` was absent, exit 1. Final run pending after engine installation. |
+| `npx playwright install --with-deps webkit` | Existing pinned engine installed after the concrete missing-executable failure, exit 0; no package/version/configuration change. |
+| `npm run test:a11y -- --retries=0` | Pending after full browsers. |
+| `git diff --check` | Exit 0. |
+
+Unit/static checks precede Vite-backed browsers. Synthetic captures stay ignored
+and unopened; no image/archive/binary output enters the native model. The existing
+native final checker is invoked once after candidate commit/process completion;
+its actual components/results/unavailability are reported on PR #16, not assumed.
+
+### Staging and remaining gates
+
+The writer stops for parent execution trust, genuine independent completed-code
+review and first exact-head CI. Real migrations, full-reset fixture phases,
+ordinary integration/security, preservation and actual type generation must
+pass. **Only** old committed-type parity can be the anticipated Stage 1 staging
+failure after those gates; any other failure needs a concrete scoped correction.
+Nothing here claims final parity or a database pass.
+
+Stage 2 is a separately verified same-PR continuation: coordinator verifies the
+exact-head generated artifact and conveys its exact text; native imports those
+bytes without opening archives, handwriting or normalizing types. Only generated
+types/result append are then authorized, absent separately scoped correction.
+Fresh final CI must prove generation and tracked-file/exact-diff parity.
+
+Logical expiry and opportunistic cleanup do not promise inactive-account
+24-hour physical retention. Scheduler, processor/account, notice, allowance,
+deployment and paid/private-photo activation gates remain open. Full I29 still
+requires authenticated endpoint/image validation, editable draft/local composition,
+checked exact-value Save, source-image history/provenance, saved-only export and
+normal-owner acceptance. Live `31bdd067`/source `9d1858`, hosted base+I29a,
+unapplied hosted I29b/I29c, B3/counter/device/operator limits remain unchanged.
+No agents, new branch/PR, main push, Actions approval/rerun, hosted mutation,
+provider/budget choice, merge, deployment, Stage 2 or later packet was undertaken.

@@ -240,6 +240,93 @@ Remap `suggestion_feedback.item_ids` and sort them before insertion. The databas
 
 ## General errors, cancellation and idempotency
 
+### I29e source-only control RPCs
+
+These seven `public` JSONB RPCs are not wired into the application. No endpoint,
+provider configuration, photo transfer, paid work, checked Save or saved marker
+is delivered here. `private` remains unexposed and has no client table policies
+or grants. PUBLIC/anon execute is revoked for every new function; the four owner
+methods grant authenticated execution and accept **no owner parameter**. Only
+service_role can execute the three server methods. Its explicit owner parameter
+must eventually come from a verified token, never a browser/model owner claim.
+
+Money uses exact integer micro-USD, unrelated to garment currency. Input monetary
+values are PostgreSQL bigint, 0–9223372036854775807 for known bills; NULL means
+unknown. Policy limits must be positive bigint; summed accounting uses numeric
+and is returned as decimal integer **text**, never rounded/clamped. Profile
+versions likewise return decimal text. Returned JSON keys/codes are protocol
+identifiers, not localized messages.
+
+Every mutation obtains the existing profile FOR UPDATE first, captures a single
+`clock_timestamp()` after waiting, then uses controls → ledger → full-request
+order. That serializes the owner across UTC months, including deletion; no GUC,
+invented role, current-month mutex or post-profile admission-row lock is used.
+Admission uses a current statement snapshot of enabled approved-account state;
+AI permission is checked under the owner lock. A concurrent freeze can follow
+that observation; neither it nor withdrawal recalls already delivered content.
+Consent UPDATE uses the existing version/timestamp trigger, while mere locks
+do not update the profile. Result lifetime is original creation + configured TTL,
+never renewed by completion. Dispatch and content recheck pinned model/prompt/
+notice; operational limit changes do not rewrite old reserves/periods.
+
+| RPC and exact parameters | JSON outcomes |
+| --- | --- |
+| `ai_status()` | On admission denial `{code:"UNAVAILABLE"}`. Otherwise `{code,period,serverTimeMs,consent,policy,usage}` as detailed below. Performs at most 100 owned expiry removals. |
+| `ai_set_consent(p_enabled boolean,p_notice_revision integer,p_expected_version bigint)` | `{code:"OK",profileVersion:text}` on CAS success. Withdrawal requires null revision, clears consent and works without configuration. Enable needs current activated positive notice. Failures: `{code}` with INVALID_INPUT, UNAVAILABLE, CONFLICT, UNCONFIGURED, INACTIVE or CONSENT_REQUIRED; no mutation. |
+| `ai_begin_request(p_request_id uuid,p_draft_id uuid,p_generation integer,p_image_sha256 text)` | `{code:"OK",status:"reserved"\|"dispatched"\|"ready",replayed:boolean}`; otherwise `{code}`: INVALID_INPUT, UNAVAILABLE, UNCONFIGURED, INACTIVE, CONSENT_REQUIRED, CONFLICT, TERMINAL, ACTIVE_DRAFT, RATE_LIMIT or ALLOWANCE. Does not validate image bytes, dispatch or write facts/inventory. |
+| `ai_request_control(p_request_id uuid,p_action text)` | Action status/discard only. Live permitted status: `{code:"OK",status,result}` (result null until ready). Removed/expired/discarded: `{code:"TERMINAL",reason}`; reason DISCARDED, EXPIRED, FAILED, UNAVAILABLE or INVALID_FACTS. Otherwise `{code}`: INVALID_INPUT, UNAVAILABLE, UNCONFIGURED, INACTIVE, CONSENT_REQUIRED or CONFIG_CHANGED. Foreign/missing both UNAVAILABLE. Discard needs admission/ownership, not AI consent/config. |
+| `ai_mark_dispatched(p_owner_id uuid,p_request_id uuid)` | `{code,claimed:boolean}`. Only the live eligible reserved → dispatched transition returns OK/true. False codes: UNAVAILABLE, TERMINAL, EXPIRED, UNCONFIGURED, INACTIVE, CONSENT_REQUIRED, CONFIG_CHANGED, ALREADY_CLAIMED. No insertion or second claim, including lost acknowledgement. |
+| `ai_settle_request(p_owner_id uuid,p_request_id uuid,p_facts jsonb,p_billed_micro bigint,p_code text)` | Input code SUCCESS, FAILED or BILLING_ONLY. Early denial `{code,stored:false}`: UNAVAILABLE, INVALID_INPUT, BILLING_CONFLICT. After accounting `{code,stored,chargeState,accountedMicro:text,undispatchedCharge:boolean}`. Codes READY, TERMINAL, EXPIRED, BILLING_ONLY, FAILED, NOT_DISPATCHED, UNAVAILABLE, INVALID_FACTS, FACTS_CONFLICT; only READY stores facts. |
+| `ai_purge_expired(p_limit integer)` | Limit 1–1000, otherwise `{code:"INVALID_INPUT"}`. `{code:"OK",removed:integer}` counts total full rows deleted, not owners. Profile locks use SKIP LOCKED; no media/profile modification. |
+
+`ai_status` uses code OK/UNCONFIGURED/INACTIVE/CONSENT_REQUIRED. `period` is
+server UTC `YYYY-MM`; `serverTimeMs` is integer epoch milliseconds.
+`consent` is `{enabled,noticeRevision,consentedAt,profileVersion}`; unset
+revision/time are null. `policy` is null when unconfigured, otherwise
+`{activated,noticeRevision,modelId,promptVersion,maxRequestMicro,
+monthlyAllowanceMicro,maxRequestsPerHour,resultTtlSeconds}`.
+`usage` is `{accountedMicro,requestsLastHour,warning}`. Accounted admission cost
+includes current-period settled amounts **and all outstanding reserved/held
+maxima across periods**. Warning is true at ≥80% of positive allowance.
+Hourly counts include every admitted request, even released ones.
+
+UUID/draft IDs use the shared UUID shape; generation/prompt/notice are positive
+int32; image hash is 64 lowercase hex; model is 1–128 ASCII `[A-Za-z0-9._:/-]`.
+Begin looks up the owned UUID ledger before admission limits. Exact full-context
+replay checks draft/generation/hash/current pinned model/prompt/notice and costs
+nothing; conflicting reuse denies. A tombstone is terminal, never a fresh
+reservation. New admissions check active draft, rate, then allowance with fixed
+distinct reasons and no partial ledger insertion. Bounded cleanup may remove up
+to 100 old owned full rows first; it never refunds a known/dispatched charge.
+
+Settlement first reconciles known bills, even after withdrawal or removal.
+Known equal bills are idempotent, different bills conflict, and NULL does not
+overwrite known accounting. Unknown dispatched failures remain held; only
+persisted never-dispatched evidence allows release. A late known charge without
+dispatch evidence sets `undispatchedCharge:true`, records the bill and confers
+no content/dispatch authority. Billing-only never recreates context. Rejected
+content does not roll back a known bill; facts cannot overwrite different ready
+facts. A live result arriving after billing-only can store under the original
+dispatch/permission/config/expiry guards without charging twice.
+
+Ready `result` has exactly the I29d AiResult fields: `schemaVersion:1`,
+`requestId,draftId,generation,imageSha256,modelId,promptVersion,createdAtMs,
+expiresAtMs,facts`. Milliseconds use floor(epoch × 1000) from the preserved
+timestamps. Facts have exactly `{outcome:"ready"|"unclear",fields:{...}}`;
+the ten observed/four estimated fields and vocabulary/code-point/numeric/list
+bounds match `parseAiFacts`. Missing/null/empty arrays remain unknown; integer
+zero is known. Extra/private/system/confidence fields and asserted unclear
+facts are rejected. Facts and the full envelope are each at most 8192 UTF-8
+bytes (SQL JSONB representation); no provider body is stored.
+
+Explicit expiry/status cleanup and purge delete full context, retaining only
+the minimal ledger. This packet installs no scheduler and makes **no inactive
+account physical-retention guarantee**. Paid/private-photo activation remains
+blocked on separately reviewed scheduled purge and operator approvals.
+`export_manifest` stays SQL/STABLE/SECURITY INVOKER/empty-search-path/schema v2,
+excluding only the three new profile consent fields. Saved-only export and
+legacy imageless/failed-Save ambiguity are still open.
+
 Map allowlisted `AppError.code` values to localized messages; never display raw SQL/HTTP errors in any language. Keep protocol values such as deletion confirmation `DELETE`, RPC names, stable codes, filenames and JSON keys unchanged. `19-LOCALIZATION.md` defines the optional v1 profile export field `ui_language` and safe import of older backups without it; hashes are verified before normalization.
 
 PostgREST may return 200 with an empty array for a denied SELECT/UPDATE/DELETE; tests must assert absence and unchanged owner data, not only HTTP status. Normalize raw SQL errors before showing them. 401 → sign in; unauthorized/missing objects → same 404-style copy; stale edit → conflict; 413/unsupported → edit photo; 429 → bounded backoff; 5xx/network → retry with same UUID. No retry of password failures or confirmation-dependent deletion. Abort fetches when changing accounts; stale responses whose captured UID no longer matches the session are discarded.

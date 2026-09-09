@@ -12,6 +12,8 @@ import {
 import { provenanceFields } from '../../src/domain/attribute-provenance';
 import { colours, styleTagLimit } from '../../src/domain/preferences';
 import { collectionLimits, enumFields, integerRanges, seasons, textLimits } from '../../src/domain/garment-fields';
+// @ts-expect-error Executable normal-session JavaScript shares the server fixture vectors.
+import { AI_FACT_VECTORS } from '../integration/ai-controls.sessions.mjs';
 
 const facts = (fields: unknown = {}, outcome: unknown = 'ready') => ({ outcome, fields });
 function result() {
@@ -156,6 +158,41 @@ describe('future authenticated result envelope', () => {
 });
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+describe('I29e SQL/shared contract parity', () => {
+  const migration = path.join(root, 'supabase/migrations/20260909180000_ai_request_controls.sql');
+  it('uses the same semantic vectors in TypeScript and actual CI server fixtures', () => {
+    expect(AI_FACT_VECTORS.length).toBeGreaterThan(30);
+    for (const [input, expected] of AI_FACT_VECTORS as [unknown, boolean][]) {
+      expect(parseAiFacts(input).ok).toBe(expected);
+    }
+  });
+  it('pins the SQL field partition, vocabularies and all scalar/collection bounds to shared definitions', async () => {
+    const sql = await readFile(migration, 'utf8');
+    const list = (values: readonly string[]) => `array[${values.map((v) => `'${v}'`).join(',')}]`;
+    expect(sql).toContain(`observed constant text[] := ${list(observedAiFields)}`);
+    expect(sql).toContain(`estimated constant text[] := ${list(estimatedAiFields)}`);
+    for (const [field, codes] of Object.entries({
+      category: enumFields.category, pattern: enumFields.pattern, sleeve_length: enumFields.sleeve_length,
+      colours, seasons,
+    })) expect(sql).toContain(`when '${field}' then ${list(codes)}`);
+    expect(sql).toContain(`else ${list(enumFields.garment_length)} end`);
+    expect(sql).toContain(`when 'colours' then ${collectionLimits.colours} when 'seasons' then ${collectionLimits.seasons} else ${collectionLimits.style_tags}`);
+    expect(sql).toContain(`char_length(e#>>'{}')>${styleTagLimit}`);
+    expect(sql).toContain(`when 'subcategory' then ${textLimits.subcategory} when 'brand' then ${textLimits.brand} when 'size_label' then ${textLimits.size_label} else ${textLimits.material}`);
+    expect(sql).toContain(`when 'formality' then ${integerRanges.formality[1]} else ${integerRanges.upper_coverage[1]}`);
+    expect(integerRanges.lower_coverage).toEqual(integerRanges.upper_coverage);
+    expect(sql).toContain('n<>trunc(n) or n<0 or n>lim');
+    expect(sql).toContain(`octet_length(convert_to(p_facts::text,'UTF8'))>${maximumAiBytes}`);
+    expect(sql).toContain(`octet_length(convert_to(private.ai_result(r,p_facts)::text,'UTF8'))>${maximumAiBytes}`);
+    expect(sql).toContain(`generation between 1 and ${maximumAiCounter}`);
+    expect(sql).toContain(`prompt_version between 1 and ${maximumAiCounter}`);
+    expect(sql).toContain(`result_ttl_seconds between 1 and ${maximumAiLifetimeMs / 1000}`);
+    expect(sql).toContain('floor(extract(epoch from p_request.created_at)*1000)::bigint');
+    expect(sql).toContain('floor(extract(epoch from p_request.expires_at)*1000)::bigint');
+    expect(sql).toContain("'^[A-Za-z0-9._:/-]{1,128}$'");
+    expect(sql).toContain("'^[0-9a-f]{64}$'");
+  });
+});
 const modules = ['ai-analysis', 'ai-draft'].map((name) => path.join(root, 'src/domain', `${name}.ts`));
 function imports(source: string, filename: string): string[] {
   const found: string[] = [];

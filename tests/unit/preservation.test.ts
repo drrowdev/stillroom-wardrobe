@@ -23,7 +23,7 @@ type OwnerData = { label: string; ownerId: string; tables: TableRows; objects: [
 type ObjectEvidence = { path: string; bytes: number; sha256: string };
 type Snapshot = {
   schemaVersion: number; projectId: string; stage: string; run: string;
-  sources: { base: string; target: string; description: string; collections: string }; owners: string[];
+  sources: { base: string; target: string; description: string; collections: string; controls: string }; owners: string[];
   data: [OwnerData, OwnerData];
 };
 const sha = 'a'.repeat(64);
@@ -103,6 +103,7 @@ const baseTable = [
   '   `20260906000000` | ` `              | `2026-09-06 00:00:00` ',
   '   `20260909070000` | ` `              | `2026-09-09 07:00:00` ',
   '   `20260909110000` | ` `              | `2026-09-09 11:00:00` ',
+  '   `20260909180000` | ` `              | `2026-09-09 18:00:00` ',
   '',
   '',
 ].join('\n');
@@ -115,6 +116,7 @@ const targetTable = [
   '   `20260906000000` | `20260906000000` | `2026-09-06 00:00:00` ',
   '   `20260909070000` | `20260909070000` | `2026-09-09 07:00:00` ',
   '   `20260909110000` | `20260909110000` | `2026-09-09 11:00:00` ',
+  '   `20260909180000` | `20260909180000` | `2026-09-09 18:00:00` ',
   '',
   '',
 ].join('\n');
@@ -135,11 +137,11 @@ describe('CI-only preservation guards', () => {
       expect(() => assertRehearsalEnvironment({ ...validEnv, [key]: 'fictional-refused' }, [])).toThrow();
     }
   });
-  it('pins exactly four regular migrations, lengths and hashes', async () => {
-    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000']);
+  it('pins exactly five regular migrations, lengths and hashes', async () => {
+    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000']);
     expect(() => validateInventory(inventory())).not.toThrow();
     await expect(assertMigrationInventory()).resolves.toBeUndefined();
-    for (const index of [0, 1, 2, 3]) for (const [key, value] of [
+    for (const index of [0, 1, 2, 3, 4]) for (const [key, value] of [
       ['name', 'unexpected.sql'], ['bytes', 0], ['bytes', present(inventory()[index]).bytes + 1],
       ['sha256', 'b'.repeat(64)], ['regular', false], ['symlink', true],
     ]) {
@@ -177,8 +179,8 @@ describe('CI-only preservation guards', () => {
     expect(() => assertCapabilities([{ code: 0, stdout: '  --local\n' }, ...help.slice(1)])).toThrow();
   });
   it('parses source-derived applied/pending tables without claiming execution', () => {
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000'] });
-    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000'], pending: [] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000'] });
+    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000'], pending: [] });
     expect(() => assertHistory(targetTable, 'base')).toThrow();
     expect(() => assertHistory(baseTable, 'target')).toThrow();
     expect(() => assertHistory(baseTable, 'other')).toThrow();
@@ -189,7 +191,7 @@ describe('CI-only preservation guards', () => {
   it('retains SOURCE-DERIVED renderer padding, widths and decorative blank lines', () => {
     for (const table of [baseTable, targetTable]) {
       const lines = table.split('\n');
-      expect(lines).toHaveLength(10);
+      expect(lines).toHaveLength(11);
       expect(lines.slice(0, 2)).toEqual(['', '  ']);
       expect(lines.slice(-2)).toEqual(['', '']);
       for (const line of lines.slice(2, -2)) {
@@ -261,7 +263,7 @@ describe('CI-only preservation guards', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe('EVIDENCE_REQUIRED');
     expect(historyFailureDetail(failure)).toBe(`; reason=${reason}`);
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000'] });
   });
   it('distinguishes history command failure without forwarding command output or arbitrary errors', () => {
     const privateText = 'arbitrary upstream text /private/fixture-path';
@@ -279,14 +281,15 @@ describe('CI-only preservation guards', () => {
     }
   });
   it('derives untrimmed source export bodies; this is not a database observation', async () => {
-    for (const [name, md5] of [
-      ['20260905000000_initial.sql', 'a8188b771786538ec7ef031d9d974fce'],
-      ['20260906000000_item_field_provenance.sql', 'cb47b75d41751df15813773388c062cf'],
+    for (const [name, bytes, md5] of [
+      ['20260905000000_initial.sql', 1452, 'a8188b771786538ec7ef031d9d974fce'],
+      ['20260909180000_ai_request_controls.sql', 1511, '689a81770938d05caa3a3f800ae3ecef'],
     ] as const) {
       const sql = await readFile(path.join(root, 'supabase', 'migrations', name), 'utf8');
-      expect(exportBodyEvidence(sql)).toEqual({ bytes: 1452, md5 });
+      expect(exportBodyEvidence(sql)).toEqual({ bytes, md5 });
       expect(() => exportBodyEvidence(sql + sql)).toThrow();
-      expect(() => exportBodyEvidence(sql.replace('as $$\n  select case', 'as $body$\n  select case'))).toThrow();
+      const declaration = 'function public.export_manifest(p_export_id uuid) returns jsonb\nlanguage sql stable security invoker set search_path = \'\' as $$';
+      expect(() => exportBodyEvidence(sql.replace(declaration, declaration.replace('$$', '$body$')))).toThrow();
       const start = sql.indexOf('\n  select case when private.is_approved() then jsonb_build_object(');
       expect(() => exportBodyEvidence(sql.slice(0, start + 20))).toThrow();
     }
@@ -471,6 +474,18 @@ describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
     }
     downloads.mockImplementation(() => new Response(bytes));
     await expect(captureData(client(), [owner, other], run)).resolves.toMatchObject({ owners: [...owners] });
+    await expect(captureData(client(), [owner, other], run, true)).rejects.toThrow('EVIDENCE_REQUIRED');
+    for (const data of snapshot.data) Object.assign(data.tables.profiles[0], {
+      ai_enabled: false, ai_notice_revision: null, ai_consented_at: null,
+    });
+    const captured = await captureData(client(), [owner, other], run, true);
+    for (const data of captured.data) expect(Object.keys(data.tables.profiles[0]).sort()).toEqual(columns.profiles.split(' ').sort());
+    for (const [key, value] of [['ai_enabled', true], ['ai_notice_revision', 1], ['ai_consented_at', time]] as const) {
+      const row = snapshot.data[0].tables.profiles[0], prior = row[key];
+      row[key] = value;
+      await expect(captureData(client(), [owner, other], run, true)).rejects.toThrow('EVIDENCE_REQUIRED');
+      row[key] = prior!;
+    }
   });
   it('keeps full export shape, owner and table equality assertions after the HTTP reader', async () => {
     const after = upgraded(fixture());
@@ -557,6 +572,7 @@ describe('strict bounded base snapshots', () => {
     for (const changes of [
       { schemaVersion: 2 }, { projectId: 'other' }, { stage: 'target' }, { run: randomUUID() },
       { sources: { ...SOURCE_HASHES, target: sha } }, { sources: { ...SOURCE_HASHES, description: sha } }, { sources: { ...SOURCE_HASHES, collections: sha } },
+      { sources: { ...SOURCE_HASHES, controls: sha } },
       { sources: { base: SOURCE_HASHES.base, target: SOURCE_HASHES.target } }, { owners: [...owners].reverse() },
       { owners: [owners[0], owners[0]] }, { extra: true }, { data: [] },
     ]) expect(() => validateSnapshot({ ...snapshot, ...changes }, run, owners)).toThrow();

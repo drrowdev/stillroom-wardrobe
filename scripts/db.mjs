@@ -43,6 +43,16 @@ async function main() {
       return;
     }
     console.log(provision.stdout.trim());
+    const { commandEnvironment } = await import('./backend/local.mjs');
+    const ai = await runCommand(process.execPath, [path.join(ROOT, 'scripts', 'provision-ai-control-fixtures.mjs')], {
+      env: { ...commandEnvironment(), ALLOW_SECURITY_TESTS: process.env.ALLOW_SECURITY_TESTS },
+    });
+    if (ai.code !== 0) {
+      console.error('FAIL: local AI control fixtures did not complete; reset required.');
+      process.exitCode = ai.code;
+      return;
+    }
+    console.log(ai.stdout.trim());
     console.log('PASS: local migration reset and separate fixture provisioning completed.');
     return;
   }

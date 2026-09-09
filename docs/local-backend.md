@@ -142,6 +142,91 @@ accessibility; mocks and emulated devices are not hosted or physical-phone proof
 
 ## First local run
 
+### I29e staged AI control fixtures (source/local CI only)
+
+The full `npm run db:reset` branch invokes
+`scripts/provision-ai-control-fixtures.mjs` **after** the unchanged core
+provisioner. Start/types and the base-preservation provisioner are unchanged.
+There is no hosted target, admin-key/status fetch, owner impersonation,
+JWT/GUC/SET ROLE, new role, extension, environment override or fixture self-heal.
+The seeder requires existing project, local Docker socket/container, literal
+loopback and credential-cache guards, exactly the two matching fictional core
+accounts, and empty new AI tables before setup. Used/unexpected state fails.
+Existing `ALLOW_SECURITY_TESTS=1` is required; the seeder never invents an opt-in.
+
+P1–S6 are ordered checkpoints, with finite named normal children in S4 per the
+accepted PR #16 clarification. All owner actions/assertions use actual A/B
+password HTTP sessions in `normalSessionEnvironment`; only setup, trusted-server
+RPC calls, named timestamp seeding and SQL metadata inspection use privileged
+local SQL. No values, UUIDs, tokens, SQL or HTTP bodies are printed.
+
+* **P1:** normal UNCONFIGURED/default-deny, failed enable leaves profiles exact,
+  withdrawal without configuration.
+* **S2:** setup fictional policies with the **same** model `fictional:controls/v1`,
+  prompt 1, notice 1 and TTL 3600 for both owners; max reserve 5000 micro each.
+  A allowance 15000/rate 20, B allowance 100000/rate 3. A's finite spare rate
+  capacity accommodates eight named scratch requests; it does not weaken the
+  independent allowance race. No real provider/budget approval is implied.
+* **P3:** normal consent CAS and stale denial, all twelve old profile UPDATE
+  columns including trigger-neutralized timestamp/version input, A ready/expiring
+  and B ready/spare reservations, exact replay/conflicts, active-draft denial
+  before exhaustion, and separate monetary/rate races with exact rejection codes.
+  Each race admits exactly one request with one reserve/count delta.
+  Temporary normal-owned item/image/outfit/history fixtures use the existing
+  632-byte synthetic JPEG and real authenticated Storage; raw rows and downloaded
+  byte hashes are compared around controls, then exact owned fixtures are removed.
+  This is not private-photo/provider transfer or a new capture scenario.
+* **S4:** trusted dispatch/settlement creates distinct ready A/B results; named
+  normal children release race/spare reservations, reserve scratch requests,
+  withdraw/restore consent, read and discard. Release preserves admitted counts.
+  Server checks distinguish NULL from zero, never-dispatched release from held
+  failure, once-only dispatch, withdrawal/expiry denial, billing after removal,
+  immutable delayed-result lifetime, equal/different bills/facts, invalid facts,
+  a 16000-micro overrun and a one-micro anomalous late charge without dispatch.
+  No limit/balance reset occurs. Named scratch requests finish closed; no unknown
+  hold is silently refunded.
+* At the end of S4, only named new paired ledger/request timestamps and UTC
+  periods are seeded consistently into the past. A delayed-completion scratch
+  preserves its original one-hour lifetime. The purge scratch and A expiry
+  fixture become expired; a **limit-one** purge removes exactly one of two full
+  rows, retaining a held charge until known reconciliation. These are
+  **fixture-seeded clocks**, not elapsed real-time retention evidence.
+* **P5:** a normal owner reads the remaining expired fixture against actual server
+  time, receives no facts and removes the full context. Both owners finish
+  configured/consented with distinct ready results; final A accounted cost is
+  16001, B zero. No new reserve can bypass the tested allowance/rate.
+* **S6:** privileged structural verification checks two remaining ready full
+  rows, fourteen admitted ledger rows, twelve explained closures, no outstanding
+  reserved/held rows and retained expiry reason/cost. SQL grants/RLS and actual
+  export executable body/attributes are checked separately from Data API schema
+  refusal; these are not administrator assertions of owner access.
+
+The ordinary integration/security runner invokes the **full** new modules.
+Later runs are non-consuming/re-runnable read, replay, denial, isolation,
+terminal-state and immutability checks, including both directions with real
+ready peer data. Missing/changed/expired fixtures fail with reset guidance.
+They do not silently reconsent, reseed, refund or skip a subset.
+
+Preservation pins all five migrations: base-only applied/four pending, the one
+existing migration-up, then five applied/none pending. Its original two owners,
+ten tables, thirty rows, eight object byte comparisons, raw old timestamps/
+versions and 512-KiB run-bound snapshot remain unchanged. New AI profile defaults
+are checked separately in normal owned reads; the old profile/export oracle
+excludes them. This seeder never runs in the base rehearsal.
+
+**Stage 1:** generated types stay unchanged. Native validation is static/unit/
+synthetic-browser only; no extra local DB startup/reset/up/list/provision/psql/
+typegen/rehearsal. Parent trust/review and first exact-head CI must prove actual
+schema, fixtures, ordinary access, preservation and generation. Only subsequent
+old committed-type parity may be an anticipated staging failure, never a final
+pass. **Stage 2:** a separately verified continuation imports only the verified
+exact-head generated artifact's text, then fresh final CI proves exact parity.
+
+Logical expiry and opportunistic/server deletion are not an inactive-account
+24-hour physical retention guarantee. No scheduler is installed; paid/private
+photo activation, provider/account/notice/allowance setup, hosted migrations and
+deployment remain separately blocked. Live/source/hosted state is unchanged.
+
 Install/start Docker separately, using a local Unix socket or Docker Desktop Windows named pipe. Ensure ports 54320–54322 and 54324 are free. Docker contexts pointing to SSH/TCP daemons and `DOCKER_HOST`/`DOCKER_CONTEXT` overrides are deliberately refused. Use the Docker CLI's selected local context.
 
 On Windows, use `npm.cmd` if PowerShell script execution blocks `npm.ps1`:

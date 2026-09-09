@@ -12,6 +12,7 @@ export const SOURCE_HASHES = Object.freeze({
   base: MIGRATION_HASH, target: '4060e963bc5a986857f31bc9b528dd6d7ea8caee720336de8499d59e8f8c3f92',
   description: '383012f9662a4b672b58d6a690bc12691e741468af464af2fe841525e723bb98',
   collections: '5296c58ac806ae560afd3befb4dc7e0bfc4fa61fa1898e9a21ef8e6db212b1d4',
+  controls: 'f3c263ef16035a1ac07afe9911faf2ab27ed3a72b730f5db0168a0180df02ade',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -409,11 +410,18 @@ async function seed(client, owner) {
   await insert(owner, 'suggestion_feedback', { id: randomUUID(), item_ids: [explicit.id, implicit.id], vote: -1 });
 }
 
-export async function captureData(client, owners, run) {
+export async function captureData(client, owners, run, aiDefaults = false) {
   const data = [];
   for (const owner of owners) {
     const tables = {};
     for (const table of TABLES) tables[table] = await client.rows(owner, table);
+    if (aiDefaults) {
+      tables.profiles = tables.profiles.map((row) => {
+        const { ai_enabled, ai_notice_revision, ai_consented_at, ...old } = row;
+        requireEvidence(ai_enabled === false && ai_notice_revision === null && ai_consented_at === null);
+        return old;
+      });
+    }
     const objects = [];
     for (const image of tables.item_images) {
       for (const variant of ['main', 'thumb']) {
@@ -482,7 +490,7 @@ async function main() {
     } else {
       stage = 'verify-read-only-comparison';
       const before = await readSnapshot(run, ids);
-      const after = await captureData(client, owners, run);
+      const after = await captureData(client, owners, run, true);
       comparePreservation(before, after, run, ids);
       stage = 'verify-post-comparison-probes';
       await functionalProbes(client, owners, after);
