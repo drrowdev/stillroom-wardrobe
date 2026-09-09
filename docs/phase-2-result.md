@@ -1911,3 +1911,182 @@ acceptance, automatic deployments off and pending manual/device checks remain
 unchanged. I29b hosted SQL/deployment is not approved. Full I29/all-field edits,
 AI consent/receipts/allowances/expiry and saved-only export remain unfinished MVP
 work, not implicitly authorized here. Hand off this same PR and stop editing.
+
+## 9 September 2026 — I29c complete manual fields source candidate
+
+This append records the manual all-field foundation for R03/R23/R28, with
+R18/R19/R26/R27 ownership, private-image, accessibility and localization
+contracts retained. It is not full I29, Phase 2, hosted or manual acceptance.
+Earlier results above remain historical evidence, byte-for-byte unchanged.
+
+### This packet's authority and context
+
+Repository `drrowdev/stillroom-wardrobe`, PR #14, branch
+`copilot/i29c-manual-garment-field-editing`; authorized base/main
+`e00c554af6aed844eb9f582ee9db96ff54805e89`, initial head
+`530e7b43a68f9a8949ccba375ec9de689a2c146f`.
+Read the full [I29c plan](https://github.com/drrowdev/stillroom-wardrobe/pull/13#issuecomment-5601422784)
+and this session's own
+[public allocation receipt](https://github.com/drrowdev/stillroom-wardrobe/pull/14#issuecomment-5601586146)
+after context and before edits. The coordinator recorded explicit and actual
+`sweagent-capi:gpt-6-astra`, task `a0adc76b-7bad-4163-99ee-4df834f1059b`,
+session `81cd6c41-ec7f-4c1c-a301-0598fdfe7401`, repository/PR/branch/base/head and
+12:07–12:09 UTC verification. This is not a reused historical receipt.
+
+The approved actual different-provider critique was **Anthropic Claude Opus 5**,
+`i29c-full-fields-plan-critique`. Its recorded amendments couple every changed
+value and user-next assertion, omit untouched INSERT provenance, distinguish
+pending/ready caption reconciliation, retain the original preservation oracle,
+describe actual system-column authority accurately, reuse catalog/form/format
+contracts and separate the two new captures. The coordinator retained ready-row
+caption equality and approved the complete 33-path packet before implementation.
+No additional reviewer agent or implementation writer was launched here.
+
+Context/source reads included `AGENTS.md`, `.github/copilot-instructions.md`,
+`docs/cloud-development.md`, phase results, the approved blueprint requirements,
+actual migration/type contracts, and the affected domain/data/editor/upload,
+catalog/formatting, browser/mock, CI and normal-session/preservation test files.
+In particular the field implementation uses the existing
+`src/domain/attribute-provenance.ts`, `src/domain/preferences.ts`,
+`src/domain/wardrobe.ts` and `src/i18n/index.ts` contracts rather than a new
+taxonomy or form dependency. Current PR discussion/diff/reviews and Actions were
+read: base CI `34341096351` passed; initial PR CI `34349237313` and Apple
+`34349237329` required authorization. The failed-job log query returned no jobs
+or failures; it was not a test pass. This worker authorized/reran no workflow.
+
+Implementation checkpoint `c4bb389d96e7b90e62d08e6ec0627f61f80b46a3` was followed
+by the ordinary scoped summary-selector correction at source candidate
+`56b2ee1761e08640fe6f2fcfd8d292ce22c2eb1f`. Only the approved 33 paths are changed,
+including this append. Governance, packages/locks, Auth/settings, generated
+types, old migrations, image processing/transport, B3 receiver/wire sections,
+native Apple selections and traceability acceptance targets remain unchanged.
+At that source head, CI `34352029043` and Apple `34352029265` still required
+authorization; the CI failed-job query returned zero jobs. Fresh final-head
+execution remains the coordinator's gate, not an unchanged rerun-to-green.
+
+### Implemented source and evidence boundaries
+
+- One shared controlled `item-form.tsx` exposes all 30 manual garment fields,
+  grouped behind the existing optional-details wrapper. Inner accessible
+  disclosure buttons preserve the frozen generic summary selector. Unknowns,
+  optional clears and six editable app defaults are distinct; localized
+  EN/FI/SV labels/errors retain literal personal text and Unicode code points.
+  Collapsed invalid groups open before focus. Capture locks remain readonly;
+  pending/unconfirmed saved inputs remain disabled.
+- The closed raw/validated model preserves pending text, price entry locale,
+  canonical decimal meaning, real date-only values, tolerated untouched
+  collections and original dirty baselines. Nullable zero/false are not null.
+  Numeric SDK conversion checks a finite bounded two-decimal round trip; it
+  does not claim exact binary decimal representation or use formatted money
+  as stored data. Capture currency initializes once, without a profile write.
+- Changed factual values and manual revisions are built together; untouched
+  creation assertions are omitted, explicit unknown clears can assert user/1,
+  and saved unchanged user facts do not get gratuitous revision bumps.
+  All intended values and untouched facts/provenance, including `created_at`,
+  participate in strict saved confirmation. App defaults have no provenance.
+  The client projection excludes arbitrary system fields; database identity
+  UPDATE denial and server-controlled UPDATE timestamps/version do not imply
+  a blanket grant denial of owner `deleted_at` or all INSERT metadata.
+- Explicit capture Save freezes all reviewed values, description, provenance,
+  photo metadata/Blob references, request IDs and owner/epoch. A synchronous
+  latch prevents a second allocation. Duplicate continuation checks the entire
+  frozen item at version 1 and immutable image metadata. Pending requires the
+  matching caption/counter 1; ready permits a later valid counter only with the
+  same caption. Conflicts never overwrite or re-upload a changed ready row.
+  Storage transport/hash/options, upload ordering and `commit_image` are intact.
+- Saved garment and description sections retain separate frozen attempts,
+  independent drafts and explicit read-only uncertain-response reconciliation.
+  Successful saves stay on detail and refresh the library without losing the
+  sibling draft. No automatic rebase, second write, analysis or enrichment runs.
+- New `20260909110000_item_optional_collections.sql` is one transaction changing
+  only colours/seasons lower cardinalities/defaults. It is 454 bytes, SHA-256
+  `5296c58ac806ae560afd3befb4dc7e0bfc4fa61fa1898e9a21ef8e6db212b1d4`.
+  There is no backfill, new column/function/grant or old-source edit. Historical
+  `['unknown']` and all-four-season arrays/provenance remain stored unchanged.
+  Generated types remain 22312 bytes, SHA-256
+  `6787f9a2a776db922d0e424d7bfb11746854dd896bbabeec3fd2f359cd5dd759`.
+- Preservation adds only the fourth pinned source/binding and bounded
+  non-mutating collection rejection probes. The three old hashes/sizes,
+  base columns, 2 owners/10 tables/30 rows/8 objects, legacy array oracle,
+  raw versions/timestamps and actual downloaded-byte comparisons are retained.
+  Source-derived history tests are not actual CLI/migration evidence.
+  Added ordinary A/B/anonymous suites cover full fields/clears, default empties,
+  numeric limits, atomic rejection, cross-owner denial and unchanged
+  profile/history/image bytes. They were **not executed natively**.
+
+### Native validation and corrections
+
+Unit/static suites and Vite browser suites ran sequentially. Iteration exposed
+and corrected an early detail-load wait in the new FI/SV tests, the existing
+valid-title ARIA contract, and the fourth source-history fixture row count.
+The targeted all-project garment/detail run initially had 62 passes/40 failures:
+six valid-title ARIA mismatches and 34 missing pinned-WebKit launch failures.
+Only after that missing-engine failure,
+`npx playwright install --with-deps webkit` restored the existing engine/system
+dependencies (exit 0), without repository dependency/version changes.
+
+The first complete `npm run test:browser -- --retries=0` returned 413 passes and
+18 failures: the frozen Slice `details.optional-details summary` selector
+matched the nested summaries. The scoped disclosure-button correction retained
+one matching summary without changing Slice or the other frozen image specs.
+The following targeted command then passed **12/12**:
+
+```sh
+npm run test:browser -- tests/browser/slice.spec.ts tests/browser/garment-fields.spec.ts tests/browser/item-details.spec.ts --project=chromium --grep 'photo, editable draft|accessibility of private preparation|all thirty|unknown defaults|visual evidence|accessibility.*form' --retries=0
+```
+
+Final native results for source candidate `56b2ee1761e08640fe6f2fcfd8d292ce22c2eb1f`
+(subsequent changes are this result append only):
+
+| Command | Actual result |
+| --- | --- |
+| `npm run test:unit` | 815/815 in 15 files, exit 0. |
+| `npm run lint` | Exit 0. |
+| `npm run typecheck` | Exit 0. |
+| `npm run check:translations` | 470 keys in EN/FI/SV, 43 source files, exit 0. |
+| `npm run test:browser -- --retries=0` | 431/431, 5.9 minutes, exit 0 after the concrete correction. |
+| `npm run test:a11y -- --retries=0` | 33/33, 51.2 seconds, exit 0 after full browsers. |
+| `npm run build` | Exit 0; JS 174.64 kB gzip, CSS 5.33 kB gzip. Existing non-failing >500 kB chunk warning remains. |
+| `npm run scan:secrets` | 172 text files and build canary checked, exit 0. |
+| `npm run check:dependencies` | 12 production/220 development packages; zero unverified release dates; production audit completed with zero critical/high/moderate/low findings, exit 0. |
+| `git diff --check` | Exit 0. |
+
+The original phase-result prefix was also compared byte-for-byte against the
+authorized base with `cmp` (exit 0). Build and secret scan shared an unprinted process-local
+`STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`.
+
+### Handoff gates and unchanged limits
+
+Coordinator owns fresh trusted exact-final-head CI, actual four-source
+preservation, ordinary integration/security/recovery, real type generation and
+parity, unchanged native Apple 4+3, genuine independent final review, and actual
+inspection of all **eight** current-head PNGs. Existing profile/crop pairs stay;
+saved-detail slots show expanded fields; only the new creation pair is added at
+1280/320 px under `test-results/i29c-visual`. The existing pinned App artifact
+action adds only that exact pair with one-day retention/missing-file failure.
+Functional/owner/origin/route/language/privacy/overflow/axe checks run in every
+applicable project; only Chromium writes screenshots and validates the bounded
+regular PNG files.
+The worker opened no image/archive/binary and received no screenshot bytes.
+Capture/DOM/hash checks are not actual visual acceptance. The coordinator must
+verify run/head/artifact members/type/size/privacy, actually view all eight,
+record hashes/verdict publicly and in coordination records, and perform the
+named cleanup. Missing/unread evidence remains pending.
+
+The existing native final checker is reserved for one invocation after this
+candidate and result append are committed and candidate processes finish.
+Its actual components/findings and unavailable analysis belong in the PR
+handoff, not an extra self-hash-only source commit or invented SQL pass.
+Stored-at-counter-ceiling runtime coverage and existing B3/manual/operator/
+device gates retain their prior status; this packet does not waive them.
+
+No native DB start/reset/up/list/provision/psql/typegen/rehearsal, hosted
+migration/smoke/Auth operation, Actions approval/rerun, new agent/branch/PR,
+merge or deployment was performed. Live remains the reviewed historical
+`31bdd067`/source `9d1858`, hosted base plus I29a; I29b/I29c hosted application
+is not authorized here. Phase 0 remains engineering complete, acceptance open.
+Only the second hosted-account test was user-deferred, not all manual checks.
+Automatic photo analysis, consent/allowances/receipts/expiry/source-image history
+and final saved-only export remain required unfinished I29/MVP work; I08
+trash/undo/deletion/bulk/filter/eligibility workflows are not implemented by
+these basic field controls. Hand off PR #14 and stop; no next packet is implicit.
