@@ -1235,3 +1235,162 @@ Text-only model inputs were retained; fixture buffers stayed program-only.
 B3 remains open, and conditional approval `5590736782` / operator method
 `5592161566` grant no current live/DDL/history-repair/account/private-input/
 provider/paid-AI authority. Publish final head/results and stop editing for review.
+
+## PR #12 user-approved type-generation exit bucket — 9 September 2026
+
+Same PR #12 / `copilot/modelgpt-6-astra`, base
+`3c84cfb07e569dab416ccd1b5d19c7c6e251010c`, clean starting head
+`056d7b0581ffc17b8cbda7e489d3ced1d931f1ae` (six existing PR paths).
+Read full [extension 5595642216](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5595642216)
+and [core preservation plan 5591979149](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5591979149).
+The user explicitly approved two additional existing tooling paths and one
+future fresh check cycle. Actual independent **Anthropic / Claude Opus 5**
+reviewer `01e4035d-ee11-4b4e-bdb3-df15c4b55689`, turn 11, rejected unpinned
+Docker/postgres-meta prose classification and accepted the bounded numeric
+approach. Coordinator amendments require complete canonical tokens, duplicate
+rejection, source-grounded framing and neutral labels. This supports I29a's
+release-safety prerequisite (R18/R19/R23/R26/R27/R28), not another feature.
+
+After context and before edits, reread complete
+[own receipt 5595656064](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5595656064):
+explicitly requested `gpt-6-astra`, authenticated actual
+`sweagent-capi:gpt-6-astra`, task `610dc1c9-9832-428b-b47a-3faa4108ed1a`,
+session `e9b03a93-ef36-4e2d-9160-d4706973ca91`, immediate GET
+`2026-09-09T04:10:21.0024405Z`, sole-writer/ref re-verification
+`2026-09-09T04:10:59.3268529Z`. The local session ID matched that receipt;
+native run `34309921487`, repository/PR/base/head/branch matched.
+No historical receipt or prompt/branch model label substituted for allocation
+evidence. No additional agent was started.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`,
+cloud guide scope/runtime/hosted sections, relevant Phase 0/Phase 2 and
+local-backend evidence; blueprint 00/03/05/10/13/14 and relevant 07/08/15/20
+sections; actual base migration excerpt, full target migration and generated
+type excerpt; complete local helper and backend unit file, unchanged db wrapper,
+secret scanner, preservation orchestrator/unit and normal-owner module excerpts,
+and package/CI diff. PR details/discussion, empty reviews/threads and MCP
+workflow metadata/Database logs were read, including full fixture clarification
+5592284908, prior correction 5593272286 and current evidence 5593746343.
+
+### Existing real evidence remains distinct
+
+[Evidence 5593746343](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5593746343)
+and CI `34291271829` / Database `102282051833` at `056d7b0` establish real
+S1–S4 preservation PASS: base05-only history, ordinary capture of two fictional
+owners / ten tables / thirty rows / eight objects, base-history recheck, only
+target06 applied, exact final history, complete old values/versions/raw timestamp
+strings and stored-plus-actually-downloaded image comparisons, new unknowns,
+post-comparison probes and exact-run cleanup. Normal reset/integration/security
+and recovery (one case, 6.3s) passed. This is local fictional-data evidence,
+not a hosted migration or full release acceptance. Earlier failures remain above.
+
+The later type-generation gate failed: CLI exit 1, 1984ms, stdout 0 bytes,
+stderr 312 bytes, Database/images markers false, connect marker true, seven LF
+separators, first-line 21 bytes and `run-container`; wrapper exit 2, existing
+type file unchanged. Type upload/parity were skipped, not passes. Raw generator
+stderr was not retrieved or published; startup also withholds CLI output.
+Matching historical counts do not identify a cause. Separate App 554-unit /
+329-browser and native four-plus-three passes do not close type parity, actual
+visual acceptance or B3's release-quality decision.
+
+### Exact bounded change and source-derived tests
+
+Only `scripts/backend/local.mjs` inside `describeGenerationResult`,
+`tests/unit/local-backend.test.ts`, and this append change. The full PR therefore
+has eight paths; all original preservation code, package/CI wiring, other helper
+functions/exports, db wrapper, CLI arguments/environment/timeouts, SQL/types,
+app, dependencies and browser/Apple/setup configuration remain unchanged.
+
+Read the complete pinned CLI 2.116.0 handler at commit
+`997a1e69a4a83466964ed874d3a604c88a7b3866`:
+`apps/cli/src/legacy/commands/gen/types/types.handler.ts`, blob
+`63a47aa0fd509efc95d3a7cf387be557880f74bf`. It creates the error message
+`error running container: exit ${result.exitCode}`. Followed its entrypoint and
+the relevant `shared/cli/run.ts` failure path (blob
+`758ef9eac2246b73c18f0fc6c8db0efe22b6f280`) through
+`shared/output/normalize-error.ts` (blob
+`bd89a4c1d54ab454108ebea081cab780dc6a7768`) to the text failure renderer in
+`shared/output/output.layer.ts` (blob
+`bf2a98728404b799fa2018895d8fa02f2da509de`). The output service/text formatter
+were also inspected to distinguish raw failure rendering from CLI parse errors.
+With the existing `NO_COLOR=1` environment, the message is bare and followed by
+LF; clack framing, CRLF, quoting, padding, ANSI and unterminated lines are not
+accepted alternatives. No upstream implementation was copied or fetched at test
+time, and no CLI command was added or executed to obtain fixtures.
+
+The new `stderrContainerExitBucket` exists only on `nonzero-with-stderr`,
+after all eleven original fields. Its four possible literals are `exit-125`,
+`exit-126-or-127`, `other-nonzero`, and `unclassified`. The added scan runs only
+when the existing stderr byte count is at most 4096 UTF-8 bytes. Exactly one
+`error running container:` anchor anywhere in that bounded string is required,
+including malformed/embedded anchors in the duplicate count. A bare full message
+at string start or after LF must end in LF and contain a canonical unsigned
+decimal 1–255. No partial digit/text match, sign, leading zero, decimal, zero,
+out-of-range value or first/last duplicate selection is accepted. Unsupported
+or oversized input remains unclassified; invalid tuples retain their original
+output without the new field. Only the fixed bucket is emitted, never a captured
+number/message, raw text, private identifier or inferred Docker/network/auth cause.
+It does not prove that a particular container started.
+
+Sixty-two added unit cases cover numeric boundaries 0/1/124/125/126/127/128/255/256,
+malformed/partial/long-digit/duplicate anchors and framing, exact 4096/4097-byte
+limits (including multibyte text and an out-of-bound duplicate), unsupported
+values, getters/toJSON and private-shaped text. Source-derived positives are
+labelled as such. Serialized old eleven-field reports are compared after
+omitting only the new field; inactive/invalid golden reports remain byte-equal.
+Existing operation-priority, tag, byte/LF counting and privacy tests remain;
+the numeric bucket does not override old operation priority. No declarations,
+compiler exceptions, test framework or dependency were added or changed.
+
+### Actual native validation and handoff limits
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Exact command | Actual final result |
+|---|---|
+| `npm run test:unit -- tests/unit/local-backend.test.ts` | 182/182 passed, exit 0. |
+| `npm run test:unit` | 616/616 in 13 files, exit 0; includes unchanged preservation/import-safety and fail-closed local-runner tests. |
+| `npm run lint` | Exit 0. |
+| `npm run typecheck` | Exit 0. |
+| `node --check /home/runner/work/stillroom-wardrobe/stillroom-wardrobe/scripts/backend/local.mjs` | Exit 0. |
+| `npm run check:translations` | 402 EN/FI/SV keys, 37 source files, exit 0. |
+| `npm run build` | Exit 0; JS 164.26 kB gzip, CSS 4.97 kB gzip; existing non-failing >500 kB chunk warning. |
+| `npm run scan:secrets` | Exit 0; 160 text files and fresh unprinted build canary checked before this append. |
+| `git diff --check` | Exit 0 before append; repeated before commit. |
+| `git diff --exit-code 056d7b0581ffc17b8cbda7e489d3ced1d931f1ae -- . ':!scripts/backend/local.mjs' ':!tests/unit/local-backend.test.ts' ':!docs/phase-2-result.md'` | Exit 0; all frozen tracked paths unchanged. |
+
+Build/scan shared `export STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`
+without printing the value. The initial focused run had two fixture failures
+(LF byte count and multibyte boundary padding); the second retained one
+incorrect golden stdout byte count. Fixture corrections preceded the final
+targeted/full passes; production logic and scope did not change during iteration.
+Precommit `node --input-type=module` inline static assertions passed (exit 0):
+the existing TypeScript AST located the function body, all helper text outside
+it was byte-equal, this file retained its full starting-head byte prefix, and
+`git diff --name-only` contained exactly the three allowed files. The
+changed-file secret scanner reported no secrets; full PR inventory is eight paths.
+
+After the completed candidate is committed and processes finish, invoke the
+existing native final validator **once**; report actual components/languages,
+findings and unavailable tools on the PR. An unreported SQL analysis or missing
+automated reviewer is not a pass. No alternative scanner, extra agent, repeated
+validator or metadata-only evidence repair is authorized.
+
+No native type generation/rehearsal/migration-list/reset/up/provision/psql,
+DB/integration/security/recovery/browser/a11y/Apple/hosted command or service
+operation ran. Existing units exercise refusal/import-safe paths only, not live
+services. No raw privileged log, private photo, image/archive/binary view or
+image-bearing model input was used; fixture buffers stayed program-only.
+
+The coordinator owns trust inspection and genuine affected independent review
+before the **one new-head unchanged CI plus required Apple cycle, each once**.
+The worker has not authorized or rerun either workflow. A classified generation
+failure stops with the fixed category for a separate next decision; unclassified
+stops without another flag/retry series. If generation and exact parity pass,
+record that success while leaving the previous cause unobserved/not fixed and
+the new classifier's live failure path **unexercised**. Unit success here is not
+such live evidence. Fresh-head normal-owner/App/native/type/visual gates and B3
+remain required. No merge/main mutation/deployment, conditional hosted execution,
+history repair/replay, account/data/private-input/provider/paid-AI operation,
+new branch/PR/agent or next packet occurred. Publish final head/files/results
+and stop editing for parent review.

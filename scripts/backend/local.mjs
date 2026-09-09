@@ -92,6 +92,22 @@ export function describeGenerationResult(result, elapsedMs) {
           break;
         }
       }
+      report.stderrContainerExitBucket = 'unclassified';
+      // CLI 2.116.0 emits a bare message plus LF with NO_COLOR; never infer a cause.
+      if (report.stderrBytes <= 4096) {
+        const anchor = 'error running container:';
+        const first = stderr.indexOf(anchor);
+        if (first !== -1 && stderr.indexOf(anchor, first + anchor.length) === -1) {
+          const match = /(?:^|\n)error running container: exit ([1-9][0-9]{0,2})\n/.exec(stderr);
+          if (match) {
+            const exit = Number(match[1]);
+            if (exit <= 255) {
+              report.stderrContainerExitBucket = exit === 125 ? 'exit-125'
+                : exit === 126 || exit === 127 ? 'exit-126-or-127' : 'other-nonzero';
+            }
+          }
+        }
+      }
     }
   } catch {
     // Even malformed objects must yield only the fixed observational fields.
