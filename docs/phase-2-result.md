@@ -779,3 +779,618 @@ predecessors' partial scans, and does not establish live SQL correctness.
 Only this evidence append follows the validated executable candidate.
 Native changed-file secret scanning found no secrets before the candidate commit.
 Append-only verification preserved both files' complete starting contents.
+
+## PR #12 — populated-base preservation rehearsal source packet
+
+8 September 2026. **Native unit/static checks complete; actual preservation
+rehearsal UNRUN, pending authorized fresh CI.** This is the current-release
+preservation prerequisite for I29a / R18 R19 R23 R26 R27 R28, retaining R01/R11
+owner isolation. It is not I29b, full I29/Phase 2, B3 resolution or release approval.
+
+### Authority and context
+
+Existing PR #12, node `PR_kwDOUP-Oyc8AAAABCvKWmw`, branch
+`copilot/modelgpt-6-astra`; base `3c84cfb07e569dab416ccd1b5d19c7c6e251010c`,
+clean starting head `9b8ac6fa82aa10258f0bf1d1c44dd4eaaab5a039`.
+Read the full [six-path plan 5591979149](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5591979149)
+and [controlling clarification 5592284908](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592284908).
+Actual read-only **Anthropic / Claude Opus 5** reviewer
+`bc532454-fce2-4417-8b53-d69c1f44cc46`, turns 5–6, and coordinator approval
+control this packet. The clarification permits source-derived parser units
+before real CI observation; it adds no native DB authority or new architecture.
+
+After context, before edits, read this continuation's own
+[public receipt 5592308899](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592308899).
+It records explicitly selected, authenticated-GET verified actual
+`sweagent-capi:gpt-6-astra`, task `e2bd10ff-b531-4b32-a18d-a062b33e1375`,
+session `0551f3a9-c9db-4eee-97bf-66c819936e03`, observed
+`2026-09-08T21:46:05.1716489Z` and rechecked
+`2026-09-08T21:46:55.8417820Z`, with matching repository/PR/branch/base/head and
+one writer. The predecessor's receipt was not reused. Its fixture-provenance
+question was an instruction-clarification hold, not a code/DB/CAPI/authorization
+failure or an authorization workaround.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`,
+cloud guide, Phase 0 and current Phase 2 evidence, local-backend guide;
+blueprint 00/03/05/08/10/14/20 and relevant 15/I29; actual base SQL (hash-identical
+to blueprint 07), target migration and generated schema excerpts; backend
+local/CLI/environment helpers, db/provision/run-local wrappers, quality `isMain`,
+normal integration fixture/RPC contracts, hosted guard separation, quality-gate
+unit import pattern, package/CI/lint/Vite configuration. PR #12 discussion,
+empty diff/reviews and MCP workflow/job evidence were read. Starting CI
+`34279530027` was `action_required`, zero jobs; failed-log query found no failed
+jobs, **not a passing CI run**. No Actions authorization or rerun occurred.
+
+### Six-file implementation
+
+Only `scripts/preservation-rehearsal.mjs`,
+`tests/integration/preservation.sessions.mjs`, `tests/unit/preservation.test.ts`,
+the new `package.json` `db:rehearse` entry, one step in `.github/workflows/ci.yml`
+and this append change. Existing app/SQL/types/lockfile/helpers/other tests and
+workflows remain unchanged.
+
+The zero-argument orchestrator requires the literal rehearsal/CI/Actions flags,
+existing no-service-secret/project/local-Docker/known-container checks and pinned
+CLI 2.116.0. Mutable flags prevent accidents, not hostile-code execution.
+It checks exactly two regular, non-symlink migrations before reset and again
+before upgrade:
+
+| Source version | Bytes | SHA-256 |
+|---|---:|---|
+| `20260905000000` | 35214 | `4f2d44603707cb823527c80d8384c2a6390f99ead2ba294435db83403a7eead5` |
+| `20260906000000` | 5923 | `4060e963bc5a986857f31bc9b528dd6d7ea8caee720336de8499d59e8f8c3f92` |
+
+The fixed CI sequence is:
+
+1. **S1:** pinned help checks; `db reset --local --no-seed --yes --version
+   20260905000000`; `migration list --local` must show applied base and pending
+   target; unchanged `scripts/provision-test-users.mjs` provisions the fictional
+   owners.
+2. **S2:** absolute Node child `tests/integration/preservation.sessions.mjs
+   capture <runUUID>` uses exactly
+   `normalSessionEnvironment(process.env, await readCredentialCache())`.
+   Server-verified ordinary A/B identities, absent base provenance column and
+   empty pre-seed application sets precede fixture creation. Both owners get
+   implicit/explicit/imageless items, ready/retired images from the existing
+   632-byte fictional JPEG, preferences/profile saves, repeated outfit/history
+   saves, links, rules and feedback.
+3. **S3:** repeat source/history checks; only `migration up --local`; history must
+   show exactly both versions applied and none pending. No intervening reset,
+   provisioning, reseeding or repair.
+4. **S4:** the same normal child in `verify <runUUID>` first compares all ten
+   complete table sets (30 total rows), old values, versions and full timestamp
+   strings, and eight actual object downloads against stored lengths/hashes and
+   before-download evidence. Only the four new item columns are excluded from
+   old-value equality; they must separately be null/null/null/`{}`. Old physical
+   values remain intact and unverified. Only after this complete comparison run
+   bounded range, A/B/anonymous ownership and each owner's raw v2 export probes.
+
+Closed, owner/run/project/source/stage-bound snapshots have exact old column
+inventories, correct table identities, no credential/auth-response fields,
+exclusive `wx`/0600 creation, regular non-symlink reads and a 512 KiB bound.
+They stay ignored at the single derived run path. Finally cleans only that
+run's regular snapshot; no directory/wildcard deletion or snapshot artifact.
+Output is fixed stages/codes, source inventory and synthetic counts, never
+rows, object paths/bytes, credentials or arbitrary error text.
+
+The single CI opt-in step sits between existing `db:start` and `db:reset`.
+The 30-minute job, runner, permissions and all later reset/integration/security/
+recovery/type-generation/parity checks remain. Failures stop subsequent steps;
+skipped checks are not passes.
+
+### Source-derived format/body evidence, not execution
+
+Parser fixtures derive from pinned CLI v2.116.0
+`apps/cli-go/internal/migration/list/list.go` (`makeTable`),
+`internal/utils/output.go` (`RenderTable`) and `render.go` timestamp formatting,
+plus its pinned Glamour v1.0.0 ASCII/table rendering. They are **source-derived,
+not observed CLI output and not preservation proof**. Unknown format/version,
+duplicates, missing rows, wrong applied/pending columns and empty output fail
+closed. First authorized fresh CI must validate the real table and transition;
+any actual mismatch remains a failed stage, not a fallback or invented inventory.
+The predecessor's [5592028965](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592028965)
+records all three real read-only help checks, exit 0, required flags present:
+capability evidence only, not rerun or relabelled as this session's execution.
+
+Unit extraction retains the **untrimmed** SQL dollar-body newlines:
+base 1452 bytes / MD5 `a8188b771786538ec7ef031d9d974fce`;
+target 1452 bytes / MD5 `cb47b75d41751df15813773388c062cf`.
+These are source-derived `export_manifest` bodies, not new hosted observations.
+The SQL and transaction markers are unchanged; no server-atomicity guarantee.
+
+### Actual native validation
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/preservation.test.ts` | Final 36/36, exit 0; includes import side-effect tripwires, source column/body parity and malformed/history/snapshot/value/byte negatives. |
+| `node --check scripts/preservation-rehearsal.mjs` | Final exit 0. |
+| `node --check tests/integration/preservation.sessions.mjs` | Final exit 0. |
+| `npm run lint` | Final exit 0. |
+| `npm run typecheck` | Final exit 0. |
+| `npm run test:unit` | Final 516/516 in 13 files, exit 0. |
+| `npm run check:translations` | 402 EN/FI/SV keys, 37 source files, exit 0. |
+| `npm run build` | Exit 0; JS 164.26 kB gzip, CSS 4.97 kB gzip; existing non-failing >500 kB chunk warning retained. |
+| `npm run scan:secrets` | Exit 0; 160 text files and fresh unprinted build canary checked before this documentation append. |
+| `git diff --check` | Exit 0. |
+
+Initial checks caught a malformed new authorization-header string, one unused
+fixture assignment, strict indexed-access typing in unit fixtures, and a
+test-only SQL-column regex that missed digits in SHA column names. All were
+corrected before the final passing checks. No unrelated test, configuration,
+dependency or compiler setting was weakened. Binary fixture bytes were handled
+inside programs only, never viewed, encoded or emitted to the native model.
+
+### UNRUN stages and retained handoff gates
+
+This writer ran **no native** rehearsal opt-in, migration list/reset/up,
+provisioning, psql, type generation, backend mutation, integration/security/
+recovery/browser/a11y suite, hosted smoke or live operation. S1–S4 and actual
+preservation remain **UNRUN/PENDING**, not inferred from 516 unit tests.
+
+After candidate processes finish and changes are committed, the existing native
+final validator is called once; its actual components and unavailable tools are
+reported on the PR, not inferred from the wrapper heading. Coordinator owns
+executable/privacy/egress/workflow trust and fresh exact-head CI authorization,
+actual preservation evidence, independent Claude affected review, all existing
+App/normal-owner/recovery/types/native Apple gates and actual four-PNG review
+with run/head/hashes/verdict. Source tests or artifact existence waive none.
+
+Historical B3 cause remains open despite merged observational PR #11 and clean
+current observations. Full saved-only export/every-field editing and I29b stay
+parked. Conditional live I29a DDL/runtime approval still requires preservation,
+B3/release readiness and fresh metadata; operator-method decision `5592161566`
+grants this writer no live authority. No PUT/DELETE/history repair/replay,
+transaction-marker removal, privilege change, hosted probe, merge or deployment.
+Phase 0 stays engineering complete, acceptance open; only the second hosted
+account test was user-deferred. All earlier evidence and holds above remain.
+
+Rollback is source-only removal of this six-file packet, preserving its dated
+evidence, through coordinator review. No hosted rollback/reset/history repair is
+implied. The writer publishes head/files/results and stops editing for parent
+CI/independent review; no extra agent/branch/PR or next packet.
+
+Final native validator: after executable candidate
+`b81c155ff696f3fb8667809a7407076ebd4d095f` was committed and all candidate
+processes finished, invoked existing `parallel_validation` **once**.
+**Actions and JavaScript CodeQL completed with zero alerts.** No SQL analysis
+was reported. Automated code review was **unavailable: `autofind` missing**;
+the wrapper's success/no-comments heading is not a review pass. No alternate
+checker, additional agent, permission change or retry occurred. The six-path
+changed-file secret scan passed before that commit, and its required Copilot App
+co-author trailer was verified. Only this actual validation-result append follows
+the checked executable candidate; fresh CI preservation and all parent-owned
+review/release gates above remain pending.
+
+## PR #12 bounded preservation HTTP/history correction — 8 September 2026
+
+Same PR #12 / `copilot/modelgpt-6-astra`, base
+`3c84cfb07e569dab416ccd1b5d19c7c6e251010c`, clean starting head
+`10927d92bd403fcc51e0cfb130e65e535b90a79e`. This is the routine four-path
+correction approved in [5592756899](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592756899),
+not a new packet or material planning amendment. Actual independent
+**Anthropic / Claude Opus 5** reviewer `01e4035d-ee11-4b4e-bdb3-df15c4b55689`,
+turn 6, identified the blocking void-response bug and medium history-stage
+misreporting on that exact six-file head; the coordinator accepted both.
+The full [six-file plan 5591979149](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5591979149)
+and [source-derived formatter clarification 5592284908](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592284908)
+were read, including their complete bodies.
+
+Before edits, read this correction's own
+[public receipt 5592775939](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592775939):
+explicitly requested `gpt-6-astra`, authenticated allocation
+`sweagent-capi:gpt-6-astra`, task `3febe5b2-94de-4e00-a799-fbf7b3973df0`,
+session `70b69022-5ad8-4aed-895f-a3f1766f1bbb`, authenticated GET
+`2026-09-08T22:31:45.2103663Z`, reverified
+`2026-09-08T22:32:12.8270644Z`. The local session ID matched the receipt,
+as did repository/PR/base/head/branch. No old session receipt was reused.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`,
+cloud guide; relevant Phase 0/Phase 2/local-backend evidence; blueprint
+00/03/05/10/13/14/20 and relevant 08 API, 15/I29 contracts; base SQL's
+`commit_image` and target migration, generated void return type, exact base
+SQL/blueprint-07 hash parity; backend local environment/request guards,
+existing normal-session reader, recovery-unit fetch-stub conventions, the
+preservation modules/tests, package/CI diff and secret checker. PR discussion,
+diff, reviews/review threads and MCP workflow/log evidence were read.
+CI `34283894600` and Apple `34283894610` remained `action_required`; the CI
+failed-log query returned zero jobs, not a passing execution.
+
+### Correction and focused regression coverage
+
+Only `tests/integration/preservation.sessions.mjs`,
+`tests/unit/preservation.test.ts`, `scripts/preservation-rehearsal.mjs` and
+this appended evidence change. The existing package script and CI opt-in step
+are unchanged; app/schema/types/dependencies/other helpers and suites remain
+frozen.
+
+The HTTP reader now accepts null bodies only for HTTP 204, without attempting
+to read a nonexistent stream. It still refuses 5xx, missing non-204 streams,
+oversized streams and malformed nonempty JSON, and cancels streamed readers.
+`commit_image` explicitly requires successful 204/null. Other RPCs require
+200/non-null JSON and retain their downstream version/export checks. Required
+row/insert/versioned-save/auth consumers reject missing or invalid shapes;
+insert responses also require the actual table identity and current owner.
+Capture still verifies downloaded bytes against stored lengths/hashes, and
+export probes still compare the full closed owner-bound manifest/table sets.
+
+Eight new focused HTTP tests use restored Vitest fetch stubs and standard
+`Response` objects, with no sockets or database calls. Coverage includes:
+204/null success; rejected 200/null, empty/malformed required JSON and wrong
+commit responses; row/insert/save/auth/export negatives and positives; the
+512 KiB limit and cancellation; 5xx refusal; mismatched binary downloads and
+actual fixture-byte hash comparison inside programs only. The invalid
+204-with-stream case starts with a valid 200 `Response` and narrowly overrides
+its status getter, so the guard—not response construction—is tested. Existing
+import-side-effect tripwires and the two narrow documented JS-import
+`@ts-expect-error` boundaries remain intact.
+
+The orchestrator assigns `S1-base-history`, `S3-base-history` and
+`S3-target-history` immediately before the respective history calls. A source
+assertion covers all three placements. History/parser failures no longer inherit
+reset/up stage labels; output stays fixed and non-sensitive. No history/parser,
+snapshot, owner, source-hash, cleanup or preservation oracle was weakened.
+
+### Actual correction-session validation
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Exact command | Actual final result |
+|---|---|
+| `npm run test:unit -- tests/unit/preservation.test.ts` | 44/44 passed, exit 0; includes import-safety and stubbed HTTP boundary tests. |
+| `npm run test:unit` | 524/524 passed in 13 files, exit 0. |
+| `npm run lint` | Exit 0. |
+| `npm run typecheck` | Exit 0. |
+| `node --check scripts/preservation-rehearsal.mjs` | Exit 0. |
+| `node --check tests/integration/preservation.sessions.mjs` | Exit 0. |
+| `npm run check:translations` | 402 EN/FI/SV keys, 37 source files, exit 0. |
+| `npm run build` | Exit 0; JS 164.26 kB gzip, CSS 4.97 kB gzip; existing non-failing >500 kB chunk warning. |
+| `npm run scan:secrets` | Exit 0; 160 text files and fresh unprinted build canary checked before this append. |
+| `git diff --check` | Exit 0. |
+| `git diff --exit-code 10927d92bd403fcc51e0cfb130e65e535b90a79e -- package.json .github/workflows/ci.yml` | Exit 0; both frozen files unchanged. |
+
+Build and scan shared `export STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`
+without printing the value. Initial checks caught a malformed authorization-header
+comparison in the new test stub (focused suite parse/lint failure), then an inferred
+optional-property type mismatch in the negative manifest fixture list (typecheck
+failure). Both ordinary implementation errors were corrected before the final
+passing runs, with no compiler/configuration exception or unrelated test change.
+Context lookup also encountered an incorrect testing-document filename and absent
+shell `rg`; the actual blueprint index and provided search tool resolved those
+read-only lookups. No tool installation or environment workaround occurred.
+
+### Explicitly UNRUN and coordinator-owned gates
+
+Real **S1–S4**, actual pinned CLI migration-list format compatibility, populated
+base-to-target preservation and all live gates remain **UNRUN/PENDING**.
+Source-derived parser fixtures and mocked HTTP responses are not their proof.
+The three prior help probes remain historical capability evidence, not commands
+rerun by this correction writer. No native migration list/reset/up, provisioning,
+psql, rehearsal/opt-in, type generation, integration/security/recovery/browser/
+a11y/native Apple/hosted/network test or service mutation ran here.
+
+After the executable candidate is committed and its processes finish, invoke
+the existing native final validator once and record actual components/languages
+and unavailable tools separately. An unavailable automated reviewer is not a
+review pass. Coordinator still owns affected independent review, exact-head
+execution/privacy/egress/workflow trust and authorization of the first fresh CI
+rehearsal. Normal A/B/anonymous/RLS/private-image/recovery/type-parity, App/unit/
+translations/browser/a11y/build/secrets/dependencies, native four plus I07 three,
+and actual four-PNG visual gates all remain required. No skipped/mock/admin
+result substitutes for those gates.
+
+B3 remains open; clean observational suites were non-reproduction, not a fix or
+waiver. No I29b/next feature, live DDL/Cloudflare/account/private-photo/provider/
+paid-AI operation, history repair/replay/ledger mutation, Actions approval/rerun,
+agent, branch, PR, merge or deployment was authorized or performed. Conditional
+approval `5590736782` and operator method `5592161566` are not live authority now.
+Native model input remained text-only; fixture bytes were never opened or emitted
+to the model. Historical sections above remain unchanged. Publish the final
+head/files/results and stop editing for coordinator review.
+
+Final native validator for this correction: after executable candidate
+`c1045eb2b29ab0b73e00dde00018fd4a7038070b` was committed and candidate
+processes finished, invoked existing `parallel_validation` **once**.
+**Actions and JavaScript CodeQL completed with zero alerts**; no SQL analysis
+was reported. Automated code review was **unavailable: `autofind` missing**,
+not a review pass despite the wrapper heading. No alternate checker, new agent
+or repeated invocation was used. Only this evidence append follows the checked
+executable candidate; independent affected review and all real gates remain
+pending. The changed-file secret scan passed before the candidate commit.
+
+Commit metadata exception: the progress tool's candidate commit omitted the
+requested Copilot App co-author trailer. History was not amended. This final
+validation-evidence commit explicitly includes
+`Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com>`;
+that does not retroactively change the candidate commit's metadata.
+
+## PR #12 pinned history-parser correction — 8 September 2026
+
+Same PR #12 / `copilot/modelgpt-6-astra`, base
+`3c84cfb07e569dab416ccd1b5d19c7c6e251010c`, clean starting head
+`33148670ecfe8a730d171cd63b86738a298d97c5`. Scope is only the ordinary
+three-path correction in [approval 5593272286](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5593272286).
+Actual independent **Anthropic / Claude Opus 5** reviewer
+`01e4035d-ee11-4b4e-bdb3-df15c4b55689`, turn 8, directly verified the pinned
+formatter blobs, confirmed the source-contract defect and accepted this bounded
+fix. The coordinator's explicit nonempty-inner-span qualification and closed
+failure-reason recommendation are incorporated; no new whole-plan loop or scope
+amendment. This supports I29a's preservation prerequisite (R18/R19/R23/R26/R27/R28),
+not wider I29 implementation or acceptance.
+
+After context and before edits, read complete
+[own receipt 5593293205](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5593293205).
+It records explicitly requested `gpt-6-astra`, authenticated actual
+`sweagent-capi:gpt-6-astra`, task `28e12a66-c12c-49fb-9129-1eda9ddb434c`,
+session `46718486-9e12-4d4b-8b46-fab6218f02dd`, immediate authenticated GET
+`2026-09-08T23:26:01.8718499Z` and sole-writer/ref re-verification
+`2026-09-08T23:26:31.0252992Z`. Local session ID matched; native run
+`34290624601`, repository/PR/base/head/branch matched. No historical receipt,
+prompt model name or branch label substituted for platform evidence.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`,
+cloud guide, relevant Phase 0/Phase 2 and local-backend evidence; blueprint
+00/03/05/10/13/14/20, relevant 07 schema, 08 API and 15/I29 sections; actual
+base/target migrations and generated profile type excerpt; backend local guards,
+environment/CLI helpers, preservation orchestrator/unit file and normal-owner
+snapshot/comparison/execution excerpts; package/CI diff and secret checker.
+Read full [core plan 5591979149](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5591979149),
+[fixture clarification 5592284908](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5592284908),
+[first CI evidence 5593195354](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5593195354)
+and controlling correction; PR details/discussion, affected diff, empty reviews/
+threads, MCP workflow-run metadata and failed Database job logs.
+
+### First actual CI evidence, not a preservation pass
+
+CI `34287248039`, attempt 2 (first actual execution after the zero-job hold),
+failed at starting head `33148670`. Database job `102269284358` started the
+local stack successfully and printed both approved source fingerprints.
+The fixed base reset command returned 0; `S1-base-history` then failed with
+`EVIDENCE_REQUIRED` and exit 1 (log timestamp `22:59:49Z`).
+Exact base-applied/target-pending history was **not established**.
+**S1 partially ran**; provisioning, S2 capture, S3 target migration and S4 full
+comparison did not run, and no snapshot was created. Following ordinary reset,
+integration/security/recovery, type generation and parity were **SKIPPED**.
+
+Privileged CLI stdout/stderr were withheld. Pinned source proves the parser/
+fixture defect, not the observed CI table shape or an exclusive failure cause.
+Coordinator evidence separately records App job `102269284669` passing
+524 units/329 browser cases and Apple run `34287248071` passing four original
+plus three I07 cases. Neither establishes preservation or fixes B3. Artifact
+metadata matched; images were not viewed and no visual pass is claimed.
+The prior 204 and history-stage-label findings remain closed, not reopened.
+
+### Bounded correction and preserved contracts
+
+Only `scripts/preservation-rehearsal.mjs`, `tests/unit/preservation.test.ts`
+and this append change. Ordinary-owner capture/verify including 204 handling,
+package/CI wiring, SQL/types, application code, dependencies, helpers and all
+other files remain frozen.
+
+Read exact CLI 2.116.0 sources at commit
+`997a1e69a4a83466964ed874d3a604c88a7b3866`: `list.format.ts` blob
+`5d1d0d8a5ed743927b3144b8aebd5b29541b2ec5`, `legacy-glamour-table.ts` blob
+`29c6778716b0776366b2fb24d8e4f9a841747fd8`, formatter unit blob
+`b8dca8dbb4029e6b75f9d8a556bd792e91ce35d7`. Literal fixtures are explicitly
+**SOURCE-DERIVED**, retaining blank/decorative lines, two-space renderer prefix,
+quoted cells, padded widths 18/18/23 and trailing blank lines. No upstream code
+was vendored or fetched at test time.
+
+Body cells require exactly one balanced backtick pair without inner backticks.
+An explicit nonempty-inner guard rejects two-backtick empty spans; only a quoted
+single space maps to absent. Bare/mixed, unbalanced/doubled/inner quotes,
+multispace/padded inner spans, wrong cell counts/dates, missing/duplicate/extra/
+unknown/reordered versions and wrong applied/pending states fail. Both positive
+tables and malformed-table negatives retain CRLF coverage. The 4096 ASCII bound,
+four logical lines, bare headers, dash separator, ordered versions/time literals,
+source inventories and all three history-stage adjacency assertions remain.
+
+The same orchestrator adds 13 closed labels: `history-command`, `length-cap`,
+`charset`, `line-count`, `header`, `separator`, `cell-count`, `cell-quoting`,
+`cell-content`, `version-mismatch`, `remote-mismatch`, `time-mismatch`,
+`inventory-mismatch`. Only its own classified error and a literal allowlist
+member produce a reason suffix; arbitrary exceptions/messages and altered unknown
+reasons remain generic. Units cover every label and arbitrary-text suppression.
+Outer stage, `EVIDENCE_REQUIRED`, nonzero exit, command arguments/environments,
+guards, S1–S4 ordering, full old-value/downloaded-byte comparison and exact-run
+cleanup are unchanged. There is no raw-output diagnostic, mutable parser status,
+new tool/dependency or additional CLI invocation.
+
+### Actual native validation and handoff
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/preservation.test.ts` | 74/74 passed, exit 0; subsequent full run also covers added negative CRLF parity. |
+| `npm run test:unit` | Final 554/554 in 13 files, exit 0; 74 preservation cases including retained HTTP/source/import/comparison checks. |
+| `npm run lint` | Final exit 0. |
+| `npm run typecheck` | Final exit 0. |
+| `node --check scripts/preservation-rehearsal.mjs` | Final exit 0. |
+| `node --check tests/integration/preservation.sessions.mjs` | Exit 0; frozen module. |
+| `npm run check:translations` | 402 EN/FI/SV keys, 37 source files, exit 0. |
+| `npm run build` | Exit 0; JS 164.26 kB gzip, CSS 4.97 kB gzip; unchanged non-failing >500 kB warning. |
+| `npm run scan:secrets` | Exit 0; 160 text files and fresh unprinted build canary checked before this append. |
+| `git diff --check` | Exit 0 before evidence append; repeated before commit. |
+| `git diff --exit-code 33148670ecfe8a730d171cd63b86738a298d97c5 -- . ':!scripts/preservation-rehearsal.mjs' ':!tests/unit/preservation.test.ts' ':!docs/phase-2-result.md'` | Exit 0; all frozen tracked paths unchanged. |
+| `sha256sum blueprint/07-DATABASE-AND-RLS.sql supabase/migrations/*.sql` | Blueprint/base match `4f2d44603707cb823527c80d8384c2a6390f99ead2ba294435db83403a7eead5`; target remains `4060e963bc5a986857f31bc9b528dd6d7ea8caee720336de8499d59e8f8c3f92`. |
+
+Build and secret scan shared
+`export STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`, without printing it.
+No implementation test/static failure occurred in this correction. After candidate
+commit/process completion, the existing native final validator is invoked once;
+actual components/languages, findings and unavailable tools are reported on the
+PR, not inferred from a wrapper heading or recorded through a metadata-only commit.
+
+This worker ran **no** native migration-list/reset/up/provision/psql/rehearsal/
+opt-in/typegen, DB/integration/security/recovery/browser/a11y/Apple/hosted command
+or service operation; no help probe was rerun. New-head real history and full
+populated preservation remain **PENDING**, not proven by source-derived units.
+Coordinator must inspect trust and obtain affected independent review before fresh
+corrected-head CI; no unchanged `33148670` rerun. All ordinary-owner, recovery,
+types/parity, App/browser/a11y, native and actual four-PNG visual gates remain.
+No Actions approval/rerun, new agent/branch/PR, merge, deployment or next packet.
+Text-only model inputs were retained; fixture buffers stayed program-only.
+B3 remains open, and conditional approval `5590736782` / operator method
+`5592161566` grant no current live/DDL/history-repair/account/private-input/
+provider/paid-AI authority. Publish final head/results and stop editing for review.
+
+## PR #12 user-approved type-generation exit bucket — 9 September 2026
+
+Same PR #12 / `copilot/modelgpt-6-astra`, base
+`3c84cfb07e569dab416ccd1b5d19c7c6e251010c`, clean starting head
+`056d7b0581ffc17b8cbda7e489d3ced1d931f1ae` (six existing PR paths).
+Read full [extension 5595642216](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5595642216)
+and [core preservation plan 5591979149](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5591979149).
+The user explicitly approved two additional existing tooling paths and one
+future fresh check cycle. Actual independent **Anthropic / Claude Opus 5**
+reviewer `01e4035d-ee11-4b4e-bdb3-df15c4b55689`, turn 11, rejected unpinned
+Docker/postgres-meta prose classification and accepted the bounded numeric
+approach. Coordinator amendments require complete canonical tokens, duplicate
+rejection, source-grounded framing and neutral labels. This supports I29a's
+release-safety prerequisite (R18/R19/R23/R26/R27/R28), not another feature.
+
+After context and before edits, reread complete
+[own receipt 5595656064](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5595656064):
+explicitly requested `gpt-6-astra`, authenticated actual
+`sweagent-capi:gpt-6-astra`, task `610dc1c9-9832-428b-b47a-3faa4108ed1a`,
+session `e9b03a93-ef36-4e2d-9160-d4706973ca91`, immediate GET
+`2026-09-09T04:10:21.0024405Z`, sole-writer/ref re-verification
+`2026-09-09T04:10:59.3268529Z`. The local session ID matched that receipt;
+native run `34309921487`, repository/PR/base/head/branch matched.
+No historical receipt or prompt/branch model label substituted for allocation
+evidence. No additional agent was started.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`,
+cloud guide scope/runtime/hosted sections, relevant Phase 0/Phase 2 and
+local-backend evidence; blueprint 00/03/05/10/13/14 and relevant 07/08/15/20
+sections; actual base migration excerpt, full target migration and generated
+type excerpt; complete local helper and backend unit file, unchanged db wrapper,
+secret scanner, preservation orchestrator/unit and normal-owner module excerpts,
+and package/CI diff. PR details/discussion, empty reviews/threads and MCP
+workflow metadata/Database logs were read, including full fixture clarification
+5592284908, prior correction 5593272286 and current evidence 5593746343.
+
+### Existing real evidence remains distinct
+
+[Evidence 5593746343](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5593746343)
+and CI `34291271829` / Database `102282051833` at `056d7b0` establish real
+S1–S4 preservation PASS: base05-only history, ordinary capture of two fictional
+owners / ten tables / thirty rows / eight objects, base-history recheck, only
+target06 applied, exact final history, complete old values/versions/raw timestamp
+strings and stored-plus-actually-downloaded image comparisons, new unknowns,
+post-comparison probes and exact-run cleanup. Normal reset/integration/security
+and recovery (one case, 6.3s) passed. This is local fictional-data evidence,
+not a hosted migration or full release acceptance. Earlier failures remain above.
+
+The later type-generation gate failed: CLI exit 1, 1984ms, stdout 0 bytes,
+stderr 312 bytes, Database/images markers false, connect marker true, seven LF
+separators, first-line 21 bytes and `run-container`; wrapper exit 2, existing
+type file unchanged. Type upload/parity were skipped, not passes. Raw generator
+stderr was not retrieved or published; startup also withholds CLI output.
+Matching historical counts do not identify a cause. Separate App 554-unit /
+329-browser and native four-plus-three passes do not close type parity, actual
+visual acceptance or B3's release-quality decision.
+
+### Exact bounded change and source-derived tests
+
+Only `scripts/backend/local.mjs` inside `describeGenerationResult`,
+`tests/unit/local-backend.test.ts`, and this append change. The full PR therefore
+has eight paths; all original preservation code, package/CI wiring, other helper
+functions/exports, db wrapper, CLI arguments/environment/timeouts, SQL/types,
+app, dependencies and browser/Apple/setup configuration remain unchanged.
+
+Read the complete pinned CLI 2.116.0 handler at commit
+`997a1e69a4a83466964ed874d3a604c88a7b3866`:
+`apps/cli/src/legacy/commands/gen/types/types.handler.ts`, blob
+`63a47aa0fd509efc95d3a7cf387be557880f74bf`. It creates the error message
+`error running container: exit ${result.exitCode}`. Followed its entrypoint and
+the relevant `shared/cli/run.ts` failure path (blob
+`758ef9eac2246b73c18f0fc6c8db0efe22b6f280`) through
+`shared/output/normalize-error.ts` (blob
+`bd89a4c1d54ab454108ebea081cab780dc6a7768`) to the text failure renderer in
+`shared/output/output.layer.ts` (blob
+`bf2a98728404b799fa2018895d8fa02f2da509de`). The output service/text formatter
+were also inspected to distinguish raw failure rendering from CLI parse errors.
+With the existing `NO_COLOR=1` environment, the message is bare and followed by
+LF; clack framing, CRLF, quoting, padding, ANSI and unterminated lines are not
+accepted alternatives. No upstream implementation was copied or fetched at test
+time, and no CLI command was added or executed to obtain fixtures.
+
+The new `stderrContainerExitBucket` exists only on `nonzero-with-stderr`,
+after all eleven original fields. Its four possible literals are `exit-125`,
+`exit-126-or-127`, `other-nonzero`, and `unclassified`. The added scan runs only
+when the existing stderr byte count is at most 4096 UTF-8 bytes. Exactly one
+`error running container:` anchor anywhere in that bounded string is required,
+including malformed/embedded anchors in the duplicate count. A bare full message
+at string start or after LF must end in LF and contain a canonical unsigned
+decimal 1–255. No partial digit/text match, sign, leading zero, decimal, zero,
+out-of-range value or first/last duplicate selection is accepted. Unsupported
+or oversized input remains unclassified; invalid tuples retain their original
+output without the new field. Only the fixed bucket is emitted, never a captured
+number/message, raw text, private identifier or inferred Docker/network/auth cause.
+It does not prove that a particular container started.
+
+Sixty-two added unit cases cover numeric boundaries 0/1/124/125/126/127/128/255/256,
+malformed/partial/long-digit/duplicate anchors and framing, exact 4096/4097-byte
+limits (including multibyte text and an out-of-bound duplicate), unsupported
+values, getters/toJSON and private-shaped text. Source-derived positives are
+labelled as such. Serialized old eleven-field reports are compared after
+omitting only the new field; inactive/invalid golden reports remain byte-equal.
+Existing operation-priority, tag, byte/LF counting and privacy tests remain;
+the numeric bucket does not override old operation priority. No declarations,
+compiler exceptions, test framework or dependency were added or changed.
+
+### Actual native validation and handoff limits
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Exact command | Actual final result |
+|---|---|
+| `npm run test:unit -- tests/unit/local-backend.test.ts` | 182/182 passed, exit 0. |
+| `npm run test:unit` | 616/616 in 13 files, exit 0; includes unchanged preservation/import-safety and fail-closed local-runner tests. |
+| `npm run lint` | Exit 0. |
+| `npm run typecheck` | Exit 0. |
+| `node --check /home/runner/work/stillroom-wardrobe/stillroom-wardrobe/scripts/backend/local.mjs` | Exit 0. |
+| `npm run check:translations` | 402 EN/FI/SV keys, 37 source files, exit 0. |
+| `npm run build` | Exit 0; JS 164.26 kB gzip, CSS 4.97 kB gzip; existing non-failing >500 kB chunk warning. |
+| `npm run scan:secrets` | Exit 0; 160 text files and fresh unprinted build canary checked before this append. |
+| `git diff --check` | Exit 0 before append; repeated before commit. |
+| `git diff --exit-code 056d7b0581ffc17b8cbda7e489d3ced1d931f1ae -- . ':!scripts/backend/local.mjs' ':!tests/unit/local-backend.test.ts' ':!docs/phase-2-result.md'` | Exit 0; all frozen tracked paths unchanged. |
+
+Build/scan shared `export STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`
+without printing the value. The initial focused run had two fixture failures
+(LF byte count and multibyte boundary padding); the second retained one
+incorrect golden stdout byte count. Fixture corrections preceded the final
+targeted/full passes; production logic and scope did not change during iteration.
+Precommit `node --input-type=module` inline static assertions passed (exit 0):
+the existing TypeScript AST located the function body, all helper text outside
+it was byte-equal, this file retained its full starting-head byte prefix, and
+`git diff --name-only` contained exactly the three allowed files. The
+changed-file secret scanner reported no secrets; full PR inventory is eight paths.
+
+After the completed candidate is committed and processes finish, invoke the
+existing native final validator **once**; report actual components/languages,
+findings and unavailable tools on the PR. An unreported SQL analysis or missing
+automated reviewer is not a pass. No alternative scanner, extra agent, repeated
+validator or metadata-only evidence repair is authorized.
+
+No native type generation/rehearsal/migration-list/reset/up/provision/psql,
+DB/integration/security/recovery/browser/a11y/Apple/hosted command or service
+operation ran. Existing units exercise refusal/import-safe paths only, not live
+services. No raw privileged log, private photo, image/archive/binary view or
+image-bearing model input was used; fixture buffers stayed program-only.
+
+The coordinator owns trust inspection and genuine affected independent review
+before the **one new-head unchanged CI plus required Apple cycle, each once**.
+The worker has not authorized or rerun either workflow. A classified generation
+failure stops with the fixed category for a separate next decision; unclassified
+stops without another flag/retry series. If generation and exact parity pass,
+record that success while leaving the previous cause unobserved/not fixed and
+the new classifier's live failure path **unexercised**. Unit success here is not
+such live evidence. Fresh-head normal-owner/App/native/type/visual gates and B3
+remain required. No merge/main mutation/deployment, conditional hosted execution,
+history repair/replay, account/data/private-input/provider/paid-AI operation,
+new branch/PR/agent or next packet occurred. Publish final head/files/results
+and stop editing for parent review.

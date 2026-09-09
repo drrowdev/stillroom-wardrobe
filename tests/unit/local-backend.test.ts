@@ -57,7 +57,10 @@ describe('safe local type-generation description', () => {
   };
 
   function expectFixedReport(report: ReturnType<typeof describeGenerationResult>) {
-    expect(Object.keys(report)).toEqual(keys);
+    expect(Object.keys(report)).toEqual(report.tag === 'nonzero-with-stderr' ? [...keys, 'stderrContainerExitBucket'] : keys);
+    if ('stderrContainerExitBucket' in report) {
+      expect(['exit-125', 'exit-126-or-127', 'other-nonzero', 'unclassified']).toContain(report.stderrContainerExitBucket);
+    }
     expect(tags).toContain(report.tag);
     for (const field of ['exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes', 'stderrLines', 'stderrFirstLineBytes'] as const) {
       const value = report[field];
@@ -112,6 +115,7 @@ describe('safe local type-generation description', () => {
       tag: 'nonzero-with-stderr', exitCode: 1, elapsedMs: 0, stdoutBytes: 6, stderrBytes: 4,
       hasDatabaseOutput: false, hasImagesOutput: false,
       stderrMentionsConnectPhase: false, stderrLines: 0, stderrFirstLineBytes: 4, stderrDockerOperation: 'none',
+      stderrContainerExitBucket: 'unclassified',
     });
   });
 
@@ -158,7 +162,7 @@ describe('safe local type-generation description', () => {
   });
 
   it('keeps observations inactive for every other tag even with matching text', () => {
-    const stderr = `Connecting to\n${operations.map(([literal]) => literal).join('\r\n')}`;
+    const stderr = `Connecting to\n${operations.map(([literal]) => literal).join('\r\n')}\nerror running container: exit 125\n`;
     const cases = [
       { code: 0, stdout, stderr }, { code: 0, stdout: '', stderr },
       { code: 0, stdout: 'export type Database = {}', stderr },
@@ -173,6 +177,135 @@ describe('safe local type-generation description', () => {
     const invalidElapsed = describeGenerationResult({ code: 1, stdout, stderr }, Infinity);
     expectFixedReport(invalidElapsed);
     expect(invalidElapsed).toMatchObject({ tag: 'invalid-result', ...inactive });
+  });
+
+  // SOURCE-DERIVED, not observed stderr: pinned CLI 2.116.0 types.handler.ts and
+  // shared/output/output.layer.ts emit this uncoloured message with a trailing LF.
+  it.each([
+    [0, 'unclassified'], [1, 'other-nonzero'], [124, 'other-nonzero'], [125, 'exit-125'],
+    [126, 'exit-126-or-127'], [127, 'exit-126-or-127'], [128, 'other-nonzero'],
+    [255, 'other-nonzero'], [256, 'unclassified'],
+  ])('buckets only the complete source-derived container exit %s', (exit, bucket) => {
+    for (const prefix of ['', 'Connecting to db 5432\nsynthetic container detail\n']) {
+      const stderr = `${prefix}error running container: exit ${exit}\n`;
+      const report = describeGenerationResult(Object.freeze({ code: 1, stdout: '', stderr }), 12.75);
+      expectFixedReport(report);
+      expect(report).toHaveProperty('stderrContainerExitBucket', bucket);
+      const legacy = Object.fromEntries(Object.entries(report).filter(([key]) => key !== 'stderrContainerExitBucket'));
+      expect(JSON.stringify(legacy)).toBe(JSON.stringify({
+        tag: 'nonzero-with-stderr', exitCode: 1, elapsedMs: 12, stdoutBytes: 0,
+        stderrBytes: Buffer.byteLength(stderr), hasDatabaseOutput: false, hasImagesOutput: false,
+        stderrMentionsConnectPhase: prefix !== '', stderrLines: prefix === '' ? 1 : 3,
+        stderrFirstLineBytes: prefix === '' ? 30 + String(exit).length : 21,
+        stderrDockerOperation: 'run-container',
+      }));
+    }
+  });
+
+  it.each([
+    '', '0', '00', '01', '0125', '+125', '-125', '125.0', '1.25', '125e0', '0x7d',
+    '125n', '125text', '125 126', '125 ', ' 125', '\t125', '125\t', '256', '999',
+    '1250', '125' + '0'.repeat(1000), '１２５', '125\u0000', '125\u2028',
+  ])('rejects a noncanonical or partial exit token, case %#', (token) => {
+    const report = describeGenerationResult({ code: 1, stdout: '', stderr: `error running container: exit ${token}\n` }, 1);
+    expectFixedReport(report);
+    expect(report).toHaveProperty('stderrContainerExitBucket', 'unclassified');
+  });
+
+  it.each([
+    'unrelated failure\n', 'exit 125\n', 'error running container:\n',
+    'error running container: exit\n', 'error running container:exit 125\n',
+    'error running container: exit 125', 'error running container: exit 125\r\n',
+    'error running container: exit 125\r', 'Error running container: exit 125\n',
+    'prefix error running container: exit 125\n', ' error running container: exit 125\n',
+    '\terror running container: exit 125\n', '\rerror running container: exit 125\n',
+    '`error running container: exit 125`\n', '`error running container: exit 125\n',
+    'error running container: exit 125`\n', '"error running container: exit 125"\n',
+    '\u001b[31merror running container: exit 125\u001b[39m\n',
+    'error running container: exit 125\nerror running container: exit 125\n',
+    'error running container: exit 125\nerror running container: exit 127\n',
+    'error running container: exit 125\nprefix error running container: exit nope\n',
+    'error running container:\nerror running container: exit 125\n',
+    'error running container: exit 1250\nerror running container: exit 125\n',
+    'error running container: exit 125\nerror running container:',
+  ])('rejects absent, unsupported, malformed or ambiguous message framing, case %#', (stderr) => {
+    const report = describeGenerationResult({ code: 1, stdout: '', stderr }, 1);
+    expectFixedReport(report);
+    expect(report).toHaveProperty('stderrContainerExitBucket', 'unclassified');
+  });
+
+  it('bounds only the new scan in UTF-8 bytes without changing old observations', () => {
+    const message = 'error running container: exit 125\n';
+    for (const [fill, bytes] of [['x', 1], ['ä', 2]] as const) {
+      const remaining = 4096 - message.length - 1;
+      const prefix = fill.repeat(Math.floor(remaining / bytes)) + 'x'.repeat(remaining % bytes) + '\n';
+      expect(Buffer.byteLength(prefix + message)).toBe(4096);
+      for (const [stderr, bucket] of [
+        [prefix + message, 'exit-125'],
+        ['x' + prefix + message, 'unclassified'],
+        [message + 'x'.repeat(4096), 'unclassified'],
+        [prefix + message + 'error running container: exit 127\n', 'unclassified'],
+      ] as const) {
+        const report = describeGenerationResult({ code: 1, stdout: '', stderr }, 1);
+        expectFixedReport(report);
+        expect(report).toHaveProperty('stderrContainerExitBucket', bucket);
+        expect(report.stderrBytes).toBe(Buffer.byteLength(stderr));
+        expect(report.stderrDockerOperation).toBe('run-container');
+        expect(report.stderrLines).toBe(stderr.split('\n').length - 1);
+        expect(report.stderrFirstLineBytes).toBe(Buffer.byteLength(stderr.split('\n')[0]!));
+      }
+    }
+  });
+
+  it('leaves the old operation priority independent of the numeric bucket', () => {
+    for (const [literal, operation] of operations.slice(0, -1)) {
+      for (const lines of [[literal, 'error running container: exit 127'], ['error running container: exit 127', literal]]) {
+        const report = describeGenerationResult({ code: 1, stdout, stderr: lines.join('\n') + '\n' }, 1);
+        expectFixedReport(report);
+        expect(report.stderrDockerOperation).toBe(operation);
+        expect(report).toHaveProperty('stderrContainerExitBucket', 'exit-126-or-127');
+      }
+    }
+  });
+
+  it('preserves the complete serialized legacy output for inactive and invalid branches', () => {
+    const message = 'error running container: exit 125\n';
+    const fixtures = [
+      [{ code: 0, stdout, stderr: message }, 'success', 0, 42, 34, true, true],
+      [{ code: 0, stdout: '', stderr: message }, 'missing-database-output', 0, 0, 34, false, false],
+      [{ code: 0, stdout: 'export type Database = {}', stderr: message }, 'missing-images-output', 0, 25, 34, true, false],
+      [{ code: 1, stdout: '', stderr: '' }, 'nonzero-empty-output', 1, 0, 0, false, false],
+      [{ code: 1, stdout, stderr: '' }, 'nonzero-with-stdout', 1, 42, 0, true, true],
+      [{ code: null, stdout, stderr: message }, 'invalid-result', null, 42, 34, true, true],
+      [{ code: 1, stdout: null, stderr: message }, 'invalid-result', 1, null, 34, false, false],
+    ] as const;
+    for (const [result, tag, exitCode, stdoutBytes, stderrBytes, database, images] of fixtures) {
+      const report = describeGenerationResult(result, 1);
+      expectFixedReport(report);
+      expect(JSON.stringify(report)).toBe(JSON.stringify({
+        tag, exitCode, elapsedMs: 1, stdoutBytes, stderrBytes,
+        hasDatabaseOutput: database, hasImagesOutput: images, ...inactive,
+      }));
+    }
+  });
+
+  it('does not read or coerce unsupported stderr values or supplied bucket properties', () => {
+    const accessor = vi.fn(() => { throw new Error('synthetic private coercion'); });
+    for (const stderr of [undefined, null, 125, true, 1n, Symbol('private'), [],
+      new String('error running container: exit 125\n'), { toString: accessor, toJSON: accessor }]) {
+      const report = describeGenerationResult({ code: 1, stdout, stderr }, 1);
+      expectFixedReport(report);
+      expect(report).toMatchObject({ tag: 'invalid-result', stderrBytes: null, ...inactive });
+    }
+    const result = { code: 1, stdout, stderr: 'error running container: exit 125\n', toJSON: accessor };
+    Object.defineProperty(result, 'stderrContainerExitBucket', { get: accessor });
+    expect(describeGenerationResult(result, 1)).toHaveProperty('stderrContainerExitBucket', 'exit-125');
+    for (const field of ['code', 'stdout', 'stderr']) {
+      const report = describeGenerationResult(Object.defineProperty({ ...result }, field, { get: accessor }), 1);
+      expectFixedReport(report);
+      expect(report.tag).toBe('invalid-result');
+    }
+    expect(accessor).not.toHaveBeenCalled();
   });
 
   it.each([undefined, null, false, '0', 1n, NaN, Infinity, -Infinity, 0.5,
@@ -226,6 +359,10 @@ describe('safe local type-generation description', () => {
         code: 1, stdout: text, stderr: `${text}\nConnecting to ${text}\nCLI: ${literal} ${text}`,
         stderrMentionsConnectPhase: text, stderrLines: text, stderrFirstLineBytes: text, stderrDockerOperation: text,
       })),
+      ...['125', '126', '127', '128', '0', '125private'].map((token) => ({
+        code: 1, stdout: text, stderr: `${text}\nerror running container: exit ${token}\n${text}\n`,
+        stderrContainerExitBucket: text, toJSON: accessor,
+      })),
       { code: 1, stdout, stderr: 'unknown', stderrMentionsConnectPhase: true,
         stderrLines: 999, stderrFirstLineBytes: 999, stderrDockerOperation: 'inspect-image' },
       Object.defineProperty({ code: 1, stdout }, 'stderr', { get: accessor }),
@@ -235,6 +372,7 @@ describe('safe local type-generation description', () => {
       const report = describeGenerationResult(result, 1);
       expectFixedReport(report);
       for (const part of privateParts) expect(JSON.stringify(report).includes(part)).toBe(false);
+      expect(JSON.stringify(report)).not.toContain('error running container:');
     }
     for (const result of [null, {}, new Error(text), revoked.proxy,
       { code: 0, stdout: null, stderr: '' }, { code: 0, stdout, stderr: [] }]) {

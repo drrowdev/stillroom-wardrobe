@@ -75,6 +75,9 @@ jobs:
       - run: npm ci --no-fund
       - run: npx playwright install --with-deps chromium
       - run: npm run db:start
+      - run: npm run db:rehearse
+        env:
+          ALLOW_PRESERVATION_REHEARSAL: '1'
       - run: npm run db:reset
       - run: npm run test:integration
       - run: npm run test:security
