@@ -7,7 +7,7 @@ import {
   confirmsDescription, confirmsItem, prepareDescriptionAttempt, prepareGarmentAttempt, validDescription,
   type DescriptionAttempt, type ImageBaseline, type ItemAttempt, type ItemBaseline, type ItemDetail as Detail,
 } from '../../domain/item-details';
-import { garmentDraftDirty, newGarmentDraft } from '../../domain/garment-fields';
+import { garmentDraftDirty, newGarmentDraft, sameValue } from '../../domain/garment-fields';
 import { ItemForm } from './item-form';
 import type { Language, MessageKey, Translate } from '../../i18n';
 import type { PrivateImages } from '../../images/private-images';
@@ -77,7 +77,7 @@ function useSection<Base, Draft, Attempt>(initial: Base, initialDraft: (base: Ba
     }
   }
   return {
-    base, draft, setDraft: (next: Draft) => { setDraft(next); setSaved(false); }, saved, busy, error, summary,
+    base, draft, setDraft: (next: Draft) => { setDraft(next); setSaved(false); }, dirty, saved, busy, error, summary,
     locked: busy || attempt !== null, canSave: props.online && valid && !busy && attempt === null,
     save: () => { void run('save'); },
     controls: <>
@@ -107,6 +107,8 @@ const readImage = (detail: Detail) => detail.image;
 function NameSection(props: Shared & { base: ItemBaseline; onState: (state: Dirty) => void }) {
   const section = useSection<ItemBaseline, ReturnType<typeof itemDraft>, ItemAttempt>(
     props.base, itemDraft, prepareFields, saveItemFields, readItem, confirmsItem, props.base.id, props, props.onState, dirtyFields);
+  const formattingOnly = !section.dirty && !section.locked && !section.error
+    && !sameValue(section.draft.raw, itemDraft(section.base).raw);
   const { t } = props;
   return <section className="settings-card detail-name" aria-labelledby="detail-name-heading">
     <h2 id="detail-name-heading">{t('detail.nameSection')}</h2>
@@ -116,6 +118,7 @@ function NameSection(props: Shared & { base: ItemBaseline; onState: (state: Dirt
         language={props.language} t={t} prefix="detail" locked={section.locked} currency={props.currency} />
       {section.controls}
       <button className="button button-primary" disabled={!section.canSave}>{t(section.busy ? 'common.saving' : 'detail.saveName')}</button>
+      {formattingOnly && <p role="status" className="notice">{t('detail.noChanges')}</p>}
       {section.saved && <p role="status" className="settings-success">{t('detail.nameSaved')}</p>}
     </form>
   </section>;

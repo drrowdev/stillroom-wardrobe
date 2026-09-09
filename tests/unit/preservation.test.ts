@@ -192,7 +192,7 @@ describe('CI-only preservation guards', () => {
       expect(lines).toHaveLength(10);
       expect(lines.slice(0, 2)).toEqual(['', '  ']);
       expect(lines.slice(-2)).toEqual(['', '']);
-      for (const line of lines.slice(2, 7)) {
+      for (const line of lines.slice(2, -2)) {
         expect(line.startsWith('  ')).toBe(true);
         expect(line.slice(2).split('|').map((cell) => cell.length)).toEqual([18, 18, 23]);
       }

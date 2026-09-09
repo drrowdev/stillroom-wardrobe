@@ -46,6 +46,24 @@ async function fillFields(page: Page, language: Language) {
   await page.locator('#item-alt').fill('  Fictional prepared overshirt  ');
 }
 for (const language of ['en', 'fi', 'sv'] as const) {
+  test(`blank photo description ${language}: truthful help, empty stored alt and named library link`, async ({ page }) => {
+    const api = await setup(page, language);
+    await photo(page, api);
+    await expand(page, 'item');
+    await expect(page.getByText(messages['capture.descriptionHelp'][language], { exact: true })).toBeVisible();
+    await page.locator('#item-title').fill('Fictional shirt');
+    await page.locator('#item-category').selectOption('top');
+    await expect(page.locator('#item-alt')).toHaveValue('');
+    await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    expect(api.images[0]!.alt_text).toBe('');
+    const link = page.locator(`a[href="#/items/${api.items[0]!.id}"]`);
+    await expect(link.locator('img')).toHaveAttribute('alt', '');
+    await expect(link).toHaveAccessibleName(`Fictional shirt ${messages['category.top'][language]}`);
+    await link.click();
+    await expect(page.locator('.detail-photo img')).toHaveAttribute('alt', '');
+    await expect(page.locator('#detail-description')).toHaveValue('');
+  });
   test(`all thirty manual fields ${language}: exact explicit capture Save, owned edit and clear`, async ({ page }) => {
     const api = await setup(page, language);
     const foreign = api.seedSavedItem('b'), originalForeign = structuredClone(foreign);
@@ -105,6 +123,99 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect([...api.files].map(([key, buffer]) => [key, createHash('sha256').update(buffer).digest('hex')])).toEqual(bytes);
   });
 }
+for (const language of ['fi', 'sv'] as const) {
+  test(`equivalent saved formats ${language}: no write or discard, independent description draft`, async ({ page }) => {
+    const api = await mockBackend(page, { initialLanguage: language });
+    const { item, image } = api.seedSavedItem();
+    Object.assign(item, { purchase_price: 12.5, min_temp: 7,
+      field_provenance: Object.fromEntries(['title', 'purchase_price', 'min_temp'].map((field) => [field, { kind: 'user', revision: 1 }])) });
+    const original = structuredClone(item);
+    await page.goto('/'); await signIn(page);
+    const link = page.locator(`a[href="#/items/${item.id}"]`);
+    await link.click(); await expand(page, 'detail');
+    const notice = page.getByText(messages['detail.noChanges'][language], { exact: true });
+    await expect(notice).toHaveCount(0);
+    await expect(page.locator('#detail-purchase_price')).toHaveValue('12.50');
+    const requestStart = api.requests.length;
+    await page.locator('#detail-purchase_price').fill('12,50');
+    await page.locator('#detail-min_temp').fill('007');
+    await page.locator('#detail-title').fill(`  ${item.title}  `);
+    for (const field of ['purchase_price', 'min_temp', 'title']) {
+      await expect(page.locator(`#detail-${field}`)).toHaveAttribute('aria-invalid', 'false');
+    }
+    await expect(notice).toBeVisible();
+    await expect(notice).toHaveAttribute('role', 'status');
+    await expect(page.locator('.detail-name [role="alert"]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: messages['detail.saveName'][language], exact: true })).toBeDisabled();
+    await page.locator('.detail-name form').evaluate((form) => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await expect(page.locator('#detail-purchase_price')).toHaveValue('12,50');
+    await expect(page.locator('#detail-min_temp')).toHaveValue('007');
+    await expect(page.locator('#detail-title')).toHaveValue(`  ${item.title}  `);
+    await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(api.requests.slice(requestStart).filter((request) => request.path.startsWith('/rest/') && request.method !== 'GET')).toEqual([]);
+    expect(item).toEqual(original);
+
+    await link.click(); await expand(page, 'detail');
+    await page.locator('#detail-purchase_price').fill('12,50');
+    await page.locator('#detail-description').fill('Independent description');
+    await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.getByRole('dialog').getByRole('button', { name: messages['common.continueEditing'][language], exact: true }).click();
+    await expect(page.locator('#detail-purchase_price')).toHaveValue('12,50');
+    await expect(page.locator('#detail-description')).toHaveValue('Independent description');
+    await expect(notice).toBeVisible();
+    await page.getByRole('button', { name: messages['detail.saveDescription'][language], exact: true }).click();
+    await expect(page.getByText(messages['detail.descriptionSaved'][language], { exact: true })).toBeVisible();
+    await expect(page.locator('#detail-purchase_price')).toHaveValue('12,50');
+    await expect(notice).toBeVisible();
+    expect(image.alt_text).toBe('Independent description');
+    expect(item).toEqual(original);
+    expect(api.requests.slice(requestStart).filter((request) => request.path.startsWith('/rest/') && request.method !== 'GET')
+      .map(({ path, method }) => ({ path, method }))).toEqual([{ path: '/rest/v1/rpc/update_image_description', method: 'POST' }]);
+    await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+}
+test('invalid saved input, manual confirmations and explicit empty clears remain protected, not formatting notices', async ({ page }) => {
+  const api = await mockBackend(page);
+  const { item } = api.seedSavedItem();
+  Object.assign(item, { purchase_price: 12.5, field_provenance: { purchase_price: { kind: 'user', revision: 1 }, notes: { kind: 'user', revision: 1 } } });
+  await page.goto('/'); await signIn(page);
+  await page.locator(`a[href="#/items/${item.id}"]`).click(); await expand(page, 'detail');
+  const notice = page.getByText(messages['detail.noChanges'].en, { exact: true });
+  const save = page.getByRole('button', { name: messages['detail.saveName'].en, exact: true });
+  for (const [field, raw, original] of [['purchase_price', '12.', '12.50'], ['min_temp', '51', '']] as const) {
+    await page.locator(`#detail-${field}`).fill(raw);
+    await expect(page.locator(`#detail-${field}`)).toHaveAttribute('aria-invalid', 'true');
+    await expect(notice).toHaveCount(0); await expect(save).toBeDisabled();
+    await page.getByRole('button', { name: messages['common.back'].en, exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.getByRole('dialog').getByRole('button', { name: messages['common.continueEditing'].en, exact: true }).click();
+    await expect(page.locator(`#detail-${field}`)).toHaveValue(raw);
+    await page.locator(`#detail-${field}`).fill(original);
+  }
+  await page.locator('#detail-title').fill(` ${item.title} `);
+  await expect(save).toBeEnabled(); await expect(notice).toHaveCount(0);
+  await page.getByRole('button', { name: messages['item.clearField'].en.replace('{field}', messages['item.notes'].en), exact: true }).click();
+  await expect(save).toBeEnabled(); await expect(notice).toHaveCount(0);
+  let release: () => void = () => {};
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/rest/v1/items?*', async (route) => {
+    if (route.request().method() !== 'PATCH') { await route.fallback(); return; }
+    await pending; await route.abort('failed');
+  });
+  await save.click();
+  await expect(page.locator('#detail-title')).toBeDisabled();
+  await expect(notice).toHaveCount(0);
+  release();
+  await expect(page.getByRole('button', { name: messages['detail.check'].en, exact: true })).toBeVisible();
+  await expect(page.locator('#detail-title')).toBeDisabled();
+  await expect(notice).toHaveCount(0);
+  expect(item.version).toBe(1);
+});
 test('unknown defaults, invalid raw input and manual empty clears remain distinct', async ({ page }) => {
   const api = await setup(page);
   expect(api.items).toHaveLength(0);

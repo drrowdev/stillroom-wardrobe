@@ -11,6 +11,7 @@ import { fieldAssertion, maximumFieldRevision, provenanceFields, type FieldProve
 import { confirmsItem, itemFactColumns, parseItemBaseline, prepareGarmentAttempt } from '../../src/domain/item-details';
 import { newSaveAttempt, saveItem } from '../../src/images/upload';
 import { canonicalPrice, parsePrice, priceForDatabase, validDateOnly } from '../../src/i18n/format';
+import { messages } from '../../src/i18n';
 
 const owner = '10000000-0000-4000-8000-000000000001';
 const other = '10000000-0000-4000-8000-000000000002';
@@ -77,14 +78,58 @@ describe('closed complete manual fields', () => {
     expect(garmentDraftDirty(edited, base, provenance)).toBe(false);
     expect(garmentDraftDirty(edited, base, {})).toBe(true);
   });
-  it('records explicit clears even on already-empty unknown fields', () => {
+  it.each(['unknown', 'user'] as const)('records explicit clears even on already-empty %s fields', (kind) => {
     const base = parseGarmentValues(row());
     for (const field of provenanceFields.filter((key) => key !== 'title' && key !== 'category')) {
+      const provenance: FieldProvenance = { [field]: { kind, revision: 1 } };
       const next = editGarmentField(newGarmentDraft('EUR', 'en', base), field, initialRawFields('EUR')[field], 'en');
-      const { patch } = buildGarmentWrite(next, base);
+      const { patch } = buildGarmentWrite(next, base, provenance);
+      expect(garmentDraftDirty(next, base, provenance)).toBe(true);
       expect(patch).toHaveProperty(field);
-      expect(patch.field_provenance[field]).toEqual({ kind: 'user', revision: 1 });
+      expect(patch.field_provenance[field]).toEqual({ kind: 'user', revision: 2 });
     }
+  });
+  it.each([
+    ['purchase_price', '12,50', 'fi'], ['purchase_price', '12,50', 'sv'],
+    ['min_temp', '007', 'en'], ['title', '  Shirt  ', 'en'],
+  ] as const)('retains equivalent already-user %s raw input under %s without a patch or dirty guard', (field, raw, language) => {
+    const base = parseItemBaseline({ ...row(), purchase_price: 12.5, min_temp: 7,
+      field_provenance: { [field]: { kind: 'user', revision: 1 } } }, owner, id);
+    const next = editGarmentField(newGarmentDraft('EUR', language, base.values), field, raw, language);
+    expect(validateGarmentDraft(next, base.values).values).toEqual(base.values);
+    expect(garmentDraftDirty(next, base.values, base.provenance)).toBe(false);
+    expect(buildGarmentWrite(next, base.values, base.provenance).patch).toEqual({ field_provenance: base.provenance });
+    expect(() => prepareGarmentAttempt(base, next, 4)).toThrow('detail.invalidFields');
+    expect(next.raw[field]).toBe(raw);
+    expect(next.intent[field]).toBe(true);
+    expect(garmentDraftDirty(next, base.values, {})).toBe(true);
+    expect(buildGarmentWrite(next, base.values).patch).toMatchObject({ [field]: garmentPayload(base.values)[field],
+      field_provenance: { [field]: { kind: 'user', revision: 1 } } });
+  });
+  it('keeps invalid input and actual notes/ordered collection/value changes protected beside price formatting', () => {
+    const base = parseItemBaseline({ ...row(), purchase_price: 12.5, style_tags: ['calm', 'plain'],
+      field_provenance: { purchase_price: { kind: 'user', revision: 1 } } }, owner, id);
+    const formatted = editGarmentField(newGarmentDraft('EUR', 'fi', base.values), 'purchase_price', '12,50', 'fi');
+    for (const [field, raw] of [['purchase_price', '12,'], ['min_temp', '51'], ['title', ' ']] as const) {
+      const next = editGarmentField(formatted, field, raw, 'fi');
+      expect(validateGarmentDraft(next, base.values).errors[field]).toBe(true);
+      expect(garmentDraftDirty(next, base.values, base.provenance)).toBe(true);
+      expect(() => buildGarmentWrite(next, base.values, base.provenance)).toThrow();
+      expect(next.raw[field]).toBe(raw);
+    }
+    for (const [field, raw] of [['notes', '  Literal\nnotes  '], ['style_tags', ['plain', 'calm']], ['warmth', '0'], ['windproof', 'false']] as const) {
+      const next = editGarmentField(formatted, field, typeof raw === 'string' ? raw : [...raw], 'en');
+      expect(next.priceLanguage).toBe('fi');
+      expect(next.raw.purchase_price).toBe('12,50');
+      expect(garmentDraftDirty(next, base.values, base.provenance)).toBe(true);
+      const attempt = prepareGarmentAttempt(base, next, 4);
+      expect(attempt.patch).toHaveProperty(field);
+      expect(attempt.patch).not.toHaveProperty('purchase_price');
+      expect(attempt.patch.field_provenance[field]).toEqual({ kind: 'user', revision: 1 });
+    }
+    const mismatch = structuredClone(formatted);
+    mismatch.raw.notes = 'Untracked change';
+    expect(garmentDraftDirty(mismatch, base.values, base.provenance)).toBe(true);
   });
   it('rejects value/intent mismatch and arbitrary raw, intent or outgoing system keys', () => {
     const base = parseGarmentValues(row()), next = newGarmentDraft('EUR', 'en', base);
@@ -198,6 +243,18 @@ describe('full creation snapshot and metadata reconciliation (mocked SDK)', () =
     });
     return { client, fetch };
   }
+  it('explains intentional blank photo descriptions in all languages without a title fallback', () => {
+    expect(messages['capture.descriptionHelp']).toEqual({
+      en: 'Describe the photo for someone using a screen reader. If left blank, the photo is saved without a description.',
+      fi: 'Kuvaile kuvaa ruudunlukijan käyttäjälle. Jos jätät kentän tyhjäksi, kuva tallennetaan ilman kuvausta.',
+      sv: 'Beskriv fotot för den som använder skärmläsare. Om fältet lämnas tomt sparas fotot utan beskrivning.',
+    });
+    for (const caption of ['', '   ']) {
+      const attempt = newSaveAttempt(draft(), caption, photo(), scope());
+      expect(attempt.values.title).toBe('Shirt');
+      expect(attempt.altText).toBe('');
+    }
+  });
   it('deep freezes arrays/assertions/photo metadata while retaining immutable blobs and owner epoch', () => {
     const live = fullDraft(), pixels = photo(), attempt = newSaveAttempt(live, ' ', pixels, scope());
     live.raw.colours.push('pink'); live.raw.notes = 'mutated'; pixels.width = 8;

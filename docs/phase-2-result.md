@@ -2090,3 +2090,154 @@ Automatic photo analysis, consent/allowances/receipts/expiry/source-image histor
 and final saved-only export remain required unfinished I29/MVP work; I08
 trash/undo/deletion/bulk/filter/eligibility workflows are not implemented by
 these basic field controls. Hand off PR #14 and stop; no next packet is implicit.
+
+## 9 September 2026 — I29c F1–F3 routine review follow-through
+
+This correction remains on PR #14, `copilot/i29c-manual-garment-field-editing`,
+starting at `d42d7f51b2a35b6a371b2366fe499cbeb0cd6da2`, with base/main
+`e00c554af6aed844eb9f582ee9db96ff54805e89`. It addresses R03/R23/R28 while
+retaining R18/R19/R26/R27. It is not another packet or full MVP acceptance.
+The preceding 137596-byte result prefix is preserved unchanged.
+
+### Authority and context
+
+Read the complete [33-path approved plan](https://github.com/drrowdev/stillroom-wardrobe/pull/13#issuecomment-5601422784)
+(29220-byte body, SHA-256
+`4968c6030d94e15fb2bf5dc7a87a1ab63432302ba86775ba199fb4bc716ecb5d`)
+and [finished-code review with controlling corrections](https://github.com/drrowdev/stillroom-wardrobe/pull/14#issuecomment-5602961182).
+The actual different-provider reviewer was **Anthropic Claude Opus 5**,
+`i29c-finished-code-review`, agent `59aa1f07-9124-4600-ba06-5285da284d4c`.
+F1/F2/F3 and the coordinator's amendments authorize this bounded correction:
+keep blank descriptions, distinguish formatting-only input from meaningful
+intent, retain independent section guards, and correct the renderer/log count.
+No new architecture, reviewer agent or scope expansion was introduced.
+
+After context and before edits, reread this task's own
+[public runtime receipt 5603034364](https://github.com/drrowdev/stillroom-wardrobe/pull/14#issuecomment-5603034364):
+task `6ca6c3fb-26c7-4c80-b031-a4ee9a761d57`, session
+`3cc86787-d28e-46a3-8331-8ed4bc66e6a5`, explicit `gpt-6-astra`,
+coordinator-authenticated actual `sweagent-capi:gpt-6-astra`, observed
+13:52:57.3006291 UTC and reverified 13:54:32.6511517 UTC against this
+repository/PR/branch/base/head and sole-writer allocation. The original writer's
+receipt is not evidence for this session.
+
+Context reads included root `AGENTS.md`, `.github/copilot-instructions.md`,
+`docs/cloud-development.md`, current/historical sections of phase 0/1/2 results
+and `docs/local-backend.md`; blueprint `00/03/05/10/14/19/20`, relevant item/API
+sections in `07/08`, and requirement/work-packet references in `02/15`.
+Source/test reads included the eight paths below, `src/domain/item-details.ts`,
+`src/features/wardrobe/item-form.tsx`, `src/app/dialog.tsx`,
+`src/i18n/format.ts`, generated item types, the optional-collections migration,
+`tests/browser/mock-backend.ts`, `tests/unit/quality-gates.test.ts`,
+`playwright.config.ts`, `package.json`, and relevant original PR diffs.
+GitHub PR body/discussion/reviews and Actions/job logs were read without opening
+images or downloading archives. The PR had no formal submitted reviews; the
+actual independent review and approval are in the linked public comment.
+
+Exactly eight existing paths change in this follow-through:
+
+- `src/domain/garment-fields.ts`
+- `src/features/wardrobe/item-detail.tsx`
+- `src/i18n/phase-zero.json`
+- `tests/unit/garment-fields.test.ts`
+- `tests/browser/garment-fields.spec.ts`
+- `tests/unit/preservation.test.ts`
+- `scripts/preservation-rehearsal.mjs`
+- `docs/phase-2-result.md` (append only)
+
+### Corrections and regression evidence
+
+- **F1:** EN/FI/SV capture help now says a blank saves without a photo
+  description. No fallback or image behavior changed. Unit checks cover the
+  wording and blank/whitespace capture attempts. Browser tests in all three
+  languages verify the synthetic store's empty `alt_text`, empty grid/detail
+  DOM alt, and the surrounding library link's accessible title/category name.
+- **F2:** Dirty detection first uses existing validation, then shares the
+  effective-value/manual-assertion decision with the closed write builder.
+  Invalid input remains dirty; malformed structures do not become clean through
+  a catch-all fallback. Valid already-user comma prices, leading-zero integers
+  and trimmed titles retain their raw text/entry locale but create no patch,
+  provenance/version bump or item navigation warning. One EN/FI/SV non-error
+  `detail.noChanges` notice explains the local no-op, never a server-confirmed
+  Save. It is absent for invalid, meaningful, pending or unconfirmed states.
+  Explicit empty edits/clears remain assertions, including already-empty user
+  fields; unknown same-value confirmation also retains its matching user-next
+  value/provenance patch. Untouched empty fields remain untouched.
+  Tests retain null versus zero/false, actual notes/ordered-array changes,
+  intent mismatch protection and entry-locale meaning. Browser fixtures seed
+  user-revision-1 price 12.5/display 12.50, retype FI/SV 12,50, 007 for minimum
+  temperature 7 and title whitespace, and assert valid ARIA/raw preservation,
+  disabled Save, no REST mutation and exact unchanged item snapshots. A dirty
+  description still blocks Back; its independent explicit Save preserves the
+  raw item formatting, after which Back needs no discard. Invalid raw input,
+  same-value manual confirmation, empty clear and frozen/unconfirmed states
+  retain protection. No description Save/lifetime/CAS/reconciliation code changed.
+- **F3:** The padding/width loop now checks `slice(2, -2)`: header, separator
+  and all four migration rows between the decorative blanks. The sole harness
+  edit derives the informational source count from the closed `MIGRATIONS.length`.
+  Inventory, parser, commands, guards, historical oracle and all pins are intact.
+
+### Actual native validation
+
+Unit/static and Vite-backed browser suites ran sequentially. The first targeted
+unit run passed 278 tests, then typecheck found a readonly-array test-fixture
+typing error; the fixture was corrected without changing runtime behavior.
+Initial new browser cases returned 6 passes/12 failures: six used the wrong
+cancel label instead of the existing `common.continueEditing`, and six could
+not launch the missing pinned WebKit engine. Only after that missing-engine
+failure, `npx playwright install --with-deps webkit` completed with exit 0.
+No repository package/version/configuration changed.
+
+| Command | Actual result |
+| --- | --- |
+| `npm run test:unit -- tests/unit/garment-fields.test.ts tests/unit/preservation.test.ts tests/unit/item-details.test.ts` | 278/278 in 3 files, exit 0. |
+| `npm run test:browser -- tests/browser/garment-fields.spec.ts --grep 'blank photo description\|equivalent saved formats\|invalid saved input' --retries=0` | Initial 6 passed/12 failed as described above, exit 1. |
+| `npm run test:browser -- tests/browser/garment-fields.spec.ts tests/browser/item-details.spec.ts --retries=0` | After concrete corrections/restoration: 120/120, all three projects, 2.8 minutes, exit 0. |
+| `npm run test:unit` | Final 822/822 in 15 files, exit 0. |
+| `npm run lint` | Final exit 0. |
+| `npm run typecheck` | Final exit 0 after the test-fixture typing correction. |
+| `npm run check:translations` | 471 EN/FI/SV keys, 43 source files, exit 0. |
+| `npm run build` | Exit 0; JS 174.80 kB gzip, CSS 5.33 kB gzip. Existing non-failing >500 kB chunk warning remains. |
+| `npm run scan:secrets` | 172 text files and build canary checked, exit 0. |
+| `npm run check:dependencies` | 12 production/220 development packages; zero unverified release dates; production audit completed with zero critical/high/moderate/low findings, exit 0. |
+| `npm run test:browser -- --retries=0` | Final 449/449, 6.4 minutes, exit 0; no failed/flaky/skipped summary. |
+| `npm run test:a11y -- --retries=0` | 33/33, 52.0 seconds, exit 0 after full browsers. |
+| `git diff --check` | Exit 0. |
+
+Build and secret scan shared an unprinted process-local
+`STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`. These are native
+unit/synthetic-browser results, not fresh normal-session database evidence.
+The existing final checker is invoked once after the new candidate commit and
+all candidate processes finish; its actual components/languages/findings or
+unavailability are reported publicly on PR #14 after that invocation, without
+a self-hash-only source commit. The original writer's checker remains
+**UNREPORTED**, not retrospectively passed.
+
+### Handoff and unchanged external gates
+
+Earlier-head evidence remains true only for `d42d7f51b2a35b6a371b2366fe499cbeb0cd6da2`:
+CI `34352838305`/Apple `34352838224` succeeded with 815 units/431 browsers,
+real four-source preservation, ordinary integration/security/recovery, actual
+type generation/parity and native Apple 4+3. The coordinator actually viewed all
+eight d42 PNGs and found the known F1 copy issue. Neither that CI nor those views
+prove corrected-head acceptance.
+
+Coordinator follow-through still requires fresh exact-head CI, actual four-source
+preservation/normal ownership/recovery/type parity, unchanged native Apple checks,
+and actual review of all eight approved current-head PNGs with run/head/hashes/
+verdict. Existing capture names, bounds, guards and workflow steps are unchanged;
+new regressions add no PNGs. Native tools opened no images, binaries or archives.
+DOM/synthetic results are not physical-phone, screen-reader or visual acceptance.
+
+The 454-byte optional-collections source retains SHA-256
+`5296c58ac806ae560afd3befb4dc7e0bfc4fa61fa1898e9a21ef8e6db212b1d4`;
+22312-byte generated types retain
+`6787f9a2a776db922d0e424d7bfb11746854dd896bbabeec3fd2f359cd5dd759`.
+No native DB start/reset/up/list/provision/psql/typegen/rehearsal, hosted call,
+Actions approval/rerun, additional agent/branch/PR, merge or deployment occurred.
+The historical B3/counter-ceiling decisions and pending operator/device gates
+are neither changed nor waived. Live `31bdd067`/source `9d1858`, hosted base+I29a,
+and unapplied hosted I29b/I29c remain unchanged. Full I29 AI consent/receipts/
+allowances/expiry/source-image history and saved-only export remain unfinished
+MVP work; no I08/provider/next-phase work is authorized here. Stop editing and
+hand this correction back to the coordinator.

@@ -159,6 +159,14 @@ export function garmentPayload(values: GarmentValues): GarmentPayload {
   }
   return payload;
 }
+function garmentFieldChange(key: GarmentField, draft: GarmentDraft, values: GarmentValues, baseline: GarmentValues | undefined, provenance: FieldProvenance) {
+  const changed = baseline !== undefined && !sameValue(values[key], baseline[key]);
+  const factual = provenanceFields.find((field) => field === key);
+  const raw = draft.raw[key];
+  const cleared = raw === '' || Array.isArray(raw) && raw.length === 0;
+  const confirm = factual && draft.intent[key] && (!baseline || changed || cleared || fieldAssertion(provenance, factual).kind !== 'user');
+  return { changed, factual, confirm };
+}
 export function buildGarmentWrite(draft: GarmentDraft, baseline?: GarmentValues, oldProvenance: FieldProvenance = {}): {
   values: GarmentValues; patch: GarmentPatch;
 } {
@@ -169,11 +177,9 @@ export function buildGarmentWrite(draft: GarmentDraft, baseline?: GarmentValues,
   const asserted: typeof provenanceFields[number][] = [];
   const defaults = initialRawFields(draft.raw.currency);
   for (const key of garmentFields) {
-    const changed = baseline !== undefined && !sameValue(values[key], baseline[key]);
+    const { changed, factual, confirm } = garmentFieldChange(key, draft, values, baseline, oldProvenance);
     if (changed && !draft.intent[key]) throw new AppError('detail.invalidFields');
-    const factual = provenanceFields.find((field) => field === key);
     if (!baseline && factual && !draft.intent[key] && !sameValue(draft.raw[key], defaults[key])) throw new AppError('detail.invalidFields');
-    const confirm = factual && draft.intent[key] && (!baseline || changed || fieldAssertion(oldProvenance, factual).kind !== 'user');
     if (!baseline || changed || confirm) Object.assign(patch, { [key]: payload[key] });
     if (confirm && factual) asserted.push(factual);
   }
@@ -181,8 +187,12 @@ export function buildGarmentWrite(draft: GarmentDraft, baseline?: GarmentValues,
   return { values, patch };
 }
 export function garmentDraftDirty(draft: GarmentDraft, baseline: GarmentValues, provenance: FieldProvenance): boolean {
-  return !sameValue(draft.raw, newGarmentDraft(baseline.currency, 'en', baseline).raw)
-    || provenanceFields.some((field) => draft.intent[field] && fieldAssertion(provenance, field).kind !== 'user');
+  const { values } = validateGarmentDraft(draft, baseline);
+  if (!values) return true;
+  return garmentFields.some((key) => {
+    const { changed, confirm } = garmentFieldChange(key, draft, values, baseline, provenance);
+    return changed || confirm;
+  });
 }
 export function parseGarmentValues(row: Record<string, unknown>): GarmentValues {
   const draft = newGarmentDraft(typeof row.currency === 'string' ? row.currency : '', 'en');

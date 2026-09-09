@@ -164,7 +164,7 @@ async function main() {
       help.push(await cli(args));
     }
     assertCapabilities(help);
-    console.log('PASS: pinned 2.116.0 capabilities and exact three-source inventory');
+    console.log(`PASS: pinned 2.116.0 capabilities and exact ${MIGRATIONS.length}-source inventory`);
     for (const entry of MIGRATIONS) console.log(`PASS: source ${entry.version} bytes=${entry.bytes} sha256=${entry.sha256}`);
     stage = 'S1-base-reset';
     requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', MIGRATIONS[0].version], 10 * 60_000)).code === 0);
