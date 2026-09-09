@@ -35,7 +35,8 @@ function focusGarmentField(id: string): void {
     if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
     ancestor = ancestor.parentElement;
   }
-  input?.focus();
+  input?.closest('.garment-group')?.querySelector<HTMLButtonElement>('.garment-toggle[aria-expanded="false"]')?.click();
+  requestAnimationFrame(() => input?.focus());
 }
 type Props = {
   client: AppClient; scope: OwnerScope; currency: string; online: boolean; t: Translate; language: Language;

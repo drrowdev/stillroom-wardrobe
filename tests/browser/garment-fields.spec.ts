@@ -18,6 +18,9 @@ async function expand(page: Page, prefix: 'item' | 'detail') {
   await expect(page.locator(`#${prefix}-title`)).toBeVisible();
   const selector = prefix === 'item' ? '.capture-page details' : '.detail-name details';
   await page.locator(selector).evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
+  for (const button of await page.locator(`${prefix === 'item' ? '.capture-page' : '.detail-name'} .garment-toggle`).all()) {
+    if (await button.getAttribute('aria-expanded') !== 'true') await button.click();
+  }
 }
 async function photo(page: Page, api: Awaited<ReturnType<typeof mockBackend>>) {
   await page.locator('input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
@@ -110,6 +113,9 @@ test('unknown defaults, invalid raw input and manual empty clears remain distinc
   await page.locator('#item-category').selectOption('top');
   await expand(page, 'item');
   await page.locator('#item-warmth').fill('invalid');
+  await page.locator('[aria-controls="item-seasons-group"]').click();
+  await expect(page.locator('details.optional-details summary')).toHaveCount(1);
+  await page.locator('details.optional-details summary').click();
   await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
   await expect(page.locator('#item-warmth')).toBeFocused();
   await expect(page.locator('#item-warmth')).toHaveValue('invalid');

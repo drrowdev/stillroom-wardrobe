@@ -288,8 +288,11 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .capture-page:has(#edit-photo, .crop-editor) .button { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .capture-page:has(#edit-photo, .crop-editor) select { min-width: 0; max-width: 100%; }
 .garment-group { min-width: 0; border-top: 1px solid var(--border); padding-block: 10px; }
-.garment-group > summary { min-height: 44px; cursor: pointer; font-weight: 600; }
+.garment-toggle { min-height: 44px; font-weight: 600; max-width: 100%; text-align: start; white-space: normal; }
+.garment-toggle::before { content: '▸'; margin-inline-end: 8px; }
+.garment-toggle[aria-expanded="true"]::before { content: '▾'; }
 .garment-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding-top: 16px; }
+.garment-grid[hidden] { display: none; }
 .garment-field, .garment-collection { min-width: 0; overflow-wrap: anywhere; }
 .garment-label { font-weight: 600; }
 .garment-field input, .garment-field select, .garment-field textarea { min-width: 0; max-width: 100%; min-height: 44px; }

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { colours } from '../../domain/preferences';
 import { fieldAssertion, provenanceFields, type FieldProvenance } from '../../domain/attribute-provenance';
 import {
@@ -34,6 +34,7 @@ type Props = {
   showErrors?: boolean; children?: ReactNode;
 };
 export function ItemForm({ draft, onChange, baseline, provenance, language, t, prefix, locked, currency, showErrors = false, children }: Props) {
+  const [expanded, setExpanded] = useState<Partial<Record<MessageKey, boolean>>>({});
   const { errors } = validateGarmentDraft(draft, baseline);
   const defaults = initialRawFields(currency);
   const number = (value: number) => new Intl.NumberFormat(locales[language]).format(value);
@@ -106,9 +107,12 @@ export function ItemForm({ draft, onChange, baseline, provenance, language, t, p
     <details className="optional-details">
       <summary>{t('item.details')}<span>{t('common.optional')}</span></summary>
       {children}
-      {groups.map((group) => <details className="garment-group" key={group.label}>
-        <summary>{t(group.label)}</summary><div className="garment-grid">{group.fields.map(field)}</div>
-      </details>)}
+      {groups.map((group) => <div className="garment-group" key={group.label}>
+        <button className="text-button garment-toggle" type="button" aria-expanded={Boolean(expanded[group.label])}
+          aria-controls={`${prefix}-${group.fields[0]}-group`}
+          onClick={() => setExpanded((previous) => ({ ...previous, [group.label]: !previous[group.label] }))}>{t(group.label)}</button>
+        <div id={`${prefix}-${group.fields[0]}-group`} className="garment-grid" hidden={!expanded[group.label]}>{group.fields.map(field)}</div>
+      </div>)}
     </details>
   </>;
 }

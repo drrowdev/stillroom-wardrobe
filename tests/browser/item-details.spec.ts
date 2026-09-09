@@ -441,6 +441,7 @@ test('synthetic saved detail visual evidence retains functional assertions in ev
   const { api, item } = await setup(page);
   await expect(page.locator('.detail-photo img')).toBeVisible();
   await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
+  for (const button of await page.locator('.detail-name .garment-toggle').all()) await button.click();
   const directory = path.resolve('test-results/i29b-visual');
   const origin = new URL(testInfo.project.use.baseURL!).origin;
   const captures = [
