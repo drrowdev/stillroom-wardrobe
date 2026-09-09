@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isLanguage, itemCount, languages, messages, resolveLanguage, translate } from '../../src/i18n';
+import { canonicalPrice, formatDateOnly, formatMoney, parsePrice, priceForDatabase } from '../../src/i18n/format';
 
 describe('owner-isolated language', () => {
   it('resolves saved owner, sign-in, browser and English in order', () => {
@@ -27,5 +28,31 @@ describe('owner-isolated language', () => {
     expect(translate('sv', 'item.deleteConfirm', { name: '<script>Åäö</script>' })).toContain('<script>Åäö</script>');
     expect(translate('fi', 'capture.save')).not.toBe(messages['capture.save'].en);
     expect(() => translate('en', 'wardrobe.count_other')).toThrow('parameter');
+  });
+  it('formats canonical prices without changing their value or recorded currency', () => {
+    for (const language of languages) {
+      for (const price of ['0.01', '0.10', '0.00', '9999999999.99']) {
+        const display = formatMoney(price, 'USD', language);
+        expect(display.length).toBeGreaterThan(0);
+        expect(canonicalPrice(priceForDatabase(price))).toBe(price);
+        expect(formatMoney(price, 'EUR', language)).not.toBe(display);
+      }
+    }
+    expect(parsePrice('1,234.50', 'en')).toBe(parsePrice('1 234,50', 'fi'));
+    expect(parsePrice('1\u202f234,50', 'sv')).toBe('1234.50');
+    expect(() => formatMoney('1.234', 'EUR', 'en')).toThrow();
+    expect(() => formatMoney('1.23', 'eur', 'en')).toThrow();
+  });
+  it('formats real date-only values using the same UTC calendar day in all languages', () => {
+    const date = '2024-02-29';
+    expect(formatDateOnly(date, 'en')).toBe('29/02/2024');
+    expect(formatDateOnly(date, 'fi')).toBe('29.2.2024');
+    expect(formatDateOnly(date, 'sv')).toContain('2024');
+    for (const language of languages) {
+      expect(formatDateOnly('2099-12-31', language)).toContain('2099');
+      expect(() => formatDateOnly('2025-02-29', language)).toThrow();
+      expect(() => formatDateOnly('2026-04-31', language)).toThrow();
+    }
+    expect(date).toBe('2024-02-29');
   });
 });

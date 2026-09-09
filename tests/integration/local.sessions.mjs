@@ -86,9 +86,10 @@ async function itemProvenance(owner) {
       const omitted = await insert({});
       assert.deepEqual(omitted.field_provenance, {});
       for (const field of [...physical, 'pattern', 'sleeve_length', 'garment_length']) assert.equal(omitted[field], null);
-      assert.deepEqual(omitted.colours, ['unknown']);
-      assert.deepEqual(omitted.seasons, ['spring', 'summer', 'autumn', 'winter']);
-      const retained = { formality: 1, warmth: 1, rain_rating: 0, windproof: false, upper_coverage: 0, lower_coverage: 0 };
+      assert.deepEqual(omitted.colours, []);
+      assert.deepEqual(omitted.seasons, []);
+      const retained = { formality: 1, warmth: 1, rain_rating: 0, windproof: false, upper_coverage: 0, lower_coverage: 0,
+        colours: ['unknown'], seasons: ['spring', 'summer', 'autumn', 'winter'] };
       const legacyShaped = await insert(retained);
       for (const field of physical) assert.equal(legacyShaped[field], retained[field]);
       assert.deepEqual(legacyShaped.field_provenance, {});
@@ -100,23 +101,30 @@ async function itemProvenance(owner) {
         size_label: 'M', material: 'Owner supplied', seasons: ['summer'], formality: 2, warmth: 2,
         min_temp: -5, max_temp: 25, rain_rating: 1, windproof: true, upper_coverage: 2,
         lower_coverage: 1, style_tags: ['relaxed'], tags: ['fictional'], purchase_date: '2026-01-01',
-        purchase_price: 25, notes: 'Fictional owner note',
+        purchase_price: 25, notes: 'Fictional owner note', currency: 'SEK', favourite: false,
+        availability: 'laundry', lifecycle: 'archived', exclude_suggestions: true, wear_more: true,
       };
       const assertions = Object.fromEntries(fields.map((field) => [field, { kind: 'user', revision: 1 }]));
       let row = await insert({ ...values, field_provenance: { ...assertions, title: { kind: 'user', revision: JSON.rawJSON('1.0') } } });
       assert.deepEqual(row.field_provenance, assertions);
       for (const field of fields) assert.deepEqual(row[field], values[field]);
       const unchanged = row.field_provenance;
-      row = await save(row, { favourite: true, version: 999999, created_at: '2000-01-01T00:00:00Z' });
+      row = await save(row, { favourite: true, version: 999999, created_at: '2000-01-01T00:00:00Z', updated_at: '2000-01-01T00:00:00Z' });
       assert.deepEqual(row.field_provenance, unchanged);
+      assert.notEqual(row.updated_at, '2000-01-01T00:00:00Z');
+      for (const body of [{ id: randomUUID() }, { owner_id: randomUUID() }]) {
+        assert.ok(!(await patch(row, body)).ok);
+        assert.deepEqual(await read(row.id), [row]);
+      }
 
       stage = 'I29a same-value confirmation and permitted manual null and empty clears';
       const cleared = {
-        ...values, subcategory: null, colours: ['unknown'], pattern: null, sleeve_length: null,
+        ...values, subcategory: null, colours: [], seasons: [], pattern: null, sleeve_length: null,
         garment_length: null, brand: null, size_label: null, material: null, formality: null,
         warmth: null, min_temp: null, max_temp: null, rain_rating: null, windproof: null,
         upper_coverage: null, lower_coverage: null, style_tags: [], tags: [], purchase_date: null,
-        purchase_price: null, notes: '',
+        purchase_price: null, notes: '', currency: 'EUR', favourite: false, availability: 'ready',
+        lifecycle: 'active', exclude_suggestions: false, wear_more: false,
       };
       const confirmed = Object.fromEntries(fields.map((field) => [field, { kind: 'user', revision: 2 }]));
       const stale = row;
@@ -173,7 +181,13 @@ async function itemProvenance(owner) {
         ...['pattern', 'sleeve_length', 'garment_length'].map((field) => ({ [field]: 'invalid' })),
         ...['formality', 'warmth'].flatMap((field) => [-1, 5].map((value) => ({ [field]: value }))),
         ...['rain_rating', 'upper_coverage', 'lower_coverage'].flatMap((field) => [-1, 3].map((value) => ({ [field]: value }))),
-        { colours: [] }, { seasons: [] }, { title: '' }, { category: 'invalid' },
+        { colours: ['black', 'white', 'green', 'blue'] }, { seasons: ['spring', 'summer', 'autumn', 'winter', 'spring'] },
+        { seasons: ['monsoon'] }, { title: '' }, { category: 'invalid' }, { min_temp: -41 }, { max_temp: 51 },
+        { min_temp: 10, max_temp: 9 }, { purchase_price: -1 }, { purchase_price: '10000000000.00' },
+        { purchase_date: '2025-02-29' }, { currency: 'eur' }, { availability: 'unknown' }, { lifecycle: 'trash' },
+        ...[['title', 100], ['subcategory', 60], ['brand', 100], ['size_label', 50], ['material', 200], ['notes', 4000]]
+          .map(([field, maximum]) => ({ [field]: '🌿'.repeat(maximum + 1) })),
+        { tags: Array.from({ length: 12 }, (_, index) => `${index}${'🌿'.repeat(39)}`) },
       ];
       for (const body of invalidUpdates) {
         const result = await patch(row, { favourite: false, notes: 'Must roll back', ...body });
@@ -201,6 +215,18 @@ async function itemProvenance(owner) {
       for (const table of Object.values(manifest.tables)) assert.ok(table.every((entry) => entry.owner_id === owner.uid));
       for (const expected of [row, legacyShaped, newlyUnknown]) {
         assert.deepEqual(manifest.tables.items.find((entry) => entry.id === expected.id), expected);
+      }
+      stage = 'I29c optional collections and exact decimal zero false versus null';
+      for (const price of ['0.00', '0.01', '0.10', '9999999999.99']) {
+        const value = await insert({ purchase_price: price, warmth: 0, windproof: false, colours: [], seasons: [],
+          field_provenance: { purchase_price: { kind: 'user', revision: 1 }, warmth: { kind: 'user', revision: 1 },
+            windproof: { kind: 'user', revision: 1 }, colours: { kind: 'user', revision: 1 }, seasons: { kind: 'user', revision: 1 } } });
+        assert.equal(Number(value.purchase_price).toFixed(2), price);
+        assert.equal(value.warmth, 0); assert.equal(value.windproof, false);
+        const empty = await save(value, { purchase_price: null, warmth: null, windproof: null, colours: [], seasons: [],
+          field_provenance: Object.fromEntries(Object.keys(value.field_provenance).map((field) => [field, { kind: 'user', revision: 2 }])) });
+        assert.equal(empty.purchase_price, null); assert.equal(empty.warmth, null); assert.equal(empty.windproof, null);
+        assert.equal(empty.currency, value.currency); assert.deepEqual(empty.colours, []); assert.deepEqual(empty.seasons, []);
       }
       assert.ok(!manifest.tables.item_images.some((image) => ids.includes(image.item_id)));
     } finally {

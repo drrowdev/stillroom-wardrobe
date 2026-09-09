@@ -2,6 +2,7 @@ import type { OwnerScope } from '../auth/session';
 import type { AppClient } from './client';
 import { AppError, requireSuccess, throwIfAborted } from './errors';
 import { isRecord, isUuid } from '../domain/wardrobe';
+import { garmentFields } from '../domain/garment-fields';
 import {
   confirmsDescription, confirmsItem, imageDetailColumns, itemDetailColumns, parseImageBaseline, parseItemBaseline,
   type DescriptionAttempt, type ImageBaseline, type ItemAttempt, type ItemBaseline, type ItemDetail,
@@ -35,6 +36,7 @@ function writeError(error: unknown): never {
 }
 export async function saveItemFields(client: AppClient, scope: OwnerScope, attempt: ItemAttempt): Promise<ItemBaseline> {
   owned(scope, attempt.baseline.ownerId, attempt.epoch);
+  if (Object.keys(attempt.patch).some((key) => key !== 'field_provenance' && !garmentFields.some((field) => field === key))) throw new AppError('detail.invalidFields');
   let result;
   try {
     result = await client.from('items').update(attempt.patch).eq('id', attempt.baseline.id)

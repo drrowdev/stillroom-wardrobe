@@ -440,6 +440,7 @@ test('saved detail accessibility: keyboard, 320px and 200% text', async ({ page 
 test('synthetic saved detail visual evidence retains functional assertions in every project', async ({ page }, testInfo) => {
   const { api, item } = await setup(page);
   await expect(page.locator('.detail-photo img')).toBeVisible();
+  await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
   const directory = path.resolve('test-results/i29b-visual');
   const origin = new URL(testInfo.project.use.baseURL!).origin;
   const captures = [
@@ -473,6 +474,7 @@ test('synthetic saved detail visual evidence retains functional assertions in ev
     await expect(nameSave(page, capture.language)).toBeDisabled();
     await expect(descriptionSave(page, capture.language)).toBeDisabled();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= 11000)).toBe(true);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     if (testInfo.project.name === 'chromium') {
       await mkdir(directory, { recursive: true });

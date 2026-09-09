@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { AppClient } from '../../data/client';
 import type { OwnerScope } from '../../auth/session';
-import { categories, categoryKeys, validateDetails } from '../../domain/wardrobe';
+import { garmentFields, newGarmentDraft, validateGarmentDraft } from '../../domain/garment-fields';
+import { validDescription } from '../../domain/item-details';
+import { ItemForm } from './item-form';
 import { Icon } from '../../app/icon';
-import type { MessageKey, Translate } from '../../i18n';
+import type { Language, MessageKey, Translate } from '../../i18n';
 import { ImagePreparationError, type PreparedPhoto } from '../../images/process-jpeg';
 import { prepareImage } from '../../images/process-image';
 import { CropEditor } from '../../images/crop-editor';
@@ -26,19 +28,29 @@ const preparationReasons: Record<ImagePreparationDetails['reason'], MessageKey> 
   unsupported: 'photo.reasonUnsupported', tooLarge: 'photo.reasonTooLarge',
   invalid: 'photo.reasonInvalid', unavailable: 'photo.reasonUnavailable',
 };
+function focusGarmentField(id: string): void {
+  const input = document.getElementById(id);
+  let ancestor = input?.parentElement;
+  while (ancestor) {
+    if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+    ancestor = ancestor.parentElement;
+  }
+  input?.focus();
+}
 type Props = {
-  client: AppClient; scope: OwnerScope; currency: string; online: boolean; t: Translate;
+  client: AppClient; scope: OwnerScope; currency: string; online: boolean; t: Translate; language: Language;
   onSaved: () => void; onBack: () => void; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void;
 };
-export function AddItem({ client, scope, currency, online, t, onSaved, onBack, onDirty }: Props) {
+export function AddItem({ client, scope, currency, online, t, language, onSaved, onBack, onDirty }: Props) {
   const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [fullPhoto, setFullPhoto] = useState<PreparedPhoto | null>(null);
   const [fullPreview, setFullPreview] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [acceptedEdit, setAcceptedEdit] = useState<PhotoEdit>(ORIGINAL_EDIT);
-  const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('');
+  const [initialCurrency] = useState(currency);
+  const [draft, setDraft] = useState(() => newGarmentDraft(currency, language));
+  const title = draft.raw.title;
   const [altText, setAltText] = useState('');
   const [preparing, setPreparing] = useState(false);
   const [stage, setStage] = useState<SaveStage | null>(null);
@@ -53,9 +65,10 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
   const preparationWork = useRef<Promise<void>>(Promise.resolve());
   const original = useRef<Blob | null>(null);
   const focusEditorButton = useRef(false);
+  const submitLatch = useRef(false);
   const busy = stage !== null;
   const frozen = attempt !== null;
-  const dirty = preparing || photo !== null || Boolean(title || category || altText);
+  const dirty = preparing || photo !== null || Object.keys(draft.intent).length > 0 || Boolean(altText);
   useEffect(() => { onDirty(dirty, frozen, busy); }, [dirty, frozen, busy, onDirty]);
   useEffect(() => {
     if (focusEditorButton.current && !editing && !preparing) {
@@ -88,7 +101,7 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
   }, [dirty]);
 
   async function choose(file: File | undefined): Promise<void> {
-    if (!file || frozen || scope.signal.aborted) return;
+    if (!file || frozen || submitLatch.current || scope.signal.aborted) return;
     original.current = file;
     setEditing(false);
     setFullPhoto(null);
@@ -97,7 +110,7 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
     await prepare(file, ORIGINAL_EDIT, true);
   }
   async function prepare(file: Blob, edit: PhotoEdit, replacing = false): Promise<void> {
-    if (frozen || scope.signal.aborted) return;
+    if (frozen || submitLatch.current || scope.signal.aborted) return;
     preparation.current?.abort();
     const controller = new AbortController();
     preparation.current = controller;
@@ -138,18 +151,20 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
       document.getElementById(editing ? 'crop-editor-title' : 'photo-pending')?.focus();
       return;
     }
-    if (busy || !online) return;
-    const details = validateDetails(title, category, altText);
-    if (!photo || !details) {
+    if (submitLatch.current || busy || !online || scope.signal.aborted) return;
+    const validated = validateGarmentDraft(draft);
+    if (!photo || !validated.values || validDescription(altText) === null) {
       setInvalid(true);
-      document.getElementById(!photo ? 'choose-photo' : !title.trim() ? 'item-title' : !category ? 'item-category' : 'item-alt')?.focus();
+      const first = garmentFields.find((field) => validated.errors[field]);
+      focusGarmentField(!photo ? 'choose-photo' : first ? `item-${first}` : 'item-alt');
       return;
     }
-    const current = attempt ?? newSaveAttempt(details, photo, currency);
-    setAttempt(current);
+    submitLatch.current = true;
     setInvalid(false);
     setError(null);
     try {
+      const current = attempt ?? newSaveAttempt(draft, altText, photo, scope);
+      setAttempt(current);
       await saveItem(client, scope, current, setStage);
       if (!scope.signal.aborted) {
         original.current = null;
@@ -159,7 +174,7 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
       }
     } catch (problem) {
       if (!scope.signal.aborted && !isAborted(problem)) setError(errorKey(problem));
-    } finally { if (!scope.signal.aborted) setStage(null); }
+    } finally { if (!scope.signal.aborted) { submitLatch.current = false; setStage(null); } }
   }
   return (
     <section className="capture-page" aria-labelledby="capture-title">
@@ -200,20 +215,14 @@ export function AddItem({ client, scope, currency, online, t, onSaved, onBack, o
         <div className="details-panel">
           <div className="details-heading"><span className="section-number" aria-hidden="true">01</span><h2>{t('capture.detailsTitle')}</h2></div>
           <p className="fine muted">{t('capture.manualNote')}</p>
-          <div className="field">
-            <label htmlFor="item-title">{t('item.title')}</label>
-            <input id="item-title" value={title} placeholder={t('capture.namePlaceholder')} maxLength={100} readOnly={frozen} onChange={(event) => setTitle(event.target.value)} aria-invalid={invalid && !title.trim()} aria-describedby={invalid && !title.trim() ? 'title-error' : undefined} />
-            {invalid && !title.trim() && <span id="title-error" className="field-error">{t('common.required')}</span>}
-          </div>
-          <div className="field">
-            <label htmlFor="item-category">{t('item.category')}</label>
-            <select id="item-category" value={category} disabled={frozen} onChange={(event) => setCategory(event.target.value)} aria-invalid={invalid && !category} aria-describedby={invalid && !category ? 'category-error' : undefined}>
-              <option value="">{t('capture.selectCategory')}</option>
-              {categories.map((value) => <option key={value} value={value}>{t(categoryKeys[value])}</option>)}
-            </select>
-            {invalid && !category && <span id="category-error" className="field-error">{t('common.required')}</span>}
-          </div>
-          <details className="optional-details"><summary>{t('item.details')}<span>{t('common.optional')}</span></summary><div className="field"><label htmlFor="item-alt">{t('item.altText')}</label><textarea id="item-alt" rows={3} value={altText} maxLength={240} readOnly={frozen} onChange={(event) => setAltText(event.target.value)} aria-describedby="alt-help" /><p className="fine muted" id="alt-help">{t('capture.descriptionHelp')}</p></div></details>
+          <ItemForm draft={draft} onChange={(next) => { if (!submitLatch.current && !frozen) setDraft(next); }} language={language} t={t} prefix="item" locked={frozen} currency={initialCurrency} showErrors={invalid}>
+            <div className="field"><label htmlFor="item-alt">{t('item.altText')}</label>
+              <textarea id="item-alt" rows={3} value={altText} readOnly={frozen} onChange={(event) => { if (!submitLatch.current && !frozen) setAltText(event.target.value); }}
+                aria-invalid={validDescription(altText) === null} aria-describedby={validDescription(altText) === null ? 'alt-error' : 'alt-help'} />
+              <p className="fine muted" id="alt-help">{t('capture.descriptionHelp')}</p>
+              {validDescription(altText) === null && <p id="alt-error" role="alert" className="notice notice-error">{t('detail.invalidDescription')}</p>}
+            </div>
+          </ItemForm>
           {error && <div className="notice notice-error" role="alert"><p>{t(error)}</p>{attempt && <p>{t('capture.retryNote')}</p>}</div>}
           {frozen && !busy && <p className="fine muted">{t('capture.frozen')}</p>}
           <div className="save-actions"><button className="button button-primary button-wide" type="submit" disabled={!online || busy || preparing || editing}>{busy ? <span className="spinner" /> : <Icon name="check" />}{t(stage ?? (attempt ? 'common.retry' : 'capture.save'))}</button><button className="button button-quiet" type="button" onClick={onBack} disabled={busy}>{t('common.cancel')}</button></div>

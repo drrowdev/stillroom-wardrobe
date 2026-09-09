@@ -45,8 +45,15 @@ export function fieldAssertion(provenance: FieldProvenance, field: ProvenanceFie
   return provenance[field] ?? { kind: 'unknown', revision: 0 };
 }
 
-export function manualSaveProvenance(): FieldProvenance {
-  return { title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 } };
+export function manualSaveProvenance(fields: readonly ProvenanceField[] = ['title', 'category'], baseline: FieldProvenance = {}): FieldProvenance {
+  const result = parseFieldProvenance(baseline);
+  for (const field of fields) {
+    if (!provenanceFields.includes(field)) throw new InvalidFieldProvenance();
+    const previous = fieldAssertion(result, field);
+    if (previous.revision >= maximumFieldRevision) throw new InvalidFieldProvenance();
+    result[field] = { kind: 'user', revision: previous.revision + 1 };
+  }
+  return result;
 }
 
 export function sameFieldProvenance(actual: unknown, expected: unknown): boolean {

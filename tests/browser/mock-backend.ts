@@ -5,6 +5,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { Socket } from 'node:net';
 import type { Language } from '../../src/i18n';
+import { garmentFields, parseGarmentValues, sameValue } from '../../src/domain/garment-fields';
+import { parseFieldProvenance, provenanceFields } from '../../src/domain/attribute-provenance';
 
 export const owners = {
   a: '10000000-0000-4000-8000-000000000001',
@@ -12,8 +14,8 @@ export const owners = {
 };
 type JsonRow = Record<string, unknown>;
 const itemDefaults = () => ({
-  subcategory: null, colours: ['unknown'], pattern: null, sleeve_length: null, garment_length: null,
-  brand: null, size_label: null, material: null, seasons: ['spring', 'summer', 'autumn', 'winter'],
+  subcategory: null, colours: [], pattern: null, sleeve_length: null, garment_length: null,
+  brand: null, size_label: null, material: null, seasons: [],
   formality: null, warmth: null, min_temp: null, max_temp: null, rain_rating: null, windproof: null,
   upper_coverage: null, lower_coverage: null, style_tags: [], tags: [], purchase_date: null,
   purchase_price: null, currency: 'EUR', notes: '', favourite: false, availability: 'ready',
@@ -330,7 +332,15 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         const body = request.postDataJSON() as JsonRow;
         if (body.owner_id !== owner) { await json({ code: '42501' }, 403); return; }
         if (table.some((row) => row.id === body.id)) { await json({ code: '23505', message: 'duplicate' }, 409); return; }
-        if (table === items) table.push({ ...itemDefaults(), ...body, deleted_at: null, version: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+        if (table === items) {
+          const row = { ...itemDefaults(), ...body, deleted_at: null, version: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+          try {
+            parseGarmentValues(row);
+            const provenance = parseFieldProvenance(row.field_provenance);
+            if (Object.values(provenance).some((entry) => entry.kind !== 'user' || entry.revision !== 1)) throw new Error('Invalid fixture insert');
+          } catch { await json({ code: '22023', message: 'Invalid input' }, 400); return; }
+          table.push(row);
+        }
         else table.push({ ...body, description_version: 1, retired_at: null, state: 'pending', main_path: `${owner}/${body.item_id}/${body.id}/main.jpg`, thumb_path: `${owner}/${body.item_id}/${body.id}/thumb.jpg` });
         await route.fulfill({ status: 201, body: '' }); return;
       }
@@ -348,17 +358,26 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         if (!row) { await json(null); return; }
         const body = request.postDataJSON() as JsonRow;
         if (!id || url.searchParams.get('owner_id') !== `eq.${owner}` || url.searchParams.get('deleted_at') !== 'is.null'
-          || Object.keys(body).some((key) => !['title', 'category', 'field_provenance'].includes(key))) {
+          || Object.keys(body).some((key) => ![...garmentFields, 'field_provenance'].includes(key))) {
           await json({ code: '42501' }, 403); return;
         }
-        const provenance = body.field_provenance as Record<string, { kind: string; revision: number }> | undefined;
-        const old = row.field_provenance as Record<string, { kind: string; revision: number }>;
-        if (!provenance || (['title', 'category'] as const).some((field) => body[field] !== undefined && body[field] !== row[field]
-          && (provenance[field]?.kind !== 'user' || provenance[field]?.revision !== (old[field]?.revision ?? 0) + 1))
-          || Object.keys(old).some((field) => !['title', 'category'].includes(field) && JSON.stringify(old[field]) !== JSON.stringify(provenance[field]))) {
-          await json({ code: '22023', message: 'Request conflict' }, 400); return;
-        }
-        Object.assign(row, body, { version: Number(row.version) + 1, updated_at: new Date().toISOString() });
+        let provenance;
+        try {
+          provenance = parseFieldProvenance(body.field_provenance ?? row.field_provenance);
+          const old = parseFieldProvenance(row.field_provenance);
+          for (const field of provenanceFields) {
+            const previous = old[field]?.revision ?? 0, entry = provenance[field];
+            if (entry?.kind === 'ai_observed' || entry?.kind === 'ai_estimated') throw new Error('Invalid fixture assertion');
+            if (!sameValue(entry, old[field])) {
+              if (!entry || entry.revision !== previous + 1 || previous === 2147483647) throw new Error('Invalid fixture revision');
+            } else if (Object.hasOwn(body, field) && !sameValue(body[field], row[field])) {
+              if (previous === 2147483647) throw new Error('Invalid fixture revision');
+              provenance[field] = { kind: 'unknown', revision: previous + 1 };
+            }
+          }
+          parseGarmentValues({ ...row, ...body });
+        } catch { await json({ code: '22023', message: 'Request conflict' }, 400); return; }
+        Object.assign(row, body, { field_provenance: provenance, version: Number(row.version) + 1, updated_at: new Date().toISOString() });
         await json(row); return;
       }
       const singular = request.headers().accept?.includes('vnd.pgrst.object');

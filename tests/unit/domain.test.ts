@@ -23,7 +23,7 @@ describe('manual draft validation', () => {
     expect(validateDetails('', '', '')).toBeNull();
     expect(validateDetails('   ', 'top', '')).toBeNull();
     expect(validateDetails('Shirt', 'foreign', '')).toBeNull();
-    expect(validateDetails('  Shirt  ', 'top', '')).toEqual({ title: 'Shirt', category: 'top', altText: 'Shirt' });
+    expect(validateDetails('  Shirt  ', 'top', '')).toEqual({ title: 'Shirt', category: 'top', altText: '' });
   });
   it('keeps edited descriptions and bounds fields', () => {
     expect(validateDetails('Shirt', 'top', 'Front view')?.altText).toBe('Front view');

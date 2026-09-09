@@ -1,6 +1,10 @@
-import { fieldAssertion, maximumFieldRevision, parseFieldProvenance, sameFieldProvenance, type FieldProvenance } from './attribute-provenance';
+import { maximumFieldRevision, parseFieldProvenance, sameFieldProvenance, type FieldProvenance } from './attribute-provenance';
 import { isCategory, isRecord, isUuid, type Category } from './wardrobe';
 import { AppError } from '../data/errors';
+import {
+  buildGarmentWrite, editGarmentField, freezeValues, newGarmentDraft, parseGarmentValues, sameValue,
+  type GarmentDraft, type GarmentPatch, type GarmentValues,
+} from './garment-fields';
 
 export const itemFactColumns = [
   'subcategory', 'colours', 'pattern', 'sleeve_length', 'garment_length', 'brand', 'size_label',
@@ -15,6 +19,7 @@ export type ItemFields = { title: string; category: Category };
 export type ItemBaseline = ItemFields & {
   id: string; ownerId: string; version: number; provenance: FieldProvenance;
   facts: Record<string, unknown>;
+  values: GarmentValues;
 };
 export type ImageBaseline = {
   id: string; ownerId: string; itemId: string; altText: string; version: number;
@@ -22,8 +27,8 @@ export type ImageBaseline = {
 };
 export type ItemDetail = { item: ItemBaseline; image: ImageBaseline };
 export type ItemAttempt = {
-  epoch: number; baseline: ItemBaseline; fields: ItemFields;
-  patch: { title?: string; category?: Category; field_provenance: FieldProvenance };
+  epoch: number; baseline: ItemBaseline; fields: GarmentValues;
+  patch: GarmentPatch;
 };
 export type DescriptionAttempt = { epoch: number; baseline: ImageBaseline; text: string };
 
@@ -48,20 +53,6 @@ function jsonValue(value: unknown): boolean {
   if (typeof value === 'number') return Number.isFinite(value);
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
-function sameValue(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (Array.isArray(left) && Array.isArray(right)) return left.length === right.length && left.every((value, index) => sameValue(value, right[index]));
-  if (isRecord(left) && isRecord(right)) return Object.keys(left).length === Object.keys(right).length
-    && Object.keys(left).every((key) => Object.hasOwn(right, key) && sameValue(left[key], right[key]));
-  return false;
-}
-function frozen<T>(value: T): T {
-  if (value && typeof value === 'object') {
-    Object.values(value).forEach(frozen);
-    Object.freeze(value);
-  }
-  return value;
-}
 export function parseItemBaseline(value: unknown, ownerId: string, itemId: string): ItemBaseline {
   if (!isUuid(ownerId) || !isUuid(itemId) || !isRecord(value) || value.owner_id !== ownerId || value.id !== itemId
     || value.deleted_at !== null || !version(value.version, Number.MAX_SAFE_INTEGER)
@@ -71,9 +62,11 @@ export function parseItemBaseline(value: unknown, ownerId: string, itemId: strin
   }
   let provenance: FieldProvenance;
   try { provenance = parseFieldProvenance(value.field_provenance); } catch { throw new AppError('detail.unavailable'); }
-  return frozen({
+  const values = parseGarmentValues(value);
+  return freezeValues({
     id: itemId, ownerId, title: value.title, category: value.category, version: value.version, provenance,
-    facts: structuredClone(Object.fromEntries(itemFactColumns.map((key) => [key, value[key]]))),
+    values,
+    facts: structuredClone(Object.fromEntries(itemFactColumns.map((key) => [key, key === 'purchase_price' ? values.purchase_price : value[key]]))),
   });
 }
 export function parseImageBaseline(value: unknown, ownerId: string, itemId: string): ImageBaseline {
@@ -82,37 +75,35 @@ export function parseImageBaseline(value: unknown, ownerId: string, itemId: stri
     || [...value.alt_text].length > 240 || !version(value.description_version, maximumFieldRevision)
     || value.main_path !== `${ownerId}/${itemId}/${value.id}/main.jpg`
     || value.thumb_path !== `${ownerId}/${itemId}/${value.id}/thumb.jpg`) throw new AppError('detail.unavailable');
-  return frozen({
+  return freezeValues({
     id: value.id, ownerId, itemId, altText: value.alt_text, version: value.description_version,
     mainPath: String(value.main_path), thumbPath: String(value.thumb_path),
   });
 }
 export function prepareItemAttempt(baseline: ItemBaseline, title: string, category: string, epoch: number): ItemAttempt {
-  const fields = validItemFields(title, category);
-  if (!fields || baseline.version >= Number.MAX_SAFE_INTEGER) throw new AppError('detail.invalidFields');
-  const provenance = structuredClone(baseline.provenance);
-  const patch: ItemAttempt['patch'] = { field_provenance: provenance };
-  for (const field of ['title', 'category'] as const) {
-    if (fields[field] === baseline[field]) continue;
-    const assertion = fieldAssertion(provenance, field);
-    if (assertion.revision >= maximumFieldRevision) throw new AppError('error.conflict');
-    provenance[field] = { kind: 'user', revision: assertion.revision + 1 };
-    if (field === 'title') patch.title = fields.title;
-    else patch.category = fields.category;
-  }
-  if (patch.title === undefined && patch.category === undefined) throw new AppError('detail.invalidFields');
-  return frozen({ epoch, baseline: structuredClone(baseline), fields, patch });
+  let draft = newGarmentDraft(baseline.values.currency, 'en', baseline.values);
+  if (title !== baseline.title) draft = editGarmentField(draft, 'title', title, 'en');
+  if (category !== baseline.category) draft = editGarmentField(draft, 'category', category, 'en');
+  return prepareGarmentAttempt(baseline, draft, epoch);
+}
+export function prepareGarmentAttempt(baseline: ItemBaseline, draft: GarmentDraft, epoch: number): ItemAttempt {
+  if (!Number.isSafeInteger(baseline.version) || baseline.version < 1 || baseline.version >= Number.MAX_SAFE_INTEGER) throw new AppError('detail.invalidFields');
+  const { values: fields, patch } = buildGarmentWrite(draft, baseline.values, baseline.provenance);
+  if (Object.keys(patch).length === 1) throw new AppError('detail.invalidFields');
+  return freezeValues({ epoch, baseline: structuredClone(baseline), fields, patch });
 }
 export function prepareDescriptionAttempt(baseline: ImageBaseline, text: string, epoch: number): DescriptionAttempt {
   const value = validDescription(text);
   if (value === null || value === baseline.altText || baseline.version >= maximumFieldRevision) throw new AppError('detail.invalidDescription');
-  return frozen({ epoch, baseline: structuredClone(baseline), text: value });
+  return freezeValues({ epoch, baseline: structuredClone(baseline), text: value });
 }
 export function confirmsItem(actual: ItemBaseline, attempt: ItemAttempt): boolean {
+  const expectedFacts = { ...attempt.baseline.facts };
+  for (const key of itemFactColumns) if (key !== 'created_at') expectedFacts[key] = attempt.fields[key];
   return actual.ownerId === attempt.baseline.ownerId && actual.id === attempt.baseline.id
     && actual.version === attempt.baseline.version + 1 && actual.title === attempt.fields.title
     && actual.category === attempt.fields.category && sameFieldProvenance(actual.provenance, attempt.patch.field_provenance)
-    && sameValue(actual.facts, attempt.baseline.facts);
+    && sameValue(actual.facts, expectedFacts);
 }
 export function confirmsDescription(actual: ImageBaseline, attempt: DescriptionAttempt): boolean {
   return actual.ownerId === attempt.baseline.ownerId && actual.itemId === attempt.baseline.itemId

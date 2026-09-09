@@ -4,25 +4,25 @@ import type { AppClient } from '../../data/client';
 import { loadItemDetail, saveImageDescription, saveItemFields } from '../../data/item-details';
 import { errorKey, isAborted } from '../../data/errors';
 import {
-  confirmsDescription, confirmsItem, prepareDescriptionAttempt, prepareItemAttempt, validDescription, validItemFields,
+  confirmsDescription, confirmsItem, prepareDescriptionAttempt, prepareGarmentAttempt, validDescription,
   type DescriptionAttempt, type ImageBaseline, type ItemAttempt, type ItemBaseline, type ItemDetail as Detail,
 } from '../../domain/item-details';
-import { categories, categoryKeys } from '../../domain/wardrobe';
-import { fieldAssertion } from '../../domain/attribute-provenance';
-import type { MessageKey, Translate } from '../../i18n';
+import { garmentDraftDirty, newGarmentDraft } from '../../domain/garment-fields';
+import { ItemForm } from './item-form';
+import type { Language, MessageKey, Translate } from '../../i18n';
 import type { PrivateImages } from '../../images/private-images';
 import { DiscardDialog } from '../../app/dialog';
 import { Icon } from '../../app/icon';
 
 type Dirty = { dirty: boolean; busy: boolean };
 type Shared = {
-  client: AppClient; scope: OwnerScope; online: boolean; t: Translate; onSaved: () => void;
+  client: AppClient; scope: OwnerScope; online: boolean; t: Translate; language: Language; currency: string; onSaved: () => void;
 };
 function useSection<Base, Draft, Attempt>(initial: Base, initialDraft: (base: Base) => Draft,
   prepare: (base: Base, draft: Draft, epoch: number) => Attempt,
   save: (client: AppClient, scope: OwnerScope, attempt: Attempt) => Promise<Base>,
   read: (detail: Detail) => Base, confirms: (row: Base, attempt: Attempt) => boolean,
-  itemId: string, props: Shared, onState: (state: Dirty) => void) {
+  itemId: string, props: Shared, onState: (state: Dirty) => void, isDirty?: (base: Base, draft: Draft) => boolean) {
   const [base, setBase] = useState(initial);
   const [draft, setDraft] = useState(() => initialDraft(initial));
   const [attempt, setAttempt] = useState<Attempt | null>(null);
@@ -38,7 +38,7 @@ function useSection<Base, Draft, Attempt>(initial: Base, initialDraft: (base: Ba
     lifetime.current = new AbortController();
     return () => lifetime.current.abort();
   }, []);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(initialDraft(base));
+  const dirty = isDirty ? isDirty(base, draft) : JSON.stringify(draft) !== JSON.stringify(initialDraft(base));
   let valid = true;
   try { prepare(base, draft, props.scope.epoch); } catch { valid = false; }
   useEffect(() => {
@@ -97,35 +97,23 @@ function useSection<Base, Draft, Attempt>(initial: Base, initialDraft: (base: Ba
     </>,
   };
 }
-const itemDraft = (base: ItemBaseline) => ({ title: base.title, category: base.category });
+const itemDraft = (base: ItemBaseline) => newGarmentDraft(base.values.currency, 'en', base.values);
 const descriptionDraft = (base: ImageBaseline) => base.altText;
-const prepareFields = (base: ItemBaseline, draft: ReturnType<typeof itemDraft>, epoch: number) => prepareItemAttempt(base, draft.title, draft.category, epoch);
+const prepareFields = (base: ItemBaseline, draft: ReturnType<typeof itemDraft>, epoch: number) => prepareGarmentAttempt(base, draft, epoch);
+const dirtyFields = (base: ItemBaseline, draft: ReturnType<typeof itemDraft>) => garmentDraftDirty(draft, base.values, base.provenance);
 const readItem = (detail: Detail) => detail.item;
 const readImage = (detail: Detail) => detail.image;
 
 function NameSection(props: Shared & { base: ItemBaseline; onState: (state: Dirty) => void }) {
   const section = useSection<ItemBaseline, ReturnType<typeof itemDraft>, ItemAttempt>(
-    props.base, itemDraft, prepareFields, saveItemFields, readItem, confirmsItem, props.base.id, props, props.onState);
-  const invalid = validItemFields(section.draft.title, section.draft.category) === null;
+    props.base, itemDraft, prepareFields, saveItemFields, readItem, confirmsItem, props.base.id, props, props.onState, dirtyFields);
   const { t } = props;
   return <section className="settings-card detail-name" aria-labelledby="detail-name-heading">
     <h2 id="detail-name-heading">{t('detail.nameSection')}</h2>
     <p className="muted fine">{t('detail.provenance')}</p>
     <form className="stack" onSubmit={(event) => { event.preventDefault(); section.save(); }}>
-      <div className="field"><label htmlFor="detail-title">{t('item.title')}</label>
-        <input id="detail-title" value={section.draft.title} required disabled={section.locked}
-          aria-invalid={invalid} aria-describedby={invalid ? 'detail-title-error' : undefined}
-          onChange={(event) => section.setDraft({ ...section.draft, title: event.target.value })} />
-        {invalid && <p id="detail-title-error" role="alert" className="notice notice-error">{t('detail.invalidFields')}</p>}
-        {fieldAssertion(section.base.provenance, 'title').kind !== 'user' && <span className="muted fine">{t('detail.unverified')}</span>}
-      </div>
-      <div className="field"><label htmlFor="detail-category">{t('item.category')}</label>
-        <select id="detail-category" value={section.draft.category} disabled={section.locked}
-          onChange={(event) => { const category = categories.find((value) => value === event.target.value); if (category) section.setDraft({ ...section.draft, category }); }}>
-          {categories.map((category) => <option key={category} value={category}>{t(categoryKeys[category])}</option>)}
-        </select>
-        {fieldAssertion(section.base.provenance, 'category').kind !== 'user' && <span className="muted fine">{t('detail.unverified')}</span>}
-      </div>
+      <ItemForm draft={section.draft} onChange={section.setDraft} baseline={section.base.values} provenance={section.base.provenance}
+        language={props.language} t={t} prefix="detail" locked={section.locked} currency={props.currency} />
       {section.controls}
       <button className="button button-primary" disabled={!section.canSave}>{t(section.busy ? 'common.saving' : 'detail.saveName')}</button>
       {section.saved && <p role="status" className="settings-success">{t('detail.nameSaved')}</p>}

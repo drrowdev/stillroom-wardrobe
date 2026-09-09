@@ -23,7 +23,7 @@ type OwnerData = { label: string; ownerId: string; tables: TableRows; objects: [
 type ObjectEvidence = { path: string; bytes: number; sha256: string };
 type Snapshot = {
   schemaVersion: number; projectId: string; stage: string; run: string;
-  sources: { base: string; target: string; description: string }; owners: string[];
+  sources: { base: string; target: string; description: string; collections: string }; owners: string[];
   data: [OwnerData, OwnerData];
 };
 const sha = 'a'.repeat(64);
@@ -102,6 +102,7 @@ const baseTable = [
   '   `20260905000000` | `20260905000000` | `2026-09-05 00:00:00` ',
   '   `20260906000000` | ` `              | `2026-09-06 00:00:00` ',
   '   `20260909070000` | ` `              | `2026-09-09 07:00:00` ',
+  '   `20260909110000` | ` `              | `2026-09-09 11:00:00` ',
   '',
   '',
 ].join('\n');
@@ -113,6 +114,7 @@ const targetTable = [
   '   `20260905000000` | `20260905000000` | `2026-09-05 00:00:00` ',
   '   `20260906000000` | `20260906000000` | `2026-09-06 00:00:00` ',
   '   `20260909070000` | `20260909070000` | `2026-09-09 07:00:00` ',
+  '   `20260909110000` | `20260909110000` | `2026-09-09 11:00:00` ',
   '',
   '',
 ].join('\n');
@@ -133,11 +135,11 @@ describe('CI-only preservation guards', () => {
       expect(() => assertRehearsalEnvironment({ ...validEnv, [key]: 'fictional-refused' }, [])).toThrow();
     }
   });
-  it('pins exactly three regular migrations, lengths and hashes', async () => {
-    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000']);
+  it('pins exactly four regular migrations, lengths and hashes', async () => {
+    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000']);
     expect(() => validateInventory(inventory())).not.toThrow();
     await expect(assertMigrationInventory()).resolves.toBeUndefined();
-    for (const index of [0, 1, 2]) for (const [key, value] of [
+    for (const index of [0, 1, 2, 3]) for (const [key, value] of [
       ['name', 'unexpected.sql'], ['bytes', 0], ['bytes', present(inventory()[index]).bytes + 1],
       ['sha256', 'b'.repeat(64)], ['regular', false], ['symlink', true],
     ]) {
@@ -175,8 +177,8 @@ describe('CI-only preservation guards', () => {
     expect(() => assertCapabilities([{ code: 0, stdout: '  --local\n' }, ...help.slice(1)])).toThrow();
   });
   it('parses source-derived applied/pending tables without claiming execution', () => {
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000'] });
-    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000'], pending: [] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000'] });
+    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000'], pending: [] });
     expect(() => assertHistory(targetTable, 'base')).toThrow();
     expect(() => assertHistory(baseTable, 'target')).toThrow();
     expect(() => assertHistory(baseTable, 'other')).toThrow();
@@ -187,7 +189,7 @@ describe('CI-only preservation guards', () => {
   it('retains SOURCE-DERIVED renderer padding, widths and decorative blank lines', () => {
     for (const table of [baseTable, targetTable]) {
       const lines = table.split('\n');
-      expect(lines).toHaveLength(9);
+      expect(lines).toHaveLength(10);
       expect(lines.slice(0, 2)).toEqual(['', '  ']);
       expect(lines.slice(-2)).toEqual(['', '']);
       for (const line of lines.slice(2, 7)) {
@@ -259,7 +261,7 @@ describe('CI-only preservation guards', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe('EVIDENCE_REQUIRED');
     expect(historyFailureDetail(failure)).toBe(`; reason=${reason}`);
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000'] });
   });
   it('distinguishes history command failure without forwarding command output or arbitrary errors', () => {
     const privateText = 'arbitrary upstream text /private/fixture-path';
@@ -554,7 +556,7 @@ describe('strict bounded base snapshots', () => {
     const snapshot = fixture();
     for (const changes of [
       { schemaVersion: 2 }, { projectId: 'other' }, { stage: 'target' }, { run: randomUUID() },
-      { sources: { ...SOURCE_HASHES, target: sha } }, { sources: { ...SOURCE_HASHES, description: sha } },
+      { sources: { ...SOURCE_HASHES, target: sha } }, { sources: { ...SOURCE_HASHES, description: sha } }, { sources: { ...SOURCE_HASHES, collections: sha } },
       { sources: { base: SOURCE_HASHES.base, target: SOURCE_HASHES.target } }, { owners: [...owners].reverse() },
       { owners: [owners[0], owners[0]] }, { extra: true }, { data: [] },
     ]) expect(() => validateSnapshot({ ...snapshot, ...changes }, run, owners)).toThrow();

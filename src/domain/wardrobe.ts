@@ -31,7 +31,7 @@ export type WardrobeItem = {
 export type DraftDetails = { title: string; category: Category; altText: string };
 export function validateDetails(title: string, category: string, altText: string): DraftDetails | null {
   const name = title.trim();
-  const description = altText.trim() || name;
-  if (!name || name.length > 100 || !isCategory(category) || description.length > 240) return null;
+  const description = altText.trim();
+  if (!name || [...name].length > 100 || !isCategory(category) || [...description].length > 240 || name.includes('\0') || description.includes('\0')) return null;
   return { title: name, category, altText: description };
 }

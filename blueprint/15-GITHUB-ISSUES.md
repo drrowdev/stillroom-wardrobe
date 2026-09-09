@@ -126,6 +126,16 @@ Test files: `tests/integration/automatic-tagging.test.ts`; `tests/security/autom
 
 Acceptance: Given a photo only and enabled consent/allowance, automatically fill title/category/details in the editable form. No library item/image exists before Save or after discard. Save persists exactly the reviewed values; all garment fields/descriptions remain editable afterward. Manual clears, new photos and Save defeat stale results. Timeout permits manual completion; missing facts stay unknown. Description edits cannot change image bytes/paths. Complete the model gate in 20.
 
+The I29c manual foundation uses `src/features/wardrobe/item-form.tsx` for all
+thirty fields, explicit reviewed-value Save and later correction, with the
+separate description section. Its optional-collections migration preserves
+historical rows while allowing empty/unknown colours and seasons. Manual value
+patches and provenance increments are inseparable; app defaults are not AI facts.
+Coverage in `docs/phase-2-result.md` is this packet's evidence, not replacement
+of the full I29 or later lifecycle/idempotency acceptance targets. Automatic
+analysis, consent, receipts, allowances, expiry and saved-only export still belong
+to MVP I29; this manual packet does not defer or implement them.
+
 Security: Owner-authenticated analysis with current consent/budget, server image/output validation, no arbitrary URL/owner/item target and no inventory writes. No direct receipt/usage access or browser provider keys. Discard/expiry purges bounded results; unknown-billing timeouts do not auto-retry. No real inference/photos in ordinary CI.
 
 Done: Follow `21` to compare two eligible models with authorized photos, recording field errors/unknowns, correction effort, latency and billed usage before choosing a configuration. Do not assume Gemini is cheapest/best or Terra the only alternative. Cover duplicate requests, expiry, manual clears, account changes, failed Save and no AI on Save/restore. Metadata-v2 excludes drafts/results/usage. Base SQL/results are not AI evidence.
@@ -135,6 +145,10 @@ Done: Follow `21` to compare two eligible models with authorized photos, recordi
 Phase: **2** · Requirements: **R03 R23 R28** · Depends on: **I29**
 
 Goal: Implement every item field in R03, AI provenance/unknown states from I29, favourites, laundry/availability, lifecycle, trash/undo and permanent deletion. Use checked versioned edits that protect manual values and explicit clears from later AI.
+
+Reuse I29c's shared item form and its field/clear/Save contract rather than
+creating another editor. I29c's basic availability/lifecycle/flag controls are not
+I08 trash, undo, permanent deletion, bulk actions, filtering or eligibility logic.
 
 Target files: `src/features/wardrobe/item-form.tsx`; `src/features/wardrobe/item-detail.tsx`; `src/features/settings/trash.tsx`.
 
