@@ -2427,7 +2427,9 @@ active consent, not old imageless/pending library rows; saved-only remains open.
 
 The new setup seeder runs only after full-reset core provisioning. It forwards
 the existing opt-in through the stripped command environment, never manufactures
-one, fetches an admin key or changes a core guard. P1/P3/P5 and named S4 children
+one, fetches an admin key or changes a core guard. Fresh version-one core
+profiles/preferences and empty wardrobe/AI tables are required; used fixture
+state is refused. P1/P3/P5 and named S4 children
 use strict normal-session environments and real A/B HTTP. S2/S4/S6 privileged
 work is operator/server/timestamp/structural only. Both policies share fictional
 model/prompt/notice; A's 15000 allowance/rate 20 and B's 100000 allowance/rate 3
@@ -2438,7 +2440,8 @@ These are **test assertions awaiting real CI execution**, not observed DB result
 
 P3 includes populated ordinary-owned item/image/outfit/history preservation,
 actual authenticated downloads of the existing synthetic fixture bytes, and
-exact cleanup. Other named phases exercise the required server financial/content
+exact cleanup, plus unchanged profile timestamps/versions around reservation
+and status locks. Other named phases exercise the required server financial/content
 guards; the limit-one purge removes one of two expired full requests, leaving
 the second for normal owner cleanup. Named paired timestamps are fixture-seeded,
 not elapsed real-time retention. Later full integration/security suites are
@@ -2474,15 +2477,20 @@ executed against a database in this session.
 | `npm run build` | Exit 0; JS 174.80 kB gzip/CSS 5.33 kB gzip; existing non-failing large-chunk warning. |
 | `npm run scan:secrets` | 180 text files and unprinted process-local build canary checked, exit 0. |
 | `npm run check:dependencies` | 12 production/220 development packages, zero unverified release dates; production audit zero vulnerabilities, exit 0. |
-| `npm run test:browser -- --retries=0` | First run: 320 passed, 129 WebKit launch failures because pinned `webkit-2359/pw_run.sh` was absent, exit 1. Final run pending after engine installation. |
+| `npm run test:browser -- --retries=0` | First run: 320 passed, 129 WebKit launch failures because pinned `webkit-2359/pw_run.sh` was absent, exit 1. Final run after engine installation: 449/449, 6.7 minutes, exit 0. |
 | `npx playwright install --with-deps webkit` | Existing pinned engine installed after the concrete missing-executable failure, exit 0; no package/version/configuration change. |
-| `npm run test:a11y -- --retries=0` | Pending after full browsers. |
+| `npm run test:a11y -- --retries=0` | 33/33 after the successful full browser run, 54.1 seconds, exit 0. |
 | `git diff --check` | Exit 0. |
 
 Unit/static checks precede Vite-backed browsers. Synthetic captures stay ignored
 and unopened; no image/archive/binary output enters the native model. The existing
 native final checker is invoked once after candidate commit/process completion;
 its actual components/results/unavailability are reported on PR #16, not assumed.
+After browser/a11y completion, final fixture-only freshness/lock assertions were
+rechecked with syntax, all 970 units, lint, typecheck, translations, build, secret
+scan and dependency audit, all exit 0. Production SQL, runtime sources and browser
+tests remained byte-identical to the successful browser run; no unit fixture
+process ran concurrently with Vite.
 
 ### Staging and remaining gates
 

@@ -27,8 +27,14 @@ async function main() {
         from private.approved_accounts a join auth.users u on u.id=a.user_id join public.profiles p on p.owner_id=a.user_id
         where a.enabled and u.email=a.email),'empty',
         not exists(select 1 from private.ai_controls) and not exists(select 1 from private.ai_usage)
-        and not exists(select 1 from private.ai_requests));`));
-    requireEvidence(setup.empty === true && setup.accounts.length === 2);
+        and not exists(select 1 from private.ai_requests),
+        'freshCore',(select count(*)=2 and bool_and(version=1) from public.profiles)
+          and (select count(*)=2 and bool_and(version=1) from public.style_preferences)
+          and not exists(select 1 from public.items) and not exists(select 1 from public.item_images)
+          and not exists(select 1 from public.outfits) and not exists(select 1 from public.outfit_items)
+          and not exists(select 1 from public.wear_events) and not exists(select 1 from public.wear_event_items)
+          and not exists(select 1 from public.combination_rules) and not exists(select 1 from public.suggestion_feedback));`));
+    requireEvidence(setup.empty === true && setup.freshCore === true && setup.accounts.length === 2);
     eq(setup.accounts.map((a) => a.email), TEST_EMAILS);
     requireEvidence(setup.accounts.every((a) => uuid.test(a.id)) && setup.accounts[0].id !== setup.accounts[1].id);
     const owners = { A: setup.accounts[0].id, B: setup.accounts[1].id };

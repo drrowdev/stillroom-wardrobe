@@ -151,7 +151,8 @@ There is no hosted target, admin-key/status fetch, owner impersonation,
 JWT/GUC/SET ROLE, new role, extension, environment override or fixture self-heal.
 The seeder requires existing project, local Docker socket/container, literal
 loopback and credential-cache guards, exactly the two matching fictional core
-accounts, and empty new AI tables before setup. Used/unexpected state fails.
+accounts, fresh version-one core profiles/preferences, empty wardrobe tables
+and empty new AI tables before setup. Used/unexpected state fails.
 Existing `ALLOW_SECURITY_TESTS=1` is required; the seeder never invents an opt-in.
 
 P1–S6 are ordered checkpoints, with finite named normal children in S4 per the

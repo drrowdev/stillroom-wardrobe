@@ -107,8 +107,8 @@ async function populatedAdmissionProof(client, owners, action) {
   try {
     for (const owner of owners) {
       const id = AI_IDS[owner.label].ready, paths = ['main', 'thumb'].map((v) => `${owner.uid}/${id}/${id}/${v}.jpg`);
-      fixtures.push({ owner, id, paths });
       await client.insert(owner, 'items', { id, title: 'Fictional controls preservation', category: 'top' });
+      fixtures.push({ owner, id, paths });
       await client.insert(owner, 'item_images', { id, item_id: id, main_bytes: bytes.length, thumb_bytes: bytes.length,
         main_sha256: hash, thumb_sha256: hash, width: 2, height: 2, alt_text: 'Fictional controls preservation' });
       for (const objectPath of paths) requireEvidence((await client.request(owner.token, `/storage/v1/object/wardrobe/${objectPath}`, {
@@ -271,6 +271,7 @@ export async function runAiPhase(phase, client, owners) {
         && changed.data[0].ai_consented_at === before.ai_consented_at);
       await consent(client, owner, true);
     }
+    const profileBaselines = await Promise.all(owners.map((owner) => client.rows(owner, 'profiles')));
     await reserve(client, a, AI_IDS.A.ready);
     await reserve(client, a, AI_IDS.A.expiring);
     await reserve(client, b, AI_IDS.B.ready);
@@ -287,6 +288,7 @@ export async function runAiPhase(phase, client, owners) {
     }
     await race(client, a, 'ALLOWANCE');
     await race(client, b, 'RATE_LIMIT');
+    for (const [index, owner] of owners.entries()) eq(await client.rows(owner, 'profiles'), profileBaselines[index]);
   } else if (phase === 'S4-release-races') {
     for (const owner of owners) {
       const before = await aiStatus(client, owner);
