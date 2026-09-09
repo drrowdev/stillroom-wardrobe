@@ -11,8 +11,9 @@ import {
 } from '../tests/integration/preservation.sessions.mjs';
 
 export const MIGRATIONS = Object.freeze([
-  { name: '20260905000000_initial.sql', version: '20260905000000', bytes: 35214, sha256: SOURCE_HASHES.base },
-  { name: '20260906000000_item_field_provenance.sql', version: '20260906000000', bytes: 5923, sha256: SOURCE_HASHES.target },
+  { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
+  { name: '20260906000000_item_field_provenance.sql', version: '20260906000000', time: '2026-09-06 00:00:00', bytes: 5923, sha256: SOURCE_HASHES.target },
+  { name: '20260909070000_item_description_edit.sql', version: '20260909070000', time: '2026-09-09 07:00:00', bytes: 2618, sha256: SOURCE_HASHES.description },
 ]);
 
 export function assertRehearsalEnvironment(env, args) {
@@ -41,7 +42,7 @@ export async function assertMigrationInventory() {
     requireEvidence(MIGRATIONS.some((entry) => entry.name === name));
     const filename = path.join(directory, name);
     const info = await lstat(filename);
-    requireEvidence(info.isFile() && !info.isSymbolicLink() && info.size <= 35214);
+    requireEvidence(info.isFile() && !info.isSymbolicLink() && info.size <= Math.max(...MIGRATIONS.map((entry) => entry.bytes)));
     entries.push({ name, regular: true, symlink: false, bytes: info.size,
       sha256: createHash('sha256').update(await readFile(filename)).digest('hex') });
   }
@@ -89,7 +90,7 @@ export function parseMigrationHistory(output) {
   requireHistory(output.length <= 4096, 'length-cap');
   requireHistory(/^[\x20-\x7e\r\n]*$/.test(output), 'charset');
   const lines = output.trim().split(/\r?\n/).map((line) => line.trim());
-  requireHistory(lines.length === 4, 'line-count');
+  requireHistory(lines.length === MIGRATIONS.length + 2, 'line-count');
   const cells = (line) => line.split('|').map((cell) => cell.trim());
   requireHistory(JSON.stringify(cells(lines[0])) === JSON.stringify(['Local', 'Remote', 'Time (UTC)']), 'header');
   requireHistory(/^-+\|-+\|-+$/.test(lines[1]), 'separator');
@@ -102,8 +103,7 @@ export function parseMigrationHistory(output) {
       requireHistory(inner.length > 0 && (inner === ' ' || inner.trim() === inner), 'cell-content');
       return inner === ' ' ? '' : inner;
     });
-    const version = MIGRATIONS[index].version;
-    const time = index === 0 ? '2026-09-05 00:00:00' : '2026-09-06 00:00:00';
+    const { version, time } = MIGRATIONS[index];
     requireHistory(row[0] === version, 'version-mismatch');
     requireHistory(row[1] === '' || row[1] === version, 'remote-mismatch');
     requireHistory(row[2] === time, 'time-mismatch');
@@ -119,7 +119,7 @@ export function assertHistory(output, stage) {
   requireHistory(stage === 'base' || stage === 'target', 'inventory-mismatch');
   const inventory = parseMigrationHistory(output);
   const expected = stage === 'base'
-    ? { applied: [MIGRATIONS[0].version], pending: [MIGRATIONS[1].version] }
+    ? { applied: [MIGRATIONS[0].version], pending: MIGRATIONS.slice(1).map((entry) => entry.version) }
     : { applied: MIGRATIONS.map((entry) => entry.version), pending: [] };
   requireHistory(JSON.stringify(inventory) === JSON.stringify(expected), 'inventory-mismatch');
   return inventory;
@@ -163,7 +163,7 @@ async function main() {
       help.push(await cli(args));
     }
     assertCapabilities(help);
-    console.log('PASS: pinned 2.116.0 capabilities and exact two-source inventory');
+    console.log('PASS: pinned 2.116.0 capabilities and exact three-source inventory');
     for (const entry of MIGRATIONS) console.log(`PASS: source ${entry.version} bytes=${entry.bytes} sha256=${entry.sha256}`);
     stage = 'S1-base-reset';
     requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', MIGRATIONS[0].version], 10 * 60_000)).code === 0);

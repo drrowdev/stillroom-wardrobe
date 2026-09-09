@@ -52,6 +52,7 @@ export type Database = {
         Row: {
           alt_text: string
           created_at: string
+          description_version: number
           height: number
           id: string
           item_id: string
@@ -69,6 +70,7 @@ export type Database = {
         Insert: {
           alt_text: string
           created_at?: string
+          description_version?: number
           height: number
           id?: string
           item_id: string
@@ -86,6 +88,7 @@ export type Database = {
         Update: {
           alt_text?: string
           created_at?: string
+          description_version?: number
           height?: number
           id?: string
           item_id?: string
@@ -608,6 +611,20 @@ export type Database = {
           p_timezone: string
         }
         Returns: number
+      }
+      update_image_description: {
+        Args: {
+          p_alt_text: string
+          p_expected_description_version: number
+          p_image_id: string
+        }
+        Returns: {
+          alt_text: string
+          description_version: number
+          id: string
+          item_id: string
+          owner_id: string
+        }[]
       }
     }
     Enums: {

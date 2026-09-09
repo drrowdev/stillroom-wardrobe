@@ -8,6 +8,8 @@ import { LanguageSelector } from '../i18n/language-selector';
 import { Icon, WardrobeIllustration } from './icon';
 import { AddItem } from '../features/wardrobe/add-item';
 import { WardrobeScreen } from '../features/wardrobe/wardrobe-screen';
+import { ItemDetail } from '../features/wardrobe/item-detail';
+import { detailRouteId } from '../domain/item-details';
 import { DiscardDialog } from './dialog';
 import { loadWardrobe } from '../data/items';
 import { errorKey, isAborted } from '../data/errors';
@@ -56,16 +58,21 @@ function Unconfigured({ status }: { status: Configuration['status'] }) {
   useEffect(() => { document.documentElement.lang = language; }, [language]);
   return <EntryLayout language={language} onLanguage={setLanguage} t={t}><section className="entry-card setup-card"><div className="small-mark"><Icon name="wardrobe" /></div><h1>{t('setup.title')}</h1><p className="muted">{t(status === 'invalid' ? 'setup.invalid' : 'setup.body')}</p><ol className="setup-steps"><li>{t('setup.step1')}<code>npm run db:start</code></li><li>{t('setup.step2')}<code>.env.local</code></li><li>{t('setup.step3')}</li></ol><p className="privacy-note"><Icon name="lock" />{t('setup.note')}</p></section></EntryLayout>;
 }
-type WorkspaceRoute = 'wardrobe' | 'add' | 'settings';
+type WorkspaceRoute = 'wardrobe' | 'add' | 'settings' | `detail:${string}`;
 const routeHash = { wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings' };
-function currentRoute(): WorkspaceRoute { return location.hash === '#/items/new' ? 'add' : location.hash === '#/settings' ? 'settings' : 'wardrobe'; }
+function currentRoute(hash = location.hash): WorkspaceRoute {
+  return hash === '#/items/new' ? 'add' : hash === '#/settings' ? 'settings'
+    : hash.startsWith('#/items/') ? `detail:${hash}` : 'wardrobe';
+}
+function hashForRoute(route: WorkspaceRoute) { return route.startsWith('detail:') ? route.slice(7) : routeHash[route as keyof typeof routeHash]; }
 function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, language, online }: { client: AppClient; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; t: Translate; language: Language; online: boolean }) {
-  const [route, setRoute] = useState<WorkspaceRoute>(currentRoute);
+  const [route, setRoute] = useState<WorkspaceRoute>(() => currentRoute());
   const [items, setItems] = useState<WardrobeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<MessageKey | null>(null);
   const [notice, setNotice] = useState(false);
   const [discard, setDiscard] = useState<{ next: WorkspaceRoute; position?: number } | null>(null);
+  const discardFocus = useRef<HTMLElement | null>(null);
   const navigation = useRef({ route: currentRoute(), position: Number.isSafeInteger(history.state?.wardrobePosition) ? Number(history.state.wardrobePosition) : 0, restoring: false });
   const dirty = useRef({ dirty: false, incomplete: false, busy: false });
   const loadSequence = useRef(0);
@@ -86,12 +93,15 @@ function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, la
   const changeRoute = useCallback((next: WorkspaceRoute) => {
     if (next === navigation.current.route) return;
     if (dirty.current.dirty || dirty.current.busy) {
-      if (!dirty.current.busy) setDiscard({ next });
+      if (!dirty.current.busy) {
+        discardFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        setDiscard({ next });
+      }
       return;
     }
     dirty.current = { dirty: false, incomplete: false, busy: false };
     navigation.current = { route: next, position: navigation.current.position + 1, restoring: false };
-    history.pushState({ ...history.state, wardrobePosition: navigation.current.position }, '', routeHash[next]);
+    history.pushState({ ...history.state, wardrobePosition: navigation.current.position }, '', hashForRoute(next));
     setRoute(next);
   }, []);
   useEffect(() => {
@@ -108,7 +118,10 @@ function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, la
       if (next === current.route) { current.position = position; return; }
       if ((dirty.current.dirty || dirty.current.busy) && next !== current.route && position !== current.position) {
         current.restoring = true;
-        if (!dirty.current.busy) setDiscard({ next, position });
+        if (!dirty.current.busy) {
+          discardFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          setDiscard({ next, position });
+        }
         history.go(current.position - position);
         return;
       }
@@ -120,8 +133,8 @@ function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, la
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       const anchor = event.target instanceof Element ? event.target.closest('a') : null;
       const href = anchor?.getAttribute('href');
-      const next = (Object.keys(routeHash) as WorkspaceRoute[]).find((key) => routeHash[key] === href);
-      if (next) { event.preventDefault(); changeRoute(next); }
+      const next = href && (Object.values(routeHash).includes(href) || href.startsWith('#/items/')) ? currentRoute(href) : null;
+      if (next) { event.preventDefault(); if (navigation.current.route.startsWith('detail:')) anchor?.focus(); changeRoute(next); }
     };
     const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty.current.dirty) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('hashchange', onHash);
@@ -134,7 +147,7 @@ function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, la
       dirty.current = { dirty: false, incomplete: false, busy: false };
     };
   }, [changeRoute]);
-  useEffect(() => { document.getElementById(route === 'add' ? 'capture-title' : route === 'settings' ? 'settings-title' : 'wardrobe-title')?.focus(); }, [route]);
+  useEffect(() => { document.getElementById(route === 'add' ? 'capture-title' : route === 'settings' ? 'settings-title' : route.startsWith('detail:') ? 'item-detail-title' : 'wardrobe-title')?.focus(); }, [route]);
   function saved() {
     dirty.current = { dirty: false, incomplete: false, busy: false };
     setNotice(true);
@@ -150,13 +163,18 @@ function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, la
         {route === 'add'
           ? <AddItem client={client} scope={scope} currency={profile.currency} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} />
           : route === 'settings' ? <ProfileScreen client={client} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} />
+          : route.startsWith('detail:') ? <ItemDetail key={route} client={client} scope={scope} itemId={detailRouteId(route.slice(7))} images={images}
+            t={t} online={online} onDirty={onDirty} onSaved={() => { void refresh(); }} onBack={() => changeRoute('wardrobe')} />
           : <WardrobeScreen items={items} images={images} loading={loading} error={error} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={() => { void refresh(); }} />}
       </main>
-      {discard && <DiscardDialog title={t(route === 'settings' ? 'common.unsaved' : 'capture.discard')} t={t} onCancel={() => setDiscard(null)} onConfirm={() => {
+      {discard && <DiscardDialog title={t(route === 'settings' || route.startsWith('detail:') ? 'common.unsaved' : 'capture.discard')} t={t} onCancel={() => {
+        setDiscard(null);
+        if (route.startsWith('detail:')) requestAnimationFrame(() => { if (discardFocus.current?.isConnected) discardFocus.current.focus(); });
+      }} onConfirm={() => {
         dirty.current = { dirty: false, incomplete: false, busy: false }; setDiscard(null);
         if (discard.position !== undefined) history.go(discard.position - navigation.current.position);
         else changeRoute(discard.next);
-      }}><p>{t(route === 'settings' ? 'settings.discardBody' : dirty.current.incomplete ? 'capture.incompleteDiscard' : 'capture.discardBody')}</p></DiscardDialog>}
+      }}><p>{t(route === 'settings' ? 'settings.discardBody' : route.startsWith('detail:') ? 'detail.discardPage' : dirty.current.incomplete ? 'capture.incompleteDiscard' : 'capture.discardBody')}</p></DiscardDialog>}
     </>
   );
 }

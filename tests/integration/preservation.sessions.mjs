@@ -10,6 +10,7 @@ import { isMain } from '../../scripts/quality/files.mjs';
 
 export const SOURCE_HASHES = Object.freeze({
   base: MIGRATION_HASH, target: '4060e963bc5a986857f31bc9b528dd6d7ea8caee720336de8499d59e8f8c3f92',
+  description: '383012f9662a4b672b58d6a690bc12691e741468af464af2fe841525e723bb98',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -205,6 +206,11 @@ export function comparePreservation(before, after, run, owners) {
         requireEvidence(Object.hasOwn(row, column) && isDeepStrictEqual(row[column], column === 'field_provenance' ? {} : null));
         delete row[column];
       }
+    }
+    requireEvidence(Array.isArray(data.tables.item_images));
+    for (const row of data.tables.item_images) {
+      requireEvidence(Object.hasOwn(row, 'description_version') && row.description_version === 1);
+      delete row.description_version;
     }
   }
   validateSnapshot(oldShape, run, owners);

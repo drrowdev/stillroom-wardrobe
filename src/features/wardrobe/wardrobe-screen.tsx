@@ -44,7 +44,7 @@ export function WardrobeScreen({ items, images, loading, error, onAdd, onRefresh
         <>
           <div className="collection-bar"><span>{itemCount(language, items.length)}</span><button type="button" className="text-button" onClick={onRefresh} disabled={!online} aria-label={t('wardrobe.refresh')}><Icon name="refresh" />{t('common.refresh')}</button></div>
           <ul className="item-grid">
-            {items.slice(0, visible).map((item) => <li className="item-card" key={item.id}><ItemPhoto item={item} images={images} t={t} /><div className="item-caption"><h2>{item.title}</h2><span>{t(categoryKeys[item.category])}</span></div></li>)}
+            {items.slice(0, visible).map((item) => <li className="item-card" key={item.id}><a className="item-detail-link" href={`#/items/${item.id}`}><ItemPhoto item={item} images={images} t={t} /><div className="item-caption"><h2>{item.title}</h2><span>{t(categoryKeys[item.category])}</span></div></a></li>)}
           </ul>
           {items.length > visible && <div className="load-more"><button type="button" className="button button-secondary" onClick={() => setVisible(visible + 40)}>{t('wardrobe.more')}</button></div>}
         </>

@@ -65,9 +65,58 @@ REST below means `/rest/v1/…` with the publishable key and user bearer token. 
 | AI consent/status | Checked owner-only settings/result/status/allowance operations | No direct private request/usage tables, peer totals or provider keys. Withdrawn consent blocks new analysis/results. |
 | Analyze draft photo | POST `/functions/v1/analyze-clothing` with user token, request UUID, draft generation and bounded sanitized JPEG bytes -> validated attributes/image hash/status | No saved-item/owner target or external URL. No inventory writes. Identical request replay returns existing result/status; conflicting hash/config is an error. |
 | Discard analysis | Owner-only discard operation removes bounded result; retain only necessary coarse charge receipt | No item/image deletion needed before Save because none was created. Cannot recall already-sent provider data/charges. |
-| Save/edit description | Checked owner/version operation updates image `alt_text` only; new-image Save stores edited text at reservation | No image re-upload, path/hash/byte mutation or unrestricted image UPDATE. |
+| Save/edit description | RPC `update_image_description(p_image_id,p_expected_description_version,p_alt_text)` → one typed row with `id,owner_id,item_id,alt_text,description_version`; new-image Save stores edited text at reservation | Expected-counter write changes text/counter only; intentional `''` clears. No image re-upload, path/hash/byte mutation or unrestricted image UPDATE. |
 
 `deletion_control(p_owner_id,p_action,p_code)` is server-only, never granted to normal/anonymous users. The deletion endpoint derives the verified owner. The separate analysis endpoint is callable by an approved user with consent/budget, not anonymously or with only a publishable key; its provider credentials and private receipt operations remain server-only.
+
+### I29b saved-description source contract
+
+Stage 1 adds local migration source only; fresh database CI, actual generated types
+and the separately authorized Stage 2 editor remain pending. It does not authorize
+hosted application or deployment. The exact SQL signature is:
+
+```sql
+public.update_image_description(
+  p_image_id uuid, p_expected_description_version bigint, p_alt_text text
+) returns table(id uuid, owner_id uuid, item_id uuid, alt_text text, description_version bigint)
+```
+
+The RPC is VOLATILE SECURITY DEFINER with an empty search path, fully qualified
+relations, current `private.is_approved()` and ownership derived from `auth.uid()`.
+Only authenticated callers receive EXECUTE; PUBLIC/anon have none. No owner,
+path/hash/byte/state argument, table UPDATE/DELETE grant or counter INSERT grant
+is added. Null image ID/counter/text, counters outside 1–2147483647, and text above
+240 PostgreSQL characters fail with `22023` / fixed `Invalid input`. Empty text
+is preserved, never replaced with the title. SQL does not trim/translate text.
+
+One conditional UPDATE sets only `alt_text` and `description_version+1`, matching
+the image ID, owner, ready state, null retirement, exact expected counter below
+2147483647 and existence of an owned non-deleted parent item. Every matched call
+advances the counter, including same-value text. Stale equal text is not
+idempotent success. Zero affected rows always fails: an unlocked owned/current
+lookup may classify a counter mismatch/ceiling as `22023` / `Request conflict`;
+foreign, absent, pending, retired or deleted-parent targets give `42501` /
+`Not available`, as does missing admission. No raw upstream error is UI copy.
+
+There is no parent row lock. Existing `commit_image` locks the pending image,
+then parent, then old ready image; taking an old-ready-to-parent lock here would
+create a deadlock cycle. PostgreSQL rechecks the updated target image's state and
+counter after a concurrent row change; the parent EXISTS is statement-snapshot
+evidence, not a promise to observe a later soft delete. Same-counter concurrent
+edits have at most one success; replacement can retire the target but cannot
+redirect the edit to the new image. Item version/provenance, all other image
+columns, history and actual object bytes are unchanged. No analysis, upload,
+commit or restore call is triggered.
+
+The Stage 2 client must validate exactly one returned row, owned image/item
+identity, attempted text and baseline counter + 1 before accepting success.
+Name/category and description have independent explicit Saves and dirty
+baselines; saving one preserves the sibling draft. A lost/ambiguous response
+retains a frozen NOT CONFIRMED attempt and offers an explicit read-only check,
+never an automatic write/rebase. Description reconciliation requires the same
+owned image, exact attempted text and exact baseline counter + 1. Equal text
+alone or a later counter cannot confirm it. This confirms current stored state,
+not exactly-once request identity. Definitive rejection remains rejection.
 
 ## Authenticated image access
 
@@ -111,6 +160,15 @@ There is no share/link-generation feature. The app uses authenticated downloads.
 The delivered **version-1 reference** uses encrypted, independently downloadable JSON parts, avoiding a large ZIP dependency or a 500 MB allocation on a phone. Metadata-only export is a plain `.json` download after an explicit “contains personal information” label. Full backups are encrypted by default and contain sanitized photos.
 
 **Revised MVP compatibility:** metadata/part schema v2 covers saved attributes/provenance; Phase 6 reads v1/v2, keeping encryption envelope v1. Supplied references are not yet v2-capable. Verify original hashes before conversion. Exclude drafts, analysis requests/results and usage; never import active consent or trigger analysis. Remap source-image IDs, preserve clears and mark old provenance-less values unverified. V2 mapping uses `stillroom/restore/v2|targetUid|exportId|table|sourceId`; keep v1 mapping unchanged for v1 resumes.
+
+I29b's `description_version` is included by the existing full-row `to_jsonb`
+serialization in `export_manifest`; the RPC body is unchanged. The raw v2
+snapshot still includes intermediate/pending/imageless records and is not the
+completed saved-only export contract. A future restore must retain `alt_text`
+exactly, including `''`, omit the source counter from reservation INSERT, and
+start the new image's local description counter at 1. Do not import concurrency
+history as an editable counter, fabricate provenance/consent or trigger inference.
+No restore code or saved-only export implementation is part of Stage 1.
 
 Each decrypted part is UTF-8 JSON:
 
