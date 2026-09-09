@@ -1394,3 +1394,198 @@ remain required. No merge/main mutation/deployment, conditional hosted execution
 history repair/replay, account/data/private-input/provider/paid-AI operation,
 new branch/PR/agent or next packet occurred. Publish final head/files/results
 and stop editing for parent review.
+
+## PR #13 — I29b Stage 1 schema source only — 9 September 2026
+
+**Native unit/static implementation checks pass; new database runtime, generated
+types and Stage 2 UI remain UNRUN/PENDING.** This is the I29b subset of
+R18/R19/R23/R26/R27/R28, not full I29, Phase 2 or release completion.
+Repository `drrowdev/stillroom-wardrobe`; actual platform branch
+`copilot/copiloti29b-saved-item-corrections`, PR #13. Base:
+`9d1858236309436b3144a3f45fcef581faff8630`; clean starting head:
+`ec8a766736d44cfa18700d584713f15df4d38a73`, an empty platform commit directly
+parented by that base. No prior PR was reopened or modified.
+
+### Authority and context actually read
+
+Read the **full 21,849 UTF-8-byte**
+[approved plan 5597695316](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5597695316),
+published on closed PR #12 solely as authority for this new packet. It records
+actual read-only **Anthropic / Claude Opus 5**, reviewer
+`saved-edit-contract-critique`, on the privileged write/version/locking/migration
+boundaries. Coordinator amendments control: no parent lock, no nonempty-text
+condition at counter 1, strict reconciliation, and staged real CI type generation.
+The kickoff restricts this session to nine of the complete packet's 22 paths.
+No new architecture/review loop, agent, dependency or scope expansion occurred.
+
+After context and before edits, reread this task's own
+[public receipt 5597947883](https://github.com/drrowdev/stillroom-wardrobe/pull/13#issuecomment-5597947883):
+explicit request `gpt-6-astra`, authenticated actual allocation
+`sweagent-capi:gpt-6-astra`, task `40280edb-0f1c-468e-90f4-e6b3ec887719`,
+session `e9d032f6-b30c-40a6-8d88-e689fcc2eab2`. Immediate GET observation:
+`2026-09-09T07:28:01.9530608Z`; repository/PR/sole-writer/ref verification:
+`2026-09-09T07:28:45.1937695Z`. Repository, PR #13, branch, base and starting
+head match this checkout. No old receipt, prompt/branch label or self-attestation
+substituted for the coordinator's allocation evidence.
+
+Files actually consulted: root `AGENTS.md`, `.github/copilot-instructions.md`,
+`docs/cloud-development.md`, relevant `docs/phase-0-result.md`,
+`docs/phase-1-result.md`, `docs/phase-2-result.md`, `docs/local-backend.md`;
+`blueprint/AGENTS.md`, 00/03/05/06/08/10/14/20/21 and relevant 02/07/15 sections;
+both existing migrations (base byte-equal to blueprint 07), generated image/item
+type excerpts, `src/data/rows.ts`, `src/data/items.ts`, `src/data/errors.ts`;
+the existing preservation orchestrator/normal module/units, integration/security
+sessions, `scripts/backend/local.mjs` guard excerpts, `scripts/hosted-smoke.mjs`
+guard excerpt, `scripts/run-local-tests.mjs`, `scripts/scan-secrets.mjs`,
+`package.json` and the existing CI contract read by preservation units.
+PR #13 body/comments/diff/reviews/threads and MCP workflow/job evidence were read.
+
+Starting-head CI `34323985068` was `action_required`, with zero jobs and no failed
+job logs, not a passing run. Prepared native run `34323984211`, job
+`102376909588`, reports successful locked dependencies, local startup
+07:29:20–07:30:22 UTC, reset/provision 07:30:23–07:30:50 and actual baseline
+type generation 07:30:50–07:31:00. The running-job log download returned HTTP 404;
+these are step metadata, not inspected command logs or new-schema runtime proof.
+The prepared generated file was clean and remains untouched.
+
+### Exactly nine changed paths and source contract
+
+1. `supabase/migrations/20260909070000_item_description_edit.sql` (new).
+2. `tests/integration/local.sessions.mjs`.
+3. `tests/security/rls.sessions.mjs`.
+4. `scripts/preservation-rehearsal.mjs`.
+5. `tests/integration/preservation.sessions.mjs`.
+6. `tests/unit/preservation.test.ts`.
+7. `docs/phase-2-result.md` (this append only).
+8. `blueprint/08-API-AND-STORAGE.md`.
+9. `blueprint/06-DATA-MODEL.md`.
+
+The new SQL is **2618 bytes**, SHA-256
+`383012f9662a4b672b58d6a690bc12691e741468af464af2fe841525e723bb98`.
+Old 05/06 sources remain respectively 35214/5923 bytes and hashes
+`4f2d44603707cb823527c80d8384c2a6390f99ead2ba294435db83403a7eead5` /
+`4060e963bc5a986857f31bc9b528dd6d7ea8caee720336de8499d59e8f8c3f92`.
+
+The additive migration gives every image a non-null bigint description counter,
+default 1, check 1–2147483647, and relaxes only the alt-text length check to
+0–240 while retaining NOT NULL. No old-row DML/backfill, text rewrite, item
+change or image grant broadening. Cleared text is valid at counter 1 for future
+restores. Exact RPC:
+`public.update_image_description(p_image_id uuid, p_expected_description_version bigint, p_alt_text text)`
+returns one typed row `(id uuid, owner_id uuid, item_id uuid, alt_text text,
+description_version bigint)`, never paths or media.
+
+The VOLATILE SECURITY DEFINER RPC uses empty search_path, current admission and
+session-derived ownership. A single conditional target-image UPDATE matches
+owned ready/non-retired image, exact counter below ceiling and owned non-deleted
+parent; SET contains only text/counter. Same-value matched writes increment.
+Zero rows fail; an unlocked lookup can classify owned current counter conflicts,
+while absent/foreign/pending/retired/deleted-parent stays generically unavailable.
+No parent lock or change to old commit/retire RPCs. Only target state/counter
+receives the concurrent row recheck; parent EXISTS does not promise a
+newer-than-statement snapshot. Fixed errors and authenticated-only EXECUTE remain.
+
+Existing ordinary-session test source adds both-owner positives, explicit
+clears, 240-code-point Unicode/overlong/null/invalid-counter cases, fresh
+same-text increments, stale equal-text rollback, concurrent single-counter
+winners, pending/retired/deleted-parent/foreign/absent/anonymous denial and
+direct UPDATE/DELETE/counter INSERT denial. It checks full item/image rows and
+actual downloaded hashes, name/category CAS with preserved untouched facts,
+raw owned v2 export including the cleared text/counter, and replacement races
+that cannot edit the replacement. No administrator access assertion.
+
+**Stored-at-ceiling runtime case NOT RUN:** ordinary reservation grants exclude
+the counter and ordinary image UPDATE is denied. No existing permitted fixture
+can place it at 2147483647. Static SQL/finite-bound units cover the limit and the
+normal suite rejects an expected ceiling against a lower stored counter; that
+is not runtime proof of a stored-at-ceiling row. The normal suite explicitly
+reports this gap. Parent must resolve the coverage gate without new privileges,
+provisioning changes, an administrator assertion or an enormous RPC loop.
+
+Preservation now pins exactly 05/06/09, each name/length/hash/display time.
+The ASCII/4096-character/strict quoted-cell parser requires inventory length + 2
+logical lines: 05 applied and both 06/09 pending at base; all three applied and
+none pending at target. Snapshot source binding includes all three hashes.
+S1 reset/provision, S2 original base columns/fixtures, single S3 local up command,
+S4 read-only-first comparison, private 512 KiB wx/0600 snapshot, exact cleanup,
+fixed safe outputs and 2 owners/10 tables/30 rows/8 objects remain unchanged.
+S4 requires each old image's new counter exactly 1, removes only that column and
+the four verified initial I29a item columns, then compares complete old rows,
+raw timestamps and stored plus actual downloaded bytes before functional probes.
+Source fixtures/static tests are not real migration evidence; earlier two-source
+evidence above remains dated and unchanged.
+
+### Actual native commands and results
+
+Working directory: `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/preservation.test.ts` | Initial preservation extension 80/80; first SQL-contract run 81/82, then corrected final 82/82, exit 0. |
+| `npm run test:unit` | 624/624 in 13 files, exit 0, including import-safety/refusal tests. |
+| `npm run lint` | Exit 0. |
+| `npm run typecheck` | Exit 0, unchanged existing app consumers/generated types. |
+| `node --check scripts/preservation-rehearsal.mjs` | Exit 0, invoked with absolute path. |
+| `node --check tests/integration/preservation.sessions.mjs` | Exit 0, invoked with absolute path. |
+| `node --check tests/integration/local.sessions.mjs` | Exit 0, invoked with absolute path; checked again after final test-source edit. |
+| `node --check tests/security/rls.sessions.mjs` | Exit 0, invoked with absolute path. |
+| `npm run check:translations` | 402 EN/FI/SV keys, 37 source files, exit 0. |
+| `npm run build` | Exit 0; JS 164.26 kB gzip, CSS 4.97 kB gzip; existing non-failing >500 kB warning retained. |
+| `npm run scan:secrets` | Exit 0; 161 text files and fresh unprinted build canary checked before this append. |
+| `npm run check:dependencies` | Exit 0; 12 production/220 development packages, no unverified dates; completed production audit, zero alerts. |
+| `git diff --check` | Exit 0; repeated after append. |
+| `wc -c supabase/migrations/20260909070000_item_description_edit.sql` and `sha256sum supabase/migrations/*.sql` | Exact new size/hash and frozen old hashes above. |
+
+Build/scan shared `export STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`,
+never printed. The one new static-test failure was a test comment-strip pattern
+that missed indented SQL comments and incorrectly matched the word “lock”;
+the pattern was corrected without changing SQL. Its chained typecheck did not
+run after that failure and later passed explicitly. `rg` was unavailable during
+context lookup; ordinary existing text tools were used without installing it.
+No dependencies, new scanner, helper module, compiler setting or service changed.
+
+Before commit, check exact nine-path inventory, unchanged frozen tracked files,
+full starting result-document byte prefix, migration hashes, diff hygiene and
+changed-file secrets. The `python -` inline static assertions completed with
+exit 0: exact nine changed/untracked paths, `git diff --exit-code` excluding only
+those paths, complete base-document byte prefix, and all three exact migration
+lengths/SHA-256s. All four absolute-path `node --check` calls and
+`git diff --check` then passed again; changed-file scanning found no secrets.
+After candidate commit and all processes finish, invoke
+the existing native final validator **once** and publish actual components,
+languages/findings and unavailable tools on PR #13. Unreported SQL analysis or
+missing automated review is not a pass; no metadata-only follow-up commit.
+
+### Mandatory staged handoff and unchanged external gates
+
+No native db:start/reset/up/migration-list/provision/psql/typegen/rehearsal,
+opt-in change, live integration/security/recovery/browser/a11y/Apple/hosted
+command or service operation ran after unchanged preparation. No role/container
+repair or diagnostic-budget reuse. Normal-session source is **UNRUN**, not a
+passing live test. All images/binary buffers remained program-only; no image,
+archive, credential cache, private row/photo or raw service error entered model
+input or evidence output.
+
+Stop after this nine-file commit/report. Parent reviews full diff and execution/
+privacy/trust evidence before authorizing the **first fresh current-head existing
+Database CI**. It must run new migration, three-source populated preservation,
+normal integration/security/recovery and real type generation, retaining only
+the existing generated-type artifact. Old committed-type parity is expected to
+FAIL in Stage 1, not waived as a final pass. Any failure before parity is a
+genuine blocker, not “expected type noise”; no blind unchanged rerun.
+
+Only after actual artifact provenance may the coordinator assign a separate
+own-receipt-verified Stage 2 continuation on the same PR for the real generated
+file and typed UI. No handwritten types or early UI/domain/catalog/CSS/browser/
+visual/workflow changes occurred. Fresh final CI/types/independent review and
+actual approved visual/device/screen-reader gates remain. All-field editing,
+automatic analysis, consent/budgets/receipts/expiry and saved-only export remain
+unfinished I29, not post-MVP deferrals. No I08/later phase or provider work.
+
+Current live release Pages `31bdd067` / main `9d1858`, automatic production OFF /
+previews NONE, hosted I29a `20260909062611` and the base hosted mapping remain
+untouched. Prior live approval is not approval to apply this new source migration.
+B3 remains open with acceptance limited to the released runtime; no new upload
+primitive/probe or repeated human task. Rollback would be a separately reviewed
+source revert, never hosted SQL replay/history repair. Worker performs no Actions
+approval/rerun, merge, deploy, new agent/branch/PR or next packet.

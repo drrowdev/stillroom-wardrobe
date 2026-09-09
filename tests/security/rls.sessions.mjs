@@ -176,6 +176,80 @@ async function provenanceIsolation(c,own,other,foreign){
   }
 }
 
+async function descriptionIsolation(c,own,other,foreign){
+  const read=async(actor,table,id)=>{
+    const result=await call(actor.token,`/rest/v1/${table}?owner_id=eq.${actor.uid}&id=eq.${id}&select=*`);
+    assert.ok(result.ok);assert.equal(result.data.length,1);return result.data[0];
+  };
+  let image=await read(c,'item_images',own.image);
+  const sibling=await read(other,'item_images',foreign.image);
+  const item=await read(c,'items',own.item),otherItem=await read(other,'items',foreign.item);
+  const edit=(actor,id,version,text)=>call(actor?.token??null,'/rest/v1/rpc/update_image_description',{
+    method:'POST',body:{p_image_id:id,p_expected_description_version:version,p_alt_text:text},
+  });
+  const unchanged=async()=>{
+    assert.deepEqual(await read(c,'item_images',own.image),image);
+    assert.deepEqual(await read(other,'item_images',foreign.image),sibling);
+    assert.deepEqual(await read(c,'items',own.item),item);
+    assert.deepEqual(await read(other,'items',foreign.item),otherItem);
+  };
+  stage='I29b normal owner description success preserves sibling and all other row fields';
+  const saved=await edit(c,image.id,image.description_version,'Fictional owner correction');
+  assert.ok(saved.ok);
+  image={...image,alt_text:'Fictional owner correction',description_version:image.description_version+1};
+  assert.deepEqual(saved.data,[{id:image.id,owner_id:c.uid,item_id:own.item,alt_text:image.alt_text,description_version:image.description_version}]);
+  await unchanged();
+  stage='I29b foreign and missing image RPC share generic denial; anonymous EXECUTE denied';
+  for(const id of [foreign.image,randomUUID()]){
+    const denied=await edit(c,id,1,'Must not change');
+    assert.ok(!denied.ok);assert.equal(denied.data.code,'42501');assert.equal(denied.data.message,'Not available');
+    await unchanged();
+  }
+  const anonymous=await edit(null,image.id,image.description_version,'Must not change');
+  assert.ok(!anonymous.ok);assert.ok([401,403].includes(anonymous.status));assert.equal(anonymous.data.code,'42501');
+  await unchanged();
+  stage='I29b direct image UPDATE and DELETE remain forbidden';
+  for(const [actor,target] of [[c,image],[c,sibling],[null,image]]){
+    for(const body of [{alt_text:'Must not change'},{description_version:2147483647},
+      {main_sha256:'0'.repeat(64)},{state:'retired',retired_at:'2026-01-01T00:00:00Z'}]){
+      const denied=await call(actor?.token??null,`/rest/v1/item_images?owner_id=eq.${target.owner_id}&id=eq.${target.id}`,{
+        method:'PATCH',body,returnRepresentation:true,
+      });
+      assert.ok(!denied.ok);assert.equal(denied.data.code,'42501');
+      await unchanged();
+    }
+    const denied=await call(actor?.token??null,`/rest/v1/item_images?owner_id=eq.${target.owner_id}&id=eq.${target.id}`,{method:'DELETE'});
+    assert.ok(!denied.ok);assert.equal(denied.data.code,'42501');
+    await unchanged();
+  }
+  stage='I29b description counter INSERT injection denied, including one and ceiling';
+  for(const [actor,target] of [[c,image],[c,sibling],[null,image]]){
+    for(const description_version of [1,2,2147483647]){
+      const id=randomUUID();
+      try{
+        const denied=await call(actor?.token??null,'/rest/v1/item_images',{method:'POST',body:{
+          id,owner_id:target.owner_id,item_id:target.item_id,main_bytes:jpg.length,thumb_bytes:jpg.length,
+          main_sha256:sha,thumb_sha256:sha,width:2,height:2,alt_text:'',description_version,
+        }});
+        assert.ok(!denied.ok);assert.equal(denied.data.code,'42501');
+        for(const owner of [c,other]){
+          const absent=await call(owner.token,`/rest/v1/item_images?owner_id=eq.${owner.uid}&id=eq.${id}&select=id`);
+          assert.ok(absent.ok);assert.deepEqual(absent.data,[]);
+        }
+        await unchanged();
+      }finally{
+        await rpc(target.owner_id===c.uid?c:other,'forget_image',{p_image_id:id});
+      }
+    }
+  }
+  stage='I29b description corrections and denied writes preserve actual private objects';
+  for(const [owner,fixture] of [[c,own],[other,foreign]])for(const objectPath of fixture.paths){
+    const result=await call(owner.token,`/storage/v1/object/authenticated/wardrobe/${objectPath}`);
+    assert.ok(result.ok);assert.ok(Buffer.isBuffer(result.data));assert.equal(result.data.length,jpg.length);
+    assert.equal(createHash('sha256').update(result.data).digest('hex'),sha);
+  }
+}
+
 try {
   stage='normal password sign-ins';const a=await login(process.env.TEST_A_EMAIL,process.env.TEST_A_PASSWORD),b=await login(process.env.TEST_B_EMAIL,process.env.TEST_B_PASSWORD);
   assert.notEqual(a.uid,b.uid);passed.push(stage);
@@ -192,6 +266,8 @@ try {
   stage='own fixture creation';const af=await fixture(a),bf=await fixture(b);passed.push(stage);
   await provenanceIsolation(a,af,b,bf);await provenanceIsolation(b,bf,a,af);
   passed.push('I29a both directions: own manual provenance allowed; foreign/anonymous reads and writes and own AI INSERT/UPDATE denied; complete rows unchanged after denials');
+  await descriptionIsolation(a,af,b,bf);await descriptionIsolation(b,bf,a,af);
+  passed.push('I29b both directions: own description RPC allowed; foreign/absent generic denial, anonymous EXECUTE and direct image UPDATE/DELETE/counter INSERT denied; full item/image rows and actual private bytes preserved');
   await settingsIsolation(a,b);await settingsIsolation(b,a);
   passed.push('I06 both directions: actual identity immutability, server version control, stale/foreign/anonymous field writes, unchanged sibling and fresh-version restoration');
   stage='independent Finnish and Swedish preferences';

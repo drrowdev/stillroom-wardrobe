@@ -23,7 +23,7 @@ type OwnerData = { label: string; ownerId: string; tables: TableRows; objects: [
 type ObjectEvidence = { path: string; bytes: number; sha256: string };
 type Snapshot = {
   schemaVersion: number; projectId: string; stage: string; run: string;
-  sources: { base: string; target: string }; owners: string[];
+  sources: { base: string; target: string; description: string }; owners: string[];
   data: [OwnerData, OwnerData];
 };
 const sha = 'a'.repeat(64);
@@ -87,6 +87,7 @@ function upgraded(before: Snapshot): Snapshot {
   for (const data of after.data) for (const row of data.tables.items) {
     Object.assign(row, { pattern: null, sleeve_length: null, garment_length: null, field_provenance: {} });
   }
+  for (const data of after.data) for (const row of data.tables.item_images) row.description_version = 1;
   return after;
 }
 
@@ -100,6 +101,7 @@ const baseTable = [
   '  ------------------|------------------|-----------------------',
   '   `20260905000000` | `20260905000000` | `2026-09-05 00:00:00` ',
   '   `20260906000000` | ` `              | `2026-09-06 00:00:00` ',
+  '   `20260909070000` | ` `              | `2026-09-09 07:00:00` ',
   '',
   '',
 ].join('\n');
@@ -110,6 +112,7 @@ const targetTable = [
   '  ------------------|------------------|-----------------------',
   '   `20260905000000` | `20260905000000` | `2026-09-05 00:00:00` ',
   '   `20260906000000` | `20260906000000` | `2026-09-06 00:00:00` ',
+  '   `20260909070000` | `20260909070000` | `2026-09-09 07:00:00` ',
   '',
   '',
 ].join('\n');
@@ -130,10 +133,11 @@ describe('CI-only preservation guards', () => {
       expect(() => assertRehearsalEnvironment({ ...validEnv, [key]: 'fictional-refused' }, [])).toThrow();
     }
   });
-  it('pins exactly two regular migrations, lengths and hashes', async () => {
+  it('pins exactly three regular migrations, lengths and hashes', async () => {
+    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000']);
     expect(() => validateInventory(inventory())).not.toThrow();
     await expect(assertMigrationInventory()).resolves.toBeUndefined();
-    for (const index of [0, 1]) for (const [key, value] of [
+    for (const index of [0, 1, 2]) for (const [key, value] of [
       ['name', 'unexpected.sql'], ['bytes', 0], ['bytes', present(inventory()[index]).bytes + 1],
       ['sha256', 'b'.repeat(64)], ['regular', false], ['symlink', true],
     ]) {
@@ -141,7 +145,8 @@ describe('CI-only preservation guards', () => {
       Object.assign(present(bad[index]), { [key as string]: value });
       expect(() => validateInventory(bad)).toThrow();
     }
-    for (const bad of [[], inventory().slice(1), [...inventory(), inventory()[0]], [inventory()[0], inventory()[0]]]) {
+    for (const bad of [[], inventory().slice(1), inventory().slice(0, 2), [...inventory(), inventory()[0]],
+      [inventory()[0], inventory()[1], inventory()[1]]]) {
       expect(() => validateInventory(bad)).toThrow();
     }
   });
@@ -170,8 +175,8 @@ describe('CI-only preservation guards', () => {
     expect(() => assertCapabilities([{ code: 0, stdout: '  --local\n' }, ...help.slice(1)])).toThrow();
   });
   it('parses source-derived applied/pending tables without claiming execution', () => {
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000'] });
-    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000'], pending: [] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000'] });
+    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000'], pending: [] });
     expect(() => assertHistory(targetTable, 'base')).toThrow();
     expect(() => assertHistory(baseTable, 'target')).toThrow();
     expect(() => assertHistory(baseTable, 'other')).toThrow();
@@ -182,10 +187,10 @@ describe('CI-only preservation guards', () => {
   it('retains SOURCE-DERIVED renderer padding, widths and decorative blank lines', () => {
     for (const table of [baseTable, targetTable]) {
       const lines = table.split('\n');
-      expect(lines).toHaveLength(8);
+      expect(lines).toHaveLength(9);
       expect(lines.slice(0, 2)).toEqual(['', '  ']);
       expect(lines.slice(-2)).toEqual(['', '']);
-      for (const line of lines.slice(2, 6)) {
+      for (const line of lines.slice(2, 7)) {
         expect(line.startsWith('  ')).toBe(true);
         expect(line.slice(2).split('|').map((cell) => cell.length)).toEqual([18, 18, 23]);
       }
@@ -211,6 +216,11 @@ describe('CI-only preservation guards', () => {
     baseTable.replace('2026-09-06 00:00:00', '2026-09-06T00:00:00'),
     baseTable.replace('2026-09-06 00:00:00', '2026-09-06  00:00:00'),
     baseTable.replace('2026-09-06 00:00:00', '2026-09-06 00:00:01'),
+    baseTable.replace('20260909070000', '20260906000000'),
+    baseTable.replace('20260909070000', '20260910070000'),
+    baseTable.replace('2026-09-09 07:00:00', '2026-09-09 00:00:00'),
+    baseTable.replace('`20260909070000` | ` `', '`20260909070000` | `20260909070000`'),
+    baseTable.replace('`20260906000000` | ` `', '`20260906000000` | `20260906000000`'),
     baseTable.replaceAll('`', ''),
     baseTable.replace('\n   `20260906000000`', '\n\n   `20260906000000`'),
     baseTable.split('\n').map((line, index, lines) => index === 4 ? lines[5] : index === 5 ? lines[4] : line).join('\n'),
@@ -249,7 +259,7 @@ describe('CI-only preservation guards', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe('EVIDENCE_REQUIRED');
     expect(historyFailureDetail(failure)).toBe(`; reason=${reason}`);
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000'] });
   });
   it('distinguishes history command failure without forwarding command output or arbitrary errors', () => {
     const privateText = 'arbitrary upstream text /private/fixture-path';
@@ -278,6 +288,50 @@ describe('CI-only preservation guards', () => {
       const start = sql.indexOf('\n  select case when private.is_approved() then jsonb_build_object(');
       expect(() => exportBodyEvidence(sql.slice(0, start + 20))).toThrow();
     }
+  });
+});
+
+describe('I29b description SQL contract (static, not database execution)', () => {
+  it('bounds the counter independently of text, including empty counter-1 restores', async () => {
+    const sql = await readFile(path.join(root, 'supabase/migrations/20260909070000_item_description_edit.sql'), 'utf8');
+    expect(sql).toContain('add column description_version bigint not null default 1\n    check (description_version between 1 and 2147483647)');
+    expect(sql).toContain('drop constraint item_images_alt_text_check,\n  add constraint item_images_alt_text_check check (length(alt_text) between 0 and 240)');
+    expect(sql).not.toMatch(/alter column|description_version\s*=\s*1\b|insert into|delete from/i);
+    expect(sql).toContain('p_expected_description_version is null');
+    expect(sql).toContain('p_expected_description_version not between 1 and 2147483647');
+    expect(sql).toContain('p_alt_text is null or length(p_alt_text)>240');
+    expect(sql).toContain('p_image_id is null');
+    const ceiling = 2147483647n;
+    const matches = (stored: bigint, expected: bigint) => stored >= 1n && stored === expected && stored < ceiling;
+    expect(matches(ceiling - 1n, ceiling - 1n)).toBe(true);
+    expect(ceiling - 1n + 1n).toBe(ceiling);
+    for (const [stored, expected] of [[ceiling, ceiling], [1n, 0n], [1n, -1n], [1n, ceiling + 1n], [2n, 1n]]) {
+      expect(matches(present(stored), present(expected))).toBe(false);
+    }
+  });
+  it('has one owner/admission/ready/CAS UPDATE, minimal return and no parent locks or new table grants', async () => {
+    const sql = await readFile(path.join(root, 'supabase/migrations/20260909070000_item_description_edit.sql'), 'utf8');
+    const executable = sql.replace(/^ *--.*$/gm, '');
+    expect(executable.match(/\bupdate public\./g)).toHaveLength(1);
+    expect(sql).toContain('returns table(id uuid, owner_id uuid, item_id uuid, alt_text text, description_version bigint)');
+    expect(sql).toContain("language plpgsql volatile security definer set search_path = ''");
+    expect(sql).toContain('if not private.is_approved() or auth.uid() is null then');
+    expect(sql).toContain('set alt_text=p_alt_text, description_version=im.description_version+1');
+    expect(sql).toContain("where im.id=p_image_id and im.owner_id=auth.uid()\n      and im.state='ready' and im.retired_at is null");
+    expect(sql).toContain('and im.description_version=p_expected_description_version\n      and im.description_version<2147483647');
+    expect(sql).toContain('where item.id=im.item_id and item.owner_id=auth.uid() and item.deleted_at is null');
+    expect(sql).toContain('returning im.id,im.owner_id,im.item_id,im.alt_text,im.description_version;\n  if found then return; end if;');
+    expect(executable).not.toMatch(/\bfor\s+(?:update|share|key\s+share|no\s+key\s+update)|\block\b|\bexecute\s+['"]|\bgrant\s+(?:insert|update|delete|all)|storage\.|public\.(?:commit_image|retire_image)/i);
+    expect(sql).toContain('revoke all on function public.update_image_description(uuid,bigint,text) from public,anon,authenticated;');
+    expect(sql).toContain('grant execute on function public.update_image_description(uuid,bigint,text) to authenticated;');
+    expect(executable.match(/message='[^']+'/g)?.sort()).toEqual([
+      "message='Invalid input'", "message='Not available'", "message='Not available'", "message='Request conflict'",
+    ]);
+    expect(sql).toMatch(/^--[^\n]*\nbegin;[\s\S]*\ncommit;\n$/);
+    const base = await readFile(path.join(root, 'supabase/migrations/20260905000000_initial.sql'), 'utf8');
+    expect(base).toContain('revoke update on public.item_images from authenticated;');
+    expect(base).toContain('revoke delete on public.item_images from authenticated;');
+    expect(base).toContain('grant insert(id,owner_id,item_id,main_bytes,thumb_bytes,main_sha256,thumb_sha256,width,height,alt_text)\n  on public.item_images to authenticated;');
   });
 });
 
@@ -500,7 +554,8 @@ describe('strict bounded base snapshots', () => {
     const snapshot = fixture();
     for (const changes of [
       { schemaVersion: 2 }, { projectId: 'other' }, { stage: 'target' }, { run: randomUUID() },
-      { sources: { ...SOURCE_HASHES, target: sha } }, { owners: [...owners].reverse() },
+      { sources: { ...SOURCE_HASHES, target: sha } }, { sources: { ...SOURCE_HASHES, description: sha } },
+      { sources: { base: SOURCE_HASHES.base, target: SOURCE_HASHES.target } }, { owners: [...owners].reverse() },
       { owners: [owners[0], owners[0]] }, { extra: true }, { data: [] },
     ]) expect(() => validateSnapshot({ ...snapshot, ...changes }, run, owners)).toThrow();
     expect(() => validateSnapshot(upgraded(snapshot), run, owners)).toThrow();
@@ -537,7 +592,7 @@ describe('strict bounded base snapshots', () => {
 });
 
 describe('complete old-value and downloaded-byte comparison', () => {
-  it('allows only four unverified new columns and irrelevant row ordering', () => {
+  it('allows only four unverified item columns, initial image counters and irrelevant row ordering', () => {
     const before = fixture(), after = upgraded(before);
     for (const data of after.data) {
       for (const table of tables) data.tables[table].reverse();
@@ -549,6 +604,20 @@ describe('complete old-value and downloaded-byte comparison', () => {
       expect(() => comparePreservation(before, bad, run, owners)).toThrow();
       const changed = upgraded(before); changed.data[0].tables.items[0][field] = field === 'field_provenance' ? { warmth: { kind: 'user', revision: 1 } } : 'solid';
       expect(() => comparePreservation(before, changed, run, owners)).toThrow();
+    }
+  });
+  it('requires exactly counter 1 on every old ready and retired image for both owners', () => {
+    const before = fixture();
+    for (const ownerIndex of [0, 1] as const) for (const imageIndex of [0, 1] as const) {
+      for (const value of [undefined, null, '1', 0, -1, 1.5, 2, 2147483647, 2147483648]) {
+        const after = upgraded(before), image = after.data[ownerIndex].tables.item_images[imageIndex];
+        if (value === undefined) delete image.description_version;
+        else image.description_version = value;
+        expect(() => comparePreservation(before, after, run, owners)).toThrow();
+      }
+      const extra = upgraded(before);
+      extra.data[ownerIndex].tables.item_images[imageIndex].unexpected = null;
+      expect(() => comparePreservation(before, extra, run, owners)).toThrow();
     }
   });
   it('fails on every changed or missing old column in all ten tables', () => {

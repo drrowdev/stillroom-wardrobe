@@ -211,6 +211,148 @@ async function itemProvenance(owner) {
     }
   }
 
+async function descriptionCorrections(owner, fixture, jpg, sha) {
+  const readImage = async (id) => {
+    const result = await rows(owner, 'item_images', `id=eq.${id}&select=*`);
+    assert.equal(result.length, 1);
+    return result[0];
+  };
+  const readItem = () => rows(owner, 'items', `id=eq.${fixture.item}&select=*`);
+  const edit = (id, version, text) => request(owner.token, '/rest/v1/rpc/update_image_description', {
+    method: 'POST', body: { p_image_id: id, p_expected_description_version: version, p_alt_text: text },
+  });
+  const denied = (result, message) => {
+    assert.ok(!result.ok);
+    assert.equal(result.data.code, message === 'Not available' ? '42501' : '22023');
+    assert.equal(result.data.message, message);
+  };
+  const returned = (row) => ({
+    id: row.id, owner_id: owner.uid, item_id: fixture.item,
+    alt_text: row.alt_text, description_version: row.description_version,
+  });
+  let image = await readImage(fixture.image);
+  const pending = await readImage(fixture.replacement);
+  assert.equal(image.description_version, 1);
+  assert.equal(pending.description_version, 1);
+  assert.equal(pending.alt_text, '');
+  let item = (await readItem())[0];
+  stage = 'I29b ordinary name/category CAS preserves all untouched item fields';
+  const provenance = { ...item.field_provenance };
+  for (const field of ['title', 'category']) provenance[field] = {
+    kind: 'user', revision: (provenance[field]?.revision ?? 0) + 1,
+  };
+  const itemChanges = { title: 'Fictional corrected layer', category: 'layer', field_provenance: provenance };
+  const savedItem = await request(owner.token, `/rest/v1/items?owner_id=eq.${owner.uid}&id=eq.${item.id}&deleted_at=is.null&version=eq.${item.version}`, {
+    method: 'PATCH', body: itemChanges, headers: { Prefer: 'return=representation' },
+  });
+  assert.ok(savedItem.ok); assert.equal(savedItem.data.length, 1);
+  assert.deepEqual(savedItem.data[0], { ...item, ...itemChanges, version: item.version + 1, updated_at: savedItem.data[0].updated_at });
+  assert.equal(typeof savedItem.data[0].updated_at, 'string');
+  const staleItem = await request(owner.token, `/rest/v1/items?owner_id=eq.${owner.uid}&id=eq.${item.id}&version=eq.${item.version}`, {
+    method: 'PATCH', body: itemChanges, headers: { Prefer: 'return=representation' },
+  });
+  assert.ok(staleItem.ok); assert.deepEqual(staleItem.data, []);
+  item = savedItem.data[0];
+  assert.deepEqual(await readItem(), [item]);
+  assert.deepEqual(await readImage(image.id), image);
+  const unchanged = async () => {
+    assert.deepEqual(await readItem(), [item]);
+    assert.deepEqual(await readImage(image.id), image);
+    assert.deepEqual(await readImage(pending.id), pending);
+  };
+  const save = async (text) => {
+    const result = await edit(image.id, image.description_version, text);
+    assert.ok(result.ok);
+    image = { ...image, alt_text: text, description_version: image.description_version + 1 };
+    assert.deepEqual(result.data, [returned(image)]);
+    await unchanged();
+  };
+  stage = 'I29b descriptions, clear, Unicode bound and fresh same-value counter increments';
+  await save('Fictional corrected description');
+  await save('');
+  await save('');
+  await save('🌿'.repeat(240));
+  await save('Fictional corrected description');
+  stage = 'I29b invalid arguments and stale equal text leave complete rows unchanged';
+  for (const [id, version, text] of [
+    [null, image.description_version, 'invalid'],
+    [image.id, null, 'invalid'], [image.id, 0, 'invalid'], [image.id, -1, 'invalid'],
+    [image.id, 2147483648, 'invalid'], [image.id, image.description_version, null],
+    [image.id, image.description_version, 'x'.repeat(241)],
+    [image.id, image.description_version, '🌿'.repeat(241)],
+  ]) {
+    denied(await edit(id, version, text), 'Invalid input');
+    await unchanged();
+  }
+  for (const version of [image.description_version - 1, 2147483647]) {
+    denied(await edit(image.id, version, image.alt_text), 'Request conflict');
+    await unchanged();
+  }
+  for (const id of [pending.id, randomUUID()]) {
+    denied(await edit(id, 1, 'Must not change'), 'Not available');
+    await unchanged();
+  }
+  stage = 'I29b concurrent same-counter edits have exactly one success';
+  const attempts = ['Fictional concurrent one', 'Fictional concurrent two'];
+  const outcomes = await Promise.all(attempts.map((text) => edit(image.id, image.description_version, text)));
+  assert.equal(outcomes.filter((result) => result.ok).length, 1);
+  const winner = outcomes.findIndex((result) => result.ok);
+  denied(outcomes[1 - winner], 'Request conflict');
+  image = { ...image, alt_text: attempts[winner], description_version: image.description_version + 1 };
+  assert.deepEqual(outcomes[winner].data, [returned(image)]);
+  await unchanged();
+  await save('');
+  stage = 'I29b owned raw v2 export retains cleared text and description counter';
+  const manifest = await rpc(owner, 'export_manifest', { p_export_id: randomUUID() });
+  assert.equal(manifest.schema_version, 2); assert.equal(manifest.owner_id, owner.uid);
+  assert.deepEqual(manifest.tables.items.find((row) => row.id === item.id), item);
+  assert.deepEqual(manifest.tables.item_images.find((row) => row.id === image.id), image);
+  assert.deepEqual(manifest.tables.item_images.find((row) => row.id === pending.id), pending);
+  for (const table of Object.values(manifest.tables)) assert.ok(table.every((row) => row.owner_id === owner.uid));
+  stage = 'I29b ready image with deleted parent is unavailable without changing description';
+  for (const deleted_at of ['2026-01-01T00:00:00+00:00', null]) {
+    const result = await request(owner.token, `/rest/v1/items?owner_id=eq.${owner.uid}&id=eq.${item.id}&version=eq.${item.version}`, {
+      method: 'PATCH', body: { deleted_at }, headers: { Prefer: 'return=representation' },
+    });
+    assert.ok(result.ok); assert.equal(result.data.length, 1);
+    assert.deepEqual(result.data[0], { ...item, deleted_at, version: item.version + 1, updated_at: result.data[0].updated_at });
+    item = result.data[0];
+    if (deleted_at !== null) denied(await edit(image.id, image.description_version, 'Must not change'), 'Not available');
+    await unchanged();
+  }
+  stage = 'I29b replacement race stays on old image and preserves all private bytes';
+  for (const objectPath of [pending.main_path, pending.thumb_path]) {
+    fixture.paths.push(objectPath);
+    const upload = await request(owner.token, `/storage/v1/object/wardrobe/${objectPath}`, {
+      method: 'POST', body: jpg, binary: true, headers: { 'Cache-Control': 'max-age=0', 'x-upsert': 'false' },
+    });
+    assert.ok(upload.ok);
+  }
+  const [correction, commit] = await Promise.all([
+    edit(image.id, image.description_version, 'Fictional racing correction'),
+    request(owner.token, '/rest/v1/rpc/commit_image', { method: 'POST', body: { p_image_id: pending.id } }),
+  ]);
+  assert.ok(commit.ok);
+  if (correction.ok) {
+    image = { ...image, alt_text: 'Fictional racing correction', description_version: image.description_version + 1 };
+    assert.deepEqual(correction.data, [returned(image)]);
+  } else denied(correction, 'Not available');
+  const retired = await readImage(image.id);
+  assert.equal(typeof retired.retired_at, 'string');
+  assert.deepEqual(retired, { ...image, state: 'retired', retired_at: retired.retired_at });
+  assert.deepEqual(await readImage(pending.id), { ...pending, state: 'ready' });
+  denied(await edit(image.id, retired.description_version, 'Must not change'), 'Not available');
+  assert.deepEqual(await readImage(image.id), retired);
+  assert.deepEqual(await readImage(pending.id), { ...pending, state: 'ready' });
+  assert.deepEqual(await readItem(), [item]);
+  for (const objectPath of fixture.paths) {
+    const download = await request(owner.token, `/storage/v1/object/authenticated/wardrobe/${objectPath}`);
+    assert.ok(download.ok); assert.ok(Buffer.isBuffer(download.data));
+    assert.equal(download.data.length, jpg.length);
+    assert.equal(createHash('sha256').update(download.data).digest('hex'), sha);
+  }
+}
+
 async function personalSettings(owner, other, itemId) {
   const profileFields = ['display_name', 'timezone', 'currency', 'ui_language'];
   const preferenceFields = ['preferred_colours', 'style_tags', 'excluded_categories', 'minimum_upper_coverage', 'minimum_lower_coverage', 'cold_sensitivity', 'repeat_gap_days'];
@@ -336,7 +478,7 @@ try {
     assert.ok(result.ok);
     // A diagnostic signed capability is never followed, printed, or persisted.
     stage = 'interrupted replacement keeps the original ready image';
-    result = await request(owner.token, '/rest/v1/item_images', { method: 'POST', body: { ...reservation, id: fixture.replacement } });
+    result = await request(owner.token, '/rest/v1/item_images', { method: 'POST', body: { ...reservation, id: fixture.replacement, alt_text: '' } });
     assert.ok(result.ok);
     result = await request(owner.token, '/rest/v1/rpc/commit_image', { method: 'POST', body: { p_image_id: fixture.replacement } });
     assert.ok(!result.ok && result.status < 500);
@@ -355,10 +497,13 @@ try {
     result = await request(owner.token, '/rest/v1/rpc/save_outfit', { method: 'POST', body: { ...outfit, p_expected_version: version } });
     assert.ok(!result.ok && result.status < 500);
     assert.equal((await rows(owner, 'outfit_items', `outfit_id=eq.${fixture.outfit}&select=item_id`))[0].item_id, fixture.item);
+    await descriptionCorrections(owner, fixture, jpg, sha);
   }
   passed.push('Both normal users: schema, item retry/version conflict, private JPEG lifecycle, immutable bytes, interrupted upload and atomic RPC idempotency');
   passed.push('I06 both normal owners: profile/language and optional preferences version saves, conflicts, clears, unchanged sibling and existing item money; fields restored with fresh versions');
   passed.push('I29a both normal owners: nullable/legacy-shaped facts, all 24 manual fields, numeric revisions, confirmations/clears/invalidation, CAS, code lists, atomic invalid writes and owned intermediate v2 export');
+  passed.push('I29b both normal owners: name/category CAS, description clears/Unicode/bounds, same-value/stale/concurrent counters, pending/retired denial, replacement race, unchanged complete rows/media and raw v2 counter export');
+  console.log('NOT RUN: I29b stored counter ceiling; ordinary fixtures cannot inject the counter; static finite-bound coverage only.');
 } catch {
   console.error(`FAIL at ${stage}. Credentials and response contents are not logged.`);
   process.exitCode = 1;

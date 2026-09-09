@@ -70,6 +70,25 @@ Outfit and wear multi-row writes use `save_outfit` / `save_wear_event`. Unchange
 
 One image version represents two files. New versions receive new UUIDs; storage upsert is disabled. `commit_image` serializes versions, checks that both object records exist, retires the previous ready version and makes the new one ready atomically. Size/hash validation is also required in the client image pipeline; SQL existence is not proof of valid image bytes.
 
+I29b Stage 1 source migration `20260909070000_item_description_edit.sql` adds
+`item_images.description_version`: a non-null bigint, default 1, bounded to
+1–2147483647. This is a description concurrency counter, not a media version,
+item `version`, provenance revision or request receipt. Existing images begin at
+1 without rewriting their descriptions or other old fields. Only the checked
+`update_image_description` RPC advances it, on every matched expected-counter
+write including same-text writes. Ordinary reservation INSERT cannot supply it;
+direct image UPDATE/DELETE remain unavailable.
+
+`alt_text` stays non-null and now permits 0–240 PostgreSQL characters. `''` is
+an intentional clear, valid even at counter 1. A future restore reserves a new
+owned image with that exact saved text, including empty text, and starts its own
+counter at 1 rather than copying the exported counter. The RPC changes only
+description text/counter on the owned current ready image of a non-deleted item;
+immutable identity, paths, hashes, bytes, state, timestamps, item fields and
+history remain unchanged. Raw metadata-v2 exports naturally include the counter;
+saved-only export completion, restore implementation and the rest of I29 remain
+unfinished. This source addition grants no hosted migration or deployment authority.
+
 Retired versions remain for seven days from server `retired_at`, regardless of their original upload date. Pending age uses `created_at`; retired age uses `retired_at`. `retire_image` can register an imported historical image without changing the current ready version. Recovering an old photo creates a new version from its saved bytes. Storage removal must precede forgetting metadata. Item deletion can leave storage orphans after an interrupted job; compare actual bucket keys against image rows, not just SQL foreign keys. See `08` and `17`.
 
 ## Data intentionally not stored
