@@ -1589,3 +1589,201 @@ B3 remains open with acceptance limited to the released runtime; no new upload
 primitive/probe or repeated human task. Rollback would be a separately reviewed
 source revert, never hosted SQL replay/history repair. Worker performs no Actions
 approval/rerun, merge, deploy, new agent/branch/PR or next packet.
+
+## PR #13 — I29b Stage 2 saved-item editor — 9 September 2026
+
+**Source implementation and native deterministic checks pass. Final independent
+review, fresh exact-head CI/type parity, coordinator visual review and the
+stored-at-ceiling runtime coverage decision remain OPEN.** This implements only
+the three currently entered saved inputs: name, category and photo description.
+It is the I29b subset of R18/R19/R23/R26/R27/R28, not full I29, Phase 2, hosted
+acceptance or MVP completion.
+
+### Same-PR authority and verified input
+
+Repository `drrowdev/stillroom-wardrobe`, PR #13, branch
+`copilot/copiloti29b-saved-item-corrections`; base
+`9d1858236309436b3144a3f45fcef581faff8630`; starting head
+`27c37aff01c0135cf28c9e94477d68e5c96ecf3a`, tree
+`f974e60380e3f51057f596e16ea853f87d17f44d`. No new branch/PR or other writer.
+The complete approved
+[plan 5597695316](https://github.com/drrowdev/stillroom-wardrobe/pull/12#issuecomment-5597695316)
+was read: 21,849 UTF-8 bytes, SHA-256
+`c9ba45adf377cf1001ba29d025f4b6f8a2c8e5967c4baea1e9a2bae7d267ce6e`.
+Its actual Anthropic / Claude Opus 5 `saved-edit-contract-critique` and coordinator
+amendments remain controlling; no additional agent, architecture review or
+provider was invoked. The closed PR #12 comment supplies authority, not an edit
+target.
+
+After context and before implementation, reread this continuation's own
+[receipt 5598692946](https://github.com/drrowdev/stillroom-wardrobe/pull/13#issuecomment-5598692946):
+task `3e68a0be-5735-4ef5-b460-e5bee3b8f41a`, session
+`a54792b3-15d1-45fb-a316-85536f38980c`; explicit `gpt-6-astra`, coordinator
+authenticated actual allocation `sweagent-capi:gpt-6-astra`. Observation
+`2026-09-09T08:20:26.5937320Z`, reverified
+`2026-09-09T08:21:15.3536818Z` against this repo/PR/base/head/branch and sole
+writer. The Stage 1 receipt was not reused.
+
+Context consulted: root `AGENTS.md`, `.github/copilot-instructions.md`; relevant
+cloud, Phase 0/1/2 and local-backend evidence; blueprint 00/03/05/06/08/10/14/19
+and relevant 07/15/20/21 sections; actual three migration contracts and generated
+item/image rows; `src/domain/wardrobe.ts`, `attribute-provenance.ts`,
+`src/data/items.ts`, `rows.ts`, `errors.ts`, `profile.ts`, `client.ts`;
+`src/auth/session.ts` scope contract, app/router/dialog, wardrobe/add-item/profile
+screens, PrivateImages, catalogs/styles; package commands, pinned CI/Playwright,
+quality-gate unit fixtures, browser mock and profile/slice tests. PR #13 body,
+discussion, diff, reviews/threads and MCP Actions evidence were inspected.
+
+The full
+[Stage 1 handoff 5598639436](https://github.com/drrowdev/stillroom-wardrobe/pull/13#issuecomment-5598639436)
+records real CI `34324963356` attempt 2, Database job `102383503422`: migration,
+three-source populated preservation, ordinary integration/security/recovery,
+real generation and upload passed; **only old committed-type parity failed**.
+The exact Database log was read through GitHub MCP and confirms that upload
+preceded the parity failure. Stage 1 App 624 units/329 browsers and native Apple
+4+3 are dated prerequisite evidence, not this candidate's CI passes.
+
+The setup had already modified `src/data/database.types.ts`. It was not blindly
+committed: current GitHub metadata confirmed artifact `10093913972`,
+`database-types`, run `34324963356`, exact starting head, branch and repo/head-repo
+ID `1358925513`, unexpired with expiry `2026-09-10T07:55:54Z`. The exact archive
+was downloaded and checked in program-only memory using Python standard
+libraries and a 30-second request timeout:
+
+* Archive 2630 bytes, SHA-256
+  `21b1bab052497c37ddad6c44a0ebd069c1e93fc2675a32807ceb877f754791ba`,
+  matching GitHub's digest, below 1 MiB.
+* Exactly one nonencrypted regular Unix `100644` member, `database.types.ts`;
+  no directory, symlink or alternate extraction path.
+* Member 22312 bytes, below 128 KiB, strict UTF-8/no NUL, SHA-256
+  `6787f9a2a776db922d0e424d7bfb11746854dd896bbabeec3fd2f359cd5dd759`.
+* Exact byte comparison with the setup-generated file passed. Those identical
+  bytes were deliberately adopted in `e95a049`, without rewriting, regenerating
+  or hand-authoring types. The text diff is only three `description_version`
+  properties and the typed `update_image_description` Args/Returns.
+
+All migration bytes remain frozen: new SQL is still 2618 bytes / SHA-256
+`383012f9662a4b672b58d6a690bc12691e741468af464af2fe841525e723bb98`;
+old 05/06 hashes remain exactly as recorded above.
+
+### Implemented contract and source boundaries
+
+The owned completed-library card opens strict canonical `#/items/<uuid>`;
+`#/items/new` remains creation. Detail reads require the current owner,
+non-deleted item and exactly one current ready/non-retired image. Invalid,
+foreign, absent and pending-only routes show the same generic unavailable
+state. The existing authenticated PrivateImages main Blob is shown once;
+missing bytes show the existing unavailable-photo treatment, with no alternate
+source or upload.
+
+Two independent sections have separate explicit Saves and the existing
+per-section-save explanation. A save remains on detail, updates only its own
+baseline, refreshes eventual library data and preserves the sibling draft.
+Required name/category use the existing taxonomy/100-character convention.
+Saved descriptions trim and accept an intentional `''`, without the creation
+title fallback. Only changed name/category fields and their next user
+provenance revisions are PATCHed with item/owner/version/deleted-null predicates.
+All other fetched item values/provenance are retained for strict comparison;
+absence remains visibly unverified. Description writes use only the three typed
+RPC arguments and validate the exact five-field response.
+
+Each attempt is frozen and single-flight within its section. Unchanged,
+invalid/offline or frozen attempts cannot be submitted. Transport/malformed
+responses remain explicitly unconfirmed; known rejections and zero-row conflicts
+are not labelled ambiguous successes. Check saved changes performs reads only:
+identity, exact next row/counter, intended values, untouched provenance and
+item facts must match. Equal text, a later version, altered facts or a replacement
+image cannot confirm an attempt. No automatic rebase/rewrite/retry. Explicit
+discard/reload affects only that section. Owner/item lifetimes abort/ignore
+late work; UID change/logout clear old private state, and logout remains usable
+while a save is pending. Dirty/busy history navigation and cancel-focus behavior
+use the existing router/dialog patterns.
+
+Stage 2 touches only these fourteen approved paths (the overall PR remains
+exactly the approved 22-path packet):
+
+* `src/data/database.types.ts`, `src/domain/item-details.ts`,
+  `src/data/item-details.ts`, `src/features/wardrobe/item-detail.tsx`;
+* `src/app/app.tsx`, `src/features/wardrobe/wardrobe-screen.tsx`,
+  `src/i18n/phase-zero.json`, `src/styles/app.css`;
+* `tests/unit/item-details.test.ts`, `tests/browser/item-details.spec.ts`,
+  `tests/browser/mock-backend.ts`, `playwright.config.ts`;
+* `.github/workflows/ci.yml` and this append-only result document.
+
+Editor/test source was committed as `19dbcb1` with the Copilot App co-author
+trailer. Stage 1 SQL, preservation harness/ordinary tests, blueprint additions,
+existing browser specs, Auth/profile/settings/add-item/upload/image primitives,
+local tooling, dependency/lockfiles and native Apple/setup workflows are
+unchanged. WebKit configuration adds only the new spec. CI adds only one pinned
+App upload step: the two exact `test-results/i29b-visual/item-details-{en-desktop,fi-mobile}.png`
+paths, head-bound name, one-day retention and missing-file failure. Existing
+four I06/I07 captures remain. Tests guard synthetic owner/route/no credential-like
+visible text, regular PNG names/headers/widths and each file at most 1 MiB.
+Buffers stay ignored and unopened; functional assertions run in every project.
+
+### Actual native validation
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+Units/static work and Vite-backed browser suites ran sequentially. The final
+source candidate was unchanged during the full runs.
+
+| Exact command | Actual result |
+|---|---|
+| `npm run test:unit -- tests/unit/item-details.test.ts` | Final 53/53, exit 0. Domain bounds, identity/provenance/full-fact preservation, frozen attempts, typed read/PATCH/RPC predicates, strict confirmations, definitive versus uncertain errors, owner/epoch/abort guards. Mocked adapters, not live RLS. |
+| `npm run typecheck` | Exit 0. |
+| `npm run lint` | Exit 0. |
+| `npm run check:translations` | Exit 0, 423 EN/FI/SV keys, 40 source files. |
+| `npx playwright install --with-deps webkit` | Exit 0; installed the existing pinned browser/runtime libraries missing from prepared setup. No dependency, package, config, engine-selection or timeout change. |
+| `npm run test:browser -- tests/browser/item-details.spec.ts --retries=0` | 63/63 after focus/layout repairs, exit 0. All three configured projects. |
+| `npm run test:browser -- tests/browser/item-details.spec.ts --grep 'independent item attempt\|UID change' --retries=0` | Later three race additions: 9/9, exit 0. They also pass in the full run below. |
+| `npm run test:unit` | 677/677 in 14 files, exit 0. |
+| `npm run build` | Exit 0; JS 168.84 kB gzip, CSS 5.12 kB gzip. Existing non-failing >500 kB chunk warning remains. |
+| `npm run scan:secrets` | Exit 0, 166 text files and fresh unprinted build canary checked before this append. |
+| `npm run check:dependencies` | Exit 0, 12 production/220 development packages; zero unverified release dates and zero reported production vulnerabilities. |
+| `npm run test:browser -- --retries=0` | **401/401**, 4.8 minutes, exit 0; includes all 72 new editor cases and unchanged existing suites/capture guards. |
+| `npm run test:a11y -- --retries=0` | **30/30**, 40.2 seconds, exit 0; run after the full browser suite. |
+| `git diff --check` | Exit 0. |
+
+Build and its secret scan shared the process-local
+`STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"` without printing the value.
+Changed-file secret scans passed before source commits. Initial typecheck exposed
+not-yet-added catalog keys and an incorrect existing key; lint caught a callback
+dependency, both corrected. Initial unit iteration corrected the SDK's empty-array
+to-null conflict expectation and parameterized array fixtures. Initial browser
+run: 39 passed, 24 failed (21 missing-WebKit launch failures, two discard-cancel
+focus failures and one 200%-text overflow). Existing pinned WebKit installation,
+explicit detail focus restoration and scoped wrapping fixed those causes;
+no retries, skips, timeout increases or unrelated test edits.
+
+The final checker runs once after the result commit and completed processes;
+its actual component/language findings and any unavailable reviewer/analysis
+are reported on PR #13, not presumed here. No replacement scanner or agent.
+
+### Open gates and unchanged release
+
+No additional native database start/list/reset/up/provision/psql/type generation,
+preservation rehearsal, opt-in, integration/security/recovery, native Apple,
+hosted smoke, Auth setup or deployment command ran. Full browser tests use
+synthetic contract fixtures; they do not replace the Stage 1 ordinary-session
+proof or required final fresh CI. Intermediate candidate workflows were observed
+as `action_required`, not executed or passed; the worker approved/reran none.
+
+Coordinator owns final execution-trust review, fresh final-head existing CI
+(including normal-owner preservation/integration/security/recovery/generated-type
+parity), native 4+3, genuine independent review and actual provenance-verified
+inspection of all six final-head PNGs. Local DOM/axe/capture checks are not
+visual acceptance. Missing/unread images remain pending. **Stored-at-ceiling
+runtime remains OPEN/NOT RUN**, not waived by input-bound/denied-injection
+tests, static guards or these browser mocks; no privilege/helper/schema change
+or giant counter loop was used to manufacture that coverage.
+
+Full draft/saved garment-field editing, automatic analysis, provider consent,
+allowances/receipts/expiry and saved-only export remain unfinished MVP I29 work,
+not post-MVP deferrals. No I08 lifecycle/trash/filtering/replacement or later
+packet is implemented. Accounts remain independent. Current live release,
+hosted mappings, B3 limits, pending operator/physical-device/screen-reader
+acceptance and automatic-deployment-off settings are unchanged. No new hosted
+migration, paid/provider action or private input is authorized. Rollback is a
+separately reviewed source revert, never hosted replay/reset/history repair.
+Hand off this same PR and stop for coordinator review; no merge/deploy,
+new agent/branch/PR or next packet.
