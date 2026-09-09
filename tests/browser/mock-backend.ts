@@ -1,7 +1,7 @@
 // Browser contract fixtures only. Real Auth/Storage authorization is a separate blocking suite.
 import type { Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { Socket } from 'node:net';
 import type { Language } from '../../src/i18n';
@@ -11,6 +11,14 @@ export const owners = {
   b: '10000000-0000-4000-8000-000000000002',
 };
 type JsonRow = Record<string, unknown>;
+const itemDefaults = () => ({
+  subcategory: null, colours: ['unknown'], pattern: null, sleeve_length: null, garment_length: null,
+  brand: null, size_label: null, material: null, seasons: ['spring', 'summer', 'autumn', 'winter'],
+  formality: null, warmth: null, min_temp: null, max_temp: null, rain_rating: null, windproof: null,
+  upper_coverage: null, lower_coverage: null, style_tags: [], tags: [], purchase_date: null,
+  purchase_price: null, currency: 'EUR', notes: '', favourite: false, availability: 'ready',
+  lifecycle: 'active', wear_more: false, exclude_suggestions: false, field_provenance: {},
+});
 const storagePrefix = '/storage/v1/object/wardrobe/';
 const fixtureKey = 'sb_publishable_browser_fixture_only';
 const uploadHeaders = ['authorization', 'apikey', 'content-type', 'x-upsert', 'x-client-info'];
@@ -322,16 +330,55 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         const body = request.postDataJSON() as JsonRow;
         if (body.owner_id !== owner) { await json({ code: '42501' }, 403); return; }
         if (table.some((row) => row.id === body.id)) { await json({ code: '23505', message: 'duplicate' }, 409); return; }
-        if (table === items) table.push({ ...body, deleted_at: null, version: 1, created_at: new Date().toISOString() });
-        else table.push({ ...body, state: 'pending', main_path: `${owner}/${body.item_id}/${body.id}/main.jpg`, thumb_path: `${owner}/${body.item_id}/${body.id}/thumb.jpg` });
+        if (table === items) table.push({ ...itemDefaults(), ...body, deleted_at: null, version: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+        else table.push({ ...body, description_version: 1, retired_at: null, state: 'pending', main_path: `${owner}/${body.item_id}/${body.id}/main.jpg`, thumb_path: `${owner}/${body.item_id}/${body.id}/thumb.jpg` });
         await route.fulfill({ status: 201, body: '' }); return;
       }
       const own = table.filter((row) => row.owner_id === owner);
       const id = url.searchParams.get('id');
       const state = url.searchParams.get('state');
-      const rows = own.filter((row) => (!id || `eq.${row.id}` === id) && (!state || `eq.${row.state}` === state));
+      const rows = own.filter((row) => (!id || `eq.${row.id}` === id) && (!state || `eq.${row.state}` === state)
+        && (!url.searchParams.has('owner_id') || url.searchParams.get('owner_id') === `eq.${row.owner_id}`)
+        && (!url.searchParams.has('item_id') || url.searchParams.get('item_id') === `eq.${row.item_id}`)
+        && (!url.searchParams.has('deleted_at') || row.deleted_at === null)
+        && (!url.searchParams.has('retired_at') || row.retired_at === null));
+      if (method === 'PATCH') {
+        if (table !== items) { await json({ code: '42501' }, 403); return; }
+        const row = rows.find((value) => url.searchParams.get('version') === `eq.${value.version}`);
+        if (!row) { await json(null); return; }
+        const body = request.postDataJSON() as JsonRow;
+        if (!id || url.searchParams.get('owner_id') !== `eq.${owner}` || url.searchParams.get('deleted_at') !== 'is.null'
+          || Object.keys(body).some((key) => !['title', 'category', 'field_provenance'].includes(key))) {
+          await json({ code: '42501' }, 403); return;
+        }
+        const provenance = body.field_provenance as Record<string, { kind: string; revision: number }> | undefined;
+        const old = row.field_provenance as Record<string, { kind: string; revision: number }>;
+        if (!provenance || (['title', 'category'] as const).some((field) => body[field] !== undefined && body[field] !== row[field]
+          && (provenance[field]?.kind !== 'user' || provenance[field]?.revision !== (old[field]?.revision ?? 0) + 1))
+          || Object.keys(old).some((field) => !['title', 'category'].includes(field) && JSON.stringify(old[field]) !== JSON.stringify(provenance[field]))) {
+          await json({ code: '22023', message: 'Request conflict' }, 400); return;
+        }
+        Object.assign(row, body, { version: Number(row.version) + 1, updated_at: new Date().toISOString() });
+        await json(row); return;
+      }
       const singular = request.headers().accept?.includes('vnd.pgrst.object');
       await json(singular ? rows[0] ?? null : rows); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/update_image_description') {
+      const body = request.postDataJSON() as JsonRow;
+      if (method !== 'POST' || Object.keys(body).length !== 3 || typeof body.p_alt_text !== 'string'
+        || [...body.p_alt_text].length > 240 || !Number.isInteger(body.p_expected_description_version)
+        || Number(body.p_expected_description_version) < 1 || Number(body.p_expected_description_version) > 2147483647) {
+        await json({ code: '22023', message: 'Invalid input' }, 400); return;
+      }
+      const image = images.find((row) => row.id === body.p_image_id && row.owner_id === owner && row.state === 'ready'
+        && row.retired_at === null && items.some((item) => item.id === row.item_id && item.owner_id === owner && item.deleted_at === null));
+      if (!image) { await json({ code: '42501', message: 'Not available' }, 403); return; }
+      if (image.description_version !== body.p_expected_description_version || image.description_version === 2147483647) {
+        await json({ code: '22023', message: 'Request conflict' }, 400); return;
+      }
+      image.alt_text = body.p_alt_text; image.description_version = Number(image.description_version) + 1;
+      await json([{ id: image.id, owner_id: owner, item_id: image.item_id, alt_text: image.alt_text, description_version: image.description_version }]); return;
     }
     if (url.pathname === '/rest/v1/rpc/commit_image') {
       if (options.failCommitOnce && !commitFailed) { commitFailed = true; await json({ message: 'Unavailable' }, 503); return; }
@@ -362,6 +409,19 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
   return { profiles, preferences, items, images, files, requests, fixture, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
+    seedSavedItem(account: 'a' | 'b' = 'a', title = 'Olive overshirt') {
+      const owner = owners[account], id = randomUUID(), imageId = randomUUID(), now = '2026-09-09T00:00:00Z';
+      const item = { ...itemDefaults(), id, owner_id: owner, title, category: 'top', version: 1,
+        created_at: now, updated_at: now, deleted_at: null };
+      const hash = createHash('sha256').update(fixture).digest('hex');
+      const image = { id: imageId, owner_id: owner, item_id: id, state: 'ready', retired_at: null,
+        alt_text: 'An olive overshirt', description_version: 1, created_at: now,
+        main_path: `${owner}/${id}/${imageId}/main.jpg`, thumb_path: `${owner}/${id}/${imageId}/thumb.jpg`,
+        main_sha256: hash, thumb_sha256: hash, main_bytes: fixture.length, thumb_bytes: fixture.length, width: 640, height: 800 };
+      items.push(item); images.push(image);
+      files.set(image.main_path, fixture); files.set(image.thumb_path, fixture);
+      return { item, image };
+    },
     issuedWireAuthorization(account: 'a' | 'b') {
       const authorization = [...tokens].find(([, owner]) => owner === owners[account])?.[0];
       if (!authorization) throw new Error('Fixture owner authorization unavailable.');
