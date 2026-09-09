@@ -13,7 +13,7 @@ import { provenanceFields } from '../../src/domain/attribute-provenance';
 import { colours, styleTagLimit } from '../../src/domain/preferences';
 import { collectionLimits, enumFields, integerRanges, seasons, textLimits } from '../../src/domain/garment-fields';
 // @ts-expect-error Executable normal-session JavaScript shares the server fixture vectors.
-import { AI_FACT_VECTORS } from '../integration/ai-controls.sessions.mjs';
+import { AI_FACT_VECTORS, assertAiSessionEnvironment } from '../integration/ai-controls.sessions.mjs';
 
 const facts = (fields: unknown = {}, outcome: unknown = 'ready') => ({ outcome, fields });
 function result() {
@@ -25,6 +25,101 @@ function result() {
 }
 const excluded = ['title', 'warmth', 'min_temp', 'max_temp', 'rain_rating', 'windproof', 'tags', 'purchase_price', 'purchase_date', 'notes'];
 const invalid = { ok: false, code: 'INVALID_RESULT' };
+function sessionEnvironment(): Record<string, string> {
+  return {
+    ALLOW_SECURITY_TESTS: '1', SUPABASE_URL: 'http://127.0.0.1:54321',
+    SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_fixture',
+    TEST_A_EMAIL: 'user-a@example.test', TEST_A_PASSWORD: 'a'.repeat(24),
+    TEST_B_EMAIL: 'user-b@example.test', TEST_B_PASSWORD: 'b'.repeat(24),
+  };
+}
+describe('closed AI normal-child environment', () => {
+  it('accepts a strict Linux environment and defaults to the actual platform', () => {
+    const env = { ...sessionEnvironment(), HOME: '/fictional', LANG: 'C', LC_ALL: 'C' };
+    expect(assertAiSessionEnvironment(env, 'linux')).toEqual(env);
+    expect(assertAiSessionEnvironment(env)).toEqual(env);
+  });
+  it('accepts the finite Windows OS additions without forwarding them as credentials', () => {
+    const os = Object.fromEntries([
+      'HOMEDRIVE', 'HOMEPATH', 'LOGONSERVER', 'PATH', 'SYSTEMDRIVE', 'SYSTEMROOT',
+      'TEMP', 'USERDOMAIN', 'USERNAME', 'USERPROFILE', 'WINDIR',
+    ].map((name) => [name, 'fictional']));
+    expect(assertAiSessionEnvironment({ ...sessionEnvironment(), ...os }, 'win32')).toEqual({
+      ...sessionEnvironment(), SYSTEMROOT: 'fictional', USERPROFILE: 'fictional', WINDIR: 'fictional',
+    });
+  });
+  it.each(['Path', 'PATH', 'path'])('accepts Windows %s without widening other platforms', (name) => {
+    const env = { ...sessionEnvironment(), [name]: 'fictional' };
+    expect(() => assertAiSessionEnvironment(env, 'win32')).not.toThrow();
+    for (const platform of ['linux', 'darwin']) expect(() => assertAiSessionEnvironment(env, platform)).toThrow();
+  });
+  it.each(['SystemRoot', 'SYSTEMROOT', 'systemroot'])('compares Windows %s case-insensitively', (name) => {
+    expect(assertAiSessionEnvironment({ ...sessionEnvironment(), [name]: 'fictional' }, 'win32')).toEqual({
+      ...sessionEnvironment(), SYSTEMROOT: 'fictional',
+    });
+  });
+  it('accepts equal Windows aliases, including normal-session names, without changing values', () => {
+    const env = {
+      ...sessionEnvironment(), Path: 'CaseSensitive', PATH: 'CaseSensitive',
+      SystemRoot: 'FictionalRoot', SYSTEMROOT: 'FictionalRoot', allow_security_tests: '1',
+    };
+    expect(assertAiSessionEnvironment(env, 'win32')).toEqual({ ...sessionEnvironment(), SYSTEMROOT: 'FictionalRoot' });
+    const lower = Object.fromEntries(Object.entries(sessionEnvironment()).map(([name, value]) => [name.toLowerCase(), value]));
+    expect(assertAiSessionEnvironment(lower, 'win32')).toEqual(sessionEnvironment());
+    expect(() => assertAiSessionEnvironment(lower, 'linux')).toThrow();
+  });
+  it.each(['PATH', 'SYSTEMROOT', 'SUPABASE_URL', 'ALLOW_SECURITY_TESTS', 'TEST_A_PASSWORD'])(
+    'rejects conflicting Windows %s aliases without logging their values', (name) => {
+      const env = { ...sessionEnvironment(), [name]: 'Fictional', [name.toLowerCase()]: 'fictional' };
+      expect(() => assertAiSessionEnvironment(env, 'win32')).toThrow('EVIDENCE_REQUIRED');
+    },
+  );
+  it.each(['linux', 'win32'])('rejects arbitrary extras and secret/deployment names on %s, including empty values', (platform) => {
+    for (const name of ['UNEXPECTED', 'NODE_OPTIONS', 'TMP', 'APPDATA', 'CI', 'ALLOW_ENV_BYPASS',
+      'SUPABASE_SERVICE_ROLE_KEY', 'supabase_access_token', 'DATABASE_URL', 'DB_PASSWORD',
+      'PGPASSWORD', 'GITHUB_TOKEN', 'GH_TOKEN', 'CLOUDFLARE_API_TOKEN', 'AZURE_CLIENT_SECRET',
+      'OPENAI_API_KEY', 'VITE_SUPABASE_URL']) {
+      for (const value of ['fictional', '']) {
+        expect(() => assertAiSessionEnvironment({ ...sessionEnvironment(), [name]: value }, platform)).toThrow();
+      }
+    }
+  });
+  it.each(['linux', 'win32'])('retains normal credential, local-target and opt-in checks on %s', (platform) => {
+    const valid = sessionEnvironment();
+    for (const name of Object.keys(valid)) {
+      const missing = { ...valid };
+      delete missing[name];
+      expect(() => assertAiSessionEnvironment(missing, platform)).toThrow();
+      expect(() => assertAiSessionEnvironment({ ...valid, [name]: '' }, platform)).toThrow();
+    }
+    for (const changes of [
+      { ALLOW_SECURITY_TESTS: '0' }, { ALLOW_SECURITY_TESTS: 'true' },
+      { SUPABASE_URL: 'https://example.test' }, { SUPABASE_URL: 'http://127.0.0.1:54322' },
+      { SUPABASE_PUBLISHABLE_KEY: 'sb_secret_fixture' }, { SUPABASE_PUBLISHABLE_KEY: 'invalid' },
+      { TEST_A_EMAIL: 'other@example.test' }, { TEST_B_EMAIL: valid.TEST_A_EMAIL },
+      { TEST_A_PASSWORD: 'short' }, { TEST_B_PASSWORD: 'short' },
+      { TEST_B_PASSWORD: valid.TEST_A_PASSWORD },
+    ]) expect(() => assertAiSessionEnvironment({ ...valid, ...changes }, platform)).toThrow();
+  });
+  it('retains strict Linux casing and checks retained values rather than just names', () => {
+    const env = { ...sessionEnvironment(), SystemRoot: 'FictionalRoot', SYSTEMROOT: 'OtherRoot' };
+    expect(assertAiSessionEnvironment(env, 'linux')).toEqual(env);
+    expect(() => assertAiSessionEnvironment({ ...sessionEnvironment(), systemroot: 'fictional' }, 'linux')).toThrow();
+    expect(() => assertAiSessionEnvironment({ ...sessionEnvironment(), HOME: '' }, 'linux')).toThrow();
+  });
+  it.each(['linux', 'win32'])('does not mutate caller input on acceptance or refusal on %s', (platform) => {
+    const env = Object.freeze({ ...sessionEnvironment(), SystemRoot: 'FictionalRoot' });
+    const before = { ...env };
+    const validated = assertAiSessionEnvironment(env, platform);
+    expect(env).toEqual(before);
+    expect(validated).not.toBe(env);
+    validated.TEST_A_PASSWORD = 'changed';
+    expect(env).toEqual(before);
+    const rejected = Object.freeze({ ...env, UNEXPECTED: 'fictional' });
+    expect(() => assertAiSessionEnvironment(rejected, platform)).toThrow();
+    expect(rejected).toEqual({ ...before, UNEXPECTED: 'fictional' });
+  });
+});
 describe('strict provider facts', () => {
   it('partitions all 24 provenance fields into observed, estimated and excluded facts', () => {
     expect(observedAiFields).toHaveLength(10);

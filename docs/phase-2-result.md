@@ -2516,3 +2516,98 @@ normal-owner acceptance. Live `31bdd067`/source `9d1858`, hosted base+I29a,
 unapplied hosted I29b/I29c, B3/counter/device/operator limits remain unchanged.
 No agents, new branch/PR, main push, Actions approval/rerun, hosted mutation,
 provider/budget choice, merge, deployment, Stage 2 or later packet was undertaken.
+
+## I29e Stage 2 and reviewed Windows fixture correction — 9 September 2026
+
+This continuation addresses I29/R18/R19/R23/R26/R27/R28 on the same PR #16,
+branch `copilot/newpr-15-stage1-only`, starting at
+`7c45b5e491460b0e11b725996e97c6f69ebc9d83`, base
+`0d27eb0e3ea9730ae641d915b28375d7b8435ede`. All 165711 previous result bytes
+are preserved; historical Stage 1 observations above are not rewritten.
+
+Authority: [kernel plan 5607052777](https://github.com/drrowdev/stillroom-wardrobe/pull/15#issuecomment-5607052777),
+[sequence addendum 5607520616](https://github.com/drrowdev/stillroom-wardrobe/pull/16#issuecomment-5607520616)
+and [four-path correction 5608548289](https://github.com/drrowdev/stillroom-wardrobe/pull/16#issuecomment-5608548289).
+The correction records actual read-only Anthropic Claude Opus 5 reviewer
+`i29e-finished-code-review`, agent `6dbd2788-e067-486e-a974-25c1dbfd6401`,
+and its sole actionable finding: Windows restores required OS environment names,
+so strict whole-key identity blocked normal fixture children. The coordinator
+approved this routine correction plus the planned exact type import; no new
+architecture, scope, provider or agent was introduced.
+
+The new [own receipt 5608594646](https://github.com/drrowdev/stillroom-wardrobe/pull/16#issuecomment-5608594646)
+was read again after context and before edits. It records explicitly selected,
+authenticated actual `sweagent-capi:gpt-6-astra`, task
+`29a66b76-dae5-4601-918f-c3b5dcf40c49`, session
+`9ed64078-5765-40c3-86d6-59e32d1265b5`, immediate verification
+20:52:17.6462935Z and full model/ref/sole-writer verification 20:53:26.4703748Z.
+The old receipt is not reused.
+
+Context read includes root/Copilot instructions; cloud task-scope/text-only rules;
+Phase 0/current Phase 2 and local-backend evidence; blueprint 00/03/05/10/14/20
+and relevant 07/08 excerpts; current controls SQL/generated types; core local
+environment validation, AI/preservation normal modules and unit tests; package
+commands; PR #15/#16 plans/discussion, current PR refs/diff/reviews, CI run list
+and failed job logs. PR #16 had no formal reviews returned by the review API;
+the actual independent review is recorded in the coordinator correction above.
+
+### Four-path delivery and exact type provenance
+
+`assertAiSessionEnvironment` retains `normalSessionEnvironment` unchanged.
+Only `win32` folds names, accepts equal aliases and the eleven reviewed libuv OS
+names, and rejects conflicting aliases. Other platforms retain strict names.
+Expected normal values are checked; arbitrary extras, empty secret/deployment
+variables and invalid credentials/target/opt-in remain refused. The normal HTTP
+client receives the validated stripped copy. Caller input is not mutated; no
+values or identities are added to logs. The explicit platform argument is used
+only by unit regressions; actual fixture execution defaults to `process.platform`.
+
+The local types were already modified on arrival. Their bytes were compared
+directly with the coordinator's complete [public type text 5608562747](https://github.com/drrowdev/stillroom-wardrobe/pull/16#issuecomment-5608562747):
+exactly 23625 UTF-8 bytes, LF/no BOM/final LF, SHA-256
+`5bde16ca89f7ed857533be2727025160b81c4fc9041ec523360e59c2601eb71c`.
+They were retained without modification and committed as `145d85c`.
+Provenance is artifact `10123552461`, CI run `34399243001`, head `7c45b5e`.
+No archive was opened, no types were reconstructed/normalized, and no native
+generation was run. The frozen 28579-byte SQL retains SHA-256
+`f3c263ef16035a1ac07afe9911faf2ab27ed3a72b730f5db0168a0180df02ade`.
+Only the integration module, its existing ai-schema unit file, generated types
+and this append change. Core helpers, choreography, all SQL, UI/runtime,
+browser/a11y sources, packages and workflows remain byte-identical.
+
+### Actual continuation validation and limits
+
+Commands below ran from the repository root, sequentially; all exited 0.
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run test:unit -- tests/unit/ai-schema.test.ts tests/unit/preservation.test.ts` | 165 tests, two files; includes 21 new environment regressions. |
+| `node --check tests/integration/ai-controls.sessions.mjs` | Syntax pass. |
+| `npm run test:unit` | 991 tests, 17 files. |
+| `npm run lint` | Pass. |
+| `npm run typecheck` | Pass. |
+| `npm run check:translations` | 471 EN/FI/SV keys, 45 source files. |
+| `npm run build` | Pass; JS 174.80 kB gzip/CSS 5.33 kB gzip; existing non-failing chunk-size warning. |
+| `npm run scan:secrets` | 180 text files and unprinted canary checked. |
+| `npm run check:dependencies` | 12 production/220 development packages; zero unverified release dates; production audit zero vulnerabilities. |
+| `git diff --check` | Pass. |
+
+Windows cases are Linux-hosted simulated-platform regressions, not physical
+Windows execution or Windows database proof. The earlier native 449 browser/33
+a11y results carry only because runtime/browser/a11y sources remain byte-identical;
+neither suite was rerun here. No native DB/start/reset/provision/psql/typegen/
+rehearsal, hosted operation, provider call, image download or Actions approval/
+rerun occurred.
+
+[Stage 1 real evidence 5608419914](https://github.com/drrowdev/stillroom-wardrobe/pull/16#issuecomment-5608419914)
+records five-source preservation, 18 fixture phases, normal A/B, recovery and
+actual generation. The inspected failed job `102632541553` confirms old-type
+parity as the staging failure, not a final pass. Fresh final current-head CI
+must still prove browser/native, real preservation/fixtures/recovery, generation
+and exact parity, followed by coordinator precise closure. The existing
+new-candidate native checker is invoked once after commit/process completion;
+its actual components or unavailability are reported publicly on PR #16.
+The earlier native checker remains unreported, not retroactively passed.
+The writer then stops; no merge, deployment, paid/live activation or later
+packet is authorized by these results. All previous manual/operator/device and
+remaining I29 integration/retention gates stay open.

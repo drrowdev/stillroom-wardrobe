@@ -60,11 +60,28 @@ const oldProfile = ({ ai_enabled, ai_notice_revision, ai_consented_at, version, 
   return rest;
 };
 
+export function assertAiSessionEnvironment(env, platform = process.platform) {
+  const actual = Object.create(null);
+  for (const [name, value] of Object.entries(env)) {
+    const key = platform === 'win32' ? name.toUpperCase() : name;
+    requireEvidence(!Object.hasOwn(actual, key) || actual[key] === value);
+    actual[key] = value;
+  }
+  const stripped = normalSessionEnvironment(actual, actual);
+  // libuv restores only these required OS variables in Windows child processes.
+  const requiredOsNames = new Set(platform === 'win32' ? [
+    'HOMEDRIVE', 'HOMEPATH', 'LOGONSERVER', 'PATH', 'SYSTEMDRIVE', 'SYSTEMROOT',
+    'TEMP', 'USERDOMAIN', 'USERNAME', 'USERPROFILE', 'WINDIR',
+  ] : []);
+  for (const name of Object.keys(actual)) {
+    requireEvidence(Object.hasOwn(stripped, name) || requiredOsNames.has(name));
+  }
+  for (const [name, value] of Object.entries(stripped)) eq(actual[name], value);
+  return stripped;
+}
+
 export async function aiClients(env) {
-  // Also reject extra inherited environment values, not just known secret names.
-  const stripped = normalSessionEnvironment(env, env);
-  eq(Object.keys(env).sort(), Object.keys(stripped).sort());
-  const client = normalClient(env);
+  const client = normalClient(assertAiSessionEnvironment(env));
   const owners = [await client.signIn('A'), await client.signIn('B')];
   requireEvidence(owners[0].uid !== owners[1].uid && owners[0].token !== owners[1].token);
   return { client, owners };
