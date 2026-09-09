@@ -2241,3 +2241,121 @@ and unapplied hosted I29b/I29c remain unchanged. Full I29 AI consent/receipts/
 allowances/expiry/source-image history and saved-only export remain unfinished
 MVP work; no I08/provider/next-phase work is authorized here. Stop editing and
 hand this correction back to the coordinator.
+
+## 9 September 2026 — I29d provider-disabled contract foundation
+
+PR #15, `copilot/i29d-provider-disabled-ai-contract`, starts from freshly
+verified main `48f66ca0645e530c8f67b9efbe96da8322b91a5b`. Initial empty head
+`e5b629c3e604932eb1d9ea0bfeafd91feda75f93` is its direct child with unchanged
+tree `e17b2d91540a683a9e16f54ddf4e77e793b99b64`. This append preserves all
+147436 preceding bytes. Scope is the I29/R18/R19/R23/R26/R27/R28 contract
+subset, not working analysis or completed I29.
+
+### Authority, context and five-path boundary
+
+The full [approved plan 5605017667](https://github.com/drrowdev/stillroom-wardrobe/pull/14#issuecomment-5605017667)
+was supplied verbatim in the kickoff. It records actual Anthropic Claude Opus 5
+`i29-next-foundation-plan-critique` and accepted bounded
+`i29-contract-amendment-check`, with coordinator corrections. After context and
+before edits, read this task's own
+[public receipt 5605054373](https://github.com/drrowdev/stillroom-wardrobe/pull/15#issuecomment-5605054373):
+task `292d22ad-fe5c-4968-803b-fb8e7f3c52fc`, session
+`be2e7492-dbf5-4a6c-85cd-1046b57bdca5`, explicitly selected `gpt-6-astra`,
+coordinator-authenticated actual `sweagent-capi:gpt-6-astra`, full allocation
+reverified at 16:15:13.9024543 UTC against this repository/PR/branch/base/head.
+No historical PR #14 receipt was reused; no new agent or material amendment.
+
+Context included root/Copilot instructions; relevant cloud, phase-0/phase-2 and
+local-backend evidence; blueprint 00/03/05/07/08/10/14/15/19/20/21 sections;
+wardrobe/preferences/provenance/garment-fields sources; item schema/generated
+types and provenance migration excerpts; garment-fields and quality-gate tests,
+file walker, TypeScript/Playwright configuration and package scripts. PR #15's
+discussion, empty initial diff/reviews, Actions status and job-log query were
+read. Initial CI `34375464541` was `action_required`, with zero jobs/logs,
+not a failed test or a pass. Shell `rg` was absent; existing text tools were
+used instead. A CLI public-plan retrieval lacked `GH_TOKEN`; no credentials,
+permissions or setup were changed to work around it.
+
+Exactly five paths change:
+
+- `src/domain/ai-analysis.ts`: closed fourteen-field semantic facts and
+  versioned result parsers; existing taxonomies/limits, derived observation/
+  estimate kinds, explicit unknown versus invalid outcomes, UUID/hash/counter/
+  millisecond/24-hour bounds, 8192-byte UTF-8 ceiling and frozen copied results.
+- `src/domain/ai-draft.ts`: pure immutable context-bound lifecycle, explicit
+  request/generation transitions, manual-intent-preserving projection and edits,
+  expiry retaining unverified derivation, photo cleanup and terminal reference
+  invalidation; deeply immutable, exact-value/kind untrusted Save preparation.
+- `tests/unit/ai-schema.test.ts` and `tests/unit/ai-draft.test.ts`: 146 new
+  cases covering the contracts and executable TypeScript-AST import isolation.
+  Every other source TS/TSX file is walked; static/type/re-export/literal dynamic
+  imports resolve to enforce no production wiring. New modules' direct imports
+  stay within the approved domain set; existing transitive data/i18n dependencies
+  are not claimed absent.
+- This append-only result record.
+
+AI never sets manual intent. Partial results and invalid manual input remain
+honest; projection introduces no validation error in applied fields. Manual
+clears and same-value edits remove AI attribution. Expiry preserves visible
+unverified values, then a new photo clears only untouched AI derivation. Tests
+explicitly retain the current manual-only builder's rejection of non-default
+AI-filled creation fields, before and after expiry.
+
+### Actual native validation
+
+The first domain typecheck found three readonly-array parameter mismatches;
+the projection helper was corrected before the successful targeted run.
+Unit/static and Vite-backed browser suites ran sequentially.
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run test:unit -- tests/unit/ai-schema.test.ts tests/unit/ai-draft.test.ts tests/unit/garment-fields.test.ts` | 283/283, three files, exit 0. |
+| `npm run test:unit` | 968/968, 17 files, exit 0. |
+| `npm run lint` | Exit 0. |
+| `npm run typecheck` | Exit 0 after the readonly parameter correction. |
+| `npm run check:translations` | 471 EN/FI/SV keys, 45 source files, exit 0; no new UI strings. |
+| `npm run build` | Exit 0; JS 174.80 kB gzip, CSS 5.33 kB gzip; existing non-failing >500 kB chunk warning. |
+| `npm run scan:secrets` | 176 text files and build canary checked, exit 0. |
+| `npm run check:dependencies` | 12 production/220 development packages, zero unverified release dates; production audit zero critical/high/moderate/low findings, exit 0. |
+| `npm run test:browser -- --retries=0` | First run: 320 passed, 129 WebKit launch failures because pinned `webkit-2359/pw_run.sh` was absent, exit 1. No source correction. |
+| `npx playwright install --with-deps webkit` | Existing pinned engine restored only after the missing-engine failure, exit 0; no package/version/config changes. |
+| `npm run test:browser -- --retries=0` | Final 449/449, 6.5 minutes, exit 0. |
+| `npm run test:a11y -- --retries=0` | 33/33, 53.1 seconds, exit 0 after full browsers. |
+| `git diff --check` | Exit 0. |
+
+Build and secret scan shared an unprinted process-local
+`STILLROOM_SECRET_CANARY="$(openssl rand -hex 24)"`. Synthetic test captures
+remain ignored and unopened; no new capture or browser specification was added.
+The existing native final checker is invoked once after candidate commit and
+process completion; its actual components/results/unavailability are reported
+on PR #15, not predeclared here. No self-hash-only follow-up commit is needed.
+
+### Unwired integration destinations and remaining gates
+
+All four migrations and 22312-byte generated types remain byte-identical.
+No extra DB start/reset/up/list/provision/psql/typegen/rehearsal, hosted operation,
+provider call, dependency change, Actions approval/rerun, merge or deployment.
+These are unit/synthetic-browser results, not fresh normal-owner DB evidence.
+The coordinator owns exact-head execution trust, genuine independent finished-code
+review and fresh CI four-source preservation, ordinary ownership/security/recovery
+and actual generated-type parity. Production isolation is executable and no UI
+changed, so this packet adds no screenshot-download/review cycle or waiver of
+future visual gates.
+
+Next real integration must authenticate the analysis adapter and construct
+authoritative receipts; implement consent/allowances and server admission;
+connect editable draft UI and local title/description/tags composition; and
+authenticate checked Save against its own clock, receipt, current photo and
+exact values/kinds. Claims contain no owner target, revisions or provider config.
+Conflicts must not silently downgrade into a successful write. Source-image
+binding follows successful image commit in that later design. Client pending
+state is not atomic server admission/cost enforcement, and reference invalidation
+does not erase previously delivered data or outside references.
+
+Saved-only export, legacy imageless/failed-Save ambiguity, receipt/storage schema
+and provenance widening remain open: item-row existence is not completed Save.
+No provider eligibility or proposed spending figure is approved here. Live
+`31bdd067`/source `9d1858`, hosted base+I29a and unapplied hosted I29b/I29c remain
+unchanged. Dated B3/counter/device/operator limitations remain pending, not waived.
+This finishes only the bounded unwired foundation, not automatic tagging or the
+MVP. Stop after the final candidate/checker report for parent review and current CI.
