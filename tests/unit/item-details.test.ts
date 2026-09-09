@@ -19,6 +19,8 @@ function item(overrides: Record<string, unknown> = {}) {
     id, owner_id: owner, title: 'Old name', category: 'top', version: 7, deleted_at: null,
     field_provenance: { warmth: { kind: 'unknown', revision: 2 }, title: { kind: 'user', revision: 3 } },
     warmth: 2, colours: ['green'], notes: 'Literal <script> text', created_at: '2026-09-09T00:00:00Z',
+    seasons: [], style_tags: [], tags: [], currency: 'EUR', favourite: false, availability: 'ready',
+    lifecycle: 'active', exclude_suggestions: false, wear_more: false,
     updated_at: '2026-09-09T00:00:00Z', ...overrides };
 }
 function image(overrides: Record<string, unknown> = {}) {

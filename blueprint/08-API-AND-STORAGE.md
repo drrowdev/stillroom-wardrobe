@@ -118,6 +118,45 @@ owned image, exact attempted text and exact baseline counter + 1. Equal text
 alone or a later counter cannot confirm it. This confirms current stored state,
 not exactly-once request identity. Definitive rejection remains rejection.
 
+## I29c manual field Save contract
+
+The shared capture/saved form reviews all thirty item fields. Only explicit Save
+allocates item/image IDs and freezes deep copies of the validated fields, manual
+intent/provenance and exact description, with immutable prepared Blob references
+and owner/epoch. Repeated submit events share a synchronous latch. Retry reuses
+that snapshot and those IDs; no new photo analysis, automatic retry or new
+baseline is inferred.
+
+Creation inserts only manually supplied/cleared user/revision-1 assertions;
+untouched factual assertions are omitted, never unknown/revision-0 entries.
+Duplicate item reconciliation requires owned identity, no deletion, initial row
+version 1, every frozen field and semantic provenance equality. Creation does
+not compare generated timestamps. Image reconciliation checks identity, parent,
+dimensions, sizes, hashes and the frozen caption, including `''`. Pending images
+also require description counter 1. An unchanged-caption ready image may have a
+later counter; changed captions conflict rather than being overwritten or
+reported as the frozen reviewed value. Storage transport and commit are unchanged.
+
+Saved editing performs one owner/id/non-deleted/expected-version PATCH per item
+Save, coupling every changed factual value with user/previous+1. Same-value manual
+confirmation of an unverified value and explicit empty clears include both value
+and assertion; unchanged already-user values are no-ops. The six app settings
+have no provenance entries. No focus, language formatting or Save click alone
+confirms facts. Description Save remains separate and preserves the item draft.
+Uncertain item replies require exact next version, intended values/revisions and
+all untouched provenance/system facts, including original `created_at`, in an
+explicit read-only confirmation; no automatic second write or rebase.
+
+Optional blank text maps to null; notes and description clear to `''`. Prices
+retain canonical decimal meaning and their raw input's entry locale; the numeric
+SDK conversion must have a finite bounded two-decimal round trip. Formatting never
+supplies storage values or converts currency. Real date-only input uses UTC-only
+presentation. Historical values/collections remain unchanged unless edited.
+Future restore must retain empty collections and manual provenance, rebind owned
+IDs and reserve exact saved description text without inference or imported consent.
+AI receipts/allowances/expiry and final saved-only export remain unfinished I29
+work; this source contract authorizes no hosted migration or deployment.
+
 ## Authenticated image access
 
 Owner views use `storage.from('wardrobe').download(path)` through the current user's SDK client, with a custom fetch adapter setting `cache:'no-store'` for data/storage/auth requests. Convert returned JPEG bytes to a Blob URL and revoke it on unmount/logout/account change. Coalesce identical in-flight `(ownerUid,imageId,variant)` downloads and cap concurrency at four. No Edge media function, public image endpoint or sharing URL is implemented. RLS checks current approved-account status and the reserved owner path on every new Storage request.

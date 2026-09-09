@@ -68,6 +68,16 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Preserve bounded synthetic I29c visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: i29c-garment-fields-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/i29c-visual/garment-fields-en-desktop.png
+            test-results/i29c-visual/garment-fields-fi-mobile.png
+          if-no-files-found: error
+          retention-days: 1
+
   database:
     name: Real local Supabase
     runs-on: ubuntu-latest

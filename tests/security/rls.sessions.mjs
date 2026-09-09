@@ -176,6 +176,60 @@ async function provenanceIsolation(c,own,other,foreign){
   }
 }
 
+async function completeFieldIsolation(c,own,other,foreign){
+  stage='I29c full manual fields, owner-only clears and unchanged history/profile/image bytes';
+  const fields={
+    title:'Fictional reviewed overshirt',category:'layer',subcategory:'Shirt',colours:['green','blue'],
+    pattern:'striped',sleeve_length:'long',garment_length:'regular',brand:'Fictional brand',size_label:'M',
+    material:'Owner supplied',seasons:['autumn'],formality:0,warmth:0,min_temp:-5,max_temp:20,rain_rating:0,
+    windproof:false,upper_coverage:2,lower_coverage:0,style_tags:['calm'],tags:['fictional'],
+    purchase_date:'2024-02-29',purchase_price:0.1,notes:'Fictional note\nSecond line',currency:'SEK',
+    favourite:true,availability:'laundry',lifecycle:'archived',exclude_suggestions:true,wear_more:true,
+  };
+  const factual=Object.keys(fields).filter(field=>!['currency','favourite','availability','lifecycle','exclude_suggestions','wear_more'].includes(field));
+  const all=async(actor,table)=>{
+    const result=await call(actor.token,`/rest/v1/${table}?owner_id=eq.${actor.uid}&select=*`);
+    assert.ok(result.ok);return result.data;
+  };
+  const before=(await all(c,'items')).find(row=>row.id===own.item);
+  const siblings=await all(other,'items');
+  const preserved={};
+  for(const table of ['profiles','wear_events','wear_event_items','item_images'])preserved[table]=await all(c,table);
+  const patch=(actor,row,body)=>call(actor?.token??null,`/rest/v1/items?owner_id=eq.${row.owner_id}&id=eq.${row.id}&version=eq.${row.version}&deleted_at=is.null`,{
+    method:'PATCH',body,returnRepresentation:true,
+  });
+  const assertions=row=>Object.fromEntries(factual.map(field=>[field,{kind:'user',revision:(row.field_provenance[field]?.revision??0)+1}]));
+  let current=before;
+  try{
+    let result=await patch(c,current,{...fields,field_provenance:assertions(current)});
+    assert.ok(result.ok);assert.equal(result.data.length,1);
+    current=result.data[0];
+    for(const field of Object.keys(fields))assert.deepEqual(current[field],fields[field]);
+    const target=siblings.find(row=>row.id===foreign.item);
+    for(const actor of [c,null]){
+      const victim=actor?target:current;
+      result=await patch(actor,victim,{...fields,field_provenance:assertions(victim)});
+      assert.ok(!result.ok||Array.isArray(result.data)&&result.data.length===0);
+    }
+    const cleared={...fields,subcategory:null,colours:[],seasons:[],pattern:null,sleeve_length:null,garment_length:null,
+      brand:null,size_label:null,material:null,formality:null,warmth:null,min_temp:null,max_temp:null,rain_rating:null,
+      windproof:null,upper_coverage:null,lower_coverage:null,style_tags:[],tags:[],purchase_date:null,purchase_price:null,notes:''};
+    result=await patch(c,current,{...cleared,field_provenance:assertions(current)});
+    assert.ok(result.ok);assert.equal(result.data.length,1);current=result.data[0];
+    for(const field of Object.keys(cleared))assert.deepEqual(current[field],cleared[field]);
+    assert.deepEqual(await all(other,'items'),siblings);
+    for(const table of Object.keys(preserved))assert.deepEqual(await all(c,table),preserved[table]);
+    for(const imagePath of own.paths){
+      const bytes=await call(c.token,`/storage/v1/object/authenticated/wardrobe/${imagePath}`);
+      assert.ok(bytes.ok);assert.equal(createHash('sha256').update(bytes.data).digest('hex'),sha);
+    }
+  }finally{
+    const restored=await patch(c,current,{...Object.fromEntries(Object.keys(fields).map(field=>[field,before[field]])),field_provenance:assertions(current)});
+    assert.ok(restored.ok);assert.equal(restored.data.length,1);
+    for(const field of Object.keys(fields))assert.deepEqual(restored.data[0][field],before[field]);
+  }
+}
+
 async function descriptionIsolation(c,own,other,foreign){
   const read=async(actor,table,id)=>{
     const result=await call(actor.token,`/rest/v1/${table}?owner_id=eq.${actor.uid}&id=eq.${id}&select=*`);
@@ -266,6 +320,8 @@ try {
   stage='own fixture creation';const af=await fixture(a),bf=await fixture(b);passed.push(stage);
   await provenanceIsolation(a,af,b,bf);await provenanceIsolation(b,bf,a,af);
   passed.push('I29a both directions: own manual provenance allowed; foreign/anonymous reads and writes and own AI INSERT/UPDATE denied; complete rows unchanged after denials');
+  await completeFieldIsolation(a,af,b,bf);await completeFieldIsolation(b,bf,a,af);
+  passed.push('I29c both directions: all thirty fields and optional clears; foreign/anonymous CAS denied; other owner, profile, history and actual image bytes unchanged');
   await descriptionIsolation(a,af,b,bf);await descriptionIsolation(b,bf,a,af);
   passed.push('I29b both directions: own description RPC allowed; foreign/absent generic denial, anonymous EXECUTE and direct image UPDATE/DELETE/counter INSERT denied; full item/image rows and actual private bytes preserved');
   await settingsIsolation(a,b);await settingsIsolation(b,a);

@@ -8,6 +8,23 @@ Implement `supabase/migrations/20260906000000_automatic_tagging.sql` after the b
 
 Unentered physical properties remain unknown. Preserve old values but mark provenance-less values unverified. Manual empty values retain user provenance. AI fills only untouched fields in the current draft; persist the reviewed values/provenance on explicit Save, not on analysis completion.
 
+I29c source migration `20260909110000_item_optional_collections.sql` changes only
+the `colours`/`seasons` checks and future defaults: non-null text arrays may have
+0–3 colours and 0–4 valid season codes, defaulting to `[]`. It performs no old-row
+update. Historical `['unknown']` colours and all-four-season values, timestamps,
+versions and provenance remain exactly as stored. The unknown sentinel is not a
+known physical colour; absence of a provenance entry still means unknown/revision
+0. Empty collections express unentered facts or a recorded manual clear, not
+fabricated protection. The 40-code-point bounds on newly entered style words/tags
+are client limits, not per-element SQL limits on colours or style tags. SQL retains
+the tags array's 12-entry and joined-UTF-8 512-byte bounds.
+
+The form's closed field builder excludes system columns. This is not a claim
+that the existing items grant denies all system-looking input: `touch_record`
+denies identity UPDATE and controls UPDATE timestamps/version, while the owner
+can still write `deleted_at` and some INSERT metadata under the existing grant.
+I29c adds no grants, policies, functions, columns or trigger changes.
+
 Analysis creates no item/image records: photo/title/category are checked only on Save. Failed explicit saves may leave incomplete upload reservations, excluded from completed inventory/derived data. Image commit never enqueues analysis. Discard removes temporary results; expiration purges remaining bounded results. Account deletion cascades request/usage data. Metadata-v2 export contains saved fields/provenance, not drafts/results/usage or active consent. The base diagram below predates these additions.
 
 ## Entities

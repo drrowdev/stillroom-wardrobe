@@ -11,6 +11,7 @@ import { isMain } from '../../scripts/quality/files.mjs';
 export const SOURCE_HASHES = Object.freeze({
   base: MIGRATION_HASH, target: '4060e963bc5a986857f31bc9b528dd6d7ea8caee720336de8499d59e8f8c3f92',
   description: '383012f9662a4b672b58d6a690bc12691e741468af464af2fe841525e723bb98',
+  collections: '5296c58ac806ae560afd3befb4dc7e0bfc4fa61fa1898e9a21ef8e6db212b1d4',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -433,7 +434,9 @@ export async function captureData(client, owners, run) {
 export async function functionalProbes(client, owners, after) {
   for (const [index, owner] of owners.entries()) {
     const other = owners[1 - index], tables = after.data[index].tables, row = tables.items[0];
-    for (const body of [{ warmth: 5 }, { rain_rating: -1 }, { pattern: 'invalid' }]) {
+    for (const body of [{ warmth: 5 }, { rain_rating: -1 }, { pattern: 'invalid' },
+      { colours: ['black', 'white', 'green', 'blue'] }, { seasons: ['spring', 'summer', 'autumn', 'winter', 'spring'] },
+      { seasons: ['monsoon'] }]) {
       const result = await client.patch(owner, 'items', row, body);
       requireEvidence(!result.ok && result.status === 400);
       requireEvidence(isDeepStrictEqual(await client.rows(owner, 'items'), canonicalRows('items', tables.items)));

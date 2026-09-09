@@ -14,6 +14,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
   { name: '20260906000000_item_field_provenance.sql', version: '20260906000000', time: '2026-09-06 00:00:00', bytes: 5923, sha256: SOURCE_HASHES.target },
   { name: '20260909070000_item_description_edit.sql', version: '20260909070000', time: '2026-09-09 07:00:00', bytes: 2618, sha256: SOURCE_HASHES.description },
+  { name: '20260909110000_item_optional_collections.sql', version: '20260909110000', time: '2026-09-09 11:00:00', bytes: 454, sha256: SOURCE_HASHES.collections },
 ]);
 
 export function assertRehearsalEnvironment(env, args) {
@@ -163,7 +164,7 @@ async function main() {
       help.push(await cli(args));
     }
     assertCapabilities(help);
-    console.log('PASS: pinned 2.116.0 capabilities and exact three-source inventory');
+    console.log(`PASS: pinned 2.116.0 capabilities and exact ${MIGRATIONS.length}-source inventory`);
     for (const entry of MIGRATIONS) console.log(`PASS: source ${entry.version} bytes=${entry.bytes} sha256=${entry.sha256}`);
     stage = 'S1-base-reset';
     requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', MIGRATIONS[0].version], 10 * 60_000)).code === 0);

@@ -47,7 +47,17 @@ Required to **start**: a photo only. AI fills the form, including title/category
 
 Before Save, keep only a session-memory draft and the short-lived owner analysis receipt; no item or private image object exists in the library. After explicit Save, an incomplete upload reservation may exist for retry but must not appear as completed inventory or feed suggestions/statistics. Base SQL's non-null saved-item title/category constraints can remain.
 
-Optional details: subcategory; up to three colour names; pattern, sleeve/garment length; brand; size label; material; one or more seasons; formality 0–4; purchase date, nonnegative price and ISO currency; notes; favourite; availability (`ready`, `laundry`, `repair`, `lent`); lifecycle (`active`, `archived`, `donated`, `sold`); up to twelve tags. Recommendation helpers: warmth 0–4, optional temperature range, rain rating, windproof, coverage, style tags, exclude and wear-more flags. `20` specifies which details AI can fill, observed/estimated/unknown provenance and manual precedence. Unentered physical properties must not become factual numeric defaults. I29 adds the necessary migration; the supplied base SQL does not yet express this distinction.
+Optional details: subcategory; zero to three colour names; pattern, sleeve/garment length; brand; size label; material; zero to four valid seasons; formality 0–4; purchase date, nonnegative price and ISO currency; notes; favourite; availability (`ready`, `laundry`, `repair`, `lent`); lifecycle (`active`, `archived`, `donated`, `sold`); up to twelve tags. Recommendation helpers: warmth 0–4, optional temperature range, rain rating, windproof, coverage, style tags, exclude and wear-more flags. `20` specifies which details AI can fill, observed/estimated/unknown provenance and manual precedence. Unentered physical properties must not become factual numeric defaults. I29 adds the necessary migration; the supplied base SQL does not yet express this distinction.
+
+I29c's manual shared form covers these thirty fields before explicit Save and in
+the saved item's field section; the image description has its own versioned
+section afterward. Optional collections may be empty/unknown. An intentional
+clear records user provenance, while untouched missing facts remain unverified.
+The six app settings (currency, favourite, availability, lifecycle, exclude and
+wear-more) are editable defaults, not factual observations. IDs, ownership,
+timestamps, versions, soft-deletion state, immutable media and provenance internals
+are not form fields. Basic enum/flag controls do not implement I08's trash,
+bulk-action, filter or suggestion workflows.
 
 `active` is not synonymous with `ready`: an active shirt in the laundry stays in the wardrobe but cannot be suggested. Trash is separate from lifecycle. Ownership cannot be reassigned. An outfit contains only owned items. Recommendations have no input type or option for another account’s content.
 
