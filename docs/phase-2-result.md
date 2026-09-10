@@ -3325,3 +3325,145 @@ private-input capture occurred. Exact-head coordinator visual review and
 applicable device/human gates remain pending, not waived by PR16 B3 or these
 tests. Hosted AI18/checked Save remains unapplied; the live operation window
 is closed/read-only. Stop after the scoped commit and public handoff.
+
+## PR #17 Stage 2 — connected manual Save; WebKit environment blocked, 10 September 2026
+
+**Connected source candidate, not merge-ready.** This continuation uses existing
+PR #17 / `copilot/new-i29-checked-manual-save`, base/main
+`c6ee8beb890deeca0c04cf53d6d3deebe4a231f6`, starting head
+`1bf2670c46fb94f710a4bddb6b459fff6904ced8`, tree
+`690be443f639c4b222f2dc529702f4d9c0f5929d`. Requirements are I29's R03 creation
+and R04 private-photo subset with R23 checked retries, preserving
+R01/R11/R17/R19/R26/R27; not complete wardrobe CRUD or full I29.
+
+### Authority, entry order and actual source evidence
+
+Read the full [original plan 5614413353](https://github.com/drrowdev/stillroom-wardrobe/pull/16#issuecomment-5614413353),
+[A1 5614726097](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5614726097),
+controlling A2/A3/A4 and recovery adjudications, and full
+[Stage 2 assignment 5619249583](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5619249583).
+This is the already-reviewed continuation, not a new material plan.
+Actual prereviewer: Anthropic / Claude Opus 5, reviewer
+`d27104d9-e844-42b7-9f7f-a0a6723ba2dc`, turn 3; A4 final review
+`9edf6b92-27a7-47ce-b963-949860fe50a4`, turn 9, adjudicated in 5618932608.
+No additional agent/reviewer was launched by the writer.
+
+Read root `AGENTS.md`, `.github/copilot-instructions.md`, cloud task/hosted
+boundaries, Phase 0 status, relevant Phase 2 and local-backend evidence;
+blueprint 00/03/05/10/14/19/20/21, I29 in 15 and relevant base-schema/API
+sections of 07/08. Inspected actual checked-Save SQL, generated RPC text, upload
+seam, garment parser and affected unit/browser test context. Retrieved PR
+metadata/discussion/diff, empty formal reviews/threads, recent Actions runs and
+actual Database job logs. Large text tool results were paginated or selectively
+read; retrieval alone was not treated as a complete source review.
+
+Initial `git status --short`, unstaged/staged diff stats were empty. HEAD/tree/
+branch and both pinned text hashes matched the assignment, with no setup delta.
+The local historical comparison reported **no merge base** in the shallow clone;
+the GitHub PR diff was available. No fetch, history rewrite, reset or restoration
+was used. An instruction-directory discovery probe found no `.github/instructions`
+directory; it caused no source change.
+
+After these read-only entry checks, read the full matching public
+[own receipt 5619278146](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5619278146):
+task `375610f6-76e1-4e59-abf0-9ed6f93ea257`, session
+`9c0bf2ab-04e3-46b3-8b8b-9800030df835`, coordinator observation
+`2026-09-10T13:14:45.4120160Z`, explicit `gpt-6-astra` selection and actual
+`sweagent-capi:gpt-6-astra`, repository 1358925513 / PR artifact 4492828082,
+matching branch/base/start head/tree. Only then called initial progress, which
+reported **no changes to commit**, and edited source. Deeper test-route, owner
+lifetime, parser and unchanged-transport inspection followed within the packet.
+Read both blueprint child instruction files before the related documentation
+edits, without copying their historical templates over current instructions.
+
+[Outcome 5619223183](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5619223183)
+records completed CI 34477104827 attempt 2 at the starting head, actual Database
+102876472494/App 102876472132 evidence, artifact 10152858915 and coordinator
+visual review. The tracked types remain **23976 bytes**, SHA256
+`9cf1a659a46f2f611cf10a83a7b1b8f7f210233691a21142eee1e5123344e0f4`;
+sixth SQL remains **16801 bytes**, SHA256
+`023be0259305f0700c982dd27cc40e438847cd7b7f818a7fe7d3cc8b260459a8`.
+Neither file was edited, regenerated or imported. Prior CI's 1131 units and
+449 browser cases are not connected-client evidence.
+
+### Connected contract and exact nine-path scope
+
+Only `src/images/upload.ts`, `tests/unit/item-save.test.ts`,
+`tests/unit/garment-fields.test.ts`, `tests/browser/mock-backend.ts`,
+`tests/browser/garment-fields.spec.ts`, `tests/browser/images.spec.ts`,
+`blueprint/06-DATA-MODEL.md`, `blueprint/08-API-AND-STORAGE.md` and this result
+change. The optional helper, private-image tests, slice/detail specs and every
+other source path remain unchanged.
+
+Every existing AddItem submit/explicit Retry now sends the frozen 32-key item
+and 8-key image intent to typed `reserve_item_save`. Before upload, runtime
+checks require exactly one well-shaped result, the opaque 64-hex fingerprint,
+owned IDs/parent, every frozen field with canonical price/semantic provenance,
+version 1/nondeletion, immutable media metadata/paths/caption, description
+counter 1/nonretirement and reserved/pending or completed/ready consistency.
+Server timestamp fields are shape-checked, not compared with browser time.
+Malformed replies fail closed; known closed SQL failures use existing translated
+conflict/upload-incomplete messages, all other failures use unavailable.
+
+Both pending and completed retries pass checked reservation and
+`finalize_item_save`; a bare ready flag never returns success. Finalization
+requires a void response. No rejected reservation is repaired, no raw item/image
+INSERT or raw commit remains on the common Save path, and no new IDs, automatic
+retry/rebase or inference is introduced. Owner/epoch and abort checks bracket
+the asynchronous stages. The original frozen attempt builder, prepared photo,
+dirty UI and explicit Retry/Discard remain intact.
+
+Direct text comparison confirmed `ensureFile` and browser `uploadReceiver`
+byte-identical to the starting head. Thumb-before-main, JPEG/upsert-false/
+cacheControl-zero, authenticated duplicate download/SHA comparison and all
+capture bounds remain. These are not analyzed-photo byte attestation.
+All original A1/A3/A4 unit bodies remain exact; 69 connected-client unit cases
+are additive. Browser metadata routes model checked attempts and lost completed
+replies; new cases reject missing objects, changed caption/counter/version,
+deleted/retired rows and malformed reservations while preserving frozen retries.
+Mocks are not SQL concurrency, authorization or live-backend proof.
+
+### Actual bounded commands and stopping evidence
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+Units finished before the Vite-backed browser run.
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run typecheck && git diff --check` | Exit 0 after connecting the source seam. |
+| `npm run test:unit -- tests/unit/item-save.test.ts tests/unit/garment-fields.test.ts tests/unit/private-images.test.ts && npm run typecheck && npm run lint` | First exit 1: 254 passed / 13 new fixture failures; later commands did not run. Corrected new synthetic Blobs to declare `image/jpeg`, matching the asserted upload contract, without changing production transport. Repeated after that correction: exit 0, 267/267, typecheck/lint passed. |
+| `npm run typecheck && npm run lint && npm run check:translations && git diff --check` | Exit 0; 471 EN/FI/SV keys, 45 source files. |
+| `npm run test:unit -- tests/unit/item-save.test.ts tests/unit/garment-fields.test.ts tests/unit/private-images.test.ts && npm run typecheck && npm run build && npm run scan:secrets` | Exit 0 after four additional malformed-void-response cases: **271/271** in three files. Typecheck/build passed; JS 596.81 kB / gzip 175.01 kB, existing non-failing >500 kB warning. Secret scan: 184 text files, canary checked. |
+| `npm run test:browser -- tests/browser/garment-fields.spec.ts tests/browser/images.spec.ts tests/browser/slice.spec.ts tests/browser/item-details.spec.ts --retries=0` | **Exit 1: 204 passed, 102 failed**, 306 cases / two workers / 2.8 minutes. Chromium and mobile passed, including applicable accessibility and unchanged bounded captures. Every WebKit case failed at browser launch because `/home/runner/.cache/ms-playwright/webkit-2359/pw_run.sh` is absent. No WebKit application assertion ran. |
+| `git diff --check` and read-only frozen-function/original-unit-body comparisons | Exit 0; frozen functions and every original checked-Save unit body unchanged. |
+
+This task's setup run 34481417081/job 102884879378 records startup success
+13:15:37–13:16:45Z, reset/provision success 13:16:45–13:17:24Z and generation
+success 13:17:24–13:17:36Z. This is setup metadata, not new-head CI or a worker
+integration pass. Although it met the fixture prerequisite, **no worker
+`db:start`, integration/security, reset/typegen or rehearsal ran**: the browser
+environment blocker triggered the assignment's stop rule first.
+No browser install, dependency restoration/change, timeout/worker modification,
+diagnostic workaround or rerun followed. Standalone `test:a11y` was not run;
+the selected specs' Chromium/mobile accessibility checks passed, WebKit did not.
+
+### Coordinator handoff and retained gates
+
+The writer stopped implementation/validation at the missing-WebKit blocker and
+prepared only this scoped source/evidence handoff. No image/archive/binary was
+opened, downloaded into model input, attached or encoded for the worker;
+synthetic screenshot buffers remained ignored. Existing capture production is
+not coordinator visual acceptance, and the prior eight-image review covers only
+the starting head.
+
+New-head independent source/execution-trust review must precede any first CI
+request by the coordinator. Full new-head App/Database/preservation/types/
+ordinary-owner negatives/security/recovery and actual approved visual review
+remain required. The worker authorized/reran no Actions and created no agent,
+branch or PR, merged nothing and deployed nothing.
+The prior c3 failure remains undiagnosed; missing WebKit does not diagnose or
+fix B3's two-byte upload issue. B3 acceptance is not waived. Forced DB overlap,
+stored counter ceiling and the account-deletion journey remain unproved.
+Hosted AI18/checked Save remain unapplied and the live window closed. Automatic
+analysis, trusted photo/provenance binding, source history, complete backup/
+export and full I29/MVP/device/human acceptance are not delivered by this packet.

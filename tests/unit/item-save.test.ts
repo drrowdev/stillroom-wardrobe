@@ -1,7 +1,12 @@
 import { readFile } from 'node:fs/promises';
-import { describe, expect, it } from 'vitest';
-import { garmentFields } from '../../src/domain/garment-fields';
+import { describe, expect, it, vi } from 'vitest';
+import { createClient } from '@supabase/supabase-js';
+import { createHash } from 'node:crypto';
+import type { Database } from '../../src/data/database.types';
+import type { OwnerScope } from '../../src/auth/session';
+import { garmentFields, editGarmentField, newGarmentDraft } from '../../src/domain/garment-fields';
 import { provenanceFields } from '../../src/domain/attribute-provenance';
+import { newSaveAttempt, saveItem } from '../../src/images/upload';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { intent, denied, boundedRace, manualFields, equalAiStatusState } from '../integration/item-save.sessions.mjs';
 // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
@@ -207,5 +212,233 @@ describe('approved-owner full AI status comparison', () => {
     const missing = { ...status(), usage: { accountedMicro: '100', warning: false } };
     expect(() => equalAiStatusState(status(), missing)).toThrow('EVIDENCE_REQUIRED');
     expect(() => equalAiStatusState(missing, status())).toThrow('EVIDENCE_REQUIRED');
+  });
+});
+
+describe('connected checked manual Save (actual SDK, synthetic HTTP)', () => {
+  const owner = '10000000-0000-4000-8000-000000000001';
+  const other = '10000000-0000-4000-8000-000000000002';
+  const reservePath = '/rest/v1/rpc/reserve_item_save', finalizePath = '/rest/v1/rpc/finalize_item_save';
+  const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  function setup() {
+    const controller = new AbortController();
+    const scope: OwnerScope = { ownerId: owner, epoch: 3, signal: controller.signal };
+    let draft = editGarmentField(editGarmentField(newGarmentDraft('EUR', 'fi'), 'title', 'Shirt', 'fi'), 'category', 'top', 'fi');
+    draft = editGarmentField(draft, 'purchase_price', '0,10', 'fi');
+    draft = editGarmentField(draft, 'warmth', '', 'fi');
+    const main = new Blob(['synthetic-main'], { type: 'image/jpeg' }), thumb = new Blob(['synthetic-thumb'], { type: 'image/jpeg' });
+    const attempt = newSaveAttempt(draft, '', {
+      main, thumb, width: 2, height: 3,
+      mainSha256: createHash('sha256').update('synthetic-main').digest('hex'),
+      thumbSha256: createHash('sha256').update('synthetic-thumb').digest('hex'),
+    }, scope);
+    const prefix = `${owner}/${attempt.itemId}/${attempt.imageId}`, now = '2026-09-10T00:00:00Z';
+    const row = {
+      fingerprint: 'c'.repeat(64), state: 'reserved',
+      item: { ...attempt.payload, id: attempt.itemId, owner_id: owner, version: 1, deleted_at: null, created_at: now, updated_at: now },
+      image: { id: attempt.imageId, item_id: attempt.itemId, owner_id: owner, state: 'pending', retired_at: null,
+        description_version: 1, alt_text: '', main_path: `${prefix}/main.jpg`, thumb_path: `${prefix}/thumb.jpg`,
+        main_bytes: main.size, thumb_bytes: thumb.size, width: 2, height: 3,
+        main_sha256: attempt.photo.mainSha256, thumb_sha256: attempt.photo.thumbSha256, created_at: now },
+    };
+    const files = new Map<string, Blob>();
+    const calls: Array<{ path: string; method: string; body: unknown }> = [];
+    const normal = (path: string, init?: RequestInit): Response => {
+      if (path === reservePath) return reply([row]);
+      if (path === finalizePath) {
+        row.state = 'completed'; row.image.state = 'ready';
+        return new Response(null, { status: 204 });
+      }
+      if (!path.startsWith('/storage/v1/object/')) throw new Error('Unexpected test route');
+      if (init?.method === 'POST') {
+        expect(init.body).toBeInstanceOf(FormData);
+        const form = init.body;
+        if (!(form instanceof FormData)) throw new Error('Unexpected test body');
+        expect(form.get('cacheControl')).toBe('0');
+        expect(new Headers(init.headers).get('x-upsert')).toBe('false');
+        const file = form.get('');
+        if (!(file instanceof Blob)) throw new Error('Unexpected test file');
+        expect(file.type).toBe('image/jpeg');
+        if (files.has(path)) return reply({ statusCode: '409', message: 'The resource already exists' }, 409);
+        files.set(path, file);
+        return reply({ Key: path });
+      }
+      expect(init?.method).toBe('GET');
+      expect(init?.cache).toBe('no-store');
+      const file = files.get(path.replace('/object/authenticated/', '/object/'));
+      return file ? new Response(file) : reply({}, 404);
+    };
+    let handler = normal;
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      calls.push({ path, method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? JSON.parse(init.body) : null });
+      return handler(path, init);
+    });
+    const client = createClient<Database>('http://127.0.0.1:54321', 'public-fixture-only', {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch },
+    });
+    return { attempt, row, scope, controller, files, calls, client, normal, setHandler: (next: typeof normal) => { handler = next; } };
+  }
+
+  it('sends exactly the closed 32/8 inputs and finalizes the frozen IDs and opaque fingerprint', async () => {
+    const api = setup(), stages: string[] = [];
+    await saveItem(api.client, api.scope, api.attempt, (stage) => stages.push(stage));
+    expect(api.calls.map(({ path }) => path)).toEqual([
+      reservePath, `/storage/v1/object/wardrobe/${api.row.image.thumb_path}`,
+      `/storage/v1/object/wardrobe/${api.row.image.main_path}`, finalizePath,
+    ]);
+    expect(api.calls[0]!.body).toEqual({
+      p_item: { ...api.attempt.payload, id: api.attempt.itemId },
+      p_image: { id: api.attempt.imageId, main_bytes: api.attempt.photo.main.size, thumb_bytes: api.attempt.photo.thumb.size,
+        main_sha256: api.attempt.photo.mainSha256, thumb_sha256: api.attempt.photo.thumbSha256,
+        width: 2, height: 3, alt_text: '' },
+    });
+    expect(Object.keys(api.attempt.payload)).toHaveLength(31);
+    expect(api.calls[3]!.body).toEqual({ p_item_id: api.attempt.itemId, p_image_id: api.attempt.imageId, p_fingerprint: api.row.fingerprint });
+    expect(stages).toEqual(['capture.reserving', 'capture.uploading', 'capture.finishing']);
+    expect(api.row.item).toMatchObject({ purchase_price: 0.1, warmth: null,
+      field_provenance: { warmth: { kind: 'user', revision: 1 } } });
+  });
+
+  it('retries a lost completed reply through reservation, authenticated byte checks and finalization without new IDs', async () => {
+    const api = setup();
+    api.setHandler((path, init) => {
+      const response = api.normal(path, init);
+      return path === finalizePath ? reply({ message: 'Private upstream text' }, 503) : response;
+    });
+    await expect(saveItem(api.client, api.scope, api.attempt, () => {})).rejects.toThrow('error.unavailable');
+    const frozen = structuredClone(api.attempt.payload), first = api.calls[0]!.body, files = [...api.files.values()];
+    api.setHandler(api.normal);
+    await saveItem(api.client, api.scope, api.attempt, () => {});
+    expect(api.calls.filter(({ path }) => path === reservePath).map(({ body }) => body)).toEqual([first, first]);
+    expect(api.calls.filter(({ path }) => path === finalizePath)).toHaveLength(2);
+    expect(api.calls.filter(({ method }) => method === 'GET')).toHaveLength(2);
+    expect([...api.files.values()]).toEqual(files);
+    expect(api.attempt.payload).toEqual(frozen);
+    expect(api.calls.some(({ path }) => /ai_|analy|commit_image$|\/items$|\/item_images$/.test(path))).toBe(false);
+  });
+
+  it('accepts canonical price and provenance key-order equivalence without changing the frozen snapshot', async () => {
+    const api = setup();
+    api.setHandler((path, init) => path === reservePath ? reply([{ ...api.row, item: {
+      ...api.row.item, purchase_price: '0.10',
+      field_provenance: Object.fromEntries(Object.entries(api.attempt.payload.field_provenance).reverse()
+        .map(([key, entry]) => [key, { revision: entry.revision, kind: entry.kind }])),
+    } }]) : api.normal(path, init));
+    await expect(saveItem(api.client, api.scope, api.attempt, () => {})).resolves.toBeUndefined();
+    expect(api.attempt.values.purchase_price).toBe('0.10');
+  });
+
+  it.each([
+    ['null', null], ['empty', []], ['object', {}], ['primitive row', [true]], ['null row', [null]],
+  ])('rejects malformed reservation %s before uploads', async (_name, data) => {
+    const api = setup(); api.setHandler(() => reply(data));
+    await expect(saveItem(api.client, api.scope, api.attempt, () => {})).rejects.toThrow('error.conflict');
+    expect(api.calls).toHaveLength(1);
+  });
+  it.each([
+    ['multiple rows', (row: ReturnType<typeof setup>['row']) => [row, row]],
+    ['item array', (row: ReturnType<typeof setup>['row']) => [{ ...row, item: [] }]],
+    ['image null', (row: ReturnType<typeof setup>['row']) => [{ ...row, image: null }]],
+    ['extra envelope key', (row: ReturnType<typeof setup>['row']) => [{ ...row, extra: true }]],
+    ['empty fingerprint', (row: ReturnType<typeof setup>['row']) => [{ ...row, fingerprint: '' }]],
+    ['invalid fingerprint', (row: ReturnType<typeof setup>['row']) => [{ ...row, fingerprint: 'Z'.repeat(64) }]],
+    ['non-string fingerprint', (row: ReturnType<typeof setup>['row']) => [{ ...row, fingerprint: 1 }]],
+    ['unknown state', (row: ReturnType<typeof setup>['row']) => [{ ...row, state: 'ready' }]],
+    ['inconsistent completed state', (row: ReturnType<typeof setup>['row']) => [{ ...row, state: 'completed' }]],
+  ] as const)('rejects %s before uploads', async (_name, alter) => {
+    const api = setup(); api.setHandler(() => reply(alter(api.row)));
+    await expect(saveItem(api.client, api.scope, api.attempt, () => {})).rejects.toThrow('error.conflict');
+    expect(api.calls).toHaveLength(1);
+  });
+  it.each([
+    ['id', other], ['owner_id', other], ['version', 2], ['version', '1'], ['deleted_at', '2026-09-10T00:00:00Z'],
+    ['created_at', null], ['updated_at', 'invalid'], ['unexpected', true], ['purchase_price', '0.101'],
+    ['field_provenance', {}], ['field_provenance', { title: { kind: 'ai_observed', revision: 1 } }],
+  ])('rejects changed or malformed item %s', async (key, value) => {
+    const api = setup(); api.setHandler(() => reply([{ ...api.row, item: { ...api.row.item, [String(key)]: value } }]));
+    await expect(saveItem(api.client, api.scope, api.attempt, () => {})).rejects.toThrow('error.conflict');
+    expect(api.calls).toHaveLength(1);
+  });
+  it.each([
+    ['id', other], ['item_id', other], ['owner_id', other], ['description_version', 2], ['description_version', '1'],
+    ['description_version', 0], ['description_version', 2147483648], ['retired_at', '2026-09-10T00:00:00Z'],
+    ['state', 'ready'], ['state', 'retired'], ['main_path', null], ['thumb_path', 'foreign/thumb.jpg'],
+    ['main_bytes', 1], ['thumb_bytes', '15'], ['main_sha256', 'd'.repeat(64)], ['thumb_sha256', null],
+    ['width', 3], ['height', null], ['alt_text', 'Changed'], ['alt_text', null], ['created_at', 'invalid'], ['unexpected', true],
+  ])('rejects changed or malformed image %s', async (key, value) => {
+    const api = setup(); api.setHandler(() => reply([{ ...api.row, image: { ...api.row.image, [String(key)]: value } }]));
+    await expect(saveItem(api.client, api.scope, api.attempt, () => {})).rejects.toThrow('error.conflict');
+    expect(api.calls).toHaveLength(1);
+  });
+  it.each(['reserved', 'completed'])('rejects every missing JSON row key in %s state', async (state) => {
+    const template = setup().row;
+    for (const section of ['item', 'image'] as const) {
+      for (const key of Object.keys(template[section])) {
+        const api = setup(), partial: Record<string, unknown> = { ...api.row[section] };
+        delete partial[key];
+        api.setHandler(() => reply([{ ...api.row, state, image: { ...api.row.image, state: state === 'reserved' ? 'pending' : 'ready' }, [section]: partial }]));
+        await expect(saveItem(api.client, api.scope, api.attempt, () => {})).rejects.toThrow('error.conflict');
+        expect(api.calls).toHaveLength(1);
+      }
+    }
+  });
+  it.each([
+    ['22023', 'Request conflict', 'error.conflict'],
+    ['22023', 'Upload incomplete', 'error.uploadIncomplete'],
+    ['22023', 'Invalid input', 'error.unavailable'],
+    ['42501', 'Not available', 'error.unavailable'],
+    ['23505', 'Private SQL', 'error.unavailable'],
+    ['22023', 'Private upstream text', 'error.unavailable'],
+  ])('maps only closed failure %s/%s at both RPC boundaries', async (code, message, key) => {
+    for (const boundary of [reservePath, finalizePath]) {
+      const api = setup();
+      api.setHandler((path, init) => path === boundary ? reply({ code, message, details: null, hint: null }, 400) : api.normal(path, init));
+      await expect(saveItem(api.client, api.scope, api.attempt, () => {})).rejects.toThrow(key);
+      expect(api.calls).toHaveLength(boundary === reservePath ? 1 : 4);
+    }
+  });
+  it('does not classify embellished private errors as closed conflicts', async () => {
+    const api = setup(); api.setHandler(() => reply({ code: '22023', message: 'Request conflict', details: 'Private row', hint: null }, 400));
+    await expect(saveItem(api.client, api.scope, api.attempt, () => {})).rejects.toThrow('error.unavailable');
+    expect(api.calls).toHaveLength(1);
+  });
+  it.each([{}, [], true, 'ready'])('rejects a success-shaped non-void finalization reply %#', async (data) => {
+    const api = setup();
+    api.setHandler((path, init) => path === finalizePath ? reply(data) : api.normal(path, init));
+    await expect(saveItem(api.client, api.scope, api.attempt, () => {})).rejects.toThrow('error.conflict');
+    expect(api.calls).toHaveLength(4);
+  });
+  it.each([1, 2, 3, 4])('rejects abort or owner/epoch drift after async boundary %s', async (boundary) => {
+    for (const change of ['abort', 'owner', 'epoch']) {
+      const api = setup();
+      api.setHandler((path, init) => {
+        const response = api.normal(path, init);
+        if (api.calls.length === boundary) {
+          if (change === 'abort') api.controller.abort();
+          else if (change === 'owner') api.scope.ownerId = other;
+          else api.scope.epoch++;
+        }
+        return response;
+      });
+      await expect(saveItem(api.client, api.scope, api.attempt, () => {})).rejects.toThrow();
+      expect(api.calls).toHaveLength(boundary);
+    }
+  });
+  it('fails closed on ready reservation rejection rather than recreating missing objects', async () => {
+    const api = setup();
+    await saveItem(api.client, api.scope, api.attempt, () => {});
+    api.files.delete(`/storage/v1/object/wardrobe/${api.row.image.main_path}`);
+    api.setHandler(() => reply({ code: '22023', message: 'Upload incomplete', details: null, hint: null }, 400));
+    await expect(saveItem(api.client, api.scope, api.attempt, () => {})).rejects.toThrow('error.uploadIncomplete');
+    expect(api.calls).toHaveLength(5);
+    expect(api.files.size).toBe(1);
+  });
+  it('refuses duplicate object bytes with a different SHA before main upload or finalization', async () => {
+    const api = setup();
+    api.files.set(`/storage/v1/object/wardrobe/${api.row.image.thumb_path}`, new Blob(['changed']));
+    await expect(saveItem(api.client, api.scope, api.attempt, () => {})).rejects.toThrow('error.conflict');
+    expect(api.calls).toHaveLength(3);
+    expect(api.calls.some(({ path }) => path === finalizePath)).toBe(false);
   });
 });

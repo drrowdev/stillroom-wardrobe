@@ -606,9 +606,10 @@ test('I29a manual Save retries semantically reordered provenance without duplica
   expect([...files].every(([name, bytes]) => api.files.get(name)?.equals(bytes))).toBe(true);
   expect(api.uploadWire.posts).toBe(2);
   expect(api.uploadWire.payloadBytes).toBe(payloadBytes);
-  expect(api.requests.filter((request) => request.method === 'POST' && request.path === '/rest/v1/items')).toHaveLength(2);
-  expect(api.requests.filter((request) => request.method === 'POST' && request.path === '/rest/v1/item_images')).toHaveLength(2);
-  expect(api.requests.filter((request) => request.method === 'POST' && request.path === '/rest/v1/rpc/commit_image')).toHaveLength(2);
+  expect(api.requests.filter((request) => request.method === 'POST' && request.path === '/rest/v1/rpc/reserve_item_save')).toHaveLength(2);
+  expect(api.requests.filter((request) => request.method === 'POST' && request.path === '/rest/v1/rpc/finalize_item_save')).toHaveLength(2);
+  expect(api.requests.some((request) => request.method === 'POST'
+    && ['/rest/v1/items', '/rest/v1/item_images', '/rest/v1/rpc/commit_image'].includes(request.path))).toBe(false);
 });
 
 for (const mismatch of [
@@ -629,7 +630,7 @@ for (const mismatch of [
     expect(api.images[0]!.state).toBe('pending');
     expect(api.files.size).toBe(2);
     expect(api.uploadWire.posts).toBe(2);
-    expect(api.requests.filter((request) => request.method === 'POST' && request.path === '/rest/v1/rpc/commit_image')).toHaveLength(1);
+    expect(api.requests.filter((request) => request.method === 'POST' && request.path === '/rest/v1/rpc/finalize_item_save')).toHaveLength(1);
     api.items[0]!.field_provenance = {
       title: { ...mismatch.entry }, category: { kind: 'user', revision: 1 },
     };
@@ -653,7 +654,7 @@ for (const mismatch of [
     expect(api.uploadWire.payloadBytes).toBe(payloadBytes);
     expect(api.requests.slice(requestCount).filter((request) => request.method !== 'OPTIONS')
       .map(({ method, path }) => ({ method, path }))).toEqual([
-      { method: 'POST', path: '/rest/v1/items' }, { method: 'GET', path: '/rest/v1/items' },
+      { method: 'POST', path: '/rest/v1/rpc/reserve_item_save' },
     ]);
   });
 }

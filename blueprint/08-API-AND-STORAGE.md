@@ -52,7 +52,7 @@ REST below means `/rest/v1/…` with the publishable key and user bearer token. 
 | Item list/search | Owner-scoped compact metadata, stable `(created_at,id)` cursor; local search/filter; 40 visible thumbnails/page | Abort stale searches; only owned results in the wardrobe. Retry read up to twice. |
 | Item edit/trash/restore | PATCH `id`, `owner_id`, expected `version`; set fields or `deleted_at`; return row | 409-style conflict on zero-row version match. Trash affects only the current owner. |
 | Permanent item removal | Confirm, remove owned image objects, forget metadata, DELETE own item; resume remaining keys on failure | Do not claim success if bytes remain. A second DELETE of already absent content succeeds logically. |
-| Image reserve | INSERT permitted `item_images` columns; state defaults pending; paths are generated in DB | Reuse reservation UUID only for identical prepared hashes. Incomplete reservation is recoverable. |
+| Image reserve | Manual creation uses `reserve_item_save` below; legacy callers retain permitted `item_images` INSERT, pending defaults and DB-generated paths | Checked retries require the exact frozen intent and current rows, not hashes alone. |
 | Image upload | SDK Storage `.upload(path,blob,{contentType:'image/jpeg',upsert:false,cacheControl:'0'})` | 409 existing object → authenticated download and compare SHA-256; equal means success, unequal means conflict. |
 | Commit/retire/forget image | RPC `commit_image(p_image_id)` / `retire_image(p_image_id)` / `forget_image(p_image_id)` → void | Incomplete upload → keep old ready version; retiring an imported version leaves the active photo unchanged; existing object bytes block forgetting. |
 | Outfit save | RPC `save_outfit(p_id,p_title,p_occasion,p_notes,p_favourite,p_item_ids,p_expected_version)` → version | Atomic parent + ordered links; same create payload/ID is idempotent; stale version fails. |
@@ -128,15 +128,16 @@ and owner/epoch. Repeated submit events share a synchronous latch. Retry reuses
 that snapshot and those IDs; no new photo analysis, automatic retry or new
 baseline is inferred.
 
-Creation inserts only manually supplied/cleared user/revision-1 assertions;
+Creation reserves only manually supplied/cleared user/revision-1 assertions;
 untouched factual assertions are omitted, never unknown/revision-0 entries.
-Duplicate item reconciliation requires owned identity, no deletion, initial row
-version 1, every frozen field and semantic provenance equality. Creation does
-not compare generated timestamps. Image reconciliation checks identity, parent,
-dimensions, sizes, hashes and the frozen caption, including `''`. Pending images
-also require description counter 1. An unchanged-caption ready image may have a
-later counter; changed captions conflict rather than being overwritten or
-reported as the frozen reviewed value. Storage transport and commit are unchanged.
+The connected checked Save requires owned identity, no deletion, initial item
+version 1, every frozen field and semantic provenance equality. Generated
+timestamps are validated as timestamps, not compared with a browser clock.
+Image checks cover identity, parent, paths, dimensions, sizes, hashes and the
+frozen caption, including `''`. Both pending and completed retries require
+description counter 1 and no retirement. Even an unchanged-caption later counter
+conflicts. Storage transport is unchanged; checked finalization replaces raw
+commit and rechecks current rows and both objects.
 
 Saved editing performs one owner/id/non-deleted/expected-version PATCH per item
 Save, coupling every changed factual value with user/previous+1. Same-value manual
@@ -201,12 +202,18 @@ race tests must execute before acceptance. A specific lock conflict rolls back
 the whole call. Errors are closed `22023` / `Invalid input`, `Request conflict`,
 `Upload incomplete`, or `42501` / `Not available`, never raw field/peer details.
 
-Stage 1 is source only because the native database reset failed in the unchanged
-base migration. The current client still uses the earlier flow above. Stage 2
-must connect **every** manual AddItem Save after actual generated types and a
-fresh verified receipt; preserve its frozen values/IDs/owner epoch, explicit
-Retry/Discard, existing translated errors and byte-identical `ensureFile`,
-thumb-before-main upload order/options and duplicate-object SHA comparison.
+The original Stage 1 reset failure remains historical evidence in the phase
+result. CI 34477104827 at `1bf2670c` subsequently passed the database gates and
+generated exact tracked types. The Stage 2 source now connects **every** manual
+AddItem Save/retry through `src/images/upload.ts`, under receipt 5619278146.
+Before any upload it validates one reservation row, its JSON shape, exact owned
+metadata, versions, state pairing and opaque fingerprint. Completed retries
+still reserve and finalize; a reservation rejection never triggers repair.
+Only the closed 32-key item and 8-key image inputs are sent. It preserves frozen
+values/IDs/owner epoch, explicit Retry/Discard, existing translated errors and
+byte-identical `ensureFile`, thumb-before-main upload order/options and
+duplicate-object SHA comparison. New-head validation and coordinator visual
+review remain required; prior-head CI is not connected-client acceptance.
 No analysis call, byte attestation, paid activation, completed I29 or hosted
 change follows from this metadata/object-presence prerequisite.
 

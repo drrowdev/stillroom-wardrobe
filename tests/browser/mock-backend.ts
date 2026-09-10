@@ -5,8 +5,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { Socket } from 'node:net';
 import type { Language } from '../../src/i18n';
-import { garmentFields, parseGarmentValues, sameValue } from '../../src/domain/garment-fields';
+import { garmentFields, garmentPayload, parseGarmentValues, sameValue } from '../../src/domain/garment-fields';
 import { parseFieldProvenance, provenanceFields } from '../../src/domain/attribute-provenance';
+import { isRecord, isUuid } from '../../src/domain/wardrobe';
 
 export const owners = {
   a: '10000000-0000-4000-8000-000000000001',
@@ -230,6 +231,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
 }
 export type MockOptions = {
   initialLanguage?: Language | null; failCommitOnce?: boolean; failLanguageSave?: boolean;
+  loseFinalizeReplyOnce?: boolean;
   recoverStatus?: number; updateStatus?: number; logoutStatus?: number; recoveryUser?: string;
   wireDiagnostic?: WireBackend;
 };
@@ -252,6 +254,26 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   }]));
   const images: JsonRow[] = [];
   const files = new Map<string, Buffer>();
+  const saves: Array<{ owner: string; itemId: string; imageId: string; fingerprint: string; state: 'reserved' | 'completed' }> = [];
+  const imageKeys = ['id', 'main_bytes', 'thumb_bytes', 'main_sha256', 'thumb_sha256', 'width', 'height', 'alt_text'];
+  const fingerprintFor = (item: JsonRow, image: JsonRow) => {
+    const values = garmentPayload(parseGarmentValues(item)), provenance = parseFieldProvenance(item.field_provenance);
+    return createHash('sha256').update(JSON.stringify([
+      item.id, garmentFields.map((key) => values[key]), provenanceFields.map((key) => provenance[key] ?? null),
+      imageKeys.map((key) => image[key]),
+    ])).digest('hex');
+  };
+  const currentSave = (save: typeof saves[number]) => {
+    const item = items.find((row) => row.id === save.itemId && row.owner_id === save.owner);
+    const image = images.find((row) => row.id === save.imageId && row.item_id === save.itemId && row.owner_id === save.owner);
+    const prefix = `${save.owner}/${save.itemId}/${save.imageId}`;
+    if (!item || !image || item.version !== 1 || item.deleted_at !== null || image.description_version !== 1
+      || image.retired_at !== null || image.state !== (save.state === 'reserved' ? 'pending' : 'ready')
+      || image.main_path !== `${prefix}/main.jpg` || image.thumb_path !== `${prefix}/thumb.jpg`) return null;
+    try { if (fingerprintFor(item, image) !== save.fingerprint) return null; }
+    catch { return null; }
+    return { item, image, fingerprint: save.fingerprint, state: save.state };
+  };
   const requests: Array<{ method: string; path: string; owner: string | null; ownerFilter: string | null }> = [];
   let commitFailed = false;
   const fixture = await readFile(new URL('../../blueprint/validation/fixture.jpg', import.meta.url));
@@ -325,6 +347,73 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         profile.version = Number(profile.version) + 1;
       }
       await json(profile); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/reserve_item_save') {
+      const body: unknown = request.postDataJSON();
+      const invalid = () => json({ code: '22023', message: 'Invalid input', details: null, hint: null }, 400);
+      const conflict = () => json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400);
+      if (method !== 'POST' || !isRecord(body) || Object.keys(body).length !== 2
+        || !isRecord(body.p_item) || !isRecord(body.p_image)) { await invalid(); return; }
+      const item = body.p_item, image = body.p_image;
+      if (!sameValue(Object.keys(item).sort(), [...garmentFields, 'id', 'field_provenance'].sort())
+        || !sameValue(Object.keys(image).sort(), [...imageKeys].sort()) || !isUuid(item.id) || !isUuid(image.id)) {
+        await invalid(); return;
+      }
+      let fingerprint: string;
+      try {
+        const provenance = parseFieldProvenance(item.field_provenance);
+        if (Object.values(provenance).some((entry) => entry.kind !== 'user' || entry.revision !== 1)) throw new Error('Invalid fixture intent');
+        for (const key of provenanceFields) {
+          const value = item[key];
+          if (value !== null && !(Array.isArray(value) && value.length === 0) && !(key === 'notes' && value === '') && !provenance[key]) {
+            throw new Error('Invalid fixture intent');
+          }
+        }
+        if (typeof image.alt_text !== 'string' || [...image.alt_text].length > 240
+          || !['main_sha256', 'thumb_sha256'].every((key) => typeof image[key] === 'string' && /^[0-9a-f]{64}$/.test(image[key]))
+          || !['width', 'height', 'main_bytes', 'thumb_bytes'].every((key) => typeof image[key] === 'number' && Number.isSafeInteger(image[key]) && image[key] > 0)) {
+          throw new Error('Invalid fixture image');
+        }
+        fingerprint = fingerprintFor(item, image);
+      } catch { await invalid(); return; }
+      const existing = saves.find((save) => save.owner === owner && (save.itemId === item.id || save.imageId === image.id));
+      if (existing) {
+        if (existing.itemId !== item.id || existing.imageId !== image.id || existing.fingerprint !== fingerprint) { await conflict(); return; }
+        const current = currentSave(existing);
+        if (!current) { await conflict(); return; }
+        if (existing.state === 'completed' && (!files.has(String(current.image.main_path)) || !files.has(String(current.image.thumb_path)))) {
+          await json({ code: '22023', message: 'Upload incomplete', details: null, hint: null }, 400); return;
+        }
+        await json([current]); return;
+      }
+      if (items.some((row) => row.id === item.id) || images.some((row) => row.id === image.id)) { await conflict(); return; }
+      const now = new Date().toISOString(), prefix = `${owner}/${item.id}/${image.id}`;
+      items.push({ ...item, owner_id: owner, version: 1, deleted_at: null, created_at: now, updated_at: now });
+      images.push({ ...image, owner_id: owner, item_id: item.id, description_version: 1, state: 'pending', retired_at: null,
+        main_path: `${prefix}/main.jpg`, thumb_path: `${prefix}/thumb.jpg`, created_at: now });
+      const save = { owner, itemId: item.id, imageId: image.id, fingerprint, state: 'reserved' as const };
+      saves.push(save);
+      await json([currentSave(save)]); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/finalize_item_save') {
+      const body: unknown = request.postDataJSON();
+      if (method !== 'POST' || !isRecord(body) || !sameValue(Object.keys(body).sort(), ['p_fingerprint', 'p_image_id', 'p_item_id'])
+        || !isUuid(body.p_item_id) || !isUuid(body.p_image_id) || typeof body.p_fingerprint !== 'string' || !/^[0-9a-f]{64}$/.test(body.p_fingerprint)) {
+        await json({ code: '22023', message: 'Invalid input', details: null, hint: null }, 400); return;
+      }
+      const save = saves.find((value) => value.owner === owner && value.itemId === body.p_item_id
+        && value.imageId === body.p_image_id && value.fingerprint === body.p_fingerprint);
+      const current = save && currentSave(save);
+      if (!save || !current || images.some((row) => row.owner_id === owner && row.item_id === save.itemId && row.id !== save.imageId && row.state === 'ready')) {
+        await json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400); return;
+      }
+      if (!files.has(String(current.image.main_path)) || !files.has(String(current.image.thumb_path))) {
+        await json({ code: '22023', message: 'Upload incomplete', details: null, hint: null }, 400); return;
+      }
+      if (options.failCommitOnce && !commitFailed) { commitFailed = true; await json({ message: 'Unavailable' }, 503); return; }
+      current.image.state = 'ready'; save.state = 'completed';
+      if (options.loseFinalizeReplyOnce && !commitFailed) { commitFailed = true; await route.abort('failed'); return; }
+      await route.fulfill({ status: 204 }); return;
     }
     const table = url.pathname === '/rest/v1/items' ? items : url.pathname === '/rest/v1/item_images' ? images : null;
     if (table) {
@@ -403,6 +492,9 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (options.failCommitOnce && !commitFailed) { commitFailed = true; await json({ message: 'Unavailable' }, 503); return; }
       const body = request.postDataJSON() as JsonRow;
       const image = images.find((row) => row.id === body.p_image_id && row.owner_id === owner);
+      if (image && saves.some((save) => save.owner === owner && (save.itemId === image.item_id || save.imageId === image.id))) {
+        await json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400); return;
+      }
       if (!image || !files.has(String(image.main_path)) || !files.has(String(image.thumb_path))) { await json({ message: 'Upload incomplete' }, 400); return; }
       image.state = 'ready';
       await route.fulfill({ status: 204 }); return;

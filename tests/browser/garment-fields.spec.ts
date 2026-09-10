@@ -8,8 +8,8 @@ import { garmentFields } from '../../src/domain/garment-fields';
 import { provenanceFields } from '../../src/domain/attribute-provenance';
 import { mockBackend, owners, signIn } from './mock-backend';
 
-async function setup(page: Page, language: Language = 'en') {
-  const api = await mockBackend(page, { initialLanguage: language });
+async function setup(page: Page, language: Language = 'en', loseFinalizeReplyOnce = false) {
+  const api = await mockBackend(page, { initialLanguage: language, loseFinalizeReplyOnce });
   await page.goto('/'); await signIn(page);
   await page.getByRole('button', { name: messages['wardrobe.add'][language], exact: true }).first().click();
   return api;
@@ -264,7 +264,7 @@ test('synchronous capture latch and ambiguous commit retry retain full values, i
   const api = await setup(page);
   await photo(page, api); await expand(page, 'item'); await fillFields(page, 'en');
   let commits = 0;
-  await page.route('**/rest/v1/rpc/commit_image', async (route) => {
+  await page.route('**/rest/v1/rpc/finalize_item_save', async (route) => {
     commits++;
     if (commits === 1) await route.abort('failed'); else await route.fallback();
   });
@@ -282,7 +282,72 @@ test('synchronous capture latch and ambiguous commit retry retain full values, i
   expect(api.items).toEqual([item]);
   expect(api.images[0]).toMatchObject({ id: image!.id, item_id: item!.id, state: 'ready' });
   expect([...api.files].map(([key, value]) => [key, createHash('sha256').update(value).digest('hex')])).toEqual(bytes);
+  expect(commits).toBe(2);
+  expect(api.requests.filter((request) => request.path === '/rest/v1/rpc/reserve_item_save')).toHaveLength(2);
+  expect(api.requests.some((request) => request.method === 'POST'
+    && ['/rest/v1/items', '/rest/v1/item_images', '/rest/v1/rpc/commit_image'].includes(request.path))).toBe(false);
 });
+for (const change of ['unchanged', 'missing main', 'missing thumb', 'caption', 'same-caption counter', 'item version', 'deleted item', 'retired image'] as const) {
+  test(`checked completed Save retry: ${change}`, async ({ page }) => {
+    const api = await setup(page, 'en', true);
+    await photo(page, api); await expand(page, 'item'); await fillFields(page, 'en');
+    const reserveBodies: unknown[] = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/rest/v1/rpc/reserve_item_save') reserveBodies.push(request.postDataJSON());
+    });
+    await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
+    await expect(page.getByRole('button', { name: messages['common.retry'].en, exact: true })).toBeVisible();
+    expect(api.images[0]!.state).toBe('ready');
+    expect(api.items).toHaveLength(1); expect(api.images).toHaveLength(1); expect(api.files.size).toBe(2);
+    const item = api.items[0]!, image = api.images[0]!;
+    if (change === 'missing main') api.files.delete(String(image.main_path));
+    if (change === 'missing thumb') api.files.delete(String(image.thumb_path));
+    if (change === 'caption') image.alt_text = 'Changed elsewhere';
+    if (change === 'same-caption counter') image.description_version = 2;
+    if (change === 'item version') item.version = 2;
+    if (change === 'deleted item') api.items.splice(0, 1);
+    if (change === 'retired image') { image.state = 'retired'; image.retired_at = '2026-09-10T00:00:00Z'; }
+    const itemsBefore = structuredClone(api.items), imagesBefore = structuredClone(api.images);
+    const bytesBefore = [...api.files].map(([key, value]) => [key, createHash('sha256').update(value).digest('hex')]);
+    const start = api.requests.length;
+    await expect(page.locator('#item-title')).toHaveAttribute('readonly', '');
+    await expect(page.locator('#item-category')).toBeDisabled();
+    await expect(page.locator('#item-alt')).toHaveAttribute('readonly', '');
+    await page.getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
+    if (change === 'unchanged') {
+      await expect(page.locator('#wardrobe-title')).toBeVisible();
+      expect(api.requests.filter((request) => request.path === '/rest/v1/rpc/finalize_item_save')).toHaveLength(2);
+    } else {
+      const key = change.startsWith('missing') ? 'error.uploadIncomplete' : 'error.conflict';
+      await expect(page.getByRole('alert').locator('p')).toHaveText([messages[key].en, messages['capture.retryNote'].en]);
+      await expect(page.locator('#item-title')).toHaveValue('Å manual overshirt 🌿');
+      await expect(page.locator('#item-title')).toHaveAttribute('readonly', '');
+      expect(api.requests.slice(start).filter((request) => request.method !== 'OPTIONS').map(({ path }) => path))
+        .toEqual(['/rest/v1/rpc/reserve_item_save']);
+      expect(api.requests.filter((request) => request.path === '/rest/v1/rpc/finalize_item_save')).toHaveLength(1);
+    }
+    expect(reserveBodies).toHaveLength(2);
+    expect(reserveBodies[1]).toEqual(reserveBodies[0]);
+    expect(api.items).toEqual(itemsBefore); expect(api.images).toEqual(imagesBefore);
+    expect([...api.files].map(([key, value]) => [key, createHash('sha256').update(value).digest('hex')])).toEqual(bytesBefore);
+    expect(api.uploadWire.posts).toBe(2);
+  });
+}
+for (const malformed of [null, [], [{ item: {}, image: {}, state: 'completed', fingerprint: 'c'.repeat(64) }]]) {
+  test(`checked Save rejects malformed reservation ${JSON.stringify(malformed)}`, async ({ page }) => {
+    const api = await setup(page);
+    await photo(page, api);
+    await page.locator('#item-title').fill('Frozen draft');
+    await page.locator('#item-category').selectOption('top');
+    await page.route('**/rest/v1/rpc/reserve_item_save', (route) => route.fulfill({ json: malformed }));
+    await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
+    await expect(page.getByRole('alert').locator('p')).toHaveText([messages['error.conflict'].en, messages['capture.retryNote'].en]);
+    await expect(page.locator('#item-title')).toHaveValue('Frozen draft');
+    await expect(page.locator('#item-title')).toHaveAttribute('readonly', '');
+    expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+    expect(api.requests.some((request) => request.path.startsWith('/storage/') || request.path === '/rest/v1/rpc/finalize_item_save')).toBe(false);
+  });
+}
 test('complete creation form accessibility and bounded synthetic visual evidence', async ({ page }, testInfo) => {
   const api = await setup(page);
   await photo(page, api); await expand(page, 'item'); await fillFields(page, 'en');

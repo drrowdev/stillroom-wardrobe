@@ -1,8 +1,8 @@
 import type { AppClient } from '../data/client';
 import type { OwnerScope } from '../auth/session';
 import { isRecord } from '../domain/wardrobe';
-import { maximumFieldRevision, sameFieldProvenance } from '../domain/attribute-provenance';
-import { buildGarmentWrite, freezeValues, garmentFields, garmentPayload, sameValue, type GarmentDraft, type GarmentPayload, type GarmentValues } from '../domain/garment-fields';
+import { sameFieldProvenance } from '../domain/attribute-provenance';
+import { buildGarmentWrite, freezeValues, garmentPayload, sameValue, type GarmentDraft, type GarmentPayload, type GarmentValues } from '../domain/garment-fields';
 import type { FieldProvenance } from '../domain/attribute-provenance';
 import { validDescription } from '../domain/item-details';
 import { canonicalPrice } from '../i18n/format';
@@ -37,6 +37,47 @@ function matches(actual: unknown, expected: Record<string, unknown>): boolean {
     return sameValue(actual[key], value);
   });
 }
+function requireCheckedSuccess(error: unknown): void {
+  if (error === null) return;
+  if (isRecord(error) && error.code === '22023' && error.details === null && error.hint === null) {
+    if (error.message === 'Request conflict') throw new AppError('error.conflict');
+    if (error.message === 'Upload incomplete') throw new AppError('error.uploadIncomplete');
+  }
+  throw new AppError('error.unavailable');
+}
+function serverTime(value: unknown): value is string {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+function reservationFingerprint(data: unknown, attempt: SaveAttempt): string {
+  if (!Array.isArray(data) || data.length !== 1 || !isRecord(data[0])) throw new AppError('error.conflict');
+  const { item, image, fingerprint, state } = data[0];
+  if (Object.keys(data[0]).length !== 4 || !isRecord(item) || !isRecord(image)
+    || typeof fingerprint !== 'string' || !/^[0-9a-f]{64}$/.test(fingerprint)
+    || (state !== 'reserved' && state !== 'completed')
+    || !serverTime(item.created_at) || !serverTime(item.updated_at) || !serverTime(image.created_at)) {
+    throw new AppError('error.conflict');
+  }
+  const expectedItem = {
+    ...attempt.payload, id: attempt.itemId, owner_id: attempt.ownerId, version: 1, deleted_at: null,
+    created_at: item.created_at, updated_at: item.updated_at,
+  };
+  const { photo } = attempt;
+  const prefix = `${attempt.ownerId}/${attempt.itemId}/${attempt.imageId}`;
+  const expectedImage = {
+    id: attempt.imageId, owner_id: attempt.ownerId, item_id: attempt.itemId,
+    main_bytes: photo.main.size, thumb_bytes: photo.thumb.size,
+    main_sha256: photo.mainSha256, thumb_sha256: photo.thumbSha256,
+    width: photo.width, height: photo.height, alt_text: attempt.altText,
+    description_version: 1, retired_at: null, state: state === 'reserved' ? 'pending' : 'ready',
+    main_path: `${prefix}/main.jpg`, thumb_path: `${prefix}/thumb.jpg`, created_at: image.created_at,
+  };
+  if (Object.keys(item).length !== Object.keys(expectedItem).length || !matches(item, expectedItem)
+    || !sameFieldProvenance(item.field_provenance, attempt.payload.field_provenance)
+    || Object.keys(image).length !== Object.keys(expectedImage).length || !matches(image, expectedImage)) {
+    throw new AppError('error.conflict');
+  }
+  return fingerprint;
+}
 async function ensureFile(client: AppClient, path: string, bytes: Blob, expectedHash: string, scope: OwnerScope): Promise<void> {
   throwIfAborted(scope.signal);
   const { error } = await client.storage.from('wardrobe').upload(path, bytes, {
@@ -57,54 +98,38 @@ async function ensureFile(client: AppClient, path: string, bytes: Blob, expected
 export async function saveItem(
   client: AppClient, scope: OwnerScope, attempt: SaveAttempt, onStage: (stage: SaveStage) => void,
 ): Promise<void> {
-  throwIfAborted(scope.signal);
-  if (attempt.ownerId !== scope.ownerId || attempt.epoch !== scope.epoch) throw new AppError('error.conflict');
-  const { photo } = attempt;
-  const item = { ...attempt.payload, id: attempt.itemId, owner_id: scope.ownerId };
-  const fieldProvenance = attempt.payload.field_provenance;
-  onStage('capture.reserving');
-  const created = await client.from('items').insert({ ...item, field_provenance: fieldProvenance }).abortSignal(scope.signal);
-  throwIfAborted(scope.signal);
-  if (created.error) {
-    if (!duplicate(created.error)) requireSuccess(created.error);
-    const columns: string = `id,owner_id,version,deleted_at,field_provenance,${garmentFields.join(',')}`;
-    const existing = await client.from('items').select(columns)
-      .eq('id', attempt.itemId).eq('owner_id', scope.ownerId).abortSignal(scope.signal).maybeSingle();
-    requireSuccess(existing.error);
+  const checkScope = () => {
     throwIfAborted(scope.signal);
-    const row: unknown = existing.data;
-    if (!isRecord(row) || !matches(row, { ...item, deleted_at: null, version: 1 })
-      || !sameFieldProvenance(row.field_provenance, fieldProvenance)) throw new AppError('error.conflict');
-  }
-  const metadata = {
-    id: attempt.imageId, owner_id: scope.ownerId, item_id: attempt.itemId,
-    main_bytes: photo.main.size, thumb_bytes: photo.thumb.size,
-    main_sha256: photo.mainSha256, thumb_sha256: photo.thumbSha256,
-    width: photo.width, height: photo.height, alt_text: attempt.altText,
+    if (attempt.ownerId !== scope.ownerId || attempt.epoch !== scope.epoch) throw new AppError('error.conflict');
   };
-  const reserved = await client.from('item_images').insert(metadata).abortSignal(scope.signal);
-  throwIfAborted(scope.signal);
-  if (reserved.error) {
-    if (!duplicate(reserved.error)) requireSuccess(reserved.error);
-    const existing = await client.from('item_images').select('*').eq('id', attempt.imageId)
-      .eq('owner_id', scope.ownerId).abortSignal(scope.signal).maybeSingle();
-    requireSuccess(existing.error);
-    throwIfAborted(scope.signal);
-    if (!matches(existing.data, { ...metadata, retired_at: null,
-      main_path: `${scope.ownerId}/${attempt.itemId}/${attempt.imageId}/main.jpg`,
-      thumb_path: `${scope.ownerId}/${attempt.itemId}/${attempt.imageId}/thumb.jpg`,
-    }) || typeof existing.data?.description_version !== 'number' || !Number.isInteger(existing.data.description_version)
-      || existing.data.description_version < 1 || existing.data.description_version > maximumFieldRevision) throw new AppError('error.conflict');
-    if (existing.data?.state === 'ready') return;
-    if (existing.data?.state !== 'pending' || existing.data.description_version !== 1) throw new AppError('error.conflict');
-  }
+  checkScope();
+  const { photo } = attempt;
+  onStage('capture.reserving');
+  checkScope();
+  const reserved = await client.rpc('reserve_item_save', {
+    p_item: { ...attempt.payload, id: attempt.itemId },
+    p_image: {
+      id: attempt.imageId, main_bytes: photo.main.size, thumb_bytes: photo.thumb.size,
+      main_sha256: photo.mainSha256, thumb_sha256: photo.thumbSha256,
+      width: photo.width, height: photo.height, alt_text: attempt.altText,
+    },
+  }).abortSignal(scope.signal);
+  checkScope();
+  requireCheckedSuccess(reserved.error);
+  const fingerprint = reservationFingerprint(reserved.data, attempt);
   const prefix = `${scope.ownerId}/${attempt.itemId}/${attempt.imageId}`;
   onStage('capture.uploading');
+  checkScope();
   await ensureFile(client, `${prefix}/thumb.jpg`, photo.thumb, photo.thumbSha256, scope);
+  checkScope();
   await ensureFile(client, `${prefix}/main.jpg`, photo.main, photo.mainSha256, scope);
-  throwIfAborted(scope.signal);
+  checkScope();
   onStage('capture.finishing');
-  const committed = await client.rpc('commit_image', { p_image_id: attempt.imageId }).abortSignal(scope.signal);
-  throwIfAborted(scope.signal);
-  requireSuccess(committed.error);
+  checkScope();
+  const committed = await client.rpc('finalize_item_save', {
+    p_item_id: attempt.itemId, p_image_id: attempt.imageId, p_fingerprint: fingerprint,
+  }).abortSignal(scope.signal);
+  checkScope();
+  requireCheckedSuccess(committed.error);
+  if (committed.data !== null && committed.data !== undefined) throw new AppError('error.conflict');
 }

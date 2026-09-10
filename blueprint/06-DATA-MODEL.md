@@ -32,7 +32,9 @@ Analysis creates no item/image records: photo/title/category are checked only on
 ### Checked manual Save prerequisite — staged source
 
 `20260910070000_checked_item_save.sql` is the reviewed PR #17/A1 source
-candidate, not a deployed migration or completed client integration.
+candidate, not a deployed migration. The Stage 2 client connects every manual
+Save/retry to its checked reservation and finalization; exact-head CI and
+coordinator review remain separate gates.
 `private.item_save_attempts` binds an owned item and its original owned image
 through composite foreign keys. It keeps a canonical intent SHA-256, reserved/
 completed state, reservation time and actual server completion time, not another
