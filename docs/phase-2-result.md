@@ -2762,3 +2762,117 @@ camera/device/screen-reader gates remain open. Automatic form filling,
 analysed-byte binding, expiry/provenance/source history and parked incomplete
 backup remain required later work. No AI/provider/codec/dependency, hosted,
 private-input or paid operation was performed.
+
+## PR #17 A2 — bounded failure observations, 10 September 2026
+
+**Diagnostics only; backend still blocked, cause unproven.** This continuation
+starts from `95f655126b2d68064d32ed2e0e3db03f4fb671c9`, parent
+`46c53668f5ed13d2b5147fa873e61964f0210acb`, on the existing
+`copilot/new-i29-checked-manual-save` branch. PR base/main remains
+`c6ee8beb890deeca0c04cf53d6d3deebe4a231f6`. Initial checkout was clean:
+no setup-generated type changes or other untracked source outputs.
+
+Read complete [A2 approval 5615708093](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5615708093),
+original plan 5614413353 and A1 5614726097. A2 records actual read-only
+Anthropic / Claude Opus 5 (`claude-opus-5`) critique by
+`9edf6b92-27a7-47ce-b963-949860fe50a4`, turn 1, verdict AMEND, and
+coordinator approval/corrections. Accepted: stderr-only fixed observations,
+stdout byte count only, closed runtime shape and preserved guards. The
+coordinator corrected the claim that cold startup cannot apply migrations;
+both start/reset retain SQLSTATE and migration observations. No new agent,
+planning round or speculative repair was performed.
+
+After context and before edits, read this allocation's
+[own runtime receipt 5615746110](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5615746110):
+task `dffecda2-8b06-4f14-948b-5af6b36faf8e`, session
+`1409c392-cecd-4662-b9de-9ea6fb53feb5`, coordinator observation
+`2026-09-10T08:42:22.1136042Z`, explicitly selected `gpt-6-astra`,
+independently verified actual `sweagent-capi:gpt-6-astra`, repository
+1358925513/PR #17 and matching branch/base/saved head. Old receipt 5614750064
+was not reused.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`;
+cloud task-scope/text-only/hosted sections; Phase 0/1 status, Phase 2 current
+I29/PR17 evidence and `docs/local-backend.md`; blueprint 00/03/05/08/10/20,
+Phase 2 in 14, relevant 02/15 requirement excerpts and base 07 admission/RLS
+prerequisites. Source included actual initial-migration RLS/Storage excerpts,
+checked-Save migration/state guards, generated schema/RPC excerpts,
+`scripts/db.mjs`, complete `scripts/backend/local.mjs`,
+`scripts/hosted-smoke.mjs` guard excerpts, complete local-backend unit tests,
+checked-Save unit excerpts and `package.json`. Read current PR details,
+discussion, diff scope/relevant hunks, reviews/review threads, Actions metadata
+and failed Database job logs. This is observability for I29's R03/R04 subset,
+preserving R01/R11/R17/R19/R23/R26/R27, not full CRUD or I29 acceptance.
+
+### Four-file implementation boundary
+
+Only `scripts/db.mjs`, `scripts/backend/local.mjs`,
+`tests/unit/local-backend.test.ts` and this dated append changed.
+The new pure helper initializes all eleven fields on every return, reads own
+data descriptors, refuses malformed/throwing reflection and bounds direct
+string inputs to 16 MiB combined UTF-8 bytes before marker scanning. Invalid
+inputs return closed defaults. Stdout is never scanned for content.
+
+Stderr observations use the eight existing Docker literals, the unchanged
+strict 4096-byte/single bare container-exit gate, exact parenthesized SQLSTATE
+format with eleven allowed constants, six exact LF/CRLF migration announcements
+and the verified port literal. Distinct observations report `multiple`;
+announcements are deduplicated and the last index follows stderr order, not
+version order. No arbitrary input text or property is returned. The existing
+bounded capture remains unchanged, so the report guarantees neither output
+completeness nor absence of unobserved errors.
+
+Source evidence is the pinned dependency record in A2: CLI 2.116.0
+`internal/utils/docker.go` (blob `29d2edd3974087e25ca0430ac15d5a1c0483c7c8`),
+`pkg/migration/apply.go`, Go/legacy cold-start database bootstrap paths and
+pgconn v1.14.3 `errors.go`. These verified literals are observations, not a
+diagnostic cause. No guessed disk/rate-limit/deadline classifier was added.
+All pre-existing local helpers, including `runCommand` and
+`describeGenerationResult`, remain byte-identical. Existing CLI arguments,
+timeouts, human failure prefixes and wrapper exits remain unchanged. Only
+elapsed timing and JSON of the new report are appended in the existing
+start/reset nonzero branches. Success behavior is unchanged.
+
+### Actual commands and stopping evidence
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run test:unit -- tests/unit/local-backend.test.ts` | Initially 260 passed/1 failed because the new test wrapper defaulted explicit `undefined` elapsed input to 1. Corrected the wrapper; 261/261 passed, including all 183 pre-existing tests and 78 new cases. |
+| `npm run typecheck` | Pass; unchanged generated schema, not new-RPC parity. |
+| `npm run lint` | Pass. |
+| `npm run scan:secrets` | Pass; 177 text files and unprinted canary. |
+| `git diff --check` | Pass. |
+| `npm run db:start` | One invocation; wrapper exit 2. Bounded report below. No retry. |
+
+Exact bounded startup report:
+
+```json
+{"tag":"nonzero-with-stderr","exitCode":1,"elapsedMs":18529,"stdoutBytes":0,"stderrBytes":245,"stderrDockerOperation":"run-container","stderrContainerExitBucket":"other-nonzero","stderrSqlState":"none","announcedKnownMigrationCount":0,"lastAnnouncedKnownMigrationIndex":null,"stderrPortAllocationMarker":false}
+```
+
+The wrapper preserved its original protected failure prefix and exit 2.
+No raw CLI output was exposed. `none`, zero announcements and a false port
+marker are not proof that SQL, migrations or ports were uninvolved.
+The observed bucket does not identify a cause. Startup failed, so **reset was
+not run**, nor were types, normal integration/security, recovery or preservation.
+No backend repair, alternate command, service restart or hidden-output bypass
+followed this single failed action.
+
+Separately, historical CI `34451006155` attempt 2 at saved head `95f655126`
+failed Database job `102792343131` in startup, about 51 seconds after its
+announcement, at `08:02:06Z`; all later database gates/types were skipped.
+Outcome 5615471418 records App job `102792343527` passing 1000 units/449 browser
+cases. Source review 5615571684 found no high-confidence blocking source bug.
+Neither establishes execution of the new SQL. The old worker's missing
+`storage.buckets` observation remains separate evidence, not the diagnosed
+cause of either startup failure.
+
+Fresh-head executable trust/CI, independent source review and native validation
+results are handed back to the coordinator. SQL/preservation/normal-session/
+recovery/type parity and required browser/visual/human gates remain pending,
+not waived. No image/archive inputs, Actions authorization/rerun, additional
+writer/branch/PR, merge, deployment, hosted/provider/private-photo operation,
+guessed types or client wiring occurred. The live operation window remains
+closed. Rollback is reverting these diagnostics, not hosted DDL or data repair.

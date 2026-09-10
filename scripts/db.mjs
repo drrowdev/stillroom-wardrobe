@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import {
   ROOT, MIGRATION_HASH, assertProjectConfig, requireDocker, requireLocalContainer,
-  cli, localStatus, fail, reportError, runCommand, describeGenerationResult,
+  cli, localStatus, fail, reportError, runCommand, describeGenerationResult, describeStartupOrResetFailure,
 } from './backend/local.mjs';
 
 async function main() {
@@ -15,8 +15,10 @@ async function main() {
   await requireDocker();
   if (action === 'start') {
     console.log('Starting the disposable local Supabase stack; Docker image downloads may take several minutes.');
+    const startupStarted = performance.now();
     const started = await cli(['start', '--yes'], 15 * 60_000);
-    if (started.code !== 0) fail('NOT RUN: local Supabase startup failed. Check Docker resources and local service ports; CLI output is withheld to protect credentials.');
+    const startupElapsedMs = performance.now() - startupStarted;
+    if (started.code !== 0) fail('NOT RUN: local Supabase startup failed. Check Docker resources and local service ports; CLI output is withheld to protect credentials. ' + JSON.stringify(describeStartupOrResetFailure(started, startupElapsedMs)));
     await requireLocalContainer();
     const status = await localStatus();
     try {
@@ -33,8 +35,10 @@ async function main() {
     const migration = await readFile(path.join(ROOT, 'supabase', 'migrations', '20260905000000_initial.sql'));
     if (createHash('sha256').update(migration).digest('hex') !== MIGRATION_HASH) fail('REFUSED: the initial migration differs from the reviewed blueprint.');
     console.log('Resetting only the disposable local Supabase database.');
+    const resetStarted = performance.now();
     const reset = await cli(['db', 'reset', '--local', '--no-seed', '--yes'], 10 * 60_000);
-    if (reset.code !== 0) fail('FAIL: local database reset failed; no account provisioning ran. CLI output is withheld.', 1);
+    const resetElapsedMs = performance.now() - resetStarted;
+    if (reset.code !== 0) fail('FAIL: local database reset failed; no account provisioning ran. CLI output is withheld. ' + JSON.stringify(describeStartupOrResetFailure(reset, resetElapsedMs)), 1);
     const provision = await runCommand(process.execPath, [path.join(ROOT, 'scripts', 'provision-test-users.mjs')]);
     if (provision.code !== 0) {
       // The fixture's only output is a deliberately coarse, non-sensitive outcome.

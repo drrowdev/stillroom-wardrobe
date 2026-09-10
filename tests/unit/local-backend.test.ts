@@ -7,10 +7,11 @@ import path from 'node:path';
 import {
   ROOT, DB_CONTAINER, PROJECT_ID, MIGRATION_HASH, assertLoopbackUrl, assertLocalApi, assertPublishableKey,
   normalSessionEnvironment, validateSessionEnvironment, commandEnvironment, requireDocker, requireLocalContainer,
-  LocalBackendError, securityFailureExitCode, describeGenerationResult,
+  LocalBackendError, securityFailureExitCode, describeGenerationResult, describeStartupOrResetFailure,
 } from '../../scripts/backend/local.mjs';
 
 declare module '../../scripts/backend/local.mjs' {
+  export function describeStartupOrResetFailure(result: unknown, elapsedMs: unknown): Record<string, unknown>;
   export function describeGenerationResult(result: unknown, elapsedMs: unknown): {
     tag: 'success' | 'nonzero-empty-output' | 'nonzero-with-stderr' | 'nonzero-with-stdout'
       | 'missing-database-output' | 'missing-images-output' | 'invalid-result';
@@ -380,6 +381,249 @@ describe('safe local type-generation description', () => {
     }
     expect(accessor).toHaveBeenCalledTimes(1); // Only the throwing Proxy trap, never an accessor/coercion/toJSON.
     expect(describeGenerationResult(unknown, text)).toMatchObject({ tag: 'invalid-result', elapsedMs: null });
+  });
+});
+
+describe('safe startup/reset failure description', () => {
+  const defaults = Object.freeze({
+    tag: 'invalid-result', exitCode: null, elapsedMs: null, stdoutBytes: null, stderrBytes: null,
+    stderrDockerOperation: 'none', stderrContainerExitBucket: 'unclassified', stderrSqlState: 'none',
+    announcedKnownMigrationCount: 0, lastAnnouncedKnownMigrationIndex: null, stderrPortAllocationMarker: false,
+  });
+  const keys = Object.freeze(['tag', 'exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes',
+    'stderrDockerOperation', 'stderrContainerExitBucket', 'stderrSqlState',
+    'announcedKnownMigrationCount', 'lastAnnouncedKnownMigrationIndex', 'stderrPortAllocationMarker']);
+  const operations = Object.freeze([
+    ['failed to inspect docker image', 'inspect-image'],
+    ['failed to pull docker image', 'pull-image'],
+    ['failed to create docker container:', 'create-container'],
+    ['failed to start docker container ', 'start-container'],
+    ['failed to inspect docker container:', 'inspect-container'],
+    ['failed to read docker logs:', 'read-logs'],
+    ['failed to copy docker logs:', 'copy-logs'],
+    ['error running container:', 'run-container'],
+  ] as const);
+  const sqlStates = Object.freeze(['42601', '42P01', '42702', '42703', '42883', '42501',
+    '23505', '23503', '23514', '55P03', '40P01']);
+  const migrations = Object.freeze([
+    '20260905000000_initial.sql', '20260906000000_item_field_provenance.sql',
+    '20260909070000_item_description_edit.sql', '20260909110000_item_optional_collections.sql',
+    '20260909180000_ai_request_controls.sql', '20260910070000_checked_item_save.sql',
+  ]);
+
+  function report(result: unknown, ...elapsed: [] | [unknown]) {
+    const value = describeStartupOrResetFailure(result, elapsed.length ? elapsed[0] : 1);
+    expect(Reflect.ownKeys(value)).toEqual(keys);
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+    for (const key of keys) expect(Object.getOwnPropertyDescriptor(value, key)).toHaveProperty('value');
+    expect(['invalid-result', 'success', 'nonzero-empty-output', 'nonzero-with-stdout', 'nonzero-with-stderr']).toContain(value.tag);
+    for (const key of ['exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes',
+      'announcedKnownMigrationCount', 'lastAnnouncedKnownMigrationIndex']) {
+      const field = value[key];
+      expect(field === null || typeof field === 'number' && Number.isSafeInteger(field) && field >= 0).toBe(true);
+    }
+    if (value.exitCode !== null) expect(value.exitCode).toBeLessThanOrEqual(255);
+    expect(value.announcedKnownMigrationCount).not.toBeNull();
+    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(6);
+    if (value.lastAnnouncedKnownMigrationIndex !== null) {
+      expect(value.lastAnnouncedKnownMigrationIndex).toBeGreaterThanOrEqual(1);
+      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(6);
+    }
+    expect(['none', 'multiple', ...operations.map(([, operation]) => operation)]).toContain(value.stderrDockerOperation);
+    expect(['unclassified', 'exit-125', 'exit-126-or-127', 'other-nonzero']).toContain(value.stderrContainerExitBucket);
+    expect(['none', 'unclassified', 'multiple', ...sqlStates]).toContain(value.stderrSqlState);
+    expect(typeof value.stderrPortAllocationMarker).toBe('boolean');
+    expect(JSON.stringify(value).length).toBeLessThan(512);
+    return value;
+  }
+  const failure = (stderr: string) => report({ code: 1, stdout: '', stderr });
+
+  it.each([
+    [0, '', '', 'success'], [0, 'synthetic', 'warning', 'success'],
+    [1, '', '', 'nonzero-empty-output'], [255, 'ä🙂', '', 'nonzero-with-stdout'],
+    [2, 'ä🙂', '漢\u0000', 'nonzero-with-stderr'],
+  ])('returns exactly eleven bounded fields for branch %#', (code, stdout, stderr, tag) => {
+    const result = Object.freeze({ code, stdout, stderr });
+    expect(report(result, 12.75)).toEqual({
+      ...defaults, tag, exitCode: code, elapsedMs: 12,
+      stdoutBytes: Buffer.byteLength(stdout), stderrBytes: Buffer.byteLength(stderr),
+    });
+    expect(result).toEqual({ code, stdout, stderr });
+  });
+
+  it('never observes stdout markers or activates failure observations on success', () => {
+    const markers = [...operations.map(([literal]) => literal), 'error running container: exit 125',
+      ...sqlStates.map((state) => ` (SQLSTATE ${state})`),
+      ...migrations.map((name) => `Applying migration ${name}...`), 'port is already allocated'].join('\n') + '\n';
+    expect(report({ code: 1, stdout: markers, stderr: '' })).toEqual({
+      ...defaults, tag: 'nonzero-with-stdout', exitCode: 1, elapsedMs: 1,
+      stdoutBytes: Buffer.byteLength(markers), stderrBytes: 0,
+    });
+    expect(report({ code: 0, stdout: markers, stderr: markers })).toEqual({
+      ...defaults, tag: 'success', exitCode: 0, elapsedMs: 1,
+      stdoutBytes: Buffer.byteLength(markers), stderrBytes: Buffer.byteLength(markers),
+    });
+  });
+
+  it.each(operations)('observes only the fixed Docker literal %s', (literal, operation) => {
+    expect(failure(`CLI: ${literal} synthetic\n${literal}`)).toHaveProperty('stderrDockerOperation', operation);
+    expect(failure(literal.slice(0, -1))).toHaveProperty('stderrDockerOperation', 'none');
+    const other = operations.find(([, candidate]) => candidate !== operation)![0];
+    for (const text of [`${literal}\n${other}`, `${other}\n${literal}`]) {
+      expect(failure(text)).toHaveProperty('stderrDockerOperation', 'multiple');
+    }
+  });
+
+  it.each([
+    [1, 'other-nonzero'], [125, 'exit-125'], [126, 'exit-126-or-127'],
+    [127, 'exit-126-or-127'], [255, 'other-nonzero'], [0, 'unclassified'], [256, 'unclassified'],
+  ])('retains strict bounded container exit %s', (exit, bucket) => {
+    expect(failure(`before\nerror running container: exit ${exit}\nafter\n`)).toHaveProperty('stderrContainerExitBucket', bucket);
+  });
+
+  it.each([
+    'error running container: exit 125', 'error running container: exit 125\r\n',
+    'prefix error running container: exit 125\n', 'error running container: exit 125 suffix\n',
+    'error running container: exit 0125\n', 'error running container: exit +125\n',
+    'error running container: exit 125.0\n', 'error running container: exit 1250\n',
+    'error running container: exit 125\nerror running container: exit 125\n',
+    'error running container: exit 125\nerror running container: private\n',
+    '\u001b[31merror running container: exit 125\u001b[0m\n',
+  ])('rejects near-miss container framing %#', (stderr) => {
+    expect(failure(stderr)).toHaveProperty('stderrContainerExitBucket', 'unclassified');
+  });
+
+  it('enforces the existing container scan byte bound', () => {
+    const message = '\nerror running container: exit 125\n';
+    const bounded = 'ä'.repeat(2030) + 'x' + message;
+    expect(Buffer.byteLength(bounded)).toBe(4096);
+    expect(failure(bounded)).toHaveProperty('stderrContainerExitBucket', 'exit-125');
+    expect(failure('x' + bounded)).toHaveProperty('stderrContainerExitBucket', 'unclassified');
+  });
+
+  it.each(sqlStates)('returns only the literal SQLSTATE %s', (state) => {
+    expect(failure(`synthetic (SQLSTATE ${state})\r\nrepeat (SQLSTATE ${state})`)).toHaveProperty('stderrSqlState', state);
+    expect(failure(`synthetic (SQLSTATE ${state})\nother (SQLSTATE ZZ999)`)).toHaveProperty('stderrSqlState', 'multiple');
+  });
+
+  it.each([
+    ['SQLSTATE 42P01', 'none'], ['(SQLSTATE 42P01)', 'none'], [' (sqlstate 42P01)', 'none'],
+    [' (SQLSTATE 42p01)', 'none'], [' (SQLSTATE 42P01', 'none'],
+    [' (SQLSTATE 42P01x)', 'none'], [' (SQLSTATE 42P01 )', 'none'],
+    [' (SQLSTATE 42P01\n)', 'none'], [' (SQLSTATE  42P01)', 'none'],
+    [' (SQLSTATE ZZ999)', 'unclassified'], [' (SQLSTATE ZZ999) (SQLSTATE ZZ999)', 'unclassified'],
+    [' (SQLSTATE ZZ999) (SQLSTATE YY999)', 'multiple'],
+    [' (SQLSTATE 42P01) (SQLSTATE 23505)', 'multiple'],
+    [' (SQLSTATE ZZ999) (SQLSTATE 42P01)', 'multiple'],
+  ])('classifies SQLSTATE framing and distinct observations %#', (stderr, state) => {
+    expect(failure(stderr)).toHaveProperty('stderrSqlState', state);
+  });
+
+  it.each(migrations)('observes the exact known migration %s with LF/CRLF', (name) => {
+    const index = migrations.indexOf(name) + 1;
+    for (const newline of ['\n', '\r\n']) {
+      expect(failure(`Applying migration ${name}...${newline}Applying migration ${name}...${newline}`))
+        .toMatchObject({ announcedKnownMigrationCount: 1, lastAnnouncedKnownMigrationIndex: index });
+    }
+  });
+
+  it('counts distinct announcements and uses stderr order rather than version order', () => {
+    const lines = [...migrations, migrations[1], migrations[0]];
+    expect(failure(lines.map((name) => `Applying migration ${name}...\n`).join('')))
+      .toMatchObject({ announcedKnownMigrationCount: 6, lastAnnouncedKnownMigrationIndex: 1 });
+  });
+
+  it.each([
+    'Applying migration private.sql...\n', 'Applying migration /private/20260905000000_initial.sql...\n',
+    'prefix Applying migration 20260905000000_initial.sql...\n',
+    'Applying migration 20260905000000_initial.sql....\n',
+    'Applying migration 20260905000000_initial.sql...\r',
+    'Applying migration 20260905000000_initial.sql...',
+    'Applying migration 20260905000000_initial.sql... trailing\n',
+    'Applying migration 20260905000000_initial.sql...\u2028',
+  ])('ignores unknown and near-miss announcements %#', (stderr) => {
+    expect(failure(stderr)).toMatchObject({ announcedKnownMigrationCount: 0, lastAnnouncedKnownMigrationIndex: null });
+  });
+
+  it('observes only the verified case-sensitive port literal', () => {
+    expect(failure('synthetic: port is already allocated.')).toHaveProperty('stderrPortAllocationMarker', true);
+    for (const text of ['Port is already allocated', 'port already allocated', 'port is already allocate', 'rate limit disk deadline']) {
+      expect(failure(text)).toHaveProperty('stderrPortAllocationMarker', false);
+    }
+  });
+
+  it('fails closed on malformed, inherited, accessor and coercible input without invoking it', () => {
+    const hostile = vi.fn(() => { throw new Error('synthetic private accessor'); });
+    const tuple = { code: 1, stdout: '', stderr: '' };
+    const cases: unknown[] = [null, undefined, false, 1, 'private', Symbol('private'), 1n, [], new Error('private'),
+      {}, Object.create(tuple)];
+    for (const code of [-1, 256, 0.1, NaN, Infinity, Number.MAX_SAFE_INTEGER, '1', true, 1n, Symbol('private')]) {
+      cases.push({ ...tuple, code });
+    }
+    for (const field of ['code', 'stdout', 'stderr']) {
+      cases.push(Object.defineProperty({ ...tuple }, field, { get: hostile }));
+      for (const value of [undefined, null, {}, [], new String('private'), { toString: hostile, valueOf: hostile, toJSON: hostile }]) {
+        cases.push({ ...tuple, [field]: value });
+      }
+    }
+    for (const value of cases) expect(report(value)).toEqual(defaults);
+    expect(report({ ...tuple, toJSON: hostile })).toHaveProperty('tag', 'nonzero-empty-output');
+    for (const elapsed of [null, undefined, '1', false, 1n, NaN, Infinity, -Infinity, -0.1,
+      Number.MAX_SAFE_INTEGER + 1, { valueOf: hostile }, Symbol('private')]) {
+      expect(report(tuple, elapsed)).toEqual(defaults);
+    }
+    expect(report(tuple, Number.MAX_SAFE_INTEGER)).toHaveProperty('elapsedMs', Number.MAX_SAFE_INTEGER);
+    expect(hostile).not.toHaveBeenCalled();
+  });
+
+  it('returns the same invalid shape if reflection throws after any property', () => {
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    expect(report(revoked.proxy)).toEqual(defaults);
+    for (const field of ['code', 'stdout', 'stderr']) {
+      const proxy = new Proxy({ code: 1, stdout: '', stderr: '' }, {
+        getOwnPropertyDescriptor(target, key) {
+          if (key === field) throw new Error('synthetic private reflection');
+          return Reflect.getOwnPropertyDescriptor(target, key);
+        },
+      });
+      expect(report(proxy)).toEqual(defaults);
+    }
+  });
+
+  it('bounds direct strings and combined UTF-8 bytes before scanning', () => {
+    const limit = 16 * 1024 * 1024;
+    expect(report({ code: 1, stdout: 'x'.repeat(limit), stderr: '' })).toHaveProperty('stdoutBytes', limit);
+    expect(failure('x'.repeat(limit))).toHaveProperty('stderrBytes', limit);
+    for (const tuple of [
+      { code: 1, stdout: 'x'.repeat(limit + 1), stderr: '' },
+      { code: 1, stdout: '', stderr: 'x'.repeat(limit + 1) },
+      { code: 1, stdout: 'ä'.repeat(limit / 2), stderr: 'x' },
+      { code: 1, stdout: '', stderr: 'ä'.repeat(limit / 2 + 1) },
+    ]) expect(report(tuple)).toEqual(defaults);
+    expect(failure(' (SQLSTATE ZZ999)'.repeat(100_000))).toHaveProperty('stderrSqlState', 'unclassified');
+  });
+
+  it('never serializes private text or caller-supplied report fields', () => {
+    const privateParts = ['a2-private-canary', ['sb', 'secret', 'fictional-only'].join('_'),
+      ['ghp', 'x'.repeat(36)].join('_'), 'fictional@example.test', '/private/fictional.sql',
+      ['postgresql:', '//fictional:never-a-password@example.test/db'].join(''),
+      'SELECT fictional_private_value;', 'synthetic-token.payload.signature'];
+    const text = privateParts.join('\n');
+    const hostile = vi.fn(() => { throw new Error(text); });
+    const fakeFields = Object.fromEntries(keys.map((key) => [key, text]));
+    expect(report({ ...fakeFields, code: 1, stdout: 'ä🙂', stderr: '漢\u0000' })).toEqual({
+      ...defaults, tag: 'nonzero-with-stderr', exitCode: 1, elapsedMs: 1, stdoutBytes: 6, stderrBytes: 4,
+    });
+    for (const code of [0, 1, null]) {
+      const tuple = { code, stdout: text, stderr: text, toJSON: hostile };
+      for (const key of keys) Object.defineProperty(tuple, key, { get: hostile });
+      const output = report(tuple);
+      for (const part of privateParts) expect(JSON.stringify(output)).not.toContain(part);
+      expect(output).toMatchObject({ stderrSqlState: 'none', stderrDockerOperation: 'none',
+        announcedKnownMigrationCount: 0, lastAnnouncedKnownMigrationIndex: null, stderrPortAllocationMarker: false });
+    }
+    expect(hostile).not.toHaveBeenCalled();
   });
 });
 
