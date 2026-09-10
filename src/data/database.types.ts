@@ -333,6 +333,9 @@ export type Database = {
       }
       profiles: {
         Row: {
+          ai_consented_at: string | null
+          ai_enabled: boolean
+          ai_notice_revision: number | null
           created_at: string
           currency: string
           display_name: string
@@ -347,6 +350,9 @@ export type Database = {
           weather_enabled: boolean
         }
         Insert: {
+          ai_consented_at?: string | null
+          ai_enabled?: boolean
+          ai_notice_revision?: number | null
           created_at?: string
           currency?: string
           display_name: string
@@ -361,6 +367,9 @@ export type Database = {
           weather_enabled?: boolean
         }
         Update: {
+          ai_consented_at?: string | null
+          ai_enabled?: boolean
+          ai_notice_revision?: number | null
           created_at?: string
           currency?: string
           display_name?: string
@@ -568,6 +577,43 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      ai_begin_request: {
+        Args: {
+          p_draft_id: string
+          p_generation: number
+          p_image_sha256: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
+      ai_mark_dispatched: {
+        Args: { p_owner_id: string; p_request_id: string }
+        Returns: Json
+      }
+      ai_purge_expired: { Args: { p_limit: number }; Returns: Json }
+      ai_request_control: {
+        Args: { p_action: string; p_request_id: string }
+        Returns: Json
+      }
+      ai_set_consent: {
+        Args: {
+          p_enabled: boolean
+          p_expected_version: number
+          p_notice_revision: number
+        }
+        Returns: Json
+      }
+      ai_settle_request: {
+        Args: {
+          p_billed_micro: number
+          p_code: string
+          p_facts: Json
+          p_owner_id: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
+      ai_status: { Args: never; Returns: Json }
       commit_image: { Args: { p_image_id: string }; Returns: undefined }
       deletion_control: {
         Args: { p_action: string; p_code?: string; p_owner_id: string }

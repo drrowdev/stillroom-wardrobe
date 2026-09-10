@@ -15,6 +15,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260906000000_item_field_provenance.sql', version: '20260906000000', time: '2026-09-06 00:00:00', bytes: 5923, sha256: SOURCE_HASHES.target },
   { name: '20260909070000_item_description_edit.sql', version: '20260909070000', time: '2026-09-09 07:00:00', bytes: 2618, sha256: SOURCE_HASHES.description },
   { name: '20260909110000_item_optional_collections.sql', version: '20260909110000', time: '2026-09-09 11:00:00', bytes: 454, sha256: SOURCE_HASHES.collections },
+  { name: '20260909180000_ai_request_controls.sql', version: '20260909180000', time: '2026-09-09 18:00:00', bytes: 28579, sha256: SOURCE_HASHES.controls },
 ]);
 
 export function assertRehearsalEnvironment(env, args) {

@@ -138,6 +138,22 @@ to MVP I29; this manual packet does not defer or implement them.
 
 Security: Owner-authenticated analysis with current consent/budget, server image/output validation, no arbitrary URL/owner/item target and no inventory writes. No direct receipt/usage access or browser provider keys. Discard/expiry purges bounded results; unknown-billing timeouts do not auto-retry. No real inference/photos in ordinary CI.
 
+I29e Stage 1 adds the source-only consent/allowance/request kernel in
+`20260909180000_ai_request_controls.sql`, new ordinary-session integration and
+security modules, strictly separated full-reset fixtures, five-source
+preservation and SQL/shared-facts parity. Scope remains the R18/R19/R23/R26/R27/R28
+subset, not full I29 acceptance. It excludes active consent/results from export
+without claiming saved-only export. Native SQL/normal-session execution and
+generated-type parity require exact-head CI; Stage 2 imports only its actual
+generated artifact. No guessed types or staging pass.
+
+Still required: authenticated endpoint/server image validation, approved processor/
+account/notice/allowances, scheduled physical purge, paid activation approval,
+editable draft UI/local title-description composition, checked exact-value Save,
+source history/provenance binding, saved-only integration and owner acceptance.
+No provider, image transfer, inventory authority, saved marker, deployment or
+later phase is activated by these controls.
+
 Done: Follow `21` to compare two eligible models with authorized photos, recording field errors/unknowns, correction effort, latency and billed usage before choosing a configuration. Do not assume Gemini is cheapest/best or Terra the only alternative. Cover duplicate requests, expiry, manual clears, account changes, failed Save and no AI on Save/restore. Metadata-v2 excludes drafts/results/usage. Base SQL/results are not AI evidence.
 
 ## I08 — Build full item metadata and lifecycle management

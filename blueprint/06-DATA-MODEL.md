@@ -29,6 +29,43 @@ Analysis creates no item/image records: photo/title/category are checked only on
 
 ## Entities
 
+### I29e source-only request controls
+
+`20260909180000_ai_request_controls.sql` adds three protected profile fields:
+`ai_enabled` defaults false; nullable positive-int32 `ai_notice_revision` and
+`ai_consented_at` are paired. Only the consent RPC changes these through the
+ordinary API. The twelve preexisting profile UPDATE columns remain granted.
+No old profile values, item/image/history data or provenance authority change.
+
+Three RLS-enabled private tables have no client table grants/policies:
+
+* `ai_controls`: one operator-configured row per owner, activation, notice,
+  opaque model/prompt, exact positive bigint micro-USD limits, hourly rate
+  1–1000 and result TTL 1–86400 seconds. Migration inserts no configuration.
+  Missing means UNCONFIGURED/effective zero allowance, not unlimited.
+* `ai_usage`: one `(owner_id,request_id)` ledger/tombstone, immutable original
+  UTC month/reservation, admitted time, accounted amount, reserved/held/settled/
+  released charge state, minimal dispatch evidence and bounded closure reason/time.
+  No draft ID, photo hash, model, facts, provider body or aggregate balance row.
+  It survives temporary-request deletion until owner deletion.
+* `ai_requests`: same-owner ledger FK, draft/generation/hash, pinned model/prompt/
+  notice, reserved/dispatched/ready status, original timestamps and bounded facts.
+  One active reserved/dispatched request per owned draft. Full context is deleted
+  on discard, failure or expiry; no content recreation from a tombstone.
+
+Each table also references the owner's profile with ON DELETE CASCADE. All AI
+mutations lock that profile first, then controls, ledger and full request; the
+profile lock alone changes no profile version/timestamp. Accounting remains
+separate from permission to dispatch/store/return content. Unknown dispatched
+charges stay held; known zero differs from unknown; actual overruns are recorded.
+
+This is not a provider endpoint, image validation/transfer, checked Save, saved
+marker or inventory authority. Export v2 removes the three consent fields and
+still preserves legacy imageless/pending rows. Saved-only export remains open.
+Logical expiry and bounded opportunistic deletion do **not** guarantee physical
+purge for inactive accounts within 24 hours. A reviewed scheduler and separate
+processor/account, notice, allowance and deployment approvals block activation.
+
 | Table | Meaning and lifecycle |
 |---|---|
 | `private.approved_accounts` | Independent approval rows, admission numbers 1 and 2 for capacity only, lower-case email, Auth UUID and enabled flag. RLS enabled with no client table rights. Insert/update Auth triggers enforce admission and fixed emails. |
