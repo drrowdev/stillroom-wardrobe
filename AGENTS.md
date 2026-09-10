@@ -22,9 +22,9 @@ and [text-only amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/7#
 defined that packet's 23-path scope; [final review 5138563467](https://github.com/drrowdev/stillroom-wardrobe/pull/7#pullrequestreview-5138563467)
 records its engineering evidence. I06 and the dated PR #2/#3 assignments below
 are completed history, not the current task's assignment.
-The setup workflow may leave
-generated schema types untracked; review/commit those deliberately, never
-local credentials, service state or test artifacts.
+Setup generates only ignored `.supabase/generated-database.types.ts`, not tracked
+schema types. Inspect initial status/diff; preserve unexpected source deltas and
+stop, never adopt/commit them or local credentials, service state or test artifacts.
 
 Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `07-DATABASE-AND-RLS.sql`, `08-API-AND-STORAGE.md`, `10-SECURITY-AND-PRIVACY.md`, `20-AI-MODELS-AND-WORKFLOWS.md` and the current phase in `14-IMPLEMENTATION-PLAN.md` before editing. These are active root instructions: never overwrite them with historical blueprint templates.
 

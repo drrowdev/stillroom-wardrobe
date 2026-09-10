@@ -28,7 +28,7 @@ jobs:
       - name: Install the locked dependencies
         run: npm ci --no-fund
       - name: Install the browser and Linux dependencies
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium webkit
       - name: Enable disposable local tests and an ephemeral leak canary
         run: |
           echo "ALLOW_SECURITY_TESTS=1" >> "$GITHUB_ENV"
@@ -41,5 +41,11 @@ jobs:
         run: npm run db:start
       - name: Apply the local migration and provision fictional accounts
         run: npm run db:reset
-      - name: Generate actual schema types
-        run: npm run db:types
+      - name: Generate actual schema types as an ignored setup artifact
+        run: npm run db:types -- --setup-artifact
+      - name: Confirm ignored artifact and unchanged tracked files
+        run: |
+          test -f .supabase/generated-database.types.ts
+          git check-ignore --quiet .supabase/generated-database.types.ts
+          git diff --quiet
+          git diff --cached --quiet

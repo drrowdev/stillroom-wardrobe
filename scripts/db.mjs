@@ -8,8 +8,8 @@ import {
 
 async function main() {
   const [action, ...args] = process.argv.slice(2);
-  if (!['start', 'reset', 'types'].includes(action) || (args.length && !(action === 'types' && args.length === 1 && args[0] === '--check'))) {
-    fail('REFUSED: usage is db.mjs start | reset | types [--check]; no remote or extra arguments are accepted.');
+  if (!['start', 'reset', 'types'].includes(action) || (args.length && !(action === 'types' && args.length === 1 && ['--check', '--setup-artifact'].includes(args[0])))) {
+    fail('REFUSED: usage is db.mjs start | reset | types [--check | --setup-artifact]; no remote or extra arguments are accepted.');
   }
   await assertProjectConfig();
   await requireDocker();
@@ -78,15 +78,23 @@ async function main() {
     console.log('PASS: committed database types exactly match actual local generation.');
     return;
   }
-  await mkdir(path.dirname(target), { recursive: true });
-  const staging = `${target}.${randomUUID()}.pending`;
+  const setupArtifact = args[0] === '--setup-artifact';
+  const matches = setupArtifact ? await readFile(target, 'utf8') === generated.stdout : false;
+  const destination = setupArtifact ? path.join(ROOT, '.supabase', 'generated-database.types.ts') : target;
+  await mkdir(path.dirname(destination), { recursive: true });
+  const staging = `${destination}.${randomUUID()}.pending`;
   try {
     await writeFile(staging, generated.stdout, { flag: 'wx' });
-    await rename(staging, target);
+    await rename(staging, destination);
   } finally {
     await rm(staging, { force: true });
   }
-  console.log('PASS: src/data/database.types.ts generated from the actual local schema.');
+  if (setupArtifact) {
+    console.log('PASS: .supabase/generated-database.types.ts generated from the actual local schema.');
+    console.log(matches ? 'PARITY: MATCH' : 'PARITY: DIFFERENT');
+  } else {
+    console.log('PASS: src/data/database.types.ts generated from the actual local schema.');
+  }
 }
 
 main().catch(reportError);
