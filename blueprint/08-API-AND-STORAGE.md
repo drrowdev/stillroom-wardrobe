@@ -157,6 +157,49 @@ IDs and reserve exact saved description text without inference or imported conse
 AI receipts/allowances/expiry and final saved-only export remain unfinished I29
 work; this source contract authorizes no hosted migration or deployment.
 
+## PR #17 checked manual Save source candidate
+
+The staged migration `20260910070000_checked_item_save.sql` adds:
+
+* `reserve_item_save(p_item jsonb,p_image jsonb)` returns one row containing
+  `item`, `image`, `fingerprint`, `state`. The closed item input contains `id`,
+  all thirty garment fields and manual `field_provenance`; the closed image
+  input contains `id`, main/thumb byte lengths and SHA-256 metadata, width,
+  height and exact `alt_text`. Owner, versions, paths, state and times are
+  server-controlled. Only explicit user/revision-1 provenance is accepted.
+  Atomic reservation claims both used identities and creates all live rows or
+  rolls everything back. Canonical typed price/provenance semantics and JSON
+  key ordering do not create distinct intents.
+* `finalize_item_save(p_item_id uuid,p_image_id uuid,p_fingerprint text)` returns
+  void. Current admission/owner, the live attempt, exact fields/provenance,
+  item version 1/nondeletion, original image metadata/caption, description
+  version 1/nonretirement and both actual canonical Storage object records
+  are required. First completion atomically commits the image and records server
+  completion; completed replay repeats those checks, including object presence.
+  No ready-only or identifier-marker-only success is valid.
+* `commit_image` retains the legacy implementation in a non-client-callable
+  private helper. The public wrapper rejects either an owner-local used item ID
+  or used image ID, including alternate images and raw recreation after deletion.
+  Genuine legacy IDs/grants remain usable. Future checked replacement/restore
+  needs its later reviewed route, not this legacy shortcut.
+
+New paths lock the enabled owner's profile first. Attempt/image/item and object
+locks fail closed with NOWAIT; a two-second lock timeout also bounds uniqueness/
+FK waits. Existing delete cascades, retire and description paths remain unchanged;
+their reverse ordering is not assumed safe merely from a diagram. Normal-session
+race tests must execute before acceptance. A specific lock conflict rolls back
+the whole call. Errors are closed `22023` / `Invalid input`, `Request conflict`,
+`Upload incomplete`, or `42501` / `Not available`, never raw field/peer details.
+
+Stage 1 is source only because the native database reset failed in the unchanged
+base migration. The current client still uses the earlier flow above. Stage 2
+must connect **every** manual AddItem Save after actual generated types and a
+fresh verified receipt; preserve its frozen values/IDs/owner epoch, explicit
+Retry/Discard, existing translated errors and byte-identical `ensureFile`,
+thumb-before-main upload order/options and duplicate-object SHA comparison.
+No analysis call, byte attestation, paid activation, completed I29 or hosted
+change follows from this metadata/object-presence prerequisite.
+
 ## Authenticated image access
 
 Owner views use `storage.from('wardrobe').download(path)` through the current user's SDK client, with a custom fetch adapter setting `cache:'no-store'` for data/storage/auth requests. Convert returned JPEG bytes to a Blob URL and revoke it on unmount/logout/account change. Coalesce identical in-flight `(ownerUid,imageId,variant)` downloads and cap concurrency at four. No Edge media function, public image endpoint or sharing URL is implemented. RLS checks current approved-account status and the reserved owner path on every new Storage request.

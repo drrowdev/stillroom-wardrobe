@@ -29,6 +29,33 @@ Analysis creates no item/image records: photo/title/category are checked only on
 
 ## Entities
 
+### Checked manual Save prerequisite — staged source
+
+`20260910070000_checked_item_save.sql` is the reviewed PR #17/A1 source
+candidate, not a deployed migration or completed client integration.
+`private.item_save_attempts` binds an owned item and its original owned image
+through composite foreign keys. It keeps a canonical intent SHA-256, reserved/
+completed state, reservation time and actual server completion time, not another
+copy of the thirty garment fields. Item deletion cascades the attempt; image-only
+cleanup nulls only its image link. Missing/changed content cannot be reconstructed
+from an attempt.
+
+`private.item_save_used_ids` has exactly three non-null UUID columns:
+`owner_id`, `item_id`, `image_id`; primary key `(owner_id,item_id)`, unique
+`(owner_id,image_id)`, and an owner-profile FK with ON DELETE CASCADE.
+It has no item/image FK, timestamp, counter, ordering, fingerprint, field,
+caption, hash or result. These minimal **pseudonymous**, not anonymous,
+identifiers survive item/image deletion to reject retries of either used identity.
+A matching live attempt and every exact-state guard are required for any reuse.
+There is no legacy adoption or backfill.
+
+Both tables enable RLS with no client table policies/grants or read/control API;
+neither enters exports or logs. One marker per successful reservation, including
+abandoned reservations, accumulates until that profile is actually deleted.
+No scheduler, total-growth bound or working self-service account deletion is
+claimed. The profile cascade is a structural retention rule, not user-journey
+acceptance; see `10`.
+
 ### I29e source-only request controls
 
 `20260909180000_ai_request_controls.sql` adds three protected profile fields:

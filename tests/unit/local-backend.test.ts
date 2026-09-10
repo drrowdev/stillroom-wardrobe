@@ -495,6 +495,16 @@ describe('disposable local backend boundaries', () => {
     expect(child.stdout).toBe('');
   });
 
+  it('wires checked Save suites through the same stripped normal environment', async () => {
+    const source = await readFile(path.join(ROOT, 'scripts', 'run-local-tests.mjs'), 'utf8');
+    expect(source).toContain("path.join(ROOT, 'tests', suite, 'item-save.sessions.mjs')");
+    expect(source).toContain('const env = normalSessionEnvironment(process.env, credentials)');
+    const save = source.slice(source.indexOf('const saveCode'), source.indexOf("if (suite === 'integration')"));
+    expect(save).toContain('cwd: ROOT, env, shell: false');
+    expect(save).toContain('if (saveCode !== 0) { process.exitCode = saveCode; return; }');
+    expect(save).not.toContain('process.env');
+  });
+
   it.each([
     ['scripts', 'run-local-tests.mjs', 'security'],
     ['scripts', 'run-local-tests.mjs', 'integration'],

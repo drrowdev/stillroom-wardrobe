@@ -2611,3 +2611,154 @@ The earlier native checker remains unreported, not retroactively passed.
 The writer then stops; no merge, deployment, paid/live activation or later
 packet is authorized by these results. All previous manual/operator/device and
 remaining I29 integration/retention gates stay open.
+
+## PR #17 checked manual Save/A1 — Stage 1 source, 10 September 2026
+
+**Database-blocked staging, not a connected Save implementation or merge-ready
+packet.** Existing branch `copilot/new-i29-checked-manual-save`, approved base
+`c6ee8beb890deeca0c04cf53d6d3deebe4a231f6`, starting/saved head
+`46c53668f5ed13d2b5147fa873e61964f0210acb`, tree
+`a1413580bd53c0651d9f2a004df793af5ff2da9b`. The starting head was an empty
+single-parent commit against that exact base; working tree and PR diff were clean.
+This append preserves all preceding dated evidence.
+
+### Own authority and read context
+
+Read the complete [plan 5614413353](https://github.com/drrowdev/stillroom-wardrobe/pull/16#issuecomment-5614413353)
+and complete [A1 amendment 5614726097](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5614726097).
+Actual different-provider reviewer: Anthropic / Claude Opus 5
+(`claude-opus-5`), read-only `d27104d9-e844-42b7-9f7f-a0a6723ba2dc`, turns 3/4.
+Their recorded AMEND findings and coordinator adjudication narrow this to manual
+checked Save and retain **three** UUIDs, not the rejected weaker two-column
+alternative. No new agent/reviewer or scope was invented by this worker.
+
+After context and before source edits, reread this continuation's
+[own receipt 5614750064](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5614750064):
+task `0afd7714-d002-4ce5-9241-ba5e0a0e9eed`, session
+`93155b42-57ac-43a8-8d60-1c427f5eee85`, explicitly selected `gpt-6-astra`,
+coordinator-verified actual `sweagent-capi:gpt-6-astra` at
+`2026-09-10T07:23:28.2328469+00:00`, matching repository 1358925513,
+PR #17, branch, base and saved head. Original receipt 5614441409 was not reused.
+
+Actually read root `AGENTS.md`, `.github/copilot-instructions.md`, both blueprint
+instruction templates (not copied), cloud task-scope/text-only/local/hosted gates;
+Phase 0/1 relevant acceptance and Phase 2 I29d/e evidence; blueprint
+00/02/03/05/06/08/10/14/15/19/20 and relevant 21 model-gate sections.
+The complete base migration was read and compared byte-identical to blueprint07;
+provenance, description and collection migrations plus AI18 profile/table/lock
+sections were read. Source included actual generated item/image/RPC types,
+`src/images/upload.ts`, `src/domain/garment-fields.ts`, AddItem's frozen-submit
+flow, data errors/package/db commands; normal backend guards, session client,
+wrapper, preservation schema/oracle/rehearsal/tests, normal integration/security
+examples, affected unit tests and browser mock/upload boundary excerpts.
+PR discussion/diff/reviews/review threads and current Actions metadata were read.
+
+This is I29's R03 explicit-creation and R04 private-photo subset, preserving
+R01/R11/R17/R19/R26/R27; R23 is predictable retries/concurrency. R22 means original
+product, not reliability. No complete-CRUD, automatic AI, full-I29 or MVP claim.
+
+### Observed local database blocker and approved fallback
+
+Current native setup run `34449644831`, job `102782229098`, reports successful
+dependency/browser install, Docker, startup, reset/provision and type generation.
+The MCP job-log request returned HTTP 404; metadata alone is not execution proof
+of the new source. Initial CI `34447378905` and JPEG diagnostic `34447378909`
+were `action_required`; CI log lookup returned zero executed/failed jobs, not a
+pass. No Actions authorization/rerun occurred.
+
+`npm run db:start` passed. After writing the new SQL, the first
+`npm run db:reset && npm run db:types` stopped at reset, exit 1, before
+provisioning; **type generation did not run**. A bounded PostgreSQL error-log
+query returned no matching diagnostics. Through existing guarded local helpers
+(`assertProjectConfig`, `requireLocalContainer`, `cli`), `migration list --local`
+then showed all six application migrations pending; diagnostic
+`migration up --local` failed in unchanged `20260905000000_initial.sql`,
+statement 69: `relation "storage.buckets" does not exist` (42P01).
+No new SQL execution or causal claim about the reset's underlying failure follows.
+
+No repeat reset, service/config repair, fake Storage schema, guessed types or
+runtime restart was attempted. The plan's expressly approved same-PR Stage 1
+fallback applies: SQL/tests/preservation/docs only, then stop for coordinator
+execution-trust review and actual Database CI. Stage 2 requires independently
+published exact-head type text/hash and a fresh own runtime receipt before
+connecting every current manual AddItem Save. Current client/types/browser
+sources remain byte-identical; `ensureFile`, upload bytes/options/order,
+manual builder, owner epoch and form behavior have not changed.
+
+### Staged source boundary
+
+The only new migration is `20260910070000_checked_item_save.sql`. It specifies
+closed ordinary-session atomic reservation, canonical typed intent fingerprint,
+live-row/initial-version/caption/counter checks, exact object-aware finalization,
+and three-UUID owner-local used-ID guards. Content attempts cascade on item
+deletion; image cleanup nulls only their image link; markers last until actual
+profile deletion. No fields/hash/time/status enter those markers.
+
+The original commit function is moved intact behind a private non-client seam.
+The public wrapper guards either used item or used image identity, preserving
+genuine legacy grants, with no raw-row adoption/backfill. New calls lock profile
+first, then use NOWAIT on reverse-order attempt/media/item/object edges and a
+two-second lock timeout for residual uniqueness/FK waits. Specific conflicts
+roll back, not succeed. Existing delete/retire/description behavior is unchanged.
+This is reviewed source design, **not executed concurrency proof**.
+
+New integration/security suites use existing `normalClient` with normal A/B/
+anonymous PostgREST and the same stripped wrapper environment. They specify
+pending/completed exact replay, canonical price/provenance, all-field/image
+conflicts, malformed/system/AI assertions, no partial/failed first claim,
+foreign/swapped IDs, original/alternate/raw-recreated commit bypass, hard deletion,
+missing objects even when ready, cleanup, caption/counter/item changes, owner-local
+UUID reuse, genuine legacy success, and bounded overlapping operations.
+Tiny synthetic transport bytes prove no JPEG/camera or analysed-byte attestation.
+Catalog-only checks specify private ACL/RLS and exact profile/item/image FKs;
+no normal fixture profile is deleted to fake account-deletion acceptance.
+
+Preservation now pins six exact migration sources, retaining every old length/hash
+and the original COLUMNS, two-owner/ten-table/30-row/eight-object byte oracle.
+The normal wrapper still executes existing AI18 and recovery gates. New catalog
+checks run only after the original populated comparison. Blueprint06/08 document
+the staged protocol; blueprint10 adds only A1's minimal pseudonymous retention
+boundary. One row per successful reservation, including abandoned attempts,
+accumulates until actual profile deletion; no scheduler, total-growth bound or
+working self-service deletion claim.
+
+### Actual validation and remaining gates
+
+Commands ran at the repository root. These are source/unit results, not live
+database or connected-client acceptance:
+
+| Exact command | Actual result |
+| --- | --- |
+| `node --check tests/integration/item-save.sessions.mjs` | Pass. |
+| `node --check tests/security/item-save.sessions.mjs` | Pass. |
+| `node --check scripts/run-local-tests.mjs` | Pass. |
+| `node --check scripts/preservation-rehearsal.mjs` | Pass. |
+| `npm run test:unit -- tests/unit/item-save.test.ts tests/unit/preservation.test.ts tests/unit/local-backend.test.ts tests/unit/garment-fields.test.ts tests/unit/private-images.test.ts` | First 402 passed/12 failed: one shared five-source expectation omitted the sixth migration. Corrected that expectation; final 414/414 passed. |
+| `npm run typecheck` | Pass against unchanged current generated types; not new-RPC parity. |
+| `npm run lint` | Pass. |
+| `npm run check:translations` | 471 EN/FI/SV keys; 45 source files, pass. |
+| `npm run test:unit` | 1000/1000, 18 files. |
+| `npm run build` | Pass; existing non-failing chunk-size warning, unchanged 174.80 kB gzip JS/5.33 kB gzip CSS. |
+| `npm run scan:secrets` | Pass, 184 text files and unprinted canary. |
+| `npm run check:dependencies` | Pass, 12 production/220 development packages, zero unverified release dates, zero production advisories. |
+| `git diff --check` | Pass. |
+
+Actual fresh schema execution, six-source populated preservation, five-to-six
+populated transition, structural catalog results, all new/old normal-session
+integration/security, AI18's 18 phases, recovery, actual generated types/parity,
+connected client/browser/axe and coordinator exact-head artifact review remain
+**pending**. No browser/visual run or image/archive input was used in this staging
+continuation. Static checks do not establish SQL execution or normal-user access.
+The coordinator must validate the frozen source before authorizing Database CI;
+no Stage 1 merge. A fresh native validation result will be reported on PR #17
+after committing; it cannot replace the required independent exact-head review.
+
+Rollback at this un-applied source stage is reverting the packet; no hosted DDL
+or data rollback is authorized. Live Cloudflare `892f9419`/hosted05+06+09+11
+remain unchanged, AI18 unapplied, operator window closed. B3's WebKit two-byte
+parallel failure remains unlocalized/unfixed; prior PR16 acceptance is not a
+waiver. Only the second hosted-account journey is deferred; other foreign-normal,
+camera/device/screen-reader gates remain open. Automatic form filling,
+analysed-byte binding, expiry/provenance/source history and parked incomplete
+backup remain required later work. No AI/provider/codec/dependency, hosted,
+private-input or paid operation was performed.
