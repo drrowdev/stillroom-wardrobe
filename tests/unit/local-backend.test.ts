@@ -739,6 +739,29 @@ describe('disposable local backend boundaries', () => {
     expect(child.stdout).toBe('');
   });
 
+  it.each([
+    ['types', '--check', '--setup-artifact'],
+    ['types', '--setup-artifact', '--check'],
+    ['types', '--setup-artifact', '--setup-artifact'],
+    ['types', '--check', '--check'],
+    ['types', '--setup-artifact', 'extra'],
+    ['types', '--check', 'extra'],
+    ['types', '--unknown'],
+    ['types', '--setup-artifact=elsewhere.ts'],
+    ['types', '--setup-artifact', '--output', 'elsewhere.ts'],
+    ['start', '--setup-artifact'],
+    ['reset', '--setup-artifact'],
+    ['start', '--check'],
+    ['reset', '--check'],
+  ])('rejects invalid db options before Docker: %s %s', (...args) => {
+    const child = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'db.mjs'), ...args], {
+      env: commandEnvironment(), encoding: 'utf8', timeout: 10_000, windowsHide: true,
+    });
+    expect(child.status).toBe(2);
+    expect(child.stderr).toContain('REFUSED');
+    expect(child.stdout).toBe('');
+  });
+
   it('wires checked Save suites through the same stripped normal environment', async () => {
     const source = await readFile(path.join(ROOT, 'scripts', 'run-local-tests.mjs'), 'utf8');
     expect(source).toContain("path.join(ROOT, 'tests', suite, 'item-save.sessions.mjs')");

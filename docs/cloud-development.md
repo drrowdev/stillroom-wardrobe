@@ -8,25 +8,37 @@ backups and local service state must never be published.
 
 `.github/workflows/copilot-setup-steps.yml` contains the required single
 `copilot-setup-steps` job on a standard Ubuntu runner. It installs pinned Node 24,
-locked npm dependencies and Chromium, then starts disposable local Supabase,
-applies the exact base migration, provisions fictional accounts and generates
-real database types. Docker images are downloaded during setup, before the
-agent's normal network restrictions take effect.
+locked npm dependencies, Chromium and WebKit, then starts disposable local
+Supabase, applies the committed migrations and provisions fictional accounts.
+`npm run db:types -- --setup-artifact` generates real database types only at
+ignored `.supabase/generated-database.types.ts`. Docker images are downloaded
+during setup, before the agent's normal network restrictions take effect.
 
 No production Supabase access, paid AI endpoint, larger runner, firewall
 disablement or user-supplied production secret is required by cloud setup.
 The separately approved hosted project is in Stockholm (`eu-north-1`).
 
 Setup failures are not passes: Copilot may still start in a partially prepared
-environment. First inspect its setup log and `git status`, then confirm the
-local stack with `npm run db:start` rather than assuming services survived.
+environment. First inspect its setup log, `git status` and diff; preserve any
+unexpected source delta and stop. Confirm service status and actual browser
+executable availability before choosing tests; do not run a known missing-engine
+matrix or reinstall ad hoc. Initial setup may still use the old default workflow.
 Do not reset a useful in-progress fixture unless recovery requires it.
+Keep the 45-minute timeout and observe the first actual modified setup runtime.
+Linux WebKit is not native macOS or physical iPhone acceptance, and Chromium
+iPhone emulation is not Safari.
 
-The generated `src/data/database.types.ts` can initially be untracked. Review
-and commit it deliberately; never sweep `.env.local`, `.supabase`, browser
-state, test results or logs into a commit. These are ignored. The test wrapper
-passes ordinary fictional credentials to its child processes and strips
-privileged/GitHub credentials.
+Setup's fixed `PARITY: MATCH` / `PARITY: DIFFERENT` signal is informational;
+read/generation/write errors fail. The artifact proves generation, not tracked
+parity. End-of-setup artifact/ignored-path and quiet tracked/staged cleanliness
+assertions are early warnings, not a substitute for the worker's own entry checks
+and matching runtime receipt. Database CI still generates tracked
+`src/data/database.types.ts` and requires zero diff. Never commit the setup
+artifact, `.env.local`, service/browser state, test results or logs. The test
+wrapper passes ordinary fictional credentials to its child processes and strips
+privileged/GitHub credentials. After this workflow reaches default, later native
+allocations must use a compatible script branch; no silent fallback or automatic
+rebase of an older branch.
 
 ## Task scope and historical evidence
 

@@ -303,7 +303,22 @@ The actual generated file is now committed and used by `AppClient` and the
 generation evidence. `--check` invokes real generation and compares exact
 bytes; it is not a visual inspection of a generated-looking file.
 
-A Docker-capable Ubuntu CI runner can execute the same real-stack commands. Its first type-generation run must use `npm run db:types`; `--check` intentionally fails until the generated file is present. If retrieving generation from CI, upload **only** `src/data/database.types.ts`, never `.supabase`, `.env.local`, CLI status output, test credentials or session state. An artifact alone is not an integration pass: retain the actual job outcomes separately. Subsequent CI runs can use `--check` against the reviewed committed file.
+Cloud setup instead uses `npm run db:types -- --setup-artifact`: the same guards,
+generator and TypeScript parsing, with staging and atomic rename beside the fixed
+ignored `.supabase/generated-database.types.ts` destination. It never writes the
+tracked file. `PARITY: MATCH` / `PARITY: DIFFERENT` compares tracked text exactly;
+a difference is informational, but read/generation/write errors fail. The flag
+cannot combine with `--check`, accept an output path/extra argument or apply to
+start/reset; invalid arguments are refused before Docker. `--check` always reads
+the tracked file.
+
+Database CI remains `npm run db:types` followed by tracked-file and zero-diff
+checks. If retrieving its generation, upload **only** `src/data/database.types.ts`,
+never `.supabase`, `.env.local`, CLI status, credentials or session state. The
+setup artifact is generation evidence, not tracked parity or an integration pass.
+Child-process unit refusals do not prove generation, atomicity or runtime
+non-mutation; the modified setup run must demonstrate its ignored artifact and
+clean tracked/staged tree, alongside unchanged Database CI parity.
 
 ## Targeted local validation
 
