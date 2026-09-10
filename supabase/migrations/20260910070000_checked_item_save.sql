@@ -70,7 +70,7 @@ begin
   select * into im from public.item_images
     where owner_id=p_owner and item_id=p_item_id and id=p_image_id for update nowait;
   if not found or im.description_version<>1 or im.retired_at is not null
-    or im.state<>case a.state when 'reserved' then 'pending' else 'ready' end then
+    or im.state<>(case a.state when 'reserved' then 'pending' else 'ready' end) then
     raise exception using errcode='22023',message='Request conflict';
   end if;
   select * into i from public.items where owner_id=p_owner and id=p_item_id for update nowait;

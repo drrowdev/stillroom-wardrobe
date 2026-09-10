@@ -2876,3 +2876,122 @@ not waived. No image/archive inputs, Actions authorization/rerun, additional
 writer/branch/PR, merge, deployment, hosted/provider/private-photo operation,
 guessed types or client wiring occurred. The live operation window remains
 closed. Rollback is reverting these diagnostics, not hosted DDL or data repair.
+
+## PR #17 — narrow IF/CASE syntax repair, 10 September 2026
+
+**Source correction only; real database validation remains blocked.** Same branch
+`copilot/new-i29-checked-manual-save`, base/main
+`c6ee8beb890deeca0c04cf53d6d3deebe4a231f6`, starting head
+`9b3928637b082cc11bb45e8386aac0b3492a1fbc`, starting tree
+`d1b7737266290b06f2cfa741b5881aaed928cbd3`, starting parent
+`95f655126b2d68064d32ed2e0e3db03f4fb671c9`. Initial `git status --short`
+was empty: no tracked setup changes or untracked generated types. The clone is
+shallow; `git merge-base HEAD refs/remotes/origin/main` returned exit 1, not
+ancestry proof. GitHub PR metadata and the local remote-tracking main both
+identify the approved base above. No branch/history mutation was needed.
+
+### Authority, own receipt and context
+
+Read full [repair authorization 5616223669](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5616223669),
+[plan 5614413353](https://github.com/drrowdev/stillroom-wardrobe/pull/16#issuecomment-5614413353),
+[A1 5614726097](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5614726097)
+and [A2 5615708093](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5615708093).
+Their actual Anthropic / Claude Opus 5 critiques and coordinator adjudications
+remain controlling: plan/A1 reviewer `d27104d9-e844-42b7-9f7f-a0a6723ba2dc`,
+turns 3/4; A2 reviewer `9edf6b92-27a7-47ce-b963-949860fe50a4`, turn 1.
+Read source-review records 5615571684 and 5616125168 and execution-trust record
+5616021139. No new planning round, behavior amendment or additional agent.
+
+After context and before any edit, read this allocation's
+[own public runtime receipt 5616267125](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5616267125):
+task `40c50a4d-7a9d-430a-9653-e695f7a6a9a3`, created
+`2026-09-10T09:22:32.369760818Z`; session
+`5424ce1b-808c-4aef-8330-68c67f72c46e`, created
+`2026-09-10T09:22:36.403864042Z`. Coordinator publication observation
+`2026-09-10T09:23:31.5759424Z` records explicit `gpt-6-astra` selection and
+authenticated actual `sweagent-capi:gpt-6-astra`, matching repository 1358925513,
+PR #17 / 4492828082, branch, base and starting head/tree/parent. No old receipt
+was reused or model availability self-attested.
+
+Actually read root `AGENTS.md`, `.github/copilot-instructions.md`; cloud
+task-scope/text-only/setup/hosted sections; Phase 0 status/recovery limits,
+Phase 2 PR17/A1/A2 evidence and local-backend baseline sections; blueprint
+00/03/05/10/14/19/20, relevant 07 admission/schema and 08 API/checked-Save
+sections. Source reads included the complete checked-Save migration, actual
+initial-migration RLS/grants/commit excerpts, generated RPC type excerpts,
+`package.json`, `scripts/db.mjs`, preservation inventory/catalog/oracle excerpts,
+checked-Save unit tests, preservation inventory tests and normal integration/
+security Save excerpts. Read current PR details, discussion, diff scope/relevant
+hunks, empty reviews/review threads, Actions run/job metadata and failed CI job
+logs. I29 R03/R04 scope and preserved R01/R11/R17/R19/R23/R26/R27 are unchanged.
+
+### Five-path repair and actual validation
+
+Only the two parentheses around the existing state CASE changed in
+`supabase/migrations/20260910070000_checked_item_save.sql`; every other SQL byte
+is retained. The coordinator's PostgreSQL 17 parser finding explains why an
+unparenthesized CASE's first THEN can terminate the PL/pgSQL IF expression.
+This restores the reviewed comparison, not a new state/authority contract.
+
+Measured SQL identity changed from 16315 bytes /
+`9e782cff2cc18d2db8ee2f7c7bc6096de80c011cd9c0b6b83ef5a24783ac9bf3`
+to **16317 bytes** / SHA-256
+**`9058de2f231c72fc71b930f03e176457aee20de0cf82cab909fc21e879eaaac3`**.
+Only that byte length changed in `scripts/preservation-rehearsal.mjs`;
+only `SOURCE_HASHES.save` changed in
+`tests/integration/preservation.sessions.mjs`. Added one narrowly scoped,
+explicitly static IF/CASE regression in `tests/unit/item-save.test.ts`.
+This dated append is the fifth permitted path. Old five migrations and original
+oracles, A1 markers/cascades/raw grants, A2 diagnostics/guards/commands,
+client/generated types and all other files are unchanged.
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`:
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run test:unit -- tests/unit/item-save.test.ts tests/unit/preservation.test.ts` | Exit 0; 91/91 tests, two files. Static source/inventory evidence, not SQL execution. |
+| `npm run typecheck` | Exit 0; unchanged generated types, not new-RPC parity. |
+| `npm run lint` | Exit 0. |
+| `npm run scan:secrets` | Exit 0; 177 text files and unprinted canary checked. |
+| `git diff --check` | Exit 0. |
+| `npm run db:start` | Exactly one corrected-source invocation; wrapper exit 2, safe report below. |
+| `npm run db:reset` | Not run: startup failed. |
+| `npm run test:integration` | Not run: dependent database sequence stopped. |
+| `npm run test:security` | Not run: dependent database sequence stopped. |
+
+```json
+{"tag":"nonzero-with-stderr","exitCode":1,"elapsedMs":19225,"stdoutBytes":0,"stderrBytes":245,"stderrDockerOperation":"run-container","stderrContainerExitBucket":"other-nonzero","stderrSqlState":"none","announcedKnownMigrationCount":0,"lastAnnouncedKnownMigrationIndex":null,"stderrPortAllocationMarker":false}
+```
+
+No raw CLI output, retry, reset, alternate diagnostics, config/provisioning
+workaround or speculative further SQL repair followed. `none` and zero
+announcements mean no such markers observed, not proof of no SQL involvement.
+This run-container observation does not prove the syntax repair resolves the
+clean-CI error or any other startup cause.
+
+### Separate failures and remaining gates
+
+Read CI `34457240609` attempt 2 / Database job `102813409228`: at starting
+head `9b392863`, startup failed at `09:14:31Z`, wrapper exit 2. Its safe
+report recorded 51101 ms, 0 stdout bytes, 11145 stderr bytes, SQLSTATE `42601`,
+six known migration announcements, last index 6, Docker operation `none`,
+container exit bucket `unclassified` and false port marker. This is distinct
+from the corrected-source native observation above; no successful new migration
+application or actual new types are established by either.
+
+Separately, this native setup run `34460291715` / job `102816260809` reports
+startup failure during `09:23:53Z`–`09:24:47Z`, before implementation. Provisioning
+and actual type generation were skipped. The in-progress job-log endpoint
+returned HTTP 404; only setup step metadata was available, so no exact setup
+CLI report or cause is claimed. The failed shell context lookup (`rg` unavailable,
+exit 127) was replaced by read-only views/grep, without installing tooling.
+
+Fresh corrected-head CI/execution-trust review, successful migration application,
+six-source populated preservation, ordinary integration/security/concurrency,
+AI18/recovery and actual generated types/parity remain pending. No `db:types`
+command or generated-file edit occurred. Coordinator owns first fresh-head CI,
+exact type-artifact evidence and separately verified connected Stage 2. No
+unconnected Stage 1 merge or complete I29 claim. Required visual/device/human
+gates remain open; no images/archives/browser captures were used. No Actions
+authorization/rerun, hosted mutation, deployment, paid/provider/private-photo
+operation or extra writer occurred; the live operation window remains closed.

@@ -55,6 +55,10 @@ describe('checked manual Save source contract (not database execution)', () => {
     expect(sql).toContain("set lock_timeout = '2s'");
     expect(sql).not.toMatch(/when others|on conflict.*do nothing/i);
   });
+  it('statically keeps the IF state CASE parenthesized (not real SQL execution proof)', () => {
+    const current = sql.match(/create function private\.item_save_current\b[\s\S]*?\$\$;/)?.[0];
+    expect(current).toContain("or im.state<>(case a.state when 'reserved' then 'pending' else 'ready' end) then");
+  });
   it('keeps structural cascade checks separate from destructive fixture or user-journey claims', () => {
     expect(ITEM_SAVE_CATALOG_SQL).toContain('pg_catalog.pg_constraint');
     expect(ITEM_SAVE_CATALOG_SQL).toContain('ON DELETE CASCADE');
