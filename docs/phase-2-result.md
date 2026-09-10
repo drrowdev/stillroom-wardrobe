@@ -3146,3 +3146,182 @@ hosted DDL, paid/provider/private-photo access or B3 waiver occurred. Hosted
 AI18/checked Save remains unapplied and the operation window closed. Client
 connection/full I29 and later packets are outside this repair; implementation
 stops at the scoped commit and public handoff.
+
+## PR #17 A4 recovery — strict AI-state oracle and closed phases, 10 September 2026
+
+**Three-path test correction; native checks passed, final-head CI still pending.**
+Existing branch `copilot/new-i29-checked-manual-save`, base/main
+`c6ee8beb890deeca0c04cf53d6d3deebe4a231f6`, starting head
+`e7c8c5adddc2141ac4d25445a926d73b98c66f1b`, tree
+`528738a6e515cbfd956262bc216b37a53fbb9c4a`, parent
+`c3cbbb83a7547bec225e73f3f2b9c0baf14878d4`. Initial tracked, staged and
+untracked-source status was clean, with no setup-generated delta. Requirements:
+I29 R03/R04 subset, preserving R01/R11/R17/R19/R23/R26/R27. This is not Stage 2,
+connected manual Save, full I29, merge readiness or acceptance.
+
+### Prospective recovery, context and own receipt
+
+Read the full [A4 approval 5617933116](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5617933116)
+and [recovery approval 5618548131](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5618548131),
+including the user's explicit choice to keep the verified generated file
+provisionally and finish A4. Actual different-provider critique: Anthropic /
+Claude Opus 5 (`claude-opus-5`), read-only reviewer
+`9edf6b92-27a7-47ce-b963-949860fe50a4`, turns 7/8, with coordinator amendments.
+Accepted constraints retain full non-clock state, reject code-only UNAVAILABLE,
+distinguish successful cleanup from cleanup failure and keep generated types
+read-only. Native generation is not final-head parity; additive declarations
+can affect type inference and require actual typechecking. No new critique or
+agent was launched. Original plan 5614413353 and A1/A2/A3 approvals
+5614726097/5615708093/5617117513 were read and remain historical controlling
+context, not this allocation's writable scope.
+
+The [stopped handoff 5618024024](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5618024024)
+and [freeze/provenance 5618217814](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5618217814)
+remain intact. The previous initial progress operation committed types outside
+its three-path allocation before full context/own receipt reading; A4 was not
+implemented then. Preserve e7's commit/message and missing Copilot App trailer;
+this prospective approval does not ratify that operation or backdate its gate.
+No revert, amend or history rewrite occurred.
+
+Actually read root `AGENTS.md`, `.github/copilot-instructions.md`, the blueprint
+instruction template without copying it, `docs/cloud-development.md`,
+Phase 0 status/ordered handoff, Phase 2 PR17/A1/A3 evidence and
+`docs/local-backend.md`'s fixture/execution/type gates. Blueprint reads:
+00/02/03/05/08/10/14/19/20, I29 in 15, and the relevant base schema/media/RLS/
+grants/functions in 07 (byte-identical to the initial migration).
+Source reads included all six migration contracts and hashes; full provenance,
+description, collections and checked-Save migrations; AI18 status/expiry/locking;
+generated RPC types; `src/images/upload.ts` and AddItem source;
+`package.json`, `eslint.config.mjs`, `scripts/db.mjs`,
+`scripts/backend/local.mjs` guard/runner sections, hosted guard excerpts,
+`scripts/run-local-tests.mjs`, core/AI fixture source guards,
+preservation inventory/catalog/normal-client/oracle excerpts and unit diff,
+complete checked integration/unit tests and normal AI/security test excerpts.
+Read current PR discussion, metadata/diff/reviews/review threads (both review
+lists empty), controlling comments and actual failed CI database logs. No
+credential/service-state files, images or archives were opened.
+
+After that read-only context and repeated clean status/hash checks, read
+[this task's own receipt 5618586494](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5618586494)
+**before any progress operation or edits**: task
+`5105f040-3ee3-46ad-b7f5-adcb1e6f6f66`, session
+`e9dd89a5-e14b-4962-b275-463928121463`, coordinator observed
+`2026-09-10T12:20:39.8945202Z`, explicitly selected `gpt-6-astra` and verified
+actual `sweagent-capi:gpt-6-astra`, repository 1358925513, PR artifact 4492828082,
+matching branch/base/start head/tree/parent. No historical receipt or prompt
+label was substituted. The subsequent initial progress operation reported
+**no changes to commit**.
+
+Retained `src/data/database.types.ts` remains read-only: **23976 bytes**,
+SHA256 `9cf1a659a46f2f611cf10a83a7b1b8f7f210233691a21142eee1e5123344e0f4`,
+blob `fe497411cc8fc2c7fed2d5b001773db03ef1521e`. Its 13 added lines declare
+reserve/finalize; existing `commit_image` is unchanged. Provenance is the actual
+prior setup run 34471504040/job 102852230615 at c3, generation log
+`11:31:49.142278Z`, as recorded in 5618217814, not alphabetical text shape.
+All six SQL files/pins remain unchanged; sixth SQL is **16801 bytes**,
+SHA256 `023be0259305f0700c982dd27cc40e438847cd7b7f818a7fe7d3cc8b260459a8`,
+blob `2c0aad72e95b844665e9da7927a11fd11730e867`. No new client consumption of
+the retained RPC signatures occurred.
+
+### Exact correction and oracle limits
+
+`tests/integration/item-save.sessions.mjs` adds one import-safe comparison
+helper using existing `requireEvidence`/deep-strict `eq`. Both inputs must be
+non-null, non-array objects with an **own** top-level `serverTimeMs`, each a
+nonnegative safe integer. Only that validated top-level clock is excluded,
+without mutation; every other key and nested value is compared strictly,
+including unknown additions/removals and nested `serverTimeMs`. No coercion,
+defaults, clock mocking, elapsed bound or monotonicity assumption was added.
+Millisecond timestamps can tie or valid clocks can move backwards.
+
+The approved-owner full shape is `{code,period,serverTimeMs,consent,policy,usage}`:
+consent contains `enabled,noticeRevision,consentedAt,profileVersion`; policy is
+null or contains `activated,noticeRevision,modelId,promptVersion,maxRequestMicro,
+monthlyAllowanceMicro,maxRequestsPerHour,resultTtlSeconds`; usage contains
+`accountedMicro,requestsLastHour,warning`. Code-only `{code:'UNAVAILABLE'}`
+deliberately fails. Both actual `ai_status` calls and the complete profile
+equality remain; no request/order/row/byte/current-state/race assertion changed.
+
+`ai_status` is **not a pure read**: it locks profile/control rows and expires
+requests, potentially changing usage. UTC month `period`, sliding-hour counts,
+accounting/warning and all expiry-sensitive effects remain strict. Equality
+assumes no relevant rollover/expiry between snapshots; changes remain failures
+requiring evidence, never ignored or retried away. The original c3 CI run
+34466870999 attempt 2/job 102843770044 passed startup, six-source/history/original
+two-owner/ten-table/30-row/eight-object preservation/catalog/cleanup, reset/AI18,
+legacy integration and full normal AI controls, then failed checked Save at
+`11:01:48.9119326Z` with a generic message. Its actual failing assertion remains
+unknown. This later green native run does not retroactively isolate that cause.
+Security/recovery/types were skipped there; App's 1080 units/471 keys/449 browser
+cases exercised the old client, not checked Save.
+
+Fixed phase assignments cover arguments/sign-in, initial snapshots, first
+reservation/replay, incomplete upload/state, upload/raw bypass/finalization/
+completed replay, unchanged profile/AI, full fields/canonical equivalence/
+mutated intents, invalid-first rollback, deletion, stale state, races and legacy
+cases. Failure output adds only that closed phase to the existing generic
+message/nonzero exit. Cleanup saves the previous phase, labels cleanup before
+the existing await, then restores the previous phase **only on success**.
+Cleanup failure remains labelled cleanup and may mask an earlier error under
+the unchanged semantics. No new catch/retry/request/logger or private output
+was added. A phase identifies the last entered test group, not an exact SQL
+statement or lock proof.
+
+`tests/unit/item-save.test.ts` preserves every existing body/assertion and adds
+51 cases covering clock equality/change/backwards/bounds, malformed clocks on
+either side, malformed inputs, own-property and UNAVAILABLE rejection, every
+known non-clock field plus unknown/missing/nested values, nested clocks and
+input immutability. The A3 early ready `FOR UPDATE` before target/parent and
+retained late NOWAIT checks are unchanged. One description-versus-commit and
+one retire-old-ready-versus-commit pair per owner retain the 15-second bound and
+strict rows/object bytes. HTTP concurrency does not force database overlap;
+predicate row locks are not phantom protection or a universal 40P01/timing claim.
+
+### Actual bounded native validation and handoff
+
+This task's setup run **34476166271**, job **102867333464**, at e7 reports
+successful startup (`12:21:36Z`–`12:22:46Z`), reset/provision
+(`12:22:47Z`–`12:23:28Z`) and type generation
+(`12:23:29Z`–`12:23:40Z`) in its job metadata. A text-log URL was obtained, but
+the bounded setup-only retrieval was unavailable; no raw processing/fixture
+logs were emitted and no exact setup-log cause is inferred. Initial regenerated
+type bytes had no delta. Successful reset/provision metadata and the existing
+local-only wrapper/fixture guards, not startup alone, permitted the sequence.
+
+Commands ran in `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`:
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run test:unit -- tests/unit/item-save.test.ts tests/unit/preservation.test.ts` | Exit 0; 143/143 tests, two files (previous 92 plus 51 additive cases). Static/unit evidence, not database execution. |
+| `npm run typecheck` | Exit 0 against the exact retained generated types above; not CI artifact/parity proof. |
+| `npm run lint` | Exit 0. |
+| `npm run check:translations` | Exit 0; 471 EN/FI/SV keys, 45 source files. |
+| `npm run scan:secrets` | Exit 0; 178 text files and unprinted canary checked. |
+| `git diff --check` | Exit 0. |
+| `npm run db:start` | One guarded invocation, exit 0. |
+| `npm run test:integration` | One invocation, exit 0: original normal-owner integration, full AI controls, checked Save replay/deletion/state/objects/bounded races and one recovery browser test passed. |
+| `npm run test:security` | One invocation after integration success, exit 0: original security, full AI controls and checked Save normal A/B/anonymous negatives passed. |
+
+The existing I29b stored description-counter ceiling remains explicitly **NOT
+RUN** under ordinary fixture limits; static finite-bound coverage is not live
+counter-ceiling proof. No post-edit reset/type generation, repeated run,
+alternate script/raw CLI/debug/provisioning workaround or unrelated repair ran.
+Read-only lookup misses (`rg` unavailable, two guessed file paths absent) caused
+no installation or source changes.
+
+Coordinator owns exact-new-head independent review/execution trust before first
+CI. Required final-head six-source/history/populated preservation/catalog/AI18/
+legacy/checked normal A-B-anonymous/race/security/recovery evidence and a real
+CI database-types artifact with verified run/head/text/hash/byte parity remain
+mandatory. Native/setup types and these native checks do not unlock Stage 2;
+even a final type-parity-only failure is staging, not a pass. A fresh separately
+verified task must connect every manual Save later. No unconnected Stage 1
+merge, guessed types/casts, full-I29 or production-ready claim.
+
+Existing e7 CI 34471816347 remains unapproved/action_required with zero jobs;
+Apple 34471816391 was untouched. No Actions authorization/rerun, new agent/
+branch/PR, merge/deployment, hosted DDL, provider/paid/private-photo operation or
+private-input capture occurred. Exact-head coordinator visual review and
+applicable device/human gates remain pending, not waived by PR16 B3 or these
+tests. Hosted AI18/checked Save remains unapplied; the live operation window
+is closed/read-only. Stop after the scoped commit and public handoff.

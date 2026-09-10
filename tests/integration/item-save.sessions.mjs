@@ -4,6 +4,17 @@ import { isMain } from '../../scripts/quality/files.mjs';
 import { normalClient, requireEvidence } from './preservation.sessions.mjs';
 
 export const eq = (left, right) => requireEvidence(isDeepStrictEqual(left, right));
+export function equalAiStatusState(left, right) {
+  requireEvidence(left !== null && typeof left === 'object' && !Array.isArray(left)
+    && right !== null && typeof right === 'object' && !Array.isArray(right));
+  requireEvidence(Object.hasOwn(left, 'serverTimeMs') && Object.hasOwn(right, 'serverTimeMs'));
+  const { serverTimeMs: leftClock, ...leftState } = left;
+  const { serverTimeMs: rightClock, ...rightState } = right;
+  requireEvidence(Number.isSafeInteger(leftClock) && leftClock >= 0
+    && Number.isSafeInteger(rightClock) && rightClock >= 0);
+  eq(leftState, rightState);
+}
+let phase = 'arguments';
 // Tiny synthetic transport bytes prove object presence, not valid camera/JPEG processing.
 export const bytes = new Uint8Array([255, 216, 255, 217]);
 const hash = createHash('sha256').update(bytes).digest('hex');
@@ -158,12 +169,16 @@ async function legacyReplacementCases(client, owner, h) {
 async function ownerCases(client, owner) {
   const h = saveHarness(client, owner);
   try {
+    phase = 'initial-profile-status';
     const profileBefore = await client.rows(owner, 'profiles');
     const aiBefore = await client.rpc(owner, 'ai_status', {});
+    phase = 'first-reserve-replay';
     const value = h.track(), reserved = await h.reserve(value);
     eq(await h.reserve(value), reserved);
+    phase = 'incomplete-upload-state';
     denied(await h.call('finalize_item_save', h.finalizeArgs(value, reserved)), 'Upload incomplete');
     eq((await h.read('item_images', value.p_image.id))[0].state, 'pending');
+    phase = 'upload-raw-bypass-finalize-completed-replay';
     await h.upload(value);
     denied(await h.call('commit_image', { p_image_id: value.p_image.id }));
     await h.finalize(value, reserved);
@@ -171,9 +186,11 @@ async function ownerCases(client, owner) {
     eq(completed.state, 'completed'); eq(completed.image.state, 'ready');
     await h.finalize(value, completed);
     eq(await h.reserve(value), completed);
+    phase = 'unchanged-profile-ai';
     eq(await client.rows(owner, 'profiles'), profileBefore);
-    eq(await client.rpc(owner, 'ai_status', {}), aiBefore);
+    equalAiStatusState(await client.rpc(owner, 'ai_status', {}), aiBefore);
 
+    phase = 'full-fields-canonical-equivalence-mutated-intents';
     const all = h.track();
     Object.assign(all.p_item, {
       subcategory: 'shirt', colours: ['green'], pattern: 'solid', sleeve_length: 'long',
@@ -210,6 +227,7 @@ async function ownerCases(client, owner) {
     }
 
     // Failed first transaction must not claim either identity.
+    phase = 'invalid-first-rollback';
     for (const change of [
       (v) => { v.p_image.width = 0; }, (v) => { v.p_item.category = 'invalid'; },
       (v) => { v.p_item.purchase_date = '2026-02-30'; v.p_item.field_provenance.purchase_date = { kind: 'user', revision: 1 }; },
@@ -221,6 +239,7 @@ async function ownerCases(client, owner) {
     }
 
     // Permanent deletion removes live content, not the owner-local used identities.
+    phase = 'deletion';
     const pending = h.track(); await h.reserve(pending); await h.deleteItem(pending);
     denied(await h.call('reserve_item_save', pending));
     for (const combination of [
@@ -236,6 +255,7 @@ async function ownerCases(client, owner) {
     await h.deleteItem(value);
     denied(await h.call('reserve_item_save', value));
 
+    phase = 'stale-state';
     for (const mutation of ['field', 'version', 'soft-delete', 'caption', 'counter', 'retire', 'cleanup']) {
       const current = h.track(), row = await h.reserve(current);
       await h.upload(current); await h.finalize(current, row);
@@ -258,6 +278,7 @@ async function ownerCases(client, owner) {
     }
 
     // Actual ordinary PostgREST overlap, bounded failure rather than a lock-graph claim.
+    phase = 'race-groups';
     for (const kind of ['reserve', 'finalize', 'delete-reserve', 'delete-finalize', 'retire-finalize', 'description-finalize']) {
       const current = h.track(), row = kind === 'reserve' ? null : await h.reserve(current);
       if (kind !== 'reserve') await h.upload(current);
@@ -291,17 +312,25 @@ async function ownerCases(client, owner) {
         denied(await reserve()); denied(await finalize());
       }
     }
+    phase = 'legacy-cases';
     await legacyReplacementCases(client, owner, h);
-  } finally { await h.cleanup(); }
+  } finally {
+    const priorPhase = phase;
+    phase = 'cleanup';
+    await h.cleanup();
+    phase = priorPhase;
+  }
 }
 async function main() {
   try {
+    phase = 'arguments';
     requireEvidence(process.argv.length === 2);
+    phase = 'sign-in';
     const { client, owners } = await saveClients(process.env);
     for (const owner of owners) await ownerCases(client, owner);
     console.log('PASS: checked manual Save integration; normal owners=2; exact replay, deletion, state, objects and bounded races');
   } catch {
-    console.error('FAIL: checked manual Save integration; normal-session evidence required; no private details logged');
+    console.error(`FAIL: checked manual Save integration; phase=${phase}; normal-session evidence required; no private details logged`);
     process.exitCode = 1;
   }
 }

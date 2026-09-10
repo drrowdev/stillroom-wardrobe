@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { garmentFields } from '../../src/domain/garment-fields';
 import { provenanceFields } from '../../src/domain/attribute-provenance';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
-import { intent, denied, boundedRace, manualFields } from '../integration/item-save.sessions.mjs';
+import { intent, denied, boundedRace, manualFields, equalAiStatusState } from '../integration/item-save.sessions.mjs';
 // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
 import { ITEM_SAVE_CATALOG_SQL } from '../../scripts/preservation-rehearsal.mjs';
 
@@ -104,5 +104,108 @@ describe('checked manual Save source contract (not database execution)', () => {
   it('awaits all bounded operations and rejects non-contract errors', async () => {
     await expect(boundedRace([async () => ({ ok: true }), async () => ({ ok: true })])).resolves.toHaveLength(2);
     await expect(boundedRace([async () => ({ ok: false, status: 500 })])).rejects.toThrow();
+  });
+});
+
+describe('approved-owner full AI status comparison', () => {
+  const status = () => ({
+    code: 'OK', period: '2026-09', serverTimeMs: 1000,
+    consent: { enabled: true, noticeRevision: 1, consentedAt: '2026-09-10T00:00:00Z', profileVersion: '2' },
+    policy: {
+      activated: true, noticeRevision: 1, modelId: 'fictional:controls/v1', promptVersion: 1,
+      maxRequestMicro: '5000', monthlyAllowanceMicro: '15000', maxRequestsPerHour: 20, resultTtlSeconds: 3600,
+    },
+    usage: { accountedMicro: '100', requestsLastHour: 2, warning: false },
+  });
+
+  it.each([1000, 1001, 999, 0, Number.MAX_SAFE_INTEGER])('accepts clock-only value %s without mutating either input', (clock) => {
+    const left = status(), right = { ...status(), serverTimeMs: clock };
+    const leftBefore = structuredClone(left), rightBefore = structuredClone(right);
+    equalAiStatusState(left, right);
+    expect(left).toStrictEqual(leftBefore);
+    expect(right).toStrictEqual(rightBefore);
+  });
+
+  it.each([
+    ['missing', {}], ['undefined', { serverTimeMs: undefined }], ['string', { serverTimeMs: '1000' }],
+    ['null', { serverTimeMs: null }], ['fractional', { serverTimeMs: 1.5 }], ['negative', { serverTimeMs: -1 }],
+    ['unsafe', { serverTimeMs: Number.MAX_SAFE_INTEGER + 1 }], ['NaN', { serverTimeMs: NaN }],
+    ['infinite', { serverTimeMs: Infinity }], ['negative infinite', { serverTimeMs: -Infinity }],
+  ])('rejects %s clocks on either side', (_label, clock) => {
+    const malformed: Record<string, unknown> = status();
+    delete malformed.serverTimeMs;
+    Object.assign(malformed, clock);
+    expect(() => equalAiStatusState(malformed, status())).toThrow('EVIDENCE_REQUIRED');
+    expect(() => equalAiStatusState(status(), malformed)).toThrow('EVIDENCE_REQUIRED');
+  });
+
+  it.each([null, undefined, [], [1000], 'status', 1000, true, () => ({ serverTimeMs: 1000 })])(
+    'rejects malformed input %# on either side', (malformed) => {
+      expect(() => equalAiStatusState(malformed, status())).toThrow('EVIDENCE_REQUIRED');
+      expect(() => equalAiStatusState(status(), malformed)).toThrow('EVIDENCE_REQUIRED');
+    },
+  );
+
+  it('requires an own clock, not an inherited property', () => {
+    const inherited = Object.assign(Object.create({ serverTimeMs: 1000 }), status());
+    delete inherited.serverTimeMs;
+    expect(() => equalAiStatusState(inherited, status())).toThrow('EVIDENCE_REQUIRED');
+    expect(() => equalAiStatusState(status(), inherited)).toThrow('EVIDENCE_REQUIRED');
+  });
+
+  it('intentionally rejects code-only UNAVAILABLE responses', () => {
+    expect(() => equalAiStatusState({ code: 'UNAVAILABLE' }, { code: 'UNAVAILABLE' })).toThrow('EVIDENCE_REQUIRED');
+  });
+
+  it.each([
+    ['code', { code: 'INACTIVE' }], ['period', { period: '2026-10' }],
+    ['consent enabled', { consent: { ...status().consent, enabled: false } }],
+    ['consent notice', { consent: { ...status().consent, noticeRevision: 2 } }],
+    ['consent time', { consent: { ...status().consent, consentedAt: null } }],
+    ['profile version', { consent: { ...status().consent, profileVersion: '3' } }],
+    ['policy', { policy: null }],
+    ['policy activation', { policy: { ...status().policy, activated: false } }],
+    ['policy notice', { policy: { ...status().policy, noticeRevision: 2 } }],
+    ['policy model', { policy: { ...status().policy, modelId: 'fictional:controls/v2' } }],
+    ['policy prompt', { policy: { ...status().policy, promptVersion: 2 } }],
+    ['policy request maximum', { policy: { ...status().policy, maxRequestMicro: '5001' } }],
+    ['policy monthly allowance', { policy: { ...status().policy, monthlyAllowanceMicro: '15001' } }],
+    ['policy hourly maximum', { policy: { ...status().policy, maxRequestsPerHour: 21 } }],
+    ['policy expiry', { policy: { ...status().policy, resultTtlSeconds: 3601 } }],
+    ['accounting', { usage: { ...status().usage, accountedMicro: '101' } }],
+    ['hourly count', { usage: { ...status().usage, requestsLastHour: 3 } }],
+    ['warning', { usage: { ...status().usage, warning: true } }],
+    ['unknown added key', { unexpected: null }],
+    ['unknown nested key', { usage: { ...status().usage, unexpected: null } }],
+  ])('rejects non-clock change: %s', (_label, change) => {
+    const left = status(), right = { ...status(), ...change };
+    const leftBefore = structuredClone(left), rightBefore = structuredClone(right);
+    expect(() => equalAiStatusState(left, right)).toThrow('EVIDENCE_REQUIRED');
+    expect(() => equalAiStatusState(right, left)).toThrow('EVIDENCE_REQUIRED');
+    expect(left).toStrictEqual(leftBefore);
+    expect(right).toStrictEqual(rightBefore);
+  });
+
+  it.each(['code', 'period', 'consent', 'policy', 'usage'])('rejects missing non-clock key %s', (key) => {
+    const missing: Record<string, unknown> = status();
+    delete missing[key];
+    expect(() => equalAiStatusState(status(), missing)).toThrow('EVIDENCE_REQUIRED');
+    expect(() => equalAiStatusState(missing, status())).toThrow('EVIDENCE_REQUIRED');
+  });
+
+  it('compares unknown nested values, missing nested keys and nested serverTimeMs exactly', () => {
+    const left = { ...status(), unexpected: { serverTimeMs: 1, values: [null, { count: 2 }] } };
+    for (const unexpected of [
+      { serverTimeMs: 2, values: [null, { count: 2 }] },
+      { serverTimeMs: 1, values: [null, { count: 3 }] },
+      { serverTimeMs: 1 },
+    ]) {
+      const right = { ...status(), unexpected };
+      expect(() => equalAiStatusState(left, right)).toThrow('EVIDENCE_REQUIRED');
+      expect(() => equalAiStatusState(right, left)).toThrow('EVIDENCE_REQUIRED');
+    }
+    const missing = { ...status(), usage: { accountedMicro: '100', warning: false } };
+    expect(() => equalAiStatusState(status(), missing)).toThrow('EVIDENCE_REQUIRED');
+    expect(() => equalAiStatusState(missing, status())).toThrow('EVIDENCE_REQUIRED');
   });
 });
