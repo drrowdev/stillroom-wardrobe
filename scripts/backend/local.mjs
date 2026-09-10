@@ -115,6 +115,116 @@ export function describeGenerationResult(result, elapsedMs) {
   return report;
 }
 
+export function describeStartupOrResetFailure(result, elapsedMs) {
+  const report = {
+    tag: 'invalid-result',
+    exitCode: null,
+    elapsedMs: null,
+    stdoutBytes: null,
+    stderrBytes: null,
+    stderrDockerOperation: 'none',
+    stderrContainerExitBucket: 'unclassified',
+    stderrSqlState: 'none',
+    announcedKnownMigrationCount: 0,
+    lastAnnouncedKnownMigrationIndex: null,
+    stderrPortAllocationMarker: false,
+  };
+  let code, stdout, stderr;
+  try {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return report;
+    // Own data properties only; hostile reflection must leave the closed defaults intact.
+    code = Object.getOwnPropertyDescriptor(result, 'code')?.value;
+    stdout = Object.getOwnPropertyDescriptor(result, 'stdout')?.value;
+    stderr = Object.getOwnPropertyDescriptor(result, 'stderr')?.value;
+  } catch {
+    return report;
+  }
+  if (!Number.isInteger(code) || code < 0 || code > 255
+    || !Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > Number.MAX_SAFE_INTEGER
+    || typeof stdout !== 'string' || typeof stderr !== 'string') return report;
+  const limit = 16 * 1024 * 1024;
+  if (stdout.length > limit || stderr.length > limit) return report;
+  const stdoutBytes = Buffer.byteLength(stdout, 'utf8');
+  const stderrBytes = Buffer.byteLength(stderr, 'utf8');
+  if (stdoutBytes + stderrBytes > limit) return report;
+  report.exitCode = code;
+  report.elapsedMs = Math.floor(elapsedMs);
+  report.stdoutBytes = stdoutBytes;
+  report.stderrBytes = stderrBytes;
+  report.tag = code === 0 ? 'success' : stderrBytes > 0 ? 'nonzero-with-stderr'
+    : stdoutBytes > 0 ? 'nonzero-with-stdout' : 'nonzero-empty-output';
+  if (report.tag !== 'nonzero-with-stderr') return report;
+
+  const operations = [
+    ['failed to inspect docker image', 'inspect-image'],
+    ['failed to pull docker image', 'pull-image'],
+    ['failed to create docker container:', 'create-container'],
+    ['failed to start docker container ', 'start-container'],
+    ['failed to inspect docker container:', 'inspect-container'],
+    ['failed to read docker logs:', 'read-logs'],
+    ['failed to copy docker logs:', 'copy-logs'],
+    ['error running container:', 'run-container'],
+  ];
+  for (const [literal, operation] of operations) {
+    if (stderr.includes(literal)) {
+      report.stderrDockerOperation = report.stderrDockerOperation === 'none' ? operation : 'multiple';
+    }
+  }
+  if (stderrBytes <= 4096) {
+    const anchor = 'error running container:';
+    const first = stderr.indexOf(anchor);
+    if (first !== -1 && stderr.indexOf(anchor, first + anchor.length) === -1) {
+      const match = /(?:^|\n)error running container: exit ([1-9][0-9]{0,2})\n/.exec(stderr);
+      if (match) {
+        const exit = Number(match[1]);
+        if (exit <= 255) {
+          report.stderrContainerExitBucket = exit === 125 ? 'exit-125'
+            : exit === 126 || exit === 127 ? 'exit-126-or-127' : 'other-nonzero';
+        }
+      }
+    }
+  }
+  const sqlStates = ['42601', '42P01', '42702', '42703', '42883', '42501',
+    '23505', '23503', '23514', '55P03', '40P01'];
+  let firstSqlState;
+  for (const match of stderr.matchAll(/ \(SQLSTATE ([0-9A-Z]{5})\)/g)) {
+    if (firstSqlState === undefined) {
+      firstSqlState = match[1];
+      report.stderrSqlState = sqlStates.find((state) => state === firstSqlState) ?? 'unclassified';
+    } else if (match[1] !== firstSqlState) {
+      report.stderrSqlState = 'multiple';
+      break;
+    }
+  }
+  const migrations = [
+    '20260905000000_initial.sql',
+    '20260906000000_item_field_provenance.sql',
+    '20260909070000_item_description_edit.sql',
+    '20260909110000_item_optional_collections.sql',
+    '20260909180000_ai_request_controls.sql',
+    '20260910070000_checked_item_save.sql',
+  ];
+  let lastAnnouncement = -1;
+  for (const [index, filename] of migrations.entries()) {
+    const literal = `Applying migration ${filename}...`;
+    let observed = false;
+    for (let at = stderr.indexOf(literal); at !== -1; at = stderr.indexOf(literal, at + literal.length)) {
+      const end = at + literal.length;
+      if ((at === 0 || stderr[at - 1] === '\n')
+        && (stderr[end] === '\n' || stderr[end] === '\r' && stderr[end + 1] === '\n')) {
+        observed = true;
+        if (at > lastAnnouncement) {
+          lastAnnouncement = at;
+          report.lastAnnouncedKnownMigrationIndex = index + 1;
+        }
+      }
+    }
+    if (observed) report.announcedKnownMigrationCount += 1;
+  }
+  report.stderrPortAllocationMarker = stderr.includes('port is already allocated');
+  return report;
+}
+
 export function assertLoopbackUrl(value) {
   let url;
   try { url = new URL(value); } catch { fail('REFUSED: a valid loopback HTTP URL is required.'); }

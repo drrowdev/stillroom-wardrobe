@@ -3,7 +3,7 @@ import { lstat, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   ROOT, assertNoServiceSecrets, assertProjectConfig, requireDocker, requireLocalContainer,
-  cli, runCommand, normalSessionEnvironment, readCredentialCache, validateSessionEnvironment,
+  cli, runCommand, normalSessionEnvironment, readCredentialCache, validateSessionEnvironment, privilegedLocalSql,
 } from './backend/local.mjs';
 import { isMain } from './quality/files.mjs';
 import {
@@ -16,7 +16,45 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260909070000_item_description_edit.sql', version: '20260909070000', time: '2026-09-09 07:00:00', bytes: 2618, sha256: SOURCE_HASHES.description },
   { name: '20260909110000_item_optional_collections.sql', version: '20260909110000', time: '2026-09-09 11:00:00', bytes: 454, sha256: SOURCE_HASHES.collections },
   { name: '20260909180000_ai_request_controls.sql', version: '20260909180000', time: '2026-09-09 18:00:00', bytes: 28579, sha256: SOURCE_HASHES.controls },
+  { name: '20260910070000_checked_item_save.sql', version: '20260910070000', time: '2026-09-10 07:00:00', bytes: 16801, sha256: SOURCE_HASHES.save },
 ]);
+
+// Catalog-only structural proof. Never delete a normal fixture profile to test retention.
+export const ITEM_SAVE_CATALOG_SQL = `
+select jsonb_build_object(
+  'rls',(select count(*)=2 and bool_and(c.relrowsecurity)
+    from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid=c.relnamespace
+    where n.nspname='private' and c.relname in ('item_save_used_ids','item_save_attempts')),
+  'policies',(select count(*)=0 from pg_catalog.pg_policies
+    where schemaname='private' and tablename in ('item_save_used_ids','item_save_attempts')),
+  'tableDenied',(select bool_and(not has_table_privilege(r,t,'SELECT,INSERT,UPDATE,DELETE'))
+    from unnest(array['authenticated','anon']) r,
+      unnest(array['private.item_save_used_ids','private.item_save_attempts']) t),
+  'markerColumns',(select array_agg(a.attname::text order by a.attnum)=array['owner_id','item_id','image_id']
+      and bool_and(a.atttypid='uuid'::regtype and a.attnotnull)
+    from pg_catalog.pg_attribute a where a.attrelid='private.item_save_used_ids'::regclass
+      and a.attnum>0 and not a.attisdropped),
+  'markerKeys',(select count(*)=3 and bool_and(pg_get_constraintdef(c.oid)=any(array[
+      'PRIMARY KEY (owner_id, item_id)','UNIQUE (owner_id, image_id)',
+      'FOREIGN KEY (owner_id) REFERENCES profiles(owner_id) ON DELETE CASCADE']))
+    from pg_catalog.pg_constraint c where c.conrelid='private.item_save_used_ids'::regclass),
+  'attemptFks',(select count(*)=3 and bool_and(pg_get_constraintdef(c.oid)=any(array[
+      'FOREIGN KEY (owner_id) REFERENCES profiles(owner_id) ON DELETE CASCADE',
+      'FOREIGN KEY (owner_id, item_id) REFERENCES items(owner_id, id) ON DELETE CASCADE',
+      'FOREIGN KEY (owner_id, item_id, image_id) REFERENCES item_images(owner_id, item_id, id) ON DELETE SET NULL (image_id)']))
+    from pg_catalog.pg_constraint c where c.conrelid='private.item_save_attempts'::regclass and c.contype='f'),
+  'helperDenied',(select bool_and(not has_function_privilege(r,f,'EXECUTE'))
+    from unnest(array['authenticated','anon']) r,
+      unnest(array['private.commit_item_save_image(uuid)','private.item_save_owner()',
+        'private.item_save_current(uuid,uuid,uuid,text)','private.item_save_fingerprint(items,item_images)']) f),
+  'rpc',(select count(*)=3 and bool_and(p.prosecdef and p.provolatile='v'
+      and 'search_path=""'=any(p.proconfig)
+      and has_function_privilege('authenticated',p.oid,'EXECUTE')
+      and not has_function_privilege('anon',p.oid,'EXECUTE'))
+    from pg_catalog.pg_proc p where p.oid=any(array[
+      'public.reserve_item_save(jsonb,jsonb)'::regprocedure,
+      'public.finalize_item_save(uuid,uuid,text)'::regprocedure,'public.commit_image(uuid)'::regprocedure]))
+);`;
 
 export function assertRehearsalEnvironment(env, args) {
   requireEvidence(Array.isArray(args) && args.length === 0);
@@ -198,6 +236,10 @@ async function main() {
     await history('target');
     stage = 'S4-verify';
     await child('verify');
+    stage = 'S4-checked-save-catalog';
+    const catalog = JSON.parse(await privilegedLocalSql(ITEM_SAVE_CATALOG_SQL));
+    requireEvidence(Object.keys(catalog).length === 8 && Object.values(catalog).every((value) => value === true));
+    console.log('PASS: checked Save catalog protections/profile cascade; account-deletion journey NOT RUN');
     console.log('PASS: populated base-to-target preservation and bounded post-comparison probes');
   } catch (error) {
     console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}; subsequent stages NOT RUN`);

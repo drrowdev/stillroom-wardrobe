@@ -63,6 +63,23 @@ A publishable key is safe only with correctly enforced RLS. Allowlist `VITE_SUPA
 
 ## Deletion and recovery
 
+The reviewed PR #17/A1 checked-manual-Save source candidate retains a minimal
+private retry guard after item/image cleanup: exactly three UUIDs
+`owner_id,item_id,image_id`, unique per owner, with no timestamps, status,
+ordering, counts, fields, captions, hashes, fingerprints, model or result content.
+These are **pseudonymous identifiers**, not anonymous/unlinkable data or an
+activity log. They are inaccessible through client table/API grants and excluded
+from logs/exports. The separate live attempt's fingerprint and server times
+cascade on item deletion; the bare used identities do not resurrect that content.
+
+One guard row accumulates for every successful checked reservation, including
+abandoned reservations, until the owner profile is actually deleted. Its
+ON DELETE CASCADE is a structural retention boundary only. There is no scheduler,
+bounded-total-growth guarantee or completed self-service account-deletion
+journey: that UI/endpoint remains pending. Existing normal fixtures must not be
+destroyed to simulate that acceptance. This source change implies no paid
+processing, hosted migration or live deployment.
+
 Normal item/outfit/history deletion is seven-day trash with an eight-second Undo shortcut. Confirm permanent deletion with the owned object's readable name and image count. Remove image bytes before final metadata deletion. Interrupted byte removal is retryable and visible; absence of a SQL row is not proof of physical file deletion.
 
 Account deletion requires a fresh password check in the Edge Function, a deliberate confirmation and an Export first option. Never store/log the password. Sequence: private deletion receipt → disable only that approval → remove owner-prefix files → delete that profile and cascading private records → remove Auth identity → complete receipt. The server-only SQL controller guards the stages. Resume failures with the same owner/job; an operator can finish a job after the Auth identity disappears. The other account's profile, images, outfits, preferences and history must remain byte-for-byte unchanged.

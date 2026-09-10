@@ -52,7 +52,7 @@ REST below means `/rest/v1/…` with the publishable key and user bearer token. 
 | Item list/search | Owner-scoped compact metadata, stable `(created_at,id)` cursor; local search/filter; 40 visible thumbnails/page | Abort stale searches; only owned results in the wardrobe. Retry read up to twice. |
 | Item edit/trash/restore | PATCH `id`, `owner_id`, expected `version`; set fields or `deleted_at`; return row | 409-style conflict on zero-row version match. Trash affects only the current owner. |
 | Permanent item removal | Confirm, remove owned image objects, forget metadata, DELETE own item; resume remaining keys on failure | Do not claim success if bytes remain. A second DELETE of already absent content succeeds logically. |
-| Image reserve | INSERT permitted `item_images` columns; state defaults pending; paths are generated in DB | Reuse reservation UUID only for identical prepared hashes. Incomplete reservation is recoverable. |
+| Image reserve | Manual creation uses `reserve_item_save` below; legacy callers retain permitted `item_images` INSERT, pending defaults and DB-generated paths | Checked retries require the exact frozen intent and current rows, not hashes alone. |
 | Image upload | SDK Storage `.upload(path,blob,{contentType:'image/jpeg',upsert:false,cacheControl:'0'})` | 409 existing object → authenticated download and compare SHA-256; equal means success, unequal means conflict. |
 | Commit/retire/forget image | RPC `commit_image(p_image_id)` / `retire_image(p_image_id)` / `forget_image(p_image_id)` → void | Incomplete upload → keep old ready version; retiring an imported version leaves the active photo unchanged; existing object bytes block forgetting. |
 | Outfit save | RPC `save_outfit(p_id,p_title,p_occasion,p_notes,p_favourite,p_item_ids,p_expected_version)` → version | Atomic parent + ordered links; same create payload/ID is idempotent; stale version fails. |
@@ -98,9 +98,10 @@ lookup may classify a counter mismatch/ceiling as `22023` / `Request conflict`;
 foreign, absent, pending, retired or deleted-parent targets give `42501` /
 `Not available`, as does missing admission. No raw upstream error is UI copy.
 
-There is no parent row lock. Existing `commit_image` locks the pending image,
-then parent, then old ready image; taking an old-ready-to-parent lock here would
-create a deadlock cycle. PostgreSQL rechecks the updated target image's state and
+There is no parent row lock in description editing. The unchanged private legacy
+commit helper locks the target image, then parent, then old ready image. The
+PR #17 public wrapper prelocks existing ready media before target/parent as
+specified below; description editing remains image-only. PostgreSQL rechecks the updated target image's state and
 counter after a concurrent row change; the parent EXISTS is statement-snapshot
 evidence, not a promise to observe a later soft delete. Same-counter concurrent
 edits have at most one success; replacement can retire the target but cannot
@@ -127,15 +128,16 @@ and owner/epoch. Repeated submit events share a synchronous latch. Retry reuses
 that snapshot and those IDs; no new photo analysis, automatic retry or new
 baseline is inferred.
 
-Creation inserts only manually supplied/cleared user/revision-1 assertions;
+Creation reserves only manually supplied/cleared user/revision-1 assertions;
 untouched factual assertions are omitted, never unknown/revision-0 entries.
-Duplicate item reconciliation requires owned identity, no deletion, initial row
-version 1, every frozen field and semantic provenance equality. Creation does
-not compare generated timestamps. Image reconciliation checks identity, parent,
-dimensions, sizes, hashes and the frozen caption, including `''`. Pending images
-also require description counter 1. An unchanged-caption ready image may have a
-later counter; changed captions conflict rather than being overwritten or
-reported as the frozen reviewed value. Storage transport and commit are unchanged.
+The connected checked Save requires owned identity, no deletion, initial item
+version 1, every frozen field and semantic provenance equality. Generated
+timestamps are validated as timestamps, not compared with a browser clock.
+Image checks cover identity, parent, paths, dimensions, sizes, hashes and the
+frozen caption, including `''`. Both pending and completed retries require
+description counter 1 and no retirement. Even an unchanged-caption later counter
+conflicts. Storage transport is unchanged; checked finalization replaces raw
+commit and rechecks current rows and both objects.
 
 Saved editing performs one owner/id/non-deleted/expected-version PATCH per item
 Save, coupling every changed factual value with user/previous+1. Same-value manual
@@ -156,6 +158,64 @@ Future restore must retain empty collections and manual provenance, rebind owned
 IDs and reserve exact saved description text without inference or imported consent.
 AI receipts/allowances/expiry and final saved-only export remain unfinished I29
 work; this source contract authorizes no hosted migration or deployment.
+
+## PR #17 checked manual Save source candidate
+
+The staged migration `20260910070000_checked_item_save.sql` adds:
+
+* `reserve_item_save(p_item jsonb,p_image jsonb)` returns one row containing
+  `item`, `image`, `fingerprint`, `state`. The closed item input contains `id`,
+  all thirty garment fields and manual `field_provenance`; the closed image
+  input contains `id`, main/thumb byte lengths and SHA-256 metadata, width,
+  height and exact `alt_text`. Owner, versions, paths, state and times are
+  server-controlled. Only explicit user/revision-1 provenance is accepted.
+  Atomic reservation claims both used identities and creates all live rows or
+  rolls everything back. Canonical typed price/provenance semantics and JSON
+  key ordering do not create distinct intents.
+* `finalize_item_save(p_item_id uuid,p_image_id uuid,p_fingerprint text)` returns
+  void. Current admission/owner, the live attempt, exact fields/provenance,
+  item version 1/nondeletion, original image metadata/caption, description
+  version 1/nonretirement and both actual canonical Storage object records
+  are required. First completion atomically commits the image and records server
+  completion; completed replay repeats those checks, including object presence.
+  No ready-only or identifier-marker-only success is valid.
+* `commit_image` retains the legacy implementation in a non-client-callable
+  private helper. The public wrapper rejects either an owner-local used item ID
+  or used image ID, including alternate images and raw recreation after deletion.
+  Genuine legacy IDs/grants remain usable. Future checked replacement/restore
+  needs its later reviewed route, not this legacy shortcut.
+
+New paths lock the enabled owner's profile first with NOWAIT. The legacy public
+wrapper resolves the owned target's item ID without a row lock, then waits for
+that owner/item's existing ready image under the existing two-second lock timeout,
+holding neither target nor parent yet. It re-reads the owned target with NOWAIT,
+rejects missing targets with `42501` / `Not available` and owner/item identity
+drift with `22023` / `Request conflict`, then keeps the used item-or-image guard,
+parent NOWAIT and post-parent ready-image NOWAIT recheck before the unchanged
+private delegate. Already-ready targets re-lock the same row. Ordinary image
+grants exclude direct owner/item/state changes, and reviewed ready transitions
+are profile-serialized; the predicate recheck itself is not phantom protection.
+Checked attempt/image/item and object locks retain NOWAIT; the two-second timeout
+also bounds residual uniqueness/FK waits. Existing delete cascades, retire and description paths remain unchanged;
+their reverse ordering is not assumed safe merely from a diagram. Normal-session
+race tests must execute before acceptance. A specific lock conflict rolls back
+the whole call. Errors are closed `22023` / `Invalid input`, `Request conflict`,
+`Upload incomplete`, or `42501` / `Not available`, never raw field/peer details.
+
+The original Stage 1 reset failure remains historical evidence in the phase
+result. CI 34477104827 at `1bf2670c` subsequently passed the database gates and
+generated exact tracked types. The Stage 2 source now connects **every** manual
+AddItem Save/retry through `src/images/upload.ts`, under receipt 5619278146.
+Before any upload it validates one reservation row, its JSON shape, exact owned
+metadata, versions, state pairing and opaque fingerprint. Completed retries
+still reserve and finalize; a reservation rejection never triggers repair.
+Only the closed 32-key item and 8-key image inputs are sent. It preserves frozen
+values/IDs/owner epoch, explicit Retry/Discard, existing translated errors and
+byte-identical `ensureFile`, thumb-before-main upload order/options and
+duplicate-object SHA comparison. New-head validation and coordinator visual
+review remain required; prior-head CI is not connected-client acceptance.
+No analysis call, byte attestation, paid activation, completed I29 or hosted
+change follows from this metadata/object-presence prerequisite.
 
 ## Authenticated image access
 

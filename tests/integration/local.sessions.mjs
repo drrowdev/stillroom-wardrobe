@@ -348,33 +348,49 @@ async function descriptionCorrections(owner, fixture, jpg, sha) {
   }
   stage = 'I29b replacement race stays on old image and preserves all private bytes';
   for (const objectPath of [pending.main_path, pending.thumb_path]) {
+    stage = objectPath === pending.main_path
+      ? 'I29b replacement main upload' : 'I29b replacement thumb upload';
     fixture.paths.push(objectPath);
     const upload = await request(owner.token, `/storage/v1/object/wardrobe/${objectPath}`, {
       method: 'POST', body: jpg, binary: true, headers: { 'Cache-Control': 'max-age=0', 'x-upsert': 'false' },
     });
     assert.ok(upload.ok);
   }
+  stage = 'I29b replacement concurrent requests';
   const [correction, commit] = await Promise.all([
     edit(image.id, image.description_version, 'Fictional racing correction'),
     request(owner.token, '/rest/v1/rpc/commit_image', { method: 'POST', body: { p_image_id: pending.id } }),
   ]);
+  stage = !commit.ok && commit.status === 400 && commit.data?.code === '22023' && commit.data?.message === 'Request conflict'
+    ? 'I29b replacement commit assertion: exact Request conflict'
+    : 'I29b replacement commit assertion: unexpected result';
   assert.ok(commit.ok);
+  stage = 'I29b replacement correction response';
   if (correction.ok) {
     image = { ...image, alt_text: 'Fictional racing correction', description_version: image.description_version + 1 };
     assert.deepEqual(correction.data, [returned(image)]);
   } else denied(correction, 'Not available');
+  stage = 'I29b replacement retired row';
   const retired = await readImage(image.id);
   assert.equal(typeof retired.retired_at, 'string');
   assert.deepEqual(retired, { ...image, state: 'retired', retired_at: retired.retired_at });
+  stage = 'I29b replacement new ready row';
   assert.deepEqual(await readImage(pending.id), { ...pending, state: 'ready' });
+  stage = 'I29b replacement retired description denial';
   denied(await edit(image.id, retired.description_version, 'Must not change'), 'Not available');
+  stage = 'I29b replacement unchanged retired row';
   assert.deepEqual(await readImage(image.id), retired);
+  stage = 'I29b replacement unchanged new ready row';
   assert.deepEqual(await readImage(pending.id), { ...pending, state: 'ready' });
+  stage = 'I29b replacement unchanged item';
   assert.deepEqual(await readItem(), [item]);
   for (const objectPath of fixture.paths) {
+    stage = 'I29b replacement private byte download';
     const download = await request(owner.token, `/storage/v1/object/authenticated/wardrobe/${objectPath}`);
     assert.ok(download.ok); assert.ok(Buffer.isBuffer(download.data));
+    stage = 'I29b replacement private byte length';
     assert.equal(download.data.length, jpg.length);
+    stage = 'I29b replacement private byte hash';
     assert.equal(createHash('sha256').update(download.data).digest('hex'), sha);
   }
 }

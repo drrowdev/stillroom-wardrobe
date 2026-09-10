@@ -2611,3 +2611,859 @@ The earlier native checker remains unreported, not retroactively passed.
 The writer then stops; no merge, deployment, paid/live activation or later
 packet is authorized by these results. All previous manual/operator/device and
 remaining I29 integration/retention gates stay open.
+
+## PR #17 checked manual Save/A1 — Stage 1 source, 10 September 2026
+
+**Database-blocked staging, not a connected Save implementation or merge-ready
+packet.** Existing branch `copilot/new-i29-checked-manual-save`, approved base
+`c6ee8beb890deeca0c04cf53d6d3deebe4a231f6`, starting/saved head
+`46c53668f5ed13d2b5147fa873e61964f0210acb`, tree
+`a1413580bd53c0651d9f2a004df793af5ff2da9b`. The starting head was an empty
+single-parent commit against that exact base; working tree and PR diff were clean.
+This append preserves all preceding dated evidence.
+
+### Own authority and read context
+
+Read the complete [plan 5614413353](https://github.com/drrowdev/stillroom-wardrobe/pull/16#issuecomment-5614413353)
+and complete [A1 amendment 5614726097](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5614726097).
+Actual different-provider reviewer: Anthropic / Claude Opus 5
+(`claude-opus-5`), read-only `d27104d9-e844-42b7-9f7f-a0a6723ba2dc`, turns 3/4.
+Their recorded AMEND findings and coordinator adjudication narrow this to manual
+checked Save and retain **three** UUIDs, not the rejected weaker two-column
+alternative. No new agent/reviewer or scope was invented by this worker.
+
+After context and before source edits, reread this continuation's
+[own receipt 5614750064](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5614750064):
+task `0afd7714-d002-4ce5-9241-ba5e0a0e9eed`, session
+`93155b42-57ac-43a8-8d60-1c427f5eee85`, explicitly selected `gpt-6-astra`,
+coordinator-verified actual `sweagent-capi:gpt-6-astra` at
+`2026-09-10T07:23:28.2328469+00:00`, matching repository 1358925513,
+PR #17, branch, base and saved head. Original receipt 5614441409 was not reused.
+
+Actually read root `AGENTS.md`, `.github/copilot-instructions.md`, both blueprint
+instruction templates (not copied), cloud task-scope/text-only/local/hosted gates;
+Phase 0/1 relevant acceptance and Phase 2 I29d/e evidence; blueprint
+00/02/03/05/06/08/10/14/15/19/20 and relevant 21 model-gate sections.
+The complete base migration was read and compared byte-identical to blueprint07;
+provenance, description and collection migrations plus AI18 profile/table/lock
+sections were read. Source included actual generated item/image/RPC types,
+`src/images/upload.ts`, `src/domain/garment-fields.ts`, AddItem's frozen-submit
+flow, data errors/package/db commands; normal backend guards, session client,
+wrapper, preservation schema/oracle/rehearsal/tests, normal integration/security
+examples, affected unit tests and browser mock/upload boundary excerpts.
+PR discussion/diff/reviews/review threads and current Actions metadata were read.
+
+This is I29's R03 explicit-creation and R04 private-photo subset, preserving
+R01/R11/R17/R19/R26/R27; R23 is predictable retries/concurrency. R22 means original
+product, not reliability. No complete-CRUD, automatic AI, full-I29 or MVP claim.
+
+### Observed local database blocker and approved fallback
+
+Current native setup run `34449644831`, job `102782229098`, reports successful
+dependency/browser install, Docker, startup, reset/provision and type generation.
+The MCP job-log request returned HTTP 404; metadata alone is not execution proof
+of the new source. Initial CI `34447378905` and JPEG diagnostic `34447378909`
+were `action_required`; CI log lookup returned zero executed/failed jobs, not a
+pass. No Actions authorization/rerun occurred.
+
+`npm run db:start` passed. After writing the new SQL, the first
+`npm run db:reset && npm run db:types` stopped at reset, exit 1, before
+provisioning; **type generation did not run**. A bounded PostgreSQL error-log
+query returned no matching diagnostics. Through existing guarded local helpers
+(`assertProjectConfig`, `requireLocalContainer`, `cli`), `migration list --local`
+then showed all six application migrations pending; diagnostic
+`migration up --local` failed in unchanged `20260905000000_initial.sql`,
+statement 69: `relation "storage.buckets" does not exist` (42P01).
+No new SQL execution or causal claim about the reset's underlying failure follows.
+
+No repeat reset, service/config repair, fake Storage schema, guessed types or
+runtime restart was attempted. The plan's expressly approved same-PR Stage 1
+fallback applies: SQL/tests/preservation/docs only, then stop for coordinator
+execution-trust review and actual Database CI. Stage 2 requires independently
+published exact-head type text/hash and a fresh own runtime receipt before
+connecting every current manual AddItem Save. Current client/types/browser
+sources remain byte-identical; `ensureFile`, upload bytes/options/order,
+manual builder, owner epoch and form behavior have not changed.
+
+### Staged source boundary
+
+The only new migration is `20260910070000_checked_item_save.sql`. It specifies
+closed ordinary-session atomic reservation, canonical typed intent fingerprint,
+live-row/initial-version/caption/counter checks, exact object-aware finalization,
+and three-UUID owner-local used-ID guards. Content attempts cascade on item
+deletion; image cleanup nulls only their image link; markers last until actual
+profile deletion. No fields/hash/time/status enter those markers.
+
+The original commit function is moved intact behind a private non-client seam.
+The public wrapper guards either used item or used image identity, preserving
+genuine legacy grants, with no raw-row adoption/backfill. New calls lock profile
+first, then use NOWAIT on reverse-order attempt/media/item/object edges and a
+two-second lock timeout for residual uniqueness/FK waits. Specific conflicts
+roll back, not succeed. Existing delete/retire/description behavior is unchanged.
+This is reviewed source design, **not executed concurrency proof**.
+
+New integration/security suites use existing `normalClient` with normal A/B/
+anonymous PostgREST and the same stripped wrapper environment. They specify
+pending/completed exact replay, canonical price/provenance, all-field/image
+conflicts, malformed/system/AI assertions, no partial/failed first claim,
+foreign/swapped IDs, original/alternate/raw-recreated commit bypass, hard deletion,
+missing objects even when ready, cleanup, caption/counter/item changes, owner-local
+UUID reuse, genuine legacy success, and bounded overlapping operations.
+Tiny synthetic transport bytes prove no JPEG/camera or analysed-byte attestation.
+Catalog-only checks specify private ACL/RLS and exact profile/item/image FKs;
+no normal fixture profile is deleted to fake account-deletion acceptance.
+
+Preservation now pins six exact migration sources, retaining every old length/hash
+and the original COLUMNS, two-owner/ten-table/30-row/eight-object byte oracle.
+The normal wrapper still executes existing AI18 and recovery gates. New catalog
+checks run only after the original populated comparison. Blueprint06/08 document
+the staged protocol; blueprint10 adds only A1's minimal pseudonymous retention
+boundary. One row per successful reservation, including abandoned attempts,
+accumulates until actual profile deletion; no scheduler, total-growth bound or
+working self-service deletion claim.
+
+### Actual validation and remaining gates
+
+Commands ran at the repository root. These are source/unit results, not live
+database or connected-client acceptance:
+
+| Exact command | Actual result |
+| --- | --- |
+| `node --check tests/integration/item-save.sessions.mjs` | Pass. |
+| `node --check tests/security/item-save.sessions.mjs` | Pass. |
+| `node --check scripts/run-local-tests.mjs` | Pass. |
+| `node --check scripts/preservation-rehearsal.mjs` | Pass. |
+| `npm run test:unit -- tests/unit/item-save.test.ts tests/unit/preservation.test.ts tests/unit/local-backend.test.ts tests/unit/garment-fields.test.ts tests/unit/private-images.test.ts` | First 402 passed/12 failed: one shared five-source expectation omitted the sixth migration. Corrected that expectation; final 414/414 passed. |
+| `npm run typecheck` | Pass against unchanged current generated types; not new-RPC parity. |
+| `npm run lint` | Pass. |
+| `npm run check:translations` | 471 EN/FI/SV keys; 45 source files, pass. |
+| `npm run test:unit` | 1000/1000, 18 files. |
+| `npm run build` | Pass; existing non-failing chunk-size warning, unchanged 174.80 kB gzip JS/5.33 kB gzip CSS. |
+| `npm run scan:secrets` | Pass, 184 text files and unprinted canary. |
+| `npm run check:dependencies` | Pass, 12 production/220 development packages, zero unverified release dates, zero production advisories. |
+| `git diff --check` | Pass. |
+
+Actual fresh schema execution, six-source populated preservation, five-to-six
+populated transition, structural catalog results, all new/old normal-session
+integration/security, AI18's 18 phases, recovery, actual generated types/parity,
+connected client/browser/axe and coordinator exact-head artifact review remain
+**pending**. No browser/visual run or image/archive input was used in this staging
+continuation. Static checks do not establish SQL execution or normal-user access.
+The coordinator must validate the frozen source before authorizing Database CI;
+no Stage 1 merge. A fresh native validation result will be reported on PR #17
+after committing; it cannot replace the required independent exact-head review.
+
+Rollback at this un-applied source stage is reverting the packet; no hosted DDL
+or data rollback is authorized. Live Cloudflare `892f9419`/hosted05+06+09+11
+remain unchanged, AI18 unapplied, operator window closed. B3's WebKit two-byte
+parallel failure remains unlocalized/unfixed; prior PR16 acceptance is not a
+waiver. Only the second hosted-account journey is deferred; other foreign-normal,
+camera/device/screen-reader gates remain open. Automatic form filling,
+analysed-byte binding, expiry/provenance/source history and parked incomplete
+backup remain required later work. No AI/provider/codec/dependency, hosted,
+private-input or paid operation was performed.
+
+## PR #17 A2 — bounded failure observations, 10 September 2026
+
+**Diagnostics only; backend still blocked, cause unproven.** This continuation
+starts from `95f655126b2d68064d32ed2e0e3db03f4fb671c9`, parent
+`46c53668f5ed13d2b5147fa873e61964f0210acb`, on the existing
+`copilot/new-i29-checked-manual-save` branch. PR base/main remains
+`c6ee8beb890deeca0c04cf53d6d3deebe4a231f6`. Initial checkout was clean:
+no setup-generated type changes or other untracked source outputs.
+
+Read complete [A2 approval 5615708093](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5615708093),
+original plan 5614413353 and A1 5614726097. A2 records actual read-only
+Anthropic / Claude Opus 5 (`claude-opus-5`) critique by
+`9edf6b92-27a7-47ce-b963-949860fe50a4`, turn 1, verdict AMEND, and
+coordinator approval/corrections. Accepted: stderr-only fixed observations,
+stdout byte count only, closed runtime shape and preserved guards. The
+coordinator corrected the claim that cold startup cannot apply migrations;
+both start/reset retain SQLSTATE and migration observations. No new agent,
+planning round or speculative repair was performed.
+
+After context and before edits, read this allocation's
+[own runtime receipt 5615746110](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5615746110):
+task `dffecda2-8b06-4f14-948b-5af6b36faf8e`, session
+`1409c392-cecd-4662-b9de-9ea6fb53feb5`, coordinator observation
+`2026-09-10T08:42:22.1136042Z`, explicitly selected `gpt-6-astra`,
+independently verified actual `sweagent-capi:gpt-6-astra`, repository
+1358925513/PR #17 and matching branch/base/saved head. Old receipt 5614750064
+was not reused.
+
+Context actually read: root `AGENTS.md`, `.github/copilot-instructions.md`;
+cloud task-scope/text-only/hosted sections; Phase 0/1 status, Phase 2 current
+I29/PR17 evidence and `docs/local-backend.md`; blueprint 00/03/05/08/10/20,
+Phase 2 in 14, relevant 02/15 requirement excerpts and base 07 admission/RLS
+prerequisites. Source included actual initial-migration RLS/Storage excerpts,
+checked-Save migration/state guards, generated schema/RPC excerpts,
+`scripts/db.mjs`, complete `scripts/backend/local.mjs`,
+`scripts/hosted-smoke.mjs` guard excerpts, complete local-backend unit tests,
+checked-Save unit excerpts and `package.json`. Read current PR details,
+discussion, diff scope/relevant hunks, reviews/review threads, Actions metadata
+and failed Database job logs. This is observability for I29's R03/R04 subset,
+preserving R01/R11/R17/R19/R23/R26/R27, not full CRUD or I29 acceptance.
+
+### Four-file implementation boundary
+
+Only `scripts/db.mjs`, `scripts/backend/local.mjs`,
+`tests/unit/local-backend.test.ts` and this dated append changed.
+The new pure helper initializes all eleven fields on every return, reads own
+data descriptors, refuses malformed/throwing reflection and bounds direct
+string inputs to 16 MiB combined UTF-8 bytes before marker scanning. Invalid
+inputs return closed defaults. Stdout is never scanned for content.
+
+Stderr observations use the eight existing Docker literals, the unchanged
+strict 4096-byte/single bare container-exit gate, exact parenthesized SQLSTATE
+format with eleven allowed constants, six exact LF/CRLF migration announcements
+and the verified port literal. Distinct observations report `multiple`;
+announcements are deduplicated and the last index follows stderr order, not
+version order. No arbitrary input text or property is returned. The existing
+bounded capture remains unchanged, so the report guarantees neither output
+completeness nor absence of unobserved errors.
+
+Source evidence is the pinned dependency record in A2: CLI 2.116.0
+`internal/utils/docker.go` (blob `29d2edd3974087e25ca0430ac15d5a1c0483c7c8`),
+`pkg/migration/apply.go`, Go/legacy cold-start database bootstrap paths and
+pgconn v1.14.3 `errors.go`. These verified literals are observations, not a
+diagnostic cause. No guessed disk/rate-limit/deadline classifier was added.
+All pre-existing local helpers, including `runCommand` and
+`describeGenerationResult`, remain byte-identical. Existing CLI arguments,
+timeouts, human failure prefixes and wrapper exits remain unchanged. Only
+elapsed timing and JSON of the new report are appended in the existing
+start/reset nonzero branches. Success behavior is unchanged.
+
+### Actual commands and stopping evidence
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run test:unit -- tests/unit/local-backend.test.ts` | Initially 260 passed/1 failed because the new test wrapper defaulted explicit `undefined` elapsed input to 1. Corrected the wrapper; 261/261 passed, including all 183 pre-existing tests and 78 new cases. |
+| `npm run typecheck` | Pass; unchanged generated schema, not new-RPC parity. |
+| `npm run lint` | Pass. |
+| `npm run scan:secrets` | Pass; 177 text files and unprinted canary. |
+| `git diff --check` | Pass. |
+| `npm run db:start` | One invocation; wrapper exit 2. Bounded report below. No retry. |
+
+Exact bounded startup report:
+
+```json
+{"tag":"nonzero-with-stderr","exitCode":1,"elapsedMs":18529,"stdoutBytes":0,"stderrBytes":245,"stderrDockerOperation":"run-container","stderrContainerExitBucket":"other-nonzero","stderrSqlState":"none","announcedKnownMigrationCount":0,"lastAnnouncedKnownMigrationIndex":null,"stderrPortAllocationMarker":false}
+```
+
+The wrapper preserved its original protected failure prefix and exit 2.
+No raw CLI output was exposed. `none`, zero announcements and a false port
+marker are not proof that SQL, migrations or ports were uninvolved.
+The observed bucket does not identify a cause. Startup failed, so **reset was
+not run**, nor were types, normal integration/security, recovery or preservation.
+No backend repair, alternate command, service restart or hidden-output bypass
+followed this single failed action.
+
+Separately, historical CI `34451006155` attempt 2 at saved head `95f655126`
+failed Database job `102792343131` in startup, about 51 seconds after its
+announcement, at `08:02:06Z`; all later database gates/types were skipped.
+Outcome 5615471418 records App job `102792343527` passing 1000 units/449 browser
+cases. Source review 5615571684 found no high-confidence blocking source bug.
+Neither establishes execution of the new SQL. The old worker's missing
+`storage.buckets` observation remains separate evidence, not the diagnosed
+cause of either startup failure.
+
+Fresh-head executable trust/CI, independent source review and native validation
+results are handed back to the coordinator. SQL/preservation/normal-session/
+recovery/type parity and required browser/visual/human gates remain pending,
+not waived. No image/archive inputs, Actions authorization/rerun, additional
+writer/branch/PR, merge, deployment, hosted/provider/private-photo operation,
+guessed types or client wiring occurred. The live operation window remains
+closed. Rollback is reverting these diagnostics, not hosted DDL or data repair.
+
+## PR #17 — narrow IF/CASE syntax repair, 10 September 2026
+
+**Source correction only; real database validation remains blocked.** Same branch
+`copilot/new-i29-checked-manual-save`, base/main
+`c6ee8beb890deeca0c04cf53d6d3deebe4a231f6`, starting head
+`9b3928637b082cc11bb45e8386aac0b3492a1fbc`, starting tree
+`d1b7737266290b06f2cfa741b5881aaed928cbd3`, starting parent
+`95f655126b2d68064d32ed2e0e3db03f4fb671c9`. Initial `git status --short`
+was empty: no tracked setup changes or untracked generated types. The clone is
+shallow; `git merge-base HEAD refs/remotes/origin/main` returned exit 1, not
+ancestry proof. GitHub PR metadata and the local remote-tracking main both
+identify the approved base above. No branch/history mutation was needed.
+
+### Authority, own receipt and context
+
+Read full [repair authorization 5616223669](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5616223669),
+[plan 5614413353](https://github.com/drrowdev/stillroom-wardrobe/pull/16#issuecomment-5614413353),
+[A1 5614726097](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5614726097)
+and [A2 5615708093](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5615708093).
+Their actual Anthropic / Claude Opus 5 critiques and coordinator adjudications
+remain controlling: plan/A1 reviewer `d27104d9-e844-42b7-9f7f-a0a6723ba2dc`,
+turns 3/4; A2 reviewer `9edf6b92-27a7-47ce-b963-949860fe50a4`, turn 1.
+Read source-review records 5615571684 and 5616125168 and execution-trust record
+5616021139. No new planning round, behavior amendment or additional agent.
+
+After context and before any edit, read this allocation's
+[own public runtime receipt 5616267125](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5616267125):
+task `40c50a4d-7a9d-430a-9653-e695f7a6a9a3`, created
+`2026-09-10T09:22:32.369760818Z`; session
+`5424ce1b-808c-4aef-8330-68c67f72c46e`, created
+`2026-09-10T09:22:36.403864042Z`. Coordinator publication observation
+`2026-09-10T09:23:31.5759424Z` records explicit `gpt-6-astra` selection and
+authenticated actual `sweagent-capi:gpt-6-astra`, matching repository 1358925513,
+PR #17 / 4492828082, branch, base and starting head/tree/parent. No old receipt
+was reused or model availability self-attested.
+
+Actually read root `AGENTS.md`, `.github/copilot-instructions.md`; cloud
+task-scope/text-only/setup/hosted sections; Phase 0 status/recovery limits,
+Phase 2 PR17/A1/A2 evidence and local-backend baseline sections; blueprint
+00/03/05/10/14/19/20, relevant 07 admission/schema and 08 API/checked-Save
+sections. Source reads included the complete checked-Save migration, actual
+initial-migration RLS/grants/commit excerpts, generated RPC type excerpts,
+`package.json`, `scripts/db.mjs`, preservation inventory/catalog/oracle excerpts,
+checked-Save unit tests, preservation inventory tests and normal integration/
+security Save excerpts. Read current PR details, discussion, diff scope/relevant
+hunks, empty reviews/review threads, Actions run/job metadata and failed CI job
+logs. I29 R03/R04 scope and preserved R01/R11/R17/R19/R23/R26/R27 are unchanged.
+
+### Five-path repair and actual validation
+
+Only the two parentheses around the existing state CASE changed in
+`supabase/migrations/20260910070000_checked_item_save.sql`; every other SQL byte
+is retained. The coordinator's PostgreSQL 17 parser finding explains why an
+unparenthesized CASE's first THEN can terminate the PL/pgSQL IF expression.
+This restores the reviewed comparison, not a new state/authority contract.
+
+Measured SQL identity changed from 16315 bytes /
+`9e782cff2cc18d2db8ee2f7c7bc6096de80c011cd9c0b6b83ef5a24783ac9bf3`
+to **16317 bytes** / SHA-256
+**`9058de2f231c72fc71b930f03e176457aee20de0cf82cab909fc21e879eaaac3`**.
+Only that byte length changed in `scripts/preservation-rehearsal.mjs`;
+only `SOURCE_HASHES.save` changed in
+`tests/integration/preservation.sessions.mjs`. Added one narrowly scoped,
+explicitly static IF/CASE regression in `tests/unit/item-save.test.ts`.
+This dated append is the fifth permitted path. Old five migrations and original
+oracles, A1 markers/cascades/raw grants, A2 diagnostics/guards/commands,
+client/generated types and all other files are unchanged.
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`:
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run test:unit -- tests/unit/item-save.test.ts tests/unit/preservation.test.ts` | Exit 0; 91/91 tests, two files. Static source/inventory evidence, not SQL execution. |
+| `npm run typecheck` | Exit 0; unchanged generated types, not new-RPC parity. |
+| `npm run lint` | Exit 0. |
+| `npm run scan:secrets` | Exit 0; 177 text files and unprinted canary checked. |
+| `git diff --check` | Exit 0. |
+| `npm run db:start` | Exactly one corrected-source invocation; wrapper exit 2, safe report below. |
+| `npm run db:reset` | Not run: startup failed. |
+| `npm run test:integration` | Not run: dependent database sequence stopped. |
+| `npm run test:security` | Not run: dependent database sequence stopped. |
+
+```json
+{"tag":"nonzero-with-stderr","exitCode":1,"elapsedMs":19225,"stdoutBytes":0,"stderrBytes":245,"stderrDockerOperation":"run-container","stderrContainerExitBucket":"other-nonzero","stderrSqlState":"none","announcedKnownMigrationCount":0,"lastAnnouncedKnownMigrationIndex":null,"stderrPortAllocationMarker":false}
+```
+
+No raw CLI output, retry, reset, alternate diagnostics, config/provisioning
+workaround or speculative further SQL repair followed. `none` and zero
+announcements mean no such markers observed, not proof of no SQL involvement.
+This run-container observation does not prove the syntax repair resolves the
+clean-CI error or any other startup cause.
+
+### Separate failures and remaining gates
+
+Read CI `34457240609` attempt 2 / Database job `102813409228`: at starting
+head `9b392863`, startup failed at `09:14:31Z`, wrapper exit 2. Its safe
+report recorded 51101 ms, 0 stdout bytes, 11145 stderr bytes, SQLSTATE `42601`,
+six known migration announcements, last index 6, Docker operation `none`,
+container exit bucket `unclassified` and false port marker. This is distinct
+from the corrected-source native observation above; no successful new migration
+application or actual new types are established by either.
+
+Separately, this native setup run `34460291715` / job `102816260809` reports
+startup failure during `09:23:53Z`–`09:24:47Z`, before implementation. Provisioning
+and actual type generation were skipped. The in-progress job-log endpoint
+returned HTTP 404; only setup step metadata was available, so no exact setup
+CLI report or cause is claimed. The failed shell context lookup (`rg` unavailable,
+exit 127) was replaced by read-only views/grep, without installing tooling.
+
+Fresh corrected-head CI/execution-trust review, successful migration application,
+six-source populated preservation, ordinary integration/security/concurrency,
+AI18/recovery and actual generated types/parity remain pending. No `db:types`
+command or generated-file edit occurred. Coordinator owns first fresh-head CI,
+exact type-artifact evidence and separately verified connected Stage 2. No
+unconnected Stage 1 merge or complete I29 claim. Required visual/device/human
+gates remain open; no images/archives/browser captures were used. No Actions
+authorization/rerun, hosted mutation, deployment, paid/provider/private-photo
+operation or extra writer occurred; the live operation window remains closed.
+
+## PR #17 A3 — legacy replacement ordering and closed stages, 10 September 2026
+
+**Eight-path source repair; new ordinary-session execution remains blocked.**
+Existing branch `copilot/new-i29-checked-manual-save`, main/base
+`c6ee8beb890deeca0c04cf53d6d3deebe4a231f6`, starting head
+`659a376068feeaee2691696bf64abaecd14ddc77`, tree
+`af9a3254c52e367912e072e3fae12e2431327abc`, starting parent
+`9b3928637b082cc11bb45e8386aac0b3492a1fbc`. Initial checkout was clean;
+no setup-generated type delta or untracked source output was present. This
+append retains the preceding historical evidence, not a claim of Stage 1 or
+full I29 acceptance. Requirements: I29 R03/R04 subset, preserving
+R01/R11/R17/R19/R23/R26/R27.
+
+### Authority, own receipt and context
+
+Read complete [A3 approval 5617117513](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5617117513),
+original plan 5614413353 and A1 5614726097/A2 5615708093. A3 records actual
+Anthropic / Claude Opus 5 (`claude-opus-5`) reviewer
+`9edf6b92-27a7-47ce-b963-949860fe50a4`, turns 4/5, and coordinator approval.
+Turn 4's deletion shortcut was rejected and retracted in turn 5. The approved
+amendment keeps profile-first admission, waits on ready media before target/parent,
+revalidates identity and retains the post-parent NOWAIT ready recheck. Predicate
+NOWAIT alone is not phantom protection, and the private owner helper is not the
+only possible source of profile locks. No additional agent or review was launched.
+
+After context and before edits, read this allocation's
+[own runtime receipt 5617144094](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5617144094):
+task `021f0265-e284-46ea-ab93-7aebaf2b9099`, created
+`2026-09-10T10:26:24.623194195Z`; native session
+`8bf09eeb-b126-47d1-944d-0cd88b2d0b9d`, created
+`2026-09-10T10:26:26.980668962Z`. Coordinator observation
+`2026-09-10T10:27:40.8929653Z` records explicit `gpt-6-astra` selection and
+authenticated actual `sweagent-capi:gpt-6-astra`, repository 1358925513,
+PR #17/artifact 4492828082 and matching branch/base/start head/tree/parent.
+No old receipt or prompt model label was substituted.
+
+Actually read root `AGENTS.md`, `.github/copilot-instructions.md`, both blueprint
+instruction files (not copied); cloud task-scope/prepared/text-only/hosted rules;
+Phase 0 status/recovery, Phase 2 PR17/A1/A2/syntax evidence and local-backend
+baseline. Blueprint reads: 00/03/05/14/19, relevant 02 requirement IDs,
+07 image/RLS/grant/legacy-RPC sections, 08 description/checked-Save contracts,
+10 privacy/deletion and 20 photo-first/Save/AI gates. The base migration matches
+blueprint07 byte-for-byte. Source reads included base image/grant/commit/retire/
+forget implementation, description migration, AI18 profile-lock excerpts, complete
+checked-Save migration, generated item/RPC type excerpts, `src/images/upload.ts`,
+`package.json`, `scripts/db.mjs`, local and hosted guard excerpts,
+`scripts/run-local-tests.mjs`, preservation inventory/catalog/oracle/normal-client
+excerpts, complete checked-Save integration/unit tests, security suite excerpts,
+the existing local replacement test and preservation unit diff. Read current
+PR metadata/discussion, relevant base-to-head diffs, empty reviews/review threads,
+prior source-review records and actual CI failure logs. No private fixture or
+image/archive contents were opened.
+
+Prepared run `34466066262`, job `102834828436`, step metadata reports locked
+dependencies/browser/Docker/startup successful; reset/provision successful
+`10:28:50Z`–`10:29:31Z`; type generation failed `10:29:32Z`–`10:29:34Z`.
+Its in-progress log endpoint returned HTTP 404, so no exact setup failure report
+or cause is claimed. The tracked type file remains unchanged; no post-edit
+generation or type import occurred. A read-only shell lookup found `rg`
+unavailable (exit 127); existing grep/views were used, with no installation.
+
+### Exact repair and preserved scope
+
+Only `public.commit_image`'s local declaration/body changes in the sixth
+migration. It resolves the owned target's item ID without locking, waits for
+existing owner/item ready media under the unchanged two-second lock timeout,
+then re-reads/locks the owned target NOWAIT and rejects owner/item drift.
+The used ITEM OR IMAGE guard, parent NOWAIT, post-parent ready NOWAIT, unchanged
+private delegate and specific `lock_not_available` rollback handler remain.
+No broad/deadlock catch, sleep, retry or timeout increase was added. The ordinary
+path argument relies on actual image grants, pending-only raw insertion,
+`image_one_ready` and profile-serialized reviewed ready transitions; it is not a
+universal deadlock/timing claim.
+
+SQL changed from **16317 bytes** /
+`9058de2f231c72fc71b930f03e176457aee20de0cf82cab909fc21e879eaaac3`
+to **16801 bytes** /
+`023be0259305f0700c982dd27cc40e438847cd7b7f818a7fe7d3cc8b260459a8`.
+Only the sixth actual length changes in `scripts/preservation-rehearsal.mjs`;
+only the sixth actual hash changes in `tests/integration/preservation.sessions.mjs`.
+All five older migrations/pins and the original preservation oracle remain intact.
+
+`tests/unit/item-save.test.ts` adds static order, identity, retained-NOWAIT and
+unchanged timeout/handler assertions. `tests/integration/item-save.sessions.mjs`
+adds one fresh description-versus-commit and one retire-old-ready-versus-commit
+request pair per normal owner, using existing fixture/client/cleanup/byte helpers
+and the existing 15-second outer bound. Commit must succeed; description must
+succeed with its exact result or return exact HTTP 403/42501/Not available;
+retirement must succeed. Full old/new image and item rows plus four actual
+object downloads/lengths/hashes/bytes are checked. No original checked cases
+or generic error acceptance changed. These are request races, not forced
+database-overlap proof, and they did not execute in this allocation.
+
+`tests/integration/local.sessions.mjs` changes only constant stage assignments
+inside the existing replacement block: main/thumb uploads, concurrent requests,
+commit assertion, correction response, old/new rows, item and byte checks.
+The commit assertion distinguishes exact HTTP 400/22023/Request conflict from
+one fixed unexpected-result label. Original requests/order/Promise.all,
+assertions and complete row/byte oracle remain unchanged. No status/body/ID/
+path/private text is interpolated into diagnostics. Blueprint08 changes only
+the affected description/helper/wrapper locking paragraphs. This dated append
+is the eighth path. No other SQL function, grants, A1 markers, A2 diagnostics,
+security assertions, client/types, workflows, dependencies or tooling changed.
+
+### Actual validation and stopping evidence
+
+Commands ran in `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`:
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run test:unit -- tests/unit/item-save.test.ts tests/unit/preservation.test.ts` | Exit 0; 92/92 tests, two files; static/inventory evidence only. |
+| `npm run typecheck` | Exit 0 against unchanged committed types, not setup-generated/new-RPC parity. |
+| `npm run lint` | Exit 0. |
+| `npm run check:translations` | Exit 0; 471 EN/FI/SV keys, 45 source files. |
+| `npm run scan:secrets` | Exit 0; 178 text files and unprinted canary checked. |
+| `git diff --check` | Exit 0. |
+| `npm run db:start` | One post-edit invocation; exit 0. |
+| `npm run db:reset` | One invocation; wrapper exit 1; safe report below. |
+| `npm run test:integration` | Not run: dependent sequence stopped at reset. |
+| `npm run test:security` | Not run: dependent sequence stopped at reset. |
+
+```json
+{"tag":"nonzero-with-stderr","exitCode":1,"elapsedMs":17779,"stdoutBytes":0,"stderrBytes":252,"stderrDockerOperation":"run-container","stderrContainerExitBucket":"other-nonzero","stderrSqlState":"none","announcedKnownMigrationCount":0,"lastAnnouncedKnownMigrationIndex":null,"stderrPortAllocationMarker":false}
+```
+
+No account provisioning ran after that reset failure. No retry, raw CLI/SQL/debug,
+service/provisioning workaround, post-edit type generation or unrelated repair
+followed. Zero announcements and `none` mean no matching markers were observed;
+they prove neither the cause nor absence of SQL activity. Successful setup/start
+is not successful changed-SQL execution, preservation or ordinary-session proof.
+
+Separately, actual CI `34460891440` attempt 2 at starting head `659a376068`
+passed startup, six-source history/populated preservation (two owners, ten tables,
+30 rows, eight objects/catalog/cleanup) and reset/AI18 phases, then failed
+integration at the broad old replacement stage at `09:54:17Z`. Database job
+`102824485555` logs were read; [evidence 5616839094](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5616839094)
+also records App 1079 units/471 keys/449 browser cases. That broad failure does
+not isolate an assertion/status/lock or establish this regression mode as its
+observed cause. Security/recovery/types were skipped and no database-types
+artifact existed; visual artifacts were not reviewed. None transfers to new head.
+
+Coordinator owns independent exact-new-head review, executable trust, first CI
+execution and later actual type artifact/verified Stage 2. New-source SQL,
+six-source preservation, AI18, normal integration/security/races/recovery,
+type parity and applicable artifact/device/human gates remain pending.
+No Actions authorization/rerun, additional agent/branch/PR, merge, deployment,
+hosted DDL, paid/provider/private-photo access or B3 waiver occurred. Hosted
+AI18/checked Save remains unapplied and the operation window closed. Client
+connection/full I29 and later packets are outside this repair; implementation
+stops at the scoped commit and public handoff.
+
+## PR #17 A4 recovery — strict AI-state oracle and closed phases, 10 September 2026
+
+**Three-path test correction; native checks passed, final-head CI still pending.**
+Existing branch `copilot/new-i29-checked-manual-save`, base/main
+`c6ee8beb890deeca0c04cf53d6d3deebe4a231f6`, starting head
+`e7c8c5adddc2141ac4d25445a926d73b98c66f1b`, tree
+`528738a6e515cbfd956262bc216b37a53fbb9c4a`, parent
+`c3cbbb83a7547bec225e73f3f2b9c0baf14878d4`. Initial tracked, staged and
+untracked-source status was clean, with no setup-generated delta. Requirements:
+I29 R03/R04 subset, preserving R01/R11/R17/R19/R23/R26/R27. This is not Stage 2,
+connected manual Save, full I29, merge readiness or acceptance.
+
+### Prospective recovery, context and own receipt
+
+Read the full [A4 approval 5617933116](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5617933116)
+and [recovery approval 5618548131](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5618548131),
+including the user's explicit choice to keep the verified generated file
+provisionally and finish A4. Actual different-provider critique: Anthropic /
+Claude Opus 5 (`claude-opus-5`), read-only reviewer
+`9edf6b92-27a7-47ce-b963-949860fe50a4`, turns 7/8, with coordinator amendments.
+Accepted constraints retain full non-clock state, reject code-only UNAVAILABLE,
+distinguish successful cleanup from cleanup failure and keep generated types
+read-only. Native generation is not final-head parity; additive declarations
+can affect type inference and require actual typechecking. No new critique or
+agent was launched. Original plan 5614413353 and A1/A2/A3 approvals
+5614726097/5615708093/5617117513 were read and remain historical controlling
+context, not this allocation's writable scope.
+
+The [stopped handoff 5618024024](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5618024024)
+and [freeze/provenance 5618217814](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5618217814)
+remain intact. The previous initial progress operation committed types outside
+its three-path allocation before full context/own receipt reading; A4 was not
+implemented then. Preserve e7's commit/message and missing Copilot App trailer;
+this prospective approval does not ratify that operation or backdate its gate.
+No revert, amend or history rewrite occurred.
+
+Actually read root `AGENTS.md`, `.github/copilot-instructions.md`, the blueprint
+instruction template without copying it, `docs/cloud-development.md`,
+Phase 0 status/ordered handoff, Phase 2 PR17/A1/A3 evidence and
+`docs/local-backend.md`'s fixture/execution/type gates. Blueprint reads:
+00/02/03/05/08/10/14/19/20, I29 in 15, and the relevant base schema/media/RLS/
+grants/functions in 07 (byte-identical to the initial migration).
+Source reads included all six migration contracts and hashes; full provenance,
+description, collections and checked-Save migrations; AI18 status/expiry/locking;
+generated RPC types; `src/images/upload.ts` and AddItem source;
+`package.json`, `eslint.config.mjs`, `scripts/db.mjs`,
+`scripts/backend/local.mjs` guard/runner sections, hosted guard excerpts,
+`scripts/run-local-tests.mjs`, core/AI fixture source guards,
+preservation inventory/catalog/normal-client/oracle excerpts and unit diff,
+complete checked integration/unit tests and normal AI/security test excerpts.
+Read current PR discussion, metadata/diff/reviews/review threads (both review
+lists empty), controlling comments and actual failed CI database logs. No
+credential/service-state files, images or archives were opened.
+
+After that read-only context and repeated clean status/hash checks, read
+[this task's own receipt 5618586494](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5618586494)
+**before any progress operation or edits**: task
+`5105f040-3ee3-46ad-b7f5-adcb1e6f6f66`, session
+`e9dd89a5-e14b-4962-b275-463928121463`, coordinator observed
+`2026-09-10T12:20:39.8945202Z`, explicitly selected `gpt-6-astra` and verified
+actual `sweagent-capi:gpt-6-astra`, repository 1358925513, PR artifact 4492828082,
+matching branch/base/start head/tree/parent. No historical receipt or prompt
+label was substituted. The subsequent initial progress operation reported
+**no changes to commit**.
+
+Retained `src/data/database.types.ts` remains read-only: **23976 bytes**,
+SHA256 `9cf1a659a46f2f611cf10a83a7b1b8f7f210233691a21142eee1e5123344e0f4`,
+blob `fe497411cc8fc2c7fed2d5b001773db03ef1521e`. Its 13 added lines declare
+reserve/finalize; existing `commit_image` is unchanged. Provenance is the actual
+prior setup run 34471504040/job 102852230615 at c3, generation log
+`11:31:49.142278Z`, as recorded in 5618217814, not alphabetical text shape.
+All six SQL files/pins remain unchanged; sixth SQL is **16801 bytes**,
+SHA256 `023be0259305f0700c982dd27cc40e438847cd7b7f818a7fe7d3cc8b260459a8`,
+blob `2c0aad72e95b844665e9da7927a11fd11730e867`. No new client consumption of
+the retained RPC signatures occurred.
+
+### Exact correction and oracle limits
+
+`tests/integration/item-save.sessions.mjs` adds one import-safe comparison
+helper using existing `requireEvidence`/deep-strict `eq`. Both inputs must be
+non-null, non-array objects with an **own** top-level `serverTimeMs`, each a
+nonnegative safe integer. Only that validated top-level clock is excluded,
+without mutation; every other key and nested value is compared strictly,
+including unknown additions/removals and nested `serverTimeMs`. No coercion,
+defaults, clock mocking, elapsed bound or monotonicity assumption was added.
+Millisecond timestamps can tie or valid clocks can move backwards.
+
+The approved-owner full shape is `{code,period,serverTimeMs,consent,policy,usage}`:
+consent contains `enabled,noticeRevision,consentedAt,profileVersion`; policy is
+null or contains `activated,noticeRevision,modelId,promptVersion,maxRequestMicro,
+monthlyAllowanceMicro,maxRequestsPerHour,resultTtlSeconds`; usage contains
+`accountedMicro,requestsLastHour,warning`. Code-only `{code:'UNAVAILABLE'}`
+deliberately fails. Both actual `ai_status` calls and the complete profile
+equality remain; no request/order/row/byte/current-state/race assertion changed.
+
+`ai_status` is **not a pure read**: it locks profile/control rows and expires
+requests, potentially changing usage. UTC month `period`, sliding-hour counts,
+accounting/warning and all expiry-sensitive effects remain strict. Equality
+assumes no relevant rollover/expiry between snapshots; changes remain failures
+requiring evidence, never ignored or retried away. The original c3 CI run
+34466870999 attempt 2/job 102843770044 passed startup, six-source/history/original
+two-owner/ten-table/30-row/eight-object preservation/catalog/cleanup, reset/AI18,
+legacy integration and full normal AI controls, then failed checked Save at
+`11:01:48.9119326Z` with a generic message. Its actual failing assertion remains
+unknown. This later green native run does not retroactively isolate that cause.
+Security/recovery/types were skipped there; App's 1080 units/471 keys/449 browser
+cases exercised the old client, not checked Save.
+
+Fixed phase assignments cover arguments/sign-in, initial snapshots, first
+reservation/replay, incomplete upload/state, upload/raw bypass/finalization/
+completed replay, unchanged profile/AI, full fields/canonical equivalence/
+mutated intents, invalid-first rollback, deletion, stale state, races and legacy
+cases. Failure output adds only that closed phase to the existing generic
+message/nonzero exit. Cleanup saves the previous phase, labels cleanup before
+the existing await, then restores the previous phase **only on success**.
+Cleanup failure remains labelled cleanup and may mask an earlier error under
+the unchanged semantics. No new catch/retry/request/logger or private output
+was added. A phase identifies the last entered test group, not an exact SQL
+statement or lock proof.
+
+`tests/unit/item-save.test.ts` preserves every existing body/assertion and adds
+51 cases covering clock equality/change/backwards/bounds, malformed clocks on
+either side, malformed inputs, own-property and UNAVAILABLE rejection, every
+known non-clock field plus unknown/missing/nested values, nested clocks and
+input immutability. The A3 early ready `FOR UPDATE` before target/parent and
+retained late NOWAIT checks are unchanged. One description-versus-commit and
+one retire-old-ready-versus-commit pair per owner retain the 15-second bound and
+strict rows/object bytes. HTTP concurrency does not force database overlap;
+predicate row locks are not phantom protection or a universal 40P01/timing claim.
+
+### Actual bounded native validation and handoff
+
+This task's setup run **34476166271**, job **102867333464**, at e7 reports
+successful startup (`12:21:36Z`–`12:22:46Z`), reset/provision
+(`12:22:47Z`–`12:23:28Z`) and type generation
+(`12:23:29Z`–`12:23:40Z`) in its job metadata. A text-log URL was obtained, but
+the bounded setup-only retrieval was unavailable; no raw processing/fixture
+logs were emitted and no exact setup-log cause is inferred. Initial regenerated
+type bytes had no delta. Successful reset/provision metadata and the existing
+local-only wrapper/fixture guards, not startup alone, permitted the sequence.
+
+Commands ran in `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`:
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run test:unit -- tests/unit/item-save.test.ts tests/unit/preservation.test.ts` | Exit 0; 143/143 tests, two files (previous 92 plus 51 additive cases). Static/unit evidence, not database execution. |
+| `npm run typecheck` | Exit 0 against the exact retained generated types above; not CI artifact/parity proof. |
+| `npm run lint` | Exit 0. |
+| `npm run check:translations` | Exit 0; 471 EN/FI/SV keys, 45 source files. |
+| `npm run scan:secrets` | Exit 0; 178 text files and unprinted canary checked. |
+| `git diff --check` | Exit 0. |
+| `npm run db:start` | One guarded invocation, exit 0. |
+| `npm run test:integration` | One invocation, exit 0: original normal-owner integration, full AI controls, checked Save replay/deletion/state/objects/bounded races and one recovery browser test passed. |
+| `npm run test:security` | One invocation after integration success, exit 0: original security, full AI controls and checked Save normal A/B/anonymous negatives passed. |
+
+The existing I29b stored description-counter ceiling remains explicitly **NOT
+RUN** under ordinary fixture limits; static finite-bound coverage is not live
+counter-ceiling proof. No post-edit reset/type generation, repeated run,
+alternate script/raw CLI/debug/provisioning workaround or unrelated repair ran.
+Read-only lookup misses (`rg` unavailable, two guessed file paths absent) caused
+no installation or source changes.
+
+Coordinator owns exact-new-head independent review/execution trust before first
+CI. Required final-head six-source/history/populated preservation/catalog/AI18/
+legacy/checked normal A-B-anonymous/race/security/recovery evidence and a real
+CI database-types artifact with verified run/head/text/hash/byte parity remain
+mandatory. Native/setup types and these native checks do not unlock Stage 2;
+even a final type-parity-only failure is staging, not a pass. A fresh separately
+verified task must connect every manual Save later. No unconnected Stage 1
+merge, guessed types/casts, full-I29 or production-ready claim.
+
+Existing e7 CI 34471816347 remains unapproved/action_required with zero jobs;
+Apple 34471816391 was untouched. No Actions authorization/rerun, new agent/
+branch/PR, merge/deployment, hosted DDL, provider/paid/private-photo operation or
+private-input capture occurred. Exact-head coordinator visual review and
+applicable device/human gates remain pending, not waived by PR16 B3 or these
+tests. Hosted AI18/checked Save remains unapplied; the live operation window
+is closed/read-only. Stop after the scoped commit and public handoff.
+
+## PR #17 Stage 2 — connected manual Save; WebKit environment blocked, 10 September 2026
+
+**Connected source candidate, not merge-ready.** This continuation uses existing
+PR #17 / `copilot/new-i29-checked-manual-save`, base/main
+`c6ee8beb890deeca0c04cf53d6d3deebe4a231f6`, starting head
+`1bf2670c46fb94f710a4bddb6b459fff6904ced8`, tree
+`690be443f639c4b222f2dc529702f4d9c0f5929d`. Requirements are I29's R03 creation
+and R04 private-photo subset with R23 checked retries, preserving
+R01/R11/R17/R19/R26/R27; not complete wardrobe CRUD or full I29.
+
+### Authority, entry order and actual source evidence
+
+Read the full [original plan 5614413353](https://github.com/drrowdev/stillroom-wardrobe/pull/16#issuecomment-5614413353),
+[A1 5614726097](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5614726097),
+controlling A2/A3/A4 and recovery adjudications, and full
+[Stage 2 assignment 5619249583](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5619249583).
+This is the already-reviewed continuation, not a new material plan.
+Actual prereviewer: Anthropic / Claude Opus 5, reviewer
+`d27104d9-e844-42b7-9f7f-a0a6723ba2dc`, turn 3; A4 final review
+`9edf6b92-27a7-47ce-b963-949860fe50a4`, turn 9, adjudicated in 5618932608.
+No additional agent/reviewer was launched by the writer.
+
+Read root `AGENTS.md`, `.github/copilot-instructions.md`, cloud task/hosted
+boundaries, Phase 0 status, relevant Phase 2 and local-backend evidence;
+blueprint 00/03/05/10/14/19/20/21, I29 in 15 and relevant base-schema/API
+sections of 07/08. Inspected actual checked-Save SQL, generated RPC text, upload
+seam, garment parser and affected unit/browser test context. Retrieved PR
+metadata/discussion/diff, empty formal reviews/threads, recent Actions runs and
+actual Database job logs. Large text tool results were paginated or selectively
+read; retrieval alone was not treated as a complete source review.
+
+Initial `git status --short`, unstaged/staged diff stats were empty. HEAD/tree/
+branch and both pinned text hashes matched the assignment, with no setup delta.
+The local historical comparison reported **no merge base** in the shallow clone;
+the GitHub PR diff was available. No fetch, history rewrite, reset or restoration
+was used. An instruction-directory discovery probe found no `.github/instructions`
+directory; it caused no source change.
+
+After these read-only entry checks, read the full matching public
+[own receipt 5619278146](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5619278146):
+task `375610f6-76e1-4e59-abf0-9ed6f93ea257`, session
+`9c0bf2ab-04e3-46b3-8b8b-9800030df835`, coordinator observation
+`2026-09-10T13:14:45.4120160Z`, explicit `gpt-6-astra` selection and actual
+`sweagent-capi:gpt-6-astra`, repository 1358925513 / PR artifact 4492828082,
+matching branch/base/start head/tree. Only then called initial progress, which
+reported **no changes to commit**, and edited source. Deeper test-route, owner
+lifetime, parser and unchanged-transport inspection followed within the packet.
+Read both blueprint child instruction files before the related documentation
+edits, without copying their historical templates over current instructions.
+
+[Outcome 5619223183](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5619223183)
+records completed CI 34477104827 attempt 2 at the starting head, actual Database
+102876472494/App 102876472132 evidence, artifact 10152858915 and coordinator
+visual review. The tracked types remain **23976 bytes**, SHA256
+`9cf1a659a46f2f611cf10a83a7b1b8f7f210233691a21142eee1e5123344e0f4`;
+sixth SQL remains **16801 bytes**, SHA256
+`023be0259305f0700c982dd27cc40e438847cd7b7f818a7fe7d3cc8b260459a8`.
+Neither file was edited, regenerated or imported. Prior CI's 1131 units and
+449 browser cases are not connected-client evidence.
+
+### Connected contract and exact nine-path scope
+
+Only `src/images/upload.ts`, `tests/unit/item-save.test.ts`,
+`tests/unit/garment-fields.test.ts`, `tests/browser/mock-backend.ts`,
+`tests/browser/garment-fields.spec.ts`, `tests/browser/images.spec.ts`,
+`blueprint/06-DATA-MODEL.md`, `blueprint/08-API-AND-STORAGE.md` and this result
+change. The optional helper, private-image tests, slice/detail specs and every
+other source path remain unchanged.
+
+Every existing AddItem submit/explicit Retry now sends the frozen 32-key item
+and 8-key image intent to typed `reserve_item_save`. Before upload, runtime
+checks require exactly one well-shaped result, the opaque 64-hex fingerprint,
+owned IDs/parent, every frozen field with canonical price/semantic provenance,
+version 1/nondeletion, immutable media metadata/paths/caption, description
+counter 1/nonretirement and reserved/pending or completed/ready consistency.
+Server timestamp fields are shape-checked, not compared with browser time.
+Malformed replies fail closed; known closed SQL failures use existing translated
+conflict/upload-incomplete messages, all other failures use unavailable.
+
+Both pending and completed retries pass checked reservation and
+`finalize_item_save`; a bare ready flag never returns success. Finalization
+requires a void response. No rejected reservation is repaired, no raw item/image
+INSERT or raw commit remains on the common Save path, and no new IDs, automatic
+retry/rebase or inference is introduced. Owner/epoch and abort checks bracket
+the asynchronous stages. The original frozen attempt builder, prepared photo,
+dirty UI and explicit Retry/Discard remain intact.
+
+Direct text comparison confirmed `ensureFile` and browser `uploadReceiver`
+byte-identical to the starting head. Thumb-before-main, JPEG/upsert-false/
+cacheControl-zero, authenticated duplicate download/SHA comparison and all
+capture bounds remain. These are not analyzed-photo byte attestation.
+All original A1/A3/A4 unit bodies remain exact; 69 connected-client unit cases
+are additive. Browser metadata routes model checked attempts and lost completed
+replies; new cases reject missing objects, changed caption/counter/version,
+deleted/retired rows and malformed reservations while preserving frozen retries.
+Mocks are not SQL concurrency, authorization or live-backend proof.
+
+### Actual bounded commands and stopping evidence
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+Units finished before the Vite-backed browser run.
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run typecheck && git diff --check` | Exit 0 after connecting the source seam. |
+| `npm run test:unit -- tests/unit/item-save.test.ts tests/unit/garment-fields.test.ts tests/unit/private-images.test.ts && npm run typecheck && npm run lint` | First exit 1: 254 passed / 13 new fixture failures; later commands did not run. Corrected new synthetic Blobs to declare `image/jpeg`, matching the asserted upload contract, without changing production transport. Repeated after that correction: exit 0, 267/267, typecheck/lint passed. |
+| `npm run typecheck && npm run lint && npm run check:translations && git diff --check` | Exit 0; 471 EN/FI/SV keys, 45 source files. |
+| `npm run test:unit -- tests/unit/item-save.test.ts tests/unit/garment-fields.test.ts tests/unit/private-images.test.ts && npm run typecheck && npm run build && npm run scan:secrets` | Exit 0 after four additional malformed-void-response cases: **271/271** in three files. Typecheck/build passed; JS 596.81 kB / gzip 175.01 kB, existing non-failing >500 kB warning. Secret scan: 184 text files, canary checked. |
+| `npm run test:browser -- tests/browser/garment-fields.spec.ts tests/browser/images.spec.ts tests/browser/slice.spec.ts tests/browser/item-details.spec.ts --retries=0` | **Exit 1: 204 passed, 102 failed**, 306 cases / two workers / 2.8 minutes. Chromium and mobile passed, including applicable accessibility and unchanged bounded captures. Every WebKit case failed at browser launch because `/home/runner/.cache/ms-playwright/webkit-2359/pw_run.sh` is absent. No WebKit application assertion ran. |
+| `git diff --check` and read-only frozen-function/original-unit-body comparisons | Exit 0; frozen functions and every original checked-Save unit body unchanged. |
+
+This task's setup run 34481417081/job 102884879378 records startup success
+13:15:37–13:16:45Z, reset/provision success 13:16:45–13:17:24Z and generation
+success 13:17:24–13:17:36Z. This is setup metadata, not new-head CI or a worker
+integration pass. Although it met the fixture prerequisite, **no worker
+`db:start`, integration/security, reset/typegen or rehearsal ran**: the browser
+environment blocker triggered the assignment's stop rule first.
+No browser install, dependency restoration/change, timeout/worker modification,
+diagnostic workaround or rerun followed. Standalone `test:a11y` was not run;
+the selected specs' Chromium/mobile accessibility checks passed, WebKit did not.
+
+### Coordinator handoff and retained gates
+
+The writer stopped implementation/validation at the missing-WebKit blocker and
+prepared only this scoped source/evidence handoff. No image/archive/binary was
+opened, downloaded into model input, attached or encoded for the worker;
+synthetic screenshot buffers remained ignored. Existing capture production is
+not coordinator visual acceptance, and the prior eight-image review covers only
+the starting head.
+
+New-head independent source/execution-trust review must precede any first CI
+request by the coordinator. Full new-head App/Database/preservation/types/
+ordinary-owner negatives/security/recovery and actual approved visual review
+remain required. The worker authorized/reran no Actions and created no agent,
+branch or PR, merged nothing and deployed nothing.
+The prior c3 failure remains undiagnosed; missing WebKit does not diagnose or
+fix B3's two-byte upload issue. B3 acceptance is not waived. Forced DB overlap,
+stored counter ceiling and the account-deletion journey remain unproved.
+Hosted AI18/checked Save remain unapplied and the live window closed. Automatic
+analysis, trusted photo/provenance binding, source history, complete backup/
+export and full I29/MVP/device/human acceptance are not delivered by this packet.

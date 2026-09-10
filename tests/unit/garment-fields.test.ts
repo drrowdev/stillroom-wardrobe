@@ -243,6 +243,15 @@ describe('full creation snapshot and metadata reconciliation (mocked SDK)', () =
     });
     return { client, fetch };
   }
+  function reservation(attempt: ReturnType<typeof newSaveAttempt>, state = 'pending') {
+    const now = '2026-09-10T00:00:00Z', prefix = `${owner}/${attempt.itemId}/${attempt.imageId}`;
+    return { fingerprint: 'c'.repeat(64), state: state === 'pending' ? 'reserved' : 'completed',
+      item: { ...attempt.payload, id: attempt.itemId, owner_id: owner, deleted_at: null, version: 1, created_at: now, updated_at: now },
+      image: { id: attempt.imageId, item_id: attempt.itemId, owner_id: owner, state, retired_at: null,
+        main_path: `${prefix}/main.jpg`, thumb_path: `${prefix}/thumb.jpg`, created_at: now,
+        description_version: 1, alt_text: attempt.altText, width: 2, height: 2,
+        main_bytes: 4, thumb_bytes: 4, main_sha256: 'a'.repeat(64), thumb_sha256: 'b'.repeat(64) } };
+  }
   it('explains intentional blank photo descriptions in all languages without a title fallback', () => {
     expect(messages['capture.descriptionHelp']).toEqual({
       en: 'Describe the photo for someone using a screen reader. If left blank, the photo is saved without a description.',
@@ -278,31 +287,28 @@ describe('full creation snapshot and metadata reconciliation (mocked SDK)', () =
   });
   it.each(['pending', 'ready'])('checks %s caption/version without mutating transport', async (state) => {
     const attempt = newSaveAttempt(fullDraft(), '', photo(), scope());
-    let caption = '', counter = state === 'pending' ? 2 : 8;
-    const item = { ...attempt.payload, id: attempt.itemId, owner_id: owner, deleted_at: null, version: 1 };
+    const row = reservation(attempt, state);
+    row.image.description_version = state === 'pending' ? 2 : 8;
     const api = backend((url, init) => {
-      if (init?.method === 'POST') return response({ code: '23505' }, 409);
-      if (url.pathname.endsWith('/items')) return response(item);
-      return response({ id: attempt.imageId, item_id: attempt.itemId, owner_id: owner, state, retired_at: null,
-        main_path: `${owner}/${attempt.itemId}/${attempt.imageId}/main.jpg`, thumb_path: `${owner}/${attempt.itemId}/${attempt.imageId}/thumb.jpg`,
-        description_version: counter, alt_text: caption, width: 2, height: 2,
-        main_bytes: 4, thumb_bytes: 4, main_sha256: 'a'.repeat(64), thumb_sha256: 'b'.repeat(64) });
+      expect(url.pathname).toBe('/rest/v1/rpc/reserve_item_save');
+      expect(init?.method).toBe('POST');
+      return response([row]);
     });
-    if (state === 'pending') await expect(saveItem(api.client, scope(), attempt, () => {})).rejects.toThrow('error.conflict');
-    else await expect(saveItem(api.client, scope(), attempt, () => {})).resolves.toBeUndefined();
-    caption = 'Changed by owner'; counter = 1;
     await expect(saveItem(api.client, scope(), attempt, () => {})).rejects.toThrow('error.conflict');
-    expect(api.fetch.mock.calls.every(([input]) => !String(input).includes('/storage/') && !String(input).includes('/rpc/'))).toBe(true);
+    row.image.alt_text = 'Changed by owner'; row.image.description_version = 1;
+    await expect(saveItem(api.client, scope(), attempt, () => {})).rejects.toThrow('error.conflict');
+    expect(api.fetch).toHaveBeenCalledTimes(2);
   });
   it.each(garmentFields)('rejects a duplicate item with a different frozen %s', async (field) => {
     const attempt = newSaveAttempt(fullDraft(), 'caption', photo(), scope());
     const api = backend((url, init) => {
-      if (init?.method === 'POST') return response({ code: '23505' }, 409);
-      expect(url.pathname).toBe('/rest/v1/items');
-      return response({ ...attempt.payload, id: attempt.itemId, owner_id: owner, deleted_at: null, version: 1, [field]: null });
+      expect(url.pathname).toBe('/rest/v1/rpc/reserve_item_save');
+      expect(init?.method).toBe('POST');
+      const row = reservation(attempt);
+      return response([{ ...row, item: { ...row.item, [field]: null } }]);
     });
     await expect(saveItem(api.client, scope(), attempt, () => {})).rejects.toThrow('error.conflict');
-    expect(api.fetch).toHaveBeenCalledTimes(2);
+    expect(api.fetch).toHaveBeenCalledTimes(1);
   });
   it('compares nested values structurally, never by object key order', () => {
     expect(sameValue({ a: ['x', 'y'], b: { kind: 'user', revision: 1 } }, { b: { revision: 1, kind: 'user' }, a: ['x', 'y'] })).toBe(true);
