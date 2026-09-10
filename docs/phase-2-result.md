@@ -2995,3 +2995,154 @@ unconnected Stage 1 merge or complete I29 claim. Required visual/device/human
 gates remain open; no images/archives/browser captures were used. No Actions
 authorization/rerun, hosted mutation, deployment, paid/provider/private-photo
 operation or extra writer occurred; the live operation window remains closed.
+
+## PR #17 A3 — legacy replacement ordering and closed stages, 10 September 2026
+
+**Eight-path source repair; new ordinary-session execution remains blocked.**
+Existing branch `copilot/new-i29-checked-manual-save`, main/base
+`c6ee8beb890deeca0c04cf53d6d3deebe4a231f6`, starting head
+`659a376068feeaee2691696bf64abaecd14ddc77`, tree
+`af9a3254c52e367912e072e3fae12e2431327abc`, starting parent
+`9b3928637b082cc11bb45e8386aac0b3492a1fbc`. Initial checkout was clean;
+no setup-generated type delta or untracked source output was present. This
+append retains the preceding historical evidence, not a claim of Stage 1 or
+full I29 acceptance. Requirements: I29 R03/R04 subset, preserving
+R01/R11/R17/R19/R23/R26/R27.
+
+### Authority, own receipt and context
+
+Read complete [A3 approval 5617117513](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5617117513),
+original plan 5614413353 and A1 5614726097/A2 5615708093. A3 records actual
+Anthropic / Claude Opus 5 (`claude-opus-5`) reviewer
+`9edf6b92-27a7-47ce-b963-949860fe50a4`, turns 4/5, and coordinator approval.
+Turn 4's deletion shortcut was rejected and retracted in turn 5. The approved
+amendment keeps profile-first admission, waits on ready media before target/parent,
+revalidates identity and retains the post-parent NOWAIT ready recheck. Predicate
+NOWAIT alone is not phantom protection, and the private owner helper is not the
+only possible source of profile locks. No additional agent or review was launched.
+
+After context and before edits, read this allocation's
+[own runtime receipt 5617144094](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5617144094):
+task `021f0265-e284-46ea-ab93-7aebaf2b9099`, created
+`2026-09-10T10:26:24.623194195Z`; native session
+`8bf09eeb-b126-47d1-944d-0cd88b2d0b9d`, created
+`2026-09-10T10:26:26.980668962Z`. Coordinator observation
+`2026-09-10T10:27:40.8929653Z` records explicit `gpt-6-astra` selection and
+authenticated actual `sweagent-capi:gpt-6-astra`, repository 1358925513,
+PR #17/artifact 4492828082 and matching branch/base/start head/tree/parent.
+No old receipt or prompt model label was substituted.
+
+Actually read root `AGENTS.md`, `.github/copilot-instructions.md`, both blueprint
+instruction files (not copied); cloud task-scope/prepared/text-only/hosted rules;
+Phase 0 status/recovery, Phase 2 PR17/A1/A2/syntax evidence and local-backend
+baseline. Blueprint reads: 00/03/05/14/19, relevant 02 requirement IDs,
+07 image/RLS/grant/legacy-RPC sections, 08 description/checked-Save contracts,
+10 privacy/deletion and 20 photo-first/Save/AI gates. The base migration matches
+blueprint07 byte-for-byte. Source reads included base image/grant/commit/retire/
+forget implementation, description migration, AI18 profile-lock excerpts, complete
+checked-Save migration, generated item/RPC type excerpts, `src/images/upload.ts`,
+`package.json`, `scripts/db.mjs`, local and hosted guard excerpts,
+`scripts/run-local-tests.mjs`, preservation inventory/catalog/oracle/normal-client
+excerpts, complete checked-Save integration/unit tests, security suite excerpts,
+the existing local replacement test and preservation unit diff. Read current
+PR metadata/discussion, relevant base-to-head diffs, empty reviews/review threads,
+prior source-review records and actual CI failure logs. No private fixture or
+image/archive contents were opened.
+
+Prepared run `34466066262`, job `102834828436`, step metadata reports locked
+dependencies/browser/Docker/startup successful; reset/provision successful
+`10:28:50Z`–`10:29:31Z`; type generation failed `10:29:32Z`–`10:29:34Z`.
+Its in-progress log endpoint returned HTTP 404, so no exact setup failure report
+or cause is claimed. The tracked type file remains unchanged; no post-edit
+generation or type import occurred. A read-only shell lookup found `rg`
+unavailable (exit 127); existing grep/views were used, with no installation.
+
+### Exact repair and preserved scope
+
+Only `public.commit_image`'s local declaration/body changes in the sixth
+migration. It resolves the owned target's item ID without locking, waits for
+existing owner/item ready media under the unchanged two-second lock timeout,
+then re-reads/locks the owned target NOWAIT and rejects owner/item drift.
+The used ITEM OR IMAGE guard, parent NOWAIT, post-parent ready NOWAIT, unchanged
+private delegate and specific `lock_not_available` rollback handler remain.
+No broad/deadlock catch, sleep, retry or timeout increase was added. The ordinary
+path argument relies on actual image grants, pending-only raw insertion,
+`image_one_ready` and profile-serialized reviewed ready transitions; it is not a
+universal deadlock/timing claim.
+
+SQL changed from **16317 bytes** /
+`9058de2f231c72fc71b930f03e176457aee20de0cf82cab909fc21e879eaaac3`
+to **16801 bytes** /
+`023be0259305f0700c982dd27cc40e438847cd7b7f818a7fe7d3cc8b260459a8`.
+Only the sixth actual length changes in `scripts/preservation-rehearsal.mjs`;
+only the sixth actual hash changes in `tests/integration/preservation.sessions.mjs`.
+All five older migrations/pins and the original preservation oracle remain intact.
+
+`tests/unit/item-save.test.ts` adds static order, identity, retained-NOWAIT and
+unchanged timeout/handler assertions. `tests/integration/item-save.sessions.mjs`
+adds one fresh description-versus-commit and one retire-old-ready-versus-commit
+request pair per normal owner, using existing fixture/client/cleanup/byte helpers
+and the existing 15-second outer bound. Commit must succeed; description must
+succeed with its exact result or return exact HTTP 403/42501/Not available;
+retirement must succeed. Full old/new image and item rows plus four actual
+object downloads/lengths/hashes/bytes are checked. No original checked cases
+or generic error acceptance changed. These are request races, not forced
+database-overlap proof, and they did not execute in this allocation.
+
+`tests/integration/local.sessions.mjs` changes only constant stage assignments
+inside the existing replacement block: main/thumb uploads, concurrent requests,
+commit assertion, correction response, old/new rows, item and byte checks.
+The commit assertion distinguishes exact HTTP 400/22023/Request conflict from
+one fixed unexpected-result label. Original requests/order/Promise.all,
+assertions and complete row/byte oracle remain unchanged. No status/body/ID/
+path/private text is interpolated into diagnostics. Blueprint08 changes only
+the affected description/helper/wrapper locking paragraphs. This dated append
+is the eighth path. No other SQL function, grants, A1 markers, A2 diagnostics,
+security assertions, client/types, workflows, dependencies or tooling changed.
+
+### Actual validation and stopping evidence
+
+Commands ran in `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`:
+
+| Exact command | Actual result |
+| --- | --- |
+| `npm run test:unit -- tests/unit/item-save.test.ts tests/unit/preservation.test.ts` | Exit 0; 92/92 tests, two files; static/inventory evidence only. |
+| `npm run typecheck` | Exit 0 against unchanged committed types, not setup-generated/new-RPC parity. |
+| `npm run lint` | Exit 0. |
+| `npm run check:translations` | Exit 0; 471 EN/FI/SV keys, 45 source files. |
+| `npm run scan:secrets` | Exit 0; 178 text files and unprinted canary checked. |
+| `git diff --check` | Exit 0. |
+| `npm run db:start` | One post-edit invocation; exit 0. |
+| `npm run db:reset` | One invocation; wrapper exit 1; safe report below. |
+| `npm run test:integration` | Not run: dependent sequence stopped at reset. |
+| `npm run test:security` | Not run: dependent sequence stopped at reset. |
+
+```json
+{"tag":"nonzero-with-stderr","exitCode":1,"elapsedMs":17779,"stdoutBytes":0,"stderrBytes":252,"stderrDockerOperation":"run-container","stderrContainerExitBucket":"other-nonzero","stderrSqlState":"none","announcedKnownMigrationCount":0,"lastAnnouncedKnownMigrationIndex":null,"stderrPortAllocationMarker":false}
+```
+
+No account provisioning ran after that reset failure. No retry, raw CLI/SQL/debug,
+service/provisioning workaround, post-edit type generation or unrelated repair
+followed. Zero announcements and `none` mean no matching markers were observed;
+they prove neither the cause nor absence of SQL activity. Successful setup/start
+is not successful changed-SQL execution, preservation or ordinary-session proof.
+
+Separately, actual CI `34460891440` attempt 2 at starting head `659a376068`
+passed startup, six-source history/populated preservation (two owners, ten tables,
+30 rows, eight objects/catalog/cleanup) and reset/AI18 phases, then failed
+integration at the broad old replacement stage at `09:54:17Z`. Database job
+`102824485555` logs were read; [evidence 5616839094](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5616839094)
+also records App 1079 units/471 keys/449 browser cases. That broad failure does
+not isolate an assertion/status/lock or establish this regression mode as its
+observed cause. Security/recovery/types were skipped and no database-types
+artifact existed; visual artifacts were not reviewed. None transfers to new head.
+
+Coordinator owns independent exact-new-head review, executable trust, first CI
+execution and later actual type artifact/verified Stage 2. New-source SQL,
+six-source preservation, AI18, normal integration/security/races/recovery,
+type parity and applicable artifact/device/human gates remain pending.
+No Actions authorization/rerun, additional agent/branch/PR, merge, deployment,
+hosted DDL, paid/provider/private-photo access or B3 waiver occurred. Hosted
+AI18/checked Save remains unapplied and the operation window closed. Client
+connection/full I29 and later packets are outside this repair; implementation
+stops at the scoped commit and public handoff.

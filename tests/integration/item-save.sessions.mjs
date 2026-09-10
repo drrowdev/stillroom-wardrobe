@@ -100,6 +100,61 @@ export async function boundedRace(operations) {
   return result;
 }
 
+async function legacyReplacementCases(client, owner, h) {
+  // One request pair of each kind per owner; this does not force database overlap.
+  for (const kind of ['description', 'retire']) {
+    const old = h.track(), replacement = h.track();
+    replacement.p_item = { ...old.p_item };
+    const item = await client.insert(owner, 'items', old.p_item);
+    const original = await client.insert(owner, 'item_images', { ...old.p_image, item_id: item.id });
+    eq(original.state, 'pending'); eq(original.description_version, 1); eq(original.retired_at, null);
+    await h.upload(old);
+    await client.rpc(owner, 'commit_image', { p_image_id: original.id });
+    let ready = { ...original, state: 'ready' };
+    eq(await h.read('item_images', original.id), [ready]);
+    const pending = await client.insert(owner, 'item_images', { ...replacement.p_image, item_id: item.id });
+    eq(pending.state, 'pending'); eq(pending.description_version, 1); eq(pending.retired_at, null);
+    await h.upload(replacement);
+    eq(await h.read('items', item.id), [item]);
+    const start = performance.now();
+    const [change, commit] = await Promise.all([
+      kind === 'description' ? h.call('update_image_description', {
+        p_image_id: ready.id, p_expected_description_version: ready.description_version,
+        p_alt_text: 'Fictional legacy correction',
+      }) : h.call('retire_image', { p_image_id: ready.id }),
+      h.call('commit_image', { p_image_id: pending.id }),
+    ]);
+    requireEvidence(performance.now() - start < 15_000);
+    requireEvidence(commit.ok && commit.status === 204 && commit.data === null);
+    if (kind === 'description') {
+      if (change.ok) {
+        eq(change.status, 200);
+        ready = { ...ready, alt_text: 'Fictional legacy correction', description_version: ready.description_version + 1 };
+        eq(change.data, [{
+          id: ready.id, owner_id: owner.uid, item_id: item.id,
+          alt_text: ready.alt_text, description_version: ready.description_version,
+        }]);
+      } else {
+        requireEvidence(change.status === 403);
+        eq(change.data, { code: '42501', message: 'Not available', details: null, hint: null });
+      }
+    } else requireEvidence(change.ok && change.status === 204 && change.data === null);
+    const retiredRows = await h.read('item_images', ready.id);
+    requireEvidence(retiredRows.length === 1 && typeof retiredRows[0].retired_at === 'string'
+      && Number.isFinite(Date.parse(retiredRows[0].retired_at)));
+    eq(retiredRows, [{ ...ready, state: 'retired', retired_at: retiredRows[0].retired_at }]);
+    eq(await h.read('item_images', pending.id), [{ ...pending, state: 'ready' }]);
+    eq(await h.read('items', item.id), [item]);
+    for (const path of [...h.paths(old), ...h.paths(replacement)]) {
+      const download = await client.request(owner.token, `/storage/v1/object/authenticated/wardrobe/${path}`);
+      requireEvidence(download.ok && download.status === 200 && Buffer.isBuffer(download.data));
+      eq(download.data.length, bytes.length);
+      eq(createHash('sha256').update(download.data).digest('hex'), hash);
+      eq(download.data, Buffer.from(bytes));
+    }
+  }
+}
+
 async function ownerCases(client, owner) {
   const h = saveHarness(client, owner);
   try {
@@ -236,6 +291,7 @@ async function ownerCases(client, owner) {
         denied(await reserve()); denied(await finalize());
       }
     }
+    await legacyReplacementCases(client, owner, h);
   } finally { await h.cleanup(); }
 }
 async function main() {

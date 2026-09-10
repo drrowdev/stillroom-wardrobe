@@ -224,11 +224,17 @@ revoke all on function private.commit_item_save_image(uuid) from public,anon,aut
 
 create function public.commit_image(p_image_id uuid) returns void
 language plpgsql volatile security definer set search_path = '' set lock_timeout = '2s' as $$
-declare v_owner uuid; im public.item_images;
+declare v_owner uuid; v_item_id uuid; im public.item_images;
 begin
   v_owner := private.item_save_owner();
+  select item_id into v_item_id from public.item_images where owner_id=v_owner and id=p_image_id;
+  if not found then raise exception using errcode='42501',message='Not available'; end if;
+  perform 1 from public.item_images where owner_id=v_owner and item_id=v_item_id and state='ready' for update;
   select * into im from public.item_images where owner_id=v_owner and id=p_image_id for update nowait;
   if not found then raise exception using errcode='42501',message='Not available'; end if;
+  if im.owner_id is distinct from v_owner or im.item_id is distinct from v_item_id then
+    raise exception using errcode='22023',message='Request conflict';
+  end if;
   if exists(select 1 from private.item_save_used_ids u
     where u.owner_id=v_owner and (u.item_id=im.item_id or u.image_id=im.id)) then
     raise exception using errcode='22023',message='Request conflict';

@@ -98,9 +98,10 @@ lookup may classify a counter mismatch/ceiling as `22023` / `Request conflict`;
 foreign, absent, pending, retired or deleted-parent targets give `42501` /
 `Not available`, as does missing admission. No raw upstream error is UI copy.
 
-There is no parent row lock. Existing `commit_image` locks the pending image,
-then parent, then old ready image; taking an old-ready-to-parent lock here would
-create a deadlock cycle. PostgreSQL rechecks the updated target image's state and
+There is no parent row lock in description editing. The unchanged private legacy
+commit helper locks the target image, then parent, then old ready image. The
+PR #17 public wrapper prelocks existing ready media before target/parent as
+specified below; description editing remains image-only. PostgreSQL rechecks the updated target image's state and
 counter after a concurrent row change; the parent EXISTS is statement-snapshot
 evidence, not a promise to observe a later soft delete. Same-counter concurrent
 edits have at most one success; replacement can retire the target but cannot
@@ -183,9 +184,18 @@ The staged migration `20260910070000_checked_item_save.sql` adds:
   Genuine legacy IDs/grants remain usable. Future checked replacement/restore
   needs its later reviewed route, not this legacy shortcut.
 
-New paths lock the enabled owner's profile first. Attempt/image/item and object
-locks fail closed with NOWAIT; a two-second lock timeout also bounds uniqueness/
-FK waits. Existing delete cascades, retire and description paths remain unchanged;
+New paths lock the enabled owner's profile first with NOWAIT. The legacy public
+wrapper resolves the owned target's item ID without a row lock, then waits for
+that owner/item's existing ready image under the existing two-second lock timeout,
+holding neither target nor parent yet. It re-reads the owned target with NOWAIT,
+rejects missing targets with `42501` / `Not available` and owner/item identity
+drift with `22023` / `Request conflict`, then keeps the used item-or-image guard,
+parent NOWAIT and post-parent ready-image NOWAIT recheck before the unchanged
+private delegate. Already-ready targets re-lock the same row. Ordinary image
+grants exclude direct owner/item/state changes, and reviewed ready transitions
+are profile-serialized; the predicate recheck itself is not phantom protection.
+Checked attempt/image/item and object locks retain NOWAIT; the two-second timeout
+also bounds residual uniqueness/FK waits. Existing delete cascades, retire and description paths remain unchanged;
 their reverse ordering is not assumed safe merely from a diagram. Normal-session
 race tests must execute before acceptance. A specific lock conflict rolls back
 the whole call. Errors are closed `22023` / `Invalid input`, `Request conflict`,

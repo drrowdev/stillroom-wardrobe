@@ -59,6 +59,35 @@ describe('checked manual Save source contract (not database execution)', () => {
     const current = sql.match(/create function private\.item_save_current\b[\s\S]*?\$\$;/)?.[0];
     expect(current).toContain("or im.state<>(case a.state when 'reserved' then 'pending' else 'ready' end) then");
   });
+  it('statically waits for legacy ready media before target and parent locks, retaining later NOWAIT checks', () => {
+    const wrapper = sql.match(/create function public\.commit_image\b[\s\S]*?\$\$;/)?.[0];
+    expect(wrapper).toBeDefined();
+    const steps = [
+      'v_owner := private.item_save_owner();',
+      'select item_id into v_item_id from public.item_images where owner_id=v_owner and id=p_image_id;',
+      "if not found then raise exception using errcode='42501',message='Not available'; end if;",
+      "perform 1 from public.item_images where owner_id=v_owner and item_id=v_item_id and state='ready' for update;",
+      'select * into im from public.item_images where owner_id=v_owner and id=p_image_id for update nowait;',
+      "if not found then raise exception using errcode='42501',message='Not available'; end if;",
+      'if im.owner_id is distinct from v_owner or im.item_id is distinct from v_item_id then',
+      "raise exception using errcode='22023',message='Request conflict';",
+      'u.owner_id=v_owner and (u.item_id=im.item_id or u.image_id=im.id)',
+      'perform 1 from public.items where owner_id=v_owner and id=im.item_id for update nowait;',
+      "perform 1 from public.item_images where owner_id=v_owner and item_id=im.item_id and state='ready' for update nowait;",
+      'perform private.commit_item_save_image(p_image_id);',
+      "exception when lock_not_available then raise exception using errcode='22023',message='Request conflict';",
+    ];
+    let offset = 0;
+    for (const step of steps) {
+      const found = wrapper!.indexOf(step, offset);
+      expect(found).toBeGreaterThanOrEqual(offset);
+      offset = found + step.length;
+    }
+    expect(wrapper).toContain("set lock_timeout = '2s'");
+    expect(wrapper!.match(/for update nowait/g)).toHaveLength(3);
+    expect(wrapper!.match(/for update;/g)).toHaveLength(1);
+    expect(wrapper).not.toMatch(/when others|deadlock_detected|40P01|pg_sleep|\bloop\b/i);
+  });
   it('keeps structural cascade checks separate from destructive fixture or user-journey claims', () => {
     expect(ITEM_SAVE_CATALOG_SQL).toContain('pg_catalog.pg_constraint');
     expect(ITEM_SAVE_CATALOG_SQL).toContain('ON DELETE CASCADE');
