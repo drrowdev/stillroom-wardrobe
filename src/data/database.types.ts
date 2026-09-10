@@ -620,7 +620,20 @@ export type Database = {
         Returns: Json
       }
       export_manifest: { Args: { p_export_id: string }; Returns: Json }
+      finalize_item_save: {
+        Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
+        Returns: undefined
+      }
       forget_image: { Args: { p_image_id: string }; Returns: undefined }
+      reserve_item_save: {
+        Args: { p_image: Json; p_item: Json }
+        Returns: {
+          fingerprint: string
+          image: Json
+          item: Json
+          state: string
+        }[]
+      }
       restore_history_entry: {
         Args: {
           p_category: string
