@@ -3825,3 +3825,31 @@ actual visual review and terminal native setup audit remain pending. No source-
 complete or merge-ready claim is made. Hosted/provider/paid/private-photo,
 financial/hidden-thinking, model/tariff, consent/allowance, UI/Save/provenance,
 retention/purge and physical-device acceptance gates remain separate.
+
+### Repair commit validation and terminal preservation STOP
+
+Repair commit **`6ee96b4dbef1658210dc7a863bc67647bbf37665`**, tree
+`13f362af5c3546a7394d025db765bed1c72af6c8`, contains exactly the eight permitted
+files. Post-commit source was clean. No frozen-path change or extra agent was
+introduced.
+
+| Check at the repair checkpoint | Actual result |
+| --- | --- |
+| `npm run test:unit` | **1404/1404**, 19 files, exit 0; completed before any live preservation or browser suite. |
+| `npm run typecheck`; `npm run lint`; `git diff --check` | Exit 0. |
+| Changed-file secret scan, all eight paths | No secrets found before the repair commit. |
+| Automated validation at `6ee96b4` | CodeQL Actions/JavaScript: **0 alerts**. Code review **unavailable, not passed**: configured `capi-prod-claude-sonnet-4.6` missing from the registry. No replacement agent/reviewer launched. |
+| `ALLOW_SECURITY_TESTS=1 ALLOW_PRESERVATION_REHEARSAL=1 npm run db:rehearse` | **Exit 1: `preservation S1-base-reset; EVIDENCE_REQUIRED; subsequent stages NOT RUN`**. Pinned CLI capabilities and exact seven-source inventory/hashes passed. Populated snapshot/migration-up/preservation stages did not run. |
+| Subsequent reset, integration, security, single B1 rehearsal, actual types/parity | **NOT RUN** after the preservation failure. No reset/reprovision, diagnostic probe or retry followed. |
+| Browser/a11y, translations/build, repository secret/dependency commands | **NOT RUN** after terminal STOP. Earlier-head results do not satisfy these repair-head gates. |
+
+The failed disposable fixture state is preserved. The bounded output does not
+establish the cause of `S1-base-reset`; no further Docker/SQL/Auth investigation
+or speculative repair was attempted. Unit coverage proves neither actual
+runtime replacement nor the new served observations. There is **no new live
+served/real-Auth/DB success claim**, and the historical failed POST cause remains
+unproven. Required live proof, exact-head coordinator-authorized CI/Apple,
+independent repair review, terminal setup audit and actual artifact/visual
+review remain blocking/pending. The worker ends this task without another
+packet, task restart, Actions approval/rerun, merge or deployment. This final
+documentation-only record does not change executable code or failed fixtures.
