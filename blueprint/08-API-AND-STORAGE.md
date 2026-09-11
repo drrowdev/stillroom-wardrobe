@@ -390,3 +390,62 @@ legacy imageless/failed-Save ambiguity are still open.
 Map allowlisted `AppError.code` values to localized messages; never display raw SQL/HTTP errors in any language. Keep protocol values such as deletion confirmation `DELETE`, RPC names, stable codes, filenames and JSON keys unchanged. `19-LOCALIZATION.md` defines the optional v1 profile export field `ui_language` and safe import of older backups without it; hashes are verified before normalization.
 
 PostgREST may return 200 with an empty array for a denied SELECT/UPDATE/DELETE; tests must assert absence and unchanged owner data, not only HTTP status. Normalize raw SQL errors before showing them. 401 → sign in; unauthorized/missing objects → same 404-style copy; stale edit → conflict; 413/unsupported → edit photo; 429 → bounded backoff; 5xx/network → retry with same UUID. No retry of password failures or confirmation-dependent deletion. Abort fetches when changing accounts; stale responses whose captured UID no longer matches the session are discarded.
+
+## I29 B1 analysis backend contract
+
+The separately reviewed seventh migration and `analyze-clothing` source add an
+analysis-only protocol. They do not activate an owner, deploy a function, connect
+the UI or grant trusted provenance to Save. The six earlier migrations and the
+AI18 eight-key `ai_status.policy` remain unchanged.
+
+`POST /functions/v1/analyze-clothing` accepts raw `image/jpeg` (at most 512000
+bytes), ordinary bearer authentication, and `X-Stillroom-Request-Id`,
+`X-Stillroom-Draft-Id`, `X-Stillroom-Generation` (positive int32). No query,
+alternate path, encoded body, owner/model/prompt selection or image URL is
+accepted. The handler verifies the actual ordinary nonanonymous Auth user,
+structurally validates sanitized JPEG bounds (at most 1600 per side, no metadata
+or trailing bytes), and computes SHA-256 itself. This reuses the structural
+validator, not a server pixel decoder; browser pixel preparation remains required.
+
+The service-only `ai_claim_analysis` atomically admits and binds the owner,
+request/draft/generation, hash/bytes/dimensions and immutable execution manifest.
+Only its first acknowledged claim permits Google dispatch. Identical replay
+returns owner-guarded persisted status; conflicting reuse cannot dispatch.
+Unknown/lost acknowledgement never triggers blind retry. Legacy client-declared
+AI18 requests cannot be upgraded to trusted requests.
+
+Service-only `ai_finish_analysis` settles bounded facts and normalized usage.
+Usage accounting is independent of content acceptance: complete consistent
+usage becomes an **estimate**, missing/inconsistent usage remains **held**,
+and confirmed billing through legacy `BILLING_ONLY` dominates estimates.
+Conflicting usage/bills cannot overwrite prior evidence. Over-envelope usage is
+recorded without clamping and disables that owner's analysis control.
+Legacy `SUCCESS`/`FAILED` cannot alter a trusted request's content or accounting.
+Discard/expiry removes full results/attestations, not minimal ledger/evidence;
+late usage/billing cannot recreate content. Current-period estimates/confirmed
+amounts and all-period unresolved holds count toward allowance.
+
+Owner-only `ai_analysis_status(p_request_id uuid)` returns the guarded result
+with `{basis:"held"|"estimated"|"confirmed",amountMicro:string,currency:"USD"}`
+accounting, or closed denial/terminal responses. Missing/foreign/legacy requests
+are indistinguishable. Both status APIs recheck enabled owner, consent,
+model/prompt/notice, current manifest and expiry. An OK HTTP response is exactly
+`{code:"OK",status,result,accounting}`: ready 200 or dispatched 202. Other
+responses contain only `{code}`:
+
+| HTTP | Codes |
+| --- | --- |
+| 400 / 401 | `INVALID_INPUT` / `UNAUTHENTICATED` |
+| 403 | `UNAVAILABLE`, `CONSENT_REQUIRED` |
+| 409 | `CONFLICT`, `ACTIVE_DRAFT`, `TERMINAL` |
+| 413 / 415 | `TOO_LARGE` / `UNSUPPORTED_MEDIA` |
+| 429 | `RATE_LIMIT`, `ALLOWANCE` |
+| 503 | `UNCONFIGURED`, `INACTIVE`, `CONFIG_CHANGED` |
+| 502 / 504 | `ANALYSIS_FAILED` / `TIMEOUT` |
+
+Every handler response is no-store/nosniff. Request lifetime is 20 seconds,
+Auth/RPC/OAuth stages at most 5 seconds, provider response 262144 bytes and
+persisted result 8192 bytes. OPTIONS performs no Auth/DB/Google work. An absent
+Origin is distinct from literal `"null"` (denied); approved production/loopback
+browser origins retain explicit validation. The local originless startup probe
+is not browser CORS or deployed-wire acceptance; those remain separate gates.

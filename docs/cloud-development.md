@@ -473,3 +473,106 @@ agent sessions. It also supports a manual Actions run for setup diagnostics.
 Cloud agent availability and usage are governed by the account's GitHub
 Copilot settings and plan; no completion is implied merely by configuring
 this file.
+
+### B1 completion setup/readiness evidence — 11 September 2026
+
+The earlier PR #19 continuation used
+[approval 5632491947](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5632491947)
+(actual retained Anthropic Claude Opus 5 reviewer `223d6728`, turns 6/7,
+coordinator amendments N1–N6/P1–P6) and its own
+[runtime receipt 5632583458](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5632583458).
+They do not authorize a future session or another packet.
+
+Current running-job setup proof pairs explicit workflow-step status with
+timestamp-bound local critical transcripts. Docker/start, reset/fictional
+fixtures, actual ignored type generation and tracked/staged cleanliness must
+each succeed. A silent cleanliness command needs explicit current step success
+plus a bound transcript and fresh source inspection; absence of failure text is
+not proof. Setup `PARITY: DIFFERENT` was the expected ignored artifact state at
+that earlier `79c99e1` checkpoint, not final tracked parity or permission to adopt
+it before entry. It is not the expected state at the later repair start below.
+
+Do **not** demand the downloadable archive of the worker's own still-running
+job; the coordinator reviews that archive after termination. This narrow
+exception does not waive required completed logs, pinned authority or the own
+receipt: missing/failed/ambiguous prerequisites still mean preserve and STOP.
+No consumed diagnostic permission is reusable after a failed normal setup.
+After valid entry, ordinary within-scope engineering failures remain the assigned
+writer's responsibility; do not confuse those with failed entry prerequisites.
+
+The repaired local probe uses originless OPTIONS and the full handler-owned
+204/no-store/nosniff/POST signature, independently of gateway ACAO. Its actual
+CLI-served and Google-only-synthetic real Auth/DB checks are documented in
+`local-backend.md`. They do not prove production/browser CORS, hosted migration,
+paid inference or device/visual acceptance, and do not grant worker deployment,
+Actions approval/rerun, merge or additional-agent authority.
+
+### B1 identity/failure-evidence repair — 11 September 2026
+
+[Approval 5633782787](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5633782787)
+records actual Anthropic Claude Opus 5 critique (reviewer `223d6728`, turns 9/10,
+A1–A9/C1–C3) for an eight-path repair starting at `3b58b50793720d0f82a06aee9b54196fcd73715a`.
+[Own receipt 5633845391](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5633845391)
+belongs only to task `2205a7c4-8f2f-4992-bb1e-c7655dab4e72`, session
+`ad8abfaf-1a93-4bda-a91c-9150197f0522`, actual `sweagent-capi:gpt-6-astra`.
+Neither is reusable entry authority for another task.
+
+This entry required **matching** ignored/tracked schema types, successful current
+setup step metadata bound to local critical transcripts, fresh clean exact
+source, then deliberate own-receipt verification before progress/import/test/
+edit. Current run `34594725266`, job `103247716857`, had successful Docker,
+start, reset/fictional-fixture, actual ignored generation and cleanliness steps.
+Fresh type bytes matched. The phase-2 append records the exact ordered entry.
+
+The repair adds runtime-identity replacement and bounded served diagnostics as
+specified in `local-backend.md`; it does not diagnose the prior failed POST at
+11:03:10.978Z. Even a later green run cannot establish that historical cause.
+After targeted units/types/lint, preserve the serialized CI database order:
+preservation → only on success reset → integration → security → **one** B1
+rehearsal → actual types/parity. A new served/rehearsal failure means preserve
+STOP with closed evidence, not another repair/rerun or fixture reset. Existing
+app/browser/a11y/capture bounds remain mandatory; missing observations or actual
+coordinator visual review remain pending. The coordinator owns subsequent
+repair-only independent review and authorization of first new exact-head
+CI/Apple execution. No worker review substitute, Actions approval/rerun, merge,
+deployment, hosted/provider/paid/private-photo operation or additional agent is
+authorized.
+
+### B1 startup-state correction — 11 September 2026
+
+[Approval 5634444254](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634444254)
+supersedes the earlier native-live sequence only for this six-path continuation
+from `450ba7337788988f9700e1303421ed567c5c7873`. Actual read-only Anthropic
+Claude Opus 5 reviewer `223d6728-9657-4479-8ea0-1da7421db2d3`, focused turn 12,
+accepted P1–P4; the coordinator adopted the required corrections and C1
+(ps-created may legitimately become same-ID inspect-running between reads).
+No new planning agent was commissioned.
+
+Its own [receipt 5634509076](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634509076)
+records explicitly selected, platform-GET-verified `sweagent-capi:gpt-6-astra`,
+task `bf6f33b6-6bff-4d8e-8a64-1a3646c7ff34`, session
+`16efd2a1-c25e-47e5-8cce-7e5b35db0560`. Full context preceded fresh T2 checks:
+current run `34599471062` / job `103262980344` had successful critical setup
+steps bound to current local transcripts, ignored generated types matched
+tracked bytes, and source was clean. Only then was page33/perPage1 deliberately
+read and its immutable metadata verified; progress/tests/edits followed T3.
+The phase-2 result records the evidence and limits. This receipt is not reusable.
+
+The only changed paths are `scripts/backend/local.mjs`, its `local.d.mts`,
+`tests/unit/local-backend.test.ts`, `docs/local-backend.md`, this guide and
+`docs/phase-2-result.md`. The correction distinguishes not-started from malformed
+runtime metadata, pins the first replacement/start, permits bounded waiting
+only before strict confirmation, and preserves default versus explicit command
+capture behavior. Production handler/protocol, rehearsal/served children,
+SQL/types, setup/CI, packages, images and Save/UI remain unchanged.
+
+P4 permits native targeted/full units, typecheck/lint/diff and changed-file
+secret checks only. No post-setup native live/probe/reset/preservation/rehearsal/
+typegen/browser/build/capture sequence runs in this task. Historical S1 and served
+failures remain unresolved. The coordinator still owns independent repair-only
+review and authorization of the first new exact-head CI/Apple run; unchanged
+live preservation, normal-owner/security/B1 Auth-DB, final types/parity, App/
+browser/translations/build/dependency/secret, eight bounded artifacts and actual
+visual review remain mandatory. No source-complete or merge-ready claim follows
+from native units/static checks, and no hosted/provider/paid/deployment authority
+is added.

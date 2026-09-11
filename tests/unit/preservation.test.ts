@@ -23,7 +23,7 @@ type OwnerData = { label: string; ownerId: string; tables: TableRows; objects: [
 type ObjectEvidence = { path: string; bytes: number; sha256: string };
 type Snapshot = {
   schemaVersion: number; projectId: string; stage: string; run: string;
-  sources: { base: string; target: string; description: string; collections: string; controls: string; save: string }; owners: string[];
+  sources: { base: string; target: string; description: string; collections: string; controls: string; save: string; analysis: string }; owners: string[];
   data: [OwnerData, OwnerData];
 };
 const sha = 'a'.repeat(64);
@@ -105,6 +105,7 @@ const baseTable = [
   '   `20260909110000` | ` `              | `2026-09-09 11:00:00` ',
   '   `20260909180000` | ` `              | `2026-09-09 18:00:00` ',
   '   `20260910070000` | ` `              | `2026-09-10 07:00:00` ',
+  '   `20260911040000` | ` `              | `2026-09-11 04:00:00` ',
   '',
   '',
 ].join('\n');
@@ -119,6 +120,7 @@ const targetTable = [
   '   `20260909110000` | `20260909110000` | `2026-09-09 11:00:00` ',
   '   `20260909180000` | `20260909180000` | `2026-09-09 18:00:00` ',
   '   `20260910070000` | `20260910070000` | `2026-09-10 07:00:00` ',
+  '   `20260911040000` | `20260911040000` | `2026-09-11 04:00:00` ',
   '',
   '',
 ].join('\n');
@@ -139,11 +141,11 @@ describe('CI-only preservation guards', () => {
       expect(() => assertRehearsalEnvironment({ ...validEnv, [key]: 'fictional-refused' }, [])).toThrow();
     }
   });
-  it('pins exactly six regular migrations, lengths and hashes', async () => {
-    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000']);
+  it('pins exactly seven regular migrations, lengths and hashes', async () => {
+    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000']);
     expect(() => validateInventory(inventory())).not.toThrow();
     await expect(assertMigrationInventory()).resolves.toBeUndefined();
-    for (const index of [0, 1, 2, 3, 4, 5]) for (const [key, value] of [
+    for (const index of [0, 1, 2, 3, 4, 5, 6]) for (const [key, value] of [
       ['name', 'unexpected.sql'], ['bytes', 0], ['bytes', present(inventory()[index]).bytes + 1],
       ['sha256', 'b'.repeat(64)], ['regular', false], ['symlink', true],
     ]) {
@@ -181,8 +183,8 @@ describe('CI-only preservation guards', () => {
     expect(() => assertCapabilities([{ code: 0, stdout: '  --local\n' }, ...help.slice(1)])).toThrow();
   });
   it('parses source-derived applied/pending tables without claiming execution', () => {
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000'] });
-    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000'], pending: [] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000'] });
+    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000'], pending: [] });
     expect(() => assertHistory(targetTable, 'base')).toThrow();
     expect(() => assertHistory(baseTable, 'target')).toThrow();
     expect(() => assertHistory(baseTable, 'other')).toThrow();
@@ -193,7 +195,7 @@ describe('CI-only preservation guards', () => {
   it('retains SOURCE-DERIVED renderer padding, widths and decorative blank lines', () => {
     for (const table of [baseTable, targetTable]) {
       const lines = table.split('\n');
-      expect(lines).toHaveLength(12);
+      expect(lines).toHaveLength(13);
       expect(lines.slice(0, 2)).toEqual(['', '  ']);
       expect(lines.slice(-2)).toEqual(['', '']);
       for (const line of lines.slice(2, -2)) {
@@ -265,7 +267,7 @@ describe('CI-only preservation guards', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe('EVIDENCE_REQUIRED');
     expect(historyFailureDetail(failure)).toBe(`; reason=${reason}`);
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000'] });
   });
   it('distinguishes history command failure without forwarding command output or arbitrary errors', () => {
     const privateText = 'arbitrary upstream text /private/fixture-path';
@@ -713,7 +715,7 @@ describe('import safety and frozen integration boundary', () => {
   });
   it('keeps CI opt-in step-local, before unchanged final reset and suites', async () => {
     const workflow = await readFile(path.join(root, '.github/workflows/ci.yml'), 'utf8');
-    expect(workflow).toContain("      - run: npm run db:start\n      - run: npm run db:rehearse\n        env:\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:reset\n      - run: npm run test:integration\n      - run: npm run test:security\n      - run: npm run db:types");
+    expect(workflow).toContain("      - run: npm run db:start\n      - run: npm run db:rehearse\n        env:\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:reset\n      - run: npm run test:integration\n      - run: npm run test:security\n      - run: node scripts/ai-analysis-rehearsal.mjs\n      - run: npm run db:types");
     expect(workflow.match(/ALLOW_PRESERVATION_REHEARSAL/g)).toHaveLength(1);
     expect(workflow).toContain('timeout-minutes: 30');
     const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };

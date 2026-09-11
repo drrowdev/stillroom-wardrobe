@@ -17,5 +17,5 @@
     "noEmit": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "tests/**/*.ts", "vite.config.ts", "playwright.config.ts"]
+  "include": ["src", "tests/**/*.ts", "supabase/functions/**/*.ts", "vite.config.ts", "playwright.config.ts"]
 }

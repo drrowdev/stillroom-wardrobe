@@ -1,14 +1,490 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { AssertionError } from 'node:assert';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
 import {
   ROOT, DB_CONTAINER, PROJECT_ID, MIGRATION_HASH, assertLoopbackUrl, assertLocalApi, assertPublishableKey,
   normalSessionEnvironment, validateSessionEnvironment, commandEnvironment, requireDocker, requireLocalContainer,
   LocalBackendError, securityFailureExitCode, describeGenerationResult, describeStartupOrResetFailure,
+  assertAnalysisServeContract, ownAnalysisProcess, probeAnalysisHandler, waitForAnalysisHandler,
+  readAnalysisRuntime, runCommand, createServedDiagnostics, parseServedDiagnostics, servedCode,
 } from '../../scripts/backend/local.mjs';
+// @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
+import { analysisRequest, servedInvalidTokenRequest } from '../integration/ai-analysis.sessions.mjs';
+
+describe('owned B1 function lifecycle', () => {
+  const signature = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Methods': 'POST' };
+  it('textually guards against direct fetch between startup and the authoritative served child', async () => {
+    const source = await readFile(path.join(ROOT, 'scripts', 'ai-analysis-rehearsal.mjs'), 'utf8');
+    const startup = source.indexOf('owned = await startAnalysisServer();');
+    const served = source.indexOf("await child('integration', 'served', LOCAL_API);");
+    expect(startup).toBeGreaterThanOrEqual(0);
+    expect(served).toBeGreaterThan(startup);
+    expect(source.slice(startup, served)).not.toMatch(/\bfetch\s*\(/);
+  });
+  it.each([undefined, '*'])('probes actual handler without Origin, independently of ACAO %s', async (acao) => {
+    const transport = vi.fn(async () => new Response(null, { status: 204,
+      headers: { ...signature, ...(acao ? { 'Access-Control-Allow-Origin': acao } : {}) } }));
+    expect((await probeAnalysisHandler(transport)).ready).toBe(true);
+    expect(transport).toHaveBeenCalledWith('http://127.0.0.1:54321/functions/v1/analyze-clothing', {
+      method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'POST' }, redirect: 'error', signal: expect.any(AbortSignal),
+    });
+  });
+  it.each(Object.keys(signature).flatMap((key) => [undefined, 'wrong'].map((value) => [key, value])))(
+    'rejects absent/malformed handler indicator %s %s', async (key, value) => {
+      const headers = new Headers(signature);
+      if (value === undefined) headers.delete(key!); else headers.set(key!, value);
+      expect((await probeAnalysisHandler(async () => new Response(null, { status: 204, headers }))).ready).toBe(false);
+    },
+  );
+  it.each([200, 404, 503])('rejects gateway/missing handler status %s even with all indicators', async (status) => {
+    expect((await probeAnalysisHandler(async () => new Response(null, { status, headers: signature }))).ready).toBe(false);
+  });
+  it('keeps the readiness deadline and safe transport failure evidence', async () => {
+    vi.useFakeTimers();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const owned = { stop: vi.fn(), ready: vi.fn(), assertRunning: vi.fn() };
+      const now = Date.now();
+      const result = waitForAnalysisHandler(owned, { deadline: now + 60_000, spawnedAt: now,
+        previous: null, readRuntime: async () => ({ id: 'b'.repeat(64), running: true, startedAt: new Date(now).toISOString() }) },
+      async () => { throw new Error('private response must not escape'); });
+      const checked = expect(result).rejects.toThrow('replacement-not-serving');
+      await vi.advanceTimersByTimeAsync(60_000); await checked;
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('"transportFailure":true'));
+      expect(log).not.toHaveBeenCalledWith(expect.stringContaining('private response'));
+      expect(owned.ready).not.toHaveBeenCalled();
+    } finally { log.mockRestore(); vi.useRealTimers(); }
+  });
+  it('reports boot and missing-module indicators without child output', async () => {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(), stderr: new EventEmitter(), kill: vi.fn(),
+    });
+    const owned = ownAnalysisProcess(child as unknown as Parameters<typeof ownAnalysisProcess>[0]);
+    child.stderr.emit('data', Buffer.from('worker boot error: Module not found private fixture content'));
+    child.emit('close', 1);
+    expect(() => owned.assertRunning()).toThrow('boot-error');
+    expect(() => owned.assertRunning()).not.toThrow('private fixture content');
+    await owned.stop();
+  });
+  it.each([['worker boot error', 'boot-error'], ['cannot find module', 'missing-module']])(
+    'fails immediately on %s without waiting for child exit', async (text, reason) => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(), stderr: new EventEmitter(), kill: vi.fn(),
+      });
+      const owned = ownAnalysisProcess(child as unknown as Parameters<typeof ownAnalysisProcess>[0]);
+      child.stderr.emit('data', Buffer.from(text));
+      expect(() => owned.assertRunning()).toThrow(reason);
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+      child.emit('close', 1); await owned.stop();
+    });
+  const config = '[edge_runtime]\nenabled = true\n\n[functions.analyze-clothing]\nenabled = true\nverify_jwt = true\n';
+  const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json'];
+  const help = { code: 0, stdout: '  Serve all Functions locally.\n  supabase functions serve [flags] [<Function name...>]\n', stderr: '' };
+  it('requires the observed all-functions capability and closed enabled inventory', () => {
+    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, help)).not.toThrow();
+    for (const text of [config.replace('verify_jwt = true', 'verify_jwt = false'),
+      config.replace('[edge_runtime]\nenabled = true', '[edge_runtime]\nenabled = false'),
+      config + '\n[functions.other]\nenabled = true\n']) {
+      expect(() => assertAnalysisServeContract(text, ['analyze-clothing'], files, help)).toThrow();
+    }
+    expect(() => assertAnalysisServeContract(config, ['other'], files, help)).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], [...files, '.env'], help)).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, { ...help, code: 1 })).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, { ...help, stdout: '' })).toThrow();
+  });
+  it.each(['stop', 'output', 'startup', 'lifetime', 'exit'] as const)('owns only its child on %s', async (reason) => {
+    vi.useFakeTimers();
+    try {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(), stderr: new EventEmitter(),
+        kill: vi.fn(() => { queueMicrotask(() => child.emit('close', 0)); return true; }),
+      });
+      const owned = ownAnalysisProcess(child as unknown as Parameters<typeof ownAnalysisProcess>[0], 100, 50);
+      owned.assertRunning();
+      if (reason === 'output') child.stderr.emit('data', Buffer.alloc(1024 * 1024 + 1));
+      if (reason === 'startup') await vi.advanceTimersByTimeAsync(50);
+      if (reason === 'lifetime') { owned.ready(); await vi.advanceTimersByTimeAsync(100); }
+      if (reason === 'exit') child.emit('close', 1);
+      await owned.stop();
+      expect(() => owned.assertRunning()).toThrow();
+      expect(child.kill).toHaveBeenCalledTimes(reason === 'exit' ? 0 : 1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+describe('B1 replacement identity readiness', () => {
+  const now = Date.parse('2026-09-11T12:00:00Z');
+  const previous = { id: 'a'.repeat(64), running: true, startedAt: '2026-09-11T11:59:59.999999999Z' };
+  const current = { id: 'b'.repeat(64), running: true, startedAt: '2026-09-11T12:00:00Z' };
+  const signature = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Methods': 'POST' };
+  const options = () => ({ deadline: now + 60_000, spawnedAt: now, previous, readRuntime: vi.fn(async () => current) });
+  const process = () => ({ stop: vi.fn(), ready: vi.fn(), assertRunning: vi.fn() });
+  const transport = () => vi.fn(async () => new Response(null, { status: 204, headers: signature }));
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(now); vi.spyOn(console, 'log').mockImplementation(() => {}); });
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+  it('requires metadata/probe/identical metadata/probe/identical metadata and a healthy child', async () => {
+    const order: string[] = [], owned = process(), config = options();
+    config.readRuntime.mockImplementation(async (deadline?: number) => { expect(deadline).toBe(config.deadline); order.push('metadata'); return current; });
+    const fetcher = vi.fn(async () => { order.push('probe'); return new Response(null, { status: 204, headers: signature }); });
+    owned.ready.mockImplementation(() => { order.push('ready'); });
+    await waitForAnalysisHandler(owned, config, fetcher);
+    expect(order).toEqual(['metadata', 'probe', 'metadata', 'probe', 'metadata', 'ready']);
+    expect(owned.assertRunning).toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('"stable":true'));
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining(current.id));
+  });
+  it.each([true, false])('never accepts the old healthy fixed URL, previous present=%s', async (present) => {
+    const owned = process(), fetcher = transport();
+    const promise = waitForAnalysisHandler(owned, { ...options(), previous: present ? previous : null,
+      readRuntime: async () => present ? previous : null }, fetcher);
+    const checked = expect(promise).rejects.toThrow(present ? 'identity-unchanged' : 'absent-no-replacement');
+    await vi.advanceTimersByTimeAsync(60_000); await checked;
+    expect(fetcher).not.toHaveBeenCalled(); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('accepts initially absent only with a running runtime at or after spawn', async () => {
+    const owned = process();
+    await waitForAnalysisHandler(owned, { ...options(), previous: null }, transport());
+    expect(owned.ready).toHaveBeenCalledOnce();
+  });
+  it('waits for the pinned created runtime to start and serve, reading before each attempt', async () => {
+    const order: string[] = [], owned = process(), fetcher = transport();
+    const created = { ...current, running: false, startedAt: null };
+    const readRuntime = vi.fn<NonNullable<Parameters<typeof waitForAnalysisHandler>[1]['readRuntime']>>(async () => { order.push('metadata'); return current; })
+      .mockImplementationOnce(async () => { order.push('created'); return created; });
+    fetcher.mockImplementationOnce(async () => { order.push('not-serving'); return new Response(null, { status: 503 }); })
+      .mockImplementation(async () => { order.push('probe'); return new Response(null, { status: 204, headers: signature }); });
+    const result = waitForAnalysisHandler(owned, { ...options(), readRuntime }, fetcher);
+    await vi.advanceTimersByTimeAsync(249);
+    expect(fetcher).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetcher).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(250); await result;
+    expect(order).toEqual(['created', 'metadata', 'not-serving', 'metadata', 'probe', 'metadata', 'probe', 'metadata']);
+    expect(owned.ready).toHaveBeenCalledOnce();
+  });
+  it.each([null, { ...previous, running: false, startedAt: null }])(
+    'uses spawn freshness when the baseline has no start %#', async (baseline) => {
+      const owned = process();
+      await waitForAnalysisHandler(owned, { ...options(), previous: baseline }, transport());
+      expect(owned.ready).toHaveBeenCalledOnce();
+      await expect(waitForAnalysisHandler(process(), { ...options(), previous: baseline,
+        readRuntime: async () => ({ ...current, startedAt: previous.startedAt }) }, transport())).rejects.toThrow('reader-failed');
+    });
+  it('still requires a distinct ID when the old never-started runtime starts', async () => {
+    const owned = process(), fetcher = transport();
+    const result = waitForAnalysisHandler(owned, { ...options(), previous: { ...current, running: false, startedAt: null } }, fetcher);
+    const checked = expect(result).rejects.toThrow('identity-unchanged');
+    await vi.advanceTimersByTimeAsync(60_000); await checked;
+    expect(fetcher).not.toHaveBeenCalled(); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('bounds a stuck replacement, started=%s', async (started) => {
+    const owned = process(), fetcher = transport().mockResolvedValue(new Response(null, { status: 503 }));
+    const result = waitForAnalysisHandler(owned, { ...options(),
+      readRuntime: async () => started ? current : { ...current, running: false, startedAt: null } }, fetcher);
+    const checked = expect(result).rejects.toThrow(started ? 'replacement-not-serving' : 'replacement-not-started');
+    await vi.advanceTimersByTimeAsync(60_000); await checked;
+    expect(fetcher).toHaveBeenCalledTimes(started ? 240 : 0);
+    expect(owned.ready).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('"elapsedMs":60000'));
+  });
+  it.each([null, { ...current, id: 'c'.repeat(64), running: false, startedAt: null }])(
+    'never repins a created candidate after disappearance or replacement %#', async (next) => {
+      const owned = process(), fetcher = transport();
+      const readRuntime = vi.fn<NonNullable<Parameters<typeof waitForAnalysisHandler>[1]['readRuntime']>>()
+        .mockResolvedValueOnce({ ...current, running: false, startedAt: null }).mockResolvedValue(next);
+      const result = waitForAnalysisHandler(owned, { ...options(), readRuntime }, fetcher);
+      const checked = expect(result).rejects.toThrow('identity-unstable');
+      await vi.advanceTimersByTimeAsync(250); await checked;
+      expect(readRuntime).toHaveBeenCalledTimes(2); expect(fetcher).not.toHaveBeenCalled();
+    });
+  it.each([null, '2026-09-11T12:00:01Z'])('freezes the first valid start before serving, later=%s', async (startedAt) => {
+    const owned = process(), fetcher = transport().mockResolvedValue(new Response(null, { status: 503 }));
+    const readRuntime = vi.fn<NonNullable<Parameters<typeof waitForAnalysisHandler>[1]['readRuntime']>>()
+      .mockResolvedValueOnce({ ...current, running: false, startedAt: null }).mockResolvedValueOnce(current)
+      .mockResolvedValue({ ...current, running: false, startedAt });
+    const result = waitForAnalysisHandler(owned, { ...options(), readRuntime }, fetcher);
+    const checked = expect(result).rejects.toThrow('identity-unstable');
+    await vi.advanceTimersByTimeAsync(500); await checked;
+    expect(fetcher).toHaveBeenCalledOnce(); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('allows repeated transient first probes but resets transport failure after HTTP recovery', async () => {
+    const owned = process(), config = options(), fetcher = transport()
+      .mockRejectedValueOnce(new Error('private transport')).mockRejectedValueOnce(new Error('private transport'))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const result = waitForAnalysisHandler(owned, config, fetcher);
+    await vi.advanceTimersByTimeAsync(750); await result;
+    expect(fetcher).toHaveBeenCalledTimes(5); expect(config.readRuntime).toHaveBeenCalledTimes(6);
+    expect(owned.ready).toHaveBeenCalledOnce();
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('"transportFailure":false'));
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('private transport'));
+  });
+  it.each([true, false])('keeps last HTTP separate from the latest pre-confirmation transport failure=%s', async (failed) => {
+    const fetcher = transport().mockResolvedValue(new Response(null, { status: 503 }));
+    if (failed) fetcher.mockResolvedValueOnce(new Response(null, { status: 200 })).mockRejectedValue(new Error('private'));
+    else fetcher.mockRejectedValueOnce(new Error('private'));
+    const result = waitForAnalysisHandler(process(), { ...options(), deadline: now + 500 }, fetcher);
+    const checked = expect(result).rejects.toThrow('replacement-not-serving');
+    await vi.advanceTimersByTimeAsync(500); await checked;
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining(
+      `"lastHttp":{"status":${failed ? 200 : 503},"noStore":false,"nosniff":false,"post":false},"transportFailure":${failed}`));
+  });
+  it.each([1, 2])('does not restart confirmation after failed metadata read %s', async (position) => {
+    const owned = process(), config = options(), fetcher = transport();
+    for (let i = 0; i < position; i++) config.readRuntime.mockResolvedValueOnce(current);
+    config.readRuntime.mockRejectedValue(new Error('private metadata'));
+    await expect(waitForAnalysisHandler(owned, config, fetcher)).rejects.toThrow('reader-failed');
+    expect(fetcher).toHaveBeenCalledTimes(position); expect(config.readRuntime).toHaveBeenCalledTimes(position + 1);
+    expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('does not retry a nonmatching second signature', async () => {
+    const owned = process(), fetcher = transport().mockResolvedValueOnce(new Response(null, { status: 204, headers: signature }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    await expect(waitForAnalysisHandler(owned, options(), fetcher)).rejects.toThrow('signature-mismatch');
+    expect(fetcher).toHaveBeenCalledTimes(2); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('checks child health between transient attempts', async () => {
+    const owned = process(), config = options(), fetcher = transport().mockResolvedValue(new Response(null, { status: 503 }));
+    const result = waitForAnalysisHandler(owned, config, fetcher);
+    const checked = expect(result).rejects.toThrow('reader-failed');
+    await vi.advanceTimersByTimeAsync(1);
+    owned.assertRunning.mockImplementation(() => { throw new Error('private child'); });
+    await vi.advanceTimersByTimeAsync(249); await checked;
+    expect(fetcher).toHaveBeenCalledOnce(); expect(config.readRuntime).toHaveBeenCalledOnce();
+    expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('caps every probe by the remaining original budget, including confirmation', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout'), fetcher = transport()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }));
+    const result = waitForAnalysisHandler(process(), { ...options(), deadline: now + 2100 }, fetcher);
+    await vi.advanceTimersByTimeAsync(250); await result;
+    expect(timeout.mock.calls).toEqual([[2000], [1850], [1850]]);
+  });
+  it('rejects a running runtime with an explicit not-started state', async () => {
+    await expect(waitForAnalysisHandler(process(), { ...options(),
+      readRuntime: async () => ({ ...current, startedAt: null }) }, transport())).rejects.toThrow('reader-failed');
+  });
+  it.each(['2026-09-11T11:59:59Z', '2026-09-11T11:59:59.999999999Z', 'invalid', '2026-02-30T12:00:00Z'])(
+    'rejects stale/equal or malformed StartedAt %s', async (startedAt) => {
+      await expect(waitForAnalysisHandler(process(), { ...options(), readRuntime: async () => ({ ...current, startedAt }) },
+        transport())).rejects.toThrow('reader-failed');
+    });
+  it('compares nanosecond freshness, not rounded milliseconds', async () => {
+    const owned = process();
+    await waitForAnalysisHandler(owned, { ...options(),
+      previous: { ...previous, startedAt: '2026-09-11T11:59:59.999999998Z' },
+      readRuntime: async () => ({ ...current, startedAt: previous.startedAt }) }, transport());
+    expect(owned.ready).toHaveBeenCalledOnce();
+  });
+  it.each([1, 2])('fails identity instability after probe %s without restarting confirmation', async (position) => {
+    const owned = process(), config = options(), fetcher = transport();
+    for (let i = 0; i < position; i++) config.readRuntime.mockResolvedValueOnce(current);
+    config.readRuntime.mockResolvedValue({ ...current, id: 'c'.repeat(64) });
+    await expect(waitForAnalysisHandler(owned, config, fetcher)).rejects.toThrow('identity-unstable');
+    expect(fetcher).toHaveBeenCalledTimes(position); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('rejects changed running state during confirmation', async () => {
+    const config = options();
+    config.readRuntime.mockResolvedValueOnce(current).mockResolvedValue({ ...current, running: false });
+    await expect(waitForAnalysisHandler(process(), config, transport())).rejects.toThrow('identity-unstable');
+  });
+  it('keeps the last HTTP indicators when the second probe has a transport failure', async () => {
+    const fetcher = transport().mockRejectedValueOnce(new Error('unused'));
+    fetcher.mockReset().mockResolvedValueOnce(new Response(null, { status: 204, headers: signature }))
+      .mockRejectedValueOnce(new Error('private transport'));
+    await expect(waitForAnalysisHandler(process(), options(), fetcher)).rejects.toThrow('signature-mismatch');
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('"lastHttp":{"status":204,"noStore":true,"nosniff":true,"post":true},"transportFailure":true'));
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('private transport'));
+  });
+  it('does not create a fresh budget or probe after a metadata read exhausts the original deadline', async () => {
+    const owned = process(), fetcher = transport();
+    await expect(waitForAnalysisHandler(owned, { ...options(), deadline: now + 100,
+      readRuntime: async () => { vi.setSystemTime(now + 101); return current; } }, fetcher)).rejects.toThrow();
+    expect(fetcher).not.toHaveBeenCalled(); expect(owned.ready).not.toHaveBeenCalled();
+    const reader = vi.fn(async () => current);
+    await expect(waitForAnalysisHandler(owned, { ...options(), deadline: now, readRuntime: reader }, fetcher)).rejects.toThrow();
+    expect(reader).not.toHaveBeenCalled();
+  });
+  it('rejects a dead owned child even when the fixed URL is healthy', async () => {
+    const owned = process(), fetcher = transport();
+    owned.assertRunning.mockImplementation(() => { throw new Error('private child output'); });
+    await expect(waitForAnalysisHandler(owned, options(), fetcher)).rejects.toThrow('reader-failed');
+    expect(fetcher).not.toHaveBeenCalled(); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('fails closed on a denied injected reader without exposing its error', async () => {
+    await expect(waitForAnalysisHandler(process(), { ...options(),
+      readRuntime: async () => { throw new Error('private Docker failure'); } }, transport())).rejects.toThrow('reader-failed');
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('private Docker failure'));
+  });
+});
+
+describe('B1 bounded Docker runtime metadata', () => {
+  const id = 'a'.repeat(64);
+  const inspected = `${id}|true|2026-09-11T12:00:00.123456789Z\n`;
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(Date.parse('2026-09-11T12:01:00Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+  it('uses only the exact named ps and validated-ID inspect with the original remaining budget', async () => {
+    const deadline = Date.now() + 6000;
+    const run = vi.fn<typeof runCommand>().mockImplementationOnce(async () => {
+      vi.setSystemTime(Date.now() + 2000); return { code: 0, stdout: `${id} running\n`, stderr: '' };
+    }).mockResolvedValueOnce({ code: 0, stdout: inspected, stderr: '' });
+    expect(await readAnalysisRuntime(deadline, run)).toEqual({ id, running: true, startedAt: '2026-09-11T12:00:00.123456789Z' });
+    expect(run.mock.calls).toEqual([
+      ['docker', ['ps', '-a', '--no-trunc', '--filter', 'name=^/supabase_edge_runtime_stillroom-wardrobe$', '--format', '{{.ID}} {{.State}}'],
+        { timeout: 5000, maxOutputBytes: 4096 }],
+      ['docker', ['inspect', '--format', '{{.Id}}|{{.State.Running}}|{{.State.StartedAt}}', id], { timeout: 4000, maxOutputBytes: 4096 }],
+    ]);
+  });
+  it('accepts only zero-exit truly empty ps as absent', async () => {
+    const run = vi.fn<typeof runCommand>().mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    expect(await readAnalysisRuntime(Date.now() + 1000, run)).toBeNull(); expect(run).toHaveBeenCalledOnce();
+  });
+  it.each([false, true])('accepts created metadata and the legitimate cross-read start transition, running=%s', async (running) => {
+    const startedAt = running ? '2026-09-11T12:00:00.123456789Z' : '0001-01-01T00:00:00Z';
+    const run = vi.fn<typeof runCommand>().mockResolvedValueOnce({ code: 0, stdout: `${id} created\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: `${id}|${running}|${startedAt}\n`, stderr: '' });
+    expect(await readAnalysisRuntime(Date.now() + 1000, run)).toEqual({ id, running, startedAt: running ? startedAt : null });
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    ['exited', false, '0001-01-01T00:00:00Z'], ['created', true, '0001-01-01T00:00:00Z'],
+    ['created', false, '1970-01-01T00:00:00Z'], ['created', false, '0001-01-01T00:00:00.000Z'],
+    ['created', false, ''], ['created', false, 'null'],
+  ])('rejects noncanonical or inconsistent not-started metadata %s %s %s', async (state, running, startedAt) => {
+    const run = vi.fn<typeof runCommand>().mockResolvedValueOnce({ code: 0, stdout: `${id} ${state}\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: `${id}|${running}|${startedAt}\n`, stderr: '' });
+    await expect(readAnalysisRuntime(Date.now() + 1000, run)).rejects.toThrow('reader-failed');
+  });
+  it.each([
+    { code: 1, stdout: '', stderr: 'denied private metadata' },
+    { code: 0, stdout: ' \n', stderr: '' },
+    { code: 0, stdout: `${id} running\n${id} running\n`, stderr: '' },
+    { code: 0, stdout: 'short running\n', stderr: '' },
+    { code: 0, stdout: `${id} invented\n`, stderr: '' },
+    { code: 0, stdout: `${id} running\n`, stderr: 'x'.repeat(4096) },
+  ])('rejects failed/ambiguous/malformed/capture-overflow ps', async (result) => {
+    const run = vi.fn<typeof runCommand>().mockResolvedValue(result);
+    await expect(readAnalysisRuntime(Date.now() + 1000, run)).rejects.toThrow(/reader-(failed|ambiguous)/);
+    expect(run).toHaveBeenCalledOnce();
+  });
+  it.each([inspected.replace(id, 'b'.repeat(64)), inspected.replace('true', 'yes'),
+    inspected.replace('2026-09-11', '2026-02-30'), `${id}|true|invalid`, inspected + inspected,
+    `${id}|false|0001-01-01T00:00:00Z\n`])('rejects invalid inspect identity/state/time', async (text) => {
+    const run = vi.fn<typeof runCommand>().mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: text, stderr: '' });
+    await expect(readAnalysisRuntime(Date.now() + 1000, run)).rejects.toThrow('reader-failed');
+  });
+  it('issues no Docker call without a positive remaining budget', async () => {
+    const run = vi.fn<typeof runCommand>();
+    await expect(readAnalysisRuntime(Date.now(), run)).rejects.toThrow('deadline'); expect(run).not.toHaveBeenCalled();
+    run.mockImplementation(async () => { vi.setSystemTime(Date.now() + 1000); return { code: 0, stdout: `${id} running\n`, stderr: '' }; });
+    await expect(readAnalysisRuntime(Date.now() + 1000, run)).rejects.toThrow('deadline'); expect(run).toHaveBeenCalledOnce();
+  });
+});
+
+describe('B1 per-command live capture cap', () => {
+  it.each([0, -1, 1.1, NaN, Infinity, 16 * 1024 * 1024 + 1])('rejects invalid cap %s before spawn', (maxOutputBytes) => {
+    expect(() => runCommand('must-not-spawn', [], { maxOutputBytes })).toThrow('capture limit');
+  });
+  it('retains exactly the combined boundary but fails overflow without forwarding a prefix', async () => {
+    const script = 'process.stdout.write("a".repeat(2048));process.stderr.write("b".repeat(2048))';
+    const exact = await runCommand(process.execPath, ['-e', script], { maxOutputBytes: 4096 });
+    expect(exact.code).toBe(0); expect(exact.stdout.length + exact.stderr.length).toBe(4096);
+    const overflow = await runCommand(process.execPath, ['-e', script], { maxOutputBytes: 4095 });
+    expect(overflow).toEqual({ code: 2, stdout: '', stderr: '' });
+    expect((await runCommand(process.execPath, ['-e', script])).code).toBe(0);
+  });
+  it.each([false, true])('distinguishes default overflow from an explicitly supplied 16MiB cap, explicit=%s', async (explicit) => {
+    const limit = 16 * 1024 * 1024;
+    const result = await runCommand(process.execPath,
+      ['-e', `process.stderr.write("prefix",()=>process.stdout.write("a".repeat(${limit + 1})))`],
+      explicit ? { maxOutputBytes: limit } : {});
+    const size = Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr);
+    expect(result.code).toBe(2);
+    expect(size).toBeLessThanOrEqual(limit);
+    if (explicit) expect(size).toBe(0);
+    else { expect(size).toBeGreaterThan(0); expect(result.stderr === 'prefix').toBe(true); }
+  });
+  it.each([undefined, 4096])('does not mistake a timed-out command with a zero-exit signal handler for success, cap=%s', async (maxOutputBytes) => {
+    const result = await runCommand(process.execPath,
+      ['-e', 'process.on("SIGTERM",()=>process.exit(0));setInterval(()=>{},1000)'], { timeout: 100, maxOutputBytes });
+    expect(result.code).toBe(2);
+  });
+});
+
+describe('B1 closed served evidence and invalid-token request', () => {
+  const record = () => ({ case: 'served-owner', owner: 'A', status: 503, noStore: true,
+    nosniff: true, vary: true, jsonParsed: true, code: 'UNCONFIGURED', transport: 'none' });
+  const owner = { label: 'A', token: 'synthetic-owner' };
+  const env = { SUPABASE_PUBLISHABLE_KEY: 'synthetic-publishable' };
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it('round-trips only finite records and never child stdout/stderr or unknown codes', () => {
+    const lines: string[] = [], emit = createServedDiagnostics((line) => lines.push(line));
+    emit(record());
+    expect(parseServedDiagnostics(`private prefix\n${lines.join('\n')}`, 'private stderr')).toEqual(lines);
+    expect(servedCode('private error text')).toBe('unrecognized');
+    for (const code of ['INVALID_INPUT', 'UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRED', 'CONFLICT',
+      'ACTIVE_DRAFT', 'TERMINAL', 'TOO_LARGE', 'UNSUPPORTED_MEDIA', 'RATE_LIMIT', 'ALLOWANCE',
+      'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'ANALYSIS_FAILED', 'TIMEOUT']) expect(servedCode(code)).toBe(code);
+  });
+  it.each([{ extra: 'private' }, { owner: 'private' }, { case: 'private' }, { status: 99 }, { status: 600 },
+    { status: 0 }, { noStore: 'yes' }, { code: 'private' }, { transport: 'private' }])('rejects invalid/extra-key records as a whole', (change) => {
+    const text = 'B1-SERVED ' + JSON.stringify({ ...record(), ...change });
+    expect(parseServedDiagnostics('B1-SERVED ' + JSON.stringify(record()) + '\n' + text, ''))
+      .toEqual(['B1-SERVED evidence-rejected-or-overflow']);
+  });
+  it('rejects malformed, ninth and over-2048-byte input, without truncation', () => {
+    const line = 'B1-SERVED ' + JSON.stringify(record());
+    for (const text of ['B1-SERVED {', Array(9).fill(line).join('\n'), 'B1-SERVED ' + ' '.repeat(2048) + JSON.stringify(record())]) {
+      expect(parseServedDiagnostics(text, '')).toEqual(['B1-SERVED evidence-rejected-or-overflow']);
+    }
+    const lines: string[] = [], emit = createServedDiagnostics((value) => lines.push(value));
+    for (let i = 0; i < 10; i++) emit(record());
+    expect(lines).toHaveLength(9); expect(lines[8]).toBe('B1-SERVED evidence-rejected-or-overflow');
+    expect(Buffer.byteLength(lines.slice(0, 8).join('\n'))).toBeLessThanOrEqual(2048);
+  });
+  it.each(['not-json', '{"code":"UNAUTHENTICATED"}', ''])('accepts served invalid-token 401 without handler headers or JSON: %s', async (body) => {
+    const fetcher = vi.fn(async () => new Response(body, { status: 401 }));
+    vi.stubGlobal('fetch', fetcher);
+    const observe = vi.fn();
+    await servedInvalidTokenRequest('http://127.0.0.1:54321', env, owner, observe);
+    const request = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    const bearer = new Headers(request[1].headers).get('Authorization')!;
+    expect(bearer.startsWith('Bearer ')).toBe(true);
+    expect(bearer.slice(7)).toMatch(/^[A-Za-z0-9._~+/-]{1,8192}={0,2}$/);
+    expect(observe).toHaveBeenCalledWith(expect.objectContaining({ case: 'served-invalid-token', status: 401, noStore: false }));
+  });
+  it('rejects a successful invalid-token request and preserves that assertion when diagnostics throw', async () => {
+    vi.stubGlobal('fetch', async () => new Response('{}', { status: 200 }));
+    await expect(servedInvalidTokenRequest('http://127.0.0.1:54321', env, owner, () => { throw new Error('observer'); }))
+      .rejects.not.toThrow('observer');
+  });
+  it('bounds and cancels the invalid-token response body without relaxing its assertion', async () => {
+    const cancel = vi.fn(), observe = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array(32769)); }, cancel });
+    vi.stubGlobal('fetch', async () => new Response(body, { status: 401 }));
+    await expect(servedInvalidTokenRequest('http://127.0.0.1:54321', env, owner, observe)).rejects.toThrow();
+    expect(cancel).toHaveBeenCalled();
+    expect(observe).toHaveBeenCalledWith(expect.objectContaining({ status: 401, transport: 'body-failed', jsonParsed: false }));
+  });
+  it('retains the ordinary handler-header and bounded JSON guards, with failure observations', async () => {
+    const observe = vi.fn();
+    vi.stubGlobal('fetch', async () => new Response('{"code":"UNCONFIGURED"}', { status: 503 }));
+    await expect(analysisRequest('http://127.0.0.1:54321', env, owner, 1, { observe })).rejects.toThrow();
+    expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({ status: 503, jsonParsed: false, noStore: false }));
+    const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
+    vi.stubGlobal('fetch', async () => new Response('x'.repeat(32769), { status: 503, headers }));
+    await expect(analysisRequest('http://127.0.0.1:54321', env, owner, 1, { observe })).rejects.toThrow();
+    expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({ status: 503, jsonParsed: false, transport: 'body-failed' }));
+    vi.stubGlobal('fetch', async () => { throw new Error('private network'); });
+    await expect(analysisRequest('http://127.0.0.1:54321', env, owner, 1, { observe })).rejects.toThrow('private network');
+    expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({ status: 0, code: 'unrecognized', transport: 'request-failed' }));
+  });
+});
 
 declare module '../../scripts/backend/local.mjs' {
   export function describeStartupOrResetFailure(result: unknown, elapsedMs: unknown): Record<string, unknown>;
@@ -409,6 +885,7 @@ describe('safe startup/reset failure description', () => {
     '20260905000000_initial.sql', '20260906000000_item_field_provenance.sql',
     '20260909070000_item_description_edit.sql', '20260909110000_item_optional_collections.sql',
     '20260909180000_ai_request_controls.sql', '20260910070000_checked_item_save.sql',
+    '20260911040000_ai_analysis_backend.sql',
   ]);
 
   function report(result: unknown, ...elapsed: [] | [unknown]) {
@@ -424,10 +901,10 @@ describe('safe startup/reset failure description', () => {
     }
     if (value.exitCode !== null) expect(value.exitCode).toBeLessThanOrEqual(255);
     expect(value.announcedKnownMigrationCount).not.toBeNull();
-    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(6);
+    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(7);
     if (value.lastAnnouncedKnownMigrationIndex !== null) {
       expect(value.lastAnnouncedKnownMigrationIndex).toBeGreaterThanOrEqual(1);
-      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(6);
+      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(7);
     }
     expect(['none', 'multiple', ...operations.map(([, operation]) => operation)]).toContain(value.stderrDockerOperation);
     expect(['unclassified', 'exit-125', 'exit-126-or-127', 'other-nonzero']).toContain(value.stderrContainerExitBucket);
@@ -530,7 +1007,7 @@ describe('safe startup/reset failure description', () => {
   it('counts distinct announcements and uses stderr order rather than version order', () => {
     const lines = [...migrations, migrations[1], migrations[0]];
     expect(failure(lines.map((name) => `Applying migration ${name}...\n`).join('')))
-      .toMatchObject({ announcedKnownMigrationCount: 6, lastAnnouncedKnownMigrationIndex: 1 });
+      .toMatchObject({ announcedKnownMigrationCount: 7, lastAnnouncedKnownMigrationIndex: 1 });
   });
 
   it.each([
