@@ -122,17 +122,6 @@ async function main() {
     await child('integration'); await child('security');
     stage = 'served-entrypoint';
     owned = await startAnalysisServer();
-    for (const origin of ['http://127.0.0.1:5173', null]) {
-      const r = await fetch(`${LOCAL_API}/functions/v1/analyze-clothing`, { method: 'OPTIONS',
-        headers: { 'Access-Control-Request-Method': 'POST', ...(origin ? { Origin: origin } : {}) },
-        redirect: 'error', signal: AbortSignal.timeout(2000) });
-      console.log(JSON.stringify({ probe: origin ? 'old-browser-preflight' : 'actual-handler', status: r.status,
-        noStore: r.headers.get('Cache-Control') === 'no-store', nosniff: r.headers.get('X-Content-Type-Options') === 'nosniff',
-        post: r.headers.get('Access-Control-Allow-Methods') === 'POST',
-        vary: r.headers.get('Vary')?.split(',').some((value) => value.trim().toLowerCase() === 'origin') ?? false,
-        acaoPresent: r.headers.has('Access-Control-Allow-Origin') }));
-      await r.body?.cancel();
-    }
     await child('integration', 'served', LOCAL_API);
     owned.assertRunning();
     await owned.stop(); owned = undefined;

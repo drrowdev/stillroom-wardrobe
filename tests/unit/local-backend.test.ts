@@ -17,6 +17,14 @@ import { analysisRequest, servedInvalidTokenRequest } from '../integration/ai-an
 
 describe('owned B1 function lifecycle', () => {
   const signature = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Methods': 'POST' };
+  it('textually guards against direct fetch between startup and the authoritative served child', async () => {
+    const source = await readFile(path.join(ROOT, 'scripts', 'ai-analysis-rehearsal.mjs'), 'utf8');
+    const startup = source.indexOf('owned = await startAnalysisServer();');
+    const served = source.indexOf("await child('integration', 'served', LOCAL_API);");
+    expect(startup).toBeGreaterThanOrEqual(0);
+    expect(served).toBeGreaterThan(startup);
+    expect(source.slice(startup, served)).not.toMatch(/\bfetch\s*\(/);
+  });
   it.each([undefined, '*'])('probes actual handler without Origin, independently of ACAO %s', async (acao) => {
     const transport = vi.fn(async () => new Response(null, { status: 204,
       headers: { ...signature, ...(acao ? { 'Access-Control-Allow-Origin': acao } : {}) } }));

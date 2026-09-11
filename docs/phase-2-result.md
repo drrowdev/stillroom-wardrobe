@@ -3976,3 +3976,75 @@ all exact-final-head CI/live/Apple/artifact/actual visual gates remain pending.
 The coordinator owns review, evidence and execution/merge decisions; the worker
 has not authorized Actions, rerun a failed job, merged, deployed, or begun
 another packet.
+
+## PR #19 B1 duplicate diagnostic removal - 11 September 2026
+
+The completed c906 CI `34600735898` attempt 2 / DB job `103276404916`
+passed strict B1 readiness (1418 ms, replacement/running/fresh/stable, 204)
+and logged the old-browser-preflight 200, then failed at `served-entrypoint`
+before the actual-handler comparison or authoritative served child. The
+immediate transport/cancellation cause is unknown; this does not diagnose
+earlier S1/served/B3 failures. Populated preservation and the preceding normal
+owner/security checks passed, but the separate B1 real Auth/DB plus
+Google-only-synthetic proof and generated types/parity did not complete.
+
+Apple job `103276398217` records 4 + 3 passing cases. App `103276404659`
+records 1434 units in 19 files and 471 EN/FI/SV keys, but browser/captures
+never ran. The coordinator-observed check annotation confirms its 20-minute
+job limit expired during Playwright system-dependency installation, not an
+application/browser assertion failure. The slow download cause remains
+unproven; no timeout/workflow/dependency change or unchanged rerun is authorized.
+
+[Local cutover 5634938691](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634938691)
+and [three-file amendment 5635450715](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5635450715)
+control this continuation from `c906bbd9947169a17758ef2af46ea22b17d1ebd0`,
+tree `c3f886ae4a6ee2a8afb4c9f7de212d463d839e72`, base
+`de6bca3ebd7d01b96e313e47353711908f3b8a3e`. Actual Anthropic Claude Opus 5
+reviewer `223d6728-9657-4479-8ea0-1da7421db2d3`, turn 14, accepted A1-A3;
+the coordinator adopted them. After read-only context and fresh clean-source
+inspection, this same local session read and matched its own
+[coordinator-observed local model attestation/edit permission 5635556891](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5635556891).
+This is local app/usage evidence for actual `gpt-6-astra`, not a native receipt.
+
+Only the comparative loop was removed from `scripts/ai-analysis-rehearsal.mjs`.
+Strict startup, the authoritative served child, health/stop calls, deadlines,
+closed diagnostics, matrix, preservation and restoration remain unchanged.
+One test in `tests/unit/local-backend.test.ts` requires both source anchors in
+order and rejects direct `fetch` invocation between them. It is a textual
+non-reintroduction guard, not live transport/readiness/child proof. This result
+append is the third allowed file; all other paths remain frozen.
+
+[Execution amendment 5635728250](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5635728250)
+records the same actual Anthropic Claude Opus 5 reviewer's turn 15:
+final parent/test diff **PASS, no findings**, execution amendment **ACCEPT**
+with coordinator-adopted B1-B7. The coordinator separately inspected this
+result append. For this exact three-file delta only, reviewed source inspection
+and `git diff --check` replace successful local automated checks as the
+pre-commit condition. Unit/type/lint/secret requirements remain blocked locally
+and pending in unchanged full exact-new-head CI, not waived or passed.
+The reviewed code/test files remain byte-identical.
+
+Local commands use isolated Node 24.19.0 / npm 11.17.0, not global Node 24.11.1.
+
+| Command | Actual result |
+| --- | --- |
+| `npm.cmd run test:unit -- tests\unit\local-backend.test.ts` | Initial exit 1: Vitest unavailable because dependencies were absent. |
+| `npm.cmd ci --no-fund` | Exit 1: effective package-feed proxy returned E404 for locked `jose@6.2.12`; npm automatic cleanup also reported EPERM under partial `node_modules/playwright-core/lib`. Lockfile/package/pins unchanged; no registry override or manual cleanup attempted. |
+| Targeted units after restore, typecheck, lint, existing `npm.cmd run scan:secrets` | Blocked by failed locked dependency restoration; no passing results claimed. The scanner has no `--changed-only` flag. Local scanning without build/canary is not built-bundle/canary proof. |
+| `git diff --check` | Exit 0 on the scoped three-file patch; whitespace evidence only. |
+
+The coordinator's secure HEAD requests to the canonical locked package URL
+failed with .NET `TLSHandshakeFailure` and Node HTTPS `EPROTO`; the underlying
+routing/transport cause is unknown. The failed restore supplied no usable
+dependencies or validation. Final filesystem metadata reports `node_modules`
+absent; no manual cleanup occurred, and its paths remain ignored. No dependency
+retry, registry/TLS override, package substitution, state copying or manual
+cleanup is authorized.
+
+No local backend/browser/build/service command, image input, push or Actions
+execution occurred. Final document/commit inspection and exact-commit
+push/first-CI permission remain coordinator gates; only a local commit is
+authorized by the amendment. All exact-head CI/live preservation,
+normal-owner/security/B1 real Auth-DB/types/parity, App/browser/native Apple
+and approved-artifact actual visual review remain mandatory. No source-complete,
+merge-ready, hosted/provider/paid/deployment or human-acceptance claim is made.
