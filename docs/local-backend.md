@@ -359,6 +359,29 @@ be intercepted with status 200 and does not prove handler boot. Diagnostics
 expose only bounded exit/boot/module/limit/probe indicators, not child output.
 This verifies local routing, not browser/deployed production CORS.
 
+Under [repair approval 5633782787](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5633782787),
+readiness also requires replacement of the previously observed exact
+`supabase_edge_runtime_stillroom-wardrobe` container. The existing local/project/
+Docker guards precede fixed-argument, shell-free `docker ps -a --no-trunc` for
+that anchored name and a single validated full-ID `docker inspect` selecting
+only ID, Running and StartedAt. Each read uses at most 5000 ms of the **same
+60-second deadline**, established before the pre-spawn read, and a combined
+4096-byte capture cap. Empty successful ps means absent; failed, ambiguous or
+malformed metadata and capture overflow fail closed. Other command callers
+retain the 16 MiB default.
+
+The new running ID must differ and have a strictly newer valid StartedAt
+(nanosecond precision); if initially absent, StartedAt must be at/after spawn.
+Confirmation is metadata → strict OPTIONS → identical metadata → strict OPTIONS
+→ identical metadata → healthy owned child → ready. Identity instability does
+not restart confirmation. Unchanged/absent identity can wait only within the
+original deadline; boot/module failure stops the owned process immediately.
+The owned 600-second lifetime, 1 MiB output ceiling and owned-only termination
+remain. This proves stable replacement under the serialized single-writer
+guarantee, **not child-PID attribution**. `B1-READINESS` exposes bounded predicates,
+elapsed time, closed reason and last HTTP indicators separately from transport
+failure, never container IDs/timestamps or child output.
+
 Separate ordinary-session children receive the existing strict environment
 allowlist and only an ephemeral loopback origin/stage argument. The parent alone
 holds local service/fixture authority and an ephemeral synthetic signing key.
@@ -367,6 +390,25 @@ is synthetic. The parent briefly switches just the two fictional controls to
 the reviewed manifest, 2270823 maximum, 100000000 allowance, rate 200, notice 1
 and TTL 3600. Closed A/B request namespaces are bounded to 32 admissions per
 owner. Rejected validation allocates none.
+
+The CLI-served check pairs both ordinary owners' exact 503/UNCONFIGURED results
+with a separate bearer-character-valid, invalid-JWT request requiring exactly
+401. Ordinary `analysisRequest` retains its no-store/nosniff and 32768-byte JSON
+guards; the invalid-token request separately bounds/cancels the response without
+demanding handler headers or JSON. A 401 alone does not establish gateway
+attribution, and 503 alone does not prove an Auth round trip: the separate real
+Auth/DB rehearsal remains mandatory. The full pre/post no-reservation snapshot
+is unchanged.
+
+`B1-SERVED` records contain only fixed case, A/B owner, status, header/JSON
+booleans, a shared closed handler-code allowlist (or `unrecognized`) and finite
+transport category. Producer and parent enforce eight records/2048 serialized
+bytes; malformed, extra-key, unknown-code or overflowing evidence is rejected,
+not forwarded/truncated. Arbitrary child stdout/stderr is never forwarded.
+Evidence cannot control assertions, readiness, retry, admission or success;
+missing required observations still block completion evidence. Any actual
+served/rehearsal failure preserves state and is a **STOP**, not permission to
+reset, rerun to green or speculate on Auth/SQL/policy changes.
 
 Coverage includes normal/anonymous refusals, actual grants/RLS/constraints,
 cross-owner FK rejection, immutable registry, legacy/trusted separation,

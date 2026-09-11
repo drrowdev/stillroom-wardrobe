@@ -308,11 +308,14 @@ export function commandEnvironment(source = process.env) {
   return result;
 }
 
-export function runCommand(command, args, { input, env = commandEnvironment(), timeout = 120_000 } = {}) {
+export function runCommand(command, args, { input, env = commandEnvironment(), timeout = 120_000, maxOutputBytes = 16 * 1024 * 1024 } = {}) {
+  if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1 || maxOutputBytes > 16 * 1024 * 1024) {
+    fail('REFUSED: invalid command capture limit.');
+  }
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd: ROOT, env, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     const stdout = [], stderr = [];
-    let size = 0, oversized = false;
+    let size = 0, oversized = false, timedOut = false;
     const terminate = () => {
       if (process.platform === 'win32' && child.pid) {
         // Windows does not forward SIGTERM through the CLI's Node/binary wrappers.
@@ -322,10 +325,10 @@ export function runCommand(command, args, { input, env = commandEnvironment(), t
         killer.on('error', () => child.kill());
       } else child.kill();
     };
-    const timer = setTimeout(terminate, timeout);
+    const timer = setTimeout(() => { timedOut = true; terminate(); }, timeout);
     const receive = (target) => (chunk) => {
       size += chunk.length;
-      if (size > 16 * 1024 * 1024) { if (!oversized) terminate(); oversized = true; }
+      if (size > maxOutputBytes) { if (!oversized) terminate(); oversized = true; }
       else target.push(chunk);
     };
     child.stdout.on('data', receive(stdout));
@@ -334,7 +337,7 @@ export function runCommand(command, args, { input, env = commandEnvironment(), t
     child.on('error', () => { clearTimeout(timer); resolve({ code: 2, stdout: '', stderr: '' }); });
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve({ code: oversized ? 2 : code ?? 2, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') });
+      resolve({ code: oversized || timedOut ? 2 : code ?? 2, stdout: oversized ? '' : Buffer.concat(stdout).toString('utf8'), stderr: oversized ? '' : Buffer.concat(stderr).toString('utf8') });
     });
     child.stdin.end(input);
   });
@@ -480,6 +483,7 @@ export function ownAnalysisProcess(child, lifetimeMs = 600_000, startupMs = 60_0
       evidence.bootError ||= /worker boot error|failed to boot|boot failure/i.test(text);
       evidence.missingModule ||= /module not found|cannot find module/i.test(text);
       tail = text.slice(-64);
+      if (evidence.bootError || evidence.missingModule) expire();
     };
     child.stdout.on('data', receive);
     child.stderr.on('data', receive);
@@ -487,15 +491,17 @@ export function ownAnalysisProcess(child, lifetimeMs = 600_000, startupMs = 60_0
       stop,
       ready() { clearTimeout(startup); this.assertRunning(); },
       assertRunning() {
-        if (failed || exited || stopping) fail('FAIL: owned analysis function process is unavailable. ' + JSON.stringify(evidence), 1);
+        if (failed || exited || stopping) throw new AnalysisStartupError(evidence.bootError ? 'boot-error'
+          : evidence.missingModule ? 'missing-module' : evidence.outputLimit ? 'output-limit' : 'child-exit');
       },
     };
   }
 
-export async function probeAnalysisHandler(transport = fetch) {
+export async function probeAnalysisHandler(transport = fetch, timeout = 2000) {
+  if (!Number.isSafeInteger(timeout) || timeout <= 0) throw new AnalysisStartupError('deadline');
   const response = await transport(`${LOCAL_API}/functions/v1/analyze-clothing`, {
     method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'POST' },
-    redirect: 'error', signal: AbortSignal.timeout(2000),
+    redirect: 'error', signal: AbortSignal.timeout(Math.min(timeout, 2000)),
   });
   await response.body?.cancel();
   const indicators = {
@@ -507,23 +513,120 @@ export async function probeAnalysisHandler(transport = fetch) {
   return { ...indicators, ready: indicators.status === 204 && indicators.noStore && indicators.nosniff && indicators.post };
 }
 
-export async function waitForAnalysisHandler(owned, transport = fetch) {
-  const deadline = Date.now() + 60_000;
-  let evidence = { transportFailure: false };
-  while (Date.now() < deadline) {
-    try { owned.assertRunning(); }
-    catch (error) {
-      fail(error.message + ' Probe: ' + JSON.stringify(evidence), 1);
-    }
-    let ready = false;
-    try {
-      evidence = await probeAnalysisHandler(transport);
-      ready = evidence.ready;
-    } catch { evidence = { transportFailure: true }; }
-    if (ready) { owned.ready(); return; }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+class AnalysisStartupError extends LocalBackendError {
+  constructor(reason) { super(`FAIL: analysis startup ${reason}.`, 1); this.reason = reason; }
+}
+
+function startupRemaining(deadline) {
+  const remaining = deadline - Date.now();
+  if (!Number.isSafeInteger(remaining) || remaining <= 0) throw new AnalysisStartupError('deadline');
+  return remaining;
+}
+
+function runtimeTime(value) {
+  if (typeof value !== 'string') throw new AnalysisStartupError('reader-failed');
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/.exec(value);
+  const ms = match ? Date.parse(`${match[1]}Z`) : NaN;
+  if (!Number.isFinite(ms) || ms <= 0 || new Date(ms).toISOString().slice(0, 19) !== match[1]) {
+    throw new AnalysisStartupError('reader-failed');
   }
-  fail('FAIL: actual analysis handler startup was not established. Probe: ' + JSON.stringify(evidence), 1);
+  return BigInt(ms) * 1_000_000n + BigInt((match[2] ?? '').padEnd(9, '0'));
+}
+
+function validateRuntime(value) {
+  if (value === null) return value;
+  if (!value || Object.keys(value).sort().join(',') !== 'id,running,startedAt'
+    || typeof value.id !== 'string' || !/^[0-9a-f]{64}$/.test(value.id)
+    || typeof value.running !== 'boolean') throw new AnalysisStartupError('reader-failed');
+  runtimeTime(value.startedAt);
+  return value;
+}
+
+export async function readAnalysisRuntime(deadline, run = runCommand) {
+  const call = async (args) => {
+    const result = await run('docker', args, { timeout: Math.min(startupRemaining(deadline), 5000), maxOutputBytes: 4096 });
+    startupRemaining(deadline);
+    if (result.code !== 0 || typeof result.stdout !== 'string' || typeof result.stderr !== 'string'
+      || Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) > 4096) {
+      throw new AnalysisStartupError('reader-failed');
+    }
+    return result.stdout;
+  };
+  const listed = await call(['ps', '-a', '--no-trunc', '--filter',
+    'name=^/supabase_edge_runtime_stillroom-wardrobe$', '--format', '{{.ID}} {{.State}}']);
+  if (listed === '') return null;
+  if (listed.trim().split('\n').length > 1) throw new AnalysisStartupError('reader-ambiguous');
+  const match = /^([0-9a-f]{64}) (created|running|paused|restarting|removing|exited|dead)\r?\n?$/.exec(listed);
+  if (!match) throw new AnalysisStartupError('reader-failed');
+  const inspected = await call(['inspect', '--format', '{{.Id}}|{{.State.Running}}|{{.State.StartedAt}}', match[1]]);
+  const fields = /^([0-9a-f]{64})\|(true|false)\|([^\r\n]+)\r?\n?$/.exec(inspected);
+  if (!fields || fields[1] !== match[1]) throw new AnalysisStartupError('reader-failed');
+  return validateRuntime({ id: fields[1], running: fields[2] === 'true', startedAt: fields[3] });
+}
+
+export async function waitForAnalysisHandler(owned, { deadline, spawnedAt, previous, readRuntime = readAnalysisRuntime }, transport = fetch) {
+  const evidence = { replacement: false, running: false, fresh: false, stable: false,
+    elapsedMs: 0, reason: 'deadline', lastHttp: null, transportFailure: false };
+  let waitingReason = previous === null ? 'absent-no-replacement' : 'identity-unchanged';
+  const healthy = () => { startupRemaining(deadline); owned.assertRunning(); };
+  const metadata = async () => {
+    healthy();
+    let value;
+    try { value = validateRuntime(await readRuntime(deadline)); }
+    catch (error) { owned.assertRunning(); throw error; }
+    healthy();
+    return value;
+  };
+  const same = (a, b) => b !== null && a.id === b.id && a.running === b.running && a.startedAt === b.startedAt;
+  const probe = async () => {
+    healthy();
+    let result;
+    try {
+      result = await probeAnalysisHandler(transport, Math.min(startupRemaining(deadline), 2000));
+      evidence.lastHttp = { status: result.status, noStore: result.noStore, nosniff: result.nosniff, post: result.post };
+    } catch {
+      evidence.transportFailure = true;
+      healthy();
+      throw new AnalysisStartupError('signature-mismatch');
+    }
+    healthy();
+    if (!result.ready) throw new AnalysisStartupError('signature-mismatch');
+  };
+  try {
+    validateRuntime(previous);
+    if (!Number.isSafeInteger(spawnedAt) || spawnedAt > Date.now() || deadline - spawnedAt > 60_000) {
+      throw new AnalysisStartupError('reader-failed');
+    }
+    for (;;) {
+      const current = await metadata();
+      evidence.replacement = current !== null && (previous === null || current.id !== previous.id);
+      waitingReason = current === null ? 'absent-no-replacement' : evidence.replacement ? 'deadline' : 'identity-unchanged';
+      evidence.running = current?.running === true;
+      evidence.fresh = current !== null && (previous === null
+        ? runtimeTime(current.startedAt) >= BigInt(spawnedAt) * 1_000_000n
+        : runtimeTime(current.startedAt) > runtimeTime(previous.startedAt));
+      if (evidence.replacement && !evidence.fresh) throw new AnalysisStartupError('reader-failed');
+      if (evidence.replacement && evidence.running) {
+        waitingReason = 'deadline';
+        await probe();
+        if (!same(current, await metadata())) throw new AnalysisStartupError('identity-unstable');
+        await probe();
+        if (!same(current, await metadata())) throw new AnalysisStartupError('identity-unstable');
+        evidence.stable = true;
+        healthy(); owned.ready();
+        evidence.reason = 'ready';
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(250, startupRemaining(deadline))));
+    }
+  } catch (error) {
+    evidence.reason = error instanceof AnalysisStartupError ? error.reason : 'reader-failed';
+    if (evidence.reason === 'deadline') evidence.reason = waitingReason;
+    throw new AnalysisStartupError(evidence.reason);
+  } finally {
+    evidence.elapsedMs = Number.isSafeInteger(deadline) ? Math.max(0, Math.min(60_000, Date.now() - (deadline - 60_000))) : 0;
+    try { console.log('B1-READINESS ' + JSON.stringify(evidence)); } catch { /* Evidence cannot change readiness. */ }
+  }
 }
 
 export async function startAnalysisServer() {
@@ -542,16 +645,78 @@ export async function startAnalysisServer() {
     const require = createRequire(import.meta.url);
     const packagePath = require.resolve('supabase/package.json');
     const pkg = JSON.parse(await readFile(packagePath, 'utf8'));
+    const deadline = Date.now() + 60_000;
+    let previous;
+    try { previous = await readAnalysisRuntime(deadline); }
+    catch (error) {
+      try {
+        console.log('B1-READINESS ' + JSON.stringify({ replacement: false, running: false, fresh: false, stable: false,
+          elapsedMs: Math.max(0, Math.min(60_000, Date.now() - (deadline - 60_000))),
+          reason: error instanceof AnalysisStartupError ? error.reason : 'reader-failed', lastHttp: null, transportFailure: false }));
+      } catch { /* Evidence cannot replace the primary failure. */ }
+      throw new AnalysisStartupError(error instanceof AnalysisStartupError ? error.reason : 'reader-failed');
+    }
+    const spawnedAt = Date.now();
+    startupRemaining(deadline);
     const child = spawn(process.execPath, [path.join(path.dirname(packagePath), pkg.bin.supabase),
       '--agent', 'no', '--workdir', ROOT, 'functions', 'serve'], {
       cwd: ROOT, env: commandEnvironment(), shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const owned = ownAnalysisProcess(child);
+    const owned = ownAnalysisProcess(child, 600_000, Math.max(1, deadline - Date.now()));
     try {
-      await waitForAnalysisHandler(owned);
+      await waitForAnalysisHandler(owned, { deadline, spawnedAt, previous });
       return owned;
     } catch (error) {
       await owned.stop();
       throw error;
     }
+
+}
+
+const servedCodes = new Set(['INVALID_INPUT', 'UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRED',
+  'CONFLICT', 'ACTIVE_DRAFT', 'TERMINAL', 'TOO_LARGE', 'UNSUPPORTED_MEDIA', 'RATE_LIMIT', 'ALLOWANCE',
+  'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'ANALYSIS_FAILED', 'TIMEOUT', 'unrecognized']);
+const servedPrefix = 'B1-SERVED ';
+const servedNotice = 'B1-SERVED evidence-rejected-or-overflow';
+
+export function servedCode(value) { return servedCodes.has(value) ? value : 'unrecognized'; }
+
+function servedRecord(value) {
+  return value !== null && typeof value === 'object'
+    && Object.keys(value).sort().join(',') === 'case,code,jsonParsed,noStore,nosniff,owner,status,transport,vary'
+    && ['served-owner', 'served-invalid-token'].includes(value.case) && ['A', 'B'].includes(value.owner)
+    && Number.isInteger(value.status) && (value.status === 0 || (value.status >= 100 && value.status <= 599))
+    && ['noStore', 'nosniff', 'vary', 'jsonParsed'].every((key) => typeof value[key] === 'boolean')
+    && servedCodes.has(value.code) && ['none', 'request-failed', 'body-failed'].includes(value.transport)
+    && (value.status !== 0 || (!value.noStore && !value.nosniff && !value.vary && !value.jsonParsed
+      && value.code === 'unrecognized' && value.transport === 'request-failed'));
+}
+
+export function createServedDiagnostics(emit = console.log) {
+  let count = 0, bytes = 0, rejected = false;
+  return (record) => {
+    if (rejected) return;
+    let line;
+    try { if (servedRecord(record)) line = servedPrefix + JSON.stringify(record); } catch { /* Reject non-record input. */ }
+    if (!line || ++count > 8 || (bytes += Buffer.byteLength(line + '\n')) > 2048) {
+      rejected = true; emit(servedNotice); return;
+    }
+    emit(line);
+  };
+}
+
+export function parseServedDiagnostics(stdout, stderr) {
+  const records = [];
+  let bytes = 0;
+  try {
+    for (const line of `${stdout}\n${stderr}`.split(/\r?\n/)) {
+      if (!line.startsWith(servedPrefix)) continue;
+      bytes += Buffer.byteLength(line + '\n');
+      if (bytes > 2048 || records.length >= 8) throw new Error();
+      const record = JSON.parse(line.slice(servedPrefix.length));
+      if (!servedRecord(record)) throw new Error();
+      records.push(servedPrefix + JSON.stringify(record));
+    }
+    return records;
+  } catch { return [servedNotice]; }
 }

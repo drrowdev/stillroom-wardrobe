@@ -19,7 +19,7 @@ export function normalSessionEnvironment(source: Record<string, string | undefin
 export function commandEnvironment(source?: Record<string, string | undefined>): Record<string, string>;
 export type CommandResult = { code: number; stdout: string; stderr: string };
 export type CommandRunner = (command: string, args: string[]) => Promise<CommandResult>;
-export function runCommand(command: string, args: string[], options?: { input?: string; env?: Record<string, string>; timeout?: number }): Promise<CommandResult>;
+export function runCommand(command: string, args: string[], options?: { input?: string; env?: Record<string, string>; timeout?: number; maxOutputBytes?: number }): Promise<CommandResult>;
 export function assertProjectConfig(): Promise<void>;
 export function requireDocker(run?: CommandRunner): Promise<void>;
 export function requireLocalContainer(run?: CommandRunner): Promise<void>;
@@ -31,5 +31,13 @@ export function assertAnalysisServeContract(config: string, directories: string[
 export type AnalysisProcess = { stop(): Promise<void>; ready(): void; assertRunning(): void };
 export function ownAnalysisProcess(child: import('node:child_process').ChildProcessWithoutNullStreams, lifetimeMs?: number, startupMs?: number): AnalysisProcess;
 export function startAnalysisServer(): Promise<AnalysisProcess>;
-export function probeAnalysisHandler(transport?: typeof fetch): Promise<{ status: number; noStore: boolean; nosniff: boolean; post: boolean; ready: boolean }>;
-export function waitForAnalysisHandler(owned: AnalysisProcess, transport?: typeof fetch): Promise<void>;
+export function probeAnalysisHandler(transport?: typeof fetch, timeout?: number): Promise<{ status: number; noStore: boolean; nosniff: boolean; post: boolean; ready: boolean }>;
+export type AnalysisRuntime = { id: string; running: boolean; startedAt: string };
+export function readAnalysisRuntime(deadline: number, run?: typeof runCommand): Promise<AnalysisRuntime | null>;
+export function waitForAnalysisHandler(owned: AnalysisProcess, options: {
+  deadline: number; spawnedAt: number; previous: AnalysisRuntime | null;
+  readRuntime?: (deadline: number) => Promise<AnalysisRuntime | null>;
+}, transport?: typeof fetch): Promise<void>;
+export function servedCode(value: unknown): string;
+export function createServedDiagnostics(emit?: (line: string) => void): (record: unknown) => void;
+export function parseServedDiagnostics(stdout: string, stderr: string): string[];

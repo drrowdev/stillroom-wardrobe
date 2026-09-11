@@ -3718,3 +3718,110 @@ merge-ready claim is made. Completing that required gate and genuine independent
 exact-head review remains blocking, alongside the coordinator-owned checks
 already listed. This final evidence-only update does not change executable code;
 fresh-head external checks still belong to the coordinator.
+
+## B1 readiness-identity/failure-evidence repair — 11 September 2026
+
+This is only the eight-path repair under
+[approval 5633782787](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5633782787),
+not a new packet or completion claim. It targets I29 R18/R19/R23/R26/R27/R28
+while preserving R01/R11. The approval records actual independent Anthropic
+Claude Opus 5 reviewer `223d6728-9657-4479-8ea0-1da7421db2d3`, turns 9/10,
+A1–A9 and coordinator corrections C1–C3, with no remaining approval blocker.
+No worker agent or substitute critique was launched.
+
+### Exact ordered entry and context
+
+- Base/main `de6bca3ebd7d01b96e313e47353711908f3b8a3e`; branch
+  `copilot/i29-analysis-backend-b1`; start HEAD
+  `3b58b50793720d0f82a06aee9b54196fcd73715a`; start tree
+  `b75ecf69d7d4e82c98a6c181357f956b311b74cb`.
+- The first tool request read exactly PR19 page27/perPage1 and verified the
+  unedited owner approval, then all ten finite context pins were read and their
+  prescribed metadata checked. PR diff, review records and required completed
+  native `34585534602/103218762365`, CI attempt2
+  `34588742446/103238729122` (Database failure) and `103238728749` (App success),
+  and Apple `34588742433/103238728343` logs were accessible and read as text.
+  No binary archive/image was opened and no own active-job archive was required.
+- T1 context completed `11:40:56.205Z`. Fully read: root `AGENTS.md`,
+  `.github/copilot-instructions.md`, `blueprint/AGENTS.md`,
+  `docs/cloud-development.md`, `docs/local-backend.md`;
+  blueprint `00-INDEX`, `03-MVP-AND-NON-GOALS`, `05-ARCHITECTURE`,
+  `10-SECURITY-AND-PRIVACY`, `13-REPOSITORY-STRUCTURE`,
+  `14-IMPLEMENTATION-PLAN`, `19-LOCALIZATION`, `20-AI-MODELS-AND-WORKFLOWS`,
+  `21-AI-MODEL-COMPARISON` (all `.md`); `scripts/backend/local.mjs` and
+  `local.d.mts`, `scripts/ai-analysis-rehearsal.mjs`, `scripts/db.mjs`,
+  `scripts/run-local-tests.mjs`, integration/security `ai-analysis.sessions.mjs`,
+  `tests/unit/local-backend.test.ts`; all six production analyze-clothing files;
+  `supabase/config.toml`, `package.json`, `.node-version`, `tsconfig.json`,
+  `playwright.config.ts`, setup workflow and CI workflow.
+- Scoped excerpt reads, not whole-history claims: phase-0 lines 1–125,
+  current phase-2 lines 1–35 and 3580–3720; blueprint `07-DATABASE-AND-RLS.sql`
+  ownership/schema/grants, `08-API-AND-STORAGE.md` B1/AI sections and
+  `15-GITHUB-ISSUES.md` I29; B1 migration declarations/grants and lines 149–225;
+  tracked/generated schema excerpts; `src/images/jpeg.ts` lines 1–130;
+  endpoint/schema/preservation unit contracts and test inventory. Relevant
+  source was inspected directly, not inferred from historical templates.
+- Fresh T2 completed `11:41:33.313Z`: expected branch/HEAD/tree, staged,
+  unstaged and untracked source clean, only approved ignored dependency/local
+  setup state, no pending generation file, exact ignored/tracked type equality.
+  Initial read-only `merge-base` returned 1 in the shallow checkout; authenticated
+  current PR metadata confirmed exact base/head, and the expected base tree was
+  locally available. No fetch, reset or source repair was used.
+- Current native setup run `34594725266`, job `103247716857`: Linux dependency,
+  browser, Docker, start, reset/fixtures, ignored generation and cleanliness
+  steps explicitly succeeded. Docker/start/reset/types/cleanliness transcripts
+  were bound to platform scripts and matching setup-window timestamps
+  `11:36:24.925`, `11:37:35.003`, `11:38:18.217`, `11:38:29.311`,
+  `11:38:30.043Z`. Generation reported `PARITY: MATCH`; zero-byte cleanliness
+  was supported by explicit successful step56 and fresh source checks, not
+  silence alone. Windows alternatives were skipped, not required Linux gates.
+- Only after T1/T2, PR19 page28/perPage1 returned own
+  [receipt 5633845391](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5633845391),
+  one unedited `drrowdev` item created/updated `11:36:43Z`, strictly after cutoff
+  `11:31:29Z`. Task `2205a7c4-8f2f-4992-bb1e-c7655dab4e72`, session
+  `ad8abfaf-1a93-4bda-a91c-9150197f0522`, exact repository/PR/source/kickoff
+  marker matched. The session also matched current platform-created scripts.
+  T3 verified `11:41:47.448Z`; receipt records explicit `gpt-6-astra` and actual
+  `sweagent-capi:gpt-6-astra`. T4 initial progress followed, before code/import/
+  test operations. No credential/service-state contents were reported.
+
+### Repair and validation checkpoint
+
+Changes are restricted to `scripts/backend/local.mjs`, `local.d.mts`,
+`tests/unit/local-backend.test.ts`, `scripts/ai-analysis-rehearsal.mjs`,
+`tests/integration/ai-analysis.sessions.mjs`, `docs/local-backend.md`,
+`docs/cloud-development.md` and this result file. SQL, production function/
+adapter/protocol, schema types, CI/setup, package/lock, images/Save/UI and capture
+sources remain untouched.
+
+Readiness now requires a newer stable runtime identity and two strict originless
+OPTIONS observations within the single original deadline. Metadata reads have
+fixed argv, validated ID, 5000 ms/remaining-time and combined 4096-byte bounds.
+Boot/module failure stops immediately. Closed diagnostics preserve last HTTP
+indicators separately from transport failure and never expose Docker identity.
+This is serialized replacement evidence, not child-PID attribution.
+
+The served ordinary child and parent share bounded, closed records and reject
+invalid/overflow evidence. Original ordinary-response guards remain; a separate
+bounded invalid-JWT path asserts exactly 401 without requiring handler headers/
+JSON. Both ordinary owners still require 503/UNCONFIGURED; the full no-reservation
+snapshot and separate real Auth/DB, Google-only-synthetic proof remain mandatory.
+Neither 401 nor 503 alone proves its routing/Auth cause.
+
+| Command/check | Actual result before live sequence |
+| --- | --- |
+| `npm run test:unit -- tests/unit/ai-endpoint.test.ts tests/unit/ai-schema.test.ts tests/unit/local-backend.test.ts tests/unit/preservation.test.ts` | **630/630**, four files, exit 0 at 11:48Z. Earlier syntax-only collection failure corrected before live execution. |
+| `npm run typecheck`; `npm run lint` | Exit 0. Missing executable-JS declaration annotation corrected using the existing test convention. |
+| `git diff --check` | Exit 0. |
+| Serialized preservation/reset/integration/security/one rehearsal/types | Pending at this checkpoint; no live claim. |
+| Full units/app/browser/a11y/translations/build/secrets/dependencies | Pending at this checkpoint; unchanged approved capture bounds. |
+
+The prior Database failure at `11:03:10.978Z` remains unexplained; this repair
+does not retroactively diagnose it, and later green evidence cannot do so.
+Any new actual served/rehearsal failure requires preserving state and STOP,
+without resetting, retrying to green or speculative Auth/SQL/policy changes.
+Exact-head independent repair review, coordinator-authorized CI/Apple, artifact/
+actual visual review and terminal native setup audit remain pending. No source-
+complete or merge-ready claim is made. Hosted/provider/paid/private-photo,
+financial/hidden-thinking, model/tariff, consent/allowance, UI/Save/provenance,
+retention/purge and physical-device acceptance gates remain separate.

@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { once } from 'node:events';
 import { ROOT, LOCAL_API, assertNoServiceSecrets, readCredentialCache, normalSessionEnvironment,
-  localStatus, privilegedLocalSql, runCommand, startAnalysisServer } from './backend/local.mjs';
+  localStatus, privilegedLocalSql, runCommand, startAnalysisServer, parseServedDiagnostics } from './backend/local.mjs';
 import { isMain } from './quality/files.mjs';
 import { createHandler } from '../supabase/functions/analyze-clothing/handler.ts';
 import { TOKEN_URL, GOOGLE_ORIGIN } from '../supabase/functions/analyze-clothing/google-cloud.ts';
@@ -111,6 +111,11 @@ async function main() {
       const result = await runCommand(process.execPath, [
         `${ROOT}tests/${name}/ai-analysis.sessions.mjs`, ...(phase ? [phase, origin] : []),
       ], { env, timeout: 120_000 });
+      if (phase === 'served') {
+        try {
+          for (const line of parseServedDiagnostics(result.stdout, result.stderr)) console.log(line);
+        } catch { /* Diagnostics never replace the child's result. */ }
+      }
       requireEvidence(result.code === 0);
       console.log(`PASS: B1 ${name}/${phase ?? 'baseline'} normal-session child`);
     };
@@ -122,8 +127,9 @@ async function main() {
         headers: { 'Access-Control-Request-Method': 'POST', ...(origin ? { Origin: origin } : {}) },
         redirect: 'error', signal: AbortSignal.timeout(2000) });
       console.log(JSON.stringify({ probe: origin ? 'old-browser-preflight' : 'actual-handler', status: r.status,
-        cacheControl: r.headers.get('Cache-Control'), nosniff: r.headers.get('X-Content-Type-Options'),
-        allowMethods: r.headers.get('Access-Control-Allow-Methods'), vary: r.headers.get('Vary'),
+        noStore: r.headers.get('Cache-Control') === 'no-store', nosniff: r.headers.get('X-Content-Type-Options') === 'nosniff',
+        post: r.headers.get('Access-Control-Allow-Methods') === 'POST',
+        vary: r.headers.get('Vary')?.split(',').some((value) => value.trim().toLowerCase() === 'origin') ?? false,
         acaoPresent: r.headers.has('Access-Control-Allow-Origin') }));
       await r.body?.cancel();
     }

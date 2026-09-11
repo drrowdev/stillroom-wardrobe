@@ -476,7 +476,7 @@ this file.
 
 ### B1 completion setup/readiness evidence — 11 September 2026
 
-The active PR #19 continuation uses
+The earlier PR #19 continuation used
 [approval 5632491947](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5632491947)
 (actual retained Anthropic Claude Opus 5 reviewer `223d6728`, turns 6/7,
 coordinator amendments N1–N6/P1–P6) and its own
@@ -488,8 +488,9 @@ timestamp-bound local critical transcripts. Docker/start, reset/fictional
 fixtures, actual ignored type generation and tracked/staged cleanliness must
 each succeed. A silent cleanliness command needs explicit current step success
 plus a bound transcript and fresh source inspection; absence of failure text is
-not proof. Setup `PARITY: DIFFERENT` is an expected ignored artifact state here,
-not final tracked parity or permission to adopt it before the entry gate.
+not proof. Setup `PARITY: DIFFERENT` was the expected ignored artifact state at
+that earlier `79c99e1` checkpoint, not final tracked parity or permission to adopt
+it before entry. It is not the expected state at the later repair start below.
 
 Do **not** demand the downloadable archive of the worker's own still-running
 job; the coordinator reviews that archive after termination. This narrow
@@ -505,3 +506,34 @@ CLI-served and Google-only-synthetic real Auth/DB checks are documented in
 `local-backend.md`. They do not prove production/browser CORS, hosted migration,
 paid inference or device/visual acceptance, and do not grant worker deployment,
 Actions approval/rerun, merge or additional-agent authority.
+
+### B1 identity/failure-evidence repair — 11 September 2026
+
+[Approval 5633782787](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5633782787)
+records actual Anthropic Claude Opus 5 critique (reviewer `223d6728`, turns 9/10,
+A1–A9/C1–C3) for an eight-path repair starting at `3b58b50793720d0f82a06aee9b54196fcd73715a`.
+[Own receipt 5633845391](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5633845391)
+belongs only to task `2205a7c4-8f2f-4992-bb1e-c7655dab4e72`, session
+`ad8abfaf-1a93-4bda-a91c-9150197f0522`, actual `sweagent-capi:gpt-6-astra`.
+Neither is reusable entry authority for another task.
+
+This entry required **matching** ignored/tracked schema types, successful current
+setup step metadata bound to local critical transcripts, fresh clean exact
+source, then deliberate own-receipt verification before progress/import/test/
+edit. Current run `34594725266`, job `103247716857`, had successful Docker,
+start, reset/fictional-fixture, actual ignored generation and cleanliness steps.
+Fresh type bytes matched. The phase-2 append records the exact ordered entry.
+
+The repair adds runtime-identity replacement and bounded served diagnostics as
+specified in `local-backend.md`; it does not diagnose the prior failed POST at
+11:03:10.978Z. Even a later green run cannot establish that historical cause.
+After targeted units/types/lint, preserve the serialized CI database order:
+preservation → only on success reset → integration → security → **one** B1
+rehearsal → actual types/parity. A new served/rehearsal failure means preserve
+STOP with closed evidence, not another repair/rerun or fixture reset. Existing
+app/browser/a11y/capture bounds remain mandatory; missing observations or actual
+coordinator visual review remain pending. The coordinator owns subsequent
+repair-only independent review and authorization of first new exact-head
+CI/Apple execution. No worker review substitute, Actions approval/rerun, merge,
+deployment, hosted/provider/paid/private-photo operation or additional agent is
+authorized.

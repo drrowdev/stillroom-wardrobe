@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -10,7 +10,10 @@ import {
   normalSessionEnvironment, validateSessionEnvironment, commandEnvironment, requireDocker, requireLocalContainer,
   LocalBackendError, securityFailureExitCode, describeGenerationResult, describeStartupOrResetFailure,
   assertAnalysisServeContract, ownAnalysisProcess, probeAnalysisHandler, waitForAnalysisHandler,
+  readAnalysisRuntime, runCommand, createServedDiagnostics, parseServedDiagnostics, servedCode,
 } from '../../scripts/backend/local.mjs';
+// @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
+import { analysisRequest, servedInvalidTokenRequest } from '../integration/ai-analysis.sessions.mjs';
 
 describe('owned B1 function lifecycle', () => {
   const signature = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Methods': 'POST' };
@@ -33,15 +36,18 @@ describe('owned B1 function lifecycle', () => {
     expect((await probeAnalysisHandler(async () => new Response(null, { status, headers: signature }))).ready).toBe(false);
   });
   it('keeps the readiness deadline and safe transport failure evidence', async () => {
-    vi.useFakeTimers();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const owned = { stop: vi.fn(), ready: vi.fn(), assertRunning: vi.fn() };
-      const result = waitForAnalysisHandler(owned, async () => { throw new Error('private response must not escape'); });
-      const assertion = expect(result).rejects.toThrow('Probe: {"transportFailure":true}');
-      await vi.advanceTimersByTimeAsync(60_000);
-      await assertion;
+      const now = Date.now();
+      const result = waitForAnalysisHandler(owned, { deadline: now + 60_000, spawnedAt: now,
+        previous: null, readRuntime: async () => ({ id: 'b'.repeat(64), running: true, startedAt: new Date(now).toISOString() }) },
+      async () => { throw new Error('private response must not escape'); });
+      await expect(result).rejects.toThrow('signature-mismatch');
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('"transportFailure":true'));
+      expect(log).not.toHaveBeenCalledWith(expect.stringContaining('private response'));
       expect(owned.ready).not.toHaveBeenCalled();
-    } finally { vi.useRealTimers(); }
+    } finally { log.mockRestore(); }
   });
   it('reports boot and missing-module indicators without child output', async () => {
     const child = Object.assign(new EventEmitter(), {
@@ -50,10 +56,21 @@ describe('owned B1 function lifecycle', () => {
     const owned = ownAnalysisProcess(child as unknown as Parameters<typeof ownAnalysisProcess>[0]);
     child.stderr.emit('data', Buffer.from('worker boot error: Module not found private fixture content'));
     child.emit('close', 1);
-    expect(() => owned.assertRunning()).toThrow('"bootError":true,"missingModule":true');
+    expect(() => owned.assertRunning()).toThrow('boot-error');
     expect(() => owned.assertRunning()).not.toThrow('private fixture content');
     await owned.stop();
   });
+  it.each([['worker boot error', 'boot-error'], ['cannot find module', 'missing-module']])(
+    'fails immediately on %s without waiting for child exit', async (text, reason) => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(), stderr: new EventEmitter(), kill: vi.fn(),
+      });
+      const owned = ownAnalysisProcess(child as unknown as Parameters<typeof ownAnalysisProcess>[0]);
+      child.stderr.emit('data', Buffer.from(text));
+      expect(() => owned.assertRunning()).toThrow(reason);
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+      child.emit('close', 1); await owned.stop();
+    });
   const config = '[edge_runtime]\nenabled = true\n\n[functions.analyze-clothing]\nenabled = true\nverify_jwt = true\n';
   const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json'];
   const help = { code: 0, stdout: '  Serve all Functions locally.\n  supabase functions serve [flags] [<Function name...>]\n', stderr: '' };
@@ -87,6 +104,231 @@ describe('owned B1 function lifecycle', () => {
       expect(child.kill).toHaveBeenCalledTimes(reason === 'exit' ? 0 : 1);
       expect(vi.getTimerCount()).toBe(0);
     } finally { vi.useRealTimers(); }
+  });
+});
+
+describe('B1 replacement identity readiness', () => {
+  const now = Date.parse('2026-09-11T12:00:00Z');
+  const previous = { id: 'a'.repeat(64), running: true, startedAt: '2026-09-11T11:59:59.999999999Z' };
+  const current = { id: 'b'.repeat(64), running: true, startedAt: '2026-09-11T12:00:00Z' };
+  const signature = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Methods': 'POST' };
+  const options = () => ({ deadline: now + 60_000, spawnedAt: now, previous, readRuntime: vi.fn(async () => current) });
+  const process = () => ({ stop: vi.fn(), ready: vi.fn(), assertRunning: vi.fn() });
+  const transport = () => vi.fn(async () => new Response(null, { status: 204, headers: signature }));
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(now); vi.spyOn(console, 'log').mockImplementation(() => {}); });
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+  it('requires metadata/probe/identical metadata/probe/identical metadata and a healthy child', async () => {
+    const order: string[] = [], owned = process(), config = options();
+    config.readRuntime.mockImplementation(async (deadline?: number) => { expect(deadline).toBe(config.deadline); order.push('metadata'); return current; });
+    const fetcher = vi.fn(async () => { order.push('probe'); return new Response(null, { status: 204, headers: signature }); });
+    owned.ready.mockImplementation(() => { order.push('ready'); });
+    await waitForAnalysisHandler(owned, config, fetcher);
+    expect(order).toEqual(['metadata', 'probe', 'metadata', 'probe', 'metadata', 'ready']);
+    expect(owned.assertRunning).toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('"stable":true'));
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining(current.id));
+  });
+  it.each([true, false])('never accepts the old healthy fixed URL, previous present=%s', async (present) => {
+    const owned = process(), fetcher = transport();
+    const promise = waitForAnalysisHandler(owned, { ...options(), previous: present ? previous : null,
+      readRuntime: async () => present ? previous : null }, fetcher);
+    const checked = expect(promise).rejects.toThrow(present ? 'identity-unchanged' : 'absent-no-replacement');
+    await vi.advanceTimersByTimeAsync(60_000); await checked;
+    expect(fetcher).not.toHaveBeenCalled(); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('accepts initially absent only with a running runtime at or after spawn', async () => {
+    const owned = process();
+    await waitForAnalysisHandler(owned, { ...options(), previous: null }, transport());
+    expect(owned.ready).toHaveBeenCalledOnce();
+  });
+  it.each(['2026-09-11T11:59:59Z', '2026-09-11T11:59:59.999999999Z', 'invalid', '2026-02-30T12:00:00Z'])(
+    'rejects stale/equal or malformed StartedAt %s', async (startedAt) => {
+      await expect(waitForAnalysisHandler(process(), { ...options(), readRuntime: async () => ({ ...current, startedAt }) },
+        transport())).rejects.toThrow('reader-failed');
+    });
+  it('compares nanosecond freshness, not rounded milliseconds', async () => {
+    const owned = process();
+    await waitForAnalysisHandler(owned, { ...options(),
+      previous: { ...previous, startedAt: '2026-09-11T11:59:59.999999998Z' },
+      readRuntime: async () => ({ ...current, startedAt: previous.startedAt }) }, transport());
+    expect(owned.ready).toHaveBeenCalledOnce();
+  });
+  it.each([1, 2])('fails identity instability after probe %s without restarting confirmation', async (position) => {
+    const owned = process(), config = options(), fetcher = transport();
+    for (let i = 0; i < position; i++) config.readRuntime.mockResolvedValueOnce(current);
+    config.readRuntime.mockResolvedValue({ ...current, id: 'c'.repeat(64) });
+    await expect(waitForAnalysisHandler(owned, config, fetcher)).rejects.toThrow('identity-unstable');
+    expect(fetcher).toHaveBeenCalledTimes(position); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('rejects changed running state during confirmation', async () => {
+    const config = options();
+    config.readRuntime.mockResolvedValueOnce(current).mockResolvedValue({ ...current, running: false });
+    await expect(waitForAnalysisHandler(process(), config, transport())).rejects.toThrow('identity-unstable');
+  });
+  it('keeps the last HTTP indicators when the second probe has a transport failure', async () => {
+    const fetcher = transport().mockRejectedValueOnce(new Error('unused'));
+    fetcher.mockReset().mockResolvedValueOnce(new Response(null, { status: 204, headers: signature }))
+      .mockRejectedValueOnce(new Error('private transport'));
+    await expect(waitForAnalysisHandler(process(), options(), fetcher)).rejects.toThrow('signature-mismatch');
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('"lastHttp":{"status":204,"noStore":true,"nosniff":true,"post":true},"transportFailure":true'));
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('private transport'));
+  });
+  it('does not create a fresh budget or probe after a metadata read exhausts the original deadline', async () => {
+    const owned = process(), fetcher = transport();
+    await expect(waitForAnalysisHandler(owned, { ...options(), deadline: now + 100,
+      readRuntime: async () => { vi.setSystemTime(now + 101); return current; } }, fetcher)).rejects.toThrow();
+    expect(fetcher).not.toHaveBeenCalled(); expect(owned.ready).not.toHaveBeenCalled();
+    const reader = vi.fn(async () => current);
+    await expect(waitForAnalysisHandler(owned, { ...options(), deadline: now, readRuntime: reader }, fetcher)).rejects.toThrow();
+    expect(reader).not.toHaveBeenCalled();
+  });
+  it('rejects a dead owned child even when the fixed URL is healthy', async () => {
+    const owned = process(), fetcher = transport();
+    owned.assertRunning.mockImplementation(() => { throw new Error('private child output'); });
+    await expect(waitForAnalysisHandler(owned, options(), fetcher)).rejects.toThrow('reader-failed');
+    expect(fetcher).not.toHaveBeenCalled(); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('fails closed on a denied injected reader without exposing its error', async () => {
+    await expect(waitForAnalysisHandler(process(), { ...options(),
+      readRuntime: async () => { throw new Error('private Docker failure'); } }, transport())).rejects.toThrow('reader-failed');
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('private Docker failure'));
+  });
+});
+
+describe('B1 bounded Docker runtime metadata', () => {
+  const id = 'a'.repeat(64);
+  const inspected = `${id}|true|2026-09-11T12:00:00.123456789Z\n`;
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(Date.parse('2026-09-11T12:01:00Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+  it('uses only the exact named ps and validated-ID inspect with the original remaining budget', async () => {
+    const deadline = Date.now() + 6000;
+    const run = vi.fn<typeof runCommand>().mockImplementationOnce(async () => {
+      vi.setSystemTime(Date.now() + 2000); return { code: 0, stdout: `${id} running\n`, stderr: '' };
+    }).mockResolvedValueOnce({ code: 0, stdout: inspected, stderr: '' });
+    expect(await readAnalysisRuntime(deadline, run)).toEqual({ id, running: true, startedAt: '2026-09-11T12:00:00.123456789Z' });
+    expect(run.mock.calls).toEqual([
+      ['docker', ['ps', '-a', '--no-trunc', '--filter', 'name=^/supabase_edge_runtime_stillroom-wardrobe$', '--format', '{{.ID}} {{.State}}'],
+        { timeout: 5000, maxOutputBytes: 4096 }],
+      ['docker', ['inspect', '--format', '{{.Id}}|{{.State.Running}}|{{.State.StartedAt}}', id], { timeout: 4000, maxOutputBytes: 4096 }],
+    ]);
+  });
+  it('accepts only zero-exit truly empty ps as absent', async () => {
+    const run = vi.fn<typeof runCommand>().mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    expect(await readAnalysisRuntime(Date.now() + 1000, run)).toBeNull(); expect(run).toHaveBeenCalledOnce();
+  });
+  it.each([
+    { code: 1, stdout: '', stderr: 'denied private metadata' },
+    { code: 0, stdout: ' \n', stderr: '' },
+    { code: 0, stdout: `${id} running\n${id} running\n`, stderr: '' },
+    { code: 0, stdout: 'short running\n', stderr: '' },
+    { code: 0, stdout: `${id} invented\n`, stderr: '' },
+    { code: 0, stdout: `${id} running\n`, stderr: 'x'.repeat(4096) },
+  ])('rejects failed/ambiguous/malformed/capture-overflow ps', async (result) => {
+    const run = vi.fn<typeof runCommand>().mockResolvedValue(result);
+    await expect(readAnalysisRuntime(Date.now() + 1000, run)).rejects.toThrow(/reader-(failed|ambiguous)/);
+    expect(run).toHaveBeenCalledOnce();
+  });
+  it.each([inspected.replace(id, 'b'.repeat(64)), inspected.replace('true', 'yes'),
+    inspected.replace('2026-09-11', '2026-02-30'), `${id}|true|invalid`, inspected + inspected,
+    `${id}|false|0001-01-01T00:00:00Z\n`])('rejects invalid inspect identity/state/time', async (text) => {
+    const run = vi.fn<typeof runCommand>().mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: text, stderr: '' });
+    await expect(readAnalysisRuntime(Date.now() + 1000, run)).rejects.toThrow('reader-failed');
+  });
+  it('issues no Docker call without a positive remaining budget', async () => {
+    const run = vi.fn<typeof runCommand>();
+    await expect(readAnalysisRuntime(Date.now(), run)).rejects.toThrow('deadline'); expect(run).not.toHaveBeenCalled();
+    run.mockImplementation(async () => { vi.setSystemTime(Date.now() + 1000); return { code: 0, stdout: `${id} running\n`, stderr: '' }; });
+    await expect(readAnalysisRuntime(Date.now() + 1000, run)).rejects.toThrow('deadline'); expect(run).toHaveBeenCalledOnce();
+  });
+});
+
+describe('B1 per-command live capture cap', () => {
+  it.each([0, -1, 1.1, NaN, Infinity, 16 * 1024 * 1024 + 1])('rejects invalid cap %s before spawn', (maxOutputBytes) => {
+    expect(() => runCommand('must-not-spawn', [], { maxOutputBytes })).toThrow('capture limit');
+  });
+  it('retains exactly the combined boundary but fails overflow without forwarding a prefix', async () => {
+    const script = 'process.stdout.write("a".repeat(2048));process.stderr.write("b".repeat(2048))';
+    const exact = await runCommand(process.execPath, ['-e', script], { maxOutputBytes: 4096 });
+    expect(exact.code).toBe(0); expect(exact.stdout.length + exact.stderr.length).toBe(4096);
+    const overflow = await runCommand(process.execPath, ['-e', script], { maxOutputBytes: 4095 });
+    expect(overflow).toEqual({ code: 2, stdout: '', stderr: '' });
+    expect((await runCommand(process.execPath, ['-e', script])).code).toBe(0);
+  });
+  it('does not mistake a timed-out command with a zero-exit signal handler for success', async () => {
+    const result = await runCommand(process.execPath,
+      ['-e', 'process.on("SIGTERM",()=>process.exit(0));setInterval(()=>{},1000)'], { timeout: 100, maxOutputBytes: 4096 });
+    expect(result.code).toBe(2);
+  });
+});
+
+describe('B1 closed served evidence and invalid-token request', () => {
+  const record = () => ({ case: 'served-owner', owner: 'A', status: 503, noStore: true,
+    nosniff: true, vary: true, jsonParsed: true, code: 'UNCONFIGURED', transport: 'none' });
+  const owner = { label: 'A', token: 'synthetic-owner' };
+  const env = { SUPABASE_PUBLISHABLE_KEY: 'synthetic-publishable' };
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it('round-trips only finite records and never child stdout/stderr or unknown codes', () => {
+    const lines: string[] = [], emit = createServedDiagnostics((line) => lines.push(line));
+    emit(record());
+    expect(parseServedDiagnostics(`private prefix\n${lines.join('\n')}`, 'private stderr')).toEqual(lines);
+    expect(servedCode('private error text')).toBe('unrecognized');
+    for (const code of ['INVALID_INPUT', 'UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRED', 'CONFLICT',
+      'ACTIVE_DRAFT', 'TERMINAL', 'TOO_LARGE', 'UNSUPPORTED_MEDIA', 'RATE_LIMIT', 'ALLOWANCE',
+      'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'ANALYSIS_FAILED', 'TIMEOUT']) expect(servedCode(code)).toBe(code);
+  });
+  it.each([{ extra: 'private' }, { owner: 'private' }, { case: 'private' }, { status: 99 }, { status: 600 },
+    { status: 0 }, { noStore: 'yes' }, { code: 'private' }, { transport: 'private' }])('rejects invalid/extra-key records as a whole', (change) => {
+    const text = 'B1-SERVED ' + JSON.stringify({ ...record(), ...change });
+    expect(parseServedDiagnostics('B1-SERVED ' + JSON.stringify(record()) + '\n' + text, ''))
+      .toEqual(['B1-SERVED evidence-rejected-or-overflow']);
+  });
+  it('rejects malformed, ninth and over-2048-byte input, without truncation', () => {
+    const line = 'B1-SERVED ' + JSON.stringify(record());
+    for (const text of ['B1-SERVED {', Array(9).fill(line).join('\n'), 'B1-SERVED ' + ' '.repeat(2048) + JSON.stringify(record())]) {
+      expect(parseServedDiagnostics(text, '')).toEqual(['B1-SERVED evidence-rejected-or-overflow']);
+    }
+    const lines: string[] = [], emit = createServedDiagnostics((value) => lines.push(value));
+    for (let i = 0; i < 10; i++) emit(record());
+    expect(lines).toHaveLength(9); expect(lines[8]).toBe('B1-SERVED evidence-rejected-or-overflow');
+    expect(Buffer.byteLength(lines.slice(0, 8).join('\n'))).toBeLessThanOrEqual(2048);
+  });
+  it.each(['not-json', '{"code":"UNAUTHENTICATED"}', ''])('accepts served invalid-token 401 without handler headers or JSON: %s', async (body) => {
+    const fetcher = vi.fn(async () => new Response(body, { status: 401 }));
+    vi.stubGlobal('fetch', fetcher);
+    const observe = vi.fn();
+    await servedInvalidTokenRequest('http://127.0.0.1:54321', env, owner, observe);
+    const request = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    const bearer = new Headers(request[1].headers).get('Authorization')!;
+    expect(bearer.startsWith('Bearer ')).toBe(true);
+    expect(bearer.slice(7)).toMatch(/^[A-Za-z0-9._~+/-]{1,8192}={0,2}$/);
+    expect(observe).toHaveBeenCalledWith(expect.objectContaining({ case: 'served-invalid-token', status: 401, noStore: false }));
+  });
+  it('rejects a successful invalid-token request and preserves that assertion when diagnostics throw', async () => {
+    vi.stubGlobal('fetch', async () => new Response('{}', { status: 200 }));
+    await expect(servedInvalidTokenRequest('http://127.0.0.1:54321', env, owner, () => { throw new Error('observer'); }))
+      .rejects.not.toThrow('observer');
+  });
+  it('bounds and cancels the invalid-token response body without relaxing its assertion', async () => {
+    const cancel = vi.fn(), observe = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array(32769)); }, cancel });
+    vi.stubGlobal('fetch', async () => new Response(body, { status: 401 }));
+    await expect(servedInvalidTokenRequest('http://127.0.0.1:54321', env, owner, observe)).rejects.toThrow();
+    expect(cancel).toHaveBeenCalled();
+    expect(observe).toHaveBeenCalledWith(expect.objectContaining({ status: 401, transport: 'body-failed', jsonParsed: false }));
+  });
+  it('retains the ordinary handler-header and bounded JSON guards, with failure observations', async () => {
+    const observe = vi.fn();
+    vi.stubGlobal('fetch', async () => new Response('{"code":"UNCONFIGURED"}', { status: 503 }));
+    await expect(analysisRequest('http://127.0.0.1:54321', env, owner, 1, { observe })).rejects.toThrow();
+    expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({ status: 503, jsonParsed: false, noStore: false }));
+    const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
+    vi.stubGlobal('fetch', async () => new Response('x'.repeat(32769), { status: 503, headers }));
+    await expect(analysisRequest('http://127.0.0.1:54321', env, owner, 1, { observe })).rejects.toThrow();
+    expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({ status: 503, jsonParsed: false, transport: 'body-failed' }));
+    vi.stubGlobal('fetch', async () => { throw new Error('private network'); });
+    await expect(analysisRequest('http://127.0.0.1:54321', env, owner, 1, { observe })).rejects.toThrow('private network');
+    expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({ status: 0, code: 'unrecognized', transport: 'request-failed' }));
   });
 });
 

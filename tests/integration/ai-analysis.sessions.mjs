@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { assertLoopbackUrl } from '../../scripts/backend/local.mjs';
+import { assertLoopbackUrl, createServedDiagnostics, servedCode } from '../../scripts/backend/local.mjs';
 import { isMain } from '../../scripts/quality/files.mjs';
-import { readJson } from '../../supabase/functions/analyze-clothing/protocol.ts';
+import { readJson, readBounded } from '../../supabase/functions/analyze-clothing/protocol.ts';
 import { jpegHeaderFixture, joinBytes, exifSegment } from '../fixtures/jpeg-helpers.ts';
 import { aiClients, aiStatus, aiControl, requireReady, AI_IDS, beginArgs } from './ai-controls.sessions.mjs';
 import { requireEvidence } from './preservation.sessions.mjs';
@@ -17,22 +17,65 @@ export const analysisUsage = { modelVersion: 'gemini-3.8-flash', trafficType: 'O
 export const analysisStatus = (client, owner, id) => client.rpc(owner, 'ai_analysis_status', { p_request_id: id });
 export const equal = (a, b) => requireEvidence(isDeepStrictEqual(a, b));
 export const analysisHash = createHash('sha256').update(jpegHeaderFixture()).digest('hex');
+const observation = (name, owner) => ({ case: name, owner: owner.label, status: 0,
+  noStore: false, nosniff: false, vary: false, jsonParsed: false, code: 'unrecognized', transport: 'request-failed' });
+function observedResponse(record, response) {
+  record.status = response.status;
+  record.noStore = response.headers.get('Cache-Control') === 'no-store';
+  record.nosniff = response.headers.get('X-Content-Type-Options') === 'nosniff';
+  record.vary = response.headers.get('Vary')?.split(',').some((value) => value.trim().toLowerCase() === 'origin') ?? false;
+  record.transport = 'none';
+}
 export async function analysisRequest(origin, env, owner, n, options = {}) {
   const base = assertLoopbackUrl(origin);
   requireEvidence(new URL(base).hostname === '127.0.0.1');
   const id = analysisId(owner.label, n);
   const signal = AbortSignal.timeout(20_000);
-  const response = await fetch(`${base}/functions/v1/analyze-clothing${options.suffix ?? ''}`, {
-    method: options.method ?? 'POST', redirect: 'error', cache: 'no-store', signal,
-    headers: { Authorization: 'Bearer '.concat(owner.token), apikey: env.SUPABASE_PUBLISHABLE_KEY,
-      'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': id, 'X-Stillroom-Draft-Id': id,
-      'X-Stillroom-Generation': '1', ...options.headers },
-    ...(['GET', 'OPTIONS'].includes(options.method) ? {} : { body: options.body ?? jpegHeaderFixture() }),
-  });
-  requireEvidence(response.headers.get('Cache-Control') === 'no-store'
-    && response.headers.get('X-Content-Type-Options') === 'nosniff');
-  const data = await readJson(response, 32768, signal);
-  return { status: response.status, data };
+  const record = observation('served-owner', owner);
+  try {
+    const response = await fetch(`${base}/functions/v1/analyze-clothing${options.suffix ?? ''}`, {
+      method: options.method ?? 'POST', redirect: 'error', cache: 'no-store', signal,
+      headers: { Authorization: 'Bearer '.concat(owner.token), apikey: env.SUPABASE_PUBLISHABLE_KEY,
+        'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': id, 'X-Stillroom-Draft-Id': id,
+        'X-Stillroom-Generation': '1', ...options.headers },
+      ...(['GET', 'OPTIONS'].includes(options.method) ? {} : { body: options.body ?? jpegHeaderFixture() }),
+    });
+    observedResponse(record, response);
+    requireEvidence(response.headers.get('Cache-Control') === 'no-store'
+      && response.headers.get('X-Content-Type-Options') === 'nosniff');
+    let data;
+    try { data = await readJson(response, 32768, signal); }
+    catch (error) { record.transport = 'body-failed'; throw error; }
+    record.jsonParsed = true;
+    record.code = servedCode(data?.code);
+    return { status: response.status, data };
+  } finally {
+    try { options.observe?.(record); } catch { /* Diagnostics never replace the primary result. */ }
+  }
+}
+export async function servedInvalidTokenRequest(origin, env, owner, observe) {
+  const base = assertLoopbackUrl(origin);
+  requireEvidence(new URL(base).hostname === '127.0.0.1');
+  const signal = AbortSignal.timeout(20_000);
+  const record = observation('served-invalid-token', owner);
+  try {
+    const response = await fetch(`${base}/functions/v1/analyze-clothing`, {
+      method: 'POST', redirect: 'error', cache: 'no-store', signal,
+      headers: { Authorization: 'Bearer '.concat('invalid.jwt.token'), apikey: env.SUPABASE_PUBLISHABLE_KEY,
+        'Content-Type': 'image/jpeg' }, body: jpegHeaderFixture(),
+    });
+    observedResponse(record, response);
+    let bytes;
+    try { bytes = response.body ? await readBounded(response.body, 32768, signal) : new Uint8Array(); }
+    catch (error) { record.transport = 'body-failed'; throw error; }
+    try {
+      const data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      record.jsonParsed = true; record.code = servedCode(data?.code);
+    } catch { /* Gateway JSON and handler headers are not required for this case. */ }
+    equal(response.status, 401);
+  } finally {
+    try { observe(record); } catch { /* Diagnostics never replace the primary result. */ }
+  }
 }
 export async function baseline(client, owners) {
   const ready = await requireReady(client, owners);
@@ -61,10 +104,12 @@ const stages = ['served', 'validation', 'ready', 'concurrent', 'legacy', 'lost',
 export async function runAnalysisStage(stage, origin, env) {
   requireEvidence(stages.includes(stage));
   const { client, owners } = await aiClients(env);
+  const observe = createServedDiagnostics();
   for (const [index, owner] of owners.entries()) {
     const call = (n, options) => analysisRequest(origin, env, owner, n, options);
     if (stage === 'served') {
-      equal(await call(1), { status: 503, data: { code: 'UNCONFIGURED' } });
+      equal(await call(1, { observe }), { status: 503, data: { code: 'UNCONFIGURED' } });
+      await servedInvalidTokenRequest(origin, env, owner, observe);
     } else if (stage === 'validation') {
       for (const options of [
         { suffix: '?provider=other' }, { suffix: '/extra' }, { headers: { 'X-Stillroom-Generation': '0' } },
