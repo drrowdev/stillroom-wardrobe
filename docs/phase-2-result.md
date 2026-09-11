@@ -3692,3 +3692,29 @@ review/security results must likewise be recorded, not inferred from earlier
 checkpoints. Financial maximum/hidden-thinking, current tariff/model-version,
 terms/account/consent/allowance, representative-photo, retention/purge, hosted
 bundling/deployment, UI/provenance/Save and manual/device gates remain separate.
+
+### Final continuation validation and blocked handoff
+
+Implementation commit **`76a5deb9054464c5bbe1200cd9ff281e0ed35df7`** contains
+the 17 intended continuation files; the complete PR remains within the approved
+29 paths. Post-commit source was clean and frozen-path comparison confirmed all
+six old migrations, package/lock, setup workflow, `src/images` and `src/features`
+unchanged. The changed-file secret tool reported no secrets.
+
+| Final check | Actual result |
+| --- | --- |
+| `npm run test:browser` | **482/482**, 8.2 minutes, exit 0; existing Chromium/WebKit tests and capture bounds unchanged. Images were not opened. |
+| `npm run test:a11y` | **33/33**, 53.4 seconds, exit 0. Not physical-device or coordinator visual acceptance. |
+| `ALLOW_SECURITY_TESTS=1 ALLOW_PRESERVATION_REHEARSAL=1 npm run db:rehearse` | **Exit 1 at `S1-base-reset`**. Pinned CLI capabilities and all seven source hashes passed. Populated capture, migration-up and subsequent preservation stages **NOT RUN**. Root cause not established by the bounded failure output. |
+| Chained `ALLOW_SECURITY_TESTS=1 npm run db:reset`, B1 rehearsal and `npm run db:types -- --check` | **NOT RUN**, because preservation failed. Earlier successful normal-stack/rehearsal/type evidence above remains historical to its actual execution, not proof of the current partially reset state. |
+| Automated validation at `76a5deb` | CodeQL Actions and JavaScript: **0 alerts**. Code review **unavailable, not passed**: configured `capi-prod-claude-sonnet-4.6` missing from the registry. No substitute agent/reviewer was launched. |
+| GitHub CI `34587975449`, Apple `34587975444`, head `76a5deb` | Both **action_required**; authenticated log queries each reported **zero total jobs**. Worker approved/reran neither. |
+
+The user's time-limit instruction ended further validation/repair. The failed
+disposable preservation state is left intact: no blind reset retry, sweep,
+reprovision, generation, service-state adoption or new task followed. No complete
+seven-migration populated-preservation pass, current final-DB readiness or
+merge-ready claim is made. Completing that required gate and genuine independent
+exact-head review remains blocking, alongside the coordinator-owned checks
+already listed. This final evidence-only update does not change executable code;
+fresh-head external checks still belong to the coordinator.
