@@ -3955,3 +3955,24 @@ artifacts, actual coordinator visual review and terminal native audit remain
 mandatory/pending. Current starting-head CI/Apple was not authorized or rerun.
 No additional agent/branch/PR, hosted/provider/paid/private-photo work, merge
 or deployment occurred.
+
+### Committed correction validation and handoff
+
+Corrective source commit `ef41d206a4ab144f30a89342694e16b040e75be7`, tree
+`9d6faa81770e59fd6298755841925b5c296bb5b3`, contains exactly the six authorized
+paths. Post-commit Git status was clean. The changed-file secret scan covered
+all six files before commit and found no secrets.
+
+Committed-code automated validation returned **CodeQL Actions/JavaScript:
+0 alerts**. Automated code review was **unavailable, not passed**: the wrapper's
+success heading/no-comments summary was contradicted by the actual
+`capi-prod-claude-sonnet-4.6` missing-model error at `12:45:16.675Z`.
+No fallback model, new agent, or repeated tool invocation was used.
+
+The 660 targeted and 1434 full unit results and type/lint checks above apply to
+this executable correction. This final evidence append changes documentation
+only. Genuine independent repair-only review, terminal native/setup audit and
+all exact-final-head CI/live/Apple/artifact/actual visual gates remain pending.
+The coordinator owns review, evidence and execution/merge decisions; the worker
+has not authorized Actions, rerun a failed job, merged, deployed, or begun
+another packet.
