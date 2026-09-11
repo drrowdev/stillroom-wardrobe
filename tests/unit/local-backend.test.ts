@@ -4,11 +4,50 @@ import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { AssertionError } from 'node:assert';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
 import {
   ROOT, DB_CONTAINER, PROJECT_ID, MIGRATION_HASH, assertLoopbackUrl, assertLocalApi, assertPublishableKey,
   normalSessionEnvironment, validateSessionEnvironment, commandEnvironment, requireDocker, requireLocalContainer,
   LocalBackendError, securityFailureExitCode, describeGenerationResult, describeStartupOrResetFailure,
+  assertAnalysisServeContract, ownAnalysisProcess,
 } from '../../scripts/backend/local.mjs';
+
+describe('owned B1 function lifecycle', () => {
+  const config = '[edge_runtime]\nenabled = true\n\n[functions.analyze-clothing]\nenabled = true\nverify_jwt = true\n';
+  const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json'];
+  const help = { code: 0, stdout: '  Serve all Functions locally.\n  supabase functions serve [flags] [<Function name...>]\n', stderr: '' };
+  it('requires the observed all-functions capability and closed enabled inventory', () => {
+    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, help)).not.toThrow();
+    for (const text of [config.replace('verify_jwt = true', 'verify_jwt = false'),
+      config.replace('[edge_runtime]\nenabled = true', '[edge_runtime]\nenabled = false'),
+      config + '\n[functions.other]\nenabled = true\n']) {
+      expect(() => assertAnalysisServeContract(text, ['analyze-clothing'], files, help)).toThrow();
+    }
+    expect(() => assertAnalysisServeContract(config, ['other'], files, help)).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], [...files, '.env'], help)).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, { ...help, code: 1 })).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, { ...help, stdout: '' })).toThrow();
+  });
+  it.each(['stop', 'output', 'startup', 'lifetime', 'exit'] as const)('owns only its child on %s', async (reason) => {
+    vi.useFakeTimers();
+    try {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(), stderr: new EventEmitter(),
+        kill: vi.fn(() => { queueMicrotask(() => child.emit('close', 0)); return true; }),
+      });
+      const owned = ownAnalysisProcess(child as unknown as Parameters<typeof ownAnalysisProcess>[0], 100, 50);
+      owned.assertRunning();
+      if (reason === 'output') child.stderr.emit('data', Buffer.alloc(1024 * 1024 + 1));
+      if (reason === 'startup') await vi.advanceTimersByTimeAsync(50);
+      if (reason === 'lifetime') { owned.ready(); await vi.advanceTimersByTimeAsync(100); }
+      if (reason === 'exit') child.emit('close', 1);
+      await owned.stop();
+      expect(() => owned.assertRunning()).toThrow();
+      expect(child.kill).toHaveBeenCalledTimes(reason === 'exit' ? 0 : 1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+});
 
 declare module '../../scripts/backend/local.mjs' {
   export function describeStartupOrResetFailure(result: unknown, elapsedMs: unknown): Record<string, unknown>;

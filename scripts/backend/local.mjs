@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { lstat, readFile } from 'node:fs/promises';
+import { lstat, readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -431,4 +431,100 @@ export async function readCredentialCache() {
     if (error instanceof LocalBackendError) throw error;
     fail('NOT RUN: valid local fixture credentials are missing; run npm run db:reset.');
   }
+}
+
+export function assertAnalysisServeContract(config, directories, files, help) {
+    const sections = [...config.matchAll(/^\[functions\.([^\]]+)\]/gm)].map((match) => match[1]);
+    if (JSON.stringify(sections) !== '["analyze-clothing"]'
+      || JSON.stringify(directories) !== '["analyze-clothing"]'
+      || JSON.stringify([...files].sort()) !== JSON.stringify([
+        'deno.d.ts', 'deno.json', 'google-cloud.ts', 'handler.ts', 'index.ts', 'protocol.ts',
+      ])
+      || !/^\[edge_runtime\]\s*\nenabled = true\s*$/m.test(config)
+      || !/^\[functions\.analyze-clothing\]\s*\nenabled = true\s*\nverify_jwt = true\s*$/m.test(config)
+      || help?.code !== 0 || !/^ *Serve all Functions locally\./m.test(help.stdout)
+      || !/^ *supabase functions serve \[flags\] \[<Function name\.\.\.>\]\s*$/m.test(help.stdout)) {
+      fail('REFUSED: the pinned analysis function serve contract does not match.');
+    }
+  }
+
+export function ownAnalysisProcess(child, lifetimeMs = 600_000, startupMs = 60_000) {
+    let exited = false, stopping = false, failed = false, bytes = 0, killTimer;
+    const closed = new Promise((resolve) => {
+      child.once('close', () => { exited = true; resolve(); });
+      child.once('error', () => { failed = true; exited = true; resolve(); });
+    });
+    const stop = async () => {
+      if (stopping) return closed;
+      stopping = true;
+      clearTimeout(lifetime); clearTimeout(startup);
+      if (!exited) {
+        child.kill('SIGTERM');
+        killTimer = setTimeout(() => { if (!exited) child.kill('SIGKILL'); }, 2000);
+      }
+      await closed;
+      clearTimeout(killTimer);
+    };
+    const expire = () => { failed = true; void stop(); };
+    const lifetime = setTimeout(expire, lifetimeMs);
+    const startup = setTimeout(expire, startupMs);
+    const receive = (chunk) => {
+      bytes += chunk.length;
+      if (bytes > 1024 * 1024) expire();
+    };
+    child.stdout.on('data', receive);
+    child.stderr.on('data', receive);
+    return {
+      stop,
+      ready() { clearTimeout(startup); this.assertRunning(); },
+      assertRunning() {
+        if (failed || exited || stopping) fail('FAIL: owned analysis function process is unavailable.', 1);
+      },
+    };
+  }
+
+export async function startAnalysisServer() {
+    await assertProjectConfig();
+    await requireDocker();
+    await requireLocalContainer();
+    const directory = path.join(ROOT, 'supabase', 'functions');
+    const entries = await readdir(directory, { withFileTypes: true });
+    if (entries.some((entry) => !entry.isDirectory() || entry.isSymbolicLink())) {
+      fail('REFUSED: unexpected local function inventory.');
+    }
+    const files = await readdir(path.join(directory, 'analyze-clothing'), { withFileTypes: true });
+    if (files.some((entry) => !entry.isFile() || entry.isSymbolicLink())) fail('REFUSED: unexpected analysis source inventory.');
+    assertAnalysisServeContract(await readFile(path.join(ROOT, 'supabase', 'config.toml'), 'utf8'),
+      entries.map((entry) => entry.name), files.map((entry) => entry.name), await cli(['functions', 'serve', '--help']));
+    const require = createRequire(import.meta.url);
+    const packagePath = require.resolve('supabase/package.json');
+    const pkg = JSON.parse(await readFile(packagePath, 'utf8'));
+    const child = spawn(process.execPath, [path.join(path.dirname(packagePath), pkg.bin.supabase),
+      '--agent', 'no', '--workdir', ROOT, 'functions', 'serve'], {
+      cwd: ROOT, env: commandEnvironment(), shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const owned = ownAnalysisProcess(child);
+    try {
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        owned.assertRunning();
+        try {
+          const response = await fetch(`${LOCAL_API}/functions/v1/analyze-clothing`, {
+            method: 'OPTIONS', headers: { Origin: 'http://127.0.0.1:5173', 'Access-Control-Request-Method': 'POST' },
+            redirect: 'error', signal: AbortSignal.timeout(2000),
+          });
+          await response.body?.cancel();
+          if (response.status === 204 && response.headers.get('Cache-Control') === 'no-store'
+            && response.headers.get('Access-Control-Allow-Origin') === 'http://127.0.0.1:5173') {
+            owned.ready();
+            return owned;
+          }
+        } catch { /* Readiness probes never invoke Auth, SQL or Google. */ }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      fail('FAIL: actual analysis handler startup was not established.', 1);
+    } catch (error) {
+      await owned.stop();
+      throw error;
+    }
 }

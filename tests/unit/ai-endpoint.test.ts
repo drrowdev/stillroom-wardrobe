@@ -79,10 +79,27 @@ describe('B1 source runtime and fixed protocol', () => {
   it('leaves the DB untouched when Google configuration is missing', async () => {
     const fetcher = vi.fn(async (url: string) => Response.json(url.endsWith('/user')
       ? { id, role: 'authenticated', is_anonymous: false }
-      : { code: 'OK', policy: { modelId: MODEL_ID, promptVersion: 1, maxRequestMicro: '2270823' } }));
+      : { code: 'OK', consent: { enabled: true, noticeRevision: 1 },
+        policy: { activated: true, noticeRevision: 1, modelId: MODEL_ID, promptVersion: 1, maxRequestMicro: '2270823' } }));
     vi.stubGlobal('fetch', fetcher);
     const google = vi.fn();
     expect(await (await createHandler(config, google)(request())).json()).toEqual({ code: 'UNCONFIGURED' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(google).not.toHaveBeenCalled();
+  });
+  it.each([
+    [{ activated: false, noticeRevision: 1 }, { enabled: true, noticeRevision: 1 }, 'INACTIVE'],
+    [{ activated: true, noticeRevision: 1 }, { enabled: false, noticeRevision: 1 }, 'CONSENT_REQUIRED'],
+    [{ activated: true, noticeRevision: 2 }, { enabled: true, noticeRevision: 1 }, 'CONSENT_REQUIRED'],
+    [{ activated: true, noticeRevision: 0 }, { enabled: true, noticeRevision: 0 }, 'CONSENT_REQUIRED'],
+    [{ activated: true, noticeRevision: 1 }, null, 'CONSENT_REQUIRED'],
+  ])('rejects ineligible preflight before any Google access %#', async (policy, consent, code) => {
+    const fetcher = vi.fn(async (url: string) => Response.json(url.endsWith('/user')
+      ? { id, role: 'authenticated', is_anonymous: false }
+      : { code: 'OK', policy, consent }));
+    vi.stubGlobal('fetch', fetcher);
+    const google = vi.fn();
+    expect(await (await createHandler(config, google)(request())).json()).toEqual({ code });
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(google).not.toHaveBeenCalled();
   });

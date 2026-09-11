@@ -102,6 +102,10 @@ export function createHandler(config: HandlerConfig, googleTransport: Transport 
       const imageHash = await sha256(image);
       const preflight = await rpc('ai_status', {});
       if (preflight.code !== 'OK') return error(closedCode(preflight.code));
+      if (!object(preflight.policy) || preflight.policy.activated !== true) return error('INACTIVE');
+      if (!object(preflight.consent) || preflight.consent.enabled !== true
+        || !Number.isInteger(preflight.policy.noticeRevision) || Number(preflight.policy.noticeRevision) < 1
+        || preflight.consent.noticeRevision !== preflight.policy.noticeRevision) return error('CONSENT_REQUIRED');
       if (!object(preflight.policy) || preflight.policy.modelId !== MODEL_ID || preflight.policy.promptVersion !== 1
         || typeof preflight.policy.maxRequestMicro !== 'string' || !/^[1-9][0-9]{0,18}$/.test(preflight.policy.maxRequestMicro)
         || BigInt(preflight.policy.maxRequestMicro) < BigInt(RESERVATION_MICRO) || Date.now() >= REVIEW_EXPIRES) return error('UNCONFIGURED');
