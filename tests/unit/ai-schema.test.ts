@@ -25,6 +25,32 @@ function result() {
 }
 const excluded = ['title', 'warmth', 'min_temp', 'max_temp', 'rain_rating', 'windproof', 'tags', 'purchase_price', 'purchase_date', 'notes'];
 const invalid = { ok: false, code: 'INVALID_RESULT' };
+describe('B1 additive SQL source checks, not execution evidence', () => {
+  it('extracts the complete legacy admission body without changing its conditions or replies', async () => {
+    const legacy = await readFile(new URL('../../supabase/migrations/20260909180000_ai_request_controls.sql', import.meta.url), 'utf8');
+    const current = await readFile(new URL('../../supabase/migrations/20260911040000_ai_analysis_backend.sql', import.meta.url), 'utf8');
+    const body = (source: string, name: string) => {
+      const start = source.indexOf(`create function ${name}(`);
+      expect(start).toBeGreaterThanOrEqual(0);
+      const content = source.indexOf('$$', start) + 2;
+      return source.slice(content, source.indexOf('$$;', content));
+    };
+    expect(body(current, 'private.ai_begin_owner')).toBe(
+      body(legacy, 'public.ai_begin_request').replace('owner_id=auth.uid()', 'owner_id=p_owner_id'),
+    );
+  });
+  it('preserves the original settlement implementation privately and rejects trusted legacy content first', async () => {
+    const sql = await readFile(new URL('../../supabase/migrations/20260911040000_ai_analysis_backend.sql', import.meta.url), 'utf8');
+    expect(sql).toContain('alter function public.ai_settle_request(uuid,uuid,jsonb,bigint,text) set schema private');
+    const start = sql.indexOf('create function public.ai_settle_request(');
+    const wrapper = sql.slice(start, sql.indexOf('$$;', start));
+    expect(wrapper.indexOf("jsonb_build_object('code','UNAVAILABLE','stored',false)"))
+      .toBeLessThan(wrapper.indexOf('return private.ai_settle_core('));
+    expect(wrapper).not.toMatch(/ai_close|ai_expire|update private/);
+    expect(sql).toContain("p_usage->>'modelVersion' is distinct from 'gemini-3.8-flash'");
+    expect(sql).toContain("p_usage->>'trafficType' is distinct from 'ON_DEMAND'");
+  });
+});
 function sessionEnvironment(): Record<string, string> {
   return {
     ALLOW_SECURITY_TESTS: '1', SUPABASE_URL: 'http://127.0.0.1:54321',

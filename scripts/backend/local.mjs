@@ -203,6 +203,7 @@ export function describeStartupOrResetFailure(result, elapsedMs) {
     '20260909110000_item_optional_collections.sql',
     '20260909180000_ai_request_controls.sql',
     '20260910070000_checked_item_save.sql',
+    '20260911040000_ai_analysis_backend.sql',
   ];
   let lastAnnouncement = -1;
   for (const [index, filename] of migrations.entries()) {

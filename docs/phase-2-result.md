@@ -3467,3 +3467,99 @@ stored counter ceiling and the account-deletion journey remain unproved.
 Hosted AI18/checked Save remain unapplied and the live window closed. Automatic
 analysis, trusted photo/provenance binding, source history, complete backup/
 export and full I29/MVP/device/human acceptance are not delivered by this packet.
+
+## PR #19 — I29 analysis backend B1 partial source checkpoint, 11 September 2026
+
+**Incomplete and not merge-ready.** The approved source packet is not complete:
+the local reset failed before announcing any migration. No actual B1 SQL,
+generated-type parity, served function, normal-owner analysis or Google success
+is claimed. No provider/hosted operation or paid activation occurred.
+
+### Authority and entry
+
+Existing platform branch `copilot/i29-analysis-backend-b1`, base/parent
+`de6bca3ebd7d01b96e313e47353711908f3b8a3e`, start
+`0718a7dd21680dcb9d4c97c34c47236f3adac540`, identical tree
+`9c41828c260099ef50ef21b59fefbf3c48af3fcc`. Initial tracked/staged/untracked
+source was clean, with zero base diff. Setup's generated types were ignored and
+reported `PARITY: MATCH`; they were not adopted or committed.
+
+Read the full [proposal 5629192198](https://github.com/drrowdev/stillroom-wardrobe/pull/18#issuecomment-5629192198)
+and [controlling approval 5629411306](https://github.com/drrowdev/stillroom-wardrobe/pull/18#issuecomment-5629411306),
+including the coordinator-adjudicated actual Anthropic / Claude Opus 5 review
+`223d6728-9657-4479-8ea0-1da7421db2d3`, turn 0. No additional agent was launched.
+Read this task's [own verified receipt 5629490053](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5629490053)
+before progress or edits: native task `747b8d2e-6e9c-4294-8aad-fe73af8a11df`,
+session `7d9f03fa-8673-4de5-9d54-eb09aaab29f7`, coordinator-observed
+`sweagent-capi:gpt-6-astra`, matching this repository/PR/branch/base/start/tree.
+This receipt is platform evidence, not a worker self-attestation.
+
+Context actually consulted: root/Copilot and both blueprint child instructions;
+full cloud guide; Phase 0 ordered-development handoff, Phase 1 result and Phase 2
+AI18/checked-Save evidence; local-backend guide; blueprint 00/02/03/05/10/14/19/20/21,
+07 ownership/schema and 08 control-API excerpts, and I29 in 15. Source reads
+included all AI18 SQL, the provenance/description/collections migrations,
+initial ownership and checked-Save excerpts, actual generated RPC types,
+unchanged JPEG and AI parsers, shared fact vectors, normal AI/preservation
+clients, local helpers/declarations, test wrapper, unit-test context, package,
+TypeScript and CI configuration. PR #19 discussion/diff/reviews/threads were
+read; initial diff/reviews/threads were empty. Relevant large text results were
+read in ranges rather than treated as reviewed merely because fetched.
+
+Setup run `34562239733`, job `103147193550`, reports successful Node/locked
+dependencies/Chromium/WebKit/Docker/start/reset/18 AI phases/ignored typegen/
+cleanliness steps. Actual local setup text logs corroborated these results.
+GitHub's running-job log download returned HTTP 404, not a setup-failure
+diagnosis. CI `34562243760` and Apple `34562243634` at the initial head were
+`action_required`; the worker authorized or reran neither.
+
+### Partial source and actual validation
+
+The checkpoint adds the six function-source/config files, one additive SQL
+candidate, endpoint unit tests and source-equivalence checks. It includes
+server Auth/JPEG/SHA validation, the fixed Google EU OAuth/adapter, a manifest/
+attestation/one-time-claim candidate and estimated-versus-confirmed accounting.
+These are **unserved and SQL-unexecuted source**, not a complete endpoint gate.
+The seventh migration is pinned in preservation and the observational local
+list. All six old migration files/pins, manual Save, image preparation/upload,
+forms, dependencies, setup workflow and generated public types stay unchanged.
+Requirements: I29 R18/R19/R23/R26/R27/R28, preserving R01/R11.
+
+Commands ran in `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Command | Actual result |
+| --- | --- |
+| `node --version`; `node_modules/.bin/supabase --version`; `node_modules/.bin/supabase functions serve --help`; `docker info --format '{{.ServerVersion}}'` | Node 24.19.0, CLI 2.116.0, Docker 28.0.4. Help says serve all functions; planned invocation has no positional name. Chromium/WebKit executable access checks passed. No function server was started. |
+| `npm run test:unit -- tests/unit/ai-endpoint.test.ts tests/unit/ai-schema.test.ts tests/unit/local-backend.test.ts tests/unit/preservation.test.ts` | Final **506/506**, exit 0, including complete legacy admission-body equivalence and pure legacy settlement source checks. Earlier runs exposed the expected missing seventh inventory pin and two fixed-count assertions, corrected only in allowed paths. |
+| `npm run typecheck && npm run lint` | Exit 0 with function files included. Earlier adapter header syntax, Node strip-only parameter-property and new test tuple-typing errors were corrected. |
+| `npm run db:start` | Exit 0; not proof of function boot. |
+| `ALLOW_SECURITY_TESTS=1 npm run db:reset` | **Exit 1**, 17798 ms, stdout 0 bytes/stderr 252 bytes; `run-container`, `other-nonzero`, no SQLSTATE, zero announced migrations. No provisioning ran. |
+| `npm run db:types` in the chained command | **Not run**, because reset failed. Tracked types were not generated or imported. |
+| Read-only container inventory | Database recreated and healthy; existing Auth/REST/Storage/gateway/mail containers present, no Edge Runtime container. This does not establish why reset failed. |
+| `npm run scan:secrets` | Final exit 0, 186 text files, canary checked. Earlier literal PEM delimiters in the parser/ephemeral-key test triggered the pattern scanner; equivalent delimiter matching/construction removed those false positives without changing the scanner or supplying any real key. |
+| `git diff --check`; frozen-path `git diff --exit-code de6bca3ebd7d01b96e313e47353711908f3b8a3e -- …` | Both exit 0. Compared all six old migrations, tracked generated types, `src/images`, `src/features`, package/lock and setup workflow. |
+
+No reset retry, fresh-only warm reprovision, runtime/dependency replacement,
+hosted repair, image/model input, provider call or external credential use
+followed the failure. Preserve the partially reset disposable state and primary
+error for coordinator diagnosis; container health is not schema readiness.
+
+### Remaining work and gates
+
+The owned lifecycle/capability helper, actual CLI-served boot, isolated
+Google-transport-only rehearsal, temporary warm-control namespace/cleanup,
+new normal-session/security suites and catalog/grant/export oracles are
+**not implemented**. CI invocation and the remaining API/runtime/tariff
+documentation are not yet wired. Full SQL interaction/concurrency/expiry/
+accounting tests, seven-source populated preservation, all legacy18 phases,
+normal checked-Save/recovery, actual generated types and final full gates remain
+required. Static source tests do not replace any of them.
+
+The provisional 2270823 microUSD reservation is allowance arithmetic, not a
+proven invoice ceiling or expected per-photo price. Exact-route total generated
+bound including thoughts, current tariff/actual version, account/terms/consent/
+allowances, authorized photo evaluation, retention, hosted bundling/migration/
+deployment and full I29 UI/provenance/device/human gates remain separate.
+Coordinator exact-head independent review, CI/native Apple and approved artifact
+visual review are pending. Workers do not merge, deploy or launch a replacement
+task. No source-complete, merge-ready or acceptance claim is made.

@@ -409,6 +409,7 @@ describe('safe startup/reset failure description', () => {
     '20260905000000_initial.sql', '20260906000000_item_field_provenance.sql',
     '20260909070000_item_description_edit.sql', '20260909110000_item_optional_collections.sql',
     '20260909180000_ai_request_controls.sql', '20260910070000_checked_item_save.sql',
+    '20260911040000_ai_analysis_backend.sql',
   ]);
 
   function report(result: unknown, ...elapsed: [] | [unknown]) {
@@ -424,10 +425,10 @@ describe('safe startup/reset failure description', () => {
     }
     if (value.exitCode !== null) expect(value.exitCode).toBeLessThanOrEqual(255);
     expect(value.announcedKnownMigrationCount).not.toBeNull();
-    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(6);
+    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(7);
     if (value.lastAnnouncedKnownMigrationIndex !== null) {
       expect(value.lastAnnouncedKnownMigrationIndex).toBeGreaterThanOrEqual(1);
-      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(6);
+      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(7);
     }
     expect(['none', 'multiple', ...operations.map(([, operation]) => operation)]).toContain(value.stderrDockerOperation);
     expect(['unclassified', 'exit-125', 'exit-126-or-127', 'other-nonzero']).toContain(value.stderrContainerExitBucket);
@@ -530,7 +531,7 @@ describe('safe startup/reset failure description', () => {
   it('counts distinct announcements and uses stderr order rather than version order', () => {
     const lines = [...migrations, migrations[1], migrations[0]];
     expect(failure(lines.map((name) => `Applying migration ${name}...\n`).join('')))
-      .toMatchObject({ announcedKnownMigrationCount: 6, lastAnnouncedKnownMigrationIndex: 1 });
+      .toMatchObject({ announcedKnownMigrationCount: 7, lastAnnouncedKnownMigrationIndex: 1 });
   });
 
   it.each([
