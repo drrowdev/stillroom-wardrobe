@@ -1,10 +1,95 @@
 # GitHub Copilot cloud development
 
-Development continues in GitHub-hosted Copilot sessions against
-`drrowdev/stillroom-wardrobe`. Source is public; account credentials, photos,
-backups and local service state must never be published.
+Development now uses **one persistent isolated LOCAL implementation writer
+overall** against `drrowdev/stillroom-wardrobe`. No new cloud/native coding
+allocation, wrapper, retry or automatic fallback is authorized. GitHub Actions
+remains CI, not a coding agent. This historical title/path and all existing
+headings/anchors remain for evidence-link compatibility. Source is public;
+account credentials, photos, backups and local service state must never be published.
+
+## Local development policy - 11 September 2026
+
+The [user decision at 2026-09-11T12:49:58.200Z](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634772726)
+and [actual different-provider critique/coordinator-approved cutover](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634938691)
+supersede the former cloud default and two-cloud-builder allowance. Keep one
+approved packet/branch/PR and one writer per workspace. Routine scoped repairs
+stay in the same persistent local session. Genuine read-only review remains
+separate; workers never launch another agent or packet. Never implement in the
+main checkout or the coordinator's old read-only checkout. The coordinator
+records owned files, dependencies and shared-resource owners before assignment;
+do not stop, reset or mutate unrelated services.
+
+Explicitly select **GPT-6 Astra (`gpt-6-astra`)**. Start each local implementation
+session read-only until the coordinator independently retrieves the writer's OWN
+documented machine-readable actual-model usage outside the writer's turn output.
+Cross-match active app/CLI identity, repository, workspace, branch, exact
+base/start head, observation time and approved scope. Publish a
+**coordinator-observed local model attestation** and explicit edit permission;
+the writer reads both after context and before edits, with fresh source/scope
+checks. Link the eventual PR when it exists; never invent a native task or PR ID.
+Requested model names, another session's evidence, stale/mismatched identity
+or unavailable proof mean STOP, not Auto/fallback. Maintain same
+session/model/source continuity through routine scoped corrections.
+
+Local usage telemetry is locally recorded, not tamper-proof or equivalent to
+remote native-platform evidence. Independent retrieval and cross-matching
+mitigate that weaker provenance; writer self-report does not replace them.
+Use supported documented app/CLI metadata tools, not raw metadata-database
+access. Historical native receipts were coordinator-authored public comments
+backed by authenticated native-platform GET, not platform-posted receipts.
+They cannot attest a local writer. The native-only numbered-comment-page and
+quiet-window intake is historical, not a local prerequisite or workaround.
+
+Local implementers are deliberately **text-only**, not because a local-platform
+image limitation is assumed. No image/binary/archive viewing, image-returning
+tools, image attachments, encoded image bytes or image embeds into the model. Existing
+packet-approved tests may internally process bounded synthetic fixtures/capture
+buffers and return text-only outcomes. Only the designated coordinator actually
+reviews approved exact-head artifacts and records run/head/hashes/verdict.
+Artifact existence, DOM checks or worker judgment cannot replace that review.
+Historical capture bounds remain intact; missing/unread evidence stays pending.
+
+Documentation editing needs no Node, Docker or fixtures. Code validation needs
+the exact pinned Node toolchain **and required locked dependencies**, plus
+installed browsers for browser selections. Never change engines, `.node-version`,
+the lockfile, setup/CI pins or add/change another version file to fit the machine.
+Use isolated approved tooling rather than silently changing global tools.
+System/global installs, Docker/WSL changes, admin operations and licence/EULA
+acceptance require specific approval; no registry/TLS workaround, credential/
+service-state copy or cloud fallback is authorized. Historical cloud setup
+does not establish this laptop's capability. A missing dependency, browser or
+service must be reported as blocked, not passed.
+
+Backend-dependent operations require specifically approved working local-stack
+ownership/setup: `db:start`, `db:reset`, `db:rehearse`, `db:types` and actual
+local type generation, ordinary integration/security, fixture provisioning,
+live SQL/container/runtime operations and B1 rehearsal (including
+`startAnalysisServer`, `privilegedLocalSql`, `requireLocalContainer`). Until that
+capability is established, unchanged CI must supply their mandatory actual
+execution evidence; mocks cannot substitute. A CI live failure has no established
+local reproduction environment merely because Node works.
+Default `test:browser`/`test:a11y` use the `playwright.config.ts` fixture suite
+and Vite, with installed dependencies/browsers but no Docker backend requirement.
+They prove only that fixture scope. Real recovery through integration and
+`playwright.local.config.ts`, or other real-backend browser selections, need the
+owned working stack. Inspect intended daemon/project/port ownership before setup.
+
+Genuine different-provider material-plan critique and final review, all required
+exact-head automated/live/type/App/browser/native-Apple/coordinator-visual gates
+and normal merge protections remain mandatory. Unavailable review is not a pass.
+Phase 0 remains **engineering complete; acceptance open**; only the second
+hosted-account journey was deferred, not other operator/device/human checks.
+Paid activation, private-input processing, hosted mutations and deployment retain
+separate approval. Source writers receive no hosted credentials;
+`ALLOW_HOSTED_SMOKE` remains unset in implementation sessions. The dated hosted
+actor evidence below is preserved, not a fresh hosted-state observation.
 
 ## Prepared environment
+
+**Historical cloud setup contract, superseded for coding allocation on
+11 September 2026.** The technical requirements below remain evidence, not local
+capability proof, a local entry protocol or permission to start another cloud
+session. Current local entry and tooling requirements are above.
 
 `.github/workflows/copilot-setup-steps.yml` contains the required single
 `copilot-setup-steps` job on a standard Ubuntu runner. It installs pinned Node 24,
@@ -36,16 +121,19 @@ and matching runtime receipt. Database CI still generates tracked
 `src/data/database.types.ts` and requires zero diff. Never commit the setup
 artifact, `.env.local`, service/browser state, test results or logs. The test
 wrapper passes ordinary fictional credentials to its child processes and strips
-privileged/GitHub credentials. After this workflow reaches default, later native
-allocations must use a compatible script branch; no silent fallback or automatic
-rebase of an older branch.
+privileged/GitHub credentials. Under the historical cloud policy, after this
+workflow reached default, later native allocations required a compatible script
+branch, with no silent fallback or automatic rebase of an older branch. That
+compatibility contract authorizes no new allocation under the local-only policy.
 
 ## Task scope and historical evidence
 
 Historical packet restrictions below do not veto a separately approved next packet.
-For each native task, the controlling scope is the specific coordinator-approved,
+For each local packet, the controlling scope is the specific coordinator-approved,
 actually reviewed packet and public plan URL supplied in its authorized kickoff,
-followed by that task's own matching verified native receipt before edits.
+followed after context by that writer's own matching coordinator-observed local
+model attestation and explicit edit permission before edits. Native receipts and
+cloud setup/intake requirements below are dated evidence, not local entry proof.
 Dated in-tree packet names and receipts are historical evidence, not permanent
 task pins or approval for another assignment. A later separately approved packet
 can supersede that dated assignment without editing these instructions again.
@@ -60,15 +148,16 @@ As a dated 8 September 2026 handoff example, the
 defines phone image preparation/crop work after I06. That example is not a new
 permanent I07/PR pin; a future task needs its own authorized reviewed packet.
 
-Native cloud implementation and repair sessions have a standing **text-only**
+Local implementation and repair sessions have a deliberate **text-only**
 model-input boundary: no image/binary/archive opening, image-returning tools,
 image attachments, encoded image output or Markdown image embeds. Only the
 packet's reviewed Node/Playwright capture contract may generate bounded synthetic
 files, with buffers ignored and functional assertions retained. The designated
 coordinator's actual approved-artifact visual review remains mandatory and
 separate. This coding-agent restriction is not an application AI-consent rule.
-If the same native file-download failure recurs without image inputs, preserve
-the head and report a platform blocker; do not spawn more retries.
+The historical native rule required preserving the head and reporting a platform
+blocker if the same file-download failure recurred without image inputs. Its
+cause is not inferred resolved by local execution; no cloud retry is authorized.
 
 <a id="active-cloud-task-i06-personal-settings-on-pr-7"></a>
 
@@ -110,7 +199,8 @@ coordinator explicitly selected and authenticated-GET verified actual
 session `c40a8a6b-551d-4831-8703-691b138c980a`, observed
 `2026-09-08T05:47:29.6473139Z`, against this exact PR/base/saved head.
 This is the coordinator's runtime evidence, not a worker self-attestation or a
-receipt reusable by another task. New tasks/retries need their own matching receipt.
+receipt reusable by another task. Historical native tasks/retries needed their
+own matching receipt; current local entry uses the attestation contract above.
 
 ### Text-only worker and retained visual gate
 
@@ -118,9 +208,10 @@ The two preceding I06 native sessions reported `CAPIError: 400 Error while downl
 file. Upstream status code: 404`; the latest followed viewing a temporary PNG.
 The missing upstream URL and causal app-code involvement remain unknown.
 I06's single approved alternative kept Astra and excluded all native model image
-inputs. That restriction now remains the standing native implementation/repair
-boundary above, not a lapsed I06-only rule. If the same failure recurs without
-image input, preserve the head and report a platform blocker; do not spawn more retries.
+inputs. That standing native implementation/repair restriction is preserved as
+history, not a lapsed I06-only rule; current local policy deliberately retains
+the text-only boundary. The native stop rule was to preserve the head and report
+a platform blocker on the same failure without image input, not spawn retries.
 
 Existing Node/Playwright tests provide text-only functional/DOM/axe results.
 One deterministic synthetic settings flow asserts the loopback protected route,
@@ -404,6 +495,8 @@ and scan. It is a leak-detection fixture, never a production credential.
 
 ## Delivery rules
 
+Delivery uses the persistent isolated local writer and own-model attestation
+contract above, not cloud/native allocation or historical setup/intake authority.
 The dated PR #2 handoff, PR #3 recovery and completed I06/PR #7 restrictions
 remain historical evidence. Current ordered development follows the specific
 authorized packet under the task scope rule above, not an old packet pin.
@@ -429,7 +522,7 @@ workers never advance to another packet on their own.
 
 Before every implementation packet:
 
-1. Read active root/Copilot instructions, cloud and phase/backend evidence,
+1. Read active root/Copilot instructions, this guide and phase/backend evidence,
    relevant blueprint requirements/work packets, actual schema/source/tests,
    PR body/discussion/diff/reviews and CI job logs. Record exact base/head,
    files actually consulted and unresolved gates.
@@ -440,23 +533,28 @@ Before every implementation packet:
    `5560449572`/`5560847183` also remain
    historical evidence, not current-packet approval. Automated validation/self-review is
    supplemental, not that prereview; do not invent a native review tool.
-3. Before every implementation task and retry, explicitly select **GPT-6 Astra
-   (`gpt-6-astra`)**. The coordinator verifies and records the actual runtime/platform
-   model for that task/session, time and exact base/head, not another task's evidence
-   or a name in a prompt. No Auto, silent fallback or unverified implementation.
+3. Explicitly select **GPT-6 Astra (`gpt-6-astra`)** and enter each local
+   implementation session read-only. After context and before edits, read the
+   matching coordinator-observed local model attestation and explicit permission,
+   independently bound to OWN actual usage, active app/CLI/repo/workspace/branch,
+   base/start head, time and scope. Fresh source and session/model continuity
+   remain mandatory. Local telemetry has the weaker provenance described above,
+   not native-receipt equivalence. Missing/mismatched proof means STOP;
+   no Auto, silent fallback or unverified implementation.
    Every new implementation plan/material amendment requires actual read-only
    different-provider critique (reviewer/provider/model, findings and amendments),
    then coordinator approval before edits. Material means changes to scope, allowed
    files, authority, behaviour, gates or evidence claims, not typo/formatting edits.
    Stop if the required model or reviewer is unavailable.
-4. Follow the root local/cloud distinction: one writer on the shared **LOCAL**
-   checkout; initially at most **two coordinator-approved independent CLOUD
-   implementation builders** plus on-demand read-only review. One writer per
-   workspace/branch/PR and one focused approved packet per agent. Before launch,
-   the coordinator names active packets/branches, owned files, dependencies and
-   shared mutable-resource owners. Never concurrently mutate the same branch or
-   shared host resources. The corrected common-base prerequisite was merged in
-   PR #2; no additional builder is implicit in a packet, and workers do not
+4. Keep **one persistent isolated LOCAL implementation writer overall**, one
+   writer per workspace/branch/PR and one focused approved packet at a time,
+   with genuine on-demand read-only review. The former two-cloud-builder
+   allowance is superseded historical policy. Routine scoped failures stay in
+   the same session; no main/coordinator-checkout implementation. Before
+   assignment, the coordinator names the packet/branch, owned files, dependencies
+   and shared mutable-resource owners. Never concurrently mutate the same branch
+   or unrelated/shared host resources. The corrected common-base prerequisite
+   was merged in PR #2; no additional builder is implicit in a packet, and workers do not
    launch additional agents.
    Session SQL/coordination notes do not change repository authority. Merges,
    hosted DDL and deployments remain serialized and separately authorized; actor/
@@ -468,13 +566,17 @@ Before every implementation packet:
    Physical-phone/Safari, camera/library, VoiceOver and TalkBack acceptance
    remains a human gate, not something Chromium emulation or axe proves.
 
-The setup workflow must be on the default branch before it can prepare cloud
-agent sessions. It also supports a manual Actions run for setup diagnostics.
-Cloud agent availability and usage are governed by the account's GitHub
-Copilot settings and plan; no completion is implied merely by configuring
-this file.
+Under the historical cloud setup contract, the setup workflow had to be on the
+default branch before preparing cloud agent sessions. Its manual Actions
+diagnostics support remains a technical capability, not authorization to run it.
+Historical cloud availability/usage depended on the account's GitHub Copilot
+settings and plan; configuration alone implied no completion. Current local-only
+policy authorizes no fresh cloud setup/allocation or automatic fallback.
 
 ### B1 completion setup/readiness evidence — 11 September 2026
+
+This is dated native PR #19 evidence, not a current local intake protocol,
+local-machine capability claim or permission to reopen the completed packet.
 
 The earlier PR #19 continuation used
 [approval 5632491947](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5632491947)
@@ -483,8 +585,8 @@ coordinator amendments N1–N6/P1–P6) and its own
 [runtime receipt 5632583458](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5632583458).
 They do not authorize a future session or another packet.
 
-Current running-job setup proof pairs explicit workflow-step status with
-timestamp-bound local critical transcripts. Docker/start, reset/fictional
+That native continuation's running-job setup proof paired explicit workflow-step
+status with timestamp-bound local critical transcripts. Docker/start, reset/fictional
 fixtures, actual ignored type generation and tracked/staged cleanliness must
 each succeed. A silent cleanliness command needs explicit current step success
 plus a bound transcript and fresh source inspection; absence of failure text is
@@ -509,6 +611,9 @@ Actions approval/rerun, merge or additional-agent authority.
 
 ### B1 identity/failure-evidence repair — 11 September 2026
 
+The entry/runtime and repair instructions below belong to this historical native
+continuation only; they grant no local entry, new cloud allocation or B1 assignment.
+
 [Approval 5633782787](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5633782787)
 records actual Anthropic Claude Opus 5 critique (reviewer `223d6728`, turns 9/10,
 A1–A9/C1–C3) for an eight-path repair starting at `3b58b50793720d0f82a06aee9b54196fcd73715a`.
@@ -520,7 +625,7 @@ Neither is reusable entry authority for another task.
 This entry required **matching** ignored/tracked schema types, successful current
 setup step metadata bound to local critical transcripts, fresh clean exact
 source, then deliberate own-receipt verification before progress/import/test/
-edit. Current run `34594725266`, job `103247716857`, had successful Docker,
+edit. That run `34594725266`, job `103247716857`, had successful Docker,
 start, reset/fictional-fixture, actual ignored generation and cleanliness steps.
 Fresh type bytes matched. The phase-2 append records the exact ordered entry.
 
@@ -539,6 +644,10 @@ deployment, hosted/provider/paid/private-photo operation or additional agent is
 authorized.
 
 ### B1 startup-state correction — 11 September 2026
+
+The native receipt/page/entry sequence and P4 permission below are historical
+for this continuation, not a local numbered-comment-page prerequisite or a
+reusable execution exception. Current work follows its own approved local packet.
 
 [Approval 5634444254](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634444254)
 supersedes the earlier native-live sequence only for this six-path continuation

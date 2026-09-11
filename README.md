@@ -5,10 +5,13 @@ The source is public; wardrobe data, photos, credentials and backups are not.
 
 ## Development in GitHub
 
-The active development environment is **GitHub Copilot cloud agent**, prepared by
-`.github/workflows/copilot-setup-steps.yml`. It installs Node, Chromium and a
-disposable Supabase stack without production secrets. Continue through feature
-branches and pull requests; no automatic merge or paid-service activation.
+As of 11 September 2026, development uses **one persistent isolated LOCAL
+implementation writer**, with reviewed packets and coordinator-verified entry.
+GitHub Actions remains CI; no new cloud coding allocation, retry or automatic
+fallback. `.github/workflows/copilot-setup-steps.yml` is retained historical
+cloud-setup infrastructure, not local capability proof or permission to allocate
+a coding agent. Continue through feature branches and pull requests; no automatic
+merge or paid-service activation.
 See [cloud development and handoff](docs/cloud-development.md).
 
 **Phase 0 is still in progress.** As of 6 September 2026, PR #1 is merged and

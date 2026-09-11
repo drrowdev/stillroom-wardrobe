@@ -1,12 +1,19 @@
 # Stillroom Wardrobe coding-agent rules
 
-Development continues in GitHub Copilot cloud sessions. Read
+Current execution policy, 11 September 2026: development uses **one persistent
+isolated LOCAL implementation writer overall**, with one approved packet per
+branch/PR. The [user decision](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634772726)
+and [reviewed cutover](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634938691)
+supersede the former cloud default and two-cloud-builder allowance. No new
+cloud/native coding allocation, wrapper, retry or automatic fallback is
+authorized. GitHub Actions remains CI, not a coding agent. Read
 `docs/cloud-development.md`, `docs/phase-0-result.md` and the current phase result
 first. Updated 8 September 2026: Phase 0 is **engineering complete; acceptance
 open**. The user authorized continuing through the agreed MVP in order.
 Use the [task scope rule](docs/cloud-development.md#task-scope-and-historical-evidence)
 to identify the specific reviewed packet in the authorized kickoff and its own
-matching verified native receipt. Dated in-tree assignments are evidence, not
+matching **coordinator-observed local model attestation** and explicit edit
+permission. Dated in-tree assignments and native receipts are evidence, not
 permanent task pins or permission for an unsolicited later packet. Existing
 prerequisites and actual session authorization still apply. Workers must stay
 within their assigned packet; they never reopen merged PRs, push directly to
@@ -22,15 +29,17 @@ and [text-only amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/7#
 defined that packet's 23-path scope; [final review 5138563467](https://github.com/drrowdev/stillroom-wardrobe/pull/7#pullrequestreview-5138563467)
 records its engineering evidence. I06 and the dated PR #2/#3 assignments below
 are completed history, not the current task's assignment.
-Setup generates only ignored `.supabase/generated-database.types.ts`, not tracked
-schema types. Inspect initial status/diff; preserve unexpected source deltas and
-stop, never adopt/commit them or local credentials, service state or test artifacts.
+Historical cloud setup generates only ignored `.supabase/generated-database.types.ts`,
+not tracked schema types; it does not prove local-machine readiness or authorize
+new cloud setup. Inspect initial status/diff and ignored setup-product metadata;
+preserve unexpected source deltas and stop, never adopt/commit them or local
+credentials, service state or test artifacts.
 
 Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `07-DATABASE-AND-RLS.sql`, `08-API-AND-STORAGE.md`, `10-SECURITY-AND-PRIVACY.md`, `20-AI-MODELS-AND-WORKFLOWS.md` and the current phase in `14-IMPLEMENTATION-PLAN.md` before editing. These are active root instructions: never overwrite them with historical blueprint templates.
 
 ## Context, planning and coordination gate
 
-1. Before edits, read this file, `.github/copilot-instructions.md`, the cloud
+1. Before edits, read this file, `.github/copilot-instructions.md`, the development
    guide, current phase/backend evidence, relevant blueprint requirements/work
    packets, actual migrations/generated schema/source/tests, and the current PR
    discussion, diff, reviews and CI job logs. Record exact base/head hashes,
@@ -40,29 +49,38 @@ Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `
    a different model provider; record reviewer/provider/model, findings and
    amendments in the PR. Self-review and automated code checks do not replace
    this prerequisite. If the required reviewer is unavailable, stop.
-3. Before every implementation task and retry, explicitly select **GPT-6 Astra
-   (`gpt-6-astra`)**. The coordinator verifies and records the actual runtime/platform
-   model against that task/session, time and exact base/head; another task's
-   evidence or a model name in a prompt is insufficient. No Auto, silent fallback
-   or unverified implementation. Every new implementation plan or material
-   amendment requires actual read-only different-provider critique, recording
+3. Explicitly select **GPT-6 Astra (`gpt-6-astra`)** and start each local
+   implementation session read-only. Before edits, the coordinator independently
+   retrieves that writer's OWN documented machine-readable actual-model usage,
+   outside the writer's narrative, and cross-matches active app/CLI identity,
+   repository, workspace, branch, exact base/start head, time and approved scope.
+   Publish a **coordinator-observed local model attestation** and explicit edit
+   permission; the writer reads both after context and before edits. Local
+   telemetry is locally recorded, not tamper-proof or native-platform-equivalent.
+   Requested model names, another session's evidence and raw metadata-database
+   access do not qualify. Missing, stale or mismatched proof means STOP.
+   Keep the same session/model/source continuity for routine scoped corrections;
+   no Auto, silent fallback or unverified implementation. Every new plan or
+   material amendment requires actual read-only different-provider critique, recording
    reviewer/provider/model, findings and amendments, then coordinator approval
    before edits. Material means changes to scope, allowed files, authority,
    behaviour, gates or evidence claims, not typo/formatting edits. Stop if the
    required model or reviewer is unavailable.
-4. User clarification, 6 September 2026: one writer on the shared **LOCAL**
-   checkout. Independent **CLOUD** packets may run in parallel only with
-   coordinator approval: initially at most **TWO implementation builders** plus
-   on-demand read-only review. Keep one writer per workspace, branch and PR, and
-   one focused approved packet per agent. Before launch, the coordinator names
-   active packets/branches, owned files, dependencies and the owner of each shared
-   mutable resource. No concurrent same-branch edits or shared-host mutations.
+4. Keep **one persistent isolated LOCAL implementation writer overall**, one
+   writer per workspace/branch/PR and one focused approved packet at a time.
+   Routine scoped fixes stay in that session; genuine on-demand read-only review
+   does not authorize another writer. Never implement in the main checkout or
+   the coordinator's old read-only checkout. Before assignment, the coordinator
+   names the packet/branch, owned files, dependencies and shared-resource owners.
+   No concurrent same-branch edits or unrelated/shared-host mutations.
+   The 6 September two-cloud-builder allowance is superseded historical policy,
+   not current execution authority.
    The corrected common-base amendment was the now-merged PR #2 prerequisite,
    not new permission to launch another builder. Each approved packet has one
    writer; workers launch no additional agents. Session SQL/coordination
    notes do not change repository authority. Merges, hosted DDL and deployments
    remain serialized and separately authorized through their responsible actor;
-   cloud workers gain no hosted access. The coordinator handles routine scoped
+   source workers gain no hosted access. The coordinator handles routine scoped
    fixes, reviews and CI; consequential product/security/cost/scope decisions go
    to the user. Concurrency itself authorizes no new packet/PR, phase, dependency,
    provider or hosted operation; existing scope and prerequisite gates still apply.
@@ -81,16 +99,27 @@ Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `
    approvals. Report blocked/pending checks honestly and bring back a manual
    gate when it genuinely blocks a feature.
 
+Local tooling must satisfy the [development guide](docs/cloud-development.md#local-development-policy---11-september-2026):
+exact pinned Node and required locked dependencies/browsers for the chosen
+commands, plus specifically approved working stack ownership for backend work.
+Documentation editing requires no Node, Docker or fixtures. Historical cloud
+setup is not local capability proof. Never change version/engine/lockfile/setup/CI
+pins to fit the machine; system/global, Docker/WSL, admin/licence operations need
+specific approval. No registry/TLS workaround, copied credentials/service state
+or silent cloud fallback. Missing capability is a blocker, not a passing check.
+
 Historical I06 used actual **Anthropic Claude Opus 5** critiques
 `personal-settings-plan-critique` and `i06-visual-transport-critique`, with
-coordinator amendments in the linked approvals. Each new native session reads
-its own matching public runtime receipt after context and before edits, never
-an old session receipt. Preserve shared owner/epoch profile freshness, serialized
-profile/language writes, original dirty baselines and explicit per-section saves.
+coordinator amendments in the linked approvals. Native sessions required their
+own matching public runtime receipt after context and before edits, never an old
+session receipt. Those coordinator-authored records were backed by authenticated
+native-platform GET, not posted by the platform; they are not local entry proof.
+Preserve shared owner/epoch profile freshness, serialized profile/language writes,
+original dirty baselines and explicit per-section saves.
 That I06 approval did not cover schema, dependency, local tooling, JPEG, recovery,
 garment Save or provider changes; it is not approval for a later packet.
 
-Native cloud implementation and repair sessions are **text-only**: no
+LOCAL implementation and repair sessions are deliberately **text-only**: no
 image/binary/archive opening, image-returning MCP/browser tools, attachments,
 encoded image output or image embeds into the worker model. Only packet-approved
 Node/Playwright tests may generate bounded synthetic evidence, with buffers
@@ -99,8 +128,9 @@ reviews the approved exact-head artifacts and records run/head/hashes/verdict in
 the relevant PR, not a self-invalidating source commit. Missing/unread images
 leave visual acceptance pending. This coding-agent boundary is separate from
 the coordinator's required visual review and any separately approved application
-AI processing. See the cloud guide for the standing boundary, historical I06
-capture bounds and platform-failure stop rule.
+AI processing, not an assumed local-platform limitation. See the development
+guide for retained historical native evidence, I06 capture bounds and the
+platform-failure stop rule; no cloud allocation/retry is authorized.
 
 The former PR #1 plan/approval comments `5558504250` and `5558542193` are
 historical evidence. Comment `5559949209` approved the completed PR #2 source
@@ -110,12 +140,13 @@ are recorded in `5559976584`. The 6 September documentation amendment follows
 and [approval 5560847183](https://github.com/drrowdev/stillroom-wardrobe/pull/2#issuecomment-5560847183),
 which records actual Anthropic Claude Opus 5 prereview and controlling amendments.
 Preserve these historical approvals. Only the approved AI Wardrobe backend was authorized
-for coordinator initialization; the cloud agent receives
+for coordinator initialization; the source writer receives
 no hosted credentials and implements only the reviewed source/document packet.
 This approval is not merge approval or permission for paid AI/later phases.
 
 Hosted source packet: use only the separate read-only `scripts/hosted-smoke.mjs`
-through an approved private operator channel, never this cloud environment.
+through an approved private operator channel, never an implementation session
+or public CI. `ALLOW_HOSTED_SMOKE` remains unset in implementation sessions.
 It requires `ALLOW_HOSTED_SMOKE=1`, the exact approved project URL and two
 server-verified ordinary sessions with prepared non-personal fixtures. Missing
 evidence is BLOCKED/nonzero, not a pass. Local reset/provision/test guards stay

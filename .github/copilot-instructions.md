@@ -1,15 +1,22 @@
 Read root `AGENTS.md` as the main repository instruction source. These active
 instructions and the root file must not be replaced by historical templates.
 
-The root instructions now include the active cloud handoff; do not overwrite
-them with older templates. Continue in a feature branch/PR using the prepared
-Copilot cloud environment. Read `docs/cloud-development.md` and phase results.
+Current execution policy, 11 September 2026: follow the
+[user decision](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634772726)
+and [reviewed local cutover](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634938691).
+Use ONE persistent isolated LOCAL implementation writer overall, with one
+approved packet/branch/PR. No new cloud/native coding allocation, wrapper, retry
+or automatic fallback. GitHub Actions remains CI, not a coding agent.
+The root instructions and development guide contain the active local policy
+and dated cloud evidence; do not overwrite them with older templates.
+Read `docs/cloud-development.md` and phase results.
 Updated 8 September 2026: the user authorized continuing through the agreed MVP
 in order. Phase 0 is **engineering complete; acceptance open**. Only the second
 hosted-account test was user-deferred; other manual/operator/device checks remain
 pending. Use the [task scope rule](../docs/cloud-development.md#task-scope-and-historical-evidence)
 to identify the specific reviewed packet in the authorized kickoff and its own
-matching verified native receipt. Historical packet names do not pin a new task
+matching coordinator-observed local model attestation and explicit edit
+permission. Historical packet names and native receipts do not pin a new task
 or authorize an unsolicited one. Actual session authorization and all existing
 prerequisites remain mandatory. Workers stay within their assigned packet and
 never reopen merged PRs, create additional branches/PRs/agents, push to main,
@@ -25,23 +32,26 @@ a future task's allowlist. I06 merged as `6caf1b0b3dde369d85941688c7c32d5664ffce
 records its engineering evidence. I06 and the dated PR #2/#3 assignments are
 history, not permanent pins.
 
-Native cloud implementation and repair sessions are text-only. Never open/view
-images or binary archives, use image-returning tools, attach or encode image
-bytes, or emit image embeds into the native model. Use packet-approved existing
-Node/Playwright tests with text output and ignored screenshot buffers; retain
+LOCAL implementation and repair sessions are deliberately text-only. Never
+open/view images or binary archives, use image-returning tools, attach or encode
+image bytes, or emit image embeds into the implementation model. Use
+packet-approved existing Node/Playwright tests with text output and ignored
+screenshot buffers; retain
 functional checks and the approved capture bounds. The I06 amendment's two
 synthetic settings PNGs remain historical evidence for that packet. The designated
 coordinator owns actual approved exact-head artifact review and records
 run/head/hashes/verdict on the relevant PR. Missing images or absent visual review
-remain pending, not a waiver. This native coding-agent rule does not prohibit
+remain pending, not a waiver. This deliberate local policy does not prohibit
 that coordinator review or separately approved application AI processing.
-No repeated task restart if the same platform failure recurs without image inputs.
+It is not an assumed local-platform limitation. Preserve historical native
+failure evidence; no repeated task restart or cloud retry/fallback is authorized.
 
 Use `docs/cloud-development.md` for the exact hosted migration mapping,
 read-only smoke inputs and coordinator/human gates. Local fixture tools must
-never target hosted. The cloud receives no hosted credentials and runs no
-hosted smoke, Auth setup or deployment. Cloudflare Pages is connected only to
-the coordinator; automatic production/preview deployments are off. Coordinator
+never target hosted. The source writer receives no hosted credentials and runs no
+hosted smoke, Auth setup or deployment; `ALLOW_HOSTED_SMOKE` remains unset.
+Cloudflare Pages is connected only to the coordinator; automatic
+production/preview deployments are off. Coordinator
 review `5125863611` records the reviewed-main shell reachable on 6 September
 2026, 15:09 UTC; see the
 [dated cloud-guide evidence](../docs/cloud-development.md#hosted-state-and-responsible-actors).
@@ -69,21 +79,30 @@ Each new packet uses its own reviewed plan; routine corrections within that
 approved scope do not require a new planning round. PR #1 comments
 `5558504250` and `5558542193` remain historical evidence, not the active target.
 
-Before every implementation task and retry, explicitly select GPT-6 Astra
-(`gpt-6-astra`); the coordinator verifies and records the actual runtime/platform
-model for that task/session/time/base/head, never another task's evidence or a
-name in a prompt. Read the matching public receipt after context and before edits.
-No Auto, silent fallback, unverified implementation or invented
-review tool. Every new implementation plan/material amendment needs actual
-different-provider read-only critique (reviewer/provider/model, findings and
+Explicitly select GPT-6 Astra (`gpt-6-astra`) and start each local implementation
+session read-only. The coordinator independently retrieves the writer's OWN
+documented machine-readable actual-model usage outside its narrative, matching
+active app/CLI identity, repo/workspace/branch, exact base/start head, time and
+approved scope. Publish a **coordinator-observed local model attestation** and
+explicit edit permission; read both after context and before edits. Local
+telemetry is locally recorded, not tamper-proof or native-platform-equivalent.
+Requested names, another session's usage or raw metadata-database access do not
+qualify. Old native public receipts were coordinator-authored, backed by
+authenticated native-platform GET, not platform-posted or local entry evidence.
+No invented native task ID or transplanted numbered-comment-page intake.
+Missing/stale/mismatched proof means STOP; maintain same session/model/source
+continuity for routine scoped fixes. No Auto, fallback, unverified implementation
+or invented review tool. Every new implementation plan/material amendment needs
+actual different-provider read-only critique (reviewer/provider/model, findings and
 amendments) and coordinator approval before edits; stop if model/reviewer is unavailable.
 
-One writer on the shared **LOCAL** checkout does not prohibit coordinator-approved
-independent **CLOUD** packets: initially at most **two implementation builders**
-plus on-demand read-only review, one writer per workspace/branch/PR and one focused
-approved packet per agent. Before launch the coordinator names active packets/
-branches, owned files, dependencies and shared-resource owners. No concurrent
-same-branch edits or shared-host mutations. The corrected common-base prerequisite
+The former two-cloud-builder allowance is superseded historical policy.
+Keep **ONE persistent isolated LOCAL implementation writer overall**, one writer
+per workspace/branch/PR and one focused approved packet at a time, with genuine
+on-demand read-only review. Never implement in main or the coordinator's old
+read-only checkout. Before assignment the coordinator names the packet/branch,
+owned files, dependencies and shared-resource owners. No concurrent same-branch
+edits or unrelated/shared-host mutations. The corrected common-base prerequisite
 was merged in PR #2; that does not authorize another builder. Each packet has
 one writer, and workers launch no additional agents.
 Session SQL/notes do not replace repository authority. Merges, hosted DDL and
@@ -102,6 +121,16 @@ self-approval or protection bypass. Workers never merge, deploy, approve/authori
 rerun Actions or start another agent or packet. Deployments, paid AI/provider/
 dependency/codec changes, hosted schema/account/data mutations and private-input
 capture retain separate approval.
+
+Follow the [local capability contract](../docs/cloud-development.md#local-development-policy---11-september-2026):
+exact pinned Node plus required locked dependencies/browsers, and explicitly
+approved working stack ownership for backend-dependent commands. Default
+fixture browser/a11y tests do not require Docker; real recovery/backend
+selections do. Documentation editing needs no Node/Docker/fixtures. Historical
+cloud setup proves neither local readiness nor authority for another allocation.
+Do not change engines/version files/lockfile/setup/CI pins to fit the machine.
+System/global, Docker/WSL, admin/licence operations require specific approval;
+no registry/TLS workaround, copied credentials/service state or cloud fallback.
 
 For GitHub Copilot: work on the requested issue/phase, cite its blueprint requirement IDs in the PR, and report exact validation commands/results. Keep one focused work packet per PR. Do not auto-implement a suggested deferred feature or another phase. Accounts must have no relationship or sharing; the later user clarification in `blueprint/18-DECISIONS-ASSUMPTIONS-QUESTIONS.md` overrides the original attachment.
 
