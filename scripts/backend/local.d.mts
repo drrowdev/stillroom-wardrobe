@@ -32,7 +32,7 @@ export type AnalysisProcess = { stop(): Promise<void>; ready(): void; assertRunn
 export function ownAnalysisProcess(child: import('node:child_process').ChildProcessWithoutNullStreams, lifetimeMs?: number, startupMs?: number): AnalysisProcess;
 export function startAnalysisServer(): Promise<AnalysisProcess>;
 export function probeAnalysisHandler(transport?: typeof fetch, timeout?: number): Promise<{ status: number; noStore: boolean; nosniff: boolean; post: boolean; ready: boolean }>;
-export type AnalysisRuntime = { id: string; running: boolean; startedAt: string };
+export type AnalysisRuntime = { id: string; running: boolean; startedAt: string | null };
 export function readAnalysisRuntime(deadline: number, run?: typeof runCommand): Promise<AnalysisRuntime | null>;
 export function waitForAnalysisHandler(owned: AnalysisProcess, options: {
   deadline: number; spawnedAt: number; previous: AnalysisRuntime | null;

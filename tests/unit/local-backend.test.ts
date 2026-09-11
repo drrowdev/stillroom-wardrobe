@@ -36,6 +36,7 @@ describe('owned B1 function lifecycle', () => {
     expect((await probeAnalysisHandler(async () => new Response(null, { status, headers: signature }))).ready).toBe(false);
   });
   it('keeps the readiness deadline and safe transport failure evidence', async () => {
+    vi.useFakeTimers();
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const owned = { stop: vi.fn(), ready: vi.fn(), assertRunning: vi.fn() };
@@ -43,11 +44,12 @@ describe('owned B1 function lifecycle', () => {
       const result = waitForAnalysisHandler(owned, { deadline: now + 60_000, spawnedAt: now,
         previous: null, readRuntime: async () => ({ id: 'b'.repeat(64), running: true, startedAt: new Date(now).toISOString() }) },
       async () => { throw new Error('private response must not escape'); });
-      await expect(result).rejects.toThrow('signature-mismatch');
+      const checked = expect(result).rejects.toThrow('replacement-not-serving');
+      await vi.advanceTimersByTimeAsync(60_000); await checked;
       expect(log).toHaveBeenCalledWith(expect.stringContaining('"transportFailure":true'));
       expect(log).not.toHaveBeenCalledWith(expect.stringContaining('private response'));
       expect(owned.ready).not.toHaveBeenCalled();
-    } finally { log.mockRestore(); }
+    } finally { log.mockRestore(); vi.useRealTimers(); }
   });
   it('reports boot and missing-module indicators without child output', async () => {
     const child = Object.assign(new EventEmitter(), {
@@ -141,6 +143,123 @@ describe('B1 replacement identity readiness', () => {
     await waitForAnalysisHandler(owned, { ...options(), previous: null }, transport());
     expect(owned.ready).toHaveBeenCalledOnce();
   });
+  it('waits for the pinned created runtime to start and serve, reading before each attempt', async () => {
+    const order: string[] = [], owned = process(), fetcher = transport();
+    const created = { ...current, running: false, startedAt: null };
+    const readRuntime = vi.fn<NonNullable<Parameters<typeof waitForAnalysisHandler>[1]['readRuntime']>>(async () => { order.push('metadata'); return current; })
+      .mockImplementationOnce(async () => { order.push('created'); return created; });
+    fetcher.mockImplementationOnce(async () => { order.push('not-serving'); return new Response(null, { status: 503 }); })
+      .mockImplementation(async () => { order.push('probe'); return new Response(null, { status: 204, headers: signature }); });
+    const result = waitForAnalysisHandler(owned, { ...options(), readRuntime }, fetcher);
+    await vi.advanceTimersByTimeAsync(249);
+    expect(fetcher).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetcher).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(250); await result;
+    expect(order).toEqual(['created', 'metadata', 'not-serving', 'metadata', 'probe', 'metadata', 'probe', 'metadata']);
+    expect(owned.ready).toHaveBeenCalledOnce();
+  });
+  it.each([null, { ...previous, running: false, startedAt: null }])(
+    'uses spawn freshness when the baseline has no start %#', async (baseline) => {
+      const owned = process();
+      await waitForAnalysisHandler(owned, { ...options(), previous: baseline }, transport());
+      expect(owned.ready).toHaveBeenCalledOnce();
+      await expect(waitForAnalysisHandler(process(), { ...options(), previous: baseline,
+        readRuntime: async () => ({ ...current, startedAt: previous.startedAt }) }, transport())).rejects.toThrow('reader-failed');
+    });
+  it('still requires a distinct ID when the old never-started runtime starts', async () => {
+    const owned = process(), fetcher = transport();
+    const result = waitForAnalysisHandler(owned, { ...options(), previous: { ...current, running: false, startedAt: null } }, fetcher);
+    const checked = expect(result).rejects.toThrow('identity-unchanged');
+    await vi.advanceTimersByTimeAsync(60_000); await checked;
+    expect(fetcher).not.toHaveBeenCalled(); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('bounds a stuck replacement, started=%s', async (started) => {
+    const owned = process(), fetcher = transport().mockResolvedValue(new Response(null, { status: 503 }));
+    const result = waitForAnalysisHandler(owned, { ...options(),
+      readRuntime: async () => started ? current : { ...current, running: false, startedAt: null } }, fetcher);
+    const checked = expect(result).rejects.toThrow(started ? 'replacement-not-serving' : 'replacement-not-started');
+    await vi.advanceTimersByTimeAsync(60_000); await checked;
+    expect(fetcher).toHaveBeenCalledTimes(started ? 240 : 0);
+    expect(owned.ready).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('"elapsedMs":60000'));
+  });
+  it.each([null, { ...current, id: 'c'.repeat(64), running: false, startedAt: null }])(
+    'never repins a created candidate after disappearance or replacement %#', async (next) => {
+      const owned = process(), fetcher = transport();
+      const readRuntime = vi.fn<NonNullable<Parameters<typeof waitForAnalysisHandler>[1]['readRuntime']>>()
+        .mockResolvedValueOnce({ ...current, running: false, startedAt: null }).mockResolvedValue(next);
+      const result = waitForAnalysisHandler(owned, { ...options(), readRuntime }, fetcher);
+      const checked = expect(result).rejects.toThrow('identity-unstable');
+      await vi.advanceTimersByTimeAsync(250); await checked;
+      expect(readRuntime).toHaveBeenCalledTimes(2); expect(fetcher).not.toHaveBeenCalled();
+    });
+  it.each([null, '2026-09-11T12:00:01Z'])('freezes the first valid start before serving, later=%s', async (startedAt) => {
+    const owned = process(), fetcher = transport().mockResolvedValue(new Response(null, { status: 503 }));
+    const readRuntime = vi.fn<NonNullable<Parameters<typeof waitForAnalysisHandler>[1]['readRuntime']>>()
+      .mockResolvedValueOnce({ ...current, running: false, startedAt: null }).mockResolvedValueOnce(current)
+      .mockResolvedValue({ ...current, running: false, startedAt });
+    const result = waitForAnalysisHandler(owned, { ...options(), readRuntime }, fetcher);
+    const checked = expect(result).rejects.toThrow('identity-unstable');
+    await vi.advanceTimersByTimeAsync(500); await checked;
+    expect(fetcher).toHaveBeenCalledOnce(); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('allows repeated transient first probes but resets transport failure after HTTP recovery', async () => {
+    const owned = process(), config = options(), fetcher = transport()
+      .mockRejectedValueOnce(new Error('private transport')).mockRejectedValueOnce(new Error('private transport'))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const result = waitForAnalysisHandler(owned, config, fetcher);
+    await vi.advanceTimersByTimeAsync(750); await result;
+    expect(fetcher).toHaveBeenCalledTimes(5); expect(config.readRuntime).toHaveBeenCalledTimes(6);
+    expect(owned.ready).toHaveBeenCalledOnce();
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('"transportFailure":false'));
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('private transport'));
+  });
+  it.each([true, false])('keeps last HTTP separate from the latest pre-confirmation transport failure=%s', async (failed) => {
+    const fetcher = transport().mockResolvedValue(new Response(null, { status: 503 }));
+    if (failed) fetcher.mockResolvedValueOnce(new Response(null, { status: 200 })).mockRejectedValue(new Error('private'));
+    else fetcher.mockRejectedValueOnce(new Error('private'));
+    const result = waitForAnalysisHandler(process(), { ...options(), deadline: now + 500 }, fetcher);
+    const checked = expect(result).rejects.toThrow('replacement-not-serving');
+    await vi.advanceTimersByTimeAsync(500); await checked;
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining(
+      `"lastHttp":{"status":${failed ? 200 : 503},"noStore":false,"nosniff":false,"post":false},"transportFailure":${failed}`));
+  });
+  it.each([1, 2])('does not restart confirmation after failed metadata read %s', async (position) => {
+    const owned = process(), config = options(), fetcher = transport();
+    for (let i = 0; i < position; i++) config.readRuntime.mockResolvedValueOnce(current);
+    config.readRuntime.mockRejectedValue(new Error('private metadata'));
+    await expect(waitForAnalysisHandler(owned, config, fetcher)).rejects.toThrow('reader-failed');
+    expect(fetcher).toHaveBeenCalledTimes(position); expect(config.readRuntime).toHaveBeenCalledTimes(position + 1);
+    expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('does not retry a nonmatching second signature', async () => {
+    const owned = process(), fetcher = transport().mockResolvedValueOnce(new Response(null, { status: 204, headers: signature }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    await expect(waitForAnalysisHandler(owned, options(), fetcher)).rejects.toThrow('signature-mismatch');
+    expect(fetcher).toHaveBeenCalledTimes(2); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('checks child health between transient attempts', async () => {
+    const owned = process(), config = options(), fetcher = transport().mockResolvedValue(new Response(null, { status: 503 }));
+    const result = waitForAnalysisHandler(owned, config, fetcher);
+    const checked = expect(result).rejects.toThrow('reader-failed');
+    await vi.advanceTimersByTimeAsync(1);
+    owned.assertRunning.mockImplementation(() => { throw new Error('private child'); });
+    await vi.advanceTimersByTimeAsync(249); await checked;
+    expect(fetcher).toHaveBeenCalledOnce(); expect(config.readRuntime).toHaveBeenCalledOnce();
+    expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('caps every probe by the remaining original budget, including confirmation', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout'), fetcher = transport()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }));
+    const result = waitForAnalysisHandler(process(), { ...options(), deadline: now + 2100 }, fetcher);
+    await vi.advanceTimersByTimeAsync(250); await result;
+    expect(timeout.mock.calls).toEqual([[2000], [1850], [1850]]);
+  });
+  it('rejects a running runtime with an explicit not-started state', async () => {
+    await expect(waitForAnalysisHandler(process(), { ...options(),
+      readRuntime: async () => ({ ...current, startedAt: null }) }, transport())).rejects.toThrow('reader-failed');
+  });
   it.each(['2026-09-11T11:59:59Z', '2026-09-11T11:59:59.999999999Z', 'invalid', '2026-02-30T12:00:00Z'])(
     'rejects stale/equal or malformed StartedAt %s', async (startedAt) => {
       await expect(waitForAnalysisHandler(process(), { ...options(), readRuntime: async () => ({ ...current, startedAt }) },
@@ -216,6 +335,22 @@ describe('B1 bounded Docker runtime metadata', () => {
     const run = vi.fn<typeof runCommand>().mockResolvedValue({ code: 0, stdout: '', stderr: '' });
     expect(await readAnalysisRuntime(Date.now() + 1000, run)).toBeNull(); expect(run).toHaveBeenCalledOnce();
   });
+  it.each([false, true])('accepts created metadata and the legitimate cross-read start transition, running=%s', async (running) => {
+    const startedAt = running ? '2026-09-11T12:00:00.123456789Z' : '0001-01-01T00:00:00Z';
+    const run = vi.fn<typeof runCommand>().mockResolvedValueOnce({ code: 0, stdout: `${id} created\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: `${id}|${running}|${startedAt}\n`, stderr: '' });
+    expect(await readAnalysisRuntime(Date.now() + 1000, run)).toEqual({ id, running, startedAt: running ? startedAt : null });
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    ['exited', false, '0001-01-01T00:00:00Z'], ['created', true, '0001-01-01T00:00:00Z'],
+    ['created', false, '1970-01-01T00:00:00Z'], ['created', false, '0001-01-01T00:00:00.000Z'],
+    ['created', false, ''], ['created', false, 'null'],
+  ])('rejects noncanonical or inconsistent not-started metadata %s %s %s', async (state, running, startedAt) => {
+    const run = vi.fn<typeof runCommand>().mockResolvedValueOnce({ code: 0, stdout: `${id} ${state}\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: `${id}|${running}|${startedAt}\n`, stderr: '' });
+    await expect(readAnalysisRuntime(Date.now() + 1000, run)).rejects.toThrow('reader-failed');
+  });
   it.each([
     { code: 1, stdout: '', stderr: 'denied private metadata' },
     { code: 0, stdout: ' \n', stderr: '' },
@@ -255,9 +390,20 @@ describe('B1 per-command live capture cap', () => {
     expect(overflow).toEqual({ code: 2, stdout: '', stderr: '' });
     expect((await runCommand(process.execPath, ['-e', script])).code).toBe(0);
   });
-  it('does not mistake a timed-out command with a zero-exit signal handler for success', async () => {
+  it.each([false, true])('distinguishes default overflow from an explicitly supplied 16MiB cap, explicit=%s', async (explicit) => {
+    const limit = 16 * 1024 * 1024;
     const result = await runCommand(process.execPath,
-      ['-e', 'process.on("SIGTERM",()=>process.exit(0));setInterval(()=>{},1000)'], { timeout: 100, maxOutputBytes: 4096 });
+      ['-e', `process.stderr.write("prefix",()=>process.stdout.write("a".repeat(${limit + 1})))`],
+      explicit ? { maxOutputBytes: limit } : {});
+    const size = Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr);
+    expect(result.code).toBe(2);
+    expect(size).toBeLessThanOrEqual(limit);
+    if (explicit) expect(size).toBe(0);
+    else { expect(size).toBeGreaterThan(0); expect(result.stderr === 'prefix').toBe(true); }
+  });
+  it.each([undefined, 4096])('does not mistake a timed-out command with a zero-exit signal handler for success, cap=%s', async (maxOutputBytes) => {
+    const result = await runCommand(process.execPath,
+      ['-e', 'process.on("SIGTERM",()=>process.exit(0));setInterval(()=>{},1000)'], { timeout: 100, maxOutputBytes });
     expect(result.code).toBe(2);
   });
 });

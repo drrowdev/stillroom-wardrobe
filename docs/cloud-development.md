@@ -537,3 +537,42 @@ repair-only independent review and authorization of first new exact-head
 CI/Apple execution. No worker review substitute, Actions approval/rerun, merge,
 deployment, hosted/provider/paid/private-photo operation or additional agent is
 authorized.
+
+### B1 startup-state correction — 11 September 2026
+
+[Approval 5634444254](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634444254)
+supersedes the earlier native-live sequence only for this six-path continuation
+from `450ba7337788988f9700e1303421ed567c5c7873`. Actual read-only Anthropic
+Claude Opus 5 reviewer `223d6728-9657-4479-8ea0-1da7421db2d3`, focused turn 12,
+accepted P1–P4; the coordinator adopted the required corrections and C1
+(ps-created may legitimately become same-ID inspect-running between reads).
+No new planning agent was commissioned.
+
+Its own [receipt 5634509076](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634509076)
+records explicitly selected, platform-GET-verified `sweagent-capi:gpt-6-astra`,
+task `bf6f33b6-6bff-4d8e-8a64-1a3646c7ff34`, session
+`16efd2a1-c25e-47e5-8cce-7e5b35db0560`. Full context preceded fresh T2 checks:
+current run `34599471062` / job `103262980344` had successful critical setup
+steps bound to current local transcripts, ignored generated types matched
+tracked bytes, and source was clean. Only then was page33/perPage1 deliberately
+read and its immutable metadata verified; progress/tests/edits followed T3.
+The phase-2 result records the evidence and limits. This receipt is not reusable.
+
+The only changed paths are `scripts/backend/local.mjs`, its `local.d.mts`,
+`tests/unit/local-backend.test.ts`, `docs/local-backend.md`, this guide and
+`docs/phase-2-result.md`. The correction distinguishes not-started from malformed
+runtime metadata, pins the first replacement/start, permits bounded waiting
+only before strict confirmation, and preserves default versus explicit command
+capture behavior. Production handler/protocol, rehearsal/served children,
+SQL/types, setup/CI, packages, images and Save/UI remain unchanged.
+
+P4 permits native targeted/full units, typecheck/lint/diff and changed-file
+secret checks only. No post-setup native live/probe/reset/preservation/rehearsal/
+typegen/browser/build/capture sequence runs in this task. Historical S1 and served
+failures remain unresolved. The coordinator still owns independent repair-only
+review and authorization of the first new exact-head CI/Apple run; unchanged
+live preservation, normal-owner/security/B1 Auth-DB, final types/parity, App/
+browser/translations/build/dependency/secret, eight bounded artifacts and actual
+visual review remain mandatory. No source-complete or merge-ready claim follows
+from native units/static checks, and no hosted/provider/paid/deployment authority
+is added.

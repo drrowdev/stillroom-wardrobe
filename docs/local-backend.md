@@ -368,19 +368,42 @@ only ID, Running and StartedAt. Each read uses at most 5000 ms of the **same
 60-second deadline**, established before the pre-spawn read, and a combined
 4096-byte capture cap. Empty successful ps means absent; failed, ambiguous or
 malformed metadata and capture overflow fail closed. Other command callers
-retain the 16 MiB default.
+retain the 16 MiB default and, on overflow, only their previously collected
+bounded prefix with nonzero exit. Explicit numeric caps, including an explicit
+16 MiB, discard both streams on overflow. Timeout is always nonzero, even if
+the terminated child exits zero.
 
-The new running ID must differ and have a strictly newer valid StartedAt
-(nanosecond precision); if initially absent, StartedAt must be at/after spawn.
+Under [startup-state correction 5634444254](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634444254),
+the three-field runtime contract allows `startedAt: null` only while not running.
+Only ps `created` plus same-ID inspect Running=false and exact Docker timestamp
+`0001-01-01T00:00:00Z` maps to null. Exited/running zero, epoch zero and malformed
+values fail closed. The two reads are separate observations: ps-created followed
+by same-ID inspect-running with a valid positive timestamp is legitimate (C1).
+
+The first distinct replacement ID is pinned even before starting; disappearance
+or replacement never repins it. Its first valid StartedAt must be strictly newer
+than the previous valid start (nanosecond precision); if initially absent or
+never started, it must be at/after spawn. A preexisting never-started ID must
+still be replaced. Null may transition once to a valid fresh start; that start
+then freezes, so reversion or timestamp change fails closed.
+
+Before the first strict signature, the same candidate may wait for start or
+serving, including transient transport/nonmatching responses. Every attempt
+rereads metadata, pauses 250 ms between attempts, checks owned-child health, and
+caps its probe at min(remaining, 2000 ms) within the original deadline.
 Confirmation is metadata → strict OPTIONS → identical metadata → strict OPTIONS
-→ identical metadata → healthy owned child → ready. Identity instability does
-not restart confirmation. Unchanged/absent identity can wait only within the
-original deadline; boot/module failure stops the owned process immediately.
+→ identical metadata → healthy owned child → ready. Once the first strict
+signature succeeds, any confirmation failure is terminal, not a retry-to-green.
+No POST is retried. Deadline reasons distinguish `replacement-not-started`,
+`replacement-not-serving`, `absent-no-replacement` and `identity-unchanged`.
+Boot/module failure stops the owned process immediately.
 The owned 600-second lifetime, 1 MiB output ceiling and owned-only termination
 remain. This proves stable replacement under the serialized single-writer
 guarantee, **not child-PID attribution**. `B1-READINESS` exposes bounded predicates,
 elapsed time, closed reason and last HTTP indicators separately from transport
-failure, never container IDs/timestamps or child output.
+failure, never container IDs/timestamps or child output. A later received HTTP
+response clears the latest-attempt transport-failure flag; a transport failure
+does not erase the last received HTTP indicators.
 
 Separate ordinary-session children receive the existing strict environment
 allowlist and only an ephemeral loopback origin/stage argument. The parent alone
@@ -426,3 +449,11 @@ Database CI runs this after existing integration/security and before actual type
 generation. No dependency, setup workflow, six old migrations, image preparation
 or Save behavior is changed. Required external/visual/native/paid gates remain
 separate from this local evidence.
+
+For the six-path native correction above, approval P4 allows only targeted/full
+units, typecheck, lint, diff and changed-file secret checks after valid entry.
+No post-setup native reset, preservation, B1 rehearsal, backend probe, type
+generation, browser, build or capture is authorized. The unchanged serialized
+live CI sequence and final-head owner/security/types/App/Apple/artifact/actual
+coordinator visual gates remain mandatory after independent repair review and
+separate coordinator execution authorization; this is not a live-proof waiver.

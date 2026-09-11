@@ -308,7 +308,9 @@ export function commandEnvironment(source = process.env) {
   return result;
 }
 
-export function runCommand(command, args, { input, env = commandEnvironment(), timeout = 120_000, maxOutputBytes = 16 * 1024 * 1024 } = {}) {
+export function runCommand(command, args, { input, env = commandEnvironment(), timeout = 120_000, maxOutputBytes } = {}) {
+  const explicitCaptureLimit = maxOutputBytes !== undefined;
+  if (!explicitCaptureLimit) maxOutputBytes = 16 * 1024 * 1024;
   if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1 || maxOutputBytes > 16 * 1024 * 1024) {
     fail('REFUSED: invalid command capture limit.');
   }
@@ -337,7 +339,8 @@ export function runCommand(command, args, { input, env = commandEnvironment(), t
     child.on('error', () => { clearTimeout(timer); resolve({ code: 2, stdout: '', stderr: '' }); });
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve({ code: oversized || timedOut ? 2 : code ?? 2, stdout: oversized ? '' : Buffer.concat(stdout).toString('utf8'), stderr: oversized ? '' : Buffer.concat(stderr).toString('utf8') });
+      const discard = oversized && explicitCaptureLimit;
+      resolve({ code: oversized || timedOut ? 2 : code ?? 2, stdout: discard ? '' : Buffer.concat(stdout).toString('utf8'), stderr: discard ? '' : Buffer.concat(stderr).toString('utf8') });
     });
     child.stdin.end(input);
   });
@@ -538,7 +541,9 @@ function validateRuntime(value) {
   if (!value || Object.keys(value).sort().join(',') !== 'id,running,startedAt'
     || typeof value.id !== 'string' || !/^[0-9a-f]{64}$/.test(value.id)
     || typeof value.running !== 'boolean') throw new AnalysisStartupError('reader-failed');
-  runtimeTime(value.startedAt);
+  if (value.startedAt === null) {
+    if (value.running) throw new AnalysisStartupError('reader-failed');
+  } else runtimeTime(value.startedAt);
   return value;
 }
 
@@ -561,13 +566,16 @@ export async function readAnalysisRuntime(deadline, run = runCommand) {
   const inspected = await call(['inspect', '--format', '{{.Id}}|{{.State.Running}}|{{.State.StartedAt}}', match[1]]);
   const fields = /^([0-9a-f]{64})\|(true|false)\|([^\r\n]+)\r?\n?$/.exec(inspected);
   if (!fields || fields[1] !== match[1]) throw new AnalysisStartupError('reader-failed');
-  return validateRuntime({ id: fields[1], running: fields[2] === 'true', startedAt: fields[3] });
+  const startedAt = match[2] === 'created' && fields[2] === 'false' && fields[3] === '0001-01-01T00:00:00Z'
+    ? null : fields[3];
+  return validateRuntime({ id: fields[1], running: fields[2] === 'true', startedAt });
 }
 
 export async function waitForAnalysisHandler(owned, { deadline, spawnedAt, previous, readRuntime = readAnalysisRuntime }, transport = fetch) {
   const evidence = { replacement: false, running: false, fresh: false, stable: false,
     elapsedMs: 0, reason: 'deadline', lastHttp: null, transportFailure: false };
   let waitingReason = previous === null ? 'absent-no-replacement' : 'identity-unchanged';
+  let candidate = null;
   const healthy = () => { startupRemaining(deadline); owned.assertRunning(); };
   const metadata = async () => {
     healthy();
@@ -584,13 +592,14 @@ export async function waitForAnalysisHandler(owned, { deadline, spawnedAt, previ
     try {
       result = await probeAnalysisHandler(transport, Math.min(startupRemaining(deadline), 2000));
       evidence.lastHttp = { status: result.status, noStore: result.noStore, nosniff: result.nosniff, post: result.post };
+      evidence.transportFailure = false;
     } catch {
       evidence.transportFailure = true;
       healthy();
-      throw new AnalysisStartupError('signature-mismatch');
+      return false;
     }
     healthy();
-    if (!result.ready) throw new AnalysisStartupError('signature-mismatch');
+    return result.ready;
   };
   try {
     validateRuntime(previous);
@@ -599,18 +608,24 @@ export async function waitForAnalysisHandler(owned, { deadline, spawnedAt, previ
     }
     for (;;) {
       const current = await metadata();
+      if (candidate && (current === null || candidate.id !== current.id
+        || candidate.startedAt !== null && candidate.startedAt !== current.startedAt)) {
+        throw new AnalysisStartupError('identity-unstable');
+      }
       evidence.replacement = current !== null && (previous === null || current.id !== previous.id);
-      waitingReason = current === null ? 'absent-no-replacement' : evidence.replacement ? 'deadline' : 'identity-unchanged';
+      waitingReason = current === null ? 'absent-no-replacement' : !evidence.replacement ? 'identity-unchanged'
+        : current.startedAt === null ? 'replacement-not-started' : 'replacement-not-serving';
       evidence.running = current?.running === true;
-      evidence.fresh = current !== null && (previous === null
+      evidence.fresh = current !== null && current.startedAt !== null && (previous === null || previous.startedAt === null
         ? runtimeTime(current.startedAt) >= BigInt(spawnedAt) * 1_000_000n
         : runtimeTime(current.startedAt) > runtimeTime(previous.startedAt));
-      if (evidence.replacement && !evidence.fresh) throw new AnalysisStartupError('reader-failed');
-      if (evidence.replacement && evidence.running) {
-        waitingReason = 'deadline';
-        await probe();
+      if (evidence.replacement) {
+        if (current.startedAt !== null && !evidence.fresh) throw new AnalysisStartupError('reader-failed');
+        candidate = { id: current.id, startedAt: current.startedAt };
+      }
+      if (evidence.replacement && evidence.running && await probe()) {
         if (!same(current, await metadata())) throw new AnalysisStartupError('identity-unstable');
-        await probe();
+        if (!await probe()) throw new AnalysisStartupError('signature-mismatch');
         if (!same(current, await metadata())) throw new AnalysisStartupError('identity-unstable');
         evidence.stable = true;
         healthy(); owned.ready();
