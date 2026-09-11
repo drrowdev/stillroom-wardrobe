@@ -3538,6 +3538,8 @@ Commands ran in `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
 | Read-only container inventory | Database recreated and healthy; existing Auth/REST/Storage/gateway/mail containers present, no Edge Runtime container. This does not establish why reset failed. |
 | `npm run scan:secrets` | Final exit 0, 186 text files, canary checked. Earlier literal PEM delimiters in the parser/ephemeral-key test triggered the pattern scanner; equivalent delimiter matching/construction removed those false positives without changing the scanner or supplying any real key. |
 | `git diff --check`; frozen-path `git diff --exit-code de6bca3ebd7d01b96e313e47353711908f3b8a3e -- …` | Both exit 0. Compared all six old migrations, tracked generated types, `src/images`, `src/features`, package/lock and setup workflow. |
+| Automated validation on source checkpoint `4d290487f935c3678e669c3bdb1ab9579ecc1fec` | CodeQL JavaScript: **0 alerts**. Code review **unavailable**, not a pass: configured `claude-sonnet-4.6` was absent from the tool's model registry. No substitute reviewer or additional agent was launched. |
+| GitHub CI `34563329264` and Apple diagnostic `34563329203` on that checkpoint | Both `action_required`; job-log queries report **0 jobs**. No worker approval/rerun and no CI/native acceptance result. |
 
 No reset retry, fresh-only warm reprovision, runtime/dependency replacement,
 hosted repair, image/model input, provider call or external credential use
