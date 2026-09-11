@@ -3565,3 +3565,130 @@ deployment and full I29 UI/provenance/device/human gates remain separate.
 Coordinator exact-head independent review, CI/native Apple and approved artifact
 visual review are pending. Workers do not merge, deploy or launch a replacement
 task. No source-complete, merge-ready or acceptance claim is made.
+
+## PR #19 — B1 readiness/completion continuation, 11 September 2026
+
+This dated continuation supersedes the earlier checkpoint's unexecuted-source
+status, not its historical failed commands. Scope remains **I29 backend B1 only**,
+requirements **R18/R19/R23/R26/R27/R28**, preserving **R01/R11**. No next packet,
+UI analysis/trusted Save integration, provider activation, hosted mutation,
+deployment or merge is included. Phase 0 remains engineering complete,
+acceptance open; I29/MVP/manual/device acceptance is not complete.
+
+### Authority, runtime and entry sequence
+
+Read all nine frozen context pins: PR #18 comments `5629030227`, `5629192198`,
+`5629411306`; PR #19 `5629778640`, `5629889200`, `5630622364`, `5631428528`,
+`5632401441`, `5632491947`. The first tool was the prescribed authenticated
+one-item page-21 probe. Each ID/author/timestamp/PR URL matched.
+[Approval 5632491947](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5632491947)
+records actual Anthropic / Claude Opus 5 reviewer
+`223d6728-9657-4479-8ea0-1da7421db2d3`, turns 6/7, and coordinator adoption of
+N1–N6/P1–P6. Original 29-path scope and prior approval remain controlling.
+No worker agent/reviewer/task/branch was launched.
+
+* **T1:** context completed after `09:58:09Z`, before the fresh T2 inspection.
+  Full root/Copilot and blueprint child instructions, cloud guide, blueprint
+  00/03/05/10/13/14/19/20/21; Phase 0 status/hosted and Phase 2 B1 excerpts,
+  local-backend evidence, blueprint 07 ownership/grants, 08 API/control and 15
+  I29 excerpts. Source included all six function files, full B1/AI18 SQL,
+  relevant older migrations/types/JPEG boundaries, helpers/declarations,
+  generator/wrapper, package/setup/CI/TypeScript/Playwright contracts and
+  endpoint/schema/lifecycle/preservation/ordinary-session tests. PR discussion,
+  diff, reviews/threads (empty) and relevant completed CI logs were read.
+  Large historical phase documents were read selectively, not claimed as fully read.
+* **T2:** `09:58:28.759–09:58:28.918Z`, actual branch
+  `copilot/i29-analysis-backend-b1`, HEAD
+  `79c99e111771c6757d386ac3e15dcb8bb3c11829`, tree
+  `0b4365bab4ba273abd90b993694d61ea0509b514`, base/main
+  `de6bca3ebd7d01b96e313e47353711908f3b8a3e`. Tracked, staged and untracked
+  source clean; only expected ignored setup state, no pending type-generation
+  file. Docker 28.0.4/services and Chromium/WebKit executables available.
+* **T3:** deliberately read page 22 only after T1/T2:
+  [own receipt 5632583458](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5632583458),
+  unedited, created/updated `09:43:23Z`, after cutoff `09:35:43Z`.
+  Task `ccfc35c1-92b8-410d-8f4c-f9aa02d1ac86`, session
+  `ba09a309-1779-4870-bfe4-b7e2280bef13`, coordinator-verified actual
+  `sweagent-capi:gpt-6-astra`, explicit `gpt-6-astra`, no fallback.
+  Session matched current platform setup-script records; verification finished
+  `09:58:42.697Z`. Repository/PR IDs, kickoff marker and exact base/head/tree matched.
+* **T4:** initial write-capable progress call followed completed T3; edits and
+  project imports/tests followed that call. No pre-entry worker writes/tests.
+
+Current setup run **34585534602**, job **103218762365**, window
+`09:42:17–09:55:12Z`: Docker/start/reset+fictional fixtures/ignored generation/
+cleanliness steps all explicitly **success**, paired with current local
+transcripts ending respectively `09:53:04.649`, `09:54:16.726`, `09:54:59.688`,
+`09:55:11.341`, `09:55:12.128Z`. Silent cleanliness had explicit step success,
+a bound zero-byte transcript and fresh T2 source proof. Generation reported
+**PASS / PARITY: DIFFERENT**, not final tracked parity. No current active-job
+archive was requested; coordinator terminal-archive review remains separate.
+
+Required completed evidence was read: `34577988231/103194764024` (old Docker125
+type-generation failure), `34581677783/103206441089` (later setup pass/different
+parity), and CI `34563462889` attempt 2, database job `103154672854` (earlier SQL/
+ordinary tests succeeded, tracked parity failed). Historical green checks were
+not reused as current-head validation. Head-79 CI/Apple runs remained
+`action_required`; the worker approved/reran neither.
+
+### Implemented and locally proved
+
+The strict originless probe requires 204/no-store/nosniff/POST and never inspects
+ACAO for readiness. Actual gateway observation: old browser preflight **200**
+without handler indicators; originless **204**, all indicators present, ACAO
+present in both. Literal `"null"` remains denied. The real CLI-served entrypoint
+accepted ordinary Auth and returned closed `UNCONFIGURED` for both owners,
+without Google configuration or fixture changes. Safe process/probe diagnostics,
+startup/lifetime/output limits and owned-process cleanup remain enforced.
+
+The new warm rehearsal uses real Auth/DB with only Google transport synthetic,
+strict ordinary-session child environments, exact bounded request namespaces,
+real catalog/grant/RLS/check/FK/immutable-registry assertions, complete fact
+vectors and replay/concurrency/lost-acknowledgement/terminal/accounting scenarios.
+Each successful run produced **12 synthetic generations**, restored exact old
+**14 ledger / 2 ready / 0 held-or-reserved** rows and eight-key controls,
+A16001/B-three-recent usage, and preserved normal inventory/export/media hashes.
+Consent used ordinary CAS: **two profile-version increments per owner per run**,
+never rewound. No real Google request, hosted request, private photo, image
+display or binary/archive input occurred.
+
+The actual tracked generator added only the three B1 RPC signatures (26 lines);
+independent `--check` generation matched. CI now invokes the rehearsal after
+existing integration/security and before unchanged final type generation.
+API/runtime/tariff/local-cloud documentation is updated in approved paths.
+Six old migration bytes, setup workflow, dependencies, image preparation,
+manual Save and browser capture bounds are unchanged.
+
+### Current commands and remaining gates
+
+Commands ran from `/home/runner/work/stillroom-wardrobe/stillroom-wardrobe`.
+
+| Command | Result |
+| --- | --- |
+| `npm run lint`; `npm run typecheck` | Exit 0. |
+| `npm run test:unit -- tests/unit/ai-endpoint.test.ts tests/unit/ai-schema.test.ts tests/unit/local-backend.test.ts tests/unit/preservation.test.ts` | **572/572**, four files, exit 0. |
+| `npm run test:unit` | **1346/1346**, 19 files, exit 0. |
+| `npm run check:translations` | 471 keys EN/FI/SV, 45 source files, exit 0. |
+| `npm run build` | Exit 0; existing >500 kB chunk advisory remains. |
+| `npm run scan:secrets` | 195 text files, canary checked, exit 0. |
+| `npm run check:dependencies` | 12 production/220 development packages, zero unverified dates; production audit zero findings. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:integration` | Existing local/AI18/checked-Save suites plus B1 baseline passed; recovery browser 1/1. Stored I29b counter-ceiling injection remains explicitly NOT RUN. |
+| `ALLOW_SECURITY_TESTS=1 npm run test:security` | Existing ordinary A/B/anonymous suites plus B1 RPC/private-schema refusals passed. |
+| `ALLOW_SECURITY_TESTS=1 node scripts/ai-analysis-rehearsal.mjs` | Full served and synthetic-Google/real-DB rehearsal passed, including success-only exact baseline restoration. |
+| `npm run db:types`; `npm run db:types -- --check` | Actual generation and exact tracked parity passed. |
+
+Ordinary engineering corrections retained the assertions: the first ad-hoc
+served follow-up omitted explicit opt-in and stopped before Auth/fixture writes;
+the approved CI step required updating its frozen ordering assertion; a catalog
+fact-vector query needed `to_jsonb` rather than parsing PostgreSQL `t/f`.
+Catalog invariants themselves all passed. No failed normal setup or consumed
+diagnostic permission was reused.
+
+Browser/accessibility and seven-source populated preservation were running at
+this record's initial commit; final results are recorded below when available.
+Exact-head external CI/Apple, coordinator independent/visual/terminal-setup
+review and merge decision remain coordinator-owned and pending. Automated
+review/security results must likewise be recorded, not inferred from earlier
+checkpoints. Financial maximum/hidden-thinking, current tariff/model-version,
+terms/account/consent/allowance, representative-photo, retention/purge, hosted
+bundling/deployment, UI/provenance/Save and manual/device gates remain separate.

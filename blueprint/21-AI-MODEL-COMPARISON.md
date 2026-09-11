@@ -113,3 +113,40 @@ Large context windows, coding scores and image-generation quality are not decisi
 6. Record the chosen API ID/snapshot, product/region, schema/prompt/image settings, observed results and allowance in `docs/ai-model-selection.md`. Model replacement needs review and processor disclosure; never auto-failover a private photo to another provider.
 
 **Current conclusion:** Gemini 3.5 Flash-Lite has a credible deployment fit, not a demonstrated accuracy lead. The winner for this wardrobe must be selected by the permitted route and actual correction burden, not by the incumbent recommendation or marketing scores.
+
+## Reviewed B1 source-only execution manifest — 11 September 2026
+
+The [B1 proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/18#issuecomment-5629192198)
+and [approval](https://github.com/drrowdev/stillroom-wardrobe/pull/18#issuecomment-5629411306)
+select `gemini-3.8-flash` for this narrowly reviewed backend source. This is not
+a measured clothing-quality winner, an authorized paid activation, or a change
+to the two-candidate/30-photo acceptance procedure above.
+
+Immutable `google-eu-3.8-v1` pins Google Cloud Gemini Enterprise Agent Platform,
+standard ON_DEMAND, `v1`, EU multi-region:
+`https://aiplatform.eu.rep.googleapis.com/v1/projects/<server-project>/locations/eu/publishers/google/models/gemini-3.8-flash:generateContent`.
+It is not the Gemini Developer API, global processing or Stockholm-only inference.
+The runtime also requires the exact returned model version; no silent fallback.
+
+The retained [pricing source](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)
+was retrieved at `2026-09-11T04:17:01.6988801Z` for the approved plan, not freshly
+measured by the completion worker. Non-global standard 3.8 Flash rates for both
+≤200K and >200K contexts were USD 0.825 input / 4.125 output per million through
+31 December 2026; announced 1 January 2027 rates were 1.65 / 8.25. The manifest
+conservatively uses the higher pair without credits, cache discounts or priority.
+Full prompt input is charged once; `totalTokenCount - promptTokenCount` includes
+generated thinking once. Integer microUSD estimates round upward.
+
+The 1048576-input / 65536-generated allowance envelope yields **2270823
+microUSD** reserved per admitted request. This is **allowance arithmetic, not
+a proven invoice ceiling or expected per-photo cost**. Missing/inconsistent
+usage stays held; estimates are not confirmed bills; over-envelope usage is
+unclamped, recorded as anomalous and disables the owner control. Review expires
+at `2027-01-01T00:00:00Z`; source does not silently refresh it.
+
+Before any paid/private-photo activation, independently verify current tariff,
+actual model-version behavior and exact-route total generated bound including
+hidden thoughts. Account/terms eligibility, regional configuration, consent,
+finite allowances, authorized photo evaluation, retention/purge and deployment
+approvals remain required. Synthetic usage tests prove arithmetic and lifecycle,
+not Google's billing behavior or those external gates.

@@ -31,3 +31,5 @@ export function assertAnalysisServeContract(config: string, directories: string[
 export type AnalysisProcess = { stop(): Promise<void>; ready(): void; assertRunning(): void };
 export function ownAnalysisProcess(child: import('node:child_process').ChildProcessWithoutNullStreams, lifetimeMs?: number, startupMs?: number): AnalysisProcess;
 export function startAnalysisServer(): Promise<AnalysisProcess>;
+export function probeAnalysisHandler(transport?: typeof fetch): Promise<{ status: number; noStore: boolean; nosniff: boolean; post: boolean; ready: boolean }>;
+export function waitForAnalysisHandler(owned: AnalysisProcess, transport?: typeof fetch): Promise<void>;

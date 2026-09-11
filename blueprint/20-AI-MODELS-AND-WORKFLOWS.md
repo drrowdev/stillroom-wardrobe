@@ -121,3 +121,26 @@ I29 covers photo-only start, automatic title/category/details, editing every gar
 Before adoption, use `21`'s comparison procedure with at least 30 authorized representative photos and two eligible candidates. Require at least 90% correct category/main-colour labels on clear single garments, no invented physical protection, and explicit per-field error/unknown/correction-time reporting. Prefer fewer corrections over small token-price savings. Record complete-response latency and actual billed usage. These are future acceptance targets, not measured results.
 
 The final release includes working automatic tagging for enabled accounts, plus the existing real dressing-usefulness evaluation for deterministic suggestions. No AI service has been configured or evaluated by this blueprint revision.
+
+## I29 B1 source implementation boundary — 11 September 2026
+
+The approved B1 packet supplies a real, inactive-by-default server adapter and
+atomic claim/settlement protocol, not automatic UI analysis or full I29 delivery.
+The exact source contract is in `08`; the source-only route/tariff decision and
+remaining financial gates are in `21`. The 14 fact fields remain the existing
+ten observed/four estimated partition. Title/description presentation, draft
+application and trusted Save binding are not silently added to this backend.
+
+Only `index.ts` reads server configuration: Supabase runtime keys and
+`AI_GOOGLE_PROJECT_ID`, `AI_GOOGLE_CLIENT_EMAIL`, `AI_GOOGLE_PRIVATE_KEY`.
+The adapter performs a fixed RS256 OAuth exchange, then one fixed Google Cloud
+EU request with inline sanitized bytes, fixed prompt/schema, LOW thinking,
+`includeThoughts:false`, 4096 output tokens, HIGH media resolution and standard
+safety thresholds. It has no SDK credential discovery, tools, file upload,
+external image URL, processor fallback or automatic inference retry.
+
+Local validation runs the actual CLI entrypoint unconfigured and the production
+handler against real ordinary Auth/DB with **only Google transport synthetic**.
+These are engineering tests, not paid accuracy, billing, retention, regional
+wire, hosted rollout or representative-photo evidence. No provider credential,
+private photo or paid call is used. Save/restore never invokes this adapter.

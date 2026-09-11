@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHandler } from '../../supabase/functions/analyze-clothing/handler';
@@ -48,6 +48,25 @@ describe('B1 source runtime and fixed protocol', () => {
       expect((await handler(request({ headers: { Origin: origin } }))).status).toBe(403);
     }
     expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('distinguishes absent Origin from literal null without Auth, RPC or Google access', async () => {
+    const upstream = vi.fn(), google = vi.fn();
+    vi.stubGlobal('fetch', upstream);
+    const handler = createHandler(config, google);
+    const response = await handler(request({ method: 'OPTIONS', body: null,
+      headers: { 'Access-Control-Request-Method': 'POST' } }));
+    expect(response.status).toBe(204);
+    expect(response.body).toBeNull();
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    expect(response.headers.get('Access-Control-Allow-Methods')).toBe('POST');
+    expect(response.headers.has('Access-Control-Allow-Origin')).toBe(false);
+    const denied = await handler(request({ method: 'OPTIONS', body: null,
+      headers: { Origin: 'null', 'Access-Control-Request-Method': 'POST' } }));
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ code: 'UNAVAILABLE' });
+    expect(upstream).not.toHaveBeenCalled();
+    expect(google).not.toHaveBeenCalled();
   });
   it('rejects unsupported methods, routes, queries and absent auth without upstream calls', async () => {
     const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
@@ -107,6 +126,43 @@ describe('B1 source runtime and fixed protocol', () => {
     const stream = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(5)); controller.close(); } });
     await expect(readBounded(stream, 4, AbortSignal.timeout(1000))).rejects.toThrow('TOO_LARGE');
   });
+  it('cancels a stalled body on abort without accepting a truncated image', async () => {
+    const cancel = vi.fn(), controller = new AbortController();
+    const stream = new ReadableStream<Uint8Array>({ cancel });
+    const result = readBounded(stream, 512000, controller.signal);
+    const assertion = expect(result).rejects.toThrow('aborted');
+    controller.abort();
+    await assertion;
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(stream.locked).toBe(false);
+  });
+  it.each(['lost-ack', 'expired-claim', 'config-changed', 'provider-timeout'])(
+    'never retries or dispatches without a valid acknowledgement: %s (unit transport)', async (failure) => {
+      const privateKey = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
+      const calls: string[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        calls.push(url.split('/').at(-1)!);
+        if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
+        if (url.endsWith('/ai_status')) return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 1 },
+          policy: { activated: true, noticeRevision: 1, modelId: MODEL_ID, promptVersion: 1, maxRequestMicro: '2270823' } });
+        expect(url.endsWith('/ai_claim_analysis')).toBe(true);
+        if (failure === 'lost-ack') throw new Error('private transport failure');
+        if (failure === 'config-changed') return Response.json({ code: 'CONFIG_CHANGED', claimed: false });
+        return Response.json({ code: 'OK', claimed: true, manifestId: MANIFEST_ID,
+          resultExpiresAtMs: Date.now() + 10000, dispatchBeforeMs: Date.now() + (failure === 'expired-claim' ? -1 : 1000) });
+      }));
+      const google = vi.fn(async (url: string) => {
+        if (url === TOKEN_URL) return Response.json({ access_token: 'fictional-only', token_type: 'Bearer', expires_in: 300 });
+        throw new DOMException('fixture timeout', 'TimeoutError');
+      });
+      const response = await createHandler({ ...config,
+        google: { projectId: 'fictional-project', clientEmail: 'fixture@fictional-project.iam.gserviceaccount.com', privateKey } }, google)(request());
+      expect(await response.json()).toEqual({ code: failure === 'lost-ack' ? 'ANALYSIS_FAILED'
+        : failure === 'config-changed' ? 'CONFIG_CHANGED' : 'TIMEOUT' });
+      expect(calls).toEqual(['user', 'ai_status', 'ai_claim_analysis']);
+      expect(google).toHaveBeenCalledTimes(failure === 'provider-timeout' ? 2 : 1);
+    },
+  );
 });
 describe('Google usage estimates are not confirmed billing', () => {
   const full = { promptTokenCount: 100, totalTokenCount: 125, candidatesTokenCount: 10, thoughtsTokenCount: 15, trafficType: 'ON_DEMAND' };
@@ -161,6 +217,23 @@ describe('Google usage estimates are not confirmed billing', () => {
     const result = await analyzeGoogle({ projectId: 'fictional-project' }, 'fictional-opaque', jpegHeaderFixture(), AbortSignal.timeout(5000), transport);
     expect(result.usage).not.toBeNull();
     expect(result.facts !== null).toBe(finishReason === 'STOP');
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+  it.each(AI_FACT_VECTORS as [unknown, boolean][])('filters the shared facts at the provider boundary %#', async (facts, expected) => {
+    const result = await analyzeGoogle({ projectId: 'fictional-project' }, 'fictional-only', jpegHeaderFixture(),
+      AbortSignal.timeout(1000), async () => Response.json({ modelVersion: MODEL_ID, usageMetadata: full,
+        candidates: [{ finishReason: 'STOP', content: { role: 'model', parts: [{ text: JSON.stringify(facts) }] } }] }));
+    expect(result.facts !== null).toBe(expected);
+    expect(result.usage).toEqual({ ...full, modelVersion: MODEL_ID });
+  });
+  it('bounds and cancels a provider response before parsing, without retry', async () => {
+    const cancel = vi.fn();
+    const transport = vi.fn(async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new Uint8Array(262145)); }, cancel,
+    })));
+    await expect(analyzeGoogle({ projectId: 'fictional-project' }, 'fictional-only', jpegHeaderFixture(),
+      AbortSignal.timeout(1000), transport)).rejects.toThrow('TOO_LARGE');
+    expect(cancel).toHaveBeenCalledTimes(1);
     expect(transport).toHaveBeenCalledTimes(1);
   });
 });

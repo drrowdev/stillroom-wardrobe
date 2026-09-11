@@ -577,12 +577,38 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      ai_analysis_status: { Args: { p_request_id: string }; Returns: Json }
       ai_begin_request: {
         Args: {
           p_draft_id: string
           p_generation: number
           p_image_sha256: string
           p_request_id: string
+        }
+        Returns: Json
+      }
+      ai_claim_analysis: {
+        Args: {
+          p_byte_count: number
+          p_draft_id: string
+          p_generation: number
+          p_height: number
+          p_image_sha256: string
+          p_manifest_id: string
+          p_owner_id: string
+          p_request_id: string
+          p_width: number
+        }
+        Returns: Json
+      }
+      ai_finish_analysis: {
+        Args: {
+          p_code: string
+          p_facts: Json
+          p_manifest_id: string
+          p_owner_id: string
+          p_request_id: string
+          p_usage: Json
         }
         Returns: Json
       }

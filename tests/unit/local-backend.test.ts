@@ -9,10 +9,51 @@ import {
   ROOT, DB_CONTAINER, PROJECT_ID, MIGRATION_HASH, assertLoopbackUrl, assertLocalApi, assertPublishableKey,
   normalSessionEnvironment, validateSessionEnvironment, commandEnvironment, requireDocker, requireLocalContainer,
   LocalBackendError, securityFailureExitCode, describeGenerationResult, describeStartupOrResetFailure,
-  assertAnalysisServeContract, ownAnalysisProcess,
+  assertAnalysisServeContract, ownAnalysisProcess, probeAnalysisHandler, waitForAnalysisHandler,
 } from '../../scripts/backend/local.mjs';
 
 describe('owned B1 function lifecycle', () => {
+  const signature = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Methods': 'POST' };
+  it.each([undefined, '*'])('probes actual handler without Origin, independently of ACAO %s', async (acao) => {
+    const transport = vi.fn(async () => new Response(null, { status: 204,
+      headers: { ...signature, ...(acao ? { 'Access-Control-Allow-Origin': acao } : {}) } }));
+    expect((await probeAnalysisHandler(transport)).ready).toBe(true);
+    expect(transport).toHaveBeenCalledWith('http://127.0.0.1:54321/functions/v1/analyze-clothing', {
+      method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'POST' }, redirect: 'error', signal: expect.any(AbortSignal),
+    });
+  });
+  it.each(Object.keys(signature).flatMap((key) => [undefined, 'wrong'].map((value) => [key, value])))(
+    'rejects absent/malformed handler indicator %s %s', async (key, value) => {
+      const headers = new Headers(signature);
+      if (value === undefined) headers.delete(key!); else headers.set(key!, value);
+      expect((await probeAnalysisHandler(async () => new Response(null, { status: 204, headers }))).ready).toBe(false);
+    },
+  );
+  it.each([200, 404, 503])('rejects gateway/missing handler status %s even with all indicators', async (status) => {
+    expect((await probeAnalysisHandler(async () => new Response(null, { status, headers: signature }))).ready).toBe(false);
+  });
+  it('keeps the readiness deadline and safe transport failure evidence', async () => {
+    vi.useFakeTimers();
+    try {
+      const owned = { stop: vi.fn(), ready: vi.fn(), assertRunning: vi.fn() };
+      const result = waitForAnalysisHandler(owned, async () => { throw new Error('private response must not escape'); });
+      const assertion = expect(result).rejects.toThrow('Probe: {"transportFailure":true}');
+      await vi.advanceTimersByTimeAsync(60_000);
+      await assertion;
+      expect(owned.ready).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+  it('reports boot and missing-module indicators without child output', async () => {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(), stderr: new EventEmitter(), kill: vi.fn(),
+    });
+    const owned = ownAnalysisProcess(child as unknown as Parameters<typeof ownAnalysisProcess>[0]);
+    child.stderr.emit('data', Buffer.from('worker boot error: Module not found private fixture content'));
+    child.emit('close', 1);
+    expect(() => owned.assertRunning()).toThrow('"bootError":true,"missingModule":true');
+    expect(() => owned.assertRunning()).not.toThrow('private fixture content');
+    await owned.stop();
+  });
   const config = '[edge_runtime]\nenabled = true\n\n[functions.analyze-clothing]\nenabled = true\nverify_jwt = true\n';
   const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json'];
   const help = { code: 0, stdout: '  Serve all Functions locally.\n  supabase functions serve [flags] [<Function name...>]\n', stderr: '' };

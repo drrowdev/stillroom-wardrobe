@@ -450,8 +450,13 @@ export function assertAnalysisServeContract(config, directories, files, help) {
 
 export function ownAnalysisProcess(child, lifetimeMs = 600_000, startupMs = 60_000) {
     let exited = false, stopping = false, failed = false, bytes = 0, killTimer;
+    const evidence = { exitCode: null, bootError: false, missingModule: false, outputLimit: false };
+    let tail = '';
     const closed = new Promise((resolve) => {
-      child.once('close', () => { exited = true; resolve(); });
+      child.once('close', (code) => {
+        evidence.exitCode = Number.isInteger(code) && code >= 0 && code <= 255 ? code : null;
+        exited = true; resolve();
+      });
       child.once('error', () => { failed = true; exited = true; resolve(); });
     });
     const stop = async () => {
@@ -470,7 +475,11 @@ export function ownAnalysisProcess(child, lifetimeMs = 600_000, startupMs = 60_0
     const startup = setTimeout(expire, startupMs);
     const receive = (chunk) => {
       bytes += chunk.length;
-      if (bytes > 1024 * 1024) expire();
+      if (bytes > 1024 * 1024) { evidence.outputLimit = true; expire(); return; }
+      const text = tail + chunk.toString('utf8');
+      evidence.bootError ||= /worker boot error|failed to boot|boot failure/i.test(text);
+      evidence.missingModule ||= /module not found|cannot find module/i.test(text);
+      tail = text.slice(-64);
     };
     child.stdout.on('data', receive);
     child.stderr.on('data', receive);
@@ -478,10 +487,44 @@ export function ownAnalysisProcess(child, lifetimeMs = 600_000, startupMs = 60_0
       stop,
       ready() { clearTimeout(startup); this.assertRunning(); },
       assertRunning() {
-        if (failed || exited || stopping) fail('FAIL: owned analysis function process is unavailable.', 1);
+        if (failed || exited || stopping) fail('FAIL: owned analysis function process is unavailable. ' + JSON.stringify(evidence), 1);
       },
     };
   }
+
+export async function probeAnalysisHandler(transport = fetch) {
+  const response = await transport(`${LOCAL_API}/functions/v1/analyze-clothing`, {
+    method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'POST' },
+    redirect: 'error', signal: AbortSignal.timeout(2000),
+  });
+  await response.body?.cancel();
+  const indicators = {
+    status: response.status,
+    noStore: response.headers.get('Cache-Control') === 'no-store',
+    nosniff: response.headers.get('X-Content-Type-Options') === 'nosniff',
+    post: response.headers.get('Access-Control-Allow-Methods') === 'POST',
+  };
+  return { ...indicators, ready: indicators.status === 204 && indicators.noStore && indicators.nosniff && indicators.post };
+}
+
+export async function waitForAnalysisHandler(owned, transport = fetch) {
+  const deadline = Date.now() + 60_000;
+  let evidence = { transportFailure: false };
+  while (Date.now() < deadline) {
+    try { owned.assertRunning(); }
+    catch (error) {
+      fail(error.message + ' Probe: ' + JSON.stringify(evidence), 1);
+    }
+    let ready = false;
+    try {
+      evidence = await probeAnalysisHandler(transport);
+      ready = evidence.ready;
+    } catch { evidence = { transportFailure: true }; }
+    if (ready) { owned.ready(); return; }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  fail('FAIL: actual analysis handler startup was not established. Probe: ' + JSON.stringify(evidence), 1);
+}
 
 export async function startAnalysisServer() {
     await assertProjectConfig();
@@ -505,24 +548,8 @@ export async function startAnalysisServer() {
     });
     const owned = ownAnalysisProcess(child);
     try {
-      const deadline = Date.now() + 60_000;
-      while (Date.now() < deadline) {
-        owned.assertRunning();
-        try {
-          const response = await fetch(`${LOCAL_API}/functions/v1/analyze-clothing`, {
-            method: 'OPTIONS', headers: { Origin: 'http://127.0.0.1:5173', 'Access-Control-Request-Method': 'POST' },
-            redirect: 'error', signal: AbortSignal.timeout(2000),
-          });
-          await response.body?.cancel();
-          if (response.status === 204 && response.headers.get('Cache-Control') === 'no-store'
-            && response.headers.get('Access-Control-Allow-Origin') === 'http://127.0.0.1:5173') {
-            owned.ready();
-            return owned;
-          }
-        } catch { /* Readiness probes never invoke Auth, SQL or Google. */ }
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
-      fail('FAIL: actual analysis handler startup was not established.', 1);
+      await waitForAnalysisHandler(owned);
+      return owned;
     } catch (error) {
       await owned.stop();
       throw error;

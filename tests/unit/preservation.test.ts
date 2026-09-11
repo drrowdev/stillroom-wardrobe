@@ -715,7 +715,7 @@ describe('import safety and frozen integration boundary', () => {
   });
   it('keeps CI opt-in step-local, before unchanged final reset and suites', async () => {
     const workflow = await readFile(path.join(root, '.github/workflows/ci.yml'), 'utf8');
-    expect(workflow).toContain("      - run: npm run db:start\n      - run: npm run db:rehearse\n        env:\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:reset\n      - run: npm run test:integration\n      - run: npm run test:security\n      - run: npm run db:types");
+    expect(workflow).toContain("      - run: npm run db:start\n      - run: npm run db:rehearse\n        env:\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:reset\n      - run: npm run test:integration\n      - run: npm run test:security\n      - run: node scripts/ai-analysis-rehearsal.mjs\n      - run: npm run db:types");
     expect(workflow.match(/ALLOW_PRESERVATION_REHEARSAL/g)).toHaveLength(1);
     expect(workflow).toContain('timeout-minutes: 30');
     const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };

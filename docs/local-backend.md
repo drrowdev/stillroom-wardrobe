@@ -332,3 +332,55 @@ node .\scripts\db.mjs types --check
 Without Docker, the last three commands report `NOT RUN` and nonzero status.
 That historical refusal is not a passing live backend test, nor does it negate
 the later successful standard-stack CI evidence above.
+
+## B1 warm analysis rehearsal
+
+After successful normal setup and the existing integration/security suites:
+
+```sh
+ALLOW_SECURITY_TESTS=1 node scripts/ai-analysis-rehearsal.mjs
+```
+
+This is an opt-in **disposable local** parent fixture process, not a hosted or
+paid test. It first checks the exact warm AI18 baseline: two old ready envelopes,
+14 ledger rows, no held/reserved rows, exact eight-key policies, A's 16001
+accounted amount and B's three recent admissions. Sufficient TTL/rate headroom
+and an empty B1 namespace are mandatory; it never reruns the fresh-only AI
+provisioner against warm state. A ten-minute progress deadline bounds the
+rehearsal; child/request/owned-process limits apply independently.
+
+The actual pinned CLI is invoked as `functions serve` without a positional name,
+with a closed function inventory and unchanged `verify_jwt=true`. Its owned
+process must pass originless OPTIONS at the real function URL with
+`Access-Control-Request-Method: POST`, status 204, `Cache-Control: no-store`,
+`X-Content-Type-Options: nosniff`, and `Access-Control-Allow-Methods: POST`.
+Readiness never consults ACAO: Kong may append `*`. Generic browser preflight can
+be intercepted with status 200 and does not prove handler boot. Diagnostics
+expose only bounded exit/boot/module/limit/probe indicators, not child output.
+This verifies local routing, not browser/deployed production CORS.
+
+Separate ordinary-session children receive the existing strict environment
+allowlist and only an ephemeral loopback origin/stage argument. The parent alone
+holds local service/fixture authority and an ephemeral synthetic signing key.
+Real Auth, claims, status and settlement remain unmocked; only Google transport
+is synthetic. The parent briefly switches just the two fictional controls to
+the reviewed manifest, 2270823 maximum, 100000000 allowance, rate 200, notice 1
+and TTL 3600. Closed A/B request namespaces are bounded to 32 admissions per
+owner. Rejected validation allocates none.
+
+Coverage includes normal/anonymous refusals, actual grants/RLS/constraints,
+cross-owner FK rejection, immutable registry, legacy/trusted separation,
+once-only dispatch/replay/concurrency, lost acknowledgement, structural JPEG/
+server hash checks, shared fact vectors, terminal/consent/configuration guards,
+held/estimated/confirmed usage and cross-month reconciliation. Full-row negative
+oracles and normal-session inventory/export/media hashes guard preservation.
+On success only exact harness ledger IDs are deleted (dependent evidence cascades),
+captured controls are restored exactly and the old baseline is reverified.
+Consent changes use ordinary CAS and retain two version increments per run.
+No profile version is rewound. Unknown failure preserves state and exits nonzero;
+there is no automatic cleanup/reset masking the primary failure.
+
+Database CI runs this after existing integration/security and before actual type
+generation. No dependency, setup workflow, six old migrations, image preparation
+or Save behavior is changed. Required external/visual/native/paid gates remain
+separate from this local evidence.

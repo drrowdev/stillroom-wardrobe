@@ -473,3 +473,35 @@ agent sessions. It also supports a manual Actions run for setup diagnostics.
 Cloud agent availability and usage are governed by the account's GitHub
 Copilot settings and plan; no completion is implied merely by configuring
 this file.
+
+### B1 completion setup/readiness evidence — 11 September 2026
+
+The active PR #19 continuation uses
+[approval 5632491947](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5632491947)
+(actual retained Anthropic Claude Opus 5 reviewer `223d6728`, turns 6/7,
+coordinator amendments N1–N6/P1–P6) and its own
+[runtime receipt 5632583458](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5632583458).
+They do not authorize a future session or another packet.
+
+Current running-job setup proof pairs explicit workflow-step status with
+timestamp-bound local critical transcripts. Docker/start, reset/fictional
+fixtures, actual ignored type generation and tracked/staged cleanliness must
+each succeed. A silent cleanliness command needs explicit current step success
+plus a bound transcript and fresh source inspection; absence of failure text is
+not proof. Setup `PARITY: DIFFERENT` is an expected ignored artifact state here,
+not final tracked parity or permission to adopt it before the entry gate.
+
+Do **not** demand the downloadable archive of the worker's own still-running
+job; the coordinator reviews that archive after termination. This narrow
+exception does not waive required completed logs, pinned authority or the own
+receipt: missing/failed/ambiguous prerequisites still mean preserve and STOP.
+No consumed diagnostic permission is reusable after a failed normal setup.
+After valid entry, ordinary within-scope engineering failures remain the assigned
+writer's responsibility; do not confuse those with failed entry prerequisites.
+
+The repaired local probe uses originless OPTIONS and the full handler-owned
+204/no-store/nosniff/POST signature, independently of gateway ACAO. Its actual
+CLI-served and Google-only-synthetic real Auth/DB checks are documented in
+`local-backend.md`. They do not prove production/browser CORS, hosted migration,
+paid inference or device/visual acceptance, and do not grant worker deployment,
+Actions approval/rerun, merge or additional-agent authority.
