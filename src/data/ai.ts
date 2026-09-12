@@ -68,7 +68,8 @@ export class AiClient {
         throw new AiError('UNAVAILABLE');
       }
       const reader = response.body.getReader();
-      let failed = false, text = '', bytes = 0;
+      let failed = false, cleanupFailed = false, text = '', bytes = 0;
+      let failure: unknown, cleanupFailure: unknown, value: unknown;
       const decoder = new TextDecoder('utf-8', { fatal: true });
       try {
         for (;;) {
@@ -78,14 +79,19 @@ export class AiClient {
           if (bytes > 32768) throw new AiError('UNAVAILABLE');
           text += decoder.decode(part.value, { stream: true });
         }
-        const value: unknown = JSON.parse(text + decoder.decode());
-        return { status: response.status, value };
-      } catch (error) { failed = true; throw error; }
+        value = JSON.parse(text + decoder.decode());
+      } catch (error) { failed = true; failure = error; }
       finally {
         try { await wait(reader.cancel()); }
-        catch (error) { if (!failed) throw error; }
-        finally { reader.releaseLock(); }
+        catch (error) { cleanupFailed = true; cleanupFailure = error; }
+        finally {
+          try { reader.releaseLock(); }
+          catch (error) { if (!cleanupFailed) { cleanupFailed = true; cleanupFailure = error; } }
+        }
       }
+      if (failed) throw failure;
+      if (cleanupFailed) throw cleanupFailure;
+      return { status: response.status, value };
     }, outer);
   }
   async status(signal?: AbortSignal) {

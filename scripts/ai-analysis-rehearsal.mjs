@@ -21,6 +21,48 @@ const manifest = 'google-eu-3.8-v1';
 const privateTables = ['ai_controls', 'ai_usage', 'ai_requests', 'ai_usage_evidence', 'ai_analysis_attestations'];
 const rowsSql = (table, where = 'true') =>
   `coalesce((select jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text) from ${table} t where ${where}),'[]'::jsonb)`;
+function markedRecords(stdout, stderr, marker, limit, recordLimit, lineLimit = 262145) {
+  if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > 262144) return null;
+  const records = [];
+  for (const text of [stdout, stderr]) {
+    const lines = text.split(/\r\n|\n|\r/);
+    if (lines.length > lineLimit) return null;
+    for (const [index, line] of lines.entries()) {
+      const at = line.indexOf(marker);
+      if (at < 0) continue;
+      if (line.length > recordLimit + 256 || at > 256 || index === lines.length - 1
+        || line.indexOf(marker, at + marker.length) !== -1
+        || !line.slice(0, at).split('\u001b').every((part, index) => {
+          const progress = index === 0 ? part : part.replace(/^\[[0-9;]*m/, '');
+          return (index === 0 || progress !== part) && /^[ \t.\u00b7\u00b0\u00d7\u00b1\u2713\u2718]*$/.test(progress);
+        })) return null;
+      let record = line.slice(at).trimEnd();
+      // Strip only trailing SGR decoration, never escapes embedded in protocol data.
+      for (;;) {
+        const escape = record.lastIndexOf('\u001b');
+        if (escape < 0 || !/^\[[0-9;]*m$/.test(record.slice(escape + 1))) break;
+        record = record.slice(0, escape).trimEnd();
+      }
+      if (!record.startsWith(`${marker} `) || Buffer.byteLength(record) > recordLimit || records.length >= limit) return null;
+      records.push(record.slice(marker.length + 1));
+    }
+  }
+  return records;
+}
+function cProgress(stdout, stderr) {
+  const records = markedRecords(stdout, stderr, 'I29_C_STAGE', 32, 128, 4096);
+  const ownerStages = ['OWNER', 'INITIALIZE', 'CONSENT', 'ANALYSIS', 'SAVE', 'VERIFY', 'CLEANUP', 'CLOSED', 'RESTORE', 'DONE'];
+  const expected = ['ENTRY 0', 'AUTH 0', ...[1, 2].flatMap((owner) => ownerStages.map((stage) => `${stage} ${owner}`)), 'COMPLETE 2'];
+  if (!records?.length || records.length > expected.length || records.some((record, index) => record !== expected[index])) {
+    return { stage: 'UNKNOWN', owner: 0 };
+  }
+  const [stage, owner] = expected[records.length - 1].split(' ');
+  return { stage, owner: Number(owner) };
+}
+function nonAiProfile(profile) {
+  return Object.fromEntries(Object.entries(profile).filter(([key]) =>
+    !['version', 'updated_at', 'ai_enabled', 'ai_notice_revision', 'ai_consented_at'].includes(key)));
+}
 async function snapshot() {
   return db(`select jsonb_build_object(${privateTables.map((t) => `${literal(t)},${rowsSql(`private.${t}`)}`).join(',')});`);
 }
@@ -496,6 +538,11 @@ async function main() {
     const headroom = () => deadline - Date.now();
     console.log(`C timing: entryHeadroomMs=${headroom()}`);
     requireEvidence(headroom() > 150_000 && cRequests.length === 0 && cCountBefore === 34);
+    const cEntryProfiles = await Promise.all(owners.map(async (owner) => (await client.rows(owner, 'profiles'))[0]));
+    for (const [index, profile] of cEntryProfiles.entries()) {
+      requireEvidence(profile.owner_id === owners[index].uid && profile.version === versions[index] + 4
+        && (profile.ui_language === null || ['en', 'fi', 'sv'].includes(profile.ui_language)));
+    }
     for (const table of ['public.items', 'public.item_images', 'private.ai_usage', 'private.ai_requests',
       'private.ai_save_used_receipts', 'private.item_save_used_ids']) {
       const field = table.startsWith('public.') ? 'id' : table.includes('ai_usage') || table.includes('ai_requests') ? 'request_id' : 'item_id';
@@ -515,10 +562,12 @@ async function main() {
       env: { ...env, I29_C_ANALYSIS_ORIGIN: origin }, timeout: 120_000, maxOutputBytes: 262144,
     });
     console.log(`C timing: childElapsedMs=${Date.now() - cStarted}; remainingMs=${headroom()}`);
+    const diagnostic = cProgress(result.stdout, result.stderr);
+    console.log(`C child diagnostic: stage=${diagnostic.stage}; ownerIndex=${diagnostic.owner}; exitCode=${result.code}`);
     requireEvidence(result.code === 0 && headroom() > 0);
-    const lines = result.stdout.split(/\r?\n/).filter((line) => line.startsWith('I29_C_RECEIPT '));
-    requireEvidence(lines.length === 1 && lines[0].length <= 4096);
-    const receipts = JSON.parse(lines[0].slice('I29_C_RECEIPT '.length));
+    const lines = markedRecords(result.stdout, result.stderr, 'I29_C_RECEIPT', 1, 4096);
+    requireEvidence(lines !== null && lines.length === 1);
+    const receipts = JSON.parse(lines[0]);
     requireEvidence(Array.isArray(receipts) && receipts.length === 2 && cRequests.length === 2 && generations - cCountBefore === 2
       && cRequests[0].imageSha256 !== cRequests[1].imageSha256);
     const cKeys = ['ownerId', 'requestId', 'draftId', 'generation', 'itemId', 'imageId', 'imageSha256', 'byteCount', 'width', 'height'];
@@ -536,7 +585,11 @@ async function main() {
       requireEvidence(attestation && attestation.image_sha256 === receipt.imageSha256 && attestation.byte_count === receipt.byteCount
         && attestation.width === receipt.width && attestation.height === receipt.height && attestation.manifest_id === manifest);
       const p = (await client.rows(owner, 'profiles'))[0];
-      requireEvidence(p.version === versions[index] + 6 && p.ai_enabled && p.ai_notice_revision === 1);
+      const original = cEntryProfiles[index], languageWrites = original.ui_language === null ? 2 : 0;
+      requireEvidence(p.version === versions[index] + 6 + languageWrites
+        && p.version === original.version + 2 + languageWrites && p.ai_enabled === true && p.ai_notice_revision === 1
+        && typeof p.ai_consented_at === 'string' && Number.isFinite(Date.parse(p.ai_consented_at)));
+      equal(nonAiProfile(p), nonAiProfile(original));
     }
     stage = 'C-success-only-restoration';
     owned.assertRunning(); await owned.stop(); owned = undefined;
@@ -568,9 +621,9 @@ async function main() {
     equal(await snapshot(), before); equal(await b2Snapshot(), b2Before);
     equal(await requireReady(client, owners), ready); await baseline(client, owners);
     requireEvidence(headroom() > 0);
-    console.log(`PASS: C ordinary-owner UI; generations=2; C profile CAS advances=2 per owner; exact cleanup/restoration; elapsedMs=${Date.now() - cStarted}; remainingMs=${headroom()}`);
+    console.log(`PASS: C ordinary-owner UI; generations=2; AI consent CAS=2 per owner; language initialization/restoration CAS=2 only for originally-null language; exact cleanup/restoration; elapsedMs=${Date.now() - cStarted}; remainingMs=${headroom()}`);
   } catch {
-    console.error(`FAIL: B1 rehearsal at ${stage}; private evidence withheld; fixture state preserved, no automatic recovery`);
+    console.error(`FAIL: AI rehearsal at ${stage}; private evidence withheld; fixture state preserved, no automatic recovery`);
     process.exitCode = 1;
   } finally {
     await owned?.stop();

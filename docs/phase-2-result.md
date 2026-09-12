@@ -4195,3 +4195,103 @@ security/preservation/recovery, B1=12/B2=22/new C=2, and coordinator artifact
 run/head/hash/verdict remain pending. Human/device/release, saved-only backup/
 history restoration, hosted migrations, paid/private-photo activation and
 deployment remain pending and separately authorized; PR #21 stays closed.
+
+## I29 photo-first C first-CI correction candidate - 12 September 2026
+
+**Five-path source-only correction; unstaged and not yet independently accepted
+or published.** The preceding source-candidate checkpoint remains historical.
+That candidate and its first source-review correction were subsequently
+accepted, committed as `293ff3bf7663161ff4542fe9715bbfc929e59e8a` (tree
+`fc872cbbb864b4817c7a9ac23208b0fa8d9afe32`, sole parent
+`56e52790d6f2014d6a0383ec478c20d70cefd486`) and published as draft
+[PR #22](https://github.com/drrowdev/stillroom-wardrobe/pull/22).
+
+The coordinator's [first exact-head evidence and proposal 5646602214](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5646602214)
+records attempt 1 at that head:
+
+- [CI 34699742483](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34699742483)
+  failed. App job `103569267225` passed `npm ci --no-fund`, then failed
+  `npm run lint`: `src/data/ai.ts:86`, `no-unsafe-finally` / unsafe throw.
+  Typecheck, translations, unit, build, scanners, dependency checks, browser
+  checks and all twelve visual artifacts were skipped, not passed.
+- Backend job `103569267238` passed setup/reset, ordinary integration/security,
+  real recovery, B1's exact 12 generations/restoration and B2's exact 22
+  additional generations/restoration, then failed at `C-ui-child`. Fixtures
+  were preserved, without success restoration. Generated types/artifact/parity
+  were skipped. C entry headroom was 557985 ms; startup elapsed 3128 ms and child
+  headroom 554857 ms; elapsed from C entry at child exit 5552 ms and remaining
+  552433 ms. This is not evidence of insufficient headroom.
+- [Apple 34699742501](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34699742501),
+  job `103569267251`, passed generated-JPEG 4 cases (17.4 s) and native
+  orientation/composition 3 cases (13.6 s). Those limited cases do not establish
+  AI UI behavior or visual acceptance.
+
+The source required a nonnull profile language before opening the UI, although
+the actual fixture contract permits null and the existing application performs
+ordinary first-login language initialization. This precondition mismatch is
+source-confirmed; the precise failed child assertion is still unknown because
+raw output was withheld. Collection/compile failure is not excluded, and the
+first-head typecheck did not run.
+
+The [controlling amendment and own source-only permission 5646653804](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5646653804)
+records actual retained reviewer
+`d4c52a66-e314-4ad0-a96a-675e79fdd049`, Anthropic / `claude-opus-5`,
+turn 8 PASS with controlling conditions and coordinator resolutions.
+This is amendment approval, not new-source acceptance. The same canonical
+`c69545b0-699e-4284-b64e-99cb7bcbf371` GPT-6 Astra writer retained the isolated
+workspace/branch/model. Fresh entry inspection matched clean `293ff3bf`, its
+tree/parent and all 33 accepted working SHA256/canonical Git blob/byte pairs.
+The full own permission was reread after targeted context and before edits.
+
+This correction moves successful reply return and cleanup-only rejection
+outside `finally`, retaining bounded cancellation, lock release and primary
+failure priority with explicit failure-presence flags for unknown/falsy
+rejections. Added unit source covers delayed cleanup, cleanup-only failures
+including undefined/null/false/0, and primary read/parse/cancel/lock-release
+failure priority.
+
+C now retains the original nullable profile and uses browser locale `en-US`.
+After UI readiness it independently verifies settled initialization: original
+null must become `en` at exactly +1; an existing language must remain at the
+same version. All other parsed profile values remain equal. The consent
+baseline is taken only after that proof; AI opt-out/opt-in still requires
+exactly +2, with unchanged non-AI values through analysis/Save/reload.
+Only after a fully successful owner journey and successful browser context
+closure does an ordinary fresh-version CAS restore an originally-null language
+at exactly +1. No failure catch/finally performs restoration. The parent
+independently captures C-entry profiles, checks their B1/B2 +4 baseline and
+derives total +6 for originally-nonnull or +8 for originally-null profiles,
+never a version range. Full non-AI profile equality and explicit AI consent
+state checks remain gates, together with existing inventory/ready/baseline
+equality and exact-ID success-only private restoration.
+
+The child progress protocol emits only finite fixed stages and owner index
+0/1/2 (23 ordered records on success). The parent bounds capture at the existing
+262144 bytes, progress lines at 4096, progress records at 32 and record bytes at 128,
+then synthesizes a fixed last stage/index and numeric exit alongside existing
+timings. Missing, malformed or truncated progress is diagnostic `UNKNOWN`, not
+a new success/failure gate. Exit code 2 remains ambiguous, not an inferred
+timeout. Raw stdout/stderr remain private. Marker-aware, bounded per-line
+parsing tolerates dot-reporter decoration for both protocols; an actual exit 0
+still requires exactly one <=4096-byte success receipt, strict JSON, the same
+closed ten-key/two-owner membership and independent request/attestation binding.
+Duplicate/invalid success receipts fail. The generic failure label now says
+AI rehearsal rather than incorrectly assigning a C failure to B1.
+
+Only `src/data/ai.ts`, `tests/unit/ai-client.test.ts`,
+`tests/integration/ai-photo-first.spec.ts`, `scripts/ai-analysis-rehearsal.mjs`
+and this phase result are changed. The other 28 packet files, SQL/types,
+profile controller/adapter, backend helpers/collector, provider/codec,
+dependencies/configuration/workflows and all 12 capture definitions are frozen.
+The 600-second parent, 120-second child, 150000/135000 ms admissions, one
+Chromium worker/retries zero, B1=12/B2=22/C=2, two distinct real prepared JPEGs
+and one explicit Save per owner are unchanged.
+
+No local runtime/version/install/lint/type/test/scanner/build/browser/backend
+command was run for this correction. Manual source/hash inspection is not
+compiler or execution proof. Coordinator full-five-pattern refresh and actual
+retained independent source-delta adjudication remain required before separate
+commit/publication permission. All new-head CI/type/real-owner/C/restoration/
+twelve-visual gates remain pending, as do human/device/release, hosted,
+paid/private-photo activation and deployment gates. No merge, deployment,
+paid/private activation or production change is claimed or authorized.

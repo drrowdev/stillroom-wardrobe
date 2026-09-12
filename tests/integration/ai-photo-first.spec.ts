@@ -6,15 +6,20 @@ import type { Database } from '../../src/data/database.types';
 import { isRecord, isUuid } from '../../src/domain/wardrobe';
 import { parseProfile } from '../../src/data/profile';
 import { parseAiStatus } from '../../src/domain/ai-controls';
-import { messages } from '../../src/i18n';
+import { isLanguage, messages } from '../../src/i18n';
 import { assertSanitizedJpeg, readJpegHeader } from '../../src/images/jpeg';
 
 function check(value: unknown): asserts value { if (!value) throw new Error('C ordinary-owner gate failed.'); }
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 type PhotoReceipt = { requestId: string; draftId: string; generation: number; imageSha256: string; byteCount: number; width: number; height: number };
+type ProgressStage = 'ENTRY' | 'AUTH' | 'OWNER' | 'INITIALIZE' | 'CONSENT' | 'ANALYSIS' | 'SAVE'
+  | 'VERIFY' | 'CLEANUP' | 'CLOSED' | 'RESTORE' | 'DONE' | 'COMPLETE';
+function progress(stage: ProgressStage, owner: 0 | 1 | 2) {
+  console.log(`I29_C_STAGE ${stage} ${owner}`);
+}
 
 test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and exact cleanup', async ({ browser }) => {
-  let stage = 'entry';
+  progress('ENTRY', 0);
   const env = process.env;
   validateSessionEnvironment(env);
   const base = assertLocalApi(env.SUPABASE_URL!), key = env.SUPABASE_PUBLISHABLE_KEY!;
@@ -35,6 +40,7 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
     itemId: string; imageId: string; imageSha256: string; byteCount: number; width: number; height: number }> = [];
   const sessions: Array<{ ownerId: string; token: string }> = [];
   try {
+    progress('AUTH', 0);
     for (const [index, label] of (['A', 'B'] as const).entries()) {
       const client = clients[index]!;
       const signed = await client.auth.signInWithPassword({ email: env[`TEST_${label}_EMAIL`]!, password: env[`TEST_${label}_PASSWORD`]! });
@@ -45,20 +51,25 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
     }
     check(sessions.length === 2 && sessions[0]!.ownerId !== sessions[1]!.ownerId && sessions[0]!.token !== sessions[1]!.token);
     for (const [index, label] of (['A', 'B'] as const).entries()) {
-      stage = `owner-${index + 1}`;
+      const ownerIndex = index === 0 ? 1 : 2;
+      progress('OWNER', ownerIndex);
       const client = clients[index]!, peer = clients[1 - index]!, ownerId = sessions[index]!.ownerId;
       const prefix = index === 0 ? 'c329a000-' : 'c329b000-';
       const profileReply = await client.from('profiles').select('owner_id,display_name,ui_language,timezone,currency,version').eq('owner_id', ownerId).single();
       check(!profileReply.error);
-      const profile = parseProfile(profileReply.data, ownerId), language = profile.ui_language;
-      check(language !== null);
+      const originalProfile = parseProfile(profileReply.data, ownerId);
+      const initializationWrites = originalProfile.ui_language === null ? 1 : 0;
+      const expectedConsentProfile = { ...originalProfile, ui_language: originalProfile.ui_language ?? 'en',
+        version: originalProfile.version + initializationWrites + 2 };
       const entryStatus = await client.rpc('ai_status');
       const entry = parseAiStatus(entryStatus.data);
       check(!entryStatus.error && entry?.consent.enabled);
       const itemsBefore = await client.from('items').select('id').eq('owner_id', ownerId).order('id');
       const imagesBefore = await client.from('item_images').select('id').eq('owner_id', ownerId).order('id');
       check(!itemsBefore.error && !imagesBefore.error);
-      const context = await browser.newContext({ serviceWorkers: 'block' });
+      // en-US makes the existing first-login initialization deterministic; saved languages still win.
+      const context = await browser.newContext({ serviceWorkers: 'block', locale: 'en-US' });
+      let consentedAt: string | null = null;
       try {
         await context.addInitScript((namespace) => {
           const native = crypto.randomUUID.bind(crypto);
@@ -92,11 +103,20 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
             headers: request.headers(), postData: body, timeout: 25000, maxRedirects: 0, maxRetries: 0 });
           await route.fulfill({ response });
         });
+        progress('INITIALIZE', ownerIndex);
         await page.goto('http://127.0.0.1:5173/');
         await page.locator('#email').fill(env[`TEST_${label}_EMAIL`]!);
         await page.locator('#password').fill(env[`TEST_${label}_PASSWORD`]!);
         await page.locator('button[type=submit]').click();
         await page.locator('#wardrobe-title').waitFor();
+        const initialized = await client.from('profiles').select('owner_id,display_name,ui_language,timezone,currency,version')
+          .eq('owner_id', ownerId).single();
+        check(!initialized.error);
+        const profile = parseProfile(initialized.data, ownerId), language = profile.ui_language;
+        check(isLanguage(language));
+        check(JSON.stringify(profile) === JSON.stringify({ ...originalProfile,
+          ui_language: originalProfile.ui_language ?? 'en', version: originalProfile.version + initializationWrites }));
+        progress('CONSENT', ownerIndex);
         await page.getByRole('button', { name: messages['account.menu'][language] }).click();
         await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
         await page.getByRole('button', { name: messages['aiC.disable'][language], exact: true }).click();
@@ -107,6 +127,11 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         const afterConsent = await client.from('profiles').select('owner_id,display_name,ui_language,timezone,currency,version').eq('owner_id', ownerId).single();
         check(!afterConsent.error);
         check(JSON.stringify(parseProfile(afterConsent.data, ownerId)) === JSON.stringify({ ...profile, version: profile.version + 2 }));
+        const consentReply = await client.rpc('ai_status'), consent = parseAiStatus(consentReply.data);
+        check(!consentReply.error && consent?.consent.enabled && consent.consent.noticeRevision === 1
+          && consent.consent.profileVersion === String(profile.version + 2) && consent.consent.consentedAt !== null);
+        consentedAt = consent.consent.consentedAt;
+        progress('ANALYSIS', ownerIndex);
         await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
         await page.getByRole('button', { name: messages['wardrobe.add'][language], exact: true }).first().click();
         // Bytes are generated inside the browser and never attached or printed.
@@ -128,12 +153,17 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         check(JSON.stringify((await client.from('item_images').select('id').eq('owner_id', ownerId).order('id')).data) === JSON.stringify(imagesBefore.data));
         const localTitle = await page.locator('#item-title').inputValue();
         check(localTitle.length > 0 && await page.locator('#item-category').inputValue() === 'top');
+        const analyzedProfile = await client.from('profiles').select('owner_id,display_name,ui_language,timezone,currency,version')
+          .eq('owner_id', ownerId).single();
+        check(!analyzedProfile.error && JSON.stringify(parseProfile(analyzedProfile.data, ownerId)) === JSON.stringify(expectedConsentProfile));
         await page.locator('#item-title').fill(`Fictional C garment ${label}`);
+        progress('SAVE', ownerIndex);
         await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
         await page.locator('#wardrobe-title').waitFor();
         check(mutations.length === 4 && mutations.filter((path) => path.endsWith('/reserve_analyzed_item_save')).length === 1
           && mutations.filter((path) => path.endsWith('/finalize-analyzed-item')).length === 1
           && mutations.filter((path) => path.startsWith('/storage/v1/object/')).length === 2);
+        progress('VERIFY', ownerIndex);
         const own = await client.from('items').select('*').eq('owner_id', ownerId);
         check(!own.error && own.data);
         const item = own.data.find((row) => row.id.startsWith(prefix));
@@ -166,15 +196,41 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         const finalProfile = await client.from('profiles').select('owner_id,display_name,ui_language,timezone,currency,version').eq('owner_id', ownerId).single();
         check(!finalProfile.error && JSON.stringify(parseProfile(finalProfile.data, ownerId)) === JSON.stringify({ ...profile, version: profile.version + 2 }));
         receipts.push({ ownerId, ...actual, itemId: item.id, imageId: image.id });
+        progress('CLEANUP', ownerIndex);
         check(image.main_path && image.thumb_path);
         check(!(await client.storage.from('wardrobe').remove([image.main_path, image.thumb_path])).error);
         check(!(await client.from('items').delete().eq('owner_id', ownerId).eq('id', item.id)).error);
         check(JSON.stringify((await client.from('items').select('id').eq('owner_id', ownerId).order('id')).data) === JSON.stringify(itemsBefore.data));
         check(JSON.stringify((await client.from('item_images').select('id').eq('owner_id', ownerId).order('id')).data) === JSON.stringify(imagesBefore.data));
       } finally { await context.close(); }
+      progress('CLOSED', ownerIndex);
+      const freshReply = await client.from('profiles').select('owner_id,display_name,ui_language,timezone,currency,version')
+        .eq('owner_id', ownerId).single();
+      check(!freshReply.error);
+      const fresh = parseProfile(freshReply.data, ownerId);
+      check(JSON.stringify(fresh) === JSON.stringify(expectedConsentProfile));
+      progress('RESTORE', ownerIndex);
+      if (originalProfile.ui_language === null) {
+        const restored = await client.from('profiles').update({ ui_language: null })
+          .eq('owner_id', ownerId).eq('version', fresh.version).eq('ui_language', 'en')
+          .select('owner_id,display_name,ui_language,timezone,currency,version').single();
+        check(!restored.error && JSON.stringify(parseProfile(restored.data, ownerId))
+          === JSON.stringify({ ...originalProfile, version: fresh.version + 1 }));
+      }
+      const restoredReply = await client.from('profiles').select('owner_id,display_name,ui_language,timezone,currency,version')
+        .eq('owner_id', ownerId).single();
+      const expectedVersion = originalProfile.version + 2 + initializationWrites * 2;
+      check(!restoredReply.error && JSON.stringify(parseProfile(restoredReply.data, ownerId))
+        === JSON.stringify({ ...originalProfile, version: expectedVersion }));
+      const finalStatusReply = await client.rpc('ai_status'), finalStatus = parseAiStatus(finalStatusReply.data);
+      check(!finalStatusReply.error && finalStatus?.consent.enabled && finalStatus.consent.noticeRevision === 1
+        && finalStatus.consent.consentedAt === consentedAt && consentedAt !== null
+        && finalStatus.consent.profileVersion === String(expectedVersion));
+      progress('DONE', ownerIndex);
     }
     check(receipts.length === 2 && receipts[0]!.imageSha256 !== receipts[1]!.imageSha256);
+    progress('COMPLETE', 2);
     console.log(`I29_C_RECEIPT ${JSON.stringify(receipts)}`);
-  } catch { throw new Error(`C failure at ${stage}; private output withheld; no success restoration.`); }
+  } catch { throw new Error('C journey failed; private output withheld; no failure-path restoration.'); }
   finally { for (const client of clients) await client.auth.stopAutoRefresh(); }
 });

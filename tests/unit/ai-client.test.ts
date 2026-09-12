@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createClient, type Session } from '@supabase/supabase-js';
 import type { Database } from '../../src/data/database.types';
-import { AiClient } from '../../src/data/ai';
+import { AiClient, AiError } from '../../src/data/ai';
 import { parseAiStatus, supportedAiPolicy, parseAnalysisReply } from '../../src/domain/ai-controls';
 
 const owner = '10000000-0000-4000-8000-000000000001';
@@ -30,7 +30,66 @@ function fixture() {
   return { ai, auth, refresh, session, scope, abort, photo };
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+function responseReader(text = JSON.stringify(status())) {
+  const response = new Response(text, { headers: { 'content-type': 'application/json' } });
+  if (!response.body) throw new Error('Synthetic response body missing');
+  const reader = response.body.getReader();
+  vi.spyOn(response.body, 'getReader').mockReturnValue(reader);
+  const cancel = vi.spyOn(reader, 'cancel');
+  const unlock = reader.releaseLock.bind(reader);
+  const release = vi.spyOn(reader, 'releaseLock');
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response);
+  vi.stubGlobal('fetch', fetcher);
+  return { response, reader, cancel, release, unlock, fetcher };
+}
 describe('closed ordinary-auth AI boundary', () => {
+  it('returns a parsed reply only after cancellation and lock release', async () => {
+    const f = fixture(), stream = responseReader();
+    let finish: (() => void) | undefined;
+    stream.cancel.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    let settled = false;
+    const result = f.ai.status().then((reply) => { settled = true; return reply; });
+    await vi.waitFor(() => expect(stream.cancel).toHaveBeenCalledTimes(1));
+    expect(settled).toBe(false); expect(stream.release).not.toHaveBeenCalled();
+    if (!finish) throw new Error('Synthetic cleanup was not reached');
+    finish();
+    expect(await result).toMatchObject({ code: 'OK', consent: { profileVersion: '1' } });
+    expect(stream.release).toHaveBeenCalledTimes(1);
+    expect(stream.response.body?.locked).toBe(false);
+    expect(stream.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each([undefined, null, false, 0, new AiError('TIMEOUT')])('retains cleanup-only failure %# after valid JSON', async (reason) => {
+    const f = fixture(), stream = responseReader();
+    stream.cancel.mockRejectedValue(reason);
+    await expect(f.ai.status()).rejects.toMatchObject({ code: reason instanceof AiError ? 'TIMEOUT' : 'UNAVAILABLE' });
+    expect(stream.cancel).toHaveBeenCalledTimes(1); expect(stream.release).toHaveBeenCalledTimes(1);
+    expect(stream.response.body?.locked).toBe(false); expect(stream.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each(['read', 'parse'] as const)('preserves primary %s failure over cleanup failure', async (kind) => {
+    const f = fixture(), stream = responseReader(kind === 'parse' ? '{' : JSON.stringify(status()));
+    if (kind === 'read') vi.spyOn(stream.reader, 'read').mockRejectedValue(new AiError('CONFLICT'));
+    stream.cancel.mockRejectedValue(new AiError('TIMEOUT'));
+    await expect(f.ai.status()).rejects.toMatchObject({ code: kind === 'read' ? 'CONFLICT' : 'UNAVAILABLE' });
+    expect(stream.cancel).toHaveBeenCalledTimes(1); expect(stream.release).toHaveBeenCalledTimes(1);
+    expect(stream.response.body?.locked).toBe(false); expect(stream.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each([undefined, null, false, 0])('retains falsy primary failure %# over cleanup failure', async (reason) => {
+    const f = fixture(), stream = responseReader();
+    vi.spyOn(stream.reader, 'read').mockRejectedValue(reason);
+    stream.cancel.mockRejectedValue(new AiError('TIMEOUT'));
+    await expect(f.ai.status()).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+    expect(stream.cancel).toHaveBeenCalledTimes(1); expect(stream.release).toHaveBeenCalledTimes(1);
+    expect(stream.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each(['release', 'cancel', 'read'] as const)('retains %s failure priority when lock release also fails', async (kind) => {
+    const f = fixture(), stream = responseReader();
+    if (kind === 'read') vi.spyOn(stream.reader, 'read').mockRejectedValue(new AiError('INVALID_INPUT'));
+    if (kind !== 'release') stream.cancel.mockRejectedValue(new AiError('CONFLICT'));
+    stream.release.mockImplementation(() => { stream.unlock(); throw new AiError('TIMEOUT'); });
+    await expect(f.ai.status()).rejects.toMatchObject({ code: kind === 'read' ? 'INVALID_INPUT' : kind === 'cancel' ? 'CONFLICT' : 'TIMEOUT' });
+    expect(stream.cancel).toHaveBeenCalledTimes(1); expect(stream.release).toHaveBeenCalledTimes(1);
+    expect(stream.response.body?.locked).toBe(false); expect(stream.fetcher).toHaveBeenCalledTimes(1);
+  });
   it.each(['DISCARDED', 'EXPIRED', 'FAILED', 'UNAVAILABLE', 'INVALID_FACTS'])('confirms strictly terminal %s without inference', async (reason) => {
     const f = fixture();
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ code: 'TERMINAL', reason }));
