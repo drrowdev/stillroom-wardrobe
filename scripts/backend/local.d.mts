@@ -26,8 +26,10 @@ export function requireLocalContainer(run?: CommandRunner): Promise<void>;
 export function cli(args: string[], timeout?: number): Promise<CommandResult>;
 export function localStatus(): Promise<{ url: string; key: string; serviceKey: string }>;
 export function privilegedLocalSql(sql: string): Promise<string>;
+export function withAnalyzedSaveFixtureLock(ownerId: string, itemId: string, imageId: string,
+  resource: 'profile' | 'item' | 'image' | 'objects', operation: () => Promise<void>): Promise<void>;
 export function readCredentialCache(): Promise<Record<string, string>>;
-export function assertAnalysisServeContract(config: string, directories: string[], files: string[], help: CommandResult): void;
+export function assertAnalysisServeContract(config: string, directories: string[], files: string[], help: CommandResult, finalizerFiles: string[]): void;
 export type AnalysisProcess = { stop(): Promise<void>; ready(): void; assertRunning(): void };
 export function ownAnalysisProcess(child: import('node:child_process').ChildProcessWithoutNullStreams, lifetimeMs?: number, startupMs?: number): AnalysisProcess;
 export function startAnalysisServer(): Promise<AnalysisProcess>;

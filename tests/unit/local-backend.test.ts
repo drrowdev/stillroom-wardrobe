@@ -11,9 +11,35 @@ import {
   LocalBackendError, securityFailureExitCode, describeGenerationResult, describeStartupOrResetFailure,
   assertAnalysisServeContract, ownAnalysisProcess, probeAnalysisHandler, waitForAnalysisHandler,
   readAnalysisRuntime, runCommand, createServedDiagnostics, parseServedDiagnostics, servedCode,
+  withAnalyzedSaveFixtureLock,
 } from '../../scripts/backend/local.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { analysisRequest, servedInvalidTokenRequest } from '../integration/ai-analysis.sessions.mjs';
+
+describe('B2 fixture lock boundary', () => {
+  it('rejects identities outside the B2 namespace before any backend command', async () => {
+    const operation = vi.fn(async () => {});
+    await expect(withAnalyzedSaveFixtureLock(
+      '10000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001',
+      '30000000-0000-4000-8000-000000000001', 'profile', operation,
+    )).rejects.toThrow('REFUSED: B2 fixture lock boundary.');
+    expect(operation).not.toHaveBeenCalled();
+  });
+  it('retains explicit full normal-session rehearsal calls and deterministic lock admission', async () => {
+    const source = await readFile(path.join(ROOT, 'scripts', 'ai-analysis-rehearsal.mjs'), 'utf8');
+    for (const phase of ['prepare', 'full', 'withdraw', 'expired', 'inactive', 'cleanup'])
+      expect(source).toContain(`b2Child('integration', '${phase}'`);
+    expect(source).toContain("b2Child('security', 'full')");
+    expect(source).toContain('requireEvidence(generations === 12)');
+    expect(source).toContain('requireEvidence(generations - countBefore === 22)');
+    expect(source).toContain('equal(await snapshot(), before); equal(await b2Snapshot(), b2Before)');
+    expect(source).toContain('await withAnalyzedSaveFixtureLock(');
+    const locks = await readFile(path.join(ROOT, 'scripts', 'backend', 'local.mjs'), 'utf8');
+    expect(locks).toContain('for update nowait;');
+    expect(locks).toContain("output.trim() === 'B2_LOCK_HELD'");
+    expect(locks).toContain('await ready;\n    await operation();');
+  });
+});
 
 describe('owned B1 function lifecycle', () => {
   const signature = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Methods': 'POST' };
@@ -81,20 +107,27 @@ describe('owned B1 function lifecycle', () => {
       expect(child.kill).toHaveBeenCalledWith('SIGTERM');
       child.emit('close', 1); await owned.stop();
     });
-  const config = '[edge_runtime]\nenabled = true\n\n[functions.analyze-clothing]\nenabled = true\nverify_jwt = true\n';
+  const config = '[edge_runtime]\nenabled = true\n\n[functions.analyze-clothing]\nenabled = true\nverify_jwt = true\n'
+    + '\n[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = true\n';
   const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json'];
+  const directories = ['finalize-analyzed-item', 'analyze-clothing'];
+  const finalizerFiles = ['index.ts', 'handler.ts', 'deno.json'];
   const help = { code: 0, stdout: '  Serve all Functions locally.\n  supabase functions serve [flags] [<Function name...>]\n', stderr: '' };
   it('requires the observed all-functions capability and closed enabled inventory', () => {
-    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, help)).not.toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles)).not.toThrow();
     for (const text of [config.replace('verify_jwt = true', 'verify_jwt = false'),
+      config.replace('[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = true',
+        '[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = false'),
       config.replace('[edge_runtime]\nenabled = true', '[edge_runtime]\nenabled = false'),
       config + '\n[functions.other]\nenabled = true\n']) {
-      expect(() => assertAnalysisServeContract(text, ['analyze-clothing'], files, help)).toThrow();
+      expect(() => assertAnalysisServeContract(text, directories, files, help, finalizerFiles)).toThrow();
     }
-    expect(() => assertAnalysisServeContract(config, ['other'], files, help)).toThrow();
-    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], [...files, '.env'], help)).toThrow();
-    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, { ...help, code: 1 })).toThrow();
-    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, { ...help, stdout: '' })).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['other'], files, help, finalizerFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, [...files, '.env'], help, finalizerFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, code: 1 }, finalizerFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, stdout: '' }, finalizerFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, help, [...finalizerFiles, 'deno.d.ts'])).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, help, finalizerFiles)).toThrow();
   });
   it.each(['stop', 'output', 'startup', 'lifetime', 'exit'] as const)('owns only its child on %s', async (reason) => {
     vi.useFakeTimers();
@@ -1242,6 +1275,8 @@ describe('disposable local backend boundaries', () => {
   it('wires checked Save suites through the same stripped normal environment', async () => {
     const source = await readFile(path.join(ROOT, 'scripts', 'run-local-tests.mjs'), 'utf8');
     expect(source).toContain("path.join(ROOT, 'tests', suite, 'item-save.sessions.mjs')");
+    expect(source).toContain("path.join(ROOT, 'tests', suite, 'analyzed-save.sessions.mjs')");
+    expect(source).toContain('if (analyzedSaveCode !== 0) { process.exitCode = analyzedSaveCode; return; }');
     expect(source).toContain('const env = normalSessionEnvironment(process.env, credentials)');
     const save = source.slice(source.indexOf('const saveCode'), source.indexOf("if (suite === 'integration')"));
     expect(save).toContain('cwd: ROOT, env, shell: false');

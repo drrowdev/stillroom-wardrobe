@@ -353,7 +353,7 @@ describe('executable unwired production boundary', () => {
     expect(resolved.every((entry) => entry && modules.includes(entry))).toBe(true);
     expect(resolveImport(modules[0]!, './ai-draft')).toBe(modules[1]);
   });
-  it('walks every other source TS/TSX file and forbids importing either contract', async () => {
+  it('walks every other source TS/TSX file and permits only the reviewed B2 composer to import the draft', async () => {
     const files: string[] = await walkFiles(path.join(root, 'src'));
     const existing = files.filter((filename) => /\.tsx?$/.test(filename) && !modules.includes(filename));
     expect(existing.length).toBeGreaterThan(30);
@@ -361,6 +361,8 @@ describe('executable unwired production boundary', () => {
     for (const filename of existing) {
       for (const specifier of imports(await readFile(filename, 'utf8'), filename)) {
         count++;
+        if (filename === path.join(root, 'src/domain/analyzed-save.ts')
+          && resolveImport(filename, specifier) === modules[1]) continue;
         expect(modules, `${path.relative(root, filename)} imports ${specifier}`).not.toContain(resolveImport(filename, specifier));
       }
     }
