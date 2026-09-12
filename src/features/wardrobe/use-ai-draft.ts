@@ -139,7 +139,7 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language) {
     if (state?.context) {
       for (const field of garmentFields) {
         if (sameValue(next.raw[field], current.current.draft.raw[field]) && next.intent[field] === current.current.draft.intent[field]) continue;
-        const result = editAiDraftField(state, state.context, field, next.raw[field], next.priceLanguage);
+        const result: AiTransition = editAiDraftField(state, state.context, field, next.raw[field], next.priceLanguage);
         if (result.status !== 'updated') throw new AppError('aiC.unavailable');
         state = result.state;
         if (!state.context) throw new AppError('aiC.unavailable');

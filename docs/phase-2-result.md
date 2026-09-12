@@ -4295,3 +4295,42 @@ commit/publication permission. All new-head CI/type/real-owner/C/restoration/
 twelve-visual gates remain pending, as do human/device/release, hosted,
 paid/private-photo activation and deployment gates. No merge, deployment,
 paid/private activation or production change is claimed or authorized.
+
+## I29 C compiler correction candidate - 12 September 2026
+
+**Source-only, unstaged; new-source acceptance and execution pending.**
+The coordinator's [exact-c3 evidence 5646866990](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5646866990)
+records CI `34702229945` at `c3d92b0ff198c2f342fcb53e312cf34aed2df0af`:
+real ordinary-owner integration/security/recovery, B1=12, B2=22 and C=2
+passed, including one explicit Save per C owner and exact cleanup/restoration.
+App lint passed, then typecheck failed on incompatible cached/refreshed SDK
+response unions and the hook edit-loop inference cycle. Later App checks and
+all twelve visual artifacts were skipped. Apple `34702229972` passed its
+limited 4+3 cases. None of these results establishes a later source head.
+
+After the successful real rehearsals, `npm run db:types` failed: the closed
+diagnostic classified run-container / exit-125, but the underlying cause
+remains unknown. Generated-type artifact/parity were skipped. No schema,
+helper, dependency or configuration remedy or blind rerun is authorized;
+the next genuine source head must run the unchanged full pipeline.
+
+[Own permission 5646910665](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5646910665)
+records retained Anthropic / claude-opus-5 reviewer
+`d4c52a66-e314-4ad0-a96a-675e79fdd049`, turn 10 pre-edit PASS with conditions,
+not new-source acceptance. The same GPT-6 Astra writer verified clean c3 and
+all 33 accepted triples, read targeted context and reread full permission.
+This four-path candidate separates cached/refreshed responses and validates
+the selected session, adds only the existing `AiTransition` annotation to the
+hook's edit result, and adds typed returned-error/wrong-owner/thrown-rejection
+no-dispatch tests plus a refreshed-token case. Existing guards, null/manual
+editing, refresh/no-401-retry and fifteen cleanup cases remain unchanged.
+The defensive refresh-null check remains; an error-free null-session mock
+is omitted because compatibility with the unavailable local SDK declarations
+could not be established without prohibited dependency restoration or casts.
+
+No local runtime/compiler/tests/install/probes ran. The other 29 packet files
+remain frozen. Coordinator manual refresh, retained source-delta adjudication
+and separate commit/publication permission are pending, as are new-head full
+CI/type/C/restoration/generated-type/twelve-visual and human/release gates.
+The separate UX-copy request is not part of this correction. No hosted,
+provider, paid/private-photo activation, deployment or merge is authorized.

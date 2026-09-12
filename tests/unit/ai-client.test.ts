@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createClient, type Session } from '@supabase/supabase-js';
+import { AuthError, createClient, type Session } from '@supabase/supabase-js';
 import type { Database } from '../../src/data/database.types';
 import { AiClient, AiError } from '../../src/data/ai';
 import { parseAiStatus, supportedAiPolicy, parseAnalysisReply } from '../../src/domain/ai-controls';
@@ -150,6 +150,43 @@ describe('closed ordinary-auth AI boundary', () => {
     vi.stubGlobal('fetch', fetcher);
     await expect(f.ai.status()).rejects.toThrow();
     expect(f.refresh).toHaveBeenCalledTimes(1); expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it('uses the selected refreshed session token with one proactive refresh', async () => {
+    const f = fixture(); f.session.expires_at = 1;
+    const refreshed: Session = { ...f.session, access_token: 'fictional-refreshed-unit-only',
+      expires_at: Math.floor(Date.now() / 1000) + 3600 };
+    f.refresh.mockResolvedValue({ data: { session: refreshed, user: refreshed.user }, error: null });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(status()));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(f.ai.status()).resolves.toMatchObject({ code: 'OK' });
+    expect(f.auth).toHaveBeenCalledTimes(1); expect(f.refresh).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get('authorization')).toBe(`Bearer ${refreshed.access_token}`);
+  });
+  it('rejects a returned SDK refresh error without dispatch or retry', async () => {
+    const f = fixture(); f.session.expires_at = 1;
+    f.refresh.mockResolvedValue({ data: { session: null, user: null }, error: new AuthError('Synthetic refresh failure') });
+    const fetcher = vi.fn<typeof fetch>(); vi.stubGlobal('fetch', fetcher);
+    await expect(f.ai.status()).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
+    expect(f.auth).toHaveBeenCalledTimes(1); expect(f.refresh).toHaveBeenCalledTimes(1);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('rejects a refreshed session belonging to another owner without dispatch', async () => {
+    const f = fixture(); f.session.expires_at = 1;
+    const refreshed: Session = { ...f.session, user: { ...f.session.user, id: context.draftId } };
+    f.refresh.mockResolvedValue({ data: { session: refreshed, user: refreshed.user }, error: null });
+    const fetcher = vi.fn<typeof fetch>(); vi.stubGlobal('fetch', fetcher);
+    await expect(f.ai.status()).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
+    expect(f.auth).toHaveBeenCalledTimes(1); expect(f.refresh).toHaveBeenCalledTimes(1);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('keeps thrown SDK refresh rejection unavailable without dispatch or retry', async () => {
+    const f = fixture(); f.session.expires_at = 1;
+    f.refresh.mockRejectedValue(new AuthError('Synthetic thrown refresh failure'));
+    const fetcher = vi.fn<typeof fetch>(); vi.stubGlobal('fetch', fetcher);
+    await expect(f.ai.status()).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+    expect(f.auth).toHaveBeenCalledTimes(1); expect(f.refresh).toHaveBeenCalledTimes(1);
+    expect(fetcher).not.toHaveBeenCalled();
   });
   it.each([0, 512001])('rejects %s prepared bytes before auth or dispatch', async (size) => {
     const f = fixture(), fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);

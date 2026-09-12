@@ -50,13 +50,15 @@ export class AiClient {
     body: object | Blob, ms: number, extra: Record<string, string> = {}, outer?: AbortSignal) {
     return this.bounded(ms, async (signal, wait) => {
       if (signal.aborted) throw new AiError('TIMEOUT');
-      let auth = await wait(this.client.auth.getSession());
-      if (auth.error || !auth.data.session || auth.data.session.user.id !== this.scope.ownerId) throw new AiError('UNAUTHENTICATED');
-      if ((auth.data.session.expires_at ?? 0) * 1000 <= Date.now() + ms) {
-        auth = await wait(this.client.auth.refreshSession());
+      const cached = await wait(this.client.auth.getSession());
+      if (cached.error || !cached.data.session || cached.data.session.user.id !== this.scope.ownerId) throw new AiError('UNAUTHENTICATED');
+      let session = cached.data.session;
+      if ((session.expires_at ?? 0) * 1000 <= Date.now() + ms) {
+        const refreshed = await wait(this.client.auth.refreshSession());
+        if (refreshed.error || !refreshed.data.session) throw new AiError('UNAUTHENTICATED');
+        session = refreshed.data.session;
       }
-      const session = auth.data.session;
-      if (auth.error || !session || session.user.id !== this.scope.ownerId || signal.aborted) throw new AiError('UNAUTHENTICATED');
+      if (session.user.id !== this.scope.ownerId || signal.aborted) throw new AiError('UNAUTHENTICATED');
       const response = await wait(fetch(`${this.config.url}${path}`, {
         method: 'POST', redirect: 'error', cache: 'no-store', credentials: 'omit', signal,
         headers: { apikey: this.config.publishableKey, Authorization: `Bearer ${session.access_token}`,
