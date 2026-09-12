@@ -4460,3 +4460,41 @@ requires a user decision; any 400/reset/lost/corrupt/empty bytes, cleanup failur
 or flaky retry blocks, without a PR16 waiver. All corrected-head automated,
 twelve-image and human/release gates remain pending; UX/hosted/provider/paid/
 private/deployment authority remains separate.
+
+## I29 C reservations-test observation candidate - 12 September 2026
+
+**Source-only, unstaged; source review and new-head validation pending.**
+[Independent 2a4 assessment 5648305666](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5648305666)
+records an unchanged-against-main reservations/credentials test with a WebKit
+upload failure and successful configured retry, but no same-attempt receiver
+facts. No affirmative source evidence attributes it to C; neither harness-only
+causation nor production-photo corruption is established. Coordinator
+[2a4 artifact/visual review 5648267317](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5648267317)
+verified types and twelve images without an additional blocking scoped defect;
+that dated evidence does not remove the flaky-upload or human acceptance gates.
+
+[User cycle approval 5648398993](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5648398993),
+[plan 5648406473](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5648406473)
+and [own source permission 5648467753](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5648467753)
+record actual Anthropic / claude-opus-5 reviewer215a1de6 Turn4 AMEND and
+coordinator resolutions A1-A3. Only the selected case opts into existing server
+observation, from setup through the final assertion, with synchronous bounded
+finally evidence and unchanged fixture teardown. All original requests,
+payloads, response/body-reading behavior and strict assertions remain; the
+shared sender, receiver and passing parallel cases are untouched.
+
+Route counters include preceding refusals; the intended valid upload is the
+first receiver POST, not a guessed measured counter result. Observation adds
+counters/stages/facts, envelope/high-byte work after stream drain and other
+bookkeeping; scheduling/response timing effects are not excluded. A captured
+stage is not a fix and clean non-reproduction is not localization.
+
+No local runtime/compiler/lint/tests/install/probes/scanner or image review ran.
+Other32 paths and this document's original301163 bytes remain frozen. Source
+review and separate commit/publication permission precede the user's one future
+normal full CI plus existing Apple cycle. Even lint/setup failure consumes it;
+no automatic replacement, unchanged rerun or further loop is authorized.
+Missing evidence, bad uploads/bytes/reset/cleanup or flaky retry blocks.
+Still unlocalized, even if green, requires a user decision; no PR16 waiver.
+All corrected-head automated/twelve-image/human gates remain pending; UX and
+hosted/provider/paid/private/deployment authority remain separate.

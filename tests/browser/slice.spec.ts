@@ -240,34 +240,73 @@ test('actual upload wire enforces the receiver byte cap for a direct Node actor'
   }
 });
 
-test('actual upload wire restricts reservations and synthetic credentials without forwarding other requests', async ({ page }) => {
-  const backend = await mockBackend(page, { initialLanguage: 'en' });
-  await page.goto('/');
-  await signIn(page);
-  await expect(page.locator('#wardrobe-title')).toBeVisible();
-  const own = reserveWireImage(backend), foreign = reserveWireImage(backend, owners.b);
-  for (const path of [foreign, own.replace('/main.jpg', '/other.jpg'), own + '?unexpected=1',
-    `${owners.a}/${randomUUID()}/${randomUUID()}/main.jpg`]) {
-    expect(await sendWireForm(page, path, 'valid')).toEqual({ ok: false, status: 403 });
+test('actual upload wire restricts reservations and synthetic credentials without forwarding other requests', async ({ page }, testInfo) => {
+  let backend: Awaited<ReturnType<typeof mockBackend>> | undefined;
+  const observed: { scripted503: WireResult | null; firstUpload: WireResult | null; duplicate409: WireResult | null } =
+    { scripted503: null, firstUpload: null, duplicate409: null };
+  try {
+    backend = await mockBackend(page, { initialLanguage: 'en', wireObservation: 'first' });
+    await page.goto('/');
+    await signIn(page);
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    const own = reserveWireImage(backend), foreign = reserveWireImage(backend, owners.b);
+    for (const path of [foreign, own.replace('/main.jpg', '/other.jpg'), own + '?unexpected=1',
+      `${owners.a}/${randomUUID()}/${randomUUID()}/main.jpg`]) {
+      expect(await sendWireForm(page, path, 'valid')).toEqual({ ok: false, status: 403 });
+    }
+    for (const kind of ['wrong-key', 'wrong-bearer', 'upsert'] satisfies WireForm[]) {
+      expect(await sendWireForm(page, own, kind)).toEqual({ ok: false, status: kind === 'wrong-bearer' ? 401 : 403 });
+    }
+    expect(backend.uploadWire.posts).toBe(0);
+    expect(backend.files.size).toBe(0);
+    let scriptedFailure = true;
+    await page.route('**/storage/v1/object/wardrobe/' + own, async (route) => {
+      if (scriptedFailure && route.request().method() === 'POST') {
+        scriptedFailure = false;
+        await route.fulfill({ status: 503, json: { message: 'Unavailable' } });
+      } else await route.fallback();
+    });
+    observed.scripted503 = await sendWireForm(page, own, 'valid');
+    expect(observed.scripted503).toEqual({ ok: false, status: 503 });
+    expect(backend.uploadWire.posts).toBe(0);
+    observed.firstUpload = await sendWireForm(page, own, 'valid');
+    expect(observed.firstUpload).toEqual({ ok: true, status: 200 });
+    assertWireBytes(backend.files.get(own)!, Buffer.from([0, 128, 255, 13, 10]));
+    observed.duplicate409 = await sendWireForm(page, own, 'valid');
+    expect(observed.duplicate409).toEqual({ ok: false, status: 409 });
+    expect(backend.uploadWire.posts).toBe(1);
+  } finally {
+    const evidence: {
+      case: 'reservations-credentials'; mode: 'OFF'; repeat: number; retry: number | null;
+      serverCollection: 'ON'; responseDecoration: 'OFF'; clientParse: 'OFF'; expectedBackend: 'first';
+      client: Record<string, WireResult | null>; server: object | null; captureError: boolean;
+    } = { case: 'reservations-credentials', mode: 'OFF', repeat: testInfo.repeatEachIndex, retry: null,
+      serverCollection: 'ON', responseDecoration: 'OFF', clientParse: 'OFF', expectedBackend: 'first',
+      client: {}, server: null, captureError: false };
+    try {
+      if (!Number.isSafeInteger(testInfo.retry) || testInfo.retry < 0 || testInfo.retry > 1) {
+        evidence.captureError = true;
+      } else {
+        evidence.retry = testInfo.retry;
+        evidence.client = { ...observed };
+        if (backend?.wireDiagnostic) evidence.server = {
+          ...backend.wireDiagnostic, rejections: { ...backend.wireDiagnostic.rejections },
+          receiverFacts: backend.wireDiagnostic.receiverFacts ? { ...backend.wireDiagnostic.receiverFacts } : null,
+          firstPost400Attempt: backend.wireDiagnostic.firstPost400Attempt ? {
+            ...backend.wireDiagnostic.firstPost400Attempt,
+            facts: backend.wireDiagnostic.firstPost400Attempt.facts ? { ...backend.wireDiagnostic.firstPost400Attempt.facts } : null,
+          } : null,
+          counterScope: 'cumulative', receiverFactsScope: 'last-completed-or-rejected-receiver-request-or-null-overwrite',
+          receivedBytes: backend.uploadWire.receivedBytes, payloadBytes: backend.uploadWire.payloadBytes,
+        };
+        else evidence.captureError = true;
+      }
+    } catch { evidence.captureError = true; }
+    try { testInfo.annotations.push({ type: 'synthetic-wire-reservation-localization', description: JSON.stringify(evidence) }); }
+    catch { evidence.captureError = true; }
+    try { console.log('synthetic-wire-reservation-localization', JSON.stringify(evidence)); }
+    catch { evidence.captureError = true; }
   }
-  for (const kind of ['wrong-key', 'wrong-bearer', 'upsert'] satisfies WireForm[]) {
-    expect(await sendWireForm(page, own, kind)).toEqual({ ok: false, status: kind === 'wrong-bearer' ? 401 : 403 });
-  }
-  expect(backend.uploadWire.posts).toBe(0);
-  expect(backend.files.size).toBe(0);
-  let scriptedFailure = true;
-  await page.route('**/storage/v1/object/wardrobe/' + own, async (route) => {
-    if (scriptedFailure && route.request().method() === 'POST') {
-      scriptedFailure = false;
-      await route.fulfill({ status: 503, json: { message: 'Unavailable' } });
-    } else await route.fallback();
-  });
-  expect(await sendWireForm(page, own, 'valid')).toEqual({ ok: false, status: 503 });
-  expect(backend.uploadWire.posts).toBe(0);
-  expect(await sendWireForm(page, own, 'valid')).toEqual({ ok: true, status: 200 });
-  assertWireBytes(backend.files.get(own)!, Buffer.from([0, 128, 255, 13, 10]));
-  expect(await sendWireForm(page, own, 'valid')).toEqual({ ok: false, status: 409 });
-  expect(backend.uploadWire.posts).toBe(1);
 });
 
 for (const diagnostic of [false, true]) {
