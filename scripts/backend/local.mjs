@@ -434,7 +434,7 @@ export async function withAnalyzedSaveFixtureLock(ownerId, itemId, imageId, reso
     '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-A'], {
     cwd: ROOT, env: commandEnvironment(), shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
   });
-  let resolveReady, rejectReady, output = '', bytes = 0, failure, releasing = false, primaryError = false;
+  let resolveReady, rejectReady, output = '', bytes = 0, failure, releaseError, releasing = false, primaryError = false;
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   const reject = (message) => {
     failure ??= new LocalBackendError(message, 1);
@@ -474,9 +474,10 @@ export async function withAnalyzedSaveFixtureLock(ownerId, itemId, imageId, reso
     clearTimeout(timer);
     if (code !== 0 || failure) {
       if (primaryError) console.error('FAIL: B2 fixture lock release; primary failure retained.');
-      else throw failure ?? new LocalBackendError('FAIL: B2 fixture lock release.', 1);
+      else releaseError = failure ?? new LocalBackendError('FAIL: B2 fixture lock release.', 1);
     }
   }
+  if (releaseError) throw releaseError;
 }
 
 export async function readCredentialCache() {
