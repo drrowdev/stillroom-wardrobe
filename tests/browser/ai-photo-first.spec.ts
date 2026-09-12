@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Response as PlaywrightResponse } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open, lstat } from 'node:fs/promises';
 import path from 'node:path';
@@ -152,7 +152,25 @@ test('analysis browser wire admits exactly the one-byte and 512000-byte boundari
 });
 test('status admission proves the issued bearer separately from legacy decoded-owner request records', async ({ page }) => {
   const api = await mockBackend(page, { initialLanguage: 'en' });
-  await page.goto('/'); await signIn(page); await expect(page.locator('#wardrobe-title')).toBeVisible();
+  const initial = { items: new Set<PlaywrightResponse>(), images: new Set<PlaywrightResponse>() };
+  const observeInitial = (response: PlaywrightResponse) => {
+    const url = new URL(response.url());
+    if (response.request().method() !== 'GET' || url.origin !== 'http://127.0.0.1:54321'
+      || url.searchParams.get('owner_id') !== `eq.${owners.a}`) return;
+    if (url.pathname === '/rest/v1/items') initial.items.add(response);
+    if (url.pathname === '/rest/v1/item_images') initial.images.add(response);
+  };
+  page.on('response', observeInitial);
+  try {
+    await page.goto('/'); await signIn(page);
+    // Dev StrictMode starts two loads; the stale load is not cancelled by effect cleanup.
+    await expect.poll(() => [initial.items.size, initial.images.size]).toEqual([2, 2]);
+    const responses = [...initial.items, ...initial.images];
+    expect(responses.map((response) => response.status())).toEqual([200, 200, 200, 200]);
+    expect(await Promise.all(responses.map((response) => response.finished()))).toEqual([null, null, null, null]);
+    await expect(page.getByRole('button', { name: messages['wardrobe.firstItem'].en, exact: true })).toBeVisible();
+    expect([initial.items.size, initial.images.size]).toEqual([2, 2]);
+  } finally { page.off('response', observeInitial); }
   const before = api.requests.length;
   for (const kind of ['valid', 'forged', 'nonempty', 'array'] as const) {
     const status = await page.evaluate(async ({ authorization, kind }) => {

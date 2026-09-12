@@ -54,10 +54,13 @@ type WireDiagnostic = {
   rejections: Record<WireStage, number>;
   // Facts describe the last completed/rejected receiver request; counters remain cumulative.
   receiverFacts: WireReceiverFacts | null;
+  firstPost400Attempt: {
+    receiverPostOrdinal: number; routePostsAtReceipt: number; stage: WireStage; facts: WireReceiverFacts | null;
+  } | null;
 };
 
 async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], files: Map<string, Buffer>, tokens: Map<string, string>,
-  diagnostic?: WireDiagnostic, analysis?: AnalysisHandler) {
+  decorateWireResponses: boolean, diagnostic?: WireDiagnostic, analysis?: AnalysisHandler) {
   const port = Number(process.env.PLAYWRIGHT_PORT ?? 5181);
   if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid browser test port.');
   const origin = `http://127.0.0.1:${port}`;
@@ -203,6 +206,8 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
       return;
     }
     if (diagnostic && request.method === 'POST') diagnostic.receiverPosts++;
+    const postAtReceipt = diagnostic && request.method === 'POST'
+      ? { receiverPostOrdinal: diagnostic.receiverPosts, routePostsAtReceipt: diagnostic.routePosts } : null;
     const facts: WireReceiverFacts | null = diagnostic ? {
       fieldFailure: null, boundaryLength: null, bodyTrailer: null, parsedFileSize: null, bodyHighByte: null,
     } : null;
@@ -210,7 +215,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     const timer = setTimeout(() => { state.rejected++; recordRejection('receiver-timeout', facts); void close(); }, 5000);
     const finish = (body: JsonRow, status = 200, responseStage: WireStage = 'none') => {
       response.writeHead(status, { ...cors, 'content-type': 'application/json', ...(status >= 400 ? { connection: 'close' } : {}) });
-      response.end(JSON.stringify(diagnostic ? { ...body, wireBackend: diagnostic.backend, wireStage: responseStage } : body),
+      response.end(JSON.stringify(decorateWireResponses && diagnostic ? { ...body, wireBackend: diagnostic.backend, wireStage: responseStage } : body),
         () => { if (status >= 400) void close(); });
     };
     response.once('close', () => clearTimeout(timer));
@@ -294,8 +299,12 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     })().catch(() => {
       state.rejected++;
       recordRejection(stage, facts);
-      if (!response.destroyed && !response.headersSent) finish({ message: 'Fixture upload rejected.' }, 400, stage);
-      else void close();
+      if (!response.destroyed && !response.headersSent) {
+        if (diagnostic && postAtReceipt && diagnostic.firstPost400Attempt === null) {
+          diagnostic.firstPost400Attempt = { ...postAtReceipt, stage, facts: facts ? { ...facts } : null };
+        }
+        finish({ message: 'Fixture upload rejected.' }, 400, stage);
+      } else void close();
     });
   });
   let closing: Promise<void> | undefined;
@@ -343,6 +352,7 @@ export type MockOptions = {
   loseAnalyzedReserveReplyOnce?: boolean;
   recoverStatus?: number; updateStatus?: number; logoutStatus?: number; recoveryUser?: string;
   wireDiagnostic?: WireBackend;
+  wireObservation?: WireBackend;
   aiResults?: Map<string, import('../../src/domain/ai-analysis').AiResult>;
   analysis?: AnalysisHandler;
 };
@@ -403,13 +413,15 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     statusProofs.push({ owner, issuedBearer, emptyObject });
     return request.method() === 'POST' && !url.search && issuedBearer && emptyObject;
   };
-  const wireDiagnostic: WireDiagnostic | undefined = options.wireDiagnostic ? {
-    backend: options.wireDiagnostic, routePosts: 0, receiverPosts: 0, success: 0, routeRejected: 0, receiverRejected: 0,
+  const decorateWireResponses = options.wireDiagnostic !== undefined;
+  const wireBackend = options.wireDiagnostic ?? options.wireObservation;
+  const wireDiagnostic: WireDiagnostic | undefined = wireBackend ? {
+    backend: wireBackend, routePosts: 0, receiverPosts: 0, success: 0, routeRejected: 0, receiverRejected: 0,
     routeStage: 'none', receiverStage: 'none',
     rejections: Object.fromEntries(wireStages.map((stage) => [stage, 0])) as Record<WireStage, number>,
-    receiverFacts: null,
+    receiverFacts: null, firstPost400Attempt: null,
   } : undefined;
-  const receiver = await uploadReceiver(page, items, images, files, tokens, wireDiagnostic, options.analysis);
+  const receiver = await uploadReceiver(page, items, images, files, tokens, decorateWireResponses, wireDiagnostic, options.analysis);
   await page.route('http://127.0.0.1:54321/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -442,7 +454,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (wireDiagnostic && wirePost) {
         wireDiagnostic.routeStage = stage;
         if (status >= 400) { wireDiagnostic.routeRejected++; wireDiagnostic.rejections[stage]++; }
-        body = { ...body as JsonRow, wireBackend: wireDiagnostic.backend, wireStage: stage };
+        if (decorateWireResponses) body = { ...body as JsonRow, wireBackend: wireDiagnostic.backend, wireStage: stage };
       }
       return route.fulfill({ status, json: body, headers: { 'x-supabase-api-version': '2024-01-01' } });
     };

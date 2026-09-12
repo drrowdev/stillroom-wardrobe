@@ -278,8 +278,10 @@ for (const diagnostic of [false, true]) {
     const observed: { unreserved: WireResult | null; first: WireResult | null; second: WireResult | null; afterFirstClose: WireResult | null } =
       { unreserved: null, first: null, second: null, afterFirstClose: null };
     try {
-      firstBackend = await mockBackend(page, { initialLanguage: 'en', ...(diagnostic ? { wireDiagnostic: 'first' as const } : {}) });
-      secondBackend = await mockBackend(second, { initialLanguage: 'en', ...(diagnostic ? { wireDiagnostic: 'second' as const } : {}) });
+      firstBackend = await mockBackend(page, { initialLanguage: 'en',
+        ...(diagnostic ? { wireDiagnostic: 'first' as const } : { wireObservation: 'first' as const }) });
+      secondBackend = await mockBackend(second, { initialLanguage: 'en',
+        ...(diagnostic ? { wireDiagnostic: 'second' as const } : { wireObservation: 'second' as const }) });
       for (const tab of [page, second]) {
         await tab.goto('/');
         await signIn(tab);
@@ -327,17 +329,27 @@ for (const diagnostic of [false, true]) {
     } finally {
       for (const expectedBackend of ['first', 'second'] as const) {
         const evidence: {
-          mode: 'ON' | 'OFF'; repeat: number; expectedBackend: WireBackend; client: Record<string, WireResult | null>;
+          mode: 'ON' | 'OFF'; repeat: number; retry: number | null;
+          serverCollection: 'ON'; responseDecoration: 'ON' | 'OFF'; clientParse: 'ON' | 'OFF';
+          expectedBackend: WireBackend; client: Record<string, WireResult | null>;
           server: object | null; captureError: boolean;
-        } = { mode: diagnostic ? 'ON' : 'OFF', repeat: testInfo.repeatEachIndex, expectedBackend, client: {}, server: null, captureError: false };
+        } = { mode: diagnostic ? 'ON' : 'OFF', repeat: testInfo.repeatEachIndex, retry: null,
+          serverCollection: 'ON', responseDecoration: diagnostic ? 'ON' : 'OFF', clientParse: diagnostic ? 'ON' : 'OFF',
+          expectedBackend, client: {}, server: null, captureError: false };
         try {
+          if (!Number.isSafeInteger(testInfo.retry) || testInfo.retry < 0 || testInfo.retry > 1) throw new Error('Unexpected fixture retry.');
+          evidence.retry = testInfo.retry;
           const backend = expectedBackend === 'first' ? firstBackend : secondBackend;
           evidence.client = expectedBackend === 'first' ? { parallel: observed.first } :
             { unreserved: observed.unreserved, parallel: observed.second, afterFirstClose: observed.afterFirstClose };
           if (backend?.wireDiagnostic) evidence.server = {
             ...backend.wireDiagnostic, rejections: { ...backend.wireDiagnostic.rejections },
             receiverFacts: backend.wireDiagnostic.receiverFacts ? { ...backend.wireDiagnostic.receiverFacts } : null,
-            counterScope: 'cumulative', receiverFactsScope: 'last-completed-or-rejected-receiver-request',
+            firstPost400Attempt: backend.wireDiagnostic.firstPost400Attempt ? {
+              ...backend.wireDiagnostic.firstPost400Attempt,
+              facts: backend.wireDiagnostic.firstPost400Attempt.facts ? { ...backend.wireDiagnostic.firstPost400Attempt.facts } : null,
+            } : null,
+            counterScope: 'cumulative', receiverFactsScope: 'last-completed-or-rejected-receiver-request-or-null-overwrite',
             receivedBytes: backend.uploadWire.receivedBytes, payloadBytes: backend.uploadWire.payloadBytes,
           };
         } catch { evidence.captureError = true; }

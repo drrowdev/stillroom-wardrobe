@@ -4397,3 +4397,38 @@ manual refresh, independent source review and separate commit/publication
 permissions precede fresh exact-head CI/types/Apple/twelve-visual gates.
 Human/release/hosted/provider/paid/private/deployment gates remain separate;
 this is not the UX packet or a claim of full browser acceptance.
+
+## I29 C status setup and storage observation candidate - 12 September 2026
+
+**Source-only, unstaged; source review and execution pending.**
+[Exact-47e evidence 5647757080](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647757080)
+records CI `34709652699`: 1579 units passed; browser totals were 614 passed,
+2 failed and 4 project-gated visual cases skipped. The previous 32 failures
+and new analysis-wire canaries passed, including WebKit. Backend ordinary-owner,
+security/recovery/B1=12/B2=22/C=2/restoration/types/parity and Apple
+`34709652652` passed. Type artifact content and twelve-image acceptance remain
+unreviewed. The status canary included late StrictMode image GETs; the separate
+WebKit multipart parallel OFF case returned 400 on both configured attempts.
+Its cause remains unlocalized; passing ON and analysis tests do not diagnose it.
+
+[Own permission 5647876516](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647876516)
+records actual replacement Anthropic / claude-opus-5 reviewer
+`1689057f-d002-4b02-abd9-9e188d72a0a8` AMEND and coordinator resolutions R1-R3.
+This four-file candidate completes two items and two item-images responses
+before the status baseline. Storage observation uses the existing state,
+independent of the single old-option-derived response-decoration flag, with
+one copied first POST400-attempt snapshot and explicit retry/mode labels.
+OFF still does not read response bodies; normal OFF serialization is preserved
+structurally, not proven by a new runtime body-equality check. Last-facts null
+overwrites, multipart protocol, transport, strict assertions and captures stay.
+
+No local runtime/compiler/tests/install/probes or image review ran. Other30
+packet paths and this document's original 296804 bytes remain frozen.
+Observation adds overhead, not a storage fix; ON response draining remains an
+untested alternative hypothesis. Source review and separate commit/publication
+permissions precede any next exact-head CI. The proposed later budget is one
+ordinary PR-sync CI only; if still unlocalized, even if green, a user decision
+is required. Any 400/reset/lost/corrupt/empty bytes, cleanup failure or flaky
+retry blocks; no repeat diagnostics or PR16 waiver follows. Fresh compiler,
+browser/normal-owner/B1/B2/C/restoration/types/Apple/twelve-visual/human gates,
+UX and hosted/provider/paid/private/deployment authority remain separate.
