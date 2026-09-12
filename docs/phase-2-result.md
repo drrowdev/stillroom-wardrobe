@@ -4432,3 +4432,31 @@ is required. Any 400/reset/lost/corrupt/empty bytes, cleanup failure or flaky
 retry blocks; no repeat diagnostics or PR16 waiver follows. Fresh compiler,
 browser/normal-owner/B1/B2/C/restoration/types/Apple/twelve-visual/human gates,
 UX and hosted/provider/paid/private/deployment authority remain separate.
+
+## I29 C retry-guard correction candidate - 12 September 2026
+
+**Source-only, unstaged; corrected-head validation pending.**
+[Own permission and evidence 5648083748](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5648083748)
+records exact-944 CI `34712818709`: install passed, then App lint failed at
+`slice.spec.ts:340:98` with `no-unsafe-finally`. Remaining App type/translations/
+units/build/scanners/browser and visual uploads were skipped. Backend
+ordinary-owner/security/recovery/B1=12/B2=22/C=2/restoration/types/parity passed;
+Apple `34712818790` passed its four generated and three native cases.
+No browser observation ran; the WebKit storage cause remains unknown.
+
+The same Anthropic / claude-opus-5 reviewer `215a1de6-d6ea-4629-b745-f54a666171ef`
+assessed this semantics-preserving correction and replacement-budget amendment.
+The unchanged invalid-retry predicate now sets captureError directly; only its
+else branch assigns retry and collects the same evidence in the original order.
+Defaults, surrounding catch, annotation/logging/cleanup, R1/R2 and all strict
+transport/capture assertions remain. Other32 paths and this document's original
+299268 bytes are frozen. No local lint/compiler/tests/runtime/install/probes ran;
+prior source review was not lint proof and this candidate has no runtime pass.
+
+The user approved one replacement normal full CI plus existing Apple companion,
+only after source review and separate commit/publication permission. No unchanged
+rerun or further diagnostic loop is authorized. Still unlocalized, even if green,
+requires a user decision; any 400/reset/lost/corrupt/empty bytes, cleanup failure
+or flaky retry blocks, without a PR16 waiver. All corrected-head automated,
+twelve-image and human/release gates remain pending; UX/hosted/provider/paid/
+private/deployment authority remains separate.

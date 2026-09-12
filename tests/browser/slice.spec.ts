@@ -337,21 +337,24 @@ for (const diagnostic of [false, true]) {
           serverCollection: 'ON', responseDecoration: diagnostic ? 'ON' : 'OFF', clientParse: diagnostic ? 'ON' : 'OFF',
           expectedBackend, client: {}, server: null, captureError: false };
         try {
-          if (!Number.isSafeInteger(testInfo.retry) || testInfo.retry < 0 || testInfo.retry > 1) throw new Error('Unexpected fixture retry.');
-          evidence.retry = testInfo.retry;
-          const backend = expectedBackend === 'first' ? firstBackend : secondBackend;
-          evidence.client = expectedBackend === 'first' ? { parallel: observed.first } :
-            { unreserved: observed.unreserved, parallel: observed.second, afterFirstClose: observed.afterFirstClose };
-          if (backend?.wireDiagnostic) evidence.server = {
-            ...backend.wireDiagnostic, rejections: { ...backend.wireDiagnostic.rejections },
-            receiverFacts: backend.wireDiagnostic.receiverFacts ? { ...backend.wireDiagnostic.receiverFacts } : null,
-            firstPost400Attempt: backend.wireDiagnostic.firstPost400Attempt ? {
-              ...backend.wireDiagnostic.firstPost400Attempt,
-              facts: backend.wireDiagnostic.firstPost400Attempt.facts ? { ...backend.wireDiagnostic.firstPost400Attempt.facts } : null,
-            } : null,
-            counterScope: 'cumulative', receiverFactsScope: 'last-completed-or-rejected-receiver-request-or-null-overwrite',
-            receivedBytes: backend.uploadWire.receivedBytes, payloadBytes: backend.uploadWire.payloadBytes,
-          };
+          if (!Number.isSafeInteger(testInfo.retry) || testInfo.retry < 0 || testInfo.retry > 1) {
+            evidence.captureError = true;
+          } else {
+            evidence.retry = testInfo.retry;
+            const backend = expectedBackend === 'first' ? firstBackend : secondBackend;
+            evidence.client = expectedBackend === 'first' ? { parallel: observed.first } :
+              { unreserved: observed.unreserved, parallel: observed.second, afterFirstClose: observed.afterFirstClose };
+            if (backend?.wireDiagnostic) evidence.server = {
+              ...backend.wireDiagnostic, rejections: { ...backend.wireDiagnostic.rejections },
+              receiverFacts: backend.wireDiagnostic.receiverFacts ? { ...backend.wireDiagnostic.receiverFacts } : null,
+              firstPost400Attempt: backend.wireDiagnostic.firstPost400Attempt ? {
+                ...backend.wireDiagnostic.firstPost400Attempt,
+                facts: backend.wireDiagnostic.firstPost400Attempt.facts ? { ...backend.wireDiagnostic.firstPost400Attempt.facts } : null,
+              } : null,
+              counterScope: 'cumulative', receiverFactsScope: 'last-completed-or-rejected-receiver-request-or-null-overwrite',
+              receivedBytes: backend.uploadWire.receivedBytes, payloadBytes: backend.uploadWire.payloadBytes,
+            };
+          }
         } catch { evidence.captureError = true; }
         try { testInfo.annotations.push({ type: 'synthetic-wire-localization', description: JSON.stringify(evidence) }); }
         catch { evidence.captureError = true; }
