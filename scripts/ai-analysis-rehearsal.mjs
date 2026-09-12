@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { once } from 'node:events';
 import { ROOT, LOCAL_API, assertNoServiceSecrets, readCredentialCache, normalSessionEnvironment,
-  localStatus, privilegedLocalSql, runCommand, startAnalysisServer, parseServedDiagnostics } from './backend/local.mjs';
+  localStatus, privilegedLocalSql, runCommand, startAnalysisServer, parseServedDiagnostics, withAnalyzedSaveFixtureLock } from './backend/local.mjs';
 import { isMain } from './quality/files.mjs';
 import { createHandler } from '../supabase/functions/analyze-clothing/handler.ts';
 import { TOKEN_URL, GOOGLE_ORIGIN } from '../supabase/functions/analyze-clothing/google-cloud.ts';
@@ -10,6 +10,7 @@ import { MODEL_ID, readJson, GENERATION_CONFIG, SAFETY_SETTINGS, PROMPT } from '
 import { aiClients, requireReady, AI_FACT_VECTORS } from '../tests/integration/ai-controls.sessions.mjs';
 import { baseline, analysisId, analysisFacts, analysisUsage, analysisHash, equal } from '../tests/integration/ai-analysis.sessions.mjs';
 import { TABLES, requireEvidence } from '../tests/integration/preservation.sessions.mjs';
+import { analyzedHarness, analyzedIntent, saveId } from '../tests/integration/analyzed-save.sessions.mjs';
 
 const literal = (value) => "'" + String(value).replaceAll("'", "''") + "'";
 const json = (value) => `${literal(JSON.stringify(value))}::jsonb`;
@@ -49,28 +50,37 @@ async function inventory(client, owners) {
 }
 export const ANALYSIS_CATALOG_SQL = `
 select jsonb_build_object(
- 'privateRls',(select count(*)=3 and bool_and(relrowsecurity)
-   from pg_class where oid in ('private.ai_execution_manifests'::regclass,'private.ai_usage_evidence'::regclass,'private.ai_analysis_attestations'::regclass)),
+ 'privateRls',(select count(*)=7 and bool_and(relrowsecurity)
+   from pg_class where oid in ('private.ai_execution_manifests'::regclass,'private.ai_usage_evidence'::regclass,'private.ai_analysis_attestations'::regclass,
+     'private.ai_save_used_receipts'::regclass,'private.ai_item_save_attempts'::regclass,
+     'private.ai_item_save_context'::regclass,'private.item_attribution_history'::regclass)),
  'noPolicies',(select count(*)=0 from pg_policies where schemaname='private'
-   and tablename in ('ai_execution_manifests','ai_usage_evidence','ai_analysis_attestations')),
+   and tablename in ('ai_execution_manifests','ai_usage_evidence','ai_analysis_attestations',
+     'ai_save_used_receipts','ai_item_save_attempts','ai_item_save_context','item_attribution_history')),
  'tableDenied',(select bool_and(not has_table_privilege(r,t,'SELECT,INSERT,UPDATE,DELETE'))
    from unnest(array['anon','authenticated','service_role']) r,
-   unnest(array['private.ai_execution_manifests','private.ai_usage_evidence','private.ai_analysis_attestations']) t),
- 'privateDenied',(select count(*)=6 and bool_and(not has_function_privilege('anon',p.oid,'EXECUTE')
+   unnest(array['private.ai_execution_manifests','private.ai_usage_evidence','private.ai_analysis_attestations',
+     'private.ai_save_used_receipts','private.ai_item_save_attempts','private.ai_item_save_context','private.item_attribution_history']) t),
+ 'privateDenied',(select count(*)=11 and bool_and(not has_function_privilege('anon',p.oid,'EXECUTE')
    and not has_function_privilege('authenticated',p.oid,'EXECUTE') and not has_function_privilege('service_role',p.oid,'EXECUTE')
    and not exists(select 1 from aclexplode(p.proacl) a where a.grantee=0 and a.privilege_type='EXECUTE'))
    from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='private'
-   and p.proname in ('ai_manifest_immutable','ai_begin_owner','ai_settle_core','ai_normal_usage','ai_analysis_permitted','ai_accounting')),
- 'serviceOnly',(select count(*)=3 and bool_and(p.prosecdef and p.proconfig=array['search_path=""']
+   and p.proname in ('ai_manifest_immutable','ai_begin_owner','ai_settle_core','ai_normal_usage','ai_analysis_permitted','ai_accounting',
+     'item_save_value_hash','item_field_provenance','reserve_item_save','finalize_manual_item_save','analyzed_item_save_current')),
+ 'serviceOnly',(select count(*)=4 and bool_and(p.prosecdef
+   and p.proconfig=(case when p.proname='complete_analyzed_item_save' then array['search_path=""','lock_timeout=2s'] else array['search_path=""'] end)
    and has_function_privilege('service_role',p.oid,'EXECUTE') and not has_function_privilege('authenticated',p.oid,'EXECUTE')
    and not has_function_privilege('anon',p.oid,'EXECUTE'))
    from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'
-   and p.proname in ('ai_claim_analysis','ai_finish_analysis','ai_settle_request')),
- 'ownerOnly',(select count(*)=3 and bool_and(p.prosecdef and p.proconfig=array['search_path=""']
+   and p.proname in ('ai_claim_analysis','ai_finish_analysis','ai_settle_request','complete_analyzed_item_save')),
+ 'ownerOnly',(select count(*)=7 and bool_and(p.prosecdef
+   and p.proconfig=(case when p.proname in ('reserve_analyzed_item_save','analyzed_item_save_preflight','cancel_analyzed_item_save')
+     then array['search_path=""','lock_timeout=2s'] else array['search_path=""'] end)
    and has_function_privilege('authenticated',p.oid,'EXECUTE') and not has_function_privilege('service_role',p.oid,'EXECUTE')
    and not has_function_privilege('anon',p.oid,'EXECUTE'))
    from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'
-   and p.proname in ('ai_begin_request','ai_request_control','ai_analysis_status')),
+   and p.proname in ('ai_begin_request','ai_request_control','ai_analysis_status',
+     'reserve_analyzed_item_save','analyzed_item_save_preflight','cancel_analyzed_item_save','item_attribution_history')),
  'oldConstraints',(select count(*)=5 from pg_constraint where conrelid='private.ai_usage'::regclass
    and conname in ('ai_usage_check','ai_usage_check1','ai_usage_check2','ai_usage_check3','ai_usage_check4')),
  'evidenceCascade',exists(select 1 from pg_constraint where conrelid='private.ai_usage_evidence'::regclass
@@ -78,7 +88,16 @@ select jsonb_build_object(
    and pg_get_constraintdef(oid)='FOREIGN KEY (owner_id, request_id) REFERENCES private.ai_usage(owner_id, request_id) ON DELETE CASCADE'),
  'attestationCascade',exists(select 1 from pg_constraint where conrelid='private.ai_analysis_attestations'::regclass
    and confrelid='private.ai_requests'::regclass and confdeltype='c'
-   and pg_get_constraintdef(oid)='FOREIGN KEY (owner_id, request_id) REFERENCES private.ai_requests(owner_id, request_id) ON DELETE CASCADE')
+   and pg_get_constraintdef(oid)='FOREIGN KEY (owner_id, request_id) REFERENCES private.ai_requests(owner_id, request_id) ON DELETE CASCADE'),
+ 'receiptOwnerLifetime',(select count(*)=1 and bool_and(confrelid='public.profiles'::regclass and confdeltype='c')
+   from pg_constraint where conrelid='private.ai_save_used_receipts'::regclass and contype='f'),
+ 'saveExtensionCascade',exists(select 1 from pg_constraint where conrelid='private.ai_item_save_attempts'::regclass
+   and confrelid='private.item_save_attempts'::regclass and confdeltype='c'),
+ 'historyNullableImage',exists(select 1 from pg_constraint where conrelid='private.item_attribution_history'::regclass
+   and pg_get_constraintdef(oid)='FOREIGN KEY (owner_id, item_id, source_image_id) REFERENCES item_images(owner_id, item_id, id) ON DELETE SET NULL (source_image_id)'),
+ 'contextEmpty',not exists(select 1 from private.ai_item_save_context),
+ 'storageIdentity',exists(select 1 from pg_attribute where attrelid='storage.objects'::regclass and attname='id' and atttypid='uuid'::regtype)
+   and exists(select 1 from pg_attribute where attrelid='storage.objects'::regclass and attname='version' and not attisdropped)
 );`;
 
 async function main() {
@@ -352,6 +371,93 @@ async function main() {
     await baseline(client, owners);
     await child('integration'); await child('security');
     console.log(`PASS: B1 real Auth/DB and Google-only synthetic transport; generations=${generations}; exact 14-ledger/2-ready baseline restored; profile CAS versions advanced twice`);
+    stage = 'B2-entry';
+    requireEvidence(generations === 12);
+    const b2Tables = ['ai_save_used_receipts', 'ai_item_save_attempts', 'ai_item_save_context', 'item_attribution_history', 'item_save_used_ids'];
+    const b2Snapshot = () => db(`select jsonb_build_object(${b2Tables.map((t) => `${literal(t)},${rowsSql(`private.${t}`)}`).join(',')});`);
+    const b2Before = await b2Snapshot(), countBefore = generations;
+    const b2Child = async (suite, phase, origin) => {
+      stage = `B2-${suite}-${phase}`;
+      requireEvidence(Date.now() < deadline);
+      const result = await runCommand(process.execPath, [`${ROOT}tests/${suite}/analyzed-save.sessions.mjs`,
+        phase, ...(origin ? [origin] : [])], { env, timeout: 120_000 });
+      requireEvidence(result.code === 0);
+      console.log(`PASS: B2 ${suite}/${phase} normal-session child`);
+    };
+    await privilegedLocalSql(`update private.ai_controls set activated=true,notice_revision=1,model_id='gemini-3.8-flash',
+      prompt_version=1,max_request_micro=2270823,monthly_allowance_micro=100000000,max_requests_per_hour=200,
+      result_ttl_seconds=3600,execution_manifest_id=${literal(manifest)} where ${ownerWhere};`);
+    mode = 'ready';
+    owned = await startAnalysisServer();
+    await b2Child('integration', 'prepare', origin);
+    requireEvidence(generations - countBefore === 22);
+    owned.assertRunning();
+    // The server credential only exercises service-boundary negatives, never owner access assertions.
+    const completeProbe = async (owner, value, row, objects, expected) => {
+      const response = await fetch(`${LOCAL_API}/rest/v1/rpc/complete_analyzed_item_save`, {
+        method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(5000),
+        headers: { Authorization: 'Bearer '.concat(local.serviceKey), apikey: local.serviceKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_owner_id: owner.uid, p_item_id: value.p_item.id,
+          p_image_id: value.p_image.id, p_fingerprint: row.fingerprint, p_objects: objects }),
+      });
+      requireEvidence(response.status === 400 || response.status === 403);
+      const result = await readJson(response, 4096, AbortSignal.timeout(5000));
+      requireEvidence(result.code === expected && result.details === null && result.hint === null);
+    };
+    for (const owner of owners) {
+      const h = analyzedHarness(client, owner, env), value = analyzedIntent(owner, 27), row = await h.reserve(value);
+      const old = await h.preflight(value, row);
+      await h.remove(value); await h.upload(value);
+      const next = await h.preflight(value, row);
+      for (const variant of ['main', 'thumb']) {
+        requireEvidence(old.objects[variant].id !== next.objects[variant].id
+          && old.objects[variant].version !== next.objects[variant].version);
+        for (const field of ['id', 'version']) {
+          const wrong = structuredClone(next.objects); wrong[variant][field] = old.objects[variant][field];
+          await completeProbe(owner, value, row, wrong, '22023');
+        }
+      }
+      await completeProbe(owner, value, row, old.objects, '22023');
+      for (const resource of ['profile', 'item', 'image', 'objects'])
+        await withAnalyzedSaveFixtureLock(owner.uid, value.p_item.id, value.p_image.id, resource,
+          () => completeProbe(owner, value, row, next.objects, '22023'));
+      requireEvidence((await h.endpoint(value, row, local.serviceKey)).status === 401);
+      const approval = await db(`select to_jsonb(enabled) from private.approved_accounts where user_id=${literal(owner.uid)};`);
+      requireEvidence(approval === true);
+      await privilegedLocalSql(`update private.approved_accounts set enabled=false where user_id=${literal(owner.uid)};`);
+      await completeProbe(owner, value, row, next.objects, '42501');
+      requireEvidence((await h.endpoint(value, row)).status === 403);
+      await privilegedLocalSql(`update private.approved_accounts set enabled=true where user_id=${literal(owner.uid)};`);
+    }
+    await b2Child('security', 'full');
+    await b2Child('integration', 'full');
+    await b2Child('integration', 'withdraw');
+    const expiring = owners.flatMap((o) => [24, 31].map((n) => analysisId(o.label, n)));
+    await privilegedLocalSql(`update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',
+      expires_at=clock_timestamp()-interval '1 hour' where ${ownerWhere} and request_id in (${expiring.map(literal).join(',')});`);
+    await b2Child('integration', 'expired');
+    await privilegedLocalSql(`update private.ai_controls set activated=false where ${ownerWhere};`);
+    await b2Child('integration', 'inactive');
+    await b2Child('integration', 'cleanup');
+    owned.assertRunning(); await owned.stop(); owned = undefined;
+    stage = 'B2-success-only-restoration';
+    requireEvidence(generations - countBefore === 22);
+    equal(await inventory(client, owners), preserved);
+    const b2Ids = owners.flatMap((o) => Array.from({ length: 11 }, (_, i) => saveId(o.label, i + 21)));
+    const now = await b2Snapshot();
+    for (const table of b2Tables)
+      equal(now[table].filter((r) => !b2Ids.includes(r.item_id)), b2Before[table]);
+    requireEvidence(now.ai_item_save_context.length === 0 && now.ai_item_save_attempts.length === 0
+      && now.item_attribution_history.length === 0);
+    for (const [index, owner] of owners.entries())
+      requireEvidence((await client.rows(owner, 'profiles'))[0].version === versions[index] + 4);
+    await privilegedLocalSql(`begin; delete from private.ai_usage where ${namespace};
+      delete from private.ai_save_used_receipts where ${ownerWhere} and item_id in (${b2Ids.map(literal).join(',')});
+      delete from private.item_save_used_ids where ${ownerWhere} and item_id in (${b2Ids.map(literal).join(',')});
+      ${restore} commit;`);
+    equal(await snapshot(), before); equal(await b2Snapshot(), b2Before);
+    equal(await requireReady(client, owners), ready); await baseline(client, owners);
+    console.log('PASS: B2 actual Deno/Auth/DB/Storage; synthetic Google generations=22 separately from B1=12; exact private/14-ledger/2-ready baseline restored; B2 profile CAS advances=2 per owner');
   } catch {
     console.error(`FAIL: B1 rehearsal at ${stage}; private evidence withheld; fixture state preserved, no automatic recovery`);
     process.exitCode = 1;

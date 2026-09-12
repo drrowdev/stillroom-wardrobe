@@ -640,7 +640,25 @@ export type Database = {
         Returns: Json
       }
       ai_status: { Args: never; Returns: Json }
+      analyzed_item_save_preflight: {
+        Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
+        Returns: Json
+      }
+      cancel_analyzed_item_save: {
+        Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
+        Returns: undefined
+      }
       commit_image: { Args: { p_image_id: string }; Returns: undefined }
+      complete_analyzed_item_save: {
+        Args: {
+          p_fingerprint: string
+          p_image_id: string
+          p_item_id: string
+          p_objects: Json
+          p_owner_id: string
+        }
+        Returns: undefined
+      }
       deletion_control: {
         Args: { p_action: string; p_code?: string; p_owner_id: string }
         Returns: Json
@@ -651,6 +669,16 @@ export type Database = {
         Returns: undefined
       }
       forget_image: { Args: { p_image_id: string }; Returns: undefined }
+      item_attribution_history: { Args: { p_item_id: string }; Returns: Json }
+      reserve_analyzed_item_save: {
+        Args: { p_claim: Json; p_image: Json; p_item: Json }
+        Returns: {
+          fingerprint: string
+          image: Json
+          item: Json
+          state: string
+        }[]
+      }
       reserve_item_save: {
         Args: { p_image: Json; p_item: Json }
         Returns: {

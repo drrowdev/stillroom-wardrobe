@@ -96,6 +96,34 @@ Recheck consent/membership before returning results. Cancellation/browser closur
 
 Discard, photo changes, edits, account changes and Save invalidate the corresponding draft generation. No late response edits a saved garment. Freeze/deletion denies new calls/results and removes analysis data. Export saved attributes/provenance only, not requests, drafts or usage.
 
+### B2 explicit Save reservation boundary
+
+The owner-selected rule is **Finish the already-started Save**. After a valid
+first Save reservation has frozen the accepted intent and genuine owned B1
+attestation, later AI opt-out, analysis-only discard, expiry or operator AI
+deactivation does not cancel that Save or erase truthful frozen attribution.
+No inference occurs during Save/retry. Account freeze/deletion and current
+owned row/object guards still block it; explicit cancellation of the Save itself
+is respected. Expired or discarded proof before FIRST reservation fails; retaining
+values requires a separate explicit unknown/manual snapshot, not automatic
+downgrade, confirmation or reanalysis.
+
+B2 source supplies a separate analyzed/unknown composer and checked reservation,
+authenticated synchronous main/thumb byte finalizer, service-only narrow
+completion and minimal owner-readable completed attribution history. It preserves
+manual overrides/clears and explicit unknown@1, without changing the manual
+composer/transport. Both raw INSERT and UPDATE/import remain unable to mint AI
+trust. Receipt-use identities survive result/item deletion; the completed
+source-image link alone becomes null during normal image cleanup. See `08` for
+the exact owner, fingerprint and Storage ID/opaque-version boundary.
+
+This source packet supports the existing fourteen B1 facts; automatic title,
+description and photo-first UI integration are not included or complete.
+New exact-head CI execution, genuine independent review and coordinator-owned
+artifact review remain owed. Raw-v2/saved-only backup and restoration of trusted
+history remain parked and mandatory before release, not silently implemented
+or waived here. Source editing does not authorize paid/provider/hosted activation.
+
 ## Privacy and cost controls
 
 Send the sanitized photo, fixed instructions and taxonomy only, before library Save. No history, account email, location, notes, other photos or peer data. EXIF removal does not hide identifying pixels. Use inline bytes, not a public bucket, persistent vendor file or reusable signed link. Temporary validated results are owner-only and excluded from wardrobe queries/exports.

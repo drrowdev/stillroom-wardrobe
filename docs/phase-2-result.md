@@ -4048,3 +4048,77 @@ authorized by the amendment. All exact-head CI/live preservation,
 normal-owner/security/B1 real Auth-DB/types/parity, App/browser/native Apple
 and approved-artifact actual visual review remain mandatory. No source-complete,
 merge-ready, hosted/provider/paid/deployment or human-acceptance claim is made.
+
+## I29 B2 trusted analyzed-item Save source - 12 September 2026
+
+**Unstaged source implementation; not locally executed, independently accepted,
+published, merge-ready or deployed.** Requirements R18/R19/R23/R26/R27/R28;
+preserve independent-owner R01/R11 and Phase 0 engineering-complete /
+acceptance-open boundaries.
+
+Base/head remains `6ba1b88365b5ffb66033f28feb6b0dc65a394a4a`, base tree
+`85fffe2e7908593ca46485b5a4ba41e4d3df9135`, isolated branch
+`drrowdev-sturdy-telegram`, sole local writer
+`7f9ce2cb-b215-48ba-a15c-b2b5790eb872`.
+[Proposal 5640041892](https://github.com/drrowdev/stillroom-wardrobe/pull/20#issuecomment-5640041892),
+[actual Anthropic Claude Opus 5 turn-22 critique 5640286958](https://github.com/drrowdev/stillroom-wardrobe/pull/20#issuecomment-5640286958)
+and [controlling approval/user decision 5643582833](https://github.com/drrowdev/stillroom-wardrobe/pull/20#issuecomment-5643582833)
+bound the maximum 29 paths. After completed read-only intake/supplement, the writer
+read its entire [own coordinator-observed LOCAL model attestation and source-edit
+permission 5643664527](https://github.com/drrowdev/stillroom-wardrobe/pull/20#issuecomment-5643664527)
+before editing. This is independently crossmatched local usage for this
+session's actual gpt-6-astra, not native-platform-equivalent evidence.
+
+The eighth migration preserves all seven prior SQL files and pins. A protected
+initial item-projection marker, checked canonical B1 facts and an UPDATE barrier
+separate genuine analyzed attribution from user assertions and explicit unknowns.
+Manual admission is extracted without changing its validations, identity lifecycle
+or fingerprint; the old manual composer, transport and assertions remain.
+Separate frozen attempt metadata and owner-lifetime receipt-use identities
+survive short-lived analysis cleanup. Completed history binds a nullable owned
+source-image link only after successful image commit.
+
+The sibling client route reserves, uploads immutable thumb/main objects and calls
+the synchronous authenticated finalizer. Auth/Storage use the ordinary token;
+only the narrow completion RPC receives the server credential. Actual downloaded
+bytes, dimensions and hashes are checked before matching exactly two real
+Storage object IDs/opaque versions under transactional locks. No JWT/GUC
+impersonation, legacy helper delegation, signed URL, new inference or Storage
+mutation is part of service completion.
+
+The user-selected already-started Save survives later AI opt-out, analysis-only
+discard, expiry and AI deactivation. Current account/row/object guards and
+explicit Save cancellation still apply. Expired-first proof never silently
+downgrades. Both blueprint `08` and `20` state this temporal boundary.
+
+Source tests explicitly wire ordinary-session baseline suites into the hardcoded
+runner and full B2 cases into the owned rehearsal with actual Deno/Auth/DB/Storage
+and Google-only synthetic transport. The original B1 twelve synthetic generations
+and original fourteen-ledger/two-ready restoration are retained separately;
+B2 plans 22 additional synthetic generations. New cases cover mixed provenance,
+raw/import/update refusals, service/peer/anonymous denials, byte/object replacement,
+completed replay, source-image cleanup, cancellation and seeded-expiry/consent
+boundaries. Named SQL-held-lock handshakes exercise actual profile/item/image/
+object conflicts rather than claiming parallel HTTP necessarily overlapped.
+B2 cleanup is bounded to its synthetic identities and restores the original
+private fixture snapshot on success only. B1 and B2 each advance the ordinary
+profile consent CAS twice per owner; neither is represented as unchanged profile
+timestamps or an elapsed-time expiry test.
+
+Under this packet's CI-backed execution approval, **no local npm/Node, unit,
+lint, type, translation, scanner, build, browser, setup, backend or provider
+command ran**. No dependencies were restored or probed. SQL-projected public RPC
+types are **provisional**, not generated evidence: the complete first exact-head
+CI-generated artifact must prove or replace them before merge. Non-executing
+Git/diff/source-hash/manual review is not a passing application test or packaged
+credential scan. Snapshot-bound credential-pattern and publication permissions
+remain coordinator gates; no new scanner profile is inferred.
+
+All existing exact-head CI gates remain owed: lint/type/EN-FI-SV/unit/build,
+full scanner plus canary, dependencies, browser/eight approved captures, native
+Apple, preservation/recovery/security/normal owners/B1/B2 and generated-type
+parity. Real pinned Storage version and lock behavior are unexecuted prerequisites,
+not a hosted claim. Genuine final independent review and coordinator-owned
+visual review remain pending. No UI/title/description/provider expansion,
+saved-only backup/history restore completion, hosted migration, paid activation,
+deployment or human acceptance is claimed. PR #20 stays closed.

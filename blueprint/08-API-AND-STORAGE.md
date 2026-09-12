@@ -217,6 +217,65 @@ review remain required; prior-head CI is not connected-client acceptance.
 No analysis call, byte attestation, paid activation, completed I29 or hosted
 change follows from this metadata/object-presence prerequisite.
 
+## I29 B2 checked analyzed-item Save
+
+The additive `20260911200000_checked_ai_item_save.sql` source introduces a
+separate `reserve_analyzed_item_save(p_item,p_image,p_claim)` route. The item
+and image inputs retain the manual route's closed 32/8-key contracts.
+`p_claim` is either null for an explicitly chosen unknown/manual Save, or the
+closed requestId/draftId/generation/imageSha256/fields claim against a genuine
+owned B1 ready result and server attestation. Only B1's fourteen supported facts
+can be attributed. Manual overrides and clears take precedence; retained
+unverified values use explicit `unknown@1`. The existing manual composer and
+manual Save transport do not acquire an AI mode.
+
+First reservation requires current valid proof, consent and approved-account
+admission. It freezes minimal manifest/model/prompt/hash/dimension information,
+per-field classes/revisions and a claim digest, not a copied full draft or
+provider response. A private transaction-local marker binds the exact initial
+item projection. Raw INSERT, PATCH and import cannot mint or advance AI
+assertions; unchanged legitimate assertions survive unrelated edits, while
+changed unconfirmed values become unknown at the next revision.
+The separate extension leaves the old manual attempt schema and used-ID
+semantics intact. Once-only receipt identities survive analysis and item
+deletion until owner-profile deletion.
+
+**Finish the already-started Save:** after the first accepted reservation, later
+AI opt-out, analysis-only discard, result expiry or operator AI deactivation
+does not cancel that frozen Save or erase its truthful attribution. It performs
+no inference. Current account freeze/deletion and row/object/identity guards
+still deny completion. Explicit `cancel_analyzed_item_save` cancels the Save
+itself; it cannot undo an already completed transaction. An expired first
+reservation requires a separate explicit unknown/manual attempt, never an
+automatic downgrade or hidden retry.
+
+`analyzed_item_save_preflight` returns the current owned image and exactly two
+canonical Storage object identities. The authenticated synchronous
+`finalize-analyzed-item` endpoint accepts only itemId/imageId/fingerprint,
+verifies the real ordinary Auth user, downloads both private objects using that
+user's token and checks bounded bytes, SHA-256 and sanitized JPEG dimensions.
+No signed URL, caller path, provider credential or Storage mutation is involved.
+`complete_analyzed_item_save` is service-only: explicit server-verified owner,
+profile-first admission, unchanged explicit-owner fingerprint/current-row guards
+and the same two Storage object IDs and opaque versions under share/NOWAIT locks.
+It neither impersonates an owner via JWT/GUC nor invokes the auth.uid-bound
+legacy commit helper. Manual/legacy finalization cannot bypass this boundary.
+Completed retries repeat byte and live-object checks.
+
+Only successful image completion publishes owner-readable
+`item_attribution_history` with field revisions/classes, model/prompt and image
+hash. Its composite owned source-image link is bound after commit and becomes
+null on image cleanup without deleting descriptive history. Pending attempts
+are not completed history. Item/profile deletion removes that history.
+
+These are source contracts, not executed B2 evidence. First exact-head CI must
+establish the pinned Storage ID/version behavior, actual Deno/Auth/DB/Storage
+success and denial cases, held-lock and delete/recreate conflicts, preservation
+and full generated-type parity. No claim applies to every hosted Storage
+configuration. Full automatic form/title/description wiring and the parked
+saved-only backup/restore/provenance-history contract remain separate release
+work; B2 does not make raw-v2 backups complete or authorize inference/deployment.
+
 ## Authenticated image access
 
 Owner views use `storage.from('wardrobe').download(path)` through the current user's SDK client, with a custom fetch adapter setting `cache:'no-store'` for data/storage/auth requests. Convert returned JPEG bytes to a Blob URL and revoke it on unmount/logout/account change. Coalesce identical in-flight `(ownerUid,imageId,variant)` downloads and cap concurrency at four. No Edge media function, public image endpoint or sharing URL is implemented. RLS checks current approved-account status and the reserved owner path on every new Storage request.

@@ -1,3 +1,4 @@
+import { FunctionsHttpError } from '@supabase/supabase-js';
 import type { AppClient } from '../data/client';
 import type { OwnerScope } from '../auth/session';
 import { isRecord } from '../domain/wardrobe';
@@ -8,6 +9,8 @@ import { validDescription } from '../domain/item-details';
 import { canonicalPrice } from '../i18n/format';
 import type { PreparedPhoto } from './process-jpeg';
 import { AppError, requireSuccess, throwIfAborted } from '../data/errors';
+import type { AnalyzedSaveAttempt } from '../domain/analyzed-save';
+import type { Json } from '../data/database.types';
 
 export type SaveStage = 'capture.reserving' | 'capture.uploading' | 'capture.finishing';
 export type SaveAttempt = {
@@ -132,4 +135,97 @@ export async function saveItem(
   checkScope();
   requireCheckedSuccess(committed.error);
   if (committed.data !== null && committed.data !== undefined) throw new AppError('error.conflict');
+}
+
+async function analyzedFinalizerFailure(error: unknown, signal: AbortSignal, checkScope: () => void): Promise<never> {
+  checkScope();
+  if (!(error instanceof FunctionsHttpError) || !(error.context instanceof Response)
+    || error.context.status !== 409 || error.context.headers.get('Content-Type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') {
+    throw new AppError('error.unavailable');
+  }
+  const response = error.context;
+  let value: unknown;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let onAbort: () => void = () => {};
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new AppError('error.unavailable'));
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    checkScope();
+    if (!response.body) throw new AppError('error.unavailable');
+    reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    let text = '', bytes = 0;
+    while (true) {
+      checkScope();
+      const chunk = await Promise.race([reader.read(), aborted]);
+      checkScope();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > 1024) throw new AppError('error.unavailable');
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    value = JSON.parse(text + decoder.decode());
+  } catch {
+    value = undefined;
+    checkScope();
+  } finally {
+    try {
+      if (reader) await Promise.race([reader.cancel(), aborted]);
+    } catch {
+      value = undefined;
+    } finally {
+      signal.removeEventListener('abort', onAbort);
+      reader?.releaseLock();
+    }
+  }
+  checkScope();
+  if (isRecord(value) && Object.keys(value).length === 1) {
+    if (value.code === 'CONFLICT') throw new AppError('error.conflict');
+    if (value.code === 'UPLOAD_INCOMPLETE') throw new AppError('error.uploadIncomplete');
+  }
+  throw new AppError('error.unavailable');
+}
+
+export async function saveAnalyzedItem(
+  client: AppClient, scope: OwnerScope, attempt: AnalyzedSaveAttempt, onStage: (stage: SaveStage) => void,
+): Promise<void> {
+  const checkScope = () => {
+    throwIfAborted(scope.signal);
+    if (attempt.ownerId !== scope.ownerId || attempt.epoch !== scope.epoch) throw new AppError('error.conflict');
+  };
+  checkScope();
+  const { photo } = attempt;
+  const claimFields: Record<string, Json> = {};
+  if (attempt.claim) for (const [field, entry] of Object.entries(attempt.claim.fields)) {
+    if (!entry) throw new AppError('error.conflict');
+    claimFields[field] = { kind: entry.kind, value: typeof entry.value === 'object' ? [...entry.value] : entry.value };
+  }
+  onStage('capture.reserving');
+  checkScope();
+  const reserved = await client.rpc('reserve_analyzed_item_save', {
+    p_item: { ...attempt.payload, id: attempt.itemId },
+    p_image: { id: attempt.imageId, main_bytes: photo.main.size, thumb_bytes: photo.thumb.size,
+      main_sha256: photo.mainSha256, thumb_sha256: photo.thumbSha256, width: photo.width, height: photo.height, alt_text: attempt.altText },
+    p_claim: attempt.claim === null ? null : { ...attempt.claim, fields: claimFields },
+  }).abortSignal(scope.signal);
+  checkScope();
+  requireCheckedSuccess(reserved.error);
+  const fingerprint = reservationFingerprint(reserved.data, attempt);
+  const prefix = `${scope.ownerId}/${attempt.itemId}/${attempt.imageId}`;
+  onStage('capture.uploading');
+  checkScope();
+  await ensureFile(client, `${prefix}/thumb.jpg`, photo.thumb, photo.thumbSha256, scope);
+  checkScope();
+  await ensureFile(client, `${prefix}/main.jpg`, photo.main, photo.mainSha256, scope);
+  checkScope();
+  onStage('capture.finishing');
+  checkScope();
+  const committed = await client.functions.invoke('finalize-analyzed-item', {
+    body: { itemId: attempt.itemId, imageId: attempt.imageId, fingerprint }, signal: scope.signal,
+  });
+  checkScope();
+  if (committed.error) await analyzedFinalizerFailure(committed.error, scope.signal, checkScope);
+  if (committed.data !== null && committed.data !== undefined && committed.data !== '') throw new AppError('error.conflict');
 }

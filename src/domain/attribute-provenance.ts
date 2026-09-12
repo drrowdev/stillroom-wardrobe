@@ -66,3 +66,7 @@ export function sameFieldProvenance(actual: unknown, expected: unknown): boolean
     throw error;
   }
 }
+
+export function analyzedSaveProvenance(kinds: Partial<Record<ProvenanceField, ProvenanceKind>>): FieldProvenance {
+  return parseFieldProvenance(Object.fromEntries(Object.entries(kinds).map(([field, kind]) => [field, { kind, revision: 1 }])));
+}

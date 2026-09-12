@@ -419,6 +419,66 @@ export async function privilegedLocalSql(sql) {
   return result.stdout.trim();
 }
 
+export async function withAnalyzedSaveFixtureLock(ownerId, itemId, imageId, resource, operation) {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  if (process.env.CI !== 'true' || process.env.GITHUB_ACTIONS !== 'true' || process.env.ALLOW_SECURITY_TESTS !== '1'
+    || !uuid.test(ownerId) || !uuid.test(itemId) || !uuid.test(imageId)
+    || !itemId.startsWith('b229') || !imageId.startsWith('b229')
+    || !['profile', 'item', 'image', 'objects'].includes(resource)) fail('REFUSED: B2 fixture lock boundary.');
+  await requireLocalContainer();
+  const target = resource === 'profile' ? `public.profiles where owner_id='${ownerId}'`
+    : resource === 'item' ? `public.items where owner_id='${ownerId}' and id='${itemId}'`
+      : resource === 'image' ? `public.item_images where owner_id='${ownerId}' and id='${imageId}'`
+        : `storage.objects where bucket_id='wardrobe' and name in ('${ownerId}/${itemId}/${imageId}/main.jpg','${ownerId}/${itemId}/${imageId}/thumb.jpg')`;
+  const child = spawn('docker', ['exec', '-i', DB_CONTAINER, 'psql', '-X', '--no-password',
+    '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-A'], {
+    cwd: ROOT, env: commandEnvironment(), shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let resolveReady, rejectReady, output = '', bytes = 0, failure, releasing = false, primaryError = false;
+  const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+  const reject = (message) => {
+    failure ??= new LocalBackendError(message, 1);
+    rejectReady(failure);
+    child.kill('SIGTERM');
+  };
+  const closed = new Promise((resolve) => {
+    child.once('close', (code) => {
+      if (!releasing) reject('FAIL: B2 lock child closed before release.');
+      resolve(code);
+    });
+    child.once('error', () => { reject('FAIL: B2 lock child failed.'); resolve(1); });
+  });
+  const timer = setTimeout(() => reject('FAIL: B2 fixture lock deadline.'), 15_000);
+  child.stdin.on('error', () => reject('FAIL: B2 fixture lock input.'));
+  child.stdout.on('data', (chunk) => {
+    bytes += chunk.length;
+    if (bytes > 4096) { reject('FAIL: B2 fixture lock output bound.'); return; }
+    output += chunk.toString();
+    if (output.trim() === 'B2_LOCK_HELD') resolveReady();
+  });
+  child.stderr.on('data', () => reject('FAIL: B2 fixture lock SQL.'));
+  try {
+    child.stdin.write(`begin; do $$ declare n integer; begin perform 1 from ${target} for update nowait;
+      get diagnostics n = row_count; if n<>${resource === 'objects' ? 2 : 1} then raise exception 'Fixture absent'; end if;
+      end $$;\n\\echo B2_LOCK_HELD\n`);
+    await ready;
+    await operation();
+    if (failure) throw failure;
+  } catch (error) {
+    primaryError = true;
+    throw error;
+  } finally {
+    releasing = true;
+    if (!child.stdin.writableEnded && !child.stdin.destroyed) child.stdin.end('rollback;\n');
+    const code = await closed;
+    clearTimeout(timer);
+    if (code !== 0 || failure) {
+      if (primaryError) console.error('FAIL: B2 fixture lock release; primary failure retained.');
+      else throw failure ?? new LocalBackendError('FAIL: B2 fixture lock release.', 1);
+    }
+  }
+}
+
 export async function readCredentialCache() {
   try {
     const stat = await lstat(CACHE_PATH);
@@ -439,15 +499,18 @@ export async function readCredentialCache() {
   }
 }
 
-export function assertAnalysisServeContract(config, directories, files, help) {
+export function assertAnalysisServeContract(config, directories, files, help, finalizerFiles) {
     const sections = [...config.matchAll(/^\[functions\.([^\]]+)\]/gm)].map((match) => match[1]);
-    if (JSON.stringify(sections) !== '["analyze-clothing"]'
-      || JSON.stringify(directories) !== '["analyze-clothing"]'
+    if (JSON.stringify(sections.sort()) !== '["analyze-clothing","finalize-analyzed-item"]'
+      || JSON.stringify([...directories].sort()) !== '["analyze-clothing","finalize-analyzed-item"]'
       || JSON.stringify([...files].sort()) !== JSON.stringify([
         'deno.d.ts', 'deno.json', 'google-cloud.ts', 'handler.ts', 'index.ts', 'protocol.ts',
       ])
+      || !Array.isArray(finalizerFiles)
+      || JSON.stringify([...finalizerFiles].sort()) !== '["deno.json","handler.ts","index.ts"]'
       || !/^\[edge_runtime\]\s*\nenabled = true\s*$/m.test(config)
       || !/^\[functions\.analyze-clothing\]\s*\nenabled = true\s*\nverify_jwt = true\s*$/m.test(config)
+      || !/^\[functions\.finalize-analyzed-item\]\s*\nenabled = true\s*\nverify_jwt = true\s*$/m.test(config)
       || help?.code !== 0 || !/^ *Serve all Functions locally\./m.test(help.stdout)
       || !/^ *supabase functions serve \[flags\] \[<Function name\.\.\.>\]\s*$/m.test(help.stdout)) {
       fail('REFUSED: the pinned analysis function serve contract does not match.');
@@ -655,8 +718,11 @@ export async function startAnalysisServer() {
     }
     const files = await readdir(path.join(directory, 'analyze-clothing'), { withFileTypes: true });
     if (files.some((entry) => !entry.isFile() || entry.isSymbolicLink())) fail('REFUSED: unexpected analysis source inventory.');
+    const finalizerFiles = await readdir(path.join(directory, 'finalize-analyzed-item'), { withFileTypes: true });
+    if (finalizerFiles.some((entry) => !entry.isFile() || entry.isSymbolicLink())) fail('REFUSED: unexpected finalizer source inventory.');
     assertAnalysisServeContract(await readFile(path.join(ROOT, 'supabase', 'config.toml'), 'utf8'),
-      entries.map((entry) => entry.name), files.map((entry) => entry.name), await cli(['functions', 'serve', '--help']));
+      entries.map((entry) => entry.name), files.map((entry) => entry.name), await cli(['functions', 'serve', '--help']),
+      finalizerFiles.map((entry) => entry.name));
     const require = createRequire(import.meta.url);
     const packagePath = require.resolve('supabase/package.json');
     const pkg = JSON.parse(await readFile(packagePath, 'utf8'));

@@ -57,6 +57,14 @@ async function main() {
     child.on('close', (value) => resolve(value ?? 2));
   });
   if (saveCode !== 0) { process.exitCode = saveCode; return; }
+  const analyzedSaveCode = await new Promise((resolve) => {
+    const child = spawn(process.execPath, [path.join(ROOT, 'tests', suite, 'analyzed-save.sessions.mjs')], {
+      cwd: ROOT, env, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'],
+    });
+    child.on('error', () => resolve(2));
+    child.on('close', (value) => resolve(value ?? 2));
+  });
+  if (analyzedSaveCode !== 0) { process.exitCode = analyzedSaveCode; return; }
   if (suite === 'integration') {
     const recoveryCode = await new Promise((resolve) => {
       const child = spawn(process.execPath, [
