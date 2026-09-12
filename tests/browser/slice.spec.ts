@@ -485,6 +485,7 @@ test('late selection cannot overwrite a replacement or manual edits and clears n
   await signIn(page);
   await page.getByRole('button', { name: 'Add your first piece' }).click();
   const before = backend.requests.length;
+  const proofsBefore = backend.statusProofs().length;
   await holdNextPhotoRead(page);
   const input = page.locator('input[type="file"]').first();
   await input.setInputFiles({ name: 'old.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
@@ -493,18 +494,34 @@ test('late selection cannot overwrite a replacement or manual edits and clears n
   await page.locator('#item-title').fill('Edited while preparing');
   await page.locator('#item-category').selectOption('bottom');
   const replacement = { name: 'same.jpg', mimeType: 'image/jpeg', buffer: backend.fixture };
+  const firstStatus = page.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url() === 'http://127.0.0.1:54321/rest/v1/rpc/ai_status');
   await input.setInputFiles(replacement);
   await expect(page.locator('.capture-photo img')).toBeVisible();
+  expect((await firstStatus).status()).toBe(200);
+  await expect(page.getByText(messages['aiC.checking'].en, { exact: true })).toHaveCount(0);
   const preview = await page.locator('.capture-photo img').getAttribute('src');
   await page.evaluate(() => (window as PhotoReadProbe).releasePhotoRead?.());
   await expect(page.locator('.capture-photo img')).toHaveAttribute('src', preview!);
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(page.locator('#item-title')).toHaveValue('Edited while preparing');
   await expect(page.locator('#item-category')).toHaveValue('bottom');
+  const secondStatus = page.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url() === 'http://127.0.0.1:54321/rest/v1/rpc/ai_status');
   await input.setInputFiles(replacement);
   await expect(page.locator('.capture-photo img')).toBeVisible();
   await expect(page.locator('.capture-photo img')).not.toHaveAttribute('src', preview!);
-  expect(backend.requests.slice(before)).toEqual([]);
+  expect((await secondStatus).status()).toBe(200);
+  await expect(page.getByText(messages['aiC.checking'].en, { exact: true })).toHaveCount(0);
+  expect(backend.requests.slice(before)).toEqual([
+    { method: 'POST', path: '/rest/v1/rpc/ai_status', owner: owners.a, ownerFilter: null },
+    { method: 'POST', path: '/rest/v1/rpc/ai_status', owner: owners.a, ownerFilter: null },
+  ]);
+  expect(backend.statusProofs().slice(proofsBefore)).toEqual([
+    { owner: owners.a, issuedBearer: true, emptyObject: true },
+    { owner: owners.a, issuedBearer: true, emptyObject: true },
+  ]);
+  expect(backend.items).toHaveLength(0); expect(backend.images).toHaveLength(0); expect(backend.files.size).toBe(0);
 });
 
 test('discard and owner logout clear preparation details and ignore late photo reads', async ({ page }) => {
@@ -550,8 +567,13 @@ test('discarding a prepared draft creates no library records', async ({ page }) 
   await signIn(page);
   await page.getByRole('button', { name: 'Add your first piece' }).click();
   const before = backend.requests.length;
+  const proofsBefore = backend.statusProofs().length;
+  const status = page.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url() === 'http://127.0.0.1:54321/rest/v1/rpc/ai_status');
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
   await expect(page.locator('.capture-photo img')).toBeVisible();
+  expect((await status).status()).toBe(200);
+  await expect(page.getByText(messages['aiC.checking'].en, { exact: true })).toHaveCount(0);
   await page.locator('#item-title').fill('Unsaved');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -561,8 +583,14 @@ test('discarding a prepared draft creates no library records', async ({ page }) 
   await page.getByRole('button', { name: 'Discard changes' }).click();
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   expect(backend.items).toHaveLength(0);
+  expect(backend.images).toHaveLength(0);
   expect(backend.files.size).toBe(0);
-  expect(backend.requests.slice(before)).toEqual([]);
+  expect(backend.requests.slice(before)).toEqual([
+    { method: 'POST', path: '/rest/v1/rpc/ai_status', owner: owners.a, ownerFilter: null },
+  ]);
+  expect(backend.statusProofs().slice(proofsBefore)).toEqual([
+    { owner: owners.a, issuedBearer: true, emptyObject: true },
+  ]);
 });
 
 test('retrying a failed commit reuses the same records and image bytes', async ({ page }, testInfo) => {

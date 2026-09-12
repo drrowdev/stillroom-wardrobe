@@ -4365,3 +4365,35 @@ and separate commit/publication permission precede fresh full CI, including
 App/unit/ordinary-owner/B1/B2/C/restoration/types/Apple/twelve-visual gates.
 Human/release and hosted/provider/paid/private/deployment gates remain pending;
 no generator repair or UX-copy work is authorized here.
+
+## I29 C browser-fixture repair candidate - 12 September 2026
+
+**Source-only, unstaged; execution and resulting-source review pending.**
+[Exact-462 evidence 5647388954](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647388954)
+records CI `34706266313`: lint/type/translations, 1579 unit tests, build/canary,
+secret/dependency checks passed; browser totals were 524 passed / 32 failed.
+Backend normal-owner/security/recovery/B1=12/B2=22/C=2/restoration/types/parity
+and Apple `34706266181` passed. Visual uploads were skipped; no twelve-image
+acceptance follows. The unchanged generator passed again; its earlier failure
+cause remains unknown. The 462 type artifact has not yet been independently
+content-reviewed; historical 7344 artifact verification is not new-head proof.
+
+[Own permission 5647465239](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647465239)
+adopts actual retained Anthropic / claude-opus-5 turn 16 AMEND conditions M1-M7.
+This seven-file candidate preserves legacy request records and adds separate
+issued-bearer/empty-object status proofs, exact preparation-trigger oracles,
+and response-listener timing outside delayed route handlers. The existing
+loopback server gains a separate optional analysis protocol; its actual bounded
+stream supplies the synthetic hash, never Playwright's body inspector.
+Storage guards/counters, production/UI/copy and all twelve capture bounds stay
+unchanged. Added canaries cover binary equality, corruption/truncation detection,
+byte limits, invalid input, expected rejection liveness and isolated cleanup.
+
+No local runtime/compiler/tests/install/probes or image review ran. The other
+27 packet paths and this document's original 294569 bytes remain frozen.
+Actual WebKit wire corruption, emptiness or truncation would remain a blocker,
+not permission for reconstructed bodies, skips or weaker checks. Coordinator
+manual refresh, independent source review and separate commit/publication
+permissions precede fresh exact-head CI/types/Apple/twelve-visual gates.
+Human/release/hosted/provider/paid/private/deployment gates remain separate;
+this is not the UX packet or a claim of full browser acceptance.

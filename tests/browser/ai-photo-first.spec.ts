@@ -1,10 +1,282 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open, lstat } from 'node:fs/promises';
 import path from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
+import { connect } from 'node:net';
 import { messages, type Language } from '../../src/i18n';
 import { aiFixture, addAiPhoto } from './ai-photo-first-support';
-import { signIn } from './mock-backend';
+import { analysisPath, mockBackend, owners, signIn } from './mock-backend';
+
+type AiFixture = Awaited<ReturnType<typeof aiFixture>>;
+const fixtureKey = 'sb_publishable_browser_fixture_only';
+const analysisHeaderNames = 'authorization, apikey, content-type, x-stillroom-request-id, x-stillroom-draft-id, x-stillroom-generation';
+function analysisIds(account: 'a' | 'b' = 'a') {
+  const id = () => `c329${account}000-${randomUUID().slice(9)}`;
+  return { requestId: id(), draftId: id(), generation: '1' };
+}
+function storageCounts(api: AiFixture) {
+  const { posts, preflights, rejected, receivedBytes, payloadBytes, peakBufferedBytes } = api.uploadWire;
+  return { posts, preflights, rejected, receivedBytes, payloadBytes, peakBufferedBytes };
+}
+function assertAnalysisBytes(input: { bytes: number; sha256: string }, expected: Buffer) {
+  expect(input.bytes).toBeGreaterThan(0);
+  expect(input.bytes).toBe(expected.length);
+  expect(input.sha256).toBe(createHash('sha256').update(expected).digest('hex'));
+}
+async function assertAnalysisClosed(page: Page, api: AiFixture) {
+  await page.close();
+  await expect.poll(() => ({ closed: api.uploadWire.closed, listening: api.uploadWire.listening,
+    connections: api.uploadWire.connections, active: api.analysisWire.active }))
+    .toEqual({ closed: true, listening: false, connections: 0, active: 0 });
+}
+type BrowserAnalysisKind = 'valid' | 'wrong-key' | 'wrong-bearer' | 'wrong-owner' | 'request-id' |
+  'draft-id' | 'generation' | 'method' | 'path' | 'query' | 'content-type' | 'empty' | 'oversized';
+async function sendBrowserAnalysis(page: Page, api: AiFixture, kind: BrowserAnalysisKind = 'valid',
+  bytes = Buffer.from(Array.from({ length: 4096 }, (_, index) => index % 256))) {
+  const ids = analysisIds();
+  return page.evaluate(async ({ authorization, ids, kind, bytes, route, key }) => {
+    const headers = { authorization: kind === 'wrong-bearer' ? 'Bearer not-issued' : authorization,
+      apikey: kind === 'wrong-key' ? 'wrong-fixture-key' : key,
+      'content-type': kind === 'content-type' ? 'text/plain' : 'image/jpeg',
+      'x-stillroom-request-id': kind === 'request-id' ? 'invalid' : kind === 'wrong-owner'
+        ? ids.requestId.replace('c329a000', 'c329b000') : ids.requestId,
+      'x-stillroom-draft-id': kind === 'draft-id' ? 'invalid' : ids.draftId,
+      'x-stillroom-generation': kind === 'generation' ? '0' : ids.generation };
+    const body = new Blob([kind === 'empty' ? new Uint8Array() : kind === 'oversized'
+      ? new Uint8Array(512001) : new Uint8Array(bytes)], { type: headers['content-type'] });
+    try {
+      const response = await fetch('http://127.0.0.1:54321' + route
+        + (kind === 'path' ? '-unapproved' : kind === 'query' ? '?unexpected=1' : ''), {
+        method: kind === 'method' ? 'PUT' : 'POST', headers, body, credentials: 'omit', signal: AbortSignal.timeout(5000),
+      });
+      return { status: response.status, outcome: 'response' };
+    } catch { return { status: null, outcome: 'network-rejection' }; }
+  }, { authorization: api.issuedWireAuthorization('a'), ids, kind, bytes: [...bytes], route: analysisPath, key: fixtureKey });
+}
+function analysisTarget(page: Page, api: AiFixture) {
+  const target = new URL(api.uploadWireUrl), origin = new URL(page.url()).origin;
+  if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1' || !target.port
+    || target.username || target.password || target.pathname !== '/' || target.search || target.hash
+    || origin !== `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5181}`) throw new Error('Fixture analysis target refused.');
+  target.pathname = analysisPath;
+  return { target, origin };
+}
+type DirectAnalysisKind = 'valid' | 'origin' | 'cookie' | 'empty-cookie' | 'key' | 'bearer' | 'owner' | 'request-id' |
+  'draft-owner' | 'generation' | 'method' | 'query' | 'content-type' | 'empty' | 'over-limit' |
+  'preflight' | 'preflight-headers' | 'preflight-method' | 'preflight-origin' | 'preflight-cookie';
+async function sendDirectAnalysis(page: Page, api: AiFixture, kind: DirectAnalysisKind) {
+  const { target, origin } = analysisTarget(page, api), ids = analysisIds();
+  if (kind === 'query') target.search = '?unexpected=1';
+  const preflight = kind.startsWith('preflight');
+  const headers: Record<string, string> = preflight ? {
+    origin: kind === 'preflight-origin' ? 'http://127.0.0.1:1' : origin,
+    'access-control-request-method': kind === 'preflight-method' ? 'PUT' : 'POST',
+    'access-control-request-headers': kind === 'preflight-headers' ? analysisHeaderNames + ', x-unapproved' : analysisHeaderNames,
+  } : {
+    origin: kind === 'origin' ? 'http://127.0.0.1:1' : origin, apikey: kind === 'key' ? 'wrong-key' : fixtureKey,
+    authorization: kind === 'bearer' ? 'Bearer not-issued' : api.issuedWireAuthorization('a'),
+    'content-type': kind === 'content-type' ? 'text/plain' : 'image/jpeg',
+    'x-stillroom-request-id': kind === 'request-id' ? 'invalid' : kind === 'owner'
+      ? ids.requestId.replace('c329a000', 'c329b000') : ids.requestId,
+    'x-stillroom-draft-id': kind === 'draft-owner' ? ids.draftId.replace('c329a000', 'c329b000') : ids.draftId,
+    'x-stillroom-generation': kind === 'generation' ? '2147483648' : ids.generation,
+  };
+  if (kind === 'cookie' || kind === 'preflight-cookie') headers.cookie = 'synthetic=1';
+  if (kind === 'empty-cookie') headers.cookie = '';
+  const body = Buffer.alloc(preflight || kind === 'empty' ? 0 : kind === 'over-limit' ? 512001 : 17, 197);
+  return new Promise<{ status: number | null; outcome: string; allowOrigin?: string; allowHeaders?: string; credentials?: string }>((resolve) => {
+    let outcome = 'incomplete', status: number | null = null;
+    let cors: { allowOrigin?: string; allowHeaders?: string; credentials?: string } = {};
+    const request = httpRequest(target, { method: preflight ? 'OPTIONS' : kind === 'method' ? 'PUT' : 'POST', headers, agent: false });
+    const timer = setTimeout(() => { outcome = 'timeout'; request.destroy(); }, 5000);
+    const fail = (error: NodeJS.ErrnoException) => {
+      if (outcome !== 'timeout') outcome = ['EPIPE', 'ECONNRESET'].includes(error.code ?? '') ? 'reset' : 'unexpected-error';
+      request.destroy();
+    };
+    request.on('error', fail);
+    request.on('response', (response) => {
+      status = response.statusCode ?? null;
+      const header = (key: string) => typeof response.headers[key] === 'string' ? response.headers[key] : undefined;
+      cors = { allowOrigin: header('access-control-allow-origin'), allowHeaders: header('access-control-allow-headers'),
+        credentials: header('access-control-allow-credentials') };
+      response.on('error', fail);
+      response.once('end', () => { outcome = 'response'; request.destroy(); });
+      response.resume();
+    });
+    let offset = 0;
+    const write = () => {
+      while (!request.destroyed && offset < body.length) {
+        const end = Math.min(offset + 16384, body.length), ready = request.write(body.subarray(offset, end));
+        offset = end;
+        if (!ready) return;
+      }
+      if (!request.destroyed) request.end();
+    };
+    request.on('drain', write);
+    request.once('close', () => { clearTimeout(timer); request.off('drain', write); resolve({ status, outcome, ...cors }); });
+    write();
+  });
+}
+
+test('analysis wire preserves actual browser binary bytes; length/hash oracle detects corruption and truncation', async ({ page }) => {
+  const api = await aiFixture(page), before = storageCounts(api);
+  try {
+    const sent = Buffer.from(Array.from({ length: 4096 }, (_, index) => index % 256));
+    expect(await sendBrowserAnalysis(page, api, 'valid', sent)).toEqual({ status: 200, outcome: 'response' });
+    expect(api.inputs).toHaveLength(1);
+    assertAnalysisBytes(api.inputs[0]!, sent);
+    const corrupted = Buffer.from(sent); corrupted[123] = corrupted[123]! ^ 1;
+    expect(() => assertAnalysisBytes(api.inputs[0]!, corrupted)).toThrow();
+    expect(() => assertAnalysisBytes(api.inputs[0]!, sent.subarray(1))).toThrow();
+    expect(api.results.get(api.inputs[0]!.requestId)?.imageSha256).toBe(api.inputs[0]!.sha256);
+    expect(api.analysisWire).toMatchObject({ posts: 1, callbacks: 1, receivedBytes: 4096, payloadBytes: 4096, rejected: 0 });
+    expect(storageCounts(api)).toEqual(before);
+    expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+  } finally { await assertAnalysisClosed(page, api); }
+});
+test('analysis browser wire admits exactly the one-byte and 512000-byte boundaries', async ({ page }) => {
+  const api = await aiFixture(page), before = storageCounts(api);
+  try {
+    for (const size of [1, 512000]) {
+      const sent = Buffer.alloc(size, 197);
+      expect(await sendBrowserAnalysis(page, api, 'valid', sent)).toEqual({ status: 200, outcome: 'response' });
+      assertAnalysisBytes(api.inputs.at(-1)!, sent);
+    }
+    expect(api.analysisWire).toMatchObject({ posts: 2, callbacks: 2, payloadBytes: 512001, rejected: 0 });
+    expect(api.inputs).toHaveLength(2);
+    expect(storageCounts(api)).toEqual(before);
+    expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+  } finally { await assertAnalysisClosed(page, api); }
+});
+test('status admission proves the issued bearer separately from legacy decoded-owner request records', async ({ page }) => {
+  const api = await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto('/'); await signIn(page); await expect(page.locator('#wardrobe-title')).toBeVisible();
+  const before = api.requests.length;
+  for (const kind of ['valid', 'forged', 'nonempty', 'array'] as const) {
+    const status = await page.evaluate(async ({ authorization, kind }) => {
+      const response = await fetch('http://127.0.0.1:54321/rest/v1/rpc/ai_status', {
+        method: 'POST', credentials: 'omit', signal: AbortSignal.timeout(5000),
+        headers: { authorization: kind === 'forged' ? authorization + '-unissued' : authorization,
+          apikey: 'sb_publishable_browser_fixture_only', 'content-type': 'application/json' },
+        body: JSON.stringify(kind === 'array' ? [] : kind === 'nonempty' ? { unexpected: true } : {}),
+      });
+      return response.status;
+    }, { authorization: api.issuedWireAuthorization('a'), kind });
+    expect(status).toBe(kind === 'valid' ? 200 : 401);
+  }
+  expect(api.requests.slice(before)).toEqual(Array.from({ length: 4 }, () => ({
+    method: 'POST', path: '/rest/v1/rpc/ai_status', owner: owners.a, ownerFilter: null,
+  })));
+  expect(api.statusProofs()).toEqual([
+    { owner: owners.a, issuedBearer: true, emptyObject: true },
+    { owner: null, issuedBearer: false, emptyObject: true },
+    { owner: owners.a, issuedBearer: true, emptyObject: false },
+    { owner: owners.a, issuedBearer: true, emptyObject: false },
+  ]);
+  expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+});
+for (const kind of ['wrong-key', 'wrong-bearer', 'wrong-owner', 'request-id', 'draft-id', 'generation',
+  'method', 'path', 'query', 'content-type', 'empty', 'oversized'] as const) {
+  test(`analysis source forwarding refuses ${kind} without synthetic analysis or storage traffic`, async ({ page }) => {
+    const api = await aiFixture(page), before = storageCounts(api);
+    try {
+      const result = await sendBrowserAnalysis(page, api, kind);
+      expect(result).toEqual({ status: kind === 'path' ? 404 : kind === 'empty' ? 400 : kind === 'oversized' ? 413 : 403,
+        outcome: 'response' });
+      expect(api.analysisWire.callbacks).toBe(0);
+      expect(api.analysisWire.peakBufferedBytes).toBeLessThanOrEqual(512000);
+      if (!['empty', 'oversized'].includes(kind)) expect(api.analysisWire.forwarded).toBe(0);
+      expect(api.inputs).toHaveLength(0); expect(api.results.size).toBe(0);
+      expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+      expect(storageCounts(api)).toEqual(before);
+      expect(api.uploadWire.listening).toBe(true);
+    } finally { await assertAnalysisClosed(page, api); }
+  });
+}
+test('analysis receiver independently refuses invalid credentials/envelopes and bounds streamed bytes', async ({ page }) => {
+  const api = await aiFixture(page), before = storageCounts(api);
+  try {
+    const preflight = await sendDirectAnalysis(page, api, 'preflight');
+    expect(preflight).toEqual({ status: 204, outcome: 'response', allowOrigin: new URL(page.url()).origin,
+      allowHeaders: analysisHeaderNames, credentials: undefined });
+    for (const kind of ['origin', 'cookie', 'empty-cookie', 'key', 'bearer', 'owner', 'request-id', 'draft-owner', 'generation', 'method',
+      'query', 'content-type', 'empty', 'over-limit', 'preflight-headers', 'preflight-method', 'preflight-origin', 'preflight-cookie'] as const) {
+      const result = await sendDirectAnalysis(page, api, kind);
+      expect(result.outcome).toBe('response');
+      expect(result.status).toBe(kind === 'empty' ? 400 : kind === 'over-limit' ? 413 : 403);
+      expect(api.uploadWire.listening).toBe(true);
+    }
+    expect(api.analysisWire).toMatchObject({ callbacks: 0, rejected: 18, preflights: 1, timedOut: 0, active: 0 });
+    expect(api.analysisWire.receivedBytes).toBeGreaterThan(512000);
+    expect(api.analysisWire.peakBufferedBytes).toBeLessThanOrEqual(512000);
+    expect(api.inputs).toHaveLength(0); expect(api.results.size).toBe(0);
+    expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+    expect(storageCounts(api)).toEqual(before);
+  } finally { await assertAnalysisClosed(page, api); }
+});
+test('expected analysis 403/502/504 responses leave the shared storage receiver alive', async ({ page }) => {
+  const api = await aiFixture(page), before = storageCounts(api);
+  try {
+    api.consent.set(owners.a, false);
+    expect((await sendBrowserAnalysis(page, api)).status).toBe(403);
+    api.consent.set(owners.a, true); api.mode('failed');
+    expect((await sendBrowserAnalysis(page, api)).status).toBe(502);
+    api.mode('timeout');
+    expect((await sendBrowserAnalysis(page, api)).status).toBe(504);
+    api.mode('ready');
+    expect((await sendBrowserAnalysis(page, api)).status).toBe(200);
+    expect(api.analysisWire).toMatchObject({ posts: 4, callbacks: 4, rejected: 0, timedOut: 0 });
+    expect(api.uploadWire.listening).toBe(true);
+    expect(storageCounts(api)).toEqual(before);
+    expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+  } finally { await assertAnalysisClosed(page, api); }
+});
+for (const mode of ['parser-error', 'truncated', 'stalled'] as const) {
+  test(`isolated analysis ${mode} never invokes the callback and cleans its receiver`, async ({ page }) => {
+    const api = await aiFixture(page), { target, origin } = analysisTarget(page, api), ids = analysisIds();
+    try {
+      const started = performance.now();
+      const outcome = await new Promise<string>((resolve) => {
+        let result = 'incomplete';
+        const socket = connect({ host: '127.0.0.1', port: Number(target.port) });
+        const timer = setTimeout(() => { result = 'watchdog'; socket.destroy(); }, 6500);
+        socket.on('error', (error: NodeJS.ErrnoException) => {
+          result = ['EPIPE', 'ECONNRESET'].includes(error.code ?? '') ? 'reset' : 'unexpected-error';
+        });
+        socket.on('data', () => { result = 'response'; });
+        socket.once('close', () => { clearTimeout(timer); resolve(result); });
+        socket.once('connect', () => {
+          if (mode === 'parser-error') { socket.end('INVALID HTTP\r\n\r\n'); return; }
+          const headers = `POST ${analysisPath} HTTP/1.1\r\nHost: ${target.host}\r\nOrigin: ${origin}\r\n` +
+            `Authorization: ${api.issuedWireAuthorization('a')}\r\nApikey: ${fixtureKey}\r\nContent-Type: image/jpeg\r\n` +
+            `X-Stillroom-Request-Id: ${ids.requestId}\r\nX-Stillroom-Draft-Id: ${ids.draftId}\r\n` +
+            `X-Stillroom-Generation: 1\r\nContent-Length: 100\r\n\r\n`;
+          if (mode === 'truncated') socket.end(headers + 'partial');
+          else socket.write(headers);
+        });
+      });
+      expect(['response', 'reset', 'incomplete']).toContain(outcome);
+      expect(api.analysisWire.callbacks).toBe(0);
+      expect(api.results.size).toBe(0); expect(api.inputs).toHaveLength(0);
+      expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+      if (mode === 'stalled') {
+        expect(performance.now() - started).toBeGreaterThanOrEqual(4500);
+        expect(performance.now() - started).toBeLessThan(6500);
+        if (api.analysisWire.timedOut === 0) {
+          // The unchanged HTTP server deadline can win the race with the analysis timer.
+          await expect.poll(() => api.uploadWire.closed).toBe(true);
+          expect(api.uploadWire.rejected).toBe(1);
+        } else expect(api.analysisWire.timedOut).toBe(1);
+      }
+      if (mode === 'parser-error') {
+        await expect.poll(() => api.uploadWire.closed).toBe(true);
+        expect(api.uploadWire.rejected).toBe(1);
+      } else expect(api.analysisWire.rejected).toBe(1);
+    } finally { await assertAnalysisClosed(page, api); }
+  });
+}
 
 for (const language of ['en', 'fi', 'sv'] as const) {
   test(`photo-first ${language}: one call, editable facts, unknown local text and explicit trusted Save`, async ({ page }) => {

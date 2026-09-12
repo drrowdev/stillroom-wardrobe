@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Page, type Route, type Request as PlaywrightRequest, type Response as PlaywrightResponse } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open, readdir, lstat } from 'node:fs/promises';
 import path from 'node:path';
@@ -78,7 +78,7 @@ for (const action of ['save', 'reconcile'] as const) {
     await expect(page.getByText(messages['aiC.disabled'].en, { exact: true })).toBeVisible();
     await page.locator('#profile-display_name').fill('My slow-operation edits');
     let writes = 0;
-    page.on('request', (request) => { if (request.url().endsWith('/ai_set_consent')) writes++; });
+    const countWrite = (request: PlaywrightRequest) => { if (request.url().endsWith('/ai_set_consent')) writes++; };
     if (action === 'reconcile') {
       await page.route('**/rest/v1/rpc/ai_set_consent', async (route) => {
         api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
@@ -88,7 +88,11 @@ for (const action of ['save', 'reconcile'] as const) {
       await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
       await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
     } else await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
-    const timings: Array<{ path: string; start: number; elapsed?: number }> = [];
+    const timings = new Map<PlaywrightRequest, { path: string; start: number; elapsed?: number; status?: number }>();
+    const recordResponse = (response: PlaywrightResponse) => {
+      const timing = timings.get(response.request());
+      if (timing) { timing.status = response.status(); timing.elapsed = performance.now() - timing.start; }
+    };
     const delay = action === 'save' ? 1500 : 2800;
     const statusLimit = action === 'save' ? 2 : 1;
     let statuses = 0;
@@ -96,41 +100,49 @@ for (const action of ['save', 'reconcile'] as const) {
       if (route.request().method() === 'OPTIONS') { await route.fallback(); return; }
       const pathname = new URL(route.request().url()).pathname;
       if (pathname.endsWith('/ai_status') && ++statuses > statusLimit) { await route.fallback(); return; }
-      const timing: typeof timings[number] = { path: pathname, start: performance.now() };
-      timings.push(timing);
+      timings.set(route.request(), { path: pathname, start: performance.now() });
       await new Promise((resolve) => setTimeout(resolve, delay));
       await route.fallback();
-      const response = await route.request().response();
-      expect(response?.status()).toBe(200);
-      timing.elapsed = performance.now() - timing.start;
+      return;
     };
     await page.route('**/rest/v1/rpc/ai_status', delayCall);
     if (action === 'save') await page.route('**/rest/v1/rpc/ai_set_consent', delayCall);
     await page.route(profileUrl, delayCall);
-    const writesBefore = writes, started = performance.now();
-    await page.getByRole('button', { name: messages[action === 'save' ? 'aiC.enable' : 'aiC.checkConsent'].en, exact: true }).click();
-    await expect(page.getByText(messages['aiC.enabled'].en, { exact: true })).toBeVisible({ timeout: 12000 });
-    expect(performance.now() - started).toBeGreaterThan(5000);
-    expect(performance.now() - started).toBeLessThan(20000);
-    expect(timings).toHaveLength(action === 'save' ? 4 : 2);
-    await expect.poll(() => timings.every((timing) => timing.elapsed !== undefined)).toBe(true);
-    for (const timing of timings) {
-      expect(timing.elapsed).toBeGreaterThanOrEqual(delay - 50);
-      expect(timing.elapsed).toBeLessThan(5000);
-    }
-    expect(timings.map((timing) => timing.path)).toEqual(action === 'save'
-      ? ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/ai_set_consent', '/rest/v1/rpc/ai_status', '/rest/v1/profiles']
-      : ['/rest/v1/rpc/ai_status', '/rest/v1/profiles']);
-    expect(writes - writesBefore).toBe(action === 'save' ? 1 : 0);
-    await page.unroute(profileUrl, delayCall);
-    await expect(page.locator('#profile-display_name')).toHaveValue('My slow-operation edits');
-    await page.getByRole('button', { name: messages['settings.saveProfile'].en, exact: true }).click();
-    if (action === 'save') {
-      await expect(page.getByText(messages['settings.profileSaved'].en, { exact: true })).toBeVisible();
-      expect(api.profiles[owners.a]).toMatchObject({ version: 3, display_name: 'My slow-operation edits', ui_language: 'en' });
-    } else {
-      await expect(page.getByRole('button', { name: messages['settings.keepEdits'].en, exact: true })).toBeVisible();
-      expect(api.profiles[owners.a]).toMatchObject({ version: 2, display_name: 'Alex', ui_language: 'en' });
+    page.on('response', recordResponse);
+    page.on('request', countWrite);
+    try {
+      const writesBefore = writes, started = performance.now();
+      await page.getByRole('button', { name: messages[action === 'save' ? 'aiC.enable' : 'aiC.checkConsent'].en, exact: true }).click();
+      await expect(page.getByText(messages['aiC.enabled'].en, { exact: true })).toBeVisible({ timeout: 12000 });
+      expect(performance.now() - started).toBeGreaterThan(5000);
+      expect(performance.now() - started).toBeLessThan(20000);
+      expect(timings.size).toBe(action === 'save' ? 4 : 2);
+      await expect.poll(() => [...timings.values()].every((timing) => timing.elapsed !== undefined)).toBe(true);
+      for (const timing of timings.values()) {
+        expect(timing.status).toBe(200);
+        expect(timing.elapsed).toBeGreaterThanOrEqual(delay - 50);
+        expect(timing.elapsed).toBeLessThan(5000);
+      }
+      expect([...timings.values()].map((timing) => timing.path)).toEqual(action === 'save'
+        ? ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/ai_set_consent', '/rest/v1/rpc/ai_status', '/rest/v1/profiles']
+        : ['/rest/v1/rpc/ai_status', '/rest/v1/profiles']);
+      expect(writes - writesBefore).toBe(action === 'save' ? 1 : 0);
+      await page.unroute(profileUrl, delayCall);
+      await expect(page.locator('#profile-display_name')).toHaveValue('My slow-operation edits');
+      await page.getByRole('button', { name: messages['settings.saveProfile'].en, exact: true }).click();
+      if (action === 'save') {
+        await expect(page.getByText(messages['settings.profileSaved'].en, { exact: true })).toBeVisible();
+        expect(api.profiles[owners.a]).toMatchObject({ version: 3, display_name: 'My slow-operation edits', ui_language: 'en' });
+      } else {
+        await expect(page.getByRole('button', { name: messages['settings.keepEdits'].en, exact: true })).toBeVisible();
+        expect(api.profiles[owners.a]).toMatchObject({ version: 2, display_name: 'Alex', ui_language: 'en' });
+      }
+    } finally {
+      page.off('response', recordResponse);
+      page.off('request', countWrite);
+      await page.unroute(profileUrl, delayCall);
+      await page.unroute('**/rest/v1/rpc/ai_status', delayCall);
+      if (action === 'save') await page.unroute('**/rest/v1/rpc/ai_set_consent', delayCall);
     }
   });
 }

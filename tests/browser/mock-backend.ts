@@ -1,5 +1,5 @@
 // Browser contract fixtures only. Real Auth/Storage authorization is a separate blocking suite.
-import type { Page } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
@@ -26,6 +26,11 @@ const storagePrefix = '/storage/v1/object/wardrobe/';
 const fixtureKey = 'sb_publishable_browser_fixture_only';
 const uploadHeaders = ['authorization', 'apikey', 'content-type', 'x-upsert', 'x-client-info'];
 const uploadLimit = 1024 * 1024;
+export const analysisPath = '/functions/v1/analyze-clothing';
+const analysisHeaders = ['authorization', 'apikey', 'content-type', 'x-stillroom-request-id', 'x-stillroom-draft-id', 'x-stillroom-generation'];
+export type AnalysisInput = { owner: string; requestId: string; draftId: string; generation: number; bytes: Buffer };
+type AnalysisHandler = (input: AnalysisInput) => { body: JsonRow; status: number };
+type StatusProof = { owner: string | null; issuedBearer: boolean; emptyObject: boolean };
 
 export const wireStages = [
   'none', 'route-auth', 'route-owner', 'route-existing', 'route-reservation-credentials',
@@ -52,7 +57,7 @@ type WireDiagnostic = {
 };
 
 async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], files: Map<string, Buffer>, tokens: Map<string, string>,
-  diagnostic?: WireDiagnostic) {
+  diagnostic?: WireDiagnostic, analysis?: AnalysisHandler) {
   const port = Number(process.env.PLAYWRIGHT_PORT ?? 5181);
   if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid browser test port.');
   const origin = `http://127.0.0.1:${port}`;
@@ -68,6 +73,32 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     get listening() { return server.listening; },
     get connections() { return sockets.size; },
     closed: false, posts: 0, preflights: 0, rejected: 0, receivedBytes: 0, payloadBytes: 0, peakBufferedBytes: 0,
+  };
+  const analysisState = { forwarded: 0, routeRejected: 0, posts: 0, preflights: 0, rejected: 0, callbacks: 0,
+    receivedBytes: 0, payloadBytes: 0, peakBufferedBytes: 0, active: 0, timedOut: 0 };
+  const analysisCors = {
+    'access-control-allow-origin': origin, 'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-headers': analysisHeaders.join(', '), vary: 'Origin',
+  };
+  const analysisPreflightAllowed = (headers: IncomingHttpHeaders) => {
+    const names = typeof headers['access-control-request-headers'] === 'string'
+      ? headers['access-control-request-headers'].split(',').map((name) => name.trim().toLowerCase()).sort() : [];
+    return headers.origin === origin && headers.cookie === undefined && headers['access-control-request-method'] === 'POST'
+      && sameValue(names, [...analysisHeaders].sort());
+  };
+  const analysisIdentity = (headers: IncomingHttpHeaders) => {
+    const owner = tokens.get(headers.authorization ?? '');
+    const prefix = owner === owners.a ? 'c329a000-' : owner === owners.b ? 'c329b000-' : null;
+    const requestId = headers['x-stillroom-request-id'], draftId = headers['x-stillroom-draft-id'];
+    const generation = headers['x-stillroom-generation'];
+    const id = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    if (!owner || !prefix || headers.origin !== origin || headers.cookie !== undefined || headers.apikey !== fixtureKey
+      || headers['content-type'] !== 'image/jpeg'
+      || typeof requestId !== 'string' || !id.test(requestId) || !requestId.startsWith(prefix)
+      || typeof draftId !== 'string' || !id.test(draftId) || !draftId.startsWith(prefix)
+      || typeof generation !== 'string' || !/^[1-9][0-9]{0,9}$/.test(generation)
+      || Number(generation) > 2147483647) return null;
+    return { owner, requestId, draftId, generation: Number(generation) };
   };
   const reservedOwner = (pathname: string) => {
     if (!pathname.startsWith(storagePrefix)) return undefined;
@@ -95,6 +126,82 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     }
   };
   const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, connectionsCheckingInterval: 1000 }, (request, response) => {
+    if (analysis && (request.url ?? '').split('?')[0] === analysisPath) {
+      analysisState.active++;
+      let terminal = false;
+      const timer = setTimeout(() => {
+        analysisState.timedOut++;
+        reject(408);
+      }, 5000);
+      const cleanup = () => {
+        clearTimeout(timer);
+        request.off('data', onData);
+        request.off('end', onEnd);
+        request.off('aborted', onAborted);
+        request.off('error', onError);
+      };
+      const finish = (body: JsonRow, status: number, destroyRequest = false) => {
+        if (terminal) return;
+        terminal = true;
+        clearTimeout(timer);
+        analysisState.active--;
+        if (!response.destroyed) {
+          response.writeHead(status, { ...analysisCors, 'content-type': 'application/json' });
+          response.end(JSON.stringify(body), () => { if (destroyRequest) request.destroy(); });
+        } else request.destroy();
+      };
+      const reject = (status: number) => {
+        if (terminal) return;
+        analysisState.rejected++;
+        finish({ code: 'INVALID_INPUT' }, status, true);
+      };
+      const onAborted = () => reject(400);
+      const onError = () => reject(400);
+      const chunks: Buffer[] = [];
+      let length = 0;
+      const onData = (chunk: Buffer) => {
+        if (terminal) return;
+        analysisState.receivedBytes += chunk.length;
+        if (chunk.length > 512000 - length) { reject(413); return; }
+        length += chunk.length;
+        chunks.push(chunk);
+        analysisState.peakBufferedBytes = Math.max(analysisState.peakBufferedBytes, length);
+      };
+      const identity = analysisIdentity(request.headers);
+      const onEnd = () => {
+        if (terminal) return;
+        if (!identity || !request.complete || length < 1 || closing) { reject(400); return; }
+        const bytes = Buffer.concat(chunks, length);
+        try {
+          analysisState.callbacks++;
+          const reply = analysis({ ...identity, bytes });
+          analysisState.payloadBytes += length;
+          finish(reply.body, reply.status);
+        } catch {
+          reject(500);
+        }
+      };
+      request.once('close', () => {
+        if (!terminal) reject(400);
+        cleanup();
+      });
+      request.on('error', onError);
+      request.once('aborted', onAborted);
+      const address = server.address();
+      if (request.url !== analysisPath || !address || typeof address === 'string'
+        || request.headers.host !== `127.0.0.1:${address.port}`) { reject(403); return; }
+      if (request.method === 'OPTIONS') {
+        if (!analysisPreflightAllowed(request.headers)) { reject(403); return; }
+        analysisState.preflights++;
+        finish({}, 204);
+        return;
+      }
+      if (request.method !== 'POST' || !identity) { reject(403); return; }
+      analysisState.posts++;
+      request.on('data', onData);
+      request.once('end', onEnd);
+      return;
+    }
     if (diagnostic && request.method === 'POST') diagnostic.receiverPosts++;
     const facts: WireReceiverFacts | null = diagnostic ? {
       fieldFailure: null, boundaryLength: null, bodyTrailer: null, parsedFileSize: null, bodyHighByte: null,
@@ -223,7 +330,8 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     if (page.isClosed() || closing) throw new Error('Fixture page closed.');
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Fixture receiver unavailable.');
-    return { url: `http://127.0.0.1:${address.port}`, state, cors, reservedOwner, preflightAllowed, credentialsAllowed, close };
+    return { url: `http://127.0.0.1:${address.port}`, state, cors, reservedOwner, preflightAllowed, credentialsAllowed, close,
+      analysisState, analysisCors, analysisPreflightAllowed, analysisIdentity };
   } catch {
     await close();
     throw new Error('Fixture receiver unavailable.');
@@ -236,6 +344,7 @@ export type MockOptions = {
   recoverStatus?: number; updateStatus?: number; logoutStatus?: number; recoveryUser?: string;
   wireDiagnostic?: WireBackend;
   aiResults?: Map<string, import('../../src/domain/ai-analysis').AiResult>;
+  analysis?: AnalysisHandler;
 };
 export function recoveryHash(owner = owners.a, seconds = 3600): string {
   const expires = Math.floor(Date.now() / 1000) + seconds;
@@ -280,17 +389,46 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   let commitFailed = false, analyzedReserveReplyLost = false;
   const fixture = await readFile(new URL('../../blueprint/validation/fixture.jpg', import.meta.url));
   const tokens = new Map<string, string>();
+  const statusProofs: StatusProof[] = [];
+  const admitAiStatus = (request: Request) => {
+    const url = new URL(request.url());
+    if (url.origin !== 'http://127.0.0.1:54321' || url.pathname !== '/rest/v1/rpc/ai_status') return false;
+    const owner = tokens.get(request.headers().authorization ?? '') ?? null;
+    let emptyObject = false;
+    try {
+      const body: unknown = request.postDataJSON();
+      emptyObject = isRecord(body) && Object.keys(body).length === 0;
+    } catch { /* Malformed status JSON is recorded as a failed proof and refused. */ }
+    const issuedBearer = owner === owners.a || owner === owners.b;
+    statusProofs.push({ owner, issuedBearer, emptyObject });
+    return request.method() === 'POST' && !url.search && issuedBearer && emptyObject;
+  };
   const wireDiagnostic: WireDiagnostic | undefined = options.wireDiagnostic ? {
     backend: options.wireDiagnostic, routePosts: 0, receiverPosts: 0, success: 0, routeRejected: 0, receiverRejected: 0,
     routeStage: 'none', receiverStage: 'none',
     rejections: Object.fromEntries(wireStages.map((stage) => [stage, 0])) as Record<WireStage, number>,
     receiverFacts: null,
   } : undefined;
-  const receiver = await uploadReceiver(page, items, images, files, tokens, wireDiagnostic);
+  const receiver = await uploadReceiver(page, items, images, files, tokens, wireDiagnostic, options.analysis);
   await page.route('http://127.0.0.1:54321/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
+    if (options.analysis && url.pathname === analysisPath) {
+      const headers = await request.allHeaders();
+      const validSource = url.origin === 'http://127.0.0.1:54321' && !url.search;
+      const valid = validSource && (method === 'OPTIONS' ? receiver.analysisPreflightAllowed(headers)
+        : method === 'POST' && receiver.analysisIdentity(headers) !== null);
+      if (!valid) {
+        receiver.analysisState.routeRejected++;
+        await route.fulfill({ status: 403, json: { code: 'INVALID_INPUT' }, headers: receiver.analysisCors });
+        return;
+      }
+      receiver.analysisState.forwarded++;
+      try { await route.continue({ url: receiver.url + analysisPath }); }
+      catch { throw new Error('Fixture analysis continuation failed.'); }
+      return;
+    }
     const wirePost = method === 'POST' && url.pathname.startsWith(storagePrefix);
     if (wireDiagnostic && wirePost) { wireDiagnostic.routePosts++; wireDiagnostic.routeStage = 'none'; }
     let owner: string | null = null;
@@ -351,6 +489,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       await json(profile); return;
     }
     if (url.pathname === '/rest/v1/rpc/ai_status') {
+      if (!admitAiStatus(request)) { await json({ code: 'UNAUTHENTICATED' }, 401); return; }
       await json({ code: 'UNCONFIGURED', period: new Date().toISOString().slice(0, 7), serverTimeMs: Date.now(),
         consent: { enabled: false, noticeRevision: null, consentedAt: null, profileVersion: String(profiles[owner]!.version) },
         policy: null, usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } }); return;
@@ -560,6 +699,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
   return { profiles, preferences, items, images, files, requests, fixture, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
+    analysisWire: receiver.analysisState, admitAiStatus,
+    statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),
     seedSavedItem(account: 'a' | 'b' = 'a', title = 'Olive overshirt') {
       const owner = owners[account], id = randomUUID(), imageId = randomUUID(), now = '2026-09-09T00:00:00Z';
       const item = { ...itemDefaults(), id, owner_id: owner, title, category: 'top', version: 1,

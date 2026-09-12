@@ -11,13 +11,33 @@ export async function manualEntry(page: Page) {
 }
 export async function aiFixture(page: Page, language: Language = 'en', enabled = true, lost?: 'reservation' | 'finalizer') {
   const results = new Map<string, AiResult>();
-  const api = await mockBackend(page, { initialLanguage: language, aiResults: results,
-    loseAnalyzedReserveReplyOnce: lost === 'reservation', loseFinalizeReplyOnce: lost === 'finalizer' });
   const consent = new Map<string, boolean>([[owners.a, enabled], [owners.b, false]]);
   const calls: Array<{ route: string; body: unknown }> = [];
+  const inputs: Array<{ owner: string; requestId: string; bytes: number; sha256: string }> = [];
   const failed = new Set<string>();
   let analysisMode: 'ready' | 'pending' | 'timeout' | 'unclear' | 'failed' = 'ready';
   let ttl = 3600000;
+  const accounting = { basis: 'estimated', amountMicro: '413', currency: 'USD' };
+  const api = await mockBackend(page, { initialLanguage: language, aiResults: results,
+    loseAnalyzedReserveReplyOnce: lost === 'reservation', loseFinalizeReplyOnce: lost === 'finalizer',
+    analysis: ({ owner, requestId, draftId, generation, bytes }) => {
+      if (!consent.get(owner)) return { body: { code: 'CONSENT_REQUIRED' }, status: 403 };
+      const imageSha256 = createHash('sha256').update(bytes).digest('hex');
+      inputs.push({ owner, requestId, bytes: bytes.length, sha256: imageSha256 });
+      calls.push({ route: '/functions/v1/analyze-clothing', body: { requestId } });
+      if (analysisMode === 'failed') {
+        failed.add(requestId);
+        return { body: { code: 'ANALYSIS_FAILED' }, status: 502 };
+      }
+      const result: AiResult = { schemaVersion: 1, requestId, draftId, generation, imageSha256,
+        modelId: 'gemini-3.8-flash', promptVersion: 1, createdAtMs: Date.now() - 1, expiresAtMs: Date.now() + ttl,
+        facts: analysisMode === 'unclear' ? { outcome: 'unclear', fields: {} }
+          : { outcome: 'ready', fields: { category: 'top', colours: ['green'], formality: 0, material: 'Cotton' } } };
+      results.set(requestId, result);
+      if (analysisMode === 'timeout') return { body: { code: 'TIMEOUT' }, status: 504 };
+      return { body: { code: 'OK', status: analysisMode === 'pending' ? 'dispatched' : 'ready',
+        result: analysisMode === 'pending' ? null : result, accounting }, status: analysisMode === 'pending' ? 202 : 200 };
+    } });
   await page.addInitScript(() => {
     const native = crypto.randomUUID.bind(crypto);
     crypto.randomUUID = () => {
@@ -25,7 +45,7 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
       return `c329a000-${id.slice(9, 13)}-${id.slice(14, 18)}-${id.slice(19, 23)}-${id.slice(24)}`;
     };
   });
-  await page.route(/\/(?:rest\/v1\/rpc\/ai_(?:status|set_consent|analysis_status|request_control)|functions\/v1\/analyze-clothing)$/, async (route) => {
+  await page.route(/\/rest\/v1\/rpc\/ai_(?:status|set_consent|analysis_status|request_control)$/, async (route) => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (request.method() === 'OPTIONS') { await route.fallback(); return; }
     const bearer = request.headers().authorization;
@@ -37,6 +57,7 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
     const profile = api.profiles[owner]!;
     const json = (body: unknown, status = 200) => route.fulfill({ json: body, status });
     if (path.endsWith('/ai_status')) {
+      if (!api.admitAiStatus(request)) { await json({ code: 'UNAUTHENTICATED' }, 401); return; }
       calls.push({ route: path, body: {} });
       await json({ code: consent.get(owner) ? 'OK' : 'CONSENT_REQUIRED', period: new Date().toISOString().slice(0, 7),
         serverTimeMs: Date.now(), consent: { enabled: consent.get(owner), noticeRevision: consent.get(owner) ? 1 : null,
@@ -54,44 +75,24 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
       consent.set(owner, body.p_enabled); profile.version = Number(profile.version) + 1;
       await json({ code: 'OK', profileVersion: String(profile.version) }); return;
     }
-    const accounting = { basis: 'estimated', amountMicro: '413', currency: 'USD' };
-    if (path.endsWith('/analyze-clothing')) {
-      if (!consent.get(owner)) { await json({ code: 'CONSENT_REQUIRED' }, 403); return; }
-      const bytes = request.postDataBuffer();
-      expect(bytes !== null && bytes.length > 0 && bytes.length <= 512000).toBe(true);
-      const requestId = request.headers()['x-stillroom-request-id']!;
-      calls.push({ route: path, body: { requestId } });
-      if (analysisMode === 'failed') {
-        failed.add(requestId);
-        await json({ code: 'ANALYSIS_FAILED' }, 502); return;
-      }
-      const result: AiResult = { schemaVersion: 1, requestId, draftId: request.headers()['x-stillroom-draft-id']!,
-        generation: Number(request.headers()['x-stillroom-generation']), imageSha256: createHash('sha256').update(bytes!).digest('hex'),
-        modelId: 'gemini-3.8-flash', promptVersion: 1, createdAtMs: Date.now() - 1, expiresAtMs: Date.now() + ttl,
-        facts: analysisMode === 'unclear' ? { outcome: 'unclear', fields: {} }
-          : { outcome: 'ready', fields: { category: 'top', colours: ['green'], formality: 0, material: 'Cotton' } } };
-      results.set(requestId, result);
-      if (analysisMode === 'timeout') await json({ code: 'TIMEOUT' }, 504);
-      else await json({ code: 'OK', status: analysisMode === 'pending' ? 'dispatched' : 'ready',
-        result: analysisMode === 'pending' ? null : result, accounting }, analysisMode === 'pending' ? 202 : 200);
-      return;
-    }
     const body = request.postDataJSON() as { p_request_id: string; p_action?: string };
     calls.push({ route: path, body });
+    if (path.endsWith('/ai_request_control') && body.p_action !== 'discard') {
+      await json({ code: 'INVALID_INPUT' }, 400); return;
+    }
     const result = results.get(body.p_request_id);
     if (failed.has(body.p_request_id)) {
-      if (path.endsWith('/ai_request_control')) expect(body.p_action).toBe('discard');
       await json({ code: 'TERMINAL', reason: 'FAILED' }); return;
     }
     if (path.endsWith('/ai_request_control')) {
-      expect(body.p_action).toBe('discard'); results.delete(body.p_request_id);
+      results.delete(body.p_request_id);
       await json({ code: 'TERMINAL', reason: 'DISCARDED' }); return;
     }
     await json(result ? { code: 'OK', status: 'ready', result, accounting } : { code: 'UNAVAILABLE' });
   });
   await page.goto('/'); await signIn(page);
   await expect(page.locator('#wardrobe-title')).toBeVisible();
-  return { ...api, results, calls, consent, mode: (mode: typeof analysisMode) => { analysisMode = mode; },
+  return { ...api, results, calls, inputs, consent, mode: (mode: typeof analysisMode) => { analysisMode = mode; },
     ttl: (milliseconds: number) => { if (milliseconds < 1 || milliseconds > 3600000) throw new Error('Invalid fixture TTL'); ttl = milliseconds; } };
 }
 export async function addAiPhoto(page: Page, fixture: Awaited<ReturnType<typeof aiFixture>>, language: Language = 'en') {

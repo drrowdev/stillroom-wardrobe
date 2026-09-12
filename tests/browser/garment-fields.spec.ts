@@ -369,7 +369,12 @@ test('complete creation form accessibility and bounded synthetic visual evidence
     await page.setViewportSize({ width: capture.width, height: 900 });
     expect(api.items.length === 0 && api.images.length === 0 && api.files.size === 0
       && api.profiles[owners.a]?.ui_language === capture.language
-      && api.requests.filter((request) => request.path.startsWith('/rest/')).every((request) => request.owner === owners.a && request.ownerFilter === `eq.${owners.a}`)).toBe(true);
+      && api.requests.filter((request) => request.path.startsWith('/rest/')).every((request) => request.owner === owners.a
+        && (request.path === '/rest/v1/rpc/ai_status'
+          ? request.method === 'POST' && request.ownerFilter === null : request.ownerFilter === `eq.${owners.a}`))).toBe(true);
+    expect(api.statusProofs()).toEqual(api.requests.filter((request) => request.path === '/rest/v1/rpc/ai_status')
+      .map(() => ({ owner: owners.a, issuedBearer: true, emptyObject: true })));
+    expect(api.statusProofs().length).toBeGreaterThan(0);
     expect(await page.evaluate(({ origin, language }) => {
       const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility === 'visible';
       const values = [...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea')]
