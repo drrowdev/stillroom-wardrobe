@@ -4334,3 +4334,34 @@ and separate commit/publication permission are pending, as are new-head full
 CI/type/C/restoration/generated-type/twelve-visual and human/release gates.
 The separate UX-copy request is not part of this correction. No hosted,
 provider, paid/private-photo activation, deployment or merge is authorized.
+
+## I29 C import-boundary correction candidate - 12 September 2026
+
+**Source-only and unstaged; new-source acceptance/execution pending.**
+[Exact-7344 evidence 5647126842](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647126842)
+records CI `34704304057`: lint/typecheck/translations and all 55 ai-client
+cases passed; unit totals were 1563 passed / 2 failed. Failures at
+`ai-schema.test.ts:366/377` enforce the historical unwired/B2-only contract,
+which predates the reviewed C incoming edges and draft-to-presentation import.
+Backend ordinary-owner/security/recovery/B1/B2/C/exact restoration, generated
+types and repository parity passed. Apple `34704304073` passed its limited
+4+3 cases. The prior generator failure did not recur without changes; its
+cause remains unknown, not repaired. Later App build/canary/scanner/dependency/
+browser and all twelve visual steps were skipped.
+
+[Own permission 5647170119](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647170119)
+records actual retained Anthropic / claude-opus-5 turn 13 pre-edit PASS with
+A1-A6, not resulting-source acceptance. This two-file correction extends the
+packet to 34 paths only for the existing schema test. A single exact-path
+admission predicate serves real source assertions and positive/negative
+canaries; the full walk must equal the static seven incoming pairs. The
+shared outgoing pool adds presentation only for the draft core. The AST
+walker, Bundler resolver, seven-form probe and non-vacuity oracles remain
+unchanged, as do the test's first 316 lines and all production/UI/copy.
+
+No local runtime/compiler/tests/install/probes ran. The other 32 packet paths
+remain frozen. Coordinator manual refresh, actual source-delta adjudication
+and separate commit/publication permission precede fresh full CI, including
+App/unit/ordinary-owner/B1/B2/C/restoration/types/Apple/twelve-visual gates.
+Human/release and hosted/provider/paid/private/deployment gates remain pending;
+no generator repair or UX-copy work is authorized here.
