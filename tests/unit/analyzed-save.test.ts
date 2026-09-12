@@ -84,12 +84,17 @@ describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
     const attempt = newAnalyzedSaveAttempt(state, context, '', photo, scope, 1000);
     const prefix = `${owner}/${attempt.itemId}/${attempt.imageId}`;
     const calls: string[] = [];
+    const requests: Array<{ path: string; method: string; cache: RequestCache | undefined;
+      hasAuthorization: boolean; hasApiKey: boolean }> = [];
     const bodies: unknown[] = [];
     let completed = false, lost = false, drift = 0;
     let finalizerResponse: (() => Response) | undefined;
     const files = new Map<string, Blob>();
     const fetcher = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(url)).pathname;
+      const headers = new Headers(init?.headers);
+      requests.push({ path, method: init?.method ?? 'GET', cache: init?.cache,
+        hasAuthorization: Boolean(headers.get('authorization')), hasApiKey: Boolean(headers.get('apikey')) });
       calls.push(path); bodies.push(typeof init?.body === 'string' ? JSON.parse(init.body) : null);
       if (drift === calls.length) scope.epoch++;
       if (path.endsWith('/reserve_analyzed_item_save')) return Response.json([{
@@ -124,18 +129,23 @@ describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
     const client = createClient<Database>('http://127.0.0.1:54321', 'public-fixture-only', {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: fetcher },
     });
-    return { client, scope, attempt, calls, bodies, controller, lose: (value: boolean) => { lost = value; }, drift: (n: number) => { drift = n; },
+    return { client, scope, attempt, calls, requests, bodies, files, controller, lose: (value: boolean) => { lost = value; }, drift: (n: number) => { drift = n; },
       respond: (response: () => Response) => { finalizerResponse = response; }, completed: () => completed };
   }
   it('routes only through analyzed reserve, immutable uploads and finalizer, preserving frozen proof on lost-reply retry', async () => {
     const a = api(); a.lose(true);
     await expect(saveAnalyzedItem(a.client, a.scope, a.attempt, () => {})).rejects.toThrow('error.unavailable');
     expect(a.completed()).toBe(true);
+    const stored = [...a.files.entries()];
     a.lose(false);
     await saveAnalyzedItem(a.client, a.scope, a.attempt, () => {});
     expect(a.bodies[0]).toEqual(a.bodies[4]);
     expect(a.calls.filter((p) => p.endsWith('/finalize-analyzed-item'))).toHaveLength(2);
-    expect(a.calls.filter((p) => p.includes('/authenticated/'))).toHaveLength(2);
+    expect(a.requests.filter(({ method }) => method === 'GET')).toEqual(['thumb', 'main'].map((variant) => ({
+      path: `/storage/v1/object/wardrobe/${owner}/${a.attempt.itemId}/${a.attempt.imageId}/${variant}.jpg`,
+      method: 'GET', cache: 'no-store', hasAuthorization: true, hasApiKey: true,
+    })));
+    expect([...a.files.entries()]).toEqual(stored);
     expect(a.calls.some((p) => /analyze-clothing|finalize_item_save|commit_image/.test(p))).toBe(false);
   });
   it.each([['CONFLICT', 'error.conflict'], ['UPLOAD_INCOMPLETE', 'error.uploadIncomplete']] as const)(
