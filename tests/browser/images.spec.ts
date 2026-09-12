@@ -6,6 +6,7 @@ import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { CORNER_COLOURS, ORIENTATION_CORNERS } from '../fixtures/jpeg-helpers';
 import { mockBackend, owners, signIn } from './mock-backend';
+import { manualEntry } from './ai-photo-first-support';
 
 type Format = 'png' | 'webp' | 'jpeg';
 
@@ -223,6 +224,7 @@ async function setup(page: Page, language: Language = 'en', failCommitOnce = fal
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: Buffer.from(bytes) });
   await expect(page.locator('.capture-photo img')).toBeVisible();
   await expect(page.locator('#edit-photo')).toBeEnabled();
+  await manualEntry(page);
   return api;
 }
 

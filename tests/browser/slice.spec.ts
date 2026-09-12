@@ -5,6 +5,7 @@ import { request as httpRequest } from 'node:http';
 import { messages, type Language } from '../../src/i18n';
 import { inspectJpegSegments } from '../fixtures/jpeg-helpers';
 import { mockBackend, owners, signIn, wireStages, type WireBackend, type WireStage } from './mock-backend';
+import { manualEntry } from './ai-photo-first-support';
 
 function reserveWireImage(backend: Awaited<ReturnType<typeof mockBackend>>, owner = owners.a) {
   const item = randomUUID(), image = randomUUID();
@@ -374,6 +375,7 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
     await page.getByRole('button', { name: messages['wardrobe.firstItem'][language] }).click();
     await page.locator('input[type="file"]').first().setInputFiles({ name: 'shirt.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
     await expect(page.locator('.capture-photo img')).toBeVisible();
+    await manualEntry(page);
     expect(backend.items).toHaveLength(0);
     expect(backend.files.size).toBe(0);
     await page.locator('#item-title').fill('My edited olive shirt');
@@ -444,7 +446,7 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
     await expect(page.locator('#item-title')).toHaveValue('Manual synthetic title');
     await expect(page.locator('#item-category')).toHaveValue('top');
     await expect(page.locator('#item-alt')).toHaveValue('');
-    expect(backend.requests.slice(before)).toEqual([]);
+    expect(backend.requests.slice(before).every((request) => request.path === '/rest/v1/rpc/ai_status')).toBe(true);
     expect(backend.items).toHaveLength(0);
     expect(backend.files.size).toBe(0);
     expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
@@ -570,6 +572,7 @@ test('retrying a failed commit reuses the same records and image bytes', async (
   await page.getByRole('button', { name: 'Add your first piece' }).click();
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'shirt.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
   await expect(page.locator('.capture-photo img')).toBeVisible();
+  await manualEntry(page);
   await page.locator('#item-title').fill('A retryable shirt');
   await page.locator('#item-category').selectOption('top');
   await page.getByRole('button', { name: 'Save to my wardrobe' }).click();

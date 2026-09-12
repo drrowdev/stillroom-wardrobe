@@ -4122,3 +4122,76 @@ not a hosted claim. Genuine final independent review and coordinator-owned
 visual review remain pending. No UI/title/description/provider expansion,
 saved-only backup/history restore completion, hosted migration, paid activation,
 deployment or human acceptance is claimed. PR #20 stays closed.
+
+## I29 photo-first C source candidate - 12 September 2026
+
+**Unstaged source; not executed, independently accepted, published, merged or
+deployed.** Requirements R18/R19/R23/R26/R27/R28 retain independent-owner
+R01/R11 and Phase 0 engineering-complete / acceptance-open distinctions.
+The preceding B2 section is its historical intake record. B2 subsequently
+completed under PR #21 comments
+[5645805099](https://github.com/drrowdev/stillroom-wardrobe/pull/21#issuecomment-5645805099)
+and [5645868493](https://github.com/drrowdev/stillroom-wardrobe/pull/21#issuecomment-5645868493);
+its merged source is this packet's base, not new C validation.
+
+This one persistent local GPT-6 Astra writer is canonical session
+`c69545b0-699e-4284-b64e-99cb7bcbf371`, workspace alias
+`fd165bf2-e75e-4ad4-a64d-7012af4536b8`, isolated branch
+`drrowdev-animated-fiesta`. Base/start HEAD remains
+`56e52790d6f2014d6a0383ec478c20d70cefd486`, tree
+`f9afd08446c7f3f21a01d050ee6f2353307adefd`. Completed read-only context preceded
+reading the complete
+[own attestation and 33-path source permission 5646092805](https://github.com/drrowdev/stillroom-wardrobe/pull/21#issuecomment-5646092805).
+The [proposal 5645946533](https://github.com/drrowdev/stillroom-wardrobe/pull/21#issuecomment-5645946533),
+[controlling amendment 5646005294](https://github.com/drrowdev/stillroom-wardrobe/pull/21#issuecomment-5646005294)
+and [approval 5646036986](https://github.com/drrowdev/stillroom-wardrobe/pull/21#issuecomment-5646036986)
+record the retained Anthropic / claude-opus-5 reviewer
+`d4c52a66-e314-4ad0-a96a-675e79fdd049`, turns 4/5 and PASS-amended-plan.
+Supported coordinator-observed local telemetry is not native-platform or
+tamper-proof evidence; the stopped B2 writer's receipt was not reused.
+
+The source connects consent/status, committed-photo automatic analysis,
+locally generated once-per-result EN/FI/SV title/description/tags, all-field
+review and explicit trusted/unverified Save. Original manual transport stays
+manual. Consent shares the profile/language mutex with nullable typed REST,
+an ACK floor, exact own AI-only +1 rebase guard and explicit read-only
+reconciliation after uncertainty. Edits/clears, language invariance, expiry,
+owner/epoch and stale-generation guards remain. Save/Cancel share a latch;
+only a fully validated same-attempt B2 fingerprint enables cancellation.
+Missing proof does not trigger reservation from Cancel. Unresolved navigation
+does not claim cancellation, deletion, completed Save or refund.
+
+The existing `node scripts/ai-analysis-rehearsal.mjs` CI collector now describes
+C after B1/B2 success restoration. It directly spawns the installed
+`node_modules/@playwright/test/cli.js test --config playwright.ai.config.ts`
+with one Chromium worker, retries zero and a 120-second child inside the fixed
+600-second parent deadline. Numeric entry/startup/child/headroom diagnostics
+fail closed when there is insufficient time; the budget is not extended.
+The exact analysis-route bridge uses the same Node production handler with
+only synthetic Google/OAuth transport. Real ordinary Auth/REST/Storage and
+Deno finalization are not mocked. Two C UUID namespaces retain native random
+suffixes, two distinct prepared photos bind request-local bytes/dimensions/hash
+to provider input and real attestation, and each owner explicitly opts out/in
+(+2 profile CAS) and Saves once. Raw child output is withheld. Exact owner
+cleanup and parent exact-ID/private restoration happen only after their
+success gates, preserving all non-C inventories and existing image bytes.
+No normal integration collector, SQL/types, backend helper, dependency,
+provider, codec, setup or root-policy file is changed.
+
+Browser source adds EN/FI/SV draft/control/navigation cases and retains the
+existing functional suites. One pinned one-day artifact step lists exactly
+four new synthetic PNGs under `test-results/i29-photo-first-visual`: consent
+and analyzed draft at EN desktop 1280 and FI mobile 320, each at most 1 MiB.
+All eight existing captures remain. No writer image review is performed.
+
+Under the source-only permission, **no local npm/Node/version, lint/type,
+unit/browser/backend, translation/scanner/build, dependency or installation
+command ran**. Non-executing source/Git/hash inspection is not runtime or
+security-scanner evidence. Locked dependencies remain unrestored. Full
+changed-file five-pattern manual review, retained independent source review
+and separate publication permission precede any commit/PR. Full automatic
+exact-head CI, Apple, generated-type parity, real normal-owner DB/Storage/
+security/preservation/recovery, B1=12/B2=22/new C=2, and coordinator artifact
+run/head/hash/verdict remain pending. Human/device/release, saved-only backup/
+history restoration, hosted migrations, paid/private-photo activation and
+deployment remain pending and separately authorized; PR #21 stays closed.

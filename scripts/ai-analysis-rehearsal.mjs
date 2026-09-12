@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { once } from 'node:events';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { ROOT, LOCAL_API, assertNoServiceSecrets, readCredentialCache, normalSessionEnvironment,
   localStatus, privilegedLocalSql, runCommand, startAnalysisServer, parseServedDiagnostics, withAnalyzedSaveFixtureLock } from './backend/local.mjs';
 import { isMain } from './quality/files.mjs';
@@ -11,6 +12,7 @@ import { aiClients, requireReady, AI_FACT_VECTORS } from '../tests/integration/a
 import { baseline, analysisId, analysisFacts, analysisUsage, analysisHash, equal } from '../tests/integration/ai-analysis.sessions.mjs';
 import { TABLES, requireEvidence } from '../tests/integration/preservation.sessions.mjs';
 import { analyzedHarness, analyzedIntent, saveId } from '../tests/integration/analyzed-save.sessions.mjs';
+import { assertSanitizedJpeg, readJpegHeader } from '../src/images/jpeg.ts';
 
 const literal = (value) => "'" + String(value).replaceAll("'", "''") + "'";
 const json = (value) => `${literal(JSON.stringify(value))}::jsonb`;
@@ -184,6 +186,8 @@ async function main() {
     };
     const key = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' });
     let mode = 'ready', generations = 0, oauth = 0;
+    const cRequestContext = new AsyncLocalStorage();
+    const cRequests = [];
     const handler = createHandler({ supabaseUrl: LOCAL_API, publicKey: local.key, serviceKey: local.serviceKey,
       google: { projectId: 'fictional-b1', clientEmail: 'fixture@fictional-b1.iam.gserviceaccount.com', privateKey: key } },
     async (url, init) => {
@@ -199,7 +203,18 @@ async function main() {
       equal(sent.generationConfig, GENERATION_CONFIG); equal(sent.safetySettings, SAFETY_SETTINGS);
       equal(sent.systemInstruction, { parts: [{ text: PROMPT }] });
       const image = sent.contents[0].parts[0].inlineData;
-      requireEvidence(image.mimeType === 'image/jpeg' && createHash('sha256').update(Buffer.from(image.data, 'base64')).digest('hex') === analysisHash);
+      const cRequest = cRequestContext.getStore();
+      if (cRequest) {
+        const bytes = Buffer.from(image.data, 'base64');
+        const dimensions = readJpegHeader(bytes);
+        requireEvidence(image.mimeType === 'image/jpeg' && bytes.length === cRequest.byteCount
+          && dimensions.width === cRequest.width && dimensions.height === cRequest.height
+          && createHash('sha256').update(bytes).digest('hex') === cRequest.imageSha256
+          && cRequest.generations === 0);
+        cRequest.generations++;
+      } else {
+        requireEvidence(image.mimeType === 'image/jpeg' && createHash('sha256').update(Buffer.from(image.data, 'base64')).digest('hex') === analysisHash);
+      }
       return Response.json({ modelVersion: MODEL_ID,
         usageMetadata: mode === 'unknown' ? { trafficType: 'ON_DEMAND' } : mode === 'zero'
           ? { trafficType: 'ON_DEMAND', promptTokenCount: 0, totalTokenCount: 0 } : { ...analysisUsage, modelVersion: undefined },
@@ -211,11 +226,29 @@ async function main() {
       try {
         const chunks = []; let size = 0;
         for await (const chunk of req) { size += chunk.length; requireEvidence(size <= 513000); chunks.push(chunk); }
+        const bytes = Buffer.concat(chunks);
         const request = new Request(`http://127.0.0.1${req.url}`, {
           method: req.method, headers: req.headers,
-          ...(['GET', 'HEAD', 'OPTIONS'].includes(req.method) ? {} : { body: Buffer.concat(chunks) }),
+          ...(['GET', 'HEAD', 'OPTIONS'].includes(req.method) ? {} : { body: bytes }),
         });
-        const response = await handler(request);
+        const requestId = request.headers.get('x-stillroom-request-id') ?? '';
+        let cRequest;
+        if (requestId.startsWith('c329')) {
+          const match = /^c329([ab])000-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.exec(requestId);
+          requireEvidence(match && req.method === 'POST' && req.url === '/analyze-clothing'
+            && request.headers.get('content-type') === 'image/jpeg' && bytes.length > 0 && bytes.length <= 512000);
+          const owner = owners[match[1] === 'a' ? 0 : 1], prefix = requestId.slice(0, 9);
+          const draftId = request.headers.get('x-stillroom-draft-id') ?? '';
+          requireEvidence(new RegExp(`^${prefix}[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).test(draftId)
+            && draftId !== requestId && request.headers.get('x-stillroom-generation') === '1'
+            && !cRequests.some((value) => value.ownerId === owner.uid));
+          const dimensions = readJpegHeader(bytes);
+          assertSanitizedJpeg(bytes, dimensions.width, dimensions.height);
+          cRequest = { ownerId: owner.uid, requestId, draftId, generation: 1, imageSha256: createHash('sha256').update(bytes).digest('hex'),
+            byteCount: bytes.length, width: dimensions.width, height: dimensions.height, generations: 0 };
+          cRequests.push(cRequest);
+        }
+        const response = await cRequestContext.run(cRequest, () => handler(request));
         res.writeHead(response.status, Object.fromEntries(response.headers));
         res.end(Buffer.from(await response.arrayBuffer()));
       } catch { res.writeHead(500); res.end(); }
@@ -458,6 +491,84 @@ async function main() {
     equal(await snapshot(), before); equal(await b2Snapshot(), b2Before);
     equal(await requireReady(client, owners), ready); await baseline(client, owners);
     console.log('PASS: B2 actual Deno/Auth/DB/Storage; synthetic Google generations=22 separately from B1=12; exact private/14-ledger/2-ready baseline restored; B2 profile CAS advances=2 per owner');
+    stage = 'C-entry';
+    const cStarted = Date.now(), cCountBefore = generations;
+    const headroom = () => deadline - Date.now();
+    console.log(`C timing: entryHeadroomMs=${headroom()}`);
+    requireEvidence(headroom() > 150_000 && cRequests.length === 0 && cCountBefore === 34);
+    for (const table of ['public.items', 'public.item_images', 'private.ai_usage', 'private.ai_requests',
+      'private.ai_save_used_receipts', 'private.item_save_used_ids']) {
+      const field = table.startsWith('public.') ? 'id' : table.includes('ai_usage') || table.includes('ai_requests') ? 'request_id' : 'item_id';
+      requireEvidence(await db(`select to_jsonb(not exists(select 1 from ${table} where ${field}::text like 'c329a000-%' or ${field}::text like 'c329b000-%'));`));
+    }
+    await privilegedLocalSql(`update private.ai_controls set activated=true,notice_revision=1,model_id='gemini-3.8-flash',
+      prompt_version=1,max_request_micro=2270823,monthly_allowance_micro=100000000,max_requests_per_hour=200,
+      result_ttl_seconds=3600,execution_manifest_id=${literal(manifest)} where ${ownerWhere};`);
+    mode = 'ready';
+    owned = await startAnalysisServer();
+    owned.assertRunning();
+    console.log(`C timing: startupElapsedMs=${Date.now() - cStarted}; childHeadroomMs=${headroom()}`);
+    requireEvidence(headroom() > 135_000);
+    stage = 'C-ui-child';
+    const result = await runCommand(process.execPath, [`${ROOT}node_modules/@playwright/test/cli.js`, 'test',
+      '--config', `${ROOT}playwright.ai.config.ts`], {
+      env: { ...env, I29_C_ANALYSIS_ORIGIN: origin }, timeout: 120_000, maxOutputBytes: 262144,
+    });
+    console.log(`C timing: childElapsedMs=${Date.now() - cStarted}; remainingMs=${headroom()}`);
+    requireEvidence(result.code === 0 && headroom() > 0);
+    const lines = result.stdout.split(/\r?\n/).filter((line) => line.startsWith('I29_C_RECEIPT '));
+    requireEvidence(lines.length === 1 && lines[0].length <= 4096);
+    const receipts = JSON.parse(lines[0].slice('I29_C_RECEIPT '.length));
+    requireEvidence(Array.isArray(receipts) && receipts.length === 2 && cRequests.length === 2 && generations - cCountBefore === 2
+      && cRequests[0].imageSha256 !== cRequests[1].imageSha256);
+    const cKeys = ['ownerId', 'requestId', 'draftId', 'generation', 'itemId', 'imageId', 'imageSha256', 'byteCount', 'width', 'height'];
+    for (const [index, owner] of owners.entries()) {
+      const receipt = receipts[index], request = cRequests.find((value) => value.ownerId === owner.uid);
+      requireEvidence(receipt && Object.keys(receipt).length === cKeys.length && cKeys.every((key) => Object.hasOwn(receipt, key))
+        && request && request.generations === 1 && receipt.ownerId === owner.uid);
+      for (const key of cKeys.filter((key) => !['itemId', 'imageId'].includes(key))) equal(receipt[key], request[key]);
+      const prefix = index === 0 ? 'c329a000-' : 'c329b000-';
+      requireEvidence(['requestId', 'draftId', 'itemId', 'imageId'].every((key) =>
+        new RegExp(`^${prefix}[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).test(receipt[key]))
+        && new Set(['requestId', 'draftId', 'itemId', 'imageId'].map((key) => receipt[key])).size === 4);
+      const attestation = await db(`select to_jsonb(t) from private.ai_analysis_attestations t
+        where owner_id=${literal(owner.uid)} and request_id=${literal(receipt.requestId)};`);
+      requireEvidence(attestation && attestation.image_sha256 === receipt.imageSha256 && attestation.byte_count === receipt.byteCount
+        && attestation.width === receipt.width && attestation.height === receipt.height && attestation.manifest_id === manifest);
+      const p = (await client.rows(owner, 'profiles'))[0];
+      requireEvidence(p.version === versions[index] + 6 && p.ai_enabled && p.ai_notice_revision === 1);
+    }
+    stage = 'C-success-only-restoration';
+    owned.assertRunning(); await owned.stop(); owned = undefined;
+    requireEvidence(headroom() > 0);
+    equal(await inventory(client, owners), preserved);
+    const cFinal = await snapshot(), cB2Final = await b2Snapshot();
+    const requestIds = receipts.map((row) => row.requestId), itemIds = receipts.map((row) => row.itemId);
+    for (const table of ['ai_usage', 'ai_requests', 'ai_usage_evidence', 'ai_analysis_attestations']) {
+      requireEvidence(cFinal[table].length === before[table].length + 2);
+      equal(cFinal[table].filter((row) => !requestIds.includes(row.request_id)), before[table]);
+    }
+    for (const table of b2Tables) equal(cB2Final[table].filter((row) => !itemIds.includes(row.item_id)), b2Before[table]);
+    requireEvidence(cB2Final.ai_save_used_receipts.length === b2Before.ai_save_used_receipts.length + 2
+      && cB2Final.item_save_used_ids.length === b2Before.item_save_used_ids.length + 2
+      && cB2Final.ai_item_save_attempts.length === b2Before.ai_item_save_attempts.length
+      && cB2Final.item_attribution_history.length === b2Before.item_attribution_history.length
+      && cB2Final.ai_item_save_context.length === 0);
+    for (const receipt of receipts) {
+      requireEvidence(cB2Final.ai_save_used_receipts.some((row) => row.owner_id === receipt.ownerId && row.request_id === receipt.requestId
+        && row.item_id === receipt.itemId && row.image_id === receipt.imageId));
+    }
+    requireEvidence(headroom() > 0);
+    await privilegedLocalSql(`begin; ${receipts.map((row) => `
+      delete from private.ai_usage where owner_id=${literal(row.ownerId)} and request_id=${literal(row.requestId)};
+      delete from private.ai_save_used_receipts where owner_id=${literal(row.ownerId)} and request_id=${literal(row.requestId)}
+        and item_id=${literal(row.itemId)} and image_id=${literal(row.imageId)};
+      delete from private.item_save_used_ids where owner_id=${literal(row.ownerId)} and item_id=${literal(row.itemId)} and image_id=${literal(row.imageId)};`).join('\n')}
+      ${restore} commit;`);
+    equal(await snapshot(), before); equal(await b2Snapshot(), b2Before);
+    equal(await requireReady(client, owners), ready); await baseline(client, owners);
+    requireEvidence(headroom() > 0);
+    console.log(`PASS: C ordinary-owner UI; generations=2; C profile CAS advances=2 per owner; exact cleanup/restoration; elapsedMs=${Date.now() - cStarted}; remainingMs=${headroom()}`);
   } catch {
     console.error(`FAIL: B1 rehearsal at ${stage}; private evidence withheld; fixture state preserved, no automatic recovery`);
     process.exitCode = 1;

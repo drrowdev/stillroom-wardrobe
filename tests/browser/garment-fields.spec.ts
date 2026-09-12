@@ -7,6 +7,7 @@ import { messages, type Language } from '../../src/i18n';
 import { garmentFields } from '../../src/domain/garment-fields';
 import { provenanceFields } from '../../src/domain/attribute-provenance';
 import { mockBackend, owners, signIn } from './mock-backend';
+import { manualEntry } from './ai-photo-first-support';
 
 async function setup(page: Page, language: Language = 'en', loseFinalizeReplyOnce = false) {
   const api = await mockBackend(page, { initialLanguage: language, loseFinalizeReplyOnce });
@@ -26,6 +27,7 @@ async function photo(page: Page, api: Awaited<ReturnType<typeof mockBackend>>) {
   await page.locator('input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
   await expect(page.locator('.capture-photo img')).toBeVisible();
   await expect(page.locator('#edit-photo')).toBeEnabled();
+  await manualEntry(page);
 }
 async function fillFields(page: Page, language: Language) {
   const text = {

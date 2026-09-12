@@ -4,6 +4,7 @@ import { mkdir, open, readdir, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
+import { aiFixture } from './ai-photo-first-support';
 
 async function settings(page: Page, language: Language = 'en') {
   await page.getByRole('button', { name: messages['account.menu'][language] }).click();
@@ -18,6 +19,190 @@ async function setup(page: Page, language: Language = 'en') {
 }
 const profileUrl = 'http://127.0.0.1:54321/rest/v1/profiles*';
 const preferenceUrl = 'http://127.0.0.1:54321/rest/v1/style_preferences*';
+test('AI consent shares profile/language mutex and rebases only its own exact plus-one ACK', async ({ page }) => {
+  const api = await aiFixture(page, 'en', false);
+  await settings(page);
+  await page.locator('#profile-display_name').fill('Preserved unsaved name');
+  await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
+  let held: Route | undefined;
+  await page.route('**/rest/v1/rpc/ai_set_consent', (route) => { held = route; });
+  await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
+  await expect.poll(() => Boolean(held)).toBe(true);
+  await expect(page.getByRole('button', { name: 'Suomi', exact: true })).toBeDisabled();
+  await expect(page.locator('#profile-display_name')).toBeDisabled();
+  await held!.fallback();
+  await expect(page.getByText(messages['aiC.enabled'].en, { exact: true })).toBeVisible();
+  await expect(page.locator('#profile-display_name')).toHaveValue('Preserved unsaved name');
+  await page.getByRole('button', { name: messages['settings.saveProfile'].en, exact: true }).click();
+  await expect(page.getByText(messages['settings.profileSaved'].en, { exact: true })).toBeVisible();
+  expect(api.profiles[owners.a]).toMatchObject({ version: 3, display_name: 'Preserved unsaved name', ui_language: 'en' });
+  expect(api.calls.filter((call) => call.route.endsWith('/ai_set_consent'))).toHaveLength(1);
+});
+for (const failure of ['lost-ack', 'stale-profile'] as const) {
+  test(`AI consent ${failure}: explicit read-only reconciliation cannot silently rebase dirty edits`, async ({ page }) => {
+    const api = await aiFixture(page, 'en', false);
+    await settings(page);
+    const old = structuredClone(api.profiles[owners.a]);
+    await page.locator('#profile-display_name').fill('My unsaved name');
+    if (failure === 'lost-ack') {
+      await page.route('**/rest/v1/rpc/ai_set_consent', async (route) => {
+        api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
+        await route.abort('failed');
+      });
+    } else {
+      await page.route(profileUrl, async (route) => {
+        if (route.request().method() === 'GET') await route.fulfill({ json: old });
+        else await route.fallback();
+      });
+    }
+    await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
+    await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
+    await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: messages['aiC.enable'].en, exact: true })).toBeDisabled();
+    if (failure === 'stale-profile') await page.unroute(profileUrl);
+    let writes = 0;
+    page.on('request', (request) => { if (request.url().endsWith('/ai_set_consent')) writes++; });
+    await page.getByRole('button', { name: messages['aiC.checkConsent'].en, exact: true }).click();
+    await expect(page.getByText(messages['aiC.enabled'].en, { exact: true })).toBeVisible();
+    expect(writes).toBe(0);
+    await expect(page.locator('#profile-display_name')).toHaveValue('My unsaved name');
+    await page.getByRole('button', { name: messages['settings.saveProfile'].en, exact: true }).click();
+    await expect(page.getByRole('button', { name: messages['settings.keepEdits'].en, exact: true })).toBeVisible();
+    expect(api.profiles[owners.a]!.display_name).toBe('Alex');
+  });
+}
+for (const action of ['save', 'reconcile'] as const) {
+  test(`AI consent ${action} allows a measured aggregate above five seconds with bounded individual reads`, async ({ page }) => {
+    const api = await aiFixture(page, 'en', false);
+    await settings(page);
+    await expect(page.getByText(messages['aiC.disabled'].en, { exact: true })).toBeVisible();
+    await page.locator('#profile-display_name').fill('My slow-operation edits');
+    let writes = 0;
+    page.on('request', (request) => { if (request.url().endsWith('/ai_set_consent')) writes++; });
+    if (action === 'reconcile') {
+      await page.route('**/rest/v1/rpc/ai_set_consent', async (route) => {
+        api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
+        await route.abort('failed');
+      });
+      await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
+      await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
+      await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
+    } else await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
+    const timings: Array<{ path: string; start: number; elapsed?: number }> = [];
+    const delay = action === 'save' ? 1500 : 2800;
+    const statusLimit = action === 'save' ? 2 : 1;
+    let statuses = 0;
+    const delayCall = async (route: Route) => {
+      if (route.request().method() === 'OPTIONS') { await route.fallback(); return; }
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname.endsWith('/ai_status') && ++statuses > statusLimit) { await route.fallback(); return; }
+      const timing: typeof timings[number] = { path: pathname, start: performance.now() };
+      timings.push(timing);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      await route.fallback();
+      const response = await route.request().response();
+      expect(response?.status()).toBe(200);
+      timing.elapsed = performance.now() - timing.start;
+    };
+    await page.route('**/rest/v1/rpc/ai_status', delayCall);
+    if (action === 'save') await page.route('**/rest/v1/rpc/ai_set_consent', delayCall);
+    await page.route(profileUrl, delayCall);
+    const writesBefore = writes, started = performance.now();
+    await page.getByRole('button', { name: messages[action === 'save' ? 'aiC.enable' : 'aiC.checkConsent'].en, exact: true }).click();
+    await expect(page.getByText(messages['aiC.enabled'].en, { exact: true })).toBeVisible({ timeout: 12000 });
+    expect(performance.now() - started).toBeGreaterThan(5000);
+    expect(performance.now() - started).toBeLessThan(20000);
+    expect(timings).toHaveLength(action === 'save' ? 4 : 2);
+    await expect.poll(() => timings.every((timing) => timing.elapsed !== undefined)).toBe(true);
+    for (const timing of timings) {
+      expect(timing.elapsed).toBeGreaterThanOrEqual(delay - 50);
+      expect(timing.elapsed).toBeLessThan(5000);
+    }
+    expect(timings.map((timing) => timing.path)).toEqual(action === 'save'
+      ? ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/ai_set_consent', '/rest/v1/rpc/ai_status', '/rest/v1/profiles']
+      : ['/rest/v1/rpc/ai_status', '/rest/v1/profiles']);
+    expect(writes - writesBefore).toBe(action === 'save' ? 1 : 0);
+    await page.unroute(profileUrl, delayCall);
+    await expect(page.locator('#profile-display_name')).toHaveValue('My slow-operation edits');
+    await page.getByRole('button', { name: messages['settings.saveProfile'].en, exact: true }).click();
+    if (action === 'save') {
+      await expect(page.getByText(messages['settings.profileSaved'].en, { exact: true })).toBeVisible();
+      expect(api.profiles[owners.a]).toMatchObject({ version: 3, display_name: 'My slow-operation edits', ui_language: 'en' });
+    } else {
+      await expect(page.getByRole('button', { name: messages['settings.keepEdits'].en, exact: true })).toBeVisible();
+      expect(api.profiles[owners.a]).toMatchObject({ version: 2, display_name: 'Alex', ui_language: 'en' });
+    }
+  });
+}
+type AiProfileWait = { started: number; aborted: number | null; released: boolean; release: () => Promise<void> };
+type AiProfileWindow = Window & { aiProfileWait?: AiProfileWait };
+for (const action of ['save', 'reconcile'] as const) {
+  test(`AI consent ${action} releases the mutex at the profile call deadline and rejects its late result`, async ({ page }) => {
+    const api = await aiFixture(page, 'en', false);
+    await settings(page);
+    await expect(page.getByText(messages['aiC.disabled'].en, { exact: true })).toBeVisible();
+    let writes = 0;
+    page.on('request', (request) => { if (request.url().endsWith('/ai_set_consent')) writes++; });
+    if (action === 'reconcile') {
+      await page.route('**/rest/v1/rpc/ai_set_consent', async (route) => {
+        api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
+        await route.abort('failed');
+      });
+      await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
+      await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
+      await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
+    } else await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
+    await page.route(profileUrl, async (route) => {
+      expect(route.request().method()).toBe('GET');
+      await route.fulfill({ json: { ...api.profiles[owners.a], display_name: 'Late unconfirmed profile' } });
+    });
+    // Model an SDK fetch promise that ignores abort until the test releases the actual response.
+    await page.evaluate(() => {
+      const target = window as AiProfileWindow, original = window.fetch;
+      window.fetch = async (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const response = await original(input, init);
+        if (new URL(url, location.href).pathname !== '/rest/v1/profiles') return response;
+        window.fetch = original;
+        return new Promise<Response>((resolve) => {
+          const signal = init?.signal ?? (input instanceof Request ? input.signal : null);
+          if (!signal) throw new Error('Profile read must carry its deadline signal');
+          const state: AiProfileWait = { started: performance.now(), aborted: null, released: false,
+            release: async () => {
+              resolve(response);
+              await new Promise((settled) => setTimeout(settled, 100));
+              state.released = true;
+            } };
+          target.aiProfileWait = state;
+          signal.addEventListener('abort', () => { state.aborted = performance.now(); }, { once: true });
+        });
+      };
+    });
+    const writesBefore = writes;
+    await page.getByRole('button', { name: messages[action === 'save' ? 'aiC.enable' : 'aiC.checkConsent'].en, exact: true }).click();
+    await expect.poll(() => page.evaluate(() => Boolean((window as AiProfileWindow).aiProfileWait))).toBe(true);
+    await expect(page.locator('#profile-display_name')).toBeDisabled();
+    await expect(page.getByRole('button', { name: messages['aiC.checkConsent'].en, exact: true })).toBeEnabled({ timeout: 6500 });
+    const deadline = await page.evaluate(() => {
+      const state = (window as AiProfileWindow).aiProfileWait!;
+      return { elapsed: state.aborted === null ? null : state.aborted - state.started, released: state.released };
+    });
+    expect(deadline.released).toBe(false);
+    expect(deadline.elapsed).not.toBeNull();
+    expect(deadline.elapsed).toBeGreaterThanOrEqual(4500);
+    expect(deadline.elapsed).toBeLessThan(6000);
+    await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
+    await page.evaluate(async () => { await (window as AiProfileWindow).aiProfileWait!.release(); });
+    await expect(page.locator('#profile-display_name')).toHaveValue('Alex');
+    await expect(page.locator('.workspace-identity')).not.toContainText('Late unconfirmed profile');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(page.getByText(messages['aiC.enabled'].en, { exact: true })).toHaveCount(0);
+    await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: messages['aiC.enable'].en, exact: true })).toBeDisabled();
+    expect(writes - writesBefore).toBe(action === 'save' ? 1 : 0);
+    expect(api.profiles[owners.a]).toMatchObject({ version: 2, display_name: 'Alex', ui_language: 'en' });
+  });
+}
 for (const language of ['en', 'fi', 'sv'] as const) {
   test(`settings ${language}: private fields, preferences, clearing and persistence`, async ({ page }) => {
     const api = await setup(page, language);
@@ -332,7 +517,8 @@ test('synthetic settings visual evidence retains functional assertions in every 
     expect(api.profiles[owners.a]?.owner_id === owners.a
       && api.profiles[owners.a]?.ui_language === capture.language
       && api.requests.filter((request) => request.path.startsWith('/rest/'))
-        .every((request) => request.owner === owners.a && request.ownerFilter === `eq.${owners.a}`)).toBe(true);
+        .every((request) => request.owner === owners.a && (request.ownerFilter === `eq.${owners.a}`
+          || request.path === '/rest/v1/rpc/ai_status' && request.ownerFilter === null))).toBe(true);
     expect(await page.evaluate(({ origin, language }) => {
       const visible = (element: Element) => element.getClientRects().length > 0
         && getComputedStyle(element).visibility === 'visible';

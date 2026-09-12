@@ -232,8 +232,10 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
 export type MockOptions = {
   initialLanguage?: Language | null; failCommitOnce?: boolean; failLanguageSave?: boolean;
   loseFinalizeReplyOnce?: boolean;
+  loseAnalyzedReserveReplyOnce?: boolean;
   recoverStatus?: number; updateStatus?: number; logoutStatus?: number; recoveryUser?: string;
   wireDiagnostic?: WireBackend;
+  aiResults?: Map<string, import('../../src/domain/ai-analysis').AiResult>;
 };
 export function recoveryHash(owner = owners.a, seconds = 3600): string {
   const expires = Math.floor(Date.now() / 1000) + seconds;
@@ -254,7 +256,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   }]));
   const images: JsonRow[] = [];
   const files = new Map<string, Buffer>();
-  const saves: Array<{ owner: string; itemId: string; imageId: string; fingerprint: string; state: 'reserved' | 'completed' }> = [];
+  const saves: Array<{ owner: string; itemId: string; imageId: string; fingerprint: string; state: 'reserved' | 'completed'; analyzed?: boolean; cancelled?: boolean }> = [];
   const imageKeys = ['id', 'main_bytes', 'thumb_bytes', 'main_sha256', 'thumb_sha256', 'width', 'height', 'alt_text'];
   const fingerprintFor = (item: JsonRow, image: JsonRow) => {
     const values = garmentPayload(parseGarmentValues(item)), provenance = parseFieldProvenance(item.field_provenance);
@@ -267,7 +269,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     const item = items.find((row) => row.id === save.itemId && row.owner_id === save.owner);
     const image = images.find((row) => row.id === save.imageId && row.item_id === save.itemId && row.owner_id === save.owner);
     const prefix = `${save.owner}/${save.itemId}/${save.imageId}`;
-    if (!item || !image || item.version !== 1 || item.deleted_at !== null || image.description_version !== 1
+    if (save.cancelled || !item || !image || item.version !== 1 || item.deleted_at !== null || image.description_version !== 1
       || image.retired_at !== null || image.state !== (save.state === 'reserved' ? 'pending' : 'ready')
       || image.main_path !== `${prefix}/main.jpg` || image.thumb_path !== `${prefix}/thumb.jpg`) return null;
     try { if (fingerprintFor(item, image) !== save.fingerprint) return null; }
@@ -275,7 +277,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     return { item, image, fingerprint: save.fingerprint, state: save.state };
   };
   const requests: Array<{ method: string; path: string; owner: string | null; ownerFilter: string | null }> = [];
-  let commitFailed = false;
+  let commitFailed = false, analyzedReserveReplyLost = false;
   const fixture = await readFile(new URL('../../blueprint/validation/fixture.jpg', import.meta.url));
   const tokens = new Map<string, string>();
   const wireDiagnostic: WireDiagnostic | undefined = options.wireDiagnostic ? {
@@ -348,11 +350,17 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       }
       await json(profile); return;
     }
-    if (url.pathname === '/rest/v1/rpc/reserve_item_save') {
+    if (url.pathname === '/rest/v1/rpc/ai_status') {
+      await json({ code: 'UNCONFIGURED', period: new Date().toISOString().slice(0, 7), serverTimeMs: Date.now(),
+        consent: { enabled: false, noticeRevision: null, consentedAt: null, profileVersion: String(profiles[owner]!.version) },
+        policy: null, usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } }); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/reserve_item_save' || url.pathname === '/rest/v1/rpc/reserve_analyzed_item_save') {
+      const analyzed = url.pathname.endsWith('/reserve_analyzed_item_save');
       const body: unknown = request.postDataJSON();
       const invalid = () => json({ code: '22023', message: 'Invalid input', details: null, hint: null }, 400);
       const conflict = () => json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400);
-      if (method !== 'POST' || !isRecord(body) || Object.keys(body).length !== 2
+      if (method !== 'POST' || !isRecord(body) || Object.keys(body).length !== (analyzed ? 3 : 2)
         || !isRecord(body.p_item) || !isRecord(body.p_image)) { await invalid(); return; }
       const item = body.p_item, image = body.p_image;
       if (!sameValue(Object.keys(item).sort(), [...garmentFields, 'id', 'field_provenance'].sort())
@@ -362,7 +370,26 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       let fingerprint: string;
       try {
         const provenance = parseFieldProvenance(item.field_provenance);
-        if (Object.values(provenance).some((entry) => entry.kind !== 'user' || entry.revision !== 1)) throw new Error('Invalid fixture intent');
+        if (Object.values(provenance).some((entry) => (!analyzed && entry.kind !== 'user') || entry.revision !== 1)) throw new Error('Invalid fixture intent');
+        if (analyzed) {
+          const claim = body.p_claim;
+          if (claim !== null) {
+            if (!isRecord(claim) || !isRecord(claim.fields) || typeof claim.requestId !== 'string') throw new Error('Invalid fixture claim');
+            const result = options.aiResults?.get(claim.requestId);
+            if (!result || result.draftId !== claim.draftId || result.generation !== claim.generation
+              || result.imageSha256 !== claim.imageSha256 || result.imageSha256 !== image.main_sha256
+              || result.expiresAtMs <= Date.now() || !claim.requestId.startsWith(owner === owners.a ? 'c329a000-' : 'c329b000-')) {
+              throw new Error('Invalid fixture claim');
+            }
+            for (const [field, entry] of Object.entries(claim.fields)) {
+              if (!isRecord(entry) || !sameValue(entry.value, result.facts.fields[field as keyof typeof result.facts.fields])
+                || !sameValue(entry.value, item[field]) || provenance[field as keyof typeof provenance]?.kind !== entry.kind) throw new Error('Invalid fixture claim');
+            }
+          }
+          for (const [field, entry] of Object.entries(provenance)) {
+            if (entry.kind.startsWith('ai_') && (!isRecord(claim) || !isRecord(claim.fields) || !Object.hasOwn(claim.fields, field))) throw new Error('Invalid fixture provenance');
+          }
+        }
         for (const key of provenanceFields) {
           const value = item[key];
           if (value !== null && !(Array.isArray(value) && value.length === 0) && !(key === 'notes' && value === '') && !provenance[key]) {
@@ -391,12 +418,25 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       items.push({ ...item, owner_id: owner, version: 1, deleted_at: null, created_at: now, updated_at: now });
       images.push({ ...image, owner_id: owner, item_id: item.id, description_version: 1, state: 'pending', retired_at: null,
         main_path: `${prefix}/main.jpg`, thumb_path: `${prefix}/thumb.jpg`, created_at: now });
-      const save = { owner, itemId: item.id, imageId: image.id, fingerprint, state: 'reserved' as const };
+      const save = { owner, itemId: item.id, imageId: image.id, fingerprint, state: 'reserved' as const, analyzed };
       saves.push(save);
+      if (analyzed && options.loseAnalyzedReserveReplyOnce && !analyzedReserveReplyLost) {
+        analyzedReserveReplyLost = true; await route.abort('failed'); return;
+      }
       await json([currentSave(save)]); return;
     }
-    if (url.pathname === '/rest/v1/rpc/finalize_item_save') {
+    if (url.pathname === '/rest/v1/rpc/cancel_analyzed_item_save') {
       const body: unknown = request.postDataJSON();
+      const save = isRecord(body) && saves.find((value) => value.owner === owner && value.analyzed
+        && value.itemId === body.p_item_id && value.imageId === body.p_image_id && value.fingerprint === body.p_fingerprint);
+      if (!save || save.state !== 'reserved' || !currentSave(save)) { await json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400); return; }
+      save.cancelled = true; await route.fulfill({ status: 204 }); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/finalize_item_save' || url.pathname === '/functions/v1/finalize-analyzed-item') {
+      const analyzed = url.pathname.endsWith('/finalize-analyzed-item');
+      const raw: unknown = request.postDataJSON();
+      const body: unknown = analyzed && isRecord(raw) && Object.keys(raw).length === 3
+        ? { p_item_id: raw.itemId, p_image_id: raw.imageId, p_fingerprint: raw.fingerprint } : raw;
       if (method !== 'POST' || !isRecord(body) || !sameValue(Object.keys(body).sort(), ['p_fingerprint', 'p_image_id', 'p_item_id'])
         || !isUuid(body.p_item_id) || !isUuid(body.p_image_id) || typeof body.p_fingerprint !== 'string' || !/^[0-9a-f]{64}$/.test(body.p_fingerprint)) {
         await json({ code: '22023', message: 'Invalid input', details: null, hint: null }, 400); return;
@@ -404,7 +444,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const save = saves.find((value) => value.owner === owner && value.itemId === body.p_item_id
         && value.imageId === body.p_image_id && value.fingerprint === body.p_fingerprint);
       const current = save && currentSave(save);
-      if (!save || !current || images.some((row) => row.owner_id === owner && row.item_id === save.itemId && row.id !== save.imageId && row.state === 'ready')) {
+      if (!save || Boolean(save.analyzed) !== analyzed || !current || images.some((row) => row.owner_id === owner && row.item_id === save.itemId && row.id !== save.imageId && row.state === 'ready')) {
         await json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400); return;
       }
       if (!files.has(String(current.image.main_path)) || !files.has(String(current.image.thumb_path))) {

@@ -276,6 +276,42 @@ configuration. Full automatic form/title/description wiring and the parked
 saved-only backup/restore/provenance-history contract remain separate release
 work; B2 does not make raw-v2 backups complete or authorize inference/deployment.
 
+## I29 photo-first C client source
+
+The C source candidate connects committed, locally prepared main JPEGs to
+the fixed ordinary-auth analysis route, with 1..512000 byte admission, a
+25-second outer analysis budget and five-second control budgets. Status 202
+is pending; timeout/504 is possibly charged. Neither starts an automatic new
+POST. Explicit status checks keep the request identity; deliberately choosing
+a new analysis allocates a new generation and displays the possible extra cost.
+
+`AiClient` reads current SDK authentication for each fixed route and checks
+owner/epoch across asynchronous boundaries. Responses use a bounded closed
+JSON reader; usage and acknowledgment versions retain decimal-string precision.
+`SessionController.saveAiConsent` shares the existing profile/language mutex,
+but uses typed REST for nullable opt-out, without modifying `ProfileUpdate`,
+the profile adapter or generated signatures. Only an exact own AI-only +1 ACK,
+unchanged profile fields/language and unchanged published baseline can rebase
+a dirty profile draft. An acknowledged version is a refresh floor. Lost ACKs
+require explicit read-only reconciliation, never an automatic repeated write.
+
+Local title/description/tags are generated once in the current EN/FI/SV language,
+without another model call; title/tags remain unknown unless manually edited.
+Manual edits and clears survive late results and committed-photo changes.
+Explicit trusted Save uses B2; explicit continuation with retained unverified
+values uses its null-claim composer. Pure manual entry retains the original
+manual composer/transport. No automatic library Save or post-save inference
+is added. The existing saved editor still exposes all thirty garment fields
+and independent image-description Save.
+
+The B2 reservation callback exposes a fingerprint only after full same-attempt
+validation. Save/Cancel are mutually exclusive. Cancellation never reserves
+to obtain a missing fingerprint: the owner may explicitly retry the same
+frozen Save to reacquire it. Unknown cancellation, including a possibly
+completed Save, offers an honest leave-without-confirmation option; it does
+not claim deletion or a refund. These are source contracts, not passing C
+runtime, type, visual or release evidence; see the dated phase result.
+
 ## Authenticated image access
 
 Owner views use `storage.from('wardrobe').download(path)` through the current user's SDK client, with a custom fetch adapter setting `cache:'no-store'` for data/storage/auth requests. Convert returned JPEG bytes to a Blob URL and revoke it on unmount/logout/account change. Coalesce identical in-flight `(ownerUid,imageId,variant)` downloads and cap concurrency at four. No Edge media function, public image endpoint or sharing URL is implemented. RLS checks current approved-account status and the reserved owner path on every new Storage request.

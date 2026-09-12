@@ -7,12 +7,14 @@ import { errorKey, isAborted } from '../../data/errors';
 import type { Language, MessageKey, Translate } from '../../i18n';
 import { LanguageSettings } from '../settings/language-settings';
 import { Preferences } from './preferences';
+import { AiSettings } from '../settings/ai-settings';
+import type { AiClient } from '../../data/ai';
 
-type Props = { client: AppClient; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; language: Language; online: boolean; t: Translate; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void; onBack: () => void };
+type Props = { client: AppClient; ai: AiClient; unresolved: boolean; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; language: Language; online: boolean; t: Translate; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void; onBack: () => void };
 function intlOptions(key: 'timeZone' | 'currency'): string[] {
   try { return typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf(key) : []; } catch { return []; }
 }
-export function ProfileScreen({ client, controller, scope, profile, change, busy, language, online, t, onDirty, onBack }: Props) {
+export function ProfileScreen({ client, ai, unresolved, controller, scope, profile, change, busy, language, online, t, onDirty, onBack }: Props) {
   const [base, setBase] = useState(profile);
   const [seen, setSeen] = useState(profile);
   const [fields, setFields] = useState<ProfileFields>(() => profileFields(profile));
@@ -31,6 +33,9 @@ export function ProfileScreen({ client, controller, scope, profile, change, busy
     if (!dirty) { setBase(profile); setFields(profileFields(profile)); }
     else if (change?.kind === 'language' && change.previous.version === base.version
       && sameProfileFields(change.previous, base) && sameProfileFields(profile, base)) setBase(profile);
+    else if (change?.kind === 'ai' && change.previous.version === base.version && profile.version === base.version + 1
+      && sameProfileFields(change.previous, base) && sameProfileFields(profile, base)
+      && change.previous.ui_language === base.ui_language && profile.ui_language === base.ui_language) setBase(profile);
   }
   useEffect(() => {
     onDirty(dirty || preferencesDirty, false, busy || reading || preferencesBusy);
@@ -87,6 +92,8 @@ export function ProfileScreen({ client, controller, scope, profile, change, busy
         <p className="privacy-note">{t('profile.privacy')}</p>
       </section>
       <Preferences client={client} scope={scope} t={t} language={language} online={online} onDirty={setPreferencesDirty} onBusy={setPreferencesBusy} />
+      <AiSettings ai={ai} controller={controller} scope={scope} profile={profile} busy={busy || reading}
+        unresolved={unresolved} language={language} online={online} t={t} />
     </div>
   </div>;
 }
