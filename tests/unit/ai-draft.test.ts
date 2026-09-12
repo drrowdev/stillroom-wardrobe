@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   aiSaveClaim, beginAiAnalysis, continueAiManually, createAiDraft, editAiDraftField, expireAiDraft,
-  failAiAnalysis, invalidateAiDraft, prepareAiGeneration, receiveAiResult,
+  failAiAnalysis, invalidateAiDraft, prepareAiGeneration, receiveAiResult, presentAiDraft,
   type AiContext, type AiDraftState, type AiTransition,
 } from '../../src/domain/ai-draft';
 import { aiFields, aiKind, type AiFacts, type AiField } from '../../src/domain/ai-analysis';
@@ -66,6 +66,24 @@ const mismatches = [
 ] as const;
 
 describe('pure bound draft projection', () => {
+  it('creates local text once, preserves language invariance and removes only untouched presentation on replacement', () => {
+    const first = changed(presentAiDraft(ready(), context, 'fi'));
+    expect(raw(first).intent).toEqual({});
+    expect(raw(first).raw.title.length).toBeGreaterThan(0);
+    expect(raw(first).raw.tags.length).toBeGreaterThan(0);
+    expect(presentAiDraft(first, context, 'sv')).toEqual({ status: 'ignored', state: first, reason: 'ineligible_state' });
+    expect(claim(first).fields).not.toHaveProperty('title');
+    expect(claim(first).fields).not.toHaveProperty('tags');
+    const cleared = changed(editAiDraftField(first, context, 'tags', [], 'sv'));
+    const edited = changed(editAiDraftField(cleared, context, 'title', 'My own title', 'en'));
+    const replaced = changed(prepareAiGeneration(edited, context, nextContext));
+    expect(raw(replaced).raw.title).toBe('My own title');
+    expect(raw(replaced).raw.tags).toEqual([]);
+    expect(raw(replaced).intent).toEqual({ title: true, tags: true });
+    const untouched = changed(prepareAiGeneration(first, context, nextContext));
+    expect(raw(untouched).raw.title).toBe('');
+    expect(raw(untouched).raw.tags).toEqual([]);
+  });
   it('requires explicit request start and distinct draft/request/generation identity', () => {
     const idle = initial();
     expect(idle.context?.draftId).not.toBe(idle.context?.requestId);

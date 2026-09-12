@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { AppClient } from '../../data/client';
 import type { OwnerScope } from '../../auth/session';
-import { garmentFields, newGarmentDraft, validateGarmentDraft } from '../../domain/garment-fields';
+import { garmentFields, validateGarmentDraft } from '../../domain/garment-fields';
 import { validDescription } from '../../domain/item-details';
 import { ItemForm } from './item-form';
 import { Icon } from '../../app/icon';
@@ -11,8 +11,13 @@ import { prepareImage } from '../../images/process-image';
 import { CropEditor } from '../../images/crop-editor';
 import { ORIGINAL_EDIT, type PhotoEdit } from '../../images/crop';
 import type { ImagePreparationDetails, ImagePreparationStage } from '../../images/jpeg';
-import { newSaveAttempt, saveItem, type SaveAttempt, type SaveStage } from '../../images/upload';
+import { newSaveAttempt, saveItem, saveAnalyzedItem, type SaveStage } from '../../images/upload';
 import { errorKey, isAborted } from '../../data/errors';
+import { newAnalyzedSaveAttempt, newUnverifiedSaveAttempt, type AnalyzedSaveAttempt } from '../../domain/analyzed-save';
+import type { AiClient } from '../../data/ai';
+import { useAiDraft } from './use-ai-draft';
+import { microUsd } from '../../domain/ai-presentation';
+import type { BeforeDiscard } from '../../app/dialog';
 
 const preparationErrors: Record<ImagePreparationError['code'], MessageKey> = {
   unsupported: 'photo.prepareUnsupported',
@@ -41,8 +46,9 @@ function focusGarmentField(id: string): void {
 type Props = {
   client: AppClient; scope: OwnerScope; currency: string; online: boolean; t: Translate; language: Language;
   onSaved: () => void; onBack: () => void; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void;
+  ai: AiClient; onBeforeDiscard: (handler: BeforeDiscard | null) => void;
 };
-export function AddItem({ client, scope, currency, online, t, language, onSaved, onBack, onDirty }: Props) {
+export function AddItem({ client, scope, currency, online, t, language, onSaved, onBack, onDirty, ai, onBeforeDiscard }: Props) {
   const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [fullPhoto, setFullPhoto] = useState<PreparedPhoto | null>(null);
@@ -50,16 +56,19 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   const [editing, setEditing] = useState(false);
   const [acceptedEdit, setAcceptedEdit] = useState<PhotoEdit>(ORIGINAL_EDIT);
   const [initialCurrency] = useState(currency);
-  const [draft, setDraft] = useState(() => newGarmentDraft(currency, language));
+  const analysis = useAiDraft(ai, currency, language);
+  const { draft, description: altText } = analysis;
   const title = draft.raw.title;
-  const [altText, setAltText] = useState('');
   const [preparing, setPreparing] = useState(false);
   const [stage, setStage] = useState<SaveStage | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
   const [preparationDetails, setPreparationDetails] = useState<ImagePreparationDetails | null>(null);
   const [showPreparationDetails, setShowPreparationDetails] = useState(false);
   const [invalid, setInvalid] = useState(false);
-  const [attempt, setAttempt] = useState<SaveAttempt | null>(null);
+  const [attempt, setAttempt] = useState<AnalyzedSaveAttempt | null>(null);
+  const receipt = useRef<{ attempt: AnalyzedSaveAttempt; fingerprint: string } | null>(null);
+  const manualTransport = useRef(false);
+  const [cancelling, setCancelling] = useState(false);
   const library = useRef<HTMLInputElement>(null);
   const camera = useRef<HTMLInputElement>(null);
   const preparation = useRef<AbortController | null>(null);
@@ -67,10 +76,30 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   const original = useRef<Blob | null>(null);
   const focusEditorButton = useRef(false);
   const submitLatch = useRef(false);
-  const busy = stage !== null;
+  const busy = stage !== null || cancelling;
   const frozen = attempt !== null;
   const dirty = preparing || photo !== null || Object.keys(draft.intent).length > 0 || Boolean(altText);
   useEffect(() => { onDirty(dirty, frozen, busy); }, [dirty, frozen, busy, onDirty]);
+  useEffect(() => {
+    onBeforeDiscard(async () => {
+      if (submitLatch.current || scope.signal.aborted) return 'unresolved';
+      submitLatch.current = true;
+      setCancelling(true);
+      analysis.stop();
+      try {
+        if (attempt) {
+          if (manualTransport.current || receipt.current?.attempt !== attempt) return 'unresolved';
+          await ai.cancel(attempt, receipt.current.fingerprint);
+        } else {
+          const state = analysis.snapshot().state;
+          if (state?.context && state.status !== 'idle' && state.status !== 'cancelled') await ai.discard(state.context);
+        }
+        return 'cancelled';
+      } catch { return 'unresolved'; }
+      finally { submitLatch.current = false; if (!scope.signal.aborted) setCancelling(false); }
+    });
+    return () => onBeforeDiscard(null);
+  }, [analysis, ai, attempt, onBeforeDiscard, scope]);
   useEffect(() => {
     if (focusEditorButton.current && !editing && !preparing) {
       focusEditorButton.current = false;
@@ -112,6 +141,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   }
   async function prepare(file: Blob, edit: PhotoEdit, replacing = false): Promise<void> {
     if (frozen || submitLatch.current || scope.signal.aborted) return;
+    analysis.stop();
     preparation.current?.abort();
     const controller = new AbortController();
     preparation.current = controller;
@@ -128,6 +158,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
         const prepared = await prepareImage(file, signal, edit);
         if (!signal.aborted) {
           setPhoto(prepared);
+          void analysis.commitPhoto(prepared);
           if (replacing) setFullPhoto(prepared);
           setAcceptedEdit(edit);
           setEditing(false);
@@ -152,7 +183,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
       document.getElementById(editing ? 'crop-editor-title' : 'photo-pending')?.focus();
       return;
     }
-    if (submitLatch.current || busy || !online || scope.signal.aborted) return;
+    if (submitLatch.current || busy || !online || scope.signal.aborted || !attempt && !analysis.canSave) return;
     const validated = validateGarmentDraft(draft);
     if (!photo || !validated.values || validDescription(altText) === null) {
       setInvalid(true);
@@ -164,9 +195,20 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     setInvalid(false);
     setError(null);
     try {
-      const current = attempt ?? newSaveAttempt(draft, altText, photo, scope);
+      const state = analysis.snapshot();
+      if (!attempt) manualTransport.current = state.manual && state.state?.status !== 'invalidated'
+        && !state.state?.presentation && Object.keys(state.state?.derivation ?? {}).length === 0;
+      const current = attempt ?? (state.manual
+        ? manualTransport.current ? Object.freeze({ ...newSaveAttempt(state.draft, state.description, photo, scope), claim: null })
+          : newUnverifiedSaveAttempt(state.draft, state.description, photo, scope)
+        : state.state?.context ? newAnalyzedSaveAttempt(state.state, state.state.context, state.description, photo, scope, Date.now())
+          : null);
+      if (!current) return;
       setAttempt(current);
-      await saveItem(client, scope, current, setStage);
+      if (manualTransport.current) await saveItem(client, scope, current, setStage);
+      else await saveAnalyzedItem(client, scope, current, setStage, (reserved, fingerprint) => {
+        if (reserved === current && !scope.signal.aborted) receipt.current = { attempt: reserved, fingerprint };
+      });
       if (!scope.signal.aborted) {
         original.current = null;
         setPhoto(null);
@@ -203,7 +245,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
             }} />}
           {(editing || preparing) && <p id="photo-pending" tabIndex={-1} role="status" className="notice">{t(preparing ? 'photo.pendingPreparation' : 'photo.pendingCrop')}</p>}
           {invalid && !photo && <p className="field-error">{t('common.required')}</p>}
-          <p className="privacy-note"><Icon name="lock" />{t('capture.local')}</p>
+          <p className="privacy-note"><Icon name="lock" />{t('aiC.photoNotice')}</p>
           <p className="fine muted">{t('photo.cameraFallback')}</p>
           {preparationDetails && <>
             <button className="text-button" type="button" aria-expanded={showPreparationDetails} aria-controls="preparation-details" onClick={() => setShowPreparationDetails(!showPreparationDetails)}>{t(showPreparationDetails ? 'photo.hideDetails' : 'photo.showDetails')}</button>
@@ -215,10 +257,23 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
         </div>
         <div className="details-panel">
           <div className="details-heading"><span className="section-number" aria-hidden="true">01</span><h2>{t('capture.detailsTitle')}</h2></div>
-          <p className="fine muted">{t('capture.manualNote')}</p>
-          <ItemForm draft={draft} onChange={(next) => { if (!submitLatch.current && !frozen) setDraft(next); }} language={language} t={t} prefix="item" locked={frozen} currency={initialCurrency} showErrors={invalid}>
+          <p className="fine muted">{t('aiC.draftNotice')}</p>
+          {analysis.notice && <p role="status" className="notice">{t(analysis.notice)}</p>}
+          {analysis.accounting && <p className="fine muted">{t(analysis.accounting.basis === 'held' ? 'aiC.held' : analysis.accounting.basis === 'estimated' ? 'aiC.estimated' : 'aiC.confirmed',
+            { amount: microUsd(analysis.accounting.amountMicro, language) })}</p>}
+          {photo && !frozen && <div className="settings-actions">
+            <button type="button" className="text-button" disabled={!online || analysis.working || analysis.manual}
+              onClick={() => { void analysis.checkStatus(); }}>{t('aiC.checkStatus')}</button>
+            <button type="button" className="button button-secondary" disabled={analysis.manual}
+              onClick={() => { void analysis.continueManual(); }}>{t('aiC.continueManual')}</button>
+            <button type="button" className="text-button" disabled={!online || analysis.working || preparing || editing}
+              onClick={() => { void analysis.commitPhoto(photo); }}>{t('aiC.newAnalysis')}</button>
+          </div>}
+          <a href="#/settings" className="text-button">{t('aiC.settings')}</a>
+          <ItemForm draft={draft} onChange={(next) => { if (!submitLatch.current && !frozen) analysis.edit(next); }} language={language} t={t} prefix="item" locked={frozen} currency={initialCurrency} showErrors={invalid}
+            aiDerived={analysis.state?.status === 'ready' ? analysis.state.derivation : analysis.state ? {} : undefined}>
             <div className="field"><label htmlFor="item-alt">{t('item.altText')}</label>
-              <textarea id="item-alt" rows={3} value={altText} readOnly={frozen} onChange={(event) => { if (!submitLatch.current && !frozen) setAltText(event.target.value); }}
+              <textarea id="item-alt" rows={3} value={altText} readOnly={frozen} onChange={(event) => { if (!submitLatch.current && !frozen) analysis.editDescription(event.target.value); }}
                 aria-invalid={validDescription(altText) === null} aria-describedby={validDescription(altText) === null ? 'alt-error' : 'alt-help'} />
               <p className="fine muted" id="alt-help">{t('capture.descriptionHelp')}</p>
               {validDescription(altText) === null && <p id="alt-error" role="alert" className="notice notice-error">{t('detail.invalidDescription')}</p>}
@@ -226,7 +281,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           </ItemForm>
           {error && <div className="notice notice-error" role="alert"><p>{t(error)}</p>{attempt && <p>{t('capture.retryNote')}</p>}</div>}
           {frozen && !busy && <p className="fine muted">{t('capture.frozen')}</p>}
-          <div className="save-actions"><button className="button button-primary button-wide" type="submit" disabled={!online || busy || preparing || editing}>{busy ? <span className="spinner" /> : <Icon name="check" />}{t(stage ?? (attempt ? 'common.retry' : 'capture.save'))}</button><button className="button button-quiet" type="button" onClick={onBack} disabled={busy}>{t('common.cancel')}</button></div>
+          <div className="save-actions"><button className="button button-primary button-wide" type="submit" disabled={!online || busy || preparing || editing || !attempt && !analysis.canSave}>{busy ? <span className="spinner" /> : <Icon name="check" />}{t(stage ?? (attempt ? 'common.retry' : 'capture.save'))}</button><button className="button button-quiet" type="button" onClick={onBack} disabled={busy}>{t('common.cancel')}</button></div>
           {stage && <p className="sr-only" role="status">{t(stage)}</p>}
         </div>
       </form>

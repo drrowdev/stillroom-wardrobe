@@ -10,7 +10,8 @@ import { AddItem } from '../features/wardrobe/add-item';
 import { WardrobeScreen } from '../features/wardrobe/wardrobe-screen';
 import { ItemDetail } from '../features/wardrobe/item-detail';
 import { detailRouteId } from '../domain/item-details';
-import { DiscardDialog } from './dialog';
+import { DiscardDialog, type BeforeDiscard } from './dialog';
+import { AiClient } from '../data/ai';
 import { loadWardrobe } from '../data/items';
 import { errorKey, isAborted } from '../data/errors';
 import type { AppClient } from '../data/client';
@@ -65,7 +66,7 @@ function currentRoute(hash = location.hash): WorkspaceRoute {
     : hash.startsWith('#/items/') ? `detail:${hash}` : 'wardrobe';
 }
 function hashForRoute(route: WorkspaceRoute) { return route.startsWith('detail:') ? route.slice(7) : routeHash[route as keyof typeof routeHash]; }
-function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, language, online }: { client: AppClient; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; t: Translate; language: Language; online: boolean }) {
+function OwnedWardrobe({ client, config, controller, scope, profile, change, busy, unresolved, t, language, online }: { client: AppClient; config: PublicConfig; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; unresolved: boolean; t: Translate; language: Language; online: boolean }) {
   const [route, setRoute] = useState<WorkspaceRoute>(() => currentRoute());
   const [items, setItems] = useState<WardrobeItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,6 +78,9 @@ function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, la
   const dirty = useRef({ dirty: false, incomplete: false, busy: false });
   const loadSequence = useRef(0);
   const images = useMemo(() => new PrivateImages(client, scope), [client, scope]);
+  const ai = useMemo(() => new AiClient(client, config, scope), [client, config, scope]);
+  const beforeDiscard = useRef<BeforeDiscard | null>(null);
+  const onBeforeDiscard = useCallback((handler: BeforeDiscard | null) => { beforeDiscard.current = handler; }, []);
   const onDirty = useCallback((isDirty: boolean, incomplete: boolean, busy: boolean) => { dirty.current = { dirty: isDirty, incomplete, busy }; }, []);
   const refresh = useCallback(async () => {
     const sequence = ++loadSequence.current;
@@ -161,13 +165,14 @@ function OwnedWardrobe({ client, controller, scope, profile, change, busy, t, la
         {!online && <div className="notice notice-offline" role="status">{t('common.offline')} {t('common.stale')}</div>}
         {notice && route === 'wardrobe' && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('item.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setNotice(false)}><Icon name="close" /></button></div>}
         {route === 'add'
-          ? <AddItem client={client} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} />
-          : route === 'settings' ? <ProfileScreen client={client} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} />
+          ? <AddItem client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} />
+          : route === 'settings' ? <ProfileScreen client={client} ai={ai} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} />
           : route.startsWith('detail:') ? <ItemDetail key={route} client={client} scope={scope} itemId={detailRouteId(route.slice(7))} images={images}
             t={t} language={language} currency={profile.currency} online={online} onDirty={onDirty} onSaved={() => { void refresh(); }} onBack={() => changeRoute('wardrobe')} />
           : <WardrobeScreen items={items} images={images} loading={loading} error={error} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={() => { void refresh(); }} />}
       </main>
-      {discard && <DiscardDialog title={t(route === 'settings' || route.startsWith('detail:') ? 'common.unsaved' : 'capture.discard')} t={t} onCancel={() => {
+      {discard && <DiscardDialog beforeConfirm={route === 'add' ? async () => beforeDiscard.current ? beforeDiscard.current() : 'unresolved' : undefined}
+        title={t(route === 'settings' || route.startsWith('detail:') ? 'common.unsaved' : 'capture.discard')} t={t} onCancel={() => {
         setDiscard(null);
         if (route.startsWith('detail:')) requestAnimationFrame(() => { if (discardFocus.current?.isConnected) discardFocus.current.focus(); });
       }} onConfirm={() => {
@@ -226,7 +231,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
       <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); document.getElementById('main')?.focus(); }}>{t('common.skipContent')}</a>
       <header className="workspace-header"><Brand /><nav aria-label={t('nav.wardrobe')}><a className="active-nav" href="#/wardrobe"><Icon name="wardrobe" />{t('nav.wardrobe')}</a></nav><div className="account-controls"><button type="button" className="account-button" aria-expanded={menu} aria-label={t('account.menu')} onClick={() => setMenu(!menu)}><span className="avatar">{state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)}</span><span>{state.profile.display_name}</span><Icon name="chevron" /></button>{menu && <div className="account-popover"><a className="text-button" href="#/settings" onClick={() => setMenu(false)}>{t('nav.settings')}</a><LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} /><button className="text-button" type="button" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div>}</div></header>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online || state.profileSaving} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}
-      <OwnedWardrobe key={state.scope.epoch} client={client} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} language={state.language} online={online} t={t} />
+      <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={state.language} online={online} t={t} />
       <footer className="site-footer"><span>{t('intro.private')}</span><span>Stillroom Wardrobe</span></footer>
     </div>
   );

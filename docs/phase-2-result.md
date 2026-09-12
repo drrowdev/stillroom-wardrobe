@@ -4122,3 +4122,379 @@ not a hosted claim. Genuine final independent review and coordinator-owned
 visual review remain pending. No UI/title/description/provider expansion,
 saved-only backup/history restore completion, hosted migration, paid activation,
 deployment or human acceptance is claimed. PR #20 stays closed.
+
+## I29 photo-first C source candidate - 12 September 2026
+
+**Unstaged source; not executed, independently accepted, published, merged or
+deployed.** Requirements R18/R19/R23/R26/R27/R28 retain independent-owner
+R01/R11 and Phase 0 engineering-complete / acceptance-open distinctions.
+The preceding B2 section is its historical intake record. B2 subsequently
+completed under PR #21 comments
+[5645805099](https://github.com/drrowdev/stillroom-wardrobe/pull/21#issuecomment-5645805099)
+and [5645868493](https://github.com/drrowdev/stillroom-wardrobe/pull/21#issuecomment-5645868493);
+its merged source is this packet's base, not new C validation.
+
+This one persistent local GPT-6 Astra writer is canonical session
+`c69545b0-699e-4284-b64e-99cb7bcbf371`, workspace alias
+`fd165bf2-e75e-4ad4-a64d-7012af4536b8`, isolated branch
+`drrowdev-animated-fiesta`. Base/start HEAD remains
+`56e52790d6f2014d6a0383ec478c20d70cefd486`, tree
+`f9afd08446c7f3f21a01d050ee6f2353307adefd`. Completed read-only context preceded
+reading the complete
+[own attestation and 33-path source permission 5646092805](https://github.com/drrowdev/stillroom-wardrobe/pull/21#issuecomment-5646092805).
+The [proposal 5645946533](https://github.com/drrowdev/stillroom-wardrobe/pull/21#issuecomment-5645946533),
+[controlling amendment 5646005294](https://github.com/drrowdev/stillroom-wardrobe/pull/21#issuecomment-5646005294)
+and [approval 5646036986](https://github.com/drrowdev/stillroom-wardrobe/pull/21#issuecomment-5646036986)
+record the retained Anthropic / claude-opus-5 reviewer
+`d4c52a66-e314-4ad0-a96a-675e79fdd049`, turns 4/5 and PASS-amended-plan.
+Supported coordinator-observed local telemetry is not native-platform or
+tamper-proof evidence; the stopped B2 writer's receipt was not reused.
+
+The source connects consent/status, committed-photo automatic analysis,
+locally generated once-per-result EN/FI/SV title/description/tags, all-field
+review and explicit trusted/unverified Save. Original manual transport stays
+manual. Consent shares the profile/language mutex with nullable typed REST,
+an ACK floor, exact own AI-only +1 rebase guard and explicit read-only
+reconciliation after uncertainty. Edits/clears, language invariance, expiry,
+owner/epoch and stale-generation guards remain. Save/Cancel share a latch;
+only a fully validated same-attempt B2 fingerprint enables cancellation.
+Missing proof does not trigger reservation from Cancel. Unresolved navigation
+does not claim cancellation, deletion, completed Save or refund.
+
+The existing `node scripts/ai-analysis-rehearsal.mjs` CI collector now describes
+C after B1/B2 success restoration. It directly spawns the installed
+`node_modules/@playwright/test/cli.js test --config playwright.ai.config.ts`
+with one Chromium worker, retries zero and a 120-second child inside the fixed
+600-second parent deadline. Numeric entry/startup/child/headroom diagnostics
+fail closed when there is insufficient time; the budget is not extended.
+The exact analysis-route bridge uses the same Node production handler with
+only synthetic Google/OAuth transport. Real ordinary Auth/REST/Storage and
+Deno finalization are not mocked. Two C UUID namespaces retain native random
+suffixes, two distinct prepared photos bind request-local bytes/dimensions/hash
+to provider input and real attestation, and each owner explicitly opts out/in
+(+2 profile CAS) and Saves once. Raw child output is withheld. Exact owner
+cleanup and parent exact-ID/private restoration happen only after their
+success gates, preserving all non-C inventories and existing image bytes.
+No normal integration collector, SQL/types, backend helper, dependency,
+provider, codec, setup or root-policy file is changed.
+
+Browser source adds EN/FI/SV draft/control/navigation cases and retains the
+existing functional suites. One pinned one-day artifact step lists exactly
+four new synthetic PNGs under `test-results/i29-photo-first-visual`: consent
+and analyzed draft at EN desktop 1280 and FI mobile 320, each at most 1 MiB.
+All eight existing captures remain. No writer image review is performed.
+
+Under the source-only permission, **no local npm/Node/version, lint/type,
+unit/browser/backend, translation/scanner/build, dependency or installation
+command ran**. Non-executing source/Git/hash inspection is not runtime or
+security-scanner evidence. Locked dependencies remain unrestored. Full
+changed-file five-pattern manual review, retained independent source review
+and separate publication permission precede any commit/PR. Full automatic
+exact-head CI, Apple, generated-type parity, real normal-owner DB/Storage/
+security/preservation/recovery, B1=12/B2=22/new C=2, and coordinator artifact
+run/head/hash/verdict remain pending. Human/device/release, saved-only backup/
+history restoration, hosted migrations, paid/private-photo activation and
+deployment remain pending and separately authorized; PR #21 stays closed.
+
+## I29 photo-first C first-CI correction candidate - 12 September 2026
+
+**Five-path source-only correction; unstaged and not yet independently accepted
+or published.** The preceding source-candidate checkpoint remains historical.
+That candidate and its first source-review correction were subsequently
+accepted, committed as `293ff3bf7663161ff4542fe9715bbfc929e59e8a` (tree
+`fc872cbbb864b4817c7a9ac23208b0fa8d9afe32`, sole parent
+`56e52790d6f2014d6a0383ec478c20d70cefd486`) and published as draft
+[PR #22](https://github.com/drrowdev/stillroom-wardrobe/pull/22).
+
+The coordinator's [first exact-head evidence and proposal 5646602214](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5646602214)
+records attempt 1 at that head:
+
+- [CI 34699742483](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34699742483)
+  failed. App job `103569267225` passed `npm ci --no-fund`, then failed
+  `npm run lint`: `src/data/ai.ts:86`, `no-unsafe-finally` / unsafe throw.
+  Typecheck, translations, unit, build, scanners, dependency checks, browser
+  checks and all twelve visual artifacts were skipped, not passed.
+- Backend job `103569267238` passed setup/reset, ordinary integration/security,
+  real recovery, B1's exact 12 generations/restoration and B2's exact 22
+  additional generations/restoration, then failed at `C-ui-child`. Fixtures
+  were preserved, without success restoration. Generated types/artifact/parity
+  were skipped. C entry headroom was 557985 ms; startup elapsed 3128 ms and child
+  headroom 554857 ms; elapsed from C entry at child exit 5552 ms and remaining
+  552433 ms. This is not evidence of insufficient headroom.
+- [Apple 34699742501](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34699742501),
+  job `103569267251`, passed generated-JPEG 4 cases (17.4 s) and native
+  orientation/composition 3 cases (13.6 s). Those limited cases do not establish
+  AI UI behavior or visual acceptance.
+
+The source required a nonnull profile language before opening the UI, although
+the actual fixture contract permits null and the existing application performs
+ordinary first-login language initialization. This precondition mismatch is
+source-confirmed; the precise failed child assertion is still unknown because
+raw output was withheld. Collection/compile failure is not excluded, and the
+first-head typecheck did not run.
+
+The [controlling amendment and own source-only permission 5646653804](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5646653804)
+records actual retained reviewer
+`d4c52a66-e314-4ad0-a96a-675e79fdd049`, Anthropic / `claude-opus-5`,
+turn 8 PASS with controlling conditions and coordinator resolutions.
+This is amendment approval, not new-source acceptance. The same canonical
+`c69545b0-699e-4284-b64e-99cb7bcbf371` GPT-6 Astra writer retained the isolated
+workspace/branch/model. Fresh entry inspection matched clean `293ff3bf`, its
+tree/parent and all 33 accepted working SHA256/canonical Git blob/byte pairs.
+The full own permission was reread after targeted context and before edits.
+
+This correction moves successful reply return and cleanup-only rejection
+outside `finally`, retaining bounded cancellation, lock release and primary
+failure priority with explicit failure-presence flags for unknown/falsy
+rejections. Added unit source covers delayed cleanup, cleanup-only failures
+including undefined/null/false/0, and primary read/parse/cancel/lock-release
+failure priority.
+
+C now retains the original nullable profile and uses browser locale `en-US`.
+After UI readiness it independently verifies settled initialization: original
+null must become `en` at exactly +1; an existing language must remain at the
+same version. All other parsed profile values remain equal. The consent
+baseline is taken only after that proof; AI opt-out/opt-in still requires
+exactly +2, with unchanged non-AI values through analysis/Save/reload.
+Only after a fully successful owner journey and successful browser context
+closure does an ordinary fresh-version CAS restore an originally-null language
+at exactly +1. No failure catch/finally performs restoration. The parent
+independently captures C-entry profiles, checks their B1/B2 +4 baseline and
+derives total +6 for originally-nonnull or +8 for originally-null profiles,
+never a version range. Full non-AI profile equality and explicit AI consent
+state checks remain gates, together with existing inventory/ready/baseline
+equality and exact-ID success-only private restoration.
+
+The child progress protocol emits only finite fixed stages and owner index
+0/1/2 (23 ordered records on success). The parent bounds capture at the existing
+262144 bytes, progress lines at 4096, progress records at 32 and record bytes at 128,
+then synthesizes a fixed last stage/index and numeric exit alongside existing
+timings. Missing, malformed or truncated progress is diagnostic `UNKNOWN`, not
+a new success/failure gate. Exit code 2 remains ambiguous, not an inferred
+timeout. Raw stdout/stderr remain private. Marker-aware, bounded per-line
+parsing tolerates dot-reporter decoration for both protocols; an actual exit 0
+still requires exactly one <=4096-byte success receipt, strict JSON, the same
+closed ten-key/two-owner membership and independent request/attestation binding.
+Duplicate/invalid success receipts fail. The generic failure label now says
+AI rehearsal rather than incorrectly assigning a C failure to B1.
+
+Only `src/data/ai.ts`, `tests/unit/ai-client.test.ts`,
+`tests/integration/ai-photo-first.spec.ts`, `scripts/ai-analysis-rehearsal.mjs`
+and this phase result are changed. The other 28 packet files, SQL/types,
+profile controller/adapter, backend helpers/collector, provider/codec,
+dependencies/configuration/workflows and all 12 capture definitions are frozen.
+The 600-second parent, 120-second child, 150000/135000 ms admissions, one
+Chromium worker/retries zero, B1=12/B2=22/C=2, two distinct real prepared JPEGs
+and one explicit Save per owner are unchanged.
+
+No local runtime/version/install/lint/type/test/scanner/build/browser/backend
+command was run for this correction. Manual source/hash inspection is not
+compiler or execution proof. Coordinator full-five-pattern refresh and actual
+retained independent source-delta adjudication remain required before separate
+commit/publication permission. All new-head CI/type/real-owner/C/restoration/
+twelve-visual gates remain pending, as do human/device/release, hosted,
+paid/private-photo activation and deployment gates. No merge, deployment,
+paid/private activation or production change is claimed or authorized.
+
+## I29 C compiler correction candidate - 12 September 2026
+
+**Source-only, unstaged; new-source acceptance and execution pending.**
+The coordinator's [exact-c3 evidence 5646866990](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5646866990)
+records CI `34702229945` at `c3d92b0ff198c2f342fcb53e312cf34aed2df0af`:
+real ordinary-owner integration/security/recovery, B1=12, B2=22 and C=2
+passed, including one explicit Save per C owner and exact cleanup/restoration.
+App lint passed, then typecheck failed on incompatible cached/refreshed SDK
+response unions and the hook edit-loop inference cycle. Later App checks and
+all twelve visual artifacts were skipped. Apple `34702229972` passed its
+limited 4+3 cases. None of these results establishes a later source head.
+
+After the successful real rehearsals, `npm run db:types` failed: the closed
+diagnostic classified run-container / exit-125, but the underlying cause
+remains unknown. Generated-type artifact/parity were skipped. No schema,
+helper, dependency or configuration remedy or blind rerun is authorized;
+the next genuine source head must run the unchanged full pipeline.
+
+[Own permission 5646910665](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5646910665)
+records retained Anthropic / claude-opus-5 reviewer
+`d4c52a66-e314-4ad0-a96a-675e79fdd049`, turn 10 pre-edit PASS with conditions,
+not new-source acceptance. The same GPT-6 Astra writer verified clean c3 and
+all 33 accepted triples, read targeted context and reread full permission.
+This four-path candidate separates cached/refreshed responses and validates
+the selected session, adds only the existing `AiTransition` annotation to the
+hook's edit result, and adds typed returned-error/wrong-owner/thrown-rejection
+no-dispatch tests plus a refreshed-token case. Existing guards, null/manual
+editing, refresh/no-401-retry and fifteen cleanup cases remain unchanged.
+The defensive refresh-null check remains; an error-free null-session mock
+is omitted because compatibility with the unavailable local SDK declarations
+could not be established without prohibited dependency restoration or casts.
+
+No local runtime/compiler/tests/install/probes ran. The other 29 packet files
+remain frozen. Coordinator manual refresh, retained source-delta adjudication
+and separate commit/publication permission are pending, as are new-head full
+CI/type/C/restoration/generated-type/twelve-visual and human/release gates.
+The separate UX-copy request is not part of this correction. No hosted,
+provider, paid/private-photo activation, deployment or merge is authorized.
+
+## I29 C import-boundary correction candidate - 12 September 2026
+
+**Source-only and unstaged; new-source acceptance/execution pending.**
+[Exact-7344 evidence 5647126842](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647126842)
+records CI `34704304057`: lint/typecheck/translations and all 55 ai-client
+cases passed; unit totals were 1563 passed / 2 failed. Failures at
+`ai-schema.test.ts:366/377` enforce the historical unwired/B2-only contract,
+which predates the reviewed C incoming edges and draft-to-presentation import.
+Backend ordinary-owner/security/recovery/B1/B2/C/exact restoration, generated
+types and repository parity passed. Apple `34704304073` passed its limited
+4+3 cases. The prior generator failure did not recur without changes; its
+cause remains unknown, not repaired. Later App build/canary/scanner/dependency/
+browser and all twelve visual steps were skipped.
+
+[Own permission 5647170119](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647170119)
+records actual retained Anthropic / claude-opus-5 turn 13 pre-edit PASS with
+A1-A6, not resulting-source acceptance. This two-file correction extends the
+packet to 34 paths only for the existing schema test. A single exact-path
+admission predicate serves real source assertions and positive/negative
+canaries; the full walk must equal the static seven incoming pairs. The
+shared outgoing pool adds presentation only for the draft core. The AST
+walker, Bundler resolver, seven-form probe and non-vacuity oracles remain
+unchanged, as do the test's first 316 lines and all production/UI/copy.
+
+No local runtime/compiler/tests/install/probes ran. The other 32 packet paths
+remain frozen. Coordinator manual refresh, actual source-delta adjudication
+and separate commit/publication permission precede fresh full CI, including
+App/unit/ordinary-owner/B1/B2/C/restoration/types/Apple/twelve-visual gates.
+Human/release and hosted/provider/paid/private/deployment gates remain pending;
+no generator repair or UX-copy work is authorized here.
+
+## I29 C browser-fixture repair candidate - 12 September 2026
+
+**Source-only, unstaged; execution and resulting-source review pending.**
+[Exact-462 evidence 5647388954](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647388954)
+records CI `34706266313`: lint/type/translations, 1579 unit tests, build/canary,
+secret/dependency checks passed; browser totals were 524 passed / 32 failed.
+Backend normal-owner/security/recovery/B1=12/B2=22/C=2/restoration/types/parity
+and Apple `34706266181` passed. Visual uploads were skipped; no twelve-image
+acceptance follows. The unchanged generator passed again; its earlier failure
+cause remains unknown. The 462 type artifact has not yet been independently
+content-reviewed; historical 7344 artifact verification is not new-head proof.
+
+[Own permission 5647465239](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647465239)
+adopts actual retained Anthropic / claude-opus-5 turn 16 AMEND conditions M1-M7.
+This seven-file candidate preserves legacy request records and adds separate
+issued-bearer/empty-object status proofs, exact preparation-trigger oracles,
+and response-listener timing outside delayed route handlers. The existing
+loopback server gains a separate optional analysis protocol; its actual bounded
+stream supplies the synthetic hash, never Playwright's body inspector.
+Storage guards/counters, production/UI/copy and all twelve capture bounds stay
+unchanged. Added canaries cover binary equality, corruption/truncation detection,
+byte limits, invalid input, expected rejection liveness and isolated cleanup.
+
+No local runtime/compiler/tests/install/probes or image review ran. The other
+27 packet paths and this document's original 294569 bytes remain frozen.
+Actual WebKit wire corruption, emptiness or truncation would remain a blocker,
+not permission for reconstructed bodies, skips or weaker checks. Coordinator
+manual refresh, independent source review and separate commit/publication
+permissions precede fresh exact-head CI/types/Apple/twelve-visual gates.
+Human/release/hosted/provider/paid/private/deployment gates remain separate;
+this is not the UX packet or a claim of full browser acceptance.
+
+## I29 C status setup and storage observation candidate - 12 September 2026
+
+**Source-only, unstaged; source review and execution pending.**
+[Exact-47e evidence 5647757080](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647757080)
+records CI `34709652699`: 1579 units passed; browser totals were 614 passed,
+2 failed and 4 project-gated visual cases skipped. The previous 32 failures
+and new analysis-wire canaries passed, including WebKit. Backend ordinary-owner,
+security/recovery/B1=12/B2=22/C=2/restoration/types/parity and Apple
+`34709652652` passed. Type artifact content and twelve-image acceptance remain
+unreviewed. The status canary included late StrictMode image GETs; the separate
+WebKit multipart parallel OFF case returned 400 on both configured attempts.
+Its cause remains unlocalized; passing ON and analysis tests do not diagnose it.
+
+[Own permission 5647876516](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647876516)
+records actual replacement Anthropic / claude-opus-5 reviewer
+`1689057f-d002-4b02-abd9-9e188d72a0a8` AMEND and coordinator resolutions R1-R3.
+This four-file candidate completes two items and two item-images responses
+before the status baseline. Storage observation uses the existing state,
+independent of the single old-option-derived response-decoration flag, with
+one copied first POST400-attempt snapshot and explicit retry/mode labels.
+OFF still does not read response bodies; normal OFF serialization is preserved
+structurally, not proven by a new runtime body-equality check. Last-facts null
+overwrites, multipart protocol, transport, strict assertions and captures stay.
+
+No local runtime/compiler/tests/install/probes or image review ran. Other30
+packet paths and this document's original 296804 bytes remain frozen.
+Observation adds overhead, not a storage fix; ON response draining remains an
+untested alternative hypothesis. Source review and separate commit/publication
+permissions precede any next exact-head CI. The proposed later budget is one
+ordinary PR-sync CI only; if still unlocalized, even if green, a user decision
+is required. Any 400/reset/lost/corrupt/empty bytes, cleanup failure or flaky
+retry blocks; no repeat diagnostics or PR16 waiver follows. Fresh compiler,
+browser/normal-owner/B1/B2/C/restoration/types/Apple/twelve-visual/human gates,
+UX and hosted/provider/paid/private/deployment authority remain separate.
+
+## I29 C retry-guard correction candidate - 12 September 2026
+
+**Source-only, unstaged; corrected-head validation pending.**
+[Own permission and evidence 5648083748](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5648083748)
+records exact-944 CI `34712818709`: install passed, then App lint failed at
+`slice.spec.ts:340:98` with `no-unsafe-finally`. Remaining App type/translations/
+units/build/scanners/browser and visual uploads were skipped. Backend
+ordinary-owner/security/recovery/B1=12/B2=22/C=2/restoration/types/parity passed;
+Apple `34712818790` passed its four generated and three native cases.
+No browser observation ran; the WebKit storage cause remains unknown.
+
+The same Anthropic / claude-opus-5 reviewer `215a1de6-d6ea-4629-b745-f54a666171ef`
+assessed this semantics-preserving correction and replacement-budget amendment.
+The unchanged invalid-retry predicate now sets captureError directly; only its
+else branch assigns retry and collects the same evidence in the original order.
+Defaults, surrounding catch, annotation/logging/cleanup, R1/R2 and all strict
+transport/capture assertions remain. Other32 paths and this document's original
+299268 bytes are frozen. No local lint/compiler/tests/runtime/install/probes ran;
+prior source review was not lint proof and this candidate has no runtime pass.
+
+The user approved one replacement normal full CI plus existing Apple companion,
+only after source review and separate commit/publication permission. No unchanged
+rerun or further diagnostic loop is authorized. Still unlocalized, even if green,
+requires a user decision; any 400/reset/lost/corrupt/empty bytes, cleanup failure
+or flaky retry blocks, without a PR16 waiver. All corrected-head automated,
+twelve-image and human/release gates remain pending; UX/hosted/provider/paid/
+private/deployment authority remains separate.
+
+## I29 C reservations-test observation candidate - 12 September 2026
+
+**Source-only, unstaged; source review and new-head validation pending.**
+[Independent 2a4 assessment 5648305666](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5648305666)
+records an unchanged-against-main reservations/credentials test with a WebKit
+upload failure and successful configured retry, but no same-attempt receiver
+facts. No affirmative source evidence attributes it to C; neither harness-only
+causation nor production-photo corruption is established. Coordinator
+[2a4 artifact/visual review 5648267317](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5648267317)
+verified types and twelve images without an additional blocking scoped defect;
+that dated evidence does not remove the flaky-upload or human acceptance gates.
+
+[User cycle approval 5648398993](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5648398993),
+[plan 5648406473](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5648406473)
+and [own source permission 5648467753](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5648467753)
+record actual Anthropic / claude-opus-5 reviewer215a1de6 Turn4 AMEND and
+coordinator resolutions A1-A3. Only the selected case opts into existing server
+observation, from setup through the final assertion, with synchronous bounded
+finally evidence and unchanged fixture teardown. All original requests,
+payloads, response/body-reading behavior and strict assertions remain; the
+shared sender, receiver and passing parallel cases are untouched.
+
+Route counters include preceding refusals; the intended valid upload is the
+first receiver POST, not a guessed measured counter result. Observation adds
+counters/stages/facts, envelope/high-byte work after stream drain and other
+bookkeeping; scheduling/response timing effects are not excluded. A captured
+stage is not a fix and clean non-reproduction is not localization.
+
+No local runtime/compiler/lint/tests/install/probes/scanner or image review ran.
+Other32 paths and this document's original301163 bytes remain frozen. Source
+review and separate commit/publication permission precede the user's one future
+normal full CI plus existing Apple cycle. Even lint/setup failure consumes it;
+no automatic replacement, unchanged rerun or further loop is authorized.
+Missing evidence, bad uploads/bytes/reset/cleanup or flaky retry blocks.
+Still unlocalized, even if green, requires a user decision; no PR16 waiver.
+All corrected-head automated/twelve-image/human gates remain pending; UX and
+hosted/provider/paid/private/deployment authority remain separate.

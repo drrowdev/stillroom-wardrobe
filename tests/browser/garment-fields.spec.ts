@@ -7,6 +7,7 @@ import { messages, type Language } from '../../src/i18n';
 import { garmentFields } from '../../src/domain/garment-fields';
 import { provenanceFields } from '../../src/domain/attribute-provenance';
 import { mockBackend, owners, signIn } from './mock-backend';
+import { manualEntry } from './ai-photo-first-support';
 
 async function setup(page: Page, language: Language = 'en', loseFinalizeReplyOnce = false) {
   const api = await mockBackend(page, { initialLanguage: language, loseFinalizeReplyOnce });
@@ -26,6 +27,7 @@ async function photo(page: Page, api: Awaited<ReturnType<typeof mockBackend>>) {
   await page.locator('input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
   await expect(page.locator('.capture-photo img')).toBeVisible();
   await expect(page.locator('#edit-photo')).toBeEnabled();
+  await manualEntry(page);
 }
 async function fillFields(page: Page, language: Language) {
   const text = {
@@ -367,7 +369,12 @@ test('complete creation form accessibility and bounded synthetic visual evidence
     await page.setViewportSize({ width: capture.width, height: 900 });
     expect(api.items.length === 0 && api.images.length === 0 && api.files.size === 0
       && api.profiles[owners.a]?.ui_language === capture.language
-      && api.requests.filter((request) => request.path.startsWith('/rest/')).every((request) => request.owner === owners.a && request.ownerFilter === `eq.${owners.a}`)).toBe(true);
+      && api.requests.filter((request) => request.path.startsWith('/rest/')).every((request) => request.owner === owners.a
+        && (request.path === '/rest/v1/rpc/ai_status'
+          ? request.method === 'POST' && request.ownerFilter === null : request.ownerFilter === `eq.${owners.a}`))).toBe(true);
+    expect(api.statusProofs()).toEqual(api.requests.filter((request) => request.path === '/rest/v1/rpc/ai_status')
+      .map(() => ({ owner: owners.a, issuedBearer: true, emptyObject: true })));
+    expect(api.statusProofs().length).toBeGreaterThan(0);
     expect(await page.evaluate(({ origin, language }) => {
       const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility === 'visible';
       const values = [...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea')]
