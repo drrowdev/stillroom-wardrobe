@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Response as PlaywrightResponse } from '@playwright/test';
+import { expect, test, type Page, type Response as PlaywrightResponse, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open, lstat } from 'node:fs/promises';
 import path from 'node:path';
@@ -7,9 +7,63 @@ import { request as httpRequest } from 'node:http';
 import { connect } from 'node:net';
 import { messages, type Language } from '../../src/i18n';
 import { aiFixture, addAiPhoto } from './ai-photo-first-support';
-import { analysisPath, mockBackend, owners, signIn } from './mock-backend';
+import { analysisPath, mockBackend, owners, signIn, type RawAnalysisObservation } from './mock-backend';
 
 type AiFixture = Awaited<ReturnType<typeof aiFixture>>;
+type RawAnalysisClient = { status: number | null; outcome: 'response' | 'network-rejection' };
+type RawAnalysisEvidence = {
+  case: 'oversized' | 'response-sequence'; project: 'chromium' | 'mobile' | 'webkit-photo' | null;
+  retry: number | null; repeat: number | null; fixturePresent: boolean;
+  snapshotPhase: 'not-captured' | 'before-cleanup' | 'fixture-unavailable';
+  cleanupStarted: boolean; cleanupCompleted: boolean; captureError: boolean;
+  client: Array<RawAnalysisClient | null>; observation: RawAnalysisObservation | null;
+  cumulative: AiFixture['analysisWire'] | null;
+};
+function rawAnalysisEvidence(kind: RawAnalysisEvidence['case']): RawAnalysisEvidence {
+  return { case: kind, project: null, retry: null, repeat: null, fixturePresent: false,
+    snapshotPhase: 'not-captured', cleanupStarted: false, cleanupCompleted: false, captureError: false,
+    client: [], observation: null, cumulative: null };
+}
+function snapshotRawAnalysis(evidence: RawAnalysisEvidence, api: AiFixture | undefined,
+  clients: readonly (Awaited<ReturnType<typeof sendBrowserAnalysis>> | null)[]) {
+  try {
+    evidence.fixturePresent = api !== undefined;
+    evidence.snapshotPhase = api ? 'before-cleanup' : 'fixture-unavailable';
+    evidence.client = clients.slice(0, 4).map((client) => {
+      if (client === null) return null;
+      if ((client.outcome !== 'response' && client.outcome !== 'network-rejection')
+        || (client.status !== null && ![200, 400, 403, 413, 502, 504].includes(client.status))) {
+        evidence.captureError = true;
+        return null;
+      }
+      return { status: client.status, outcome: client.outcome };
+    });
+    if (clients.length > 4) evidence.captureError = true;
+    if (api?.rawAnalysisObservation) {
+      const observation = api.rawAnalysisObservation;
+      evidence.observation = { ...observation, posts: observation.posts.slice(0, 4).map((post) => ({
+        ...post, firstPostTerminalReject: post.firstPostTerminalReject ? { ...post.firstPostTerminalReject } : null,
+      })), firstAttemptedPost400: observation.firstAttemptedPost400 ? { ...observation.firstAttemptedPost400 } : null };
+      evidence.cumulative = { ...api.analysisWire };
+      if (observation.overflow || observation.evidenceError || observation.posts.length > 4) evidence.captureError = true;
+    } else evidence.captureError = true;
+  } catch { evidence.captureError = true; }
+}
+function emitRawAnalysis(evidence: RawAnalysisEvidence, testInfo: TestInfo) {
+  try {
+    if (!Number.isSafeInteger(testInfo.retry) || testInfo.retry < 0 || testInfo.retry > 1) evidence.captureError = true;
+    else evidence.retry = testInfo.retry;
+    if (!Number.isSafeInteger(testInfo.repeatEachIndex) || testInfo.repeatEachIndex < 0) evidence.captureError = true;
+    else evidence.repeat = testInfo.repeatEachIndex;
+    const project = testInfo.project.name;
+    if (project === 'chromium' || project === 'mobile' || project === 'webkit-photo') evidence.project = project;
+    else evidence.captureError = true;
+  } catch { evidence.captureError = true; }
+  try { testInfo.annotations.push({ type: 'synthetic-raw-analysis-localization', description: JSON.stringify(evidence) }); }
+  catch { evidence.captureError = true; }
+  try { console.log('synthetic-raw-analysis-localization', JSON.stringify(evidence)); }
+  catch { evidence.captureError = true; }
+}
 const fixtureKey = 'sb_publishable_browser_fixture_only';
 const analysisHeaderNames = 'authorization, apikey, content-type, x-stillroom-request-id, x-stillroom-draft-id, x-stillroom-generation';
 function analysisIds(account: 'a' | 'b' = 'a') {
@@ -197,20 +251,33 @@ test('status admission proves the issued bearer separately from legacy decoded-o
 });
 for (const kind of ['wrong-key', 'wrong-bearer', 'wrong-owner', 'request-id', 'draft-id', 'generation',
   'method', 'path', 'query', 'content-type', 'empty', 'oversized'] as const) {
-  test(`analysis source forwarding refuses ${kind} without synthetic analysis or storage traffic`, async ({ page }) => {
-    const api = await aiFixture(page), before = storageCounts(api);
+  test(`analysis source forwarding refuses ${kind} without synthetic analysis or storage traffic`, async ({ page }, testInfo) => {
+    let api: AiFixture | undefined;
+    let result: Awaited<ReturnType<typeof sendBrowserAnalysis>> | null = null;
+    const evidence = kind === 'oversized' ? rawAnalysisEvidence('oversized') : null;
     try {
-      const result = await sendBrowserAnalysis(page, api, kind);
-      expect(result).toEqual({ status: kind === 'path' ? 404 : kind === 'empty' ? 400 : kind === 'oversized' ? 413 : 403,
-        outcome: 'response' });
-      expect(api.analysisWire.callbacks).toBe(0);
-      expect(api.analysisWire.peakBufferedBytes).toBeLessThanOrEqual(512000);
-      if (!['empty', 'oversized'].includes(kind)) expect(api.analysisWire.forwarded).toBe(0);
-      expect(api.inputs).toHaveLength(0); expect(api.results.size).toBe(0);
-      expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
-      expect(storageCounts(api)).toEqual(before);
-      expect(api.uploadWire.listening).toBe(true);
-    } finally { await assertAnalysisClosed(page, api); }
+      try {
+        api = await aiFixture(page, 'en', true, undefined, kind === 'oversized');
+        const before = storageCounts(api);
+        result = await sendBrowserAnalysis(page, api, kind);
+        expect(result).toEqual({ status: kind === 'path' ? 404 : kind === 'empty' ? 400 : kind === 'oversized' ? 413 : 403,
+          outcome: 'response' });
+        expect(api.analysisWire.callbacks).toBe(0);
+        expect(api.analysisWire.peakBufferedBytes).toBeLessThanOrEqual(512000);
+        if (!['empty', 'oversized'].includes(kind)) expect(api.analysisWire.forwarded).toBe(0);
+        expect(api.inputs).toHaveLength(0); expect(api.results.size).toBe(0);
+        expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+        expect(storageCounts(api)).toEqual(before);
+        expect(api.uploadWire.listening).toBe(true);
+      } finally {
+        if (evidence) snapshotRawAnalysis(evidence, api, [result]);
+        if (api) {
+          if (evidence) evidence.cleanupStarted = true;
+          await assertAnalysisClosed(page, api);
+          if (evidence) evidence.cleanupCompleted = true;
+        }
+      }
+    } finally { if (evidence) emitRawAnalysis(evidence, testInfo); }
   });
 }
 test('analysis receiver independently refuses invalid credentials/envelopes and bounds streamed bytes', async ({ page }) => {
@@ -234,22 +301,39 @@ test('analysis receiver independently refuses invalid credentials/envelopes and 
     expect(storageCounts(api)).toEqual(before);
   } finally { await assertAnalysisClosed(page, api); }
 });
-test('expected analysis 403/502/504 responses leave the shared storage receiver alive', async ({ page }) => {
-  const api = await aiFixture(page), before = storageCounts(api);
+test('expected analysis 403/502/504 responses leave the shared storage receiver alive', async ({ page }, testInfo) => {
+  let api: AiFixture | undefined;
+  const results: Array<Awaited<ReturnType<typeof sendBrowserAnalysis>> | null> = [null, null, null, null];
+  const evidence = rawAnalysisEvidence('response-sequence');
   try {
-    api.consent.set(owners.a, false);
-    expect((await sendBrowserAnalysis(page, api)).status).toBe(403);
-    api.consent.set(owners.a, true); api.mode('failed');
-    expect((await sendBrowserAnalysis(page, api)).status).toBe(502);
-    api.mode('timeout');
-    expect((await sendBrowserAnalysis(page, api)).status).toBe(504);
-    api.mode('ready');
-    expect((await sendBrowserAnalysis(page, api)).status).toBe(200);
-    expect(api.analysisWire).toMatchObject({ posts: 4, callbacks: 4, rejected: 0, timedOut: 0 });
-    expect(api.uploadWire.listening).toBe(true);
-    expect(storageCounts(api)).toEqual(before);
-    expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
-  } finally { await assertAnalysisClosed(page, api); }
+    try {
+      api = await aiFixture(page, 'en', true, undefined, true);
+      const before = storageCounts(api);
+      api.consent.set(owners.a, false);
+      results[0] = await sendBrowserAnalysis(page, api);
+      expect(results[0].status).toBe(403);
+      api.consent.set(owners.a, true); api.mode('failed');
+      results[1] = await sendBrowserAnalysis(page, api);
+      expect(results[1].status).toBe(502);
+      api.mode('timeout');
+      results[2] = await sendBrowserAnalysis(page, api);
+      expect(results[2].status).toBe(504);
+      api.mode('ready');
+      results[3] = await sendBrowserAnalysis(page, api);
+      expect(results[3].status).toBe(200);
+      expect(api.analysisWire).toMatchObject({ posts: 4, callbacks: 4, rejected: 0, timedOut: 0 });
+      expect(api.uploadWire.listening).toBe(true);
+      expect(storageCounts(api)).toEqual(before);
+      expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+    } finally {
+      snapshotRawAnalysis(evidence, api, results);
+      if (api) {
+        evidence.cleanupStarted = true;
+        await assertAnalysisClosed(page, api);
+        evidence.cleanupCompleted = true;
+      }
+    }
+  } finally { emitRawAnalysis(evidence, testInfo); }
 });
 for (const mode of ['parser-error', 'truncated', 'stalled'] as const) {
   test(`isolated analysis ${mode} never invokes the callback and cleans its receiver`, async ({ page }) => {

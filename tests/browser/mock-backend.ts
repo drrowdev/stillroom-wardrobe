@@ -2,7 +2,7 @@
 import type { Page, Request } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
-import { createServer, type IncomingHttpHeaders } from 'node:http';
+import { createServer, type IncomingHttpHeaders, type IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import type { Language } from '../../src/i18n';
 import { garmentFields, garmentPayload, parseGarmentValues, sameValue } from '../../src/domain/garment-fields';
@@ -32,6 +32,36 @@ export type AnalysisInput = { owner: string; requestId: string; draftId: string;
 type AnalysisHandler = (input: AnalysisInput) => { body: JsonRow; status: number };
 type StatusProof = { owner: string | null; issuedBearer: boolean; emptyObject: boolean };
 
+type RawAnalysisGuard = 'end-identity' | 'end-incomplete' | 'end-empty' | 'end-closing' |
+  'aborted' | 'request-error' | 'close-before-terminal' | 'timeout' | 'body-limit' | 'admission' | 'callback-error';
+type RawAnalysisRejection = Readonly<{
+  guard: RawAnalysisGuard; ordinal: number; forwardedAtReceipt: number;
+  receivedBytes: number; acceptedBytes: number;
+  identityPresent: boolean; complete: boolean; readableEnded: boolean; aborted: boolean; closing: boolean;
+}>;
+type RawAnalysisPost = {
+  ordinal: number; forwardedAtReceipt: number; receivedBytes: number; acceptedBytes: number;
+  writeStatus: ReturnType<typeof rawAnalysisStatus> | null;
+  writeResponseDestroyed: boolean | null; writeResponseWritableFinished: boolean | null;
+  endCallbackRan: boolean; postTerminalRejects: number; firstPostTerminalReject: RawAnalysisRejection | null;
+};
+export type RawAnalysisObservation = {
+  postCount: number; overflow: boolean; evidenceError: boolean; posts: RawAnalysisPost[];
+  firstAttemptedPost400: RawAnalysisRejection | null;
+};
+function rawAnalysisStatus(status: number) {
+  switch (status) {
+    case 200: case 202: case 204: case 400: case 403: case 408: case 413: case 500: case 502: case 504: return status;
+    default: return 'unexpected' as const;
+  }
+}
+function rawAnalysisRejection(guard: RawAnalysisGuard, post: RawAnalysisPost, request: IncomingMessage,
+  identityPresent: boolean, closing: boolean): RawAnalysisRejection {
+  return { guard, ordinal: post.ordinal, forwardedAtReceipt: post.forwardedAtReceipt,
+    receivedBytes: post.receivedBytes, acceptedBytes: post.acceptedBytes, identityPresent,
+    complete: request.complete, readableEnded: request.readableEnded, aborted: request.aborted, closing };
+}
+
 export const wireStages = [
   'none', 'route-auth', 'route-owner', 'route-existing', 'route-reservation-credentials',
   'receiver-reservation-origin', 'receiver-preflight', 'receiver-method-credentials',
@@ -60,7 +90,7 @@ type WireDiagnostic = {
 };
 
 async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], files: Map<string, Buffer>, tokens: Map<string, string>,
-  decorateWireResponses: boolean, diagnostic?: WireDiagnostic, analysis?: AnalysisHandler) {
+  decorateWireResponses: boolean, diagnostic?: WireDiagnostic, analysis?: AnalysisHandler, rawObservation?: RawAnalysisObservation) {
   const port = Number(process.env.PLAYWRIGHT_PORT ?? 5181);
   if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid browser test port.');
   const origin = `http://127.0.0.1:${port}`;
@@ -131,10 +161,21 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
   const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, connectionsCheckingInterval: 1000 }, (request, response) => {
     if (analysis && (request.url ?? '').split('?')[0] === analysisPath) {
       analysisState.active++;
+      let observedPost: RawAnalysisPost | undefined;
+      if (rawObservation && request.method === 'POST') {
+        rawObservation.postCount++;
+        if (rawObservation.posts.length < 4) {
+          observedPost = { ordinal: rawObservation.postCount, forwardedAtReceipt: analysisState.forwarded,
+            receivedBytes: 0, acceptedBytes: 0, writeStatus: null,
+            writeResponseDestroyed: null, writeResponseWritableFinished: null, endCallbackRan: false,
+            postTerminalRejects: 0, firstPostTerminalReject: null };
+          rawObservation.posts.push(observedPost);
+        } else { rawObservation.overflow = true; rawObservation.evidenceError = true; }
+      }
       let terminal = false;
       const timer = setTimeout(() => {
         analysisState.timedOut++;
-        reject(408);
+        reject(408, 'timeout');
       }, 5000);
       const cleanup = () => {
         clearTimeout(timer);
@@ -150,30 +191,53 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
         analysisState.active--;
         if (!response.destroyed) {
           response.writeHead(status, { ...analysisCors, 'content-type': 'application/json' });
-          response.end(JSON.stringify(body), () => { if (destroyRequest) request.destroy(); });
+          if (observedPost) {
+            observedPost.writeStatus = rawAnalysisStatus(status);
+            observedPost.writeResponseDestroyed = response.destroyed;
+            observedPost.writeResponseWritableFinished = response.writableFinished;
+            if (observedPost.writeStatus === 'unexpected' && rawObservation) rawObservation.evidenceError = true;
+          }
+          response.end(JSON.stringify(body), () => {
+            if (observedPost) observedPost.endCallbackRan = true;
+            if (destroyRequest) request.destroy();
+          });
         } else request.destroy();
       };
-      const reject = (status: number) => {
-        if (terminal) return;
+      const reject = (status: number, guard: RawAnalysisGuard) => {
+        if (terminal) {
+          if (observedPost) {
+            observedPost.postTerminalRejects++;
+            observedPost.firstPostTerminalReject ??= rawAnalysisRejection(guard, observedPost, request, identity !== null, Boolean(closing));
+          }
+          return;
+        }
+        if (rawObservation && observedPost && status === 400 && !response.destroyed && rawObservation.firstAttemptedPost400 === null) {
+          rawObservation.firstAttemptedPost400 = rawAnalysisRejection(guard, observedPost, request, identity !== null, Boolean(closing));
+        }
         analysisState.rejected++;
         finish({ code: 'INVALID_INPUT' }, status, true);
       };
-      const onAborted = () => reject(400);
-      const onError = () => reject(400);
+      const onAborted = () => reject(400, 'aborted');
+      const onError = () => reject(400, 'request-error');
       const chunks: Buffer[] = [];
       let length = 0;
       const onData = (chunk: Buffer) => {
         if (terminal) return;
         analysisState.receivedBytes += chunk.length;
-        if (chunk.length > 512000 - length) { reject(413); return; }
+        if (observedPost) observedPost.receivedBytes += chunk.length;
+        if (chunk.length > 512000 - length) { reject(413, 'body-limit'); return; }
         length += chunk.length;
+        if (observedPost) observedPost.acceptedBytes = length;
         chunks.push(chunk);
         analysisState.peakBufferedBytes = Math.max(analysisState.peakBufferedBytes, length);
       };
       const identity = analysisIdentity(request.headers);
       const onEnd = () => {
         if (terminal) return;
-        if (!identity || !request.complete || length < 1 || closing) { reject(400); return; }
+        if (!identity || !request.complete || length < 1 || closing) {
+          reject(400, !identity ? 'end-identity' : !request.complete ? 'end-incomplete' : length < 1 ? 'end-empty' : 'end-closing');
+          return;
+        }
         const bytes = Buffer.concat(chunks, length);
         try {
           analysisState.callbacks++;
@@ -181,25 +245,25 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
           analysisState.payloadBytes += length;
           finish(reply.body, reply.status);
         } catch {
-          reject(500);
+          reject(500, 'callback-error');
         }
       };
       request.once('close', () => {
-        if (!terminal) reject(400);
+        if (!terminal) reject(400, 'close-before-terminal');
         cleanup();
       });
       request.on('error', onError);
       request.once('aborted', onAborted);
       const address = server.address();
       if (request.url !== analysisPath || !address || typeof address === 'string'
-        || request.headers.host !== `127.0.0.1:${address.port}`) { reject(403); return; }
+        || request.headers.host !== `127.0.0.1:${address.port}`) { reject(403, 'admission'); return; }
       if (request.method === 'OPTIONS') {
-        if (!analysisPreflightAllowed(request.headers)) { reject(403); return; }
+        if (!analysisPreflightAllowed(request.headers)) { reject(403, 'admission'); return; }
         analysisState.preflights++;
         finish({}, 204);
         return;
       }
-      if (request.method !== 'POST' || !identity) { reject(403); return; }
+      if (request.method !== 'POST' || !identity) { reject(403, 'admission'); return; }
       analysisState.posts++;
       request.on('data', onData);
       request.once('end', onEnd);
@@ -355,6 +419,7 @@ export type MockOptions = {
   wireObservation?: WireBackend;
   aiResults?: Map<string, import('../../src/domain/ai-analysis').AiResult>;
   analysis?: AnalysisHandler;
+  observeRawAnalysis?: boolean;
 };
 export function recoveryHash(owner = owners.a, seconds = 3600): string {
   const expires = Math.floor(Date.now() / 1000) + seconds;
@@ -421,7 +486,10 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     rejections: Object.fromEntries(wireStages.map((stage) => [stage, 0])) as Record<WireStage, number>,
     receiverFacts: null, firstPost400Attempt: null,
   } : undefined;
-  const receiver = await uploadReceiver(page, items, images, files, tokens, decorateWireResponses, wireDiagnostic, options.analysis);
+  const rawAnalysisObservation: RawAnalysisObservation | undefined = options.observeRawAnalysis ? {
+    postCount: 0, overflow: false, evidenceError: false, posts: [], firstAttemptedPost400: null,
+  } : undefined;
+  const receiver = await uploadReceiver(page, items, images, files, tokens, decorateWireResponses, wireDiagnostic, options.analysis, rawAnalysisObservation);
   await page.route('http://127.0.0.1:54321/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -711,7 +779,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
   return { profiles, preferences, items, images, files, requests, fixture, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
-    analysisWire: receiver.analysisState, admitAiStatus,
+    analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),
     seedSavedItem(account: 'a' | 'b' = 'a', title = 'Olive overshirt') {
       const owner = owners[account], id = randomUUID(), imageId = randomUUID(), now = '2026-09-09T00:00:00Z';

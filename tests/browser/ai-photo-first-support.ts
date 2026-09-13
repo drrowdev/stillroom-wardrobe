@@ -9,7 +9,8 @@ export async function manualEntry(page: Page) {
   await expect(page.getByText(messages['aiC.checking'][language], { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: messages['aiC.continueManual'][language], exact: true }).click();
 }
-export async function aiFixture(page: Page, language: Language = 'en', enabled = true, lost?: 'reservation' | 'finalizer') {
+export async function aiFixture(page: Page, language: Language = 'en', enabled = true, lost?: 'reservation' | 'finalizer',
+  observeRawAnalysis = false) {
   const results = new Map<string, AiResult>();
   const consent = new Map<string, boolean>([[owners.a, enabled], [owners.b, false]]);
   const calls: Array<{ route: string; body: unknown }> = [];
@@ -18,7 +19,7 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
   let analysisMode: 'ready' | 'pending' | 'timeout' | 'unclear' | 'failed' = 'ready';
   let ttl = 3600000;
   const accounting = { basis: 'estimated', amountMicro: '413', currency: 'USD' };
-  const api = await mockBackend(page, { initialLanguage: language, aiResults: results,
+  const api = await mockBackend(page, { initialLanguage: language, aiResults: results, observeRawAnalysis,
     loseAnalyzedReserveReplyOnce: lost === 'reservation', loseFinalizeReplyOnce: lost === 'finalizer',
     analysis: ({ owner, requestId, draftId, generation, bytes }) => {
       if (!consent.get(owner)) return { body: { code: 'CONSENT_REQUIRED' }, status: 403 };

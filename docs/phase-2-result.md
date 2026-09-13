@@ -4498,3 +4498,45 @@ Missing evidence, bad uploads/bytes/reset/cleanup or flaky retry blocks.
 Still unlocalized, even if green, requires a user decision; no PR16 waiver.
 All corrected-head automated/twelve-image/human gates remain pending; UX and
 hosted/provider/paid/private/deployment authority remain separate.
+
+## I29 C raw-analysis observation candidate - 13 September 2026
+
+**Source-only; unstaged, independent SOURCE review and new-head gates pending.**
+[User approval 5651327667](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5651327667)
+and [proposal 5651291047](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5651291047)
+address two dated861 WebKit raw-analysis400 flakes. Existing multipart counters
+cannot identify those raw-branch failures. The oversized and synthetic504 calls
+use the browser test sender, not the application AI client or a provider timeout;
+this does not establish a harness-only cause or exclude production risk.
+
+[Actual plan AMEND/resolutions 5651362398](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5651362398)
+records replacement reviewer c372f28c-ff12-4e64-b313-4227796ac4e2, Anthropic /
+claude-opus-5/high, and adopted M1-M9. [Own source permission 5651366729](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5651366729)
+records coordinator-observed same-writer GPT-6 Astra usage and the clean resumed
+preflight. Local telemetry is not native/tamper-proof. Earlier preflights stopped
+on reviewer-owned scratch; its removal and fresh checks, not those partial
+checks, established the clean baseline.
+
+Only the two selected cases enable a separate four-POST-capped raw observer.
+Overflow is an evidence error. Primitive first-attempted400 guard/lifecycle facts
+remain separate from per-POST bytes/ordinals, write status, existing end-callback
+and suppressed-rejection metadata. Copied evidence precedes page cleanup; outer
+synchronous emission retains the original cleanup call and exception precedence.
+WriteHead return and end-callback execution do not prove client delivery; a false
+callback flag at snapshot is not itself failure. Actual console attempt records
+are required; captureErrorfalse does not establish every emission succeeded.
+
+Original sender/URL-only forwarding, response bodies/draining, socket lifecycle,
+timers/retries, strict status/byte/hash/isolation/cleanup oracles and twelve capture
+bounds remain unchanged. Other30 paths and all303883 pre-append document bytes
+are frozen. No local runtime/compiler/lint/tests/install/probes/scanner or image
+review ran. Observation overhead is not zero or ruled out; close ordering is an
+unranked hypothesis, not an identified cause or fix.
+
+Actual SOURCE review and separate commit/immutable/publication permission remain.
+The new one-normal-CI-plus-existing-Apple allowance is unspent and publication
+gated; early failure consumes it, with no automatic replacement or unchanged
+rerun. Missing evidence, invalid bytes, failed/flaky requests or cleanup failure
+blocks; a captured guard is localization, not repair or waiver. New-head automated,
+types/twelve-image/human gates remain pending. No transport repair, UX, merge,
+deployment, hosted/private/paid/provider authority follows.
