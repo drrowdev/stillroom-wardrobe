@@ -188,42 +188,193 @@ for (const language of ['fi', 'sv'] as const) {
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 }
-test('invalid saved input, manual confirmations and explicit empty clears remain protected, not formatting notices', async ({ page }) => {
-  const api = await mockBackend(page);
-  const { item } = api.seedSavedItem();
-  Object.assign(item, { purchase_price: 12.5, field_provenance: { purchase_price: { kind: 'user', revision: 1 }, notes: { kind: 'user', revision: 1 } } });
-  await page.goto('/'); await signIn(page);
-  await page.locator(`a[href="#/items/${item.id}"]`).click(); await expand(page, 'detail');
-  const notice = page.getByText(messages['detail.noChanges'].en, { exact: true });
-  const save = page.getByRole('button', { name: messages['detail.saveName'].en, exact: true });
-  for (const [field, raw, original] of [['purchase_price', '12.', '12.50'], ['min_temp', '51', '']] as const) {
-    await page.locator(`#detail-${field}`).fill(raw);
-    await expect(page.locator(`#detail-${field}`)).toHaveAttribute('aria-invalid', 'true');
-    await expect(notice).toHaveCount(0); await expect(save).toBeDisabled();
-    await page.getByRole('button', { name: messages['common.back'].en, exact: true }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await page.getByRole('dialog').getByRole('button', { name: messages['common.continueEditing'].en, exact: true }).click();
-    await expect(page.locator(`#detail-${field}`)).toHaveValue(raw);
-    await page.locator(`#detail-${field}`).fill(original);
+test('invalid saved input, manual confirmations and explicit empty clears remain protected, not formatting notices', async ({ page }, testInfo) => {
+  let interceptedItemPatches = 0;
+  type Count = 0 | 1 | 'more' | null;
+  type Field = 'title' | 'purchase_price' | 'min_temp' | 'other';
+  type Stage = 'setup' | 'open-detail' | `${'purchase_price' | 'min_temp'}-${'invalid' | 'back' | 'continue' | 'restore'}`
+    | 'title-fill' | 'title-save-enabled' | 'clear-notes' | 'notes-save-enabled' | 'register-patch' | 'save' | 'pending-write' | 'failed-write';
+  type Failure = 'metadata' | 'clock' | 'fixture' | 'presentation' | 'serialization' | 'oversize' | 'emission';
+  type FieldState = { expectedValue: boolean | null; ariaInvalid: boolean | null; disabled: boolean | null };
+  type Presentation = {
+    title: FieldState; price: FieldState; minTemp: FieldState; saveDisabled: boolean | null;
+    errorPresent: boolean | null; checkPresent: boolean | null; reloadPresent: boolean | null;
+    navigatorOnline: boolean | null; offlineVisible: boolean | null;
+    invalidFields: Field[] | null; focus: Field | 'save' | 'dialog' | 'none' | null; visibleDialogs: Count;
+  };
+  type Fixture = Awaited<ReturnType<typeof mockBackend>>;
+  const evidence: {
+    test: 'garment-fields'; case: 'saved-input-confirmations'; project: 'chromium' | 'mobile' | 'webkit-photo' | null;
+    retry: 0 | 1 | null; repeat: 0 | null; stage: Stage; bodyCompleted: boolean;
+    elapsedReference: 'node-original-body-start'; elapsedMs: number | null; captureError: boolean; failures: Failure[];
+    interceptedItemPatches: Count; mockRecordedItemPatches: Count; itemPatchHandlerInvocations: Count;
+    fixtureVersionUnchanged: boolean | null; presentation: Presentation | null;
+  } = {
+    test: 'garment-fields', case: 'saved-input-confirmations', project: null, retry: null, repeat: null,
+    stage: 'setup', bodyCompleted: false, elapsedReference: 'node-original-body-start', elapsedMs: null,
+    captureError: false, failures: [], interceptedItemPatches: null, mockRecordedItemPatches: null,
+    itemPatchHandlerInvocations: null, fixtureVersionUnchanged: null, presentation: null,
+  };
+  let observedApi: Fixture | undefined, observedItem: ReturnType<Fixture['seedSavedItem']>['item'] | undefined;
+  let stage: Stage = 'setup', startedAt: number | null = null;
+  function fail(reason: Failure) {
+    evidence.captureError = true;
+    if (!evidence.failures.includes(reason)) evidence.failures.push(reason);
   }
-  await page.locator('#detail-title').fill(` ${item.title} `);
-  await expect(save).toBeEnabled(); await expect(notice).toHaveCount(0);
-  await page.getByRole('button', { name: messages['item.clearField'].en.replace('{field}', messages['item.notes'].en), exact: true }).click();
-  await expect(save).toBeEnabled(); await expect(notice).toHaveCount(0);
-  let release: () => void = () => {};
-  const pending = new Promise<void>((resolve) => { release = resolve; });
-  await page.route('**/rest/v1/items?*', async (route) => {
-    if (route.request().method() !== 'PATCH') { await route.fallback(); return; }
-    await pending; await route.abort('failed');
-  });
-  await save.click();
-  await expect(page.locator('#detail-title')).toBeDisabled();
-  await expect(notice).toHaveCount(0);
-  release();
-  await expect(page.getByRole('button', { name: messages['detail.check'].en, exact: true })).toBeVisible();
-  await expect(page.locator('#detail-title')).toBeDisabled();
-  await expect(notice).toHaveCount(0);
-  expect(item.version).toBe(1);
+  function count(value: number): Count {
+    if (!Number.isSafeInteger(value) || value < 0) { fail('fixture'); return null; }
+    return value === 0 ? 0 : value === 1 ? 1 : 'more';
+  }
+  async function snapshot() {
+    evidence.stage = stage;
+    try {
+      const project = testInfo.project.name;
+      if (project === 'chromium' || project === 'mobile' || project === 'webkit-photo') evidence.project = project;
+      else fail('metadata');
+      if (testInfo.retry === 0 || testInfo.retry === 1) evidence.retry = testInfo.retry;
+      else fail('metadata');
+      if (testInfo.repeatEachIndex === 0) evidence.repeat = 0;
+      else fail('metadata');
+    } catch { fail('metadata'); }
+    try {
+      const elapsed = startedAt === null ? null : Math.floor(performance.now() - startedAt);
+      if (elapsed !== null && Number.isSafeInteger(elapsed) && elapsed >= 0) evidence.elapsedMs = elapsed;
+      else fail('clock');
+    } catch { fail('clock'); }
+    try {
+      evidence.interceptedItemPatches = count(interceptedItemPatches);
+      if (observedApi) {
+        const recorded = observedApi.requests.filter((request) => request.method === 'PATCH' && request.path === '/rest/v1/items').length;
+        evidence.mockRecordedItemPatches = count(recorded);
+        evidence.itemPatchHandlerInvocations = count(interceptedItemPatches + recorded);
+      } else fail('fixture');
+      if (observedItem && typeof observedItem.version === 'number') evidence.fixtureVersionUnchanged = observedItem.version === 1;
+      else fail('fixture');
+    } catch { fail('fixture'); }
+    try {
+      const result = await page.evaluate(({ checkName, reloadName }) => {
+        let captureError = false;
+        const field = (key: 'title' | 'purchase_price' | 'min_temp', expected: string): FieldState => {
+          const matches = document.querySelectorAll(`#detail-${key}`);
+          const input = matches.length === 1 ? matches[0] : null;
+          if (!(input instanceof HTMLInputElement)) {
+            captureError = true;
+            return { expectedValue: null, ariaInvalid: null, disabled: null };
+          }
+          const invalid = input.getAttribute('aria-invalid');
+          if (invalid !== 'true' && invalid !== 'false') captureError = true;
+          return { expectedValue: input.value === expected, ariaInvalid: invalid === 'true' ? true : invalid === 'false' ? false : null,
+            disabled: input.disabled };
+        };
+        const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility === 'visible';
+        const section = document.querySelector('.detail-name');
+        const main = document.querySelector('.workspace-main');
+        const saves = document.querySelectorAll('.detail-name form > button.button-primary');
+        const firstSave = saves.length === 1 ? saves[0] : null;
+        const save = firstSave instanceof HTMLButtonElement ? firstSave : null;
+        if (!section || !main || !save) captureError = true;
+        const buttonPresent = (name: string) => section
+          ? [...section.querySelectorAll('button')].some((button) => button.textContent === name) : null;
+        const classify = (element: Element): Field => element.id === 'detail-title' ? 'title'
+          : element.id === 'detail-purchase_price' ? 'purchase_price' : element.id === 'detail-min_temp' ? 'min_temp' : 'other';
+        const active = document.activeElement;
+        const dialogs = [...document.querySelectorAll('dialog[open], [role="dialog"]')].filter(visible);
+        const presentation: Presentation = {
+          title: field('title', ' Olive overshirt '), price: field('purchase_price', '12.50'), minTemp: field('min_temp', ''),
+          saveDisabled: save ? save.disabled : null,
+          errorPresent: section ? section.querySelector('[role="alert"]') !== null : null,
+          checkPresent: buttonPresent(checkName), reloadPresent: buttonPresent(reloadName),
+          navigatorOnline: typeof navigator.onLine === 'boolean' ? navigator.onLine : null,
+          offlineVisible: main ? [...main.querySelectorAll('.notice-offline')].some(visible) : null,
+          invalidFields: section ? [...new Set([...section.querySelectorAll('[aria-invalid="true"]')].map(classify))] : null,
+          focus: !active || active === document.body ? 'none' : active === save ? 'save'
+            : dialogs.some((dialog) => dialog.contains(active)) ? 'dialog' : classify(active),
+          visibleDialogs: dialogs.length === 0 ? 0 : dialogs.length === 1 ? 1 : 'more',
+        };
+        if (presentation.navigatorOnline === null) captureError = true;
+        return { captureError, presentation };
+      }, { checkName: messages['detail.check'].en, reloadName: messages['detail.reload'].en });
+      evidence.presentation = result.presentation;
+      if (result.captureError) fail('presentation');
+    } catch { fail('presentation'); }
+  }
+  function emit() {
+    let record: string;
+    try { record = JSON.stringify(evidence); }
+    catch {
+      fail('serialization');
+      record = '{"test":"garment-fields","case":"saved-input-confirmations","project":null,"retry":null,"repeat":null,"captureError":true,"failures":["serialization"]}';
+    }
+    try {
+      if (Buffer.byteLength(record, 'utf8') > 2048) {
+        fail('oversize');
+        record = '{"test":"garment-fields","case":"saved-input-confirmations","project":null,"retry":null,"repeat":null,"captureError":true,"failures":["oversize"]}';
+      }
+      console.log(record);
+    } catch {
+      fail('emission');
+      try { console.error('Garment-form diagnostic emission failed.'); } catch { fail('emission'); }
+    }
+  }
+  try { startedAt = performance.now(); } catch { fail('clock'); }
+  try {
+    const api = await mockBackend(page);
+    observedApi = api;
+    const { item } = api.seedSavedItem();
+    observedItem = item;
+    Object.assign(item, { purchase_price: 12.5, field_provenance: { purchase_price: { kind: 'user', revision: 1 }, notes: { kind: 'user', revision: 1 } } });
+    await page.goto('/'); await signIn(page);
+    stage = 'open-detail';
+    await page.locator(`a[href="#/items/${item.id}"]`).click(); await expand(page, 'detail');
+    const notice = page.getByText(messages['detail.noChanges'].en, { exact: true });
+    const save = page.getByRole('button', { name: messages['detail.saveName'].en, exact: true });
+    for (const [field, raw, original] of [['purchase_price', '12.', '12.50'], ['min_temp', '51', '']] as const) {
+      stage = `${field}-invalid`;
+      await page.locator(`#detail-${field}`).fill(raw);
+      await expect(page.locator(`#detail-${field}`)).toHaveAttribute('aria-invalid', 'true');
+      await expect(notice).toHaveCount(0); await expect(save).toBeDisabled();
+      stage = `${field}-back`;
+      await page.getByRole('button', { name: messages['common.back'].en, exact: true }).click();
+      await expect(page.getByRole('dialog')).toBeVisible();
+      stage = `${field}-continue`;
+      await page.getByRole('dialog').getByRole('button', { name: messages['common.continueEditing'].en, exact: true }).click();
+      await expect(page.locator(`#detail-${field}`)).toHaveValue(raw);
+      stage = `${field}-restore`;
+      await page.locator(`#detail-${field}`).fill(original);
+    }
+    stage = 'title-fill';
+    await page.locator('#detail-title').fill(` ${item.title} `);
+    stage = 'title-save-enabled';
+    await expect(save).toBeEnabled(); await expect(notice).toHaveCount(0);
+    stage = 'clear-notes';
+    await page.getByRole('button', { name: messages['item.clearField'].en.replace('{field}', messages['item.notes'].en), exact: true }).click();
+    stage = 'notes-save-enabled';
+    await expect(save).toBeEnabled(); await expect(notice).toHaveCount(0);
+    let release: () => void = () => {};
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    stage = 'register-patch';
+    await page.route('**/rest/v1/items?*', async (route) => {
+      if (route.request().method() !== 'PATCH') { await route.fallback(); return; }
+      interceptedItemPatches = Math.min(interceptedItemPatches + 1, 2);
+      await pending; await route.abort('failed');
+    });
+    stage = 'save';
+    await save.click();
+    stage = 'pending-write';
+    await expect(page.locator('#detail-title')).toBeDisabled();
+    await expect(notice).toHaveCount(0);
+    release();
+    stage = 'failed-write';
+    await expect(page.getByRole('button', { name: messages['detail.check'].en, exact: true })).toBeVisible();
+    await expect(page.locator('#detail-title')).toBeDisabled();
+    await expect(notice).toHaveCount(0);
+    expect(item.version).toBe(1);
+    evidence.bodyCompleted = true;
+  } finally {
+    try { await snapshot(); } catch { fail('presentation'); }
+    try { emit(); } catch { fail('emission'); }
+  }
+  expect(evidence.captureError, 'Garment-form diagnostic capture must be complete.').toBe(false);
 });
 test('unknown defaults, invalid raw input and manual empty clears remain distinct', async ({ page }) => {
   const api = await setup(page);

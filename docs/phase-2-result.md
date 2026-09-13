@@ -4611,3 +4611,95 @@ No local compiler/runtime/tests/captures or unchanged-job rerun was performed.
 This unstaged correction awaits coordinator source/commit/publication gates and
 fresh changed-head CI, Apple, types and actual eighteen-image review. Earlier
 job success does not validate a new head; all separate holds remain in force.
+
+## 13 September 2026 - garment-form diagnostic source candidate
+
+**Source-only, unstaged; independent source review and runtime gates pending.**
+This R23/R27/R28 diagnostic follows the
+[reviewed plan and controlling corrections](https://github.com/drrowdev/stillroom-wardrobe/pull/23#issuecomment-5652315814)
+and [own local-model attestation, counter amendment and source permission](https://github.com/drrowdev/stillroom-wardrobe/pull/23#issuecomment-5652367276).
+The same local writer starts from
+`04ef876bc56e6df2a200c7ce4fd8b47ab095eede`, tree
+`95ee162d52a89d35cf5526a85ca14b6943ed6b37`. Coordinator-observed own
+GPT-6 Astra usage is locally recorded, not tamper-proof/native-platform evidence.
+Actual retained Anthropic Claude Opus 5 review was T6 AMEND/T7 correction PASS
+and narrow T8 AMEND, with all A1-A6 adopted by the coordinator; these are plan
+reviews, not a source or runtime pass for this candidate.
+
+[Actual post-merge blocker](https://github.com/drrowdev/stillroom-wardrobe/pull/23#issuecomment-5652253843)
+records automatic main CI34747427454 attempt1, App103697808095:
+625 selected, 620 passed, one flaky and four existing skips. WebKit's selected
+garment-field case failed at the original line210 because Save garment details
+remained disabled for 5000 ms after invalid-input correction/discard-dialog
+loops and title whitespace entry. Retry1 passed; Chromium/mobile passed first
+try. All six raw-analysis records were clean retry0; this is a distinct,
+unlocalized failure. PR #23 remains merged and I08 remains paused.
+
+Only that existing test case gains closed local diagnostic data, assignment-only
+stage markers, post-body presentation observation and bounded Node-console JSON.
+Native try/finally retains the original exception, including falsy throws.
+Observation/emission errors set captureError; a post-finally assertion rejects
+incomplete evidence only after normal original-body completion. Serialization
+and oversize failures emit explicit failure records; missing emission still
+blocks coordinator acceptance. Each actual attempt emits at most one JSON record
+of at most 2048 UTF-8 bytes. Unchanged projects/retries/repeats permit at most six
+attempt records. No annotation, artifact, listener, polling or new capture.
+
+The sole permitted handler addition is a branchless interception counter capped
+at two, after the existing PATCH guard and before unchanged pending/abort actions.
+Its separate component, the shared mock's exact PATCH/items-path count, and their
+sum serialize as 0/1/more or unavailable null. The shared array is uncapped;
+no Playwright request-history buffer is used. These count disjoint handler
+invocations, not delivery, abort completion, server writes or all network traffic.
+Zero interception before registration is valid; missing mock evidence is not
+invented zero. Expected pre-registration 0/0 and final intercepted-write/0 shapes
+are context only, not added assertions or replacements for actual observations.
+
+Presentation contains only fixed synthetic value-equality booleans/nulls,
+aria-invalid/disabled flags, error/check/reload and offline presentation,
+navigator.onLine, closed invalid-field/focus labels and capped visible-dialog
+counts. Fixture version is compared with its unchanged version1. No raw values,
+text, HTML, URL, token, owner ID or image bytes are emitted. Elapsed milliseconds
+are monotonic Node time from original-body start, bounded to a nonnegative safe
+integer; they are not browser-input timing. Final focus/dialog state is weak,
+non-causal evidence. A successful original body ends after its deliberate failed
+write and lock, not at the earlier failing Save-enabled assertion.
+
+Title is a provenance field: this fixture replaces provenance with price/notes
+only, so title whitespace editing can confirm unknown title, while explicit
+min-temperature clearing contributes independently. Remaining validation errors
+can still disable Save. Missing corrected presentation does not prove misrouted
+input; correct DOM values with no visible error/lock do not prove lost intent.
+DOM is not internal draft state, and navigator.onLine is not React online state.
+Observation/counter overhead is nonzero; no production-harmlessness claim follows.
+No recurrence means not reproduced, not fixed, and the packet stops.
+
+All original actions, values, assertions, route behavior and cleanup remain,
+apart from the explicitly approved counter assignment. Other cases, all eighteen
+capture definitions/bounds, upload steps and 208 outside paths stay frozen.
+This document's original 311834 working bytes are preserved. Manual text/Git/
+hash inspection is not compiler or test execution. No local Node/npm/version,
+compiler/lint/test/scanner/build/browser/backend/install/probe or image work ran.
+Independent source review and separate commit/publication permission are still
+required. One future ordinary new-head full CI plus existing Apple cycle remains
+unspent and gated; even early failure consumes it, with no automatic replacement,
+unchanged rerun or risk waiver. Exact-head App/browser/translation/unit,
+normal-owner recovery/B1/B2/C/restoration/types and actual eighteen-image review
+remain pending. Production f318/six hosted migrations, unhosted B1/B2 and all
+hosted/private/paid/provider/deployment/manual-device holds remain unchanged.
+
+## 13 September 2026 - diagnostic source-review R1 correction
+
+[Genuine source review and narrow correction permission](https://github.com/drrowdev/stillroom-wardrobe/pull/23#issuecomment-5652431015)
+records retained Anthropic Claude Opus 5 Turn9 AMEND for R1, with all other
+reviewed items PASS; it is not an unconditional completed-source or runtime PASS.
+R1 introduces a local firstSave variable before the existing HTMLButtonElement
+check. This uncompiled explicit-narrowing correction is not a proven TypeScript
+defect or a fix for the WebKit flake. No diagnostic behavior or test action changes.
+
+Interpretation remains limited: errorPresent also includes per-field alerts;
+expectedValue compares against the expected end-state values and may be false
+earlier; absent records after termination or timeouts provide no evidence.
+All 317230 previously reviewed document bytes and the original 311834-byte prefix
+remain frozen. The candidate remains unstaged, with no local runtime checks or
+publication; the future gated CI/Apple cycle remains unspent and all holds remain.
