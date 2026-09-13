@@ -4914,3 +4914,105 @@ deployment is authorized. Storage diagnosis remains coordinator-owned;
 the observed500 stays failed and no raw response reconstruction or acceptance
 relaxation is part of R4. Original Save uncertainty and every production,
 privacy, paid, device and saved-only recovery/export release hold remain.
+
+### I08 T20 coherent source repair - unexecuted candidate (13 September 2026)
+
+[T20 actual critique and corrected plan approval](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655317164)
+records the retained Anthropic Claude Opus5/high AMEND and binding coordinator
+corrections. [Source-only model attestation](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655347691)
+matches this same persistent GPT-6 Astra writer, local240b8030/tree9103, branch
+drrowdev-item-lifecycle. This append preserves the entire preceding332518-byte
+working document and all five earlier checkpoints; dated evidence is not rewritten.
+
+The nineteen-path candidate addresses R03/R23/R28 and related
+R11/R12/R17/R20/R26/R27. It replaces admission-only reasoning with an immediate
+all-role AFTER/ALWAYS final-publication guard and profile/approval/image/parent
+SHARE NOWAIT locks, fresh eligibility and immutable identity/version/dark flags.
+Standard-upload and singular-delete server operation restrictions preserve owner
+checks. A shared erasable TypeScript singular protocol distinguishes exact
+acknowledged removal, exact missing and hard denial; malformed/unknown/5xx fail.
+Normal callers and mocks are adapted together, without Save/capture/AI changes.
+Only explicit analyzed-Save cancellation blocks finishing accepted Save; no
+analysis call, consent import, provider fallback or post-save worker is added.
+
+The user approved retaining only owner/image UUID pairs until actual Auth-row
+deletion in [the controlling amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655261015).
+Transactional registration preserves replay, rollback and independent cross-owner
+reuse while refusing same-owner legacy image reuse. Profile/wardrobe clearing and
+disabling an account do not delete this registry. No content/timestamp/path/hash
+is added, exposed in client grants, exported or logged. Current-image/checked-Save
+backfill does not prove safety for historical deleted IDs absent from those inputs.
+
+Future defined acceptance includes the real two-owner four-byte ordinary POST
+paused after native permission and actual partial-file metadata readiness, then
+fast-pair Save/Trash/singular deletion/FINISH before slow-body completion. Final
+publication denial, labelled actual catalogprefix0 and normal-owner unreadability
+are required; privileged INSERT or grant readiness is not a substitute. A valid
+pending no-blob marker followed by ordinary legacy deletion preserves pre-BEGIN
+orphan refusal and reversible Restore; cleanup uses the real singular API, not a
+0055 internal-flag override. Runtime identity/config/mount/digest and byte-phase
+proof remain unexecuted. Bounded cleanup/observation faults remain hard failures.
+
+Application source hashes/ACLs and positive catalog properties are pinned.
+The bounded native Storage schema inventory is explicitly REVIEW_REQUIRED;
+unknown incompatible executable/versioning behavior must not be auto-blessed.
+Native Storage55P03/ResourceLocked replaces the source22023/DatabaseError500
+mistake at the Storage boundary only. Both earlier CI cycles remain consumed
+and failed. The observed500 raw body is unknown; no byte-count reconstruction
+or softened classifier is evidence. Original Save uncertainty still requires
+STOP on recurrence.
+
+The user's [remnant decision](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5654674701)
+accepts inaccessible interrupted-upload remnants at Supabase without a verified
+cleanup deadline. It does not accept later publication/readability, accessible
+TUS control metadata, failed accessible deletion, physical-purge claims, queued
+cleanup as proof, or an indefinite visible deletion hold. Historical TUS JSON/
+companion authorization exposure needs exact cutover evidence; it is not a
+verified cross-owner/anonymous exploit. Old inflight requests, absent historical
+identities, exact deployed backend companions and vendor-trigger privileges/
+upgrades remain open hosted gates. The vendor-table trigger exception is source
+only, not hosted DDL approval.
+
+Only manual text/Git/.NET source checks are permitted here. No Node/npm/compiler,
+lint, tests, backend/browser probe, install, Actions/log/artifact/image access,
+staging/commit/push or hosted/provider/deployment operation was run for this
+candidate. Defined tests are not passing runtime evidence. Actual generated
+public types, all preceding backend gates, exact-head CI/Apple, independent final
+review and Stage2/visual/device acceptance remain pending. Four public lifecycle
+signatures are unchanged; types are not hand-authored. The complete candidate
+must remain unstaged for coordinator source review and later separate authority.
+
+### I08 T21 confirmed source corrections (13 September 2026)
+
+[T21 disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655669664)
+authorizes routine corrections under the same T20 receipt and nineteen-path plan.
+[Pinned native wire evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655552023)
+establishes final HTTP error fields `not_found` for NoSuchKey and `Unauthorized`
+for AccessDenied. The shared classifier, intended native mocks, caller assertions
+and API documentation now use those exact fields. Counterfeit code-as-error
+envelopes remain rejected, not compatibility aliases. Exact200 success, distinct
+missing, hard denial and malformed/unknown/5xx failures are unchanged; the existing
+adapter's extra range field remains accepted. Only the new rejected-settlement
+mock uses an unrelated73-byte count; actual107-byte history is untouched.
+
+The migration and two lifecycle session mjs files are formatted to the existing
+LF contract with canonical-before/after equality, without attribute or test
+normalization changes. The entire337325-byte prior candidate and all six older
+phase prefixes remain intact. The rehearsal's semantic content is temporarily
+frozen pending coordinator reconciliation of T21 A1; no unconditional response
+resolution or termination-observation relaxation is introduced. N4's speculative
+catalog relaxation is not adopted. These are source corrections only: no runtime,
+test, compiler, backend, Actions, publication or hosted operation was executed.
+The candidate remains unstaged; actual validation and Stage2 remain held.
+
+[T21 final disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655702583)
+withdraws A1: existing request-error and close observations settle the respective
+promises; cleanup, events, timers and N4 assertions remain unchanged. The released
+C1 correction changes only the child's final-denial error field to `Unauthorized`,
+retaining HTTP400, statusCode403, codeAccessDenied, messageNot available and all
+other checks. Its exact inverse restores the reviewed rehearsal bytes/hash/blob.
+N2 is qualified: the real INSERT permission probe also runs the AFTER guard;
+previously admitted uploads require the distinct final-publication check.
+The full338968-byte prior phase candidate and seven older prefixes are preserved.
+This is source-only evidence, not runtime identity or termination proof. No tests
+or execution were run; the complete candidate remains unstaged and Stage2 held.

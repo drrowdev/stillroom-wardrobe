@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { normalSessionEnvironment } from '../../scripts/backend/local.mjs';
 import { isMain } from '../../scripts/quality/files.mjs';
 import { normalClient, requireEvidence, TABLES, canonicalRows } from './preservation.sessions.mjs';
+import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
 
 export const AI_POLICY = Object.freeze({
   model: 'fictional:controls/v1', prompt: 1, notice: 1, maximum: '5000', ttl: 3600,
@@ -143,9 +144,10 @@ async function populatedAdmissionProof(client, owners, action) {
     eq(await snapshot(client, owners), before);
   } finally {
     for (const { owner, id, paths } of fixtures) {
-      requireEvidence((await client.request(owner.token, '/storage/v1/object/wardrobe', {
-        method: 'DELETE', body: { prefixes: paths },
-      })).ok);
+      for (const path of paths) {
+        await deleteWardrobeObject((route, options) => client.request(owner.token, route, options), owner.uid, path);
+        requireEvidence(!(await client.request(owner.token, `/storage/v1/object/authenticated/wardrobe/${path}`)).ok);
+      }
       requireEvidence((await client.request(owner.token, '/rest/v1/rpc/forget_image', {
         method: 'POST', body: { p_image_id: id },
       })).ok);

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { isMain } from '../../scripts/quality/files.mjs';
 import { requireEvidence } from '../integration/preservation.sessions.mjs';
-import { bytes, saveClients, denied, eq } from '../integration/item-save.sessions.mjs';
+import { bytes, intent, saveClients, denied, eq } from '../integration/item-save.sessions.mjs';
+import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
 import { lifecycleHarness } from '../integration/item-lifecycle.sessions.mjs';
 
 async function main() {
@@ -14,6 +15,54 @@ async function main() {
     for (const [index, owner] of owners.entries()) {
       const h = harnesses[index], peer = harnesses[1 - index];
       const own = await h.create(), foreign = await peer.create();
+      phase = 'native-operation-boundary';
+      const pending = h.track(intent());
+      await h.reserve(pending);
+      const catalog = async () => {
+        const result = await client.request(owner.token, '/storage/v1/object/list/wardrobe', {
+          method: 'POST', body: { prefix: `${owner.uid}/${own.p_item.id}/${own.p_image.id}/`, limit: 10, offset: 0 },
+        });
+        requireEvidence(result.ok && Array.isArray(result.data) && result.data.length === 2);
+        return result.data.map(({ id, name, metadata }) => ({ id, name, metadata })).sort((a, b) => a.name.localeCompare(b.name));
+      };
+      const originalCatalog = await catalog();
+      for (const headers of [{}, { 'storage.operation': 'storage.object.delete',
+        'x-storage-operation': 'storage.object.delete', 'x-http-method-override': 'DELETE' }]) {
+        const bulk = await client.request(owner.token, '/storage/v1/object/wardrobe',
+          { method: 'DELETE', body: { prefixes: h.paths(own) }, headers });
+        requireEvidence(bulk.status < 500);
+        if (bulk.ok) eq(bulk.data, []);
+        for (const path of h.paths(own)) await h.download(path);
+        eq(await catalog(), originalCatalog);
+      }
+      for (const [route, options] of [
+        [`/storage/v1/object/wardrobe/${h.paths(pending)[0]}`, { method: 'PUT', body: bytes, binary: true }],
+        ['/storage/v1/object/copy', { method: 'POST', body: {
+          bucketId: 'wardrobe', sourceKey: h.paths(own)[0], destinationKey: h.paths(pending)[0],
+        } }],
+        ['/storage/v1/object/move', { method: 'POST', body: {
+          bucketId: 'wardrobe', sourceKey: h.paths(own)[0], destinationKey: h.paths(pending)[0],
+        } }],
+        [`/storage/v1/object/upload/sign/wardrobe/${h.paths(pending)[0]}`, { method: 'POST', body: {} }],
+        ['/storage/v1/upload/resumable', { method: 'POST', body: bytes, binary: true, headers: {
+          'Tus-Resumable': '1.0.0', 'Upload-Length': '4', 'Content-Type': 'application/offset+octet-stream',
+          'Upload-Metadata': `bucketName ${Buffer.from('wardrobe').toString('base64')},objectName ${Buffer.from(h.paths(pending)[0]).toString('base64')},contentType ${Buffer.from('image/jpeg').toString('base64')}`,
+        } }],
+      ]) {
+        const response = await client.request(owner.token, route, { ...options, headers: {
+          ...options.headers, 'storage.operation': 'storage.object.upload', 'x-storage-operation': 'storage.object.upload',
+        } });
+        requireEvidence(!response.ok && response.status < 500);
+        for (const path of h.paths(own)) await h.download(path);
+        eq(await catalog(), originalCatalog);
+        requireEvidence(!(await client.request(owner.token, `/storage/v1/object/authenticated/wardrobe/${h.paths(pending)[0]}`)).ok);
+      }
+      // Standard POST and pending delete/new-INSERT remain supported after alternate-route denial.
+      await h.upload(pending);
+      for (const path of h.paths(pending)) {
+        eq(await deleteWardrobeObject((route, options) => client.request(owner.token, route, options), owner.uid, path), 'removed');
+      }
+      await h.upload(pending);
       await h.trash(own, 1); await peer.trash(foreign, 1);
       const ownPreview = await h.status(own), foreignPreview = await peer.status(foreign);
       const peerArgs = peer.beginArgs(foreign, foreignPreview);
@@ -83,6 +132,14 @@ async function main() {
         method: 'DELETE', body: { prefixes: peer.paths(foreign) },
       });
       requireEvidence(remove.ok && Array.isArray(remove.data)); eq(remove.data, []);
+      const singular = await client.request(owner.token, `/storage/v1/object/wardrobe/${peer.paths(foreign)[0]}`, { method: 'DELETE' });
+      requireEvidence(!singular.ok && singular.status < 500);
+      eq(singular.data, { statusCode: '403', code: 'AccessDenied', error: 'Unauthorized', message: 'Access denied' });
+      eq(singular.status, 400);
+      const missing = await client.request(owner.token,
+        `/storage/v1/object/wardrobe/${owners[1 - index].uid}/${foreign.p_item.id}/${randomUUID()}/main.jpg`, { method: 'DELETE' });
+      requireEvidence(!missing.ok); eq(missing.status, 400);
+      eq(missing.data, { statusCode: '404', code: 'NoSuchKey', error: 'not_found', message: 'Object not found' });
       await peer.unchanged(foreign, foreignBefore);
       for (const path of peer.paths(foreign)) await peer.download(path);
       phase = 'normal-completion';

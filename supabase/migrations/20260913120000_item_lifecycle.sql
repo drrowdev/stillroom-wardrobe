@@ -1,6 +1,30 @@
 -- I08: ordinary-owner lifecycle; no provider calls or public row-shape changes.
 begin;
 
+create table private.item_image_used_ids (
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  image_id uuid not null,
+  primary key (owner_id,image_id)
+);
+alter table private.item_image_used_ids enable row level security;
+revoke all on private.item_image_used_ids from public,anon,authenticated;
+insert into private.item_image_used_ids(owner_id,image_id)
+  select owner_id,id from public.item_images
+  union select owner_id,image_id from private.item_save_used_ids;
+
+create function private.record_item_image_identity() returns trigger
+language plpgsql volatile security definer set search_path = '' set lock_timeout = '2s' as $$
+begin
+  insert into private.item_image_used_ids(owner_id,image_id) values(new.owner_id,new.id);
+  return new;
+exception when unique_violation or lock_not_available then
+  raise exception using errcode='22023',message='Request conflict';
+end;
+$$;
+create trigger item_image_identity_guard after insert on public.item_images
+for each row execute function private.record_item_image_identity();
+alter table public.item_images enable always trigger item_image_identity_guard;
+
 create table private.item_deletion_claims (
   owner_id uuid not null,
   item_id uuid not null,
@@ -87,7 +111,8 @@ create function private.may_create_item_object(p_name text) returns boolean
 language plpgsql volatile security definer set search_path = '' set lock_timeout = '2s' as $$
 declare u uuid := auth.uid(); target uuid;
 begin
-  if u is null or not private.is_approved() then return false; end if;
+  if u is null or not private.is_approved()
+    or not storage.allow_only_operation('storage.object.upload') then return false; end if;
   select im.item_id into target from public.item_images im
     where im.owner_id=u and im.state='pending' and p_name in(im.main_path,im.thumb_path);
   if not found then return false; end if;
@@ -98,12 +123,70 @@ begin
       and im.state='pending' and p_name in(im.main_path,im.thumb_path))
     and not exists(select 1 from private.item_deletion_claims c where c.owner_id=u and c.item_id=target);
 exception when lock_not_available then
-  raise exception using errcode='22023',message='Request conflict';
+  raise exception using errcode='55P03',message='The resource is locked';
 end;
 $$;
 drop policy wardrobe_create on storage.objects;
 create policy wardrobe_create on storage.objects for insert to authenticated
 with check (bucket_id='wardrobe' and private.may_create_item_object(name));
+drop policy wardrobe_delete on storage.objects;
+create policy wardrobe_delete on storage.objects for delete to authenticated
+using (bucket_id='wardrobe' and private.may_delete_storage(name)
+  and storage.allow_only_operation('storage.object.delete'));
+
+-- Admission rolls back before transfer. This guard runs again in final publication.
+create function private.guard_item_object_publication() returns trigger
+language plpgsql volatile security definer set search_path = '' set lock_timeout = '2s' as $$
+declare image public.item_images; item public.items; u uuid; image_id uuid; parent_id uuid;
+begin
+  if tg_op='UPDATE' then
+    if old.bucket_id<>'wardrobe' and new.bucket_id<>'wardrobe' then return new; end if;
+    if row(new.id,new.bucket_id,new.name,new.owner,new.owner_id,new.archived_at,new.is_delete_marker,new.is_versioned)
+      is distinct from row(old.id,old.bucket_id,old.name,old.owner,old.owner_id,old.archived_at,old.is_delete_marker,old.is_versioned) then
+      raise exception using errcode='42501',message='Not available';
+    end if;
+    if new.version is distinct from old.version then
+      raise exception using errcode='23505',message='The resource already exists';
+    end if;
+    return new;
+  end if;
+  if new.bucket_id<>'wardrobe' then return new; end if;
+  select im.owner_id,im.id,im.item_id into u,image_id,parent_id
+    from public.item_images im where new.name in(im.main_path,im.thumb_path);
+  if not found or new.owner_id is distinct from u::text
+    or (new.owner is not null and new.owner<>u)
+    or new.archived_at is not null or new.is_delete_marker is distinct from false
+    or new.is_versioned is distinct from false then
+    raise exception using errcode='42501',message='Not available';
+  end if;
+  perform 1 from public.profiles p where p.owner_id=u for share nowait;
+  if not found then raise exception using errcode='42501',message='Not available'; end if;
+  perform 1 from private.approved_accounts a where a.user_id=u for share nowait;
+  if not found then raise exception using errcode='42501',message='Not available'; end if;
+  select im.* into image from public.item_images im where im.owner_id=u and im.id=image_id for share nowait;
+  if not found then raise exception using errcode='42501',message='Not available'; end if;
+  select i.* into item from public.items i where i.owner_id=u and i.id=parent_id for share nowait;
+  if not found then raise exception using errcode='42501',message='Not available'; end if;
+  -- Fresh statements after all locks; cancellation uses the same profile serialization.
+  select im.* into image from public.item_images im where im.owner_id=u and im.id=image_id;
+  select i.* into item from public.items i where i.owner_id=u and i.id=parent_id;
+  if not exists(select 1 from public.profiles p where p.owner_id=u)
+    or not exists(select 1 from private.approved_accounts a where a.user_id=u and a.enabled)
+    or image.item_id is distinct from parent_id or image.state is distinct from 'pending'
+    or image.retired_at is not null or new.name not in(image.main_path,image.thumb_path)
+    or item.id is null or item.deleted_at is not null
+    or exists(select 1 from private.item_deletion_claims c where c.owner_id=u and c.item_id=parent_id)
+    or exists(select 1 from private.ai_item_save_attempts a where a.owner_id=u and a.item_id=parent_id and a.cancelled) then
+    raise exception using errcode='42501',message='Not available';
+  end if;
+  return new;
+exception when lock_not_available then
+  raise exception using errcode='55P03',message='The resource is locked';
+end;
+$$;
+create trigger item_object_publication_guard after insert or update on storage.objects
+for each row execute function private.guard_item_object_publication();
+alter table storage.objects enable always trigger item_object_publication_guard;
 
 create function public.set_item_trashed(p_item_id uuid,p_expected_version bigint,p_trashed boolean)
 returns table(id uuid,owner_id uuid,version bigint,deleted_at timestamptz)
@@ -227,7 +310,7 @@ begin
   perform 1 from storage.objects o where o.bucket_id='wardrobe'
     and starts_with(o.name,u::text || '/' || p_item_id::text || '/') order by o.name for share nowait;
   if found then raise exception using errcode='22023',message='Request conflict'; end if;
-  -- The parent UPDATE lock, not an empty Storage query, excludes admitted INSERTs.
+  -- Final-publication SHARE locks conflict with this parent UPDATE through commit.
   delete from public.items i where i.owner_id=u and i.id=p_item_id;
   return query select 'completed'::text;
 exception when lock_not_available then
@@ -236,6 +319,8 @@ end;
 $$;
 
 revoke all on function private.item_lifecycle_manifest(jsonb) from public,anon,authenticated;
+revoke all on function private.record_item_image_identity() from public,anon,authenticated;
+revoke all on function private.guard_item_object_publication() from public,anon,authenticated;
 revoke all on function private.item_lifecycle_owner() from public,anon,authenticated;
 revoke all on function private.guard_item_deletion() from public,anon,authenticated;
 revoke all on function private.guard_item_image_deletion() from public,anon,authenticated;

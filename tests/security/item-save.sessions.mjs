@@ -64,7 +64,7 @@ async function main() {
         denied(await h.call('reserve_item_save', bad), 'Invalid input');
         eq(await h.read('items', bad.p_item.id), []);
       }
-      for (const table of ['item_save_used_ids', 'item_save_attempts']) {
+      for (const table of ['item_save_used_ids', 'item_save_attempts', 'item_image_used_ids']) {
         for (const method of ['GET', 'POST', 'PATCH', 'DELETE']) {
           const response = await client.request(owner.token, `/rest/v1/${table}`,
             { method, ...(method === 'GET' || method === 'DELETE' ? {} : { body: {} }),
@@ -72,7 +72,8 @@ async function main() {
           requireEvidence(!response.ok && response.status === 406 && response.data.code === 'PGRST106');
         }
       }
-      for (const name of ['commit_item_save_image', 'item_save_current', 'item_save_owner', 'item_save_fingerprint']) {
+      for (const name of ['commit_item_save_image', 'item_save_current', 'item_save_owner', 'item_save_fingerprint',
+        'record_item_image_identity', 'guard_item_object_publication']) {
         const result = await client.request(owner.token, `/rest/v1/rpc/${name}`,
           { method: 'POST', body: {}, headers: { 'Content-Profile': 'private' } });
         requireEvidence(!result.ok && result.status === 406);
@@ -91,6 +92,13 @@ async function main() {
       ];
       for (const raw of recreated) {
         await client.insert(owner, 'items', raw.p_item);
+        if (raw.p_image.id === original.p_image.id) {
+          denied(await client.request(owner.token, '/rest/v1/item_images', { method: 'POST',
+            body: { ...raw.p_image, owner_id: owner.uid, item_id: raw.p_item.id } }));
+          eq(await h.read('item_images', raw.p_image.id), []);
+          denied(await h.call('reserve_item_save', raw));
+          continue;
+        }
         await client.insert(owner, 'item_images', { ...raw.p_image, item_id: raw.p_item.id });
         await h.upload(raw);
         denied(await h.call('commit_image', { p_image_id: raw.p_image.id }));
@@ -105,8 +113,11 @@ async function main() {
       requireEvidence((await h.call('commit_image', { p_image_id: legacy.p_image.id })).ok);
       eq((await h.read('item_images', legacy.p_image.id))[0].state, 'ready');
       await h.remove(legacy); await h.deleteItem(legacy);
-      // Rejected legacy adoption left no used-ID marker, so this is a genuine first claim.
-      await h.reserve(legacy);
+      // Raw insertion also burns the image identity; a genuinely fresh image is required.
+      denied(await h.call('reserve_item_save', legacy));
+      eq(await h.read('items', legacy.p_item.id), []);
+      const freshLegacy = h.track({ p_item: legacy.p_item, p_image: { ...legacy.p_image, id: randomUUID() } });
+      await h.reserve(freshLegacy);
 
       // Owner-local UUID reuse once public rows disappear: no peer marker lookup/adoption.
       const deleted = peer.track(); await peer.reserve(deleted); await peer.deleteItem(deleted);

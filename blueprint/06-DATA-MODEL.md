@@ -31,8 +31,8 @@ Analysis creates no item/image records: photo/title/category are checked only on
 
 ### I08 owned-item lifecycle - Stage 1 source candidate
 
-`20260913120000_item_lifecycle.sql` adds only a private live deletion claim and
-four owner RPCs; it does not add an item column, alter checked-Save fingerprints,
+`20260913120000_item_lifecycle.sql` adds a private live deletion claim, a private
+image-identity non-reuse registry and four owner RPCs; it does not add an item column, alter checked-Save fingerprints,
 copy garment/photo content or change the export shape. This is unexecuted source,
 not a hosted migration or completed Trash UI.
 
@@ -52,12 +52,36 @@ and current version. A sorted metadata/description-revision manifest excludes
 Storage membership, so removing bytes does not invalidate an exact replay.
 
 Final deletion checks the whole literal owned-item prefix, not only known photo
-paths. It keeps the parent UPDATE admission fence until transaction end and
-deletes the item only when no catalog objects remain. Image/claim cascades then
+paths. An immediate, ALWAYS, all-role Storage AFTER trigger acquires profile,
+approval, image and parent SHARE NOWAIT locks through publication. These conflict
+with finalization/deletion locks; the earlier permission-probe transaction is
+not an upload-completion fence. Exact paths require a live enabled owner, pending
+non-retired image, live untrashed parent, no deletion claim and no explicitly
+canceled analyzed Save. AI opt-out or result age does not cancel an accepted Save.
+Immutable Storage identity/version/versioning flags prevent replacement through UPDATE;
+genuine metadata maintenance remains possible. Only after acknowledged singular
+object removals and an empty catalog prefix can the item be deleted. Image/claim cascades then
 remove live metadata; wear-event title/category snapshots retain null item links.
 Existing unclaimed raw DELETE behavior remains, including its orphan risk.
 Pre-existing orphan cases can use reversible Trash/Restore but cannot begin
 permanent deletion until separately scoped I10 cleanup is available.
+
+`private.item_image_used_ids` contains only `(owner_id,image_id)`, with no content,
+timestamps, paths, hashes or operation state. Its primary key prevents same-owner
+reuse, including legacy raw image insertion; successful insertion records the pair
+in the same transaction and a rolled-back insertion does not consume it. Exact
+checked-Save replay does not insert another image. Cross-owner UUID reuse after
+the original public row disappears is still independent. Backfill covers current
+images and checked-Save used IDs, not previously deleted identities absent from
+those inputs. That historical gap remains a hosted cutover proof hold.
+
+The user explicitly approved retaining this pseudonymous pair until actual
+`auth.users` deletion. RLS has no client policies/grants; it is not exported or
+logged. Profile/wardrobe clearing does not purge it; disabling or soft-retaining
+the sign-in identity is not deletion. The Auth FK cascades only when that identity
+row is actually deleted. Interrupted uploads can leave inaccessible provider
+remnants with no verified cleanup deadline; they must not become published or
+readable. This is not physical-erasure or backup-deletion proof.
 
 ### Checked manual Save prerequisite — staged source
 

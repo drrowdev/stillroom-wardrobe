@@ -8,6 +8,7 @@ import { parseProfile } from '../../src/data/profile';
 import { parseAiStatus } from '../../src/domain/ai-controls';
 import { isLanguage, messages } from '../../src/i18n';
 import { assertSanitizedJpeg, readJpegHeader } from '../../src/images/jpeg';
+import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
 
 function check(value: unknown): asserts value { if (!value) throw new Error('C ordinary-owner gate failed.'); }
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -198,7 +199,22 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         receipts.push({ ownerId, ...actual, itemId: item.id, imageId: image.id });
         progress('CLEANUP', ownerIndex);
         check(image.main_path && image.thumb_path);
-        check(!(await client.storage.from('wardrobe').remove([image.main_path, image.thumb_path])).error);
+        const session = await client.auth.getSession();
+        check(!session.error && session.data.session?.user.id === ownerId);
+        const token = session.data.session.access_token;
+        for (const path of [image.main_path, image.thumb_path]) {
+          check(await deleteWardrobeObject(async (route, options) => {
+            const response = await fetch(base + route, {
+              ...options, headers: { apikey: key, Authorization: 'Bearer ' + token },
+              redirect: 'error', cache: 'no-store', credentials: 'omit', signal: AbortSignal.timeout(10000),
+            });
+            const bytes = await response.arrayBuffer();
+            check(bytes.byteLength <= 4096);
+            const data: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+            return { status: response.status, ok: response.ok, data };
+          }, ownerId, path) === 'removed');
+          check((await client.storage.from('wardrobe').download(path)).error);
+        }
         check(!(await client.from('items').delete().eq('owner_id', ownerId).eq('id', item.id)).error);
         check(JSON.stringify((await client.from('items').select('id').eq('owner_id', ownerId).order('id')).data) === JSON.stringify(itemsBefore.data));
         check(JSON.stringify((await client.from('item_images').select('id').eq('owner_id', ownerId).order('id')).data) === JSON.stringify(imagesBefore.data));

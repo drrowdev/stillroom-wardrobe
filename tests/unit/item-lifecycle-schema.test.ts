@@ -8,13 +8,16 @@ import type { Database } from '../../src/data/database.types';
 import type { OwnerScope } from '../../src/auth/session';
 import { editGarmentField, newGarmentDraft } from '../../src/domain/garment-fields';
 import { newSaveAttempt, saveItem } from '../../src/images/upload';
+import { classifyObjectDeletion, deleteWardrobeObject, wardrobeDeleteRoute } from '../../src/data/storage-delete';
+import type { DeleteReply, DeleteRequest } from '../../src/data/storage-delete';
 // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
-import { ITEM_LIFECYCLE_CATALOG_SQL, assertLifecycleFixture, MIGRATIONS, withLifecycleParentLock, withLifecycleCatalogMarker } from '../../scripts/preservation-rehearsal.mjs';
+import { ITEM_LIFECYCLE_CATALOG_SQL, assertLifecycleFixture, MIGRATIONS, withLifecycleParentLock, withLifecycleCatalogMarker as catalogMarker, lifecycleStorageRuntime, withLifecycleLateUpload, requireStorageCatalogInventory } from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { one, lifecycleObservation, serializeLifecycleObservation, readLifecycleUploadResponse, requireLifecycleUploadConflict, lifecycleFixtureCases } from '../integration/item-lifecycle.sessions.mjs';
 
 const fixtureMocks = vi.hoisted(() => ({
   spawn: vi.fn(), requireLocalContainer: vi.fn(), privilegedLocalSql: vi.fn(), commandEnvironment: vi.fn(), saveClients: vi.fn(),
+  markerRemove: vi.fn(), runCommand: vi.fn(), requireDocker: vi.fn(),
 }));
 vi.mock('node:child_process', async () => ({
   ...await vi.importActual<Record<string, unknown>>('node:child_process'), spawn: fixtureMocks.spawn,
@@ -23,6 +26,7 @@ vi.mock('../../scripts/backend/local.mjs', async () => ({
   ...await vi.importActual<Record<string, unknown>>('../../scripts/backend/local.mjs'),
   requireLocalContainer: fixtureMocks.requireLocalContainer,
   privilegedLocalSql: fixtureMocks.privilegedLocalSql, commandEnvironment: fixtureMocks.commandEnvironment,
+  runCommand: fixtureMocks.runCommand, requireDocker: fixtureMocks.requireDocker,
 }));
 vi.mock('../integration/item-save.sessions.mjs', async () => ({
   ...await vi.importActual<Record<string, unknown>>('../integration/item-save.sessions.mjs'), saveClients: fixtureMocks.saveClients,
@@ -44,12 +48,161 @@ function ordered(source: string, steps: string[]) {
   }
 }
 
+describe('singular Storage deletion protocol (no backend execution)', () => {
+  const owner = '10000000-0000-4000-8000-000000000001';
+  const path = `${owner}/10800000-0000-4000-8000-000000000002/10000000-0000-4000-8000-000000000003/main.jpg`;
+  const success: DeleteReply = { status: 200, ok: true, data: { message: 'Successfully deleted' } };
+  const missing: DeleteReply = { status: 400, ok: false,
+    data: { statusCode: '404', code: 'NoSuchKey', error: 'not_found', message: 'Object not found' } };
+  const denial: DeleteReply = { status: 400, ok: false,
+    data: { statusCode: '403', code: 'AccessDenied', error: 'Unauthorized', message: 'Access denied' } };
+  it('distinguishes acknowledged removal, exact missing, and hard denial', () => {
+    expect(classifyObjectDeletion(success)).toBe('removed');
+    expect(classifyObjectDeletion(missing)).toBe('missing');
+    expect(() => classifyObjectDeletion(denial)).toThrow('error.notAvailable');
+  });
+  it.each<DeleteReply>([
+    { ...missing, data: { statusCode: '404', code: 'NoSuchKey', error: 'NoSuchKey', message: 'Object not found' } },
+    { ...denial, data: { statusCode: '403', code: 'AccessDenied', error: 'AccessDenied', message: 'Access denied' } },
+    { ...missing, data: { statusCode: '404', code: 'NoSuchKey', error: 'not_found', message: 'Access denied' } },
+    { ...denial, data: { statusCode: '403', code: 'AccessDenied', error: 'Unauthorized', message: 'Object not found' } },
+    { ...missing, data: { statusCode: 404, code: 'NoSuchKey', error: 'not_found', message: 'Object not found' } },
+    { ...denial, data: { statusCode: '403', code: 'AccessDenied', error: 'Unauthorized', message: 'Not available' } },
+    { ...success, data: [] }, { ...success, status: 204 }, { ...success, ok: false },
+    { ...success, data: { message: 'Successfully deleted', extra: true } },
+    { ...missing, status: 404 }, { ...missing, ok: true },
+    { ...missing, data: { code: 'NoSuchKey' } }, { ...missing, data: null },
+    { ...missing, data: 'Private upstream content' }, { ...missing, data: { statusCode: 404, code: 'NoSuchKey', error: 'NoSuchKey', message: 'Object not found' } },
+    { ...missing, data: { statusCode: '404', code: 'NoSuchKey', error: 'NoSuchKey', message: 'Other' } },
+    { ...denial, data: { statusCode: '403', code: 'AccessDenied', error: 'AccessDenied', message: 'Other' } },
+    ...[500, 502, 503, 599].flatMap((status) => [success, missing, denial].map((reply) => ({ ...reply, status }))),
+  ])('refuses unexpected/5xx response %# rather than inventing missing or success', (reply) => {
+    expect(() => classifyObjectDeletion(reply)).toThrow('error.unavailable');
+  });
+  it('makes one fixed singular request; no bulk, inference or retry', async () => {
+    const request = vi.fn<DeleteRequest>().mockResolvedValue(success);
+    expect(await deleteWardrobeObject(request, owner, path)).toBe('removed');
+    expect(request).toHaveBeenCalledExactlyOnceWith(`/storage/v1/object/wardrobe/${path}`, { method: 'DELETE' });
+  });
+  it('accepts the existing adapter range field without broadening the body contract', () => {
+    const reply = { ...missing, range: null };
+    expect(classifyObjectDeletion(reply)).toBe('missing');
+    expect(classifyObjectDeletion({ ...reply, ...success })).toBe('removed');
+  });
+  it.each([new Error('Primary'), undefined, null, false, 0, ''])('retains exact adapter failure %#', async (primary) => {
+    const request = vi.fn<DeleteRequest>().mockRejectedValue(primary);
+    const result = await deleteWardrobeObject(request, owner, path).then(() => ({ rejected: false, value: null }),
+      (value: unknown) => ({ rejected: true, value }));
+    expect(result).toEqual({ rejected: true, value: primary }); expect(request).toHaveBeenCalledOnce();
+  });
+  it('rejects traversal, foreign owner, query/fragment and endpoint escapes before transport', async () => {
+    const request = vi.fn<DeleteRequest>();
+    expect(() => Reflect.apply(wardrobeDeleteRoute, undefined, [owner, { toString: () => path }])).toThrow('error.unavailable');
+    for (const changed of [path.replace(owner, '20000000-0000-4000-8000-000000000001'), path + '?x', path + '#x',
+      path.replace('/main.jpg', '/../main.jpg'), path.replace('/main.jpg', '/main.jpg%2f'), 'https://example.test/' + path]) {
+      expect(() => wardrobeDeleteRoute(owner, changed)).toThrow('error.unavailable');
+      await expect(deleteWardrobeObject(request, owner, changed)).rejects.toThrow('error.unavailable');
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe('late-upload child orchestration (mock-only, not byte-phase acceptance)', () => {
+  const uid = '10000000-0000-4000-8000-000000000001';
+  const owner = { uid, token: ['unit', Buffer.from(JSON.stringify({ sub: uid, role: 'authenticated' })).toString('base64url'), 'unit'].join('.') };
+  const value = { p_item: { id: '10800000-0000-4000-8000-000000000002' }, p_image: { id: '10000000-0000-4000-8000-000000000003' } };
+  const container = 'supabase_storage_stillroom-wardrobe', imageId = 'sha256:' + 'a'.repeat(64);
+  const runtime = { name: '/' + container, project: 'stillroom-wardrobe', running: true, image: 'supabase/storage-api:v1.70.3', id: imageId,
+    mounts: [{ type: 'volume', name: container, target: '/mnt', rw: true }],
+    config: ['STORAGE_BACKEND=file', 'FILE_STORAGE_BACKEND_PATH=/mnt', 'TENANT_ID=stub', 'GLOBAL_S3_BUCKET=stub', null] };
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubEnv('CI', 'true'); vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('ALLOW_PRESERVATION_REHEARSAL', '1'); vi.stubEnv('ALLOW_SECURITY_TESTS', '1');
+    fixtureMocks.runCommand.mockReset(); fixtureMocks.spawn.mockReset();
+    fixtureMocks.requireDocker.mockResolvedValue(undefined); fixtureMocks.commandEnvironment.mockReturnValue({});
+    fixtureMocks.runCommand.mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(runtime) })
+      .mockResolvedValueOnce({ code: 0, stdout: JSON.stringify({ id: imageId, digests: ['supabase/storage-api@' + imageId] }) });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Unexpected network'); }));
+  });
+  afterEach(() => {
+    try { expect(vi.getTimerCount()).toBe(0); expect(globalThis.fetch).not.toHaveBeenCalled(); }
+    finally { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
+  });
+  function child(reply: unknown = { stage: 'settled', status: 400, bodyBytes: 91, denied: true, failed: false },
+    endFailure?: { value: unknown }) {
+    const proc = new EventEmitter(), stdin = new EventEmitter(), stdout = new EventEmitter(), stderr = new EventEmitter();
+    const write = vi.fn(() => { queueMicrotask(() => stdout.emit('data', Buffer.from('{"stage":"ready","partialBytes":2}\n'))); return true; });
+    const end = vi.fn((command: string) => {
+      queueMicrotask(() => {
+        if (command === 'complete\n') stdout.emit('data', Buffer.from(JSON.stringify(reply) + '\n'));
+        proc.emit('close', command === 'complete\n' ? 0 : 1);
+      });
+      if (endFailure) throw endFailure.value;
+    });
+    const kill = vi.fn(() => { queueMicrotask(() => proc.emit('close', 1)); return true; });
+    fixtureMocks.spawn.mockReturnValue(Object.assign(proc, {
+      stdin: Object.assign(stdin, { write, end, writableEnded: false, destroyed: false }), stdout, stderr, kill,
+    }));
+    return { write, end, kill, stdout, proc };
+  }
+  it('sends only stdin credentials, waits for readiness, completes once and joins before resolving', async () => {
+    const c = child(), operation = vi.fn(async () => { expect(c.end).not.toHaveBeenCalled(); });
+    await withLifecycleLateUpload(owner, value, operation);
+    expect(operation).toHaveBeenCalledOnce();
+    expect(c.end).toHaveBeenCalledExactlyOnceWith('complete\n');
+    expect(c.write).toHaveBeenCalledOnce();
+    expect(JSON.stringify(fixtureMocks.spawn.mock.calls)).not.toContain(owner.token);
+    expect(fixtureMocks.runCommand).toHaveBeenCalledTimes(2);
+    expect(c.kill).not.toHaveBeenCalled();
+  });
+  it.each([new Error('Primary'), undefined, null, false, 0, ''])('joins cancellation without masking exact/falsy operation failure %#', async (primary) => {
+    const c = child(undefined, { value: new Error('Secondary') });
+    const result = await withLifecycleLateUpload(owner, value, async () => { throw primary; })
+      .then(() => ({ rejected: false, value: null }), (value: unknown) => ({ rejected: true, value }));
+    expect(result).toEqual({ rejected: true, value: primary }); expect(c.end).toHaveBeenCalledWith('cancel\n');
+  });
+  it.each([
+    { stage: 'settled', status: 500, bodyBytes: 73, denied: false, failed: true },
+    { stage: 'settled', status: 200, bodyBytes: 4, denied: true, failed: false },
+    { stage: 'settled', status: 400, bodyBytes: null, denied: true, failed: false },
+    { stage: 'settled', status: 400, bodyBytes: 4097, denied: true, failed: false },
+    { stage: 'settled', status: 400, bodyBytes: 90, denied: true, failed: false, extra: true },
+  ])('rejects malformed, overflow and unknown/5xx settlement %#', async (reply) => {
+    child(reply);
+    await expect(withLifecycleLateUpload(owner, value, async () => {})).rejects.toThrow('EVIDENCE_REQUIRED');
+  });
+  it('fails an unacknowledged deadline, cancels and terminates the exact child', async () => {
+    const c = child();
+    await expect(withLifecycleLateUpload(owner, value, async () => { await vi.advanceTimersByTimeAsync(15_000); }))
+      .rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(c.end).toHaveBeenCalledWith('cancel\n'); expect(c.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+  it.each([
+    { project: 'different' }, { running: false }, { image: 'supabase/storage-api:latest' },
+    { mounts: [{ type: 'bind', name: container, target: '/mnt', rw: true }] },
+    { config: ['STORAGE_BACKEND=s3'] }, { id: 'unverified' },
+  ])('refuses owned-runtime mismatch %# without a child/upload', async (change) => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: JSON.stringify({ ...runtime, ...change }) });
+    await expect(lifecycleStorageRuntime()).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(fixtureMocks.spawn).not.toHaveBeenCalled();
+  });
+  it('does not bless absent, excessive or incompatible catalog observations', () => {
+    for (const input of [null, {}, { deleteProtected: true }, { triggers: new Array(17).fill({}) }]) {
+      expect(() => requireStorageCatalogInventory(input)).toThrow('EVIDENCE_REQUIRED');
+    }
+  });
+});
+
 describe('I08 SQL source contract, not live database proof', () => {
   it('has only four public RPCs and no public table/fingerprint/export edits', () => {
     expect([...sql.matchAll(/create function public\.(\w+)/g)].map((match) => match[1])).toEqual([
       'set_item_trashed', 'item_deletion_status', 'begin_item_deletion', 'finish_item_deletion',
     ]);
-    expect(sql).not.toMatch(/alter table public|create (?:or replace )?function public\.(?:export|reserve|commit|finalize)|ai_|set_config|current_setting|when others|pg_sleep|\bloop\b/i);
+    expect(sql).not.toMatch(/alter table public.*(?:add|drop|disable)|create (?:or replace )?function public\.(?:export|reserve|commit|finalize)|set_config|current_setting|when others|pg_sleep|\bloop\b/i);
+    expect(sql.match(/private\.ai_\w+/g)).toEqual(['private.ai_item_save_attempts']);
     expect(sql).not.toMatch(/revoke .*on public\.(?:items|item_images)|lock table|references public\.profiles/);
     expect(sql).toContain('foreign key (owner_id,item_id) references public.items(owner_id,id) on delete cascade');
     const claim = sql.slice(sql.indexOf('create table private.item_deletion_claims'), sql.indexOf('alter table private.item_deletion_claims'));
@@ -80,10 +233,12 @@ describe('I08 SQL source contract, not live database proof', () => {
       'for key share nowait;', 'return private.is_approved()', "im.state='pending'", 'from private.item_deletion_claims',
     ]);
     expect(routine('private.may_create_item_object')).not.toMatch(/::uuid|split_part/);
-    expect(routine('private.may_create_item_object')).toContain("errcode='22023',message='Request conflict'");
-    expect(sql.match(/drop policy/g)).toHaveLength(1);
+    expect(routine('private.may_create_item_object')).toContain("errcode='55P03',message='The resource is locked'");
+    expect(sql.match(/drop policy/g)).toHaveLength(2);
+    expect(sql).toContain("storage.allow_only_operation('storage.object.upload')");
+    expect(sql).toContain("storage.allow_only_operation('storage.object.delete')");
     expect(sql).toContain("with check (bucket_id='wardrobe' and private.may_create_item_object(name))");
-    expect(sql).not.toMatch(/wardrobe_read|wardrobe_delete|owns_storage_path/);
+    expect(sql).not.toMatch(/drop policy wardrobe_read|create policy wardrobe_read|owns_storage_path/);
   });
   it('orders profile, images, parent UPDATE, full image reread and claim locks', () => {
     for (const name of ['public.begin_item_deletion', 'public.finish_item_deletion']) {
@@ -109,6 +264,37 @@ describe('I08 SQL source contract, not live database proof', () => {
     ]);
     expect(routine('public.finish_item_deletion')).toContain("'absent'::text");
     expect(routine('public.finish_item_deletion')).not.toMatch(/delete from (?:storage|public\.item_images)|forget_image/);
+  });
+  it('fences all-role publication with transaction-held SHARE locks, not admission or expiry', () => {
+    const publication = routine('private.guard_item_object_publication');
+    expect(publication).toContain("volatile security definer set search_path = '' set lock_timeout = '2s'");
+    ordered(publication, ['from public.profiles p where p.owner_id=u for share nowait',
+      'from private.approved_accounts a where a.user_id=u for share nowait',
+      'from public.item_images im where im.owner_id=u and im.id=image_id for share nowait',
+      'from public.items i where i.owner_id=u and i.id=parent_id for share nowait',
+      'select im.* into image', 'select i.* into item', 'and a.enabled',
+      "image.state is distinct from 'pending'", 'from private.item_deletion_claims', 'and a.cancelled']);
+    expect(publication).toContain('new.owner_id is distinct from u::text');
+    expect(publication).toContain('(new.owner is not null and new.owner<>u)');
+    expect(publication).toContain('new.version is distinct from old.version');
+    for (const field of ['id', 'bucket_id', 'name', 'owner', 'owner_id', 'archived_at', 'is_delete_marker', 'is_versioned']) {
+      expect(publication).toContain(`new.${field}`);
+      expect(publication).toContain(`old.${field}`);
+    }
+    expect(publication).not.toMatch(/auth\.uid|current_user|session_user|pg_trigger_depth|for key share|::uuid|ai_enabled|expires_at|clock_timestamp/);
+    expect(sql).toContain('after insert or update on storage.objects');
+    expect(sql).toContain('enable always trigger item_object_publication_guard');
+    expect(sql).toContain('revoke all on function private.guard_item_object_publication() from public,anon,authenticated');
+  });
+  it('retains only the approved owner/image pair until actual Auth deletion and records transactionally', () => {
+    const table = sql.slice(sql.indexOf('create table private.item_image_used_ids'), sql.indexOf('alter table private.item_image_used_ids'));
+    expect(table).toContain('references auth.users(id) on delete cascade');
+    expect(table).toContain('primary key (owner_id,image_id)');
+    expect(table).not.toMatch(/time|path|hash|state|content|item_id|profile|email/);
+    expect(sql).toContain('union select owner_id,image_id from private.item_save_used_ids');
+    expect(routine('private.record_item_image_identity')).toContain('insert into private.item_image_used_ids');
+    expect(routine('private.record_item_image_identity')).not.toMatch(/on conflict do nothing|auth.uid|current_user/);
+    expect(sql).toContain('enable always trigger item_image_identity_guard');
   });
   it('keeps status read-only in one relation-read statement and manifest independent of bytes', () => {
     const status = routine('public.item_deletion_status');
@@ -154,6 +340,11 @@ describe('I08 SQL source contract, not live database proof', () => {
     expect(ITEM_LIFECYCLE_CATALOG_SQL).toContain("cmd in ('UPDATE','ALL')");
     expect(ITEM_LIFECYCLE_CATALOG_SQL).toContain('private.may_delete_storage(name)');
     expect(ITEM_LIFECYCLE_CATALOG_SQL).not.toMatch(/^\s*(delete|update|insert|create|alter|grant)\b/im);
+    for (const match of sql.matchAll(/create function ([\w.]+)\((.*?)\)[\s\S]*?as \$\$([\s\S]*?)\$\$;/g)) {
+      const body = match[3];
+      if (body === undefined) throw new Error('Missing routine body');
+      expect(ITEM_LIFECYCLE_CATALOG_SQL).toContain(createHash('md5').update(body).digest('hex'));
+    }
   });
   it('runs new ordinary suites additively without granting normal children CI fixture authority', async () => {
     const runner = await read('scripts/run-local-tests.mjs');
@@ -246,6 +437,9 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
   const primaryValues: unknown[] = [privateError, undefined, null, false, 0, ''];
   const lockNotice = 'FAIL: I08 exact parent-lock release';
   const markerNotice = 'FAIL: I08 exact catalog-marker cleanup';
+  const markerImage = '10000000-0000-4000-8000-000000000003';
+  const withLifecycleCatalogMarker = (ownerId: string, itemId: string, operation: () => Promise<unknown>) =>
+    catalogMarker(ownerId, itemId, operation, { imageId: markerImage, remove: fixtureMocks.markerRemove });
   let log: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -257,6 +451,7 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
     fixtureMocks.requireLocalContainer.mockResolvedValue(undefined);
     fixtureMocks.commandEnvironment.mockReturnValue({});
     fixtureMocks.privilegedLocalSql.mockImplementation(() => { throw new Error('Unexpected SQL request'); });
+    fixtureMocks.markerRemove.mockResolvedValue('removed');
     vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Unexpected network request'); }));
     log = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -381,13 +576,17 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
       assertCleaned() {
         expect(statements).toHaveLength(3);
         expect(statements[0]).toContain('insert into storage.objects');
-        expect(statements[1]).toContain('delete from storage.objects');
+        expect(statements[1]).toContain('select count(*) from storage.objects');
+        expect(statements.join('\n')).not.toMatch(/delete from storage\.objects|set_config|allow_delete_query/);
+        if (!setup && !mode.startsWith('delete')) {
+          expect(fixtureMocks.markerRemove).toHaveBeenCalledExactlyOnceWith(`${owner}/${item}/${markerImage}/thumb.jpg`);
+        }
         expect(statements[2]).toContain('select count(*) from storage.objects');
         const markerId = statements[0]?.match(/values\('([0-9a-f-]+)'/)?.[1];
         expect(markerId).toBeDefined();
         for (const statement of statements.slice(1)) {
           expect(statement).toContain(`id='${markerId}'`);
-          expect(statement).toContain(`${owner}/${item}/i08-catalog-marker`);
+          expect(statement).toContain(`${owner}/${item}/${markerImage}/thumb.jpg`);
         }
         expect(fixtureMocks.spawn).not.toHaveBeenCalled();
         expect(fixtureMocks.requireLocalContainer).not.toHaveBeenCalled();
@@ -478,6 +677,21 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
     await rejection(withLifecycleCatalogMarker(owner, item, async () => { throw primary; }), primary);
     fixture.assertCleaned();
   });
+  it.each(primaryValues)('preserves singular-API cleanup failure %# and still verifies catalog absence', async (first) => {
+    marker();
+    fixtureMocks.markerRemove.mockRejectedValueOnce(first);
+    fixtureMocks.privilegedLocalSql.mockResolvedValueOnce('I08_MARKER_CREATED').mockResolvedValueOnce('1')
+      .mockRejectedValueOnce(cleanupError);
+    log.mockImplementation(() => { throw privateError; });
+    await rejection(withLifecycleCatalogMarker(owner, item, async () => {}), first);
+    expect(fixtureMocks.markerRemove).toHaveBeenCalledOnce();
+    expect(fixtureMocks.privilegedLocalSql).toHaveBeenCalledTimes(3);
+  });
+  it.each(['missing', 'denied', undefined])('never treats marker API %s as acknowledged deletion', async (result) => {
+    marker(); fixtureMocks.markerRemove.mockResolvedValueOnce(result);
+    await expect(withLifecycleCatalogMarker(owner, item, async () => {})).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(fixtureMocks.privilegedLocalSql).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe('R3 bounded held-upload response and closed evidence (mock-only)', () => {
@@ -533,6 +747,7 @@ describe('R3 bounded held-upload response and closed evidence (mock-only)', () =
         reservation: Record<string, unknown>; requestId: unknown; expected: unknown }>();
       const events: string[] = [];
       let held: string | null = null, marker = false, cleanupStarted = false;
+      const removed = new Set<string>();
       const conflict = () => ({ ok: false, status: 400, data: { code: '22023', message: 'Request conflict', details: null, hint: null } });
       const request = vi.fn(async (token: string, route: string, options: { method?: string; body?: unknown } = {}) => {
         const owner = owners.find((candidate) => candidate.token === token);
@@ -550,7 +765,20 @@ describe('R3 bounded held-upload response and closed evidence (mock-only)', () =
           }
           return { ok: true, status: 200, data: [structuredClone(row.reservation)] };
         }
-        if (route.startsWith('/storage/v1/object/wardrobe')) return { ok: true, status: 200, data: [] };
+        if (route.startsWith('/storage/v1/object/wardrobe/')) {
+          const path = route.slice('/storage/v1/object/wardrobe/'.length);
+          if (options.method === 'DELETE') {
+            const missing = removed.has(path); removed.add(path);
+            return missing ? { ok: false, status: 400, data: { statusCode: '404', code: 'NoSuchKey', error: 'not_found', message: 'Object not found' } }
+              : { ok: true, status: 200, data: { message: 'Successfully deleted' } };
+          }
+          removed.delete(path);
+          return { ok: true, status: 200, data: {} };
+        }
+        if (route.startsWith('/storage/v1/object/authenticated/wardrobe/')
+          && removed.has(route.slice('/storage/v1/object/authenticated/wardrobe/'.length))) {
+          return { ok: false, status: 400, data: { statusCode: '404', code: 'NoSuchKey', error: 'not_found', message: 'Object not found' } };
+        }
         if (options.method === 'DELETE') {
           if (marker) return conflict();
           events.push('cleanup'); cleanupStarted = true;
@@ -679,7 +907,8 @@ describe('R3 bounded held-upload response and closed evidence (mock-only)', () =
       expect(f.events).toEqual(['holder-settled', 'record', 'holder-settled', 'holder-settled', 'cleanup',
         'holder-settled', 'record', 'holder-settled', 'holder-settled', 'cleanup']);
       expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-      expect(f.withLifecycleCatalogMarker).toHaveBeenCalledTimes(2);
+      expect(f.withLifecycleCatalogMarker).not.toHaveBeenCalled();
+      expect(f.request.mock.calls.filter(([, route]) => route.endsWith('/finish_item_deletion'))).toHaveLength(4);
     });
     it('retains two records when the second owner fails after the first passes, without another request or retry', async () => {
       vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({ code: '22023', message: 'Request conflict' }), { status: 400 }))
@@ -735,6 +964,20 @@ describe('R3 bounded held-upload response and closed evidence (mock-only)', () =
     expect(observation).toMatchObject({ status: 400, ok: false, bodyType: 'object', captureError: 'none',
       bodyBytes: Buffer.byteLength(JSON.stringify(conflict)), truncated: false, cancelFailed: false, releaseFailed: false });
     expect(() => requireLifecycleUploadConflict(result)).not.toThrow();
+  });
+  it('requires the exact native 55P03 wrapper and records its closed code without accepting 5xx', async () => {
+    const locked = { statusCode: '423', code: 'ResourceLocked', error: 'ResourceLocked', message: 'The resource is locked' };
+    fetchMock.mockResolvedValue(response(locked));
+    const observation = lifecycleObservation(1);
+    const result = await readLifecycleUploadResponse(env, owner, value, observation);
+    expect(observation).toMatchObject({ code: 'ResourceLocked', status: 400, statusCodeMatches: false, exactRequestConflict: false });
+    expect(() => serializeLifecycleObservation(observation)).not.toThrow();
+    expect(() => requireLifecycleUploadConflict(result)).not.toThrow();
+    for (const changed of [{ ...result, status: 500 }, { ...result, elapsedMs: 5000 },
+      { ...result, data: { ...locked, extra: true } }, { ...result, data: { ...locked, statusCode: '400' } },
+      { ...result, data: { ...locked, message: 'Other' } }]) {
+      expect(() => requireLifecycleUploadConflict(changed)).toThrow('EVIDENCE_REQUIRED');
+    }
   });
   it('refuses endpoint, identity and credential escapes before any request', async () => {
     for (const change of [

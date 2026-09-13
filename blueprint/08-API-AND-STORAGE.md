@@ -73,12 +73,26 @@ triggers use fresh definer reads, not caller-visible RLS-filtered Storage rows.
 A valid final cascade is permitted by parent absence after byte checking, not by
 an auth mismatch, GUC, definer exemption or profile-delete shortcut.
 
-Only `wardrobe_create` changes: its narrowly granted private helper resolves an
-exact owned reserved pending path, holds parent KEY SHARE through the catalog
-INSERT, then rechecks pending/path/owner/no-claim. Read/delete helpers and the
-absence of an UPDATE policy stay unchanged. This introduces bounded upload
-authorization contention. The actual Storage HTTP wrapper must be observed in
-CI; SQL's fixed conflict does not specify that wrapper's HTTP code. Existing
+`wardrobe_create` requires the server-assigned `storage.object.upload` operation
+as well as the existing owned pending path and parent KEY SHARE admission checks.
+`wardrobe_delete` requires `storage.object.delete`; owner/enabled-account checks
+remain. No UPDATE policy is added. Client headers cannot select a different
+native operation. Bulk DELETE can return200/[] without deleting anything; it is
+not a removal acknowledgement. PUT, copy, signed upload and TUS admission remain
+unsupported; move already lacks UPDATE permission. S3 mapped-user operations
+are distinct from separately privileged administrative S3 credentials.
+
+Permission probes roll back before transfer. The app-owned immediate AFTER
+INSERT/UPDATE ALWAYS guard rechecks final publication for every role, with
+profile/approval/image/parent SHARE NOWAIT locks held through commit, fresh
+stable-ID reads, authoritative text owner_id and nullable-or-matching deprecated
+owner. Native probe version1 is valid; identity/version and dark versioning flags
+cannot be replaced, while genuine nonpublication metadata UPDATE is permitted.
+Only explicit analyzed-Save cancellation blocks an already accepted Save, not
+later AI opt-out/result expiry. Storage contention uses SQLSTATE55P03: at pinned
+Storage1.70.3 this renders HTTP400 and exact
+`{statusCode:"423",code:"ResourceLocked",error:"ResourceLocked",message:"The resource is locked"}`.
+Public/image RPC conflicts still use22023. HTTP5xx remains failure. Existing
 `ensureFile`/`requireSuccess` reports nonduplicate failures as unavailable, keeps
 the same draft/photo/IDs and offers explicit retry. It is not photo rejection or
 an automatic resend; capture/transport source stays frozen.
@@ -89,21 +103,39 @@ After BEGIN, no Restore/Undo, item update, image reservation/update/forgetting o
 metadata-per-batch deletion is allowed. Remove only validated retained main/thumb
 paths via ordinary Storage; preserve metadata until FINISH. FINISH also takes
 SHARE NOWAIT locks on any present prefix objects and refuses them. An empty
-query does not lock absence: the held parent UPDATE fence excludes admitted
-ordinary catalog INSERTs.
+query does not lock absence: the final-publication guard conflicts with the
+held parent UPDATE lock, then rejects future publication when the image/item is
+gone. The owner/image non-reuse registry prevents later rebinding of that path.
+
+`src/data/storage-delete.ts` performs one validated singular DELETE via a narrow
+ordinary-session caller adapter. Exact200/`{message:"Successfully deleted"}` means
+`removed`; exact400/`{statusCode:"404",code:"NoSuchKey",error:"not_found",message:"Object not found"}`
+means distinct `missing`, not physical byte proof. Exact400/
+`{statusCode:"403",code:"AccessDenied",error:"Unauthorized",message:"Access denied"}`
+is a hard denial. These are the pinned final HTTP formatter's legacy error names,
+not aliases for the code field. Every other envelope, malformed
+response or5xx fails with a fixed sanitized error. Checked permanent deletion
+requires each present registered object to return `removed`; test cleanup may
+reconcile `missing` with separate absence checks. A foreign absent path can return
+NoSuchKey before RLS; anonymous outer-auth errors need not match one fixed status.
 
 Future Stage 2 must fresh-read confirmation name/version/photo context, require
 all editor sections clean and resolved, and use the returned original/current
 versions and nonce for explicit reload/resume. An ambiguous BEGIN permits only a
 read-only Check status before deliberate Resume. Each action has a 30-second
-work budget, pages of at most 40 photo versions and removal batches of at most
-40 named paths; route/owner cancellation stops new requests and invalidates late
+work budget, pages of at most 40 photo versions and at most40 individually
+acknowledged singular removals; route/owner cancellation stops new requests and invalidates late
 continuations, without pretending an already-sent SDK removal was canceled.
 Eight-second Undo is owner-memory-only and supplemental to seven-day Trash.
 
 Ordinary Storage acknowledgements plus SQL catalog absence are not provider
-backup/physical-erasure proof. Service/admin bypasses, unobserved provider blobs
-and interrupted streams are outside this fence. No signed-upload flow, orphan
+backup/physical-erasure proof. The user accepted inaccessible interrupted-upload
+remnants without a verified cleanup deadline, not later publication/readability,
+accessible TUS metadata or failed removal. Hosted cutover must separately verify
+old admitted requests, missing historical image identities, backend companions
+and vendor-trigger compatibility/privileges/upgrades. Ordinary native elevated
+completion is fenced; privileged administrative schema/API changes are not
+claimed impossible. No signed-upload flow, orphan
 cleaner, scheduler, AI call, I09 bulk/filter feature or I10 media replacement is
 introduced. Named EN/FI/SV permanent-delete confirmation must explain that wear
 history retains its recorded garment name/category.

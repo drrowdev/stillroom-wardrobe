@@ -34,10 +34,11 @@ its SQL acknowledgement proves the lock is held before normal HTTP assertions
 begin. It is released by rollback, with a 15-second deadline and closed output.
 Tests observe the real Storage wrapper's fixed-conflict response (otherwise
 fail), verify unchanged draft/IDs/rows, then explicitly retry after release.
-The marker callback inserts one exact unmanifested catalog marker only after
-a normal claim and manifested-object removal. It has no bytes. Ordinary-owner
-raw DELETE/FINISH must refuse it without losing the item/claim; exact marker
-cleanup and subsequent normal completion are required. No fixture profile,
+The original marker callback inserted an unmanifested marker after claim; the
+T20 repair below supersedes that incompatible fixture with canonical pending
+metadata and an ordinary legacy-delete orphan. It has no bytes. Normal BEGIN
+must refuse the orphan without an irreversible claim; singular API cleanup and
+labelled catalog1-to-0 verification are mandatory. No fixture profile,
 shared row, production RPC or provider-side blob is created/deleted by setup.
 
 **At initial source review, none of this candidate had executed locally or in CI.** Local tooling
@@ -105,6 +106,85 @@ or test executed. The candidate remains unstaged for coordinator review.
 No new CI/Apple cycle, publication or Stage2 is authorized. Actual lint,
 unit/typecheck, normal-owner/Storage/lock/recovery/type/browser/visual evidence
 and every original Save, production, hosted, paid and release hold remain.
+
+### I08 T20 final-publication repair - source only (13 September 2026)
+
+[Approved nineteen-path plan](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655317164)
+and [fresh writer attestation/edit permission](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655347691)
+authorize the coherent source correction, not execution or publication. Original
+and R3 cycles both failed and are consumed; R4 is local240b8030, not published.
+The actual500 raw body remains unknown. Pinned Storage maps22023 to DatabaseError500
+and55P03 to ResourceLocked; this source explanation does not reconstruct that body.
+The new Storage helper uses55P03 and strict HTTP400/body423/ResourceLocked.
+The existing <5s gate and every5xx failure remain.
+
+Storage1.70.3 (`288dd95c4c06f3df72a2369ea5196a8e400aeed7`) rolls its
+permission probe back before transfer. A source-approved app-owned immediate
+AFTER/ALWAYS trigger fences final INSERT and identity/version-changing UPDATE for
+every role. Profile/approval/image/parent SHARE NOWAIT locks survive publication;
+fresh checks reject canceled Save, retired/nonpending images, trash/claims and
+missing owners/items. Native owner_id is authoritative text; deprecated owner
+may be null. Probe version1 is not mistaken for a UUID. Unchanged identity/version/
+dark flags permit genuine metadata maintenance. The private owner/image ID pair
+prevents rebinding; it is retained until actual Auth deletion, not profile
+clearing or disabling, under the user's limited-retention decision.
+
+Standard native upload and singular native DELETE predicates accompany one shared
+erasable TypeScript deletion helper and all normal fixture callers. Only exact
+acknowledged success is `removed`; exact NoSuchKey is distinct `missing`, and
+AccessDenied/unknown/malformed/5xx fail. Missing is not byte proof. No bulk-success
+mock, new auth/HTTP harness, endpoint, dependency or AI invocation substitutes for
+this protocol. Future Node24 execution imports the helper explicitly as `.ts`.
+The blueprint reference validation script is historical and **not executed or
+updated** as part of this repair.
+
+After nine-source preservation, future rehearsal checks nineteen positive
+application catalog properties, including exact eleven routine-body hashes,
+ACLs, trigger type/ALWAYS/nondeferred state and two-ID registry/Auth FK. A bounded
+32768-byte schema-metadata-only Storage trigger/function/column/constraint
+inventory and SHA256 are emitted as **REVIEW_REQUIRED**, not auto-enrolled as a
+compatible baseline. Actual0055/0058/0062 and any unknown executable/versioning
+behavior must be reviewed by the coordinator before compatibility acceptance.
+No row contents, credentials, image bytes or private-schema function bodies are
+included. This adds no separate inspection-run permission.
+
+The real late-upload fixture uses two ordinary owners and one four-byte POST
+each inside the verified owned FileBackend container. CLI2.116.0 stable selects
+the legacy start handler and Storage service; its source config is file backend,
+`/mnt`, tenant/global bucket `stub`, and the project-named volume. Runtime checks
+must still verify exact container/project/image content ID, repository digests,
+mount and the four nonsecret config values. Source assumptions do not pass them.
+There is no additional control upload or broad directory discovery.
+
+Each child receives only the ordinary token and fresh1080 fixture IDs via bounded
+stdin, in a stripped environment. It sends two bytes and withholds the last two.
+Readiness requires an actual single UUID-version regular partial file of size2,
+under the exact fresh namespace, with symlink/type checks and at most100 polls/
+5s; client write completion or a sleep is not readiness. No file content is read.
+After readiness the fast normal pair is uploaded, checked Save completes, and
+Trash/BEGIN/two acknowledged singular removals/FINISH complete before release.
+The withheld bytes are then sent; publication must fail, followed by labelled
+privileged catalogprefix0 and ordinary download/sign/list/row absence checks.
+The direct container HTTP test is not proof of gateway buffering behavior.
+
+Child HTTP/body/IPC/deadlines are bounded (4KiB body,1KiB closed output,15s).
+Requests and closure are observed, cancellation is attempted on every failure,
+and exact/falsy primary and first cleanup failures survive secondary notices.
+Unacknowledged child closure is failure, not proof of termination. The no-blob
+marker now passes the real publication guard for a pending canonical image;
+ordinary unclaimed deletion creates the orphan. Its true singular API cleanup
+uses FileBackend's missing-file-safe deletion and catalogue1-to-0 checks, never
+the0055 internal flag or privileged SQL DELETE.
+
+The accepted limitation is inaccessible interrupted-upload remnants **without a
+verified cleanup deadline**, not physical purge, async cleanup proof, failed
+accessible deletion, backups, or an indefinite visible hold. Historical TUS JSON/
+other companions have potential authorization exposure, not a verified cross-owner
+or anonymous exploit; outer registration was not fully reviewed. Exact hosted
+backend/companions, old admitted requests, absent historical identity records,
+vendor-trigger privileges/upgrades and cutover remain separately authorized gates.
+No new source-inferred runtime PASS, generated types, Stage2/UI/captures, run budget,
+hosted DDL, deployment, spending or provider action is granted.
 
 The local tools use the pinned Supabase CLI **2.116.0**, Node 24 and Docker. They do not install Docker, create cloud resources, link projects, use a management API, or reset remote databases. Host `psql` is not needed: the isolated provisioning process uses `docker exec` into the specifically labelled local database container, connecting to that container's own loopback Postgres endpoint with stock local trust authentication. It refuses password prompting.
 

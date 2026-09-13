@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { assertLocalApi, validateSessionEnvironment } from '../../scripts/backend/local.mjs';
 import { parseProfile } from '../../src/data/profile';
 import { messages as catalogMessages } from '../../src/i18n';
+import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
 
 const root = 'http://127.0.0.1:5173/';
 const projection = 'owner_id,display_name,ui_language,timezone,currency,version';
@@ -239,7 +240,18 @@ test('LOCAL real recovery UI, no-opener/new-context isolation and ordinary resto
       await profile(a.c, a.user.id); await profile(b.c, b.user.id);
       for (const fixture of fixtures) {
         const c = fixture.label === 'A' ? a.c : b.c;
-        if (fixture.paths.length) check(!(await c.storage.from('wardrobe').remove(fixture.paths)).error);
+        const session = await c.auth.getSession();
+        check(!session.error && session.data.session?.user.id === fixture.owner);
+        const token = session.data.session.access_token;
+        for (const path of fixture.paths) {
+          await deleteWardrobeObject(async (route, options) => {
+            const response = await transport(base + route, {
+              ...options, headers: { apikey: key, Authorization: 'Bearer ' + token },
+            });
+            const data: unknown = await response.json();
+            return { status: response.status, ok: response.ok, data };
+          }, fixture.owner, path);
+        }
         for (const path of fixture.paths) check((await c.storage.from('wardrobe').download(path)).error);
         check(!(await c.rpc('forget_image', { p_image_id: fixture.image })).error);
         check(!(await c.from('items').delete().eq('owner_id', fixture.owner).eq('id', fixture.item)).error);

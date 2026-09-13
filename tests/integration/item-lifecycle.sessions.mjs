@@ -1,12 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { isMain } from '../../scripts/quality/files.mjs';
 import { requireEvidence, TABLES } from './preservation.sessions.mjs';
 import { bytes, intent, saveClients, saveHarness, denied, eq } from './item-save.sessions.mjs';
 import { validateSessionEnvironment, assertLocalApi, assertPublishableKey, jwtClaims } from '../../scripts/backend/local.mjs';
+import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
 
 const heldStages = ['before-holder', 'holder-ready', 'request-sent', 'response-read', 'classified',
   'intent-and-rows', 'image-insert-denied', 'status-read', 'released'];
-const codeClasses = ['22023', '55P03', '42501', '23505', 'other', 'missing'];
+const codeClasses = ['22023', '55P03', '42501', '23505', 'ResourceLocked', 'other', 'missing'];
 export function lifecycleObservation(ownerOrdinal) {
   requireEvidence(ownerOrdinal === 1 || ownerOrdinal === 2);
   return {
@@ -115,7 +117,7 @@ export async function readLifecycleUploadResponse(env, owner, value, observation
           ? Array.isArray(data) ? 'array' : 'object' : 'primitive';
         requireEvidence(observation.bodyType === 'object');
         observation.code = !Object.hasOwn(data, 'code') ? 'missing'
-          : codeClasses.slice(0, 4).find((code) => code === data.code) ?? 'other';
+          : codeClasses.slice(0, 5).find((code) => code === data.code) ?? 'other';
         observation.errorPresent = Object.hasOwn(data, 'error');
         observation.errorIsString = typeof data.error === 'string';
         observation.statusCodePresent = Object.hasOwn(data, 'statusCode');
@@ -159,7 +161,10 @@ export function requireLifecycleUploadConflict(result) {
   const dbConflict = result.data?.code === '22023' && result.data?.message === 'Request conflict';
   const wrappedConflict = result.data?.message === 'Request conflict'
     && typeof result.data?.error === 'string' && String(result.data?.statusCode) === String(result.status);
-  requireEvidence(dbConflict || wrappedConflict);
+  const nativeLocked = result.status === 400 && isDeepStrictEqual(result.data, {
+    statusCode: '423', code: 'ResourceLocked', error: 'ResourceLocked', message: 'The resource is locked',
+  });
+  requireEvidence(dbConflict || wrappedConflict || nativeLocked);
 }
 
 const statusKeys = ['id', 'owner_id', 'title', 'version', 'deleted_at', 'photo_count', 'current_image_id',
@@ -232,7 +237,8 @@ export function lifecycleHarness(client, owner) {
       eq(await h.read('item_images', value.p_image.id), []);
     }
   };
-  return { ...h, track, create, status, trash, beginArgs, begin, finish, unchanged, snapshot, download, cleanup };
+  return { ...h, remove: (value) => removePaths(client, owner, h.paths(value)),
+    track, create, status, trash, beginArgs, begin, finish, unchanged, snapshot, download, cleanup };
 }
 
 function savedValues(item) {
@@ -243,8 +249,9 @@ function savedValues(item) {
 }
 async function removePaths(client, owner, paths) {
   requireEvidence(paths.length > 0 && paths.length <= 40);
-  const result = await client.request(owner.token, '/storage/v1/object/wardrobe', { method: 'DELETE', body: { prefixes: paths } });
-  requireEvidence(result.ok);
+  for (const path of paths) {
+    eq(await deleteWardrobeObject((route, options) => client.request(owner.token, route, options), owner.uid, path), 'removed');
+  }
 }
 
 async function ownerCases(client, owner, h) {
@@ -450,7 +457,7 @@ async function raceCases(client, owner, h) {
   eq((await h.status(legacy)).version, trashed.version);
 }
 
-export async function lifecycleFixtureCases(env, { withLifecycleParentLock, withLifecycleCatalogMarker }) {
+export async function lifecycleFixtureCases(env, { withLifecycleParentLock }) {
   const { client, owners } = await saveClients(env);
   requireEvidence(owners.length === 2);
   for (const [index, owner] of owners.entries()) {
@@ -472,7 +479,7 @@ export async function lifecycleFixtureCases(env, { withLifecycleParentLock, with
           const result = await readLifecycleUploadResponse(env, owner, value, observation);
           requireLifecycleUploadConflict(result);
           observation.stage = 'classified';
-          console.log(`PASS: I08 observed held-parent Storage rejection http=${result.status}; fixed Request conflict; no photo-validation claim`);
+          console.log(`PASS: I08 observed held-parent Storage rejection http=${result.status}; fixed lifecycle contention; no photo-validation claim`);
           eq(value, retainedIntent); eq(await h.read('items', value.p_item.id), [reservation.item]);
           eq(await h.read('item_images', value.p_image.id), [reservation.image]);
           observation.stage = 'intent-and-rows';
@@ -507,21 +514,80 @@ export async function lifecycleFixtureCases(env, { withLifecycleParentLock, with
       await withLifecycleParentLock(owner.uid, value.p_item.id, 'key share', async () => {
         denied(await h.call('finish_item_deletion', { p_item_id: value.p_item.id, p_request_id: args.p_request_id }));
       });
-      const claimed = await h.snapshot(value);
-      phase = 'catalog-marker-only';
-      await withLifecycleCatalogMarker(owner.uid, value.p_item.id, async () => {
-        const status = await h.status(value);
-        eq(status.cleanup_blocked, true); eq(status.unmanifested_count, 1);
-        eq(status.image_manifest_sha256, claimed.status.image_manifest_sha256);
-        denied(await client.request(owner.token, `/rest/v1/items?owner_id=eq.${owner.uid}&id=eq.${value.p_item.id}`, { method: 'DELETE' }));
-        denied(await h.call('finish_item_deletion', { p_item_id: value.p_item.id, p_request_id: args.p_request_id }));
-        eq(await h.read('items', value.p_item.id), claimed.items);
-        eq(await h.read('item_images', value.p_image.id), claimed.images);
-        eq((await h.status(value)).request_id, args.p_request_id);
-      });
-      await h.unchanged(value, claimed);
       eq(await h.finish(value, args.p_request_id), 'completed');
       eq(await h.read('items', value.p_item.id), []); eq(await h.read('item_images', value.p_image.id), []);
+    } catch (error) {
+      primaryFailed = true; primaryValue = error;
+      try { console.error(`FAIL: I08 fixture ${phase}; ordinary-session evidence required`); }
+      catch (noticeError) { cleanupFailure(noticeError); }
+    }
+    try { await h.cleanup(); } catch (error) {
+      cleanupFailure(error);
+      try { console.error('FAIL: I08 exact lifecycle fixture cleanup'); } catch (noticeError) { cleanupFailure(noticeError); }
+    }
+    if (primaryFailed) throw primaryValue;
+    if (cleanupFailed) throw cleanupValue;
+  }
+}
+
+export async function lifecyclePublicationCases(env, { withLifecycleCatalogMarker, withLifecycleLateUpload,
+  requireLifecyclePrefixEmpty, requireLifecycleClaimFence }) {
+  const { client, owners } = await saveClients(env);
+  requireEvidence(owners.length === 2);
+  for (const owner of owners) {
+    const h = lifecycleHarness(client, owner);
+    let phase, primaryFailed = false, primaryValue, cleanupFailed = false, cleanupValue;
+    const cleanupFailure = (error) => {
+      if (!cleanupFailed) { cleanupFailed = true; cleanupValue = error; }
+    };
+    try {
+      phase = 'catalog-marker-before-claim';
+      const legacy = h.track();
+      legacy.p_item.id = '1080' + legacy.p_item.id.slice(4);
+      await client.insert(owner, 'items', legacy.p_item);
+      await client.insert(owner, 'item_images', { ...legacy.p_image, item_id: legacy.p_item.id });
+      await withLifecycleCatalogMarker(owner.uid, legacy.p_item.id, async () => {
+        await h.deleteItem(legacy);
+        const replacement = h.track({ p_item: legacy.p_item, p_image: { ...legacy.p_image, id: randomUUID() } });
+        await client.insert(owner, 'items', replacement.p_item);
+        await client.insert(owner, 'item_images', { ...replacement.p_image, item_id: replacement.p_item.id });
+        await h.upload(replacement);
+        await client.rpc(owner, 'commit_image', { p_image_id: replacement.p_image.id });
+        await h.trash(replacement, 1);
+        const beforeMarker = await h.snapshot(replacement);
+        eq(beforeMarker.status.cleanup_blocked, true); eq(beforeMarker.status.unmanifested_count, 1);
+        denied(await h.call('begin_item_deletion', h.beginArgs(replacement, beforeMarker.status)));
+        await h.unchanged(replacement, beforeMarker);
+        eq((await h.trash(replacement, beforeMarker.status.version, false)).deleted_at, null);
+      }, { imageId: legacy.p_image.id,
+        remove: (path) => deleteWardrobeObject((route, options) => client.request(owner.token, route, options), owner.uid, path) });
+      phase = 'real-late-publication';
+      const late = h.track();
+      late.p_item.id = '1080' + late.p_item.id.slice(4);
+      const lateReservation = await h.reserve(late), lateIntent = structuredClone(late);
+      await withLifecycleLateUpload(owner, late, async () => {
+        await h.upload(late);
+        eq(late, lateIntent);
+        await h.finalize(late, lateReservation);
+        await h.trash(late, 1);
+        const lateArgs = h.beginArgs(late, await h.status(late));
+        await h.begin(lateArgs);
+        await removePaths(client, owner, h.paths(late));
+        await requireLifecycleClaimFence(owner.uid, late.p_item.id, late.p_image.id);
+        eq(await h.finish(late, lateArgs.p_request_id), 'completed');
+      });
+      await requireLifecyclePrefixEmpty(owner.uid, late.p_item.id);
+      for (const path of h.paths(late)) {
+        requireEvidence(!(await client.request(owner.token, `/storage/v1/object/authenticated/wardrobe/${path}`)).ok);
+        requireEvidence(!(await client.request(owner.token, `/storage/v1/object/sign/wardrobe/${path}`, {
+          method: 'POST', body: { expiresIn: 60 },
+        })).ok);
+      }
+      const listed = await client.request(owner.token, '/storage/v1/object/list/wardrobe', {
+        method: 'POST', body: { prefix: `${owner.uid}/${late.p_item.id}/`, limit: 10, offset: 0 },
+      });
+      requireEvidence(listed.ok); eq(listed.data, []);
+      eq(await h.read('items', late.p_item.id), []); eq(await h.read('item_images', late.p_image.id), []);
     } catch (error) {
       primaryFailed = true;
       primaryValue = error;
