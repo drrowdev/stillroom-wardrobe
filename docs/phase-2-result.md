@@ -4589,3 +4589,25 @@ unlocalized, not fixed or reclassified as harness-only/prod-safe. The earlier
 accepted integration risk is not a future waiver. Source remains ahead of
 production: deployed f318/six hosted migrations; B1/B2 are not hosted. No merge,
 deployment, hosted/private/paid/provider or additional writer authority follows.
+
+## 13 September 2026 - UX-copy zoom cleanup compiler correction
+
+First-head CI [34745157539, attempt 1](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34745157539)
+at `fd8f839419b0ddd394df48f315b0761839da1be7` failed in App job
+`103691615006`: installation and lint passed, but `tsc --noEmit` emitted TS2339
+for `Node.remove` in recovery.spec.ts:429 and slice.spec.ts:1151. Subsequent App
+steps, browser checks and captures were skipped, not passed. The actual sanitized
+compiler log was read. This is a new test-source typing defect, not a raw400
+diagnosis. Backend and Apple success reported in the
+[repair receipt](https://github.com/drrowdev/stillroom-wardrobe/pull/23#issuecomment-5651952459)
+is job/step metadata, not new detailed counts or artifact acceptance.
+
+The same persistent writer narrows each zoom cleanup node to HTMLStyleElement
+and requires attachment to document.head before removing it. Unexpected type or
+structure throws explicitly. Both 200% assertions, all iterations, captures and
+other oracles remain unchanged. Only these two callbacks and this append change;
+the preceding 310314 working-file bytes and other 207 tracked paths stay frozen.
+No local compiler/runtime/tests/captures or unchanged-job rerun was performed.
+This unstaged correction awaits coordinator source/commit/publication gates and
+fresh changed-head CI, Apple, types and actual eighteen-image review. Earlier
+job success does not validate a new head; all separate holds remain in force.

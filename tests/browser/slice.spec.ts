@@ -1148,7 +1148,10 @@ test('concise empty wardrobe and bounded synthetic evidence', async ({ page }, t
     const zoom = await page.addStyleTag({ content: 'html { font-size: 200%; }' });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-    await zoom.evaluate((element) => element.remove());
+    await zoom.evaluate((element) => {
+      if (!(element instanceof HTMLStyleElement) || element.parentNode !== document.head) throw new Error('Expected the attached zoom stylesheet.');
+      element.remove();
+    });
   }
   if (testInfo.project.name === 'chromium') {
     const files = await readdir(directory);
