@@ -46,10 +46,10 @@ function EntryLayout({ children, language, onLanguage, t }: { children: ReactNod
     <div className="entry-page">
       <header className="entry-header"><Brand /><LanguageSelector language={language} onChange={onLanguage} t={t} /></header>
       <main id="main" className="entry-main">
-        <div className="intro"><p className="eyebrow">{t('intro.eyebrow')}</p><h2>{t('intro.title')}</h2><p className="intro-body">{t('intro.body')}</p><WardrobeIllustration /><div className="intro-caption"><span className="caption-line" />{t('intro.caption')}</div></div>
+        <div className="intro"><WardrobeIllustration /></div>
         {children}
       </main>
-      <footer className="site-footer"><span>{t('intro.private')}</span><span>Stillroom Wardrobe</span></footer>
+      <footer className="site-footer"><span>Stillroom Wardrobe</span></footer>
     </div>
   );
 }
@@ -57,7 +57,7 @@ function Unconfigured({ status }: { status: Configuration['status'] }) {
   const [language, setLanguage] = useState(resolveLanguage(browserLanguages));
   const t = useCallback<Translate>((key, parameters) => translate(language, key, parameters), [language]);
   useEffect(() => { document.documentElement.lang = language; }, [language]);
-  return <EntryLayout language={language} onLanguage={setLanguage} t={t}><section className="entry-card setup-card"><div className="small-mark"><Icon name="wardrobe" /></div><h1>{t('setup.title')}</h1><p className="muted">{t(status === 'invalid' ? 'setup.invalid' : 'setup.body')}</p><ol className="setup-steps"><li>{t('setup.step1')}<code>npm run db:start</code></li><li>{t('setup.step2')}<code>.env.local</code></li><li>{t('setup.step3')}</li></ol><p className="privacy-note"><Icon name="lock" />{t('setup.note')}</p></section></EntryLayout>;
+  return <EntryLayout language={language} onLanguage={setLanguage} t={t}><section className="entry-card setup-card"><div className="small-mark"><Icon name="wardrobe" /></div><h1>{t('setup.title')}</h1><p className="muted">{t(status === 'invalid' ? 'setup.invalid' : 'setup.body')}</p><details className="copy-details"><summary>{t('setup.instructions')}</summary><ol className="setup-steps"><li>{t('setup.step1')}<code>npm run db:start</code></li><li>{t('setup.step2')}<code>.env.local</code></li><li>{t('setup.step3')}</li></ol></details><p className="privacy-note"><Icon name="lock" />{t('setup.note')}</p></section></EntryLayout>;
 }
 type WorkspaceRoute = 'wardrobe' | 'add' | 'settings' | `detail:${string}`;
 const routeHash = { wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings' };
@@ -232,7 +232,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
       <header className="workspace-header"><Brand /><nav aria-label={t('nav.wardrobe')}><a className="active-nav" href="#/wardrobe"><Icon name="wardrobe" />{t('nav.wardrobe')}</a></nav><div className="account-controls"><button type="button" className="account-button" aria-expanded={menu} aria-label={t('account.menu')} onClick={() => setMenu(!menu)}><span className="avatar">{state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)}</span><span>{state.profile.display_name}</span><Icon name="chevron" /></button>{menu && <div className="account-popover"><a className="text-button" href="#/settings" onClick={() => setMenu(false)}>{t('nav.settings')}</a><LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} /><button className="text-button" type="button" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div>}</div></header>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online || state.profileSaving} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}
       <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={state.language} online={online} t={t} />
-      <footer className="site-footer"><span>{t('intro.private')}</span><span>Stillroom Wardrobe</span></footer>
+      <footer className="site-footer"><span>Stillroom Wardrobe</span></footer>
     </div>
   );
 }

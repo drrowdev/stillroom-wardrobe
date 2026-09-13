@@ -32,7 +32,7 @@ export function WardrobeScreen({ items, images, loading, error, onAdd, onRefresh
   return (
     <section className="wardrobe-page" aria-labelledby="wardrobe-title">
       <div className="page-heading">
-        <div><p className="eyebrow">{t('wardrobe.eyebrow')}</p><h1 id="wardrobe-title" tabIndex={-1}>{t('wardrobe.title')}</h1><p className="muted">{t('wardrobe.description')}</p></div>
+        <div><h1 id="wardrobe-title" tabIndex={-1}>{t('wardrobe.title')}</h1></div>
         <button type="button" className="button button-primary" onClick={onAdd}><Icon name="plus" />{t('wardrobe.add')}</button>
       </div>
       {error && <div className="notice notice-error" role="alert"><span>{t(error)}</span><button className="text-button" onClick={onRefresh} disabled={!online}>{t('common.retry')}</button></div>}
@@ -51,7 +51,7 @@ export function WardrobeScreen({ items, images, loading, error, onAdd, onRefresh
       ) : !error ? (
         <div className="empty-wardrobe">
           <div className="empty-art"><WardrobeIllustration /></div>
-          <div className="empty-copy"><p className="eyebrow">{t('wardrobe.everyday')}</p><h2>{t('wardrobe.empty')}</h2><p>{t('wardrobe.emptyBody')}</p><button type="button" className="button button-primary" onClick={onAdd}><Icon name="plus" />{t('wardrobe.firstItem')}</button><p className="privacy-note"><Icon name="lock" />{t('wardrobe.privateNote')}</p></div>
+          <div className="empty-copy"><h2>{t('wardrobe.empty')}</h2><button type="button" className="button button-primary" onClick={onAdd}><Icon name="plus" />{t('wardrobe.add')}</button><p className="privacy-note"><Icon name="lock" />{t('wardrobe.privateNote')}</p></div>
         </div>
       ) : null}
     </section>

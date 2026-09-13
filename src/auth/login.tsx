@@ -22,8 +22,7 @@ export function Login({ controller, online, t, onRecovery, onAuthActivity }: { c
   return (
     <section className="entry-card" aria-labelledby="login-title">
       <div className="small-mark"><Icon name="wardrobe" /></div>
-      <h1 id="login-title" tabIndex={-1}>{t('auth.welcome')}</h1>
-      <p className="muted">{t('auth.subtitle')}</p>
+      <h1 id="login-title" tabIndex={-1}>{t('auth.signIn')}</h1>
       <form className="stack login-form" onChange={onAuthActivity} onSubmit={(event) => { void submit(event); }}>
         <div className="field">
           <label htmlFor="email">{t('auth.email')}</label>

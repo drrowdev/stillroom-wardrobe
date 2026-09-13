@@ -2,6 +2,8 @@ import { expect, test, type Page, type Request } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { createHash, randomUUID } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
+import { lstat, mkdir, open, readdir } from 'node:fs/promises';
+import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { inspectJpegSegments } from '../fixtures/jpeg-helpers';
 import { mockBackend, owners, signIn, wireStages, type WireBackend, type WireStage } from './mock-backend';
@@ -426,7 +428,7 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
     await signIn(page);
     await expect(page.locator('html')).toHaveAttribute('lang', language);
     await expect(page.locator('#wardrobe-title')).toHaveText(messages['wardrobe.title'][language]);
-    await page.getByRole('button', { name: messages['wardrobe.firstItem'][language] }).click();
+    await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'][language], exact: true }).click();
     await page.locator('input[type="file"]').first().setInputFiles({ name: 'shirt.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
     await expect(page.locator('.capture-photo img')).toBeVisible();
     await manualEntry(page);
@@ -457,7 +459,7 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
     await page.setViewportSize({ width: 320, height: 800 });
     await page.goto('/');
     await signIn(page);
-    await page.getByRole('button', { name: messages['wardrobe.firstItem'][language] }).click();
+    await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'][language], exact: true }).click();
     await page.locator('#item-title').fill('Manual synthetic title');
     await page.locator('#item-category').selectOption('top');
     await page.locator('details.optional-details summary').click();
@@ -507,7 +509,7 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
     expect(await page.evaluate(() => caches.keys())).toEqual([]);
     await page.getByRole('button', { name: messages['common.cancel'][language], exact: true }).click();
     await page.getByRole('button', { name: messages['common.discard'][language], exact: true }).click();
-    await page.getByRole('button', { name: messages['wardrobe.firstItem'][language] }).click();
+    await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'][language], exact: true }).click();
     await expect(show).toHaveCount(0);
     await expect(page.locator('#item-title')).toHaveValue('');
     await expect(page.locator('.capture-photo img')).toHaveCount(0);
@@ -537,14 +539,14 @@ test('late selection cannot overwrite a replacement or manual edits and clears n
   const backend = await mockBackend(page, { initialLanguage: 'en' });
   await page.goto('/');
   await signIn(page);
-  await page.getByRole('button', { name: 'Add your first piece' }).click();
+  await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
   const before = backend.requests.length;
   const proofsBefore = backend.statusProofs().length;
   await holdNextPhotoRead(page);
   const input = page.locator('input[type="file"]').first();
   await input.setInputFiles({ name: 'old.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
   await expect.poll(() => page.evaluate(() => (window as PhotoReadProbe).photoReadStarted)).toBe(true);
-  await expect(page.getByRole('button', { name: 'Save to my wardrobe' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: messages['capture.save'].en, exact: true })).toBeDisabled();
   await page.locator('#item-title').fill('Edited while preparing');
   await page.locator('#item-category').selectOption('bottom');
   const replacement = { name: 'same.jpg', mimeType: 'image/jpeg', buffer: backend.fixture };
@@ -582,14 +584,14 @@ test('discard and owner logout clear preparation details and ignore late photo r
   const backend = await mockBackend(page, { initialLanguage: 'en' });
   await page.goto('/');
   await signIn(page);
-  await page.getByRole('button', { name: 'Add your first piece' }).click();
+  await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
   const input = page.locator('input[type="file"]').first();
   await input.setInputFiles({ name: 'invalid.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
   await page.getByRole('button', { name: 'Show preparation details' }).click();
   await page.locator('#item-title').fill('Unsaved synthetic');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.getByRole('button', { name: 'Discard changes' }).click();
-  await page.getByRole('button', { name: 'Add your first piece' }).click();
+  await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
   await expect(page.locator('#preparation-details')).toHaveCount(0);
   await input.setInputFiles({ name: 'invalid.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
   await page.getByRole('button', { name: 'Show preparation details' }).click();
@@ -619,7 +621,7 @@ test('discarding a prepared draft creates no library records', async ({ page }) 
   const backend = await mockBackend(page, { initialLanguage: 'en' });
   await page.goto('/');
   await signIn(page);
-  await page.getByRole('button', { name: 'Add your first piece' }).click();
+  await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
   const before = backend.requests.length;
   const proofsBefore = backend.statusProofs().length;
   const status = page.waitForResponse((response) => response.request().method() === 'POST'
@@ -651,13 +653,13 @@ test('retrying a failed commit reuses the same records and image bytes', async (
   const backend = await mockBackend(page, { initialLanguage: 'en', failCommitOnce: true });
   await page.goto('/');
   await signIn(page);
-  await page.getByRole('button', { name: 'Add your first piece' }).click();
+  await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'shirt.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
   await expect(page.locator('.capture-photo img')).toBeVisible();
   await manualEntry(page);
   await page.locator('#item-title').fill('A retryable shirt');
   await page.locator('#item-category').selectOption('top');
-  await page.getByRole('button', { name: 'Save to my wardrobe' }).click();
+  await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
   await expect(page.getByRole('alert')).toBeVisible();
   const image = { ...backend.images[0] };
   const item = { ...backend.items[0] };
@@ -720,10 +722,10 @@ test('offline save is disabled without losing draft text', async ({ page, contex
   await mockBackend(page, { initialLanguage: 'en' });
   await page.goto('/');
   await signIn(page);
-  await page.getByRole('button', { name: 'Add your first piece' }).click();
+  await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
   await page.locator('#item-title').fill('Still here');
   await context.setOffline(true);
-  await expect(page.getByRole('button', { name: 'Save to my wardrobe' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: messages['capture.save'].en, exact: true })).toBeDisabled();
   await expect(page.locator('#item-title')).toHaveValue('Still here');
 });
 
@@ -1048,7 +1050,7 @@ test('accessibility while wardrobe items are loading', async ({ page }, testInfo
     release.resolve();
     await expect(loading).toHaveCount(0);
     await expect(page.locator('#wardrobe-title')).toHaveText(messages['wardrobe.title'].en);
-    await expect(page.getByRole('button', { name: messages['wardrobe.firstItem'].en })).toBeVisible();
+    await expect(page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true })).toBeVisible();
     expect(backend.requests).toContainEqual({ method: 'GET', path: '/rest/v1/items', owner: owners.a, ownerFilter: `eq.${owners.a}` });
   } finally {
     release.resolve();
@@ -1086,8 +1088,82 @@ test('accessibility and 320px layout across login, empty wardrobe and draft', as
   await signIn(page);
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await page.getByRole('button', { name: 'Add your first piece' }).click();
+  await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
   await expect(page.locator('#capture-title')).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('concise empty wardrobe and bounded synthetic evidence', async ({ page }, testInfo) => {
+  const api = await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto('/'); await signIn(page);
+  const directory = path.resolve('test-results/ux-copy-visual');
+  const ownFiles = ['wardrobe-empty-en-desktop.png', 'wardrobe-empty-fi-mobile.png'];
+  const allowedFiles = [...ownFiles, 'sign-in-en-desktop.png', 'sign-in-fi-mobile.png', 'recovery-en-desktop.png', 'recovery-fi-mobile.png'];
+  const origin = new URL(testInfo.project.use.baseURL!).origin;
+  const foreign = structuredClone(api.profiles[owners.b]);
+  let previous: Language = 'en';
+  for (const language of ['en', 'fi', 'sv'] as const) {
+    const width = language === 'en' ? 1280 : 320;
+    await expect(page.locator('.empty-copy')).toBeVisible();
+    if (language !== previous) {
+      await page.getByRole('button', { name: messages['account.menu'][previous], exact: true }).click();
+      await page.getByRole('button', { name: messages[`language.${language}`][language], exact: true }).click();
+      await expect(page.locator('html')).toHaveAttribute('lang', language);
+      await page.getByRole('button', { name: messages['account.menu'][language], exact: true }).click();
+    }
+    previous = language;
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.locator('.empty-copy h2')).toHaveText(messages['wardrobe.empty'][language]);
+    await expect(page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'][language], exact: true })).toBeVisible();
+    await expect(page.locator('.empty-copy > p:not(.privacy-note), .page-heading .eyebrow, .page-heading .muted')).toHaveCount(0);
+    await expect(page.getByText(messages['wardrobe.privateNote'][language], { exact: true })).toBeVisible();
+    expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+    expect(api.profiles[owners.b]).toEqual(foreign);
+    expect(api.profiles[owners.a]?.ui_language).toBe(language);
+    expect(api.requests.filter((request) => request.path.startsWith('/rest/'))
+      .every((request) => request.owner === owners.a && request.ownerFilter === `eq.${owners.a}`)).toBe(true);
+    expect(await page.evaluate(({ origin, language, width }) => {
+      const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
+      const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
+      return location.origin === origin && location.hostname === '127.0.0.1'
+        && (location.hash === '' || location.hash === '#/wardrobe') && !location.search
+        && document.documentElement.lang === language && innerWidth === width
+        && document.querySelector('.workspace-identity')?.textContent?.includes('Alex') === true
+        && !document.querySelector('input[type=password],#email,#password,.item-card')
+        && !privatePattern.test(document.body.innerText)
+        && [...document.querySelectorAll('.privacy-note, .workspace-identity, .site-footer')].filter(visible)
+          .every((element) => parseFloat(getComputedStyle(element).fontSize) >= 14)
+        && [...document.querySelectorAll('button')].filter(visible).every((button) => button.getBoundingClientRect().height >= 44)
+        && document.documentElement.scrollWidth <= innerWidth;
+    }, { origin, language, width }), 'Synthetic empty owner wardrobe and readable copy').toBe(true);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    if (testInfo.project.name === 'chromium' && language !== 'sv') {
+      await mkdir(directory, { recursive: true });
+      const metadata = await lstat(directory);
+      expect(metadata.isDirectory() && !metadata.isSymbolicLink()).toBe(true);
+      await page.screenshot({ path: path.join(directory, `wardrobe-empty-${language === 'en' ? 'en-desktop' : 'fi-mobile'}.png`),
+        fullPage: true, animations: 'disabled', scale: 'css' });
+    }
+    const zoom = await page.addStyleTag({ content: 'html { font-size: 200%; }' });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await zoom.evaluate((element) => element.remove());
+  }
+  if (testInfo.project.name === 'chromium') {
+    const files = await readdir(directory);
+    expect(files.every((file) => allowedFiles.includes(file))).toBe(true);
+    expect(files.filter((file) => file.startsWith('wardrobe-empty-')).sort()).toEqual([...ownFiles].sort());
+    for (const file of ownFiles) {
+      const filename = path.join(directory, file), metadata = await lstat(filename);
+      expect(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > 24 && metadata.size <= 1024 * 1024).toBe(true);
+      const handle = await open(filename, 'r');
+      try {
+        const header = Buffer.alloc(24), { bytesRead } = await handle.read(header, 0, 24, 0);
+        expect(bytesRead === 24 && header.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+          && header.toString('ascii', 12, 16) === 'IHDR'
+          && header.readUInt32BE(16) === (file.endsWith('en-desktop.png') ? 1280 : 320)).toBe(true);
+      } finally { await handle.close(); }
+    }
+  }
 });

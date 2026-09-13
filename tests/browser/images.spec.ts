@@ -219,7 +219,7 @@ async function setup(page: Page, language: Language = 'en', failCommitOnce = fal
   const api = await mockBackend(page, { initialLanguage: language, failCommitOnce });
   await page.goto('/');
   await signIn(page);
-  await page.getByRole('button', { name: messages['wardrobe.firstItem'][language] }).click();
+  await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'][language], exact: true }).click();
   const bytes = await fixture(page, 'png', false, size);
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: Buffer.from(bytes) });
   await expect(page.locator('.capture-photo img')).toBeVisible();

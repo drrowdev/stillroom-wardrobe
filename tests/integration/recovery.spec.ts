@@ -4,6 +4,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { assertLocalApi, validateSessionEnvironment } from '../../scripts/backend/local.mjs';
 import { parseProfile } from '../../src/data/profile';
+import { messages as catalogMessages } from '../../src/i18n';
 
 const root = 'http://127.0.0.1:5173/';
 const projection = 'owner_id,display_name,ui_language,timezone,currency,version';
@@ -145,9 +146,9 @@ test('LOCAL real recovery UI, no-opener/new-context isolation and ordinary resto
     const started = Date.now();
     stage = 'single recovery request through real UI';
     const requested = requestPage.waitForResponse(response => new URL(response.url()).pathname === '/auth/v1/recover', { timeout: 20_000 });
-    await requestPage.getByRole('button', { name: 'Request recovery email', exact: true }).click();
+    await requestPage.getByRole('button', { name: catalogMessages['recovery.send'].en, exact: true }).click();
     check((await requested).ok() && recoverCount === 1);
-    await requestPage.getByRole('status').filter({ hasText: 'If this account is eligible' }).waitFor();
+    await requestPage.getByRole('status').filter({ hasText: catalogMessages['recovery.acknowledgement'].en }).waitFor();
     stage = 'fresh recipient and time-correlated mail';
     let messageId: string | null = null;
     const deadline = started + 20_000;

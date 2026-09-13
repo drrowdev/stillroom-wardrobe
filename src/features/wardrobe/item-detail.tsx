@@ -199,7 +199,7 @@ export function ItemDetail(props: Shared & {
   }, [client, scope, itemId, reload]);
   return <section className="detail-page" aria-labelledby="item-detail-title">
     <button className="text-button" onClick={(event) => { event.currentTarget.focus(); props.onBack(); }}>{t('common.back')}</button>
-    <header className="settings-heading"><p className="eyebrow">{t('common.private')}</p><h1 id="item-detail-title" tabIndex={-1}>{t('detail.title')}</h1><p className="muted">{t('settings.intro')}</p></header>
+    <header className="settings-heading"><h1 id="item-detail-title" tabIndex={-1}>{t('detail.title')}</h1></header>
     {error ? <div className="notice notice-error" role="alert"><p>{t(error)}</p>
       <button className="text-button" disabled={!props.online} onClick={() => setReload((value) => value + 1)}>{t('common.retry')}</button></div>
       : detail ? <Editor {...props} detail={detail} /> : <p role="status">{t('common.loading')}</p>}
