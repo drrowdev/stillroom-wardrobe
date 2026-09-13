@@ -5,6 +5,7 @@ import { request as httpRequest } from 'node:http';
 import { messages, type Language } from '../../src/i18n';
 import { inspectJpegSegments } from '../fixtures/jpeg-helpers';
 import { mockBackend, owners, signIn, wireStages, type WireBackend, type WireStage } from './mock-backend';
+import { manualEntry } from './ai-photo-first-support';
 
 function reserveWireImage(backend: Awaited<ReturnType<typeof mockBackend>>, owner = owners.a) {
   const item = randomUUID(), image = randomUUID();
@@ -239,34 +240,73 @@ test('actual upload wire enforces the receiver byte cap for a direct Node actor'
   }
 });
 
-test('actual upload wire restricts reservations and synthetic credentials without forwarding other requests', async ({ page }) => {
-  const backend = await mockBackend(page, { initialLanguage: 'en' });
-  await page.goto('/');
-  await signIn(page);
-  await expect(page.locator('#wardrobe-title')).toBeVisible();
-  const own = reserveWireImage(backend), foreign = reserveWireImage(backend, owners.b);
-  for (const path of [foreign, own.replace('/main.jpg', '/other.jpg'), own + '?unexpected=1',
-    `${owners.a}/${randomUUID()}/${randomUUID()}/main.jpg`]) {
-    expect(await sendWireForm(page, path, 'valid')).toEqual({ ok: false, status: 403 });
+test('actual upload wire restricts reservations and synthetic credentials without forwarding other requests', async ({ page }, testInfo) => {
+  let backend: Awaited<ReturnType<typeof mockBackend>> | undefined;
+  const observed: { scripted503: WireResult | null; firstUpload: WireResult | null; duplicate409: WireResult | null } =
+    { scripted503: null, firstUpload: null, duplicate409: null };
+  try {
+    backend = await mockBackend(page, { initialLanguage: 'en', wireObservation: 'first' });
+    await page.goto('/');
+    await signIn(page);
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    const own = reserveWireImage(backend), foreign = reserveWireImage(backend, owners.b);
+    for (const path of [foreign, own.replace('/main.jpg', '/other.jpg'), own + '?unexpected=1',
+      `${owners.a}/${randomUUID()}/${randomUUID()}/main.jpg`]) {
+      expect(await sendWireForm(page, path, 'valid')).toEqual({ ok: false, status: 403 });
+    }
+    for (const kind of ['wrong-key', 'wrong-bearer', 'upsert'] satisfies WireForm[]) {
+      expect(await sendWireForm(page, own, kind)).toEqual({ ok: false, status: kind === 'wrong-bearer' ? 401 : 403 });
+    }
+    expect(backend.uploadWire.posts).toBe(0);
+    expect(backend.files.size).toBe(0);
+    let scriptedFailure = true;
+    await page.route('**/storage/v1/object/wardrobe/' + own, async (route) => {
+      if (scriptedFailure && route.request().method() === 'POST') {
+        scriptedFailure = false;
+        await route.fulfill({ status: 503, json: { message: 'Unavailable' } });
+      } else await route.fallback();
+    });
+    observed.scripted503 = await sendWireForm(page, own, 'valid');
+    expect(observed.scripted503).toEqual({ ok: false, status: 503 });
+    expect(backend.uploadWire.posts).toBe(0);
+    observed.firstUpload = await sendWireForm(page, own, 'valid');
+    expect(observed.firstUpload).toEqual({ ok: true, status: 200 });
+    assertWireBytes(backend.files.get(own)!, Buffer.from([0, 128, 255, 13, 10]));
+    observed.duplicate409 = await sendWireForm(page, own, 'valid');
+    expect(observed.duplicate409).toEqual({ ok: false, status: 409 });
+    expect(backend.uploadWire.posts).toBe(1);
+  } finally {
+    const evidence: {
+      case: 'reservations-credentials'; mode: 'OFF'; repeat: number; retry: number | null;
+      serverCollection: 'ON'; responseDecoration: 'OFF'; clientParse: 'OFF'; expectedBackend: 'first';
+      client: Record<string, WireResult | null>; server: object | null; captureError: boolean;
+    } = { case: 'reservations-credentials', mode: 'OFF', repeat: testInfo.repeatEachIndex, retry: null,
+      serverCollection: 'ON', responseDecoration: 'OFF', clientParse: 'OFF', expectedBackend: 'first',
+      client: {}, server: null, captureError: false };
+    try {
+      if (!Number.isSafeInteger(testInfo.retry) || testInfo.retry < 0 || testInfo.retry > 1) {
+        evidence.captureError = true;
+      } else {
+        evidence.retry = testInfo.retry;
+        evidence.client = { ...observed };
+        if (backend?.wireDiagnostic) evidence.server = {
+          ...backend.wireDiagnostic, rejections: { ...backend.wireDiagnostic.rejections },
+          receiverFacts: backend.wireDiagnostic.receiverFacts ? { ...backend.wireDiagnostic.receiverFacts } : null,
+          firstPost400Attempt: backend.wireDiagnostic.firstPost400Attempt ? {
+            ...backend.wireDiagnostic.firstPost400Attempt,
+            facts: backend.wireDiagnostic.firstPost400Attempt.facts ? { ...backend.wireDiagnostic.firstPost400Attempt.facts } : null,
+          } : null,
+          counterScope: 'cumulative', receiverFactsScope: 'last-completed-or-rejected-receiver-request-or-null-overwrite',
+          receivedBytes: backend.uploadWire.receivedBytes, payloadBytes: backend.uploadWire.payloadBytes,
+        };
+        else evidence.captureError = true;
+      }
+    } catch { evidence.captureError = true; }
+    try { testInfo.annotations.push({ type: 'synthetic-wire-reservation-localization', description: JSON.stringify(evidence) }); }
+    catch { evidence.captureError = true; }
+    try { console.log('synthetic-wire-reservation-localization', JSON.stringify(evidence)); }
+    catch { evidence.captureError = true; }
   }
-  for (const kind of ['wrong-key', 'wrong-bearer', 'upsert'] satisfies WireForm[]) {
-    expect(await sendWireForm(page, own, kind)).toEqual({ ok: false, status: kind === 'wrong-bearer' ? 401 : 403 });
-  }
-  expect(backend.uploadWire.posts).toBe(0);
-  expect(backend.files.size).toBe(0);
-  let scriptedFailure = true;
-  await page.route('**/storage/v1/object/wardrobe/' + own, async (route) => {
-    if (scriptedFailure && route.request().method() === 'POST') {
-      scriptedFailure = false;
-      await route.fulfill({ status: 503, json: { message: 'Unavailable' } });
-    } else await route.fallback();
-  });
-  expect(await sendWireForm(page, own, 'valid')).toEqual({ ok: false, status: 503 });
-  expect(backend.uploadWire.posts).toBe(0);
-  expect(await sendWireForm(page, own, 'valid')).toEqual({ ok: true, status: 200 });
-  assertWireBytes(backend.files.get(own)!, Buffer.from([0, 128, 255, 13, 10]));
-  expect(await sendWireForm(page, own, 'valid')).toEqual({ ok: false, status: 409 });
-  expect(backend.uploadWire.posts).toBe(1);
 });
 
 for (const diagnostic of [false, true]) {
@@ -277,8 +317,10 @@ for (const diagnostic of [false, true]) {
     const observed: { unreserved: WireResult | null; first: WireResult | null; second: WireResult | null; afterFirstClose: WireResult | null } =
       { unreserved: null, first: null, second: null, afterFirstClose: null };
     try {
-      firstBackend = await mockBackend(page, { initialLanguage: 'en', ...(diagnostic ? { wireDiagnostic: 'first' as const } : {}) });
-      secondBackend = await mockBackend(second, { initialLanguage: 'en', ...(diagnostic ? { wireDiagnostic: 'second' as const } : {}) });
+      firstBackend = await mockBackend(page, { initialLanguage: 'en',
+        ...(diagnostic ? { wireDiagnostic: 'first' as const } : { wireObservation: 'first' as const }) });
+      secondBackend = await mockBackend(second, { initialLanguage: 'en',
+        ...(diagnostic ? { wireDiagnostic: 'second' as const } : { wireObservation: 'second' as const }) });
       for (const tab of [page, second]) {
         await tab.goto('/');
         await signIn(tab);
@@ -326,19 +368,32 @@ for (const diagnostic of [false, true]) {
     } finally {
       for (const expectedBackend of ['first', 'second'] as const) {
         const evidence: {
-          mode: 'ON' | 'OFF'; repeat: number; expectedBackend: WireBackend; client: Record<string, WireResult | null>;
+          mode: 'ON' | 'OFF'; repeat: number; retry: number | null;
+          serverCollection: 'ON'; responseDecoration: 'ON' | 'OFF'; clientParse: 'ON' | 'OFF';
+          expectedBackend: WireBackend; client: Record<string, WireResult | null>;
           server: object | null; captureError: boolean;
-        } = { mode: diagnostic ? 'ON' : 'OFF', repeat: testInfo.repeatEachIndex, expectedBackend, client: {}, server: null, captureError: false };
+        } = { mode: diagnostic ? 'ON' : 'OFF', repeat: testInfo.repeatEachIndex, retry: null,
+          serverCollection: 'ON', responseDecoration: diagnostic ? 'ON' : 'OFF', clientParse: diagnostic ? 'ON' : 'OFF',
+          expectedBackend, client: {}, server: null, captureError: false };
         try {
-          const backend = expectedBackend === 'first' ? firstBackend : secondBackend;
-          evidence.client = expectedBackend === 'first' ? { parallel: observed.first } :
-            { unreserved: observed.unreserved, parallel: observed.second, afterFirstClose: observed.afterFirstClose };
-          if (backend?.wireDiagnostic) evidence.server = {
-            ...backend.wireDiagnostic, rejections: { ...backend.wireDiagnostic.rejections },
-            receiverFacts: backend.wireDiagnostic.receiverFacts ? { ...backend.wireDiagnostic.receiverFacts } : null,
-            counterScope: 'cumulative', receiverFactsScope: 'last-completed-or-rejected-receiver-request',
-            receivedBytes: backend.uploadWire.receivedBytes, payloadBytes: backend.uploadWire.payloadBytes,
-          };
+          if (!Number.isSafeInteger(testInfo.retry) || testInfo.retry < 0 || testInfo.retry > 1) {
+            evidence.captureError = true;
+          } else {
+            evidence.retry = testInfo.retry;
+            const backend = expectedBackend === 'first' ? firstBackend : secondBackend;
+            evidence.client = expectedBackend === 'first' ? { parallel: observed.first } :
+              { unreserved: observed.unreserved, parallel: observed.second, afterFirstClose: observed.afterFirstClose };
+            if (backend?.wireDiagnostic) evidence.server = {
+              ...backend.wireDiagnostic, rejections: { ...backend.wireDiagnostic.rejections },
+              receiverFacts: backend.wireDiagnostic.receiverFacts ? { ...backend.wireDiagnostic.receiverFacts } : null,
+              firstPost400Attempt: backend.wireDiagnostic.firstPost400Attempt ? {
+                ...backend.wireDiagnostic.firstPost400Attempt,
+                facts: backend.wireDiagnostic.firstPost400Attempt.facts ? { ...backend.wireDiagnostic.firstPost400Attempt.facts } : null,
+              } : null,
+              counterScope: 'cumulative', receiverFactsScope: 'last-completed-or-rejected-receiver-request-or-null-overwrite',
+              receivedBytes: backend.uploadWire.receivedBytes, payloadBytes: backend.uploadWire.payloadBytes,
+            };
+          }
         } catch { evidence.captureError = true; }
         try { testInfo.annotations.push({ type: 'synthetic-wire-localization', description: JSON.stringify(evidence) }); }
         catch { evidence.captureError = true; }
@@ -374,6 +429,7 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
     await page.getByRole('button', { name: messages['wardrobe.firstItem'][language] }).click();
     await page.locator('input[type="file"]').first().setInputFiles({ name: 'shirt.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
     await expect(page.locator('.capture-photo img')).toBeVisible();
+    await manualEntry(page);
     expect(backend.items).toHaveLength(0);
     expect(backend.files.size).toBe(0);
     await page.locator('#item-title').fill('My edited olive shirt');
@@ -444,7 +500,7 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
     await expect(page.locator('#item-title')).toHaveValue('Manual synthetic title');
     await expect(page.locator('#item-category')).toHaveValue('top');
     await expect(page.locator('#item-alt')).toHaveValue('');
-    expect(backend.requests.slice(before)).toEqual([]);
+    expect(backend.requests.slice(before).every((request) => request.path === '/rest/v1/rpc/ai_status')).toBe(true);
     expect(backend.items).toHaveLength(0);
     expect(backend.files.size).toBe(0);
     expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
@@ -483,6 +539,7 @@ test('late selection cannot overwrite a replacement or manual edits and clears n
   await signIn(page);
   await page.getByRole('button', { name: 'Add your first piece' }).click();
   const before = backend.requests.length;
+  const proofsBefore = backend.statusProofs().length;
   await holdNextPhotoRead(page);
   const input = page.locator('input[type="file"]').first();
   await input.setInputFiles({ name: 'old.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
@@ -491,18 +548,34 @@ test('late selection cannot overwrite a replacement or manual edits and clears n
   await page.locator('#item-title').fill('Edited while preparing');
   await page.locator('#item-category').selectOption('bottom');
   const replacement = { name: 'same.jpg', mimeType: 'image/jpeg', buffer: backend.fixture };
+  const firstStatus = page.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url() === 'http://127.0.0.1:54321/rest/v1/rpc/ai_status');
   await input.setInputFiles(replacement);
   await expect(page.locator('.capture-photo img')).toBeVisible();
+  expect((await firstStatus).status()).toBe(200);
+  await expect(page.getByText(messages['aiC.checking'].en, { exact: true })).toHaveCount(0);
   const preview = await page.locator('.capture-photo img').getAttribute('src');
   await page.evaluate(() => (window as PhotoReadProbe).releasePhotoRead?.());
   await expect(page.locator('.capture-photo img')).toHaveAttribute('src', preview!);
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(page.locator('#item-title')).toHaveValue('Edited while preparing');
   await expect(page.locator('#item-category')).toHaveValue('bottom');
+  const secondStatus = page.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url() === 'http://127.0.0.1:54321/rest/v1/rpc/ai_status');
   await input.setInputFiles(replacement);
   await expect(page.locator('.capture-photo img')).toBeVisible();
   await expect(page.locator('.capture-photo img')).not.toHaveAttribute('src', preview!);
-  expect(backend.requests.slice(before)).toEqual([]);
+  expect((await secondStatus).status()).toBe(200);
+  await expect(page.getByText(messages['aiC.checking'].en, { exact: true })).toHaveCount(0);
+  expect(backend.requests.slice(before)).toEqual([
+    { method: 'POST', path: '/rest/v1/rpc/ai_status', owner: owners.a, ownerFilter: null },
+    { method: 'POST', path: '/rest/v1/rpc/ai_status', owner: owners.a, ownerFilter: null },
+  ]);
+  expect(backend.statusProofs().slice(proofsBefore)).toEqual([
+    { owner: owners.a, issuedBearer: true, emptyObject: true },
+    { owner: owners.a, issuedBearer: true, emptyObject: true },
+  ]);
+  expect(backend.items).toHaveLength(0); expect(backend.images).toHaveLength(0); expect(backend.files.size).toBe(0);
 });
 
 test('discard and owner logout clear preparation details and ignore late photo reads', async ({ page }) => {
@@ -548,8 +621,13 @@ test('discarding a prepared draft creates no library records', async ({ page }) 
   await signIn(page);
   await page.getByRole('button', { name: 'Add your first piece' }).click();
   const before = backend.requests.length;
+  const proofsBefore = backend.statusProofs().length;
+  const status = page.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url() === 'http://127.0.0.1:54321/rest/v1/rpc/ai_status');
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
   await expect(page.locator('.capture-photo img')).toBeVisible();
+  expect((await status).status()).toBe(200);
+  await expect(page.getByText(messages['aiC.checking'].en, { exact: true })).toHaveCount(0);
   await page.locator('#item-title').fill('Unsaved');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -559,8 +637,14 @@ test('discarding a prepared draft creates no library records', async ({ page }) 
   await page.getByRole('button', { name: 'Discard changes' }).click();
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   expect(backend.items).toHaveLength(0);
+  expect(backend.images).toHaveLength(0);
   expect(backend.files.size).toBe(0);
-  expect(backend.requests.slice(before)).toEqual([]);
+  expect(backend.requests.slice(before)).toEqual([
+    { method: 'POST', path: '/rest/v1/rpc/ai_status', owner: owners.a, ownerFilter: null },
+  ]);
+  expect(backend.statusProofs().slice(proofsBefore)).toEqual([
+    { owner: owners.a, issuedBearer: true, emptyObject: true },
+  ]);
 });
 
 test('retrying a failed commit reuses the same records and image bytes', async ({ page }, testInfo) => {
@@ -570,6 +654,7 @@ test('retrying a failed commit reuses the same records and image bytes', async (
   await page.getByRole('button', { name: 'Add your first piece' }).click();
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'shirt.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
   await expect(page.locator('.capture-photo img')).toBeVisible();
+  await manualEntry(page);
   await page.locator('#item-title').fill('A retryable shirt');
   await page.locator('#item-category').selectOption('top');
   await page.getByRole('button', { name: 'Save to my wardrobe' }).click();

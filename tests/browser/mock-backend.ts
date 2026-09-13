@@ -1,8 +1,8 @@
 // Browser contract fixtures only. Real Auth/Storage authorization is a separate blocking suite.
-import type { Page } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
-import { createServer, type IncomingHttpHeaders } from 'node:http';
+import { createServer, type IncomingHttpHeaders, type IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import type { Language } from '../../src/i18n';
 import { garmentFields, garmentPayload, parseGarmentValues, sameValue } from '../../src/domain/garment-fields';
@@ -26,6 +26,41 @@ const storagePrefix = '/storage/v1/object/wardrobe/';
 const fixtureKey = 'sb_publishable_browser_fixture_only';
 const uploadHeaders = ['authorization', 'apikey', 'content-type', 'x-upsert', 'x-client-info'];
 const uploadLimit = 1024 * 1024;
+export const analysisPath = '/functions/v1/analyze-clothing';
+const analysisHeaders = ['authorization', 'apikey', 'content-type', 'x-stillroom-request-id', 'x-stillroom-draft-id', 'x-stillroom-generation'];
+export type AnalysisInput = { owner: string; requestId: string; draftId: string; generation: number; bytes: Buffer };
+type AnalysisHandler = (input: AnalysisInput) => { body: JsonRow; status: number };
+type StatusProof = { owner: string | null; issuedBearer: boolean; emptyObject: boolean };
+
+type RawAnalysisGuard = 'end-identity' | 'end-incomplete' | 'end-empty' | 'end-closing' |
+  'aborted' | 'request-error' | 'close-before-terminal' | 'timeout' | 'body-limit' | 'admission' | 'callback-error';
+type RawAnalysisRejection = Readonly<{
+  guard: RawAnalysisGuard; ordinal: number; forwardedAtReceipt: number;
+  receivedBytes: number; acceptedBytes: number;
+  identityPresent: boolean; complete: boolean; readableEnded: boolean; aborted: boolean; closing: boolean;
+}>;
+type RawAnalysisPost = {
+  ordinal: number; forwardedAtReceipt: number; receivedBytes: number; acceptedBytes: number;
+  writeStatus: ReturnType<typeof rawAnalysisStatus> | null;
+  writeResponseDestroyed: boolean | null; writeResponseWritableFinished: boolean | null;
+  endCallbackRan: boolean; postTerminalRejects: number; firstPostTerminalReject: RawAnalysisRejection | null;
+};
+export type RawAnalysisObservation = {
+  postCount: number; overflow: boolean; evidenceError: boolean; posts: RawAnalysisPost[];
+  firstAttemptedPost400: RawAnalysisRejection | null;
+};
+function rawAnalysisStatus(status: number) {
+  switch (status) {
+    case 200: case 202: case 204: case 400: case 403: case 408: case 413: case 500: case 502: case 504: return status;
+    default: return 'unexpected' as const;
+  }
+}
+function rawAnalysisRejection(guard: RawAnalysisGuard, post: RawAnalysisPost, request: IncomingMessage,
+  identityPresent: boolean, closing: boolean): RawAnalysisRejection {
+  return { guard, ordinal: post.ordinal, forwardedAtReceipt: post.forwardedAtReceipt,
+    receivedBytes: post.receivedBytes, acceptedBytes: post.acceptedBytes, identityPresent,
+    complete: request.complete, readableEnded: request.readableEnded, aborted: request.aborted, closing };
+}
 
 export const wireStages = [
   'none', 'route-auth', 'route-owner', 'route-existing', 'route-reservation-credentials',
@@ -49,10 +84,13 @@ type WireDiagnostic = {
   rejections: Record<WireStage, number>;
   // Facts describe the last completed/rejected receiver request; counters remain cumulative.
   receiverFacts: WireReceiverFacts | null;
+  firstPost400Attempt: {
+    receiverPostOrdinal: number; routePostsAtReceipt: number; stage: WireStage; facts: WireReceiverFacts | null;
+  } | null;
 };
 
 async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], files: Map<string, Buffer>, tokens: Map<string, string>,
-  diagnostic?: WireDiagnostic) {
+  decorateWireResponses: boolean, diagnostic?: WireDiagnostic, analysis?: AnalysisHandler, rawObservation?: RawAnalysisObservation) {
   const port = Number(process.env.PLAYWRIGHT_PORT ?? 5181);
   if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid browser test port.');
   const origin = `http://127.0.0.1:${port}`;
@@ -68,6 +106,32 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     get listening() { return server.listening; },
     get connections() { return sockets.size; },
     closed: false, posts: 0, preflights: 0, rejected: 0, receivedBytes: 0, payloadBytes: 0, peakBufferedBytes: 0,
+  };
+  const analysisState = { forwarded: 0, routeRejected: 0, posts: 0, preflights: 0, rejected: 0, callbacks: 0,
+    receivedBytes: 0, payloadBytes: 0, peakBufferedBytes: 0, active: 0, timedOut: 0 };
+  const analysisCors = {
+    'access-control-allow-origin': origin, 'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-headers': analysisHeaders.join(', '), vary: 'Origin',
+  };
+  const analysisPreflightAllowed = (headers: IncomingHttpHeaders) => {
+    const names = typeof headers['access-control-request-headers'] === 'string'
+      ? headers['access-control-request-headers'].split(',').map((name) => name.trim().toLowerCase()).sort() : [];
+    return headers.origin === origin && headers.cookie === undefined && headers['access-control-request-method'] === 'POST'
+      && sameValue(names, [...analysisHeaders].sort());
+  };
+  const analysisIdentity = (headers: IncomingHttpHeaders) => {
+    const owner = tokens.get(headers.authorization ?? '');
+    const prefix = owner === owners.a ? 'c329a000-' : owner === owners.b ? 'c329b000-' : null;
+    const requestId = headers['x-stillroom-request-id'], draftId = headers['x-stillroom-draft-id'];
+    const generation = headers['x-stillroom-generation'];
+    const id = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    if (!owner || !prefix || headers.origin !== origin || headers.cookie !== undefined || headers.apikey !== fixtureKey
+      || headers['content-type'] !== 'image/jpeg'
+      || typeof requestId !== 'string' || !id.test(requestId) || !requestId.startsWith(prefix)
+      || typeof draftId !== 'string' || !id.test(draftId) || !draftId.startsWith(prefix)
+      || typeof generation !== 'string' || !/^[1-9][0-9]{0,9}$/.test(generation)
+      || Number(generation) > 2147483647) return null;
+    return { owner, requestId, draftId, generation: Number(generation) };
   };
   const reservedOwner = (pathname: string) => {
     if (!pathname.startsWith(storagePrefix)) return undefined;
@@ -95,7 +159,119 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     }
   };
   const server = createServer({ requestTimeout: 5000, headersTimeout: 5000, connectionsCheckingInterval: 1000 }, (request, response) => {
+    if (analysis && (request.url ?? '').split('?')[0] === analysisPath) {
+      analysisState.active++;
+      let observedPost: RawAnalysisPost | undefined;
+      if (rawObservation && request.method === 'POST') {
+        rawObservation.postCount++;
+        if (rawObservation.posts.length < 4) {
+          observedPost = { ordinal: rawObservation.postCount, forwardedAtReceipt: analysisState.forwarded,
+            receivedBytes: 0, acceptedBytes: 0, writeStatus: null,
+            writeResponseDestroyed: null, writeResponseWritableFinished: null, endCallbackRan: false,
+            postTerminalRejects: 0, firstPostTerminalReject: null };
+          rawObservation.posts.push(observedPost);
+        } else { rawObservation.overflow = true; rawObservation.evidenceError = true; }
+      }
+      let terminal = false;
+      const timer = setTimeout(() => {
+        analysisState.timedOut++;
+        reject(408, 'timeout');
+      }, 5000);
+      const cleanup = () => {
+        clearTimeout(timer);
+        request.off('data', onData);
+        request.off('end', onEnd);
+        request.off('aborted', onAborted);
+        request.off('error', onError);
+      };
+      const finish = (body: JsonRow, status: number, destroyRequest = false) => {
+        if (terminal) return;
+        terminal = true;
+        clearTimeout(timer);
+        analysisState.active--;
+        if (!response.destroyed) {
+          response.writeHead(status, { ...analysisCors, 'content-type': 'application/json' });
+          if (observedPost) {
+            observedPost.writeStatus = rawAnalysisStatus(status);
+            observedPost.writeResponseDestroyed = response.destroyed;
+            observedPost.writeResponseWritableFinished = response.writableFinished;
+            if (observedPost.writeStatus === 'unexpected' && rawObservation) rawObservation.evidenceError = true;
+          }
+          response.end(JSON.stringify(body), () => {
+            if (observedPost) observedPost.endCallbackRan = true;
+            if (destroyRequest) request.destroy();
+          });
+        } else request.destroy();
+      };
+      const reject = (status: number, guard: RawAnalysisGuard) => {
+        if (terminal) {
+          if (observedPost) {
+            observedPost.postTerminalRejects++;
+            observedPost.firstPostTerminalReject ??= rawAnalysisRejection(guard, observedPost, request, identity !== null, Boolean(closing));
+          }
+          return;
+        }
+        if (rawObservation && observedPost && status === 400 && !response.destroyed && rawObservation.firstAttemptedPost400 === null) {
+          rawObservation.firstAttemptedPost400 = rawAnalysisRejection(guard, observedPost, request, identity !== null, Boolean(closing));
+        }
+        analysisState.rejected++;
+        finish({ code: 'INVALID_INPUT' }, status, true);
+      };
+      const onAborted = () => reject(400, 'aborted');
+      const onError = () => reject(400, 'request-error');
+      const chunks: Buffer[] = [];
+      let length = 0;
+      const onData = (chunk: Buffer) => {
+        if (terminal) return;
+        analysisState.receivedBytes += chunk.length;
+        if (observedPost) observedPost.receivedBytes += chunk.length;
+        if (chunk.length > 512000 - length) { reject(413, 'body-limit'); return; }
+        length += chunk.length;
+        if (observedPost) observedPost.acceptedBytes = length;
+        chunks.push(chunk);
+        analysisState.peakBufferedBytes = Math.max(analysisState.peakBufferedBytes, length);
+      };
+      const identity = analysisIdentity(request.headers);
+      const onEnd = () => {
+        if (terminal) return;
+        if (!identity || !request.complete || length < 1 || closing) {
+          reject(400, !identity ? 'end-identity' : !request.complete ? 'end-incomplete' : length < 1 ? 'end-empty' : 'end-closing');
+          return;
+        }
+        const bytes = Buffer.concat(chunks, length);
+        try {
+          analysisState.callbacks++;
+          const reply = analysis({ ...identity, bytes });
+          analysisState.payloadBytes += length;
+          finish(reply.body, reply.status);
+        } catch {
+          reject(500, 'callback-error');
+        }
+      };
+      request.once('close', () => {
+        if (!terminal) reject(400, 'close-before-terminal');
+        cleanup();
+      });
+      request.on('error', onError);
+      request.once('aborted', onAborted);
+      const address = server.address();
+      if (request.url !== analysisPath || !address || typeof address === 'string'
+        || request.headers.host !== `127.0.0.1:${address.port}`) { reject(403, 'admission'); return; }
+      if (request.method === 'OPTIONS') {
+        if (!analysisPreflightAllowed(request.headers)) { reject(403, 'admission'); return; }
+        analysisState.preflights++;
+        finish({}, 204);
+        return;
+      }
+      if (request.method !== 'POST' || !identity) { reject(403, 'admission'); return; }
+      analysisState.posts++;
+      request.on('data', onData);
+      request.once('end', onEnd);
+      return;
+    }
     if (diagnostic && request.method === 'POST') diagnostic.receiverPosts++;
+    const postAtReceipt = diagnostic && request.method === 'POST'
+      ? { receiverPostOrdinal: diagnostic.receiverPosts, routePostsAtReceipt: diagnostic.routePosts } : null;
     const facts: WireReceiverFacts | null = diagnostic ? {
       fieldFailure: null, boundaryLength: null, bodyTrailer: null, parsedFileSize: null, bodyHighByte: null,
     } : null;
@@ -103,7 +279,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     const timer = setTimeout(() => { state.rejected++; recordRejection('receiver-timeout', facts); void close(); }, 5000);
     const finish = (body: JsonRow, status = 200, responseStage: WireStage = 'none') => {
       response.writeHead(status, { ...cors, 'content-type': 'application/json', ...(status >= 400 ? { connection: 'close' } : {}) });
-      response.end(JSON.stringify(diagnostic ? { ...body, wireBackend: diagnostic.backend, wireStage: responseStage } : body),
+      response.end(JSON.stringify(decorateWireResponses && diagnostic ? { ...body, wireBackend: diagnostic.backend, wireStage: responseStage } : body),
         () => { if (status >= 400) void close(); });
     };
     response.once('close', () => clearTimeout(timer));
@@ -187,8 +363,12 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     })().catch(() => {
       state.rejected++;
       recordRejection(stage, facts);
-      if (!response.destroyed && !response.headersSent) finish({ message: 'Fixture upload rejected.' }, 400, stage);
-      else void close();
+      if (!response.destroyed && !response.headersSent) {
+        if (diagnostic && postAtReceipt && diagnostic.firstPost400Attempt === null) {
+          diagnostic.firstPost400Attempt = { ...postAtReceipt, stage, facts: facts ? { ...facts } : null };
+        }
+        finish({ message: 'Fixture upload rejected.' }, 400, stage);
+      } else void close();
     });
   });
   let closing: Promise<void> | undefined;
@@ -223,7 +403,8 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     if (page.isClosed() || closing) throw new Error('Fixture page closed.');
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Fixture receiver unavailable.');
-    return { url: `http://127.0.0.1:${address.port}`, state, cors, reservedOwner, preflightAllowed, credentialsAllowed, close };
+    return { url: `http://127.0.0.1:${address.port}`, state, cors, reservedOwner, preflightAllowed, credentialsAllowed, close,
+      analysisState, analysisCors, analysisPreflightAllowed, analysisIdentity };
   } catch {
     await close();
     throw new Error('Fixture receiver unavailable.');
@@ -232,8 +413,13 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
 export type MockOptions = {
   initialLanguage?: Language | null; failCommitOnce?: boolean; failLanguageSave?: boolean;
   loseFinalizeReplyOnce?: boolean;
+  loseAnalyzedReserveReplyOnce?: boolean;
   recoverStatus?: number; updateStatus?: number; logoutStatus?: number; recoveryUser?: string;
   wireDiagnostic?: WireBackend;
+  wireObservation?: WireBackend;
+  aiResults?: Map<string, import('../../src/domain/ai-analysis').AiResult>;
+  analysis?: AnalysisHandler;
+  observeRawAnalysis?: boolean;
 };
 export function recoveryHash(owner = owners.a, seconds = 3600): string {
   const expires = Math.floor(Date.now() / 1000) + seconds;
@@ -254,7 +440,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   }]));
   const images: JsonRow[] = [];
   const files = new Map<string, Buffer>();
-  const saves: Array<{ owner: string; itemId: string; imageId: string; fingerprint: string; state: 'reserved' | 'completed' }> = [];
+  const saves: Array<{ owner: string; itemId: string; imageId: string; fingerprint: string; state: 'reserved' | 'completed'; analyzed?: boolean; cancelled?: boolean }> = [];
   const imageKeys = ['id', 'main_bytes', 'thumb_bytes', 'main_sha256', 'thumb_sha256', 'width', 'height', 'alt_text'];
   const fingerprintFor = (item: JsonRow, image: JsonRow) => {
     const values = garmentPayload(parseGarmentValues(item)), provenance = parseFieldProvenance(item.field_provenance);
@@ -267,7 +453,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     const item = items.find((row) => row.id === save.itemId && row.owner_id === save.owner);
     const image = images.find((row) => row.id === save.imageId && row.item_id === save.itemId && row.owner_id === save.owner);
     const prefix = `${save.owner}/${save.itemId}/${save.imageId}`;
-    if (!item || !image || item.version !== 1 || item.deleted_at !== null || image.description_version !== 1
+    if (save.cancelled || !item || !image || item.version !== 1 || item.deleted_at !== null || image.description_version !== 1
       || image.retired_at !== null || image.state !== (save.state === 'reserved' ? 'pending' : 'ready')
       || image.main_path !== `${prefix}/main.jpg` || image.thumb_path !== `${prefix}/thumb.jpg`) return null;
     try { if (fingerprintFor(item, image) !== save.fingerprint) return null; }
@@ -275,20 +461,54 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     return { item, image, fingerprint: save.fingerprint, state: save.state };
   };
   const requests: Array<{ method: string; path: string; owner: string | null; ownerFilter: string | null }> = [];
-  let commitFailed = false;
+  let commitFailed = false, analyzedReserveReplyLost = false;
   const fixture = await readFile(new URL('../../blueprint/validation/fixture.jpg', import.meta.url));
   const tokens = new Map<string, string>();
-  const wireDiagnostic: WireDiagnostic | undefined = options.wireDiagnostic ? {
-    backend: options.wireDiagnostic, routePosts: 0, receiverPosts: 0, success: 0, routeRejected: 0, receiverRejected: 0,
+  const statusProofs: StatusProof[] = [];
+  const admitAiStatus = (request: Request) => {
+    const url = new URL(request.url());
+    if (url.origin !== 'http://127.0.0.1:54321' || url.pathname !== '/rest/v1/rpc/ai_status') return false;
+    const owner = tokens.get(request.headers().authorization ?? '') ?? null;
+    let emptyObject = false;
+    try {
+      const body: unknown = request.postDataJSON();
+      emptyObject = isRecord(body) && Object.keys(body).length === 0;
+    } catch { /* Malformed status JSON is recorded as a failed proof and refused. */ }
+    const issuedBearer = owner === owners.a || owner === owners.b;
+    statusProofs.push({ owner, issuedBearer, emptyObject });
+    return request.method() === 'POST' && !url.search && issuedBearer && emptyObject;
+  };
+  const decorateWireResponses = options.wireDiagnostic !== undefined;
+  const wireBackend = options.wireDiagnostic ?? options.wireObservation;
+  const wireDiagnostic: WireDiagnostic | undefined = wireBackend ? {
+    backend: wireBackend, routePosts: 0, receiverPosts: 0, success: 0, routeRejected: 0, receiverRejected: 0,
     routeStage: 'none', receiverStage: 'none',
     rejections: Object.fromEntries(wireStages.map((stage) => [stage, 0])) as Record<WireStage, number>,
-    receiverFacts: null,
+    receiverFacts: null, firstPost400Attempt: null,
   } : undefined;
-  const receiver = await uploadReceiver(page, items, images, files, tokens, wireDiagnostic);
+  const rawAnalysisObservation: RawAnalysisObservation | undefined = options.observeRawAnalysis ? {
+    postCount: 0, overflow: false, evidenceError: false, posts: [], firstAttemptedPost400: null,
+  } : undefined;
+  const receiver = await uploadReceiver(page, items, images, files, tokens, decorateWireResponses, wireDiagnostic, options.analysis, rawAnalysisObservation);
   await page.route('http://127.0.0.1:54321/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
+    if (options.analysis && url.pathname === analysisPath) {
+      const headers = await request.allHeaders();
+      const validSource = url.origin === 'http://127.0.0.1:54321' && !url.search;
+      const valid = validSource && (method === 'OPTIONS' ? receiver.analysisPreflightAllowed(headers)
+        : method === 'POST' && receiver.analysisIdentity(headers) !== null);
+      if (!valid) {
+        receiver.analysisState.routeRejected++;
+        await route.fulfill({ status: 403, json: { code: 'INVALID_INPUT' }, headers: receiver.analysisCors });
+        return;
+      }
+      receiver.analysisState.forwarded++;
+      try { await route.continue({ url: receiver.url + analysisPath }); }
+      catch { throw new Error('Fixture analysis continuation failed.'); }
+      return;
+    }
     const wirePost = method === 'POST' && url.pathname.startsWith(storagePrefix);
     if (wireDiagnostic && wirePost) { wireDiagnostic.routePosts++; wireDiagnostic.routeStage = 'none'; }
     let owner: string | null = null;
@@ -302,7 +522,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (wireDiagnostic && wirePost) {
         wireDiagnostic.routeStage = stage;
         if (status >= 400) { wireDiagnostic.routeRejected++; wireDiagnostic.rejections[stage]++; }
-        body = { ...body as JsonRow, wireBackend: wireDiagnostic.backend, wireStage: stage };
+        if (decorateWireResponses) body = { ...body as JsonRow, wireBackend: wireDiagnostic.backend, wireStage: stage };
       }
       return route.fulfill({ status, json: body, headers: { 'x-supabase-api-version': '2024-01-01' } });
     };
@@ -348,11 +568,18 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       }
       await json(profile); return;
     }
-    if (url.pathname === '/rest/v1/rpc/reserve_item_save') {
+    if (url.pathname === '/rest/v1/rpc/ai_status') {
+      if (!admitAiStatus(request)) { await json({ code: 'UNAUTHENTICATED' }, 401); return; }
+      await json({ code: 'UNCONFIGURED', period: new Date().toISOString().slice(0, 7), serverTimeMs: Date.now(),
+        consent: { enabled: false, noticeRevision: null, consentedAt: null, profileVersion: String(profiles[owner]!.version) },
+        policy: null, usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } }); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/reserve_item_save' || url.pathname === '/rest/v1/rpc/reserve_analyzed_item_save') {
+      const analyzed = url.pathname.endsWith('/reserve_analyzed_item_save');
       const body: unknown = request.postDataJSON();
       const invalid = () => json({ code: '22023', message: 'Invalid input', details: null, hint: null }, 400);
       const conflict = () => json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400);
-      if (method !== 'POST' || !isRecord(body) || Object.keys(body).length !== 2
+      if (method !== 'POST' || !isRecord(body) || Object.keys(body).length !== (analyzed ? 3 : 2)
         || !isRecord(body.p_item) || !isRecord(body.p_image)) { await invalid(); return; }
       const item = body.p_item, image = body.p_image;
       if (!sameValue(Object.keys(item).sort(), [...garmentFields, 'id', 'field_provenance'].sort())
@@ -362,7 +589,26 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       let fingerprint: string;
       try {
         const provenance = parseFieldProvenance(item.field_provenance);
-        if (Object.values(provenance).some((entry) => entry.kind !== 'user' || entry.revision !== 1)) throw new Error('Invalid fixture intent');
+        if (Object.values(provenance).some((entry) => (!analyzed && entry.kind !== 'user') || entry.revision !== 1)) throw new Error('Invalid fixture intent');
+        if (analyzed) {
+          const claim = body.p_claim;
+          if (claim !== null) {
+            if (!isRecord(claim) || !isRecord(claim.fields) || typeof claim.requestId !== 'string') throw new Error('Invalid fixture claim');
+            const result = options.aiResults?.get(claim.requestId);
+            if (!result || result.draftId !== claim.draftId || result.generation !== claim.generation
+              || result.imageSha256 !== claim.imageSha256 || result.imageSha256 !== image.main_sha256
+              || result.expiresAtMs <= Date.now() || !claim.requestId.startsWith(owner === owners.a ? 'c329a000-' : 'c329b000-')) {
+              throw new Error('Invalid fixture claim');
+            }
+            for (const [field, entry] of Object.entries(claim.fields)) {
+              if (!isRecord(entry) || !sameValue(entry.value, result.facts.fields[field as keyof typeof result.facts.fields])
+                || !sameValue(entry.value, item[field]) || provenance[field as keyof typeof provenance]?.kind !== entry.kind) throw new Error('Invalid fixture claim');
+            }
+          }
+          for (const [field, entry] of Object.entries(provenance)) {
+            if (entry.kind.startsWith('ai_') && (!isRecord(claim) || !isRecord(claim.fields) || !Object.hasOwn(claim.fields, field))) throw new Error('Invalid fixture provenance');
+          }
+        }
         for (const key of provenanceFields) {
           const value = item[key];
           if (value !== null && !(Array.isArray(value) && value.length === 0) && !(key === 'notes' && value === '') && !provenance[key]) {
@@ -391,12 +637,25 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       items.push({ ...item, owner_id: owner, version: 1, deleted_at: null, created_at: now, updated_at: now });
       images.push({ ...image, owner_id: owner, item_id: item.id, description_version: 1, state: 'pending', retired_at: null,
         main_path: `${prefix}/main.jpg`, thumb_path: `${prefix}/thumb.jpg`, created_at: now });
-      const save = { owner, itemId: item.id, imageId: image.id, fingerprint, state: 'reserved' as const };
+      const save = { owner, itemId: item.id, imageId: image.id, fingerprint, state: 'reserved' as const, analyzed };
       saves.push(save);
+      if (analyzed && options.loseAnalyzedReserveReplyOnce && !analyzedReserveReplyLost) {
+        analyzedReserveReplyLost = true; await route.abort('failed'); return;
+      }
       await json([currentSave(save)]); return;
     }
-    if (url.pathname === '/rest/v1/rpc/finalize_item_save') {
+    if (url.pathname === '/rest/v1/rpc/cancel_analyzed_item_save') {
       const body: unknown = request.postDataJSON();
+      const save = isRecord(body) && saves.find((value) => value.owner === owner && value.analyzed
+        && value.itemId === body.p_item_id && value.imageId === body.p_image_id && value.fingerprint === body.p_fingerprint);
+      if (!save || save.state !== 'reserved' || !currentSave(save)) { await json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400); return; }
+      save.cancelled = true; await route.fulfill({ status: 204 }); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/finalize_item_save' || url.pathname === '/functions/v1/finalize-analyzed-item') {
+      const analyzed = url.pathname.endsWith('/finalize-analyzed-item');
+      const raw: unknown = request.postDataJSON();
+      const body: unknown = analyzed && isRecord(raw) && Object.keys(raw).length === 3
+        ? { p_item_id: raw.itemId, p_image_id: raw.imageId, p_fingerprint: raw.fingerprint } : raw;
       if (method !== 'POST' || !isRecord(body) || !sameValue(Object.keys(body).sort(), ['p_fingerprint', 'p_image_id', 'p_item_id'])
         || !isUuid(body.p_item_id) || !isUuid(body.p_image_id) || typeof body.p_fingerprint !== 'string' || !/^[0-9a-f]{64}$/.test(body.p_fingerprint)) {
         await json({ code: '22023', message: 'Invalid input', details: null, hint: null }, 400); return;
@@ -404,7 +663,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const save = saves.find((value) => value.owner === owner && value.itemId === body.p_item_id
         && value.imageId === body.p_image_id && value.fingerprint === body.p_fingerprint);
       const current = save && currentSave(save);
-      if (!save || !current || images.some((row) => row.owner_id === owner && row.item_id === save.itemId && row.id !== save.imageId && row.state === 'ready')) {
+      if (!save || Boolean(save.analyzed) !== analyzed || !current || images.some((row) => row.owner_id === owner && row.item_id === save.itemId && row.id !== save.imageId && row.state === 'ready')) {
         await json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400); return;
       }
       if (!files.has(String(current.image.main_path)) || !files.has(String(current.image.thumb_path))) {
@@ -520,6 +779,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
   return { profiles, preferences, items, images, files, requests, fixture, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
+    analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
+    statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),
     seedSavedItem(account: 'a' | 'b' = 'a', title = 'Olive overshirt') {
       const owner = owners[account], id = randomUUID(), imageId = randomUUID(), now = '2026-09-09T00:00:00Z';
       const item = { ...itemDefaults(), id, owner_id: owner, title, category: 'top', version: 1,

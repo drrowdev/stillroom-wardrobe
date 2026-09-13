@@ -315,6 +315,27 @@ describe('I29e SQL/shared contract parity', () => {
   });
 });
 const modules = ['ai-analysis', 'ai-draft'].map((name) => path.join(root, 'src/domain', `${name}.ts`));
+const incoming: readonly (readonly [string, string])[] = [
+  [path.join(root, 'src/domain/analyzed-save.ts'), path.join(root, 'src/domain/ai-draft.ts')],
+  [path.join(root, 'src/data/ai.ts'), path.join(root, 'src/domain/ai-draft.ts')],
+  [path.join(root, 'src/data/ai.ts'), path.join(root, 'src/domain/ai-analysis.ts')],
+  [path.join(root, 'src/domain/ai-controls.ts'), path.join(root, 'src/domain/ai-analysis.ts')],
+  [path.join(root, 'src/domain/ai-presentation.ts'), path.join(root, 'src/domain/ai-analysis.ts')],
+  [path.join(root, 'src/features/wardrobe/item-form.tsx'), path.join(root, 'src/domain/ai-draft.ts')],
+  [path.join(root, 'src/features/wardrobe/use-ai-draft.ts'), path.join(root, 'src/domain/ai-draft.ts')],
+];
+const sharedOutgoing = [...modules, ...['wardrobe', 'preferences', 'attribute-provenance', 'garment-fields']
+  .map((name) => path.join(root, 'src/domain', `${name}.ts`))];
+const outgoing = new Map<string, readonly string[]>(modules.map((filename) => [
+  filename, filename === path.join(root, 'src/domain/ai-draft.ts')
+    ? [...sharedOutgoing, path.join(root, 'src/domain/ai-presentation.ts')] : sharedOutgoing,
+]));
+function admits(importer: string, resolvedTarget: string | undefined): boolean {
+  if (resolvedTarget === undefined) return false;
+  const dependencies = outgoing.get(importer);
+  return dependencies ? dependencies.includes(resolvedTarget)
+    : incoming.some(([source, target]) => source === importer && target === resolvedTarget);
+}
 function imports(source: string, filename: string): string[] {
   const found: string[] = [];
   function visit(node: ts.Node) {
@@ -336,7 +357,7 @@ function resolveImport(filename: string, specifier: string): string | undefined 
     moduleResolution: ts.ModuleResolutionKind.Bundler, allowImportingTsExtensions: true,
   }, ts.sys).resolvedModule?.resolvedFileName;
 }
-describe('executable unwired production boundary', () => {
+describe('executable reviewed B2/C production import boundary', () => {
   it('non-vacuously resolves static/type/re-export/dynamic imports, extensions and relative paths', () => {
     const filename = path.join(root, 'src/features/boundary-probe.tsx');
     const source = [
@@ -353,28 +374,68 @@ describe('executable unwired production boundary', () => {
     expect(resolved.every((entry) => entry && modules.includes(entry))).toBe(true);
     expect(resolveImport(modules[0]!, './ai-draft')).toBe(modules[1]);
   });
-  it('walks every other source TS/TSX file and permits only the reviewed B2 composer to import the draft', async () => {
+  it.each(incoming)('admits reviewed incoming pair %s -> %s', (importer, target) => {
+    const resolved = resolveImport(importer, target);
+    expect(resolved).toBe(target);
+    expect(admits(importer, resolved)).toBe(true);
+  });
+  it('admits presentation only from the draft core', () => {
+    const importer = path.join(root, 'src/domain/ai-draft.ts');
+    const target = path.join(root, 'src/domain/ai-presentation.ts');
+    const resolved = resolveImport(importer, './ai-presentation');
+    expect(resolved).toBe(target);
+    expect(admits(importer, resolved)).toBe(true);
+  });
+  it.each([
+    [path.join(root, 'src/domain/ai-controls.ts'), path.join(root, 'src/domain/ai-draft.ts')],
+    [path.join(root, 'src/features/wardrobe/item-form.tsx'), path.join(root, 'src/domain/ai-analysis.ts')],
+    [path.join(root, 'src/features/boundary-probe.tsx'), path.join(root, 'src/domain/ai-analysis.ts')],
+    [path.join(root, 'src/features/boundary-probe.tsx'), path.join(root, 'src/domain/ai-draft.ts')],
+    [path.join(root, 'src/domain/ai-analysis.ts'), path.join(root, 'src/domain/ai-presentation.ts')],
+  ])('rejects unapproved pair %s -> %s', (importer, target) => {
+    const resolved = resolveImport(importer, target);
+    expect(resolved).toBe(target);
+    expect(admits(importer, resolved)).toBe(false);
+  });
+  it('never admits an unresolved target', () => {
+    for (const importer of [...incoming.map(([source]) => source), ...modules]) {
+      const resolved = resolveImport(importer, './missing-boundary-probe');
+      expect(resolved).toBeUndefined();
+      expect(admits(importer, resolved)).toBe(false);
+    }
+  });
+  it('walks every other source TS/TSX file and admits exactly the seven reviewed incoming pairs', async () => {
     const files: string[] = await walkFiles(path.join(root, 'src'));
     const existing = files.filter((filename) => /\.tsx?$/.test(filename) && !modules.includes(filename));
     expect(existing.length).toBeGreaterThan(30);
+    expect(incoming).toHaveLength(7);
+    const admitted = new Set<string>();
     let count = 0;
     for (const filename of existing) {
       for (const specifier of imports(await readFile(filename, 'utf8'), filename)) {
         count++;
-        if (filename === path.join(root, 'src/domain/analyzed-save.ts')
-          && resolveImport(filename, specifier) === modules[1]) continue;
-        expect(modules, `${path.relative(root, filename)} imports ${specifier}`).not.toContain(resolveImport(filename, specifier));
+        const target = resolveImport(filename, specifier);
+        if (target !== undefined && modules.includes(target)) {
+          const accepted = admits(filename, target);
+          expect(accepted, `${path.relative(root, filename)} imports ${specifier}`).toBe(true);
+          if (accepted) admitted.add(JSON.stringify([filename, target]));
+        }
       }
     }
     expect(count).toBeGreaterThan(30);
+    expect(admitted).toEqual(new Set(incoming.map((pair) => JSON.stringify(pair))));
   });
-  it('allows only reviewed direct domain imports in the new modules', async () => {
-    const allowed = [...modules, ...['wardrobe', 'preferences', 'attribute-provenance', 'garment-fields']
-      .map((name) => path.join(root, 'src/domain', `${name}.ts`))];
+  it('allows only the reviewed per-core direct outgoing imports', async () => {
     for (const filename of modules) {
+      const allowed = outgoing.get(filename);
+      expect(allowed).toBeDefined();
       const references = imports(await readFile(filename, 'utf8'), filename);
       expect(references.length).toBeGreaterThan(0);
-      for (const specifier of references) expect(allowed).toContain(resolveImport(filename, specifier));
+      for (const specifier of references) {
+        const target = resolveImport(filename, specifier);
+        expect(allowed).toContain(target);
+        expect(admits(filename, target)).toBe(true);
+      }
     }
   });
 });

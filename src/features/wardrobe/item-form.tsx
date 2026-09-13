@@ -6,6 +6,7 @@ import {
   type GarmentDraft, type GarmentField, type GarmentValues, type RawFields,
 } from '../../domain/garment-fields';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
+import type { AiDerivation } from '../../domain/ai-draft';
 
 const labels: Record<GarmentField, MessageKey> = {
   title: 'item.title', category: 'item.category', subcategory: 'item.subcategory', colours: 'item.colour',
@@ -32,8 +33,9 @@ type Props = {
   draft: GarmentDraft; onChange: (draft: GarmentDraft) => void; baseline?: GarmentValues; provenance?: FieldProvenance;
   language: Language; t: Translate; prefix: 'item' | 'detail'; locked: boolean; currency: string;
   showErrors?: boolean; children?: ReactNode;
+  aiDerived?: AiDerivation;
 };
-export function ItemForm({ draft, onChange, baseline, provenance, language, t, prefix, locked, currency, showErrors = false, children }: Props) {
+export function ItemForm({ draft, onChange, baseline, provenance, language, t, prefix, locked, currency, showErrors = false, children, aiDerived }: Props) {
   const [expanded, setExpanded] = useState<Partial<Record<MessageKey, boolean>>>({});
   const { errors } = validateGarmentDraft(draft, baseline);
   const defaults = initialRawFields(currency);
@@ -98,6 +100,8 @@ export function ItemForm({ draft, onChange, baseline, provenance, language, t, p
       <p id={`${id}-help`} className="fine muted">{hint}</p>
       {invalid && <p id={`${id}-error`} role="alert" className="notice notice-error">{t(key === 'title' && prefix === 'detail' ? 'detail.invalidFields' : 'item.invalidField', { field: label })}</p>}
       {provenance && assertion && fieldAssertion(provenance, assertion).kind !== 'user' && <span className="fine muted">{t('detail.unverified')}</span>}
+      {aiDerived && assertion && !draft.intent[key] && <span className="fine muted">{t(Object.entries(aiDerived).some(([field, value]) => field === key && value?.kind === 'ai_observed')
+        ? 'aiC.observed' : Object.entries(aiDerived).some(([field]) => field === key) ? 'aiC.estimate' : 'aiC.unknown')}</span>}
       {key !== 'title' && key !== 'category' && <button className="text-button" type="button" disabled={locked}
         onClick={() => change(key, defaults[key])}>{t(optional ? 'item.clearField' : 'item.resetField', { field: label })}</button>}
     </div>;

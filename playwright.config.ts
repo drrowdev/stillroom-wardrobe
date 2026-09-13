@@ -21,7 +21,7 @@ export default defineConfig({
     { name: 'mobile', use: { ...devices['iPhone 13'], defaultBrowserType: 'chromium' } },
     {
       name: 'webkit-photo',
-      testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', 'item-details.spec.ts', 'garment-fields.spec.ts'],
+      testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', 'item-details.spec.ts', 'garment-fields.spec.ts', 'ai-photo-first.spec.ts'],
       use: { ...devices['Desktop Safari'] },
     },
   ],

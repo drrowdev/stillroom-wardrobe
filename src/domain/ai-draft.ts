@@ -1,4 +1,5 @@
 import { isUuid } from './wardrobe';
+import { presentAiFacts } from './ai-presentation';
 import {
   editGarmentField, freezeValues, garmentFields, initialRawFields, sameValue, validateGarmentDraft,
   type GarmentDraft, type GarmentField, type GarmentValues, type RawFields,
@@ -21,6 +22,7 @@ export type AiInvalidation = 'logout' | 'owner_changed' | 'discarded' | 'saved';
 type ActiveDraft = DeepReadonly<{
   status: 'idle' | 'pending' | 'ready' | 'unclear' | 'failed' | 'cancelled' | 'expired';
   context: AiContext; draft: GarmentDraft; derivation: AiDerivation; result: AiResult | null;
+  presentation?: { title: string; tags: string[] };
 }>;
 export type AiDraftState = ActiveDraft | Readonly<{
   status: 'invalidated'; reason: AiInvalidation; context: null; draft: null; derivation: null; result: null;
@@ -124,6 +126,16 @@ export function editAiDraftField<K extends GarmentField>(
   if (aiFields.some((key) => key === field)) delete derivation[field as AiField];
   return updated({ ...state, draft, derivation });
 }
+export function presentAiDraft(state: AiDraftState, current: AiContext, language: GarmentDraft['priceLanguage']): AiTransition {
+  const blocked = guard(state, current);
+  if (blocked) return blocked;
+  if (state.status !== 'ready' || !state.result || state.presentation) return { status: 'ignored', state, reason: 'ineligible_state' };
+  const presentation = presentAiFacts(state.result.facts, language);
+  const draft = copyDraft(state.draft);
+  if (!draft.intent.title && draft.raw.title === '') draft.raw.title = presentation.title;
+  if (!draft.intent.tags && draft.raw.tags.length === 0) draft.raw.tags = [...presentation.tags];
+  return updated({ ...state, draft, presentation: { title: presentation.title, tags: presentation.tags } });
+}
 // An explicit new generation is also required for retry; no request is allocated here.
 export function prepareAiGeneration(state: AiDraftState, current: unknown, next: unknown): AiTransition {
   const blocked = guard(state, current);
@@ -141,6 +153,10 @@ export function prepareAiGeneration(state: AiDraftState, current: unknown, next:
     if (previous && !draft.intent[field] && sameValue(draft.raw[field], projectedValue(previous.value))) {
       Object.assign(draft.raw, { [field]: defaults[field] });
     }
+  }
+  if (state.presentation) {
+    if (!draft.intent.title && draft.raw.title === state.presentation.title) draft.raw.title = '';
+    if (!draft.intent.tags && sameValue(draft.raw.tags, state.presentation.tags)) draft.raw.tags = [];
   }
   return updated({ status: 'idle', context: { ...next }, draft, derivation: {}, result: null });
 }

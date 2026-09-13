@@ -124,6 +124,42 @@ artifact review remain owed. Raw-v2/saved-only backup and restoration of trusted
 history remain parked and mandatory before release, not silently implemented
 or waived here. Source editing does not authorize paid/provider/hosted activation.
 
+### Photo-first C source candidate - 12 September 2026
+
+The approved C packet now supplies the client connection described above:
+committed prepared JPEG -> automatic bounded B1 analysis -> editable draft ->
+explicit B2 Save, or explicit unknown/manual continuation. All thirty garment
+fields remain editable. Initial title, description and tags use only canonical
+detected labels in the current language; they are local nonattested text, not
+additional inference or user confirmation. Later language changes do not
+regenerate them. Edits/clears, owner/epoch, generation, expiry and frozen Save
+identities remain independent guards.
+
+The UI displays the reviewed Google Cloud Gemini 3.8 Flash EU multi-region
+notice, finite owner allowance and held/estimated/confirmed accounting.
+This follows the later reviewed manifest in `21`, not the earlier provisional
+Flash-Lite research table. It makes no provider, terms, region or activation
+change. Client analysis is bounded to 25 seconds overall, including current
+authentication, status and response consumption; controls have five-second
+budgets. HTTP 202 remains pending and 504 may still be charged. Status checks
+and Save/retry never initiate another analysis.
+
+C's real CI rehearsal is collected by the existing analysis parent, after
+unchanged B1=12/B2=22 generation gates and restoration. A pinned installed
+Playwright CLI runs two normal-owner UI journeys with exactly two distinct
+pixel-prepared photos/two synthetic Google generations. Only the analysis route
+is bridged to the same Node production handler; Auth, REST, Storage and Deno
+finalization remain real. Request-local C namespace context binds actual image
+bytes/dimensions/hash, synthetic provider input and server attestation. The
+child has 120 seconds inside the unchanged 600-second parent budget; admission
+checks numeric headroom, and failures preserve evidence rather than resetting.
+
+Source is not execution evidence. The four new bounded synthetic captures,
+all eight existing captures, full exact-head CI/Apple/schema/owner gates and
+independent source/coordinator visual review remain required. Human/device
+acceptance, saved-only backup/history restoration, hosted changes and paid
+activation remain separate pending release gates.
+
 ## Privacy and cost controls
 
 Send the sanitized photo, fixed instructions and taxonomy only, before library Save. No history, account email, location, notes, other photos or peer data. EXIF removal does not hide identifying pixels. Use inline bytes, not a public bucket, persistent vendor file or reusable signed link. Temporary validated results are owner-only and excluded from wardrobe queries/exports.

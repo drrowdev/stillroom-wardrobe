@@ -190,6 +190,7 @@ async function analyzedFinalizerFailure(error: unknown, signal: AbortSignal, che
 
 export async function saveAnalyzedItem(
   client: AppClient, scope: OwnerScope, attempt: AnalyzedSaveAttempt, onStage: (stage: SaveStage) => void,
+  onReserved?: (attempt: AnalyzedSaveAttempt, fingerprint: string) => void,
 ): Promise<void> {
   const checkScope = () => {
     throwIfAborted(scope.signal);
@@ -213,6 +214,8 @@ export async function saveAnalyzedItem(
   checkScope();
   requireCheckedSuccess(reserved.error);
   const fingerprint = reservationFingerprint(reserved.data, attempt);
+  checkScope();
+  onReserved?.(attempt, fingerprint);
   const prefix = `${scope.ownerId}/${attempt.itemId}/${attempt.imageId}`;
   onStage('capture.uploading');
   checkScope();

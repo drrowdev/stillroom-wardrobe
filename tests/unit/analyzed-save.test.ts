@@ -148,6 +148,19 @@ describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
     expect([...a.files.entries()]).toEqual(stored);
     expect(a.calls.some((p) => /analyze-clothing|finalize_item_save|commit_image/.test(p))).toBe(false);
   });
+  it('delivers only a fully validated same-attempt fingerprint and re-derives it on explicit retry', async () => {
+    const a = api(), reserved = vi.fn();
+    a.lose(true);
+    await expect(saveAnalyzedItem(a.client, a.scope, a.attempt, () => {}, reserved)).rejects.toThrow();
+    expect(reserved).toHaveBeenCalledExactlyOnceWith(a.attempt, 'c'.repeat(64));
+    a.lose(false);
+    await saveAnalyzedItem(a.client, a.scope, a.attempt, () => {}, reserved);
+    expect(reserved).toHaveBeenNthCalledWith(2, a.attempt, 'c'.repeat(64));
+    const b = api(), deniedReceipt = vi.fn();
+    b.drift(1);
+    await expect(saveAnalyzedItem(b.client, b.scope, b.attempt, () => {}, deniedReceipt)).rejects.toThrow();
+    expect(deniedReceipt).not.toHaveBeenCalled();
+  });
   it.each([['CONFLICT', 'error.conflict'], ['UPLOAD_INCOMPLETE', 'error.uploadIncomplete']] as const)(
     'preserves checked HTTP 409 %s without completing or retrying the fixture', async (code, key) => {
       const a = api(); a.respond(() => Response.json({ code }, { status: 409 }));
