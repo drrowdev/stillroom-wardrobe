@@ -5016,3 +5016,52 @@ previously admitted uploads require the distinct final-publication check.
 The full338968-byte prior phase candidate and seven older prefixes are preserved.
 This is source-only evidence, not runtime identity or termination proof. No tests
 or execution were run; the complete candidate remains unstaged and Stage2 held.
+
+### I08 T23 bounded startup diagnostic - source only (13 September 2026)
+
+[Third-cycle terminal evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655881258)
+records CI34779824003 attempt1 failed and Apple34779824006 attempt1 passed at
+source f60733cad8a0983b7decf50ef9b4624c7c4bb4f4, actual checkout0e2c59f11bfa35c56f1d2e207218ff46ecbef6c6/tree d5116b23102413f728dcb54958a414f3eabca2fa.
+App passed1884 units and621 browser cases with4 existing skips; Apple passed7
+cases. The original Save failure did not recur, which does not establish a fix.
+The [coordinator's synthetic artifact verdict](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655929995)
+records17 byte-identical prior views reused and one changed image actually
+reviewed, with no blocking visible regression on those existing surfaces.
+This writer read only the text receipt, not images, archives or raw job logs.
+
+Database startup failed with SQLSTATE42501, stderr11805bytes and seven known
+announcements/last-known-index7. The prior classifier knew only seven of nine
+filenames; no failing migration, statement, target or privilege cause follows.
+Rehearsal, lifecycle/Storage, normal-owner/backend/recovery/catalog/type gates did
+not run. This third cycle is consumed, not the anticipated final type-parity red.
+
+[Actual T23 critique](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655993126)
+and [framing closure/model attestation/edit permission](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5656047462)
+record retained Anthropic Claude Opus5/high26+8 actual events, binding coordinator
+corrections and five OWN GPT-6 Astra/medium entry events for this persistent
+writer. Four paths only: the startup classifier, matching unit declaration/tests,
+local-backend documentation and this append. All211 other files remain frozen.
+The entire339890-byte preceding working document and eight older prefixes remain
+unchanged. No migration, rehearsal, wrapper, workflow, application or pin changed.
+
+The source adds the exact eighth/ninth announcements and two bounded fields:
+zero-based `stderrStatementIndex`0–9999/null and an eight-value generic permission
+marker. Whole LF/CRLF framing, first severity delimiter, exact42501 suffix and
+message-start-only fixed English prefixes prevent loose substring attribution.
+Malformed/conflicting statement candidates invalidate the ordinal; distinct
+permission categories become multiple. Unsupported/localized message text is
+unclassified, while localized severity is permitted. Unsupported superuser
+inference is omitted. A complete SQL echo can imitate both shapes: neither field
+authenticates a cause, target, failed migration or actual statement execution.
+The ordinal can also refer to injected role/history or reset statements.
+
+Existing eleven-field semantics, own-data/accessor/proxy defenses, failure-only/
+stderr-only activation,16MiB aggregate UTF-8 cap, closed less-than512-byte output
+and wrapper masking/exits/timeouts are preserved. New source-defined cases cover
+thirteen keys, nine announcements, framing/bounds/ambiguity, synthetic11805-byte
+and maximum-bound input, worst-case output, forged shapes and secret canaries.
+These definitions were not executed; manual source/Git/hash checks are not a
+test, compiler or runtime pass. The candidate remains unstaged. Startup cause,
+runtime/catalog/lifecycle/generated types, Stage2, hosted cutover, independent
+final review and human acceptance remain pending; no new run, publication,
+privilege change, paid/provider action or deployment is authorized.

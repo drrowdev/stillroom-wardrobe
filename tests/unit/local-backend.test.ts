@@ -520,7 +520,11 @@ describe('B1 closed served evidence and invalid-token request', () => {
 });
 
 declare module '../../scripts/backend/local.mjs' {
-  export function describeStartupOrResetFailure(result: unknown, elapsedMs: unknown): Record<string, unknown>;
+  export function describeStartupOrResetFailure(result: unknown, elapsedMs: unknown): Record<string, unknown> & {
+    stderrStatementIndex: number | null;
+    stderrPermissionMarker: 'none' | 'owner-required' | 'table-privilege' | 'schema-privilege'
+      | 'function-privilege' | 'rls-policy-violation' | 'unclassified' | 'multiple';
+  };
   export function describeGenerationResult(result: unknown, elapsedMs: unknown): {
     tag: 'success' | 'nonzero-empty-output' | 'nonzero-with-stderr' | 'nonzero-with-stdout'
       | 'missing-database-output' | 'missing-images-output' | 'invalid-result';
@@ -898,10 +902,12 @@ describe('safe startup/reset failure description', () => {
     tag: 'invalid-result', exitCode: null, elapsedMs: null, stdoutBytes: null, stderrBytes: null,
     stderrDockerOperation: 'none', stderrContainerExitBucket: 'unclassified', stderrSqlState: 'none',
     announcedKnownMigrationCount: 0, lastAnnouncedKnownMigrationIndex: null, stderrPortAllocationMarker: false,
+    stderrStatementIndex: null, stderrPermissionMarker: 'none',
   });
   const keys = Object.freeze(['tag', 'exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes',
     'stderrDockerOperation', 'stderrContainerExitBucket', 'stderrSqlState',
-    'announcedKnownMigrationCount', 'lastAnnouncedKnownMigrationIndex', 'stderrPortAllocationMarker']);
+    'announcedKnownMigrationCount', 'lastAnnouncedKnownMigrationIndex', 'stderrPortAllocationMarker',
+    'stderrStatementIndex', 'stderrPermissionMarker']);
   const operations = Object.freeze([
     ['failed to inspect docker image', 'inspect-image'],
     ['failed to pull docker image', 'pull-image'],
@@ -919,6 +925,7 @@ describe('safe startup/reset failure description', () => {
     '20260909070000_item_description_edit.sql', '20260909110000_item_optional_collections.sql',
     '20260909180000_ai_request_controls.sql', '20260910070000_checked_item_save.sql',
     '20260911040000_ai_analysis_backend.sql',
+    '20260911200000_checked_ai_item_save.sql', '20260913120000_item_lifecycle.sql',
   ]);
 
   function report(result: unknown, ...elapsed: [] | [unknown]) {
@@ -928,22 +935,26 @@ describe('safe startup/reset failure description', () => {
     for (const key of keys) expect(Object.getOwnPropertyDescriptor(value, key)).toHaveProperty('value');
     expect(['invalid-result', 'success', 'nonzero-empty-output', 'nonzero-with-stdout', 'nonzero-with-stderr']).toContain(value.tag);
     for (const key of ['exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes',
-      'announcedKnownMigrationCount', 'lastAnnouncedKnownMigrationIndex']) {
+      'announcedKnownMigrationCount', 'lastAnnouncedKnownMigrationIndex', 'stderrStatementIndex']) {
       const field = value[key];
       expect(field === null || typeof field === 'number' && Number.isSafeInteger(field) && field >= 0).toBe(true);
     }
     if (value.exitCode !== null) expect(value.exitCode).toBeLessThanOrEqual(255);
     expect(value.announcedKnownMigrationCount).not.toBeNull();
-    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(7);
+    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(9);
     if (value.lastAnnouncedKnownMigrationIndex !== null) {
       expect(value.lastAnnouncedKnownMigrationIndex).toBeGreaterThanOrEqual(1);
-      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(7);
+      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(9);
     }
     expect(['none', 'multiple', ...operations.map(([, operation]) => operation)]).toContain(value.stderrDockerOperation);
     expect(['unclassified', 'exit-125', 'exit-126-or-127', 'other-nonzero']).toContain(value.stderrContainerExitBucket);
     expect(['none', 'unclassified', 'multiple', ...sqlStates]).toContain(value.stderrSqlState);
     expect(typeof value.stderrPortAllocationMarker).toBe('boolean');
+    if (value.stderrStatementIndex !== null) expect(value.stderrStatementIndex).toBeLessThanOrEqual(9999);
+    expect(['none', 'owner-required', 'table-privilege', 'schema-privilege', 'function-privilege',
+      'rls-policy-violation', 'unclassified', 'multiple']).toContain(value.stderrPermissionMarker);
     expect(JSON.stringify(value).length).toBeLessThan(512);
+    expect(Buffer.byteLength(JSON.stringify(value), 'utf8')).toBeLessThan(512);
     return value;
   }
   const failure = (stderr: string) => report({ code: 1, stdout: '', stderr });
@@ -952,7 +963,7 @@ describe('safe startup/reset failure description', () => {
     [0, '', '', 'success'], [0, 'synthetic', 'warning', 'success'],
     [1, '', '', 'nonzero-empty-output'], [255, 'ä🙂', '', 'nonzero-with-stdout'],
     [2, 'ä🙂', '漢\u0000', 'nonzero-with-stderr'],
-  ])('returns exactly eleven bounded fields for branch %#', (code, stdout, stderr, tag) => {
+  ])('returns exactly thirteen bounded fields for branch %#', (code, stdout, stderr, tag) => {
     const result = Object.freeze({ code, stdout, stderr });
     expect(report(result, 12.75)).toEqual({
       ...defaults, tag, exitCode: code, elapsedMs: 12,
@@ -964,7 +975,8 @@ describe('safe startup/reset failure description', () => {
   it('never observes stdout markers or activates failure observations on success', () => {
     const markers = [...operations.map(([literal]) => literal), 'error running container: exit 125',
       ...sqlStates.map((state) => ` (SQLSTATE ${state})`),
-      ...migrations.map((name) => `Applying migration ${name}...`), 'port is already allocated'].join('\n') + '\n';
+      ...migrations.map((name) => `Applying migration ${name}...`), 'port is already allocated',
+      'At statement: 9999', 'ERROR: permission denied for table synthetic (SQLSTATE 42501)'].join('\n') + '\n';
     expect(report({ code: 1, stdout: markers, stderr: '' })).toEqual({
       ...defaults, tag: 'nonzero-with-stdout', exitCode: 1, elapsedMs: 1,
       stdoutBytes: Buffer.byteLength(markers), stderrBytes: 0,
@@ -1040,7 +1052,137 @@ describe('safe startup/reset failure description', () => {
   it('counts distinct announcements and uses stderr order rather than version order', () => {
     const lines = [...migrations, migrations[1], migrations[0]];
     expect(failure(lines.map((name) => `Applying migration ${name}...\n`).join('')))
-      .toMatchObject({ announcedKnownMigrationCount: 7, lastAnnouncedKnownMigrationIndex: 1 });
+      .toMatchObject({ announcedKnownMigrationCount: 9, lastAnnouncedKnownMigrationIndex: 1 });
+  });
+
+  it('keeps eighth/ninth announcements distinct from the observed statement ordinal', () => {
+    const announcements = migrations.map((name) => `Applying migration ${name}...\n`);
+    expect(failure(announcements.slice(0, 8).join('') + 'At statement: 0\n'))
+      .toMatchObject({ announcedKnownMigrationCount: 8, lastAnnouncedKnownMigrationIndex: 8, stderrStatementIndex: 0 });
+    expect(failure(announcements.join('') + 'At statement: 9999\n'))
+      .toMatchObject({ announcedKnownMigrationCount: 9, lastAnnouncedKnownMigrationIndex: 9, stderrStatementIndex: 9999 });
+  });
+
+  it.each([0, 1, 9, 10, 999, 9999])('observes zero-based statement %s only in whole LF/CRLF lines', (index) => {
+    for (const newline of ['\n', '\r\n']) {
+      expect(failure(`before${newline}At statement: ${index}${newline}At statement: ${index}${newline}echoed SQL${newline}`))
+        .toHaveProperty('stderrStatementIndex', index);
+    }
+  });
+
+  it.each(['', ' ', '00', '01', '-1', '-0', '+1', '1.0', '1e2', '10000', '999999999999999999999',
+    ' 1', '\t1', '1 ', '1\t', '1 suffix', '1\rprivate', '1\r\r', '1\u2028', '1\u2029', '１２', 'private-canary'])(
+    'invalidates an exact statement-marker candidate with malformed value %#', (value) => {
+      const candidate = `At statement: ${value}\n`;
+      for (const text of [candidate, 'At statement: 7\n' + candidate, candidate + 'At statement: 7\n']) {
+        expect(failure(text)).toHaveProperty('stderrStatementIndex', null);
+      }
+    });
+
+  it.each(['At statement:\n', 'At statement:7\n', 'At statement:\t7\n'])(
+    'invalidates malformed exact colon framing %#', (candidate) => {
+      expect(failure('At statement: 7\n' + candidate + 'At statement: 7\n')).toHaveProperty('stderrStatementIndex', null);
+    });
+
+  it.each(['At statement: 1\nAt statement: 2\n', 'At statement: 0\r\nAt statement: 9999\r\nAt statement: 0\n'])(
+    'does not select a convenient conflicting statement %#', (text) => {
+      expect(failure(text)).toHaveProperty('stderrStatementIndex', null);
+    });
+
+  it.each(['At statement 7\n', 'at statement: 7\n', ' At statement: 7\n', 'prefix At statement: 7\n',
+    'At statements: 7\n', 'At statement: 7', 'At statement: 7\r', 'At statement: 7\u2028',
+    '\u001b[31mAt statement: 7\u001b[0m\n'])('ignores non-marker or unterminated statement framing %#', (text) => {
+    expect(failure(text)).toHaveProperty('stderrStatementIndex', null);
+    expect(failure('At statement: 3\n' + text)).toHaveProperty('stderrStatementIndex', 3);
+  });
+
+  const permissionCases = [
+    ['must be owner of table ', 'owner-required'], ['must be owner of relation ', 'owner-required'],
+    ['must be owner of schema ', 'owner-required'], ['must be owner of function ', 'owner-required'],
+    ['permission denied for table ', 'table-privilege'], ['permission denied for schema ', 'schema-privilege'],
+    ['permission denied for function ', 'function-privilege'],
+    ['new row violates row-level security policy', 'rls-policy-violation'],
+    ['target row violates row-level security policy', 'rls-policy-violation'],
+  ] as const;
+  it.each(permissionCases)('observes only the message-start prefix %s with server-supplied severity', (prefix, category) => {
+    for (const newline of ['\n', '\r\n']) {
+      for (const severity of ['ERROR', 'VIRHE', 'FEL', 'エラー']) {
+        const head = `${severity}: ${prefix}synthetic (SQLSTATE 42501)${newline}`;
+        expect(failure(head + head)).toMatchObject({ stderrPermissionMarker: category, stderrSqlState: '42501' });
+      }
+    }
+  });
+
+  it('agrees on repeated categories but keeps differing and unsupported heads ambiguous', () => {
+    expect(failure('ERROR: must be owner of table a (SQLSTATE 42501)\nFEL: must be owner of schema b (SQLSTATE 42501)\n'))
+      .toHaveProperty('stderrPermissionMarker', 'owner-required');
+    const heads = [
+      'ERROR: permission denied for table a (SQLSTATE 42501)\n',
+      'FEL: permission denied for schema b (SQLSTATE 42501)\n',
+      'ERROR: permission denied for function c (SQLSTATE 42501)\n',
+      'ERROR: must be owner of relation d (SQLSTATE 42501)\n',
+      'ERROR: new row violates row-level security policy (SQLSTATE 42501)\n',
+      'ERROR: unsupported synthetic text (SQLSTATE 42501)\n',
+    ];
+    for (const first of heads) {
+      for (const second of heads) {
+        if (first === second) continue;
+        expect(failure(first + second + first)).toHaveProperty('stderrPermissionMarker', 'multiple');
+      }
+    }
+  });
+
+  it.each(['permission denied for sequence synthetic', 'must be owner of type synthetic',
+    'must be superuser to perform synthetic operation', 'käyttöoikeus puuttuu', 'åtkomst nekad',
+    'unrelated permission denied for table synthetic', 'quoted \"must be owner of table synthetic\"',
+    'other: permission denied for table synthetic', ' permission denied for table synthetic',
+    'permission denied for table', 'must be owner of relation'])(
+    'keeps unsupported messages or buried prefixes unclassified %#', (message) => {
+      const head = `ERROR: ${message} (SQLSTATE 42501)\n`;
+      expect(failure(head + head)).toHaveProperty('stderrPermissionMarker', 'unclassified');
+    });
+
+  it.each([
+    'permission denied for table synthetic (SQLSTATE 42501)\n',
+    ': permission denied for table synthetic (SQLSTATE 42501)\n',
+    'ERROR:permission denied for table synthetic (SQLSTATE 42501)\n',
+    'ERROR: permission denied for table synthetic (SQLSTATE 23505)\n',
+    'ERROR: permission denied for table synthetic (SQLSTATE 42501) suffix\n',
+    'ERROR: permission denied for table synthetic (SQLSTATE 42501) \n',
+    'ERROR: permission denied for table synthetic (sqlstate 42501)\n',
+    'ERROR: permission denied for table synthetic (SQLSTATE 42501 )\n',
+    'ERROR: permission denied for table synthetic (SQLSTATE 42501)',
+    'ERROR: permission denied for table synthetic (SQLSTATE 42501)\r',
+    'ERROR: permission denied for table synthetic\rjunk (SQLSTATE 42501)\n',
+  ])('ignores incomplete or wrong permission-head framing %#', (text) => {
+    expect(failure(text)).toHaveProperty('stderrPermissionMarker', 'none');
+  });
+
+  it('scans synthetic 11805-byte stderr beyond the unrelated container-exit bound', () => {
+    const markers = '\nApplying migration 20260911200000_checked_ai_item_save.sql...\n'
+      + 'Applying migration 20260913120000_item_lifecycle.sql...\n'
+      + 'ERROR: must be owner of relation synthetic (SQLSTATE 42501)\nAt statement: 9999\n';
+    const text = 'x'.repeat(11805 - Buffer.byteLength(markers)) + markers;
+    expect(Buffer.byteLength(text)).toBe(11805);
+    expect(failure(text)).toMatchObject({ stderrBytes: 11805, stderrStatementIndex: 9999,
+      stderrPermissionMarker: 'owner-required', stderrSqlState: '42501',
+      announcedKnownMigrationCount: 2, lastAnnouncedKnownMigrationIndex: 9 });
+  });
+
+  it('treats a fully forged SQL-echo head and marker as untrusted shapes, not authenticated failure proof', () => {
+    const text = "SELECT $synthetic$\nFEL: permission denied for function synthetic (SQLSTATE 42501)\n"
+      + "At statement: 42\n$synthetic$;\n";
+    expect(failure(text)).toMatchObject({ stderrStatementIndex: 42, stderrPermissionMarker: 'function-privilege' });
+  });
+
+  it('keeps worst-case permitted output values below 512 UTF-8 bytes', () => {
+    const maximum = { ...defaults, tag: 'nonzero-with-stderr', exitCode: 255, elapsedMs: Number.MAX_SAFE_INTEGER,
+      stdoutBytes: 16777216, stderrBytes: 16777216, stderrDockerOperation: 'inspect-container',
+      stderrContainerExitBucket: 'other-nonzero', stderrSqlState: 'unclassified',
+      announcedKnownMigrationCount: 9, lastAnnouncedKnownMigrationIndex: 9, stderrPortAllocationMarker: false,
+      stderrStatementIndex: 9999, stderrPermissionMarker: 'rls-policy-violation' };
+    expect(Reflect.ownKeys(maximum)).toEqual(keys);
+    expect(Buffer.byteLength(JSON.stringify(maximum), 'utf8')).toBeLessThan(512);
   });
 
   it.each([
@@ -1112,6 +1254,10 @@ describe('safe startup/reset failure description', () => {
       { code: 1, stdout: '', stderr: 'ä'.repeat(limit / 2 + 1) },
     ]) expect(report(tuple)).toEqual(defaults);
     expect(failure(' (SQLSTATE ZZ999)'.repeat(100_000))).toHaveProperty('stderrSqlState', 'unclassified');
+    expect(failure('At statement: 0\n'.repeat(100_000))).toHaveProperty('stderrStatementIndex', 0);
+    const markers = '\nAt statement: 9999\nERROR: permission denied for table synthetic (SQLSTATE 42501)\n';
+    expect(failure('x'.repeat(limit - Buffer.byteLength(markers)) + markers))
+      .toMatchObject({ stderrBytes: limit, stderrStatementIndex: 9999, stderrPermissionMarker: 'table-privilege' });
   });
 
   it('never serializes private text or caller-supplied report fields', () => {
@@ -1120,6 +1266,11 @@ describe('safe startup/reset failure description', () => {
       ['postgresql:', '//fictional:never-a-password@example.test/db'].join(''),
       'SELECT fictional_private_value;', 'synthetic-token.payload.signature'];
     const text = privateParts.join('\n');
+    for (const part of privateParts) {
+      const output = failure(`ERROR: permission denied for table ${part} (SQLSTATE 42501)\nAt statement: ${part}\n`);
+      expect(output).toMatchObject({ stderrPermissionMarker: 'table-privilege', stderrStatementIndex: null });
+      for (const canary of privateParts) expect(JSON.stringify(output)).not.toContain(canary);
+    }
     const hostile = vi.fn(() => { throw new Error(text); });
     const fakeFields = Object.fromEntries(keys.map((key) => [key, text]));
     expect(report({ ...fakeFields, code: 1, stdout: 'ä🙂', stderr: '漢\u0000' })).toEqual({

@@ -128,6 +128,8 @@ export function describeStartupOrResetFailure(result, elapsedMs) {
     announcedKnownMigrationCount: 0,
     lastAnnouncedKnownMigrationIndex: null,
     stderrPortAllocationMarker: false,
+    stderrStatementIndex: null,
+    stderrPermissionMarker: 'none',
   };
   let code, stdout, stderr;
   try {
@@ -204,6 +206,8 @@ export function describeStartupOrResetFailure(result, elapsedMs) {
     '20260909180000_ai_request_controls.sql',
     '20260910070000_checked_item_save.sql',
     '20260911040000_ai_analysis_backend.sql',
+    '20260911200000_checked_ai_item_save.sql',
+    '20260913120000_item_lifecycle.sql',
   ];
   let lastAnnouncement = -1;
   for (const [index, filename] of migrations.entries()) {
@@ -223,6 +227,43 @@ export function describeStartupOrResetFailure(result, elapsedMs) {
     if (observed) report.announcedKnownMigrationCount += 1;
   }
   report.stderrPortAllocationMarker = stderr.includes('port is already allocated');
+  const permissionPrefixes = [
+    ['must be owner of table ', 'owner-required'],
+    ['must be owner of relation ', 'owner-required'],
+    ['must be owner of schema ', 'owner-required'],
+    ['must be owner of function ', 'owner-required'],
+    ['permission denied for table ', 'table-privilege'],
+    ['permission denied for schema ', 'schema-privilege'],
+    ['permission denied for function ', 'function-privilege'],
+    ['new row violates row-level security policy', 'rls-policy-violation'],
+    ['target row violates row-level security policy', 'rls-policy-violation'],
+  ];
+  const permissionSuffix = ' (SQLSTATE 42501)';
+  let statementInvalid = false, lineStart = 0;
+  // Even complete heads/markers can be echoed SQL: observe shape, never authenticate a cause.
+  for (let lf = stderr.indexOf('\n'); lf !== -1; lf = stderr.indexOf('\n', lineStart)) {
+    const line = stderr.slice(lineStart, stderr[lf - 1] === '\r' ? lf - 1 : lf);
+    lineStart = lf + 1;
+    if (line.startsWith('At statement:')) {
+      const match = /^At statement: (0|[1-9][0-9]{0,3})$/.exec(line);
+      if (!match || match[0] !== line) statementInvalid = true;
+      else {
+        const index = Number(match[1]);
+        if (report.stderrStatementIndex !== null && report.stderrStatementIndex !== index) statementInvalid = true;
+        report.stderrStatementIndex = index;
+      }
+    }
+    const delimiter = line.indexOf(': ');
+    const messageLength = line.length - permissionSuffix.length - delimiter - 2;
+    if (delimiter > 0 && messageLength >= 0
+      && !line.includes('\r') && line.endsWith(permissionSuffix)) {
+      const category = permissionPrefixes.find(([prefix]) =>
+        prefix.length <= messageLength && line.startsWith(prefix, delimiter + 2))?.[1] ?? 'unclassified';
+      if (report.stderrPermissionMarker === 'none') report.stderrPermissionMarker = category;
+      else if (report.stderrPermissionMarker !== category) report.stderrPermissionMarker = 'multiple';
+    }
+  }
+  if (statementInvalid) report.stderrStatementIndex = null;
   return report;
 }
 

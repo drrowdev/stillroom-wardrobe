@@ -444,6 +444,27 @@ npm run dev
 
 `db:start` launches the actual local services, checks the known database container, and verifies a healthy Auth HTTP response. Initial Docker image downloads can take several minutes. CLI output is captured rather than printed because startup/status can include credentials.
 
+The [T23 startup-diagnostic amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5656047462)
+defines thirteen closed fields; marker observations activate only on failed
+stderr-bearing results. The known
+announcement inventory now covers all nine exact migration filenames; its last
+index is one-based and follows stderr order, not proof of the failing migration.
+`stderrStatementIndex` observes whole LF/CRLF `At statement: N` lines, with a
+zero-based ordinal0–9999; absent, malformed or conflicting candidates yield null.
+It is not a source line/byte position and may denote injected restore/history or
+reset statements. `stderrPermissionMarker` emits only a fixed generic category
+from a head-shaped42501 line, with nonempty server-supplied severity and an exact
+English message-start prefix. Unsupported messages remain unclassified; distinct
+categories are multiple. No identifiers, severity, SQL, role, path or raw message
+are emitted. Complete forged SQL-echo heads/markers can match: these are untrusted
+shape observations, not authenticated causes or permission evidence.
+
+Parsing retains the16MiB combined UTF-8 input cap and a less-than512-byte JSON
+record; the4096-byte container-exit gate does not restrict these two fields.
+CLI2.116.0/PG17 source framing is not proof of the failing runtime's identity.
+The third I08 cycle failed startup with42501 before rehearsal; the diagnostic
+amendment does not repair privileges or authorize a retry, execution or cutover.
+
 `db:reset` is destructive **only to the disposable local stack**. It checks Docker locality and the database container's exact name, Supabase project label, Postgres image and running state. It invokes `db reset --local --no-seed`, never `--linked`, `--db-url` or `--project-ref`; extra arguments are rejected. A changed initial migration hash also aborts the reset.
 
 After successful migration, a separate Node process runs `scripts/provision-test-users.mjs`:
