@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createClient } from '@supabase/supabase-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import type { Database } from '../../src/data/database.types';
 import type { OwnerScope } from '../../src/auth/session';
 import { editGarmentField, newGarmentDraft } from '../../src/domain/garment-fields';
@@ -514,7 +515,7 @@ describe('R3 bounded held-upload response and closed evidence (mock-only)', () =
     });
     const primaryValues: unknown[] = [new Error('Private primary'), undefined, null, false, 0, ''];
     const secondary = new Error('Private secondary');
-    let output: ReturnType<typeof vi.spyOn>, notices: ReturnType<typeof vi.spyOn>;
+    let output: MockInstance<(...args: unknown[]) => void>, notices: MockInstance<(...args: unknown[]) => void>;
     beforeEach(() => {
       fixtureMocks.saveClients.mockReset();
       output = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -616,8 +617,13 @@ describe('R3 bounded held-upload response and closed evidence (mock-only)', () =
       return { request, events, withLifecycleParentLock, withLifecycleCatalogMarker,
         isHeld: () => held !== null, cleanupStarted: () => cleanupStarted };
     }
-    function records() {
-      return output.mock.calls.filter(([line]) => typeof line === 'string' && line.startsWith('{')).map(([line]) => JSON.parse(line));
+    function records(): Record<string, unknown>[] {
+      return output.mock.calls.map(([line]) => line)
+        .filter((line): line is string => typeof line === 'string' && line.startsWith('{'))
+        .map((line) => {
+          const parsed: unknown = JSON.parse(line);
+          return object(parsed);
+        });
     }
     async function rejection(promise: Promise<unknown>, expected: unknown) {
       const result = await promise.then(() => ({ rejected: false, value: undefined }), (value: unknown) => ({ rejected: true, value }));
@@ -688,7 +694,7 @@ describe('R3 bounded held-upload response and closed evidence (mock-only)', () =
       const f = fixture(undefined, { value: first });
       notices.mockImplementation(() => { throw secondary; });
       await rejection(lifecycleFixtureCases(env, f), first);
-      expect(records()).toHaveLength(1); expect(records()[0].stage).toBe('released');
+      expect(records()).toHaveLength(1); expect(object(records()[0]).stage).toBe('released');
       expect(f.events.filter((event) => event === 'cleanup')).toHaveLength(1);
     });
     it.each(primaryValues)('preserves exact/falsy record-output failure %# and still runs outer cleanup', async (first) => {

@@ -4872,3 +4872,45 @@ remain blocked; a new-head CI/Apple cycle needs separate verification and
 permission. Original Save uncertainty/stop-on-recurrence, productionf318/six
 hosted migrations and human/device/saved-only recovery-export release holds
 are unchanged.
+
+## 13 September 2026 - R4 mock typing correction, source only
+
+[The actual R3 cycle result](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5654205492)
+records CI34765493857 attempt1 failing at source
+`aceb74ee2f68144495854fb89bc6e0ff8dc2b944`. Its actual checkout
+`5da9f9834509341f2ef1e1162c3a8e37ba7e3d8b` shared reviewed tree
+`73fdd028b8ae521c52a1e5b57a97789a6bab166e`. App lint passed; typecheck
+reported five implicit-any errors in the added console-call/record mock code.
+These are source defects, not environment failures. Later App checks,
+including unit/browser/visual checks and the Save diagnostic, did not run.
+
+Backend again passed nine-source migration application, populated preservation
+and catalog checks, then rejected a nonmatching HTTP500 in the first held-upload
+phase. The bounded record observed a107-byte JSON object in13ms, with neither
+an exact nor contained Request conflict phrase. It does not disclose the raw
+code/message or establish a root cause. Reader cleanup flags are not independent
+parent-lock release evidence. Later backend/type-generation/upload/parity
+gates did not run; artifacts were zero. Apple34765493868 attempt1 passed
+four generated JPEG and three orientation/composition cases, not device or
+I08 UI acceptance. Both authorized CI cycles are consumed and failed.
+
+[R4 read-only entry](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5654271826)
+and [fresh model attestation/source permission](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5654293594)
+authorize only a routine unit-typing correction and this append. Concrete
+console-call mock signatures use unknown arguments and void results. The
+record helper narrows strings, parses into unknown and reuses its existing
+object guard to return typed records. Indexed record access also uses that
+guard; missing/invalid records reject rather than defaulting or being skipped.
+All existing cases, field/count/timing assertions, exact/falsy failure checks
+and HTTP5xx rejection remain. No suppression, compiler rule, dependency,
+production, SQL, reader/classifier, fixture or workflow change is included.
+
+The entire preceding329636-byte working document and all earlier prefixes
+remain intact; all212 other source paths are frozen. Only manual text/Git/.NET
+checks were performed. Actual R4 typecheck, lint and tests remain unexecuted,
+not inferred passing from source review. The candidate stops unstaged.
+No publication, new CI/Apple budget, Stage2, hosted/provider operation or
+deployment is authorized. Storage diagnosis remains coordinator-owned;
+the observed500 stays failed and no raw response reconstruction or acceptance
+relaxation is part of R4. Original Save uncertainty and every production,
+privacy, paid, device and saved-only recovery/export release hold remain.
