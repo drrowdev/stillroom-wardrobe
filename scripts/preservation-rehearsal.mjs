@@ -124,25 +124,34 @@ export async function withLifecycleParentLock(ownerId, itemId, mode, operation) 
     '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-A'], {
     cwd: ROOT, env: commandEnvironment(), shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
   });
-  let resolveReady, rejectReady, output = '', size = 0, failure, releasing = false, primaryFailed = false;
+  let resolveReady, rejectReady, resolveClosed, output = '', size = 0, failure, releasing = false;
+  let primaryFailed = false, primaryValue, cleanupFailed = false, cleanupValue;
+  const cleanupFailure = (error) => {
+    if (!cleanupFailed) { cleanupFailed = true; cleanupValue = error; }
+  };
+  const terminate = () => {
+    try { child.kill('SIGTERM'); } catch (error) { cleanupFailure(error); }
+  };
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   // Setup can throw before await ready; observe release-time rejection without changing that await.
   void ready.catch(() => {});
-  const reject = () => {
-    failure ??= new Error('EVIDENCE_REQUIRED');
+  const failChild = () => {
+    if (!failure) failure = new Error('EVIDENCE_REQUIRED');
     rejectReady(failure);
-    child.kill('SIGTERM');
+    terminate();
   };
   const closed = new Promise((resolve) => {
-    child.once('error', () => { reject(); resolve(1); });
-    child.once('close', (code) => { if (!releasing) reject(); resolve(code); });
+    resolveClosed = resolve;
+    child.once('error', failChild);
+    child.once('close', (code) => { if (!releasing) failChild(); resolve(code); });
   });
+  const reject = () => { failChild(); resolveClosed(1); };
   const timer = setTimeout(reject, 15_000);
-  child.stdin.on('error', reject);
-  child.stderr.on('data', reject);
+  child.stdin.on('error', failChild);
+  child.stderr.on('data', failChild);
   child.stdout.on('data', (chunk) => {
     size += chunk.length;
-    if (size > 128) { reject(); return; }
+    if (size > 128) { failChild(); return; }
     output += chunk.toString();
     if (output.trim() === 'I08_PARENT_HELD') resolveReady();
   });
@@ -157,26 +166,22 @@ export async function withLifecycleParentLock(ownerId, itemId, mode, operation) 
     requireEvidence(!failure);
   } catch (error) {
     primaryFailed = true;
-    throw error;
-  } finally {
-    releasing = true;
-    try {
-      try {
-        if (!child.stdin.writableEnded && !child.stdin.destroyed) child.stdin.end('rollback;\n');
-      } catch (error) {
-        child.kill('SIGTERM');
-        throw error;
-      } finally {
-        try {
-          const code = await closed;
-          requireEvidence(code === 0 && !failure);
-        } finally { clearTimeout(timer); }
-      }
-    } catch (error) {
-      console.error('FAIL: I08 exact parent-lock release');
-      if (!primaryFailed) throw error;
-    }
+    primaryValue = error;
   }
+  releasing = true;
+  try {
+    if (!child.stdin.writableEnded && !child.stdin.destroyed) child.stdin.end('rollback;\n');
+  } catch (error) { cleanupFailure(error); terminate(); }
+  try {
+    const code = await closed;
+    requireEvidence(code === 0 && !failure);
+  } catch (error) { cleanupFailure(error); }
+  try { clearTimeout(timer); } catch (error) { cleanupFailure(error); }
+  if (cleanupFailed) {
+    try { console.error('FAIL: I08 exact parent-lock release'); } catch (error) { cleanupFailure(error); }
+  }
+  if (primaryFailed) throw primaryValue;
+  if (cleanupFailed) throw cleanupValue;
 }
 
 export async function withLifecycleCatalogMarker(ownerId, itemId, operation) {
@@ -184,7 +189,10 @@ export async function withLifecycleCatalogMarker(ownerId, itemId, operation) {
   requireEvidence(typeof operation === 'function');
   const markerId = randomUUID(), name = `${ownerId}/${itemId}/i08-catalog-marker`;
   // No bytes are written. Normal BEGIN must already have installed this exact claim.
-  let created = false, primaryFailed = false;
+  let created = false, primaryFailed = false, primaryValue, cleanupFailed = false, cleanupValue;
+  const cleanupFailure = (error) => {
+    if (!cleanupFailed) { cleanupFailed = true; cleanupValue = error; }
+  };
   try {
     const setup = await privilegedLocalSql(`do $$ begin
       if not exists(select 1 from private.item_deletion_claims where owner_id='${ownerId}' and item_id='${itemId}')
@@ -197,23 +205,23 @@ export async function withLifecycleCatalogMarker(ownerId, itemId, operation) {
     await operation();
   } catch (error) {
     primaryFailed = true;
-    throw error;
-  } finally {
-    try {
-      try {
-        const cleanup = await privilegedLocalSql(`with removed as (
+    primaryValue = error;
+  }
+  try {
+    const cleanup = await privilegedLocalSql(`with removed as (
           delete from storage.objects where id='${markerId}' and bucket_id='wardrobe' and name='${name}' returning id
         ) select count(*) from removed;`);
-        requireEvidence(created ? cleanup === '1' : ['0', '1'].includes(cleanup));
-      } finally {
-        requireEvidence(await privilegedLocalSql(`select count(*) from storage.objects
+    requireEvidence(created ? cleanup === '1' : ['0', '1'].includes(cleanup));
+  } catch (error) { cleanupFailure(error); }
+  try {
+    requireEvidence(await privilegedLocalSql(`select count(*) from storage.objects
           where id='${markerId}' or (bucket_id='wardrobe' and name='${name}');`) === '0');
-      }
-    } catch (error) {
-      console.error('FAIL: I08 exact catalog-marker cleanup');
-      if (!primaryFailed) throw error;
-    }
+  } catch (error) { cleanupFailure(error); }
+  if (cleanupFailed) {
+    try { console.error('FAIL: I08 exact catalog-marker cleanup'); } catch (error) { cleanupFailure(error); }
   }
+  if (primaryFailed) throw primaryValue;
+  if (cleanupFailed) throw cleanupValue;
 }
 
 export function assertRehearsalEnvironment(env, args) {

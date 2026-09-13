@@ -40,7 +40,7 @@ raw DELETE/FINISH must refuse it without losing the item/claim; exact marker
 cleanup and subsequent normal completion are required. No fixture profile,
 shared row, production RPC or provider-side blob is created/deleted by setup.
 
-**None of this candidate has been executed locally or in CI.** Local tooling
+**At initial source review, none of this candidate had executed locally or in CI.** Local tooling
 restoration and all runtime probes remain prohibited by the source-only receipt.
 The candidate must stop unstaged for coordinator review; there is no publication
 or run budget. An eventual Stage 1 cycle needs all preceding checks plus actual
@@ -51,6 +51,60 @@ independent review remain later gates. No new run or rerun is authorized here.
 Original Save uncertainty/stop-on-recurrence, production/privacy/paid/deployment
 holds, manual/device acceptance and saved-only recovery/export release work
 remain unchanged.
+
+### I08 original cycle failure and R3 source correction (13 September 2026)
+
+[Original-cycle evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5653886139)
+records CI34761885375 attempt1 at source `e8829d1`, with the actual PR merge
+checkout sharing tree `75ad01054f059d5b588115649e5a89a039020697`.
+App lint failed with three `no-unsafe-finally` errors. Backend's strict nine-source
+inventory, migration application, populated preservation and both catalog checks
+passed, then the held-upload fixture failed without a response/substep record.
+That does not establish HTTP500 or its cause. Later backend/type-generation,
+App/browser and visual gates did not run; there were zero artifacts.
+Apple34761885372 attempt1 passed its four generated JPEG and three approved
+orientation/composition cases, not physical-device or I08 UI acceptance.
+The original cycle is consumed and failed, not the anticipated final type diff.
+
+[T16 AMEND with binding corrections](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5653989229)
+and [matching source permission](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5654022792)
+bound R3 to five source/document files. The candidate moves fixture rethrows
+after cleanup, outside finally. Explicit flags retain exact/falsy primary and
+first cleanup values. Mandatory child end/termination/closure/timer, marker
+delete/count/absence and outer fixture cleanup are individually guarded;
+fixed notices cannot replace an earlier failure. A failed closure deadline
+remains failed release evidence, never proof that the child/lock disappeared.
+
+Only the existing held-parent negative POST uses a test-local response reader.
+It retains the exported local/session/key guards, verified ordinary owner,
+exact thumb path, four synthetic bytes, original headers, no-store,
+redirect:error and 15-second request timeout. There is no extra request,
+sign-in, retry, general helper option or change to shared normalClient.
+Headers/status precede bounded incremental body reads; at most4096bytes are
+retained. Strict UTF-8 and a non-array JSON object are required for classification.
+Missing/empty bodies cannot pass. Overflow fails with `truncated:true` and
+`bodyBytes:null`, not a clamped count or Content-Length estimate. Cancellation
+and reader release are both attempted without masking the first failure.
+The original floating elapsed interval includes body handling/cleanup; only
+record metadata is rounded. **HTTP<500 remains required**, alongside `!ok`,
+the existing <5000ms limit and exact conflict classifier. Even an exact-conflict
+500 is diagnostic failure, not a new acceptance class.
+
+One validated JSON line, at most1024UTF-8bytes, is attempted after each held
+phase settles and before outer cleanup. The two-owner fail-fast loop permits
+zero records before any attempt, one after a first-owner failure, or two if
+the second owner is reached. Unobserved values remain null; stages and all
+code/message/error-shape classes are closed. No IDs, paths, headers, raw body,
+private strings or digests are printed. Serialization/output failures fail
+the evidence gate. The distinct parent-release notice remains authoritative
+for failed release; `released` is set only after a normal holder return.
+Observation has bounded nonzero overhead, not a demonstrated causal effect.
+
+R3's behavior/mocked fault tests are source definitions only: no local runtime
+or test executed. The candidate remains unstaged for coordinator review.
+No new CI/Apple cycle, publication or Stage2 is authorized. Actual lint,
+unit/typecheck, normal-owner/Storage/lock/recovery/type/browser/visual evidence
+and every original Save, production, hosted, paid and release hold remain.
 
 The local tools use the pinned Supabase CLI **2.116.0**, Node 24 and Docker. They do not install Docker, create cloud resources, link projects, use a management API, or reset remote databases. Host `psql` is not needed: the isolated provisioning process uses `docker exec` into the specifically labelled local database container, connecting to that container's own loopback Postgres endpoint with stock local trust authentication. It refuses password prompting.
 

@@ -4800,3 +4800,75 @@ frozen. Only the same three repair paths changed; all other candidate/source
 boundaries and migration pins remain unchanged. T15 remains AMEND, not an
 unconditional reviewer or runtime PASS. No tests/runtime commands/publication
 ran; the candidate stops UNSTAGED and all prior execution and release holds remain.
+
+## 13 September 2026 - I08 original cycle blocked; R3 source-only correction
+
+[The original cycle's actual evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5653886139)
+supersedes the earlier candidate's unexecuted status without rewriting it.
+CI34761885375 attempt1 failed at source
+`e8829d1aa91187a2c15ff3bf30159a0d486068bc`; actual merge checkout
+`37245ab0db1deebd77e061a3f2460ece2f3dd499` had the identical reviewed tree
+`75ad01054f059d5b588115649e5a89a039020697`. App's lint reported three
+no-unsafe-finally errors in the accepted cleanup correction. Backend passed
+the strict nine-source inventory/history/application, populated preservation
+(two owners, ten tables, thirty rows, eight objects) and both catalog checks,
+then failed in held-upload without an observed response/sub-operation. Exact-run
+snapshot cleanup passed. The common reader's pre-body >=500 refusal is a source
+boundary, not proof that this response was500 or that the cause is diagnosed.
+
+Later App/backend/type-generation/upload/parity/browser/visual gates did not
+run; artifact count was zero. Apple34761885372 attempt1 passed four generated
+JPEG and three orientation/composition cases. This is not physical-iPhone,
+I08 UI, hosted acceptance or a substitute for failed CI. The original Save
+diagnostic case did not run, so no recurrence/non-reproduction is claimed.
+The original cycle is consumed and unsuccessful, not the final type-parity
+staging condition. No rerun or new cycle is authorized by this source record.
+
+The [R3 proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5653907461)
+received actual Anthropic Claude Opus5 T16 AMEND, adopted with
+[binding C1-C5 and count corrections](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5653989229).
+The same writer's [coordinator-observed entry and edit permission](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5654022792)
+authorizes only this five-path source candidate, not runtime or unconditional
+review PASS. Start head/tree remain e8829/75ad; all209 outside files, SQL/pins,
+shared normalClient, Save/capture/transports, workflow and types are frozen.
+The entire preceding324722working-byte document and all earlier prefixes remain.
+
+The candidate separately guards mandatory helper cleanup, reader cancel/release,
+observation output and outer fixture cleanup. Explicit primary/cleanup flags
+retain the first exact value even if undefined/null/false/zero/empty-string;
+rethrows occur after cleanup, outside finally. Fixed notices cannot replace
+the retained rejection. A failed child closure/termination is failed evidence,
+not an assertion of physical release.
+
+The one existing held-upload negative POST now has a local guarded4096-byte
+reader, preserving ordinary credentials, exact endpoint/bytes/headers,
+redirect refusal and15-second request timeout. It observes headers/status
+before missing, empty, malformed, non-object, UTF-8 or read failures; both
+cleanup actions still run where a reader was acquired. **Status<500 remains
+necessary for PASS**, with the original !ok, floating <5000ms and exact
+classifier. HTTP5xx is recordable failure, not accepted conflict evidence.
+No additional request/sign-in or shared API relaxation is introduced.
+
+After the holder settles and before outer cleanup, each attempted phase emits
+one validated JSON line of at most1024UTF-8bytes; the two-owner fail-fast loop
+allows0/1/2 records according to attempted phases. Closed fields preserve
+unobserved nulls; overflow sets bodyBytes:null/truncated:true, never a clamped
+or header-derived byte count. Raw errors/bodies/headers/IDs/paths/private values
+are excluded. Serialization/output failures remain failures. Last-reached
+stage survives failure; released means only a normal holder return. Observation
+has bounded nonzero overhead; no performance or causal claim is made.
+
+Added mock-only tests cover exact/falsy cleanup precedence, failed notices,
+bounded child failure, reader/shape/size/UTF-8/cleanup errors, original request
+identity and headers, strict4xx-versus5xx classification, closed serialization,
+record timing/counts and outer cleanup. Existing assertions remain.
+Only manual source/Git/PowerShell/.NET inspection occurred: no local lint,
+compiler, Node/npm, unit/backend/browser test, probe or install. The candidate
+stops UNSTAGED, with actual validation and independent source review pending.
+
+No publication, Actions operation, artifact/image input, hosted/private/paid/
+provider operation, merge or deployment occurred. Generated types and Stage2
+remain blocked; a new-head CI/Apple cycle needs separate verification and
+permission. Original Save uncertainty/stop-on-recurrence, productionf318/six
+hosted migrations and human/device/saved-only recovery-export release holds
+are unchanged.

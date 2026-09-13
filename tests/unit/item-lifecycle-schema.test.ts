@@ -10,10 +10,10 @@ import { newSaveAttempt, saveItem } from '../../src/images/upload';
 // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
 import { ITEM_LIFECYCLE_CATALOG_SQL, assertLifecycleFixture, MIGRATIONS, withLifecycleParentLock, withLifecycleCatalogMarker } from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
-import { one } from '../integration/item-lifecycle.sessions.mjs';
+import { one, lifecycleObservation, serializeLifecycleObservation, readLifecycleUploadResponse, requireLifecycleUploadConflict, lifecycleFixtureCases } from '../integration/item-lifecycle.sessions.mjs';
 
 const fixtureMocks = vi.hoisted(() => ({
-  spawn: vi.fn(), requireLocalContainer: vi.fn(), privilegedLocalSql: vi.fn(), commandEnvironment: vi.fn(),
+  spawn: vi.fn(), requireLocalContainer: vi.fn(), privilegedLocalSql: vi.fn(), commandEnvironment: vi.fn(), saveClients: vi.fn(),
 }));
 vi.mock('node:child_process', async () => ({
   ...await vi.importActual<Record<string, unknown>>('node:child_process'), spawn: fixtureMocks.spawn,
@@ -22,6 +22,9 @@ vi.mock('../../scripts/backend/local.mjs', async () => ({
   ...await vi.importActual<Record<string, unknown>>('../../scripts/backend/local.mjs'),
   requireLocalContainer: fixtureMocks.requireLocalContainer,
   privilegedLocalSql: fixtureMocks.privilegedLocalSql, commandEnvironment: fixtureMocks.commandEnvironment,
+}));
+vi.mock('../integration/item-save.sessions.mjs', async () => ({
+  ...await vi.importActual<Record<string, unknown>>('../integration/item-save.sessions.mjs'), saveClients: fixtureMocks.saveClients,
 }));
 
 const read = (name: string) => readFile(new URL('../../' + name, import.meta.url), 'utf8');
@@ -286,6 +289,7 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
       stdin: Object.assign(stdin, { write, end, writableEnded: false, destroyed: false }), stdout, stderr, kill,
     }));
     return {
+      child, end, kill,
       assertReleased() {
         expect(closed).toBe(true);
         expect(end).toHaveBeenCalledExactlyOnceWith('rollback;\n');
@@ -426,5 +430,448 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
     const fixture = marker('ok', { error: privateError }, count);
     await rejection(withLifecycleCatalogMarker(owner, item, vi.fn()), privateError);
     fixture.assertCleaned(); expect(log).not.toHaveBeenCalled();
+  });
+  it.each(primaryValues)('retains first exact/falsy parent cleanup failure %# when termination and logging throw', async (first) => {
+    const fixture = parent();
+    fixture.end.mockImplementation(() => { throw first; });
+    fixture.kill.mockImplementation(() => {
+      queueMicrotask(() => fixture.child.emit('close', 0));
+      throw cleanupError;
+    });
+    log.mockImplementation(() => { throw privateError; });
+    await rejection(withLifecycleParentLock(owner, item, 'update', async () => {}), first);
+    expect(fixture.end).toHaveBeenCalledOnce();
+    expect(fixture.kill).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each(primaryValues)('retains exact/falsy primary %# when parent cleanup notice itself throws', async (primary) => {
+    const child = parent('status');
+    log.mockImplementation(() => { throw cleanupError; });
+    await rejection(withLifecycleParentLock(owner, item, 'update', async () => { throw primary; }), primary);
+    child.assertReleased();
+  });
+  it('bounds closure failure when termination throws and no close event arrives', async () => {
+    const child = new EventEmitter(), stdin = new EventEmitter(), stdout = new EventEmitter(), stderr = new EventEmitter();
+    const end = vi.fn(() => { throw cleanupError; }), kill = vi.fn(() => { throw privateError; });
+    fixtureMocks.spawn.mockReturnValue(Object.assign(child, {
+      stdin: Object.assign(stdin, { write: () => stdout.emit('data', Buffer.from('I08_PARENT_HELD\n')), end }), stdout, stderr, kill,
+    }));
+    const pending = rejection(withLifecycleParentLock(owner, item, 'update', async () => {}), cleanupError);
+    await vi.advanceTimersByTimeAsync(15_000);
+    await pending;
+    expect(end).toHaveBeenCalledOnce(); expect(kill).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0); expect(log.mock.calls).toEqual([[lockNotice]]);
+  });
+  it.each(primaryValues)('retains first exact/falsy marker cleanup %# through later absence and notice errors', async (first) => {
+    marker();
+    fixtureMocks.privilegedLocalSql.mockResolvedValueOnce('I08_MARKER_CREATED')
+      .mockRejectedValueOnce(first).mockRejectedValueOnce(cleanupError);
+    log.mockImplementation(() => { throw privateError; });
+    await rejection(withLifecycleCatalogMarker(owner, item, async () => {}), first);
+    expect(fixtureMocks.privilegedLocalSql).toHaveBeenCalledTimes(3);
+    expect(fixtureMocks.privilegedLocalSql.mock.calls[2]?.[0]).toContain('select count(*) from storage.objects');
+  });
+  it.each(primaryValues)('retains marker primary %# when cleanup and its notice both fail', async (primary) => {
+    const fixture = marker('absence-reject');
+    log.mockImplementation(() => { throw cleanupError; });
+    await rejection(withLifecycleCatalogMarker(owner, item, async () => { throw primary; }), primary);
+    fixture.assertCleaned();
+  });
+});
+
+describe('R3 bounded held-upload response and closed evidence (mock-only)', () => {
+  const env = {
+    ALLOW_SECURITY_TESTS: '1', SUPABASE_URL: 'http://127.0.0.1:54321', SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_unit_fixture',
+    TEST_A_EMAIL: 'user-a@example.test', TEST_B_EMAIL: 'user-b@example.test',
+    TEST_A_PASSWORD: 'a'.repeat(24), TEST_B_PASSWORD: 'b'.repeat(24),
+  };
+  const uid = '10000000-0000-4000-8000-000000000001';
+  const token = ['unit', Buffer.from(JSON.stringify({ role: 'authenticated', sub: uid })).toString('base64url'), 'unit'].join('.');
+  const owner = { label: 'A', uid, token };
+  const value = { p_item: { id: '10800000-0000-4000-8000-000000000002' }, p_image: { id: '10000000-0000-4000-8000-000000000003' } };
+  const conflict = { code: '22023', message: 'Request conflict' };
+  const primaryValues: unknown[] = [new Error('Private primary'), undefined, null, false, 0, ''];
+  const cleanupError = new Error('Private secondary');
+  const response = (data: unknown, status = 400) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let log: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    fetchMock = vi.fn(() => { throw new Error('Unexpected network request'); });
+    vi.stubGlobal('fetch', fetchMock);
+    log = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  describe('R3 held-phase records and outer cleanup (fully mocked ordinary clients)', () => {
+    const env = {
+      ALLOW_SECURITY_TESTS: '1', SUPABASE_URL: 'http://127.0.0.1:54321', SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_unit_fixture',
+      TEST_A_EMAIL: 'user-a@example.test', TEST_B_EMAIL: 'user-b@example.test',
+      TEST_A_PASSWORD: 'a'.repeat(24), TEST_B_PASSWORD: 'b'.repeat(24),
+    };
+    const owners = [1, 2].map((index) => {
+      const uid = `10000000-0000-4000-8000-00000000000${index}`;
+      return { label: index === 1 ? 'A' : 'B', uid,
+        token: ['unit', Buffer.from(JSON.stringify({ role: 'authenticated', sub: uid })).toString('base64url'), 'unit'].join('.') };
+    });
+    const primaryValues: unknown[] = [new Error('Private primary'), undefined, null, false, 0, ''];
+    const secondary = new Error('Private secondary');
+    let output: ReturnType<typeof vi.spyOn>, notices: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      fixtureMocks.saveClients.mockReset();
+      output = vi.spyOn(console, 'log').mockImplementation(() => {});
+      notices = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: '22023', message: 'Request conflict' }), { status: 400 })));
+    });
+    afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+    function object(value: unknown): Record<string, unknown> {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid mock object');
+      return value as Record<string, unknown>;
+    }
+    function fixture(fault?: { at: 'before' | 'rows' | 'insert' | 'status' | 'release' | 'reserve'; value: unknown },
+      cleanup?: { value: unknown }) {
+      const rows = new Map<string, { item: Record<string, unknown>; image: Record<string, unknown>;
+        reservation: Record<string, unknown>; requestId: unknown; expected: unknown }>();
+      const events: string[] = [];
+      let held: string | null = null, marker = false, cleanupStarted = false;
+      const conflict = () => ({ ok: false, status: 400, data: { code: '22023', message: 'Request conflict', details: null, hint: null } });
+      const request = vi.fn(async (token: string, route: string, options: { method?: string; body?: unknown } = {}) => {
+        const owner = owners.find((candidate) => candidate.token === token);
+        if (!owner) throw new Error('Unexpected mock owner');
+        const body = options.body === undefined ? {} : object(options.body);
+        let row = rows.get(owner.uid);
+        if (route.endsWith('/reserve_item_save')) {
+          if (fault?.at === 'reserve') throw fault.value;
+          if (!row) {
+            const item: Record<string, unknown> = { ...object(body.p_item), owner_id: owner.uid, version: 1, deleted_at: null };
+            const image: Record<string, unknown> = { ...object(body.p_image), owner_id: owner.uid, item_id: item.id, description_version: 1,
+              retired_at: null, state: 'pending', thumb_path: `${owner.uid}/${item.id}/${object(body.p_image).id}/thumb.jpg` };
+            row = { item, image, reservation: { fingerprint: 'a'.repeat(64), state: 'reserved', item, image }, requestId: null, expected: null };
+            rows.set(owner.uid, row);
+          }
+          return { ok: true, status: 200, data: [structuredClone(row.reservation)] };
+        }
+        if (route.startsWith('/storage/v1/object/wardrobe')) return { ok: true, status: 200, data: [] };
+        if (options.method === 'DELETE') {
+          if (marker) return conflict();
+          events.push('cleanup'); cleanupStarted = true;
+          if (cleanup) throw cleanup.value;
+          rows.delete(owner.uid);
+          return { ok: true, status: 200, data: [] };
+        }
+        if (route.startsWith('/rest/v1/items?') || route.startsWith('/rest/v1/item_images?')) {
+          if (held === 'update' && fault?.at === 'rows') throw fault.value;
+          return { ok: true, status: 200, data: row ? [structuredClone(route.startsWith('/rest/v1/items?') ? row.item : row.image)] : [] };
+        }
+        if (!row) throw new Error('Missing mock item');
+        if (route === '/rest/v1/item_images' && options.method === 'POST') {
+          if (fault?.at === 'insert') throw fault.value;
+          return conflict();
+        }
+        if (route.endsWith('/finalize_item_save')) {
+          row.image = { ...row.image, state: 'ready' };
+          return { ok: true, status: 204, data: null };
+        }
+        if (route.startsWith('/storage/v1/object/authenticated/')) {
+          return { ok: true, status: 200, data: Buffer.from([255, 216, 255, 217]) };
+        }
+        if (route.endsWith('/set_item_trashed')) {
+          row.item = { ...row.item, version: 2, deleted_at: '2026-09-13T12:00:00Z' };
+          return { ok: true, status: 200, data: [{ id: row.item.id, owner_id: owner.uid, version: 2, deleted_at: row.item.deleted_at }] };
+        }
+        if (route.endsWith('/item_deletion_status')) {
+          if (held === 'update' && fault?.at === 'status') throw fault.value;
+          return { ok: true, status: 200, data: [{
+            id: row.item.id, owner_id: owner.uid, title: row.item.title, version: row.item.version, deleted_at: row.item.deleted_at,
+            photo_count: 1, current_image_id: row.image.id, current_thumb_path: row.image.thumb_path,
+            image_manifest_sha256: 'a'.repeat(64), cleanup_blocked: marker, unmanifested_count: marker ? 1 : 0,
+            request_id: row.requestId, expected_version: row.expected, started_at: row.requestId ? '2026-09-13T12:00:00Z' : null,
+          }] };
+        }
+        if (route.endsWith('/begin_item_deletion')) {
+          if (held) return conflict();
+          row.requestId = body.p_request_id; row.expected = body.p_expected_version;
+          row.item = { ...row.item, version: 3 };
+          return { ok: true, status: 200, data: [{
+            request_id: row.requestId, expected_version: row.expected, version: 3,
+            started_at: '2026-09-13T12:00:00Z', image_manifest_sha256: 'a'.repeat(64),
+          }] };
+        }
+        if (route.endsWith('/finish_item_deletion')) {
+          if (held || marker) return conflict();
+          rows.delete(owner.uid);
+          return { ok: true, status: 200, data: [{ state: 'completed' }] };
+        }
+        throw new Error('Unexpected mock request');
+      });
+      fixtureMocks.saveClients.mockResolvedValue({ client: { request }, owners });
+      const withLifecycleParentLock = vi.fn(async (_owner: string, _item: string, mode: string, operation: () => Promise<void>) => {
+        if (fault?.at === 'before') { events.push('holder-failed'); throw fault.value; }
+        held = mode;
+        try { await operation(); } finally { held = null; events.push('holder-settled'); }
+        if (fault?.at === 'release') throw fault.value;
+      });
+      const withLifecycleCatalogMarker = vi.fn(async (_owner: string, _item: string, operation: () => Promise<void>) => {
+        marker = true;
+        try { await operation(); } finally { marker = false; }
+      });
+      return { request, events, withLifecycleParentLock, withLifecycleCatalogMarker,
+        isHeld: () => held !== null, cleanupStarted: () => cleanupStarted };
+    }
+    function records() {
+      return output.mock.calls.filter(([line]) => typeof line === 'string' && line.startsWith('{')).map(([line]) => JSON.parse(line));
+    }
+    async function rejection(promise: Promise<unknown>, expected: unknown) {
+      const result = await promise.then(() => ({ rejected: false, value: undefined }), (value: unknown) => ({ rejected: true, value }));
+      expect(result.rejected).toBe(true); expect(result.value).toBe(expected);
+    }
+    it.each(primaryValues)('emits once after holder failure %# and before cleanup, retaining primary through output/cleanup errors', async (primary) => {
+      const f = fixture({ at: 'before', value: primary }, { value: secondary }), seen: string[] = [];
+      output.mockImplementation((line: unknown) => {
+        expect(f.isHeld()).toBe(false); expect(f.cleanupStarted()).toBe(false);
+        if (typeof line === 'string') seen.push(line);
+        throw secondary;
+      });
+      notices.mockImplementation(() => { throw secondary; });
+      await rejection(lifecycleFixtureCases(env, f), primary);
+      expect(seen).toHaveLength(1);
+      expect(JSON.parse(seen[0]!)).toMatchObject({ stage: 'before-holder', status: null, code: null, bodyBytes: null });
+      expect(f.events).toEqual(['holder-failed', 'cleanup']);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+    it('emits no invented record if reservation fails before a held phase', async () => {
+      const primary = new Error('Private reserve');
+      const f = fixture({ at: 'reserve', value: primary });
+      await rejection(lifecycleFixtureCases(env, f), primary);
+      expect(records()).toHaveLength(0); expect(f.withLifecycleParentLock).not.toHaveBeenCalled();
+    });
+    it.each([
+      ['rows', 'classified'], ['insert', 'intent-and-rows'], ['status', 'image-insert-denied'], ['release', 'status-read'],
+    ] as const)('retains last reached stage after %s failure, not a fabricated release', async (at, stage) => {
+      const primary = new Error('Private assertion'), f = fixture({ at, value: primary });
+      await rejection(lifecycleFixtureCases(env, f), primary);
+      expect(records()).toHaveLength(1); expect(records()[0]).toMatchObject({ stage, status: 400, code: '22023' });
+      expect(f.events).toEqual(['holder-settled', 'cleanup']);
+      expect(globalThis.fetch).toHaveBeenCalledOnce();
+    });
+    it('observes an exact-conflict 500 but fails rather than running subsequent functional checks', async () => {
+      vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({ code: '22023', message: 'Request conflict' }), { status: 500 }));
+      const f = fixture();
+      await expect(lifecycleFixtureCases(env, f)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(records()).toHaveLength(1); expect(records()[0]).toMatchObject({ status: 500, stage: 'response-read', exactRequestConflict: true });
+      expect(f.events).toEqual(['holder-settled', 'cleanup']);
+      expect(output.mock.calls.some(([line]) => typeof line === 'string' && line.startsWith('PASS:'))).toBe(false);
+    });
+    it('emits exactly two complete records for two successful attempted owner phases, each outside the lock before cleanup', async () => {
+      const f = fixture();
+      output.mockImplementation((line: unknown) => {
+        if (typeof line === 'string' && line.startsWith('{')) {
+          expect(f.isHeld()).toBe(false); f.events.push('record');
+          expect(Buffer.byteLength(line)).toBeLessThanOrEqual(1024);
+        }
+      });
+      await expect(lifecycleFixtureCases(env, f)).resolves.toBeUndefined();
+      expect(records().map((row) => [row.ownerOrdinal, row.stage, row.status])).toEqual([[1, 'released', 400], [2, 'released', 400]]);
+      expect(f.events).toEqual(['holder-settled', 'record', 'holder-settled', 'holder-settled', 'cleanup',
+        'holder-settled', 'record', 'holder-settled', 'holder-settled', 'cleanup']);
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+      expect(f.withLifecycleCatalogMarker).toHaveBeenCalledTimes(2);
+    });
+    it('retains two records when the second owner fails after the first passes, without another request or retry', async () => {
+      vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({ code: '22023', message: 'Request conflict' }), { status: 400 }))
+        .mockRejectedValueOnce(secondary);
+      const f = fixture();
+      await rejection(lifecycleFixtureCases(env, f), secondary);
+      expect(records().map((row) => [row.ownerOrdinal, row.stage, row.status])).toEqual([[1, 'released', 400], [2, 'request-sent', null]]);
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+      expect(f.events.filter((event) => event === 'cleanup')).toHaveLength(2);
+    });
+    it.each(primaryValues)('retains exact/falsy cleanup-only rejection %# without a success-shaped outer result', async (first) => {
+      const f = fixture(undefined, { value: first });
+      notices.mockImplementation(() => { throw secondary; });
+      await rejection(lifecycleFixtureCases(env, f), first);
+      expect(records()).toHaveLength(1); expect(records()[0].stage).toBe('released');
+      expect(f.events.filter((event) => event === 'cleanup')).toHaveLength(1);
+    });
+    it.each(primaryValues)('preserves exact/falsy record-output failure %# and still runs outer cleanup', async (first) => {
+      const f = fixture(undefined, { value: secondary });
+      output.mockImplementation((line: unknown) => {
+        if (typeof line === 'string' && line.startsWith('{')) throw first;
+      });
+      notices.mockImplementation(() => { throw secondary; });
+      await rejection(lifecycleFixtureCases(env, f), first);
+      expect(records()).toHaveLength(1);
+      expect(f.events).toEqual(['holder-settled', 'cleanup']);
+    });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals(); vi.restoreAllMocks();
+  });
+  async function rejection(promise: Promise<unknown>, expected: unknown) {
+    const result = await promise.then(() => ({ rejected: false, value: undefined }), (value: unknown) => ({ rejected: true, value }));
+    expect(result.rejected).toBe(true); expect(result.value).toBe(expected);
+  }
+  it('makes precisely the original local ordinary POST, with the same bytes/headers and 15s signal', async () => {
+    const reply = response(conflict), reader = reply.body!.getReader();
+    const cancel = vi.spyOn(reader, 'cancel'), release = vi.spyOn(reader, 'releaseLock');
+    vi.spyOn(reply.body!, 'getReader').mockReturnValue(reader);
+    fetchMock.mockResolvedValue(reply);
+    const timeout = vi.spyOn(AbortSignal, 'timeout'), observation = lifecycleObservation(1);
+    const result = await readLifecycleUploadResponse(env, owner, value, observation);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(`http://127.0.0.1:54321/storage/v1/object/wardrobe/${uid}/${value.p_item.id}/${value.p_image.id}/thumb.jpg`);
+    expect(init).toEqual({
+      method: 'POST', cache: 'no-store', redirect: 'error', signal: expect.any(AbortSignal),
+      body: new Uint8Array([255, 216, 255, 217]),
+      headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'image/jpeg', 'x-upsert': 'false' },
+    });
+    expect(timeout).toHaveBeenCalledExactlyOnceWith(15_000);
+    expect(cancel).toHaveBeenCalledOnce(); expect(release).toHaveBeenCalledOnce();
+    expect(observation).toMatchObject({ status: 400, ok: false, bodyType: 'object', captureError: 'none',
+      bodyBytes: Buffer.byteLength(JSON.stringify(conflict)), truncated: false, cancelFailed: false, releaseFailed: false });
+    expect(() => requireLifecycleUploadConflict(result)).not.toThrow();
+  });
+  it('refuses endpoint, identity and credential escapes before any request', async () => {
+    for (const change of [
+      { SUPABASE_URL: 'https://example.test' }, { SUPABASE_URL: 'http://127.0.0.1:54322' },
+      { SUPABASE_URL: 'http://127.0.0.1:54321/path' }, { SUPABASE_URL: 'http://127.0.0.1:54321@elsewhere.test' },
+      { SUPABASE_PUBLISHABLE_KEY: 'sb_secret_refused' }, { ALLOW_SECURITY_TESTS: '' }, { SERVICE_ROLE_KEY: 'refused' },
+      { TEST_A_EMAIL: 'elsewhere@example.test' },
+    ]) await expect(readLifecycleUploadResponse({ ...env, ...change }, owner, value, lifecycleObservation(1))).rejects.toThrow();
+    for (const changed of [{ ...owner, uid: 'bad/path' }, { ...owner, token: 'bad\r\nheader' }, { ...owner, token: 'service-role' },
+      { ...owner, uid: value.p_image.id }]) {
+      await expect(readLifecycleUploadResponse(env, changed, value, lifecycleObservation(1))).rejects.toThrow();
+    }
+    for (const changed of [{ ...value, p_item: { id: uid } }, { ...value, p_image: { id: '../other' } }]) {
+      await expect(readLifecycleUploadResponse(env, owner, changed, lifecycleObservation(1))).rejects.toThrow();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it('requires exact existing conflicts and excludes every 5xx even with an exact conflict envelope', async () => {
+    for (const [data, status, passes] of [
+      [conflict, 400, true], [{ error: 'Private wrapper', statusCode: '409', message: 'Request conflict' }, 409, true],
+      [conflict, 500, false], [conflict, 503, false], [{ error: 'Private', statusCode: '500', message: 'Request conflict' }, 500, false],
+      [{ message: 'Private server failure' }, 500, false], [{ code: '22023', message: 'prefix Request conflict' }, 400, false],
+      [{ code: '55P03', message: 'Request conflict' }, 400, false], [{ error: 'Private', statusCode: '401', message: 'Request conflict' }, 400, false],
+      [{ error: 1, statusCode: 400, message: 'Request conflict' }, 400, false], [conflict, 200, false],
+    ] as const) {
+      fetchMock.mockResolvedValueOnce(response(data, status));
+      const observation = lifecycleObservation(1), result = await readLifecycleUploadResponse(env, owner, value, observation);
+      expect(observation.status).toBe(status);
+      if (passes) expect(() => requireLifecycleUploadConflict(result)).not.toThrow();
+      else expect(() => requireLifecycleUploadConflict(result)).toThrow('EVIDENCE_REQUIRED');
+      expect(serializeLifecycleObservation(observation)).not.toContain('Private');
+    }
+    expect(() => requireLifecycleUploadConflict({ ok: false, status: 400, elapsedMs: 5000, data: conflict })).toThrow();
+    expect(() => requireLifecycleUploadConflict({ ok: false, status: 400, elapsedMs: 4999.999, data: conflict })).not.toThrow();
+  });
+  it('retains null for missing response and records headers before missing/empty/body-shape failures', async () => {
+    fetchMock.mockRejectedValueOnce(cleanupError);
+    const absent = lifecycleObservation(1);
+    await rejection(readLifecycleUploadResponse(env, owner, value, absent), cleanupError);
+    expect(absent).toMatchObject({ status: null, ok: null, bodyBytes: null, code: null, captureError: 'request' });
+    for (const reply of [new Response(null, { status: 204 }), new Response(null, { status: 500 }), new Response('', { status: 400 })]) {
+      fetchMock.mockResolvedValueOnce(reply);
+      const observation = lifecycleObservation(1), result = await readLifecycleUploadResponse(env, owner, value, observation);
+      expect(observation.status).toBe(reply.status); expect(observation.code).toBeNull();
+      expect(() => requireLifecycleUploadConflict(result)).toThrow();
+    }
+    for (const [body, bodyType, captureError] of [
+      ['not JSON', 'invalid-json', 'json'], ['{', 'invalid-json', 'json'], ['[]', 'array', 'shape'],
+      ['null', 'primitive', 'shape'], ['1', 'primitive', 'shape'], ['"Private"', 'primitive', 'shape'],
+      [new Uint8Array([0xff]), 'invalid-utf8', 'decode'],
+    ] as const) {
+      fetchMock.mockResolvedValueOnce(new Response(body, { status: 500, headers: { 'content-type': 'text/plain' } }));
+      const observation = lifecycleObservation(1);
+      await expect(readLifecycleUploadResponse(env, owner, value, observation)).rejects.toThrow();
+      expect(observation).toMatchObject({ status: 500, ok: false, contentType: 'other', bodyType, captureError, code: null });
+      expect(serializeLifecycleObservation(observation)).not.toContain('Private');
+    }
+  });
+  it('counts actual incremental bytes, accepts 4096 and refuses overflow without clamping or retaining its chunk', async () => {
+    const text = JSON.stringify(conflict).padEnd(4096, ' ');
+    fetchMock.mockResolvedValueOnce(new Response(text, { status: 400, headers: { 'content-length': '1' } }));
+    const exact = lifecycleObservation(1);
+    const result = await readLifecycleUploadResponse(env, owner, value, exact);
+    requireLifecycleUploadConflict(result);
+    expect(exact.bodyBytes).toBe(4096);
+    for (const chunks of [[new Uint8Array(4097)], [new Uint8Array(4096), new Uint8Array(1)]]) {
+      const cancel = vi.fn(), stream = new ReadableStream<Uint8Array>({
+        start(controller) { for (const chunk of chunks) controller.enqueue(chunk); }, cancel,
+      });
+      const reply = new Response(stream, { status: 500, headers: { 'content-length': '4096' } });
+      const reader = stream.getReader(), release = vi.spyOn(reader, 'releaseLock');
+      vi.spyOn(stream, 'getReader').mockReturnValue(reader); fetchMock.mockResolvedValueOnce(reply);
+      const observation = lifecycleObservation(1);
+      await expect(readLifecycleUploadResponse(env, owner, value, observation)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(observation).toMatchObject({ status: 500, bodyBytes: null, truncated: true, captureError: 'overflow', code: null });
+      expect(cancel).toHaveBeenCalledOnce(); expect(release).toHaveBeenCalledOnce();
+    }
+  });
+  for (const mode of ['read', 'cancel', 'release'] as const) {
+    it.each(primaryValues)(`preserves exact/falsy ${mode} failure %# and attempts every reader cleanup`, async (first) => {
+      const reply = response(conflict), reader = reply.body!.getReader();
+      vi.spyOn(reply.body!, 'getReader').mockReturnValue(reader);
+      const cancel = vi.spyOn(reader, 'cancel'), release = vi.spyOn(reader, 'releaseLock');
+      if (mode === 'read') vi.spyOn(reader, 'read').mockRejectedValueOnce(first);
+      if (mode !== 'release') cancel.mockRejectedValueOnce(mode === 'cancel' ? first : cleanupError);
+      release.mockImplementationOnce(() => { throw mode === 'release' ? first : cleanupError; });
+      log.mockImplementation(() => { throw new Error('Private output failure'); });
+      fetchMock.mockResolvedValueOnce(reply);
+      const observation = lifecycleObservation(1);
+      await rejection(readLifecycleUploadResponse(env, owner, value, observation), first);
+      expect(cancel).toHaveBeenCalledOnce(); expect(release).toHaveBeenCalledOnce();
+      expect(observation.cancelFailed).toBe(mode !== 'release'); expect(observation.releaseFailed).toBe(true);
+      expect(serializeLifecycleObservation(observation)).not.toContain('Private');
+      release.mockRestore(); reader.releaseLock();
+    });
+  }
+  it('rejects a failed getReader and retains its observed status without invented body observations', async () => {
+    const reply = response(conflict); vi.spyOn(reply.body!, 'getReader').mockImplementation(() => { throw cleanupError; });
+    fetchMock.mockResolvedValueOnce(reply);
+    const observation = lifecycleObservation(1);
+    await rejection(readLifecycleUploadResponse(env, owner, value, observation), cleanupError);
+    expect(observation).toMatchObject({ status: 400, captureError: 'read', bodyBytes: null, truncated: null, cancelFailed: false, releaseFailed: null });
+  });
+  it.each(primaryValues)('preserves header failure %# through body cancellation failure without inventing a parsed object', async (primary) => {
+    const reply = response(conflict);
+    vi.spyOn(reply.headers, 'get').mockImplementation(() => { throw primary; });
+    const cancel = vi.spyOn(reply.body!, 'cancel').mockRejectedValueOnce(cleanupError);
+    fetchMock.mockResolvedValueOnce(reply);
+    const observation = lifecycleObservation(1);
+    await rejection(readLifecycleUploadResponse(env, owner, value, observation), primary);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(observation).toMatchObject({ status: 400, captureError: 'headers', bodyBytes: null, code: null, cancelFailed: true, releaseFailed: null });
+  });
+  it.each(primaryValues)('does not let elapsed observation failure replace primary %#', async (primary) => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValueOnce(100).mockImplementationOnce(() => { throw cleanupError; });
+    fetchMock.mockRejectedValueOnce(primary);
+    const observation = lifecycleObservation(1);
+    await rejection(readLifecycleUploadResponse(env, owner, value, observation), primary);
+    expect(observation.elapsedMs).toBeNull(); expect(clock).toHaveBeenCalledTimes(2);
+  });
+  it('enforces closed keys/types/enums/bounds without serializing private properties or invoking accessors', () => {
+    const initial = lifecycleObservation(1), text = serializeLifecycleObservation(initial);
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1024);
+    expect(text).not.toMatch(/[\r\n]/); expect(JSON.parse(text)).toEqual(initial);
+    for (const change of [
+      { private: 'Private' }, { stage: 'Private' }, { ownerOrdinal: 0 }, { ownerOrdinal: 3 }, { status: 99 }, { status: 600 },
+      { elapsedMs: -1 }, { elapsedMs: 600001 }, { elapsedMs: 1.1 }, { elapsedMs: NaN }, { bodyBytes: 4097 },
+      { bodyBytes: 4096, truncated: true }, { code: 'Private' }, { ok: 'Private' }, { bodyType: 'Private' },
+      { captureError: 'Private' }, { code: 'missing' }, { messagePresent: false },
+    ]) expect(() => serializeLifecycleObservation({ ...initial, ...change })).toThrow();
+    const getter = vi.fn(() => 'Private'), accessor = { ...initial };
+    Object.defineProperty(accessor, 'stage', { enumerable: true, get: getter });
+    expect(() => serializeLifecycleObservation(accessor)).toThrow(); expect(getter).not.toHaveBeenCalled();
+    const stringify = vi.spyOn(JSON, 'stringify');
+    stringify.mockReturnValueOnce('x'.repeat(1025));
+    expect(() => serializeLifecycleObservation(initial)).toThrow();
+    stringify.mockReturnValueOnce('bad\nline');
+    expect(() => serializeLifecycleObservation(initial)).toThrow();
+    stringify.mockReturnValueOnce('not JSON');
+    expect(() => serializeLifecycleObservation(initial)).toThrow();
+    stringify.mockReturnValueOnce('{}');
+    expect(() => serializeLifecycleObservation(initial)).toThrow();
+    stringify.mockImplementationOnce(() => { throw cleanupError; });
+    expect(() => serializeLifecycleObservation(initial)).toThrow(cleanupError);
   });
 });
