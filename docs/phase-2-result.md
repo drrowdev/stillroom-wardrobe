@@ -4703,3 +4703,100 @@ earlier; absent records after termination or timeouts provide no evidence.
 All 317230 previously reviewed document bytes and the original 311834-byte prefix
 remain frozen. The candidate remains unstaged, with no local runtime checks or
 publication; the future gated CI/Apple cycle remains unspent and all holds remain.
+
+## 13 September 2026 - I08 Stage 1 source-only lifecycle candidate
+
+Requirements R03/R23/R28 and related R11/R12/R17/R20/R26/R27. This append follows
+the [reviewed T14 corrections](https://github.com/drrowdev/stillroom-wardrobe/pull/24#issuecomment-5653340839)
+and [coordinator-observed own-model/source permission](https://github.com/drrowdev/stillroom-wardrobe/pull/24#issuecomment-5653390965),
+not the historical diagnostic packet's authority. The existing 318324 working
+bytes remain frozen; historical evidence above is not rewritten.
+
+One persistent local writer, canonical session
+`a8161d14-3457-4d7f-83a2-e05600445062`, branch `drrowdev-item-lifecycle`, base
+`221d60c8a07eb4a89a546133685b80487cf434be`, remains within the thirteen Stage 1
+paths. The other 201 original paths, generated types, thirty-field editor,
+readiness logic, upload/capture source, diagnostics and workflow remain frozen.
+Actual Anthropic Claude Opus 5 T13/T14 AMEND and the coordinator's binding
+corrections precede implementation; no unconditional source/runtime PASS is
+inferred from plan approval or local model telemetry.
+
+The source candidate adds a private cascading live-item claim, four owner RPCs,
+fresh privileged row guards and same-parent image/Storage INSERT fences.
+Read-only single-snapshot status includes the original/current versions and
+nonce needed for exact reload/resume. Initial pending/orphan states reject
+permanent BEGIN before mutation. Claimed image metadata stays intact through
+byte removal; FINISH retains parent UPDATE exclusion and requires an empty
+whole item prefix before cascade. Unclaimed legacy behavior, saved fields/
+provenance and wear-history name/category snapshots are preserved.
+
+The strict ninth canonical source pin is 15332 bytes,
+SHA-256 `38de5f1b7bd4edd0f7e3829f90e1b1486c0b32385c1bd75b03b7dee9263ba1c5`.
+New ordinary-session/static test definitions and positive catalog checks cover
+the claim/grant/lock/replay contract, real Storage removal, retained versions,
+history and cross-owner negatives. Source-defined CI-only fixtures hold one
+exact disposable parent or add one no-blob catalog marker; ordinary users make
+the access assertions. A SQL lock acknowledgement, not a sleep or Promise.all,
+is required for forced-overlap evidence. Unknown Storage wrapper responses and
+cleanup failures stop the gate. Existing capture retry source is unchanged.
+
+Status: **UNSTAGED, unexecuted source candidate for coordinator review.**
+Only manual text/Git/PowerShell/.NET metadata/hash inspection was permitted.
+No Node/npm/compiler/lint/unit/browser/backend/build/scanner/install/TLS probe,
+Actions query/run, image/archive input, generated artifacts, stage/commit/push,
+new PR, hosted operation or deployment was authorized or performed. Static test
+definitions are not a passing test run or live SQL/Storage evidence.
+
+Separate publication/execution permission is still required. Stage 1 actual
+generation/upload and all preceding gates must succeed before its sole
+anticipated final four-RPC type-parity red can be accepted as an intermediate
+artifact-producing cycle, never backend/merge PASS. Same-writer Stage 2 still
+needs actual generated types, integrated UI, four additional bounded captures,
+full exact-head CI/Apple/live/types/coordinator visual and genuine final review.
+No run budget has been spent by this source work.
+
+Original Save failure uncertainty and STOP on recurrence remain. Production
+f318/six hosted migrations, unhosted B1/B2, paid/private/provider/deployment
+holds, physical-device/manual acceptance and mandatory saved-only I29 recovery/
+export before release remain unchanged. No I09 compound filters/bulk, I10
+replacement/orphan/scheduler, AI lifecycle call or next packet is included.
+
+## 13 September 2026 - I08 T15 source-review R1 correction
+
+[Actual T15 AMEND and narrow correction permission](https://github.com/drrowdev/stillroom-wardrobe/pull/24#issuecomment-5653613862)
+records Anthropic Claude Opus 5 review and one cleanup-error-fidelity finding,
+not an unconditional source/runtime PASS. Both new I08 fixture helpers now
+preserve the exact primary setup/operation rejection, including falsy thrown
+values, when release or cleanup also fails. Secondary failures emit only fixed
+non-sensitive notices; cleanup-only failures still reject. Parent closure/timer
+cleanup and exact marker deletion-count/absence assertions remain required.
+
+Focused mock-only regression definitions cover success, primary-only,
+cleanup-only, simultaneous and falsy failures, synchronous/awaited cleanup and
+bounded child release. No Docker, SQL or network operation is used by those
+mock definitions, and no test was executed here. Only the two helper control
+flows, their new unit coverage and this append changed. The full preceding
+322125 working bytes and original 318324-byte prefix remain frozen, as do the
+other ten candidate blobs, migration/pins and 201 outside paths.
+
+The same writer/session/branch stops UNSTAGED for coordinator verification.
+No runtime/compiler/test/probe, publication, Actions or hosted operation was
+authorized or performed. All existing exact-head, original Save uncertainty,
+Stage 2, production/privacy/paid/deployment and release-acceptance holds remain.
+
+## 13 September 2026 - I08 coordinator source follow-up R2
+
+[Narrow R2 permission](https://github.com/drrowdev/stillroom-wardrobe/pull/24#issuecomment-5653660835)
+addresses a setup-before-await readiness rejection and unconditional unit
+teardown. An early rejection observer now covers the separate readiness promise;
+the actual readiness await, primary rejection and cleanup checks remain intact.
+Mock-only setup-failure/async-child-error cases include exact/falsy primary
+values and check for unhandled rejection, fixed notice, child closure and timer
+cleanup. Timer/network assertions still fail normally, with timer/environment/
+global/spy restoration in finally.
+
+The preceding 323640 working bytes and earlier 322125/318324-byte prefixes remain
+frozen. Only the same three repair paths changed; all other candidate/source
+boundaries and migration pins remain unchanged. T15 remains AMEND, not an
+unconditional reviewer or runtime PASS. No tests/runtime commands/publication
+ran; the candidate stops UNSTAGED and all prior execution and release holds remain.

@@ -2,6 +2,56 @@
 
 ## Implemented scope and current evidence
 
+### I08 Stage 1 source-only candidate (13 September 2026)
+
+The I08 candidate adds a strictly pinned ninth migration,
+`20260913120000_item_lifecycle.sql`, canonical LF 15332 bytes,
+SHA-256 `38de5f1b7bd4edd0f7e3829f90e1b1486c0b32385c1bd75b03b7dee9263ba1c5`.
+All eight earlier pins and base-to-target content comparisons remain unchanged.
+History parsing requires all nine exact names/versions/times; this is not a
+permissive migration-count increase. Existing checked-Save catalog evidence
+remains separate from the new positive claim/RPC/trigger/Storage-policy checks.
+
+`run-local-tests.mjs` adds the I08 ordinary integration/security children after
+the unchanged existing children and before integration's recovery selection.
+They use only the existing normal-session environment. The source tests cover
+versioned Trash/Restore, exact replay and reload versions, pending/orphan refusal,
+partial actual Storage cleanup, retained versions, legacy DELETE, snapshots,
+owner-local nonce reuse, private406 and foreign-row/byte preservation. Seeded
+legacy timestamps on either side of seven days are labelled fixtures, not
+seven days of observed operation. Ordinary Promise.all samples are not forced
+overlap proof.
+
+Only preservation rehearsal defines/executes the special CI fixture callbacks,
+after unchanged preservation comparison and positive catalog verification.
+The fixture gate requires CI, GITHUB_ACTIONS, ALLOW_PRESERVATION_REHEARSAL and
+ALLOW_SECURITY_TESTS literal opt-ins, a validated local container and newly
+allocated `1080`-prefixed disposable item UUIDs. It does not borrow B2's `b229`
+guard or accept arbitrary SQL/table/owner overrides.
+
+The lock callback holds exactly one owned parent row in UPDATE or KEY SHARE;
+its SQL acknowledgement proves the lock is held before normal HTTP assertions
+begin. It is released by rollback, with a 15-second deadline and closed output.
+Tests observe the real Storage wrapper's fixed-conflict response (otherwise
+fail), verify unchanged draft/IDs/rows, then explicitly retry after release.
+The marker callback inserts one exact unmanifested catalog marker only after
+a normal claim and manifested-object removal. It has no bytes. Ordinary-owner
+raw DELETE/FINISH must refuse it without losing the item/claim; exact marker
+cleanup and subsequent normal completion are required. No fixture profile,
+shared row, production RPC or provider-side blob is created/deleted by setup.
+
+**None of this candidate has been executed locally or in CI.** Local tooling
+restoration and all runtime probes remain prohibited by the source-only receipt.
+The candidate must stop unstaged for coordinator review; there is no publication
+or run budget. An eventual Stage 1 cycle needs all preceding checks plus actual
+generated-type upload, with only the specifically approved final four-RPC type
+parity difference allowed as an intermediate red, not backend PASS. Actual
+generated types and Stage 2 UI/captures, full exact-head CI/Apple/live/visual/
+independent review remain later gates. No new run or rerun is authorized here.
+Original Save uncertainty/stop-on-recurrence, production/privacy/paid/deployment
+holds, manual/device acceptance and saved-only recovery/export release work
+remain unchanged.
+
 The local tools use the pinned Supabase CLI **2.116.0**, Node 24 and Docker. They do not install Docker, create cloud resources, link projects, use a management API, or reset remote databases. Host `psql` is not needed: the isolated provisioning process uses `docker exec` into the specifically labelled local database container, connecting to that container's own loopback Postgres endpoint with stock local trust authentication. It refuses password prompting.
 
 The initial migration is a byte-for-byte copy of `blueprint/07-DATABASE-AND-RLS.sql`, revision 1.1, including its transaction. SHA-256:

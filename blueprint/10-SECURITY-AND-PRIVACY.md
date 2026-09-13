@@ -63,6 +63,48 @@ A publishable key is safe only with correctly enforced RLS. Allowlist `VITE_SUPA
 
 ## Deletion and recovery
 
+### I08 ordinary-item deletion boundary - unexecuted source candidate
+
+The ninth lifecycle migration uses an owner-only private live-item claim,
+not a public item flag or another copy of garment fields/photos. Its request UUID,
+original expected version and server start time persist only while that live
+item has unfinished deletion. The claim is not a completed receipt, export
+member or log entry. It has no client table grants/policies, automatic purge or
+independent profile cascade.
+
+After explicit BEGIN, item/image mutation and Restore are refused; partial byte
+removal retains the frozen metadata and can resume using the same nonce and
+original/current versions. Private SECURITY DEFINER guards use fresh visibility
+of claims and Storage even for ordinary raw DELETE, so RLS-hidden orphan objects
+cannot masquerade as an empty prefix. A same-parent image/Storage INSERT fence
+and the final parent UPDATE lock protect the ordinary catalog boundary.
+Completion requires an empty entire literal item prefix before the metadata
+cascade. Generic absent is deliberately not a byte-deletion receipt.
+
+Permanent item deletion removes the garment record and its registered photos;
+**wear history retains the recorded garment name and category** with a null
+item link. Current outfit links and impossible feedback follow their existing
+cascades. The later named confirmation must say this naturally in English,
+Finnish and Swedish and distinguish this operation from whole-account deletion.
+No promise is made to erase historical text, external exports or provider backups.
+
+Unclaimed legacy operations remain supported. An initial unmanifested-prefix
+case blocks permanent BEGIN without changing rows/versions; reversible
+Trash/Restore remains possible within its window. I10 orphan cleanup is not
+implemented. No scheduler, provider call or global raw-DELETE redesign is hidden
+in I08. The normal deletion controller's bytes-first account sequence remains;
+a privileged profile deletion which bypasses it may now be refused while a
+claimed item's objects remain. Structural cascade checks are not account-journey
+acceptance.
+
+Future CI includes positive private-schema/grant/trigger/policy catalog checks,
+ordinary A/B/anonymous assertions and exact retained-photo/history/peer checks.
+Separately labelled CI-only setup may hold one exact disposable item-row lock or
+insert one exact catalog marker after a normal claim and manifested-byte removal.
+The marker has no blob: it tests privileged visibility in an ordinary-owner
+deletion refusal, not physical byte deletion. The setup never serves as the
+access-assertion identity, and exact cleanup failure fails the gate.
+
 The reviewed PR #17/A1 checked-manual-Save source candidate retains a minimal
 private retry guard after item/image cleanup: exactly three UUIDs
 `owner_id,item_id,image_id`, unique per owner, with no timestamps, status,

@@ -29,6 +29,36 @@ Analysis creates no item/image records: photo/title/category are checked only on
 
 ## Entities
 
+### I08 owned-item lifecycle - Stage 1 source candidate
+
+`20260913120000_item_lifecycle.sql` adds only a private live deletion claim and
+four owner RPCs; it does not add an item column, alter checked-Save fingerprints,
+copy garment/photo content or change the export shape. This is unexecuted source,
+not a hosted migration or completed Trash UI.
+
+`private.item_deletion_claims` contains `owner_id`, `item_id`, owner-local unique
+`request_id`, the original `expected_version` and server `started_at`. Its composite
+item FK cascades with the item. It has no separate profile FK whose cascade could
+erase the claim before the item's deletion guard. RLS is enabled without client
+table policies/grants. An unfinished claim remains until its live item is deleted;
+there is no timeout purge, completed tombstone or claim export.
+
+Trash/Restore changes only `deleted_at` and normal server timestamp/version.
+Permanent deletion first rejects pending photos and unmanifested item-prefix
+objects, then advances the version exactly once before installing the claim.
+The claim freezes the item and all ready/retired image metadata through partial
+byte cleanup. Reload returns the same request UUID, original expected version
+and current version. A sorted metadata/description-revision manifest excludes
+Storage membership, so removing bytes does not invalidate an exact replay.
+
+Final deletion checks the whole literal owned-item prefix, not only known photo
+paths. It keeps the parent UPDATE admission fence until transaction end and
+deletes the item only when no catalog objects remain. Image/claim cascades then
+remove live metadata; wear-event title/category snapshots retain null item links.
+Existing unclaimed raw DELETE behavior remains, including its orphan risk.
+Pre-existing orphan cases can use reversible Trash/Restore but cannot begin
+permanent deletion until separately scoped I10 cleanup is available.
+
 ### Checked manual Save prerequisite — staged source
 
 `20260910070000_checked_item_save.sql` is the reviewed PR #17/A1 source

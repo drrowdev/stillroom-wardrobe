@@ -41,6 +41,73 @@ The SQL column constraints are the validation maxima. Add runtime parsers at bou
 
 ## Operations
 
+### I08 lifecycle RPCs - Stage 1 source candidate
+
+These four source-defined RPCs use enabled ordinary-owner sessions, qualified
+relations, empty search paths and fixed errors. They have not been executed or
+deployed. Actual generated public types are mandatory before the separate
+Stage 2 Trash/Undo/Restore/delete UI; do not hand-author those signatures.
+
+| RPC | Arguments | Result |
+|---|---|---|
+| `set_item_trashed` | `p_item_id uuid, p_expected_version bigint, p_trashed boolean` | One `id,owner_id,version,deleted_at` row. Trash requires a current ready image; Restore requires an unclaimed trash timestamp within seven server days. |
+| `item_deletion_status` | `p_item_ids uuid[]`, 1-40 distinct non-null UUIDs | At most one row per owned item: `id,owner_id,title,version,deleted_at,photo_count,current_image_id,current_thumb_path,image_manifest_sha256,cleanup_blocked,unmanifested_count,request_id,expected_version,started_at`. Missing/foreign items are omitted. |
+| `begin_item_deletion` | `p_item_id uuid, p_expected_version bigint, p_request_id uuid, p_image_manifest_sha256 text` | One `request_id,expected_version,version,started_at,image_manifest_sha256` row. Exact replay returns the existing claim without another write. |
+| `finish_item_deletion` | `p_item_id uuid, p_request_id uuid` | One `state` row: `completed` only for this checked deletion; generic `absent` for missing/foreign/already deleted, never proof of byte removal. |
+
+Expected versions are positive safe integers, at most 9007199254740990 before
+increment; hashes are exactly 64 lowercase hexadecimal characters. Null/invalid
+arguments use fixed `22023 / Invalid input`; state/version/manifest/nonce/lock
+conflicts use `22023 / Request conflict`; unavailable approval uses
+`42501 / Not available`. RPC EXECUTE remains authenticated-only. Status has
+VOLATILE metadata for fresh protected visibility, but its relation reads are a
+single read-only statement; its manifest helper is a pure immutable projection.
+It exposes a blocked count, never unregistered object names or removal authority.
+
+Mutations lock the owner profile, ordered existing images, then the parent
+`FOR UPDATE NOWAIT`, and re-read/lock the complete image set after the parent.
+BEGIN/FINISH then lock the own claim. Explicit locks use NOWAIT with a 2-second
+lock-timeout backstop and fixed conflict translation. Image INSERT takes the
+same parent's KEY SHARE before a fresh claim check. Existing-row image and item
+triggers use fresh definer reads, not caller-visible RLS-filtered Storage rows.
+A valid final cascade is permitted by parent absence after byte checking, not by
+an auth mismatch, GUC, definer exemption or profile-delete shortcut.
+
+Only `wardrobe_create` changes: its narrowly granted private helper resolves an
+exact owned reserved pending path, holds parent KEY SHARE through the catalog
+INSERT, then rechecks pending/path/owner/no-claim. Read/delete helpers and the
+absence of an UPDATE policy stay unchanged. This introduces bounded upload
+authorization contention. The actual Storage HTTP wrapper must be observed in
+CI; SQL's fixed conflict does not specify that wrapper's HTTP code. Existing
+`ensureFile`/`requireSuccess` reports nonduplicate failures as unavailable, keeps
+the same draft/photo/IDs and offers explicit retry. It is not photo rejection or
+an automatic resend; capture/transport source stays frozen.
+
+Initial pending images or unmanifested item-prefix objects refuse BEGIN before
+any irreversible claim/version change. Restore remains available in its window.
+After BEGIN, no Restore/Undo, item update, image reservation/update/forgetting or
+metadata-per-batch deletion is allowed. Remove only validated retained main/thumb
+paths via ordinary Storage; preserve metadata until FINISH. FINISH also takes
+SHARE NOWAIT locks on any present prefix objects and refuses them. An empty
+query does not lock absence: the held parent UPDATE fence excludes admitted
+ordinary catalog INSERTs.
+
+Future Stage 2 must fresh-read confirmation name/version/photo context, require
+all editor sections clean and resolved, and use the returned original/current
+versions and nonce for explicit reload/resume. An ambiguous BEGIN permits only a
+read-only Check status before deliberate Resume. Each action has a 30-second
+work budget, pages of at most 40 photo versions and removal batches of at most
+40 named paths; route/owner cancellation stops new requests and invalidates late
+continuations, without pretending an already-sent SDK removal was canceled.
+Eight-second Undo is owner-memory-only and supplemental to seven-day Trash.
+
+Ordinary Storage acknowledgements plus SQL catalog absence are not provider
+backup/physical-erasure proof. Service/admin bypasses, unobserved provider blobs
+and interrupted streams are outside this fence. No signed-upload flow, orphan
+cleaner, scheduler, AI call, I09 bulk/filter feature or I10 media replacement is
+introduced. Named EN/FI/SV permanent-delete confirmation must explain that wear
+history retains its recorded garment name/category.
+
 REST below means `/rest/v1/…` with the publishable key and user bearer token. Query only explicitly needed columns. Private original tables never use “owner OR household” filters.
 
 | Operation | Contract and response | Error/retry behaviour |

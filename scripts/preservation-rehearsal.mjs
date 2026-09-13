@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   ROOT, assertNoServiceSecrets, assertProjectConfig, requireDocker, requireLocalContainer,
   cli, runCommand, normalSessionEnvironment, readCredentialCache, validateSessionEnvironment, privilegedLocalSql,
+  DB_CONTAINER, commandEnvironment,
 } from './backend/local.mjs';
 import { isMain } from './quality/files.mjs';
 import {
@@ -19,6 +21,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260910070000_checked_item_save.sql', version: '20260910070000', time: '2026-09-10 07:00:00', bytes: 16801, sha256: SOURCE_HASHES.save },
   { name: '20260911040000_ai_analysis_backend.sql', version: '20260911040000', time: '2026-09-11 04:00:00', bytes: 24856, sha256: SOURCE_HASHES.analysis },
   { name: '20260911200000_checked_ai_item_save.sql', version: '20260911200000', time: '2026-09-11 20:00:00', bytes: 29668, sha256: SOURCE_HASHES.analyzedSave },
+  { name: '20260913120000_item_lifecycle.sql', version: '20260913120000', time: '2026-09-13 12:00:00', bytes: 15332, sha256: SOURCE_HASHES.lifecycle },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -57,6 +60,161 @@ select jsonb_build_object(
       'public.reserve_item_save(jsonb,jsonb)'::regprocedure,
       'public.finalize_item_save(uuid,uuid,text)'::regprocedure,'public.commit_image(uuid)'::regprocedure]))
 );`;
+
+export const ITEM_LIFECYCLE_CATALOG_SQL = `
+select jsonb_build_object(
+  'rls',(select c.relrowsecurity from pg_catalog.pg_class c where c.oid='private.item_deletion_claims'::regclass),
+  'policies',(select count(*)=0 from pg_catalog.pg_policies where schemaname='private' and tablename='item_deletion_claims'),
+  'tableDenied',(select bool_and(not has_table_privilege(r,'private.item_deletion_claims','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
+    from unnest(array['anon','authenticated']) r),
+  'columns',(select array_agg(a.attname::text order by a.attnum)=array['owner_id','item_id','request_id','expected_version','started_at']
+      and bool_and(a.attnotnull) from pg_catalog.pg_attribute a
+    where a.attrelid='private.item_deletion_claims'::regclass and a.attnum>0 and not a.attisdropped),
+  'keys',(select count(*)=3 and bool_and(pg_get_constraintdef(c.oid)=any(array[
+      'PRIMARY KEY (owner_id, item_id)','UNIQUE (owner_id, request_id)',
+      'FOREIGN KEY (owner_id, item_id) REFERENCES items(owner_id, id) ON DELETE CASCADE']))
+    from pg_catalog.pg_constraint c where c.conrelid='private.item_deletion_claims'::regclass and c.contype in ('p','u','f')),
+  'rpc',(select count(*)=4 and bool_and(p.prosecdef and p.provolatile='v'
+      and 'search_path=""'=any(p.proconfig) and 'lock_timeout=2s'=any(p.proconfig)
+      and has_function_privilege('authenticated',p.oid,'EXECUTE') and not has_function_privilege('anon',p.oid,'EXECUTE')
+      and not exists(select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where a.grantee=0 and a.privilege_type='EXECUTE'))
+    from pg_catalog.pg_proc p where p.oid=any(array[
+      'public.set_item_trashed(uuid,bigint,boolean)'::regprocedure,'public.item_deletion_status(uuid[])'::regprocedure,
+      'public.begin_item_deletion(uuid,bigint,uuid,text)'::regprocedure,'public.finish_item_deletion(uuid,uuid)'::regprocedure])),
+  'guards',(select count(*)=4 and bool_and(p.prosecdef and p.provolatile='v'
+      and 'search_path=""'=any(p.proconfig) and 'lock_timeout=2s'=any(p.proconfig)
+      and not has_function_privilege('anon',p.oid,'EXECUTE')
+      and has_function_privilege('authenticated',p.oid,'EXECUTE')=(p.proname='may_create_item_object')
+      and not exists(select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where a.grantee=0 and a.privilege_type='EXECUTE'))
+    from pg_catalog.pg_proc p where p.oid=any(array['private.item_lifecycle_owner()'::regprocedure,
+      'private.guard_item_deletion()'::regprocedure,'private.guard_item_image_deletion()'::regprocedure,
+      'private.may_create_item_object(text)'::regprocedure])),
+  'pureManifest',(select p.provolatile='i' and not p.prosecdef and 'search_path=""'=any(p.proconfig)
+      and not has_function_privilege('anon',p.oid,'EXECUTE') and not has_function_privilege('authenticated',p.oid,'EXECUTE')
+      and not exists(select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where a.grantee=0 and a.privilege_type='EXECUTE')
+    from pg_catalog.pg_proc p where p.oid='private.item_lifecycle_manifest(jsonb)'::regprocedure),
+  'triggers',(select count(*)=2 and bool_and(t.tgenabled='O' and not t.tgisinternal and
+      ((t.tgrelid='public.items'::regclass and t.tgfoid='private.guard_item_deletion()'::regprocedure and t.tgtype=27)
+        or (t.tgrelid='public.item_images'::regclass and t.tgfoid='private.guard_item_image_deletion()'::regprocedure and t.tgtype=31)))
+    from pg_catalog.pg_trigger t where t.tgname in ('item_deletion_guard','item_image_deletion_guard')),
+  'storageCreate',(select count(*)=1 and bool_and(cmd='INSERT' and roles=array['authenticated']::name[]
+      and qual is null and with_check='((bucket_id = ''wardrobe''::text) AND private.may_create_item_object(name))')
+    from pg_catalog.pg_policies where schemaname='storage' and tablename='objects' and policyname='wardrobe_create'),
+  'storageUnchanged',(select count(*)=2 and bool_and(cmd in ('SELECT','DELETE')
+      and roles=array['authenticated']::name[] and qual=case policyname
+        when 'wardrobe_read' then '((bucket_id = ''wardrobe''::text) AND private.owns_storage_path(name, false))'
+        when 'wardrobe_delete' then '((bucket_id = ''wardrobe''::text) AND private.may_delete_storage(name))' end)
+    from pg_catalog.pg_policies where schemaname='storage' and tablename='objects' and policyname in ('wardrobe_read','wardrobe_delete'))
+      and not exists(select 1 from pg_catalog.pg_policies where schemaname='storage' and tablename='objects' and cmd in ('UPDATE','ALL'))
+);`;
+
+export function assertLifecycleFixture(env, ownerId, itemId) {
+  assertRehearsalEnvironment(env, []);
+  requireEvidence(env.ALLOW_SECURITY_TESTS === '1');
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  requireEvidence(uuid.test(ownerId) && uuid.test(itemId) && itemId.startsWith('1080'));
+}
+
+// CI-only setup, not an access assertion or a general SQL callback.
+export async function withLifecycleParentLock(ownerId, itemId, mode, operation) {
+  assertLifecycleFixture(process.env, ownerId, itemId);
+  requireEvidence(['update', 'key share'].includes(mode) && typeof operation === 'function');
+  await requireLocalContainer();
+  const child = spawn('docker', ['exec', '-i', DB_CONTAINER, 'psql', '-X', '--no-password',
+    '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-A'], {
+    cwd: ROOT, env: commandEnvironment(), shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let resolveReady, rejectReady, output = '', size = 0, failure, releasing = false, primaryFailed = false;
+  const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+  // Setup can throw before await ready; observe release-time rejection without changing that await.
+  void ready.catch(() => {});
+  const reject = () => {
+    failure ??= new Error('EVIDENCE_REQUIRED');
+    rejectReady(failure);
+    child.kill('SIGTERM');
+  };
+  const closed = new Promise((resolve) => {
+    child.once('error', () => { reject(); resolve(1); });
+    child.once('close', (code) => { if (!releasing) reject(); resolve(code); });
+  });
+  const timer = setTimeout(reject, 15_000);
+  child.stdin.on('error', reject);
+  child.stderr.on('data', reject);
+  child.stdout.on('data', (chunk) => {
+    size += chunk.length;
+    if (size > 128) { reject(); return; }
+    output += chunk.toString();
+    if (output.trim() === 'I08_PARENT_HELD') resolveReady();
+  });
+  try {
+    child.stdin.write(`begin; set local statement_timeout='12s'; set local idle_in_transaction_session_timeout='12s';
+      do $$ declare n integer; begin
+        perform 1 from public.items where owner_id='${ownerId}' and id='${itemId}' for ${mode} nowait;
+        get diagnostics n = row_count; if n<>1 then raise exception 'Fixture absent'; end if;
+      end $$;\n\\echo I08_PARENT_HELD\n`);
+    await ready;
+    await operation();
+    requireEvidence(!failure);
+  } catch (error) {
+    primaryFailed = true;
+    throw error;
+  } finally {
+    releasing = true;
+    try {
+      try {
+        if (!child.stdin.writableEnded && !child.stdin.destroyed) child.stdin.end('rollback;\n');
+      } catch (error) {
+        child.kill('SIGTERM');
+        throw error;
+      } finally {
+        try {
+          const code = await closed;
+          requireEvidence(code === 0 && !failure);
+        } finally { clearTimeout(timer); }
+      }
+    } catch (error) {
+      console.error('FAIL: I08 exact parent-lock release');
+      if (!primaryFailed) throw error;
+    }
+  }
+}
+
+export async function withLifecycleCatalogMarker(ownerId, itemId, operation) {
+  assertLifecycleFixture(process.env, ownerId, itemId);
+  requireEvidence(typeof operation === 'function');
+  const markerId = randomUUID(), name = `${ownerId}/${itemId}/i08-catalog-marker`;
+  // No bytes are written. Normal BEGIN must already have installed this exact claim.
+  let created = false, primaryFailed = false;
+  try {
+    const setup = await privilegedLocalSql(`do $$ begin
+      if not exists(select 1 from private.item_deletion_claims where owner_id='${ownerId}' and item_id='${itemId}')
+        or exists(select 1 from storage.objects where bucket_id='wardrobe' and starts_with(name,'${ownerId}/${itemId}/'))
+        then raise exception 'Fixture state'; end if;
+      insert into storage.objects(id,bucket_id,name) values('${markerId}','wardrobe','${name}');
+      end $$; select 'I08_MARKER_CREATED';`);
+    requireEvidence(setup === 'I08_MARKER_CREATED');
+    created = true;
+    await operation();
+  } catch (error) {
+    primaryFailed = true;
+    throw error;
+  } finally {
+    try {
+      try {
+        const cleanup = await privilegedLocalSql(`with removed as (
+          delete from storage.objects where id='${markerId}' and bucket_id='wardrobe' and name='${name}' returning id
+        ) select count(*) from removed;`);
+        requireEvidence(created ? cleanup === '1' : ['0', '1'].includes(cleanup));
+      } finally {
+        requireEvidence(await privilegedLocalSql(`select count(*) from storage.objects
+          where id='${markerId}' or (bucket_id='wardrobe' and name='${name}');`) === '0');
+      }
+    } catch (error) {
+      console.error('FAIL: I08 exact catalog-marker cleanup');
+      if (!primaryFailed) throw error;
+    }
+  }
+}
 
 export function assertRehearsalEnvironment(env, args) {
   requireEvidence(Array.isArray(args) && args.length === 0);
@@ -242,6 +400,14 @@ async function main() {
     const catalog = JSON.parse(await privilegedLocalSql(ITEM_SAVE_CATALOG_SQL));
     requireEvidence(Object.keys(catalog).length === 8 && Object.values(catalog).every((value) => value === true));
     console.log('PASS: checked Save catalog protections/profile cascade; account-deletion journey NOT RUN');
+    stage = 'S4-item-lifecycle-catalog';
+    const lifecycleCatalog = JSON.parse(await privilegedLocalSql(ITEM_LIFECYCLE_CATALOG_SQL));
+    requireEvidence(Object.keys(lifecycleCatalog).length === 11 && Object.values(lifecycleCatalog).every((value) => value === true));
+    console.log('PASS: I08 private claims, privileged fresh guards and narrow Storage policy catalog');
+    stage = 'S4-item-lifecycle-fixtures';
+    const { lifecycleFixtureCases } = await import('../tests/integration/item-lifecycle.sessions.mjs');
+    await lifecycleFixtureCases(env, { withLifecycleParentLock, withLifecycleCatalogMarker });
+    console.log('PASS: I08 CI-only exact-parent overlap and catalog-marker setup; ordinary-owner assertions; no physical erasure claim');
     console.log('PASS: populated base-to-target preservation and bounded post-comparison probes');
   } catch (error) {
     console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}; subsequent stages NOT RUN`);
