@@ -45,7 +45,8 @@ export function ItemForm({ draft, onChange, baseline, provenance, language, t, p
     const id = `${prefix}-${key}`, label = t(labels[key]), raw = draft.raw[key];
     const invalid = Boolean(errors[key] && (showErrors || draft.intent[key] || prefix === 'detail'));
     const textProps = { readOnly: prefix === 'item' && locked, disabled: prefix === 'detail' && locked };
-    const aria = { 'aria-invalid': invalid, 'aria-describedby': invalid ? `${id}-error` : prefix === 'detail' && key === 'title' ? undefined : `${id}-help` };
+    const hasHint = !(key in enumFields || booleanFields.some((value) => value === key));
+    const aria = { 'aria-invalid': invalid, 'aria-describedby': invalid ? `${id}-error` : !hasHint || prefix === 'detail' && key === 'title' ? undefined : `${id}-help` };
     const optional = key !== 'title' && key !== 'category' && !['currency', 'favourite', 'availability', 'lifecycle', 'exclude_suggestions', 'wear_more'].includes(key);
     const assertion = provenanceFields.find((value) => value === key);
     let control: ReactNode;
@@ -70,13 +71,11 @@ export function ItemForm({ draft, onChange, baseline, provenance, language, t, p
       </div>;
     } else if (key in enumFields) {
       const options = enumFields[key as keyof typeof enumFields];
-      hint = optional ? t('item.unknown') : t('common.required');
       control = <select id={id} value={raw} disabled={locked} {...aria} onChange={(event) => change(key, event.target.value)}>
         {(optional || key === 'category') && <option value="">{t(optional ? 'item.unknown' : 'capture.selectCategory')}</option>}
         {options.map((value) => <option key={value} value={value}>{t(optionKey(key, value))}</option>)}
       </select>;
     } else if (booleanFields.some((value) => value === key)) {
-      hint = optional ? t('item.unknown') : t('common.required');
       control = <select id={id} value={raw} disabled={locked} {...aria} onChange={(event) => change(key, event.target.value)}>
         {optional && <option value="">{t('item.unknown')}</option>}
         <option value="true">{t('item.yes')}</option><option value="false">{t('item.no')}</option>
@@ -97,7 +96,7 @@ export function ItemForm({ draft, onChange, baseline, provenance, language, t, p
     }
     return <div className="field garment-field" key={key}>
       {Array.isArray(raw) ? <span className="garment-label">{label}</span> : <label htmlFor={id}>{label}</label>}{control}
-      <p id={`${id}-help`} className="fine muted">{hint}</p>
+      {hasHint && <p id={`${id}-help`} className="fine muted">{hint}</p>}
       {invalid && <p id={`${id}-error`} role="alert" className="notice notice-error">{t(key === 'title' && prefix === 'detail' ? 'detail.invalidFields' : 'item.invalidField', { field: label })}</p>}
       {provenance && assertion && fieldAssertion(provenance, assertion).kind !== 'user' && <span className="fine muted">{t('detail.unverified')}</span>}
       {aiDerived && assertion && !draft.intent[key] && <span className="fine muted">{t(Object.entries(aiDerived).some(([field, value]) => field === key && value?.kind === 'ai_observed')

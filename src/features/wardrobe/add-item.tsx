@@ -222,7 +222,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   return (
     <section className="capture-page" aria-labelledby="capture-title">
       <button className="text-button back-button" type="button" onClick={onBack} disabled={busy}><Icon name="arrow" />{t('wardrobe.back')}</button>
-      <div className="page-heading"><div><p className="eyebrow">{t('capture.eyebrow')}</p><h1 id="capture-title" tabIndex={-1}>{t('capture.title')}</h1><p className="muted">{t('capture.subtitle')}</p></div></div>
+      <div className="page-heading"><div><h1 id="capture-title" tabIndex={-1}>{t('capture.title')}</h1></div></div>
       <form className="capture-layout" onSubmit={(event) => { void submit(event); }} noValidate>
         <div className="photo-panel">
           {!editing && <div className={`capture-photo ${preview ? 'has-photo' : ''}`} aria-busy={preparing}>
@@ -246,7 +246,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           {(editing || preparing) && <p id="photo-pending" tabIndex={-1} role="status" className="notice">{t(preparing ? 'photo.pendingPreparation' : 'photo.pendingCrop')}</p>}
           {invalid && !photo && <p className="field-error">{t('common.required')}</p>}
           <p className="privacy-note"><Icon name="lock" />{t('aiC.photoNotice')}</p>
-          <p className="fine muted">{t('photo.cameraFallback')}</p>
+          <details className="copy-details"><summary>{t('photo.cameraHelp')}</summary><p>{t('photo.cameraFallback')}</p></details>
           {preparationDetails && <>
             <button className="text-button" type="button" aria-expanded={showPreparationDetails} aria-controls="preparation-details" onClick={() => setShowPreparationDetails(!showPreparationDetails)}>{t(showPreparationDetails ? 'photo.hideDetails' : 'photo.showDetails')}</button>
             <section id="preparation-details" aria-label={t('photo.details')} hidden={!showPreparationDetails}>

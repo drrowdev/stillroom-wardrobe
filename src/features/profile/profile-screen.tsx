@@ -65,7 +65,7 @@ export function ProfileScreen({ client, ai, unresolved, controller, scope, profi
   }
   return <div className="settings-page">
     <button className="text-button" onClick={onBack}>{t('common.back')}</button>
-    <header className="settings-heading"><p className="eyebrow">{t('common.private')}</p><h1 id="settings-title" tabIndex={-1}>{t('nav.settings')}</h1><p className="muted">{t('settings.intro')}</p></header>
+    <header className="settings-heading"><h1 id="settings-title" tabIndex={-1}>{t('nav.settings')}</h1></header>
     <div className="settings-grid">
       <section className="settings-card" aria-labelledby="profile-heading">
         <h2 id="profile-heading">{t('profile.title')}</h2><p className="muted fine">{t('settings.profileHint')}</p>

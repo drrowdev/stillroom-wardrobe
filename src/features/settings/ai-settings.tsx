@@ -46,7 +46,15 @@ export function AiSettings({ ai, controller, scope, profile, busy, unresolved, o
   const supported = status && supportedAiPolicy(status);
   return <section className="settings-card" aria-labelledby="ai-consent-title" aria-busy={busy || reading}>
     <h2 id="ai-consent-title">{t('aiC.settings')}</h2>
-    <p>{t('aiC.notice')}</p><p className="fine muted">{t('aiC.allowanceNotice')}</p>
+    <dl className="ai-notice fine">
+      <dt>{t('aiC.processing')}</dt>
+      <dd>{t('aiC.notice')}</dd>
+      <dt>{t('aiC.retentionTitle')}</dt>
+      <dd><p>{t('aiC.trainingNotice')}</p><p>{t('aiC.retentionNotice')}</p></dd>
+      <dt>{t('aiC.chargesTitle')}</dt>
+      <dd><p>{t('aiC.allowanceNotice')}</p><p>{t('aiC.optOutNotice')}</p></dd>
+    </dl>
+    <p className="fine">{t('aiC.reviewNotice')}</p>
     <p role="status">{t(unresolved ? 'aiC.reconcile' : busy || reading ? 'aiC.controlPending'
       : !supported ? 'aiC.inactive' : status?.consent.enabled ? 'aiC.enabled' : 'aiC.disabled')}</p>
     {status?.policy && <dl>
@@ -55,7 +63,7 @@ export function AiSettings({ ai, controller, scope, profile, busy, unresolved, o
       <dt>{t('aiC.accounted')}</dt><dd>{microUsd(status.usage.accountedMicro, language)}</dd>
     </dl>}
     {status?.usage.warning && <p className="notice">{t('aiC.warning')}</p>}
-    <label><input type="checkbox" checked={agreed} disabled={!supported || busy || reading || unresolved}
+    <label className="consent-confirm"><input type="checkbox" checked={agreed} disabled={!supported || busy || reading || unresolved}
       onChange={(event) => setAgreed(event.target.checked)} />{t('aiC.agree')}</label>
     <div className="settings-actions">
       <button className="button button-primary" disabled={!online || busy || reading || unresolved || !supported || !agreed}

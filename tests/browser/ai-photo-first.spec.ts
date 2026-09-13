@@ -222,7 +222,7 @@ test('status admission proves the issued bearer separately from legacy decoded-o
     const responses = [...initial.items, ...initial.images];
     expect(responses.map((response) => response.status())).toEqual([200, 200, 200, 200]);
     expect(await Promise.all(responses.map((response) => response.finished()))).toEqual([null, null, null, null]);
-    await expect(page.getByRole('button', { name: messages['wardrobe.firstItem'].en, exact: true })).toBeVisible();
+    await expect(page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true })).toBeVisible();
     expect([initial.items.size, initial.images.size]).toEqual([2, 2]);
   } finally { page.off('response', observeInitial); }
   const before = api.requests.length;

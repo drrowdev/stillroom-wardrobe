@@ -25,7 +25,7 @@ describe('owner-isolated language', () => {
     expect(itemCount('en', 2)).toBe('2 items');
     expect(itemCount('fi', 0)).toContain('0');
     expect(() => itemCount('sv', -1)).toThrow();
-    expect(translate('sv', 'item.deleteConfirm', { name: '<script>Åäö</script>' })).toContain('<script>Åäö</script>');
+    expect(translate('sv', 'profile.active', { name: '<script>Åäö</script>' })).toContain('<script>Åäö</script>');
     expect(translate('fi', 'capture.save')).not.toBe(messages['capture.save'].en);
     expect(() => translate('en', 'wardrobe.count_other')).toThrow('parameter');
   });

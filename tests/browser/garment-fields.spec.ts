@@ -53,6 +53,10 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await photo(page, api);
     await expand(page, 'item');
     await expect(page.getByText(messages['capture.descriptionHelp'][language], { exact: true })).toBeVisible();
+    await expect(page.locator('#item-category-help, #item-windproof-help')).toHaveCount(0);
+    expect(await page.locator('.capture-page').evaluate((element) =>
+      [...element.querySelectorAll('[aria-describedby]')].every((control) =>
+        control.getAttribute('aria-describedby')!.split(/\s+/).every((id) => document.getElementById(id))))).toBe(true);
     await page.locator('#item-title').fill('Fictional shirt');
     await page.locator('#item-category').selectOption('top');
     await expect(page.locator('#item-alt')).toHaveValue('');
@@ -65,6 +69,9 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await link.click();
     await expect(page.locator('.detail-photo img')).toHaveAttribute('alt', '');
     await expect(page.locator('#detail-description')).toHaveValue('');
+    expect(await page.locator('.detail-page').evaluate((element) =>
+      [...element.querySelectorAll('[aria-describedby]')].every((control) =>
+        control.getAttribute('aria-describedby')!.split(/\s+/).every((id) => document.getElementById(id))))).toBe(true);
   });
   test(`all thirty manual fields ${language}: exact explicit capture Save, owned edit and clear`, async ({ page }) => {
     const api = await setup(page, language);

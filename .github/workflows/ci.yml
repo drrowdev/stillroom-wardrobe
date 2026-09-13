@@ -90,6 +90,20 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Preserve bounded synthetic UX-copy visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ux-copy-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/ux-copy-visual/sign-in-en-desktop.png
+            test-results/ux-copy-visual/sign-in-fi-mobile.png
+            test-results/ux-copy-visual/recovery-en-desktop.png
+            test-results/ux-copy-visual/recovery-fi-mobile.png
+            test-results/ux-copy-visual/wardrobe-empty-en-desktop.png
+            test-results/ux-copy-visual/wardrobe-empty-fi-mobile.png
+          if-no-files-found: error
+          retention-days: 1
+
   database:
     name: Real local Supabase
     runs-on: ubuntu-latest

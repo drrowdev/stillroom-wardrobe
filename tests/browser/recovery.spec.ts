@@ -1,14 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { lstat, mkdir, open, readdir } from 'node:fs/promises';
+import path from 'node:path';
 import { mockBackend, owners, recoveryHash, signIn } from './mock-backend';
 import { translate, type Language } from '../../src/i18n';
 
 const password = 'fictional recovery password only';
-async function confirm(page: Page) {
+async function confirm(page: Page, language: Language = 'en') {
   await expect(page.getByRole('checkbox')).not.toBeChecked();
   await expect(page.locator('#recovery-password')).toHaveCount(0);
   await page.getByRole('checkbox').check();
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: translate(language, 'recovery.continue'), exact: true }).click();
   await expect(page.locator('#recovery-password')).toBeVisible();
 }
 async function fillPasswords(page: Page) {
@@ -36,7 +38,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
 test('verified target, explicit confirmation, reset and normal Login without wardrobe or persistence', async ({ page }) => {
   const backend = await mockBackend(page);
   await page.goto('/' + recoveryHash());
-  await expect(page.getByText('The service verified this recovery target: user-a@example.test')).toBeVisible();
+  await expect(page.getByText(translate('en', 'recovery.target', { email: 'user-a@example.test' }), { exact: true })).toBeVisible();
   expect(await page.evaluate(() => location.hash === '#/recovery' && location.search === '' && history.state === null)).toBe(true);
   await confirm(page);
   await expect(page.locator('#recovery-password')).toHaveAttribute('autocomplete', 'new-password');
@@ -152,7 +154,7 @@ test('competing recovery callbacks discard both capabilities', async ({ page }) 
   await confirm(page);
   const before = backend.requests.length;
   await page.evaluate(hash => { location.hash = hash; }, recoveryHash(owners.b));
-  await expect(page.getByRole('alert')).toContainText('could not be verified');
+  await expect(page.getByRole('alert')).toHaveText(translate('en', 'recovery.invalid'));
   await expect(page.locator('#recovery-password')).toHaveCount(0);
   expect(backend.requests).toHaveLength(before);
 });
@@ -161,7 +163,7 @@ test('lost own-profile admission on focus removes password entry', async ({ page
   await page.goto('/' + recoveryHash()); await confirm(page);
   await page.route('**/rest/v1/profiles?**', route => route.fulfill({ json: [] }));
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(page.getByRole('alert')).toContainText('could not be verified');
+  await expect(page.getByRole('alert')).toHaveText(translate('en', 'recovery.invalid'));
   await expect(page.locator('#recovery-password')).toHaveCount(0);
   expect(backend.requests.filter(request => request.method !== 'GET')).toHaveLength(0);
 });
@@ -170,7 +172,7 @@ test('expiry margin cancels before password transmission without refresh', async
   await page.clock.install();
   await page.goto('/' + recoveryHash(owners.a, 600)); await confirm(page);
   await page.clock.fastForward(451_000);
-  await expect(page.getByRole('alert')).toContainText('could not be verified');
+  await expect(page.getByRole('alert')).toHaveText(translate('en', 'recovery.invalid'));
   await expect(page.locator('#recovery-password')).toHaveCount(0);
   expect(backend.requests.every(request => request.method === 'GET')).toBe(true);
 });
@@ -197,12 +199,12 @@ test('confirmed password success removes fields while revocation is pending', as
   await page.route('**/auth/v1/logout?**', async route => { await wait; await route.fallback(); });
   await page.goto('/' + recoveryHash()); await confirm(page); await fillPasswords(page);
   await page.getByRole('button', { name: 'Change password', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Checking session revocation');
+  await expect(page.getByRole('status')).toHaveText(translate('en', 'recovery.revoking'));
   await expect(page.locator('#recovery-password')).toHaveCount(0);
   await page.getByRole('button', { name: 'Return to sign in' }).click();
   release?.();
   await expect(page.locator('#login-title')).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('Password changed, but session revocation could not be confirmed.');
+  await expect(page.getByRole('status')).toHaveText(translate('en', 'recovery.revocationUncertain'));
 });
 for (const status of [429, 503]) {
   test(`request reports outage or throttle honestly without exposing server text: ${status}`, async ({ page }) => {
@@ -238,7 +240,7 @@ test('occupied bootstrap refuses before normal Auth initialization or target loo
   const backend = await mockBackend(page);
   await page.addInitScript(() => sessionStorage.setItem('stillroom.auth', 'nonempty-unparseable'));
   await page.goto('/' + recoveryHash());
-  await expect(page.getByRole('alert')).toContainText('already holds or has started');
+  await expect(page.getByRole('alert')).toHaveText(translate('en', 'recovery.conflict'));
   expect(backend.requests).toHaveLength(0);
   expect(await page.evaluate(() => sessionStorage.getItem('stillroom.auth') === 'nonempty-unparseable')).toBe(true);
 });
@@ -248,7 +250,7 @@ test('late callback refuses after normal initialization even with empty storage'
   await expect(page.locator('#login-title')).toBeVisible();
   for (const hash of [recoveryHash(), '#provider_token', '#/wardrobe?code_verifier', '#error_description', '#sb']) {
     await page.evaluate(value => { location.hash = value; }, hash);
-    await expect(page.getByRole('alert')).toContainText('already holds or has started');
+    await expect(page.getByRole('alert')).toHaveText(translate('en', 'recovery.conflict'));
     expect(await page.evaluate(() => location.hash === '#/recovery')).toBe(true);
   }
   expect(backend.requests.filter(request => request.path === '/auth/v1/user')).toHaveLength(0);
@@ -262,14 +264,14 @@ test('late callback while normal sign-in is in flight never starts recovery', as
   await page.goto('/');
   await signIn(page);
   await page.evaluate(hash => { location.hash = hash; }, recoveryHash(owners.b));
-  await expect(page.getByRole('alert')).toContainText('already holds or has started');
+  await expect(page.getByRole('alert')).toHaveText(translate('en', 'recovery.conflict'));
   release?.();
   expect(backend.requests.filter(request => request.path === '/auth/v1/user')).toHaveLength(0);
 });
 test('foreign server identity fails before password entry', async ({ page }) => {
   const backend = await mockBackend(page, { recoveryUser: owners.b });
   await page.goto('/' + recoveryHash());
-  await expect(page.getByRole('alert')).toContainText('could not be verified');
+  await expect(page.getByRole('alert')).toHaveText(translate('en', 'recovery.invalid'));
   await expect(page.locator('#recovery-password')).toHaveCount(0);
   expect(backend.requests.filter(request => request.path === '/rest/v1/profiles')).toHaveLength(0);
 });
@@ -283,14 +285,14 @@ test('malformed, non-recovery, expired, query and reload callbacks scrub and fai
     '?utm_source=x' + recoveryHash(),
   ]) {
     await page.goto('/' + suffix);
-    await expect(page.getByRole('alert')).toContainText('could not be verified');
+    await expect(page.getByRole('alert')).toHaveText(translate('en', 'recovery.invalid'));
     expect(await page.evaluate(() => location.hash === '#/recovery' && !location.search && history.state === null)).toBe(true);
   }
   expect(backend.requests).toHaveLength(0);
   await page.goto('/' + recoveryHash());
   await expect(page.getByRole('checkbox')).toBeVisible();
   await page.reload();
-  await expect(page.getByRole('alert')).toContainText('could not be verified');
+  await expect(page.getByRole('alert')).toHaveText(translate('en', 'recovery.invalid'));
 });
 test('global explicit logout cancels isolated recovery, without recovery server logout', async ({ page, context }) => {
   const backend = await mockBackend(page);
@@ -300,7 +302,7 @@ test('global explicit logout cancels isolated recovery, without recovery server 
   await mockBackend(sender);
   await sender.goto('/');
   await sender.evaluate(() => { const channel = new BroadcastChannel('stillroom.logout'); channel.postMessage('sign-out'); channel.close(); });
-  await expect(page.getByRole('alert')).toContainText('could not be verified');
+  await expect(page.getByRole('alert')).toHaveText(translate('en', 'recovery.invalid'));
   await expect(page.locator('#recovery-password')).toHaveCount(0);
   expect(backend.requests.filter(request => request.path === '/auth/v1/logout')).toHaveLength(0);
 });
@@ -321,7 +323,7 @@ test('password rejection and unconfirmed revocation have distinct truthful outco
   await page.goto('/' + recoveryHash());
   await confirm(page); await fillPasswords(page);
   await page.getByRole('button', { name: 'Change password', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('additional verification');
+  await expect(page.getByRole('alert')).toHaveText(translate('en', 'recovery.reauthentication'));
   await expect(page.locator('#recovery-password')).toHaveCount(0);
   await page.unrouteAll({ behavior: 'wait' });
   await mockBackend(page, { logoutStatus: 403 });
@@ -330,7 +332,7 @@ test('password rejection and unconfirmed revocation have distinct truthful outco
   await confirm(page); await fillPasswords(page);
   await page.getByRole('button', { name: 'Change password', exact: true }).click();
   await expect(page.locator('#login-title')).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('Password changed, but session revocation could not be confirmed.');
+  await expect(page.getByRole('status')).toHaveText(translate('en', 'recovery.revocationUncertain'));
 });
 test('cancelling an in-flight update warns honestly and never retries', async ({ page }) => {
   const backend = await mockBackend(page);
@@ -346,7 +348,7 @@ test('cancelling an in-flight update warns honestly and never retries', async ({
   await page.getByRole('button', { name: 'Return to sign in' }).click();
   release?.();
   await expect(page.locator('#login-title')).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('outcome is unconfirmed');
+  await expect(page.getByRole('status')).toHaveText(translate('en', 'recovery.uncertain'));
   expect(backend.requests.filter(request => request.method === 'PUT').length).toBeLessThanOrEqual(1);
   expect(backend.requests.filter(request => request.path === '/auth/v1/logout')).toHaveLength(0);
 });
@@ -370,3 +372,80 @@ for (const language of ['en', 'fi', 'sv'] as Language[]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 }
+
+test('concise entry copy, accessible recovery and bounded synthetic entry evidence', async ({ page }, testInfo) => {
+  const api = await mockBackend(page);
+  const profiles = structuredClone(api.profiles);
+  const directory = path.resolve('test-results/ux-copy-visual');
+  const ownFiles = ['sign-in-en-desktop.png', 'sign-in-fi-mobile.png', 'recovery-en-desktop.png', 'recovery-fi-mobile.png'];
+  const allowedFiles = [...ownFiles, 'wardrobe-empty-en-desktop.png', 'wardrobe-empty-fi-mobile.png'];
+  const origin = new URL(testInfo.project.use.baseURL!).origin;
+  for (const language of ['en', 'fi', 'sv'] as const) {
+    const width = language === 'en' ? 1280 : 320;
+    await page.setViewportSize({ width, height: 900 });
+    for (const surface of ['sign-in', 'recovery'] as const) {
+      await page.goto('about:blank');
+      await page.goto(surface === 'sign-in' ? '/' : '/' + recoveryHash());
+      await expect(page.locator(surface === 'sign-in' ? '#login-title' : '.recovery-confirm')).toBeVisible();
+      await page.getByRole('button', { name: translate(language, `language.${language}`), exact: true }).click();
+      await expect(page.locator('html')).toHaveAttribute('lang', language);
+      if (surface === 'recovery') await confirm(page, language);
+      await expect(page.getByRole('heading', { name: translate(language, surface === 'sign-in' ? 'auth.signIn' : 'recovery.passwordTitle'), exact: true })).toBeVisible();
+      await expect(page.locator('.intro h2, .intro-body, .intro-caption')).toHaveCount(0);
+      if (width === 320) await expect(page.locator('.intro')).toBeHidden();
+      expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+      expect(api.profiles).toEqual(profiles);
+      expect(api.requests.every((request) => request.method === 'GET')).toBe(true);
+      expect(api.requests.filter((request) => request.path.startsWith('/rest/'))
+        .every((request) => request.owner === owners.a && request.ownerFilter === `eq.${owners.a}`)).toBe(true);
+      expect(await page.evaluate(({ origin, language, surface, width }) => {
+        const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
+        const fields = [...document.querySelectorAll<HTMLInputElement>('input')].filter(visible);
+        const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
+        const copy = [...document.querySelectorAll('.entry-footer, .fine, .password-input button, .site-footer')].filter(visible);
+        return location.origin === origin && location.hostname === '127.0.0.1' && !location.search
+          && (surface === 'sign-in' ? location.hash === '' : location.hash === '#/recovery')
+          && document.documentElement.lang === language && innerWidth === width
+          && fields.every((field) => field.value === '') && !privatePattern.test(document.body.innerText)
+          && !document.querySelector('.workspace, .recovery-confirm')
+          && copy.every((element) => parseFloat(getComputedStyle(element).fontSize) >= 14)
+          && [...document.querySelectorAll<HTMLButtonElement>('button')].filter(visible)
+            .every((button) => button.getBoundingClientRect().height >= 44)
+          && [...document.querySelectorAll('[aria-describedby]')].every((element) =>
+            element.getAttribute('aria-describedby')!.split(/\s+/).every((id) => document.getElementById(id)))
+          && document.documentElement.scrollWidth <= innerWidth;
+      }, { origin, language, surface, width }), 'Empty synthetic entry, copy size and accessible descriptions').toBe(true);
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      if (testInfo.project.name === 'chromium' && language !== 'sv') {
+        await mkdir(directory, { recursive: true });
+        const metadata = await lstat(directory);
+        expect(metadata.isDirectory() && !metadata.isSymbolicLink()).toBe(true);
+        const file = `${surface}-${language === 'en' ? 'en-desktop' : 'fi-mobile'}.png`;
+        await page.screenshot({ path: path.join(directory, file), fullPage: true, animations: 'disabled', scale: 'css' });
+      }
+      const zoom = await page.addStyleTag({ content: 'html { font-size: 200%; }' });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      await zoom.evaluate((element) => {
+        if (!(element instanceof HTMLStyleElement) || element.parentNode !== document.head) throw new Error('Expected the attached zoom stylesheet.');
+        element.remove();
+      });
+    }
+  }
+  if (testInfo.project.name === 'chromium') {
+    const files = await readdir(directory);
+    expect(files.every((file) => allowedFiles.includes(file))).toBe(true);
+    expect(files.filter((file) => !file.startsWith('wardrobe-empty-')).sort()).toEqual([...ownFiles].sort());
+    for (const file of ownFiles) {
+      const filename = path.join(directory, file), metadata = await lstat(filename);
+      expect(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > 24 && metadata.size <= 1024 * 1024).toBe(true);
+      const handle = await open(filename, 'r');
+      try {
+        const header = Buffer.alloc(24), { bytesRead } = await handle.read(header, 0, 24, 0);
+        expect(bytesRead === 24 && header.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+          && header.toString('ascii', 12, 16) === 'IHDR'
+          && header.readUInt32BE(16) === (file.endsWith('en-desktop.png') ? 1280 : 320)).toBe(true);
+      } finally { await handle.close(); }
+    }
+  }
+});

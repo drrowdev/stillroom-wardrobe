@@ -61,3 +61,25 @@ AI returns canonical attributes, not UI translations. Generate an editable title
 `tests/unit/i18n.test.ts` covers negotiation order, region variants, unsupported fallback, interpolation, plural counts 0/1/2, Nordic text, decimal parsing, currency and date invariance. `tests/browser/localization.spec.ts` runs the core journey in `en`, `fi`, `sv`, checks `<html lang>`, critical text and narrow layouts; A's language change must not alter B's profile or leak into B's session. `tests/security/rls.sessions.mjs` proves cross-owner language changes have no effect using real normal sessions when configured.
 
 Run `npm run check:translations` in every CI build alongside existing checks. `validation/check-localization.mjs` is an executable reference check for the delivered catalog/helpers. Passing it validates those references only, not an unbuilt app or professional language review. No new service fee or language-related network call is introduced; remeasure the initial bundle after adding the small static catalogs.
+
+## Active interface copy guidance - 13 September 2026
+
+Under the [reviewed UX-copy plan](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5646983663)
+and [T12 controlling amendments](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647110681),
+use plain, specific EN/FI/SV labels and concise errors. Remove rhetorical welcome,
+lifestyle and assistant-like copy and paragraphs that repeat a heading or control.
+Write naturally in each language; keep named parameters and personal/generated
+content unchanged. Historical starter catalogs are not active UI copy authority.
+
+Keep consequential privacy, consent, provider/location/retention, cost, recovery,
+ownership and unknown-outcome guidance visible. Separate short, complete notice
+sentences from the consent checkbox label; do not collapse the AI policy facts.
+Only secondary setup instructions and camera workarounds use disclosure controls.
+Removing helper text also removes its accessible-description reference, never
+the field's label, validation or genuine constraint.
+
+New or moved small copy is at least 14 px, with 44 px controls and normal-text
+contrast of at least 4.5:1. Check 320 px and 200% text without clipping. Preserve
+the brand and illustration; hide the textless entry illustration container on
+mobile rather than leaving an empty layout row. Automated checks and synthetic
+captures do not replace actual exact-head visual or native-device acceptance.

@@ -218,6 +218,17 @@ for (const action of ['save', 'reconcile'] as const) {
 for (const language of ['en', 'fi', 'sv'] as const) {
   test(`settings ${language}: private fields, preferences, clearing and persistence`, async ({ page }) => {
     const api = await setup(page, language);
+    const consent = page.locator('section[aria-labelledby="ai-consent-title"]');
+    for (const key of ['aiC.notice', 'aiC.trainingNotice', 'aiC.retentionNotice', 'aiC.allowanceNotice', 'aiC.optOutNotice', 'aiC.reviewNotice'] as const) {
+      await expect(consent.getByText(messages[key][language], { exact: true })).toBeVisible();
+    }
+    await expect(consent.getByRole('checkbox', { name: messages['aiC.agree'][language], exact: true })).toHaveCount(1);
+    await expect(consent.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toBeVisible();
+    await expect(consent.getByRole('button', { name: messages['aiC.disable'][language], exact: true })).toBeVisible();
+    expect(await consent.evaluate((element) =>
+      !element.querySelector('details')
+      && [...element.querySelectorAll('.fine')].every((copy) => parseFloat(getComputedStyle(copy).fontSize) >= 14)
+      && element.querySelector('.consent-confirm')!.getBoundingClientRect().height >= 44)).toBe(true);
     const beforeB = structuredClone(api.profiles[owners.b]);
     const patches: Record<string, unknown>[] = [];
     page.on('request', (request) => { if (request.method() === 'PATCH') patches.push(request.postDataJSON() as Record<string, unknown>); });

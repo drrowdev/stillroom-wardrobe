@@ -4540,3 +4540,74 @@ rerun. Missing evidence, invalid bytes, failed/flaky requests or cleanup failure
 blocks; a captured guard is localization, not repair or waiver. New-head automated,
 types/twelve-image/human gates remain pending. No transport repair, UX, merge,
 deployment, hosted/private/paid/provider authority follows.
+
+## 13 September 2026 - reviewed UX-copy source candidate (unstaged)
+
+This append follows the [UX proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5646983663),
+[actual Anthropic T12 critique and coordinator amendments](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5647110681),
+and [fresh OWN-model attestation and source permission](https://github.com/drrowdev/stillroom-wardrobe/pull/22#issuecomment-5651727569).
+The persistent local writer starts from merged main
+`4589b06deb10baf695e432bd6058f4af01085c5d`, tree
+`7b0b206171e5b800a6501c75acb0b7e156ca2a2c`. PR #22 remains merged;
+this source permission does not authorize publication or a new PR yet.
+
+The R27 localization/accessibility work removes repeated entry, wardrobe,
+capture and settings introductions and obsolete future onboarding copy. Active
+EN/FI/SV labels and helper/error text are shorter. Genuine owner, recovery,
+privacy, consent, provider/location/retention and charge/unknown-outcome guidance
+remains; the AI notice uses visible, separately labelled paragraphs. Only
+secondary setup/camera instructions are collapsible. Removed select hints have
+no dangling accessible-description references. Field editing, explicit Save,
+auth/recovery operations, owner isolation, generated personal text, taxonomy,
+formatting and provider policy are unchanged.
+
+The existing twelve synthetic captures are retained. Existing recovery fixtures
+own sign-in and password-entry EN 1280/FI 320 captures; existing slice fixtures own
+empty-wardrobe EN 1280/FI 320 captures. These are the six literal
+`test-results/ux-copy-visual/` paths in the additional pinned artifact step,
+bounded to one MiB each with regular-file, approved-name/count and PNG/IHDR-width
+checks. The two test owners check disjoint exact subsets without a shared-directory
+completion race. Functional/language/accessibility checks remain in all selected
+projects; only Chromium writes these six buffers. No local images were generated
+or viewed. All eighteen actual exact-head artifact reviews remain coordinator
+gates, not claims made by this source candidate.
+
+The original 306880 working-file bytes above this append remain frozen, as do
+both C integration/support files, domain/helpers/scripts/types/migrations and
+existing raw-byte/status/ownership/timing/cleanup oracles. Real recovery changes
+are catalog imports/selectors only; operation counts, deadlines and restoration
+are unchanged. The existing five visual upload steps are unchanged.
+
+Local runtime, Node/npm/version commands, tests, scanners, builds, browsers,
+backend, installation and registry/TLS probes are prohibited and were not run.
+Manual text/Git inspection is not a passing runtime check. Independent SOURCE
+review and separate commit/publication approval precede new exact-head
+lint/types/translations/unit/build/scanner/dependency/browser/axe, real normal-owner
+recovery/B1/B2/C/restoration/types, Apple and eighteen-artifact visual gates.
+Native/manual acceptance remains open. The historical intermittent raw400 remains
+unlocalized, not fixed or reclassified as harness-only/prod-safe. The earlier
+accepted integration risk is not a future waiver. Source remains ahead of
+production: deployed f318/six hosted migrations; B1/B2 are not hosted. No merge,
+deployment, hosted/private/paid/provider or additional writer authority follows.
+
+## 13 September 2026 - UX-copy zoom cleanup compiler correction
+
+First-head CI [34745157539, attempt 1](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/34745157539)
+at `fd8f839419b0ddd394df48f315b0761839da1be7` failed in App job
+`103691615006`: installation and lint passed, but `tsc --noEmit` emitted TS2339
+for `Node.remove` in recovery.spec.ts:429 and slice.spec.ts:1151. Subsequent App
+steps, browser checks and captures were skipped, not passed. The actual sanitized
+compiler log was read. This is a new test-source typing defect, not a raw400
+diagnosis. Backend and Apple success reported in the
+[repair receipt](https://github.com/drrowdev/stillroom-wardrobe/pull/23#issuecomment-5651952459)
+is job/step metadata, not new detailed counts or artifact acceptance.
+
+The same persistent writer narrows each zoom cleanup node to HTMLStyleElement
+and requires attachment to document.head before removing it. Unexpected type or
+structure throws explicitly. Both 200% assertions, all iterations, captures and
+other oracles remain unchanged. Only these two callbacks and this append change;
+the preceding 310314 working-file bytes and other 207 tracked paths stay frozen.
+No local compiler/runtime/tests/captures or unchanged-job rerun was performed.
+This unstaged correction awaits coordinator source/commit/publication gates and
+fresh changed-head CI, Apple, types and actual eighteen-image review. Earlier
+job success does not validate a new head; all separate holds remain in force.

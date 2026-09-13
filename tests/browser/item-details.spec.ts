@@ -37,7 +37,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     const calls = writes(page);
     await expect(nameSave(page, language)).toBeDisabled();
     await expect(descriptionSave(page, language)).toBeDisabled();
-    await expect(page.getByText(messages['settings.intro'][language], { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: messages['detail.title'][language], exact: true })).toBeVisible();
     await page.locator('#detail-title').fill('Å overshirt 🌿');
     await page.locator('#detail-category').selectOption('layer');
     await page.locator('#detail-description').fill('Oma kuvaus / egen beskrivning');
