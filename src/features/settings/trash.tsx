@@ -128,6 +128,7 @@ function DeleteDialog({ preview, busy, t, language, returnFocus, onCancel, onCon
 export function Trash(props: Shared & { language: Language; onBack: () => void; onChanged: () => void }) {
   const { lifecycle, scope, images, online, t, language } = props;
   const action = useAction(scope, online);
+  const { run } = action;
   const [rows, setRows] = useState<DeletionStatus[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -143,7 +144,7 @@ export function Trash(props: Shared & { language: Language; onBack: () => void; 
     setRows(old => after ? [...old.filter(row => !page.rows.some(value => value.id === row.id)), ...page.rows] : page.rows);
     setNext(page.next); setLoaded(true);
   }, [lifecycle]);
-  useEffect(() => { if (!loaded) void action.run(signal => load(signal, null)); }, [action.run, load, loaded]);
+  useEffect(() => { if (!loaded) void run(signal => load(signal, null)); }, [run, load, loaded]);
   function removeRow(id: string) {
     setRows(old => old.filter(row => row.id !== id)); setIntent(null); setRestore(null); setObserved(false);
     props.onChanged(); document.getElementById('trash-title')?.focus();

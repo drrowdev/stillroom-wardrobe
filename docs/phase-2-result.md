@@ -5643,3 +5643,29 @@ Only static source/diff/byte checks are permitted. The17 original phase prefixes
 exact generated types,200 frozen files and18+4 capture bounds remain unchanged.
 Source review, exact-head execution/visual acceptance and all previously stated
 holds remain; ten cycles/no11/rerun, no staging/commit/push/merge/deploy.
+
+#### 14 September 2026 - cycle11 repair source, execution pending
+
+[Cycle11 evidence and repair proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5669937352)
+record lint failure and two new live-page failures on38c4/tree49a2, with ordinary
+cleanup verified in both wrappers; Apple7 passed. All three checkout objects
+were coordinator-verified as cb9f/tree49a2 with ordered main221/head38c4 parents.
+Later App checks/browser/22visuals and backend security/types were skipped.
+The original live exceptions remain unknown: branch labels do not prove DELETE.
+
+[Independent Anthropic Claude Opus5 repair-plan acceptance and disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5670094345)
+and [current GPT-6 Astra repair-task model/edit receipt](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5670197301)
+authorize only this four-file unstaged repair. The flagged Trash effect uses its
+stable run alias; both test helpers scope the exact Trash link to the account
+popover, preserving legitimate Undo navigation. The fixture asserts one scoped
+target and exercises both visible links. The live test keeps strict click without
+an extra count probe. Separate granular main/proof/cleanup checkpoints retain
+first failures privately and emit at most one bounded failure-only diagnostic,
+never raw exceptions, tokens, identifiers or DOM. Existing assertions, one-shot
+transport, timeouts, retries and cleanup remain; no original cause is recovered.
+
+These corrections are **UNEXECUTED**. All19 phase prefixes, exact generated types,
+other19 Stage2 files and200 outside files, capture suffix/22bounds and four
+withheld-line qualifications remain preserved. Eleven cycles consumed; no12 or
+rerun is released. Source review and all runtime/visual/type/security, normal
+merge/exact-main and previously recorded human/hosted/cutover gates remain.

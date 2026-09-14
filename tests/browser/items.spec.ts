@@ -16,7 +16,9 @@ async function setup(page: Page, language: Language = 'en', options: MockOptions
 }
 async function trashPage(page: Page, language: Language = 'en') {
   await button(page, 'account.menu', language).click();
-  await page.getByRole('link', { name: messages['nav.trash'][language], exact: true }).click();
+  const link = page.locator('.account-popover').getByRole('link', { name: messages['nav.trash'][language], exact: true });
+  await expect(link).toHaveCount(1);
+  await link.click();
   await expect(page.locator('#trash-title')).toBeVisible();
 }
 async function move(page: Page, id: string, language: Language = 'en') {
@@ -29,6 +31,17 @@ test.beforeEach(({ page }, info) => { checkRetry(page, info.retry); });
 function checkRetry(page: Page, retry: number) {
   expect(!page.isClosed() && retry === 0, 'New lifecycle flakiness blocks acceptance').toBe(true);
 }
+test('account-menu Trash navigation remains unique alongside the Undo notice link', async ({ page }) => {
+  const { item } = await setup(page);
+  await move(page, item.id);
+  await button(page, 'account.menu').click();
+  await expect(page.getByRole('link', { name: messages['nav.trash'].en, exact: true })).toHaveCount(2);
+  await expect(page.locator('.lifecycle-undo').getByRole('link', { name: messages['nav.trash'].en, exact: true })).toBeVisible();
+  await expect(page.locator('.account-popover').getByRole('link', { name: messages['nav.trash'].en, exact: true })).toBeVisible();
+  await button(page, 'account.menu').click();
+  await trashPage(page);
+  await expect(page.locator('.trash-list li')).toHaveCount(1);
+});
 for (const language of ['en', 'fi', 'sv'] as const) {
   test(`lifecycle ${language}: dirty sections, exact Undo and server Restore preserve saved fields`, async ({ page }) => {
     const { api, item, image, peer } = await setup(page, language);
