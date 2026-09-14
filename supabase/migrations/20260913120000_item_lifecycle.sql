@@ -186,7 +186,7 @@ end;
 $$;
 create trigger item_object_publication_guard after insert or update on storage.objects
 for each row execute function private.guard_item_object_publication();
-alter table storage.objects enable always trigger item_object_publication_guard;
+-- Installation is incomplete until the separately guarded CI owner step verifies ALWAYS.
 
 create function public.set_item_trashed(p_item_id uuid,p_expected_version bigint,p_trashed boolean)
 returns table(id uuid,owner_id uuid,version bigint,deleted_at timestamptz)

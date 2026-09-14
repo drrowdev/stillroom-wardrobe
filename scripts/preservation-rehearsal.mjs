@@ -5,8 +5,9 @@ import path from 'node:path';
 import {
   ROOT, assertNoServiceSecrets, assertProjectConfig, requireDocker, requireLocalContainer,
   cli, runCommand, normalSessionEnvironment, readCredentialCache, validateSessionEnvironment, privilegedLocalSql,
-  DB_CONTAINER, commandEnvironment, jwtClaims,
+  DB_CONTAINER, commandEnvironment, jwtClaims, reportError,
 } from './backend/local.mjs';
+import { PUBLICATION_BODY_MD5, assertCiStorageGuardInstall, installCiStorageGuard, verifyCiStorageGuard } from './backend/ci-storage-guard.mjs';
 import { isMain } from './quality/files.mjs';
 import {
   SOURCE_HASHES, requireEvidence, assertSnapshotAbsent, cleanupSnapshot,
@@ -21,7 +22,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260910070000_checked_item_save.sql', version: '20260910070000', time: '2026-09-10 07:00:00', bytes: 16801, sha256: SOURCE_HASHES.save },
   { name: '20260911040000_ai_analysis_backend.sql', version: '20260911040000', time: '2026-09-11 04:00:00', bytes: 24856, sha256: SOURCE_HASHES.analysis },
   { name: '20260911200000_checked_ai_item_save.sql', version: '20260911200000', time: '2026-09-11 20:00:00', bytes: 29668, sha256: SOURCE_HASHES.analyzedSave },
-  { name: '20260913120000_item_lifecycle.sql', version: '20260913120000', time: '2026-09-13 12:00:00', bytes: 20516, sha256: SOURCE_HASHES.lifecycle },
+  { name: '20260913120000_item_lifecycle.sql', version: '20260913120000', time: '2026-09-13 12:00:00', bytes: 20525, sha256: SOURCE_HASHES.lifecycle },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -135,7 +136,7 @@ select jsonb_build_object(
       ('private.guard_item_deletion()','a3215f653a4b240d691f7a4a16be4cbd'),
       ('private.guard_item_image_deletion()','dc3c9d450fb27915b20ac84313acf80e'),
       ('private.may_create_item_object(text)','93443dd83aaec31f8696ca844331dd83'),
-      ('private.guard_item_object_publication()','a1e6faa7a53dd540403d8b6e831820b4'),
+      ('private.guard_item_object_publication()','${PUBLICATION_BODY_MD5}'),
       ('public.set_item_trashed(uuid,bigint,boolean)','c27f9c20cb84663278c1b7adc465311e'),
       ('public.item_deletion_status(uuid[])','4b9f170466dcac2472112ea5cb6b3a67'),
       ('public.begin_item_deletion(uuid,bigint,uuid,text)','c9bb6b0a059b4bd19e7dcbb5800f1151'),
@@ -704,6 +705,8 @@ async function history(stage) {
 }
 
 async function main() {
+  try { assertCiStorageGuardInstall(); }
+  catch (error) { reportError(error); return; }
   let stage = 'guards', run, ownsSnapshot = false;
   try {
     assertRehearsalEnvironment(process.env, process.argv.slice(2));
@@ -746,6 +749,9 @@ async function main() {
     await history('base');
     stage = 'S3-migration-up';
     requireEvidence((await cli(['migration', 'up', '--local'])).code === 0);
+    stage = 'S3-storage-guard';
+    await installCiStorageGuard();
+    await verifyCiStorageGuard();
     stage = 'S3-target-history';
     await history('target');
     stage = 'S4-verify';

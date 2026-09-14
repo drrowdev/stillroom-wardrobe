@@ -133,6 +133,13 @@ The source-only vendor-table trigger exception is approved; actual catalog,
 backend identity, upgrade behavior and hosted privilege/cutover evidence remain
 separate gates. No hosted DDL or privileged bypass is authorized.
 
+The T26 disposable-CI installer uses one fixed Storage-owner connection solely
+to finalize and verify the exact ALWAYS guard; ordinary-session assertions
+remain separate. Docker/loopback trust is superuser-equivalent capability:
+selecting the owner constrains reviewed code, not authentication authority.
+An ordinary-only intermediate trigger is incomplete setup, never readiness
+or a production waiver. Hosted owner/quiescence cutover remains blocked.
+
 The reviewed PR #17/A1 checked-manual-Save source candidate retains a minimal
 private retry guard after item/image cleanup: exactly three UUIDs
 `owner_id,item_id,image_id`, unique per owner, with no timestamps, status,

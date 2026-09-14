@@ -722,9 +722,29 @@ describe('import safety and frozen integration boundary', () => {
     const workflow = await readFile(path.join(root, '.github/workflows/ci.yml'), 'utf8');
     expect(workflow).toContain("      - run: npm run db:start\n      - run: npm run db:rehearse\n        env:\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:reset\n      - run: npm run test:integration\n      - run: npm run test:security\n      - run: node scripts/ai-analysis-rehearsal.mjs\n      - run: npm run db:types");
     expect(workflow.match(/ALLOW_PRESERVATION_REHEARSAL/g)).toHaveLength(1);
+    expect(workflow.match(/ALLOW_CI_STORAGE_GUARD_INSTALL/g)).toHaveLength(1);
+    expect(workflow).toContain("      ALLOW_SECURITY_TESTS: '1'\n      ALLOW_CI_STORAGE_GUARD_INSTALL: '1'");
+    expect(workflow.slice(0, workflow.indexOf('\n  database:'))).not.toContain('ALLOW_CI_STORAGE_GUARD_INSTALL');
+    expect(workflow).not.toContain('GITHUB_JOB:');
     expect(workflow).toContain('timeout-minutes: 30');
     const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     expect(pkg.scripts['db:rehearse']).toBe('node scripts/preservation-rehearsal.mjs');
+  });
+  it('preflights before CLI mutation, skips base S1 installation and finalizes S3 before target traffic', async () => {
+    const source = await readFile(path.join(root, 'scripts/preservation-rehearsal.mjs'), 'utf8');
+    const main = source.slice(source.indexOf('async function main()'));
+    expect(main.indexOf('assertCiStorageGuardInstall();')).toBeLessThan(main.indexOf('await assertProjectConfig();'));
+    expect(main.indexOf('assertCiStorageGuardInstall();')).toBeLessThan(main.indexOf('await cli(args)'));
+    const base = main.slice(0, main.indexOf("stage = 'S3-migration-up'"));
+    expect(base).not.toContain('await installCiStorageGuard();');
+    expect(base).not.toContain('await verifyCiStorageGuard();');
+    const finalized = main.indexOf('await installCiStorageGuard();');
+    expect(finalized).toBeGreaterThan(main.indexOf("await cli(['migration', 'up', '--local'])"));
+    expect(main.indexOf('await verifyCiStorageGuard();')).toBeGreaterThan(finalized);
+    expect(main.indexOf("await history('target');")).toBeGreaterThan(main.indexOf('await verifyCiStorageGuard();'));
+    expect(main.indexOf('ITEM_LIFECYCLE_CATALOG_SQL')).toBeGreaterThan(main.indexOf("await history('target');"));
+    expect(main.match(/await installCiStorageGuard\(\);/g)).toHaveLength(1);
+    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(1);
   });
   it('keeps the normal child free of privileged calls and compares before probes', async () => {
     const source = await readFile(path.join(root, 'tests/integration/preservation.sessions.mjs'), 'utf8');

@@ -265,7 +265,7 @@ describe('I08 SQL source contract, not live database proof', () => {
     expect(routine('public.finish_item_deletion')).toContain("'absent'::text");
     expect(routine('public.finish_item_deletion')).not.toMatch(/delete from (?:storage|public\.item_images)|forget_image/);
   });
-  it('fences all-role publication with transaction-held SHARE locks, not admission or expiry', () => {
+  it('fences all-role publication with transaction-held SHARE locks, not admission or expiry', async () => {
     const publication = routine('private.guard_item_object_publication');
     expect(publication).toContain("volatile security definer set search_path = '' set lock_timeout = '2s'");
     ordered(publication, ['from public.profiles p where p.owner_id=u for share nowait',
@@ -283,7 +283,11 @@ describe('I08 SQL source contract, not live database proof', () => {
     }
     expect(publication).not.toMatch(/auth\.uid|current_user|session_user|pg_trigger_depth|for key share|::uuid|ai_enabled|expires_at|clock_timestamp/);
     expect(sql).toContain('after insert or update on storage.objects');
-    expect(sql).toContain('enable always trigger item_object_publication_guard');
+    expect(sql).not.toContain('alter table storage.objects enable always trigger item_object_publication_guard;');
+    const installer = await read('scripts/backend/ci-storage-guard.mjs');
+    expect(installer).toContain('alter table storage.objects enable always trigger item_object_publication_guard;');
+    expect(installer).toContain("observed#>>'{trigger,tgenabled}' is distinct from 'A'");
+    expect(ITEM_LIFECYCLE_CATALOG_SQL).toContain("tgenabled='A'");
     expect(sql).toContain('revoke all on function private.guard_item_object_publication() from public,anon,authenticated');
   });
   it('retains only the approved owner/image pair until actual Auth deletion and records transactionally', () => {

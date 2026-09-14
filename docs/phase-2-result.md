@@ -5065,3 +5065,97 @@ test, compiler or runtime pass. The candidate remains unstaged. Startup cause,
 runtime/catalog/lifecycle/generated types, Stage2, hosted cutover, independent
 final review and human acceptance remain pending; no new run, publication,
 privilege change, paid/provider action or deployment is authorized.
+
+### I08 T23 fixture spelling correction - source only (13 September 2026)
+
+[Fourth-cycle terminal evidence and correction permission](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5656189592)
+records CI34782897424 attempt1 failed and Apple34782897385 attempt1 passed at
+source a94575ebb40789f4d77caa741a2096a0f62a5166. All three jobs used actual
+checkout461305a20b65f14fa8bb936a9ad6d28d23038637/tree c600b3b0fd9260fe61d6376607980ce2808574c4,
+with parents221d60+a945. The fourth cycle is consumed.
+
+App lint failed with two `no-useless-escape` errors at
+`tests/unit/local-backend.test.ts`1137:64/98. Later typecheck, translations, unit,
+build, browser and artifact steps were skipped, not passing. This correction
+removes exactly two unnecessary backslashes before double quotes in the
+single-quoted negative fixture. Its JavaScript string value and unclassified
+expectation remain unchanged; no suppression or assertion weakening was added.
+
+Database startup failed again with wrapper exit2. The actual closed diagnostic
+reported exitCode1, elapsedMs52896, stdoutBytes0, stderrBytes11705, Docker marker
+none, container-exit bucket unclassified, SQLSTATE42501, nine announcements,
+last-known-index9, port markerfalse, statement index24 and owner-required.
+These are untrusted shape observations, not authenticated cause/target evidence.
+The coordinator's proposed statement mapping still needs pinned parser
+confirmation; no raw CLI text or privilege cause is reconstructed here.
+All subsequent rehearsal/reset/integration/security/recovery/runtime/catalog/type
+gates were skipped. The actual artifact inventory was zero.
+
+Apple passed four generated-JPEG cases in17.6s and three orientation/composition
+cases in13.4s, not physical-device, Save or lifecycle acceptance. Prior App/browser
+passes remain historical. This writer read only the sanitized text receipt.
+
+Only this append and the two-character fixture correction changed. The full
+343557-byte preceding phase document and nine older prefixes remain intact;
+all213 other files, including the classifier, SQL and rehearsal, remain frozen.
+Only manual source/Git/hash checks were performed; this correction has not been
+executed. The separate installation-context proposal is not edit authority.
+The candidate remains unstaged; no commit, push, new CI budget, Stage2, hosted
+mutation, provider activity or deployment is authorized.
+
+## I08 T26 CI-only owner installation source amendment - 14 September 2026
+
+[User direction](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659040589),
+[concrete proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659102726)
+and [binding reviewed design](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659205055)
+replace the rejected T25 ordinary-role-switch direction. The retained
+Anthropic Claude Opus5/high critique had25actual events; the coordinator adopted
+its amendments, including the in-module image check and catalog joins that do
+not require private-schema USAGE. This is not runtime approval or a new review.
+[Edit-only release](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659261035)
+records this same writer's9OWN GPT-6 Astra/medium events and independent
+05:02:30.8140799Z source/identity guard at
+a94575ebb40789f4d77caa741a2096a0f62a5166/tree
+c600b3b0fd9260fe61d6376607980ce2808574c4, soleparentf60733c.
+
+The thirteen-path candidate moves only the owner-required Storage ALWAYS
+statement from migration nine to a fixed CI-only installer. All eleven function
+bodies, other SQL, native pins and nineteen evaluated catalog checks remain
+unchanged. The publication body's existing MD5 is now one immutable exported
+constant, interpolated into the unchanged catalog. Ninth source bytes are20525,
+SHA25651529f087b63f99f0645e57f943b2ec041f3a4ccf0440e8c8307ae6721de0143;
+both inventory references change coherently. The integration reader changes
+only its lifecycle hash literal. The accepted two-character quote correction
+in local-backend.test.ts is frozen and retained.
+
+Pure preflight refuses unapproved start/reset/preservation before CLI mutation.
+Only the database job receives the new opt-in; neither stripped environment
+helper nor normal child changes. The installer independently checks local
+target/container and the pinned17.6.1.165 image under CLI-default ECR/GHCR/Hub
+names. Source-only verification used CLI997a1e69's manifest and registry resolver;
+no image was pulled and no backend/transport was probed. Fixed owner TCP,
+catalog identity/body/config/ACL checks, a bounded relation-locked transaction
+and unchanged-metadata comparison allow only O-to-A or already-A verification.
+COMMIT precedes the exact success marker; missing/extra/error/timeout output
+fails without retry. These are source contracts, not observed installation.
+
+Start/reset verify strict A before readiness/provisioning; S1 remains base-only,
+S3 finalizes before target traffic, and types only verifies through the frozen
+postgres helper. The selected owner constrains reviewed code, not Docker's
+superuser-equivalent authentication capability. Intermediate ordinary-only
+trigger state is incomplete isolated setup, not ready or a production waiver.
+New unit/mock/source definitions cover scope/import purity, transport bounds,
+metadata/SQL/refusal/receipt contracts, environment stripping and ordering;
+they have not been executed. Existing ordinary-session and cleanup semantics
+are not relaxed.
+
+Only permitted manual source/Git/.NET byte/hash/diff checks were performed.
+The full346005-byte preceding document and ten older prefixes are preserved.
+The candidate is unstaged; no runtime PASS, fifth cycle, staging/commit/push,
+Node/npm/compiler/test/Docker/psql/probe/install/Actions/artifact/hosted work,
+new agent, generated types, Stage2 or deployment is authorized. Actual
+owner/image/HBA/vendor-trigger compatibility, preservation, normal-owner
+negative/access tests, native late-upload, catalog, generated types and all
+previous acceptance/Save/cutover holds remain pending. Four prior cycles stay
+consumed; hosted ninth installation still needs separately reviewed
+owner/quiescence authority.

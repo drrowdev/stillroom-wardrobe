@@ -110,6 +110,7 @@ jobs:
     timeout-minutes: 30
     env:
       ALLOW_SECURITY_TESTS: '1'
+      ALLOW_CI_STORAGE_GUARD_INSTALL: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

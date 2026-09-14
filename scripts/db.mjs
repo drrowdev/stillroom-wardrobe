@@ -5,12 +5,14 @@ import {
   ROOT, MIGRATION_HASH, assertProjectConfig, requireDocker, requireLocalContainer,
   cli, localStatus, fail, reportError, runCommand, describeGenerationResult, describeStartupOrResetFailure,
 } from './backend/local.mjs';
+import { assertCiStorageGuardInstall, installCiStorageGuard, verifyCiStorageGuard } from './backend/ci-storage-guard.mjs';
 
 async function main() {
   const [action, ...args] = process.argv.slice(2);
   if (!['start', 'reset', 'types'].includes(action) || (args.length && !(action === 'types' && args.length === 1 && ['--check', '--setup-artifact'].includes(args[0])))) {
     fail('REFUSED: usage is db.mjs start | reset | types [--check | --setup-artifact]; no remote or extra arguments are accepted.');
   }
+  if (action !== 'types') assertCiStorageGuardInstall();
   await assertProjectConfig();
   await requireDocker();
   if (action === 'start') {
@@ -19,6 +21,8 @@ async function main() {
     const started = await cli(['start', '--yes'], 15 * 60_000);
     const startupElapsedMs = performance.now() - startupStarted;
     if (started.code !== 0) fail('NOT RUN: local Supabase startup failed. Check Docker resources and local service ports; CLI output is withheld to protect credentials. ' + JSON.stringify(describeStartupOrResetFailure(started, startupElapsedMs)));
+    await installCiStorageGuard();
+    await verifyCiStorageGuard();
     await requireLocalContainer();
     const status = await localStatus();
     try {
@@ -39,6 +43,8 @@ async function main() {
     const reset = await cli(['db', 'reset', '--local', '--no-seed', '--yes'], 10 * 60_000);
     const resetElapsedMs = performance.now() - resetStarted;
     if (reset.code !== 0) fail('FAIL: local database reset failed; no account provisioning ran. CLI output is withheld. ' + JSON.stringify(describeStartupOrResetFailure(reset, resetElapsedMs)), 1);
+    await installCiStorageGuard();
+    await verifyCiStorageGuard();
     const provision = await runCommand(process.execPath, [path.join(ROOT, 'scripts', 'provision-test-users.mjs')]);
     if (provision.code !== 0) {
       // The fixture's only output is a deliberately coarse, non-sensitive outcome.
@@ -60,6 +66,7 @@ async function main() {
     console.log('PASS: local migration reset and separate fixture provisioning completed.');
     return;
   }
+  await verifyCiStorageGuard();
   const generationStarted = performance.now();
   const generated = await cli(['gen', 'types', 'typescript', '--local', '--schema', 'public'], 180_000);
   const generationElapsedMs = performance.now() - generationStarted;

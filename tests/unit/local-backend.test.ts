@@ -1134,7 +1134,7 @@ describe('safe startup/reset failure description', () => {
 
   it.each(['permission denied for sequence synthetic', 'must be owner of type synthetic',
     'must be superuser to perform synthetic operation', 'käyttöoikeus puuttuu', 'åtkomst nekad',
-    'unrelated permission denied for table synthetic', 'quoted \"must be owner of table synthetic\"',
+    'unrelated permission denied for table synthetic', 'quoted "must be owner of table synthetic"',
     'other: permission denied for table synthetic', ' permission denied for table synthetic',
     'permission denied for table', 'must be owner of relation'])(
     'keeps unsupported messages or buried prefixes unclassified %#', (message) => {

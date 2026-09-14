@@ -412,6 +412,54 @@ Logical expiry and opportunistic/server deletion are not an inactive-account
 photo activation, provider/account/notice/allowance setup, hosted migrations and
 deployment remain separately blocked. Live/source/hosted state is unchanged.
 
+### T26 CI-only Storage installation boundary
+
+The [reviewed T26 amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659205055)
+moves only the ninth migration's owner-required Storage `ENABLE ALWAYS` statement
+to `scripts/backend/ci-storage-guard.mjs`. The migration alone leaves an
+**incomplete installation**, not a ready stack or an atomic production cutover.
+The all-role publication body, image-ID trigger, nineteen catalog conditions and
+native pins are unchanged. Final readiness still requires the exact ALWAYS guard.
+
+`db:start`, `db:reset` and the preservation parent now refuse before CLI mutation
+unless the approved disposable database job has literal
+`ALLOW_CI_STORAGE_GUARD_INSTALL=1`, `CI=true`, `GITHUB_ACTIONS=true`,
+`GITHUB_REPOSITORY=drrowdev/stillroom-wardrobe` and `GITHUB_JOB=database`.
+Only Database CI sets the new flag. Do not spoof CI variables for local use;
+the local command examples below do not authorize a weaker installation.
+Normal children and stripped command environments inherit none of this scope.
+
+The fixed installer checks project, local daemon, named running container and
+the pinned `supabase/postgres:17.6.1.165` image's CLI-default ECR/GHCR/Hub names.
+It never pulls or selects a fallback. These names come from CLI
+`997a1e69a4a83466964ed874d3a604c88a7b3866`'s Dockerfile and registry resolver,
+not measured image/HBA compatibility. It uses only container TCP127.0.0.1:5432,
+database `postgres`, actor/session `supabase_storage_admin`, `psql -X`,
+`--no-password`, `ON_ERROR_STOP=1` and SQL stdin. Docker/loopback trust grants
+superuser-equivalent capability; this fixed owner path constrains reviewed code,
+not the authentication capability. No role switch, grant or ownership transfer
+is permitted. The generic postgres fixture helper remains unchanged.
+
+Catalog joins validate actual table/function ownership, exact trigger identity,
+body/config/ACLs and metadata. Under a SHARE ROW EXCLUSIVE relation lock, one
+transaction changes only O to A or verifies existing A; absent/D/R/null/mismatched
+state fails. Relevant ownership/ACL/replica identity, full function/trigger
+metadata and session/effective/replication state must remain unchanged.
+Statement/lock/idle-transaction deadlines are10s/2s/10s; the owner process has
+30s and4096-byte bounds. Only exit0, empty stderr and the exact trimmed marker
+emitted **after COMMIT** succeed. Uncertain outcomes fail without retry;
+client closure or a receipt fragment is not server-termination evidence.
+
+Start finalizes and verifies before status/Auth health; reset does so before
+account/AI fixture provisioning. Preservation S1 remains base-only with no
+installer; S3 finalizes before target history, comparison, catalog and fixtures.
+Types performs only strict-A read-only catalog verification through the existing
+postgres helper before generation, never installation. No ordinary-user access
+assertion runs under the owner. Actual owner/image/HBA/trigger compatibility,
+ordinary-session and downstream gates remain unverified. Hosted installation
+requires separately reviewed owner/quiescence cutover; no production waiver,
+retry budget or backend execution is granted by this source change.
+
 Install/start Docker separately, using a local Unix socket or Docker Desktop Windows named pipe. Ensure ports 54320–54322 and 54324 are free. Docker contexts pointing to SSH/TCP daemons and `DOCKER_HOST`/`DOCKER_CONTEXT` overrides are deliberately refused. Use the Docker CLI's selected local context.
 
 On Windows, use `npm.cmd` if PowerShell script execution blocks `npm.ps1`:
@@ -442,7 +490,7 @@ npm run db:types -- --check
 npm run dev
 ```
 
-`db:start` launches the actual local services, checks the known database container, and verifies a healthy Auth HTTP response. Initial Docker image downloads can take several minutes. CLI output is captured rather than printed because startup/status can include credentials.
+After the T26 permission preflight, `db:start` launches the actual local services, finalizes and verifies the Storage guard, checks the known database container, and verifies a healthy Auth HTTP response. Initial Docker image downloads can take several minutes. CLI output is captured rather than printed because startup/status can include credentials.
 
 The [T23 startup-diagnostic amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5656047462)
 defines thirteen closed fields; marker observations activate only on failed
@@ -467,7 +515,7 @@ amendment does not repair privileges or authorize a retry, execution or cutover.
 
 `db:reset` is destructive **only to the disposable local stack**. It checks Docker locality and the database container's exact name, Supabase project label, Postgres image and running state. It invokes `db reset --local --no-seed`, never `--linked`, `--db-url` or `--project-ref`; extra arguments are rejected. A changed initial migration hash also aborts the reset.
 
-After successful migration, a separate Node process runs `scripts/provision-test-users.mjs`:
+After successful migration and strict Storage guard finalization/verification, a separate Node process runs `scripts/provision-test-users.mjs`:
 
 1. Read CLI status JSON into setup-only memory, never console output.
 2. Through local container `psql`, reserve two independent fictional approval slots using `scripts/reserve-accounts.sql`. Refuse unexpected existing identities. No password is passed in SQL, a process argument or a command log.
@@ -501,7 +549,7 @@ This Phase 0 harness does not claim physical-device behavior, account-freeze orc
 
 ## Actual database type generation
 
-`npm run db:types` requires the real running local container and invokes the pinned CLI `gen types typescript --local --schema public`. Only successful plausible generator output is atomically written to `src/data/database.types.ts`. `--check` compares the exact output, including line endings, and fails on a missing or differing file. Nothing is hand-generated from the SQL and failures never replace a previous file.
+`npm run db:types` requires the real running local container and read-only strict-A Storage guard verification before invoking the pinned CLI `gen types typescript --local --schema public`. It never installs the guard. Only successful plausible generator output is atomically written to `src/data/database.types.ts`. `--check` compares the exact output, including line endings, and fails on a missing or differing file. Nothing is hand-generated from the SQL and failures never replace a previous file.
 
 The actual generated file is now committed and used by `AppClient` and the
 `src/data/rows.ts` projections. Runtime guards remain, but are not schema

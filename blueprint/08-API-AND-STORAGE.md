@@ -97,6 +97,12 @@ Public/image RPC conflicts still use22023. HTTP5xx remains failure. Existing
 the same draft/photo/IDs and offers explicit retry. It is not photo rejection or
 an automatic resend; capture/transport source stays frozen.
 
+The reviewed CI-only owner installer must verify this exact guard as ALWAYS
+before stack readiness, target-schema fixture traffic or type generation; ordinary migration
+completion alone is an incomplete installation. Hosted installation remains
+blocked pending separately reviewed owner/quiescence cutover, not an atomic
+migration guarantee or a weaker production boundary.
+
 Initial pending images or unmanifested item-prefix objects refuse BEGIN before
 any irreversible claim/version change. Restore remains available in its window.
 After BEGIN, no Restore/Undo, item update, image reservation/update/forgetting or
