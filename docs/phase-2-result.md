@@ -5309,3 +5309,77 @@ Actions/seventh cycle, extra agent/native allocation, Stage2, hosted mutation,
 merge/deploy or paid/private-photo processing is authorized. Six cycles consumed;
 original Save STOP-on-recurrence, separate browser400 uncertainty, real-owner
 lifecycle/cleanup/later backend/types and human/device/hosted/cutover gates persist.
+
+## I08 T30 bounded security diagnosis - 14 September 2026
+
+[Cycle7 terminal5661793018](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5661793018)
+records CI34826747424attempt1 failing at09:17:24UTC for source
+c7ddb349af5ac22f95ebf0eb7c22fa152020caa9/tree
+fdd8f053f93e9cef2583c4f62cb8fa4a7600f312. All three actual job checkouts were
+7dbf8c4bc2331a1b457527961da3393da8e3f611, the same tree with ordered parents
+main221d60c8a07eb4a89a546133685b80487cf434be and headc7; Node24.19.0.
+DB start/rehearsal/reset and full integration for two ordinary owners passed.
+All nineteen evaluated lifecycle catalog checks, contention, publication and
+marker cleanup passed. The new SELECT qual has positive evaluated exact-equality
+evidence, not a separately dumped measured string. The4935-byte native projection
+SHA25613a320de0ac4d372108560857eaf24bbe0e4a1a855003f2b46883779666bd484
+was accepted by coordinator-verified identical-content reuse, not hosted or
+unprojected/image/HBA evidence. Native image/provenance/HBA review remains pending.
+
+Security failed at the coarse `native-operation-boundary` phase. Its actual
+failing owner ordinal, operation and response remain unknown. The preceding
+shared orphan helper in that iteration returned; this does not prove both
+security owners completed. No exact-cleanup failure notice was emitted, which
+does not itself prove physical erasure. App failed only lint at unit262,
+`no-regex-spaces`. Later App/typecheck/units/browser/visual uploads and later
+AI-analysis rehearsal/real types/upload/parity were skipped; artifact inventory
+was zero. This is not the approved final four-RPC type-only difference. Old1a6
+visual acceptance remains historical, not current-head acceptance.
+Apple34826747429attempt1 passed4generated-JPEG plus3orientation/composition tests,
+not physical-iPhone/HEIC/Save/RLS or human acceptance. This writer read only public
+sanitized text receipts, not Actions logs/artifacts/images.
+
+[Proposal5661891889](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5661891889)
+and [binding disposition/edit release5662072605](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5662072605)
+record retained critic c372 turns31/32 AMEND:6actual Anthropic claude-opus-5/high
+events09:32:57.663-09:38:14.068UTC, with M1-M9 adopted and coordinator corrections.
+Fresh OWN attestation records6gpt-6-astra events09:32:40.248-09:34:50.726UTC:
+5medium and1reasoning unspecified/NULL, not6medium. Coordinator supported identity
+and independent source seal09:42:17.8405036UTC matched this persistent writer.
+Writer rechecked all217HEAD/index/working entries,3raw baselines,214outside
+raw manifest,14phase prefixes and36root-inclusive directories at09:48:26.3984329UTC;
+independent Git/REST refs matched at09:48:13.6843869UTC. The full hash-verified
+receipt was reread immediately before the first patch. This is locally recorded
+coordinator-observed usage, not tamper-proof/native-platform attestation.
+
+T30 changes only security observation definitions/call-site labels, focused
+unit definitions plus the equivalent two-space regexp quantifier, and this
+append. The failure-only record has six exact fields: schemaVersion, ownerOrdinal,
+case, stage, status, ok; ten fixed cases, three direct and fifteen opaque stages.
+Fresh per-owner state and same-statement null resets prevent stale attribution.
+Only existing returned bulk/alternate/pending-absence results supply validated
+status/ok; catalog, singular deletion and other helpers stay opaque. Null at a
+direct stage means no returned result was captured, not proof a request reached
+the wire or of any particular failure. The unchanged normal client rejects
+HTTP500+ and other failures before returning; no adapter/catch recovers them.
+The serializer's100..599 bound is not evidence that current HTTP500+ is observed.
+
+Original request tuples/options/order/refusals and byte/row assertions remain.
+Exact outer-phase gating prevents stale evidence from later/cleanup-only failure.
+The original coarse failure/nonzero assignment precedes guarded diagnostic output;
+capture and fixed-notice sink failures cannot replace it or prevent cleanup.
+Closed own-key/data-descriptor/type/null-pair checks reject private/accessor extras;
+JSON is bounded to512UTF8bytes with no CR/LF and exact round-trip validation.
+Focused units are unexecuted definitions and mock-only value-flow examples, not
+native/main execution or privacy proof. No speculative SQL or policy repair.
+
+Full360440preceding raw phase bytes and all13older prefixes stay immutable.
+All214other files, including SQL/eleven bodies/ALWAYS/native pins/installer/
+transport/product/Save/browser/workflow/dependencies/types and blueprint/backend
+docs, remain frozen. Manual source/Git/hash/whitespace review only; no local
+compiler/lint/unit/runtime PASS. Candidate is UNSTAGED for source review.
+No staging/object write/commit/push, eighth cycle/Actions, local runtime/probe/
+install, extra agent/native allocation, Stage2, hosted mutation, merge/deploy or
+paid/private-input work is authorized. Seven cycles consumed; original Save STOP,
+separate browser400 uncertainty, current App/security/later backend/types/visuals,
+native image/HBA and human/device/recovery/export/cutover gates persist.

@@ -5,9 +5,43 @@ import { bytes, intent, saveClients, denied, eq } from '../integration/item-save
 import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
 import { lifecycleHarness, legacyOrphanCase } from '../integration/item-lifecycle.sessions.mjs';
 
+const alternateCases = ['alternate-put', 'alternate-copy', 'alternate-move', 'alternate-sign-upload', 'alternate-tus'];
+const securityCases = ['setup', 'bulk-plain', 'bulk-spoofed', ...alternateCases, 'pending-roundtrip', 'claim-setup'];
+const directStages = ['bulk-request', 'alternate-request', 'pending-absence'];
+const opaqueStages = ['track-pending', 'reserve-pending', 'catalog', 'download-owned', 'prepare-alternates',
+  'upload-pending', 'remove-pending', 'reupload-pending', 'trash-own', 'trash-peer', 'status-own', 'status-peer',
+  'begin-args', 'begin-peer', 'snapshot-peer'];
+export function securityObservation(ownerOrdinal) {
+  requireEvidence(ownerOrdinal === 1 || ownerOrdinal === 2);
+  return { schemaVersion: 1, ownerOrdinal, case: null, stage: null, status: null, ok: null };
+}
+export function serializeSecurityObservation(observation) {
+  const keys = Object.keys(securityObservation(1)), output = {};
+  requireEvidence(observation !== null && typeof observation === 'object' && !Array.isArray(observation));
+  const ownKeys = Reflect.ownKeys(observation);
+  requireEvidence(ownKeys.length === keys.length && ownKeys.every((key) => typeof key === 'string' && keys.includes(key)));
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(observation, key);
+    requireEvidence(descriptor && Object.hasOwn(descriptor, 'value'));
+    output[key] = descriptor.value;
+  }
+  requireEvidence(output.schemaVersion === 1 && [1, 2].includes(output.ownerOrdinal));
+  requireEvidence(output.case === null || securityCases.includes(output.case));
+  requireEvidence(output.stage === null || directStages.includes(output.stage) || opaqueStages.includes(output.stage));
+  requireEvidence(output.status === null || (Number.isInteger(output.status) && output.status >= 100 && output.status <= 599));
+  requireEvidence(output.ok === null || typeof output.ok === 'boolean');
+  requireEvidence((output.status === null) === (output.ok === null));
+  if (!directStages.includes(output.stage)) requireEvidence(output.status === null && output.ok === null);
+  const serialized = JSON.stringify(output);
+  requireEvidence(typeof serialized === 'string' && !/[\r\n]/.test(serialized) && Buffer.byteLength(serialized, 'utf8') <= 512);
+  eq(JSON.parse(serialized), output);
+  return serialized;
+}
+
 async function main() {
   const harnesses = [];
   let phase = 'arguments';
+  let observation = null;
   try {
     requireEvidence(process.argv.length === 2);
     const { client, owners } = await saveClients(process.env);
@@ -18,7 +52,11 @@ async function main() {
       await legacyOrphanCase(client, owner, owners[1 - index], h);
       const own = await h.create(), foreign = await peer.create();
       phase = 'native-operation-boundary';
+      observation = null;
+      observation = securityObservation(index + 1);
+      Object.assign(observation, { case: 'setup', stage: 'track-pending', status: null, ok: null });
       const pending = h.track(intent());
+      Object.assign(observation, { case: 'setup', stage: 'reserve-pending', status: null, ok: null });
       await h.reserve(pending);
       const catalog = async () => {
         const result = await client.request(owner.token, '/storage/v1/object/list/wardrobe', {
@@ -27,17 +65,28 @@ async function main() {
         requireEvidence(result.ok && Array.isArray(result.data) && result.data.length === 2);
         return result.data.map(({ id, name, metadata }) => ({ id, name, metadata })).sort((a, b) => a.name.localeCompare(b.name));
       };
+      Object.assign(observation, { case: 'setup', stage: 'catalog', status: null, ok: null });
       const originalCatalog = await catalog();
-      for (const headers of [{}, { 'storage.operation': 'storage.object.delete',
-        'x-storage-operation': 'storage.object.delete', 'x-http-method-override': 'DELETE' }]) {
+      for (const [bulkIndex, headers] of [{}, { 'storage.operation': 'storage.object.delete',
+        'x-storage-operation': 'storage.object.delete', 'x-http-method-override': 'DELETE' }].entries()) {
+        const caseName = ['bulk-plain', 'bulk-spoofed'][bulkIndex];
+        Object.assign(observation, { case: caseName, stage: 'bulk-request', status: null, ok: null });
         const bulk = await client.request(owner.token, '/storage/v1/object/wardrobe',
           { method: 'DELETE', body: { prefixes: h.paths(own) }, headers });
+        requireEvidence(Number.isInteger(bulk.status) && bulk.status >= 100 && bulk.status <= 599 && typeof bulk.ok === 'boolean');
+        Object.assign(observation, { status: bulk.status, ok: bulk.ok });
         requireEvidence(bulk.status < 500);
         if (bulk.ok) eq(bulk.data, []);
-        for (const path of h.paths(own)) await h.download(path);
+        Object.assign(observation, { case: caseName, stage: 'download-owned', status: null, ok: null });
+        for (const path of h.paths(own)) {
+          Object.assign(observation, { case: caseName, stage: 'download-owned', status: null, ok: null });
+          await h.download(path);
+        }
+        Object.assign(observation, { case: caseName, stage: 'catalog', status: null, ok: null });
         eq(await catalog(), originalCatalog);
       }
-      for (const [route, options] of [
+      Object.assign(observation, { case: 'setup', stage: 'prepare-alternates', status: null, ok: null });
+      const alternates = [
         [`/storage/v1/object/wardrobe/${h.paths(pending)[0]}`, { method: 'PUT', body: bytes, binary: true }],
         ['/storage/v1/object/copy', { method: 'POST', body: {
           bucketId: 'wardrobe', sourceKey: h.paths(own)[0], destinationKey: h.paths(pending)[0],
@@ -50,25 +99,53 @@ async function main() {
           'Tus-Resumable': '1.0.0', 'Upload-Length': '4', 'Content-Type': 'application/offset+octet-stream',
           'Upload-Metadata': `bucketName ${Buffer.from('wardrobe').toString('base64')},objectName ${Buffer.from(h.paths(pending)[0]).toString('base64')},contentType ${Buffer.from('image/jpeg').toString('base64')}`,
         } }],
-      ]) {
+      ];
+      requireEvidence(alternates.length === 5 && alternateCases.length === 5);
+      for (const [alternateIndex, [route, options]] of alternates.entries()) {
+        const caseName = alternateCases[alternateIndex];
+        Object.assign(observation, { case: caseName, stage: 'alternate-request', status: null, ok: null });
         const response = await client.request(owner.token, route, { ...options, headers: {
           ...options.headers, 'storage.operation': 'storage.object.upload', 'x-storage-operation': 'storage.object.upload',
         } });
+        requireEvidence(Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 && typeof response.ok === 'boolean');
+        Object.assign(observation, { status: response.status, ok: response.ok });
         requireEvidence(!response.ok && response.status < 500);
-        for (const path of h.paths(own)) await h.download(path);
+        Object.assign(observation, { case: caseName, stage: 'download-owned', status: null, ok: null });
+        for (const path of h.paths(own)) {
+          Object.assign(observation, { case: caseName, stage: 'download-owned', status: null, ok: null });
+          await h.download(path);
+        }
+        Object.assign(observation, { case: caseName, stage: 'catalog', status: null, ok: null });
         eq(await catalog(), originalCatalog);
-        requireEvidence(!(await client.request(owner.token, `/storage/v1/object/authenticated/wardrobe/${h.paths(pending)[0]}`)).ok);
+        Object.assign(observation, { case: caseName, stage: 'pending-absence', status: null, ok: null });
+        const absent = await client.request(owner.token, `/storage/v1/object/authenticated/wardrobe/${h.paths(pending)[0]}`);
+        requireEvidence(Number.isInteger(absent.status) && absent.status >= 100 && absent.status <= 599 && typeof absent.ok === 'boolean');
+        Object.assign(observation, { status: absent.status, ok: absent.ok });
+        requireEvidence(!absent.ok);
       }
       // Standard POST and pending delete/new-INSERT remain supported after alternate-route denial.
+      Object.assign(observation, { case: 'pending-roundtrip', stage: 'upload-pending', status: null, ok: null });
       await h.upload(pending);
+      Object.assign(observation, { case: 'pending-roundtrip', stage: 'remove-pending', status: null, ok: null });
       for (const path of h.paths(pending)) {
+        Object.assign(observation, { case: 'pending-roundtrip', stage: 'remove-pending', status: null, ok: null });
         eq(await deleteWardrobeObject((route, options) => client.request(owner.token, route, options), owner.uid, path), 'removed');
       }
+      Object.assign(observation, { case: 'pending-roundtrip', stage: 'reupload-pending', status: null, ok: null });
       await h.upload(pending);
-      await h.trash(own, 1); await peer.trash(foreign, 1);
-      const ownPreview = await h.status(own), foreignPreview = await peer.status(foreign);
+      Object.assign(observation, { case: 'claim-setup', stage: 'trash-own', status: null, ok: null });
+      await h.trash(own, 1);
+      Object.assign(observation, { case: 'claim-setup', stage: 'trash-peer', status: null, ok: null });
+      await peer.trash(foreign, 1);
+      Object.assign(observation, { case: 'claim-setup', stage: 'status-own', status: null, ok: null });
+      const ownPreview = await h.status(own);
+      Object.assign(observation, { case: 'claim-setup', stage: 'status-peer', status: null, ok: null });
+      const foreignPreview = await peer.status(foreign);
+      Object.assign(observation, { case: 'claim-setup', stage: 'begin-args', status: null, ok: null });
       const peerArgs = peer.beginArgs(foreign, foreignPreview);
+      Object.assign(observation, { case: 'claim-setup', stage: 'begin-peer', status: null, ok: null });
       await peer.begin(peerArgs);
+      Object.assign(observation, { case: 'claim-setup', stage: 'snapshot-peer', status: null, ok: null });
       const foreignBefore = await peer.snapshot(foreign);
       phase = 'foreign-and-absent';
       const status = await h.call('item_deletion_status', { p_item_ids: [own.p_item.id, foreign.p_item.id, randomUUID()] });
@@ -162,6 +239,13 @@ async function main() {
   } catch {
     console.error(`FAIL: I08 security ${phase}; evidence required; private details suppressed`);
     process.exitCode = 1;
+    if (phase === 'native-operation-boundary' && observation !== null) {
+      try { console.error(`I08 security observation: ${serializeSecurityObservation(observation)}`); } catch {
+        try { console.error('FAIL: I08 security observation capture'); } catch {
+          // The primary failure is already reported; diagnostics must not prevent cleanup.
+        }
+      }
+    }
   } finally {
     for (const h of harnesses) {
       try { await h.cleanup(); } catch { console.error('FAIL: I08 exact security cleanup'); process.exitCode = 1; }

@@ -14,6 +14,8 @@ import type { DeleteReply, DeleteRequest } from '../../src/data/storage-delete';
 import { ITEM_LIFECYCLE_CATALOG_SQL, assertLifecycleFixture, MIGRATIONS, withLifecycleParentLock, withLifecycleCatalogMarker as catalogMarker, lifecycleStorageRuntime, withLifecycleLateUpload, requireStorageCatalogInventory } from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { one, lifecycleObservation, serializeLifecycleObservation, readLifecycleUploadResponse, requireLifecycleUploadConflict, lifecycleFixtureCases, lifecyclePublicationCases, legacyOrphanCase } from '../integration/item-lifecycle.sessions.mjs';
+// @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
+import { securityObservation, serializeSecurityObservation } from '../security/item-lifecycle.sessions.mjs';
 
 const fixtureMocks = vi.hoisted(() => ({
   spawn: vi.fn(), requireLocalContainer: vi.fn(), privilegedLocalSql: vi.fn(), commandEnvironment: vi.fn(), saveClients: vi.fn(),
@@ -259,7 +261,7 @@ describe('I08 SQL source contract, not live database proof', () => {
   });
   it('pins read/delete catalog shape, derived qualifiers and the complete three-policy set separately', () => {
     const catalog = ITEM_LIFECYCLE_CATALOG_SQL as string;
-    expect([...catalog.matchAll(/^  '(\w+)',/gm)]).toHaveLength(19);
+    expect([...catalog.matchAll(/^ {2}'(\w+)',/gm)]).toHaveLength(19);
     const guard = catalog.slice(catalog.indexOf("  'storageReadDelete',"));
     expect(guard).toBe(`  'storageReadDelete',(select count(*)=2 and bool_and(
       cmd=case policyname when 'wardrobe_read' then 'SELECT' when 'wardrobe_delete' then 'DELETE' end
@@ -1440,5 +1442,216 @@ describe('R3 bounded held-upload response and closed evidence (mock-only)', () =
     expect(() => serializeLifecycleObservation(initial)).toThrow();
     stringify.mockImplementationOnce(() => { throw cleanupError; });
     expect(() => serializeLifecycleObservation(initial)).toThrow(cleanupError);
+  });
+});
+
+describe('I08 bounded security observation definitions (not native/main execution)', () => {
+  const cases = ['setup', 'bulk-plain', 'bulk-spoofed', 'alternate-put', 'alternate-copy', 'alternate-move',
+    'alternate-sign-upload', 'alternate-tus', 'pending-roundtrip', 'claim-setup'];
+  const direct = ['bulk-request', 'alternate-request', 'pending-absence'];
+  const opaque = ['track-pending', 'reserve-pending', 'catalog', 'download-owned', 'prepare-alternates',
+    'upload-pending', 'remove-pending', 'reupload-pending', 'trash-own', 'trash-peer', 'status-own', 'status-peer',
+    'begin-args', 'begin-peer', 'snapshot-peer'];
+  const keys = ['schemaVersion', 'ownerOrdinal', 'case', 'stage', 'status', 'ok'];
+  afterEach(() => vi.restoreAllMocks());
+
+  it('creates fresh six-field owner-local defaults and rejects all other owner values', () => {
+    for (const ownerOrdinal of [1, 2]) {
+      const value = securityObservation(ownerOrdinal);
+      expect(Reflect.ownKeys(value)).toEqual(keys);
+      expect(value).toEqual({ schemaVersion: 1, ownerOrdinal, case: null, stage: null, status: null, ok: null });
+      expect(JSON.parse(serializeSecurityObservation(value))).toEqual(value);
+      value.status = 400; value.ok = false;
+      expect(securityObservation(ownerOrdinal)).toMatchObject({ case: null, stage: null, status: null, ok: null });
+    }
+    for (const owner of [undefined, null, 0, 3, -1, 1.1, NaN, Infinity, '1', true, {}, []]) {
+      expect(() => securityObservation(owner)).toThrow('EVIDENCE_REQUIRED');
+    }
+  });
+  it('pins all ten cases, three direct stages and fifteen opaque stages without borrowing a response', () => {
+    expect(cases).toHaveLength(10); expect(direct).toHaveLength(3); expect(opaque).toHaveLength(15);
+    for (const caseName of [null, ...cases]) {
+      for (const stage of [null, ...direct, ...opaque]) {
+        const value = { ...securityObservation(2), case: caseName, stage };
+        expect(JSON.parse(serializeSecurityObservation(value))).toEqual(value);
+        const returned = { ...value, status: 400, ok: false };
+        if (stage !== null && direct.includes(stage)) {
+          expect(JSON.parse(serializeSecurityObservation(returned))).toEqual(returned);
+        } else expect(() => serializeSecurityObservation(returned)).toThrow('EVIDENCE_REQUIRED');
+      }
+    }
+    for (const status of [100, 200, 400, 499, 500, 599]) {
+      for (const ok of [true, false]) {
+        const value = { ...securityObservation(1), case: 'bulk-plain', stage: 'bulk-request', status, ok };
+        expect(JSON.parse(serializeSecurityObservation(value))).toEqual(value);
+      }
+    }
+  });
+  it('rejects invalid scalars, mismatched null pairs, private/extra/symbol/missing keys before serialization', () => {
+    const base = { ...securityObservation(1), case: 'bulk-plain', stage: 'bulk-request', status: 400, ok: false };
+    const stringify = vi.spyOn(JSON, 'stringify');
+    for (const change of [
+      { schemaVersion: 2 }, { schemaVersion: '1' }, { ownerOrdinal: null }, { ownerOrdinal: 0 }, { ownerOrdinal: 3 },
+      { ownerOrdinal: '1' }, { case: 'Private owner/path' }, { case: 1 }, { stage: 'Private token/body' }, { stage: {} },
+      { status: undefined }, { status: '400' }, { status: true }, { status: 99 }, { status: 600 },
+      { status: 400.1 }, { status: NaN }, { status: Infinity }, { status: -Infinity },
+      { ok: undefined }, { ok: 'false' }, { ok: 0 }, { ok: {} }, { status: null }, { ok: null },
+      { private: 'Private token/UUID/URL/body/image' }, { [Symbol('Private')]: 'Private' },
+    ]) expect(() => serializeSecurityObservation({ ...base, ...change })).toThrow('EVIDENCE_REQUIRED');
+    for (const value of [null, undefined, 1, true, 'Private', [], Object.create(base)]) {
+      expect(() => serializeSecurityObservation(value)).toThrow('EVIDENCE_REQUIRED');
+    }
+    for (const key of keys) {
+      const missing = { ...base };
+      Reflect.deleteProperty(missing, key);
+      expect(() => serializeSecurityObservation(missing)).toThrow('EVIDENCE_REQUIRED');
+      const getter = vi.fn(() => 'Private'), accessor = { ...base };
+      Object.defineProperty(accessor, key, { enumerable: true, get: getter });
+      expect(() => serializeSecurityObservation(accessor)).toThrow('EVIDENCE_REQUIRED');
+      expect(getter).not.toHaveBeenCalled();
+    }
+    const hidden = { ...base };
+    Object.defineProperty(hidden, 'private', { value: 'Private', enumerable: false });
+    expect(() => serializeSecurityObservation(hidden)).toThrow('EVIDENCE_REQUIRED');
+    expect(stringify).not.toHaveBeenCalled();
+  });
+  it('bounds the longest real enums and rejects serializer/size/newline/round-trip failures', () => {
+    const value = { ...securityObservation(2), case: 'alternate-sign-upload', stage: 'prepare-alternates' };
+    for (const longest of [value, { ...value, stage: 'alternate-request', status: 599, ok: false }]) {
+      const text = serializeSecurityObservation(longest);
+      expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(512);
+      expect(text).not.toMatch(/[\r\n]/); expect(JSON.parse(text)).toEqual(longest);
+    }
+    const stringify = vi.spyOn(JSON, 'stringify');
+    for (const bad of ['x'.repeat(513), '\u00e9'.repeat(257), 'bad\nline', 'bad\rline', 'not JSON', '{}', 'null']) {
+      stringify.mockReturnValueOnce(bad);
+      expect(() => serializeSecurityObservation(value)).toThrow();
+    }
+    const privateError = new Error('Private serializer failure');
+    stringify.mockImplementationOnce(() => { throw privateError; });
+    expect(() => serializeSecurityObservation(value)).toThrow(privateError);
+  });
+  it.each([new Error('Private failure'), undefined, null, false, 0, ''])(
+    'illustrates null reset and exact/falsy stub propagation without invoking the runner %#', async (primary) => {
+      const value = { ...securityObservation(1), case: 'bulk-plain', stage: 'bulk-request', status: 200, ok: true };
+      const stub = vi.fn().mockRejectedValueOnce(primary);
+      const flow = (async () => {
+        Object.assign(value, { case: 'alternate-put', stage: 'alternate-request', status: null, ok: null });
+        const result = await stub();
+        Object.assign(value, { status: result.status, ok: result.ok });
+      })();
+      await expect(flow).rejects.toBe(primary);
+      expect(stub).toHaveBeenCalledOnce();
+      expect(JSON.parse(serializeSecurityObservation(value))).toMatchObject({
+        case: 'alternate-put', stage: 'alternate-request', status: null, ok: null,
+      });
+    },
+  );
+  it('illustrates returned-result assertion evidence followed by opaque-call clearing, not native execution', async () => {
+    const value = securityObservation(2), primary = new Error('Private assertion');
+    const stub = vi.fn().mockResolvedValueOnce({ status: 400, ok: false });
+    const flow = (async () => {
+      Object.assign(value, { case: 'bulk-spoofed', stage: 'bulk-request', status: null, ok: null });
+      const result = await stub();
+      Object.assign(value, { status: result.status, ok: result.ok });
+      throw primary;
+    })();
+    await expect(flow).rejects.toBe(primary);
+    expect(JSON.parse(serializeSecurityObservation(value))).toMatchObject({ status: 400, ok: false });
+    Object.assign(value, { case: 'bulk-spoofed', stage: 'download-owned', status: null, ok: null });
+    expect(JSON.parse(serializeSecurityObservation(value))).toMatchObject({ stage: 'download-owned', status: null, ok: null });
+  });
+  it('pins per-owner reset, boundary operations, direct captures and opaque helper stages in actual source', async () => {
+    const source = await read('tests/security/item-lifecycle.sessions.mjs');
+    const body = source.slice(source.indexOf('async function main()'));
+    const boundary = body.slice(body.indexOf("      phase = 'native-operation-boundary';"), body.indexOf("      phase = 'foreign-and-absent';"));
+    const reset = (caseName: string, stage: string) =>
+      `Object.assign(observation, { case: ${caseName}, stage: '${stage}', status: null, ok: null });`;
+    ordered(body, [
+      'let observation = null;', 'for (const [index, owner] of owners.entries())',
+      "phase = 'legacy-orphan-privacy';", 'await legacyOrphanCase(client, owner, owners[1 - index], h);',
+      'const own = await h.create(), foreign = await peer.create();', "phase = 'native-operation-boundary';",
+      'observation = null;', 'observation = securityObservation(index + 1);',
+    ]);
+    ordered(boundary, [
+      reset("'setup'", 'track-pending'), 'const pending = h.track(intent());',
+      reset("'setup'", 'reserve-pending'), 'await h.reserve(pending);',
+      reset("'setup'", 'catalog'), 'const originalCatalog = await catalog();',
+      "const caseName = ['bulk-plain', 'bulk-spoofed'][bulkIndex];", reset('caseName', 'bulk-request'),
+      "const bulk = await client.request(owner.token, '/storage/v1/object/wardrobe',",
+      "requireEvidence(Number.isInteger(bulk.status) && bulk.status >= 100 && bulk.status <= 599 && typeof bulk.ok === 'boolean');",
+      'Object.assign(observation, { status: bulk.status, ok: bulk.ok });',
+      'requireEvidence(bulk.status < 500);', 'if (bulk.ok) eq(bulk.data, []);',
+      reset('caseName', 'download-owned'), 'for (const path of h.paths(own)) {',
+      reset('caseName', 'download-owned'), 'await h.download(path);',
+      reset('caseName', 'catalog'), 'eq(await catalog(), originalCatalog);',
+      reset("'setup'", 'prepare-alternates'), 'const alternates = [',
+      'requireEvidence(alternates.length === 5 && alternateCases.length === 5);',
+      'for (const [alternateIndex, [route, options]] of alternates.entries())',
+      'const caseName = alternateCases[alternateIndex];', reset('caseName', 'alternate-request'),
+      'const response = await client.request(owner.token, route, { ...options, headers: {',
+      "requireEvidence(Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 && typeof response.ok === 'boolean');",
+      'Object.assign(observation, { status: response.status, ok: response.ok });',
+      'requireEvidence(!response.ok && response.status < 500);',
+      reset('caseName', 'download-owned'), 'for (const path of h.paths(own)) {',
+      reset('caseName', 'download-owned'), 'await h.download(path);',
+      reset('caseName', 'catalog'), 'eq(await catalog(), originalCatalog);',
+      reset('caseName', 'pending-absence'),
+      'const absent = await client.request(owner.token, `/storage/v1/object/authenticated/wardrobe/${h.paths(pending)[0]}`);',
+      "requireEvidence(Number.isInteger(absent.status) && absent.status >= 100 && absent.status <= 599 && typeof absent.ok === 'boolean');",
+      'Object.assign(observation, { status: absent.status, ok: absent.ok });', 'requireEvidence(!absent.ok);',
+      reset("'pending-roundtrip'", 'upload-pending'), 'await h.upload(pending);',
+      reset("'pending-roundtrip'", 'remove-pending'),
+      'for (const path of h.paths(pending)) {', reset("'pending-roundtrip'", 'remove-pending'),
+      "eq(await deleteWardrobeObject((route, options) => client.request(owner.token, route, options), owner.uid, path), 'removed');",
+      reset("'pending-roundtrip'", 'reupload-pending'), 'await h.upload(pending);',
+      reset("'claim-setup'", 'trash-own'), 'await h.trash(own, 1);',
+      reset("'claim-setup'", 'trash-peer'), 'await peer.trash(foreign, 1);',
+      reset("'claim-setup'", 'status-own'), 'const ownPreview = await h.status(own);',
+      reset("'claim-setup'", 'status-peer'), 'const foreignPreview = await peer.status(foreign);',
+      reset("'claim-setup'", 'begin-args'), 'const peerArgs = peer.beginArgs(foreign, foreignPreview);',
+      reset("'claim-setup'", 'begin-peer'), 'await peer.begin(peerArgs);',
+      reset("'claim-setup'", 'snapshot-peer'), 'const foreignBefore = await peer.snapshot(foreign);',
+    ]);
+    expect(boundary).not.toMatch(/\bcatch\b|\btry\b|\.catch\s*\(|\bfetch\s*\(|console\./);
+    expect([...boundary.matchAll(/Object\.assign\(observation, \{ status:/g)]).toHaveLength(3);
+    expect(source).toContain("const alternateCases = ['alternate-put', 'alternate-copy', 'alternate-move', 'alternate-sign-upload', 'alternate-tus'];");
+    expect(source).toContain("const securityCases = ['setup', 'bulk-plain', 'bulk-spoofed', ...alternateCases, 'pending-roundtrip', 'claim-setup'];");
+    expect(source).toContain(`const directStages = ['${direct.join("', '")}'];`);
+    expect(source).toContain(`const opaqueStages = ['${opaque.slice(0, 5).join("', '")}',\n  '${opaque.slice(5, 12).join("', '")}',\n  '${opaque.slice(12).join("', '")}'];`);
+    expect(boundary.slice(boundary.indexOf('      const catalog = async () => {'), boundary.indexOf(reset("'setup'", 'catalog'))).trimEnd()).toBe([
+      '      const catalog = async () => {',
+      "        const result = await client.request(owner.token, '/storage/v1/object/list/wardrobe', {",
+      "          method: 'POST', body: { prefix: `${owner.uid}/${own.p_item.id}/${own.p_image.id}/`, limit: 10, offset: 0 },",
+      '        });',
+      '        requireEvidence(result.ok && Array.isArray(result.data) && result.data.length === 2);',
+      '        return result.data.map(({ id, name, metadata }) => ({ id, name, metadata })).sort((a, b) => a.name.localeCompare(b.name));',
+      '      };',
+    ].join('\n'));
+    expect([...source.matchAll(/^export function (\w+)/gm)].map((match) => match[1]))
+      .toEqual(['securityObservation', 'serializeSecurityObservation']);
+  });
+  it('pins guarded failure-only capture without masking coarse failure, exit or original cleanup', async () => {
+    const source = await read('tests/security/item-lifecycle.sessions.mjs');
+    expect(source.slice(source.lastIndexOf('  } catch {'))).toBe(`  } catch {
+    console.error(\`FAIL: I08 security \${phase}; evidence required; private details suppressed\`);
+    process.exitCode = 1;
+    if (phase === 'native-operation-boundary' && observation !== null) {
+      try { console.error(\`I08 security observation: \${serializeSecurityObservation(observation)}\`); } catch {
+        try { console.error('FAIL: I08 security observation capture'); } catch {
+          // The primary failure is already reported; diagnostics must not prevent cleanup.
+        }
+      }
+    }
+  } finally {
+    for (const h of harnesses) {
+      try { await h.cleanup(); } catch { console.error('FAIL: I08 exact security cleanup'); process.exitCode = 1; }
+    }
+  }
+}
+if (isMain(import.meta.url)) await main();
+`);
+    expect([...source.matchAll(/serializeSecurityObservation\(observation\)/g)]).toHaveLength(2);
+    expect(source).not.toMatch(/catch\s*\([^)]*\)/);
   });
 });
