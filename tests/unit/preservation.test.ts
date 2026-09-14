@@ -364,6 +364,142 @@ describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
   const empty = () => new Response(null, { status: 204 });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  it('retains fictional TUS 422 bytes and exact outgoing request without recovering a native response', async () => {
+    const body = new Uint8Array([0, 255]), raw = Buffer.from('Fictional refusal');
+    const headers = { 'Content-Type': 'application/offset+octet-stream', 'Tus-Resumable': '1.0.0', 'Upload-Length': '2' };
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(raw, {
+      status: 422, headers: { 'content-range': '0-0/1' },
+    }));
+    vi.stubGlobal('fetch', fetch);
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    const result = await client().request(owner.token, '/storage/v1/upload/resumable', { method: 'POST', body, binary: true, headers });
+    expect(result).toEqual({ ok: false, status: 422, data: raw, range: '0-0/1' });
+    expect(Buffer.isBuffer(result.data)).toBe(true);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(timeout.mock.calls).toEqual([[15_000]]);
+    const [url, init] = present(fetch.mock.calls[0]);
+    expect(url).toBe(env.SUPABASE_URL + '/storage/v1/upload/resumable');
+    expect(init).toEqual({
+      method: 'POST', cache: 'no-store', redirect: 'error', signal: expect.any(AbortSignal),
+      headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY, Authorization: 'Bearer ' + owner.token, ...headers }, body,
+    });
+    expect(init?.body).toBe(body);
+  });
+  it.each([
+    { label: 'JSON-looking refusal', raw: Buffer.from('{"fictional":true}'), status: 422, ok: false },
+    { label: 'empty non-204 stream', raw: Buffer.alloc(0), status: 422, ok: false },
+    { label: 'fictional successful response', raw: Buffer.from('Fictional success'), status: 201, ok: true },
+  ])('keeps $label as a TUS Buffer without normalizing status or ok', async ({ raw, status, ok }) => {
+    respond(new Response(raw, { status }));
+    const result = await client().request(owner.token, '/storage/v1/upload/resumable', {
+      method: 'POST', body: new Uint8Array([0]), binary: true,
+    });
+    expect(result).toEqual({ ok, status, data: raw, range: null });
+    expect(Buffer.isBuffer(result.data)).toBe(true);
+    expect(result.data.length).toBe(raw.length);
+  });
+  it.each([
+    { label: 'lowercase method', method: 'post' },
+    { label: 'mixed-case method', method: 'Post' },
+    { label: 'PUT method', method: 'PUT' },
+    { label: 'GET method', method: 'GET' },
+    { label: 'trailing slash', route: '/storage/v1/upload/resumable/' },
+    { label: 'query', route: '/storage/v1/upload/resumable?unit=1' },
+    { label: 'child', route: '/storage/v1/upload/resumable/unit' },
+    { label: 'lookalike', route: '/storage/v1/upload/resumable-other' },
+    { label: 'false binary', binary: false },
+    { label: 'omitted binary', binary: undefined },
+    { label: 'numeric binary', binary: 1 },
+    { label: 'string binary', binary: 'true' },
+  ])('retains strict JSON outside the exact TUS fixture: $label', async (variant) => {
+    const { method = 'POST', route = '/storage/v1/upload/resumable', binary } = { binary: true, ...variant };
+    respond(new Response('Fictional non-JSON refusal', { status: 422 }));
+    await expect(client().request(owner.token, route, { method, ...(binary === undefined ? {} : { binary }) }))
+      .rejects.toThrow('EVIDENCE_REQUIRED');
+  });
+  it.each(['/rest/v1/items', '/auth/v1/token?grant_type=password', '/rest/v1/rpc/save_outfit', '/storage/v1/object/wardrobe/unit'])(
+    'preserves ordinary JSON requirements for %s', async (route) => {
+      respond(new Response('Fictional non-JSON refusal', { status: 422 }));
+      await expect(client().request(owner.token, route, { method: 'POST', binary: true })).rejects.toThrow('EVIDENCE_REQUIRED');
+      respond(json({ fictional: true }));
+      await expect(client().request(owner.token, route, { method: 'POST', binary: true }))
+        .resolves.toEqual({ ok: true, status: 200, data: { fictional: true }, range: null });
+    },
+  );
+  it('preserves authenticated-download bytes outside the TUS fixture', async () => {
+    const raw = Buffer.from([0, 255, 1]);
+    respond(new Response(raw));
+    const result = await client().request(owner.token, '/storage/v1/object/authenticated/wardrobe/unit');
+    expect(result).toEqual({ ok: true, status: 200, data: raw, range: null });
+    expect(Buffer.isBuffer(result.data)).toBe(true);
+  });
+  it('keeps matching TUS 204 bodyless and rejects null non-204 or noncompliant 204 streams', async () => {
+    const options = { method: 'POST', binary: true, body: new Uint8Array([0]) };
+    respond(empty());
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', options))
+      .resolves.toEqual({ ok: true, status: 204, data: null, range: null });
+    respond(new Response(null, { status: 422 }));
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', options)).rejects.toThrow('EVIDENCE_REQUIRED');
+    const response = new Response('Fictional noncompliant stream');
+    vi.spyOn(response, 'status', 'get').mockReturnValue(204);
+    const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+    respond(response);
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', options)).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(getReader).not.toHaveBeenCalled();
+  });
+  it('retains the exact 512KiB TUS byte ceiling and cancels after completion or overflow', async () => {
+    const raw = Buffer.alloc(MAX_SNAPSHOT_BYTES, 255);
+    const response = new Response(raw), stream = present(response.body ?? undefined), reader = stream.getReader();
+    const cancelled = vi.spyOn(reader, 'cancel');
+    vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+    respond(response);
+    const options = { method: 'POST', binary: true, body: new Uint8Array([0]) };
+    const result = await client().request(owner.token, '/storage/v1/upload/resumable', options);
+    expect(Buffer.isBuffer(result.data)).toBe(true);
+    expect(result.data).toEqual(raw);
+    expect(result.data.length).toBe(MAX_SNAPSHOT_BYTES);
+    expect(cancelled).toHaveBeenCalledOnce();
+    const cancel = vi.fn();
+    respond(new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(raw); controller.enqueue(new Uint8Array(1)); },
+      cancel,
+    })));
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', options)).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+  it.each([500, 503])('rejects matching TUS %s before accessing its reader', async (status) => {
+    const response = new Response('Fictional server failure', { status });
+    const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+    respond(response);
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', {
+      method: 'POST', binary: true, body: new Uint8Array([0]),
+    })).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(getReader).not.toHaveBeenCalled();
+  });
+  it.each(['read', 'cancel', 'read-and-cancel'])('preserves matching TUS %s failure and finally precedence', async (failure) => {
+    const response = new Response('Fictional stream'), stream = present(response.body ?? undefined), reader = stream.getReader();
+    const readError = new Error('Fictional read failure'), cancelError = new Error('Fictional cancel failure');
+    const read = vi.spyOn(reader, 'read'), cancel = vi.spyOn(reader, 'cancel');
+    if (failure !== 'cancel') read.mockRejectedValue(readError);
+    if (failure !== 'read') cancel.mockRejectedValue(cancelError);
+    vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+    respond(response);
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', {
+      method: 'POST', binary: true, body: new Uint8Array([0]),
+    })).rejects.toBe(failure === 'read' ? readError : cancelError);
+    expect(read).toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+  it('preserves matching TUS network failure without returning a result or retrying', async () => {
+    const failure = new Error('Fictional network failure');
+    const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(failure);
+    vi.stubGlobal('fetch', fetch);
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', {
+      method: 'POST', binary: true, body: new Uint8Array([0]),
+    })).rejects.toBe(failure);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it.each(['DELETE', 'GET', 'HEAD'])('omits automatic Content-Type and body for undefined %s bodies', async (method) => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => empty());
     vi.stubGlobal('fetch', fetch);

@@ -5383,3 +5383,82 @@ install, extra agent/native allocation, Stage2, hosted mutation, merge/deploy or
 paid/private-input work is authorized. Seven cycles consumed; original Save STOP,
 separate browser400 uncertainty, current App/security/later backend/types/visuals,
 native image/HBA and human/device/recovery/export/cutover gates persist.
+
+## I08 T31 bounded TUS fixture response compatibility - 14 September 2026
+
+[Cycle8 terminal5662633020](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5662633020)
+records CI34832111814attempt1 failing for source
+7fa6934d3c4803496108e7d2ea50ee3d5344925b/tree
+a33cf57e2922db8dd8a80e3cdb6bd1a4cd6a41cc. All three actual checkouts were
+c123d825b1c3cfb569dd844feab1e23fa5eede7f with ordered main221/head7fa parents.
+App passed2102units and621browser checks with4existing skips. DB startup,
+rehearsal/reset and ordinary integration for both owners passed; all nineteen
+catalog gates and contention/publication/marker checks passed. Apple passed
+4generated-JPEG plus3orientation/composition checks. These are7fa results,
+not execution of the new T31 definitions.
+
+Security's111-byte failure record identifies ownerOrdinal1,case alternate-tus,
+stage alternate-request,status null,ok null. No returned result was captured;
+neither actual status/body nor cause or even a sent request is established.
+The earlier first-owner checks returned, not both security owners' completion.
+Later AI rehearsal/real types/upload/parity were skipped, not the approved final
+four-RPC type-only difference. Source-confirmed native TUS raw-message responses
+conflict with the client's unconditional non-download JSON assumption, but do
+not prove that parsing caused this particular failure. Source pins are not
+runtime-image provenance. No server/policy defect or literal native403 is inferred.
+
+[Coordinator visual record5662808761](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5662808761)
+accepts7fa's eighteen approved static surfaces using17verified identical-content
+reuses and1actual current coordinator view, not eighteen fresh views. Its retained
+fine-copy/long-form/contrast and human/device limitations still apply. The writer
+read only that public text, never images/archives; this does not accept a future
+candidate/head's visual evidence.
+
+[Proposal5662665403](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5662665403),
+[reconciliation5662808758](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5662808758)
+and [approved disposition/edit release5662899205](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5662899205)
+record actual retained critic c372, Anthropic claude-opus-5/high: turn33 AMEND
+(3events10:45:07.554-10:47:35.930UTC), turn34 ACCEPT of the bounded correction
+(2events10:54:33.749-10:55:51.700UTC). Coordinator adopted M1-M7/N1-N3/N5-N7;
+N4's historical array-type inference is not asserted. The original214manifest
+mismatch was the coordinator's ordering error, not changed source. Explicit
+string[] ordinal paths with invariant decimal/NUL/UTF8 serialization produce
+c331eb731af9ea2821fab88b1cf5f41f57f6cf52d60cabe3164a033c0b6eb55f.
+The first stopped entry did not reach the phase-prefix checks. Corrected entry
+verified all fifteen prefixes; no retroactive first-entry pass is claimed.
+
+Fresh coordinator-observed OWN usage records4gpt-6-astra/medium events
+10:54:02.056,10:54:52.465,10:55:40.215,10:55:45.843UTC for canonicala816.
+Supported canonical app/CLI identity, source/time and branch matching are in
+the release, without borrowing extra active-session fields from writer output.
+This is local telemetry, not tamper-proof/native-platform attestation. Writer
+prepatch seal11:02:51.9765742UTC matched217HEAD/index/working canonical files,
+three W/C/B baselines,214outside raw/canonical files,all fifteen prefixes and
+217regular files/36root-inclusive directories. Independent Git+REST guards at
+11:02:39.8434216UTC matched7fa/main221/draft25; the full hash-verified matching
+receipt was reread immediately before the first patch.
+
+The only transport change is a post-reader raw Buffer exception for exact
+POST + /storage/v1/upload/resumable + binary === true. The boolean pins one
+existing fixture, not a general binary-response rule. Original request options,
+headers/body identity, local/auth gates,15000ms timeout,pre-body500+ rejection,
+204/null/non-null contracts,512KiB ceiling,reader/cancel order and final return
+remain. Empty non204streams and JSON-looking TUS responses stay byte Buffers;
+201 stays ok:true, so the unchanged security caller still refuses success.
+Focused stub definitions use fictional422/201 responses, never recovered native
+statuses. Exact-match exclusions retain strict JSON. Matching TUS boundary,
+network/read/cancel tests retain existing finally precedence: if both read and
+cancel reject, the cancel error wins. Other pre-return failures can still yield
+the same null/null; source compatibility correction is not guaranteed unblocking.
+
+Only preservation.sessions,its existing HTTP unit describe and this append
+change. Full365803preceding phase bytes plus fourteen older prefixes remain
+immutable; all214other files, including the complete security runner/T30observer,
+lifecycle-schema tests,SQL/native/Save/browser/types/workflow/dependencies, stay
+frozen. New tests are UNEXECUTED; only manual source/Git/hash/whitespace review is
+authorized. This UNSTAGED candidate awaits source review, not runtime/privacy
+acceptance. No staging/object write/commit/push/local runtime/probe/install,
+Actions/artifacts/images/hosted/private work,new agent/native allocation,Stage2,
+merge or deployment. Eight cycles consumed; no ninth authorized. Original Save
+STOP,separate browser400 uncertainty,full security/later backend/real types,
+native-image/HBA and human/device/recovery/export/cutover holds persist.

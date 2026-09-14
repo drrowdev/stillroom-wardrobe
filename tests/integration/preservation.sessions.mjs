@@ -302,7 +302,9 @@ export function normalClient(env) {
     } finally { await reader.cancel(); }
     const raw = Buffer.concat(chunks);
     let data = raw;
-    if (!route.startsWith('/storage/v1/object/authenticated/')) {
+    // binary === true pins the single TUS fixture, not all binary requests.
+    const tusFixture = method === 'POST' && route === '/storage/v1/upload/resumable' && binary === true;
+    if (!route.startsWith('/storage/v1/object/authenticated/') && !tusFixture) {
       try { data = JSON.parse(raw.toString('utf8')); } catch { requireEvidence(raw.length === 0); data = null; }
     }
     return { ok: response.ok, status: response.status, data, range: response.headers.get('content-range') };
