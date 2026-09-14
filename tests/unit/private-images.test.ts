@@ -19,6 +19,47 @@ function makePool() {
 const response = () => new Response(new Uint8Array([255, 216, 255, 217]), { headers: { 'content-type': 'image/jpeg' } });
 
 describe('session-scoped private media', () => {
+  it('invalidates queued generations before download and notifies mounted consumers', async () => {
+    const { pending, pool, download } = makePool();
+    const changed = vi.fn(), unsubscribe = pool.subscribe(changed);
+    const first = Array.from({ length: 4 }, (_, index) => pool.get(path(index + 1)));
+    const cancelled = pool.get(path(5)).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(pending).toHaveLength(4));
+    pool.invalidate([path(5)]);
+    expect(changed).toHaveBeenCalledWith([path(5)]);
+    pending[0]!(response());
+    expect(await cancelled).toMatchObject({ name: 'AbortError' });
+    expect(download).toHaveBeenCalledTimes(4);
+    for (let index = 1; index < 4; index++) pending[index]!(response());
+    await Promise.all(first); unsubscribe(); pool.clear();
+  });
+  it('does not let old failure cleanup erase a replacement for the same path', async () => {
+    const { pending, pool, download } = makePool();
+    const old = pool.get(path(1)).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    pool.invalidate([path(1)]);
+    const replacement = pool.get(path(1));
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    pending[0]!(response());
+    expect(await old).toMatchObject({ name: 'AbortError' });
+    expect(pool.get(path(1))).toBe(replacement);
+    pending[1]!(response()); await replacement;
+    expect(download).toHaveBeenCalledTimes(2); pool.clear();
+  });
+  it('retains the four-active bound while cleared generations settle after reactivation', async () => {
+    const { pending, pool } = makePool();
+    const old = Array.from({ length: 4 }, (_, index) => pool.get(path(index + 1)).catch((error: unknown) => error));
+    await vi.waitFor(() => expect(pending).toHaveLength(4));
+    pool.clear(); pool.activate();
+    const next = pool.get(path(5));
+    expect(pending).toHaveLength(4);
+    pending[0]!(response());
+    await vi.waitFor(() => expect(pending).toHaveLength(5));
+    for (let index = 1; index < 5; index++) pending[index]!(response());
+    expect(await next).toMatch(/^blob:/);
+    expect((await Promise.all(old)).every(error => error instanceof DOMException && error.name === 'AbortError')).toBe(true);
+    pool.clear();
+  });
   it('coalesces requests and revokes URLs on owner invalidation', async () => {
     const { pending, download, controller, pool } = makePool();
     const revoke = vi.spyOn(URL, 'revokeObjectURL');

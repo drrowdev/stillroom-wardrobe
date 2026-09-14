@@ -411,6 +411,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
   }
 }
 export type MockOptions = {
+  lifecycleLoss?: 'begin' | 'delete' | 'finish' | 'change';
   initialLanguage?: Language | null; failCommitOnce?: boolean; failLanguageSave?: boolean;
   loseFinalizeReplyOnce?: boolean;
   loseAnalyzedReserveReplyOnce?: boolean;
@@ -440,6 +441,22 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   }]));
   const images: JsonRow[] = [];
   const files = new Map<string, Buffer>();
+  const deletionClaims = new Map<string, { request_id: string; expected_version: number; started_at: string }>();
+  let lifecycleReplyLost = false;
+  const manifest = (itemId: unknown, owner: string) => createHash('sha256').update(JSON.stringify(
+    images.filter(row => row.item_id === itemId && row.owner_id === owner).sort((a, b) => String(a.id).localeCompare(String(b.id))),
+  )).digest('hex');
+  const deletionStatus = (item: JsonRow, owner: string) => {
+    const all = images.filter(row => row.owner_id === owner && row.item_id === item.id);
+    const ready = all.filter(row => row.state === 'ready');
+    if (ready.length > 1) throw new Error('Invalid lifecycle fixture.');
+    const count = [...files.keys()].filter(path => path.startsWith(`${owner}/${item.id}/`)
+      && !all.some(row => row.main_path === path || row.thumb_path === path)).length;
+    return { id: item.id, owner_id: owner, title: item.title, version: item.version, deleted_at: item.deleted_at,
+      photo_count: all.length, current_image_id: ready[0]?.id ?? null, current_thumb_path: ready[0]?.thumb_path ?? null,
+      image_manifest_sha256: manifest(item.id, owner), cleanup_blocked: count > 0, unmanifested_count: count,
+      request_id: null, expected_version: null, started_at: null, ...deletionClaims.get(String(item.id)) };
+  };
   const saves: Array<{ owner: string; itemId: string; imageId: string; fingerprint: string; state: 'reserved' | 'completed'; analyzed?: boolean; cancelled?: boolean }> = [];
   const imageKeys = ['id', 'main_bytes', 'thumb_bytes', 'main_sha256', 'thumb_sha256', 'width', 'height', 'alt_text'];
   const fingerprintFor = (item: JsonRow, image: JsonRow) => {
@@ -674,11 +691,60 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (options.loseFinalizeReplyOnce && !commitFailed) { commitFailed = true; await route.abort('failed'); return; }
       await route.fulfill({ status: 204 }); return;
     }
+    if (url.pathname === '/rest/v1/rpc/item_deletion_status') {
+      const body = request.postDataJSON() as JsonRow;
+      const ids = body.p_item_ids;
+      if (method !== 'POST' || !Array.isArray(ids) || !ids.length || ids.length > 40 || new Set(ids).size !== ids.length || !ids.every(isUuid)) {
+        await json({ code: '22023', message: 'Invalid input' }, 400); return;
+      }
+      await json(items.filter(row => row.owner_id === owner && ids.includes(row.id)).map(row => deletionStatus(row, owner!))); return;
+    }
+    if (['set_item_trashed', 'begin_item_deletion', 'finish_item_deletion'].some(name => url.pathname === `/rest/v1/rpc/${name}`)) {
+      const body = request.postDataJSON() as JsonRow, id = String(body.p_item_id);
+      const item = items.find(row => row.owner_id === owner && row.id === id);
+      const conflict = () => json({ code: '22023', message: 'Request conflict' }, 400);
+      const claim = deletionClaims.get(id);
+      if (url.pathname.endsWith('/finish_item_deletion')) {
+        if (!item) { await json([{ state: 'absent' }]); return; }
+        if (!claim || claim.request_id !== body.p_request_id || item.version !== claim.expected_version + 1
+          || [...files.keys()].some(path => path.startsWith(`${owner}/${id}/`))) { await conflict(); return; }
+        items.splice(items.indexOf(item), 1);
+        for (let i = images.length - 1; i >= 0; i--) if (images[i]!.owner_id === owner && images[i]!.item_id === id) images.splice(i, 1);
+        deletionClaims.delete(id);
+        if (options.lifecycleLoss === 'finish' && !lifecycleReplyLost) { lifecycleReplyLost = true; await route.abort('failed'); return; }
+        await json([{ state: 'completed' }]); return;
+      }
+      if (!item || !Number.isSafeInteger(body.p_expected_version)) { await conflict(); return; }
+      if (url.pathname.endsWith('/set_item_trashed')) {
+        if (claim || item.version !== body.p_expected_version || typeof body.p_trashed !== 'boolean'
+          || (body.p_trashed ? item.deleted_at !== null || !images.some(row => row.item_id === id && row.owner_id === owner && row.state === 'ready')
+            : !item.deleted_at || Date.parse(String(item.deleted_at)) > Date.now() || Date.parse(String(item.deleted_at)) < Date.now() - 7 * 86400000)) {
+          await conflict(); return;
+        }
+        item.deleted_at = body.p_trashed ? new Date().toISOString() : null;
+        item.version = Number(item.version) + 1; item.updated_at = new Date().toISOString();
+        if (options.lifecycleLoss === 'change' && !lifecycleReplyLost) { lifecycleReplyLost = true; await route.abort('failed'); return; }
+        await json([{ id, owner_id: owner, version: item.version, deleted_at: item.deleted_at }]); return;
+      }
+      if (!isUuid(body.p_request_id) || !item.deleted_at || body.p_image_manifest_sha256 !== manifest(id, owner!)) { await conflict(); return; }
+      if (claim ? claim.request_id !== body.p_request_id || claim.expected_version !== body.p_expected_version || item.version !== claim.expected_version + 1
+        : item.version !== body.p_expected_version || deletionStatus(item, owner!).cleanup_blocked
+          || images.some(row => row.item_id === id && row.owner_id === owner && row.state === 'pending')) { await conflict(); return; }
+      if (!claim) {
+        if ([...deletionClaims].some(([other, value]) => other !== id && value.request_id === body.p_request_id
+          && items.some(row => row.id === other && row.owner_id === owner))) { await conflict(); return; }
+        item.version = Number(item.version) + 1; item.updated_at = new Date().toISOString();
+        deletionClaims.set(id, { request_id: body.p_request_id, expected_version: Number(body.p_expected_version), started_at: new Date().toISOString() });
+      }
+      if (options.lifecycleLoss === 'begin' && !lifecycleReplyLost) { lifecycleReplyLost = true; await route.abort('failed'); return; }
+      await json([{ ...deletionClaims.get(id), version: item.version, image_manifest_sha256: manifest(id, owner!) }]); return;
+    }
     const table = url.pathname === '/rest/v1/items' ? items : url.pathname === '/rest/v1/item_images' ? images : null;
     if (table) {
       if (method === 'POST') {
         const body = request.postDataJSON() as JsonRow;
         if (body.owner_id !== owner) { await json({ code: '42501' }, 403); return; }
+        if (table === images && deletionClaims.has(String(body.item_id))) { await json({ code: '22023', message: 'Request conflict' }, 400); return; }
         if (table.some((row) => row.id === body.id)) { await json({ code: '23505', message: 'duplicate' }, 409); return; }
         if (table === items) {
           const row = { ...itemDefaults(), ...body, deleted_at: null, version: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
@@ -695,15 +761,16 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const own = table.filter((row) => row.owner_id === owner);
       const id = url.searchParams.get('id');
       const state = url.searchParams.get('state');
-      const rows = own.filter((row) => (!id || `eq.${row.id}` === id) && (!state || `eq.${row.state}` === state)
+      const rows = own.filter((row) => (!id || (id.startsWith('gt.') ? String(row.id) > id.slice(3) : `eq.${row.id}` === id)) && (!state || `eq.${row.state}` === state)
         && (!url.searchParams.has('owner_id') || url.searchParams.get('owner_id') === `eq.${row.owner_id}`)
         && (!url.searchParams.has('item_id') || url.searchParams.get('item_id') === `eq.${row.item_id}`)
-        && (!url.searchParams.has('deleted_at') || row.deleted_at === null)
+        && (!url.searchParams.has('deleted_at') || (url.searchParams.get('deleted_at') === 'not.is.null' ? row.deleted_at !== null : row.deleted_at === null))
         && (!url.searchParams.has('retired_at') || row.retired_at === null));
       if (method === 'PATCH') {
         if (table !== items) { await json({ code: '42501' }, 403); return; }
         const row = rows.find((value) => url.searchParams.get('version') === `eq.${value.version}`);
         if (!row) { await json(null); return; }
+        if (deletionClaims.has(String(row.id))) { await json({ code: '22023', message: 'Request conflict' }, 400); return; }
         const body = request.postDataJSON() as JsonRow;
         if (!id || url.searchParams.get('owner_id') !== `eq.${owner}` || url.searchParams.get('deleted_at') !== 'is.null'
           || Object.keys(body).some((key) => ![...garmentFields, 'field_provenance'].includes(key))) {
@@ -729,7 +796,22 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         await json(row); return;
       }
       const singular = request.headers().accept?.includes('vnd.pgrst.object');
-      await json(singular ? rows[0] ?? null : rows); return;
+      const ordered = [...rows];
+      const order = url.searchParams.get('order');
+      if (order) ordered.sort((a, b) => {
+        for (const part of order.split(',')) {
+          const [key, direction] = part.split('.');
+          const left = String(a[key!]), right = String(b[key!]);
+          const compare = left < right ? -1 : left > right ? 1 : 0;
+          if (compare) return direction === 'desc' ? -compare : compare;
+        }
+        return 0;
+      });
+      const limit = url.searchParams.get('limit');
+      const selected = limit ? ordered.slice(0, Number(limit)) : ordered;
+      const select = url.searchParams.get('select');
+      const projected = select ? selected.map(row => Object.fromEntries(select.split(',').filter(key => Object.hasOwn(row, key)).map(key => [key, row[key]]))) : selected;
+      await json(singular ? projected[0] ?? null : projected); return;
     }
     if (url.pathname === '/rest/v1/rpc/update_image_description') {
       const body = request.postDataJSON() as JsonRow;
@@ -741,6 +823,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const image = images.find((row) => row.id === body.p_image_id && row.owner_id === owner && row.state === 'ready'
         && row.retired_at === null && items.some((item) => item.id === row.item_id && item.owner_id === owner && item.deleted_at === null));
       if (!image) { await json({ code: '42501', message: 'Not available' }, 403); return; }
+      if (deletionClaims.has(String(image.item_id))) { await json({ code: '42501', message: 'Not available' }, 403); return; }
       if (image.description_version !== body.p_expected_description_version || image.description_version === 2147483647) {
         await json({ code: '22023', message: 'Request conflict' }, 400); return;
       }
@@ -763,6 +846,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const path = url.pathname.slice(prefix.length);
       if (!path.startsWith(`${owner}/`)) { await json({ statusCode: '403', message: 'Denied' }, 403, 'route-owner'); return; }
       if (method === 'POST') {
+        if (deletionClaims.has(path.split('/')[1]!)) { await json({ statusCode: '403', code: 'AccessDenied', error: 'Unauthorized', message: 'Access denied' }, 400); return; }
         if (files.has(path)) { await json({ statusCode: '409', message: 'The resource already exists' }, 409, 'route-existing'); return; }
         if (url.search || receiver.reservedOwner(url.pathname) !== owner || !receiver.credentialsAllowed(request.headers(), owner)) {
           await json({ message: 'Fixture upload rejected.' }, 403, 'route-reservation-credentials'); return;
@@ -771,20 +855,31 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         catch { await receiver.close(); throw new Error('Fixture continuation failed.'); }
         return;
       }
+      if (method === 'DELETE') {
+        const item = items.find(row => row.id === path.split('/')[1] && row.owner_id === owner);
+        if (!item || !images.some(row => row.owner_id === owner && row.item_id === item.id && [row.main_path, row.thumb_path].includes(path))) {
+          await json({ statusCode: '403', code: 'AccessDenied', error: 'Unauthorized', message: 'Access denied' }, 400); return;
+        }
+        if (request.postData() !== null) { await json({ message: 'Invalid fixture delete' }, 400); return; }
+        if (!files.delete(path)) { await json({ statusCode: '404', code: 'NoSuchKey', error: 'not_found', message: 'Object not found' }, 400); return; }
+        if (options.lifecycleLoss === 'delete' && !lifecycleReplyLost) { lifecycleReplyLost = true; await route.abort('failed'); return; }
+        await json({ message: 'Successfully deleted' }); return;
+      }
       const bytes = files.get(path);
       if (!bytes) { await json({ message: 'Not found' }, 404); return; }
       await route.fulfill({ status: 200, body: bytes, contentType: 'image/jpeg' }); return;
     }
+    if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { profiles, preferences, items, images, files, requests, fixture, uploadWire: receiver.state, wireDiagnostic,
+  return { profiles, preferences, items, images, files, requests, fixture, deletionClaims, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),
     seedSavedItem(account: 'a' | 'b' = 'a', title = 'Olive overshirt') {
       const owner = owners[account], id = randomUUID(), imageId = randomUUID(), now = '2026-09-09T00:00:00Z';
       const item = { ...itemDefaults(), id, owner_id: owner, title, category: 'top', version: 1,
-        created_at: now, updated_at: now, deleted_at: null };
+        created_at: now, updated_at: now, deleted_at: null as string | null };
       const hash = createHash('sha256').update(fixture).digest('hex');
       const image = { id: imageId, owner_id: owner, item_id: id, state: 'ready', retired_at: null,
         alt_text: 'An olive overshirt', description_version: 1, created_at: now,

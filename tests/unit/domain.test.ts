@@ -5,7 +5,7 @@ import {
   maximumFieldRevision, maximumProvenanceBytes, parseFieldProvenance, fieldAssertion,
   manualSaveProvenance, sameFieldProvenance,
 } from '../../src/domain/attribute-provenance';
-import { categories, isUuid, validateDetails } from '../../src/domain/wardrobe';
+import { categories, eligibleForSuggestions, isUuid, validateDetails } from '../../src/domain/wardrobe';
 import { readConfiguration } from '../../src/data/config';
 import { parseWardrobeRows } from '../../src/data/items';
 import { parseProfile } from '../../src/data/profile';
@@ -13,7 +13,8 @@ import { parseProfile } from '../../src/data/profile';
 const owner = '10000000-0000-4000-8000-000000000001';
 const itemId = '20000000-0000-4000-8000-000000000001';
 const imageId = '30000000-0000-4000-8000-000000000001';
-const row = { id: itemId, owner_id: owner, title: 'Olive shirt', category: 'top', created_at: '2026-09-06T08:00:00Z', deleted_at: null };
+const row = { id: itemId, owner_id: owner, title: 'Olive shirt', category: 'top', created_at: '2026-09-06T08:00:00Z', deleted_at: null,
+  favourite: false, availability: 'ready', lifecycle: 'active', exclude_suggestions: false };
 const image = {
   id: imageId, item_id: itemId, owner_id: owner, state: 'ready', alt_text: 'Olive shirt',
   main_path: `${owner}/${itemId}/${imageId}/main.jpg`, thumb_path: `${owner}/${itemId}/${imageId}/thumb.jpg`,
@@ -35,6 +36,17 @@ describe('manual draft validation', () => {
   });
 });
 describe('private API boundaries', () => {
+  it('retains standalone list states without making them suggestion eligible', () => {
+    const active = parseWardrobeRows([row], [image], owner)[0]!;
+    expect(eligibleForSuggestions(active)).toBe(true);
+    for (const patch of [{ availability: 'laundry' }, { lifecycle: 'archived' }, { lifecycle: 'sold' }, { lifecycle: 'donated' }, { exclude_suggestions: true }]) {
+      const saved = parseWardrobeRows([{ ...row, ...patch }], [image], owner);
+      expect(saved).toHaveLength(1); expect(eligibleForSuggestions(saved[0]!)).toBe(false);
+    }
+    for (const patch of [{ availability: 'invented' }, { lifecycle: null }, { favourite: 'true' }, { exclude_suggestions: undefined }]) {
+      expect(() => parseWardrobeRows([{ ...row, ...patch }], [image], owner)).toThrow();
+    }
+  });
   it('shows only complete owned items', () => {
     expect(parseWardrobeRows([row], [], owner)).toEqual([]);
     expect(parseWardrobeRows([row], [{ ...image, state: 'pending' }], owner)).toEqual([]);

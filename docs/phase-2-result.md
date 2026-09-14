@@ -5556,3 +5556,90 @@ commit/push,local runtime/probe/install,Actions/log/artifact/image/hosted/privat
 work,new agent/native allocation,Stage2,merge or deployment. Nine cycles consumed;
 no tenth/rerun. Original SaveSTOP,browser400 uncertainty,native-image/HBA,later
 backend/real types,human/device/recovery/export/final-review/cutover holds persist.
+
+### 14 September 2026 - T33 I08 Stage2 source candidate (not runtime acceptance)
+
+The [corrected Stage1 gate](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5664571822)
+accepts the intended intermediate gate on `033588bec6d75aec45188ff7293fcc14d25175d5`:
+App2179 units/621 browser tests with four retained skips, Apple7, ordinary
+backend/B1/B2/C, the actual four-RPC type artifact, and18 coordinator-accepted
+content-reused visuals. The anticipated final generated-type parity difference
+was not a blanket green-CI claim. Corrected review withdrew the false
+`--no-password`/auth-class claim and invented HBA/DB-digest prerequisites;
+unknown authentication/HBA/credential-source/database/source-image facts remain
+limitations, not newly passed facts or permission to investigate credentials.
+No cycle9 startup cause or fix is inferred.
+
+The [23-path plan](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5664983574),
+[actual retained Anthropic Claude Opus5 T39 critique and binding dispositions](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5666571286),
+and [matching coordinator-observed local model/edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5666668828)
+authorize this one unstaged candidate in the same GPT-6 Astra writer. Requirements
+R03/R23/R28 and the relevant R11/R12/R17/R20/R26/R27 boundaries are addressed by
+integrated Trash, eight-second owner-memory Undo, server-checked seven-day Restore,
+named permanent-delete confirmation and explicit checked/resumable deletion.
+Unconfirmed mutations retain their intent; absent rows never prove byte erasure.
+The first production consumer of the frozen singular Storage helper uses the
+configured API origin, ordinary session, no-body DELETE and raw parsed JSON.
+Malformed/unread/oversized replies are safe unconfirmed failures, not fabricated
+classifier data. Work is bounded to30 seconds,4096-byte replies and40-row/path
+batches; no explicit auth-refresh fallback, automatic destructive resend or AI call.
+Nullable RPC coherence is validated separately from exact generated declarations.
+
+The candidate also wires list status, dirty/owner/route cancellation, per-path
+cache invalidation with generation/identity-safe cleanup and concurrency4, and
+EN/FI/SV copy. Focused unit and browser definitions cover the boundaries.
+Independent real-page cases use per-case ordinary fixtures/sessions, bounded
+setup/cleanup within the unchanged120-second test budget, authenticated PAGE
+DELETE proof, actual upstream response loss and missing-on-reload/resume.
+Their cleanup retains expected used-ID markers; it does not delete Auth accounts
+or assert whole-private-baseline erasure. Actual execution must establish fitness
+within those budgets; no timing guarantee is claimed.
+
+Only the literal WebKit/local selectors and four-PNG upload addition are changed.
+All four future I08 captures belong exclusively to exact project `chromium`,
+at1280/320 EN/FI, with each PNG bounded to1MiB; all18 prior capture definitions
+remain unchanged. New-file flakiness blocks acceptance. The existing18 visual
+acceptances are not automatic acceptance of this future candidate.
+
+Validation at this point is manual source/diff/byte/hash/whitespace inspection
+only. New tests are **UNEXECUTED locally**; no compiler, parser, lint, runtime,
+backend or browser execution was authorized. The adopted actual generated text
+is26875 canonical LF bytes/SHA256
+`63cca6eb5af1a341956310932034bef654665e4b9146a260bec291574cd90e5b`.
+The previous378095 raw phase bytes and all16 older prefixes remain immutable;
+the200 outside files remain frozen. No staging, object write, commit, push,
+Actions, artifact/image review, hosted/private mutation, new agent, merge or
+deployment accompanies this candidate. Ten cycles spent; no11/rerun is released.
+Source review and separate exact-head execution, zero-type-diff/live/App/Apple/
+22-image/final-review/normal-merge-main gates remain, along with SaveSTOP,
+browser400 uncertainty, human/device/account-deletion/recovery/export/paid/
+hosted/cutover holds. Productionf318 and the six hosted migrations are unchanged.
+
+#### T33 routine correction batch after T40 source review
+
+The [completed T40 review and binding coordinator disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5668793354)
+authorize one unstaged correction batch in the same writer and23-path scope,
+under the existing model/edit attestation. T33 names the writer packet, T39 the
+plan critique and T40 the actual retained Anthropic Claude Opus5 source review.
+Read-only Refresh now preserves unresolved intents and row locks; reconnect
+preserves successfully loaded pages while first offline entry still loads on
+reconnect. Confirmation construction is caught inside the admitted action after
+closing the dialog. Known cleanup-blocked status uses the approved neutral
+EN/FI/SV limitation, without claims about prior/concurrent effects or recovery.
+The requested-order mock comparator is ordinal. Focused regression definitions
+exercise those paths, owner reset and singular DELETE transport failure without
+subsequent path requests or FINISH. No clock or photo-version/history/warning
+rewrite accompanies this batch.
+
+The requirement mapping above is scoped: this packet contributes I08 lifecycle
+actions to R03, destructive concurrency/retry handling to R23, and preserves R28
+explicit-Save, saved-only and no-AI-mutation boundaries. Supporting
+R11/R12/R17/R20/R26/R27 remain relevant; R20 here is seven-day Trash/Restore,
+not completed backups or quarterly restore. No full R03/R28, Phase0 or MVP
+acceptance is claimed. Four token-shaped lines remained semantically withheld
+from the reviewer; hashes are not semantic proof and no bypass is authorized.
+All new tests remain **UNEXECUTED** pending separate execution authority.
+Only static source/diff/byte checks are permitted. The17 original phase prefixes,
+exact generated types,200 frozen files and18+4 capture bounds remain unchanged.
+Source review, exact-head execution/visual acceptance and all previously stated
+holds remain; ten cycles/no11/rerun, no staging/commit/push/merge/deploy.

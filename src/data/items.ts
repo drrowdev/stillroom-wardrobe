@@ -2,6 +2,7 @@ import { isCategory, isRecord, isUuid, type WardrobeItem } from '../domain/wardr
 import type { AppClient } from './client';
 import type { OwnerScope } from '../auth/session';
 import { AppError, requireSuccess, throwIfAborted } from './errors';
+import { availability, lifecycle } from '../domain/garment-fields';
 
 export function parseWardrobeRows(items: unknown, images: unknown, ownerId: string): WardrobeItem[] {
   if (!Array.isArray(items) || !Array.isArray(images)) throw new AppError('error.unavailable');
@@ -11,6 +12,9 @@ export function parseWardrobeRows(items: unknown, images: unknown, ownerId: stri
       throw new AppError('error.unavailable');
     }
     if (item.deleted_at !== null) return [];
+    const available = availability.find(value => value === item.availability);
+    const state = lifecycle.find(value => value === item.lifecycle);
+    if (!available || !state || typeof item.favourite !== 'boolean' || typeof item.exclude_suggestions !== 'boolean') throw new AppError('error.unavailable');
     const image: unknown = images.find((candidate: unknown) =>
       isRecord(candidate) && candidate.item_id === item.id && candidate.owner_id === ownerId && candidate.state === 'ready');
     if (!image) return [];
@@ -20,6 +24,7 @@ export function parseWardrobeRows(items: unknown, images: unknown, ownerId: stri
     return [{
       id: item.id, ownerId, title: item.title, category: item.category, createdAt: item.created_at,
       imageId: image.id, mainPath: String(image.main_path), thumbPath: String(image.thumb_path), altText: image.alt_text,
+      favourite: item.favourite, availability: available, lifecycle: state, excludeSuggestions: item.exclude_suggestions,
     }];
   });
 }
@@ -30,7 +35,7 @@ export async function loadWardrobe(client: AppClient, scope: OwnerScope): Promis
   let itemCursor: { createdAt: string; id: string } | null = null;
   for (;;) {
     throwIfAborted(scope.signal);
-    let query = client.from('items').select('id,owner_id,title,category,created_at,deleted_at')
+    let query = client.from('items').select('id,owner_id,title,category,created_at,deleted_at,favourite,availability,lifecycle,exclude_suggestions')
       .eq('owner_id', scope.ownerId).is('deleted_at', null)
       .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(500);
     if (itemCursor) query = query.or(`created_at.lt.${itemCursor.createdAt},and(created_at.eq.${itemCursor.createdAt},id.lt.${itemCursor.id})`);
