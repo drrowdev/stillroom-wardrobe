@@ -22,7 +22,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260910070000_checked_item_save.sql', version: '20260910070000', time: '2026-09-10 07:00:00', bytes: 16801, sha256: SOURCE_HASHES.save },
   { name: '20260911040000_ai_analysis_backend.sql', version: '20260911040000', time: '2026-09-11 04:00:00', bytes: 24856, sha256: SOURCE_HASHES.analysis },
   { name: '20260911200000_checked_ai_item_save.sql', version: '20260911200000', time: '2026-09-11 20:00:00', bytes: 29668, sha256: SOURCE_HASHES.analyzedSave },
-  { name: '20260913120000_item_lifecycle.sql', version: '20260913120000', time: '2026-09-13 12:00:00', bytes: 20525, sha256: SOURCE_HASHES.lifecycle },
+  { name: '20260913120000_item_lifecycle.sql', version: '20260913120000', time: '2026-09-13 12:00:00', bytes: 20822, sha256: SOURCE_HASHES.lifecycle },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -142,11 +142,16 @@ select jsonb_build_object(
       ('public.begin_item_deletion(uuid,bigint,uuid,text)','c9bb6b0a059b4bd19e7dcbb5800f1151'),
       ('public.finish_item_deletion(uuid,uuid)','7dbb0841f466bd4b7da3b56e6bb4ad0a')
     ) expected(identity,hash) join pg_catalog.pg_proc p on p.oid=expected.identity::regprocedure),
-  'storageReadDelete',(select count(*)=2 and bool_and(cmd in ('SELECT','DELETE')
-      and roles=array['authenticated']::name[] and qual=case policyname
-        when 'wardrobe_read' then '((bucket_id = ''wardrobe''::text) AND private.owns_storage_path(name, false))'
+  'storageReadDelete',(select count(*)=2 and bool_and(
+      cmd=case policyname when 'wardrobe_read' then 'SELECT' when 'wardrobe_delete' then 'DELETE' end
+      and roles=array['authenticated']::name[] and with_check is null)
+    from pg_catalog.pg_policies where schemaname='storage' and tablename='objects' and policyname in ('wardrobe_read','wardrobe_delete'))
+      and (select count(*)=2 and bool_and(qual is not null and qual=case policyname
+        when 'wardrobe_read' then '((bucket_id = ''wardrobe''::text) AND (private.owns_storage_path(name, false) OR (private.may_delete_storage(name) AND storage.allow_only_operation(''storage.object.delete''::text))))'
         when 'wardrobe_delete' then '((bucket_id = ''wardrobe''::text) AND private.may_delete_storage(name) AND storage.allow_only_operation(''storage.object.delete''::text))' end)
     from pg_catalog.pg_policies where schemaname='storage' and tablename='objects' and policyname in ('wardrobe_read','wardrobe_delete'))
+      and (select array_agg(policyname::text order by policyname::text)=array['wardrobe_create','wardrobe_delete','wardrobe_read']::text[]
+        from pg_catalog.pg_policies where schemaname='storage' and tablename='objects')
       and not exists(select 1 from pg_catalog.pg_policies where schemaname='storage' and tablename='objects' and cmd in ('UPDATE','ALL'))
 );`;
 
@@ -282,9 +287,10 @@ export async function withLifecycleCatalogMarker(ownerId, itemId, operation, { i
     && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(imageId));
   const markerId = randomUUID(), name = `${ownerId}/${itemId}/${imageId}/thumb.jpg`;
   // A canonical pending image must pass the real publication guard. No blob is created.
+  let phase = 'setup', primaryPhase, cleanupPhase;
   let created = false, primaryFailed = false, primaryValue, cleanupFailed = false, cleanupValue;
   const cleanupFailure = (error) => {
-    if (!cleanupFailed) { cleanupFailed = true; cleanupValue = error; }
+    if (!cleanupFailed) { cleanupFailed = true; cleanupValue = error; cleanupPhase = phase; }
   };
   try {
     const setup = await privilegedLocalSql(`do $$ begin
@@ -311,23 +317,36 @@ export async function withLifecycleCatalogMarker(ownerId, itemId, operation, { i
       end $$; select 'I08_MARKER_CREATED';`);
     requireEvidence(setup === 'I08_MARKER_CREATED');
     created = true;
+    phase = 'callback';
     await operation(name);
   } catch (error) {
     primaryFailed = true;
     primaryValue = error;
+    primaryPhase = phase;
   }
   try {
+    phase = 'cleanup-count';
     const cleanup = await privilegedLocalSql(`select count(*) from storage.objects
       where id='${markerId}' and bucket_id='wardrobe' and name='${name}';`);
     requireEvidence(created ? cleanup === '1' : ['0', '1'].includes(cleanup));
-    if (cleanup === '1') requireEvidence(await remove(name) === 'removed');
+    if (cleanup === '1') {
+      phase = 'removal';
+      requireEvidence(await remove(name) === 'removed');
+    }
   } catch (error) { cleanupFailure(error); }
   try {
+    phase = 'final-absence';
     requireEvidence(await privilegedLocalSql(`select count(*) from storage.objects
           where id='${markerId}' or (bucket_id='wardrobe' and name='${name}');`) === '0');
   } catch (error) { cleanupFailure(error); }
   if (cleanupFailed) {
+    phase = 'notice';
     try { console.error('FAIL: I08 exact catalog-marker cleanup'); } catch (error) { cleanupFailure(error); }
+  }
+  if (primaryFailed || cleanupFailed) {
+    phase = 'notice';
+    try { console.error(`FAIL: I08 catalog-marker primary=${primaryFailed ? primaryPhase : 'none'}; cleanup=${cleanupFailed ? cleanupPhase : 'none'}`); }
+    catch (error) { cleanupFailure(error); }
   }
   if (primaryFailed) throw primaryValue;
   if (cleanupFailed) throw cleanupValue;

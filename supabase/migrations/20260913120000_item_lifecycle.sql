@@ -126,6 +126,11 @@ exception when lock_not_available then
   raise exception using errcode='55P03',message='The resource is locked';
 end;
 $$;
+drop policy wardrobe_read on storage.objects;
+create policy wardrobe_read on storage.objects for select to authenticated
+using (bucket_id='wardrobe' and (private.owns_storage_path(name,false)
+  or (private.may_delete_storage(name)
+    and storage.allow_only_operation('storage.object.delete'))));
 drop policy wardrobe_create on storage.objects;
 create policy wardrobe_create on storage.objects for insert to authenticated
 with check (bucket_id='wardrobe' and private.may_create_item_object(name));

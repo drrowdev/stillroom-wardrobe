@@ -3,7 +3,7 @@ import { isMain } from '../../scripts/quality/files.mjs';
 import { requireEvidence } from '../integration/preservation.sessions.mjs';
 import { bytes, intent, saveClients, denied, eq } from '../integration/item-save.sessions.mjs';
 import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
-import { lifecycleHarness } from '../integration/item-lifecycle.sessions.mjs';
+import { lifecycleHarness, legacyOrphanCase } from '../integration/item-lifecycle.sessions.mjs';
 
 async function main() {
   const harnesses = [];
@@ -14,6 +14,8 @@ async function main() {
     harnesses.push(...owners.map((owner) => lifecycleHarness(client, owner)));
     for (const [index, owner] of owners.entries()) {
       const h = harnesses[index], peer = harnesses[1 - index];
+      phase = 'legacy-orphan-privacy';
+      await legacyOrphanCase(client, owner, owners[1 - index], h);
       const own = await h.create(), foreign = await peer.create();
       phase = 'native-operation-boundary';
       const pending = h.track(intent());

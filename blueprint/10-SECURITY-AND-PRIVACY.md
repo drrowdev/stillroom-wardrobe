@@ -96,7 +96,18 @@ Unclaimed legacy operations remain supported. An initial unmanifested-prefix
 case blocks permanent BEGIN without changing rows/versions; reversible
 Trash/Restore remains possible within its window. I10 orphan cleanup is not
 implemented. No scheduler, provider call or global raw-DELETE redesign is hidden
-in I08. The normal deletion controller's bytes-first account sequence remains;
+in I08. T29's replacement SELECT policy supplies only the existing approved-owner
+canonical-prefix predicate during native singular deletion, alongside unchanged
+manifested reads. The trusted native operation is not taken from client headers;
+orphan download/sign/list, own bulk deletion and foreign/anonymous singular
+deletion remain excluded. This is not protection against privileged/direct SQL
+holders setting GUCs. The pinned operation-function dependency now covers both
+read and delete and must be re-reviewed on vendor upgrades. The derived catalog
+qual is not yet a measured runtime pin. New normal-session real-byte assertions
+retain strict `removed` acknowledgements followed by absence, never equate
+prior RLS-hidden GET with deletion, and reject5xx or malformed success evidence.
+They are source definitions, not a completed runtime/privacy acceptance claim.
+The normal deletion controller's bytes-first account sequence remains;
 a privileged profile deletion which bypasses it may now be refused while a
 claimed item's objects remain. Structural cascade checks are not account-journey
 acceptance.

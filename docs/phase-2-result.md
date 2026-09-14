@@ -5232,3 +5232,80 @@ normal-owner/manual/device/hosted/cutover gates remain unresolved. Original
 Save STOP-on-recurrence remains. Candidate is unstaged: no object write,
 commit/push, Actions, new cycle/agent, Stage2, paid/private processing,
 hosted mutation, merge or deployment is authorized.
+
+## I08 T29 singular orphan deletion visibility - 14 September 2026
+
+[Sixth-cycle terminal evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660754752)
+records CI34818638302attempt1 failing at source
+1a6bb0d0ddf2fc8d3d733d3b4c4bac3859755f6d/tree
+90e9c4b656e4db8fdfbe1986b12205c35dd24eb9. All three CI jobs checked out
+4c27224848bda470045bff8a35e2dd3f8b47a2e5, that same tree with parents
+main221d60c8a07eb4a89a546133685b80487cf434be and head1a6; Node24.19.0.
+Startup/owner installation, preservation/checked Save and nineteen lifecycle
+catalog checks passed. Both contention fixtures returned. Subsequent catalog
+marker and lifecycle cleanup failed; the first failing HTTP operation and
+response remain unknown. Later reset/integration/security/AI/recovery/generated
+types/upload/parity were skipped. This is not the approved final type-diff red.
+
+App lint/typecheck/translations/build/secret/dependency checks and2048units in
+25files passed. Browser621passed with4oldskips and no retry/flaky summary;
+three existing boundary records showed200/200 for1/512000bytes, without recorded
+rejection, timeout, observer or cleanup failure. A clean run does not establish
+that the separate earlier WebKit400 was fixed. Apple34818638294attempt1 passed
+all7synthetic cases, not physical-device acceptance.
+[Exact1a6 catalog/visual review](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660948869)
+accepted the bounded catalog projection and18existing synthetic surfaces:
+17byte-identical reuses of prior actual views and1actual current view, not
+18fresh views. These are historical1a6 results, not T29 runtime/visual acceptance.
+This writer read only sanitized public text receipts, no logs/artifacts/images.
+
+[Proposal5660878443](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660878443)
+and [binding disposition5661198540](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5661198540)
+record retained reviewer c372 turn30,13actual Anthropic Claude Opus5/high events
+08:13:19.293-08:21:10.888UTC, AMEND adopted with M1-M5/N1-N5 corrections.
+The critic's statement24 chronology was corrected to cycle4/a945/34782897424,
+not cycle5; no additional owner installation step is introduced.
+[Matching edit-only release5661295740](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5661295740)
+independently records8OWN gpt-6-astra/medium events for this same persistent
+writer,08:33:10.651-08:36:24.538UTC. Supported identity and coordinator source
+guard08:37:35.8880982Z matched. Writer rechecked all217canonical/index entries,
+ten raw targets,207outside raw bytes and36root-inclusive regular directories at
+08:43:17.1869168Z before rereading the complete hash-verified receipt and patching.
+This is local coordinator-observed usage, not tamper-proof/native attestation.
+
+The source-supported SELECT/RETURNING mismatch explains an intended deletion
+path that was blocked; it is not recovered proof of the first runtime failure.
+Only `wardrobe_read` is replaced: existing manifested reads OR existing
+approved-owner canonical-prefix deletion during trusted `storage.object.delete`.
+DELETE/INSERT and all eleven function bodies remain unchanged. Download/sign/
+list/bulk are not granted orphan visibility; direct/privileged SQL GUC capability
+is not claimed impossible. The native operation-function contract now also
+fences SELECT and requires review on future vendor upgrades, without a version
+or installer change here.
+
+The nineteen-key catalog retains independent shape/exact-qual operands and now
+requires the complete three-policy set. Its new deparsed read qual is derived,
+not measured; a false combined boolean cannot by itself localize the mismatch.
+Source units replace old blanket SELECT prohibitions with exact narrow policies.
+Marker helper/caller fixed phases preserve operation/SQL order, exact/falsy
+primary and first cleanup values, and the original cleanup notice. Shared
+real-byte orphan regressions cover normal/spoofed A/B/anonymous read/sign/list,
+own bulk refusal, foreign/anonymous singular refusal and exact owner removal
+followed by status/NoSuchKey absence. They do not manufacture readable orphan
+bytes or claim physical purge. New test definitions remain unexecuted locally.
+
+Current ninth canonical LF is20822bytes/SHA256
+8cc0fc1207737d63b7e1d000fc7471a9941a4833aaebebc75979c498a4d6c476.
+Its two current source fingerprint references and the backend document match;
+the original15332-byte backend pin is explicitly historical. The full354986-byte
+preceding phase record and all12older prefixes remain immutable. Other207files,
+ALWAYS/publication/claim/history bodies, native pins/inventory, owner installer,
+stream/protocol, Save/browser/timers/retries/captures/types/dependencies stay frozen.
+
+Only manual source/Git/hash/whitespace checks are permitted. No local Node/npm/
+compiler/lint/tests/browser/backend/Docker/psql/probes/install or runtime PASS.
+Candidate remains UNSTAGED for source review: no object writes/commit/push,
+Actions/seventh cycle, extra agent/native allocation, Stage2, hosted mutation,
+merge/deploy or paid/private-photo processing is authorized. Six cycles consumed;
+original Save STOP-on-recurrence, separate browser400 uncertainty, real-owner
+lifecycle/cleanup/later backend/types and human/device/hosted/cutover gates persist.

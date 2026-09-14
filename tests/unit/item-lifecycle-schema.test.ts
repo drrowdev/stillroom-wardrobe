@@ -13,7 +13,7 @@ import type { DeleteReply, DeleteRequest } from '../../src/data/storage-delete';
 // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
 import { ITEM_LIFECYCLE_CATALOG_SQL, assertLifecycleFixture, MIGRATIONS, withLifecycleParentLock, withLifecycleCatalogMarker as catalogMarker, lifecycleStorageRuntime, withLifecycleLateUpload, requireStorageCatalogInventory } from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
-import { one, lifecycleObservation, serializeLifecycleObservation, readLifecycleUploadResponse, requireLifecycleUploadConflict, lifecycleFixtureCases } from '../integration/item-lifecycle.sessions.mjs';
+import { one, lifecycleObservation, serializeLifecycleObservation, readLifecycleUploadResponse, requireLifecycleUploadConflict, lifecycleFixtureCases, lifecyclePublicationCases, legacyOrphanCase } from '../integration/item-lifecycle.sessions.mjs';
 
 const fixtureMocks = vi.hoisted(() => ({
   spawn: vi.fn(), requireLocalContainer: vi.fn(), privilegedLocalSql: vi.fn(), commandEnvironment: vi.fn(), saveClients: vi.fn(),
@@ -234,11 +234,45 @@ describe('I08 SQL source contract, not live database proof', () => {
     ]);
     expect(routine('private.may_create_item_object')).not.toMatch(/::uuid|split_part/);
     expect(routine('private.may_create_item_object')).toContain("errcode='55P03',message='The resource is locked'");
-    expect(sql.match(/drop policy/g)).toHaveLength(2);
     expect(sql).toContain("storage.allow_only_operation('storage.object.upload')");
     expect(sql).toContain("storage.allow_only_operation('storage.object.delete')");
     expect(sql).toContain("with check (bucket_id='wardrobe' and private.may_create_item_object(name))");
-    expect(sql).not.toMatch(/drop policy wardrobe_read|create policy wardrobe_read|owns_storage_path/);
+  });
+  it('replaces exactly three policies, admitting orphan SELECT only for the existing singular DELETE predicate', () => {
+    expect(sql.match(/(?:drop|create) policy\b[^;]+;/gi)).toEqual([
+      'drop policy wardrobe_read on storage.objects;',
+      "create policy wardrobe_read on storage.objects for select to authenticated\n"
+        + "using (bucket_id='wardrobe' and (private.owns_storage_path(name,false)\n"
+        + "  or (private.may_delete_storage(name)\n"
+        + "    and storage.allow_only_operation('storage.object.delete'))));",
+      'drop policy wardrobe_create on storage.objects;',
+      "create policy wardrobe_create on storage.objects for insert to authenticated\n"
+        + "with check (bucket_id='wardrobe' and private.may_create_item_object(name));",
+      'drop policy wardrobe_delete on storage.objects;',
+      "create policy wardrobe_delete on storage.objects for delete to authenticated\n"
+        + "using (bucket_id='wardrobe' and private.may_delete_storage(name)\n"
+        + "  and storage.allow_only_operation('storage.object.delete'));",
+    ]);
+    expect(sql.match(/drop policy\b/gi)).toHaveLength(3);
+    expect(sql.match(/create policy\b/gi)).toHaveLength(3);
+    expect(sql).not.toMatch(/\balter policy\b|\bfor (?:update|all) to\b|\bgrant\b[^;]*\bon (?:table )?storage\./i);
+  });
+  it('pins read/delete catalog shape, derived qualifiers and the complete three-policy set separately', () => {
+    const catalog = ITEM_LIFECYCLE_CATALOG_SQL as string;
+    expect([...catalog.matchAll(/^  '(\w+)',/gm)]).toHaveLength(19);
+    const guard = catalog.slice(catalog.indexOf("  'storageReadDelete',"));
+    expect(guard).toBe(`  'storageReadDelete',(select count(*)=2 and bool_and(
+      cmd=case policyname when 'wardrobe_read' then 'SELECT' when 'wardrobe_delete' then 'DELETE' end
+      and roles=array['authenticated']::name[] and with_check is null)
+    from pg_catalog.pg_policies where schemaname='storage' and tablename='objects' and policyname in ('wardrobe_read','wardrobe_delete'))
+      and (select count(*)=2 and bool_and(qual is not null and qual=case policyname
+        when 'wardrobe_read' then '((bucket_id = ''wardrobe''::text) AND (private.owns_storage_path(name, false) OR (private.may_delete_storage(name) AND storage.allow_only_operation(''storage.object.delete''::text))))'
+        when 'wardrobe_delete' then '((bucket_id = ''wardrobe''::text) AND private.may_delete_storage(name) AND storage.allow_only_operation(''storage.object.delete''::text))' end)
+    from pg_catalog.pg_policies where schemaname='storage' and tablename='objects' and policyname in ('wardrobe_read','wardrobe_delete'))
+      and (select array_agg(policyname::text order by policyname::text)=array['wardrobe_create','wardrobe_delete','wardrobe_read']::text[]
+        from pg_catalog.pg_policies where schemaname='storage' and tablename='objects')
+      and not exists(select 1 from pg_catalog.pg_policies where schemaname='storage' and tablename='objects' and cmd in ('UPDATE','ALL'))
+);`);
   });
   it('orders profile, images, parent UPDATE, full image reread and claim locks', () => {
     for (const name of ['public.begin_item_deletion', 'public.finish_item_deletion']) {
@@ -441,6 +475,8 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
   const primaryValues: unknown[] = [privateError, undefined, null, false, 0, ''];
   const lockNotice = 'FAIL: I08 exact parent-lock release';
   const markerNotice = 'FAIL: I08 exact catalog-marker cleanup';
+  const markerPhases = (primary: string, cleanup: string) =>
+    `FAIL: I08 catalog-marker primary=${primary}; cleanup=${cleanup}`;
   const markerImage = '10000000-0000-4000-8000-000000000003';
   const withLifecycleCatalogMarker = (ownerId: string, itemId: string, operation: () => Promise<unknown>) =>
     catalogMarker(ownerId, itemId, operation, { imageId: markerImage, remove: fixtureMocks.markerRemove });
@@ -598,6 +634,7 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
     };
   }
   const markerFailures: MarkerMode[] = ['delete-throw', 'delete-reject', 'delete-count', 'absence-throw', 'absence-reject', 'absence-count'];
+  const markerCleanupPhase = (mode: MarkerMode) => mode.startsWith('delete') ? 'cleanup-count' : 'final-absence';
   it('removes and verifies the exact marker after success', async () => {
     const fixture = marker(), operation = vi.fn(async () => {});
     await expect(withLifecycleCatalogMarker(owner, item, operation)).resolves.toBeUndefined();
@@ -606,20 +643,20 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
   it.each(primaryValues)('preserves exact marker operation rejection %# with successful cleanup', async (primary) => {
     const fixture = marker();
     await rejection(withLifecycleCatalogMarker(owner, item, async () => { throw primary; }), primary);
-    fixture.assertCleaned(); expect(log).not.toHaveBeenCalled();
+    fixture.assertCleaned(); expect(log.mock.calls).toEqual([[markerPhases('callback', 'none')]]);
   });
   it.each(markerFailures)('rejects marker cleanup-only %s, retaining deletion and absence checks', async (mode) => {
     const fixture = marker(mode);
     await expect(withLifecycleCatalogMarker(owner, item, async () => {})).rejects.toThrow(
       mode.endsWith('count') ? 'EVIDENCE_REQUIRED' : cleanupError.message,
     );
-    fixture.assertCleaned(); expect(log.mock.calls).toEqual([[markerNotice]]);
+    fixture.assertCleaned(); expect(log.mock.calls).toEqual([[markerNotice], [markerPhases('none', markerCleanupPhase(mode))]]);
   });
   for (const mode of markerFailures) {
     it.each(primaryValues)(`preserves exact/falsy marker operation rejection %# through ${mode}`, async (primary) => {
       const fixture = marker(mode);
       await rejection(withLifecycleCatalogMarker(owner, item, async () => { throw primary; }), primary);
-      fixture.assertCleaned(); expect(log.mock.calls).toEqual([[markerNotice]]);
+      fixture.assertCleaned(); expect(log.mock.calls).toEqual([[markerNotice], [markerPhases('callback', markerCleanupPhase(mode))]]);
     });
   }
   for (const mode of ['ok', ...markerFailures] as MarkerMode[]) {
@@ -627,13 +664,14 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
       const fixture = marker(mode, { error: primary }), operation = vi.fn();
       await rejection(withLifecycleCatalogMarker(owner, item, operation), primary);
       fixture.assertCleaned(); expect(operation).not.toHaveBeenCalled();
-      expect(log.mock.calls).toEqual(mode === 'ok' ? [] : [[markerNotice]]);
+      expect(log.mock.calls).toEqual(mode === 'ok' ? [[markerPhases('setup', 'none')]]
+        : [[markerNotice], [markerPhases('setup', markerCleanupPhase(mode))]]);
     });
   }
   it.each(['0', '1'])('retains strict uncertain-setup cleanup count %s', async (count) => {
     const fixture = marker('ok', { error: privateError }, count);
     await rejection(withLifecycleCatalogMarker(owner, item, vi.fn()), privateError);
-    fixture.assertCleaned(); expect(log).not.toHaveBeenCalled();
+    fixture.assertCleaned(); expect(log.mock.calls).toEqual([[markerPhases('setup', 'none')]]);
   });
   it.each(primaryValues)('retains first exact/falsy parent cleanup failure %# when termination and logging throw', async (first) => {
     const fixture = parent();
@@ -674,12 +712,14 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
     await rejection(withLifecycleCatalogMarker(owner, item, async () => {}), first);
     expect(fixtureMocks.privilegedLocalSql).toHaveBeenCalledTimes(3);
     expect(fixtureMocks.privilegedLocalSql.mock.calls[2]?.[0]).toContain('select count(*) from storage.objects');
+    expect(log.mock.calls).toEqual([[markerNotice], [markerPhases('none', 'cleanup-count')]]);
   });
   it.each(primaryValues)('retains marker primary %# when cleanup and its notice both fail', async (primary) => {
     const fixture = marker('absence-reject');
     log.mockImplementation(() => { throw cleanupError; });
     await rejection(withLifecycleCatalogMarker(owner, item, async () => { throw primary; }), primary);
     fixture.assertCleaned();
+    expect(log.mock.calls).toEqual([[markerNotice], [markerPhases('callback', 'final-absence')]]);
   });
   it.each(primaryValues)('preserves singular-API cleanup failure %# and still verifies catalog absence', async (first) => {
     marker();
@@ -690,11 +730,226 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
     await rejection(withLifecycleCatalogMarker(owner, item, async () => {}), first);
     expect(fixtureMocks.markerRemove).toHaveBeenCalledOnce();
     expect(fixtureMocks.privilegedLocalSql).toHaveBeenCalledTimes(3);
+    expect(log.mock.calls).toEqual([[markerNotice], [markerPhases('none', 'removal')]]);
   });
   it.each(['missing', 'denied', undefined])('never treats marker API %s as acknowledged deletion', async (result) => {
     marker(); fixtureMocks.markerRemove.mockResolvedValueOnce(result);
     await expect(withLifecycleCatalogMarker(owner, item, async () => {})).rejects.toThrow('EVIDENCE_REQUIRED');
     expect(fixtureMocks.privilegedLocalSql).toHaveBeenCalledTimes(3);
+    expect(log.mock.calls).toEqual([[markerNotice], [markerPhases('none', 'removal')]]);
+  });
+  it.each(primaryValues)('retains callback failure %# when only its new phase notice fails', async (primary) => {
+    const fixture = marker();
+    log.mockImplementation(() => { throw cleanupError; });
+    await rejection(withLifecycleCatalogMarker(owner, item, async () => { throw primary; }), primary);
+    fixture.assertCleaned();
+    expect(log.mock.calls).toEqual([[markerPhases('callback', 'none')]]);
+  });
+  it('records callback and removal failures separately without private values', async () => {
+    marker();
+    fixtureMocks.markerRemove.mockRejectedValueOnce(cleanupError);
+    await rejection(withLifecycleCatalogMarker(owner, item, async () => { throw privateError; }), privateError);
+    expect(log.mock.calls).toEqual([[markerNotice], [markerPhases('callback', 'removal')]]);
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/Private|[0-9a-f]{8}-|storage\.objects/);
+  });
+});
+
+describe('T29 real-orphan assertion definitions (mock-only; no backend)', () => {
+  const owner = { uid: '10000000-0000-4000-8000-000000000001', token: 'ordinary-owner' };
+  const other = { uid: '10000000-0000-4000-8000-000000000002', token: 'ordinary-peer' };
+  const value = { p_item: { id: '10800000-0000-4000-8000-000000000003' },
+    p_image: { id: '10800000-0000-4000-8000-000000000004' } };
+  const paths = (attempt: typeof value) => ['thumb', 'main'].map((part) =>
+    `${owner.uid}/${attempt.p_item.id}/${attempt.p_image.id}/${part}.jpg`);
+  type Reply = { ok: boolean; status: number; data: unknown };
+  type Options = { method?: string; body?: unknown; headers?: Record<string, string> };
+  type Boundary = 'read' | 'sign' | 'list' | 'bulk' | 'foreign-delete' | 'anonymous-delete' | 'owner-delete' | 'absence';
+  function fixture(fault?: { boundary: Boundary; reply: Reply }) {
+    const events: string[] = [], removed = new Set<string>();
+    const status = { photo_count: 0, unmanifested_count: 2, cleanup_blocked: true, version: 2 };
+    const before = { items: [{ id: value.p_item.id }], images: [], status };
+    const request = vi.fn(async (token: string | null, route: string, options: Options = {}): Promise<Reply> => {
+      let boundary: Boundary;
+      if (route.startsWith('/storage/v1/object/authenticated/')) boundary = 'read';
+      else if (route.startsWith('/storage/v1/object/sign/')) boundary = 'sign';
+      else if (route === '/storage/v1/object/list/wardrobe') boundary = 'list';
+      else if (route === '/storage/v1/object/wardrobe') boundary = 'bulk';
+      else {
+        expect(route).toMatch(/^\/storage\/v1\/object\/wardrobe\/(?:[0-9a-f-]+\/){3}(?:main|thumb)\.jpg$/);
+        expect(options.method).toBe('DELETE');
+        boundary = token === null ? 'anonymous-delete' : token === other.token ? 'foreign-delete'
+          : removed.has(route) ? 'absence' : 'owner-delete';
+      }
+      events.push(boundary);
+      if (fault?.boundary === boundary) return fault.reply;
+      if (boundary === 'list' || boundary === 'bulk') return { ok: true, status: 200, data: [] };
+      if (boundary === 'owner-delete') {
+        removed.add(route);
+        return { ok: true, status: 200, data: { message: 'Successfully deleted' } };
+      }
+      if (boundary === 'absence') return { ok: false, status: 400,
+        data: { statusCode: '404', code: 'NoSuchKey', error: 'not_found', message: 'Object not found' } };
+      return { ok: false, status: 400, data: { statusCode: '403', code: 'AccessDenied', error: 'Unauthorized', message: 'Access denied' } };
+    });
+    const h = {
+      create: vi.fn(async () => value), paths, download: vi.fn(async () => {}),
+      deleteItem: vi.fn(async () => {}), track: (attempt: typeof value) => attempt,
+      upload: vi.fn(async () => {}), trash: vi.fn(async () => ({ deleted_at: null })),
+      snapshot: vi.fn(async () => structuredClone(before)), unchanged: vi.fn(async () => {}),
+      status: vi.fn(async () => removed.size ? { ...status, unmanifested_count: 0, cleanup_blocked: false } : { ...status }),
+      beginArgs: vi.fn(() => ({})),
+      call: vi.fn(async () => ({ ok: false, status: 400,
+        data: { code: '22023', message: 'Request conflict', details: null, hint: null } })),
+      read: vi.fn(async (table: string, id: string) => table === 'items' ? before.items : id === value.p_image.id ? [] : [{ id }]),
+      remove: vi.fn(async (attempt: typeof value) => {
+        for (const path of paths(attempt)) expect(await deleteWardrobeObject(
+          (route, options) => request(owner.token, route, options), owner.uid, path)).toBe('removed');
+      }),
+    };
+    return { h, request, events, client: { request, insert: vi.fn(async () => {}), rpc: vi.fn(async () => {}) } };
+  }
+  beforeEach(() => { vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Unexpected network'); })); });
+  afterEach(() => { expect(globalThis.fetch).not.toHaveBeenCalled(); vi.unstubAllGlobals(); });
+  it('uses all three normal principals and both header sets, then exact owner removal and independent absence', async () => {
+    const f = fixture();
+    await legacyOrphanCase(f.client, owner, other, f.h);
+    expect(f.h.create).toHaveBeenCalledExactlyOnceWith(true);
+    expect(f.h.download.mock.calls.slice(0, 2)).toEqual(paths(value).map((path) => [path]));
+    expect(f.h.unchanged).toHaveBeenCalledTimes(3);
+    expect(f.request).toHaveBeenCalledTimes(44);
+    for (const boundary of ['read', 'sign', 'list'] as const) {
+      const calls = f.request.mock.calls.filter((_, index) => f.events[index] === boundary);
+      expect(new Set(calls.map(([token]) => token))).toEqual(new Set([owner.token, other.token, null]));
+      expect(new Set(calls.map(([, , options]) => JSON.stringify(options?.headers)))).toEqual(new Set([
+        '{}', JSON.stringify({ 'storage.operation': 'storage.object.delete',
+          'x-storage-operation': 'storage.object.delete', 'x-http-method-override': 'DELETE' }),
+      ]));
+    }
+    expect(f.events.filter((event) => event === 'bulk')).toHaveLength(2);
+    expect(f.events.filter((event) => event === 'foreign-delete')).toHaveLength(4);
+    expect(f.events.filter((event) => event === 'anonymous-delete')).toHaveLength(4);
+    expect(f.events.slice(-4)).toEqual(['owner-delete', 'owner-delete', 'absence', 'absence']);
+    expect(f.h.remove).toHaveBeenCalledExactlyOnceWith(value);
+  });
+  it.each(['read', 'sign', 'list', 'bulk', 'foreign-delete', 'anonymous-delete', 'owner-delete', 'absence'] as const)(
+    'never accepts server error at %s as privacy or deletion evidence', async (boundary) => {
+      const f = fixture({ boundary, reply: { ok: false, status: 500, data: {} } });
+      await expect(legacyOrphanCase(f.client, owner, other, f.h)).rejects.toThrow();
+      expect(f.events.at(-1)).toBe(boundary);
+    },
+  );
+  it.each([
+    ['read', { exposed: true }], ['sign', { signedURL: 'unexpected' }], ['list', [{ name: 'main.jpg' }]],
+    ['bulk', [{ name: 'main.jpg' }]], ['foreign-delete', { message: 'Successfully deleted' }],
+    ['anonymous-delete', { message: 'Successfully deleted' }], ['owner-delete', {}], ['absence', {}],
+  ] as const)('rejects disclosure, off-route deletion or malformed success at %s', async (boundary, data) => {
+    const f = fixture({ boundary, reply: { ok: true, status: 200, data } });
+    await expect(legacyOrphanCase(f.client, owner, other, f.h)).rejects.toThrow();
+  });
+  it('does not count pre-existing absence as successful owner deletion', async () => {
+    const f = fixture({ boundary: 'owner-delete', reply: { ok: false, status: 400,
+      data: { statusCode: '404', code: 'NoSuchKey', error: 'not_found', message: 'Object not found' } } });
+    await expect(legacyOrphanCase(f.client, owner, other, f.h)).rejects.toThrow();
+    expect(f.events.at(-1)).toBe('owner-delete');
+  });
+});
+
+describe('T29 marker caller phases (mock-only; no SQL, backend or process)', () => {
+  const owner = { uid: '10000000-0000-4000-8000-000000000001', token: 'ordinary-owner' };
+  const other = { uid: '10000000-0000-4000-8000-000000000002', token: 'ordinary-peer' };
+  const phases = ['item-insert', 'image-insert', 'setup', 'legacy-delete', 'item-reinsert', 'image-reinsert',
+    'upload', 'commit-image', 'trash', 'snapshot', 'begin-refusal', 'unchanged', 'restore', 'removal'] as const;
+  const cleanupError = new Error('Private cleanup'), primaryValues = [new Error('Private primary'), undefined, null, false, 0, ''];
+  let notices: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    fixtureMocks.saveClients.mockReset();
+    vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Unexpected network'); }));
+    notices = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    vi.unstubAllGlobals(); vi.restoreAllMocks();
+  });
+  function fixture(at: typeof phases[number], primary: unknown) {
+    let item: Record<string, unknown> = {}, image: Record<string, unknown> = {};
+    let inserts = 0, callbackFailed = false, outerCleanup = false, begun = false;
+    const events: string[] = [];
+    function step(name: typeof phases[number]) {
+      if (events.at(-1) !== name) events.push(name);
+      if (at === name && !callbackFailed) { callbackFailed = true; throw primary; }
+    }
+    const request = vi.fn(async (token: string, route: string, options: { method?: string; body?: Record<string, unknown> } = {}) => {
+      expect(token).toBe(owner.token);
+      if (outerCleanup) {
+        if (route.startsWith('/storage/v1/object/wardrobe/')) return { ok: true, status: 200, data: { message: 'Successfully deleted' } };
+        if (route.startsWith('/storage/v1/object/authenticated/')) return { ok: false, status: 400, data: {} };
+        if (options.method === 'DELETE') throw cleanupError;
+        throw new Error('Unexpected later cleanup request');
+      }
+      if (route.startsWith('/storage/v1/object/wardrobe/')) {
+        if (options.method === 'DELETE') { step('removal'); throw cleanupError; }
+        step('upload'); return { ok: true, status: 200, data: {} };
+      }
+      if (options.method === 'DELETE') { step('legacy-delete'); return { ok: true, status: 204, data: null }; }
+      if (route.endsWith('/set_item_trashed')) {
+        step(options.body?.p_trashed ? 'trash' : 'restore');
+        item = { ...item, version: options.body?.p_trashed ? 2 : 3,
+          deleted_at: options.body?.p_trashed ? '2026-09-14T00:00:00Z' : null };
+        return { ok: true, status: 200, data: [{ id: item.id, owner_id: owner.uid, version: item.version, deleted_at: item.deleted_at }] };
+      }
+      if (route.endsWith('/begin_item_deletion')) {
+        step('begin-refusal'); begun = true;
+        return { ok: false, status: 400, data: { code: '22023', message: 'Request conflict', details: null, hint: null } };
+      }
+      step(begun ? 'unchanged' : 'snapshot');
+      if (route.startsWith('/rest/v1/items?')) return { ok: true, status: 200, data: [item] };
+      if (route.startsWith('/rest/v1/item_images?')) return { ok: true, status: 200, data: [image] };
+      expect(route).toBe('/rest/v1/rpc/item_deletion_status');
+      return { ok: true, status: 200, data: [{
+        id: item.id, owner_id: owner.uid, title: item.title, version: item.version, deleted_at: item.deleted_at,
+        photo_count: 1, current_image_id: image.id, current_thumb_path: 'unused', image_manifest_sha256: 'a'.repeat(64),
+        cleanup_blocked: true, unmanifested_count: 1, request_id: null, expected_version: null, started_at: null,
+      }] };
+    });
+    const client = { request, insert: vi.fn(async (_owner: unknown, table: string, body: Record<string, unknown>) => {
+      const phase = (['item-insert', 'image-insert', 'item-reinsert', 'image-reinsert'] as const)[inserts++];
+      if (!phase) throw new Error('Unexpected insert');
+      step(phase);
+      if (table === 'items') item = { ...body, owner_id: owner.uid, version: 1, deleted_at: null };
+      else image = { ...body, owner_id: owner.uid };
+    }), rpc: vi.fn(async () => { step('commit-image'); }) };
+    fixtureMocks.saveClients.mockResolvedValue({ client, owners: [owner, other] });
+    const withLifecycleCatalogMarker = vi.fn(async (_owner: string, _item: string, operation: () => Promise<void>,
+      options: { imageId: string; remove: (path: string) => Promise<unknown> }) => {
+      let failed = false, first: unknown;
+      try { step('setup'); await operation(); } catch (error) { failed = true; first = error; }
+      try { await options.remove(`${_owner}/${_item}/${options.imageId}/thumb.jpg`); }
+      catch (error) { if (!failed) { failed = true; first = error; } }
+      outerCleanup = true;
+      if (failed) throw first;
+    });
+    // Setup failures before the helper still enter the unchanged outer cleanup.
+    notices.mockImplementation(() => { outerCleanup = true; throw cleanupError; });
+    return { events, request, client, withLifecycleCatalogMarker,
+      withLifecycleLateUpload: vi.fn(() => { throw new Error('Unexpected late-upload fixture'); }),
+      requireLifecyclePrefixEmpty: vi.fn(), requireLifecycleClaimFence: vi.fn() };
+  }
+  it.each(phases)('retains the exact/falsy %s failure despite marker removal and outer cleanup failures', async (at) => {
+    for (const primary of primaryValues) {
+      notices.mockClear();
+      const f = fixture(at, primary);
+      const result = await lifecyclePublicationCases({}, f).then(
+        () => ({ failed: false, value: null }), (value: unknown) => ({ failed: true, value }));
+      expect(result.failed).toBe(true); expect(result.value).toBe(primary);
+      expect(notices.mock.calls).toEqual([
+        [`FAIL: I08 fixture catalog-marker-${at}; ordinary-session evidence required`],
+        ['FAIL: I08 exact lifecycle fixture cleanup'],
+      ]);
+      expect(f.withLifecycleLateUpload).not.toHaveBeenCalled();
+      expect(f.requireLifecyclePrefixEmpty).not.toHaveBeenCalled();
+      expect(f.events.filter((event) => event !== 'removal')).toEqual(phases.slice(0, phases.indexOf(at) + 1).filter((event) => event !== 'removal'));
+      expect(JSON.stringify(notices.mock.calls)).not.toContain('Private');
+    }
   });
 });
 

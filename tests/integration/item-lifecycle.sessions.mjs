@@ -374,8 +374,10 @@ async function historyCase(client, owner, h) {
   }
 }
 
-async function legacyOrphanCase(client, owner, h) {
+export async function legacyOrphanCase(client, owner, other, h) {
+  requireEvidence(owner.uid !== other.uid && owner.token !== other.token);
   const value = await h.create(true);
+  for (const path of h.paths(value)) await h.download(path);
   // The deliberate legacy raw DELETE leaves real bytes. Reuse only this exact owned UUID.
   await h.deleteItem(value);
   await client.insert(owner, 'items', value.p_item);
@@ -389,8 +391,53 @@ async function legacyOrphanCase(client, owner, h) {
   denied(await h.call('begin_item_deletion', h.beginArgs(value, before.status)));
   await h.unchanged(value, before);
   eq((await h.trash(value, before.status.version, false)).deleted_at, null);
+  const restored = await h.snapshot(value), replacementRows = await h.read('item_images', replacement.p_image.id);
+  for (const headers of [{}, { 'storage.operation': 'storage.object.delete',
+    'x-storage-operation': 'storage.object.delete', 'x-http-method-override': 'DELETE' }]) {
+    for (const token of [owner.token, other.token, null]) {
+      for (const path of h.paths(value)) {
+        const read = await client.request(token, `/storage/v1/object/authenticated/wardrobe/${path}`, { headers });
+        requireEvidence(!read.ok && read.status >= 400 && read.status < 500);
+        const sign = await client.request(token, `/storage/v1/object/sign/wardrobe/${path}`,
+          { method: 'POST', body: { expiresIn: 60 }, headers });
+        requireEvidence(!sign.ok && sign.status >= 400 && sign.status < 500);
+      }
+      const listed = await client.request(token, '/storage/v1/object/list/wardrobe', {
+        method: 'POST', body: { prefix: `${owner.uid}/${value.p_item.id}/${value.p_image.id}/`, limit: 10, offset: 0 }, headers,
+      });
+      if (listed.ok) { eq(listed.status, 200); eq(listed.data, []); }
+      else requireEvidence(listed.status >= 400 && listed.status < 500);
+    }
+    const bulk = await client.request(owner.token, '/storage/v1/object/wardrobe',
+      { method: 'DELETE', body: { prefixes: h.paths(value) }, headers });
+    if (bulk.ok) { eq(bulk.status, 200); eq(bulk.data, []); }
+    else requireEvidence(bulk.status >= 400 && bulk.status < 500);
+    for (const token of [other.token, null]) {
+      for (const path of h.paths(value)) {
+        const removed = await client.request(token, `/storage/v1/object/wardrobe/${path}`, { method: 'DELETE', headers });
+        requireEvidence(!removed.ok && removed.status >= 400 && removed.status < 500);
+        if (token !== null) {
+          eq(removed.status, 400);
+          eq(removed.data, { statusCode: '403', code: 'AccessDenied', error: 'Unauthorized', message: 'Access denied' });
+        }
+      }
+    }
+    await h.unchanged(value, restored);
+    eq(await h.read('item_images', replacement.p_image.id), replacementRows);
+    for (const path of h.paths(replacement)) await h.download(path);
+  }
   // Exact known fixture paths only; this is not a production orphan cleaner.
   await h.remove(value);
+  const removed = await h.status(value);
+  eq(removed, { ...restored.status, unmanifested_count: 0, cleanup_blocked: false });
+  eq(await h.read('items', value.p_item.id), restored.items);
+  eq(await h.read('item_images', value.p_image.id), []);
+  eq(await h.read('item_images', replacement.p_image.id), replacementRows);
+  for (const path of h.paths(replacement)) await h.download(path);
+  for (const path of h.paths(value)) {
+    // Unlike an RLS-hidden GET, exact NoSuchKey follows the native privileged row lookup.
+    eq(await deleteWardrobeObject((route, options) => client.request(owner.token, route, options), owner.uid, path), 'missing');
+  }
 }
 
 async function retainedVersionsCase(client, owner, h) {
@@ -546,7 +593,7 @@ export async function lifecyclePublicationCases(env, { withLifecycleCatalogMarke
   requireEvidence(owners.length === 2);
   for (const owner of owners) {
     const h = lifecycleHarness(client, owner);
-    let phase, primaryFailed = false, primaryValue, cleanupFailed = false, cleanupValue;
+    let phase, callbackFailurePhase, primaryFailed = false, primaryValue, cleanupFailed = false, cleanupValue;
     const cleanupFailure = (error) => {
       if (!cleanupFailed) { cleanupFailed = true; cleanupValue = error; }
     };
@@ -554,23 +601,44 @@ export async function lifecyclePublicationCases(env, { withLifecycleCatalogMarke
       phase = 'catalog-marker-before-claim';
       const legacy = h.track();
       legacy.p_item.id = '1080' + legacy.p_item.id.slice(4);
+      phase = 'catalog-marker-item-insert';
       await client.insert(owner, 'items', legacy.p_item);
+      phase = 'catalog-marker-image-insert';
       await client.insert(owner, 'item_images', { ...legacy.p_image, item_id: legacy.p_item.id });
+      phase = 'catalog-marker-setup';
+      callbackFailurePhase = phase;
       await withLifecycleCatalogMarker(owner.uid, legacy.p_item.id, async () => {
-        await h.deleteItem(legacy);
-        const replacement = h.track({ p_item: legacy.p_item, p_image: { ...legacy.p_image, id: randomUUID() } });
-        await client.insert(owner, 'items', replacement.p_item);
-        await client.insert(owner, 'item_images', { ...replacement.p_image, item_id: replacement.p_item.id });
-        await h.upload(replacement);
-        await client.rpc(owner, 'commit_image', { p_image_id: replacement.p_image.id });
-        await h.trash(replacement, 1);
-        const beforeMarker = await h.snapshot(replacement);
-        eq(beforeMarker.status.cleanup_blocked, true); eq(beforeMarker.status.unmanifested_count, 1);
-        denied(await h.call('begin_item_deletion', h.beginArgs(replacement, beforeMarker.status)));
-        await h.unchanged(replacement, beforeMarker);
-        eq((await h.trash(replacement, beforeMarker.status.version, false)).deleted_at, null);
+        try {
+          phase = 'catalog-marker-legacy-delete';
+          await h.deleteItem(legacy);
+          const replacement = h.track({ p_item: legacy.p_item, p_image: { ...legacy.p_image, id: randomUUID() } });
+          phase = 'catalog-marker-item-reinsert';
+          await client.insert(owner, 'items', replacement.p_item);
+          phase = 'catalog-marker-image-reinsert';
+          await client.insert(owner, 'item_images', { ...replacement.p_image, item_id: replacement.p_item.id });
+          phase = 'catalog-marker-upload';
+          await h.upload(replacement);
+          phase = 'catalog-marker-commit-image';
+          await client.rpc(owner, 'commit_image', { p_image_id: replacement.p_image.id });
+          phase = 'catalog-marker-trash';
+          await h.trash(replacement, 1);
+          phase = 'catalog-marker-snapshot';
+          const beforeMarker = await h.snapshot(replacement);
+          eq(beforeMarker.status.cleanup_blocked, true); eq(beforeMarker.status.unmanifested_count, 1);
+          phase = 'catalog-marker-begin-refusal';
+          denied(await h.call('begin_item_deletion', h.beginArgs(replacement, beforeMarker.status)));
+          phase = 'catalog-marker-unchanged';
+          await h.unchanged(replacement, beforeMarker);
+          phase = 'catalog-marker-restore';
+          eq((await h.trash(replacement, beforeMarker.status.version, false)).deleted_at, null);
+          phase = 'catalog-marker-callback-complete';
+          callbackFailurePhase = undefined;
+        } catch (error) { callbackFailurePhase = phase; throw error; }
       }, { imageId: legacy.p_image.id,
-        remove: (path) => deleteWardrobeObject((route, options) => client.request(owner.token, route, options), owner.uid, path) });
+        remove: (path) => {
+          phase = 'catalog-marker-removal';
+          return deleteWardrobeObject((route, options) => client.request(owner.token, route, options), owner.uid, path);
+        } });
       phase = 'real-late-publication';
       const late = h.track();
       late.p_item.id = '1080' + late.p_item.id.slice(4);
@@ -601,7 +669,7 @@ export async function lifecyclePublicationCases(env, { withLifecycleCatalogMarke
     } catch (error) {
       primaryFailed = true;
       primaryValue = error;
-      try { console.error(`FAIL: I08 fixture ${phase}; ordinary-session evidence required`); }
+      try { console.error(`FAIL: I08 fixture ${callbackFailurePhase ?? phase}; ordinary-session evidence required`); }
       catch (noticeError) { cleanupFailure(noticeError); }
     }
     try { await h.cleanup(); } catch (error) {
@@ -626,7 +694,7 @@ async function main() {
       const before = await Promise.all(TABLES.map((table) => client.rows(other, table)));
       phase = 'versioned-lifecycle'; await ownerCases(client, owner, h);
       phase = 'history'; await historyCase(client, owner, h);
-      phase = 'legacy-orphan'; await legacyOrphanCase(client, owner, h);
+      phase = 'legacy-orphan'; await legacyOrphanCase(client, owner, other, h);
       phase = 'retained-photo-versions'; await retainedVersionsCase(client, owner, h);
       phase = 'bounded-race-samples'; await raceCases(client, owner, h);
       eq(await Promise.all(TABLES.map((table) => client.rows(other, table))), before);

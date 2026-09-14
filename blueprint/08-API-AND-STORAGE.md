@@ -76,7 +76,16 @@ an auth mismatch, GUC, definer exemption or profile-delete shortcut.
 `wardrobe_create` requires the server-assigned `storage.object.upload` operation
 as well as the existing owned pending path and parent KEY SHARE admission checks.
 `wardrobe_delete` requires `storage.object.delete`; owner/enabled-account checks
-remain. No UPDATE policy is added. Client headers cannot select a different
+remain. T29 replaces `wardrobe_read` without an additive policy: the existing
+manifested-read branch OR the same approved-owner canonical-prefix delete
+predicate gated by `storage.object.delete`. This supplies SELECT visibility
+needed by the native singular DELETE/RETURNING for an unmanifested owned object;
+it does not admit orphan download, sign, list or bulk deletion. The pinned native
+operation-function contract now fences both read and delete and requires
+re-review on any future vendor upgrade. Direct/privileged SQL capability to set
+a custom GUC is outside this ordinary-route guarantee. The new catalog qual pin
+is derived and unmeasured until separately authorized runtime verification.
+No UPDATE policy is added. Client headers cannot select a different
 native operation. Bulk DELETE can return200/[] without deleting anything; it is
 not a removal acknowledgement. PUT, copy, signed upload and TUS admission remain
 unsupported; move already lacks UPDATE permission. S3 mapped-user operations

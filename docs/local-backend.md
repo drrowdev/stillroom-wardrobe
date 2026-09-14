@@ -4,9 +4,12 @@
 
 ### I08 Stage 1 source-only candidate (13 September 2026)
 
-The I08 candidate adds a strictly pinned ninth migration,
-`20260913120000_item_lifecycle.sql`, canonical LF 15332 bytes,
+The initial 13 September I08 candidate added a strictly pinned ninth migration,
+`20260913120000_item_lifecycle.sql`, historical canonical LF 15332 bytes,
 SHA-256 `38de5f1b7bd4edd0f7e3829f90e1b1486c0b32385c1bd75b03b7dee9263ba1c5`.
+The current T29 source candidate is canonical LF 20822 bytes,
+SHA-256 `8cc0fc1207737d63b7e1d000fc7471a9941a4833aaebebc75979c498a4d6c476`;
+neither fingerprint claims hosted installation or completed lifecycle evidence.
 All eight earlier pins and base-to-target content comparisons remain unchanged.
 History parsing requires all nine exact names/versions/times; this is not a
 permissive migration-count increase. Existing checked-Save catalog evidence
@@ -21,6 +24,35 @@ owner-local nonce reuse, private406 and foreign-row/byte preservation. Seeded
 legacy timestamps on either side of seven days are labelled fixtures, not
 seven days of observed operation. Ordinary Promise.all samples are not forced
 overlap proof.
+
+T29 replaces only `wardrobe_read`: its existing manifested-read branch remains,
+and the existing approved-owner canonical-prefix delete predicate is admitted
+only during native `storage.object.delete`. PostgreSQL SELECT visibility is
+also needed by the pinned singular DELETE/RETURNING query. Normal orphan
+download/sign/list and bulk deletion remain excluded, even with spoofed operation
+headers. The already pinned native operation-function contract now fences read
+as well as delete; any future vendor upgrade needs re-review. This is an ordinary
+API boundary, not a claim that privileged/direct SQL cannot set custom GUCs.
+DELETE/INSERT policies, all eleven bodies and owner installation stay unchanged.
+
+The nineteen-key catalog retains separate shape and exact-qual operands inside
+`storageReadDelete`, plus the complete three-policy set. Its new deparsed SELECT
+string is derived, **not yet measured**; one false combined boolean alone does
+not distinguish a shape mismatch from a text mismatch. Marker helper diagnostics
+label setup/callback/cleanup-count/removal/final-absence and retain distinct
+primary/cleanup phases, exact/falsy errors and the original cleanup notice.
+Caller labels identify the failing callback operation without losing it to
+later removal. Real-byte orphan regressions use existing ordinary A/B/anonymous
+fixtures, explicit own bulk refusal, foreign/anonymous singular refusal, strict
+owner `removed` acknowledgements and subsequent status/NoSuchKey absence.
+Initial byte/hash checks and replacement-byte checks are not downloads of
+inaccessible orphan bytes, nor provider physical-erasure proof.
+
+Cycle6's unlogged first HTTP failure remains unknown. Its reviewed1a6 catalog,
+App/Apple and18existing visual results are historical, not T29 acceptance.
+New definitions remain unexecuted locally. No seventh cycle, local runtime,
+Stage2, generated types, browser400 resolution, Save-uncertainty waiver or hosted
+cutover is authorized by this source change.
 
 Only preservation rehearsal defines/executes the special CI fixture callbacks,
 after unchanged preservation comparison and positive catalog verification.
