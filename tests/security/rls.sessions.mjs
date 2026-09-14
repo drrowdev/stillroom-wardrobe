@@ -11,7 +11,7 @@ const key=process.env.SUPABASE_PUBLISHABLE_KEY;
 function claims(token){try{return JSON.parse(Buffer.from(token.split('.')[1],'base64url').toString());}catch{return {};}}
 const passed=[];let stage='configuration';const cleanups=[],profileCleanups=[];
 async function call(token,path,{method='GET',body,bytes=false,returnRepresentation=false}={}) {
-  const r=await fetch(base+path,{method,headers:{apikey:key,...(token?{Authorization:`Bearer ${token}`}:{ }),'Content-Type':bytes?'image/jpeg':'application/json',...(returnRepresentation?{Prefer:'return=representation'}:{})},
+  const r=await fetch(base+path,{method,headers:{apikey:key,...(token?{Authorization:`Bearer ${token}`}:{ }),...(body!==undefined?{'Content-Type':bytes?'image/jpeg':'application/json'}:{}),...(returnRepresentation?{Prefer:'return=representation'}:{})},
     ...(body!==undefined?{body:bytes?body:JSON.stringify(body)}:{}),cache:'no-store',redirect:'error',signal:AbortSignal.timeout(15000)})
     .catch(()=>{throw new LocalBackendError('BLOCKED: local service transport unavailable.');});
   if(r.status>=500)throw new LocalBackendError('BLOCKED: local service returned a server error.');

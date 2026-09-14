@@ -280,7 +280,7 @@ export function normalClient(env) {
     const response = await fetch(base + route, {
       method, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15_000),
       headers: { apikey: key, ...(token ? { Authorization: 'Bearer ' + token } : {}),
-        'Content-Type': binary ? 'image/jpeg' : 'application/json', ...headers },
+        ...(body === undefined ? {} : { 'Content-Type': binary ? 'image/jpeg' : 'application/json' }), ...headers },
       ...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) }),
     });
     requireEvidence(response.status < 500);

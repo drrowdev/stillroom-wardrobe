@@ -504,17 +504,27 @@ export async function lifecycleFixtureCases(env, { withLifecycleParentLock }) {
       await h.download(h.paths(value)[0]); await h.download(h.paths(value)[1]);
       await h.trash(value, 1);
       const args = h.beginArgs(value, await h.status(value)), before = await h.snapshot(value);
-      phase = 'begin-overlap';
+      phase = 'begin-held';
       await withLifecycleParentLock(owner.uid, value.p_item.id, 'key share', async () => {
+        phase = 'begin-held-denial';
         denied(await h.call('begin_item_deletion', args));
+        phase = 'begin-held-unchanged';
         await h.unchanged(value, before);
+        phase = 'begin-holder-release';
       });
-      await h.begin(args); await h.remove(value);
-      phase = 'finish-overlap';
+      phase = 'begin-released';
+      await h.begin(args);
+      phase = 'singular-removal';
+      await h.remove(value);
+      phase = 'finish-held';
       await withLifecycleParentLock(owner.uid, value.p_item.id, 'key share', async () => {
+        phase = 'finish-held-denial';
         denied(await h.call('finish_item_deletion', { p_item_id: value.p_item.id, p_request_id: args.p_request_id }));
+        phase = 'finish-holder-release';
       });
+      phase = 'finish-released';
       eq(await h.finish(value, args.p_request_id), 'completed');
+      phase = 'final-rows';
       eq(await h.read('items', value.p_item.id), []); eq(await h.read('item_images', value.p_image.id), []);
     } catch (error) {
       primaryFailed = true; primaryValue = error;

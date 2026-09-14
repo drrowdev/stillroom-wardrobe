@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { deleteWardrobeObject } from '../../src/data/storage-delete';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
 import { MIGRATIONS, assertRehearsalEnvironment, validateInventory, assertMigrationInventory, assertCapabilities, parseMigrationHistory, assertHistory, assertHistoryResult, historyFailureDetail, exportBodyEvidence } from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
@@ -363,6 +364,80 @@ describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
   const empty = () => new Response(null, { status: 204 });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  it.each(['DELETE', 'GET', 'HEAD'])('omits automatic Content-Type and body for undefined %s bodies', async (method) => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => empty());
+    vi.stubGlobal('fetch', fetch);
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    for (const binary of [false, true]) {
+      await client().request(owner.token, '/rest/v1/items', { method, binary });
+    }
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(timeout.mock.calls).toEqual([[15_000], [15_000]]);
+    for (const [url, init] of fetch.mock.calls) {
+      expect(url).toBe(env.SUPABASE_URL + '/rest/v1/items');
+      expect(init).toEqual({
+        method, cache: 'no-store', redirect: 'error', signal: expect.any(AbortSignal),
+        headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY, Authorization: 'Bearer ' + owner.token },
+      });
+      expect(init).not.toHaveProperty('body');
+      expect(new Headers(init?.headers).has('content-type')).toBe(false);
+    }
+  });
+  it.each([null, { title: 'Fictional transport item' }])('retains JSON headers and serialization for %j', async (body) => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(empty());
+    vi.stubGlobal('fetch', fetch);
+    await client().request(owner.token, '/rest/v1/items', { method: 'POST', body });
+    expect(fetch).toHaveBeenCalledOnce();
+    const init = present(fetch.mock.calls[0]?.[1]);
+    expect(init.body).toBe(JSON.stringify(body));
+    expect(new Headers(init.headers).get('content-type')).toBe('application/json');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer ' + owner.token);
+    expect(init.method).toBe('POST');
+  });
+  it('retains binary body identity, image type and anonymous key headers', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(empty()), body = new Uint8Array([0, 255]);
+    vi.stubGlobal('fetch', fetch);
+    await client().request(null, '/storage/v1/object/wardrobe/unit', { method: 'POST', body, binary: true });
+    expect(fetch).toHaveBeenCalledOnce();
+    const init = present(fetch.mock.calls[0]?.[1]);
+    expect(init.body).toBe(body);
+    expect(init.headers).toEqual({ apikey: env.SUPABASE_PUBLISHABLE_KEY, 'Content-Type': 'image/jpeg' });
+  });
+  it.each([undefined, null, { title: 'Fictional explicit headers' }])('preserves explicit header overrides with body %j', async (body) => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(empty());
+    vi.stubGlobal('fetch', fetch);
+    const headers = { 'Content-Type': 'application/custom', Prefer: 'return=representation', Authorization: 'Bearer explicit-fixture' };
+    await client().request(owner.token, '/rest/v1/items', { method: 'DELETE', body, headers });
+    expect(fetch).toHaveBeenCalledOnce();
+    const init = present(fetch.mock.calls[0]?.[1]);
+    expect(init.headers).toEqual({ apikey: env.SUPABASE_PUBLISHABLE_KEY, ...headers });
+    if (body === undefined) expect(init).not.toHaveProperty('body');
+    else expect(init.body).toBe(JSON.stringify(body));
+  });
+  it('sends singular DELETE without JSON and still refuses an empty-JSON parser error', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      statusCode: 400, error: 'Bad Request', message: 'Body cannot be empty when content-type is set to application/json',
+    }, 400));
+    vi.stubGlobal('fetch', fetch);
+    const transport = client(), objectPath = `${owner.uid}/${run}/${run}/main.jpg`;
+    await expect(deleteWardrobeObject((route, options) => transport.request(owner.token, route, options), owner.uid, objectPath))
+      .rejects.toThrow('error.unavailable');
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0]?.[0]).toBe(env.SUPABASE_URL + '/storage/v1/object/wardrobe/' + objectPath);
+    const init = present(fetch.mock.calls[0]?.[1]);
+    expect(init.method).toBe('DELETE'); expect(init).not.toHaveProperty('body');
+    expect(new Headers(init.headers).has('content-type')).toBe(false);
+  });
+  it('keeps standalone normal-session headers conditional without executing their runners', async () => {
+    const local = await readFile(path.join(root, 'tests/integration/local.sessions.mjs'), 'utf8');
+    const security = await readFile(path.join(root, 'tests/security/rls.sessions.mjs'), 'utf8');
+    expect(local).toContain("...(body === undefined ? {} : { 'Content-Type': binary ? 'image/jpeg' : 'application/json' }), ...headers,");
+    expect(local).toContain("...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) })");
+    expect(local).toContain('deleteWardrobeObject((route, options) => request(owner.token, route, options), owner.uid, objectPath)');
+    expect(security).toContain("...(body!==undefined?{'Content-Type':bytes?'image/jpeg':'application/json'}:{}),...(returnRepresentation?{Prefer:'return=representation'}:{})");
+    expect(security).toContain("...(body!==undefined?{body:bytes?body:JSON.stringify(body)}:{})");
+    expect(security).toContain('deleteWardrobeObject((route,options)=>call(c.token,route,options),c.uid,path)');
+  });
   it('accepts bodyless 204 without reading a nonexistent stream and requires it for commit_image', async () => {
     const response = empty();
     const read = vi.spyOn(response, 'arrayBuffer');

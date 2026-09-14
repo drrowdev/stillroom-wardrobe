@@ -733,6 +733,10 @@ describe('R3 bounded held-upload response and closed evidence (mock-only)', () =
     });
     const primaryValues: unknown[] = [new Error('Private primary'), undefined, null, false, 0, ''];
     const secondary = new Error('Private secondary');
+    const lifecyclePhases = ['begin-held', 'begin-held-denial', 'begin-held-unchanged', 'begin-holder-release',
+      'begin-released', 'singular-removal', 'finish-held', 'finish-held-denial', 'finish-holder-release',
+      'finish-released', 'final-rows'] as const;
+    type LifecyclePhase = typeof lifecyclePhases[number];
     let output: MockInstance<(...args: unknown[]) => void>, notices: MockInstance<(...args: unknown[]) => void>;
     beforeEach(() => {
       fixtureMocks.saveClients.mockReset();
@@ -745,19 +749,37 @@ describe('R3 bounded held-upload response and closed evidence (mock-only)', () =
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid mock object');
       return value as Record<string, unknown>;
     }
-    function fixture(fault?: { at: 'before' | 'rows' | 'insert' | 'status' | 'release' | 'reserve'; value: unknown },
+    function fixture(fault?: { at: 'before' | 'rows' | 'insert' | 'status' | 'release' | 'reserve' | LifecyclePhase; value: unknown },
       cleanup?: { value: unknown }) {
       const rows = new Map<string, { item: Record<string, unknown>; image: Record<string, unknown>;
         reservation: Record<string, unknown>; requestId: unknown; expected: unknown }>();
       const events: string[] = [];
       let held: string | null = null, marker = false, cleanupStarted = false;
+      const lifecycleEvents: LifecyclePhase[] = [];
+      let lifecycleFailed = false, keyShareCalls = 0, requestCount = 0, failureRequestCount = 0;
       const removed = new Set<string>();
       const conflict = () => ({ ok: false, status: 400, data: { code: '22023', message: 'Request conflict', details: null, hint: null } });
       const request = vi.fn(async (token: string, route: string, options: { method?: string; body?: unknown } = {}) => {
+        requestCount++;
         const owner = owners.find((candidate) => candidate.token === token);
         if (!owner) throw new Error('Unexpected mock owner');
         const body = options.body === undefined ? {} : object(options.body);
         let row = rows.get(owner.uid);
+        if (owner.uid === owners[0]!.uid && !lifecycleFailed && !cleanupStarted) {
+          let step: LifecyclePhase | undefined;
+          if (route.endsWith('/begin_item_deletion')) step = held ? 'begin-held-denial' : 'begin-released';
+          else if (route.endsWith('/finish_item_deletion')) step = held ? 'finish-held-denial' : 'finish-released';
+          else if (route.startsWith('/storage/v1/object/wardrobe/') && options.method === 'DELETE' && row?.requestId) {
+            step = 'singular-removal';
+          } else if (route.startsWith('/rest/v1/items?') || route.startsWith('/rest/v1/item_images?')) {
+            if (held === 'key share' && !row?.requestId) step = 'begin-held-unchanged';
+            else if (!row && ['finish-released', 'final-rows'].includes(lifecycleEvents.at(-1) ?? '')) step = 'final-rows';
+          }
+          if (step && lifecycleEvents.at(-1) !== step) {
+            lifecycleEvents.push(step);
+            if (fault?.at === step) { lifecycleFailed = true; failureRequestCount = requestCount; throw fault.value; }
+          }
+        }
         if (route.endsWith('/reserve_item_save')) {
           if (fault?.at === 'reserve') throw fault.value;
           if (!row) {
@@ -838,16 +860,27 @@ describe('R3 bounded held-upload response and closed evidence (mock-only)', () =
       fixtureMocks.saveClients.mockResolvedValue({ client: { request }, owners });
       const withLifecycleParentLock = vi.fn(async (_owner: string, _item: string, mode: string, operation: () => Promise<void>) => {
         if (fault?.at === 'before') { events.push('holder-failed'); throw fault.value; }
+        const lifecycleStep = mode === 'key share' && _owner === owners[0]!.uid
+          ? (++keyShareCalls === 1 ? 'begin-held' : 'finish-held') : undefined;
+        if (lifecycleStep) {
+          lifecycleEvents.push(lifecycleStep);
+          if (fault?.at === lifecycleStep) { lifecycleFailed = true; failureRequestCount = requestCount; throw fault.value; }
+        }
         held = mode;
         try { await operation(); } finally { held = null; events.push('holder-settled'); }
         if (fault?.at === 'release') throw fault.value;
+        if (lifecycleStep) {
+          const released = lifecycleStep === 'begin-held' ? 'begin-holder-release' : 'finish-holder-release';
+          lifecycleEvents.push(released);
+          if (fault?.at === released) { lifecycleFailed = true; failureRequestCount = requestCount; throw fault.value; }
+        }
       });
       const withLifecycleCatalogMarker = vi.fn(async (_owner: string, _item: string, operation: () => Promise<void>) => {
         marker = true;
         try { await operation(); } finally { marker = false; }
       });
-      return { request, events, withLifecycleParentLock, withLifecycleCatalogMarker,
-        isHeld: () => held !== null, cleanupStarted: () => cleanupStarted };
+      return { request, events, lifecycleEvents, withLifecycleParentLock, withLifecycleCatalogMarker,
+        isHeld: () => held !== null, cleanupStarted: () => cleanupStarted, failureRequestCount: () => failureRequestCount };
     }
     function records(): Record<string, unknown>[] {
       return output.mock.calls.map(([line]) => line)
@@ -922,6 +955,32 @@ describe('R3 bounded held-upload response and closed evidence (mock-only)', () =
       expect(records().map((row) => [row.ownerOrdinal, row.stage, row.status])).toEqual([[1, 'released', 400], [2, 'request-sent', null]]);
       expect(globalThis.fetch).toHaveBeenCalledTimes(2);
       expect(f.events.filter((event) => event === 'cleanup')).toHaveLength(2);
+    });
+    it.each(lifecyclePhases)('labels %s without later operations and preserves exact primary through cleanup failure', async (at) => {
+      for (const primary of primaryValues) {
+        notices.mockClear();
+        notices.mockImplementation(() => { throw secondary; });
+        const f = fixture({ at, value: primary }, { value: secondary });
+        await rejection(lifecycleFixtureCases(env, f), primary);
+        expect(f.lifecycleEvents).toEqual(lifecyclePhases.slice(0, lifecyclePhases.indexOf(at) + 1));
+        expect(f.withLifecycleParentLock).toHaveBeenCalledTimes(lifecyclePhases.indexOf(at) < 6 ? 2 : 3);
+        expect(f.isHeld()).toBe(false);
+        expect(f.events.filter((event) => event === 'cleanup')).toEqual(['cleanup']);
+        expect(new Set(f.request.mock.calls.map(([token]) => token))).toEqual(new Set([owners[0]!.token]));
+        expect(f.request.mock.calls.slice(f.failureRequestCount()).map(([, route, options]) => [route, options?.method ?? 'GET']))
+          .toEqual([
+            [expect.stringMatching(/^\/storage\/v1\/object\/wardrobe\/[^?]+\/thumb\.jpg$/), 'DELETE'],
+            [expect.stringMatching(/^\/storage\/v1\/object\/authenticated\/wardrobe\/[^?]+\/thumb\.jpg$/), 'GET'],
+            [expect.stringMatching(/^\/storage\/v1\/object\/wardrobe\/[^?]+\/main\.jpg$/), 'DELETE'],
+            [expect.stringMatching(/^\/storage\/v1\/object\/authenticated\/wardrobe\/[^?]+\/main\.jpg$/), 'GET'],
+            [expect.stringMatching(/^\/rest\/v1\/items\?owner_id=eq\.[^&]+&id=eq\.[^&]+$/), 'DELETE'],
+          ]);
+        expect(notices.mock.calls).toEqual([
+          [`FAIL: I08 fixture ${at}; ordinary-session evidence required`],
+          ['FAIL: I08 exact lifecycle fixture cleanup'],
+        ]);
+        expect(JSON.stringify(notices.mock.calls)).not.toContain('Private');
+      }
     });
     it.each(primaryValues)('retains exact/falsy cleanup-only rejection %# without a success-shaped outer result', async (first) => {
       const f = fixture(undefined, { value: first });

@@ -412,6 +412,23 @@ Logical expiry and opportunistic/server deletion are not an inactive-account
 photo activation, provider/account/notice/allowance setup, hosted migrations and
 deployment remain separately blocked. Live/source/hosted state is unchanged.
 
+### T28 bodyless ordinary-session requests
+
+The three ordinary-session test transports must not add an automatic Content-Type
+when `body === undefined`. Explicit headers still apply; `null` remains JSON
+`null`, and binary/JSON bodies retain their existing serialization and headers.
+The singular Storage deletion utility currently has no product caller: this is
+a harness repair and a rule for the later product transport, not a deployed fix.
+
+Pinned Storage/Fastify source selects the JSON parser for a bodyless DELETE with
+application/json and refuses its empty input before the handler. That establishes
+a request-construction defect, not the recovered cause of cycle5's coarse
+begin-overlap/cleanup failure. Empty-JSON400 still fails closed; it is neither
+`missing` nor `removed`. Real bodyless PostgREST and native deletion remain gates,
+including the skipped integration/security suites. The separate WebKit boundary
+400/200 flake is unresolved; its existing bounded observer adds evidence only.
+No receiver, retry, cleanup or response assertion is relaxed.
+
 ### T26 CI-only Storage installation boundary
 
 The [reviewed T26 amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659205055)

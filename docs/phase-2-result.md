@@ -5159,3 +5159,76 @@ negative/access tests, native late-upload, catalog, generated types and all
 previous acceptance/Save/cutover holds remain pending. Four prior cycles stay
 consumed; hosted ninth installation still needs separately reviewed
 owner/quiescence authority.
+
+## I08 T28 ordinary-session headers and bounded diagnostics - 14 September 2026
+
+[Fifth-cycle terminal evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659993608)
+records CI34812510149attempt1 failing at published
+e32464115cbaf8ea8fa127d9965fdc0b3244fb76/tree
+90b5887c7b9113c3fdc3af6ce83beffcbf55682f. All three jobs actually checked out
+909510ebb3a289d4fad2881c87046f1a4c078c0b, with that tree and parents
+main221d60c8a07eb4a89a546133685b80487cf434be and heade324641; Node24.19.0.
+Database startup/CI owner installation reached readiness. S3 applied all nine
+migrations; preservation2owners/10tables/30rows/8objects, checked Save catalog,
+profile cascade and nineteen I08 catalog predicates passed. Held-parent Storage
+rejectionHTTP400 passed. The broad S4begin-overlap phase and exact lifecycle
+fixture cleanup then failed; snapshot cleanup passed. Later reset, integration,
+security, AI, recovery, types and parity were skipped; no generated types exist
+from this cycle.
+
+App lint/typecheck/translations502keys/52files,2026unit tests/25files, build,
+secret and dependency checks passed. Browser exited0 with620passed,1flaky and
+4oldskips, not an all-clean run. WebKit's existing one/512000-byte boundary test
+received400instead200 on its first attempt and passed its configured retry.
+This remains a separate unresolved browser-wire blocker, not the original
+Save-button recurrence or a PR16 waiver. Apple34812510135attempt1 passed all
+7synthetic cases. Five cycles are consumed; no sixth cycle is authorized.
+
+[Exact e324 catalog/evidence review](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660119420)
+accepted the observed catalog projection, not a complete runtime certificate.
+[Completed existing-image review](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660235899)
+found no blocking visible regression in the18approved synthetic surfaces:
+16byte-identical prior actual views plus two changed images actually reviewed,
+not18fresh views. The final sign-in view is no longer pending. Existing tall
+preview/fine-copy caveats remain. These are historical e324 results, not visual
+or runtime acceptance of this T28 candidate. This writer accessed no images,
+archives, artifacts or raw logs.
+
+[Proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660005552)
+and [binding nine-path disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660219242)
+record retained Anthropic Claude Opus5/high review:14actual events, AMEND adopted
+with M1-M4/N1-N4 corrections. The two additional standalone normal-session
+helpers share the preservation client's automatic bodyless JSON-header defect.
+Pinned Storage/Fastify source establishes parser selection and empty-JSON
+refusal, not the actual unlogged cause of S4's broad failure.
+[Edit-only release](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660296037)
+records this same writer's11OWN gpt-6-astra events and independent source/identity
+guard;10events record medium effort and one omits effort. The writer refreshed
+all217HEAD/index/working canonical blobs, nine raw targets,208outside raw files
+and36regular ancestors at07:10:36.9191537Z before re-reading the full release
+and patching. This is local coordinator-observed evidence, not a native receipt.
+
+The source candidate changes only the three automatic request headers,
+preserving undefined versus null, binary option names, explicit overrides and
+all response/cleanup semantics. New unexecuted preservation tests inspect actual
+outgoing RequestInit and retain strict parser-error refusal; narrow source
+assertions cover the two standalone runners without importing or executing them.
+Fixed lifecycle labels separate held/released BEGIN, unchanged-state check,
+holder release, singular removal, held/released FINISH and final rows; operations
+and primary/cleanup handling do not change. Injected fixture test definitions
+retain exact/falsy errors and stop/cleanup assertions. The existing boundary
+test opts into its existing bounded observer with two fixed result positions
+and a pre-cleanup snapshot; payloads, assertions, traffic, receiver, timers,
+retries and captures remain unchanged.
+
+Only authorized manual source/Git/hash/whitespace checks were performed; no
+Node/npm/compiler/lint/test/browser/backend/Docker/psql/probe/install ran.
+The full349860-byte preceding document and all eleven older prefixes remain.
+All208outside files, nine migrations/hashes/elevenSQLbodies/nineteencatalog,
+installer/native fixtures/types/workflows/product/Save/provider source stay
+frozen. No runtime PASS is claimed. Real bodyless PostgREST, native lifecycle
+and cleanup, browser flakiness, later backend/generated types and other
+normal-owner/manual/device/hosted/cutover gates remain unresolved. Original
+Save STOP-on-recurrence remains. Candidate is unstaged: no object write,
+commit/push, Actions, new cycle/agent, Stage2, paid/private processing,
+hosted mutation, merge or deployment is authorized.

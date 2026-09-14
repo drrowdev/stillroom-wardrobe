@@ -12,7 +12,7 @@ import { analysisPath, mockBackend, owners, signIn, type RawAnalysisObservation 
 type AiFixture = Awaited<ReturnType<typeof aiFixture>>;
 type RawAnalysisClient = { status: number | null; outcome: 'response' | 'network-rejection' };
 type RawAnalysisEvidence = {
-  case: 'oversized' | 'response-sequence'; project: 'chromium' | 'mobile' | 'webkit-photo' | null;
+  case: 'oversized' | 'response-sequence' | 'boundaries'; project: 'chromium' | 'mobile' | 'webkit-photo' | null;
   retry: number | null; repeat: number | null; fixturePresent: boolean;
   snapshotPhase: 'not-captured' | 'before-cleanup' | 'fixture-unavailable';
   cleanupStarted: boolean; cleanupCompleted: boolean; captureError: boolean;
@@ -190,19 +190,33 @@ test('analysis wire preserves actual browser binary bytes; length/hash oracle de
     expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
   } finally { await assertAnalysisClosed(page, api); }
 });
-test('analysis browser wire admits exactly the one-byte and 512000-byte boundaries', async ({ page }) => {
-  const api = await aiFixture(page), before = storageCounts(api);
+test('analysis browser wire admits exactly the one-byte and 512000-byte boundaries', async ({ page }, testInfo) => {
+  let api: AiFixture | undefined;
+  const results: [Awaited<ReturnType<typeof sendBrowserAnalysis>> | null, Awaited<ReturnType<typeof sendBrowserAnalysis>> | null] = [null, null];
+  const evidence = rawAnalysisEvidence('boundaries');
   try {
-    for (const size of [1, 512000]) {
-      const sent = Buffer.alloc(size, 197);
-      expect(await sendBrowserAnalysis(page, api, 'valid', sent)).toEqual({ status: 200, outcome: 'response' });
-      assertAnalysisBytes(api.inputs.at(-1)!, sent);
+    try {
+      api = await aiFixture(page, 'en', true, undefined, true);
+      const before = storageCounts(api);
+      for (const size of [1, 512000]) {
+        const sent = Buffer.alloc(size, 197), index = size === 1 ? 0 : 1;
+        results[index] = await sendBrowserAnalysis(page, api, 'valid', sent);
+        expect(results[index]).toEqual({ status: 200, outcome: 'response' });
+        assertAnalysisBytes(api.inputs.at(-1)!, sent);
+      }
+      expect(api.analysisWire).toMatchObject({ posts: 2, callbacks: 2, payloadBytes: 512001, rejected: 0 });
+      expect(api.inputs).toHaveLength(2);
+      expect(storageCounts(api)).toEqual(before);
+      expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+    } finally {
+      snapshotRawAnalysis(evidence, api, results);
+      if (api) {
+        evidence.cleanupStarted = true;
+        await assertAnalysisClosed(page, api);
+        evidence.cleanupCompleted = true;
+      }
     }
-    expect(api.analysisWire).toMatchObject({ posts: 2, callbacks: 2, payloadBytes: 512001, rejected: 0 });
-    expect(api.inputs).toHaveLength(2);
-    expect(storageCounts(api)).toEqual(before);
-    expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
-  } finally { await assertAnalysisClosed(page, api); }
+  } finally { emitRawAnalysis(evidence, testInfo); }
 });
 test('status admission proves the issued bearer separately from legacy decoded-owner request records', async ({ page }) => {
   const api = await mockBackend(page, { initialLanguage: 'en' });
