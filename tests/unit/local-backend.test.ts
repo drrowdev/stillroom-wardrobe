@@ -360,6 +360,318 @@ describe('B1 bounded Docker runtime metadata', () => {
   const inspected = `${id}|true|2026-09-11T12:00:00.123456789Z\n`;
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(Date.parse('2026-09-11T12:01:00Z')); });
   afterEach(() => { vi.useRealTimers(); });
+  const readerSteps = ['ps-call', 'ps-result', 'ps-shape', 'inspect-call', 'inspect-result', 'inspect-shape', 'runtime-validation'] as const;
+  const listedStates = ['created', 'running', 'paused', 'restarting', 'removing', 'exited', 'dead'] as const;
+  const readerLog = () => vi.spyOn(console, 'log').mockImplementation(() => {});
+  const expectReaderLine = (log: ReturnType<typeof readerLog>, step: typeof readerSteps[number],
+    commandCode: number | null, listedState: typeof listedStates[number] | null, index = 0) => {
+    const line: unknown = log.mock.calls[index]?.[0];
+    if (typeof line !== 'string') throw new Error('Expected reader observation line');
+    expect(log.mock.calls[index]).toHaveLength(1);
+    expect(line.startsWith('B1-RUNTIME-READ ')).toBe(true);
+    expect(line).not.toMatch(/[\r\n]/);
+    expect(Buffer.byteLength(line + '\n', 'utf8')).toBeLessThanOrEqual(512);
+    const record: unknown = JSON.parse(line.slice('B1-RUNTIME-READ '.length));
+    expect(record).toEqual({ schemaVersion: 1, step, commandCode, listedState });
+    expect(line).not.toContain(id);
+    expect(line).not.toContain('2026-');
+    expect(line).not.toContain('private');
+  };
+  const readerFailure = async (operation: () => Promise<unknown>): Promise<unknown> => {
+    try { await operation(); } catch (error) { return error; }
+    throw new Error('Expected the reader to fail');
+  };
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('bounds the complete closed reader protocol including prefix and final LF', () => {
+    let maximum = 0;
+    for (const step of readerSteps) for (const listedState of [null, ...listedStates]) {
+      for (const commandCode of [null, ...Array.from({ length: 256 }, (_, code) => code)]) {
+        const line = 'B1-RUNTIME-READ ' + JSON.stringify({ schemaVersion: 1, step, commandCode, listedState }) + '\n';
+        maximum = Math.max(maximum, Buffer.byteLength(line, 'utf8'));
+      }
+    }
+    expect(maximum).toBeGreaterThan(0);
+    expect(maximum).toBeLessThanOrEqual(512);
+  });
+  it('emits nothing for absent, running and created reads and never classifies successful results', async () => {
+    const log = readerLog(), descriptor = vi.fn(() => { throw new Error('private descriptor must not run'); });
+    for (const stdout of ['', `${id} running\n`, `${id} created\n`]) {
+      const run = vi.fn<typeof runCommand>()
+        .mockResolvedValueOnce(new Proxy({ code: 0, stdout, stderr: '' }, { getOwnPropertyDescriptor: descriptor }))
+        .mockResolvedValueOnce({ code: 0, stdout: inspected, stderr: '' });
+      const result = await readAnalysisRuntime(Date.now() + 6000, run);
+      expect(result).toEqual(stdout === '' ? null : { id, running: true, startedAt: '2026-09-11T12:00:00.123456789Z' });
+      expect(run).toHaveBeenCalledTimes(stdout === '' ? 1 : 2);
+    }
+    expect(descriptor).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+  });
+  it.each(['ps', 'inspect'] as const)('preserves every thrown %s value and resets the current command code', async (command) => {
+    const log = readerLog();
+    for (const sentinel of [new Error('private thrown error'), { private: 'private thrown object' }, null, undefined, false, 0]) {
+      log.mockClear();
+      const run = vi.fn<typeof runCommand>();
+      if (command === 'inspect') run.mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' });
+      run.mockRejectedValueOnce(sentinel);
+      expect(await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run))).toBe(sentinel);
+      expect(run).toHaveBeenCalledTimes(command === 'ps' ? 1 : 2);
+      expect(log).toHaveBeenCalledOnce();
+      expectReaderLine(log, command === 'ps' ? 'ps-call' : 'inspect-call', null, command === 'ps' ? null : 'running');
+    }
+  });
+  it.each(['reader-failed', 'reader-ambiguous'] as const)('rethrows the same verified harvested %s instance', async (reason) => {
+    const log = readerLog();
+    const run = vi.fn<typeof runCommand>().mockResolvedValue({ code: 0,
+      stdout: reason === 'reader-ambiguous' ? `${id} running\n${id} running\n` : 'private malformed ps', stderr: '' });
+    const sentinel = await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run));
+    expect(sentinel).toBeInstanceOf(LocalBackendError);
+    if (!(sentinel instanceof LocalBackendError)) throw new Error('Expected authentic reader error');
+    expect(Reflect.get(sentinel, 'reason')).toBe(reason);
+    expect(sentinel.message).toBe(`FAIL: analysis startup ${reason}.`);
+    expectReaderLine(log, 'ps-shape', 0, null);
+    log.mockClear(); run.mockReset().mockRejectedValueOnce(sentinel);
+    expect(await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run))).toBe(sentinel);
+    expect(run).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledOnce();
+    expectReaderLine(log, 'ps-call', null, null);
+  });
+  it.each(['ps', 'inspect'] as const)('classifies only closed current %s result codes after original refusal', async (command) => {
+    const log = readerLog();
+    for (const code of [0, 1, 2, 255, -1, 256, 1.5, NaN, Infinity, '0', null, undefined]) {
+      log.mockClear();
+      const result = { code, stdout: 1, stderr: 'private result canary' };
+      const run = vi.fn().mockResolvedValue(result);
+      if (command === 'inspect') run.mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' });
+      await expect(Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run])).rejects.toThrow('reader-failed');
+      expect(run).toHaveBeenCalledTimes(command === 'ps' ? 1 : 2);
+      expect(log).toHaveBeenCalledOnce();
+      const expected = typeof code === 'number' && Number.isInteger(code) && code >= 0 && code <= 255 ? code : null;
+      expectReaderLine(log, command === 'ps' ? 'ps-result' : 'inspect-result', expected, command === 'ps' ? null : 'running');
+    }
+  });
+  it.each(['ps', 'inspect'] as const)('retains malformed and oversized %s result refusals without leaking output', async (command) => {
+    const log = readerLog();
+    for (const result of [
+      { code: 0, stdout: '', stderr: null },
+      { code: 0, stdout: null, stderr: '' },
+      { code: 0, stdout: 'private'.repeat(586), stderr: '' },
+      { code: 0, stdout: 'private', stderr: 'x'.repeat(4090) },
+    ]) {
+      log.mockClear();
+      const run = vi.fn().mockResolvedValue(result);
+      if (command === 'inspect') run.mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' });
+      await expect(Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run])).rejects.toThrow('reader-failed');
+      expect(log).toHaveBeenCalledOnce();
+      expectReaderLine(log, command === 'ps' ? 'ps-result' : 'inspect-result', 0, command === 'ps' ? null : 'running');
+      expect(run).toHaveBeenCalledTimes(command === 'ps' ? 1 : 2);
+    }
+  });
+  it.each([' \n', 'short running\n', `${id} invented\n`, `${id} running\n${id} running\n`])(
+    'leaves listed state null when the whole ps shape is not valid %#', async (stdout) => {
+      const log = readerLog(), run = vi.fn<typeof runCommand>().mockResolvedValue({ code: 0, stdout, stderr: '' });
+      await expect(readAnalysisRuntime(Date.now() + 6000, run)).rejects.toThrow(
+        stdout === `${id} running\n${id} running\n` ? 'reader-ambiguous' : 'reader-failed');
+      expect(log).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledOnce();
+      expectReaderLine(log, 'ps-shape', 0, null);
+    });
+  it.each(listedStates)('reports only the validated ps sample %s, never an inferred inspect state', async (state) => {
+    const log = readerLog(), run = vi.fn<typeof runCommand>()
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} ${state}\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: 'private invalid inspect', stderr: '' });
+    await expect(readAnalysisRuntime(Date.now() + 6000, run)).rejects.toThrow('reader-failed');
+    expect(log).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledTimes(2);
+    expectReaderLine(log, 'inspect-shape', 0, state);
+  });
+  it.each([inspected.replace(id, 'b'.repeat(64)), inspected.replace('true', 'yes'), inspected + inspected])(
+    'retains inspect identity and shape refusal %#', async (stdout) => {
+      const log = readerLog(), run = vi.fn<typeof runCommand>()
+        .mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+        .mockResolvedValueOnce({ code: 0, stdout, stderr: '' });
+      await expect(readAnalysisRuntime(Date.now() + 6000, run)).rejects.toThrow('reader-failed');
+      expectReaderLine(log, 'inspect-shape', 0, 'running');
+      expect(log).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledTimes(2);
+    });
+  it.each(['invalid', '2026-02-30T12:00:00Z', '2026-09-11T12:00:00.1234567890Z', '1970-01-01T00:00:00Z'])(
+    'localizes strict StartedAt validation after valid ps and inspect shape: %s', async (startedAt) => {
+      const log = readerLog(), run = vi.fn<typeof runCommand>()
+        .mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+        .mockResolvedValueOnce({ code: 0, stdout: `${id}|true|${startedAt}\n`, stderr: '' });
+      await expect(readAnalysisRuntime(Date.now() + 6000, run)).rejects.toThrow('reader-failed');
+      expectReaderLine(log, 'runtime-validation', 0, 'running');
+      expect(log).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledTimes(2);
+    });
+  it('clears all reader state between invocations after an inspect failure', async () => {
+    const log = readerLog(), sentinel = new Error('private subsequent read');
+    const run = vi.fn<typeof runCommand>()
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} restarting\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 255, stdout: '', stderr: 'private inspect failure' })
+      .mockRejectedValueOnce(sentinel);
+    await expect(readAnalysisRuntime(Date.now() + 6000, run)).rejects.toThrow('reader-failed');
+    expectReaderLine(log, 'inspect-result', 255, 'restarting');
+    expect(await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run))).toBe(sentinel);
+    expectReaderLine(log, 'ps-call', null, null, 1);
+    expect(log).toHaveBeenCalledTimes(2); expect(run).toHaveBeenCalledTimes(3);
+  });
+  it.each(['ps-before', 'ps-after', 'inspect-before', 'inspect-after'] as const)(
+    'keeps the original deadline and null code at %s without inferring whether a command ran', async (position) => {
+      const log = readerLog(), now = Date.now(), deadline = now + 1000;
+      const run = vi.fn<typeof runCommand>().mockResolvedValue({ code: 0, stdout: inspected, stderr: '' });
+      if (position === 'inspect-before') run.mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' });
+      if (position === 'ps-before') vi.setSystemTime(deadline);
+      if (position === 'ps-after') run.mockImplementationOnce(async () => {
+        vi.setSystemTime(deadline); return { code: 0, stdout: `${id} running\n`, stderr: '' };
+      });
+      if (position === 'inspect-before') vi.spyOn(Date, 'now')
+        .mockReturnValueOnce(now).mockReturnValueOnce(now).mockReturnValue(deadline);
+      if (position === 'inspect-after') run.mockImplementationOnce(async () => ({ code: 0, stdout: `${id} running\n`, stderr: '' }))
+        .mockImplementationOnce(async () => { vi.setSystemTime(deadline); return { code: 0, stdout: inspected, stderr: '' }; });
+      await expect(readAnalysisRuntime(deadline, run)).rejects.toThrow('deadline');
+      expect(log).toHaveBeenCalledOnce();
+      expectReaderLine(log, position.startsWith('ps') ? 'ps-call' : 'inspect-call', null,
+        position.startsWith('ps') ? null : 'running');
+      expect(run).toHaveBeenCalledTimes(position === 'ps-before' ? 0 : position === 'inspect-after' ? 2 : 1);
+      for (const call of run.mock.calls) expect(call[2]).toEqual({ timeout: 1000, maxOutputBytes: 4096 });
+    });
+  it('never classifies a result before the original post-command deadline check', async () => {
+    const log = readerLog(), deadline = Date.now() + 1000;
+    const getter = vi.fn(() => { throw new Error('private getter'); });
+    const descriptor = vi.fn(() => { throw new Error('private descriptor'); });
+    const result = new Proxy(Object.defineProperty({}, 'code', { get: getter }), { getOwnPropertyDescriptor: descriptor });
+    const run = vi.fn(async () => { vi.setSystemTime(deadline); return result; });
+    await expect(Reflect.apply(readAnalysisRuntime, undefined, [deadline, run])).rejects.toThrow('deadline');
+    expect(getter).not.toHaveBeenCalled(); expect(descriptor).not.toHaveBeenCalled();
+    expectReaderLine(log, 'ps-call', null, null); expect(log).toHaveBeenCalledOnce();
+  });
+  it('defers own-data classification until the original compound refusal has thrown', async () => {
+    const log = readerLog(), order: string[] = [];
+    const sentinel = new Error('private original stdout');
+    const result = new Proxy({ code: 0, stdout: '', stderr: '' }, {
+      get(target, key, receiver) {
+        if (key === 'then') return undefined;
+        order.push(String(key));
+        if (key === 'stdout') throw sentinel;
+        return Reflect.get(target, key, receiver);
+      },
+      getOwnPropertyDescriptor(target, key) { order.push('descriptor:' + String(key)); return Reflect.getOwnPropertyDescriptor(target, key); },
+    });
+    const run = vi.fn<typeof runCommand>().mockResolvedValue(result);
+    expect(await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run))).toBe(sentinel);
+    expect(order).toEqual(['code', 'stdout', 'descriptor:code']);
+    expectReaderLine(log, 'ps-result', 0, null); expect(log).toHaveBeenCalledOnce();
+  });
+  it('does not invoke result accessors again or serialize private canaries', async () => {
+    const log = readerLog(), sentinel = new Error('private getter failure');
+    const getter = vi.fn(() => { throw sentinel; }), toJSON = vi.fn(() => { throw new Error('private JSON'); });
+    const result = Object.defineProperties({ stdout: 'private stdout', stderr: 'private stderr', toJSON }, {
+      code: { get: getter }, private: { get: () => { throw new Error('private extra'); } },
+    });
+    const run = vi.fn(async () => result);
+    expect(await readerFailure(() => Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run]))).toBe(sentinel);
+    expect(getter).toHaveBeenCalledOnce(); expect(toJSON).not.toHaveBeenCalled();
+    expectReaderLine(log, 'ps-result', null, null); expect(log).toHaveBeenCalledOnce();
+  });
+  it('preserves the primary thrown value when a diagnostic-only proxy trap fails', async () => {
+    const log = readerLog(), sentinel = new Error('private original result');
+    const descriptor = vi.fn(() => { throw new Error('private diagnostic trap'); });
+    const result = new Proxy({}, {
+      get(_target, key) { if (key === 'then') return undefined; throw sentinel; },
+      getOwnPropertyDescriptor: descriptor,
+    });
+    const run = vi.fn(async () => result);
+    expect(await readerFailure(() => Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run]))).toBe(sentinel);
+    expect(descriptor).toHaveBeenCalledOnce(); expect(log).not.toHaveBeenCalled();
+  });
+  it.each([null, undefined, 1, 'private primitive', {}])('keeps malformed result diagnostics closed %#', async (result) => {
+    const log = readerLog(), run = vi.fn(async () => result);
+    const error = await readerFailure(() => Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run]));
+    expect(error).toBeInstanceOf(Error);
+    expectReaderLine(log, 'ps-result', null, null);
+    expect(log).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledOnce();
+  });
+  it('does not promote an inherited result code into observed own-data evidence', async () => {
+    const log = readerLog(), result = Object.create({ code: 2 });
+    Object.assign(result, { stdout: 'private stdout', stderr: 'private stderr' });
+    const run = vi.fn(async () => result);
+    await expect(Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run])).rejects.toThrow('reader-failed');
+    expectReaderLine(log, 'ps-result', null, null); expect(log).toHaveBeenCalledOnce();
+  });
+  it.each(['serialize', 'output'] as const)('preserves original failure if diagnostic %s throws', async (failure) => {
+    const log = readerLog(), sentinel = new Error('private original command');
+    const run = vi.fn<typeof runCommand>().mockRejectedValue(sentinel);
+    const stringify = failure === 'serialize'
+      ? vi.spyOn(JSON, 'stringify').mockImplementation(() => { throw new Error('private serialization'); }) : undefined;
+    if (failure === 'output') log.mockImplementation(() => { throw new Error('private sink'); });
+    let captured: unknown;
+    try { captured = await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run)); }
+    finally { stringify?.mockRestore(); }
+    expect(captured).toBe(sentinel);
+    expect(run).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledTimes(failure === 'serialize' ? 0 : 1);
+  });
+  it('keeps concurrent reader observations invocation-local', async () => {
+    const log = readerLog(), sentinel = new Error('private delayed ps');
+    let rejectPs: (error: unknown) => void = () => { throw new Error('Missing deferred read'); };
+    const slowRun = vi.fn<typeof runCommand>(() => new Promise((_resolve, reject) => { rejectPs = reject; }));
+    const slow = readerFailure(() => readAnalysisRuntime(Date.now() + 6000, slowRun));
+    const fastRun = vi.fn<typeof runCommand>()
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} paused\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 2, stdout: '', stderr: 'private fast inspect' });
+    await expect(readAnalysisRuntime(Date.now() + 6000, fastRun)).rejects.toThrow('reader-failed');
+    rejectPs(sentinel); expect(await slow).toBe(sentinel);
+    expectReaderLine(log, 'inspect-result', 2, 'paused');
+    expectReaderLine(log, 'ps-call', null, null, 1);
+    expect(log).toHaveBeenCalledTimes(2);
+  });
+  it('emits the real reader line before the original owned-child health override', async () => {
+    const log = readerLog(), now = Date.now();
+    const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: vi.fn() });
+    const owned: ReturnType<typeof ownAnalysisProcess> = Reflect.apply(ownAnalysisProcess, undefined, [child]);
+    const health = vi.spyOn(owned, 'assertRunning'), ready = vi.spyOn(owned, 'ready'), fetcher = vi.fn<typeof fetch>();
+    const run = vi.fn<typeof runCommand>().mockImplementationOnce(async () => {
+      expect(health).toHaveBeenCalledOnce();
+      child.emit('close', 1);
+      return { code: 2, stdout: '', stderr: 'private command failure after child exit' };
+    });
+    const readRuntime = vi.fn((deadline: number) => readAnalysisRuntime(deadline, run));
+    try {
+      await expect(waitForAnalysisHandler(owned, { deadline: now + 60_000, spawnedAt: now, previous: null, readRuntime }, fetcher))
+        .rejects.toThrow('child-exit');
+      expectReaderLine(log, 'ps-result', 2, null);
+      expect(log.mock.calls[1]?.[0]).toBe('B1-READINESS ' + JSON.stringify({
+        replacement: false, running: false, fresh: false, stable: false, elapsedMs: 0,
+        reason: 'child-exit', lastHttp: null, transportFailure: false,
+      }));
+      expect(log).toHaveBeenCalledTimes(2); expect(run).toHaveBeenCalledOnce(); expect(readRuntime).toHaveBeenCalledOnce();
+      expect(health).toHaveBeenCalledTimes(2);
+      expect(fetcher).not.toHaveBeenCalled(); expect(ready).not.toHaveBeenCalled(); expect(child.kill).not.toHaveBeenCalled();
+    } finally { await owned.stop(); }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('models a FICTIONAL old running sample then inspect failure, not the recovered cycle9 cause', async () => {
+    const log = readerLog(), now = Date.now();
+    const previous = { id, running: true, startedAt: '2026-09-11T12:00:00.123456789Z' };
+    const owned = { stop: vi.fn(), ready: vi.fn(), assertRunning: vi.fn() }, fetcher = vi.fn<typeof fetch>();
+    const run = vi.fn<typeof runCommand>()
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: inspected, stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+      .mockRejectedValueOnce(new Error('private fictional inspect'));
+    const readRuntime = vi.fn((deadline: number) => readAnalysisRuntime(deadline, run));
+    const waiting = waitForAnalysisHandler(owned, { deadline: now + 60_000, spawnedAt: now, previous, readRuntime }, fetcher);
+    const checked = expect(waiting).rejects.toThrow('reader-failed');
+    await vi.advanceTimersByTimeAsync(250); await checked;
+    expectReaderLine(log, 'inspect-call', null, 'running');
+    expect(log.mock.calls[1]?.[0]).toBe('B1-READINESS ' + JSON.stringify({
+      replacement: false, running: true, fresh: false, stable: false, elapsedMs: 250,
+      reason: 'reader-failed', lastHttp: null, transportFailure: false,
+    }));
+    expect(log).toHaveBeenCalledTimes(2); expect(readRuntime).toHaveBeenCalledTimes(2); expect(run).toHaveBeenCalledTimes(4);
+    expect(run.mock.calls.map((call) => call[1][0])).toEqual(['ps', 'inspect', 'ps', 'inspect']);
+    for (const call of run.mock.calls) expect(call[2]).toEqual({ timeout: 5000, maxOutputBytes: 4096 });
+    expect(fetcher).not.toHaveBeenCalled(); expect(owned.ready).not.toHaveBeenCalled(); expect(owned.stop).not.toHaveBeenCalled();
+  });
+
   it('uses only the exact named ps and validated-ID inspect with the original remaining budget', async () => {
     const deadline = Date.now() + 6000;
     const run = vi.fn<typeof runCommand>().mockImplementationOnce(async () => {

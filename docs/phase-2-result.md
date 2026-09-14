@@ -5462,3 +5462,97 @@ Actions/artifacts/images/hosted/private work,new agent/native allocation,Stage2,
 merge or deployment. Eight cycles consumed; no ninth authorized. Original Save
 STOP,separate browser400 uncertainty,full security/later backend/real types,
 native-image/HBA and human/device/recovery/export/cutover holds persist.
+
+## I08 T32 bounded runtime-reader localization - 14 September 2026
+
+[Cycle9 terminal5663394197](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5663394197)
+supersedes the partial running status in
+[support5663325972](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5663325972).
+CI34838272733attempt1 failed11:36:51UTC for source
+2c5e143a8c57abb65c101aee18db687852be3ea3/tree
+4fe6246b1f20439022a2f37735e6f4a9d1ee372f. All three actual job checkouts were
+a30cb5572115d1a416f288a201cc3464b2cdb90c, ordered main221/head2c5 parents.
+App passed2131units/25files and621browser checks with4skips, not passes.
+DB startup/rehearsal/reset, full ordinary I08 integration for two owners and
+security for two owners plus anonymous passed. Apple passed4generated-JPEG and
+3orientation/composition checks. TUS no longer blocked this run; no actual TUS
+status/body or cycle8 literal cause was recovered.
+
+B1 baseline integration/security children then passed before served-entrypoint
+startup failed. Its readiness record was replacement=false,running=true,
+fresh=false,stable=false,elapsedMs=628,reason=reader-failed,lastHttp=null,
+transportFailure=false. Running=true came through waitForAnalysisHandler after
+at least one successful post-spawn metadata observation, not the baseline-reader
+failure record that hardcodes false. The last successful fields need not describe
+the failing read. No poll count, Docker code, timestamp, race or cause is inferred.
+Authoritative served/catalog work and actual type generation/upload/parity remain
+unproven/skipped as applicable; this is not the final four-RPC type-only exception.
+
+The coordinator accepted the exact4935-byte native structural projection by
+verified identical content, not actual runtime-image/HBA provenance. Current
+eighteen static surfaces were accepted by eighteen verified content reuses
+(seventeen via7fa and one via1a6), not fresh views. This writer read only public
+receipt text, not logs/archives/images. Those2c5 results do not accept this
+candidate or a future head; visual/human/device limitations remain.
+
+[Proposal5663438867](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5663438867),
+[disposition5663537543](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5663537543)
+and [edit release5663598514](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5663598514)
+record actual retained critic c372, Anthropic claude-opus-5/high: turn35 AMEND
+(five events11:51:23.048-11:55:37.965UTC) and turn36 ACCEPT with C1/C2
+(two events12:00:08.625/12:01:55.319UTC). Coordinator adopted M1-M9/N1-N6,
+deferred classification until the primary failure and retained both deadline
+observations. The critic withdrew exclusion of the reader from a missing line
+and inferred iteration counts. Conditional source interpretation is not diagnosis.
+
+Fresh coordinator-observed OWN evidence records five gpt-6-astra/medium events
+11:51:13.993/11:51:30.522/11:52:22.092/11:53:09.026/11:53:14.197UTC,
+canonicala816 with matched app/CLI/workspace/branch/source/time. No extra fields
+were borrowed from writer output. Local telemetry is not tamper-proof/native
+platform attestation. Writer prepatch source seal12:08:40.0782915UTC matched
+217HEAD/index/working canonical entries,three W/C/B baselines,214outside files,
+all sixteen phase prefixes and217regular files/36root-inclusive directories.
+Independent Git+REST guards12:08:23.5013449UTC matched2c5/main221/draft25;
+the full hash-verified matching release was reread immediately before patching.
+
+T32 changes only readAnalysisRuntime's invocation-local failure observation,
+focused additions in the existing bounded-Docker unit describe and this append.
+The B1-RUNTIME-READ record has exactly schemaVersion,step,commandCode,listedState;
+seven fixed steps and at most512UTF8bytes including prefix/LF. No success/absence
+record, global state or retry. Current result/code reset before each command;
+only a result reference is saved after the original post-command deadline check.
+Own-data code classification occurs only after the original failure is caught.
+Accessors are not reinvoked; diagnostic proxy/serialization/output failures cannot
+replace the same thrown value. No raw/private output, IDs, timestamps or hashes
+enter the diagnostic record.
+
+Step means section entered, not a precise failed statement. Pre- and post-command
+deadline errors may both report a call step/null code; null does not prove the
+command was unissued. Code2 may be natural or synthesized for spawn/timeout/
+overflow/signal-null, not a cause. Listed state is only the validated ps sample.
+After valid ps/inspect shapes with ordinary built-ins, runtime-validation points
+to strict StartedAt lexical/fraction/positive-epoch/calendar checks, not an
+observed cycle9 timestamp defect. Validators and all surrounding functions stay
+unchanged, including command arguments,4096bytes,5s-or-remaining/shared60s bounds,
+replacement/freshness/healthy-child/two-probe/identical-metadata and stop precedence.
+
+Reader-failed remains overloaded outside the reader: baseline/second runtime
+validation,spawn inputs,time comparisons,freshness refusal and unexpected errors
+are a non-exhaustive source map. A delivered reader line may precede an outer
+child-health or stop error. Missing output does not exclude the reader because
+diagnostic delivery can fail. No fallback, extra request or expanded log follows.
+New mock definitions pin same-error identity, deadlines, closed protocol/maximum,
+private/proxy/output noninterference and the real reader with a fake owned child
+exiting during the read. A separate FICTIONAL old-running then inspect-failure
+sequence demonstrates stale readiness fields, not the recovered628ms cause.
+
+Full371432previous phase bytes plus fifteen older prefixes remain immutable.
+All214other files, including declarations,T31transport/unit,T30observer,
+SQL/types,AI rehearsal,product/browser/workflow/dependencies, remain frozen.
+New definitions are UNEXECUTED locally. Manual source/textual-equivalence/Git/
+hash/whitespace inspection only; this UNSTAGED candidate awaits source review,
+not runtime/privacy acceptance or guaranteed unblocking. No staging/object write/
+commit/push,local runtime/probe/install,Actions/log/artifact/image/hosted/private
+work,new agent/native allocation,Stage2,merge or deployment. Nine cycles consumed;
+no tenth/rerun. Original SaveSTOP,browser400 uncertainty,native-image/HBA,later
+backend/real types,human/device/recovery/export/final-review/cutover holds persist.

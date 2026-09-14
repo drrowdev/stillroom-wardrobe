@@ -653,27 +653,50 @@ function validateRuntime(value) {
 }
 
 export async function readAnalysisRuntime(deadline, run = runCommand) {
+  const observation = { schemaVersion: 1, step: 'ps-call', commandCode: null, listedState: null };
+  let currentResult = null;
   const call = async (args) => {
+    currentResult = null; observation.commandCode = null;
     const result = await run('docker', args, { timeout: Math.min(startupRemaining(deadline), 5000), maxOutputBytes: 4096 });
     startupRemaining(deadline);
+    currentResult = result;
+    observation.step = observation.step === 'ps-call' ? 'ps-result' : 'inspect-result';
     if (result.code !== 0 || typeof result.stdout !== 'string' || typeof result.stderr !== 'string'
       || Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) > 4096) {
       throw new AnalysisStartupError('reader-failed');
     }
     return result.stdout;
   };
-  const listed = await call(['ps', '-a', '--no-trunc', '--filter',
-    'name=^/supabase_edge_runtime_stillroom-wardrobe$', '--format', '{{.ID}} {{.State}}']);
-  if (listed === '') return null;
-  if (listed.trim().split('\n').length > 1) throw new AnalysisStartupError('reader-ambiguous');
-  const match = /^([0-9a-f]{64}) (created|running|paused|restarting|removing|exited|dead)\r?\n?$/.exec(listed);
-  if (!match) throw new AnalysisStartupError('reader-failed');
-  const inspected = await call(['inspect', '--format', '{{.Id}}|{{.State.Running}}|{{.State.StartedAt}}', match[1]]);
-  const fields = /^([0-9a-f]{64})\|(true|false)\|([^\r\n]+)\r?\n?$/.exec(inspected);
-  if (!fields || fields[1] !== match[1]) throw new AnalysisStartupError('reader-failed');
-  const startedAt = match[2] === 'created' && fields[2] === 'false' && fields[3] === '0001-01-01T00:00:00Z'
-    ? null : fields[3];
-  return validateRuntime({ id: fields[1], running: fields[2] === 'true', startedAt });
+  try {
+    const listed = await call(['ps', '-a', '--no-trunc', '--filter',
+      'name=^/supabase_edge_runtime_stillroom-wardrobe$', '--format', '{{.ID}} {{.State}}']);
+    observation.step = 'ps-shape';
+    if (listed === '') return null;
+    if (listed.trim().split('\n').length > 1) throw new AnalysisStartupError('reader-ambiguous');
+    const match = /^([0-9a-f]{64}) (created|running|paused|restarting|removing|exited|dead)\r?\n?$/.exec(listed);
+    if (!match) throw new AnalysisStartupError('reader-failed');
+    observation.listedState = match[2];
+    observation.step = 'inspect-call';
+    const inspected = await call(['inspect', '--format', '{{.Id}}|{{.State.Running}}|{{.State.StartedAt}}', match[1]]);
+    observation.step = 'inspect-shape';
+    const fields = /^([0-9a-f]{64})\|(true|false)\|([^\r\n]+)\r?\n?$/.exec(inspected);
+    if (!fields || fields[1] !== match[1]) throw new AnalysisStartupError('reader-failed');
+    const startedAt = match[2] === 'created' && fields[2] === 'false' && fields[3] === '0001-01-01T00:00:00Z'
+      ? null : fields[3];
+    observation.step = 'runtime-validation';
+    return validateRuntime({ id: fields[1], running: fields[2] === 'true', startedAt });
+  } catch (error) {
+    try {
+      // Classify only after the original failure, without invoking result accessors.
+      const descriptor = currentResult !== null && typeof currentResult === 'object'
+        ? Object.getOwnPropertyDescriptor(currentResult, 'code') : undefined;
+      if (descriptor && Object.hasOwn(descriptor, 'value') && Number.isInteger(descriptor.value)
+        && descriptor.value >= 0 && descriptor.value <= 255) observation.commandCode = descriptor.value;
+      const line = 'B1-RUNTIME-READ ' + JSON.stringify(observation);
+      if (Buffer.byteLength(line + '\n', 'utf8') <= 512 && !/[\r\n]/.test(line)) console.log(line);
+    } catch { /* Diagnostic failure cannot replace the original thrown value. */ }
+    throw error;
+  }
 }
 
 export async function waitForAnalysisHandler(owned, { deadline, spawnedAt, previous, readRuntime = readAnalysisRuntime }, transport = fetch) {
