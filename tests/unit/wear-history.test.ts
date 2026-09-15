@@ -66,13 +66,31 @@ describe('bounded owner wear history', () => {
     }
     expect(urls[1]!.searchParams.get('id')).toBe(`gt.${rows[499]!.id}`);
   });
-  it('refuses repeated cursors, errors and malformed responses', async () => {
+  it('refuses repeated cursors and malformed responses', async () => {
     const rows = Array.from({ length: 500 }, (_, n) => link(n));
     let calls = 0;
     await expect(loadWearHistory(client(async () => { calls++; return new Response(JSON.stringify(rows)); }), scope(), items)).rejects.toThrow('wardrobe.historyUnavailable');
     expect(calls).toBe(2);
     await expect(loadWearHistory(client(async () => new Response('{}')), scope(), items)).rejects.toThrow('wardrobe.historyUnavailable');
-    await expect(loadWearHistory(client(async () => new Response('{}', { status: 503 })), scope(), items)).rejects.toThrow('wardrobe.historyUnavailable');
+  });
+  it('exhausts four persistent 503 attempts after the default seven-second backoff', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const started = Date.now();
+    const pending = loadWearHistory(client(async () => { calls++; return new Response('{}', { status: 503 }); }), scope(), items);
+    const rejected = expect(pending).rejects.toEqual(new AppError('wardrobe.historyUnavailable'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(1);
+    for (const [index, delay] of [1000, 2000, 4000].entries()) {
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(calls).toBe(index + 1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls).toBe(index + 2);
+    }
+    expect(Date.now() - started).toBe(7000);
+    expect(calls).toBe(4);
+    await rejected;
+    expect(vi.getTimerCount()).toBe(0);
   });
   it('refuses a changed owner epoch rather than publishing a stale successful snapshot', async () => {
     const lifetime = scope();

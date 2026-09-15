@@ -148,7 +148,7 @@ test('history pending/failure, switch-away and staged refresh retain a valid vie
   let release: (() => void) | undefined;
   const held = new Promise<void>(resolve => { release = resolve; });
   let entered = false;
-  await page.route('**/rest/v1/wear_event_items?*', async route => { entered = true; await held; await route.fulfill({ status: 503, json: {} }); });
+  await page.route('**/rest/v1/wear_event_items?*', async route => { entered = true; await held; await route.fulfill({ status: 503, headers: { 'Retry-After': '0' }, json: {} }); });
   await page.locator('#wardrobe-sort').selectOption('leastWorn');
   await expect.poll(() => entered).toBe(true);
   await expect(page.getByText(messages['wardrobe.historyLoading'].en)).toBeVisible();
@@ -157,9 +157,11 @@ test('history pending/failure, switch-away and staged refresh retain a valid vie
   release!();
   await expect(page.locator('#wardrobe-sort')).toHaveValue('price');
   await page.unroute('**/rest/v1/wear_event_items?*');
-  await page.route('**/rest/v1/wear_event_items?*', route => route.fulfill({ status: 503, json: {} }));
+  let selectionAttempts = 0;
+  await page.route('**/rest/v1/wear_event_items?*', route => { selectionAttempts++; return route.fulfill({ status: 503, headers: { 'Retry-After': '0' }, json: {} }); });
   await page.locator('#wardrobe-sort').selectOption('leastWorn');
   await expect(page.getByText(messages['wardrobe.historyUnavailable'].en)).toBeVisible();
+  expect(selectionAttempts).toBe(4);
   await expect(page.locator('#wardrobe-sort')).toHaveValue('price');
   await expect(page.locator('.item-card')).toHaveCount(2);
   await page.unroute('**/rest/v1/wear_event_items?*');
@@ -168,9 +170,11 @@ test('history pending/failure, switch-away and staged refresh retain a valid vie
   await expect(page.locator('.item-caption h2')).toHaveText(['Beta', 'Alpha']);
   b.item.deleted_at = '2026-09-02T00:00:00Z';
   api.seedSavedItem('a', 'New saved item');
-  await page.route('**/rest/v1/wear_event_items?*', route => route.fulfill({ status: 503, json: {} }));
+  let refreshAttempts = 0;
+  await page.route('**/rest/v1/wear_event_items?*', route => { refreshAttempts++; return route.fulfill({ status: 503, headers: { 'Retry-After': '0' }, json: {} }); });
   await button(page, 'wardrobe.refresh').click();
   await expect(page.getByText(messages['wardrobe.historyUnavailable'].en)).toBeVisible();
+  expect(refreshAttempts).toBe(4);
   await expect(page.locator('.item-caption h2')).toHaveText(['Alpha']);
   await page.unroute('**/rest/v1/wear_event_items?*');
   await page.getByRole('alert').getByRole('button').click();
