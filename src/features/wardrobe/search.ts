@@ -51,7 +51,7 @@ export function sortItems(items: readonly WardrobeItem[], sort: WardrobeSort, la
     for (const item of items) if (item.purchasePrice !== null) amounts.set(item.id, cents(item.purchasePrice));
   }
   return [...items].sort((a, b) => {
-    let order = 0;
+    let order: number;
     if (sort === 'name') order = collator.compare(a.title.normalize('NFC'), b.title.normalize('NFC'));
     else if (sort === 'price') {
       order = a.purchasePrice === null ? b.purchasePrice === null ? 0 : 1 : b.purchasePrice === null ? -1
