@@ -5759,3 +5759,71 @@ R03/R23 integration evidence and preserves R28 explicit-Save boundaries.
 Fourteen cycles consumed; no15/rerun, commit/push, merge or deployment authorized.
 Retained-delta review, future-head validation and all human/device/account
 deletion/recovery/export/hosted/paid/cutover gates remain.
+
+### 15 September 2026 - I09 wardrobe browse source candidate, execution pending
+
+This is the source-only I09/R05/R21/R27, S04 packet under the
+[original plan](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5679336263),
+[controlling A1](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5679486715)
+and [approval](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5679576705).
+The [own workspace binding](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5679615220)
+and [coordinator-observed model attestation/source release](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5679693839)
+identify persistent local writer b072a5ab-1da8-4ee6-9c13-e86e7e618c41,
+GPT-6 Astra, branch `drrowdev-glowing-carnival`, starting at
+`986d7cb7e5e5f4649c9af5a988f24759943948b9` /
+tree `03b0e6f16c3fa3795cea542e0cf6003e2e25a1d4`.
+[Accepted I08 exact-main evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5678596450)
+is prerequisite history, not this candidate's validation or a reopened PR 25.
+
+The candidate adds title/brand/tag and current-language taxonomy search, seven
+compound facets, five deterministic sorts, invariant currency price groups and
+one trailing genuine-null-price group. A recorded zero remains a real price.
+The seven required browse fields retain valid legacy values and current
+empty/null defaults while rejecting invalid projections. Eligibility is saved,
+nontrashed, ready-image metadata, never suggestion eligibility or Blob success.
+Wear sorts use the existing composite owner/event INNER relation, owner-scoped
+500-row advancing keysets and distinct stored local dates (R08 semantics only).
+All ready-image metadata may load; thumbnails remain window/viewport bounded.
+History deliberately avoids a 500-ID URL and is a paginated read, not a
+transactionally frozen cross-page snapshot.
+There is no schema/view/RPC/grant/generated-type change or inference trigger.
+
+Owner-memory state preserves browse choices across detail navigation and clears
+on owner invalidation. History is on demand with a 30-second overall bound,
+cancellation/generation guards, complete snapshots and explicit pending/error
+states; failed refreshes retain a visibly stale valid view while pruning known
+absences. Forty-card windows and near-viewport thumbnail admission reuse the
+unchanged private-image queue/coalescing/global-four/epoch behavior. Per-card
+unmount cancels observation/subscription, not an individual shared transport.
+EN/FI/SV use only A1's seven new keys. The grid declares two columns below 600,
+three at 600-899, four at 900 and five at 1250, with the approved sizing bounds.
+
+New unit/browser test source covers projections, search/facets/sorts, 500/501
+keysets, wear-date aggregation, errors, timeout/cancellation, staged/late/owner
+responses, memory reset, viewport admission, keyboard/a11y and layout boundaries.
+The 500-own plus 500-foreign browser fixtures are mocked evidence, not live
+500-row performance or RLS proof. The new small ordinary A/B/anonymous local-CI
+query test uses checked explicit Save fixtures, actual metadata/embedded-history
+reads, peer/anonymous denial and owner-only cleanup. No administrator access
+assertion, hosted endpoint or private input is introduced.
+
+**NOT RUN:** Node/npm, lint, typecheck, translation checks, unit/browser/a11y,
+integration/security, build, scans, rehearsals and generated-type parity.
+Local execution is prohibited; later CI needs separate publication/execution
+release. This entry is not a passing runtime result, engineering acceptance,
+performance measurement, commit, merge, deployment or finished MVP claim.
+All prior phase text, diagnostics, assertions and 22 capture definitions remain.
+The [C1 read-boundary incident](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5680008883)
+records three read-range overshoots and no masked-content recovery; preserved
+file identities do not erase that incident or establish semantic inspection.
+Exactly two new bounded CI captures are declared: EN 1280x900 wardrobe grid and
+FI 320x1200 filters, each at most 1 MiB, with one-day retention. Neither has been
+generated or viewed here. Coordinator exact-head/run/hash review and actual
+user/operator review of new/changed pixels remain required before merge.
+These two representative captures do not cover every state, the three-column
+band, Swedish wording, pending/errors or real devices; DOM checks are distinct
+from visual acceptance. No physical-phone LCP or native-language/a11y acceptance
+is claimed.
+Independent review, exact-head CI/no-new-flakiness, normal-owner evidence and
+all existing human/device/recovery/export/hosted/paid/cutover gates remain;
+Phase 0 is engineering complete with acceptance open.
