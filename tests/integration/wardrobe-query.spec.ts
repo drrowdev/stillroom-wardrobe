@@ -14,6 +14,14 @@ import { ItemLifecycleClient } from '../../src/data/item-lifecycle';
 import { deletionIntent } from '../../src/domain/item-lifecycle';
 import { deleteWardrobeObject, type DeleteRequest, type ObjectDeletion } from '../../src/data/storage-delete';
 
+// SQL accepts a null outfit; generated RPC types omit argument nullability.
+type WearEventArgs = Omit<Database['public']['Functions']['save_wear_event']['Args'], 'p_outfit_id'> & {
+  p_outfit_id: string | null;
+};
+type WearEventClient = AppClient & {
+  rpc(name: 'save_wear_event', args: WearEventArgs): ReturnType<AppClient['rpc']>;
+};
+
 const failure = new Error('Normal-owner wardrobe query gate failed.');
 function check(value: unknown): asserts value { if (!value) throw failure; }
 type Stage = 'setup.configuration' | 'setup.photo' | 'setup.client'
@@ -146,7 +154,7 @@ test('real ordinary A/B metadata, composite history read and denial with isolate
     const event = async (item: string, day: string, state: 'worn' | 'planned', deleted = false) => {
       progress.stage = 'fixture.history';
       const id = randomUUID(); value.events.push(id);
-      check(!(await client.rpc('save_wear_event', { p_id: id, p_local_date: day, p_timezone: 'Europe/Helsinki', p_state: state,
+      check(!(await (client as WearEventClient).rpc('save_wear_event', { p_id: id, p_local_date: day, p_timezone: 'Europe/Helsinki', p_state: state,
         p_label: 'Synthetic query history', p_outfit_id: null, p_item_ids: [item] })).error);
       if (deleted) {
         progress.stage = 'fixture.deleted-history';
