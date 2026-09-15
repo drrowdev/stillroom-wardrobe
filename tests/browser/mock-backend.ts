@@ -463,6 +463,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     [owners.b]: { owner_id: owners.b, display_name: 'Robin', ui_language: 'sv', timezone: 'Europe/Helsinki', currency: 'EUR', version: 1 },
   };
   const items: JsonRow[] = [];
+  const wearEvents: JsonRow[] = [];
+  const wearLinks: JsonRow[] = [];
   const preferences: Record<string, JsonRow> = Object.fromEntries(Object.values(owners).map((owner) => [owner, {
     owner_id: owner, version: 1, preferred_colours: [], style_tags: [], excluded_categories: [],
     minimum_upper_coverage: 0, minimum_lower_coverage: 0, cold_sensitivity: 0, repeat_gap_days: 2,
@@ -779,6 +781,24 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (options.lifecycleLoss === 'begin' && !lifecycleReplyLost) { lifecycleReplyLost = true; await route.abort('failed'); return; }
       await json([{ ...deletionClaims.get(id), version: item.version, image_manifest_sha256: manifest(id, owner!) }]); return;
     }
+    if (url.pathname === '/rest/v1/wear_event_items' && method === 'GET') {
+      const expected = 'id,owner_id,item_id,event_id,event:wear_events!wear_event_items_owner_id_event_id_fkey!inner(id,owner_id,local_date,state,deleted_at)';
+      if (!owner || url.searchParams.get('select') !== expected || url.searchParams.get('owner_id') !== `eq.${owner}`
+        || url.searchParams.get('event.owner_id') !== `eq.${owner}` || url.searchParams.get('event.state') !== 'eq.worn'
+        || url.searchParams.get('event.deleted_at') !== 'is.null' || url.searchParams.get('item_id') !== 'not.is.null'
+        || url.searchParams.get('order') !== 'id.asc' || url.searchParams.get('limit') !== '500') {
+        await json({ code: '42501' }, 403); return;
+      }
+      const cursor = url.searchParams.get('id');
+      if (cursor && (!cursor.startsWith('gt.') || !isUuid(cursor.slice(3)))) { await json({ code: '22023' }, 400); return; }
+      const result = wearLinks.filter(row => row.owner_id === owner && row.item_id !== null && (!cursor || String(row.id) > cursor.slice(3)))
+        .flatMap(row => {
+          const event = wearEvents.find(event => event.id === row.event_id && event.owner_id === owner && event.state === 'worn' && event.deleted_at === null);
+          return event ? [{ id: row.id, owner_id: row.owner_id, item_id: row.item_id, event_id: row.event_id,
+            event: { id: event.id, owner_id: event.owner_id, local_date: event.local_date, state: event.state, deleted_at: event.deleted_at } }] : [];
+        }).sort((a, b) => String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0).slice(0, 500);
+      await json(result); return;
+    }
     const table = url.pathname === '/rest/v1/items' ? items : url.pathname === '/rest/v1/item_images' ? images : null;
     if (table) {
       if (method === 'POST') {
@@ -801,7 +821,13 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const own = table.filter((row) => row.owner_id === owner);
       const id = url.searchParams.get('id');
       const state = url.searchParams.get('state');
+      const keyset = table === items && method === 'GET' ? url.searchParams.get('or') : null;
+      const match = keyset ? /^\(created_at\.lt\.([^,]+),and\(created_at\.eq\.([^,]+),id\.lt\.([^)]+)\)\)$/.exec(keyset) : null;
+      if (keyset && (!match || match[1] !== match[2] || !isUuid(match[3]) || !Number.isFinite(Date.parse(match[1]!)))) {
+        await json({ code: '22023' }, 400); return;
+      }
       const rows = own.filter((row) => (!id || (id.startsWith('gt.') ? String(row.id) > id.slice(3) : `eq.${row.id}` === id)) && (!state || `eq.${row.state}` === state)
+        && (!match || String(row.created_at) < match[1]! || row.created_at === match[1] && String(row.id) < match[3]!)
         && (!url.searchParams.has('owner_id') || url.searchParams.get('owner_id') === `eq.${row.owner_id}`)
         && (!url.searchParams.has('item_id') || url.searchParams.get('item_id') === `eq.${row.item_id}`)
         && (!url.searchParams.has('deleted_at') || (url.searchParams.get('deleted_at') === 'not.is.null' ? row.deleted_at !== null : row.deleted_at === null))
@@ -912,7 +938,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { profiles, preferences, items, images, files, requests, fixture, deletionClaims, uploadWire: receiver.state, wireDiagnostic,
+  return { profiles, preferences, items, images, wearEvents, wearLinks, files, requests, fixture, deletionClaims, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),
