@@ -5669,3 +5669,32 @@ other19 Stage2 files and200 outside files, capture suffix/22bounds and four
 withheld-line qualifications remain preserved. Eleven cycles consumed; no12 or
 rerun is released. Source review and all runtime/visual/type/security, normal
 merge/exact-main and previously recorded human/hosted/cutover gates remain.
+
+#### 15 September 2026 - cycle12 compiler correction, execution pending
+
+[Cycle12 results](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5674670059)
+record lint PASS on95fae9c/treeca827, but the first reached Stage2 typecheck
+failed with eight diagnostics. Later App checks and22visual captures were skipped.
+Real Supabase integration (including3live tests), security, preservation,
+rehearsals, generated-type parity and Apple7 passed. Coordinator
+[artifact/catalog verification](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5674838721)
+does not require a type/source change or establish future-head acceptance.
+
+The [reviewed five-path amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5674799145)
+and [current GPT-6 Astra edit receipt with corrected line74 preservation](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5674869284)
+control this unstaged correction: registered UI error keys, a mock row string
+guard, one captured/narrowed header value and a guarded history snapshot.
+Raw denial sentinel input and all uncertainty arguments remain, including
+work.changed at74. Unit expectations distinguish exact denial from all seven
+unknown replies and pin foreign-epoch/read and changed-owner/begin failures.
+Each response case retains one DELETE/no FINISH; owner checks retain their
+existing request restrictions. No new visible-copy change is claimed.
+
+Three problematic expressions existed in original Stage2; header extraction
+is newer, but the prior inline form's typecheck was never executed, so compiler
+regression attribution is not settled. These corrections are **UNEXECUTED**;
+passing cycle12 live tests did not recover the old exceptions or exercise every
+failure diagnostic. All20 phase prefixes, other18 Stage2+200outside files,
+exact types,22capture bounds and originalfour redactions plus unread217 remain.
+Twelve cycles consumed; no13/rerun. Scoped-delta review and remaining App/visual,
+final-review/normal-merge/exact-main/human/hosted/paid/cutover gates remain.

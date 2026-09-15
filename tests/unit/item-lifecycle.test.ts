@@ -143,15 +143,25 @@ describe('first production singular deletion adapter', () => {
     expect(await h.api.delete(intent, true, () => {})).toEqual({ removed: 0, missing: 2 });
     expect(h.requests.at(-1)!.url.pathname.endsWith('/finish_item_deletion')).toBe(true);
   });
+  it('stops on exact Storage denial with a definite registered error and no automatic resend', async () => {
+    const h = harness({ deleteReply: () => json(denied, 400) });
+    await expect(h.api.delete(intent, true, () => {})).rejects.toMatchObject({
+      stage: 'bytes', uncertain: false, messageKey: 'error.unavailable',
+    });
+    expect(h.requests.filter(request => request.method === 'DELETE')).toHaveLength(1);
+    expect(h.requests.some(request => request.url.pathname.endsWith('/finish_item_deletion'))).toBe(false);
+  });
   it.each([
-    () => json(denied, 400), () => json({ ...denied, extra: true }, 400), () => json([], 200),
+    () => json({ ...denied, extra: true }, 400), () => json([], 200),
     () => json({ message: 'Successfully deleted', extra: true }), () => json({ message: 'Successfully deleted' }, 500),
     () => new Response('{broken', { headers: { 'content-type': 'application/json' } }),
     () => json({ message: 'x'.repeat(4096) }),
     () => new Response('unread', { headers: { 'content-type': 'text/plain' } }),
-  ])('stops on denial, malformed or unrecognized response without automatic resend', async deleteReply => {
+  ])('keeps malformed or unrecognized responses unconfirmed without automatic resend', async deleteReply => {
     const h = harness({ deleteReply });
-    await expect(h.api.delete(intent, true, () => {})).rejects.toThrow();
+    await expect(h.api.delete(intent, true, () => {})).rejects.toMatchObject({
+      stage: 'bytes', uncertain: true, messageKey: 'lifecycle.unconfirmed',
+    });
     expect(h.requests.filter(request => request.method === 'DELETE')).toHaveLength(1);
     expect(h.requests.some(request => request.url.pathname.endsWith('/finish_item_deletion'))).toBe(false);
   });
@@ -205,10 +215,14 @@ describe('first production singular deletion adapter', () => {
   });
   it('rejects foreign epoch before any request and changed session owner before bytes', async () => {
     const h = harness();
-    await expect(h.api.delete({ ...intent, epoch: 2 }, true, () => {})).rejects.toThrow();
+    await expect(h.api.delete({ ...intent, epoch: 2 }, true, () => {})).rejects.toMatchObject({
+      stage: 'read', uncertain: false, messageKey: 'error.unavailable',
+    });
     expect(h.requests).toHaveLength(0);
     vi.mocked(h.client.auth.getSession).mockResolvedValue({ data: { session: { ...h.session, user: { ...h.session.user, id: nonce } } }, error: null });
-    await expect(h.api.delete(intent, true, () => {})).rejects.toThrow();
+    await expect(h.api.delete(intent, true, () => {})).rejects.toMatchObject({
+      stage: 'begin', uncertain: false, messageKey: 'error.unavailable',
+    });
     expect(h.requests.some(request => request.method === 'DELETE')).toBe(false);
   });
   it.each(['owner', 'epoch', 'route'] as const)('rejects a late %s result before initiating another operation', async change => {

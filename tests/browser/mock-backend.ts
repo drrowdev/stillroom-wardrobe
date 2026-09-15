@@ -697,7 +697,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (method !== 'POST' || !Array.isArray(ids) || !ids.length || ids.length > 40 || new Set(ids).size !== ids.length || !ids.every(isUuid)) {
         await json({ code: '22023', message: 'Invalid input' }, 400); return;
       }
-      await json(items.filter(row => row.owner_id === owner && ids.includes(row.id)).map(row => deletionStatus(row, owner!))); return;
+      await json(items.filter(row => row.owner_id === owner && typeof row.id === 'string' && ids.includes(row.id)).map(row => deletionStatus(row, owner!))); return;
     }
     if (['set_item_trashed', 'begin_item_deletion', 'finish_item_deletion'].some(name => url.pathname === `/rest/v1/rpc/${name}`)) {
       const body = request.postDataJSON() as JsonRow, id = String(body.p_item_id);

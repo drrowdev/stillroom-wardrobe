@@ -15,7 +15,7 @@ import { deleteWardrobeObject } from './storage-delete';
 
 export type LifecycleStage = 'read' | 'change' | 'begin' | 'bytes' | 'finish';
 export class LifecycleError extends AppError {
-  constructor(readonly stage: LifecycleStage, readonly uncertain: boolean, key: 'error.unavailable' | 'error.notAvailable' | 'error.conflict' = 'error.unavailable') {
+  constructor(readonly stage: LifecycleStage, readonly uncertain: boolean, key: 'error.unavailable' | 'error.conflict' = 'error.unavailable') {
     super(uncertain ? 'lifecycle.unconfirmed' : key);
   }
 }
@@ -27,13 +27,13 @@ type Work = {
 function failure(work: Work, problem?: unknown): LifecycleError {
   if (problem instanceof LifecycleError) return problem;
   if (problem instanceof AppError && problem.messageKey === 'error.conflict') return new LifecycleError(work.stage, false, 'error.conflict');
-  if (problem instanceof Error && problem.message === 'error.notAvailable') return new LifecycleError(work.stage, false, 'error.notAvailable');
+  if (problem instanceof Error && problem.message === 'error.notAvailable') return new LifecycleError(work.stage, false, 'error.unavailable');
   return new LifecycleError(work.stage, work.changed);
 }
 function rpcError(work: Work, error: unknown): void {
   if (!error) return;
   if (isRecord(error) && error.code === '22023' && error.message === 'Request conflict') throw new LifecycleError(work.stage, false, 'error.conflict');
-  if (isRecord(error) && ['42501', 'PGRST301', 'PGRST302'].includes(String(error.code))) throw new LifecycleError(work.stage, false, 'error.notAvailable');
+  if (isRecord(error) && ['42501', 'PGRST301', 'PGRST302'].includes(String(error.code))) throw new LifecycleError(work.stage, false, 'error.unavailable');
   throw failure(work);
 }
 export class ItemLifecycleClient {
@@ -71,7 +71,7 @@ export class ItemLifecycleClient {
   }
   private async status(work: Work, id: string): Promise<DeletionStatus> {
     const rows = await this.statuses(work, [id]);
-    if (rows.length !== 1) throw new LifecycleError(work.stage, work.changed, 'error.notAvailable');
+    if (rows.length !== 1) throw new LifecycleError(work.stage, work.changed, 'error.unavailable');
     return rows[0]!;
   }
   statusOf(id: string, signal?: AbortSignal) { return this.bounded(signal, work => this.status(work, id)); }
@@ -118,7 +118,7 @@ export class ItemLifecycleClient {
   }
   checkChange(intent: TrashIntent, signal?: AbortSignal): Promise<LifecycleSnapshot> {
     return this.bounded(signal, async work => {
-      if (intent.epoch !== this.epoch || intent.baseline.ownerId !== this.owner) throw new AppError('error.notAvailable');
+      if (intent.epoch !== this.epoch || intent.baseline.ownerId !== this.owner) throw new AppError('error.unavailable');
       const actual = await this.snapshot(work, intent.baseline.id);
       if (!confirmsTrash(actual, intent)) throw new LifecycleError('read', true);
       return actual;
@@ -134,13 +134,13 @@ export class ItemLifecycleClient {
   }
   private bindIntent(intent: DeletionIntent): void {
     if (intent.epoch !== this.epoch || intent.preview.owner_id !== this.owner || !canonicalId(intent.requestId)
-      || !safeVersion(intent.expectedVersion, true)) throw new AppError('error.notAvailable');
+      || !safeVersion(intent.expectedVersion, true)) throw new AppError('error.unavailable');
   }
   private async remove(work: Work, path: string): Promise<'removed' | 'missing'> {
     return deleteWardrobeObject(async (route, options) => {
       const auth = await work.wait(() => this.client.auth.getSession());
       const session = auth.data.session;
-      if (auth.error || !session || session.user.id !== this.owner) throw new LifecycleError(work.stage, false, 'error.notAvailable');
+      if (auth.error || !session || session.user.id !== this.owner) throw new LifecycleError(work.stage, false, 'error.unavailable');
       work.check();
       work.stage = 'bytes'; work.changed = true;
       const response = await work.wait(() => fetch(`${this.config.url}${route}`, {

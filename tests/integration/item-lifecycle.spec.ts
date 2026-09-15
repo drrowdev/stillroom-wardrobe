@@ -210,8 +210,9 @@ async function journey(browser: Browser, resume: boolean) {
             && !url.search && !url.hash && request.postData() === null));
           const authorization = await proofStep('request.headers', async () => {
             const headers = await request.allHeaders();
-            check(headers.apikey === key && headers.authorization?.startsWith('Bearer '));
-            return headers.authorization;
+            const value = headers.authorization;
+            check(headers.apikey === key && typeof value === 'string' && value.startsWith('Bearer '));
+            return value;
           });
           await proofStep('request.owner', async () => {
             const verified = await a.client.auth.getUser(authorization.slice(7));
@@ -306,8 +307,9 @@ async function journey(browser: Browser, resume: boolean) {
       check((await nodeStatus(a)).length === 0);
       complete(); start('finish.history');
       const history = await a.client.from('wear_event_items').select('item_id,title_snapshot,category_snapshot').eq('owner_id', a.owner).eq('event_id', a.event);
-      check(!history.error && history.data?.length === 1 && history.data[0].item_id === null
-        && history.data[0].title_snapshot === 'Fictional lifecycle A' && history.data[0].category_snapshot === 'top');
+      const snapshot = history.data?.[0];
+      check(!history.error && history.data?.length === 1 && snapshot !== undefined && snapshot.item_id === null
+        && snapshot.title_snapshot === 'Fictional lifecycle A' && snapshot.category_snapshot === 'top');
       complete();
       page.removeAllListeners('request'); page.removeAllListeners('response');
     }
