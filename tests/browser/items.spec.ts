@@ -218,13 +218,13 @@ test('requested wardrobe order retains ordinal descending dates and ID tiebreaks
   const other = api.seedSavedItem('a', 'Fictional tie'), newest = api.seedSavedItem('a', 'Fictional newest');
   newest.item.created_at = '2026-09-10T00:00:00Z';
   const tied = [item, other.item].sort((a, b) => a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
-  await button(page, 'common.refresh').click();
+  await button(page, 'wardrobe.refresh').click();
   await expect(page.locator('.item-card h2')).toHaveText([newest.item.title, ...tied.map(row => row.title)]);
 });
 test('standalone list states and initially offline Trash preserve pages across reconnect, not owners', async ({ page, context }) => {
   const { api, item } = await setup(page);
   Object.assign(item, { availability: 'laundry', lifecycle: 'archived', favourite: true, exclude_suggestions: true });
-  await button(page, 'common.refresh').click();
+  await button(page, 'wardrobe.refresh').click();
   await expect(page.locator('.item-card')).toHaveCount(1);
   for (const key of ['availability.laundry', 'lifecycle.archived', 'lifecycle.excluded', 'item.favourite'] as const) {
     await expect(page.locator('.item-card').getByText(messages[key].en, { exact: true })).toBeVisible();

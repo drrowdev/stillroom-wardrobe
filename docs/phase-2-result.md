@@ -5698,3 +5698,31 @@ failure diagnostic. All20 phase prefixes, other18 Stage2+200outside files,
 exact types,22capture bounds and originalfour redactions plus unread217 remain.
 Twelve cycles consumed; no13/rerun. Scoped-delta review and remaining App/visual,
 final-review/normal-merge/exact-main/human/hosted/paid/cutover gates remain.
+
+#### 15 September 2026 - cycle13 browser fixture correction, execution pending
+
+[Cycle13 results](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5675285570)
+record lint, typecheck, translations, build, scans and2212unit tests passing
+on005f167/tree7052. Backend integration/security/rehearsals/type parity and
+Apple7 passed; browser results were12failed/4skipped/663passed across three
+projects. Two scenarios stopped at the wardrobe Refresh lookup and two at the
+owner-item title assertion. Later assertions were not reached; all22visual
+gates remain pending.
+
+The [reviewed three-file correction and M1](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5675500983)
+change only two wardrobe lookup keys to the existing accessible name and add
+four schema-default fields to the shared owner-tab fixture. All assertions,
+nine Trash refresh lookups, timing/retry limits and capture behavior remain.
+M1 preserves every non-target item-spec byte, including the complete capture
+declaration and body from262. All21phase prefixes,220other current files,
+199retained historical-outside files and exact generated types are preserved;
+the old200manifest and composite item suffix remain historical evidence.
+
+The [verified evidence supplement](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5675402927)
+records exact types/catalog evidence and distinguishes raw-analysis wire,
+reservation credentials and deliberately failed-write Save handling. These
+are not interchangeable Save proofs or recovery of earlier exceptions.
+This correction is **UNEXECUTED**; later owner/logout and other scenario steps
+may reveal further defects. Thirteen cycles consumed; no14/rerun authorized.
+Scoped-delta review and future-head validation, visual/final-review/normal-merge/
+exact-main/human/device/recovery/export/hosted/paid/cutover gates remain.
