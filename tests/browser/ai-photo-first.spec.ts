@@ -253,13 +253,13 @@ test('status admission proves the issued bearer separately from legacy decoded-o
   page.on('response', observeInitial);
   try {
     await page.goto('/'); await signIn(page);
-    // Dev StrictMode starts two loads; the stale load is not cancelled by effect cleanup.
-    await expect.poll(() => [initial.items.size, initial.images.size]).toEqual([2, 2]);
-    const responses = [...initial.items, ...initial.images];
-    expect(responses.map((response) => response.status())).toEqual([200, 200, 200, 200]);
-    expect(await Promise.all(responses.map((response) => response.finished()))).toEqual([null, null, null, null]);
+    // Effect cleanup cancels the stale StrictMode load; settle the active metadata pair.
     await expect(page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true })).toBeVisible();
-    expect([initial.items.size, initial.images.size]).toEqual([2, 2]);
+    await expect.poll(() => [initial.items.size, initial.images.size]).toEqual([1, 1]);
+    const responses = [...initial.items, ...initial.images];
+    expect(responses.map((response) => response.status())).toEqual([200, 200]);
+    expect(await Promise.all(responses.map((response) => response.finished()))).toEqual([null, null]);
+    expect([initial.items.size, initial.images.size]).toEqual([1, 1]);
   } finally { page.off('response', observeInitial); }
   const before = api.requests.length;
   for (const kind of ['valid', 'forged', 'nonempty', 'array'] as const) {

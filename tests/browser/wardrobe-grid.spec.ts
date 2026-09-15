@@ -59,7 +59,7 @@ for (const account of ['a', 'b'] as const) {
     expect(historyRequests(api)).toHaveLength(0);
     await page.locator('.item-detail-link').first().click();
     await expect(page.locator('#item-detail-title')).toBeVisible();
-    await button(page, 'wardrobe.back').click();
+    await button(page, 'common.back').click();
     await expect(page.locator('#wardrobe-search')).toHaveValue('Owned 49');
     await expect(page.locator('#wardrobe-sort')).toHaveValue('name');
     await expect(page.locator('.item-card')).toHaveCount(15);
@@ -72,7 +72,7 @@ for (const account of ['a', 'b'] as const) {
     await expect(page.locator('.item-caption h2').last()).toHaveText('Owned 079');
     await page.locator('.item-detail-link').last().click();
     await expect(page.locator('#item-detail-title')).toBeVisible();
-    await button(page, 'wardrobe.back').click();
+    await button(page, 'common.back').click();
     await expect(page.locator('#wardrobe-search')).toHaveValue('Owned');
     await expect(page.locator('#wardrobe-sort')).toHaveValue('name');
     await expect(page.locator('.wardrobe-result-count')).toHaveText(itemCount('en', 500));
@@ -148,7 +148,11 @@ test('history pending/failure, switch-away and staged refresh retain a valid vie
   let release: (() => void) | undefined;
   const held = new Promise<void>(resolve => { release = resolve; });
   let entered = false;
-  await page.route('**/rest/v1/wear_event_items?*', async route => { entered = true; await held; await route.fulfill({ status: 503, headers: { 'Retry-After': '0' }, json: {} }); });
+  const unavailable = { status: 503, headers: { 'Retry-After': '0', 'Access-Control-Expose-Headers': 'Retry-After' }, json: {} };
+  await page.route('**/rest/v1/wear_event_items?*', async route => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    entered = true; await held; await route.fulfill(unavailable);
+  });
   await page.locator('#wardrobe-sort').selectOption('leastWorn');
   await expect.poll(() => entered).toBe(true);
   await expect(page.getByText(messages['wardrobe.historyLoading'].en)).toBeVisible();
@@ -158,7 +162,10 @@ test('history pending/failure, switch-away and staged refresh retain a valid vie
   await expect(page.locator('#wardrobe-sort')).toHaveValue('price');
   await page.unroute('**/rest/v1/wear_event_items?*');
   let selectionAttempts = 0;
-  await page.route('**/rest/v1/wear_event_items?*', route => { selectionAttempts++; return route.fulfill({ status: 503, headers: { 'Retry-After': '0' }, json: {} }); });
+  await page.route('**/rest/v1/wear_event_items?*', route => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    selectionAttempts++; return route.fulfill(unavailable);
+  });
   await page.locator('#wardrobe-sort').selectOption('leastWorn');
   await expect(page.getByText(messages['wardrobe.historyUnavailable'].en)).toBeVisible();
   expect(selectionAttempts).toBe(4);
@@ -171,7 +178,10 @@ test('history pending/failure, switch-away and staged refresh retain a valid vie
   b.item.deleted_at = '2026-09-02T00:00:00Z';
   api.seedSavedItem('a', 'New saved item');
   let refreshAttempts = 0;
-  await page.route('**/rest/v1/wear_event_items?*', route => { refreshAttempts++; return route.fulfill({ status: 503, headers: { 'Retry-After': '0' }, json: {} }); });
+  await page.route('**/rest/v1/wear_event_items?*', route => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    refreshAttempts++; return route.fulfill(unavailable);
+  });
   await button(page, 'wardrobe.refresh').click();
   await expect(page.getByText(messages['wardrobe.historyUnavailable'].en)).toBeVisible();
   expect(refreshAttempts).toBe(4);
@@ -380,8 +390,25 @@ test('layout boundaries, translated filters, 200% text and exactly two bounded s
   }
   expect(await page.locator('.item-caption > span, .wardrobe-price, .wardrobe-choice, .wardrobe-tools > label, .collection-bar').evaluateAll(labels =>
     labels.length > 0 && labels.every(label => Number.parseFloat(getComputedStyle(label).fontSize) >= 14))).toBe(true);
-  await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 2rem; }' });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const measureText = () => page.evaluate(() => ({
+    root: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+    body: Number.parseFloat(getComputedStyle(document.body).fontSize),
+    labels: [...document.querySelectorAll('.item-caption > span, .wardrobe-price, .wardrobe-choice, .wardrobe-tools > label, .collection-bar')]
+      .map(label => Number.parseFloat(getComputedStyle(label).fontSize)),
+  }));
+  const before = await measureText();
+  expect(before.labels.length).toBeGreaterThan(0);
+  await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 1rem; }' });
+  const after = await measureText();
+  expect(after.root).toBe(before.root * 2);
+  expect(after.body).toBe(before.body * 2);
+  expect(after.labels).toHaveLength(before.labels.length);
+  expect(after.labels).toEqual(before.labels.map(size => size * 2));
+  const widths = await page.evaluate(() => ({
+    client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth,
+  }));
+  expect(widths.client).toBe(320);
+  expect(widths.scroll).toBeLessThanOrEqual(widths.client);
   expect(await page.locator('.wardrobe-choice').evaluateAll(labels => labels.every(label => label.getBoundingClientRect().height >= 44))).toBe(true);
   expect(await page.locator('.item-caption > span').evaluateAll(labels => labels.every(label => Number.parseFloat(getComputedStyle(label).fontSize) >= 14))).toBe(true);
 });
