@@ -5726,3 +5726,36 @@ This correction is **UNEXECUTED**; later owner/logout and other scenario steps
 may reveal further defects. Thirteen cycles consumed; no14/rerun authorized.
 Scoped-delta review and future-head validation, visual/final-review/normal-merge/
 exact-main/human/device/recovery/export/hosted/paid/cutover gates remain.
+
+#### 15 September 2026 - cycle14 raw-analysis diagnostics, execution pending
+
+[Cycle14 results](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5676028969)
+record green CI on1462efd/tree647faa, including2212unit tests, backend
+integration/security/rehearsals/type parity, three live lifecycle tests and
+Apple7. The four corrected browser scenarios passed all12first attempts.
+Browser output still records1flaky/4skipped/674passed: the WebKit raw-analysis
+response sequence received400 instead of504 on its third request. The receiver
+observed an empty completed body and rejected it before the analysis callback.
+The retry pass does not satisfy the no-new-flakiness gate; the cause is unknown.
+
+[Coordinator visual acceptance](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5676139788)
+covers all22approved surfaces at1462: six inspected images and16verified
+identical-content reuses. It is not automatic future-head or device acceptance.
+The [distinct diagnostic evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5676169103)
+separates raw-analysis boundaries, reservation credentials and deliberately
+failed-write Save handling; none proves successful persisted Save or recovery
+of earlier exceptions.
+
+The [reviewed diagnostic amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5676448136)
+adds sequence-only, bounded observations of constructed Blob size, intercepted
+body representation and receiver framing/stream properties. Other helper result
+shapes, request bodies, owner/error/cleanup guards and capture limits remain.
+Independent route/receiver POST ordinals do not prove a shared TCP connection.
+API-absent bodies or framing alone do not identify a browser/transport cause;
+instrumentation may affect timing, and nonrecurrence is not causal recovery.
+The new diagnostics are **UNEXECUTED**, not a transport fix or acceptance waiver.
+All22prior phase prefixes and220other files remain frozen. This supports
+R03/R23 integration evidence and preserves R28 explicit-Save boundaries.
+Fourteen cycles consumed; no15/rerun, commit/push, merge or deployment authorized.
+Retained-delta review, future-head validation and all human/device/account
+deletion/recovery/export/hosted/paid/cutover gates remain.

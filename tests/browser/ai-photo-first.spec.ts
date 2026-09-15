@@ -10,7 +10,7 @@ import { aiFixture, addAiPhoto } from './ai-photo-first-support';
 import { analysisPath, mockBackend, owners, signIn, type RawAnalysisObservation } from './mock-backend';
 
 type AiFixture = Awaited<ReturnType<typeof aiFixture>>;
-type RawAnalysisClient = { status: number | null; outcome: 'response' | 'network-rejection' };
+type RawAnalysisClient = { status: number | null; outcome: 'response' | 'network-rejection'; constructedBytes?: number };
 type RawAnalysisEvidence = {
   case: 'oversized' | 'response-sequence' | 'boundaries'; project: 'chromium' | 'mobile' | 'webkit-photo' | null;
   retry: number | null; repeat: number | null; fixturePresent: boolean;
@@ -36,14 +36,33 @@ function snapshotRawAnalysis(evidence: RawAnalysisEvidence, api: AiFixture | und
         evidence.captureError = true;
         return null;
       }
+      if (evidence.case === 'response-sequence') {
+        if (typeof client.constructedBytes !== 'number' || !Number.isSafeInteger(client.constructedBytes)
+          || client.constructedBytes < 0 || client.constructedBytes > 512001) {
+          evidence.captureError = true;
+          return null;
+        }
+        return { status: client.status, outcome: client.outcome, constructedBytes: client.constructedBytes };
+      }
       return { status: client.status, outcome: client.outcome };
     });
     if (clients.length > 4) evidence.captureError = true;
     if (api?.rawAnalysisObservation) {
       const observation = api.rawAnalysisObservation;
-      evidence.observation = { ...observation, posts: observation.posts.slice(0, 4).map((post) => ({
+      const { detail, ...baseObservation } = observation;
+      evidence.observation = { ...baseObservation, posts: observation.posts.slice(0, 4).map((post) => ({
         ...post, firstPostTerminalReject: post.firstPostTerminalReject ? { ...post.firstPostTerminalReject } : null,
       })), firstAttemptedPost400: observation.firstAttemptedPost400 ? { ...observation.firstAttemptedPost400 } : null };
+      if (evidence.case === 'response-sequence') {
+        if (detail) {
+          evidence.observation.detail = { ...detail,
+            routes: detail.routes.slice(0, 4).map((record) => ({ ...record })),
+            receivers: detail.receivers.slice(0, 4).map((record) => ({ ...record })) };
+          if (detail.overflow || detail.evidenceError || detail.routes.length > 4 || detail.receivers.length > 4) {
+            evidence.captureError = true;
+          }
+        } else evidence.captureError = true;
+      }
       evidence.cumulative = { ...api.analysisWire };
       if (observation.overflow || observation.evidenceError || observation.posts.length > 4) evidence.captureError = true;
     } else evidence.captureError = true;
@@ -88,9 +107,9 @@ async function assertAnalysisClosed(page: Page, api: AiFixture) {
 type BrowserAnalysisKind = 'valid' | 'wrong-key' | 'wrong-bearer' | 'wrong-owner' | 'request-id' |
   'draft-id' | 'generation' | 'method' | 'path' | 'query' | 'content-type' | 'empty' | 'oversized';
 async function sendBrowserAnalysis(page: Page, api: AiFixture, kind: BrowserAnalysisKind = 'valid',
-  bytes = Buffer.from(Array.from({ length: 4096 }, (_, index) => index % 256))) {
+  bytes = Buffer.from(Array.from({ length: 4096 }, (_, index) => index % 256)), captureSize = false): Promise<{ status: number | null; outcome: string; constructedBytes?: number }> {
   const ids = analysisIds();
-  return page.evaluate(async ({ authorization, ids, kind, bytes, route, key }) => {
+  const result = await page.evaluate(async ({ authorization, ids, kind, bytes, route, key }) => {
     const headers = { authorization: kind === 'wrong-bearer' ? 'Bearer not-issued' : authorization,
       apikey: kind === 'wrong-key' ? 'wrong-fixture-key' : key,
       'content-type': kind === 'content-type' ? 'text/plain' : 'image/jpeg',
@@ -100,14 +119,17 @@ async function sendBrowserAnalysis(page: Page, api: AiFixture, kind: BrowserAnal
       'x-stillroom-generation': kind === 'generation' ? '0' : ids.generation };
     const body = new Blob([kind === 'empty' ? new Uint8Array() : kind === 'oversized'
       ? new Uint8Array(512001) : new Uint8Array(bytes)], { type: headers['content-type'] });
+    const constructedBytes = body.size;
     try {
       const response = await fetch('http://127.0.0.1:54321' + route
         + (kind === 'path' ? '-unapproved' : kind === 'query' ? '?unexpected=1' : ''), {
         method: kind === 'method' ? 'PUT' : 'POST', headers, body, credentials: 'omit', signal: AbortSignal.timeout(5000),
       });
-      return { status: response.status, outcome: 'response' };
-    } catch { return { status: null, outcome: 'network-rejection' }; }
+      return { status: response.status, outcome: 'response', constructedBytes };
+    } catch { return { status: null, outcome: 'network-rejection', constructedBytes }; }
   }, { authorization: api.issuedWireAuthorization('a'), ids, kind, bytes: [...bytes], route: analysisPath, key: fixtureKey });
+  return { status: result.status, outcome: result.outcome,
+    ...(captureSize ? { constructedBytes: result.constructedBytes } : {}) };
 }
 function analysisTarget(page: Page, api: AiFixture) {
   const target = new URL(api.uploadWireUrl), origin = new URL(page.url()).origin;
@@ -322,20 +344,27 @@ test('expected analysis 403/502/504 responses leave the shared storage receiver 
   try {
     try {
       api = await aiFixture(page, 'en', true, undefined, true);
+      if (api.rawAnalysisObservation) {
+        api.rawAnalysisObservation.detail = { routePosts: 0, receiverPosts: 0, overflow: false, evidenceError: false,
+          routes: [], receivers: [] };
+      } else evidence.captureError = true;
       const before = storageCounts(api);
       api.consent.set(owners.a, false);
-      results[0] = await sendBrowserAnalysis(page, api);
+      results[0] = await sendBrowserAnalysis(page, api, 'valid', undefined, true);
       expect(results[0].status).toBe(403);
       api.consent.set(owners.a, true); api.mode('failed');
-      results[1] = await sendBrowserAnalysis(page, api);
+      results[1] = await sendBrowserAnalysis(page, api, 'valid', undefined, true);
       expect(results[1].status).toBe(502);
       api.mode('timeout');
-      results[2] = await sendBrowserAnalysis(page, api);
+      results[2] = await sendBrowserAnalysis(page, api, 'valid', undefined, true);
       expect(results[2].status).toBe(504);
       api.mode('ready');
-      results[3] = await sendBrowserAnalysis(page, api);
+      results[3] = await sendBrowserAnalysis(page, api, 'valid', undefined, true);
       expect(results[3].status).toBe(200);
-      expect(api.analysisWire).toMatchObject({ posts: 4, callbacks: 4, rejected: 0, timedOut: 0 });
+      expect(api.analysisWire).toMatchObject({ posts: 4, callbacks: 4, rejected: 0, timedOut: 0,
+        receivedBytes: 16384, payloadBytes: 16384 });
+      expect(api.rawAnalysisObservation?.posts.map(({ receivedBytes, acceptedBytes }) => ({ receivedBytes, acceptedBytes })))
+        .toEqual(Array.from({ length: 4 }, () => ({ receivedBytes: 4096, acceptedBytes: 4096 })));
       expect(api.uploadWire.listening).toBe(true);
       expect(storageCounts(api)).toEqual(before);
       expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);

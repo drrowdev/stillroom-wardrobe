@@ -48,6 +48,15 @@ type RawAnalysisPost = {
 export type RawAnalysisObservation = {
   postCount: number; overflow: boolean; evidenceError: boolean; posts: RawAnalysisPost[];
   firstAttemptedPost400: RawAnalysisRejection | null;
+  detail?: {
+    routePosts: number; receiverPosts: number; overflow: boolean; evidenceError: boolean;
+    routes: Array<{ ordinal: number; body: 'absent' | 'empty' | '4096' | 'other' }>;
+    receivers: Array<{
+      ordinal: number; contentLength: 'absent' | 'zero' | '4096' | 'other' | 'invalid';
+      transferEncoding: 'absent' | 'chunked' | 'other'; complete: boolean; readableEnded: boolean;
+      readableLength: 'zero' | '4096' | 'other' | 'invalid';
+    }>;
+  };
 };
 function rawAnalysisStatus(status: number) {
   switch (status) {
@@ -265,6 +274,25 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
       }
       if (request.method !== 'POST' || !identity) { reject(403, 'admission'); return; }
       analysisState.posts++;
+      const detail = rawObservation?.detail;
+      if (detail) {
+        if (detail.receiverPosts >= 4) { detail.overflow = true; detail.evidenceError = true; }
+        else {
+          const ordinal = ++detail.receiverPosts;
+          try {
+            const contentLength = request.headers['content-length'], transferEncoding = request.headers['transfer-encoding'];
+            const length = typeof contentLength === 'string' && /^[0-9]+$/.test(contentLength) ? Number(contentLength) : NaN;
+            const readableLength = request.readableLength;
+            detail.receivers.push({ ordinal,
+              contentLength: contentLength === undefined ? 'absent' : !Number.isSafeInteger(length) || length < 0
+                ? 'invalid' : length === 0 ? 'zero' : length === 4096 ? '4096' : 'other',
+              transferEncoding: transferEncoding === undefined ? 'absent' : transferEncoding === 'chunked' ? 'chunked' : 'other',
+              complete: request.complete, readableEnded: request.readableEnded,
+              readableLength: !Number.isSafeInteger(readableLength) || readableLength < 0 ? 'invalid'
+                : readableLength === 0 ? 'zero' : readableLength === 4096 ? '4096' : 'other' });
+          } catch { detail.evidenceError = true; }
+        }
+      }
       request.on('data', onData);
       request.once('end', onEnd);
       return;
@@ -522,6 +550,18 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         return;
       }
       receiver.analysisState.forwarded++;
+      const detail = rawAnalysisObservation?.detail;
+      if (detail && method === 'POST') {
+        if (detail.routePosts >= 4) { detail.overflow = true; detail.evidenceError = true; }
+        else {
+          const ordinal = ++detail.routePosts;
+          try {
+            const body = request.postDataBuffer();
+            detail.routes.push({ ordinal, body: body === null ? 'absent' : body.length === 0 ? 'empty'
+              : body.length === 4096 ? '4096' : 'other' });
+          } catch { detail.evidenceError = true; }
+        }
+      }
       try { await route.continue({ url: receiver.url + analysisPath }); }
       catch { throw new Error('Fixture analysis continuation failed.'); }
       return;
