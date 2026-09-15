@@ -174,6 +174,8 @@ test('history pending/failure, switch-away and staged refresh retain a valid vie
   await page.unroute('**/rest/v1/wear_event_items?*');
   await page.getByRole('alert').getByRole('button').click();
   await expect(page.locator('#wardrobe-sort')).toHaveValue('leastWorn');
+  await expect(page.getByText(messages['wardrobe.historyLoading'].en)).not.toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(page.locator('.item-caption h2')).toHaveText(['Beta', 'Alpha']);
   b.item.deleted_at = '2026-09-02T00:00:00Z';
   api.seedSavedItem('a', 'New saved item');
@@ -182,7 +184,29 @@ test('history pending/failure, switch-away and staged refresh retain a valid vie
     if (route.request().method() !== 'GET') return route.fallback();
     refreshAttempts++; return route.fulfill(unavailable);
   });
+  const refreshRequestStart = api.requests.length;
+  const refreshSnapshot = async () => ({
+    historyErrorVisible: await page.getByText(messages['wardrobe.historyUnavailable'].en).isVisible(),
+    historyLoadingVisible: await page.getByText(messages['wardrobe.historyLoading'].en).isVisible(),
+    alertCount: await page.getByRole('alert').count(),
+    requestedSort: await page.locator('#wardrobe-sort').count() ? await page.locator('#wardrobe-sort').inputValue() : null,
+    cardCount: await page.locator('.item-card').count(),
+    refreshAttempts,
+    itemGetCount: api.requests.slice(refreshRequestStart).filter(request => request.method === 'GET' && request.path === '/rest/v1/items').length,
+    imageGetCount: api.requests.slice(refreshRequestStart).filter(request => request.method === 'GET' && request.path === '/rest/v1/item_images').length,
+  });
+  let lastRefreshSnapshot: Awaited<ReturnType<typeof refreshSnapshot>> | null = null;
   await button(page, 'wardrobe.refresh').click();
+  try {
+    await expect.poll(async () => {
+      const snapshot = await refreshSnapshot();
+      lastRefreshSnapshot = snapshot;
+      return snapshot.historyErrorVisible;
+    }).toBe(true);
+  } catch (error) {
+    console.error('I09 history refresh diagnostic', JSON.stringify(lastRefreshSnapshot));
+    throw error;
+  }
   await expect(page.getByText(messages['wardrobe.historyUnavailable'].en)).toBeVisible();
   expect(refreshAttempts).toBe(4);
   await expect(page.locator('.item-caption h2')).toHaveText(['Alpha']);
