@@ -644,6 +644,21 @@ export type Database = {
         Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
         Returns: Json
       }
+      begin_item_deletion: {
+        Args: {
+          p_expected_version: number
+          p_image_manifest_sha256: string
+          p_item_id: string
+          p_request_id: string
+        }
+        Returns: {
+          expected_version: number
+          image_manifest_sha256: string
+          request_id: string
+          started_at: string
+          version: number
+        }[]
+      }
       cancel_analyzed_item_save: {
         Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
         Returns: undefined
@@ -668,8 +683,33 @@ export type Database = {
         Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
         Returns: undefined
       }
+      finish_item_deletion: {
+        Args: { p_item_id: string; p_request_id: string }
+        Returns: {
+          state: string
+        }[]
+      }
       forget_image: { Args: { p_image_id: string }; Returns: undefined }
       item_attribution_history: { Args: { p_item_id: string }; Returns: Json }
+      item_deletion_status: {
+        Args: { p_item_ids: string[] }
+        Returns: {
+          cleanup_blocked: boolean
+          current_image_id: string
+          current_thumb_path: string
+          deleted_at: string
+          expected_version: number
+          id: string
+          image_manifest_sha256: string
+          owner_id: string
+          photo_count: number
+          request_id: string
+          started_at: string
+          title: string
+          unmanifested_count: number
+          version: number
+        }[]
+      }
       reserve_analyzed_item_save: {
         Args: { p_claim: Json; p_image: Json; p_item: Json }
         Returns: {
@@ -724,6 +764,19 @@ export type Database = {
           p_timezone: string
         }
         Returns: number
+      }
+      set_item_trashed: {
+        Args: {
+          p_expected_version: number
+          p_item_id: string
+          p_trashed: boolean
+        }
+        Returns: {
+          deleted_at: string
+          id: string
+          owner_id: string
+          version: number
+        }[]
       }
       update_image_description: {
         Args: {

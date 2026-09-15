@@ -41,6 +41,120 @@ The SQL column constraints are the validation maxima. Add runtime parsers at bou
 
 ## Operations
 
+### I08 lifecycle RPCs - Stage 1 source candidate
+
+These four source-defined RPCs use enabled ordinary-owner sessions, qualified
+relations, empty search paths and fixed errors. They have not been executed or
+deployed. Actual generated public types are mandatory before the separate
+Stage 2 Trash/Undo/Restore/delete UI; do not hand-author those signatures.
+
+| RPC | Arguments | Result |
+|---|---|---|
+| `set_item_trashed` | `p_item_id uuid, p_expected_version bigint, p_trashed boolean` | One `id,owner_id,version,deleted_at` row. Trash requires a current ready image; Restore requires an unclaimed trash timestamp within seven server days. |
+| `item_deletion_status` | `p_item_ids uuid[]`, 1-40 distinct non-null UUIDs | At most one row per owned item: `id,owner_id,title,version,deleted_at,photo_count,current_image_id,current_thumb_path,image_manifest_sha256,cleanup_blocked,unmanifested_count,request_id,expected_version,started_at`. Missing/foreign items are omitted. |
+| `begin_item_deletion` | `p_item_id uuid, p_expected_version bigint, p_request_id uuid, p_image_manifest_sha256 text` | One `request_id,expected_version,version,started_at,image_manifest_sha256` row. Exact replay returns the existing claim without another write. |
+| `finish_item_deletion` | `p_item_id uuid, p_request_id uuid` | One `state` row: `completed` only for this checked deletion; generic `absent` for missing/foreign/already deleted, never proof of byte removal. |
+
+Expected versions are positive safe integers, at most 9007199254740990 before
+increment; hashes are exactly 64 lowercase hexadecimal characters. Null/invalid
+arguments use fixed `22023 / Invalid input`; state/version/manifest/nonce/lock
+conflicts use `22023 / Request conflict`; unavailable approval uses
+`42501 / Not available`. RPC EXECUTE remains authenticated-only. Status has
+VOLATILE metadata for fresh protected visibility, but its relation reads are a
+single read-only statement; its manifest helper is a pure immutable projection.
+It exposes a blocked count, never unregistered object names or removal authority.
+
+Mutations lock the owner profile, ordered existing images, then the parent
+`FOR UPDATE NOWAIT`, and re-read/lock the complete image set after the parent.
+BEGIN/FINISH then lock the own claim. Explicit locks use NOWAIT with a 2-second
+lock-timeout backstop and fixed conflict translation. Image INSERT takes the
+same parent's KEY SHARE before a fresh claim check. Existing-row image and item
+triggers use fresh definer reads, not caller-visible RLS-filtered Storage rows.
+A valid final cascade is permitted by parent absence after byte checking, not by
+an auth mismatch, GUC, definer exemption or profile-delete shortcut.
+
+`wardrobe_create` requires the server-assigned `storage.object.upload` operation
+as well as the existing owned pending path and parent KEY SHARE admission checks.
+`wardrobe_delete` requires `storage.object.delete`; owner/enabled-account checks
+remain. T29 replaces `wardrobe_read` without an additive policy: the existing
+manifested-read branch OR the same approved-owner canonical-prefix delete
+predicate gated by `storage.object.delete`. This supplies SELECT visibility
+needed by the native singular DELETE/RETURNING for an unmanifested owned object;
+it does not admit orphan download, sign, list or bulk deletion. The pinned native
+operation-function contract now fences both read and delete and requires
+re-review on any future vendor upgrade. Direct/privileged SQL capability to set
+a custom GUC is outside this ordinary-route guarantee. The new catalog qual pin
+is derived and unmeasured until separately authorized runtime verification.
+No UPDATE policy is added. Client headers cannot select a different
+native operation. Bulk DELETE can return200/[] without deleting anything; it is
+not a removal acknowledgement. PUT, copy, signed upload and TUS admission remain
+unsupported; move already lacks UPDATE permission. S3 mapped-user operations
+are distinct from separately privileged administrative S3 credentials.
+
+Permission probes roll back before transfer. The app-owned immediate AFTER
+INSERT/UPDATE ALWAYS guard rechecks final publication for every role, with
+profile/approval/image/parent SHARE NOWAIT locks held through commit, fresh
+stable-ID reads, authoritative text owner_id and nullable-or-matching deprecated
+owner. Native probe version1 is valid; identity/version and dark versioning flags
+cannot be replaced, while genuine nonpublication metadata UPDATE is permitted.
+Only explicit analyzed-Save cancellation blocks an already accepted Save, not
+later AI opt-out/result expiry. Storage contention uses SQLSTATE55P03: at pinned
+Storage1.70.3 this renders HTTP400 and exact
+`{statusCode:"423",code:"ResourceLocked",error:"ResourceLocked",message:"The resource is locked"}`.
+Public/image RPC conflicts still use22023. HTTP5xx remains failure. Existing
+`ensureFile`/`requireSuccess` reports nonduplicate failures as unavailable, keeps
+the same draft/photo/IDs and offers explicit retry. It is not photo rejection or
+an automatic resend; capture/transport source stays frozen.
+
+The reviewed CI-only owner installer must verify this exact guard as ALWAYS
+before stack readiness, target-schema fixture traffic or type generation; ordinary migration
+completion alone is an incomplete installation. Hosted installation remains
+blocked pending separately reviewed owner/quiescence cutover, not an atomic
+migration guarantee or a weaker production boundary.
+
+Initial pending images or unmanifested item-prefix objects refuse BEGIN before
+any irreversible claim/version change. Restore remains available in its window.
+After BEGIN, no Restore/Undo, item update, image reservation/update/forgetting or
+metadata-per-batch deletion is allowed. Remove only validated retained main/thumb
+paths via ordinary Storage; preserve metadata until FINISH. FINISH also takes
+SHARE NOWAIT locks on any present prefix objects and refuses them. An empty
+query does not lock absence: the final-publication guard conflicts with the
+held parent UPDATE lock, then rejects future publication when the image/item is
+gone. The owner/image non-reuse registry prevents later rebinding of that path.
+
+`src/data/storage-delete.ts` performs one validated singular DELETE via a narrow
+ordinary-session caller adapter. Exact200/`{message:"Successfully deleted"}` means
+`removed`; exact400/`{statusCode:"404",code:"NoSuchKey",error:"not_found",message:"Object not found"}`
+means distinct `missing`, not physical byte proof. Exact400/
+`{statusCode:"403",code:"AccessDenied",error:"Unauthorized",message:"Access denied"}`
+is a hard denial. These are the pinned final HTTP formatter's legacy error names,
+not aliases for the code field. Every other envelope, malformed
+response or5xx fails with a fixed sanitized error. Checked permanent deletion
+requires each present registered object to return `removed`; test cleanup may
+reconcile `missing` with separate absence checks. A foreign absent path can return
+NoSuchKey before RLS; anonymous outer-auth errors need not match one fixed status.
+
+Future Stage 2 must fresh-read confirmation name/version/photo context, require
+all editor sections clean and resolved, and use the returned original/current
+versions and nonce for explicit reload/resume. An ambiguous BEGIN permits only a
+read-only Check status before deliberate Resume. Each action has a 30-second
+work budget, pages of at most 40 photo versions and at most40 individually
+acknowledged singular removals; route/owner cancellation stops new requests and invalidates late
+continuations, without pretending an already-sent SDK removal was canceled.
+Eight-second Undo is owner-memory-only and supplemental to seven-day Trash.
+
+Ordinary Storage acknowledgements plus SQL catalog absence are not provider
+backup/physical-erasure proof. The user accepted inaccessible interrupted-upload
+remnants without a verified cleanup deadline, not later publication/readability,
+accessible TUS metadata or failed removal. Hosted cutover must separately verify
+old admitted requests, missing historical image identities, backend companions
+and vendor-trigger compatibility/privileges/upgrades. Ordinary native elevated
+completion is fenced; privileged administrative schema/API changes are not
+claimed impossible. No signed-upload flow, orphan
+cleaner, scheduler, AI call, I09 bulk/filter feature or I10 media replacement is
+introduced. Named EN/FI/SV permanent-delete confirmation must explain that wear
+history retains its recorded garment name/category.
+
 REST below means `/rest/v1/…` with the publishable key and user bearer token. Query only explicitly needed columns. Private original tables never use “owner OR household” filters.
 
 | Operation | Contract and response | Error/retry behaviour |

@@ -4703,3 +4703,1059 @@ earlier; absent records after termination or timeouts provide no evidence.
 All 317230 previously reviewed document bytes and the original 311834-byte prefix
 remain frozen. The candidate remains unstaged, with no local runtime checks or
 publication; the future gated CI/Apple cycle remains unspent and all holds remain.
+
+## 13 September 2026 - I08 Stage 1 source-only lifecycle candidate
+
+Requirements R03/R23/R28 and related R11/R12/R17/R20/R26/R27. This append follows
+the [reviewed T14 corrections](https://github.com/drrowdev/stillroom-wardrobe/pull/24#issuecomment-5653340839)
+and [coordinator-observed own-model/source permission](https://github.com/drrowdev/stillroom-wardrobe/pull/24#issuecomment-5653390965),
+not the historical diagnostic packet's authority. The existing 318324 working
+bytes remain frozen; historical evidence above is not rewritten.
+
+One persistent local writer, canonical session
+`a8161d14-3457-4d7f-83a2-e05600445062`, branch `drrowdev-item-lifecycle`, base
+`221d60c8a07eb4a89a546133685b80487cf434be`, remains within the thirteen Stage 1
+paths. The other 201 original paths, generated types, thirty-field editor,
+readiness logic, upload/capture source, diagnostics and workflow remain frozen.
+Actual Anthropic Claude Opus 5 T13/T14 AMEND and the coordinator's binding
+corrections precede implementation; no unconditional source/runtime PASS is
+inferred from plan approval or local model telemetry.
+
+The source candidate adds a private cascading live-item claim, four owner RPCs,
+fresh privileged row guards and same-parent image/Storage INSERT fences.
+Read-only single-snapshot status includes the original/current versions and
+nonce needed for exact reload/resume. Initial pending/orphan states reject
+permanent BEGIN before mutation. Claimed image metadata stays intact through
+byte removal; FINISH retains parent UPDATE exclusion and requires an empty
+whole item prefix before cascade. Unclaimed legacy behavior, saved fields/
+provenance and wear-history name/category snapshots are preserved.
+
+The strict ninth canonical source pin is 15332 bytes,
+SHA-256 `38de5f1b7bd4edd0f7e3829f90e1b1486c0b32385c1bd75b03b7dee9263ba1c5`.
+New ordinary-session/static test definitions and positive catalog checks cover
+the claim/grant/lock/replay contract, real Storage removal, retained versions,
+history and cross-owner negatives. Source-defined CI-only fixtures hold one
+exact disposable parent or add one no-blob catalog marker; ordinary users make
+the access assertions. A SQL lock acknowledgement, not a sleep or Promise.all,
+is required for forced-overlap evidence. Unknown Storage wrapper responses and
+cleanup failures stop the gate. Existing capture retry source is unchanged.
+
+Status: **UNSTAGED, unexecuted source candidate for coordinator review.**
+Only manual text/Git/PowerShell/.NET metadata/hash inspection was permitted.
+No Node/npm/compiler/lint/unit/browser/backend/build/scanner/install/TLS probe,
+Actions query/run, image/archive input, generated artifacts, stage/commit/push,
+new PR, hosted operation or deployment was authorized or performed. Static test
+definitions are not a passing test run or live SQL/Storage evidence.
+
+Separate publication/execution permission is still required. Stage 1 actual
+generation/upload and all preceding gates must succeed before its sole
+anticipated final four-RPC type-parity red can be accepted as an intermediate
+artifact-producing cycle, never backend/merge PASS. Same-writer Stage 2 still
+needs actual generated types, integrated UI, four additional bounded captures,
+full exact-head CI/Apple/live/types/coordinator visual and genuine final review.
+No run budget has been spent by this source work.
+
+Original Save failure uncertainty and STOP on recurrence remain. Production
+f318/six hosted migrations, unhosted B1/B2, paid/private/provider/deployment
+holds, physical-device/manual acceptance and mandatory saved-only I29 recovery/
+export before release remain unchanged. No I09 compound filters/bulk, I10
+replacement/orphan/scheduler, AI lifecycle call or next packet is included.
+
+## 13 September 2026 - I08 T15 source-review R1 correction
+
+[Actual T15 AMEND and narrow correction permission](https://github.com/drrowdev/stillroom-wardrobe/pull/24#issuecomment-5653613862)
+records Anthropic Claude Opus 5 review and one cleanup-error-fidelity finding,
+not an unconditional source/runtime PASS. Both new I08 fixture helpers now
+preserve the exact primary setup/operation rejection, including falsy thrown
+values, when release or cleanup also fails. Secondary failures emit only fixed
+non-sensitive notices; cleanup-only failures still reject. Parent closure/timer
+cleanup and exact marker deletion-count/absence assertions remain required.
+
+Focused mock-only regression definitions cover success, primary-only,
+cleanup-only, simultaneous and falsy failures, synchronous/awaited cleanup and
+bounded child release. No Docker, SQL or network operation is used by those
+mock definitions, and no test was executed here. Only the two helper control
+flows, their new unit coverage and this append changed. The full preceding
+322125 working bytes and original 318324-byte prefix remain frozen, as do the
+other ten candidate blobs, migration/pins and 201 outside paths.
+
+The same writer/session/branch stops UNSTAGED for coordinator verification.
+No runtime/compiler/test/probe, publication, Actions or hosted operation was
+authorized or performed. All existing exact-head, original Save uncertainty,
+Stage 2, production/privacy/paid/deployment and release-acceptance holds remain.
+
+## 13 September 2026 - I08 coordinator source follow-up R2
+
+[Narrow R2 permission](https://github.com/drrowdev/stillroom-wardrobe/pull/24#issuecomment-5653660835)
+addresses a setup-before-await readiness rejection and unconditional unit
+teardown. An early rejection observer now covers the separate readiness promise;
+the actual readiness await, primary rejection and cleanup checks remain intact.
+Mock-only setup-failure/async-child-error cases include exact/falsy primary
+values and check for unhandled rejection, fixed notice, child closure and timer
+cleanup. Timer/network assertions still fail normally, with timer/environment/
+global/spy restoration in finally.
+
+The preceding 323640 working bytes and earlier 322125/318324-byte prefixes remain
+frozen. Only the same three repair paths changed; all other candidate/source
+boundaries and migration pins remain unchanged. T15 remains AMEND, not an
+unconditional reviewer or runtime PASS. No tests/runtime commands/publication
+ran; the candidate stops UNSTAGED and all prior execution and release holds remain.
+
+## 13 September 2026 - I08 original cycle blocked; R3 source-only correction
+
+[The original cycle's actual evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5653886139)
+supersedes the earlier candidate's unexecuted status without rewriting it.
+CI34761885375 attempt1 failed at source
+`e8829d1aa91187a2c15ff3bf30159a0d486068bc`; actual merge checkout
+`37245ab0db1deebd77e061a3f2460ece2f3dd499` had the identical reviewed tree
+`75ad01054f059d5b588115649e5a89a039020697`. App's lint reported three
+no-unsafe-finally errors in the accepted cleanup correction. Backend passed
+the strict nine-source inventory/history/application, populated preservation
+(two owners, ten tables, thirty rows, eight objects) and both catalog checks,
+then failed in held-upload without an observed response/sub-operation. Exact-run
+snapshot cleanup passed. The common reader's pre-body >=500 refusal is a source
+boundary, not proof that this response was500 or that the cause is diagnosed.
+
+Later App/backend/type-generation/upload/parity/browser/visual gates did not
+run; artifact count was zero. Apple34761885372 attempt1 passed four generated
+JPEG and three orientation/composition cases. This is not physical-iPhone,
+I08 UI, hosted acceptance or a substitute for failed CI. The original Save
+diagnostic case did not run, so no recurrence/non-reproduction is claimed.
+The original cycle is consumed and unsuccessful, not the final type-parity
+staging condition. No rerun or new cycle is authorized by this source record.
+
+The [R3 proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5653907461)
+received actual Anthropic Claude Opus5 T16 AMEND, adopted with
+[binding C1-C5 and count corrections](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5653989229).
+The same writer's [coordinator-observed entry and edit permission](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5654022792)
+authorizes only this five-path source candidate, not runtime or unconditional
+review PASS. Start head/tree remain e8829/75ad; all209 outside files, SQL/pins,
+shared normalClient, Save/capture/transports, workflow and types are frozen.
+The entire preceding324722working-byte document and all earlier prefixes remain.
+
+The candidate separately guards mandatory helper cleanup, reader cancel/release,
+observation output and outer fixture cleanup. Explicit primary/cleanup flags
+retain the first exact value even if undefined/null/false/zero/empty-string;
+rethrows occur after cleanup, outside finally. Fixed notices cannot replace
+the retained rejection. A failed child closure/termination is failed evidence,
+not an assertion of physical release.
+
+The one existing held-upload negative POST now has a local guarded4096-byte
+reader, preserving ordinary credentials, exact endpoint/bytes/headers,
+redirect refusal and15-second request timeout. It observes headers/status
+before missing, empty, malformed, non-object, UTF-8 or read failures; both
+cleanup actions still run where a reader was acquired. **Status<500 remains
+necessary for PASS**, with the original !ok, floating <5000ms and exact
+classifier. HTTP5xx is recordable failure, not accepted conflict evidence.
+No additional request/sign-in or shared API relaxation is introduced.
+
+After the holder settles and before outer cleanup, each attempted phase emits
+one validated JSON line of at most1024UTF-8bytes; the two-owner fail-fast loop
+allows0/1/2 records according to attempted phases. Closed fields preserve
+unobserved nulls; overflow sets bodyBytes:null/truncated:true, never a clamped
+or header-derived byte count. Raw errors/bodies/headers/IDs/paths/private values
+are excluded. Serialization/output failures remain failures. Last-reached
+stage survives failure; released means only a normal holder return. Observation
+has bounded nonzero overhead; no performance or causal claim is made.
+
+Added mock-only tests cover exact/falsy cleanup precedence, failed notices,
+bounded child failure, reader/shape/size/UTF-8/cleanup errors, original request
+identity and headers, strict4xx-versus5xx classification, closed serialization,
+record timing/counts and outer cleanup. Existing assertions remain.
+Only manual source/Git/PowerShell/.NET inspection occurred: no local lint,
+compiler, Node/npm, unit/backend/browser test, probe or install. The candidate
+stops UNSTAGED, with actual validation and independent source review pending.
+
+No publication, Actions operation, artifact/image input, hosted/private/paid/
+provider operation, merge or deployment occurred. Generated types and Stage2
+remain blocked; a new-head CI/Apple cycle needs separate verification and
+permission. Original Save uncertainty/stop-on-recurrence, productionf318/six
+hosted migrations and human/device/saved-only recovery-export release holds
+are unchanged.
+
+## 13 September 2026 - R4 mock typing correction, source only
+
+[The actual R3 cycle result](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5654205492)
+records CI34765493857 attempt1 failing at source
+`aceb74ee2f68144495854fb89bc6e0ff8dc2b944`. Its actual checkout
+`5da9f9834509341f2ef1e1162c3a8e37ba7e3d8b` shared reviewed tree
+`73fdd028b8ae521c52a1e5b57a97789a6bab166e`. App lint passed; typecheck
+reported five implicit-any errors in the added console-call/record mock code.
+These are source defects, not environment failures. Later App checks,
+including unit/browser/visual checks and the Save diagnostic, did not run.
+
+Backend again passed nine-source migration application, populated preservation
+and catalog checks, then rejected a nonmatching HTTP500 in the first held-upload
+phase. The bounded record observed a107-byte JSON object in13ms, with neither
+an exact nor contained Request conflict phrase. It does not disclose the raw
+code/message or establish a root cause. Reader cleanup flags are not independent
+parent-lock release evidence. Later backend/type-generation/upload/parity
+gates did not run; artifacts were zero. Apple34765493868 attempt1 passed
+four generated JPEG and three orientation/composition cases, not device or
+I08 UI acceptance. Both authorized CI cycles are consumed and failed.
+
+[R4 read-only entry](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5654271826)
+and [fresh model attestation/source permission](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5654293594)
+authorize only a routine unit-typing correction and this append. Concrete
+console-call mock signatures use unknown arguments and void results. The
+record helper narrows strings, parses into unknown and reuses its existing
+object guard to return typed records. Indexed record access also uses that
+guard; missing/invalid records reject rather than defaulting or being skipped.
+All existing cases, field/count/timing assertions, exact/falsy failure checks
+and HTTP5xx rejection remain. No suppression, compiler rule, dependency,
+production, SQL, reader/classifier, fixture or workflow change is included.
+
+The entire preceding329636-byte working document and all earlier prefixes
+remain intact; all212 other source paths are frozen. Only manual text/Git/.NET
+checks were performed. Actual R4 typecheck, lint and tests remain unexecuted,
+not inferred passing from source review. The candidate stops unstaged.
+No publication, new CI/Apple budget, Stage2, hosted/provider operation or
+deployment is authorized. Storage diagnosis remains coordinator-owned;
+the observed500 stays failed and no raw response reconstruction or acceptance
+relaxation is part of R4. Original Save uncertainty and every production,
+privacy, paid, device and saved-only recovery/export release hold remain.
+
+### I08 T20 coherent source repair - unexecuted candidate (13 September 2026)
+
+[T20 actual critique and corrected plan approval](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655317164)
+records the retained Anthropic Claude Opus5/high AMEND and binding coordinator
+corrections. [Source-only model attestation](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655347691)
+matches this same persistent GPT-6 Astra writer, local240b8030/tree9103, branch
+drrowdev-item-lifecycle. This append preserves the entire preceding332518-byte
+working document and all five earlier checkpoints; dated evidence is not rewritten.
+
+The nineteen-path candidate addresses R03/R23/R28 and related
+R11/R12/R17/R20/R26/R27. It replaces admission-only reasoning with an immediate
+all-role AFTER/ALWAYS final-publication guard and profile/approval/image/parent
+SHARE NOWAIT locks, fresh eligibility and immutable identity/version/dark flags.
+Standard-upload and singular-delete server operation restrictions preserve owner
+checks. A shared erasable TypeScript singular protocol distinguishes exact
+acknowledged removal, exact missing and hard denial; malformed/unknown/5xx fail.
+Normal callers and mocks are adapted together, without Save/capture/AI changes.
+Only explicit analyzed-Save cancellation blocks finishing accepted Save; no
+analysis call, consent import, provider fallback or post-save worker is added.
+
+The user approved retaining only owner/image UUID pairs until actual Auth-row
+deletion in [the controlling amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655261015).
+Transactional registration preserves replay, rollback and independent cross-owner
+reuse while refusing same-owner legacy image reuse. Profile/wardrobe clearing and
+disabling an account do not delete this registry. No content/timestamp/path/hash
+is added, exposed in client grants, exported or logged. Current-image/checked-Save
+backfill does not prove safety for historical deleted IDs absent from those inputs.
+
+Future defined acceptance includes the real two-owner four-byte ordinary POST
+paused after native permission and actual partial-file metadata readiness, then
+fast-pair Save/Trash/singular deletion/FINISH before slow-body completion. Final
+publication denial, labelled actual catalogprefix0 and normal-owner unreadability
+are required; privileged INSERT or grant readiness is not a substitute. A valid
+pending no-blob marker followed by ordinary legacy deletion preserves pre-BEGIN
+orphan refusal and reversible Restore; cleanup uses the real singular API, not a
+0055 internal-flag override. Runtime identity/config/mount/digest and byte-phase
+proof remain unexecuted. Bounded cleanup/observation faults remain hard failures.
+
+Application source hashes/ACLs and positive catalog properties are pinned.
+The bounded native Storage schema inventory is explicitly REVIEW_REQUIRED;
+unknown incompatible executable/versioning behavior must not be auto-blessed.
+Native Storage55P03/ResourceLocked replaces the source22023/DatabaseError500
+mistake at the Storage boundary only. Both earlier CI cycles remain consumed
+and failed. The observed500 raw body is unknown; no byte-count reconstruction
+or softened classifier is evidence. Original Save uncertainty still requires
+STOP on recurrence.
+
+The user's [remnant decision](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5654674701)
+accepts inaccessible interrupted-upload remnants at Supabase without a verified
+cleanup deadline. It does not accept later publication/readability, accessible
+TUS control metadata, failed accessible deletion, physical-purge claims, queued
+cleanup as proof, or an indefinite visible deletion hold. Historical TUS JSON/
+companion authorization exposure needs exact cutover evidence; it is not a
+verified cross-owner/anonymous exploit. Old inflight requests, absent historical
+identities, exact deployed backend companions and vendor-trigger privileges/
+upgrades remain open hosted gates. The vendor-table trigger exception is source
+only, not hosted DDL approval.
+
+Only manual text/Git/.NET source checks are permitted here. No Node/npm/compiler,
+lint, tests, backend/browser probe, install, Actions/log/artifact/image access,
+staging/commit/push or hosted/provider/deployment operation was run for this
+candidate. Defined tests are not passing runtime evidence. Actual generated
+public types, all preceding backend gates, exact-head CI/Apple, independent final
+review and Stage2/visual/device acceptance remain pending. Four public lifecycle
+signatures are unchanged; types are not hand-authored. The complete candidate
+must remain unstaged for coordinator source review and later separate authority.
+
+### I08 T21 confirmed source corrections (13 September 2026)
+
+[T21 disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655669664)
+authorizes routine corrections under the same T20 receipt and nineteen-path plan.
+[Pinned native wire evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655552023)
+establishes final HTTP error fields `not_found` for NoSuchKey and `Unauthorized`
+for AccessDenied. The shared classifier, intended native mocks, caller assertions
+and API documentation now use those exact fields. Counterfeit code-as-error
+envelopes remain rejected, not compatibility aliases. Exact200 success, distinct
+missing, hard denial and malformed/unknown/5xx failures are unchanged; the existing
+adapter's extra range field remains accepted. Only the new rejected-settlement
+mock uses an unrelated73-byte count; actual107-byte history is untouched.
+
+The migration and two lifecycle session mjs files are formatted to the existing
+LF contract with canonical-before/after equality, without attribute or test
+normalization changes. The entire337325-byte prior candidate and all six older
+phase prefixes remain intact. The rehearsal's semantic content is temporarily
+frozen pending coordinator reconciliation of T21 A1; no unconditional response
+resolution or termination-observation relaxation is introduced. N4's speculative
+catalog relaxation is not adopted. These are source corrections only: no runtime,
+test, compiler, backend, Actions, publication or hosted operation was executed.
+The candidate remains unstaged; actual validation and Stage2 remain held.
+
+[T21 final disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655702583)
+withdraws A1: existing request-error and close observations settle the respective
+promises; cleanup, events, timers and N4 assertions remain unchanged. The released
+C1 correction changes only the child's final-denial error field to `Unauthorized`,
+retaining HTTP400, statusCode403, codeAccessDenied, messageNot available and all
+other checks. Its exact inverse restores the reviewed rehearsal bytes/hash/blob.
+N2 is qualified: the real INSERT permission probe also runs the AFTER guard;
+previously admitted uploads require the distinct final-publication check.
+The full338968-byte prior phase candidate and seven older prefixes are preserved.
+This is source-only evidence, not runtime identity or termination proof. No tests
+or execution were run; the complete candidate remains unstaged and Stage2 held.
+
+### I08 T23 bounded startup diagnostic - source only (13 September 2026)
+
+[Third-cycle terminal evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655881258)
+records CI34779824003 attempt1 failed and Apple34779824006 attempt1 passed at
+source f60733cad8a0983b7decf50ef9b4624c7c4bb4f4, actual checkout0e2c59f11bfa35c56f1d2e207218ff46ecbef6c6/tree d5116b23102413f728dcb54958a414f3eabca2fa.
+App passed1884 units and621 browser cases with4 existing skips; Apple passed7
+cases. The original Save failure did not recur, which does not establish a fix.
+The [coordinator's synthetic artifact verdict](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655929995)
+records17 byte-identical prior views reused and one changed image actually
+reviewed, with no blocking visible regression on those existing surfaces.
+This writer read only the text receipt, not images, archives or raw job logs.
+
+Database startup failed with SQLSTATE42501, stderr11805bytes and seven known
+announcements/last-known-index7. The prior classifier knew only seven of nine
+filenames; no failing migration, statement, target or privilege cause follows.
+Rehearsal, lifecycle/Storage, normal-owner/backend/recovery/catalog/type gates did
+not run. This third cycle is consumed, not the anticipated final type-parity red.
+
+[Actual T23 critique](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655993126)
+and [framing closure/model attestation/edit permission](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5656047462)
+record retained Anthropic Claude Opus5/high26+8 actual events, binding coordinator
+corrections and five OWN GPT-6 Astra/medium entry events for this persistent
+writer. Four paths only: the startup classifier, matching unit declaration/tests,
+local-backend documentation and this append. All211 other files remain frozen.
+The entire339890-byte preceding working document and eight older prefixes remain
+unchanged. No migration, rehearsal, wrapper, workflow, application or pin changed.
+
+The source adds the exact eighth/ninth announcements and two bounded fields:
+zero-based `stderrStatementIndex`0–9999/null and an eight-value generic permission
+marker. Whole LF/CRLF framing, first severity delimiter, exact42501 suffix and
+message-start-only fixed English prefixes prevent loose substring attribution.
+Malformed/conflicting statement candidates invalidate the ordinal; distinct
+permission categories become multiple. Unsupported/localized message text is
+unclassified, while localized severity is permitted. Unsupported superuser
+inference is omitted. A complete SQL echo can imitate both shapes: neither field
+authenticates a cause, target, failed migration or actual statement execution.
+The ordinal can also refer to injected role/history or reset statements.
+
+Existing eleven-field semantics, own-data/accessor/proxy defenses, failure-only/
+stderr-only activation,16MiB aggregate UTF-8 cap, closed less-than512-byte output
+and wrapper masking/exits/timeouts are preserved. New source-defined cases cover
+thirteen keys, nine announcements, framing/bounds/ambiguity, synthetic11805-byte
+and maximum-bound input, worst-case output, forged shapes and secret canaries.
+These definitions were not executed; manual source/Git/hash checks are not a
+test, compiler or runtime pass. The candidate remains unstaged. Startup cause,
+runtime/catalog/lifecycle/generated types, Stage2, hosted cutover, independent
+final review and human acceptance remain pending; no new run, publication,
+privilege change, paid/provider action or deployment is authorized.
+
+### I08 T23 fixture spelling correction - source only (13 September 2026)
+
+[Fourth-cycle terminal evidence and correction permission](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5656189592)
+records CI34782897424 attempt1 failed and Apple34782897385 attempt1 passed at
+source a94575ebb40789f4d77caa741a2096a0f62a5166. All three jobs used actual
+checkout461305a20b65f14fa8bb936a9ad6d28d23038637/tree c600b3b0fd9260fe61d6376607980ce2808574c4,
+with parents221d60+a945. The fourth cycle is consumed.
+
+App lint failed with two `no-useless-escape` errors at
+`tests/unit/local-backend.test.ts`1137:64/98. Later typecheck, translations, unit,
+build, browser and artifact steps were skipped, not passing. This correction
+removes exactly two unnecessary backslashes before double quotes in the
+single-quoted negative fixture. Its JavaScript string value and unclassified
+expectation remain unchanged; no suppression or assertion weakening was added.
+
+Database startup failed again with wrapper exit2. The actual closed diagnostic
+reported exitCode1, elapsedMs52896, stdoutBytes0, stderrBytes11705, Docker marker
+none, container-exit bucket unclassified, SQLSTATE42501, nine announcements,
+last-known-index9, port markerfalse, statement index24 and owner-required.
+These are untrusted shape observations, not authenticated cause/target evidence.
+The coordinator's proposed statement mapping still needs pinned parser
+confirmation; no raw CLI text or privilege cause is reconstructed here.
+All subsequent rehearsal/reset/integration/security/recovery/runtime/catalog/type
+gates were skipped. The actual artifact inventory was zero.
+
+Apple passed four generated-JPEG cases in17.6s and three orientation/composition
+cases in13.4s, not physical-device, Save or lifecycle acceptance. Prior App/browser
+passes remain historical. This writer read only the sanitized text receipt.
+
+Only this append and the two-character fixture correction changed. The full
+343557-byte preceding phase document and nine older prefixes remain intact;
+all213 other files, including the classifier, SQL and rehearsal, remain frozen.
+Only manual source/Git/hash checks were performed; this correction has not been
+executed. The separate installation-context proposal is not edit authority.
+The candidate remains unstaged; no commit, push, new CI budget, Stage2, hosted
+mutation, provider activity or deployment is authorized.
+
+## I08 T26 CI-only owner installation source amendment - 14 September 2026
+
+[User direction](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659040589),
+[concrete proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659102726)
+and [binding reviewed design](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659205055)
+replace the rejected T25 ordinary-role-switch direction. The retained
+Anthropic Claude Opus5/high critique had25actual events; the coordinator adopted
+its amendments, including the in-module image check and catalog joins that do
+not require private-schema USAGE. This is not runtime approval or a new review.
+[Edit-only release](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659261035)
+records this same writer's9OWN GPT-6 Astra/medium events and independent
+05:02:30.8140799Z source/identity guard at
+a94575ebb40789f4d77caa741a2096a0f62a5166/tree
+c600b3b0fd9260fe61d6376607980ce2808574c4, soleparentf60733c.
+
+The thirteen-path candidate moves only the owner-required Storage ALWAYS
+statement from migration nine to a fixed CI-only installer. All eleven function
+bodies, other SQL, native pins and nineteen evaluated catalog checks remain
+unchanged. The publication body's existing MD5 is now one immutable exported
+constant, interpolated into the unchanged catalog. Ninth source bytes are20525,
+SHA25651529f087b63f99f0645e57f943b2ec041f3a4ccf0440e8c8307ae6721de0143;
+both inventory references change coherently. The integration reader changes
+only its lifecycle hash literal. The accepted two-character quote correction
+in local-backend.test.ts is frozen and retained.
+
+Pure preflight refuses unapproved start/reset/preservation before CLI mutation.
+Only the database job receives the new opt-in; neither stripped environment
+helper nor normal child changes. The installer independently checks local
+target/container and the pinned17.6.1.165 image under CLI-default ECR/GHCR/Hub
+names. Source-only verification used CLI997a1e69's manifest and registry resolver;
+no image was pulled and no backend/transport was probed. Fixed owner TCP,
+catalog identity/body/config/ACL checks, a bounded relation-locked transaction
+and unchanged-metadata comparison allow only O-to-A or already-A verification.
+COMMIT precedes the exact success marker; missing/extra/error/timeout output
+fails without retry. These are source contracts, not observed installation.
+
+Start/reset verify strict A before readiness/provisioning; S1 remains base-only,
+S3 finalizes before target traffic, and types only verifies through the frozen
+postgres helper. The selected owner constrains reviewed code, not Docker's
+superuser-equivalent authentication capability. Intermediate ordinary-only
+trigger state is incomplete isolated setup, not ready or a production waiver.
+New unit/mock/source definitions cover scope/import purity, transport bounds,
+metadata/SQL/refusal/receipt contracts, environment stripping and ordering;
+they have not been executed. Existing ordinary-session and cleanup semantics
+are not relaxed.
+
+Only permitted manual source/Git/.NET byte/hash/diff checks were performed.
+The full346005-byte preceding document and ten older prefixes are preserved.
+The candidate is unstaged; no runtime PASS, fifth cycle, staging/commit/push,
+Node/npm/compiler/test/Docker/psql/probe/install/Actions/artifact/hosted work,
+new agent, generated types, Stage2 or deployment is authorized. Actual
+owner/image/HBA/vendor-trigger compatibility, preservation, normal-owner
+negative/access tests, native late-upload, catalog, generated types and all
+previous acceptance/Save/cutover holds remain pending. Four prior cycles stay
+consumed; hosted ninth installation still needs separately reviewed
+owner/quiescence authority.
+
+## I08 T28 ordinary-session headers and bounded diagnostics - 14 September 2026
+
+[Fifth-cycle terminal evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659993608)
+records CI34812510149attempt1 failing at published
+e32464115cbaf8ea8fa127d9965fdc0b3244fb76/tree
+90b5887c7b9113c3fdc3af6ce83beffcbf55682f. All three jobs actually checked out
+909510ebb3a289d4fad2881c87046f1a4c078c0b, with that tree and parents
+main221d60c8a07eb4a89a546133685b80487cf434be and heade324641; Node24.19.0.
+Database startup/CI owner installation reached readiness. S3 applied all nine
+migrations; preservation2owners/10tables/30rows/8objects, checked Save catalog,
+profile cascade and nineteen I08 catalog predicates passed. Held-parent Storage
+rejectionHTTP400 passed. The broad S4begin-overlap phase and exact lifecycle
+fixture cleanup then failed; snapshot cleanup passed. Later reset, integration,
+security, AI, recovery, types and parity were skipped; no generated types exist
+from this cycle.
+
+App lint/typecheck/translations502keys/52files,2026unit tests/25files, build,
+secret and dependency checks passed. Browser exited0 with620passed,1flaky and
+4oldskips, not an all-clean run. WebKit's existing one/512000-byte boundary test
+received400instead200 on its first attempt and passed its configured retry.
+This remains a separate unresolved browser-wire blocker, not the original
+Save-button recurrence or a PR16 waiver. Apple34812510135attempt1 passed all
+7synthetic cases. Five cycles are consumed; no sixth cycle is authorized.
+
+[Exact e324 catalog/evidence review](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660119420)
+accepted the observed catalog projection, not a complete runtime certificate.
+[Completed existing-image review](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660235899)
+found no blocking visible regression in the18approved synthetic surfaces:
+16byte-identical prior actual views plus two changed images actually reviewed,
+not18fresh views. The final sign-in view is no longer pending. Existing tall
+preview/fine-copy caveats remain. These are historical e324 results, not visual
+or runtime acceptance of this T28 candidate. This writer accessed no images,
+archives, artifacts or raw logs.
+
+[Proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660005552)
+and [binding nine-path disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660219242)
+record retained Anthropic Claude Opus5/high review:14actual events, AMEND adopted
+with M1-M4/N1-N4 corrections. The two additional standalone normal-session
+helpers share the preservation client's automatic bodyless JSON-header defect.
+Pinned Storage/Fastify source establishes parser selection and empty-JSON
+refusal, not the actual unlogged cause of S4's broad failure.
+[Edit-only release](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660296037)
+records this same writer's11OWN gpt-6-astra events and independent source/identity
+guard;10events record medium effort and one omits effort. The writer refreshed
+all217HEAD/index/working canonical blobs, nine raw targets,208outside raw files
+and36regular ancestors at07:10:36.9191537Z before re-reading the full release
+and patching. This is local coordinator-observed evidence, not a native receipt.
+
+The source candidate changes only the three automatic request headers,
+preserving undefined versus null, binary option names, explicit overrides and
+all response/cleanup semantics. New unexecuted preservation tests inspect actual
+outgoing RequestInit and retain strict parser-error refusal; narrow source
+assertions cover the two standalone runners without importing or executing them.
+Fixed lifecycle labels separate held/released BEGIN, unchanged-state check,
+holder release, singular removal, held/released FINISH and final rows; operations
+and primary/cleanup handling do not change. Injected fixture test definitions
+retain exact/falsy errors and stop/cleanup assertions. The existing boundary
+test opts into its existing bounded observer with two fixed result positions
+and a pre-cleanup snapshot; payloads, assertions, traffic, receiver, timers,
+retries and captures remain unchanged.
+
+Only authorized manual source/Git/hash/whitespace checks were performed; no
+Node/npm/compiler/lint/test/browser/backend/Docker/psql/probe/install ran.
+The full349860-byte preceding document and all eleven older prefixes remain.
+All208outside files, nine migrations/hashes/elevenSQLbodies/nineteencatalog,
+installer/native fixtures/types/workflows/product/Save/provider source stay
+frozen. No runtime PASS is claimed. Real bodyless PostgREST, native lifecycle
+and cleanup, browser flakiness, later backend/generated types and other
+normal-owner/manual/device/hosted/cutover gates remain unresolved. Original
+Save STOP-on-recurrence remains. Candidate is unstaged: no object write,
+commit/push, Actions, new cycle/agent, Stage2, paid/private processing,
+hosted mutation, merge or deployment is authorized.
+
+## I08 T29 singular orphan deletion visibility - 14 September 2026
+
+[Sixth-cycle terminal evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660754752)
+records CI34818638302attempt1 failing at source
+1a6bb0d0ddf2fc8d3d733d3b4c4bac3859755f6d/tree
+90e9c4b656e4db8fdfbe1986b12205c35dd24eb9. All three CI jobs checked out
+4c27224848bda470045bff8a35e2dd3f8b47a2e5, that same tree with parents
+main221d60c8a07eb4a89a546133685b80487cf434be and head1a6; Node24.19.0.
+Startup/owner installation, preservation/checked Save and nineteen lifecycle
+catalog checks passed. Both contention fixtures returned. Subsequent catalog
+marker and lifecycle cleanup failed; the first failing HTTP operation and
+response remain unknown. Later reset/integration/security/AI/recovery/generated
+types/upload/parity were skipped. This is not the approved final type-diff red.
+
+App lint/typecheck/translations/build/secret/dependency checks and2048units in
+25files passed. Browser621passed with4oldskips and no retry/flaky summary;
+three existing boundary records showed200/200 for1/512000bytes, without recorded
+rejection, timeout, observer or cleanup failure. A clean run does not establish
+that the separate earlier WebKit400 was fixed. Apple34818638294attempt1 passed
+all7synthetic cases, not physical-device acceptance.
+[Exact1a6 catalog/visual review](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660948869)
+accepted the bounded catalog projection and18existing synthetic surfaces:
+17byte-identical reuses of prior actual views and1actual current view, not
+18fresh views. These are historical1a6 results, not T29 runtime/visual acceptance.
+This writer read only sanitized public text receipts, no logs/artifacts/images.
+
+[Proposal5660878443](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5660878443)
+and [binding disposition5661198540](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5661198540)
+record retained reviewer c372 turn30,13actual Anthropic Claude Opus5/high events
+08:13:19.293-08:21:10.888UTC, AMEND adopted with M1-M5/N1-N5 corrections.
+The critic's statement24 chronology was corrected to cycle4/a945/34782897424,
+not cycle5; no additional owner installation step is introduced.
+[Matching edit-only release5661295740](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5661295740)
+independently records8OWN gpt-6-astra/medium events for this same persistent
+writer,08:33:10.651-08:36:24.538UTC. Supported identity and coordinator source
+guard08:37:35.8880982Z matched. Writer rechecked all217canonical/index entries,
+ten raw targets,207outside raw bytes and36root-inclusive regular directories at
+08:43:17.1869168Z before rereading the complete hash-verified receipt and patching.
+This is local coordinator-observed usage, not tamper-proof/native attestation.
+
+The source-supported SELECT/RETURNING mismatch explains an intended deletion
+path that was blocked; it is not recovered proof of the first runtime failure.
+Only `wardrobe_read` is replaced: existing manifested reads OR existing
+approved-owner canonical-prefix deletion during trusted `storage.object.delete`.
+DELETE/INSERT and all eleven function bodies remain unchanged. Download/sign/
+list/bulk are not granted orphan visibility; direct/privileged SQL GUC capability
+is not claimed impossible. The native operation-function contract now also
+fences SELECT and requires review on future vendor upgrades, without a version
+or installer change here.
+
+The nineteen-key catalog retains independent shape/exact-qual operands and now
+requires the complete three-policy set. Its new deparsed read qual is derived,
+not measured; a false combined boolean cannot by itself localize the mismatch.
+Source units replace old blanket SELECT prohibitions with exact narrow policies.
+Marker helper/caller fixed phases preserve operation/SQL order, exact/falsy
+primary and first cleanup values, and the original cleanup notice. Shared
+real-byte orphan regressions cover normal/spoofed A/B/anonymous read/sign/list,
+own bulk refusal, foreign/anonymous singular refusal and exact owner removal
+followed by status/NoSuchKey absence. They do not manufacture readable orphan
+bytes or claim physical purge. New test definitions remain unexecuted locally.
+
+Current ninth canonical LF is20822bytes/SHA256
+8cc0fc1207737d63b7e1d000fc7471a9941a4833aaebebc75979c498a4d6c476.
+Its two current source fingerprint references and the backend document match;
+the original15332-byte backend pin is explicitly historical. The full354986-byte
+preceding phase record and all12older prefixes remain immutable. Other207files,
+ALWAYS/publication/claim/history bodies, native pins/inventory, owner installer,
+stream/protocol, Save/browser/timers/retries/captures/types/dependencies stay frozen.
+
+Only manual source/Git/hash/whitespace checks are permitted. No local Node/npm/
+compiler/lint/tests/browser/backend/Docker/psql/probes/install or runtime PASS.
+Candidate remains UNSTAGED for source review: no object writes/commit/push,
+Actions/seventh cycle, extra agent/native allocation, Stage2, hosted mutation,
+merge/deploy or paid/private-photo processing is authorized. Six cycles consumed;
+original Save STOP-on-recurrence, separate browser400 uncertainty, real-owner
+lifecycle/cleanup/later backend/types and human/device/hosted/cutover gates persist.
+
+## I08 T30 bounded security diagnosis - 14 September 2026
+
+[Cycle7 terminal5661793018](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5661793018)
+records CI34826747424attempt1 failing at09:17:24UTC for source
+c7ddb349af5ac22f95ebf0eb7c22fa152020caa9/tree
+fdd8f053f93e9cef2583c4f62cb8fa4a7600f312. All three actual job checkouts were
+7dbf8c4bc2331a1b457527961da3393da8e3f611, the same tree with ordered parents
+main221d60c8a07eb4a89a546133685b80487cf434be and headc7; Node24.19.0.
+DB start/rehearsal/reset and full integration for two ordinary owners passed.
+All nineteen evaluated lifecycle catalog checks, contention, publication and
+marker cleanup passed. The new SELECT qual has positive evaluated exact-equality
+evidence, not a separately dumped measured string. The4935-byte native projection
+SHA25613a320de0ac4d372108560857eaf24bbe0e4a1a855003f2b46883779666bd484
+was accepted by coordinator-verified identical-content reuse, not hosted or
+unprojected/image/HBA evidence. Native image/provenance/HBA review remains pending.
+
+Security failed at the coarse `native-operation-boundary` phase. Its actual
+failing owner ordinal, operation and response remain unknown. The preceding
+shared orphan helper in that iteration returned; this does not prove both
+security owners completed. No exact-cleanup failure notice was emitted, which
+does not itself prove physical erasure. App failed only lint at unit262,
+`no-regex-spaces`. Later App/typecheck/units/browser/visual uploads and later
+AI-analysis rehearsal/real types/upload/parity were skipped; artifact inventory
+was zero. This is not the approved final four-RPC type-only difference. Old1a6
+visual acceptance remains historical, not current-head acceptance.
+Apple34826747429attempt1 passed4generated-JPEG plus3orientation/composition tests,
+not physical-iPhone/HEIC/Save/RLS or human acceptance. This writer read only public
+sanitized text receipts, not Actions logs/artifacts/images.
+
+[Proposal5661891889](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5661891889)
+and [binding disposition/edit release5662072605](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5662072605)
+record retained critic c372 turns31/32 AMEND:6actual Anthropic claude-opus-5/high
+events09:32:57.663-09:38:14.068UTC, with M1-M9 adopted and coordinator corrections.
+Fresh OWN attestation records6gpt-6-astra events09:32:40.248-09:34:50.726UTC:
+5medium and1reasoning unspecified/NULL, not6medium. Coordinator supported identity
+and independent source seal09:42:17.8405036UTC matched this persistent writer.
+Writer rechecked all217HEAD/index/working entries,3raw baselines,214outside
+raw manifest,14phase prefixes and36root-inclusive directories at09:48:26.3984329UTC;
+independent Git/REST refs matched at09:48:13.6843869UTC. The full hash-verified
+receipt was reread immediately before the first patch. This is locally recorded
+coordinator-observed usage, not tamper-proof/native-platform attestation.
+
+T30 changes only security observation definitions/call-site labels, focused
+unit definitions plus the equivalent two-space regexp quantifier, and this
+append. The failure-only record has six exact fields: schemaVersion, ownerOrdinal,
+case, stage, status, ok; ten fixed cases, three direct and fifteen opaque stages.
+Fresh per-owner state and same-statement null resets prevent stale attribution.
+Only existing returned bulk/alternate/pending-absence results supply validated
+status/ok; catalog, singular deletion and other helpers stay opaque. Null at a
+direct stage means no returned result was captured, not proof a request reached
+the wire or of any particular failure. The unchanged normal client rejects
+HTTP500+ and other failures before returning; no adapter/catch recovers them.
+The serializer's100..599 bound is not evidence that current HTTP500+ is observed.
+
+Original request tuples/options/order/refusals and byte/row assertions remain.
+Exact outer-phase gating prevents stale evidence from later/cleanup-only failure.
+The original coarse failure/nonzero assignment precedes guarded diagnostic output;
+capture and fixed-notice sink failures cannot replace it or prevent cleanup.
+Closed own-key/data-descriptor/type/null-pair checks reject private/accessor extras;
+JSON is bounded to512UTF8bytes with no CR/LF and exact round-trip validation.
+Focused units are unexecuted definitions and mock-only value-flow examples, not
+native/main execution or privacy proof. No speculative SQL or policy repair.
+
+Full360440preceding raw phase bytes and all13older prefixes stay immutable.
+All214other files, including SQL/eleven bodies/ALWAYS/native pins/installer/
+transport/product/Save/browser/workflow/dependencies/types and blueprint/backend
+docs, remain frozen. Manual source/Git/hash/whitespace review only; no local
+compiler/lint/unit/runtime PASS. Candidate is UNSTAGED for source review.
+No staging/object write/commit/push, eighth cycle/Actions, local runtime/probe/
+install, extra agent/native allocation, Stage2, hosted mutation, merge/deploy or
+paid/private-input work is authorized. Seven cycles consumed; original Save STOP,
+separate browser400 uncertainty, current App/security/later backend/types/visuals,
+native image/HBA and human/device/recovery/export/cutover gates persist.
+
+## I08 T31 bounded TUS fixture response compatibility - 14 September 2026
+
+[Cycle8 terminal5662633020](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5662633020)
+records CI34832111814attempt1 failing for source
+7fa6934d3c4803496108e7d2ea50ee3d5344925b/tree
+a33cf57e2922db8dd8a80e3cdb6bd1a4cd6a41cc. All three actual checkouts were
+c123d825b1c3cfb569dd844feab1e23fa5eede7f with ordered main221/head7fa parents.
+App passed2102units and621browser checks with4existing skips. DB startup,
+rehearsal/reset and ordinary integration for both owners passed; all nineteen
+catalog gates and contention/publication/marker checks passed. Apple passed
+4generated-JPEG plus3orientation/composition checks. These are7fa results,
+not execution of the new T31 definitions.
+
+Security's111-byte failure record identifies ownerOrdinal1,case alternate-tus,
+stage alternate-request,status null,ok null. No returned result was captured;
+neither actual status/body nor cause or even a sent request is established.
+The earlier first-owner checks returned, not both security owners' completion.
+Later AI rehearsal/real types/upload/parity were skipped, not the approved final
+four-RPC type-only difference. Source-confirmed native TUS raw-message responses
+conflict with the client's unconditional non-download JSON assumption, but do
+not prove that parsing caused this particular failure. Source pins are not
+runtime-image provenance. No server/policy defect or literal native403 is inferred.
+
+[Coordinator visual record5662808761](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5662808761)
+accepts7fa's eighteen approved static surfaces using17verified identical-content
+reuses and1actual current coordinator view, not eighteen fresh views. Its retained
+fine-copy/long-form/contrast and human/device limitations still apply. The writer
+read only that public text, never images/archives; this does not accept a future
+candidate/head's visual evidence.
+
+[Proposal5662665403](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5662665403),
+[reconciliation5662808758](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5662808758)
+and [approved disposition/edit release5662899205](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5662899205)
+record actual retained critic c372, Anthropic claude-opus-5/high: turn33 AMEND
+(3events10:45:07.554-10:47:35.930UTC), turn34 ACCEPT of the bounded correction
+(2events10:54:33.749-10:55:51.700UTC). Coordinator adopted M1-M7/N1-N3/N5-N7;
+N4's historical array-type inference is not asserted. The original214manifest
+mismatch was the coordinator's ordering error, not changed source. Explicit
+string[] ordinal paths with invariant decimal/NUL/UTF8 serialization produce
+c331eb731af9ea2821fab88b1cf5f41f57f6cf52d60cabe3164a033c0b6eb55f.
+The first stopped entry did not reach the phase-prefix checks. Corrected entry
+verified all fifteen prefixes; no retroactive first-entry pass is claimed.
+
+Fresh coordinator-observed OWN usage records4gpt-6-astra/medium events
+10:54:02.056,10:54:52.465,10:55:40.215,10:55:45.843UTC for canonicala816.
+Supported canonical app/CLI identity, source/time and branch matching are in
+the release, without borrowing extra active-session fields from writer output.
+This is local telemetry, not tamper-proof/native-platform attestation. Writer
+prepatch seal11:02:51.9765742UTC matched217HEAD/index/working canonical files,
+three W/C/B baselines,214outside raw/canonical files,all fifteen prefixes and
+217regular files/36root-inclusive directories. Independent Git+REST guards at
+11:02:39.8434216UTC matched7fa/main221/draft25; the full hash-verified matching
+receipt was reread immediately before the first patch.
+
+The only transport change is a post-reader raw Buffer exception for exact
+POST + /storage/v1/upload/resumable + binary === true. The boolean pins one
+existing fixture, not a general binary-response rule. Original request options,
+headers/body identity, local/auth gates,15000ms timeout,pre-body500+ rejection,
+204/null/non-null contracts,512KiB ceiling,reader/cancel order and final return
+remain. Empty non204streams and JSON-looking TUS responses stay byte Buffers;
+201 stays ok:true, so the unchanged security caller still refuses success.
+Focused stub definitions use fictional422/201 responses, never recovered native
+statuses. Exact-match exclusions retain strict JSON. Matching TUS boundary,
+network/read/cancel tests retain existing finally precedence: if both read and
+cancel reject, the cancel error wins. Other pre-return failures can still yield
+the same null/null; source compatibility correction is not guaranteed unblocking.
+
+Only preservation.sessions,its existing HTTP unit describe and this append
+change. Full365803preceding phase bytes plus fourteen older prefixes remain
+immutable; all214other files, including the complete security runner/T30observer,
+lifecycle-schema tests,SQL/native/Save/browser/types/workflow/dependencies, stay
+frozen. New tests are UNEXECUTED; only manual source/Git/hash/whitespace review is
+authorized. This UNSTAGED candidate awaits source review, not runtime/privacy
+acceptance. No staging/object write/commit/push/local runtime/probe/install,
+Actions/artifacts/images/hosted/private work,new agent/native allocation,Stage2,
+merge or deployment. Eight cycles consumed; no ninth authorized. Original Save
+STOP,separate browser400 uncertainty,full security/later backend/real types,
+native-image/HBA and human/device/recovery/export/cutover holds persist.
+
+## I08 T32 bounded runtime-reader localization - 14 September 2026
+
+[Cycle9 terminal5663394197](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5663394197)
+supersedes the partial running status in
+[support5663325972](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5663325972).
+CI34838272733attempt1 failed11:36:51UTC for source
+2c5e143a8c57abb65c101aee18db687852be3ea3/tree
+4fe6246b1f20439022a2f37735e6f4a9d1ee372f. All three actual job checkouts were
+a30cb5572115d1a416f288a201cc3464b2cdb90c, ordered main221/head2c5 parents.
+App passed2131units/25files and621browser checks with4skips, not passes.
+DB startup/rehearsal/reset, full ordinary I08 integration for two owners and
+security for two owners plus anonymous passed. Apple passed4generated-JPEG and
+3orientation/composition checks. TUS no longer blocked this run; no actual TUS
+status/body or cycle8 literal cause was recovered.
+
+B1 baseline integration/security children then passed before served-entrypoint
+startup failed. Its readiness record was replacement=false,running=true,
+fresh=false,stable=false,elapsedMs=628,reason=reader-failed,lastHttp=null,
+transportFailure=false. Running=true came through waitForAnalysisHandler after
+at least one successful post-spawn metadata observation, not the baseline-reader
+failure record that hardcodes false. The last successful fields need not describe
+the failing read. No poll count, Docker code, timestamp, race or cause is inferred.
+Authoritative served/catalog work and actual type generation/upload/parity remain
+unproven/skipped as applicable; this is not the final four-RPC type-only exception.
+
+The coordinator accepted the exact4935-byte native structural projection by
+verified identical content, not actual runtime-image/HBA provenance. Current
+eighteen static surfaces were accepted by eighteen verified content reuses
+(seventeen via7fa and one via1a6), not fresh views. This writer read only public
+receipt text, not logs/archives/images. Those2c5 results do not accept this
+candidate or a future head; visual/human/device limitations remain.
+
+[Proposal5663438867](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5663438867),
+[disposition5663537543](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5663537543)
+and [edit release5663598514](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5663598514)
+record actual retained critic c372, Anthropic claude-opus-5/high: turn35 AMEND
+(five events11:51:23.048-11:55:37.965UTC) and turn36 ACCEPT with C1/C2
+(two events12:00:08.625/12:01:55.319UTC). Coordinator adopted M1-M9/N1-N6,
+deferred classification until the primary failure and retained both deadline
+observations. The critic withdrew exclusion of the reader from a missing line
+and inferred iteration counts. Conditional source interpretation is not diagnosis.
+
+Fresh coordinator-observed OWN evidence records five gpt-6-astra/medium events
+11:51:13.993/11:51:30.522/11:52:22.092/11:53:09.026/11:53:14.197UTC,
+canonicala816 with matched app/CLI/workspace/branch/source/time. No extra fields
+were borrowed from writer output. Local telemetry is not tamper-proof/native
+platform attestation. Writer prepatch source seal12:08:40.0782915UTC matched
+217HEAD/index/working canonical entries,three W/C/B baselines,214outside files,
+all sixteen phase prefixes and217regular files/36root-inclusive directories.
+Independent Git+REST guards12:08:23.5013449UTC matched2c5/main221/draft25;
+the full hash-verified matching release was reread immediately before patching.
+
+T32 changes only readAnalysisRuntime's invocation-local failure observation,
+focused additions in the existing bounded-Docker unit describe and this append.
+The B1-RUNTIME-READ record has exactly schemaVersion,step,commandCode,listedState;
+seven fixed steps and at most512UTF8bytes including prefix/LF. No success/absence
+record, global state or retry. Current result/code reset before each command;
+only a result reference is saved after the original post-command deadline check.
+Own-data code classification occurs only after the original failure is caught.
+Accessors are not reinvoked; diagnostic proxy/serialization/output failures cannot
+replace the same thrown value. No raw/private output, IDs, timestamps or hashes
+enter the diagnostic record.
+
+Step means section entered, not a precise failed statement. Pre- and post-command
+deadline errors may both report a call step/null code; null does not prove the
+command was unissued. Code2 may be natural or synthesized for spawn/timeout/
+overflow/signal-null, not a cause. Listed state is only the validated ps sample.
+After valid ps/inspect shapes with ordinary built-ins, runtime-validation points
+to strict StartedAt lexical/fraction/positive-epoch/calendar checks, not an
+observed cycle9 timestamp defect. Validators and all surrounding functions stay
+unchanged, including command arguments,4096bytes,5s-or-remaining/shared60s bounds,
+replacement/freshness/healthy-child/two-probe/identical-metadata and stop precedence.
+
+Reader-failed remains overloaded outside the reader: baseline/second runtime
+validation,spawn inputs,time comparisons,freshness refusal and unexpected errors
+are a non-exhaustive source map. A delivered reader line may precede an outer
+child-health or stop error. Missing output does not exclude the reader because
+diagnostic delivery can fail. No fallback, extra request or expanded log follows.
+New mock definitions pin same-error identity, deadlines, closed protocol/maximum,
+private/proxy/output noninterference and the real reader with a fake owned child
+exiting during the read. A separate FICTIONAL old-running then inspect-failure
+sequence demonstrates stale readiness fields, not the recovered628ms cause.
+
+Full371432previous phase bytes plus fifteen older prefixes remain immutable.
+All214other files, including declarations,T31transport/unit,T30observer,
+SQL/types,AI rehearsal,product/browser/workflow/dependencies, remain frozen.
+New definitions are UNEXECUTED locally. Manual source/textual-equivalence/Git/
+hash/whitespace inspection only; this UNSTAGED candidate awaits source review,
+not runtime/privacy acceptance or guaranteed unblocking. No staging/object write/
+commit/push,local runtime/probe/install,Actions/log/artifact/image/hosted/private
+work,new agent/native allocation,Stage2,merge or deployment. Nine cycles consumed;
+no tenth/rerun. Original SaveSTOP,browser400 uncertainty,native-image/HBA,later
+backend/real types,human/device/recovery/export/final-review/cutover holds persist.
+
+### 14 September 2026 - T33 I08 Stage2 source candidate (not runtime acceptance)
+
+The [corrected Stage1 gate](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5664571822)
+accepts the intended intermediate gate on `033588bec6d75aec45188ff7293fcc14d25175d5`:
+App2179 units/621 browser tests with four retained skips, Apple7, ordinary
+backend/B1/B2/C, the actual four-RPC type artifact, and18 coordinator-accepted
+content-reused visuals. The anticipated final generated-type parity difference
+was not a blanket green-CI claim. Corrected review withdrew the false
+`--no-password`/auth-class claim and invented HBA/DB-digest prerequisites;
+unknown authentication/HBA/credential-source/database/source-image facts remain
+limitations, not newly passed facts or permission to investigate credentials.
+No cycle9 startup cause or fix is inferred.
+
+The [23-path plan](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5664983574),
+[actual retained Anthropic Claude Opus5 T39 critique and binding dispositions](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5666571286),
+and [matching coordinator-observed local model/edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5666668828)
+authorize this one unstaged candidate in the same GPT-6 Astra writer. Requirements
+R03/R23/R28 and the relevant R11/R12/R17/R20/R26/R27 boundaries are addressed by
+integrated Trash, eight-second owner-memory Undo, server-checked seven-day Restore,
+named permanent-delete confirmation and explicit checked/resumable deletion.
+Unconfirmed mutations retain their intent; absent rows never prove byte erasure.
+The first production consumer of the frozen singular Storage helper uses the
+configured API origin, ordinary session, no-body DELETE and raw parsed JSON.
+Malformed/unread/oversized replies are safe unconfirmed failures, not fabricated
+classifier data. Work is bounded to30 seconds,4096-byte replies and40-row/path
+batches; no explicit auth-refresh fallback, automatic destructive resend or AI call.
+Nullable RPC coherence is validated separately from exact generated declarations.
+
+The candidate also wires list status, dirty/owner/route cancellation, per-path
+cache invalidation with generation/identity-safe cleanup and concurrency4, and
+EN/FI/SV copy. Focused unit and browser definitions cover the boundaries.
+Independent real-page cases use per-case ordinary fixtures/sessions, bounded
+setup/cleanup within the unchanged120-second test budget, authenticated PAGE
+DELETE proof, actual upstream response loss and missing-on-reload/resume.
+Their cleanup retains expected used-ID markers; it does not delete Auth accounts
+or assert whole-private-baseline erasure. Actual execution must establish fitness
+within those budgets; no timing guarantee is claimed.
+
+Only the literal WebKit/local selectors and four-PNG upload addition are changed.
+All four future I08 captures belong exclusively to exact project `chromium`,
+at1280/320 EN/FI, with each PNG bounded to1MiB; all18 prior capture definitions
+remain unchanged. New-file flakiness blocks acceptance. The existing18 visual
+acceptances are not automatic acceptance of this future candidate.
+
+Validation at this point is manual source/diff/byte/hash/whitespace inspection
+only. New tests are **UNEXECUTED locally**; no compiler, parser, lint, runtime,
+backend or browser execution was authorized. The adopted actual generated text
+is26875 canonical LF bytes/SHA256
+`63cca6eb5af1a341956310932034bef654665e4b9146a260bec291574cd90e5b`.
+The previous378095 raw phase bytes and all16 older prefixes remain immutable;
+the200 outside files remain frozen. No staging, object write, commit, push,
+Actions, artifact/image review, hosted/private mutation, new agent, merge or
+deployment accompanies this candidate. Ten cycles spent; no11/rerun is released.
+Source review and separate exact-head execution, zero-type-diff/live/App/Apple/
+22-image/final-review/normal-merge-main gates remain, along with SaveSTOP,
+browser400 uncertainty, human/device/account-deletion/recovery/export/paid/
+hosted/cutover holds. Productionf318 and the six hosted migrations are unchanged.
+
+#### T33 routine correction batch after T40 source review
+
+The [completed T40 review and binding coordinator disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5668793354)
+authorize one unstaged correction batch in the same writer and23-path scope,
+under the existing model/edit attestation. T33 names the writer packet, T39 the
+plan critique and T40 the actual retained Anthropic Claude Opus5 source review.
+Read-only Refresh now preserves unresolved intents and row locks; reconnect
+preserves successfully loaded pages while first offline entry still loads on
+reconnect. Confirmation construction is caught inside the admitted action after
+closing the dialog. Known cleanup-blocked status uses the approved neutral
+EN/FI/SV limitation, without claims about prior/concurrent effects or recovery.
+The requested-order mock comparator is ordinal. Focused regression definitions
+exercise those paths, owner reset and singular DELETE transport failure without
+subsequent path requests or FINISH. No clock or photo-version/history/warning
+rewrite accompanies this batch.
+
+The requirement mapping above is scoped: this packet contributes I08 lifecycle
+actions to R03, destructive concurrency/retry handling to R23, and preserves R28
+explicit-Save, saved-only and no-AI-mutation boundaries. Supporting
+R11/R12/R17/R20/R26/R27 remain relevant; R20 here is seven-day Trash/Restore,
+not completed backups or quarterly restore. No full R03/R28, Phase0 or MVP
+acceptance is claimed. Four token-shaped lines remained semantically withheld
+from the reviewer; hashes are not semantic proof and no bypass is authorized.
+All new tests remain **UNEXECUTED** pending separate execution authority.
+Only static source/diff/byte checks are permitted. The17 original phase prefixes,
+exact generated types,200 frozen files and18+4 capture bounds remain unchanged.
+Source review, exact-head execution/visual acceptance and all previously stated
+holds remain; ten cycles/no11/rerun, no staging/commit/push/merge/deploy.
+
+#### 14 September 2026 - cycle11 repair source, execution pending
+
+[Cycle11 evidence and repair proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5669937352)
+record lint failure and two new live-page failures on38c4/tree49a2, with ordinary
+cleanup verified in both wrappers; Apple7 passed. All three checkout objects
+were coordinator-verified as cb9f/tree49a2 with ordered main221/head38c4 parents.
+Later App checks/browser/22visuals and backend security/types were skipped.
+The original live exceptions remain unknown: branch labels do not prove DELETE.
+
+[Independent Anthropic Claude Opus5 repair-plan acceptance and disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5670094345)
+and [current GPT-6 Astra repair-task model/edit receipt](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5670197301)
+authorize only this four-file unstaged repair. The flagged Trash effect uses its
+stable run alias; both test helpers scope the exact Trash link to the account
+popover, preserving legitimate Undo navigation. The fixture asserts one scoped
+target and exercises both visible links. The live test keeps strict click without
+an extra count probe. Separate granular main/proof/cleanup checkpoints retain
+first failures privately and emit at most one bounded failure-only diagnostic,
+never raw exceptions, tokens, identifiers or DOM. Existing assertions, one-shot
+transport, timeouts, retries and cleanup remain; no original cause is recovered.
+
+These corrections are **UNEXECUTED**. All19 phase prefixes, exact generated types,
+other19 Stage2 files and200 outside files, capture suffix/22bounds and four
+withheld-line qualifications remain preserved. Eleven cycles consumed; no12 or
+rerun is released. Source review and all runtime/visual/type/security, normal
+merge/exact-main and previously recorded human/hosted/cutover gates remain.
+
+#### 15 September 2026 - cycle12 compiler correction, execution pending
+
+[Cycle12 results](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5674670059)
+record lint PASS on95fae9c/treeca827, but the first reached Stage2 typecheck
+failed with eight diagnostics. Later App checks and22visual captures were skipped.
+Real Supabase integration (including3live tests), security, preservation,
+rehearsals, generated-type parity and Apple7 passed. Coordinator
+[artifact/catalog verification](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5674838721)
+does not require a type/source change or establish future-head acceptance.
+
+The [reviewed five-path amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5674799145)
+and [current GPT-6 Astra edit receipt with corrected line74 preservation](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5674869284)
+control this unstaged correction: registered UI error keys, a mock row string
+guard, one captured/narrowed header value and a guarded history snapshot.
+Raw denial sentinel input and all uncertainty arguments remain, including
+work.changed at74. Unit expectations distinguish exact denial from all seven
+unknown replies and pin foreign-epoch/read and changed-owner/begin failures.
+Each response case retains one DELETE/no FINISH; owner checks retain their
+existing request restrictions. No new visible-copy change is claimed.
+
+Three problematic expressions existed in original Stage2; header extraction
+is newer, but the prior inline form's typecheck was never executed, so compiler
+regression attribution is not settled. These corrections are **UNEXECUTED**;
+passing cycle12 live tests did not recover the old exceptions or exercise every
+failure diagnostic. All20 phase prefixes, other18 Stage2+200outside files,
+exact types,22capture bounds and originalfour redactions plus unread217 remain.
+Twelve cycles consumed; no13/rerun. Scoped-delta review and remaining App/visual,
+final-review/normal-merge/exact-main/human/hosted/paid/cutover gates remain.
+
+#### 15 September 2026 - cycle13 browser fixture correction, execution pending
+
+[Cycle13 results](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5675285570)
+record lint, typecheck, translations, build, scans and2212unit tests passing
+on005f167/tree7052. Backend integration/security/rehearsals/type parity and
+Apple7 passed; browser results were12failed/4skipped/663passed across three
+projects. Two scenarios stopped at the wardrobe Refresh lookup and two at the
+owner-item title assertion. Later assertions were not reached; all22visual
+gates remain pending.
+
+The [reviewed three-file correction and M1](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5675500983)
+change only two wardrobe lookup keys to the existing accessible name and add
+four schema-default fields to the shared owner-tab fixture. All assertions,
+nine Trash refresh lookups, timing/retry limits and capture behavior remain.
+M1 preserves every non-target item-spec byte, including the complete capture
+declaration and body from262. All21phase prefixes,220other current files,
+199retained historical-outside files and exact generated types are preserved;
+the old200manifest and composite item suffix remain historical evidence.
+
+The [verified evidence supplement](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5675402927)
+records exact types/catalog evidence and distinguishes raw-analysis wire,
+reservation credentials and deliberately failed-write Save handling. These
+are not interchangeable Save proofs or recovery of earlier exceptions.
+This correction is **UNEXECUTED**; later owner/logout and other scenario steps
+may reveal further defects. Thirteen cycles consumed; no14/rerun authorized.
+Scoped-delta review and future-head validation, visual/final-review/normal-merge/
+exact-main/human/device/recovery/export/hosted/paid/cutover gates remain.
+
+#### 15 September 2026 - cycle14 raw-analysis diagnostics, execution pending
+
+[Cycle14 results](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5676028969)
+record green CI on1462efd/tree647faa, including2212unit tests, backend
+integration/security/rehearsals/type parity, three live lifecycle tests and
+Apple7. The four corrected browser scenarios passed all12first attempts.
+Browser output still records1flaky/4skipped/674passed: the WebKit raw-analysis
+response sequence received400 instead of504 on its third request. The receiver
+observed an empty completed body and rejected it before the analysis callback.
+The retry pass does not satisfy the no-new-flakiness gate; the cause is unknown.
+
+[Coordinator visual acceptance](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5676139788)
+covers all22approved surfaces at1462: six inspected images and16verified
+identical-content reuses. It is not automatic future-head or device acceptance.
+The [distinct diagnostic evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5676169103)
+separates raw-analysis boundaries, reservation credentials and deliberately
+failed-write Save handling; none proves successful persisted Save or recovery
+of earlier exceptions.
+
+The [reviewed diagnostic amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5676448136)
+adds sequence-only, bounded observations of constructed Blob size, intercepted
+body representation and receiver framing/stream properties. Other helper result
+shapes, request bodies, owner/error/cleanup guards and capture limits remain.
+Independent route/receiver POST ordinals do not prove a shared TCP connection.
+API-absent bodies or framing alone do not identify a browser/transport cause;
+instrumentation may affect timing, and nonrecurrence is not causal recovery.
+The new diagnostics are **UNEXECUTED**, not a transport fix or acceptance waiver.
+All22prior phase prefixes and220other files remain frozen. This supports
+R03/R23 integration evidence and preserves R28 explicit-Save boundaries.
+Fourteen cycles consumed; no15/rerun, commit/push, merge or deployment authorized.
+Retained-delta review, future-head validation and all human/device/account
+deletion/recovery/export/hosted/paid/cutover gates remain.

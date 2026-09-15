@@ -63,6 +63,94 @@ A publishable key is safe only with correctly enforced RLS. Allowlist `VITE_SUPA
 
 ## Deletion and recovery
 
+### I08 ordinary-item deletion boundary - unexecuted source candidate
+
+The ninth lifecycle migration uses an owner-only private live-item claim,
+not a public item flag or another copy of garment fields/photos. Its request UUID,
+original expected version and server start time persist only while that live
+item has unfinished deletion. The claim is not a completed receipt, export
+member or log entry. It has no client table grants/policies, automatic purge or
+independent profile cascade.
+
+After explicit BEGIN, item/image mutation and Restore are refused; partial byte
+removal retains the frozen metadata and can resume using the same nonce and
+original/current versions. Private SECURITY DEFINER guards use fresh visibility
+of claims and Storage even for ordinary raw DELETE, so RLS-hidden orphan objects
+cannot masquerade as an empty prefix. An all-role immediate AFTER/ALWAYS
+publication guard holds profile/approval/image/parent SHARE locks through commit,
+not merely through the earlier permission probe. It checks the exact pending
+image/path/owner and live parent, cancellation and claim state; identity/version/
+versioning replacement is refused. The final parent UPDATE lock therefore
+protects the ordinary final-publication boundary.
+Completion requires an empty entire literal item prefix before the metadata
+cascade. Generic absent is deliberately not a byte-deletion receipt.
+
+Permanent item deletion removes the garment record and its registered photos;
+**wear history retains the recorded garment name and category** with a null
+item link. Current outfit links and impossible feedback follow their existing
+cascades. The later named confirmation must say this naturally in English,
+Finnish and Swedish and distinguish this operation from whole-account deletion.
+No promise is made to erase historical text, external exports or provider backups.
+
+Unclaimed legacy operations remain supported. An initial unmanifested-prefix
+case blocks permanent BEGIN without changing rows/versions; reversible
+Trash/Restore remains possible within its window. I10 orphan cleanup is not
+implemented. No scheduler, provider call or global raw-DELETE redesign is hidden
+in I08. T29's replacement SELECT policy supplies only the existing approved-owner
+canonical-prefix predicate during native singular deletion, alongside unchanged
+manifested reads. The trusted native operation is not taken from client headers;
+orphan download/sign/list, own bulk deletion and foreign/anonymous singular
+deletion remain excluded. This is not protection against privileged/direct SQL
+holders setting GUCs. The pinned operation-function dependency now covers both
+read and delete and must be re-reviewed on vendor upgrades. The derived catalog
+qual is not yet a measured runtime pin. New normal-session real-byte assertions
+retain strict `removed` acknowledgements followed by absence, never equate
+prior RLS-hidden GET with deletion, and reject5xx or malformed success evidence.
+They are source definitions, not a completed runtime/privacy acceptance claim.
+The normal deletion controller's bytes-first account sequence remains;
+a privileged profile deletion which bypasses it may now be refused while a
+claimed item's objects remain. Structural cascade checks are not account-journey
+acceptance.
+
+Future CI includes positive private-schema/grant/trigger/policy catalog checks,
+ordinary A/B/anonymous assertions and exact retained-photo/history/peer checks.
+Separately labelled CI-only setup may hold one exact disposable item-row lock or
+insert one exact canonical catalog marker for a valid pending fixture image.
+The marker has no blob. It is created only for a legitimate pending image before
+BEGIN, passes the publication guard, and becomes an orphan through ordinary
+unclaimed legacy deletion. Recreated-item BEGIN must refuse it without an
+irreversible claim; Restore remains possible. Cleanup requires a real singular
+owner API acknowledgement and labelled catalog1-to-0 verification, never a
+0055 protection-flag override. The setup never serves as the access-assertion
+identity, and exact cleanup failure fails the gate.
+
+The approved image-ID registry retains only owner/image UUID pairs, inaccessible
+to clients and absent from exports/logs, until actual Auth-row deletion. It
+survives profile/wardrobe clearing and identity disabling. These pseudonymous IDs
+are not anonymous data. Existing checked-Save replay and transactional rollback
+remain valid; same-owner legacy image-ID reuse no longer is. Missing pre-cutover
+deleted IDs are not recovered by backfill and remain an explicit rollout hold.
+
+Published objects require individually verified singular deletion. The user
+accepted inaccessible interrupted-upload remnants at Supabase **without a
+verified cleanup deadline**, not physical purge, queued-cleanup proof or an
+indefinite visible deletion hold. Preventing later publication/readability is
+mandatory. Historical TUS JSON/other companion metadata has potential
+authorization exposure requiring exact cutover verification; this is not a
+verified cross-owner or anonymous exploit. Such accessible metadata is not
+covered by the remnant acceptance and must not be relabeled as backups.
+
+The source-only vendor-table trigger exception is approved; actual catalog,
+backend identity, upgrade behavior and hosted privilege/cutover evidence remain
+separate gates. No hosted DDL or privileged bypass is authorized.
+
+The T26 disposable-CI installer uses one fixed Storage-owner connection solely
+to finalize and verify the exact ALWAYS guard; ordinary-session assertions
+remain separate. Docker/loopback trust is superuser-equivalent capability:
+selecting the owner constrains reviewed code, not authentication authority.
+An ordinary-only intermediate trigger is incomplete setup, never readiness
+or a production waiver. Hosted owner/quiescence cutover remains blocked.
+
 The reviewed PR #17/A1 checked-manual-Save source candidate retains a minimal
 private retry guard after item/image cleanup: exactly three UUIDs
 `owner_id,item_id,image_id`, unique per owner, with no timestamps, status,

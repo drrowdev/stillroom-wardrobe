@@ -7,7 +7,7 @@ validateSessionEnvironment(process.env);
 
 export default defineConfig({
   testDir: './tests/integration',
-  testMatch: 'recovery.spec.ts',
+  testMatch: ['recovery.spec.ts', 'item-lifecycle.spec.ts'],
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,

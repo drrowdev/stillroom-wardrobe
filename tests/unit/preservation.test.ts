@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { deleteWardrobeObject } from '../../src/data/storage-delete';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
 import { MIGRATIONS, assertRehearsalEnvironment, validateInventory, assertMigrationInventory, assertCapabilities, parseMigrationHistory, assertHistory, assertHistoryResult, historyFailureDetail, exportBodyEvidence } from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
@@ -23,7 +24,7 @@ type OwnerData = { label: string; ownerId: string; tables: TableRows; objects: [
 type ObjectEvidence = { path: string; bytes: number; sha256: string };
 type Snapshot = {
   schemaVersion: number; projectId: string; stage: string; run: string;
-  sources: { base: string; target: string; description: string; collections: string; controls: string; save: string; analysis: string; analyzedSave: string }; owners: string[];
+  sources: { base: string; target: string; description: string; collections: string; controls: string; save: string; analysis: string; analyzedSave: string; lifecycle: string }; owners: string[];
   data: [OwnerData, OwnerData];
 };
 const sha = 'a'.repeat(64);
@@ -107,6 +108,7 @@ const baseTable = [
   '   `20260910070000` | ` `              | `2026-09-10 07:00:00` ',
   '   `20260911040000` | ` `              | `2026-09-11 04:00:00` ',
   '   `20260911200000` | ` `              | `2026-09-11 20:00:00` ',
+  '   `20260913120000` | ` `              | `2026-09-13 12:00:00` ',
   '',
   '',
 ].join('\n');
@@ -123,6 +125,7 @@ const targetTable = [
   '   `20260910070000` | `20260910070000` | `2026-09-10 07:00:00` ',
   '   `20260911040000` | `20260911040000` | `2026-09-11 04:00:00` ',
   '   `20260911200000` | `20260911200000` | `2026-09-11 20:00:00` ',
+  '   `20260913120000` | `20260913120000` | `2026-09-13 12:00:00` ',
   '',
   '',
 ].join('\n');
@@ -143,11 +146,11 @@ describe('CI-only preservation guards', () => {
       expect(() => assertRehearsalEnvironment({ ...validEnv, [key]: 'fictional-refused' }, [])).toThrow();
     }
   });
-  it('pins exactly eight regular migrations, preserving all seven earlier lengths and hashes', async () => {
-    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000']);
+  it('pins exactly nine regular migrations, preserving all eight earlier lengths and hashes', async () => {
+    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000']);
     expect(() => validateInventory(inventory())).not.toThrow();
     await expect(assertMigrationInventory()).resolves.toBeUndefined();
-    for (const index of [0, 1, 2, 3, 4, 5, 6, 7]) for (const [key, value] of [
+    for (const index of [0, 1, 2, 3, 4, 5, 6, 7, 8]) for (const [key, value] of [
       ['name', 'unexpected.sql'], ['bytes', 0], ['bytes', present(inventory()[index]).bytes + 1],
       ['sha256', 'b'.repeat(64)], ['regular', false], ['symlink', true],
     ]) {
@@ -185,8 +188,8 @@ describe('CI-only preservation guards', () => {
     expect(() => assertCapabilities([{ code: 0, stdout: '  --local\n' }, ...help.slice(1)])).toThrow();
   });
   it('parses source-derived applied/pending tables without claiming execution', () => {
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000'] });
-    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000'], pending: [] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'] });
+    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'], pending: [] });
     expect(() => assertHistory(targetTable, 'base')).toThrow();
     expect(() => assertHistory(baseTable, 'target')).toThrow();
     expect(() => assertHistory(baseTable, 'other')).toThrow();
@@ -197,7 +200,7 @@ describe('CI-only preservation guards', () => {
   it('retains SOURCE-DERIVED renderer padding, widths and decorative blank lines', () => {
     for (const table of [baseTable, targetTable]) {
       const lines = table.split('\n');
-      expect(lines).toHaveLength(14);
+      expect(lines).toHaveLength(15);
       expect(lines.slice(0, 2)).toEqual(['', '  ']);
       expect(lines.slice(-2)).toEqual(['', '']);
       for (const line of lines.slice(2, -2)) {
@@ -269,7 +272,7 @@ describe('CI-only preservation guards', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe('EVIDENCE_REQUIRED');
     expect(historyFailureDetail(failure)).toBe(`; reason=${reason}`);
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'] });
   });
   it('distinguishes history command failure without forwarding command output or arbitrary errors', () => {
     const privateText = 'arbitrary upstream text /private/fixture-path';
@@ -361,6 +364,216 @@ describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
   const empty = () => new Response(null, { status: 204 });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  it('retains fictional TUS 422 bytes and exact outgoing request without recovering a native response', async () => {
+    const body = new Uint8Array([0, 255]), raw = Buffer.from('Fictional refusal');
+    const headers = { 'Content-Type': 'application/offset+octet-stream', 'Tus-Resumable': '1.0.0', 'Upload-Length': '2' };
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(raw, {
+      status: 422, headers: { 'content-range': '0-0/1' },
+    }));
+    vi.stubGlobal('fetch', fetch);
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    const result = await client().request(owner.token, '/storage/v1/upload/resumable', { method: 'POST', body, binary: true, headers });
+    expect(result).toEqual({ ok: false, status: 422, data: raw, range: '0-0/1' });
+    expect(Buffer.isBuffer(result.data)).toBe(true);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(timeout.mock.calls).toEqual([[15_000]]);
+    const [url, init] = present(fetch.mock.calls[0]);
+    expect(url).toBe(env.SUPABASE_URL + '/storage/v1/upload/resumable');
+    expect(init).toEqual({
+      method: 'POST', cache: 'no-store', redirect: 'error', signal: expect.any(AbortSignal),
+      headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY, Authorization: 'Bearer ' + owner.token, ...headers }, body,
+    });
+    expect(init?.body).toBe(body);
+  });
+  it.each([
+    { label: 'JSON-looking refusal', raw: Buffer.from('{"fictional":true}'), status: 422, ok: false },
+    { label: 'empty non-204 stream', raw: Buffer.alloc(0), status: 422, ok: false },
+    { label: 'fictional successful response', raw: Buffer.from('Fictional success'), status: 201, ok: true },
+  ])('keeps $label as a TUS Buffer without normalizing status or ok', async ({ raw, status, ok }) => {
+    respond(new Response(raw, { status }));
+    const result = await client().request(owner.token, '/storage/v1/upload/resumable', {
+      method: 'POST', body: new Uint8Array([0]), binary: true,
+    });
+    expect(result).toEqual({ ok, status, data: raw, range: null });
+    expect(Buffer.isBuffer(result.data)).toBe(true);
+    expect(result.data.length).toBe(raw.length);
+  });
+  it.each([
+    { label: 'lowercase method', method: 'post' },
+    { label: 'mixed-case method', method: 'Post' },
+    { label: 'PUT method', method: 'PUT' },
+    { label: 'GET method', method: 'GET' },
+    { label: 'trailing slash', route: '/storage/v1/upload/resumable/' },
+    { label: 'query', route: '/storage/v1/upload/resumable?unit=1' },
+    { label: 'child', route: '/storage/v1/upload/resumable/unit' },
+    { label: 'lookalike', route: '/storage/v1/upload/resumable-other' },
+    { label: 'false binary', binary: false },
+    { label: 'omitted binary', binary: undefined },
+    { label: 'numeric binary', binary: 1 },
+    { label: 'string binary', binary: 'true' },
+  ])('retains strict JSON outside the exact TUS fixture: $label', async (variant) => {
+    const { method = 'POST', route = '/storage/v1/upload/resumable', binary } = { binary: true, ...variant };
+    respond(new Response('Fictional non-JSON refusal', { status: 422 }));
+    await expect(client().request(owner.token, route, { method, ...(binary === undefined ? {} : { binary }) }))
+      .rejects.toThrow('EVIDENCE_REQUIRED');
+  });
+  it.each(['/rest/v1/items', '/auth/v1/token?grant_type=password', '/rest/v1/rpc/save_outfit', '/storage/v1/object/wardrobe/unit'])(
+    'preserves ordinary JSON requirements for %s', async (route) => {
+      respond(new Response('Fictional non-JSON refusal', { status: 422 }));
+      await expect(client().request(owner.token, route, { method: 'POST', binary: true })).rejects.toThrow('EVIDENCE_REQUIRED');
+      respond(json({ fictional: true }));
+      await expect(client().request(owner.token, route, { method: 'POST', binary: true }))
+        .resolves.toEqual({ ok: true, status: 200, data: { fictional: true }, range: null });
+    },
+  );
+  it('preserves authenticated-download bytes outside the TUS fixture', async () => {
+    const raw = Buffer.from([0, 255, 1]);
+    respond(new Response(raw));
+    const result = await client().request(owner.token, '/storage/v1/object/authenticated/wardrobe/unit');
+    expect(result).toEqual({ ok: true, status: 200, data: raw, range: null });
+    expect(Buffer.isBuffer(result.data)).toBe(true);
+  });
+  it('keeps matching TUS 204 bodyless and rejects null non-204 or noncompliant 204 streams', async () => {
+    const options = { method: 'POST', binary: true, body: new Uint8Array([0]) };
+    respond(empty());
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', options))
+      .resolves.toEqual({ ok: true, status: 204, data: null, range: null });
+    respond(new Response(null, { status: 422 }));
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', options)).rejects.toThrow('EVIDENCE_REQUIRED');
+    const response = new Response('Fictional noncompliant stream');
+    vi.spyOn(response, 'status', 'get').mockReturnValue(204);
+    const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+    respond(response);
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', options)).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(getReader).not.toHaveBeenCalled();
+  });
+  it('retains the exact 512KiB TUS byte ceiling and cancels after completion or overflow', async () => {
+    const raw = Buffer.alloc(MAX_SNAPSHOT_BYTES, 255);
+    const response = new Response(raw), stream = present(response.body ?? undefined), reader = stream.getReader();
+    const cancelled = vi.spyOn(reader, 'cancel');
+    vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+    respond(response);
+    const options = { method: 'POST', binary: true, body: new Uint8Array([0]) };
+    const result = await client().request(owner.token, '/storage/v1/upload/resumable', options);
+    expect(Buffer.isBuffer(result.data)).toBe(true);
+    expect(result.data).toEqual(raw);
+    expect(result.data.length).toBe(MAX_SNAPSHOT_BYTES);
+    expect(cancelled).toHaveBeenCalledOnce();
+    const cancel = vi.fn();
+    respond(new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(raw); controller.enqueue(new Uint8Array(1)); },
+      cancel,
+    })));
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', options)).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+  it.each([500, 503])('rejects matching TUS %s before accessing its reader', async (status) => {
+    const response = new Response('Fictional server failure', { status });
+    const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+    respond(response);
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', {
+      method: 'POST', binary: true, body: new Uint8Array([0]),
+    })).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(getReader).not.toHaveBeenCalled();
+  });
+  it.each(['read', 'cancel', 'read-and-cancel'])('preserves matching TUS %s failure and finally precedence', async (failure) => {
+    const response = new Response('Fictional stream'), stream = present(response.body ?? undefined), reader = stream.getReader();
+    const readError = new Error('Fictional read failure'), cancelError = new Error('Fictional cancel failure');
+    const read = vi.spyOn(reader, 'read'), cancel = vi.spyOn(reader, 'cancel');
+    if (failure !== 'cancel') read.mockRejectedValue(readError);
+    if (failure !== 'read') cancel.mockRejectedValue(cancelError);
+    vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+    respond(response);
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', {
+      method: 'POST', binary: true, body: new Uint8Array([0]),
+    })).rejects.toBe(failure === 'read' ? readError : cancelError);
+    expect(read).toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+  it('preserves matching TUS network failure without returning a result or retrying', async () => {
+    const failure = new Error('Fictional network failure');
+    const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(failure);
+    vi.stubGlobal('fetch', fetch);
+    await expect(client().request(owner.token, '/storage/v1/upload/resumable', {
+      method: 'POST', binary: true, body: new Uint8Array([0]),
+    })).rejects.toBe(failure);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it.each(['DELETE', 'GET', 'HEAD'])('omits automatic Content-Type and body for undefined %s bodies', async (method) => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => empty());
+    vi.stubGlobal('fetch', fetch);
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    for (const binary of [false, true]) {
+      await client().request(owner.token, '/rest/v1/items', { method, binary });
+    }
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(timeout.mock.calls).toEqual([[15_000], [15_000]]);
+    for (const [url, init] of fetch.mock.calls) {
+      expect(url).toBe(env.SUPABASE_URL + '/rest/v1/items');
+      expect(init).toEqual({
+        method, cache: 'no-store', redirect: 'error', signal: expect.any(AbortSignal),
+        headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY, Authorization: 'Bearer ' + owner.token },
+      });
+      expect(init).not.toHaveProperty('body');
+      expect(new Headers(init?.headers).has('content-type')).toBe(false);
+    }
+  });
+  it.each([null, { title: 'Fictional transport item' }])('retains JSON headers and serialization for %j', async (body) => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(empty());
+    vi.stubGlobal('fetch', fetch);
+    await client().request(owner.token, '/rest/v1/items', { method: 'POST', body });
+    expect(fetch).toHaveBeenCalledOnce();
+    const init = present(fetch.mock.calls[0]?.[1]);
+    expect(init.body).toBe(JSON.stringify(body));
+    expect(new Headers(init.headers).get('content-type')).toBe('application/json');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer ' + owner.token);
+    expect(init.method).toBe('POST');
+  });
+  it('retains binary body identity, image type and anonymous key headers', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(empty()), body = new Uint8Array([0, 255]);
+    vi.stubGlobal('fetch', fetch);
+    await client().request(null, '/storage/v1/object/wardrobe/unit', { method: 'POST', body, binary: true });
+    expect(fetch).toHaveBeenCalledOnce();
+    const init = present(fetch.mock.calls[0]?.[1]);
+    expect(init.body).toBe(body);
+    expect(init.headers).toEqual({ apikey: env.SUPABASE_PUBLISHABLE_KEY, 'Content-Type': 'image/jpeg' });
+  });
+  it.each([undefined, null, { title: 'Fictional explicit headers' }])('preserves explicit header overrides with body %j', async (body) => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(empty());
+    vi.stubGlobal('fetch', fetch);
+    const headers = { 'Content-Type': 'application/custom', Prefer: 'return=representation', Authorization: 'Bearer explicit-fixture' };
+    await client().request(owner.token, '/rest/v1/items', { method: 'DELETE', body, headers });
+    expect(fetch).toHaveBeenCalledOnce();
+    const init = present(fetch.mock.calls[0]?.[1]);
+    expect(init.headers).toEqual({ apikey: env.SUPABASE_PUBLISHABLE_KEY, ...headers });
+    if (body === undefined) expect(init).not.toHaveProperty('body');
+    else expect(init.body).toBe(JSON.stringify(body));
+  });
+  it('sends singular DELETE without JSON and still refuses an empty-JSON parser error', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      statusCode: 400, error: 'Bad Request', message: 'Body cannot be empty when content-type is set to application/json',
+    }, 400));
+    vi.stubGlobal('fetch', fetch);
+    const transport = client(), objectPath = `${owner.uid}/${run}/${run}/main.jpg`;
+    await expect(deleteWardrobeObject((route, options) => transport.request(owner.token, route, options), owner.uid, objectPath))
+      .rejects.toThrow('error.unavailable');
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0]?.[0]).toBe(env.SUPABASE_URL + '/storage/v1/object/wardrobe/' + objectPath);
+    const init = present(fetch.mock.calls[0]?.[1]);
+    expect(init.method).toBe('DELETE'); expect(init).not.toHaveProperty('body');
+    expect(new Headers(init.headers).has('content-type')).toBe(false);
+  });
+  it('keeps standalone normal-session headers conditional without executing their runners', async () => {
+    const local = await readFile(path.join(root, 'tests/integration/local.sessions.mjs'), 'utf8');
+    const security = await readFile(path.join(root, 'tests/security/rls.sessions.mjs'), 'utf8');
+    expect(local).toContain("...(body === undefined ? {} : { 'Content-Type': binary ? 'image/jpeg' : 'application/json' }), ...headers,");
+    expect(local).toContain("...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) })");
+    expect(local).toContain('deleteWardrobeObject((route, options) => request(owner.token, route, options), owner.uid, objectPath)');
+    expect(security).toContain("...(body!==undefined?{'Content-Type':bytes?'image/jpeg':'application/json'}:{}),...(returnRepresentation?{Prefer:'return=representation'}:{})");
+    expect(security).toContain("...(body!==undefined?{body:bytes?body:JSON.stringify(body)}:{})");
+    expect(security).toContain('deleteWardrobeObject((route,options)=>call(c.token,route,options),c.uid,path)');
+  });
   it('accepts bodyless 204 without reading a nonexistent stream and requires it for commit_image', async () => {
     const response = empty();
     const read = vi.spyOn(response, 'arrayBuffer');
@@ -579,6 +792,7 @@ describe('strict bounded base snapshots', () => {
       { schemaVersion: 2 }, { projectId: 'other' }, { stage: 'target' }, { run: randomUUID() },
       { sources: { ...SOURCE_HASHES, target: sha } }, { sources: { ...SOURCE_HASHES, description: sha } }, { sources: { ...SOURCE_HASHES, collections: sha } },
       { sources: { ...SOURCE_HASHES, controls: sha } },
+      { sources: { ...SOURCE_HASHES, lifecycle: sha } },
       { sources: { base: SOURCE_HASHES.base, target: SOURCE_HASHES.target } }, { owners: [...owners].reverse() },
       { owners: [owners[0], owners[0]] }, { extra: true }, { data: [] },
     ]) expect(() => validateSnapshot({ ...snapshot, ...changes }, run, owners)).toThrow();
@@ -719,9 +933,29 @@ describe('import safety and frozen integration boundary', () => {
     const workflow = await readFile(path.join(root, '.github/workflows/ci.yml'), 'utf8');
     expect(workflow).toContain("      - run: npm run db:start\n      - run: npm run db:rehearse\n        env:\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:reset\n      - run: npm run test:integration\n      - run: npm run test:security\n      - run: node scripts/ai-analysis-rehearsal.mjs\n      - run: npm run db:types");
     expect(workflow.match(/ALLOW_PRESERVATION_REHEARSAL/g)).toHaveLength(1);
+    expect(workflow.match(/ALLOW_CI_STORAGE_GUARD_INSTALL/g)).toHaveLength(1);
+    expect(workflow).toContain("      ALLOW_SECURITY_TESTS: '1'\n      ALLOW_CI_STORAGE_GUARD_INSTALL: '1'");
+    expect(workflow.slice(0, workflow.indexOf('\n  database:'))).not.toContain('ALLOW_CI_STORAGE_GUARD_INSTALL');
+    expect(workflow).not.toContain('GITHUB_JOB:');
     expect(workflow).toContain('timeout-minutes: 30');
     const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     expect(pkg.scripts['db:rehearse']).toBe('node scripts/preservation-rehearsal.mjs');
+  });
+  it('preflights before CLI mutation, skips base S1 installation and finalizes S3 before target traffic', async () => {
+    const source = await readFile(path.join(root, 'scripts/preservation-rehearsal.mjs'), 'utf8');
+    const main = source.slice(source.indexOf('async function main()'));
+    expect(main.indexOf('assertCiStorageGuardInstall();')).toBeLessThan(main.indexOf('await assertProjectConfig();'));
+    expect(main.indexOf('assertCiStorageGuardInstall();')).toBeLessThan(main.indexOf('await cli(args)'));
+    const base = main.slice(0, main.indexOf("stage = 'S3-migration-up'"));
+    expect(base).not.toContain('await installCiStorageGuard();');
+    expect(base).not.toContain('await verifyCiStorageGuard();');
+    const finalized = main.indexOf('await installCiStorageGuard();');
+    expect(finalized).toBeGreaterThan(main.indexOf("await cli(['migration', 'up', '--local'])"));
+    expect(main.indexOf('await verifyCiStorageGuard();')).toBeGreaterThan(finalized);
+    expect(main.indexOf("await history('target');")).toBeGreaterThan(main.indexOf('await verifyCiStorageGuard();'));
+    expect(main.indexOf('ITEM_LIFECYCLE_CATALOG_SQL')).toBeGreaterThan(main.indexOf("await history('target');"));
+    expect(main.match(/await installCiStorageGuard\(\);/g)).toHaveLength(1);
+    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(1);
   });
   it('keeps the normal child free of privileged calls and compares before probes', async () => {
     const source = await readFile(path.join(root, 'tests/integration/preservation.sessions.mjs'), 'utf8');

@@ -2,6 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { isMain } from '../../scripts/quality/files.mjs';
 import { normalClient, requireEvidence } from './preservation.sessions.mjs';
+import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
 
 export const eq = (left, right) => requireEvidence(isDeepStrictEqual(left, right));
 export function equalAiStatusState(left, right) {
@@ -79,9 +80,11 @@ export function saveHarness(client, owner) {
     }
   };
   const remove = async (value) => {
-    const result = await client.request(owner.token, '/storage/v1/object/wardrobe',
-      { method: 'DELETE', body: { prefixes: paths(value) } });
-    requireEvidence(result.ok);
+    for (const path of paths(value)) {
+      await deleteWardrobeObject((route, options) => client.request(owner.token, route, options), owner.uid, path);
+      const absent = await client.request(owner.token, `/storage/v1/object/authenticated/wardrobe/${path}`);
+      requireEvidence(!absent.ok && absent.status < 500);
+    }
   };
   const deleteItem = async (value) => {
     const result = await client.request(owner.token,

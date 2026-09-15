@@ -19,6 +19,9 @@ import type { WardrobeItem } from '../domain/wardrobe';
 import { PrivateImages } from '../images/private-images';
 import { ProfileScreen } from '../features/profile/profile-screen';
 import { LanguageSettings } from '../features/settings/language-settings';
+import { Trash, UndoNotice } from '../features/settings/trash';
+import { ItemLifecycleClient } from '../data/item-lifecycle';
+import { newUndo, type LifecycleSnapshot, type UndoItem } from '../domain/item-lifecycle';
 import type { ProfileRow } from '../data/rows';
 import { PasswordRecovery, RecoveryRequest } from '../auth/password-recovery';
 import {
@@ -59,10 +62,10 @@ function Unconfigured({ status }: { status: Configuration['status'] }) {
   useEffect(() => { document.documentElement.lang = language; }, [language]);
   return <EntryLayout language={language} onLanguage={setLanguage} t={t}><section className="entry-card setup-card"><div className="small-mark"><Icon name="wardrobe" /></div><h1>{t('setup.title')}</h1><p className="muted">{t(status === 'invalid' ? 'setup.invalid' : 'setup.body')}</p><details className="copy-details"><summary>{t('setup.instructions')}</summary><ol className="setup-steps"><li>{t('setup.step1')}<code>npm run db:start</code></li><li>{t('setup.step2')}<code>.env.local</code></li><li>{t('setup.step3')}</li></ol></details><p className="privacy-note"><Icon name="lock" />{t('setup.note')}</p></section></EntryLayout>;
 }
-type WorkspaceRoute = 'wardrobe' | 'add' | 'settings' | `detail:${string}`;
-const routeHash = { wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings' };
+type WorkspaceRoute = 'wardrobe' | 'add' | 'settings' | 'trash' | `detail:${string}`;
+const routeHash = { wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings', trash: '#/trash' };
 function currentRoute(hash = location.hash): WorkspaceRoute {
-  return hash === '#/items/new' ? 'add' : hash === '#/settings' ? 'settings'
+  return hash === '#/items/new' ? 'add' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
     : hash.startsWith('#/items/') ? `detail:${hash}` : 'wardrobe';
 }
 function hashForRoute(route: WorkspaceRoute) { return route.startsWith('detail:') ? route.slice(7) : routeHash[route as keyof typeof routeHash]; }
@@ -72,6 +75,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<MessageKey | null>(null);
   const [notice, setNotice] = useState(false);
+  const [undo, setUndo] = useState<UndoItem | null>(null);
   const [discard, setDiscard] = useState<{ next: WorkspaceRoute; position?: number } | null>(null);
   const discardFocus = useRef<HTMLElement | null>(null);
   const navigation = useRef({ route: currentRoute(), position: Number.isSafeInteger(history.state?.wardrobePosition) ? Number(history.state.wardrobePosition) : 0, restoring: false });
@@ -79,6 +83,13 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   const loadSequence = useRef(0);
   const images = useMemo(() => new PrivateImages(client, scope), [client, scope]);
   const ai = useMemo(() => new AiClient(client, config, scope), [client, config, scope]);
+  const lifecycle = useMemo(() => new ItemLifecycleClient(client, config, scope), [client, config, scope]);
+  const routeLifetime = useRef(new AbortController());
+  const routeSignal = useCallback(() => routeLifetime.current.signal, []);
+  useEffect(() => {
+    const current = new AbortController(); routeLifetime.current = current;
+    return () => current.abort();
+  }, [route]);
   const beforeDiscard = useRef<BeforeDiscard | null>(null);
   const onBeforeDiscard = useCallback((handler: BeforeDiscard | null) => { beforeDiscard.current = handler; }, []);
   const onDirty = useCallback((isDirty: boolean, incomplete: boolean, busy: boolean) => { dirty.current = { dirty: isDirty, incomplete, busy }; }, []);
@@ -151,7 +162,13 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       dirty.current = { dirty: false, incomplete: false, busy: false };
     };
   }, [changeRoute]);
-  useEffect(() => { document.getElementById(route === 'add' ? 'capture-title' : route === 'settings' ? 'settings-title' : route.startsWith('detail:') ? 'item-detail-title' : 'wardrobe-title')?.focus(); }, [route]);
+  useEffect(() => { document.getElementById(route === 'add' ? 'capture-title' : route === 'settings' ? 'settings-title' : route === 'trash' ? 'trash-title' : route.startsWith('detail:') ? 'item-detail-title' : 'wardrobe-title')?.focus(); }, [route]);
+  function trashed(item: LifecycleSnapshot) {
+    dirty.current = { dirty: false, incomplete: false, busy: false };
+    setItems(old => old.filter(value => value.id !== item.id));
+    setUndo(newUndo(item)); setNotice(false);
+    changeRoute('wardrobe'); void refresh();
+  }
   function saved() {
     dirty.current = { dirty: false, incomplete: false, busy: false };
     setNotice(true);
@@ -163,11 +180,16 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       <aside className="workspace-identity" aria-label={t('account.identity')}><span className="identity-dot" />{profile.display_name}<span className="identity-separator" />{t('common.private')}</aside>
       <main id="main" className="workspace-main" tabIndex={-1}>
         {!online && <div className="notice notice-offline" role="status">{t('common.offline')} {t('common.stale')}</div>}
+        {undo && <UndoNotice key={`${undo.item.id}:${undo.item.version}`} undo={undo} visible={route === 'wardrobe'} routeSignal={routeSignal} lifecycle={lifecycle} scope={scope} online={online} t={t} images={images}
+          onRestored={() => { setUndo(null); void refresh(); }} />}
         {notice && route === 'wardrobe' && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('item.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setNotice(false)}><Icon name="close" /></button></div>}
         {route === 'add'
           ? <AddItem client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} />
           : route === 'settings' ? <ProfileScreen client={client} ai={ai} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} />
+          : route === 'trash' ? <Trash lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
+            onBack={() => changeRoute('wardrobe')} onChanged={() => { setUndo(null); void refresh(); }} />
           : route.startsWith('detail:') ? <ItemDetail key={route} client={client} scope={scope} itemId={detailRouteId(route.slice(7))} images={images}
+            lifecycle={lifecycle} onTrashed={trashed}
             t={t} language={language} currency={profile.currency} online={online} onDirty={onDirty} onSaved={() => { void refresh(); }} onBack={() => changeRoute('wardrobe')} />
           : <WardrobeScreen items={items} images={images} loading={loading} error={error} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={() => { void refresh(); }} />}
       </main>
@@ -229,7 +251,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
     <div className="workspace">
       {refusal && <aside className="notice" role="alert"><p>{t(refusal.notice ?? (refusal.kind === 'conflict' ? 'recovery.conflict' : 'recovery.invalid'))}</p><button type="button" className="text-button" onClick={() => leaveRecovery()}>{t('common.close')}</button></aside>}
       <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); document.getElementById('main')?.focus(); }}>{t('common.skipContent')}</a>
-      <header className="workspace-header"><Brand /><nav aria-label={t('nav.wardrobe')}><a className="active-nav" href="#/wardrobe"><Icon name="wardrobe" />{t('nav.wardrobe')}</a></nav><div className="account-controls"><button type="button" className="account-button" aria-expanded={menu} aria-label={t('account.menu')} onClick={() => setMenu(!menu)}><span className="avatar">{state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)}</span><span>{state.profile.display_name}</span><Icon name="chevron" /></button>{menu && <div className="account-popover"><a className="text-button" href="#/settings" onClick={() => setMenu(false)}>{t('nav.settings')}</a><LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} /><button className="text-button" type="button" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div>}</div></header>
+      <header className="workspace-header"><Brand /><nav aria-label={t('nav.wardrobe')}><a className="active-nav" href="#/wardrobe"><Icon name="wardrobe" />{t('nav.wardrobe')}</a></nav><div className="account-controls"><button type="button" className="account-button" aria-expanded={menu} aria-label={t('account.menu')} onClick={() => setMenu(!menu)}><span className="avatar">{state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)}</span><span>{state.profile.display_name}</span><Icon name="chevron" /></button>{menu && <div className="account-popover"><a className="text-button" href="#/settings" onClick={() => setMenu(false)}>{t('nav.settings')}</a><a className="text-button" href="#/trash" onClick={() => setMenu(false)}>{t('nav.trash')}</a><LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} /><button className="text-button" type="button" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div>}</div></header>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online || state.profileSaving} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}
       <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={state.language} online={online} t={t} />
       <footer className="site-footer"><span>Stillroom Wardrobe</span></footer>

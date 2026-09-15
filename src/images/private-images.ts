@@ -5,8 +5,8 @@ import { AppError, requireSuccess, throwIfAborted } from '../data/errors';
 export class PrivateImages {
   private active = 0;
   private queue: Array<() => void> = [];
-  private pending = new Map<string, Promise<string>>();
-  private urls = new Set<string>();
+  private pending = new Map<string, { promise: Promise<string>; controller: AbortController; url: string | null }>();
+  private listeners = new Set<(paths: readonly string[]) => void>();
   private disposed = false;
   private controller = new AbortController();
   constructor(private client: AppClient, private scope: OwnerScope) {
@@ -26,30 +26,55 @@ export class PrivateImages {
       throw new AppError('photo.missing');
     }
     const existing = this.pending.get(path);
-    if (existing) return existing;
+    if (existing) return existing.promise;
+    const lifecycle = this.controller.signal;
+    const controller = new AbortController();
+    const entry = { promise: Promise.resolve(''), controller, url: null as string | null };
     const promise = new Promise<string>((resolve, reject) => {
       this.queue.push(() => {
+        if (controller.signal.aborted || lifecycle.aborted || this.disposed || this.pending.get(path) !== entry) {
+          reject(new DOMException('Cancelled', 'AbortError'));
+          return;
+        }
         this.active++;
-        void this.download(path).then(resolve, reject).finally(() => { this.active--; this.flush(); });
+        void this.download(path, lifecycle, entry).then(resolve, reject).finally(() => { this.active--; this.flush(); });
       });
-      this.flush();
-    }).catch((error: unknown) => { this.pending.delete(path); throw error; });
-    this.pending.set(path, promise);
+    }).catch((error: unknown) => { if (this.pending.get(path) === entry) this.pending.delete(path); throw error; });
+    entry.promise = promise;
+    this.pending.set(path, entry);
+    this.flush();
     return promise;
   }
-  private async download(path: string): Promise<string> {
+  private async download(path: string, lifecycle: AbortSignal, entry: { controller: AbortController; url: string | null }): Promise<string> {
     throwIfAborted(this.scope.signal);
-    const lifecycle = this.controller.signal;
     throwIfAborted(lifecycle);
-    const signal = AbortSignal.any([this.scope.signal, lifecycle]);
+    throwIfAborted(entry.controller.signal);
+    const signal = AbortSignal.any([this.scope.signal, lifecycle, entry.controller.signal]);
     const { data, error } = await this.client.storage.from('wardrobe').download(path, {}, { signal, cache: 'no-store' });
     throwIfAborted(this.scope.signal);
     throwIfAborted(lifecycle);
+    throwIfAborted(entry.controller.signal);
+    if (this.pending.get(path) !== entry) throw new DOMException('Cancelled', 'AbortError');
     requireSuccess(error);
     if (!data || data.type !== 'image/jpeg') throw new AppError('photo.missing');
     const url = URL.createObjectURL(data);
-    this.urls.add(url);
+    entry.url = url;
     return url;
+  }
+  subscribe(listener: (paths: readonly string[]) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+  invalidate(paths: readonly string[]): void {
+    for (const path of paths) {
+      const entry = this.pending.get(path);
+      if (!entry) continue;
+      entry.controller.abort();
+      if (entry.url) URL.revokeObjectURL(entry.url);
+      this.pending.delete(path);
+    }
+    for (const listener of this.listeners) listener(paths);
+    this.flush();
   }
   private flush(): void {
     while (this.active < 4 && this.queue.length) this.queue.shift()!();
@@ -58,9 +83,7 @@ export class PrivateImages {
     this.disposed = true;
     this.controller.abort();
     this.scope.signal.removeEventListener('abort', this.clear);
-    for (const url of this.urls) URL.revokeObjectURL(url);
-    this.urls.clear();
-    this.pending.clear();
+    this.invalidate([...this.pending.keys()]);
     this.flush();
   };
 }

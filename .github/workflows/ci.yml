@@ -104,12 +104,25 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Preserve bounded synthetic I08 visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: i08-item-lifecycle-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/i08-visual/trash-en-desktop.png
+            test-results/i08-visual/trash-fi-mobile.png
+            test-results/i08-visual/delete-en-desktop.png
+            test-results/i08-visual/delete-fi-mobile.png
+          if-no-files-found: error
+          retention-days: 1
+
   database:
     name: Real local Supabase
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       ALLOW_SECURITY_TESTS: '1'
+      ALLOW_CI_STORAGE_GUARD_INSTALL: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

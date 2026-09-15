@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import { loadItemDetail, saveImageDescription, saveItemFields } from '../../data/item-details';
@@ -13,6 +13,9 @@ import type { Language, MessageKey, Translate } from '../../i18n';
 import type { PrivateImages } from '../../images/private-images';
 import { DiscardDialog } from '../../app/dialog';
 import { Icon } from '../../app/icon';
+import type { ItemLifecycleClient } from '../../data/item-lifecycle';
+import type { LifecycleSnapshot } from '../../domain/item-lifecycle';
+import { TrashAction } from '../settings/trash';
 
 type Dirty = { dirty: boolean; busy: boolean };
 type Shared = {
@@ -104,12 +107,14 @@ const dirtyFields = (base: ItemBaseline, draft: ReturnType<typeof itemDraft>) =>
 const readItem = (detail: Detail) => detail.item;
 const readImage = (detail: Detail) => detail.image;
 
-function NameSection(props: Shared & { base: ItemBaseline; onState: (state: Dirty) => void }) {
+function NameSection(props: Shared & { base: ItemBaseline; onState: (state: Dirty) => void; onItem: (item: ItemBaseline) => void }) {
   const section = useSection<ItemBaseline, ReturnType<typeof itemDraft>, ItemAttempt>(
     props.base, itemDraft, prepareFields, saveItemFields, readItem, confirmsItem, props.base.id, props, props.onState, dirtyFields);
   const formattingOnly = !section.dirty && !section.locked && !section.error
     && !sameValue(section.draft.raw, itemDraft(section.base).raw);
   const { t } = props;
+  const { onItem } = props;
+  useEffect(() => { onItem(section.base); }, [section.base, onItem]);
   return <section className="settings-card detail-name" aria-labelledby="detail-name-heading">
     <h2 id="detail-name-heading">{t('detail.nameSection')}</h2>
     <p className="muted fine">{t('detail.provenance')}</p>
@@ -153,32 +158,40 @@ function SavedPhoto({ image, images, t }: { image: ImageBaseline; images: Privat
   useEffect(() => {
     let active = true;
     setUrl(null); setFailed(false);
+    const unsubscribe = images.subscribe(paths => { if (paths.includes(image.mainPath)) { active = false; setUrl(null); setFailed(true); } });
     void images.get(image.mainPath).then((value) => { if (active) setUrl(value); },
       (problem: unknown) => { if (active && !isAborted(problem)) setFailed(true); });
-    return () => { active = false; };
+    return () => { active = false; unsubscribe(); };
   }, [image.mainPath, images]);
   return <div className="detail-photo">{url ? <img src={url} alt={image.altText} /> :
     <p role="status">{failed ? <><Icon name="photo" />{t('photo.missing')}</> : t('common.loading')}</p>}</div>;
 }
-function Editor(props: Shared & { detail: Detail; images: PrivateImages; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void }) {
+function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecycle: ItemLifecycleClient; onTrashed: (item: LifecycleSnapshot) => void; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void }) {
   const [nameState, setNameState] = useState<Dirty>({ dirty: false, busy: false });
   const [descriptionState, setDescriptionState] = useState<Dirty>({ dirty: false, busy: false });
   const [image, setImage] = useState(props.detail.image);
+  const [item, setItem] = useState(props.detail.item);
+  const [lifecycleState, setLifecycleState] = useState({ busy: false, pending: false });
+  const onLifecycleState = useCallback((busy: boolean, pending: boolean) => setLifecycleState({ busy, pending }), []);
   const { onDirty } = props;
   useEffect(() => {
-    onDirty(nameState.dirty || descriptionState.dirty, false, nameState.busy || descriptionState.busy);
+    onDirty(nameState.dirty || descriptionState.dirty || lifecycleState.pending, false, nameState.busy || descriptionState.busy || lifecycleState.busy);
     return () => onDirty(false, false, false);
-  }, [nameState, descriptionState, onDirty]);
+  }, [nameState, descriptionState, lifecycleState, onDirty]);
   return <div className="detail-layout">
     <SavedPhoto image={image} images={props.images} t={props.t} />
     <div className="detail-sections">
-      <NameSection {...props} base={props.detail.item} onState={setNameState} />
-      <DescriptionSection {...props} base={props.detail.image} onState={setDescriptionState} onImage={setImage} />
+      <fieldset className="lifecycle-edit-lock" disabled={lifecycleState.busy || lifecycleState.pending}>
+        <NameSection {...props} base={props.detail.item} onState={setNameState} onItem={setItem} />
+        <DescriptionSection {...props} base={props.detail.image} onState={setDescriptionState} onImage={setImage} />
+      </fieldset>
+      <TrashAction {...props} item={item} image={image} onState={onLifecycleState}
+        blocked={nameState.dirty || descriptionState.dirty || nameState.busy || descriptionState.busy} />
     </div>
   </div>;
 }
 export function ItemDetail(props: Shared & {
-  itemId: string | null; images: PrivateImages; onBack: () => void;
+  itemId: string | null; images: PrivateImages; lifecycle: ItemLifecycleClient; onTrashed: (item: LifecycleSnapshot) => void; onBack: () => void;
   onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);

@@ -1,4 +1,5 @@
 import type { MessageKey } from '../i18n';
+import type { GarmentValues } from './garment-fields';
 
 export const categories = ['top', 'bottom', 'one_piece', 'footwear', 'layer', 'outerwear', 'accessory'] as const;
 export type Category = (typeof categories)[number];
@@ -26,7 +27,15 @@ export type WardrobeItem = {
   mainPath: string;
   thumbPath: string;
   altText: string;
+  favourite: boolean;
+  availability: GarmentValues['availability'];
+  lifecycle: GarmentValues['lifecycle'];
+  excludeSuggestions: boolean;
 };
+
+export function eligibleForSuggestions(item: WardrobeItem): boolean {
+  return item.availability === 'ready' && item.lifecycle === 'active' && !item.excludeSuggestions;
+}
 
 export type DraftDetails = { title: string; category: Category; altText: string };
 export function validateDetails(title: string, category: string, altText: string): DraftDetails | null {

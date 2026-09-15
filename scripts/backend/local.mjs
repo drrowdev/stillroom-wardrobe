@@ -128,6 +128,8 @@ export function describeStartupOrResetFailure(result, elapsedMs) {
     announcedKnownMigrationCount: 0,
     lastAnnouncedKnownMigrationIndex: null,
     stderrPortAllocationMarker: false,
+    stderrStatementIndex: null,
+    stderrPermissionMarker: 'none',
   };
   let code, stdout, stderr;
   try {
@@ -204,6 +206,8 @@ export function describeStartupOrResetFailure(result, elapsedMs) {
     '20260909180000_ai_request_controls.sql',
     '20260910070000_checked_item_save.sql',
     '20260911040000_ai_analysis_backend.sql',
+    '20260911200000_checked_ai_item_save.sql',
+    '20260913120000_item_lifecycle.sql',
   ];
   let lastAnnouncement = -1;
   for (const [index, filename] of migrations.entries()) {
@@ -223,6 +227,43 @@ export function describeStartupOrResetFailure(result, elapsedMs) {
     if (observed) report.announcedKnownMigrationCount += 1;
   }
   report.stderrPortAllocationMarker = stderr.includes('port is already allocated');
+  const permissionPrefixes = [
+    ['must be owner of table ', 'owner-required'],
+    ['must be owner of relation ', 'owner-required'],
+    ['must be owner of schema ', 'owner-required'],
+    ['must be owner of function ', 'owner-required'],
+    ['permission denied for table ', 'table-privilege'],
+    ['permission denied for schema ', 'schema-privilege'],
+    ['permission denied for function ', 'function-privilege'],
+    ['new row violates row-level security policy', 'rls-policy-violation'],
+    ['target row violates row-level security policy', 'rls-policy-violation'],
+  ];
+  const permissionSuffix = ' (SQLSTATE 42501)';
+  let statementInvalid = false, lineStart = 0;
+  // Even complete heads/markers can be echoed SQL: observe shape, never authenticate a cause.
+  for (let lf = stderr.indexOf('\n'); lf !== -1; lf = stderr.indexOf('\n', lineStart)) {
+    const line = stderr.slice(lineStart, stderr[lf - 1] === '\r' ? lf - 1 : lf);
+    lineStart = lf + 1;
+    if (line.startsWith('At statement:')) {
+      const match = /^At statement: (0|[1-9][0-9]{0,3})$/.exec(line);
+      if (!match || match[0] !== line) statementInvalid = true;
+      else {
+        const index = Number(match[1]);
+        if (report.stderrStatementIndex !== null && report.stderrStatementIndex !== index) statementInvalid = true;
+        report.stderrStatementIndex = index;
+      }
+    }
+    const delimiter = line.indexOf(': ');
+    const messageLength = line.length - permissionSuffix.length - delimiter - 2;
+    if (delimiter > 0 && messageLength >= 0
+      && !line.includes('\r') && line.endsWith(permissionSuffix)) {
+      const category = permissionPrefixes.find(([prefix]) =>
+        prefix.length <= messageLength && line.startsWith(prefix, delimiter + 2))?.[1] ?? 'unclassified';
+      if (report.stderrPermissionMarker === 'none') report.stderrPermissionMarker = category;
+      else if (report.stderrPermissionMarker !== category) report.stderrPermissionMarker = 'multiple';
+    }
+  }
+  if (statementInvalid) report.stderrStatementIndex = null;
   return report;
 }
 
@@ -612,27 +653,50 @@ function validateRuntime(value) {
 }
 
 export async function readAnalysisRuntime(deadline, run = runCommand) {
+  const observation = { schemaVersion: 1, step: 'ps-call', commandCode: null, listedState: null };
+  let currentResult = null;
   const call = async (args) => {
+    currentResult = null; observation.commandCode = null;
     const result = await run('docker', args, { timeout: Math.min(startupRemaining(deadline), 5000), maxOutputBytes: 4096 });
     startupRemaining(deadline);
+    currentResult = result;
+    observation.step = observation.step === 'ps-call' ? 'ps-result' : 'inspect-result';
     if (result.code !== 0 || typeof result.stdout !== 'string' || typeof result.stderr !== 'string'
       || Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) > 4096) {
       throw new AnalysisStartupError('reader-failed');
     }
     return result.stdout;
   };
-  const listed = await call(['ps', '-a', '--no-trunc', '--filter',
-    'name=^/supabase_edge_runtime_stillroom-wardrobe$', '--format', '{{.ID}} {{.State}}']);
-  if (listed === '') return null;
-  if (listed.trim().split('\n').length > 1) throw new AnalysisStartupError('reader-ambiguous');
-  const match = /^([0-9a-f]{64}) (created|running|paused|restarting|removing|exited|dead)\r?\n?$/.exec(listed);
-  if (!match) throw new AnalysisStartupError('reader-failed');
-  const inspected = await call(['inspect', '--format', '{{.Id}}|{{.State.Running}}|{{.State.StartedAt}}', match[1]]);
-  const fields = /^([0-9a-f]{64})\|(true|false)\|([^\r\n]+)\r?\n?$/.exec(inspected);
-  if (!fields || fields[1] !== match[1]) throw new AnalysisStartupError('reader-failed');
-  const startedAt = match[2] === 'created' && fields[2] === 'false' && fields[3] === '0001-01-01T00:00:00Z'
-    ? null : fields[3];
-  return validateRuntime({ id: fields[1], running: fields[2] === 'true', startedAt });
+  try {
+    const listed = await call(['ps', '-a', '--no-trunc', '--filter',
+      'name=^/supabase_edge_runtime_stillroom-wardrobe$', '--format', '{{.ID}} {{.State}}']);
+    observation.step = 'ps-shape';
+    if (listed === '') return null;
+    if (listed.trim().split('\n').length > 1) throw new AnalysisStartupError('reader-ambiguous');
+    const match = /^([0-9a-f]{64}) (created|running|paused|restarting|removing|exited|dead)\r?\n?$/.exec(listed);
+    if (!match) throw new AnalysisStartupError('reader-failed');
+    observation.listedState = match[2];
+    observation.step = 'inspect-call';
+    const inspected = await call(['inspect', '--format', '{{.Id}}|{{.State.Running}}|{{.State.StartedAt}}', match[1]]);
+    observation.step = 'inspect-shape';
+    const fields = /^([0-9a-f]{64})\|(true|false)\|([^\r\n]+)\r?\n?$/.exec(inspected);
+    if (!fields || fields[1] !== match[1]) throw new AnalysisStartupError('reader-failed');
+    const startedAt = match[2] === 'created' && fields[2] === 'false' && fields[3] === '0001-01-01T00:00:00Z'
+      ? null : fields[3];
+    observation.step = 'runtime-validation';
+    return validateRuntime({ id: fields[1], running: fields[2] === 'true', startedAt });
+  } catch (error) {
+    try {
+      // Classify only after the original failure, without invoking result accessors.
+      const descriptor = currentResult !== null && typeof currentResult === 'object'
+        ? Object.getOwnPropertyDescriptor(currentResult, 'code') : undefined;
+      if (descriptor && Object.hasOwn(descriptor, 'value') && Number.isInteger(descriptor.value)
+        && descriptor.value >= 0 && descriptor.value <= 255) observation.commandCode = descriptor.value;
+      const line = 'B1-RUNTIME-READ ' + JSON.stringify(observation);
+      if (Buffer.byteLength(line + '\n', 'utf8') <= 512 && !/[\r\n]/.test(line)) console.log(line);
+    } catch { /* Diagnostic failure cannot replace the original thrown value. */ }
+    throw error;
+  }
 }
 
 export async function waitForAnalysisHandler(owned, { deadline, spawnedAt, previous, readRuntime = readAnalysisRuntime }, transport = fetch) {

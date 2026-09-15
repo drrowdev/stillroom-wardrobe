@@ -2,6 +2,222 @@
 
 ## Implemented scope and current evidence
 
+### I08 Stage 1 source-only candidate (13 September 2026)
+
+The initial 13 September I08 candidate added a strictly pinned ninth migration,
+`20260913120000_item_lifecycle.sql`, historical canonical LF 15332 bytes,
+SHA-256 `38de5f1b7bd4edd0f7e3829f90e1b1486c0b32385c1bd75b03b7dee9263ba1c5`.
+The current T29 source candidate is canonical LF 20822 bytes,
+SHA-256 `8cc0fc1207737d63b7e1d000fc7471a9941a4833aaebebc75979c498a4d6c476`;
+neither fingerprint claims hosted installation or completed lifecycle evidence.
+All eight earlier pins and base-to-target content comparisons remain unchanged.
+History parsing requires all nine exact names/versions/times; this is not a
+permissive migration-count increase. Existing checked-Save catalog evidence
+remains separate from the new positive claim/RPC/trigger/Storage-policy checks.
+
+`run-local-tests.mjs` adds the I08 ordinary integration/security children after
+the unchanged existing children and before integration's recovery selection.
+They use only the existing normal-session environment. The source tests cover
+versioned Trash/Restore, exact replay and reload versions, pending/orphan refusal,
+partial actual Storage cleanup, retained versions, legacy DELETE, snapshots,
+owner-local nonce reuse, private406 and foreign-row/byte preservation. Seeded
+legacy timestamps on either side of seven days are labelled fixtures, not
+seven days of observed operation. Ordinary Promise.all samples are not forced
+overlap proof.
+
+T29 replaces only `wardrobe_read`: its existing manifested-read branch remains,
+and the existing approved-owner canonical-prefix delete predicate is admitted
+only during native `storage.object.delete`. PostgreSQL SELECT visibility is
+also needed by the pinned singular DELETE/RETURNING query. Normal orphan
+download/sign/list and bulk deletion remain excluded, even with spoofed operation
+headers. The already pinned native operation-function contract now fences read
+as well as delete; any future vendor upgrade needs re-review. This is an ordinary
+API boundary, not a claim that privileged/direct SQL cannot set custom GUCs.
+DELETE/INSERT policies, all eleven bodies and owner installation stay unchanged.
+
+The nineteen-key catalog retains separate shape and exact-qual operands inside
+`storageReadDelete`, plus the complete three-policy set. Its new deparsed SELECT
+string is derived, **not yet measured**; one false combined boolean alone does
+not distinguish a shape mismatch from a text mismatch. Marker helper diagnostics
+label setup/callback/cleanup-count/removal/final-absence and retain distinct
+primary/cleanup phases, exact/falsy errors and the original cleanup notice.
+Caller labels identify the failing callback operation without losing it to
+later removal. Real-byte orphan regressions use existing ordinary A/B/anonymous
+fixtures, explicit own bulk refusal, foreign/anonymous singular refusal, strict
+owner `removed` acknowledgements and subsequent status/NoSuchKey absence.
+Initial byte/hash checks and replacement-byte checks are not downloads of
+inaccessible orphan bytes, nor provider physical-erasure proof.
+
+Cycle6's unlogged first HTTP failure remains unknown. Its reviewed1a6 catalog,
+App/Apple and18existing visual results are historical, not T29 acceptance.
+New definitions remain unexecuted locally. No seventh cycle, local runtime,
+Stage2, generated types, browser400 resolution, Save-uncertainty waiver or hosted
+cutover is authorized by this source change.
+
+Only preservation rehearsal defines/executes the special CI fixture callbacks,
+after unchanged preservation comparison and positive catalog verification.
+The fixture gate requires CI, GITHUB_ACTIONS, ALLOW_PRESERVATION_REHEARSAL and
+ALLOW_SECURITY_TESTS literal opt-ins, a validated local container and newly
+allocated `1080`-prefixed disposable item UUIDs. It does not borrow B2's `b229`
+guard or accept arbitrary SQL/table/owner overrides.
+
+The lock callback holds exactly one owned parent row in UPDATE or KEY SHARE;
+its SQL acknowledgement proves the lock is held before normal HTTP assertions
+begin. It is released by rollback, with a 15-second deadline and closed output.
+Tests observe the real Storage wrapper's fixed-conflict response (otherwise
+fail), verify unchanged draft/IDs/rows, then explicitly retry after release.
+The original marker callback inserted an unmanifested marker after claim; the
+T20 repair below supersedes that incompatible fixture with canonical pending
+metadata and an ordinary legacy-delete orphan. It has no bytes. Normal BEGIN
+must refuse the orphan without an irreversible claim; singular API cleanup and
+labelled catalog1-to-0 verification are mandatory. No fixture profile,
+shared row, production RPC or provider-side blob is created/deleted by setup.
+
+**At initial source review, none of this candidate had executed locally or in CI.** Local tooling
+restoration and all runtime probes remain prohibited by the source-only receipt.
+The candidate must stop unstaged for coordinator review; there is no publication
+or run budget. An eventual Stage 1 cycle needs all preceding checks plus actual
+generated-type upload, with only the specifically approved final four-RPC type
+parity difference allowed as an intermediate red, not backend PASS. Actual
+generated types and Stage 2 UI/captures, full exact-head CI/Apple/live/visual/
+independent review remain later gates. No new run or rerun is authorized here.
+Original Save uncertainty/stop-on-recurrence, production/privacy/paid/deployment
+holds, manual/device acceptance and saved-only recovery/export release work
+remain unchanged.
+
+### I08 original cycle failure and R3 source correction (13 September 2026)
+
+[Original-cycle evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5653886139)
+records CI34761885375 attempt1 at source `e8829d1`, with the actual PR merge
+checkout sharing tree `75ad01054f059d5b588115649e5a89a039020697`.
+App lint failed with three `no-unsafe-finally` errors. Backend's strict nine-source
+inventory, migration application, populated preservation and both catalog checks
+passed, then the held-upload fixture failed without a response/substep record.
+That does not establish HTTP500 or its cause. Later backend/type-generation,
+App/browser and visual gates did not run; there were zero artifacts.
+Apple34761885372 attempt1 passed its four generated JPEG and three approved
+orientation/composition cases, not physical-device or I08 UI acceptance.
+The original cycle is consumed and failed, not the anticipated final type diff.
+
+[T16 AMEND with binding corrections](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5653989229)
+and [matching source permission](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5654022792)
+bound R3 to five source/document files. The candidate moves fixture rethrows
+after cleanup, outside finally. Explicit flags retain exact/falsy primary and
+first cleanup values. Mandatory child end/termination/closure/timer, marker
+delete/count/absence and outer fixture cleanup are individually guarded;
+fixed notices cannot replace an earlier failure. A failed closure deadline
+remains failed release evidence, never proof that the child/lock disappeared.
+
+Only the existing held-parent negative POST uses a test-local response reader.
+It retains the exported local/session/key guards, verified ordinary owner,
+exact thumb path, four synthetic bytes, original headers, no-store,
+redirect:error and 15-second request timeout. There is no extra request,
+sign-in, retry, general helper option or change to shared normalClient.
+Headers/status precede bounded incremental body reads; at most4096bytes are
+retained. Strict UTF-8 and a non-array JSON object are required for classification.
+Missing/empty bodies cannot pass. Overflow fails with `truncated:true` and
+`bodyBytes:null`, not a clamped count or Content-Length estimate. Cancellation
+and reader release are both attempted without masking the first failure.
+The original floating elapsed interval includes body handling/cleanup; only
+record metadata is rounded. **HTTP<500 remains required**, alongside `!ok`,
+the existing <5000ms limit and exact conflict classifier. Even an exact-conflict
+500 is diagnostic failure, not a new acceptance class.
+
+One validated JSON line, at most1024UTF-8bytes, is attempted after each held
+phase settles and before outer cleanup. The two-owner fail-fast loop permits
+zero records before any attempt, one after a first-owner failure, or two if
+the second owner is reached. Unobserved values remain null; stages and all
+code/message/error-shape classes are closed. No IDs, paths, headers, raw body,
+private strings or digests are printed. Serialization/output failures fail
+the evidence gate. The distinct parent-release notice remains authoritative
+for failed release; `released` is set only after a normal holder return.
+Observation has bounded nonzero overhead, not a demonstrated causal effect.
+
+R3's behavior/mocked fault tests are source definitions only: no local runtime
+or test executed. The candidate remains unstaged for coordinator review.
+No new CI/Apple cycle, publication or Stage2 is authorized. Actual lint,
+unit/typecheck, normal-owner/Storage/lock/recovery/type/browser/visual evidence
+and every original Save, production, hosted, paid and release hold remain.
+
+### I08 T20 final-publication repair - source only (13 September 2026)
+
+[Approved nineteen-path plan](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655317164)
+and [fresh writer attestation/edit permission](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5655347691)
+authorize the coherent source correction, not execution or publication. Original
+and R3 cycles both failed and are consumed; R4 is local240b8030, not published.
+The actual500 raw body remains unknown. Pinned Storage maps22023 to DatabaseError500
+and55P03 to ResourceLocked; this source explanation does not reconstruct that body.
+The new Storage helper uses55P03 and strict HTTP400/body423/ResourceLocked.
+The existing <5s gate and every5xx failure remain.
+
+Storage1.70.3 (`288dd95c4c06f3df72a2369ea5196a8e400aeed7`) rolls its
+permission probe back before transfer. A source-approved app-owned immediate
+AFTER/ALWAYS trigger fences final INSERT and identity/version-changing UPDATE for
+every role. Profile/approval/image/parent SHARE NOWAIT locks survive publication;
+fresh checks reject canceled Save, retired/nonpending images, trash/claims and
+missing owners/items. Native owner_id is authoritative text; deprecated owner
+may be null. Probe version1 is not mistaken for a UUID. Unchanged identity/version/
+dark flags permit genuine metadata maintenance. The private owner/image ID pair
+prevents rebinding; it is retained until actual Auth deletion, not profile
+clearing or disabling, under the user's limited-retention decision.
+
+Standard native upload and singular native DELETE predicates accompany one shared
+erasable TypeScript deletion helper and all normal fixture callers. Only exact
+acknowledged success is `removed`; exact NoSuchKey is distinct `missing`, and
+AccessDenied/unknown/malformed/5xx fail. Missing is not byte proof. No bulk-success
+mock, new auth/HTTP harness, endpoint, dependency or AI invocation substitutes for
+this protocol. Future Node24 execution imports the helper explicitly as `.ts`.
+The blueprint reference validation script is historical and **not executed or
+updated** as part of this repair.
+
+After nine-source preservation, future rehearsal checks nineteen positive
+application catalog properties, including exact eleven routine-body hashes,
+ACLs, trigger type/ALWAYS/nondeferred state and two-ID registry/Auth FK. A bounded
+32768-byte schema-metadata-only Storage trigger/function/column/constraint
+inventory and SHA256 are emitted as **REVIEW_REQUIRED**, not auto-enrolled as a
+compatible baseline. Actual0055/0058/0062 and any unknown executable/versioning
+behavior must be reviewed by the coordinator before compatibility acceptance.
+No row contents, credentials, image bytes or private-schema function bodies are
+included. This adds no separate inspection-run permission.
+
+The real late-upload fixture uses two ordinary owners and one four-byte POST
+each inside the verified owned FileBackend container. CLI2.116.0 stable selects
+the legacy start handler and Storage service; its source config is file backend,
+`/mnt`, tenant/global bucket `stub`, and the project-named volume. Runtime checks
+must still verify exact container/project/image content ID, repository digests,
+mount and the four nonsecret config values. Source assumptions do not pass them.
+There is no additional control upload or broad directory discovery.
+
+Each child receives only the ordinary token and fresh1080 fixture IDs via bounded
+stdin, in a stripped environment. It sends two bytes and withholds the last two.
+Readiness requires an actual single UUID-version regular partial file of size2,
+under the exact fresh namespace, with symlink/type checks and at most100 polls/
+5s; client write completion or a sleep is not readiness. No file content is read.
+After readiness the fast normal pair is uploaded, checked Save completes, and
+Trash/BEGIN/two acknowledged singular removals/FINISH complete before release.
+The withheld bytes are then sent; publication must fail, followed by labelled
+privileged catalogprefix0 and ordinary download/sign/list/row absence checks.
+The direct container HTTP test is not proof of gateway buffering behavior.
+
+Child HTTP/body/IPC/deadlines are bounded (4KiB body,1KiB closed output,15s).
+Requests and closure are observed, cancellation is attempted on every failure,
+and exact/falsy primary and first cleanup failures survive secondary notices.
+Unacknowledged child closure is failure, not proof of termination. The no-blob
+marker now passes the real publication guard for a pending canonical image;
+ordinary unclaimed deletion creates the orphan. Its true singular API cleanup
+uses FileBackend's missing-file-safe deletion and catalogue1-to-0 checks, never
+the0055 internal flag or privileged SQL DELETE.
+
+The accepted limitation is inaccessible interrupted-upload remnants **without a
+verified cleanup deadline**, not physical purge, async cleanup proof, failed
+accessible deletion, backups, or an indefinite visible hold. Historical TUS JSON/
+other companions have potential authorization exposure, not a verified cross-owner
+or anonymous exploit; outer registration was not fully reviewed. Exact hosted
+backend/companions, old admitted requests, absent historical identity records,
+vendor-trigger privileges/upgrades and cutover remain separately authorized gates.
+No new source-inferred runtime PASS, generated types, Stage2/UI/captures, run budget,
+hosted DDL, deployment, spending or provider action is granted.
+
 The local tools use the pinned Supabase CLI **2.116.0**, Node 24 and Docker. They do not install Docker, create cloud resources, link projects, use a management API, or reset remote databases. Host `psql` is not needed: the isolated provisioning process uses `docker exec` into the specifically labelled local database container, connecting to that container's own loopback Postgres endpoint with stock local trust authentication. It refuses password prompting.
 
 The initial migration is a byte-for-byte copy of `blueprint/07-DATABASE-AND-RLS.sql`, revision 1.1, including its transaction. SHA-256:
@@ -228,6 +444,71 @@ Logical expiry and opportunistic/server deletion are not an inactive-account
 photo activation, provider/account/notice/allowance setup, hosted migrations and
 deployment remain separately blocked. Live/source/hosted state is unchanged.
 
+### T28 bodyless ordinary-session requests
+
+The three ordinary-session test transports must not add an automatic Content-Type
+when `body === undefined`. Explicit headers still apply; `null` remains JSON
+`null`, and binary/JSON bodies retain their existing serialization and headers.
+The singular Storage deletion utility currently has no product caller: this is
+a harness repair and a rule for the later product transport, not a deployed fix.
+
+Pinned Storage/Fastify source selects the JSON parser for a bodyless DELETE with
+application/json and refuses its empty input before the handler. That establishes
+a request-construction defect, not the recovered cause of cycle5's coarse
+begin-overlap/cleanup failure. Empty-JSON400 still fails closed; it is neither
+`missing` nor `removed`. Real bodyless PostgREST and native deletion remain gates,
+including the skipped integration/security suites. The separate WebKit boundary
+400/200 flake is unresolved; its existing bounded observer adds evidence only.
+No receiver, retry, cleanup or response assertion is relaxed.
+
+### T26 CI-only Storage installation boundary
+
+The [reviewed T26 amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659205055)
+moves only the ninth migration's owner-required Storage `ENABLE ALWAYS` statement
+to `scripts/backend/ci-storage-guard.mjs`. The migration alone leaves an
+**incomplete installation**, not a ready stack or an atomic production cutover.
+The all-role publication body, image-ID trigger, nineteen catalog conditions and
+native pins are unchanged. Final readiness still requires the exact ALWAYS guard.
+
+`db:start`, `db:reset` and the preservation parent now refuse before CLI mutation
+unless the approved disposable database job has literal
+`ALLOW_CI_STORAGE_GUARD_INSTALL=1`, `CI=true`, `GITHUB_ACTIONS=true`,
+`GITHUB_REPOSITORY=drrowdev/stillroom-wardrobe` and `GITHUB_JOB=database`.
+Only Database CI sets the new flag. Do not spoof CI variables for local use;
+the local command examples below do not authorize a weaker installation.
+Normal children and stripped command environments inherit none of this scope.
+
+The fixed installer checks project, local daemon, named running container and
+the pinned `supabase/postgres:17.6.1.165` image's CLI-default ECR/GHCR/Hub names.
+It never pulls or selects a fallback. These names come from CLI
+`997a1e69a4a83466964ed874d3a604c88a7b3866`'s Dockerfile and registry resolver,
+not measured image/HBA compatibility. It uses only container TCP127.0.0.1:5432,
+database `postgres`, actor/session `supabase_storage_admin`, `psql -X`,
+`--no-password`, `ON_ERROR_STOP=1` and SQL stdin. Docker/loopback trust grants
+superuser-equivalent capability; this fixed owner path constrains reviewed code,
+not the authentication capability. No role switch, grant or ownership transfer
+is permitted. The generic postgres fixture helper remains unchanged.
+
+Catalog joins validate actual table/function ownership, exact trigger identity,
+body/config/ACLs and metadata. Under a SHARE ROW EXCLUSIVE relation lock, one
+transaction changes only O to A or verifies existing A; absent/D/R/null/mismatched
+state fails. Relevant ownership/ACL/replica identity, full function/trigger
+metadata and session/effective/replication state must remain unchanged.
+Statement/lock/idle-transaction deadlines are10s/2s/10s; the owner process has
+30s and4096-byte bounds. Only exit0, empty stderr and the exact trimmed marker
+emitted **after COMMIT** succeed. Uncertain outcomes fail without retry;
+client closure or a receipt fragment is not server-termination evidence.
+
+Start finalizes and verifies before status/Auth health; reset does so before
+account/AI fixture provisioning. Preservation S1 remains base-only with no
+installer; S3 finalizes before target history, comparison, catalog and fixtures.
+Types performs only strict-A read-only catalog verification through the existing
+postgres helper before generation, never installation. No ordinary-user access
+assertion runs under the owner. Actual owner/image/HBA/trigger compatibility,
+ordinary-session and downstream gates remain unverified. Hosted installation
+requires separately reviewed owner/quiescence cutover; no production waiver,
+retry budget or backend execution is granted by this source change.
+
 Install/start Docker separately, using a local Unix socket or Docker Desktop Windows named pipe. Ensure ports 54320–54322 and 54324 are free. Docker contexts pointing to SSH/TCP daemons and `DOCKER_HOST`/`DOCKER_CONTEXT` overrides are deliberately refused. Use the Docker CLI's selected local context.
 
 On Windows, use `npm.cmd` if PowerShell script execution blocks `npm.ps1`:
@@ -258,11 +539,32 @@ npm run db:types -- --check
 npm run dev
 ```
 
-`db:start` launches the actual local services, checks the known database container, and verifies a healthy Auth HTTP response. Initial Docker image downloads can take several minutes. CLI output is captured rather than printed because startup/status can include credentials.
+After the T26 permission preflight, `db:start` launches the actual local services, finalizes and verifies the Storage guard, checks the known database container, and verifies a healthy Auth HTTP response. Initial Docker image downloads can take several minutes. CLI output is captured rather than printed because startup/status can include credentials.
+
+The [T23 startup-diagnostic amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5656047462)
+defines thirteen closed fields; marker observations activate only on failed
+stderr-bearing results. The known
+announcement inventory now covers all nine exact migration filenames; its last
+index is one-based and follows stderr order, not proof of the failing migration.
+`stderrStatementIndex` observes whole LF/CRLF `At statement: N` lines, with a
+zero-based ordinal0–9999; absent, malformed or conflicting candidates yield null.
+It is not a source line/byte position and may denote injected restore/history or
+reset statements. `stderrPermissionMarker` emits only a fixed generic category
+from a head-shaped42501 line, with nonempty server-supplied severity and an exact
+English message-start prefix. Unsupported messages remain unclassified; distinct
+categories are multiple. No identifiers, severity, SQL, role, path or raw message
+are emitted. Complete forged SQL-echo heads/markers can match: these are untrusted
+shape observations, not authenticated causes or permission evidence.
+
+Parsing retains the16MiB combined UTF-8 input cap and a less-than512-byte JSON
+record; the4096-byte container-exit gate does not restrict these two fields.
+CLI2.116.0/PG17 source framing is not proof of the failing runtime's identity.
+The third I08 cycle failed startup with42501 before rehearsal; the diagnostic
+amendment does not repair privileges or authorize a retry, execution or cutover.
 
 `db:reset` is destructive **only to the disposable local stack**. It checks Docker locality and the database container's exact name, Supabase project label, Postgres image and running state. It invokes `db reset --local --no-seed`, never `--linked`, `--db-url` or `--project-ref`; extra arguments are rejected. A changed initial migration hash also aborts the reset.
 
-After successful migration, a separate Node process runs `scripts/provision-test-users.mjs`:
+After successful migration and strict Storage guard finalization/verification, a separate Node process runs `scripts/provision-test-users.mjs`:
 
 1. Read CLI status JSON into setup-only memory, never console output.
 2. Through local container `psql`, reserve two independent fictional approval slots using `scripts/reserve-accounts.sql`. Refuse unexpected existing identities. No password is passed in SQL, a process argument or a command log.
@@ -296,7 +598,7 @@ This Phase 0 harness does not claim physical-device behavior, account-freeze orc
 
 ## Actual database type generation
 
-`npm run db:types` requires the real running local container and invokes the pinned CLI `gen types typescript --local --schema public`. Only successful plausible generator output is atomically written to `src/data/database.types.ts`. `--check` compares the exact output, including line endings, and fails on a missing or differing file. Nothing is hand-generated from the SQL and failures never replace a previous file.
+`npm run db:types` requires the real running local container and read-only strict-A Storage guard verification before invoking the pinned CLI `gen types typescript --local --schema public`. It never installs the guard. Only successful plausible generator output is atomically written to `src/data/database.types.ts`. `--check` compares the exact output, including line endings, and fails on a missing or differing file. Nothing is hand-generated from the SQL and failures never replace a previous file.
 
 The actual generated file is now committed and used by `AppClient` and the
 `src/data/rows.ts` projections. Runtime guards remain, but are not schema

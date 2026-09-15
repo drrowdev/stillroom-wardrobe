@@ -16,6 +16,7 @@ export const SOURCE_HASHES = Object.freeze({
   save: '023be0259305f0700c982dd27cc40e438847cd7b7f818a7fe7d3cc8b260459a8',
   analysis: '27d5e1d5c417cb4cb9eb5e5954794b492f3d94163da87f83777e3afa6fa07dc4',
   analyzedSave: '3b42cfdbf9890c29229893dc8603a86181aea923b63b91bf75b26cf5783844ea',
+  lifecycle: '8cc0fc1207737d63b7e1d000fc7471a9941a4833aaebebc75979c498a4d6c476',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -279,7 +280,7 @@ export function normalClient(env) {
     const response = await fetch(base + route, {
       method, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15_000),
       headers: { apikey: key, ...(token ? { Authorization: 'Bearer ' + token } : {}),
-        'Content-Type': binary ? 'image/jpeg' : 'application/json', ...headers },
+        ...(body === undefined ? {} : { 'Content-Type': binary ? 'image/jpeg' : 'application/json' }), ...headers },
       ...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) }),
     });
     requireEvidence(response.status < 500);
@@ -301,7 +302,9 @@ export function normalClient(env) {
     } finally { await reader.cancel(); }
     const raw = Buffer.concat(chunks);
     let data = raw;
-    if (!route.startsWith('/storage/v1/object/authenticated/')) {
+    // binary === true pins the single TUS fixture, not all binary requests.
+    const tusFixture = method === 'POST' && route === '/storage/v1/upload/resumable' && binary === true;
+    if (!route.startsWith('/storage/v1/object/authenticated/') && !tusFixture) {
       try { data = JSON.parse(raw.toString('utf8')); } catch { requireEvidence(raw.length === 0); data = null; }
     }
     return { ok: response.ok, status: response.status, data, range: response.headers.get('content-range') };

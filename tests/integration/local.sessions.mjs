@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { assertLocalApi, jwtClaims, validateSessionEnvironment, reportError } from '../../scripts/backend/local.mjs';
+import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
 
 try { validateSessionEnvironment(process.env); } catch (error) { reportError(error); process.exit(2); }
 const base = assertLocalApi(process.env.SUPABASE_URL);
@@ -14,7 +15,7 @@ async function request(token, route, { method = 'GET', body, binary = false, hea
     method, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15_000),
     headers: {
       apikey: key, ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      'Content-Type': binary ? 'image/jpeg' : 'application/json', ...headers,
+      ...(body === undefined ? {} : { 'Content-Type': binary ? 'image/jpeg' : 'application/json' }), ...headers,
     },
     ...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) }),
   });
@@ -512,6 +513,7 @@ try {
     assert.equal((await rows(owner, 'item_images', `id=eq.${fixture.image}&select=state`))[0].state, 'ready');
     result = await request(owner.token, `/storage/v1/object/wardrobe/${fixture.paths[0]}`, { method: 'PUT', body: jpg, binary: true });
     assert.ok(!result.ok && result.status < 500);
+    assert.equal(result.status, 400); assert.equal(result.data.code, 'AccessDenied');
     result = await request(owner.token, '/storage/v1/object/list/wardrobe', {
       method: 'POST', body: { prefix: `${owner.uid}/${fixture.item}/${fixture.image}`, limit: 100, offset: 0 },
     });
@@ -554,9 +556,8 @@ try {
     try {
       const { owner } = fixture;
       if (fixture.paths.length) {
-        const result = await request(owner.token, '/storage/v1/object/wardrobe', { method: 'DELETE', body: { prefixes: fixture.paths } });
-        assert.ok(result.ok);
         for (const objectPath of fixture.paths) {
+          await deleteWardrobeObject((route, options) => request(owner.token, route, options), owner.uid, objectPath);
           const download = await request(owner.token, `/storage/v1/object/authenticated/wardrobe/${objectPath}`);
           assert.ok(!download.ok && download.status < 500);
         }

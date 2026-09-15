@@ -830,7 +830,7 @@ for (const firstOwner of ['a', 'b'] as const) {
         const itemId = `20000000-0000-4000-8000-${owner === 'a' ? '000000000001' : '000000000002'}`;
         const imageId = `30000000-0000-4000-8000-${owner === 'a' ? '000000000001' : '000000000002'}`;
         const prefix = `${owners[owner]}/${itemId}/${imageId}`;
-        backend.items.push({ id: itemId, owner_id: owners[owner], title: content[owner].title, category: owner === 'a' ? 'top' : 'bottom', created_at: '2026-09-06T00:00:00Z', deleted_at: null });
+        backend.items.push({ id: itemId, owner_id: owners[owner], title: content[owner].title, category: owner === 'a' ? 'top' : 'bottom', created_at: '2026-09-06T00:00:00Z', deleted_at: null, favourite: false, availability: 'ready', lifecycle: 'active', exclude_suggestions: false });
         backend.images.push({ id: imageId, owner_id: owners[owner], item_id: itemId, state: 'ready', main_path: `${prefix}/main.jpg`, thumb_path: `${prefix}/thumb.jpg`, alt_text: content[owner].alt });
         backend.files.set(`${prefix}/thumb.jpg`, backend.fixture);
       }

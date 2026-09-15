@@ -12,10 +12,11 @@ function ItemPhoto({ item, images, t }: { item: WardrobeItem; images: PrivateIma
     let active = true;
     setUrl(null);
     setFailed(false);
+    const unsubscribe = images.subscribe(paths => { if (paths.includes(item.thumbPath)) { active = false; setUrl(null); setFailed(true); } });
     void images.get(item.thumbPath).then((source) => { if (active) setUrl(source); }, (error: unknown) => {
       if (active && !isAborted(error)) setFailed(true);
     });
-    return () => { active = false; };
+    return () => { active = false; unsubscribe(); };
   }, [images, item.thumbPath]);
   return (
     <div className={`item-photo ${!url && !failed ? 'skeleton' : ''}`}>
@@ -44,7 +45,12 @@ export function WardrobeScreen({ items, images, loading, error, onAdd, onRefresh
         <>
           <div className="collection-bar"><span>{itemCount(language, items.length)}</span><button type="button" className="text-button" onClick={onRefresh} disabled={!online} aria-label={t('wardrobe.refresh')}><Icon name="refresh" />{t('common.refresh')}</button></div>
           <ul className="item-grid">
-            {items.slice(0, visible).map((item) => <li className="item-card" key={item.id}><a className="item-detail-link" href={`#/items/${item.id}`}><ItemPhoto item={item} images={images} t={t} /><div className="item-caption"><h2>{item.title}</h2><span>{t(categoryKeys[item.category])}</span></div></a></li>)}
+            {items.slice(0, visible).map((item) => <li className="item-card" key={item.id}><a className="item-detail-link" href={`#/items/${item.id}`}><ItemPhoto item={item} images={images} t={t} /><div className="item-caption"><h2>{item.title}</h2><span>{t(categoryKeys[item.category])}</span>
+              <div className="item-status">{item.favourite && <span>{t('item.favourite')}</span>}
+                {item.availability !== 'ready' && <span>{t(`availability.${item.availability}`)}</span>}
+                {item.lifecycle !== 'active' && <span>{t(`lifecycle.${item.lifecycle}`)}</span>}
+                {item.excludeSuggestions && <span>{t('lifecycle.excluded')}</span>}</div>
+            </div></a></li>)}
           </ul>
           {items.length > visible && <div className="load-more"><button type="button" className="button button-secondary" onClick={() => setVisible(visible + 40)}>{t('wardrobe.more')}</button></div>}
         </>

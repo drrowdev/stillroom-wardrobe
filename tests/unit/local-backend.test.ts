@@ -360,6 +360,318 @@ describe('B1 bounded Docker runtime metadata', () => {
   const inspected = `${id}|true|2026-09-11T12:00:00.123456789Z\n`;
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(Date.parse('2026-09-11T12:01:00Z')); });
   afterEach(() => { vi.useRealTimers(); });
+  const readerSteps = ['ps-call', 'ps-result', 'ps-shape', 'inspect-call', 'inspect-result', 'inspect-shape', 'runtime-validation'] as const;
+  const listedStates = ['created', 'running', 'paused', 'restarting', 'removing', 'exited', 'dead'] as const;
+  const readerLog = () => vi.spyOn(console, 'log').mockImplementation(() => {});
+  const expectReaderLine = (log: ReturnType<typeof readerLog>, step: typeof readerSteps[number],
+    commandCode: number | null, listedState: typeof listedStates[number] | null, index = 0) => {
+    const line: unknown = log.mock.calls[index]?.[0];
+    if (typeof line !== 'string') throw new Error('Expected reader observation line');
+    expect(log.mock.calls[index]).toHaveLength(1);
+    expect(line.startsWith('B1-RUNTIME-READ ')).toBe(true);
+    expect(line).not.toMatch(/[\r\n]/);
+    expect(Buffer.byteLength(line + '\n', 'utf8')).toBeLessThanOrEqual(512);
+    const record: unknown = JSON.parse(line.slice('B1-RUNTIME-READ '.length));
+    expect(record).toEqual({ schemaVersion: 1, step, commandCode, listedState });
+    expect(line).not.toContain(id);
+    expect(line).not.toContain('2026-');
+    expect(line).not.toContain('private');
+  };
+  const readerFailure = async (operation: () => Promise<unknown>): Promise<unknown> => {
+    try { await operation(); } catch (error) { return error; }
+    throw new Error('Expected the reader to fail');
+  };
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('bounds the complete closed reader protocol including prefix and final LF', () => {
+    let maximum = 0;
+    for (const step of readerSteps) for (const listedState of [null, ...listedStates]) {
+      for (const commandCode of [null, ...Array.from({ length: 256 }, (_, code) => code)]) {
+        const line = 'B1-RUNTIME-READ ' + JSON.stringify({ schemaVersion: 1, step, commandCode, listedState }) + '\n';
+        maximum = Math.max(maximum, Buffer.byteLength(line, 'utf8'));
+      }
+    }
+    expect(maximum).toBeGreaterThan(0);
+    expect(maximum).toBeLessThanOrEqual(512);
+  });
+  it('emits nothing for absent, running and created reads and never classifies successful results', async () => {
+    const log = readerLog(), descriptor = vi.fn(() => { throw new Error('private descriptor must not run'); });
+    for (const stdout of ['', `${id} running\n`, `${id} created\n`]) {
+      const run = vi.fn<typeof runCommand>()
+        .mockResolvedValueOnce(new Proxy({ code: 0, stdout, stderr: '' }, { getOwnPropertyDescriptor: descriptor }))
+        .mockResolvedValueOnce({ code: 0, stdout: inspected, stderr: '' });
+      const result = await readAnalysisRuntime(Date.now() + 6000, run);
+      expect(result).toEqual(stdout === '' ? null : { id, running: true, startedAt: '2026-09-11T12:00:00.123456789Z' });
+      expect(run).toHaveBeenCalledTimes(stdout === '' ? 1 : 2);
+    }
+    expect(descriptor).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+  });
+  it.each(['ps', 'inspect'] as const)('preserves every thrown %s value and resets the current command code', async (command) => {
+    const log = readerLog();
+    for (const sentinel of [new Error('private thrown error'), { private: 'private thrown object' }, null, undefined, false, 0]) {
+      log.mockClear();
+      const run = vi.fn<typeof runCommand>();
+      if (command === 'inspect') run.mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' });
+      run.mockRejectedValueOnce(sentinel);
+      expect(await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run))).toBe(sentinel);
+      expect(run).toHaveBeenCalledTimes(command === 'ps' ? 1 : 2);
+      expect(log).toHaveBeenCalledOnce();
+      expectReaderLine(log, command === 'ps' ? 'ps-call' : 'inspect-call', null, command === 'ps' ? null : 'running');
+    }
+  });
+  it.each(['reader-failed', 'reader-ambiguous'] as const)('rethrows the same verified harvested %s instance', async (reason) => {
+    const log = readerLog();
+    const run = vi.fn<typeof runCommand>().mockResolvedValue({ code: 0,
+      stdout: reason === 'reader-ambiguous' ? `${id} running\n${id} running\n` : 'private malformed ps', stderr: '' });
+    const sentinel = await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run));
+    expect(sentinel).toBeInstanceOf(LocalBackendError);
+    if (!(sentinel instanceof LocalBackendError)) throw new Error('Expected authentic reader error');
+    expect(Reflect.get(sentinel, 'reason')).toBe(reason);
+    expect(sentinel.message).toBe(`FAIL: analysis startup ${reason}.`);
+    expectReaderLine(log, 'ps-shape', 0, null);
+    log.mockClear(); run.mockReset().mockRejectedValueOnce(sentinel);
+    expect(await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run))).toBe(sentinel);
+    expect(run).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledOnce();
+    expectReaderLine(log, 'ps-call', null, null);
+  });
+  it.each(['ps', 'inspect'] as const)('classifies only closed current %s result codes after original refusal', async (command) => {
+    const log = readerLog();
+    for (const code of [0, 1, 2, 255, -1, 256, 1.5, NaN, Infinity, '0', null, undefined]) {
+      log.mockClear();
+      const result = { code, stdout: 1, stderr: 'private result canary' };
+      const run = vi.fn().mockResolvedValue(result);
+      if (command === 'inspect') run.mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' });
+      await expect(Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run])).rejects.toThrow('reader-failed');
+      expect(run).toHaveBeenCalledTimes(command === 'ps' ? 1 : 2);
+      expect(log).toHaveBeenCalledOnce();
+      const expected = typeof code === 'number' && Number.isInteger(code) && code >= 0 && code <= 255 ? code : null;
+      expectReaderLine(log, command === 'ps' ? 'ps-result' : 'inspect-result', expected, command === 'ps' ? null : 'running');
+    }
+  });
+  it.each(['ps', 'inspect'] as const)('retains malformed and oversized %s result refusals without leaking output', async (command) => {
+    const log = readerLog();
+    for (const result of [
+      { code: 0, stdout: '', stderr: null },
+      { code: 0, stdout: null, stderr: '' },
+      { code: 0, stdout: 'private'.repeat(586), stderr: '' },
+      { code: 0, stdout: 'private', stderr: 'x'.repeat(4090) },
+    ]) {
+      log.mockClear();
+      const run = vi.fn().mockResolvedValue(result);
+      if (command === 'inspect') run.mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' });
+      await expect(Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run])).rejects.toThrow('reader-failed');
+      expect(log).toHaveBeenCalledOnce();
+      expectReaderLine(log, command === 'ps' ? 'ps-result' : 'inspect-result', 0, command === 'ps' ? null : 'running');
+      expect(run).toHaveBeenCalledTimes(command === 'ps' ? 1 : 2);
+    }
+  });
+  it.each([' \n', 'short running\n', `${id} invented\n`, `${id} running\n${id} running\n`])(
+    'leaves listed state null when the whole ps shape is not valid %#', async (stdout) => {
+      const log = readerLog(), run = vi.fn<typeof runCommand>().mockResolvedValue({ code: 0, stdout, stderr: '' });
+      await expect(readAnalysisRuntime(Date.now() + 6000, run)).rejects.toThrow(
+        stdout === `${id} running\n${id} running\n` ? 'reader-ambiguous' : 'reader-failed');
+      expect(log).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledOnce();
+      expectReaderLine(log, 'ps-shape', 0, null);
+    });
+  it.each(listedStates)('reports only the validated ps sample %s, never an inferred inspect state', async (state) => {
+    const log = readerLog(), run = vi.fn<typeof runCommand>()
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} ${state}\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: 'private invalid inspect', stderr: '' });
+    await expect(readAnalysisRuntime(Date.now() + 6000, run)).rejects.toThrow('reader-failed');
+    expect(log).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledTimes(2);
+    expectReaderLine(log, 'inspect-shape', 0, state);
+  });
+  it.each([inspected.replace(id, 'b'.repeat(64)), inspected.replace('true', 'yes'), inspected + inspected])(
+    'retains inspect identity and shape refusal %#', async (stdout) => {
+      const log = readerLog(), run = vi.fn<typeof runCommand>()
+        .mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+        .mockResolvedValueOnce({ code: 0, stdout, stderr: '' });
+      await expect(readAnalysisRuntime(Date.now() + 6000, run)).rejects.toThrow('reader-failed');
+      expectReaderLine(log, 'inspect-shape', 0, 'running');
+      expect(log).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledTimes(2);
+    });
+  it.each(['invalid', '2026-02-30T12:00:00Z', '2026-09-11T12:00:00.1234567890Z', '1970-01-01T00:00:00Z'])(
+    'localizes strict StartedAt validation after valid ps and inspect shape: %s', async (startedAt) => {
+      const log = readerLog(), run = vi.fn<typeof runCommand>()
+        .mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+        .mockResolvedValueOnce({ code: 0, stdout: `${id}|true|${startedAt}\n`, stderr: '' });
+      await expect(readAnalysisRuntime(Date.now() + 6000, run)).rejects.toThrow('reader-failed');
+      expectReaderLine(log, 'runtime-validation', 0, 'running');
+      expect(log).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledTimes(2);
+    });
+  it('clears all reader state between invocations after an inspect failure', async () => {
+    const log = readerLog(), sentinel = new Error('private subsequent read');
+    const run = vi.fn<typeof runCommand>()
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} restarting\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 255, stdout: '', stderr: 'private inspect failure' })
+      .mockRejectedValueOnce(sentinel);
+    await expect(readAnalysisRuntime(Date.now() + 6000, run)).rejects.toThrow('reader-failed');
+    expectReaderLine(log, 'inspect-result', 255, 'restarting');
+    expect(await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run))).toBe(sentinel);
+    expectReaderLine(log, 'ps-call', null, null, 1);
+    expect(log).toHaveBeenCalledTimes(2); expect(run).toHaveBeenCalledTimes(3);
+  });
+  it.each(['ps-before', 'ps-after', 'inspect-before', 'inspect-after'] as const)(
+    'keeps the original deadline and null code at %s without inferring whether a command ran', async (position) => {
+      const log = readerLog(), now = Date.now(), deadline = now + 1000;
+      const run = vi.fn<typeof runCommand>().mockResolvedValue({ code: 0, stdout: inspected, stderr: '' });
+      if (position === 'inspect-before') run.mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' });
+      if (position === 'ps-before') vi.setSystemTime(deadline);
+      if (position === 'ps-after') run.mockImplementationOnce(async () => {
+        vi.setSystemTime(deadline); return { code: 0, stdout: `${id} running\n`, stderr: '' };
+      });
+      if (position === 'inspect-before') vi.spyOn(Date, 'now')
+        .mockReturnValueOnce(now).mockReturnValueOnce(now).mockReturnValue(deadline);
+      if (position === 'inspect-after') run.mockImplementationOnce(async () => ({ code: 0, stdout: `${id} running\n`, stderr: '' }))
+        .mockImplementationOnce(async () => { vi.setSystemTime(deadline); return { code: 0, stdout: inspected, stderr: '' }; });
+      await expect(readAnalysisRuntime(deadline, run)).rejects.toThrow('deadline');
+      expect(log).toHaveBeenCalledOnce();
+      expectReaderLine(log, position.startsWith('ps') ? 'ps-call' : 'inspect-call', null,
+        position.startsWith('ps') ? null : 'running');
+      expect(run).toHaveBeenCalledTimes(position === 'ps-before' ? 0 : position === 'inspect-after' ? 2 : 1);
+      for (const call of run.mock.calls) expect(call[2]).toEqual({ timeout: 1000, maxOutputBytes: 4096 });
+    });
+  it('never classifies a result before the original post-command deadline check', async () => {
+    const log = readerLog(), deadline = Date.now() + 1000;
+    const getter = vi.fn(() => { throw new Error('private getter'); });
+    const descriptor = vi.fn(() => { throw new Error('private descriptor'); });
+    const result = new Proxy(Object.defineProperty({}, 'code', { get: getter }), { getOwnPropertyDescriptor: descriptor });
+    const run = vi.fn(async () => { vi.setSystemTime(deadline); return result; });
+    await expect(Reflect.apply(readAnalysisRuntime, undefined, [deadline, run])).rejects.toThrow('deadline');
+    expect(getter).not.toHaveBeenCalled(); expect(descriptor).not.toHaveBeenCalled();
+    expectReaderLine(log, 'ps-call', null, null); expect(log).toHaveBeenCalledOnce();
+  });
+  it('defers own-data classification until the original compound refusal has thrown', async () => {
+    const log = readerLog(), order: string[] = [];
+    const sentinel = new Error('private original stdout');
+    const result = new Proxy({ code: 0, stdout: '', stderr: '' }, {
+      get(target, key, receiver) {
+        if (key === 'then') return undefined;
+        order.push(String(key));
+        if (key === 'stdout') throw sentinel;
+        return Reflect.get(target, key, receiver);
+      },
+      getOwnPropertyDescriptor(target, key) { order.push('descriptor:' + String(key)); return Reflect.getOwnPropertyDescriptor(target, key); },
+    });
+    const run = vi.fn<typeof runCommand>().mockResolvedValue(result);
+    expect(await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run))).toBe(sentinel);
+    expect(order).toEqual(['code', 'stdout', 'descriptor:code']);
+    expectReaderLine(log, 'ps-result', 0, null); expect(log).toHaveBeenCalledOnce();
+  });
+  it('does not invoke result accessors again or serialize private canaries', async () => {
+    const log = readerLog(), sentinel = new Error('private getter failure');
+    const getter = vi.fn(() => { throw sentinel; }), toJSON = vi.fn(() => { throw new Error('private JSON'); });
+    const result = Object.defineProperties({ stdout: 'private stdout', stderr: 'private stderr', toJSON }, {
+      code: { get: getter }, private: { get: () => { throw new Error('private extra'); } },
+    });
+    const run = vi.fn(async () => result);
+    expect(await readerFailure(() => Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run]))).toBe(sentinel);
+    expect(getter).toHaveBeenCalledOnce(); expect(toJSON).not.toHaveBeenCalled();
+    expectReaderLine(log, 'ps-result', null, null); expect(log).toHaveBeenCalledOnce();
+  });
+  it('preserves the primary thrown value when a diagnostic-only proxy trap fails', async () => {
+    const log = readerLog(), sentinel = new Error('private original result');
+    const descriptor = vi.fn(() => { throw new Error('private diagnostic trap'); });
+    const result = new Proxy({}, {
+      get(_target, key) { if (key === 'then') return undefined; throw sentinel; },
+      getOwnPropertyDescriptor: descriptor,
+    });
+    const run = vi.fn(async () => result);
+    expect(await readerFailure(() => Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run]))).toBe(sentinel);
+    expect(descriptor).toHaveBeenCalledOnce(); expect(log).not.toHaveBeenCalled();
+  });
+  it.each([null, undefined, 1, 'private primitive', {}])('keeps malformed result diagnostics closed %#', async (result) => {
+    const log = readerLog(), run = vi.fn(async () => result);
+    const error = await readerFailure(() => Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run]));
+    expect(error).toBeInstanceOf(Error);
+    expectReaderLine(log, 'ps-result', null, null);
+    expect(log).toHaveBeenCalledOnce(); expect(run).toHaveBeenCalledOnce();
+  });
+  it('does not promote an inherited result code into observed own-data evidence', async () => {
+    const log = readerLog(), result = Object.create({ code: 2 });
+    Object.assign(result, { stdout: 'private stdout', stderr: 'private stderr' });
+    const run = vi.fn(async () => result);
+    await expect(Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run])).rejects.toThrow('reader-failed');
+    expectReaderLine(log, 'ps-result', null, null); expect(log).toHaveBeenCalledOnce();
+  });
+  it.each(['serialize', 'output'] as const)('preserves original failure if diagnostic %s throws', async (failure) => {
+    const log = readerLog(), sentinel = new Error('private original command');
+    const run = vi.fn<typeof runCommand>().mockRejectedValue(sentinel);
+    const stringify = failure === 'serialize'
+      ? vi.spyOn(JSON, 'stringify').mockImplementation(() => { throw new Error('private serialization'); }) : undefined;
+    if (failure === 'output') log.mockImplementation(() => { throw new Error('private sink'); });
+    let captured: unknown;
+    try { captured = await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run)); }
+    finally { stringify?.mockRestore(); }
+    expect(captured).toBe(sentinel);
+    expect(run).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledTimes(failure === 'serialize' ? 0 : 1);
+  });
+  it('keeps concurrent reader observations invocation-local', async () => {
+    const log = readerLog(), sentinel = new Error('private delayed ps');
+    let rejectPs: (error: unknown) => void = () => { throw new Error('Missing deferred read'); };
+    const slowRun = vi.fn<typeof runCommand>(() => new Promise((_resolve, reject) => { rejectPs = reject; }));
+    const slow = readerFailure(() => readAnalysisRuntime(Date.now() + 6000, slowRun));
+    const fastRun = vi.fn<typeof runCommand>()
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} paused\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 2, stdout: '', stderr: 'private fast inspect' });
+    await expect(readAnalysisRuntime(Date.now() + 6000, fastRun)).rejects.toThrow('reader-failed');
+    rejectPs(sentinel); expect(await slow).toBe(sentinel);
+    expectReaderLine(log, 'inspect-result', 2, 'paused');
+    expectReaderLine(log, 'ps-call', null, null, 1);
+    expect(log).toHaveBeenCalledTimes(2);
+  });
+  it('emits the real reader line before the original owned-child health override', async () => {
+    const log = readerLog(), now = Date.now();
+    const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: vi.fn() });
+    const owned: ReturnType<typeof ownAnalysisProcess> = Reflect.apply(ownAnalysisProcess, undefined, [child]);
+    const health = vi.spyOn(owned, 'assertRunning'), ready = vi.spyOn(owned, 'ready'), fetcher = vi.fn<typeof fetch>();
+    const run = vi.fn<typeof runCommand>().mockImplementationOnce(async () => {
+      expect(health).toHaveBeenCalledOnce();
+      child.emit('close', 1);
+      return { code: 2, stdout: '', stderr: 'private command failure after child exit' };
+    });
+    const readRuntime = vi.fn((deadline: number) => readAnalysisRuntime(deadline, run));
+    try {
+      await expect(waitForAnalysisHandler(owned, { deadline: now + 60_000, spawnedAt: now, previous: null, readRuntime }, fetcher))
+        .rejects.toThrow('child-exit');
+      expectReaderLine(log, 'ps-result', 2, null);
+      expect(log.mock.calls[1]?.[0]).toBe('B1-READINESS ' + JSON.stringify({
+        replacement: false, running: false, fresh: false, stable: false, elapsedMs: 0,
+        reason: 'child-exit', lastHttp: null, transportFailure: false,
+      }));
+      expect(log).toHaveBeenCalledTimes(2); expect(run).toHaveBeenCalledOnce(); expect(readRuntime).toHaveBeenCalledOnce();
+      expect(health).toHaveBeenCalledTimes(2);
+      expect(fetcher).not.toHaveBeenCalled(); expect(ready).not.toHaveBeenCalled(); expect(child.kill).not.toHaveBeenCalled();
+    } finally { await owned.stop(); }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('models a FICTIONAL old running sample then inspect failure, not the recovered cycle9 cause', async () => {
+    const log = readerLog(), now = Date.now();
+    const previous = { id, running: true, startedAt: '2026-09-11T12:00:00.123456789Z' };
+    const owned = { stop: vi.fn(), ready: vi.fn(), assertRunning: vi.fn() }, fetcher = vi.fn<typeof fetch>();
+    const run = vi.fn<typeof runCommand>()
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: inspected, stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+      .mockRejectedValueOnce(new Error('private fictional inspect'));
+    const readRuntime = vi.fn((deadline: number) => readAnalysisRuntime(deadline, run));
+    const waiting = waitForAnalysisHandler(owned, { deadline: now + 60_000, spawnedAt: now, previous, readRuntime }, fetcher);
+    const checked = expect(waiting).rejects.toThrow('reader-failed');
+    await vi.advanceTimersByTimeAsync(250); await checked;
+    expectReaderLine(log, 'inspect-call', null, 'running');
+    expect(log.mock.calls[1]?.[0]).toBe('B1-READINESS ' + JSON.stringify({
+      replacement: false, running: true, fresh: false, stable: false, elapsedMs: 250,
+      reason: 'reader-failed', lastHttp: null, transportFailure: false,
+    }));
+    expect(log).toHaveBeenCalledTimes(2); expect(readRuntime).toHaveBeenCalledTimes(2); expect(run).toHaveBeenCalledTimes(4);
+    expect(run.mock.calls.map((call) => call[1][0])).toEqual(['ps', 'inspect', 'ps', 'inspect']);
+    for (const call of run.mock.calls) expect(call[2]).toEqual({ timeout: 5000, maxOutputBytes: 4096 });
+    expect(fetcher).not.toHaveBeenCalled(); expect(owned.ready).not.toHaveBeenCalled(); expect(owned.stop).not.toHaveBeenCalled();
+  });
+
   it('uses only the exact named ps and validated-ID inspect with the original remaining budget', async () => {
     const deadline = Date.now() + 6000;
     const run = vi.fn<typeof runCommand>().mockImplementationOnce(async () => {
@@ -520,7 +832,11 @@ describe('B1 closed served evidence and invalid-token request', () => {
 });
 
 declare module '../../scripts/backend/local.mjs' {
-  export function describeStartupOrResetFailure(result: unknown, elapsedMs: unknown): Record<string, unknown>;
+  export function describeStartupOrResetFailure(result: unknown, elapsedMs: unknown): Record<string, unknown> & {
+    stderrStatementIndex: number | null;
+    stderrPermissionMarker: 'none' | 'owner-required' | 'table-privilege' | 'schema-privilege'
+      | 'function-privilege' | 'rls-policy-violation' | 'unclassified' | 'multiple';
+  };
   export function describeGenerationResult(result: unknown, elapsedMs: unknown): {
     tag: 'success' | 'nonzero-empty-output' | 'nonzero-with-stderr' | 'nonzero-with-stdout'
       | 'missing-database-output' | 'missing-images-output' | 'invalid-result';
@@ -898,10 +1214,12 @@ describe('safe startup/reset failure description', () => {
     tag: 'invalid-result', exitCode: null, elapsedMs: null, stdoutBytes: null, stderrBytes: null,
     stderrDockerOperation: 'none', stderrContainerExitBucket: 'unclassified', stderrSqlState: 'none',
     announcedKnownMigrationCount: 0, lastAnnouncedKnownMigrationIndex: null, stderrPortAllocationMarker: false,
+    stderrStatementIndex: null, stderrPermissionMarker: 'none',
   });
   const keys = Object.freeze(['tag', 'exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes',
     'stderrDockerOperation', 'stderrContainerExitBucket', 'stderrSqlState',
-    'announcedKnownMigrationCount', 'lastAnnouncedKnownMigrationIndex', 'stderrPortAllocationMarker']);
+    'announcedKnownMigrationCount', 'lastAnnouncedKnownMigrationIndex', 'stderrPortAllocationMarker',
+    'stderrStatementIndex', 'stderrPermissionMarker']);
   const operations = Object.freeze([
     ['failed to inspect docker image', 'inspect-image'],
     ['failed to pull docker image', 'pull-image'],
@@ -919,6 +1237,7 @@ describe('safe startup/reset failure description', () => {
     '20260909070000_item_description_edit.sql', '20260909110000_item_optional_collections.sql',
     '20260909180000_ai_request_controls.sql', '20260910070000_checked_item_save.sql',
     '20260911040000_ai_analysis_backend.sql',
+    '20260911200000_checked_ai_item_save.sql', '20260913120000_item_lifecycle.sql',
   ]);
 
   function report(result: unknown, ...elapsed: [] | [unknown]) {
@@ -928,22 +1247,26 @@ describe('safe startup/reset failure description', () => {
     for (const key of keys) expect(Object.getOwnPropertyDescriptor(value, key)).toHaveProperty('value');
     expect(['invalid-result', 'success', 'nonzero-empty-output', 'nonzero-with-stdout', 'nonzero-with-stderr']).toContain(value.tag);
     for (const key of ['exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes',
-      'announcedKnownMigrationCount', 'lastAnnouncedKnownMigrationIndex']) {
+      'announcedKnownMigrationCount', 'lastAnnouncedKnownMigrationIndex', 'stderrStatementIndex']) {
       const field = value[key];
       expect(field === null || typeof field === 'number' && Number.isSafeInteger(field) && field >= 0).toBe(true);
     }
     if (value.exitCode !== null) expect(value.exitCode).toBeLessThanOrEqual(255);
     expect(value.announcedKnownMigrationCount).not.toBeNull();
-    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(7);
+    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(9);
     if (value.lastAnnouncedKnownMigrationIndex !== null) {
       expect(value.lastAnnouncedKnownMigrationIndex).toBeGreaterThanOrEqual(1);
-      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(7);
+      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(9);
     }
     expect(['none', 'multiple', ...operations.map(([, operation]) => operation)]).toContain(value.stderrDockerOperation);
     expect(['unclassified', 'exit-125', 'exit-126-or-127', 'other-nonzero']).toContain(value.stderrContainerExitBucket);
     expect(['none', 'unclassified', 'multiple', ...sqlStates]).toContain(value.stderrSqlState);
     expect(typeof value.stderrPortAllocationMarker).toBe('boolean');
+    if (value.stderrStatementIndex !== null) expect(value.stderrStatementIndex).toBeLessThanOrEqual(9999);
+    expect(['none', 'owner-required', 'table-privilege', 'schema-privilege', 'function-privilege',
+      'rls-policy-violation', 'unclassified', 'multiple']).toContain(value.stderrPermissionMarker);
     expect(JSON.stringify(value).length).toBeLessThan(512);
+    expect(Buffer.byteLength(JSON.stringify(value), 'utf8')).toBeLessThan(512);
     return value;
   }
   const failure = (stderr: string) => report({ code: 1, stdout: '', stderr });
@@ -952,7 +1275,7 @@ describe('safe startup/reset failure description', () => {
     [0, '', '', 'success'], [0, 'synthetic', 'warning', 'success'],
     [1, '', '', 'nonzero-empty-output'], [255, 'ä🙂', '', 'nonzero-with-stdout'],
     [2, 'ä🙂', '漢\u0000', 'nonzero-with-stderr'],
-  ])('returns exactly eleven bounded fields for branch %#', (code, stdout, stderr, tag) => {
+  ])('returns exactly thirteen bounded fields for branch %#', (code, stdout, stderr, tag) => {
     const result = Object.freeze({ code, stdout, stderr });
     expect(report(result, 12.75)).toEqual({
       ...defaults, tag, exitCode: code, elapsedMs: 12,
@@ -964,7 +1287,8 @@ describe('safe startup/reset failure description', () => {
   it('never observes stdout markers or activates failure observations on success', () => {
     const markers = [...operations.map(([literal]) => literal), 'error running container: exit 125',
       ...sqlStates.map((state) => ` (SQLSTATE ${state})`),
-      ...migrations.map((name) => `Applying migration ${name}...`), 'port is already allocated'].join('\n') + '\n';
+      ...migrations.map((name) => `Applying migration ${name}...`), 'port is already allocated',
+      'At statement: 9999', 'ERROR: permission denied for table synthetic (SQLSTATE 42501)'].join('\n') + '\n';
     expect(report({ code: 1, stdout: markers, stderr: '' })).toEqual({
       ...defaults, tag: 'nonzero-with-stdout', exitCode: 1, elapsedMs: 1,
       stdoutBytes: Buffer.byteLength(markers), stderrBytes: 0,
@@ -1040,7 +1364,137 @@ describe('safe startup/reset failure description', () => {
   it('counts distinct announcements and uses stderr order rather than version order', () => {
     const lines = [...migrations, migrations[1], migrations[0]];
     expect(failure(lines.map((name) => `Applying migration ${name}...\n`).join('')))
-      .toMatchObject({ announcedKnownMigrationCount: 7, lastAnnouncedKnownMigrationIndex: 1 });
+      .toMatchObject({ announcedKnownMigrationCount: 9, lastAnnouncedKnownMigrationIndex: 1 });
+  });
+
+  it('keeps eighth/ninth announcements distinct from the observed statement ordinal', () => {
+    const announcements = migrations.map((name) => `Applying migration ${name}...\n`);
+    expect(failure(announcements.slice(0, 8).join('') + 'At statement: 0\n'))
+      .toMatchObject({ announcedKnownMigrationCount: 8, lastAnnouncedKnownMigrationIndex: 8, stderrStatementIndex: 0 });
+    expect(failure(announcements.join('') + 'At statement: 9999\n'))
+      .toMatchObject({ announcedKnownMigrationCount: 9, lastAnnouncedKnownMigrationIndex: 9, stderrStatementIndex: 9999 });
+  });
+
+  it.each([0, 1, 9, 10, 999, 9999])('observes zero-based statement %s only in whole LF/CRLF lines', (index) => {
+    for (const newline of ['\n', '\r\n']) {
+      expect(failure(`before${newline}At statement: ${index}${newline}At statement: ${index}${newline}echoed SQL${newline}`))
+        .toHaveProperty('stderrStatementIndex', index);
+    }
+  });
+
+  it.each(['', ' ', '00', '01', '-1', '-0', '+1', '1.0', '1e2', '10000', '999999999999999999999',
+    ' 1', '\t1', '1 ', '1\t', '1 suffix', '1\rprivate', '1\r\r', '1\u2028', '1\u2029', '１２', 'private-canary'])(
+    'invalidates an exact statement-marker candidate with malformed value %#', (value) => {
+      const candidate = `At statement: ${value}\n`;
+      for (const text of [candidate, 'At statement: 7\n' + candidate, candidate + 'At statement: 7\n']) {
+        expect(failure(text)).toHaveProperty('stderrStatementIndex', null);
+      }
+    });
+
+  it.each(['At statement:\n', 'At statement:7\n', 'At statement:\t7\n'])(
+    'invalidates malformed exact colon framing %#', (candidate) => {
+      expect(failure('At statement: 7\n' + candidate + 'At statement: 7\n')).toHaveProperty('stderrStatementIndex', null);
+    });
+
+  it.each(['At statement: 1\nAt statement: 2\n', 'At statement: 0\r\nAt statement: 9999\r\nAt statement: 0\n'])(
+    'does not select a convenient conflicting statement %#', (text) => {
+      expect(failure(text)).toHaveProperty('stderrStatementIndex', null);
+    });
+
+  it.each(['At statement 7\n', 'at statement: 7\n', ' At statement: 7\n', 'prefix At statement: 7\n',
+    'At statements: 7\n', 'At statement: 7', 'At statement: 7\r', 'At statement: 7\u2028',
+    '\u001b[31mAt statement: 7\u001b[0m\n'])('ignores non-marker or unterminated statement framing %#', (text) => {
+    expect(failure(text)).toHaveProperty('stderrStatementIndex', null);
+    expect(failure('At statement: 3\n' + text)).toHaveProperty('stderrStatementIndex', 3);
+  });
+
+  const permissionCases = [
+    ['must be owner of table ', 'owner-required'], ['must be owner of relation ', 'owner-required'],
+    ['must be owner of schema ', 'owner-required'], ['must be owner of function ', 'owner-required'],
+    ['permission denied for table ', 'table-privilege'], ['permission denied for schema ', 'schema-privilege'],
+    ['permission denied for function ', 'function-privilege'],
+    ['new row violates row-level security policy', 'rls-policy-violation'],
+    ['target row violates row-level security policy', 'rls-policy-violation'],
+  ] as const;
+  it.each(permissionCases)('observes only the message-start prefix %s with server-supplied severity', (prefix, category) => {
+    for (const newline of ['\n', '\r\n']) {
+      for (const severity of ['ERROR', 'VIRHE', 'FEL', 'エラー']) {
+        const head = `${severity}: ${prefix}synthetic (SQLSTATE 42501)${newline}`;
+        expect(failure(head + head)).toMatchObject({ stderrPermissionMarker: category, stderrSqlState: '42501' });
+      }
+    }
+  });
+
+  it('agrees on repeated categories but keeps differing and unsupported heads ambiguous', () => {
+    expect(failure('ERROR: must be owner of table a (SQLSTATE 42501)\nFEL: must be owner of schema b (SQLSTATE 42501)\n'))
+      .toHaveProperty('stderrPermissionMarker', 'owner-required');
+    const heads = [
+      'ERROR: permission denied for table a (SQLSTATE 42501)\n',
+      'FEL: permission denied for schema b (SQLSTATE 42501)\n',
+      'ERROR: permission denied for function c (SQLSTATE 42501)\n',
+      'ERROR: must be owner of relation d (SQLSTATE 42501)\n',
+      'ERROR: new row violates row-level security policy (SQLSTATE 42501)\n',
+      'ERROR: unsupported synthetic text (SQLSTATE 42501)\n',
+    ];
+    for (const first of heads) {
+      for (const second of heads) {
+        if (first === second) continue;
+        expect(failure(first + second + first)).toHaveProperty('stderrPermissionMarker', 'multiple');
+      }
+    }
+  });
+
+  it.each(['permission denied for sequence synthetic', 'must be owner of type synthetic',
+    'must be superuser to perform synthetic operation', 'käyttöoikeus puuttuu', 'åtkomst nekad',
+    'unrelated permission denied for table synthetic', 'quoted "must be owner of table synthetic"',
+    'other: permission denied for table synthetic', ' permission denied for table synthetic',
+    'permission denied for table', 'must be owner of relation'])(
+    'keeps unsupported messages or buried prefixes unclassified %#', (message) => {
+      const head = `ERROR: ${message} (SQLSTATE 42501)\n`;
+      expect(failure(head + head)).toHaveProperty('stderrPermissionMarker', 'unclassified');
+    });
+
+  it.each([
+    'permission denied for table synthetic (SQLSTATE 42501)\n',
+    ': permission denied for table synthetic (SQLSTATE 42501)\n',
+    'ERROR:permission denied for table synthetic (SQLSTATE 42501)\n',
+    'ERROR: permission denied for table synthetic (SQLSTATE 23505)\n',
+    'ERROR: permission denied for table synthetic (SQLSTATE 42501) suffix\n',
+    'ERROR: permission denied for table synthetic (SQLSTATE 42501) \n',
+    'ERROR: permission denied for table synthetic (sqlstate 42501)\n',
+    'ERROR: permission denied for table synthetic (SQLSTATE 42501 )\n',
+    'ERROR: permission denied for table synthetic (SQLSTATE 42501)',
+    'ERROR: permission denied for table synthetic (SQLSTATE 42501)\r',
+    'ERROR: permission denied for table synthetic\rjunk (SQLSTATE 42501)\n',
+  ])('ignores incomplete or wrong permission-head framing %#', (text) => {
+    expect(failure(text)).toHaveProperty('stderrPermissionMarker', 'none');
+  });
+
+  it('scans synthetic 11805-byte stderr beyond the unrelated container-exit bound', () => {
+    const markers = '\nApplying migration 20260911200000_checked_ai_item_save.sql...\n'
+      + 'Applying migration 20260913120000_item_lifecycle.sql...\n'
+      + 'ERROR: must be owner of relation synthetic (SQLSTATE 42501)\nAt statement: 9999\n';
+    const text = 'x'.repeat(11805 - Buffer.byteLength(markers)) + markers;
+    expect(Buffer.byteLength(text)).toBe(11805);
+    expect(failure(text)).toMatchObject({ stderrBytes: 11805, stderrStatementIndex: 9999,
+      stderrPermissionMarker: 'owner-required', stderrSqlState: '42501',
+      announcedKnownMigrationCount: 2, lastAnnouncedKnownMigrationIndex: 9 });
+  });
+
+  it('treats a fully forged SQL-echo head and marker as untrusted shapes, not authenticated failure proof', () => {
+    const text = "SELECT $synthetic$\nFEL: permission denied for function synthetic (SQLSTATE 42501)\n"
+      + "At statement: 42\n$synthetic$;\n";
+    expect(failure(text)).toMatchObject({ stderrStatementIndex: 42, stderrPermissionMarker: 'function-privilege' });
+  });
+
+  it('keeps worst-case permitted output values below 512 UTF-8 bytes', () => {
+    const maximum = { ...defaults, tag: 'nonzero-with-stderr', exitCode: 255, elapsedMs: Number.MAX_SAFE_INTEGER,
+      stdoutBytes: 16777216, stderrBytes: 16777216, stderrDockerOperation: 'inspect-container',
+      stderrContainerExitBucket: 'other-nonzero', stderrSqlState: 'unclassified',
+      announcedKnownMigrationCount: 9, lastAnnouncedKnownMigrationIndex: 9, stderrPortAllocationMarker: false,
+      stderrStatementIndex: 9999, stderrPermissionMarker: 'rls-policy-violation' };
+    expect(Reflect.ownKeys(maximum)).toEqual(keys);
+    expect(Buffer.byteLength(JSON.stringify(maximum), 'utf8')).toBeLessThan(512);
   });
 
   it.each([
@@ -1112,6 +1566,10 @@ describe('safe startup/reset failure description', () => {
       { code: 1, stdout: '', stderr: 'ä'.repeat(limit / 2 + 1) },
     ]) expect(report(tuple)).toEqual(defaults);
     expect(failure(' (SQLSTATE ZZ999)'.repeat(100_000))).toHaveProperty('stderrSqlState', 'unclassified');
+    expect(failure('At statement: 0\n'.repeat(100_000))).toHaveProperty('stderrStatementIndex', 0);
+    const markers = '\nAt statement: 9999\nERROR: permission denied for table synthetic (SQLSTATE 42501)\n';
+    expect(failure('x'.repeat(limit - Buffer.byteLength(markers)) + markers))
+      .toMatchObject({ stderrBytes: limit, stderrStatementIndex: 9999, stderrPermissionMarker: 'table-privilege' });
   });
 
   it('never serializes private text or caller-supplied report fields', () => {
@@ -1120,6 +1578,11 @@ describe('safe startup/reset failure description', () => {
       ['postgresql:', '//fictional:never-a-password@example.test/db'].join(''),
       'SELECT fictional_private_value;', 'synthetic-token.payload.signature'];
     const text = privateParts.join('\n');
+    for (const part of privateParts) {
+      const output = failure(`ERROR: permission denied for table ${part} (SQLSTATE 42501)\nAt statement: ${part}\n`);
+      expect(output).toMatchObject({ stderrPermissionMarker: 'table-privilege', stderrStatementIndex: null });
+      for (const canary of privateParts) expect(JSON.stringify(output)).not.toContain(canary);
+    }
     const hostile = vi.fn(() => { throw new Error(text); });
     const fakeFields = Object.fromEntries(keys.map((key) => [key, text]));
     expect(report({ ...fakeFields, code: 1, stdout: 'ä🙂', stderr: '漢\u0000' })).toEqual({
