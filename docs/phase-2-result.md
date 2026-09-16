@@ -6142,3 +6142,105 @@ No CI3, push, type adoption or stage2 is released. Final independent exact-head,
 native/normal-owner/production-peer, visual/manual/device and I10b gates remain;
 I10 is incomplete and I11 ineligible. No hosted/private/provider/paid, deployment
 or merge authority follows from this correction.
+
+## PR27 CI3 failure and R4 bounded diagnostic - 16 September 2026
+
+The [coordinator's complete CI3 result](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5700033751)
+records **CI3 FAILED** on source `ce23d1cb5b1c1886090fbb8faf145d00205eff23`,
+base `bdb48cee783a9eb5be83c52cd8791e5066eba639`. CI35113101529 attempt1
+and Apple35113101500 attempt1 used merge checkout
+`8947291a1cc5cebf5f30d735ebefe52f2173b6fb`, tree
+`76e9e078e4f7c0b4dd5beb696c1015bc2fd6d74d`, with exactly that base and source
+as parents. The merge checkout is not the feature commit or this later R4 source.
+
+App104851572078 passed installation, lint, typecheck and translations. Unit
+results were 2248 passed and one failed, 2249 total, 28 passing files and one
+failing file, 7.92 seconds, with no skips. The A3 public combined-options factory
+test actually ran and passed, as did its preflight source checks, registered
+16-key assertion and corrected preservation tests. The dynamic-import directive
+passed typecheck and remains unchanged. These results neither inspect the factory
+body nor establish successful ordinary-owner cleanup.
+
+The single failing catalog assertion received id/name/version/created_at/orphan
+instead of the four expected catalog keys. Its whole-routine matcher also counted
+the later old_enough orphan argument. The actual catalog-building statement still
+has four keys. Earlier source desk checks missed this non-projection match; they
+were not executed passing evidence. App build/scans/dependency/browser checks
+and all eight visual uploads were skipped.
+
+Backend104851572467 passed installation, start, preservation, reset, ordinary
+integration/security and the existing AI rehearsal. Four real-local browser
+cases passed in 15.9 seconds; AI readiness returned 2002/1325/1123ms ready
+observations. The new cleanup step ran 15:12:00-15:12:06 UTC and failed with
+exit1: `FAIL: image cleanup rehearsal primary and fixture teardown.`
+Both failure flags were set, but the exact primary phase and teardown causes
+remain **UNKNOWN**. The real-owner preflight returned before that catch/finally;
+the aggregate message does not diagnose a factory, profile-lock, DELETE, RLS,
+timing or transport cause. Zero late-upload completion lines do not prove whether
+either case started. No complete cleanup, successful teardown or budget acceptance
+is claimed; the 325-second backend job was a partial failed run.
+
+Type generation/upload/parity were skipped and CI3 artifact inventory was zero.
+Apple104851571466 passed four generated JPEG cases (16.7 seconds) and three I07
+cases (12.5 seconds), not physical-device/HEIC acceptance. No fresh types or
+visual artifacts exist to adopt or review.
+
+The [controlling R4 plan](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5700291977)
+records actual retained Anthropic Claude Opus5/high critique79, AMEND, and
+coordinator dispositions. Its seven-key diagnostic supersedes the proposed
+six-key shape. The [fresh own-model/edit receipt](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5700466767)
+releases only the new rehearsal, new schema unit and this append.
+
+R4 scopes catalog extraction to its unique building statement before the orphan
+branch. It preserves the four ordered catalog keys and all 16 registered keys,
+UTC/parseback/shape/negative assertions. A separate whole-routine regression
+expects the five observed key/argument matches and locates the orphan call outside
+the catalog slice; this does not add a fifth catalog field. SQL remains unchanged.
+
+The backend change is **diagnostic-only, not a cleanup fix**. A fixed 25-label
+phase vocabulary tracks existing groups without wrapping, retrying or changing
+their operations. The initial phase is age-boundaries, avoiding a redundant
+initializer; the existing catch captures it without inspecting the caught value.
+The original primary value, including falsy values, and all terminal precedence,
+messages, exit codes and success output remain intact.
+
+The three original teardown catches retain every cleanup attempt and add only
+category flags. Fixture destruction records every failed attempt (0..38) and the
+first original reverse-loop slot (null or 0..37), preserving slot0. False flags
+mean no observed failure, not proof a category executed: empty or unreached
+categories can remain false. The exact tuple arrays, actor/value arguments,
+preflight, 38-fixture registry, 21 siblings, 20-per-page caps, two late cases,
+reverse teardown and time/resource bounds are unchanged.
+
+After finally, only a failure emits one added stderr record prefixed
+I10A-CLEANUP-FAILURE. Its seven fields are schemaVersion, primaryPhase,
+markerRestoreFailed, fixtureDestroyFailed, fixtureDestroyFailures,
+firstFixtureSlot and absenceCheckFailed. Nullable fields initialize explicitly
+and use nullish coalescing, not truthiness. Values are fixed phase labels,
+booleans, bounded synthetic counts/slots and null; no private error, identifier,
+path, credential, raw result or environment value is inspected or emitted.
+There is no success diagnostic, new catch, forced exit, size-check exception,
+logging framework, helper/body recovery or extra artifact.
+
+The unit adds callback/diagnostic-scoped source assertions for these boundaries,
+exact output shape, null/zero semantics, all teardown attempts and unchanged
+failure branches. The passing A3 public-factory test and other prior coverage
+remain. Static .NET UTF8 measurement of the worst-case fixed record, including
+prefix and newline, is 215 bytes, below 512. The new unit assertions and actual
+diagnostic output have not executed; no runtime or performance result is inferred.
+
+Ordinary Git diff/whitespace/attribute checks, exact scoped staged-diff inspection,
+canonical byte/blob checks and the entire 412200-byte prior document-prefix check
+are the permitted local validation. Other 234 paths remain unchanged, including
+preservation unit, all SQL/pins/types/workflows/helpers and the opaque transport.
+Only that transport's retained HEAD/index identity and normal status were checked;
+no restricted header/factory/destructor/old-helper body was read.
+
+CI1's B1 inspection incident and CI3's primary/teardown incident remain separate
+UNKNOWN holds. A later green run would emit no failure record and would not by
+itself diagnose, fix or waive either incident. No local Node/npm/compiler/parser/
+formatter/lint/tests/browser/backend/Docker/probe/install/version execution,
+push, CI4, type adoption or stage2 is authorized by this record. Final exact-head
+engineering, normal-owner/production-peer, native/visual/manual/device and I10b
+gates remain; I10 is incomplete and I11 ineligible. Hosted/private/provider/paid,
+deployment and merge remain outside this correction.

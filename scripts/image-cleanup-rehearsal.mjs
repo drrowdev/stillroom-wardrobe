@@ -476,9 +476,17 @@ export async function withImageCleanupFixtures(operation) {
     let primary;
     let failed = false;
     let teardownFailed = false;
+    let phase = 'age-boundaries';
+    let primaryPhase = null;
+    let markerRestoreFailed = false;
+    let fixtureDestroyFailed = false;
+    let fixtureDestroyFailures = 0;
+    let firstFixtureSlot = null;
+    let absenceCheckFailed = false;
     let retainedClaims = 0;
     try {
       await ageBoundaries(deadline);
+      phase = 'fixture-allocation';
       const ready = track(owner);
       const retired = track(owner, { itemId: ready.itemId });
       const pending = track(owner);
@@ -496,6 +504,7 @@ export async function withImageCleanupFixtures(operation) {
       const cleanupFirst = track(owner);
       const concurrentInsert = track(owner);
       const pagination = Array.from({ length: 21 }, () => track(owner, { itemId: empty.itemId }));
+      phase = 'base-fixtures';
       for (const [actor, value, options] of [
         [owner, ready, { ready: true }], [owner, retired, { newItem: false }],
         [owner, empty, { upload: false }], [owner, pending, {}],
@@ -504,6 +513,7 @@ export async function withImageCleanupFixtures(operation) {
         budget(deadline);
         await createCleanupFixture(actor, value, options);
       }
+      phase = 'orphan-setup';
       for (const value of [orphan, unmarked, mixed]) {
         requireCleanup(!(await owner.client.from('items').delete().eq('owner_id', owner.uid).eq('id', value.itemId)).error, 'orphan-setup');
         await ageFixture(value, 'orphan', deadline);
@@ -512,6 +522,7 @@ export async function withImageCleanupFixtures(operation) {
       historical.push(unmarked);
       await control(`delete from private.item_image_used_ids where owner_id=${identity(owner.uid)}
         and image_id=${identity(unmarked.imageId)};`, deadline);
+      phase = 'historical-orphans';
       for (const value of [historicalA, historicalB]) {
         await createCleanupFixture(owner, value);
         requireCleanup(!(await owner.client.from('items').delete().eq('owner_id', owner.uid).eq('id', value.itemId)).error, 'historical-orphan');
@@ -520,22 +531,30 @@ export async function withImageCleanupFixtures(operation) {
           and image_id=${identity(value.imageId)};`, deadline);
         await ageFixture(value, 'orphan', deadline);
       }
+      phase = 'registered-setup';
       // A currently registered third prefix must not hide either distinct historical orphan.
       await createCleanupFixture(owner, rebound, { ready: true });
       await ageFixture(empty, 'pending', deadline);
       await ageFixture(pending, 'pending', deadline);
       await ageFixture(retired, 'retired', deadline);
+      phase = 'retention';
       await seedRetention(pending, retired, deadline);
+      phase = 'timezone';
       await timezoneDeterminism(pending, retired, deadline);
+      phase = 'mixed-age';
       await control(`update storage.objects set created_at=clock_timestamp()-interval '1 day'
         where ${storageTarget(mixed)} and name='${mixed.thumb}';`, deadline);
+      phase = 'disabled-owner';
       await disabledOwner(peer, deadline);
+      phase = 'housekeeping';
       await housekeeping(owner, ready, empty, deadline);
+      phase = 'pagination-setup';
       for (const value of pagination) {
         budget(deadline);
         await createCleanupFixture(owner, value, { newItem: false, upload: false });
         await ageFixture(value, 'pending', deadline);
       }
+      phase = 'preview-baseline';
       const expected = [empty, pending, retired, orphan, unmarked, historicalA, historicalB, ...pagination];
       const candidates = await readCleanupPages(owner);
       requireCleanup(candidates.length === expected.length && expected.every((v) =>
@@ -547,6 +566,7 @@ export async function withImageCleanupFixtures(operation) {
       const peerBefore = await peer.client.from('item_images').select('*').eq('id', peerReady.imageId).single();
       requireCleanup(!readyBefore.error && !imageBefore.error && !peerBefore.error, 'preservation-baseline');
 
+      phase = 'orphan-claim';
       const oldPreview = await candidateFor(owner, orphan);
       await control(`update storage.objects set created_at=clock_timestamp()-interval '9 days'
         where ${storageTarget(orphan)};`, deadline);
@@ -571,6 +591,7 @@ export async function withImageCleanupFixtures(operation) {
       await requireAbsentBytes(owner, orphan);
       requireCleanup((await cleanupRpc(owner, 'finish_image_cleanup', { p_request_id: orphan.requestId })).state === 'completed', 'completion-replay');
 
+      phase = 'registered-claims';
       for (const value of [empty, pending, retired, unmarked, historicalA, historicalB]) {
         budget(deadline);
         await beginFixture(owner, value);
@@ -615,6 +636,7 @@ export async function withImageCleanupFixtures(operation) {
         await requireAbsentBytes(owner, value);
         if (value === pending || value === retired) await checkRetention(value, value === retired, deadline);
       }
+      phase = 'claim-pagination';
       for (const value of pagination) await beginFixture(owner, value);
       const claimPage = await cleanupRpc(owner, 'image_cleanup_claims');
       requireCleanup(claimPage.claims.length === 20 && UUID.test(claimPage.next), 'claim-page-lookahead');
@@ -622,6 +644,7 @@ export async function withImageCleanupFixtures(operation) {
       requireCleanup(claimTail.claims.length === 1 && claimTail.next === null
         && new Set([...claimPage.claims, ...claimTail.claims].map((c) => c.request_id)).size === 21, 'claim-page-keyset');
       for (const value of pagination) await resumeCleanupFixture(owner, value);
+      phase = 'preservation-checks';
       const readyAfter = await owner.client.from('items').select('*').eq('id', ready.itemId).single();
       const imageAfter = await owner.client.from('item_images').select('*').eq('id', ready.imageId).single();
       const peerAfter = await peer.client.from('item_images').select('*').eq('id', peerReady.imageId).single();
@@ -634,6 +657,7 @@ export async function withImageCleanupFixtures(operation) {
         const bytes = await actor.client.storage.from('wardrobe').download(value.main);
         requireCleanup(!bytes.error && bytes.data.size === 4, 'retained-current-bytes');
       }
+      phase = 'mixed-unsupported';
       const mixedBefore = await owner.client.storage.from('wardrobe').remove([mixed.main, mixed.thumb]);
       requireCleanup(!mixedBefore.error && Array.isArray(mixedBefore.data) && mixedBefore.data.length === 0, 'bulk-not-removal');
       await control(`do $mixed$
@@ -647,15 +671,20 @@ $mixed$;`, deadline);
       requireCleanup([400, 403].includes(malformed.error?.status), 'unsupported-upload');
       checkCleanupPage(await cleanupRpc(owner, 'image_cleanup_page'), owner.uid);
       for (const [actor, value] of [[owner, lateA], [peer, lateB]]) {
+        phase = actor === owner ? 'late-owner' : 'late-peer';
         budget(deadline);
         await latePublication(actor, value, deadline);
       }
+      phase = 'item-claim';
       await reverseItemClaim(owner, itemFirst, deadline);
       for (const [value, first] of [[insertFirst, 'metadata'], [cleanupFirst, 'cleanup'], [concurrentInsert, 'concurrent']]) {
+        phase = first === 'metadata' ? 'insertion-metadata'
+          : first === 'cleanup' ? 'insertion-cleanup' : 'insertion-concurrent';
         historical.push(value);
         budget(deadline);
         await orphanInsertionOrder(owner, value, first, deadline);
       }
+      phase = 'final-summary';
       budget(deadline);
       retainedClaims = fixtures.length ? Number(await privilegedLocalSql(`select count(*) from private.image_cleanup_claims
         where owner_id in(${identity(owner.uid)},${identity(peer.uid)}) and state='completed'
@@ -667,6 +696,7 @@ $mixed$;`, deadline);
         completedClaims: retainedClaims, deadline,
       }));
     } catch (error) {
+      primaryPhase = phase;
       primary = error;
       failed = true;
     } finally {
@@ -674,13 +704,23 @@ $mixed$;`, deadline);
         try {
           await control(`insert into private.item_image_used_ids(owner_id,image_id)
             values(${identity(value.ownerId)},${identity(value.imageId)}) on conflict do nothing;`, deadline, true);
-        } catch { teardownFailed = true; }
+        } catch {
+          teardownFailed = true;
+          markerRestoreFailed = true;
+        }
       }
+      let fixtureSlot = fixtures.length;
       for (const { actor, value } of [...fixtures].reverse()) {
+        fixtureSlot -= 1;
         try {
           budget(deadline, true);
           await destroyCleanupFixture(actor, value);
-        } catch { teardownFailed = true; }
+        } catch {
+          teardownFailed = true;
+          fixtureDestroyFailed = true;
+          fixtureDestroyFailures += 1;
+          if (firstFixtureSlot === null) firstFixtureSlot = fixtureSlot;
+        }
       }
       try {
         const ownerIds = [owner.uid, peer.uid].map(identity).join(',');
@@ -694,7 +734,21 @@ begin
       and item_id in(${itemIds})) then raise exception 'I10A_TEARDOWN'; end if;
 end;
 $teardown$;`, deadline, true);
-      } catch { teardownFailed = true; }
+      } catch {
+        teardownFailed = true;
+        absenceCheckFailed = true;
+      }
+    }
+    if (failed || teardownFailed) {
+      console.error(`I10A-CLEANUP-FAILURE ${JSON.stringify({
+        schemaVersion: 1,
+        primaryPhase: primaryPhase ?? null,
+        markerRestoreFailed,
+        fixtureDestroyFailed,
+        fixtureDestroyFailures,
+        firstFixtureSlot: firstFixtureSlot ?? null,
+        absenceCheckFailed,
+      })}`);
     }
     if (failed && teardownFailed) fail('FAIL: image cleanup rehearsal primary and fixture teardown.', 1);
     if (teardownFailed) fail('FAIL: image cleanup rehearsal fixture teardown.', 1);
