@@ -644,6 +644,15 @@ export type Database = {
         Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
         Returns: Json
       }
+      begin_image_cleanup: {
+        Args: {
+          p_image_id: string
+          p_item_id: string
+          p_manifest_sha256: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
       begin_item_deletion: {
         Args: {
           p_expected_version: number
@@ -683,6 +692,7 @@ export type Database = {
         Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
         Returns: undefined
       }
+      finish_image_cleanup: { Args: { p_request_id: string }; Returns: Json }
       finish_item_deletion: {
         Args: { p_item_id: string; p_request_id: string }
         Returns: {
@@ -690,6 +700,15 @@ export type Database = {
         }[]
       }
       forget_image: { Args: { p_image_id: string }; Returns: undefined }
+      image_cleanup_claims: {
+        Args: { p_after_request_id?: string }
+        Returns: Json
+      }
+      image_cleanup_page: {
+        Args: { p_after_image_id?: string; p_after_item_id?: string }
+        Returns: Json
+      }
+      image_cleanup_status: { Args: { p_request_id: string }; Returns: Json }
       item_attribution_history: { Args: { p_item_id: string }; Returns: Json }
       item_deletion_status: {
         Args: { p_item_ids: string[] }

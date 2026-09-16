@@ -578,7 +578,7 @@ describe('I10a failure-only rehearsal diagnostic source contract', () => {
     expect(claims.split(adoptableOpen)).toHaveLength(2);
     const emptyArm = claims.slice(emptyStart + emptyOpen.length, adoptableStart);
     const adoptableArm = claims.slice(adoptableStart, afterClaimStart);
-    expect(emptyArm).toMatch(/^\n            requireRegistered\(adoption\.error\?\.code === 'P0001', 'incomplete-upload-refusal'\);/);
+    expect(emptyArm).toMatch(/^\n {12}requireRegistered\(adoption\.error\?\.code === 'P0001', 'incomplete-upload-refusal'\);/);
     expect(emptyArm).toContain("owner.client.rpc('forget_image', {");
     expect(emptyArm.match(/\.rpc\('forget_image'/g)).toHaveLength(1);
     expect(claims.match(/\.rpc\('forget_image'/g)).toHaveLength(1);

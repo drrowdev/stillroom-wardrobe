@@ -6548,3 +6548,68 @@ hosted/account/data/private-photo/provider/paid, merge or deployment operation
 occurred. Exact-head independent/engineering/type/full-budget/normal-owner/peer/
 header/native/manual/device/visual/I10b gates remain. I10 is incomplete and
 I11 remains ineligible.
+
+## I10a R7 - generated types and exact-space lint correction, 16 September 2026
+
+Full CI6 evidence, artifact provenance and the material sequencing approval are in
+[5703681478](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5703681478).
+CI6 `35141338291`/Apple `35141338275`, attempt1, used actual merge checkout
+`4afeecaf43245def12299def0c5b0bb3fadd4680`, tree
+`28cba0e980dba4f033054f4b93234e30ef9a3341`, parents mainbdb plus source
+`a1a649eab72604f94cb8a89c17586b57b673ded2`.
+App `104946320864` failed `npm run lint`: exactly one no-regex-spaces error,
+zero ESLint warnings, at cleanup unit581:30. All later App commands and visual
+uploads were skipped, including typecheck and the new source-unit/factory tests.
+Backend `104946321011` passed preservation/reset/integration/security/AI and
+image-cleanup, then `npm run db:types` and upload; only final tracked-type parity
+failed. Cleanup passed in10358ms, with both admitted slow-upload denials and
+teardown reporting32 retained minimal claims. Complete backend time was313s,
+not a fully green job or a measured performance improvement. Apple passed4JPEG
+and3I07 cases, not physical-device/HEIC acceptance. Zero CI6 visual artifacts
+exist; prior CI5 content reuses do not accept this or a future head.
+
+Actual supplied-text-only Anthropic Claude Opus5/high critique87 returned AMEND.
+The coordinator satisfied A1 using the singular actual lint diagnostic, rejected
+A2's broad zero-reference scan and nil-risk premise, and retained mandatory
+new-head typecheck. No broad source scan or zero-type-risk claim was made.
+This explicit amendment moves an already-approved packet type synchronization
+earlier despite App failure; it releases no other stage2 UI/adapter/operator work.
+
+Fresh OWN-model/edit receipt
+[5703778033](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5703778033)
+matched8888ASCII/UTF8bytes/SHA256
+`28db9625efc6d54f37c0f1bae6c547965f7d33bebea6145964d733b3fd80b716`.
+The coordinator verified seven actual OWN582a gpt-6-astra/medium entry rows
+19:59:51.769-20:03:23.487UTC. Same writer/model/setting/workspace/branch/PR27
+continues. Entry's culture-sensitive BOM-prefix check was corrected to exact
+EFBBBF bytes; no artifact was normalized or changed. The regular raw .ts artifact
+was verified as strictUTF8/LF/noBOM before its targeted text read.
+
+The unit change replaces exactly twelve literal ASCII spaces with ` {12}`;
+all other characters and assertions remain. Types adopt the exact CI6 artifact
+10465945222 from backend104946321011:27474bytes, SHA256
+`ae56564089d0e7c529b2c18596d3ab3ecc56a19befcf142430859743dbf4d009`,
+Gitblob `257483843b71f213fa234dda67ecbeb9787d42a2`.
+Its19added lines/599bytes contain only five cleanup RPC definitions, matching
+the read SQL declarations; no local generation, schema or permission change.
+The expected unit target is61285LFbytes/SHA256
+`f587a0ca17b80ea4f69814a97c7dd5c81db1e023327d5c0fc8c1f411c9a5a6e3`,
+blob `97b544b1e43c0221b6d163944d124397c8f19f10`.
+
+Fresh ordinary pre-edit guards/current source and artifact pins passed at
+20:07:12.1500826UTC against clean a1a/tree28c/parent e58,237normal index entries.
+The three scoped apply_patch edits are subject to exact target SHA/blob checks,
+`git diff --check`, full working/staged delta review, `git diff --cached --check`,
+regular-file/attribute/index guards and one ordinary commit. Final commit/pin
+results are reported separately. This append preserves all438534priorLFbytes,
+SHA256 `f653d0954db280bdc130232c8e9bcdc5ee95c0cbb392d05cae987f1681953791`.
+Other234paths, including the rehearsal and opaque transport, remain frozen.
+No local runtime/parser/compiler/lint/typecheck/tests/probes/install/version,
+held-body/header/private-error/image/archive or Actions access occurred.
+
+CI6 selected predicates passed on a1a, not retroactive historical-cause proof.
+CI1 B1/CI3/CI4 UNKNOWN holds and review80's access incident remain unwaived.
+Final exact-head App/type/unit/backend/Apple/visual/independent/normal-owner/
+peer/header/native/manual/device/I10b gates remain. No future pass, physical
+erasure or exhaustive coverage is claimed. Stop after the one ordinary commit:
+no push/PR edit/CI7, other stage2, hosted/provider/private/paid, merge or deployment.
