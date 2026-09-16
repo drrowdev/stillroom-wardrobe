@@ -483,6 +483,14 @@ export async function withImageCleanupFixtures(operation) {
     let fixtureDestroyFailures = 0;
     let firstFixtureSlot = null;
     let absenceCheckFailed = false;
+    let registeredCheck = null;
+    let claimOrdinal = null;
+    let primaryCheck = null;
+    let primaryClaimOrdinal = null;
+    const requireRegistered = (condition, label) => {
+      if (!condition) registeredCheck = label;
+      requireCleanup(condition, label);
+    };
     let retainedClaims = 0;
     try {
       await ageBoundaries(deadline);
@@ -503,12 +511,14 @@ export async function withImageCleanupFixtures(operation) {
       const insertFirst = track(owner);
       const cleanupFirst = track(owner);
       const concurrentInsert = track(owner);
+      const adoptable = track(owner);
       const pagination = Array.from({ length: 21 }, () => track(owner, { itemId: empty.itemId }));
       phase = 'base-fixtures';
       for (const [actor, value, options] of [
         [owner, ready, { ready: true }], [owner, retired, { newItem: false }],
         [owner, empty, { upload: false }], [owner, pending, {}],
         [owner, orphan, {}], [owner, unmarked, {}], [owner, mixed, {}], [peer, peerReady, { ready: true }],
+        [owner, adoptable, {}],
       ]) {
         budget(deadline);
         await createCleanupFixture(actor, value, options);
@@ -533,8 +543,41 @@ export async function withImageCleanupFixtures(operation) {
       }
       phase = 'registered-setup';
       // A currently registered third prefix must not hide either distinct historical orphan.
-      await createCleanupFixture(owner, rebound, { ready: true });
+      await createCleanupFixture(owner, rebound, {});
+      const reboundBefore = await owner.client.from('item_images')
+        .select('id,owner_id,item_id,state,main_path,thumb_path')
+        .eq('owner_id', owner.uid).eq('item_id', rebound.itemId).eq('id', rebound.imageId).single();
+      requireCleanup(!reboundBefore.error && reboundBefore.data
+        && reboundBefore.data.id === rebound.imageId && reboundBefore.data.owner_id === owner.uid
+        && reboundBefore.data.item_id === rebound.itemId && reboundBefore.data.state === 'pending'
+        && reboundBefore.data.main_path === `${owner.uid}/${rebound.itemId}/${rebound.imageId}/main.jpg`
+        && reboundBefore.data.thumb_path === `${owner.uid}/${rebound.itemId}/${rebound.imageId}/thumb.jpg`
+        && [ready, historicalA, historicalB, adoptable].every((value) => value.itemId !== rebound.itemId)
+        && rebound.imageId === historicalA.imageId && rebound.imageId === historicalB.imageId,
+      'rebound-pending-identity');
+      await control(`do $adoption$
+begin
+  if exists(select 1 from private.item_save_used_ids where owner_id=${identity(owner.uid)}
+      and (item_id=${identity(rebound.itemId)} or image_id=${identity(rebound.imageId)}))
+    or exists(select 1 from private.image_cleanup_claims where owner_id=${identity(owner.uid)}
+      and item_id=${identity(rebound.itemId)} and image_id=${identity(rebound.imageId)} and state='active')
+    or exists(select 1 from private.item_deletion_claims where owner_id=${identity(owner.uid)}
+      and item_id=${identity(rebound.itemId)}) then raise exception 'I10A_POSITIVE_ADOPTION_PRECONDITION'; end if;
+end;
+$adoption$;`, deadline);
+      const promoted = await owner.client.rpc('commit_image', { p_image_id: rebound.imageId });
+      requireCleanup(promoted.error === null || promoted.error === undefined, 'rebound-public-adoption');
+      const reboundAfter = await owner.client.from('item_images')
+        .select('id,owner_id,item_id,state,main_path,thumb_path')
+        .eq('owner_id', owner.uid).eq('item_id', rebound.itemId).eq('id', rebound.imageId).single();
+      requireCleanup(!reboundAfter.error && reboundAfter.data
+        && reboundAfter.data.id === rebound.imageId && reboundAfter.data.owner_id === owner.uid
+        && reboundAfter.data.item_id === rebound.itemId && reboundAfter.data.state === 'ready'
+        && reboundAfter.data.main_path === `${owner.uid}/${rebound.itemId}/${rebound.imageId}/main.jpg`
+        && reboundAfter.data.thumb_path === `${owner.uid}/${rebound.itemId}/${rebound.imageId}/thumb.jpg`,
+      'rebound-ready-identity');
       await ageFixture(empty, 'pending', deadline);
+      await ageFixture(adoptable, 'pending', deadline);
       await ageFixture(pending, 'pending', deadline);
       await ageFixture(retired, 'retired', deadline);
       phase = 'retention';
@@ -555,7 +598,7 @@ export async function withImageCleanupFixtures(operation) {
         await ageFixture(value, 'pending', deadline);
       }
       phase = 'preview-baseline';
-      const expected = [empty, pending, retired, orphan, unmarked, historicalA, historicalB, ...pagination];
+      const expected = [empty, adoptable, pending, retired, orphan, unmarked, historicalA, historicalB, ...pagination];
       const candidates = await readCleanupPages(owner);
       requireCleanup(candidates.length === expected.length && expected.every((v) =>
         candidates.some((c) => c.item_id === v.itemId && c.image_id === v.imageId)), 'exact-fixture-candidate-set');
@@ -592,38 +635,78 @@ export async function withImageCleanupFixtures(operation) {
       requireCleanup((await cleanupRpc(owner, 'finish_image_cleanup', { p_request_id: orphan.requestId })).state === 'completed', 'completion-replay');
 
       phase = 'registered-claims';
-      for (const value of [empty, pending, retired, unmarked, historicalA, historicalB]) {
+      for (const value of [empty, adoptable, pending, retired, unmarked, historicalA, historicalB]) {
+        claimOrdinal = claimOrdinal === null ? 0 : claimOrdinal + 1;
         budget(deadline);
-        await beginFixture(owner, value);
-        if ([empty, pending, retired].includes(value)) {
-          requireCleanup((await owner.client.rpc('commit_image', { p_image_id: value.imageId })).error?.code === '22023', 'claimed-adoption-refusal');
+        const claimed = await beginFixture(owner, value);
+        if (value === empty || value === adoptable) {
+          requireRegistered(claimed.state === 'active' && claimed.kind === 'pending'
+            && claimed.paths.length === 2 && claimed.paths.every((path, index) =>
+              path.role === ['main', 'thumb'][index]
+              && path.path === `${owner.uid}/${value.itemId}/${value.imageId}/${path.role}.jpg`
+              && path.present === (value === adoptable)), 'adoption-claim-precondition');
+          await control(`do $adoption$
+begin
+  if exists(select 1 from private.item_save_used_ids where owner_id=${identity(owner.uid)}
+    and (item_id=${identity(value.itemId)} or image_id=${identity(value.imageId)})) then
+    raise exception 'I10A_NEGATIVE_ADOPTION_PRECONDITION';
+  end if;
+end;
+$adoption$;`, deadline);
+          const before = await owner.client.from('item_images').select('id,owner_id,item_id,state')
+            .eq('owner_id', owner.uid).eq('item_id', value.itemId).eq('id', value.imageId).single();
+          requireRegistered(!before.error && before.data && before.data.id === value.imageId
+            && before.data.owner_id === owner.uid && before.data.item_id === value.itemId
+            && before.data.state === 'pending', 'adoption-owned-pending');
+          const adoption = await owner.client.rpc('commit_image', { p_image_id: value.imageId });
+          if (value === empty) {
+            requireRegistered(adoption.error?.code === 'P0001', 'incomplete-upload-refusal');
+          } else {
+            requireRegistered(adoption.error?.code === '22023', 'claim-guard-adoption-refusal');
+            const after = await owner.client.from('item_images').select('id,owner_id,item_id,state')
+              .eq('owner_id', owner.uid).eq('item_id', value.itemId).eq('id', value.imageId).single();
+            requireRegistered(!after.error && after.data && after.data.id === value.imageId
+              && after.data.owner_id === owner.uid && after.data.item_id === value.itemId
+              && after.data.state === 'pending', 'adoption-pending-preserved');
+          }
+          const afterClaim = checkCleanupStatus(await cleanupRpc(owner, 'image_cleanup_status', {
+            p_request_id: value.requestId,
+          }), owner.uid, value.requestId);
+          requireRegistered(afterClaim.state === 'active' && afterClaim.kind === 'pending'
+            && afterClaim.item_id === value.itemId && afterClaim.image_id === value.imageId
+            && afterClaim.paths.length === 2 && afterClaim.paths.every((path, index) =>
+              path.role === ['main', 'thumb'][index]
+              && path.path === `${owner.uid}/${value.itemId}/${value.imageId}/${path.role}.jpg`
+              && path.present === (value === adoptable)), 'adoption-claim-preserved');
+        } else if (value === pending || value === retired) {
+          requireRegistered((await owner.client.rpc('commit_image', { p_image_id: value.imageId })).error?.code === '22023', 'used-id-adoption-refusal');
         }
         if (value === pending) {
-          requireCleanup((await owner.client.rpc('finalize_item_save', {
+          requireRegistered((await owner.client.rpc('finalize_item_save', {
             p_item_id: value.itemId, p_image_id: value.imageId, p_fingerprint: 'a'.repeat(64),
           })).error?.code === '22023', 'claimed-manual-finalize-refusal');
-          requireCleanup((await owner.client.rpc('analyzed_item_save_preflight', {
+          requireRegistered((await owner.client.rpc('analyzed_item_save_preflight', {
             p_item_id: value.itemId, p_image_id: value.imageId, p_fingerprint: 'a'.repeat(64),
           })).error?.code === '22023', 'claimed-analyzed-preflight-refusal');
-          requireCleanup((await owner.client.from('item_images').update({ alt_text: 'Refused fixture edit' })
+          requireRegistered((await owner.client.from('item_images').update({ alt_text: 'Refused fixture edit' })
             .eq('id', value.imageId).eq('owner_id', owner.uid)).error?.code === '22023', 'claimed-image-edit-refusal');
-          requireCleanup((await owner.client.from('item_images').delete()
+          requireRegistered((await owner.client.from('item_images').delete()
             .eq('id', value.imageId).eq('owner_id', owner.uid)).error?.code === '22023', 'claimed-image-delete-refusal');
         }
         if (value === retired) {
           const changed = await owner.client.from('items').update({ notes: 'Cleanup fixture edit' })
             .eq('owner_id', owner.uid).eq('id', ready.itemId).select('*').single();
-          requireCleanup(!changed.error && changed.data.notes === 'Cleanup fixture edit', 'unrelated-field-edit');
+          requireRegistered(!changed.error && changed.data.notes === 'Cleanup fixture edit', 'unrelated-field-edit');
           const restored = await owner.client.from('items').update({ notes: readyBefore.data.notes })
             .eq('owner_id', owner.uid).eq('id', ready.itemId).select('*').single();
-          requireCleanup(!restored.error, 'fixture-field-restore');
+          requireRegistered(!restored.error, 'fixture-field-restore');
           readyBefore.data = restored.data;
           const trashed = await cleanupRpc(owner, 'set_item_trashed', {
             p_item_id: ready.itemId, p_expected_version: restored.data.version, p_trashed: true,
           });
-          requireCleanup(Array.isArray(trashed) && trashed.length === 1, 'trash-during-cleanup');
+          requireRegistered(Array.isArray(trashed) && trashed.length === 1, 'trash-during-cleanup');
           const deletion = await cleanupRpc(owner, 'item_deletion_status', { p_item_ids: [ready.itemId] });
-          requireCleanup((await owner.client.rpc('begin_item_deletion', {
+          requireRegistered((await owner.client.rpc('begin_item_deletion', {
             p_item_id: ready.itemId, p_expected_version: deletion[0].version,
             p_request_id: randomUUID(), p_image_manifest_sha256: deletion[0].image_manifest_sha256,
           })).error?.code === '22023', 'item-begin-during-cleanup');
@@ -697,6 +780,8 @@ $mixed$;`, deadline);
       }));
     } catch (error) {
       primaryPhase = phase;
+      primaryCheck = phase === 'registered-claims' ? registeredCheck : null;
+      primaryClaimOrdinal = phase === 'registered-claims' ? claimOrdinal : null;
       primary = error;
       failed = true;
     } finally {
@@ -741,13 +826,15 @@ $teardown$;`, deadline, true);
     }
     if (failed || teardownFailed) {
       console.error(`I10A-CLEANUP-FAILURE ${JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         primaryPhase: primaryPhase ?? null,
         markerRestoreFailed,
         fixtureDestroyFailed,
         fixtureDestroyFailures,
         firstFixtureSlot: firstFixtureSlot ?? null,
         absenceCheckFailed,
+        primaryCheck: primaryCheck ?? null,
+        primaryClaimOrdinal: primaryClaimOrdinal ?? null,
       })}`);
     }
     if (failed && teardownFailed) fail('FAIL: image cleanup rehearsal primary and fixture teardown.', 1);

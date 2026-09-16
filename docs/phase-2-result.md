@@ -6244,3 +6244,161 @@ push, CI4, type adoption or stage2 is authorized by this record. Final exact-hea
 engineering, normal-owner/production-peer, native/visual/manual/device and I10b
 gates remain; I10 is incomplete and I11 ineligible. Hosted/private/provider/paid,
 deployment and merge remain outside this correction.
+
+## I10a R5 - qualified adoption cases and bounded assertion diagnostics, 16 September 2026
+
+### Authority and actual CI4 evidence
+
+This append follows full coordinator result/proposal
+[5701416425](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5701416425),
+controlling plan approval
+[5701959344](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5701959344)
+and OWN-model edit/one-commit release
+[5702054653](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5702054653).
+The release was read in full and matched 10438 ASCII/UTF8 bytes and SHA256
+`ee8fc6dbe092ea98b328f08ddefc6a052764216ded33496faa52511032f59e5c`.
+The same writer session `582a6642-4ebd-440d-a7a6-80c590ecfd65`,
+explicitly selected `gpt-6-astra`/medium, continues on
+`drrowdev-laughing-invention` and draft PR27. The coordinator independently
+observed seven OWN actual-model entry requests from 17:48:23.749 through
+17:50:40.736 UTC. This is locally recorded entry evidence, not a requested-name
+claim, another session's usage or tamper-proof/native-platform evidence.
+
+Actual Anthropic Claude Opus 5/high critiques 82 and focused 83 were supplied-text
+only, without tools/source access. Their findings, the AMEND disposition and
+focused readiness, and the final coordinator amendments are in 5701959344.
+The original proposed ready-fixture positive control was superseded: the approved
+existing REBOUND control preserves the original ready/retired constructor tuples.
+No new planning ladder, writer, reviewer or authority is created by this append.
+
+CI4 run `35122056554`, attempt 1, FAILED. Apple4 `35122056510`, attempt 1,
+SUCCEEDED. Actual merge checkout was
+`0422129f46a3979dbb75eae0d650fc2d45a82499`, tree
+`023270c6b078c96ca4a18ef8187311b2df84ce98`, parents accepted main
+`bdb48cee783a9eb5be83c52cd8791e5066eba639` and source
+`cce53fa11b425f0bca97b16c12e5db6b14e49473`.
+
+App job `104882003052` succeeded: install, lint, typecheck, translations,
+2251 unit tests in 29 files with no skips, build, secret/dependency checks,
+697 browser passes with four existing explicit skips, and all eight visual
+uploads. The A3 GitHub-only public-factory test actually executed and passed.
+Backend job `104882002542` passed through the older AI rehearsal, then failed
+the cleanup rehearsal at registered-claims. Types generation/upload and later
+parity were skipped. Apple job `104882001562` passed four JPEG and three I07
+checks on the actual runner; that is not physical-device acceptance.
+
+The coordinator observed one real 209-byte version1 failure record, including
+newline: registered-claims, markerRestoreFailed false, fixtureDestroyFailed true,
+fixtureDestroyFailures 21, firstFixtureSlot 37, absenceCheckFailed false.
+That identifies the primary phase and teardown count/first original slot only.
+It does not identify the precise assertion, SQLSTATE, every failed fixture,
+which siblings failed, or any destructor cause. CI1 B1 inspection failure and
+the CI3/CI4 cleanup failure family retain their separate UNKNOWN incident holds.
+No historical failure cause is claimed diagnosed or repaired by R5.
+
+The coordinator's attached observation ended at 16:38:45.7591691 UTC, within
+the prior finite deadline. Eight archives containing 24 PNGs were preserved.
+Twenty-three same-name byte/hash/dimension matches reuse accepted-main content
+evidence; the English I08 delete image has a pending exact-head visual verdict.
+No image/archive was opened or supplied to this writer. No types artifact
+exists. Review80's off-scope access incident remains recorded; its withdrawn
+metrics/lint assertions are not evidence and were not repeated here.
+
+### Three-file correction
+
+Only `scripts/image-cleanup-rehearsal.mjs`,
+`tests/unit/image-cleanup-schema.test.ts` and this append are changed from cce53fa.
+The complete prior 418962 LF-byte document prefix is retained, with SHA256
+`bc512e06cebc56a6aefe6e1a31bbae432ab7c86a5b212ee82415ef15ae9a07b0`.
+All other 234 paths, including every migration, generated type, workflow,
+preservation unit, old helper and opaque transport, remain frozen.
+
+The existing rebound fixture is created pending with options `{}` at
+registered-setup. An ordinary owner read checks exact owned identity, actual
+pending state and canonical main/thumb metadata paths. Its parent differs from
+ready, both historical parents and the new adoptable parent, while its image
+identity remains shared with the historical fixtures. The existing privileged
+fixture-control SQL qualifies absence of owner AND (item OR image) used IDs,
+an active exact-image cleanup claim and a whole-item deletion claim. A PUBLIC
+`commit_image` call must return explicitly null/absent error. An ordinary read
+then checks the same identity and canonical paths in ready state.
+The original ready:true/retired-newItem:false tuples and their order are intact.
+The control is not an upload-byte provenance or matched-pair claim; differing
+IDs/times/provenance and the retained shared historical image identity matter.
+The privileged qualification is not normal-user RLS evidence.
+
+Exactly one new otherwise-adoptable pending fixture adds two generated-object
+uploads. All 38 old fixtures and their relative order remain; the total is 39,
+including the unchanged 21 pagination siblings. Registered iteration order is
+empty, adoptable, pending, retired, unmarked, historicalA, historicalB.
+Only pending/retired receive the original retention seeds and identity-specific
+finalize/preflight/edit/delete/trash/item-claim/retention checks.
+
+The active pending claim's checked status, exact two canonical paths and
+presence flags qualify each new denial case. Privileged owner AND (item OR image)
+used-ID absence is checked without the positive-only claim-absence predicate.
+Immediately before the PUBLIC call, an ordinary read verifies actual owned
+pending identity. Adoptable requires specifically 22023 under
+`claim-guard-adoption-refusal`, followed by ordinary pending-state and active
+claim/both-present preservation. The original zero-object b229 empty case
+requires specifically P0001 under `incomplete-upload-refusal`, followed by
+active claim/both-absent preservation. That qualified incomplete-upload refusal
+is not UPDATE-guard proof. Seeded pending/retired still require 22023 under
+`used-id-adoption-refusal`. Original resume and byte-absence checks follow.
+No arbitrary error/code union, marker removal, state rewind or hidden-helper
+assumption substitutes for these qualifications.
+
+The failure-only record is now version2 with exactly nine ordered primitive
+keys: schemaVersion, primaryPhase, markerRestoreFailed, fixtureDestroyFailed,
+fixtureDestroyFailures, firstFixtureSlot, absenceCheckFailed, primaryCheck,
+primaryClaimOrdinal. A callback-local recorder stores a fixed literal assertion
+label on false and delegates the same condition/label to unchanged requireCleanup.
+It inspects no error object/property. The original primary catch snapshots the
+check and ordinal before finally only for registered-claims; other phases emit
+null. A helper/RPC throw before an assertion is recorded leaves primaryCheck null.
+
+Internal claim ordinal starts null, then becomes 0 through 6 before each
+registered iteration's first operation. It is separate from original registry
+slot null/0..38 and failed-destruction count 0..39. Nullable fields retain `?? null`,
+including zero. Every original reverse destruction attempt, primary/falsy value,
+failure precedence, restoration flag, terminal error and success output remains.
+The 25 fixed phases, page20, two late-upload 1080 cases and their existing bounds,
+eight-minute rehearsal, two-minute teardown reserve and 30-minute job remain.
+The additional fixture/qualification work is not claimed zero-cost or proven
+within the full runtime budget.
+
+### Static evidence and remaining gates
+
+Fresh ordinary guards passed at 17:54:55.3734526 UTC against exact cce53fa/tree023/
+soleparent ce23d1c, clean 237 normal stage0/mode100644/H index entries.
+`git diff --check` passed and the scoped rehearsal/unit diffs were desk-reviewed.
+PowerShell/.NET UTF8 text measurement over all 25 phase and 15 assertion labels
+gives a worst-case nine-key record envelope of 294 bytes including prefix/newline,
+strictly below 512. False flags, null nullable fields and the two-digit count
+cover the longest spellings of those domains. The approved conservative 324-byte
+structural envelope was not an executed diagnostic. Neither is this 294-byte
+finite-label bound a runtime result.
+
+Directly affected source-unit assertions now cover rebound qualification and
+explicit success, the three refusal cases, canonical status preservation,
+unchanged reference-identity retention blocks, 39 fixtures, nine-key order,
+fixed-label recorder, separate ordinal domain and strict byte bound. Passing
+16+4/global5 catalog, UTC, negative, A3 preflight and GitHub-only constructor
+coverage is retained. These updated tests have NOT been executed locally.
+The permitted remaining checks are exact staged diff/whitespace, regular files/
+attributes, canonical LF byte/SHA/blob and HEAD/index identities, full document
+prefix, frozen other paths, refreshed ordinary guards and postcommit cleanliness.
+Final commit identity and three pins are reported separately without rewriting
+this historical prefix or claiming future CI success.
+
+No local Node/npm/compiler/parser/formatter/lint/test/browser/backend/Docker/
+probe/install/version execution occurred. Restricted transport verification
+uses only retained HEAD/index identity and normal status, not body/header/factory/
+destructor access. No push, PR edit, Actions query or CI5 is authorized here.
+Type adoption, stage2, hosted/private/provider/paid processing, merge and deployment
+remain unreleased. Both UNKNOWN runtime holds and the recorded access incident
+remain; a future green run alone is not a waiver. Final independent exact-head,
+types/full-budget, normal-owner/production-peer/header/native/manual/device/
+visual and I10b replacement/recovery with approved pre-save AI gates remain.
+Phase0 is engineering complete with acceptance open; I10 remains incomplete
+and I11 ineligible.

@@ -185,7 +185,7 @@ describe('I10a checked image cleanup SQL source contract', () => {
     ]) expect(regression).toContain(guard);
     const call = rehearsal.indexOf('await timezoneDeterminism(pending, retired, deadline)');
     expect(call).toBeGreaterThan(rehearsal.indexOf("await ageFixture(retired, 'retired', deadline)"));
-    expect(call).toBeLessThan(rehearsal.indexOf('const expected = [empty, pending, retired'));
+    expect(call).toBeLessThan(rehearsal.indexOf('const expected = [empty, adoptable, pending, retired'));
   });
 
   it('binds exact owned tuples and stored references, not a global image-ID absence guess', () => {
@@ -408,6 +408,13 @@ describe('I10a checked image cleanup SQL source contract', () => {
 });
 
 describe('I10a failure-only rehearsal diagnostic source contract', () => {
+  const checks = [
+    'adoption-claim-precondition', 'adoption-owned-pending', 'incomplete-upload-refusal',
+    'claim-guard-adoption-refusal', 'adoption-pending-preserved', 'adoption-claim-preserved',
+    'used-id-adoption-refusal', 'claimed-manual-finalize-refusal', 'claimed-analyzed-preflight-refusal',
+    'claimed-image-edit-refusal', 'claimed-image-delete-refusal', 'unrelated-field-edit',
+    'fixture-field-restore', 'trash-during-cleanup', 'item-begin-during-cleanup',
+  ];
   const phases = [
     'age-boundaries', 'fixture-allocation', 'base-fixtures', 'orphan-setup', 'historical-orphans',
     'registered-setup', 'retention', 'timezone', 'mixed-age', 'disabled-owner', 'housekeeping',
@@ -449,9 +456,9 @@ describe('I10a failure-only rehearsal diagnostic source contract', () => {
       ['disabled-owner', 'await disabledOwner(peer, deadline);'],
       ['housekeeping', 'await housekeeping(owner, ready, empty, deadline);'],
       ['pagination-setup', 'for (const value of pagination) {'],
-      ['preview-baseline', 'const expected = [empty, pending, retired, orphan, unmarked, historicalA, historicalB, ...pagination];'],
+      ['preview-baseline', 'const expected = [empty, adoptable, pending, retired, orphan, unmarked, historicalA, historicalB, ...pagination];'],
       ['orphan-claim', 'const oldPreview = await candidateFor(owner, orphan);'],
-      ['registered-claims', 'for (const value of [empty, pending, retired, unmarked, historicalA, historicalB]) {'],
+      ['registered-claims', 'for (const value of [empty, adoptable, pending, retired, unmarked, historicalA, historicalB]) {'],
       ['claim-pagination', 'for (const value of pagination) await beginFixture(owner, value);'],
       ['preservation-checks', "const readyAfter = await owner.client.from('items').select('*').eq('id', ready.itemId).single();"],
       ['mixed-unsupported', "const mixedBefore = await owner.client.storage.from('wardrobe').remove([mixed.main, mixed.thumb]);"],
@@ -475,12 +482,96 @@ describe('I10a failure-only rehearsal diagnostic source contract', () => {
       '        budget(deadline);',
       '        await orphanInsertionOrder(owner, value, first, deadline);',
     ].join('\n'));
-    expect(callback.match(/const [a-zA-Z]+ = track\(/g)).toHaveLength(16);
+    expect(callback.match(/const [a-zA-Z]+ = track\(/g)).toHaveLength(17);
     expect(callback).toContain('const fixtures = [{ actor: owner, value: empty }];');
     expect(callback).toContain('Array.from({ length: 21 }, () => track(owner, { itemId: empty.itemId }))');
   });
 
-  it('retains primary values and all teardown attempts with one closed seven-key failure record', () => {
+  it('qualifies rebound success and separates incomplete, claimed and used-ID adoption refusals', () => {
+    const rehearsal = source('scripts/image-cleanup-rehearsal.mjs');
+    const start = rehearsal.indexOf('await withCleanupOwners(async ([owner, peer]) => {');
+    const end = rehearsal.indexOf('  }, env);', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const callback = rehearsal.slice(start, end);
+    expect(callback).toContain('[owner, ready, { ready: true }], [owner, retired, { newItem: false }]');
+    expect(callback).toContain('const retired = track(owner, { itemId: ready.itemId });');
+    expect(callback).toContain('const rebound = track(owner, { imageId: historicalA.imageId });');
+    expect(callback).toContain('const adoptable = track(owner);');
+    expect(callback.match(/const adoptable = track\(owner\);/g)).toHaveLength(1);
+    expect(callback).toContain('[owner, adoptable, {}]');
+    expect(callback).toContain("await ageFixture(adoptable, 'pending', deadline);");
+    expect(callback).toContain('await seedRetention(pending, retired, deadline);');
+    expect(callback).not.toMatch(/seedRetention\([^;]*adoptable/);
+    const positiveStart = callback.indexOf("phase = 'registered-setup';");
+    const positiveEnd = callback.indexOf("await ageFixture(empty, 'pending', deadline);", positiveStart);
+    expect(positiveStart).toBeGreaterThan(-1);
+    expect(positiveEnd).toBeGreaterThan(positiveStart);
+    const positive = callback.slice(positiveStart, positiveEnd);
+    expect(positive).toContain('await createCleanupFixture(owner, rebound, {});');
+    expect(positive).not.toContain('createCleanupFixture(owner, rebound, { ready: true })');
+    expect(positive).toContain('[ready, historicalA, historicalB, adoptable].every((value) => value.itemId !== rebound.itemId)');
+    expect(positive).toContain('rebound.imageId === historicalA.imageId && rebound.imageId === historicalB.imageId');
+    for (const [variable, state] of [['reboundBefore', 'pending'], ['reboundAfter', 'ready']]) {
+      expect(positive).toContain(`!${variable}.error && ${variable}.data`);
+      expect(positive).toContain(`${variable}.data.id === rebound.imageId && ${variable}.data.owner_id === owner.uid`);
+      expect(positive).toContain(`${variable}.data.item_id === rebound.itemId && ${variable}.data.state === '${state}'`);
+      for (const role of ['main', 'thumb']) {
+        expect(positive).toContain(`${variable}.data.${role}_path === \`\${owner.uid}/\${rebound.itemId}/\${rebound.imageId}/${role}.jpg\``);
+      }
+    }
+    expect(positive.match(/\.eq\('owner_id', owner\.uid\)\.eq\('item_id', rebound\.itemId\)\.eq\('id', rebound\.imageId\)\.single\(\)/g)).toHaveLength(2);
+    expect(positive).toContain('private.item_save_used_ids where owner_id=${identity(owner.uid)}\n      and (item_id=${identity(rebound.itemId)} or image_id=${identity(rebound.imageId)})');
+    expect(positive).toContain("private.image_cleanup_claims where owner_id=${identity(owner.uid)}\n      and item_id=${identity(rebound.itemId)} and image_id=${identity(rebound.imageId)} and state='active'");
+    expect(positive).toContain('private.item_deletion_claims where owner_id=${identity(owner.uid)}\n      and item_id=${identity(rebound.itemId)}');
+    expect(positive).toContain("const promoted = await owner.client.rpc('commit_image', { p_image_id: rebound.imageId });");
+    expect(positive.match(/\.rpc\('commit_image'/g)).toHaveLength(1);
+    expect(positive).toContain("requireCleanup(promoted.error === null || promoted.error === undefined, 'rebound-public-adoption');");
+    expect(positive.indexOf("'rebound-pending-identity'")).toBeLessThan(positive.indexOf('await control('));
+    expect(positive.indexOf('await control(')).toBeLessThan(positive.indexOf('const promoted'));
+    expect(positive.indexOf("'rebound-public-adoption'")).toBeLessThan(positive.indexOf('const reboundAfter'));
+    const claimsStart = callback.indexOf("phase = 'registered-claims';");
+    const claimsEnd = callback.indexOf("phase = 'claim-pagination';", claimsStart);
+    expect(claimsStart).toBeGreaterThan(positiveEnd);
+    expect(claimsEnd).toBeGreaterThan(claimsStart);
+    const claims = callback.slice(claimsStart, claimsEnd);
+    expect(claims).toContain('if (value === empty || value === adoptable)');
+    expect(claims).toContain("claimed.state === 'active' && claimed.kind === 'pending'");
+    expect(claims).toContain("afterClaim.state === 'active' && afterClaim.kind === 'pending'");
+    expect(claims).toContain('afterClaim.item_id === value.itemId && afterClaim.image_id === value.imageId');
+    for (const variable of ['claimed', 'afterClaim']) {
+      expect(claims).toContain(`${variable}.paths.length === 2 && ${variable}.paths.every((path, index) =>`);
+    }
+    expect(claims.match(/path\.role === \['main', 'thumb'\]\[index\]/g)).toHaveLength(2);
+    expect(claims.match(/path\.present === \(value === adoptable\)/g)).toHaveLength(2);
+    expect(claims.match(/path\.path === `\$\{owner\.uid\}\/\$\{value\.itemId\}\/\$\{value\.imageId\}\/\$\{path\.role\}\.jpg`/g)).toHaveLength(2);
+    expect(claims).toContain('private.item_save_used_ids where owner_id=${identity(owner.uid)}\n    and (item_id=${identity(value.itemId)} or image_id=${identity(value.imageId)})');
+    expect(claims).not.toMatch(/from private\.(?:image_cleanup_claims|item_deletion_claims)/);
+    expect(claims).toContain("raise exception 'I10A_NEGATIVE_ADOPTION_PRECONDITION'");
+    for (const variable of ['before', 'after']) {
+      expect(claims).toContain(`!${variable}.error && ${variable}.data && ${variable}.data.id === value.imageId`);
+      expect(claims).toContain(`${variable}.data.owner_id === owner.uid && ${variable}.data.item_id === value.itemId`);
+      expect(claims).toContain(`${variable}.data.state === 'pending'`);
+    }
+    expect(claims).toContain("'adoption-owned-pending');\n          const adoption = await owner.client.rpc('commit_image', { p_image_id: value.imageId });");
+    expect(claims).toContain([
+      'if (value === empty) {',
+      "            requireRegistered(adoption.error?.code === 'P0001', 'incomplete-upload-refusal');",
+      '          } else {',
+      "            requireRegistered(adoption.error?.code === '22023', 'claim-guard-adoption-refusal');",
+    ].join('\n'));
+    expect(claims).toContain("} else if (value === pending || value === retired) {\n          requireRegistered((await owner.client.rpc('commit_image', { p_image_id: value.imageId })).error?.code === '22023', 'used-id-adoption-refusal');");
+    expect(claims).not.toContain('claimed-adoption-refusal');
+    expect(claims).toContain("const afterClaim = checkCleanupStatus(await cleanupRpc(owner, 'image_cleanup_status', {");
+    expect(claims.indexOf("'adoption-claim-preserved'")).toBeLessThan(claims.indexOf('await resumeCleanupFixture(owner, value);'));
+    expect(claims).toContain('if (value === pending) {');
+    expect(claims).toContain('if (value === retired) {');
+    expect(claims).toContain('if (value === pending || value === retired) await checkRetention(value, value === retired, deadline);');
+    expect(claims).toContain('await resumeCleanupFixture(owner, value);\n        await requireAbsentBytes(owner, value);');
+    expect(claims).not.toMatch(/if \(value === adoptable\).*checkRetention/);
+  });
+
+  it('retains primary values and all teardown attempts with one closed nine-key failure record', () => {
     const rehearsal = source('scripts/image-cleanup-rehearsal.mjs');
     const start = rehearsal.indexOf('await withCleanupOwners(async ([owner, peer]) => {');
     const end = rehearsal.indexOf('  }, env);', start);
@@ -498,6 +589,8 @@ describe('I10a failure-only rehearsal diagnostic source contract', () => {
     expect(callback.slice(catchStart, finallyStart)).toBe([
       '    } catch (error) {',
       '      primaryPhase = phase;',
+      "      primaryCheck = phase === 'registered-claims' ? registeredCheck : null;",
+      "      primaryClaimOrdinal = phase === 'registered-claims' ? claimOrdinal : null;",
       '      primary = error;',
       '      failed = true;',
       '',
@@ -505,6 +598,8 @@ describe('I10a failure-only rehearsal diagnostic source contract', () => {
     for (const declaration of [
       'let primaryPhase = null;', 'let firstFixtureSlot = null;', 'let fixtureDestroyFailures = 0;',
       'let markerRestoreFailed = false;', 'let fixtureDestroyFailed = false;', 'let absenceCheckFailed = false;',
+      'let registeredCheck = null;', 'let claimOrdinal = null;',
+      'let primaryCheck = null;', 'let primaryClaimOrdinal = null;',
     ]) expect(callback).toContain(declaration);
     const teardown = callback.slice(finallyStart, diagnosticStart);
     expect(teardown.match(/\bcatch\b/g)).toHaveLength(3);
@@ -535,13 +630,15 @@ describe('I10a failure-only rehearsal diagnostic source contract', () => {
     expect(diagnostic).toBe([
       '    if (failed || teardownFailed) {',
       '      console.error(`I10A-CLEANUP-FAILURE ${JSON.stringify({',
-      '        schemaVersion: 1,',
+      '        schemaVersion: 2,',
       '        primaryPhase: primaryPhase ?? null,',
       '        markerRestoreFailed,',
       '        fixtureDestroyFailed,',
       '        fixtureDestroyFailures,',
       '        firstFixtureSlot: firstFixtureSlot ?? null,',
       '        absenceCheckFailed,',
+      '        primaryCheck: primaryCheck ?? null,',
+      '        primaryClaimOrdinal: primaryClaimOrdinal ?? null,',
       '      })}`);',
       '    }',
       '',
@@ -557,22 +654,70 @@ describe('I10a failure-only rehearsal diagnostic source contract', () => {
       '    console.log(`PASS: image cleanup fixture teardown; ${retainedClaims} minimal completed claims and generated used identities retained by production lifetime.`);',
     ].join('\n'));
     for (const primaryPhase of [null, ...phases]) {
-      for (const firstFixtureSlot of [null, 0, 37]) {
-        for (const fixtureDestroyFailures of [0, 38]) {
-          const record = {
-            schemaVersion: 1, primaryPhase,
-            markerRestoreFailed: false, fixtureDestroyFailed: false, fixtureDestroyFailures,
-            firstFixtureSlot, absenceCheckFailed: false,
-          };
-          expect(Object.keys(record)).toEqual([
-            'schemaVersion', 'primaryPhase', 'markerRestoreFailed', 'fixtureDestroyFailed',
-            'fixtureDestroyFailures', 'firstFixtureSlot', 'absenceCheckFailed',
-          ]);
-          expect(record.firstFixtureSlot ?? null).toBe(firstFixtureSlot);
-          expect(Buffer.byteLength(`I10A-CLEANUP-FAILURE ${JSON.stringify(record)}\n`, 'utf8')).toBeLessThan(512);
+      for (const primaryCheck of [null, ...checks]) {
+        for (const primaryClaimOrdinal of [null, 0, 6]) {
+          for (const firstFixtureSlot of [null, 0, 38]) {
+            for (const fixtureDestroyFailures of [0, 39]) {
+              const record = {
+                schemaVersion: 2, primaryPhase,
+                markerRestoreFailed: false, fixtureDestroyFailed: false, fixtureDestroyFailures,
+                firstFixtureSlot, absenceCheckFailed: false, primaryCheck, primaryClaimOrdinal,
+              };
+              expect(Object.keys(record)).toEqual([
+                'schemaVersion', 'primaryPhase', 'markerRestoreFailed', 'fixtureDestroyFailed',
+                'fixtureDestroyFailures', 'firstFixtureSlot', 'absenceCheckFailed',
+                'primaryCheck', 'primaryClaimOrdinal',
+              ]);
+              expect(record.firstFixtureSlot ?? null).toBe(firstFixtureSlot);
+              expect(record.primaryClaimOrdinal ?? null).toBe(primaryClaimOrdinal);
+              expect(Buffer.byteLength(`I10A-CLEANUP-FAILURE ${JSON.stringify(record)}\n`, 'utf8')).toBeLessThan(512);
+            }
+          }
         }
       }
     }
+  });
+
+  it('records only registered literal checks and a separate seven-case claim ordinal', () => {
+    const rehearsal = source('scripts/image-cleanup-rehearsal.mjs');
+    const start = rehearsal.indexOf('await withCleanupOwners(async ([owner, peer]) => {');
+    const end = rehearsal.indexOf('  }, env);', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const callback = rehearsal.slice(start, end);
+    expect(callback).toContain([
+      'const requireRegistered = (condition, label) => {',
+      '      if (!condition) registeredCheck = label;',
+      '      requireCleanup(condition, label);',
+      '    };',
+    ].join('\n'));
+    const claimsStart = callback.indexOf("phase = 'registered-claims';");
+    const claimsEnd = callback.indexOf("phase = 'claim-pagination';", claimsStart);
+    expect(claimsStart).toBeGreaterThan(-1);
+    expect(claimsEnd).toBeGreaterThan(claimsStart);
+    const claims = callback.slice(claimsStart, claimsEnd);
+    expect(claims).toContain([
+      'for (const value of [empty, adoptable, pending, retired, unmarked, historicalA, historicalB]) {',
+      '        claimOrdinal = claimOrdinal === null ? 0 : claimOrdinal + 1;',
+      '        budget(deadline);',
+      '        const claimed = await beginFixture(owner, value);',
+    ].join('\n'));
+    expect(callback.match(/claimOrdinal = claimOrdinal === null \? 0 : claimOrdinal \+ 1;/g)).toHaveLength(1);
+    expect(callback.slice(0, claimsStart)).not.toContain('requireRegistered(');
+    expect(callback.slice(claimsEnd)).not.toContain('requireRegistered(');
+    expect(claims).not.toContain('requireCleanup(');
+    const labels = [...claims.matchAll(/requireRegistered\([\s\S]*?, '([a-z-]+)'\);/g)].map((match) => match[1]);
+    expect(labels).toEqual(checks);
+    expect(claims.match(/requireRegistered\(/g)).toHaveLength(checks.length);
+    for (const label of checks) {
+      expect(label).toMatch(/^[a-z-]+$/);
+      expect(label.length).toBeLessThanOrEqual(64);
+    }
+    const recorderStart = callback.indexOf('const requireRegistered =');
+    const recorderEnd = callback.indexOf('    let retainedClaims', recorderStart);
+    expect(recorderEnd).toBeGreaterThan(recorderStart);
+    expect(callback.slice(recorderStart, recorderEnd)).not.toMatch(/\berror\b|\.message|\.code|\.stack|\.cause|\.name|JSON|console|\bcatch\b/);
+    expect(claims).not.toContain('fixtureSlot');
   });
 });
 
