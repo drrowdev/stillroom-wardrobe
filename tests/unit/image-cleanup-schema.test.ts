@@ -908,6 +908,7 @@ describe('I10a ordinary response validation', () => {
 describe('I10a Linux runner lifetime characterization', () => {
   it.skipIf(process.env.CI !== 'true' || process.env.GITHUB_ACTIONS !== 'true' || process.platform !== 'linux')(
     'characterizes direct timeout and inherited-pipe late settlement without claiming browser quiescence',
+    { timeout: 10000, retry: 0 },
     async () => {
       const { runCommand } = await import('../../scripts/backend/local.mjs');
       const { isAbsolute } = await import('node:path');
@@ -989,6 +990,5 @@ leaf.once('spawn', () => {
         && inheritedElapsed >= 2000 && inheritedElapsed < 10000, 'runner-inherited-characterization').toBe(true);
       emit('inherited', inheritedElapsed);
     },
-    { timeout: 10000, retry: 0 },
   );
 });

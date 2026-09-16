@@ -6673,3 +6673,18 @@ additional source discovery, held-content recovery or Actions access occurred.
 CI8/publication require a separate release. Historical runtime causes, review80,
 the writer read incidents and A/E/peer/header/native/manual/final-review/I10b
 gates remain open. No merge, deployment, hosted, private or paid authority.
+
+### Runner test-options correction - source only, 16 September 2026
+
+[5705147479](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5705147479)
+records the first-party Vitest `test(name, options, body)` API correction.
+Fresh OWN-model edit receipt
+[5705179850](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5705179850)
+matched3491ASCIIUTF8LFbytes/SHA256
+`cb3e5b74ce180c267fef4c56ee3e746f1e69b8f0613ee439ec1a0761a0cae8f4`;
+the coordinator verified four OWN582a gpt-6-astra/medium entry rows.
+Only the unchanged timeout/retry options line moves before the async callback.
+All other unit bytes and all446535prior document LFbytes are preserved.
+Commit0df remains history; this is an ordinary correction, not an amendment.
+No probe execution, runtime failure/pass, deadline or browser-quiescence
+conformance is claimed. Publication/CI8 and all existing holds remain pending.
