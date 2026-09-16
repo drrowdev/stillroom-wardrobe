@@ -5929,3 +5929,63 @@ paid-provider or private-photo authority.
 is still required; I11 is not made eligible by this source increment. Phase 0
 remains engineering complete with acceptance open. All pending normal-owner,
 operator, device, recovery/export, visual and hosted gates remain pending.
+
+## I10a R1 timezone repair source - 16 September 2026
+
+This append records the bounded repair of candidate
+`5202d179aaf0edb8bd877c7877d4239e9b84e354`, not an observed runtime failure.
+The coordinator challenged retained independent review73's initial bounded-CI
+READY before publication. Actual Anthropic Claude Opus 5/high review74 confirmed
+the source dependency and corrected a manifest-only timezone-setting proposal.
+The [reviewed E1-E4 disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5697438532)
+and [matching own model/edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5697506931)
+control this six-path, same-writer repair. No new review verdict or runtime
+acceptance is inferred.
+
+Registered and Storage timestamps previously entered hashed JSON using the
+session timezone. Setting only the hashing function's timezone would not repair
+JSON already encoded by its callers. A changed timezone could reject the
+page-to-BEGIN manifest or strand status/finish retries in that changed context;
+this is not a claim that recovery under the original timezone was impossible.
+Calendar seven-day subtraction also spans 167 or 169 hours across DST.
+
+The new I10 helpers now use UTC timestamp arithmetic for strict elapsed-age
+comparisons, encode registered created_at/retired_at and Storage created_at in
+UTC, and explicitly parse the offset-free registered strings back as UTC.
+Finite/future checks, nulls, exact sixteen/four-field projections, eligibility_at,
+signatures, receipts and all four replacement bodies remain unchanged.
+Old I08 and the nine historical migrations are not repaired or reinterpreted.
+
+The guarded rehearsal adds fixed spring-forward/fall-back anchors with 168-hour
+and 24-hour boundaries, equality and +/-1 microsecond. It asserts expected
+booleans as well as UTC/America-Los-Angeles equality. Existing pending and
+retired fixtures exercise non-null registered/catalog timestamps and retired_at,
+with one captured observation instant and non-null eligible manifest checks.
+Timezone settings are transaction-local inside the existing control-owned
+disposable CI transaction. These are private-helper determinism regressions,
+not ordinary-owner API timezone evidence, and have not been executed.
+Existing boundaries, two slow-upload denial owners, budgets and teardown remain.
+
+The repaired tenth migration is LF-canonical **30839 bytes**, SHA256
+`8fa2ea77b162ca2de587dfffc3199db24b2cb6d428b78d9be9eadc9e51a399e6`.
+Its Windows CRLF working representation is **31320 bytes**, SHA256
+`2e5f0a88f3bf11478a99937d6e45bdf9ca79dfe7f4974e34fa2abd441aa56b11`.
+The tenth inventory byte pin and cleanup source hash now match actual source.
+PowerShell/.NET text/byte hashing confirmed all four replacement-body MD5s still
+match the table above; `git diff --check` passed, and the scoped source diff was
+inspected. These are static results only, not SQL execution or test results.
+The complete prior phase-result text remains historical evidence.
+
+**NOT RUN:** compiler/parser/formatter, lint/typecheck, tests, native/backend
+rehearsals, actual timezone preferences, normal-owner flows, CI and visual review.
+PostgREST13 documents timezone preferences, but this application's installed
+stack and SDK header API remain unprobed. No new transport contract is assumed.
+The restricted Authorization value remains unreviewed and untouched; owner-only
+positive calls on the new fixture deletion transport do not prove its peer
+isolation or credential correctness. Mandatory production-path owner/peer
+acceptance is still pending, not waived.
+
+Publication, CI admission, exact-head review, artifacts and stage2 remain
+coordinator gates. This repair authorizes no push, PR, CI operation, hosted
+mutation, provider processing, deployment or merge. I10/I10b and Phase 0
+acceptance limitations above remain unchanged.

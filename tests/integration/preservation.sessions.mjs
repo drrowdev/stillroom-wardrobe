@@ -17,7 +17,7 @@ export const SOURCE_HASHES = Object.freeze({
   analysis: '27d5e1d5c417cb4cb9eb5e5954794b492f3d94163da87f83777e3afa6fa07dc4',
   analyzedSave: '3b42cfdbf9890c29229893dc8603a86181aea923b63b91bf75b26cf5783844ea',
   lifecycle: '8cc0fc1207737d63b7e1d000fc7471a9941a4833aaebebc75979c498a4d6c476',
-  cleanup: '7ac5beaeec7a05074920f866e6153ea19c0cc3a429e9e29070d3e7aa5573c6b1',
+  cleanup: '8fa2ea77b162ca2de587dfffc3199db24b2cb6d428b78d9be9eadc9e51a399e6',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;

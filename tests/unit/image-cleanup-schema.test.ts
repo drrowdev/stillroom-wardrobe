@@ -88,8 +88,9 @@ describe('I10a checked image cleanup SQL source contract', () => {
   it('uses the same private pure strict-age predicate in production and exact-boundary fixtures', () => {
     const age = routine('private.image_cleanup_old_enough');
     expect(age).toContain('language sql immutable');
-    expect(age).toContain("p_time<p_now-interval '24 hours'");
-    expect(age).toContain("p_time<p_now-interval '7 days'");
+    expect(age).toContain("timezone('UTC',p_time)<timezone('UTC',p_now)-interval '24 hours'");
+    expect(age).toContain("timezone('UTC',p_time)<timezone('UTC',p_now)-interval '7 days'");
+    expect(age).not.toContain('p_time<p_now-interval');
     expect(age).toContain('isfinite(p_time) and isfinite(p_now) and p_time<=p_now');
     expect(age).toContain('else false');
     const evidence = routine('private.image_cleanup_evidence');
@@ -106,21 +107,72 @@ describe('I10a checked image cleanup SQL source contract', () => {
 
   it('pins the closed registered-image and catalog manifest projections', () => {
     const projection = routine('private.image_cleanup_image');
-    const keys = [...projection.matchAll(/'([a-z_]+)',im\./g)].map((match) => match[1]);
+    const keys = [...projection.matchAll(/'([a-z_]+)',(?:im\.[a-z_]+|timezone\('UTC',im\.(?:created_at|retired_at)\))/g)]
+      .map((match) => match[1]);
     expect(keys).toEqual([
       'owner_id', 'item_id', 'id', 'state', 'created_at', 'retired_at', 'description_version',
       'main_path', 'thumb_path', 'main_bytes', 'thumb_bytes', 'main_sha256', 'thumb_sha256',
       'width', 'height', 'alt_text',
     ]);
     expect(projection).not.toContain('to_jsonb');
+    for (const field of ['created_at', 'retired_at']) {
+      expect(projection).toContain(`'${field}',timezone('UTC',im.${field})`);
+      expect(projection).not.toContain(`'${field}',im.${field}`);
+    }
     const evidence = routine('private.image_cleanup_evidence');
-    expect([...evidence.matchAll(/'([a-z_]+)',member\./g)].map((match) => match[1]))
+    expect([...evidence.matchAll(/'([a-z_]+)',(?:member\.[a-z_]+|timezone\('UTC',member\.created_at\))/g)].map((match) => match[1]))
       .toEqual(['id', 'name', 'version', 'created_at']);
+    expect(evidence).toContain("'created_at',timezone('UTC',member.created_at)");
+    expect(evidence).not.toContain("'created_at',member.created_at");
+    for (const field of ['created_at', 'retired_at']) {
+      expect(evidence).toContain(`timezone('UTC',(image->>'${field}')::timestamp)`);
+      expect(evidence).not.toContain(`(image->>'${field}')::timestamptz`);
+    }
     expect(evidence).toContain('order by o.name');
     expect(evidence).toContain("octet_length(convert_to(member.version,'UTF8'))>1024");
     expect(evidence).not.toMatch(/coalesce\(member\.(id|version|created_at)/);
     expect(evidence).not.toMatch(/updated_at|last_accessed_at|user_metadata|to_jsonb\(o/);
     expect(routine('private.image_cleanup_manifest')).toContain("convert_to(jsonb_build_object(");
+  });
+
+  it('declares fixed-elapsed DST expectations and non-null cross-zone manifest regressions within control ownership', () => {
+    const rehearsal = source('scripts/image-cleanup-rehearsal.mjs');
+    const start = rehearsal.indexOf('async function timezoneDeterminism(');
+    const end = rehearsal.indexOf('async function checkRetention(', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const regression = rehearsal.slice(start, end);
+    expect(regression).toContain('await control(`do $timezone$');
+    expect(regression).toContain('$timezone$;`, deadline)');
+    expect(regression).not.toMatch(/\bcommit\b|set_config\([^;]*,false\)|set\s+(?:session|global)|alter\s+(?:database|role)/i);
+    for (const anchor of ['2026-11-02T12:00:00+00', '2026-03-09T12:00:00+00']) {
+      expect(regression).toContain(`'${anchor}'::timestamptz`);
+    }
+    expect(regression).toContain("interval '24 hours' else interval '168 hours'");
+    expect(regression).toContain('boundary := anchor-elapsed');
+    expect(regression).toContain('array[-1,0,1]');
+    expect(regression).toContain("sample := boundary+offset_us*interval '1 microsecond'");
+    expect(regression).toContain('expected := offset_us<0');
+    expect(regression).toContain('actual is distinct from expected');
+    expect(regression).toContain('actual is distinct from utc_result');
+    expect(regression).toContain("array['UTC','America/Los_Angeles']");
+    expect(regression).toContain("set_config('TimeZone',zone,true)");
+    expect(regression.match(/clock_timestamp\(\)/g)).toHaveLength(1);
+    expect(regression).toContain('fixture.image_id,observed)');
+    for (const guard of [
+      "image is null or image->>'created_at' is null",
+      "fixture.kind='retired' and image->>'retired_at' is null",
+      "(evidence->>'eligible')::boolean is distinct from true",
+      "evidence->>'manifest_sha256' is null",
+      "jsonb_array_length(evidence->'objects') is distinct from 2",
+      "where o->>'created_at' is null",
+      "image is distinct from utc_image",
+      "evidence->'objects' is distinct from utc_objects",
+      "evidence->>'manifest_sha256' is distinct from utc_manifest",
+    ]) expect(regression).toContain(guard);
+    const call = rehearsal.indexOf('await timezoneDeterminism(pending, retired, deadline)');
+    expect(call).toBeGreaterThan(rehearsal.indexOf("await ageFixture(retired, 'retired', deadline)"));
+    expect(call).toBeLessThan(rehearsal.indexOf('const expected = [empty, pending, retired'));
   });
 
   it('binds exact owned tuples and stored references, not a global image-ID absence guess', () => {

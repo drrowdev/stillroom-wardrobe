@@ -322,6 +322,61 @@ values(${identity(value.ownerId)},${identity(value.itemId)},${identity(value.ima
   }
 }
 
+async function timezoneDeterminism(pending, retired, deadline) {
+  await control(`do $timezone$
+declare anchor timestamptz; kind text; elapsed interval; boundary timestamptz; sample timestamptz;
+  offset_us integer; zone text; actual boolean; expected boolean; utc_result boolean;
+  observed timestamptz := clock_timestamp(); fixture record; image jsonb; evidence jsonb;
+  utc_image jsonb; utc_objects jsonb; utc_manifest text;
+begin
+  foreach anchor in array array[
+    '2026-11-02T12:00:00+00'::timestamptz,'2026-03-09T12:00:00+00'::timestamptz
+  ] loop
+    foreach kind in array array['pending','retired','orphan'] loop
+      elapsed := case kind when 'pending' then interval '24 hours' else interval '168 hours' end;
+      boundary := anchor-elapsed;
+      foreach offset_us in array array[-1,0,1] loop
+        sample := boundary+offset_us*interval '1 microsecond';
+        expected := offset_us<0;
+        foreach zone in array array['UTC','America/Los_Angeles'] loop
+          perform set_config('TimeZone',zone,true);
+          actual := private.image_cleanup_old_enough(kind,sample,anchor);
+          if actual is distinct from expected then raise exception 'I10A_DST_EXPECTED'; end if;
+          if zone='UTC' then utc_result := actual;
+          elsif actual is distinct from utc_result then raise exception 'I10A_DST_ZONE'; end if;
+        end loop;
+      end loop;
+    end loop;
+  end loop;
+  for fixture in select * from (values
+    (${identity(pending.ownerId)},${identity(pending.itemId)},${identity(pending.imageId)},'pending'),
+    (${identity(retired.ownerId)},${identity(retired.itemId)},${identity(retired.imageId)},'retired')
+  ) v(owner_id,item_id,image_id,kind) loop
+    foreach zone in array array['UTC','America/Los_Angeles'] loop
+      perform set_config('TimeZone',zone,true);
+      image := private.image_cleanup_image(fixture.owner_id,fixture.item_id,fixture.image_id);
+      evidence := private.image_cleanup_evidence(fixture.owner_id,fixture.item_id,fixture.image_id,observed);
+      if image is null or image->>'created_at' is null
+        or (fixture.kind='retired' and image->>'retired_at' is null)
+        or evidence is null or evidence->>'kind' is distinct from fixture.kind
+        or (evidence->>'eligible')::boolean is distinct from true
+        or (evidence->>'invalid')::boolean is distinct from false
+        or evidence->>'manifest_sha256' is null
+        or jsonb_array_length(evidence->'objects') is distinct from 2
+        or exists(select 1 from jsonb_array_elements(evidence->'objects') o where o->>'created_at' is null)
+        then raise exception 'I10A_TIMEZONE_FIXTURE'; end if;
+      if zone='UTC' then
+        utc_image := image; utc_objects := evidence->'objects'; utc_manifest := evidence->>'manifest_sha256';
+      elsif image is distinct from utc_image or evidence->'objects' is distinct from utc_objects
+        or evidence->>'manifest_sha256' is distinct from utc_manifest then
+        raise exception 'I10A_MANIFEST_TIMEZONE';
+      end if;
+    end loop;
+  end loop;
+end;
+$timezone$;`, deadline);
+}
+
 async function checkRetention(value, completedAttempt, deadline) {
   await control(`do $retention$
 begin
@@ -465,6 +520,7 @@ export async function withImageCleanupFixtures(operation) {
       await ageFixture(pending, 'pending', deadline);
       await ageFixture(retired, 'retired', deadline);
       await seedRetention(pending, retired, deadline);
+      await timezoneDeterminism(pending, retired, deadline);
       await control(`update storage.objects set created_at=clock_timestamp()-interval '1 day'
         where ${storageTarget(mixed)} and name='${mixed.thumb}';`, deadline);
       await disabledOwner(peer, deadline);

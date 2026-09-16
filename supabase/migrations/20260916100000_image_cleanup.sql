@@ -40,16 +40,16 @@ revoke all on private.image_cleanup_claims,private.image_cleanup_delete_context 
 create function private.image_cleanup_old_enough(p_kind text,p_time timestamptz,p_now timestamptz) returns boolean
 language sql immutable set search_path = '' as $$
   select coalesce(isfinite(p_time) and isfinite(p_now) and p_time<=p_now
-    and case p_kind when 'pending' then p_time<p_now-interval '24 hours'
-      when 'retired' then p_time<p_now-interval '7 days'
-      when 'orphan' then p_time<p_now-interval '7 days' else false end,false);
+    and case p_kind when 'pending' then timezone('UTC',p_time)<timezone('UTC',p_now)-interval '24 hours'
+      when 'retired' then timezone('UTC',p_time)<timezone('UTC',p_now)-interval '7 days'
+      when 'orphan' then timezone('UTC',p_time)<timezone('UTC',p_now)-interval '7 days' else false end,false);
 $$;
 
 create function private.image_cleanup_image(p_owner uuid,p_item uuid,p_image uuid) returns jsonb
 language sql volatile security definer set search_path = '' as $$
   select jsonb_build_object(
     'owner_id',im.owner_id,'item_id',im.item_id,'id',im.id,'state',im.state,
-    'created_at',im.created_at,'retired_at',im.retired_at,'description_version',im.description_version,
+    'created_at',timezone('UTC',im.created_at),'retired_at',timezone('UTC',im.retired_at),'description_version',im.description_version,
     'main_path',im.main_path,'thumb_path',im.thumb_path,'main_bytes',im.main_bytes,
     'thumb_bytes',im.thumb_bytes,'main_sha256',im.main_sha256,'thumb_sha256',im.thumb_sha256,
     'width',im.width,'height',im.height,'alt_text',im.alt_text)
@@ -75,8 +75,8 @@ begin
   if image is not null then
     invalid := image->>'main_path' is distinct from prefix || 'main.jpg'
       or image->>'thumb_path' is distinct from prefix || 'thumb.jpg';
-    age := case kind when 'retired' then (image->>'retired_at')::timestamptz
-      else (image->>'created_at')::timestamptz end;
+    age := case kind when 'retired' then timezone('UTC',(image->>'retired_at')::timestamp)
+      else timezone('UTC',(image->>'created_at')::timestamp) end;
     if kind in ('pending','retired') then
       invalid := invalid or age is null or not isfinite(age) or age>p_now;
       eligible := private.image_cleanup_old_enough(kind,age,p_now);
@@ -96,7 +96,7 @@ begin
       or member.created_at>p_now or (member.version is not null
         and octet_length(convert_to(member.version,'UTF8'))>1024) then invalid := true; end if;
     objects := objects || jsonb_build_array(jsonb_build_object(
-      'id',member.id,'name',member.name,'version',member.version,'created_at',member.created_at));
+      'id',member.id,'name',member.name,'version',member.version,'created_at',timezone('UTC',member.created_at)));
     if kind='orphan' then
       eligible := eligible and private.image_cleanup_old_enough('orphan',member.created_at,p_now);
       age := greatest(age,member.created_at);
