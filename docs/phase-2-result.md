@@ -6402,3 +6402,149 @@ types/full-budget, normal-owner/production-peer/header/native/manual/device/
 visual and I10b replacement/recovery with approved pre-save AI gates remain.
 Phase0 is engineering complete with acceptance open; I10 remains incomplete
 and I11 ineligible.
+
+## I10a R6 - distinguish direct privileges from qualified claim checks, 16 September 2026
+
+### Reviewed authority and current CI5 evidence
+
+This append follows full result/proposal
+[5702843536](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5702843536),
+controlling amended approval
+[5703023881](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5703023881)
+and fresh OWN-model edit/one-commit release
+[5703097074](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5703097074).
+The release matched 10929 ASCII/UTF8 bytes and SHA256
+`5838ff1dbdee07d78d944d4cd52066c2c55b1664d1c9987ecef253eb81f238e4`.
+Accepted read-only entry ran 19:07:00.5051505-19:08:12.0059650 UTC against
+`e58bd66a857534e4242600b88439b72d6aa4a831`, tree
+`956ef126860835239a069f4232297aea4453da4b`, sole parent
+`cce53fa11b425f0bca97b16c12e5db6b14e49473`, base/main
+`bdb48cee783a9eb5be83c52cd8791e5066eba639`.
+
+The coordinator independently verified seven OWN session582a actual
+`gpt-6-astra`/medium requests from 19:06:58.855 to 19:08:54.115 UTC for this entry.
+The same explicit model/setting, isolated workspace, branch and draft PR27
+continue. This local telemetry is not tamper-proof/native-platform evidence;
+app mapping and requested model names are not substitutes for the actual rows.
+Actual supplied-text-only critique85 used Anthropic Claude Opus5/high, with one
+verified OWN row at 18:59:11.336 UTC and zero tools/source access. It required A1
+and A2; the coordinator adopted both, with the causality/coverage limits below.
+No new reviewer, writer, planning ladder or authority is created here.
+
+CI5 `35134515616`, attempt1, FAILED; Apple5 `35134515641`, attempt1, SUCCEEDED.
+All three actual job logs bind merge checkout
+`58a2e106cd040bbe209805d55d2ed2b3058c2dc8`, tree956 above, parents bdb+e58.
+App `104923420971` passed lint, typecheck, translations, 2253 unit tests in
+29 files with no skips, build, secret/dependency checks, 697 browser tests with
+four existing explicit skips, and all eight visual uploads. The cleanup source
+unit had 23 passing tests; the A3 public-constructor case executed.
+Backend `104923420547` passed db:rehearse, reset, ordinary integration/security
+(four real-local browser cases) and the older AI rehearsal, then failed cleanup.
+Its 281 seconds were partial failed execution, not a full-budget result.
+Types generation/upload/parity were skipped; there are no types to adopt.
+Apple `104923420271` passed four generated JPEG and three I07 checks, not
+physical-device or HEIC acceptance. These results come from coordinator receipt
+5702843536; this writer did not query Actions or open artifacts.
+
+The actual closed version2 failure record was 279 UTF8 bytes including prefix/LF:
+registered-claims, primaryCheck claimed-image-edit-refusal, primaryClaimOrdinal2,
+all three teardown-category flags false, destroycount0, firstslotnull.
+Ordinal2 is pending. The direct UPDATE assertion's expected22023 predicate
+failed, but its actual response code was not logged. In particular, 42501 is
+not an observed CI5 response. Source-order evidence shows the R5 rebound
+promotion, qualified empty/adoptable checks and pending finalize/preflight
+predicates returned earlier. It does not reconstruct CI3/CI4 or explain their
+21 destructor failures. Later cases/groups were not reached.
+
+The coordinator preserved all eight exact-run archives and 24 approved PNGs.
+Twenty-three match accepted CI4 content; English sign-in matches accepted PR26
+CI7 content under 5687241771. All24 have scoped accepted-content reuse, not a
+new image inspection, device verdict or future-head acceptance. No image/archive
+was supplied to or opened by this writer. The prior R5 append remains historical.
+
+### Approved source correction and A1/A2
+
+Initial SQL explicitly revokes authenticated UPDATE and DELETE on item_images.
+Direct ordinary calls therefore test the privilege boundary, not execution of
+the active-claim row trigger. Their corrected exact42501 expectations are
+source-supported and still unexecuted. The existing pending-only UPDATE input
+and both calls' identity filters remain unchanged. Ordinary exact owner/item/image
+SELECTs with the fixed eight-field projection bracket both calls. Successful,
+nonnull pending rows must have canonical paths; the after row must preserve
+identity/state/paths, alt_text and description_version. This is combined
+preservation, not per-operation attribution. Exact code checks reject unexpected
+success/no-op; before/after reads alone do not detect every no-op.
+
+The existing zero-object EMPTY arm retains its qualified P0001 refusal, then
+adds a distinct read-only `$forget$` fixture-control block: no exact Storage
+objects via unchanged storageTarget(value), no owner/item whole-item deletion
+claim, and no owner/item/image delete context. It does not query or forbid the
+active IMAGE claim. No marker/context/row is created, removed or rewound.
+That privileged fixture qualification is not normal-owner RLS/access evidence.
+
+A2 explicitly links value.main/thumb to canonical owner/item/image paths and
+the ordinary before row's metadata paths to those exact fixture paths, retaining
+the original A3 early empty preflight. One PUBLIC forget_image call must return
+exact22023. An ordinary after row must remain owned/pending with the same
+paths/caption/counter, followed by the unchanged checked active/absent afterClaim
+and original resume/byte-absence flow. The READY-only description RPC is not
+substituted for this pending-image check.
+
+A1 narrows the formerly whole-claims private-table ban to the unique,
+existence/order-checked shared `$adoption$` used-ID block. That block still
+excludes IMAGE/ITEM claims and delete context. Separate exact `$forget$` SQL
+assertions retain its positive qualifications and ban active-IMAGE queries or
+privileged mutations. Scoped empty/adoptable branch/code/label and ordering
+assertions replace the now-invalid contiguous branch pin, confining the single
+forget call to EMPTY before the shared claim/resume checks. Unrelated assertions
+are unchanged; no arbitrary-error list, skip or import adjustment is introduced.
+
+Rebound success, qualified adoptable UPDATE refusal, seeded used-ID cases,
+pending finalize/preflight and all retired/reference-identity retention behavior
+remain. So do 39 fixtures, seven registered ordinals, 21 siblings, both late
+cases, page20, all reverse teardown attempts, child/byte/poll/response/join
+bounds, eight-minute rehearsal, two-minute reserve and 30-minute backend limit.
+The version2 nine-key emitter, 25 phases, nullable zero handling, global slot
+0..38/count0..39, registered ordinal0..6, false-only recorder, snapshots,
+falsy-primary handling and failure precedence are unchanged.
+
+The two direct labels are renamed and five fixed labels added, giving exactly
+20 in the approved order. Recomputed PowerShell/.NET closed-text enumeration
+covered 9828 shapes, with a maximum294 UTF8 bytes including prefix/LF, strictly
+below512. This is a new static measurement with the new list, not reuse of the
+R5 result or execution of the diagnostic/source-unit test. False flags, null
+nullable fields and two-digit failure counts bound the longest field spellings.
+
+### Static checks and unreleased gates
+
+Fresh ordinary pre-edit guards passed at 19:12:25.6958768 UTC: exact e58/tree956/
+parentcce, same branch, clean including ignored/untracked, 237 normal stage0/
+mode100644/H index entries, boolean fsmonitorfalse before status, normal identity
+available without values, signingfalse/unset, canonical single origin and no
+hooks/locks/operations/rewrites/extra targets or overrides.
+`git diff --check` passed; the exact rehearsal/unit working deltas were read.
+Permitted precommit checks additionally cover full staged diff/whitespace,
+regular files/attributes, canonical UTF8/LF byte/SHA/blob identities, frozen
+other paths, refreshed ordinary guards and final clean commit identity.
+No application parser/compiler/lint/unit/browser/backend execution occurred.
+Final commit and pin results are reported separately, without rewriting history.
+
+Only rehearsal, its new source-unit file and this append change. The full prior
+429114 canonical LF-byte document prefix is preserved, SHA256
+`9d5ac2fd87fefbad5f77d241afb5e403c3949f755fc7fd1ddd6f368bc2666e5e`.
+Other234 paths remain frozen, including SQL/types/workflows/preservation unit/
+old helpers and opaque transport. Transport checks are retained HEAD/index
+identity plus normal status only, not body/header/factory/destructor access.
+
+Prior reads are not atomic with RPCs;22023 does not exclude every lock contender
+or establish unique historical causality. This selected narrow DELETE case and
+the retained UPDATE case do not prove globally complete guard coverage, the only
+possible route/fixture, a matched pair, byte provenance or physical erasure.
+CI1 B1 and CI3/CI4 causes remain UNKNOWN/unwaived; review80's access incident
+remains recorded. A later green run alone is not a waiver.
+No push/PR edit/Actions query/CI6/artifact/type adoption/stage2 is authorized here.
+No local tooling/runtime/probe/install/version, extra agent/session/branch,
+hosted/account/data/private-photo/provider/paid, merge or deployment operation
+occurred. Exact-head independent/engineering/type/full-budget/normal-owner/peer/
+header/native/manual/device/visual/I10b gates remain. I10 is incomplete and
+I11 remains ineligible.

@@ -661,6 +661,39 @@ $adoption$;`, deadline);
           const adoption = await owner.client.rpc('commit_image', { p_image_id: value.imageId });
           if (value === empty) {
             requireRegistered(adoption.error?.code === 'P0001', 'incomplete-upload-refusal');
+            await control(`do $forget$
+begin
+  if exists(select 1 from storage.objects where ${storageTarget(value)})
+    or exists(select 1 from private.item_deletion_claims where owner_id=${identity(owner.uid)}
+      and item_id=${identity(value.itemId)})
+    or exists(select 1 from private.image_cleanup_delete_context where owner_id=${identity(owner.uid)}
+      and item_id=${identity(value.itemId)} and image_id=${identity(value.imageId)}) then
+    raise exception 'I10A_FORGET_PRECONDITION';
+  end if;
+end;
+$forget$;`, deadline);
+            const forgetBefore = await owner.client.from('item_images')
+              .select('id,owner_id,item_id,state,main_path,thumb_path,alt_text,description_version')
+              .eq('owner_id', owner.uid).eq('item_id', value.itemId).eq('id', value.imageId).single();
+            requireRegistered(!forgetBefore.error && forgetBefore.data
+              && forgetBefore.data.id === value.imageId && forgetBefore.data.owner_id === owner.uid
+              && forgetBefore.data.item_id === value.itemId && forgetBefore.data.state === 'pending'
+              && value.main === `${owner.uid}/${value.itemId}/${value.imageId}/main.jpg`
+              && value.thumb === `${owner.uid}/${value.itemId}/${value.imageId}/thumb.jpg`
+              && forgetBefore.data.main_path === value.main && forgetBefore.data.thumb_path === value.thumb, 'forget-owned-pending');
+            requireRegistered((await owner.client.rpc('forget_image', {
+              p_image_id: value.imageId,
+            })).error?.code === '22023', 'claim-guard-delete-refusal');
+            const forgetAfter = await owner.client.from('item_images')
+              .select('id,owner_id,item_id,state,main_path,thumb_path,alt_text,description_version')
+              .eq('owner_id', owner.uid).eq('item_id', value.itemId).eq('id', value.imageId).single();
+            requireRegistered(!forgetAfter.error && forgetAfter.data
+              && forgetAfter.data.id === value.imageId && forgetAfter.data.owner_id === owner.uid
+              && forgetAfter.data.item_id === value.itemId && forgetAfter.data.state === 'pending'
+              && forgetAfter.data.main_path === forgetBefore.data.main_path
+              && forgetAfter.data.thumb_path === forgetBefore.data.thumb_path
+              && forgetAfter.data.alt_text === forgetBefore.data.alt_text
+              && forgetAfter.data.description_version === forgetBefore.data.description_version, 'forget-pending-preserved');
           } else {
             requireRegistered(adoption.error?.code === '22023', 'claim-guard-adoption-refusal');
             const after = await owner.client.from('item_images').select('id,owner_id,item_id,state')
@@ -688,10 +721,28 @@ $adoption$;`, deadline);
           requireRegistered((await owner.client.rpc('analyzed_item_save_preflight', {
             p_item_id: value.itemId, p_image_id: value.imageId, p_fingerprint: 'a'.repeat(64),
           })).error?.code === '22023', 'claimed-analyzed-preflight-refusal');
+          const directBefore = await owner.client.from('item_images')
+            .select('id,owner_id,item_id,state,main_path,thumb_path,alt_text,description_version')
+            .eq('owner_id', owner.uid).eq('item_id', value.itemId).eq('id', value.imageId).single();
+          requireRegistered(!directBefore.error && directBefore.data
+            && directBefore.data.id === value.imageId && directBefore.data.owner_id === owner.uid
+            && directBefore.data.item_id === value.itemId && directBefore.data.state === 'pending'
+            && directBefore.data.main_path === `${owner.uid}/${value.itemId}/${value.imageId}/main.jpg`
+            && directBefore.data.thumb_path === `${owner.uid}/${value.itemId}/${value.imageId}/thumb.jpg`, 'direct-image-owned-pending');
           requireRegistered((await owner.client.from('item_images').update({ alt_text: 'Refused fixture edit' })
-            .eq('id', value.imageId).eq('owner_id', owner.uid)).error?.code === '22023', 'claimed-image-edit-refusal');
+            .eq('id', value.imageId).eq('owner_id', owner.uid)).error?.code === '42501', 'direct-image-update-refusal');
           requireRegistered((await owner.client.from('item_images').delete()
-            .eq('id', value.imageId).eq('owner_id', owner.uid)).error?.code === '22023', 'claimed-image-delete-refusal');
+            .eq('id', value.imageId).eq('owner_id', owner.uid)).error?.code === '42501', 'direct-image-delete-refusal');
+          const directAfter = await owner.client.from('item_images')
+            .select('id,owner_id,item_id,state,main_path,thumb_path,alt_text,description_version')
+            .eq('owner_id', owner.uid).eq('item_id', value.itemId).eq('id', value.imageId).single();
+          requireRegistered(!directAfter.error && directAfter.data
+            && directAfter.data.id === value.imageId && directAfter.data.owner_id === owner.uid
+            && directAfter.data.item_id === value.itemId && directAfter.data.state === 'pending'
+            && directAfter.data.main_path === directBefore.data.main_path
+            && directAfter.data.thumb_path === directBefore.data.thumb_path
+            && directAfter.data.alt_text === directBefore.data.alt_text
+            && directAfter.data.description_version === directBefore.data.description_version, 'direct-image-preserved');
         }
         if (value === retired) {
           const changed = await owner.client.from('items').update({ notes: 'Cleanup fixture edit' })

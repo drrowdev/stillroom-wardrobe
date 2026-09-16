@@ -410,9 +410,11 @@ describe('I10a checked image cleanup SQL source contract', () => {
 describe('I10a failure-only rehearsal diagnostic source contract', () => {
   const checks = [
     'adoption-claim-precondition', 'adoption-owned-pending', 'incomplete-upload-refusal',
+    'forget-owned-pending', 'claim-guard-delete-refusal', 'forget-pending-preserved',
     'claim-guard-adoption-refusal', 'adoption-pending-preserved', 'adoption-claim-preserved',
     'used-id-adoption-refusal', 'claimed-manual-finalize-refusal', 'claimed-analyzed-preflight-refusal',
-    'claimed-image-edit-refusal', 'claimed-image-delete-refusal', 'unrelated-field-edit',
+    'direct-image-owned-pending', 'direct-image-update-refusal', 'direct-image-delete-refusal',
+    'direct-image-preserved', 'unrelated-field-edit',
     'fixture-field-restore', 'trash-during-cleanup', 'item-begin-during-cleanup',
   ];
   const phases = [
@@ -546,7 +548,17 @@ describe('I10a failure-only rehearsal diagnostic source contract', () => {
     expect(claims.match(/path\.present === \(value === adoptable\)/g)).toHaveLength(2);
     expect(claims.match(/path\.path === `\$\{owner\.uid\}\/\$\{value\.itemId\}\/\$\{value\.imageId\}\/\$\{path\.role\}\.jpg`/g)).toHaveLength(2);
     expect(claims).toContain('private.item_save_used_ids where owner_id=${identity(owner.uid)}\n    and (item_id=${identity(value.itemId)} or image_id=${identity(value.imageId)})');
-    expect(claims).not.toMatch(/from private\.(?:image_cleanup_claims|item_deletion_claims)/);
+    const adoptionOpen = 'await control(`do $adoption$';
+    const adoptionClose = '$adoption$;`, deadline);';
+    const adoptionStart = claims.indexOf(adoptionOpen);
+    const adoptionEnd = claims.indexOf(adoptionClose, adoptionStart);
+    expect(adoptionStart).toBeGreaterThan(-1);
+    expect(adoptionEnd).toBeGreaterThan(adoptionStart);
+    expect(claims.split(adoptionOpen)).toHaveLength(2);
+    expect(claims.split(adoptionClose)).toHaveLength(2);
+    const adoptionControl = claims.slice(adoptionStart, adoptionEnd + adoptionClose.length);
+    expect(adoptionControl).toContain('from private.item_save_used_ids where owner_id=${identity(owner.uid)}\n    and (item_id=${identity(value.itemId)} or image_id=${identity(value.imageId)})');
+    expect(adoptionControl).not.toMatch(/from private\.(?:image_cleanup_claims|item_deletion_claims|image_cleanup_delete_context)/);
     expect(claims).toContain("raise exception 'I10A_NEGATIVE_ADOPTION_PRECONDITION'");
     for (const variable of ['before', 'after']) {
       expect(claims).toContain(`!${variable}.error && ${variable}.data && ${variable}.data.id === value.imageId`);
@@ -554,12 +566,26 @@ describe('I10a failure-only rehearsal diagnostic source contract', () => {
       expect(claims).toContain(`${variable}.data.state === 'pending'`);
     }
     expect(claims).toContain("'adoption-owned-pending');\n          const adoption = await owner.client.rpc('commit_image', { p_image_id: value.imageId });");
-    expect(claims).toContain([
-      'if (value === empty) {',
-      "            requireRegistered(adoption.error?.code === 'P0001', 'incomplete-upload-refusal');",
-      '          } else {',
-      "            requireRegistered(adoption.error?.code === '22023', 'claim-guard-adoption-refusal');",
-    ].join('\n'));
+    const emptyOpen = 'if (value === empty) {';
+    const adoptableOpen = "          } else {\n            requireRegistered(adoption.error?.code === '22023', 'claim-guard-adoption-refusal');";
+    const emptyStart = claims.indexOf(emptyOpen);
+    const adoptableStart = claims.indexOf(adoptableOpen, emptyStart);
+    const afterClaimStart = claims.indexOf('          const afterClaim =', adoptableStart);
+    expect(emptyStart).toBeGreaterThan(adoptionEnd);
+    expect(adoptableStart).toBeGreaterThan(emptyStart);
+    expect(afterClaimStart).toBeGreaterThan(adoptableStart);
+    expect(claims.split(emptyOpen)).toHaveLength(2);
+    expect(claims.split(adoptableOpen)).toHaveLength(2);
+    const emptyArm = claims.slice(emptyStart + emptyOpen.length, adoptableStart);
+    const adoptableArm = claims.slice(adoptableStart, afterClaimStart);
+    expect(emptyArm).toMatch(/^\n            requireRegistered\(adoption\.error\?\.code === 'P0001', 'incomplete-upload-refusal'\);/);
+    expect(emptyArm).toContain("owner.client.rpc('forget_image', {");
+    expect(emptyArm.match(/\.rpc\('forget_image'/g)).toHaveLength(1);
+    expect(claims.match(/\.rpc\('forget_image'/g)).toHaveLength(1);
+    expect(emptyArm).not.toMatch(/\b(?:if|for|while|switch|catch)\s*\(|\belse\b/);
+    expect(adoptableArm).toContain("'adoption-pending-preserved');");
+    expect(adoptableArm).not.toContain('forget_image');
+    expect(afterClaimStart).toBeLessThan(claims.indexOf('await resumeCleanupFixture(owner, value);'));
     expect(claims).toContain("} else if (value === pending || value === retired) {\n          requireRegistered((await owner.client.rpc('commit_image', { p_image_id: value.imageId })).error?.code === '22023', 'used-id-adoption-refusal');");
     expect(claims).not.toContain('claimed-adoption-refusal');
     expect(claims).toContain("const afterClaim = checkCleanupStatus(await cleanupRpc(owner, 'image_cleanup_status', {");
@@ -569,6 +595,100 @@ describe('I10a failure-only rehearsal diagnostic source contract', () => {
     expect(claims).toContain('if (value === pending || value === retired) await checkRetention(value, value === retired, deadline);');
     expect(claims).toContain('await resumeCleanupFixture(owner, value);\n        await requireAbsentBytes(owner, value);');
     expect(claims).not.toMatch(/if \(value === adoptable\).*checkRetention/);
+  });
+
+  it('qualifies the empty public delete and brackets direct privilege refusals with combined preservation', () => {
+    const rehearsal = source('scripts/image-cleanup-rehearsal.mjs');
+    const claimsStart = rehearsal.indexOf("      phase = 'registered-claims';");
+    const claimsEnd = rehearsal.indexOf("      phase = 'claim-pagination';", claimsStart);
+    expect(claimsStart).toBeGreaterThan(-1);
+    expect(claimsEnd).toBeGreaterThan(claimsStart);
+    const claims = rehearsal.slice(claimsStart, claimsEnd);
+    const emptyStart = claims.indexOf('          if (value === empty) {');
+    const emptyEnd = claims.indexOf("          } else {\n            requireRegistered(adoption.error?.code === '22023'", emptyStart);
+    expect(emptyStart).toBeGreaterThan(-1);
+    expect(emptyEnd).toBeGreaterThan(emptyStart);
+    const empty = claims.slice(emptyStart, emptyEnd);
+    const forgetOpen = 'await control(`do $forget$';
+    const forgetClose = '$forget$;`, deadline);';
+    const forgetStart = empty.indexOf(forgetOpen);
+    const forgetEnd = empty.indexOf(forgetClose, forgetStart);
+    expect(forgetStart).toBeGreaterThan(empty.indexOf("'incomplete-upload-refusal'"));
+    expect(forgetEnd).toBeGreaterThan(forgetStart);
+    expect(claims.split(forgetOpen)).toHaveLength(2);
+    expect(claims.split(forgetClose)).toHaveLength(2);
+    const forgetControl = empty.slice(forgetStart, forgetEnd + forgetClose.length);
+    expect(forgetControl).toBe([
+      'await control(`do $forget$',
+      'begin',
+      '  if exists(select 1 from storage.objects where ${storageTarget(value)})',
+      '    or exists(select 1 from private.item_deletion_claims where owner_id=${identity(owner.uid)}',
+      '      and item_id=${identity(value.itemId)})',
+      '    or exists(select 1 from private.image_cleanup_delete_context where owner_id=${identity(owner.uid)}',
+      '      and item_id=${identity(value.itemId)} and image_id=${identity(value.imageId)}) then',
+      "    raise exception 'I10A_FORGET_PRECONDITION';",
+      '  end if;',
+      'end;',
+      '$forget$;`, deadline);',
+    ].join('\n'));
+    expect(forgetControl).not.toMatch(/private\.image_cleanup_claims|\b(?:insert|update|delete)\b/i);
+    expect(empty).toContain('value.main === `${owner.uid}/${value.itemId}/${value.imageId}/main.jpg`');
+    expect(empty).toContain('value.thumb === `${owner.uid}/${value.itemId}/${value.imageId}/thumb.jpg`');
+    expect(empty).toContain('forgetBefore.data.main_path === value.main && forgetBefore.data.thumb_path === value.thumb');
+    const forgetCall = [
+      "requireRegistered((await owner.client.rpc('forget_image', {",
+      '              p_image_id: value.imageId,',
+      "            })).error?.code === '22023', 'claim-guard-delete-refusal');",
+    ].join('\n');
+    expect(empty).toContain(forgetCall);
+    expect(claims.match(/\.rpc\('forget_image'/g)).toHaveLength(1);
+    expect(empty.indexOf('const forgetBefore =')).toBeGreaterThan(forgetEnd + forgetClose.length);
+    expect(empty.indexOf("'forget-owned-pending'")).toBeGreaterThan(empty.indexOf('const forgetBefore ='));
+    expect(empty.indexOf(forgetCall)).toBeGreaterThan(empty.indexOf("'forget-owned-pending'"));
+    expect(empty.indexOf('const forgetAfter =')).toBeGreaterThan(empty.indexOf(forgetCall));
+    expect(empty.indexOf("'forget-pending-preserved'")).toBeGreaterThan(empty.indexOf('const forgetAfter ='));
+    expect(claims.indexOf('const afterClaim =')).toBeGreaterThan(emptyEnd);
+    expect(claims).toContain("path.present === (value === adoptable)), 'adoption-claim-preserved');");
+    expect(claims.indexOf('await resumeCleanupFixture(owner, value);')).toBeGreaterThan(claims.indexOf("'adoption-claim-preserved'"));
+
+    const pendingStart = claims.indexOf('        if (value === pending) {');
+    const pendingEnd = claims.indexOf('        if (value === retired) {', pendingStart);
+    expect(pendingStart).toBeGreaterThan(emptyEnd);
+    expect(pendingEnd).toBeGreaterThan(pendingStart);
+    const pending = claims.slice(pendingStart, pendingEnd);
+    const directCalls = [
+      "requireRegistered((await owner.client.from('item_images').update({ alt_text: 'Refused fixture edit' })",
+      "            .eq('id', value.imageId).eq('owner_id', owner.uid)).error?.code === '42501', 'direct-image-update-refusal');",
+      "          requireRegistered((await owner.client.from('item_images').delete()",
+      "            .eq('id', value.imageId).eq('owner_id', owner.uid)).error?.code === '42501', 'direct-image-delete-refusal');",
+    ].join('\n');
+    expect(pending).toContain(directCalls);
+    expect(pending.indexOf('const directBefore =')).toBeGreaterThan(pending.indexOf("'claimed-analyzed-preflight-refusal'"));
+    expect(pending.indexOf("'direct-image-owned-pending'")).toBeGreaterThan(pending.indexOf('const directBefore ='));
+    expect(pending.indexOf(directCalls)).toBeGreaterThan(pending.indexOf("'direct-image-owned-pending'"));
+    expect(pending.indexOf('const directAfter =')).toBeGreaterThan(pending.indexOf(directCalls));
+    expect(pending.indexOf("'direct-image-preserved'")).toBeGreaterThan(pending.indexOf('const directAfter ='));
+    expect(pending).not.toMatch(/claimed-image-(?:edit|delete)-refusal|update_image_description|forget_image/);
+    for (const role of ['main', 'thumb']) {
+      expect(pending).toContain(`directBefore.data.${role}_path === \`\${owner.uid}/\${value.itemId}/\${value.imageId}/${role}.jpg\``);
+    }
+    for (const [region, prefix, indent] of [[empty, 'forget', '              '], [pending, 'direct', '            ']]) {
+      for (const suffix of ['Before', 'After']) {
+        const variable = `${prefix}${suffix}`;
+        expect(region).toContain([
+          `const ${variable} = await owner.client.from('item_images')`,
+          `${indent}.select('id,owner_id,item_id,state,main_path,thumb_path,alt_text,description_version')`,
+          `${indent}.eq('owner_id', owner.uid).eq('item_id', value.itemId).eq('id', value.imageId).single();`,
+        ].join('\n'));
+        expect(region).toContain(`!${variable}.error && ${variable}.data`);
+        expect(region).toContain(`${variable}.data.id === value.imageId && ${variable}.data.owner_id === owner.uid`);
+        expect(region).toContain(`${variable}.data.item_id === value.itemId && ${variable}.data.state === 'pending'`);
+      }
+      for (const field of ['main_path', 'thumb_path', 'alt_text', 'description_version']) {
+        expect(region).toContain(`${prefix}After.data.${field} === ${prefix}Before.data.${field}`);
+      }
+      expect(region).not.toMatch(/console\.|JSON\.stringify/);
+    }
   });
 
   it('retains primary values and all teardown attempts with one closed nine-key failure record', () => {
@@ -653,6 +773,8 @@ describe('I10a failure-only rehearsal diagnostic source contract', () => {
       '    if (failed) throw primary;',
       '    console.log(`PASS: image cleanup fixture teardown; ${retainedClaims} minimal completed claims and generated used identities retained by production lifetime.`);',
     ].join('\n'));
+    expect(checks).toHaveLength(20);
+    expect((phases.length + 1) * (checks.length + 1) * 3 * 3 * 2).toBe(9828);
     for (const primaryPhase of [null, ...phases]) {
       for (const primaryCheck of [null, ...checks]) {
         for (const primaryClaimOrdinal of [null, 0, 6]) {
