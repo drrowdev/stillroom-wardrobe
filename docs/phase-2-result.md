@@ -5827,3 +5827,864 @@ is claimed.
 Independent review, exact-head CI/no-new-flakiness, normal-owner evidence and
 all existing human/device/recovery/export/hosted/paid/cutover gates remain;
 Phase 0 is engineering complete with acceptance open.
+
+## I10a stage1 source increment - 16 September 2026
+
+This section records the first fourteen-path backend/test increment only.
+The accepted PR26 main at
+`bdb48cee783a9eb5be83c52cd8791e5066eba639`, tree
+`248aca28fa5d737f6aaa67ed7bee72db4cfd30ed`, supersedes its historical
+preexecution entries above. It does not supply I10a runtime evidence.
+Requirements: **R04, R12, R20, R23**, blueprint15 I10 and revision 1.3
+photo-first, approved pre-save AI rules.
+
+Authority is the [full plan](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5695610221),
+[A1](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5695944194),
+[coordinator dispositions/approval](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5696162128),
+[own stage1 model/edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5696311665),
+[public retained helper contract](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5696501155),
+[A2 proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5696525488)
+and [A2 dispositions/same-writer resume](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5696691067).
+Independent Anthropic Claude Opus 5/high critiques70/71/72 returned **AMEND**;
+coordinator dispositions, not critic READY or writer self-approval, authorize
+this source scope. The coordinator-observed local attestation belongs only to
+`582a6642-4ebd-440d-a7a6-80c590ecfd65` on
+`drrowdev-laughing-invention`; it is locally recorded usage evidence, not
+tamper-proof or native-platform-equivalent proof.
+
+The proposed tenth migration is
+`20260916100000_image_cleanup.sql`: LF-canonical **30667 bytes**,
+SHA256 `7ac5beaeec7a05074920f866e6153ea19c0cc3a429e9e29070d3e7aa5573c6b1`.
+All nine historical SQL files remain unchanged. It adds owner-scoped
+preview/begin/status/claims/finish RPCs, durable private claims and an exact
+private deletion context. Pending images require strictly more than 24 hours;
+retired images and each present canonical orphan member require strictly more
+than 7 days. Ready images remain ineligible even with missing bytes. Unsupported
+paths and unverifiable metadata are coarse review reasons, not automatic
+deletion authority. Frozen manifest evidence and fresh immutable catalog
+identity checks precede checked metadata deletion and compact completed receipts.
+Catalog absence is not a claim of physical erasure.
+
+The four replacement-body MD5 pins, computed from actual tenth-migration
+function bodies including their original whitespace, are:
+
+| Current function | MD5 |
+| --- | --- |
+| `private.guard_item_image_deletion()` | `3a84bb649cc47fdb09b8217debf27837` |
+| `private.may_create_item_object(text)` | `b2cb4bdec114c45f21e2d0bd607bc4ad` |
+| `private.guard_item_object_publication()` | `5e886ec32267f7992e963a4a0e952708` |
+| `public.begin_item_deletion(uuid,bigint,uuid,text)` | `63974c11678275f25476ec91340e9411` |
+
+A2 changes only old line367 and old383-387 of the lifecycle schema test.
+The replacement loop asserts all eleven unique original bare names, seven
+unchanged historical hashes and exactly four absent superseded hashes. The new
+test derives all four current signature/hash tuples from actual SQL bodies,
+including the publication body rather than using its imported constant as the
+expected oracle. The eleven live catalog pins, grants, native Storage guard
+checks and ALWAYS requirements remain mandatory.
+
+New ordinary integration/security suites do not receive privileged fixture
+flags. A separately guarded CI rehearsal is registered after AI rehearsal and
+before type generation, with both cleanup and legacy preservation opt-ins.
+It declares strict age boundaries, owner isolation, ready-photo preservation,
+partial deletion/resume, multi-page candidates/claims, permanent image markers,
+metadata-insertion orderings, whole-item exclusion/replay, retention and native
+housekeeping checks. Structural synthetic AI/save rows are not evidence that a
+real analyzed Save minted those rows; the existing real B2 gates remain.
+
+Both owners retain their one admitted four-byte native slow-upload denial case.
+The callback begins image cleanup but leaves pending metadata, a live untrashed
+parent and an active cleanup claim until the helper joins denied settlement.
+Catalog-zero and ordinary download/sign/list checks precede finish. These cases
+exclude the named deleted-metadata/whole-item-claim/canceled-AI alternatives,
+but contain neither an identical unclaimed successful slow control nor an exact
+guard trace. HTTP shape alone is not causal proof. The native localhost5000
+boundary is not evidence about gateway/Kong buffering. An active-claim UPDATE
+refusal may expose an earlier housekeeping UPDATE in native DELETE; disabled
+versioning does not waive that runtime check or justify claiming no self-block.
+
+The source declares a 480-second rehearsal budget with 120 seconds reserved for
+teardown, finite request/scan/resume bounds and joined operations. These are
+unexecuted declarations, not measured performance, proof of whole-process-tree
+termination, or guaranteed teardown after runner loss. Normal cleanup preserves
+production-lifetime compact receipts and used-ID records; it does not delete
+profiles/Auth to manufacture retention evidence.
+
+**NOT RUN:** local Node/npm, parser/compiler/formatter, lint/typecheck,
+translation checks, unit/integration/security/browser/a11y tests, build/scans,
+backend/native rehearsals, Docker, generated-type parity or hosted operations.
+Only ordinary Git and PowerShell/.NET source text/byte/hash checks are permitted
+for this source release. No image/archive review or local application execution
+is authorized. Source holds remain in force; hash-only preservation is not
+semantic review.
+
+Original UI and tracked generated database types remain unchanged. No operator,
+browser/config/capture or stage2 work is included. The coordinator owns future
+publication/CI admission, exact-head independent review, expiring artifact
+preservation, actual matching CI-generated type adoption and any stage2 release.
+This entry grants no push, PR, CI, merge, deployment, hosted DDL/account/data,
+paid-provider or private-photo authority.
+
+**I10 remains incomplete:** I10b replacement/recovery with approved pre-save AI
+is still required; I11 is not made eligible by this source increment. Phase 0
+remains engineering complete with acceptance open. All pending normal-owner,
+operator, device, recovery/export, visual and hosted gates remain pending.
+
+## I10a R1 timezone repair source - 16 September 2026
+
+This append records the bounded repair of candidate
+`5202d179aaf0edb8bd877c7877d4239e9b84e354`, not an observed runtime failure.
+The coordinator challenged retained independent review73's initial bounded-CI
+READY before publication. Actual Anthropic Claude Opus 5/high review74 confirmed
+the source dependency and corrected a manifest-only timezone-setting proposal.
+The [reviewed E1-E4 disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5697438532)
+and [matching own model/edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5697506931)
+control this six-path, same-writer repair. No new review verdict or runtime
+acceptance is inferred.
+
+Registered and Storage timestamps previously entered hashed JSON using the
+session timezone. Setting only the hashing function's timezone would not repair
+JSON already encoded by its callers. A changed timezone could reject the
+page-to-BEGIN manifest or strand status/finish retries in that changed context;
+this is not a claim that recovery under the original timezone was impossible.
+Calendar seven-day subtraction also spans 167 or 169 hours across DST.
+
+The new I10 helpers now use UTC timestamp arithmetic for strict elapsed-age
+comparisons, encode registered created_at/retired_at and Storage created_at in
+UTC, and explicitly parse the offset-free registered strings back as UTC.
+Finite/future checks, nulls, exact sixteen/four-field projections, eligibility_at,
+signatures, receipts and all four replacement bodies remain unchanged.
+Old I08 and the nine historical migrations are not repaired or reinterpreted.
+
+The guarded rehearsal adds fixed spring-forward/fall-back anchors with 168-hour
+and 24-hour boundaries, equality and +/-1 microsecond. It asserts expected
+booleans as well as UTC/America-Los-Angeles equality. Existing pending and
+retired fixtures exercise non-null registered/catalog timestamps and retired_at,
+with one captured observation instant and non-null eligible manifest checks.
+Timezone settings are transaction-local inside the existing control-owned
+disposable CI transaction. These are private-helper determinism regressions,
+not ordinary-owner API timezone evidence, and have not been executed.
+Existing boundaries, two slow-upload denial owners, budgets and teardown remain.
+
+The repaired tenth migration is LF-canonical **30839 bytes**, SHA256
+`8fa2ea77b162ca2de587dfffc3199db24b2cb6d428b78d9be9eadc9e51a399e6`.
+Its Windows CRLF working representation is **31320 bytes**, SHA256
+`2e5f0a88f3bf11478a99937d6e45bdf9ca79dfe7f4974e34fa2abd441aa56b11`.
+The tenth inventory byte pin and cleanup source hash now match actual source.
+PowerShell/.NET text/byte hashing confirmed all four replacement-body MD5s still
+match the table above; `git diff --check` passed, and the scoped source diff was
+inspected. These are static results only, not SQL execution or test results.
+The complete prior phase-result text remains historical evidence.
+
+**NOT RUN:** compiler/parser/formatter, lint/typecheck, tests, native/backend
+rehearsals, actual timezone preferences, normal-owner flows, CI and visual review.
+PostgREST13 documents timezone preferences, but this application's installed
+stack and SDK header API remain unprobed. No new transport contract is assumed.
+The restricted Authorization value remains unreviewed and untouched; owner-only
+positive calls on the new fixture deletion transport do not prove its peer
+isolation or credential correctness. Mandatory production-path owner/peer
+acceptance is still pending, not waived.
+
+Publication, CI admission, exact-head review, artifacts and stage2 remain
+coordinator gates. This repair authorizes no push, PR, CI operation, hosted
+mutation, provider processing, deployment or merge. I10/I10b and Phase 0
+acceptance limitations above remain unchanged.
+
+## PR27 CI1 failure and R2 source correction - 16 September 2026
+
+The [coordinator's complete CI1 record](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5698289348)
+reports **CI1 FAILED**; its first-cycle allowance is consumed. The following
+results belong to source `0bb17ad477444ede32a242998539c3f064712b21`,
+base `bdb48cee783a9eb5be83c52cd8791e5066eba639`, not this later correction.
+CI run35100624137 attempt1 and Apple run35100624112 attempt1 checked out
+merge commit `e85fcab0de3f7e2d4505e2f23ba31e269fd12fe5`, whose tree
+`2302c9dc80628cc58ddde5e9764d08f377ef14a0` matches the reviewed source.
+Its parents are the stated base and feature head; it is not the feature commit.
+
+App job104808834063 passed dependency installation, then failed `npm run lint`:
+`scripts/image-cleanup-rehearsal.mjs:409:7`, `no-useless-assignment`, one error
+and zero warnings. All subsequent App checks and eight visual uploads were
+SKIPPED, including typecheck, translations, unit/build/scans and browser tests.
+
+Backend job104808834171 passed installation, pinned Chromium, `npm run db:start`,
+`npm run db:rehearse`, `npm run db:reset`, ordinary integration and security.
+This includes the exact ten-source preservation/catalog checks, new I10a
+non-aged protocol/refusals and ordinary peer/anonymous checks, plus four
+existing real-local browser cases. It does not establish aged cleanup or
+timezone/native rehearsal success.
+
+The old AI rehearsal then failed at served-entrypoint after its B1 normal-session
+baseline children passed. Closed evidence reports `inspect-result`,
+`commandCode:1`, `listedState:running`; readiness reports `reader-failed`,
+`elapsedMs:647`, `lastHttp:null`, no transport failure, and no fresh/stable
+readiness. A running container listing preceded a nonzero Docker inspect
+result, before inspect-shape parsing. **The cause remains UNKNOWN.** No raw
+private evidence was recovered, and no container-replacement race, HTTP
+readiness or specific Docker cause is inferred.
+
+The new cleanup rehearsal, type generation/upload and parity were SKIPPED.
+The failed partial backend job took 242 seconds; this is not a completed
+cleanup or stage2 budget measurement. Artifact inventory was zero: no current
+generated types or visual bundles exist to adopt. Stage2/type adoption remains
+blocked, not waived.
+
+Apple job104808833802 passed all four generated JPEG cases (10.9 seconds) and
+three I07 orientation/composition cases (10.5 seconds) on macOS26.6.2,
+build25G83, arm64, image20260907.0351.1. This is generated Mac WebKit evidence,
+not physical iPhone/HEIC or user acceptance.
+
+Under the [matching R2 own-model/edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5698396352),
+the only executable-source change removes the redundant initial assignment:
+`let restored = false;` becomes `let restored;` in `disabledOwner`. Every
+finally path already assigns the flag before its checks. All restoration
+operations, true/false assignments, failure branches and primary-error handling
+remain unchanged; no lint rule or assertion is suppressed.
+
+R2 does **not** diagnose or repair the separate B1 reader incident. Its PR27
+incident/merge hold remains even if a later separately admitted run passes.
+The frozen reader, old AI rehearsal, SQL, pins, tests, types, workflows and
+restricted transport are untouched. The restricted Authorization value and
+exact-transport peer gap remain unreviewed; production-path owner/peer acceptance
+is still required.
+
+R2 local validation is limited to ordinary Git and text/byte identity checks.
+`git diff --check` and `git diff --cached --check` passed. Static hashing
+confirmed the exact one-declaration change and intact 402168-byte prior document
+prefix; the two-file staged diff was inspected. Other 235 paths are unchanged.
+No local lint, compiler/parser/formatter, tests, runtime, backend or Docker
+execution is permitted or claimed. CI1 evidence above was supplied by the
+coordinator, not queried through Actions by this writer. No passing lint or CI
+result is claimed for R2. No push, CI2/retry, stage2, type adoption, hosted,
+provider/private/paid, deployment or merge authority follows from this record.
+
+## PR27 CI2 failure and A3 fixture/test correction - 16 September 2026
+
+The [complete coordinator CI2 record](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5698931942)
+reports **CI2 FAILED** on source `6eb981229200167016d8b1a7e085f1a18d481ea8`,
+base `bdb48cee783a9eb5be83c52cd8791e5066eba639`. CI35104616934 attempt1
+and Apple35104617293 attempt1 used actual merge checkout
+`6ac0065634e1203ccc3fab1f28a232e9f3a52c69`, tree
+`38baaa6bd72a1ef54e1333f2b73a7c8b23922679`, with exactly that base and feature
+as parents. The merge checkout is not the feature commit or this later repair.
+
+App104822486440 passed installation, lint, typecheck and translations. R2 now
+has actual passing lint evidence. Unit tests failed: 2244 passed, three failed,
+27 passing files and two failing files, 7.76 seconds. Failures were the new
+manifest-key extractor and two stale preservation assertions. The unchanged
+local-backend unit passed all 513 tests. Build, scans, dependency/browser checks
+and all eight visual uploads were skipped; negative-test stdout is not a
+separate failed test.
+
+Backend104822486867 passed installation, start, preservation, reset, ordinary
+integration/security and the old AI rehearsal. Four existing real-local browser
+cases passed in 15.0 seconds. AI readiness returned three successful observations
+(1491/1326/1331ms). CI1's B1 inspect/code1 failure did not recur, but its cause
+remains **UNKNOWN** and the incident/merge hold remains, even after a green run.
+
+The new cleanup rehearsal failed with exit2 and the closed message
+`REFUSED: B2 fixture lock boundary.` The unchanged legacy guard requires both
+item/image UUIDv4 identities in its admitted b229 namespace; its new caller's
+real empty fixture did not request that namespace. Profile-lock admission failed
+before its callback, so the profile-lock photo read did not execute. Reaching
+this point is execution-order evidence that preceding age, setup, private-helper
+timezone and disabled-owner controls returned, not a separately passing cleanup
+suite, ordinary-owner timezone API result or teardown acceptance. Later
+candidate/claim/native deletion/slow-upload work was not completed.
+
+The cleanup step ran 13:56:52-13:56:56 UTC; the 330-second backend job was a
+partial failed run, not a completed cleanup-budget measurement. Type generation,
+upload and parity were skipped. CI2 artifact inventory was zero. Apple104822487543
+passed four generated JPEG cases (16.1 seconds) and three I07 cases (13.5 seconds);
+this is not physical iPhone/HEIC acceptance. No types or visual artifacts from
+this cycle exist to adopt or review.
+
+The [A3 disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5699158450)
+and [controlling approval](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5699294877)
+record actual retained Anthropic Claude Opus5/high critiques76/77, both AMEND,
+and coordinator corrections. Earlier claims that the 16-key extractor held were
+withdrawn. The suggested factory-body read and inaccurate workflow matcher were
+not adopted. The unit already has direct/transitive transport imports; a dynamic
+constructor lookup does not provide collection-time module isolation.
+
+Under the [fresh own-model/edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5699379886),
+A3 changes only the new rehearsal, new schema unit, preservation unit and this
+append. The rehearsal requests two independently fresh b229 UUIDv4 identities,
+calls the existing public factory once, then checks the non-null result and
+five identity/path equalities against requested inputs before tracking, try/finally
+or privileged fixture control. Only the validated real empty fixture is tracked
+and reused in the existing upload:false creation loop and housekeeping call.
+The 21 siblings, both 1080 slow-denial cases, bounds and exact reverse teardown
+remain unchanged; no fake guard-only fixture or helper change is introduced.
+
+The new public-factory contract test uses synthetic IDs, five boolean comparisons
+and an in-body dynamic import. It is explicitly skipped unless both CI and
+GITHUB_ACTIONS are true; unexpected skipping in a later admitted GitHub App job
+is missing evidence. Neither that test nor the new runtime preflight has executed.
+The combined-options contract remains unproven; a mismatch must stop before
+fixture mutation, not authorize a factory edit or weaker checks.
+
+Both manifest extractors now admit digits after the first identifier character,
+preserving the exact ordered 16 registered and four catalog fields, UTC encoding,
+parseback and negative assertions. Preservation retains its widths/decorative
+lines with the corrected 16-line count, and one exact contiguous workflow literal
+including cleanup's IMAGE then PRESERVATION keys with global preservation count2.
+The workflow, all SQL/pins/types, old helpers and other 233 paths are unchanged.
+
+Static Git whitespace/diff/attribute checks and bounded source desk review were
+performed; downstream manifest projections, UTC parseback, renderer widths,
+workflow order/step-local flags and package script remain consistent with the
+edited assertions. Canonical byte/blob and staged-prefix checks preserve the
+entire 406369-byte previous document prefix. These are source checks, not local
+parser/compiler/lint/test/runtime execution or a prediction of green CI.
+The restricted transport remains opaque: only retained HEAD/index identity and
+normal status were checked, with no factory/header/destructor-body read.
+No CI3, push, type adoption or stage2 is released. Final independent exact-head,
+native/normal-owner/production-peer, visual/manual/device and I10b gates remain;
+I10 is incomplete and I11 ineligible. No hosted/private/provider/paid, deployment
+or merge authority follows from this correction.
+
+## PR27 CI3 failure and R4 bounded diagnostic - 16 September 2026
+
+The [coordinator's complete CI3 result](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5700033751)
+records **CI3 FAILED** on source `ce23d1cb5b1c1886090fbb8faf145d00205eff23`,
+base `bdb48cee783a9eb5be83c52cd8791e5066eba639`. CI35113101529 attempt1
+and Apple35113101500 attempt1 used merge checkout
+`8947291a1cc5cebf5f30d735ebefe52f2173b6fb`, tree
+`76e9e078e4f7c0b4dd5beb696c1015bc2fd6d74d`, with exactly that base and source
+as parents. The merge checkout is not the feature commit or this later R4 source.
+
+App104851572078 passed installation, lint, typecheck and translations. Unit
+results were 2248 passed and one failed, 2249 total, 28 passing files and one
+failing file, 7.92 seconds, with no skips. The A3 public combined-options factory
+test actually ran and passed, as did its preflight source checks, registered
+16-key assertion and corrected preservation tests. The dynamic-import directive
+passed typecheck and remains unchanged. These results neither inspect the factory
+body nor establish successful ordinary-owner cleanup.
+
+The single failing catalog assertion received id/name/version/created_at/orphan
+instead of the four expected catalog keys. Its whole-routine matcher also counted
+the later old_enough orphan argument. The actual catalog-building statement still
+has four keys. Earlier source desk checks missed this non-projection match; they
+were not executed passing evidence. App build/scans/dependency/browser checks
+and all eight visual uploads were skipped.
+
+Backend104851572467 passed installation, start, preservation, reset, ordinary
+integration/security and the existing AI rehearsal. Four real-local browser
+cases passed in 15.9 seconds; AI readiness returned 2002/1325/1123ms ready
+observations. The new cleanup step ran 15:12:00-15:12:06 UTC and failed with
+exit1: `FAIL: image cleanup rehearsal primary and fixture teardown.`
+Both failure flags were set, but the exact primary phase and teardown causes
+remain **UNKNOWN**. The real-owner preflight returned before that catch/finally;
+the aggregate message does not diagnose a factory, profile-lock, DELETE, RLS,
+timing or transport cause. Zero late-upload completion lines do not prove whether
+either case started. No complete cleanup, successful teardown or budget acceptance
+is claimed; the 325-second backend job was a partial failed run.
+
+Type generation/upload/parity were skipped and CI3 artifact inventory was zero.
+Apple104851571466 passed four generated JPEG cases (16.7 seconds) and three I07
+cases (12.5 seconds), not physical-device/HEIC acceptance. No fresh types or
+visual artifacts exist to adopt or review.
+
+The [controlling R4 plan](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5700291977)
+records actual retained Anthropic Claude Opus5/high critique79, AMEND, and
+coordinator dispositions. Its seven-key diagnostic supersedes the proposed
+six-key shape. The [fresh own-model/edit receipt](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5700466767)
+releases only the new rehearsal, new schema unit and this append.
+
+R4 scopes catalog extraction to its unique building statement before the orphan
+branch. It preserves the four ordered catalog keys and all 16 registered keys,
+UTC/parseback/shape/negative assertions. A separate whole-routine regression
+expects the five observed key/argument matches and locates the orphan call outside
+the catalog slice; this does not add a fifth catalog field. SQL remains unchanged.
+
+The backend change is **diagnostic-only, not a cleanup fix**. A fixed 25-label
+phase vocabulary tracks existing groups without wrapping, retrying or changing
+their operations. The initial phase is age-boundaries, avoiding a redundant
+initializer; the existing catch captures it without inspecting the caught value.
+The original primary value, including falsy values, and all terminal precedence,
+messages, exit codes and success output remain intact.
+
+The three original teardown catches retain every cleanup attempt and add only
+category flags. Fixture destruction records every failed attempt (0..38) and the
+first original reverse-loop slot (null or 0..37), preserving slot0. False flags
+mean no observed failure, not proof a category executed: empty or unreached
+categories can remain false. The exact tuple arrays, actor/value arguments,
+preflight, 38-fixture registry, 21 siblings, 20-per-page caps, two late cases,
+reverse teardown and time/resource bounds are unchanged.
+
+After finally, only a failure emits one added stderr record prefixed
+I10A-CLEANUP-FAILURE. Its seven fields are schemaVersion, primaryPhase,
+markerRestoreFailed, fixtureDestroyFailed, fixtureDestroyFailures,
+firstFixtureSlot and absenceCheckFailed. Nullable fields initialize explicitly
+and use nullish coalescing, not truthiness. Values are fixed phase labels,
+booleans, bounded synthetic counts/slots and null; no private error, identifier,
+path, credential, raw result or environment value is inspected or emitted.
+There is no success diagnostic, new catch, forced exit, size-check exception,
+logging framework, helper/body recovery or extra artifact.
+
+The unit adds callback/diagnostic-scoped source assertions for these boundaries,
+exact output shape, null/zero semantics, all teardown attempts and unchanged
+failure branches. The passing A3 public-factory test and other prior coverage
+remain. Static .NET UTF8 measurement of the worst-case fixed record, including
+prefix and newline, is 215 bytes, below 512. The new unit assertions and actual
+diagnostic output have not executed; no runtime or performance result is inferred.
+
+Ordinary Git diff/whitespace/attribute checks, exact scoped staged-diff inspection,
+canonical byte/blob checks and the entire 412200-byte prior document-prefix check
+are the permitted local validation. Other 234 paths remain unchanged, including
+preservation unit, all SQL/pins/types/workflows/helpers and the opaque transport.
+Only that transport's retained HEAD/index identity and normal status were checked;
+no restricted header/factory/destructor/old-helper body was read.
+
+CI1's B1 inspection incident and CI3's primary/teardown incident remain separate
+UNKNOWN holds. A later green run would emit no failure record and would not by
+itself diagnose, fix or waive either incident. No local Node/npm/compiler/parser/
+formatter/lint/tests/browser/backend/Docker/probe/install/version execution,
+push, CI4, type adoption or stage2 is authorized by this record. Final exact-head
+engineering, normal-owner/production-peer, native/visual/manual/device and I10b
+gates remain; I10 is incomplete and I11 ineligible. Hosted/private/provider/paid,
+deployment and merge remain outside this correction.
+
+## I10a R5 - qualified adoption cases and bounded assertion diagnostics, 16 September 2026
+
+### Authority and actual CI4 evidence
+
+This append follows full coordinator result/proposal
+[5701416425](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5701416425),
+controlling plan approval
+[5701959344](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5701959344)
+and OWN-model edit/one-commit release
+[5702054653](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5702054653).
+The release was read in full and matched 10438 ASCII/UTF8 bytes and SHA256
+`ee8fc6dbe092ea98b328f08ddefc6a052764216ded33496faa52511032f59e5c`.
+The same writer session `582a6642-4ebd-440d-a7a6-80c590ecfd65`,
+explicitly selected `gpt-6-astra`/medium, continues on
+`drrowdev-laughing-invention` and draft PR27. The coordinator independently
+observed seven OWN actual-model entry requests from 17:48:23.749 through
+17:50:40.736 UTC. This is locally recorded entry evidence, not a requested-name
+claim, another session's usage or tamper-proof/native-platform evidence.
+
+Actual Anthropic Claude Opus 5/high critiques 82 and focused 83 were supplied-text
+only, without tools/source access. Their findings, the AMEND disposition and
+focused readiness, and the final coordinator amendments are in 5701959344.
+The original proposed ready-fixture positive control was superseded: the approved
+existing REBOUND control preserves the original ready/retired constructor tuples.
+No new planning ladder, writer, reviewer or authority is created by this append.
+
+CI4 run `35122056554`, attempt 1, FAILED. Apple4 `35122056510`, attempt 1,
+SUCCEEDED. Actual merge checkout was
+`0422129f46a3979dbb75eae0d650fc2d45a82499`, tree
+`023270c6b078c96ca4a18ef8187311b2df84ce98`, parents accepted main
+`bdb48cee783a9eb5be83c52cd8791e5066eba639` and source
+`cce53fa11b425f0bca97b16c12e5db6b14e49473`.
+
+App job `104882003052` succeeded: install, lint, typecheck, translations,
+2251 unit tests in 29 files with no skips, build, secret/dependency checks,
+697 browser passes with four existing explicit skips, and all eight visual
+uploads. The A3 GitHub-only public-factory test actually executed and passed.
+Backend job `104882002542` passed through the older AI rehearsal, then failed
+the cleanup rehearsal at registered-claims. Types generation/upload and later
+parity were skipped. Apple job `104882001562` passed four JPEG and three I07
+checks on the actual runner; that is not physical-device acceptance.
+
+The coordinator observed one real 209-byte version1 failure record, including
+newline: registered-claims, markerRestoreFailed false, fixtureDestroyFailed true,
+fixtureDestroyFailures 21, firstFixtureSlot 37, absenceCheckFailed false.
+That identifies the primary phase and teardown count/first original slot only.
+It does not identify the precise assertion, SQLSTATE, every failed fixture,
+which siblings failed, or any destructor cause. CI1 B1 inspection failure and
+the CI3/CI4 cleanup failure family retain their separate UNKNOWN incident holds.
+No historical failure cause is claimed diagnosed or repaired by R5.
+
+The coordinator's attached observation ended at 16:38:45.7591691 UTC, within
+the prior finite deadline. Eight archives containing 24 PNGs were preserved.
+Twenty-three same-name byte/hash/dimension matches reuse accepted-main content
+evidence; the English I08 delete image has a pending exact-head visual verdict.
+No image/archive was opened or supplied to this writer. No types artifact
+exists. Review80's off-scope access incident remains recorded; its withdrawn
+metrics/lint assertions are not evidence and were not repeated here.
+
+### Three-file correction
+
+Only `scripts/image-cleanup-rehearsal.mjs`,
+`tests/unit/image-cleanup-schema.test.ts` and this append are changed from cce53fa.
+The complete prior 418962 LF-byte document prefix is retained, with SHA256
+`bc512e06cebc56a6aefe6e1a31bbae432ab7c86a5b212ee82415ef15ae9a07b0`.
+All other 234 paths, including every migration, generated type, workflow,
+preservation unit, old helper and opaque transport, remain frozen.
+
+The existing rebound fixture is created pending with options `{}` at
+registered-setup. An ordinary owner read checks exact owned identity, actual
+pending state and canonical main/thumb metadata paths. Its parent differs from
+ready, both historical parents and the new adoptable parent, while its image
+identity remains shared with the historical fixtures. The existing privileged
+fixture-control SQL qualifies absence of owner AND (item OR image) used IDs,
+an active exact-image cleanup claim and a whole-item deletion claim. A PUBLIC
+`commit_image` call must return explicitly null/absent error. An ordinary read
+then checks the same identity and canonical paths in ready state.
+The original ready:true/retired-newItem:false tuples and their order are intact.
+The control is not an upload-byte provenance or matched-pair claim; differing
+IDs/times/provenance and the retained shared historical image identity matter.
+The privileged qualification is not normal-user RLS evidence.
+
+Exactly one new otherwise-adoptable pending fixture adds two generated-object
+uploads. All 38 old fixtures and their relative order remain; the total is 39,
+including the unchanged 21 pagination siblings. Registered iteration order is
+empty, adoptable, pending, retired, unmarked, historicalA, historicalB.
+Only pending/retired receive the original retention seeds and identity-specific
+finalize/preflight/edit/delete/trash/item-claim/retention checks.
+
+The active pending claim's checked status, exact two canonical paths and
+presence flags qualify each new denial case. Privileged owner AND (item OR image)
+used-ID absence is checked without the positive-only claim-absence predicate.
+Immediately before the PUBLIC call, an ordinary read verifies actual owned
+pending identity. Adoptable requires specifically 22023 under
+`claim-guard-adoption-refusal`, followed by ordinary pending-state and active
+claim/both-present preservation. The original zero-object b229 empty case
+requires specifically P0001 under `incomplete-upload-refusal`, followed by
+active claim/both-absent preservation. That qualified incomplete-upload refusal
+is not UPDATE-guard proof. Seeded pending/retired still require 22023 under
+`used-id-adoption-refusal`. Original resume and byte-absence checks follow.
+No arbitrary error/code union, marker removal, state rewind or hidden-helper
+assumption substitutes for these qualifications.
+
+The failure-only record is now version2 with exactly nine ordered primitive
+keys: schemaVersion, primaryPhase, markerRestoreFailed, fixtureDestroyFailed,
+fixtureDestroyFailures, firstFixtureSlot, absenceCheckFailed, primaryCheck,
+primaryClaimOrdinal. A callback-local recorder stores a fixed literal assertion
+label on false and delegates the same condition/label to unchanged requireCleanup.
+It inspects no error object/property. The original primary catch snapshots the
+check and ordinal before finally only for registered-claims; other phases emit
+null. A helper/RPC throw before an assertion is recorded leaves primaryCheck null.
+
+Internal claim ordinal starts null, then becomes 0 through 6 before each
+registered iteration's first operation. It is separate from original registry
+slot null/0..38 and failed-destruction count 0..39. Nullable fields retain `?? null`,
+including zero. Every original reverse destruction attempt, primary/falsy value,
+failure precedence, restoration flag, terminal error and success output remains.
+The 25 fixed phases, page20, two late-upload 1080 cases and their existing bounds,
+eight-minute rehearsal, two-minute teardown reserve and 30-minute job remain.
+The additional fixture/qualification work is not claimed zero-cost or proven
+within the full runtime budget.
+
+### Static evidence and remaining gates
+
+Fresh ordinary guards passed at 17:54:55.3734526 UTC against exact cce53fa/tree023/
+soleparent ce23d1c, clean 237 normal stage0/mode100644/H index entries.
+`git diff --check` passed and the scoped rehearsal/unit diffs were desk-reviewed.
+PowerShell/.NET UTF8 text measurement over all 25 phase and 15 assertion labels
+gives a worst-case nine-key record envelope of 294 bytes including prefix/newline,
+strictly below 512. False flags, null nullable fields and the two-digit count
+cover the longest spellings of those domains. The approved conservative 324-byte
+structural envelope was not an executed diagnostic. Neither is this 294-byte
+finite-label bound a runtime result.
+
+Directly affected source-unit assertions now cover rebound qualification and
+explicit success, the three refusal cases, canonical status preservation,
+unchanged reference-identity retention blocks, 39 fixtures, nine-key order,
+fixed-label recorder, separate ordinal domain and strict byte bound. Passing
+16+4/global5 catalog, UTC, negative, A3 preflight and GitHub-only constructor
+coverage is retained. These updated tests have NOT been executed locally.
+The permitted remaining checks are exact staged diff/whitespace, regular files/
+attributes, canonical LF byte/SHA/blob and HEAD/index identities, full document
+prefix, frozen other paths, refreshed ordinary guards and postcommit cleanliness.
+Final commit identity and three pins are reported separately without rewriting
+this historical prefix or claiming future CI success.
+
+No local Node/npm/compiler/parser/formatter/lint/test/browser/backend/Docker/
+probe/install/version execution occurred. Restricted transport verification
+uses only retained HEAD/index identity and normal status, not body/header/factory/
+destructor access. No push, PR edit, Actions query or CI5 is authorized here.
+Type adoption, stage2, hosted/private/provider/paid processing, merge and deployment
+remain unreleased. Both UNKNOWN runtime holds and the recorded access incident
+remain; a future green run alone is not a waiver. Final independent exact-head,
+types/full-budget, normal-owner/production-peer/header/native/manual/device/
+visual and I10b replacement/recovery with approved pre-save AI gates remain.
+Phase0 is engineering complete with acceptance open; I10 remains incomplete
+and I11 ineligible.
+
+## I10a R6 - distinguish direct privileges from qualified claim checks, 16 September 2026
+
+### Reviewed authority and current CI5 evidence
+
+This append follows full result/proposal
+[5702843536](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5702843536),
+controlling amended approval
+[5703023881](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5703023881)
+and fresh OWN-model edit/one-commit release
+[5703097074](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5703097074).
+The release matched 10929 ASCII/UTF8 bytes and SHA256
+`5838ff1dbdee07d78d944d4cd52066c2c55b1664d1c9987ecef253eb81f238e4`.
+Accepted read-only entry ran 19:07:00.5051505-19:08:12.0059650 UTC against
+`e58bd66a857534e4242600b88439b72d6aa4a831`, tree
+`956ef126860835239a069f4232297aea4453da4b`, sole parent
+`cce53fa11b425f0bca97b16c12e5db6b14e49473`, base/main
+`bdb48cee783a9eb5be83c52cd8791e5066eba639`.
+
+The coordinator independently verified seven OWN session582a actual
+`gpt-6-astra`/medium requests from 19:06:58.855 to 19:08:54.115 UTC for this entry.
+The same explicit model/setting, isolated workspace, branch and draft PR27
+continue. This local telemetry is not tamper-proof/native-platform evidence;
+app mapping and requested model names are not substitutes for the actual rows.
+Actual supplied-text-only critique85 used Anthropic Claude Opus5/high, with one
+verified OWN row at 18:59:11.336 UTC and zero tools/source access. It required A1
+and A2; the coordinator adopted both, with the causality/coverage limits below.
+No new reviewer, writer, planning ladder or authority is created here.
+
+CI5 `35134515616`, attempt1, FAILED; Apple5 `35134515641`, attempt1, SUCCEEDED.
+All three actual job logs bind merge checkout
+`58a2e106cd040bbe209805d55d2ed2b3058c2dc8`, tree956 above, parents bdb+e58.
+App `104923420971` passed lint, typecheck, translations, 2253 unit tests in
+29 files with no skips, build, secret/dependency checks, 697 browser tests with
+four existing explicit skips, and all eight visual uploads. The cleanup source
+unit had 23 passing tests; the A3 public-constructor case executed.
+Backend `104923420547` passed db:rehearse, reset, ordinary integration/security
+(four real-local browser cases) and the older AI rehearsal, then failed cleanup.
+Its 281 seconds were partial failed execution, not a full-budget result.
+Types generation/upload/parity were skipped; there are no types to adopt.
+Apple `104923420271` passed four generated JPEG and three I07 checks, not
+physical-device or HEIC acceptance. These results come from coordinator receipt
+5702843536; this writer did not query Actions or open artifacts.
+
+The actual closed version2 failure record was 279 UTF8 bytes including prefix/LF:
+registered-claims, primaryCheck claimed-image-edit-refusal, primaryClaimOrdinal2,
+all three teardown-category flags false, destroycount0, firstslotnull.
+Ordinal2 is pending. The direct UPDATE assertion's expected22023 predicate
+failed, but its actual response code was not logged. In particular, 42501 is
+not an observed CI5 response. Source-order evidence shows the R5 rebound
+promotion, qualified empty/adoptable checks and pending finalize/preflight
+predicates returned earlier. It does not reconstruct CI3/CI4 or explain their
+21 destructor failures. Later cases/groups were not reached.
+
+The coordinator preserved all eight exact-run archives and 24 approved PNGs.
+Twenty-three match accepted CI4 content; English sign-in matches accepted PR26
+CI7 content under 5687241771. All24 have scoped accepted-content reuse, not a
+new image inspection, device verdict or future-head acceptance. No image/archive
+was supplied to or opened by this writer. The prior R5 append remains historical.
+
+### Approved source correction and A1/A2
+
+Initial SQL explicitly revokes authenticated UPDATE and DELETE on item_images.
+Direct ordinary calls therefore test the privilege boundary, not execution of
+the active-claim row trigger. Their corrected exact42501 expectations are
+source-supported and still unexecuted. The existing pending-only UPDATE input
+and both calls' identity filters remain unchanged. Ordinary exact owner/item/image
+SELECTs with the fixed eight-field projection bracket both calls. Successful,
+nonnull pending rows must have canonical paths; the after row must preserve
+identity/state/paths, alt_text and description_version. This is combined
+preservation, not per-operation attribution. Exact code checks reject unexpected
+success/no-op; before/after reads alone do not detect every no-op.
+
+The existing zero-object EMPTY arm retains its qualified P0001 refusal, then
+adds a distinct read-only `$forget$` fixture-control block: no exact Storage
+objects via unchanged storageTarget(value), no owner/item whole-item deletion
+claim, and no owner/item/image delete context. It does not query or forbid the
+active IMAGE claim. No marker/context/row is created, removed or rewound.
+That privileged fixture qualification is not normal-owner RLS/access evidence.
+
+A2 explicitly links value.main/thumb to canonical owner/item/image paths and
+the ordinary before row's metadata paths to those exact fixture paths, retaining
+the original A3 early empty preflight. One PUBLIC forget_image call must return
+exact22023. An ordinary after row must remain owned/pending with the same
+paths/caption/counter, followed by the unchanged checked active/absent afterClaim
+and original resume/byte-absence flow. The READY-only description RPC is not
+substituted for this pending-image check.
+
+A1 narrows the formerly whole-claims private-table ban to the unique,
+existence/order-checked shared `$adoption$` used-ID block. That block still
+excludes IMAGE/ITEM claims and delete context. Separate exact `$forget$` SQL
+assertions retain its positive qualifications and ban active-IMAGE queries or
+privileged mutations. Scoped empty/adoptable branch/code/label and ordering
+assertions replace the now-invalid contiguous branch pin, confining the single
+forget call to EMPTY before the shared claim/resume checks. Unrelated assertions
+are unchanged; no arbitrary-error list, skip or import adjustment is introduced.
+
+Rebound success, qualified adoptable UPDATE refusal, seeded used-ID cases,
+pending finalize/preflight and all retired/reference-identity retention behavior
+remain. So do 39 fixtures, seven registered ordinals, 21 siblings, both late
+cases, page20, all reverse teardown attempts, child/byte/poll/response/join
+bounds, eight-minute rehearsal, two-minute reserve and 30-minute backend limit.
+The version2 nine-key emitter, 25 phases, nullable zero handling, global slot
+0..38/count0..39, registered ordinal0..6, false-only recorder, snapshots,
+falsy-primary handling and failure precedence are unchanged.
+
+The two direct labels are renamed and five fixed labels added, giving exactly
+20 in the approved order. Recomputed PowerShell/.NET closed-text enumeration
+covered 9828 shapes, with a maximum294 UTF8 bytes including prefix/LF, strictly
+below512. This is a new static measurement with the new list, not reuse of the
+R5 result or execution of the diagnostic/source-unit test. False flags, null
+nullable fields and two-digit failure counts bound the longest field spellings.
+
+### Static checks and unreleased gates
+
+Fresh ordinary pre-edit guards passed at 19:12:25.6958768 UTC: exact e58/tree956/
+parentcce, same branch, clean including ignored/untracked, 237 normal stage0/
+mode100644/H index entries, boolean fsmonitorfalse before status, normal identity
+available without values, signingfalse/unset, canonical single origin and no
+hooks/locks/operations/rewrites/extra targets or overrides.
+`git diff --check` passed; the exact rehearsal/unit working deltas were read.
+Permitted precommit checks additionally cover full staged diff/whitespace,
+regular files/attributes, canonical UTF8/LF byte/SHA/blob identities, frozen
+other paths, refreshed ordinary guards and final clean commit identity.
+No application parser/compiler/lint/unit/browser/backend execution occurred.
+Final commit and pin results are reported separately, without rewriting history.
+
+Only rehearsal, its new source-unit file and this append change. The full prior
+429114 canonical LF-byte document prefix is preserved, SHA256
+`9d5ac2fd87fefbad5f77d241afb5e403c3949f755fc7fd1ddd6f368bc2666e5e`.
+Other234 paths remain frozen, including SQL/types/workflows/preservation unit/
+old helpers and opaque transport. Transport checks are retained HEAD/index
+identity plus normal status only, not body/header/factory/destructor access.
+
+Prior reads are not atomic with RPCs;22023 does not exclude every lock contender
+or establish unique historical causality. This selected narrow DELETE case and
+the retained UPDATE case do not prove globally complete guard coverage, the only
+possible route/fixture, a matched pair, byte provenance or physical erasure.
+CI1 B1 and CI3/CI4 causes remain UNKNOWN/unwaived; review80's access incident
+remains recorded. A later green run alone is not a waiver.
+No push/PR edit/Actions query/CI6/artifact/type adoption/stage2 is authorized here.
+No local tooling/runtime/probe/install/version, extra agent/session/branch,
+hosted/account/data/private-photo/provider/paid, merge or deployment operation
+occurred. Exact-head independent/engineering/type/full-budget/normal-owner/peer/
+header/native/manual/device/visual/I10b gates remain. I10 is incomplete and
+I11 remains ineligible.
+
+## I10a R7 - generated types and exact-space lint correction, 16 September 2026
+
+Full CI6 evidence, artifact provenance and the material sequencing approval are in
+[5703681478](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5703681478).
+CI6 `35141338291`/Apple `35141338275`, attempt1, used actual merge checkout
+`4afeecaf43245def12299def0c5b0bb3fadd4680`, tree
+`28cba0e980dba4f033054f4b93234e30ef9a3341`, parents mainbdb plus source
+`a1a649eab72604f94cb8a89c17586b57b673ded2`.
+App `104946320864` failed `npm run lint`: exactly one no-regex-spaces error,
+zero ESLint warnings, at cleanup unit581:30. All later App commands and visual
+uploads were skipped, including typecheck and the new source-unit/factory tests.
+Backend `104946321011` passed preservation/reset/integration/security/AI and
+image-cleanup, then `npm run db:types` and upload; only final tracked-type parity
+failed. Cleanup passed in10358ms, with both admitted slow-upload denials and
+teardown reporting32 retained minimal claims. Complete backend time was313s,
+not a fully green job or a measured performance improvement. Apple passed4JPEG
+and3I07 cases, not physical-device/HEIC acceptance. Zero CI6 visual artifacts
+exist; prior CI5 content reuses do not accept this or a future head.
+
+Actual supplied-text-only Anthropic Claude Opus5/high critique87 returned AMEND.
+The coordinator satisfied A1 using the singular actual lint diagnostic, rejected
+A2's broad zero-reference scan and nil-risk premise, and retained mandatory
+new-head typecheck. No broad source scan or zero-type-risk claim was made.
+This explicit amendment moves an already-approved packet type synchronization
+earlier despite App failure; it releases no other stage2 UI/adapter/operator work.
+
+Fresh OWN-model/edit receipt
+[5703778033](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5703778033)
+matched8888ASCII/UTF8bytes/SHA256
+`28db9625efc6d54f37c0f1bae6c547965f7d33bebea6145964d733b3fd80b716`.
+The coordinator verified seven actual OWN582a gpt-6-astra/medium entry rows
+19:59:51.769-20:03:23.487UTC. Same writer/model/setting/workspace/branch/PR27
+continues. Entry's culture-sensitive BOM-prefix check was corrected to exact
+EFBBBF bytes; no artifact was normalized or changed. The regular raw .ts artifact
+was verified as strictUTF8/LF/noBOM before its targeted text read.
+
+The unit change replaces exactly twelve literal ASCII spaces with ` {12}`;
+all other characters and assertions remain. Types adopt the exact CI6 artifact
+10465945222 from backend104946321011:27474bytes, SHA256
+`ae56564089d0e7c529b2c18596d3ab3ecc56a19befcf142430859743dbf4d009`,
+Gitblob `257483843b71f213fa234dda67ecbeb9787d42a2`.
+Its19added lines/599bytes contain only five cleanup RPC definitions, matching
+the read SQL declarations; no local generation, schema or permission change.
+The expected unit target is61285LFbytes/SHA256
+`f587a0ca17b80ea4f69814a97c7dd5c81db1e023327d5c0fc8c1f411c9a5a6e3`,
+blob `97b544b1e43c0221b6d163944d124397c8f19f10`.
+
+Fresh ordinary pre-edit guards/current source and artifact pins passed at
+20:07:12.1500826UTC against clean a1a/tree28c/parent e58,237normal index entries.
+The three scoped apply_patch edits are subject to exact target SHA/blob checks,
+`git diff --check`, full working/staged delta review, `git diff --cached --check`,
+regular-file/attribute/index guards and one ordinary commit. Final commit/pin
+results are reported separately. This append preserves all438534priorLFbytes,
+SHA256 `f653d0954db280bdc130232c8e9bcdc5ee95c0cbb392d05cae987f1681953791`.
+Other234paths, including the rehearsal and opaque transport, remain frozen.
+No local runtime/parser/compiler/lint/typecheck/tests/probes/install/version,
+held-body/header/private-error/image/archive or Actions access occurred.
+
+CI6 selected predicates passed on a1a, not retroactive historical-cause proof.
+CI1 B1/CI3/CI4 UNKNOWN holds and review80's access incident remain unwaived.
+Final exact-head App/type/unit/backend/Apple/visual/independent/normal-owner/
+peer/header/native/manual/device/I10b gates remain. No future pass, physical
+erasure or exhaustive coverage is claimed. Stop after the one ordinary commit:
+no push/PR edit/CI7, other stage2, hosted/provider/private/paid, merge or deployment.
+
+## I10a Linux runner characterization - source only, 16 September 2026
+
+The bounded two-file plan is
+[5704996173](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5704996173),
+8976ASCIIUTF8LFbytes/SHA256
+`248a75e9154e3502bfd252dd8d8def9fa73f029c7e6bf57309ea7e6d0ef3a69b`.
+Actual supplied-text Anthropic Claude Opus5/high review89 returned AMEND;
+the coordinator incorporated A1-A4. This is not approval of the blocked
+27-path product integration or a general runner repair.
+
+Fresh OWN-model edit receipt
+[5705053720](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5705053720)
+matched5521ASCIIUTF8LFbytes/SHA256
+`31737ab506dd6e4eb9469a57ce913000ceaaf003b72c37ba536072bdf01b9342`.
+The coordinator independently verified five OWN582a gpt-6-astra/medium entry rows
+21:44:37.332-21:45:54.243UTC. The same explicitly selected writer continues.
+The read-only entry matched f923/tree610a/parent a1a,237normal clean index entries,
+both complete append prefixes and canonical public PR/main identities.
+Fresh pre-edit ordinary guards passed21:49:19.4010108UTC.
+
+The source appends one CI/GitHub/Linux-gated test with a10000ms timeout and
+zero retries. Dynamic imports remain inside that test; existing imports/tests
+are untouched. Two sequential inert cases use the unchanged runCommand,
+absolute Node, empty child environments and1024-byte capture:
+DIRECT requests2000ms with an8000ms natural exit, requiring elapsed>=2000/<8000;
+INHERITED requests1000ms with a finite2500ms leaf, requiring elapsed>=2000/<10000.
+All success markers use synchronous writes. Exact whole-line integrity,
+empty stderr, code2 and elapsed bounds are checked as booleans under fixed labels,
+without printing child output. A rejected runner promise becomes a fixed failure.
+No permanently wedged child, shell, detachment, network, file, credential,
+fixture, helper rewrite or product operation is introduced.
+
+At most two completed-case lines use I10A-RUNNER-LIFETIME and exactly eight
+ordered fields: schemaVersion,platform,case,requestedTimeoutMs,elapsedMs,
+resultCode,readySeen,endSeen. The platform is linux; integer elapsed is0-9999.
+The source checks the strict512UTF8-byte limit including prefix and LF.
+The coordinator's169-byte maximum over20000 serialized domain combinations
+is static .NET text evidence recorded in the plan, not execution by this writer.
+
+No runtime characterization has run for this source. A future passing inherited
+case would characterize a FOUND Linux deadline gap, not browser quiescence,
+8-minute budget conformance, guaranteed descendant termination or successful
+fixture teardown. The supplied runner contract can settle on error as well as
+close; code2 is not a universal cause decoder. Runner/OS loss and missing
+completion cannot be represented as joined work. Any later repair needs its
+own reviewed scope and suitable conformance assertions.
+
+All61285prior unit LFbytes retain SHA256
+`f587a0ca17b80ea4f69814a97c7dd5c81db1e023327d5c0fc8c1f411c9a5a6e3`;
+all442795prior document LFbytes retain SHA256
+`74e6f9a54bda73d26c1aeed1ac1708f150e035d24d5368e484f51c4b21420730`.
+Final static delta/prefix/pin and ordinary-commit results are reported separately.
+Other235tracked files stay frozen, including39fixtures/25phases/20labels/
+seven ordinals/nine-key rehearsal diagnostics and9828representative shapes.
+No local runtime/parser/compiler/formatter/lint/test/probe/install/version,
+additional source discovery, held-content recovery or Actions access occurred.
+CI8/publication require a separate release. Historical runtime causes, review80,
+the writer read incidents and A/E/peer/header/native/manual/final-review/I10b
+gates remain open. No merge, deployment, hosted, private or paid authority.
+
+### Runner test-options correction - source only, 16 September 2026
+
+[5705147479](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5705147479)
+records the first-party Vitest `test(name, options, body)` API correction.
+Fresh OWN-model edit receipt
+[5705179850](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5705179850)
+matched3491ASCIIUTF8LFbytes/SHA256
+`cb3e5b74ce180c267fef4c56ee3e746f1e69b8f0613ee439ec1a0761a0cae8f4`;
+the coordinator verified four OWN582a gpt-6-astra/medium entry rows.
+Only the unchanged timeout/retry options line moves before the async callback.
+All other unit bytes and all446535prior document LFbytes are preserved.
+Commit0df remains history; this is an ordinary correction, not an amendment.
+No probe execution, runtime failure/pass, deadline or browser-quiescence
+conformance is claimed. Publication/CI8 and all existing holds remain pending.

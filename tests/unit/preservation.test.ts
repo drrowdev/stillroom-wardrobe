@@ -24,7 +24,7 @@ type OwnerData = { label: string; ownerId: string; tables: TableRows; objects: [
 type ObjectEvidence = { path: string; bytes: number; sha256: string };
 type Snapshot = {
   schemaVersion: number; projectId: string; stage: string; run: string;
-  sources: { base: string; target: string; description: string; collections: string; controls: string; save: string; analysis: string; analyzedSave: string; lifecycle: string }; owners: string[];
+  sources: { base: string; target: string; description: string; collections: string; controls: string; save: string; analysis: string; analyzedSave: string; lifecycle: string; cleanup: string }; owners: string[];
   data: [OwnerData, OwnerData];
 };
 const sha = 'a'.repeat(64);
@@ -109,6 +109,7 @@ const baseTable = [
   '   `20260911040000` | ` `              | `2026-09-11 04:00:00` ',
   '   `20260911200000` | ` `              | `2026-09-11 20:00:00` ',
   '   `20260913120000` | ` `              | `2026-09-13 12:00:00` ',
+  '   `20260916100000` | ` `              | `2026-09-16 10:00:00` ',
   '',
   '',
 ].join('\n');
@@ -126,6 +127,7 @@ const targetTable = [
   '   `20260911040000` | `20260911040000` | `2026-09-11 04:00:00` ',
   '   `20260911200000` | `20260911200000` | `2026-09-11 20:00:00` ',
   '   `20260913120000` | `20260913120000` | `2026-09-13 12:00:00` ',
+  '   `20260916100000` | `20260916100000` | `2026-09-16 10:00:00` ',
   '',
   '',
 ].join('\n');
@@ -146,11 +148,11 @@ describe('CI-only preservation guards', () => {
       expect(() => assertRehearsalEnvironment({ ...validEnv, [key]: 'fictional-refused' }, [])).toThrow();
     }
   });
-  it('pins exactly nine regular migrations, preserving all eight earlier lengths and hashes', async () => {
-    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000']);
+  it('pins exactly ten regular migrations, preserving all nine earlier lengths and hashes', async () => {
+    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260916100000']);
     expect(() => validateInventory(inventory())).not.toThrow();
     await expect(assertMigrationInventory()).resolves.toBeUndefined();
-    for (const index of [0, 1, 2, 3, 4, 5, 6, 7, 8]) for (const [key, value] of [
+    for (const index of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) for (const [key, value] of [
       ['name', 'unexpected.sql'], ['bytes', 0], ['bytes', present(inventory()[index]).bytes + 1],
       ['sha256', 'b'.repeat(64)], ['regular', false], ['symlink', true],
     ]) {
@@ -188,8 +190,8 @@ describe('CI-only preservation guards', () => {
     expect(() => assertCapabilities([{ code: 0, stdout: '  --local\n' }, ...help.slice(1)])).toThrow();
   });
   it('parses source-derived applied/pending tables without claiming execution', () => {
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'] });
-    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'], pending: [] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260916100000'] });
+    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260916100000'], pending: [] });
     expect(() => assertHistory(targetTable, 'base')).toThrow();
     expect(() => assertHistory(baseTable, 'target')).toThrow();
     expect(() => assertHistory(baseTable, 'other')).toThrow();
@@ -200,7 +202,7 @@ describe('CI-only preservation guards', () => {
   it('retains SOURCE-DERIVED renderer padding, widths and decorative blank lines', () => {
     for (const table of [baseTable, targetTable]) {
       const lines = table.split('\n');
-      expect(lines).toHaveLength(15);
+      expect(lines).toHaveLength(16);
       expect(lines.slice(0, 2)).toEqual(['', '  ']);
       expect(lines.slice(-2)).toEqual(['', '']);
       for (const line of lines.slice(2, -2)) {
@@ -272,7 +274,7 @@ describe('CI-only preservation guards', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe('EVIDENCE_REQUIRED');
     expect(historyFailureDetail(failure)).toBe(`; reason=${reason}`);
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260916100000'] });
   });
   it('distinguishes history command failure without forwarding command output or arbitrary errors', () => {
     const privateText = 'arbitrary upstream text /private/fixture-path';
@@ -793,6 +795,7 @@ describe('strict bounded base snapshots', () => {
       { sources: { ...SOURCE_HASHES, target: sha } }, { sources: { ...SOURCE_HASHES, description: sha } }, { sources: { ...SOURCE_HASHES, collections: sha } },
       { sources: { ...SOURCE_HASHES, controls: sha } },
       { sources: { ...SOURCE_HASHES, lifecycle: sha } },
+      { sources: { ...SOURCE_HASHES, cleanup: sha } },
       { sources: { base: SOURCE_HASHES.base, target: SOURCE_HASHES.target } }, { owners: [...owners].reverse() },
       { owners: [owners[0], owners[0]] }, { extra: true }, { data: [] },
     ]) expect(() => validateSnapshot({ ...snapshot, ...changes }, run, owners)).toThrow();
@@ -929,10 +932,10 @@ describe('import safety and frozen integration boundary', () => {
     expect(result.stdout).toBe('IMPORT_SAFE\n');
     expect(result.stderr).toBe('');
   });
-  it('keeps CI opt-in step-local, before unchanged final reset and suites', async () => {
+  it('keeps preservation and cleanup CI opt-ins step-local in the exact suite sequence', async () => {
     const workflow = await readFile(path.join(root, '.github/workflows/ci.yml'), 'utf8');
-    expect(workflow).toContain("      - run: npm run db:start\n      - run: npm run db:rehearse\n        env:\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:reset\n      - run: npm run test:integration\n      - run: npm run test:security\n      - run: node scripts/ai-analysis-rehearsal.mjs\n      - run: npm run db:types");
-    expect(workflow.match(/ALLOW_PRESERVATION_REHEARSAL/g)).toHaveLength(1);
+    expect(workflow).toContain("      - run: npm run db:start\n      - run: npm run db:rehearse\n        env:\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:reset\n      - run: npm run test:integration\n      - run: npm run test:security\n      - run: node scripts/ai-analysis-rehearsal.mjs\n      - run: node scripts/image-cleanup-rehearsal.mjs\n        env:\n          ALLOW_IMAGE_CLEANUP_REHEARSAL: '1'\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:types");
+    expect(workflow.match(/ALLOW_PRESERVATION_REHEARSAL/g)).toHaveLength(2);
     expect(workflow.match(/ALLOW_CI_STORAGE_GUARD_INSTALL/g)).toHaveLength(1);
     expect(workflow).toContain("      ALLOW_SECURITY_TESTS: '1'\n      ALLOW_CI_STORAGE_GUARD_INSTALL: '1'");
     expect(workflow.slice(0, workflow.indexOf('\n  database:'))).not.toContain('ALLOW_CI_STORAGE_GUARD_INSTALL');

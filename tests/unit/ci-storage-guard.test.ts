@@ -276,15 +276,16 @@ describe('fixed SQL/source contracts (not executed PostgreSQL assertions)', () =
       "'replication',pg_catalog.current_setting('session_replication_role')",
     ]) expect(sql).toContain(fragment);
   });
-  it('pins the unchanged publication body once and keeps strict ALWAYS catalog semantics', async () => {
-    const migration = await read('supabase/migrations/20260913120000_item_lifecycle.sql');
-    const body = migration.match(/create function private\.guard_item_object_publication\(\)[\s\S]*?as \$\$([\s\S]*?)\$\$;/)?.[1];
+  it('pins the current publication body once and keeps strict ALWAYS catalog semantics', async () => {
+    const current = await read('supabase/migrations/20260916100000_image_cleanup.sql');
+    const body = current.match(/create or replace function private\.guard_item_object_publication\(\)[\s\S]*?as \$\$([\s\S]*?)\$\$;/)?.[1];
     if (!body) throw new Error('Missing publication body');
     expect(createHash('md5').update(body).digest('hex')).toBe(guard.PUBLICATION_BODY_MD5);
     const source = await read('scripts/preservation-rehearsal.mjs');
     expect(source).toContain("('private.guard_item_object_publication()','${PUBLICATION_BODY_MD5}')");
     expect(source).not.toContain(guard.PUBLICATION_BODY_MD5);
     expect(source).toContain("tgenabled='A'");
+    const migration = await read('supabase/migrations/20260913120000_item_lifecycle.sql');
     expect(migration).not.toContain('alter table storage.objects enable always trigger item_object_publication_guard;');
     expect(migration).toContain('alter table public.item_images enable always trigger item_image_identity_guard;');
   });
