@@ -5827,3 +5827,105 @@ is claimed.
 Independent review, exact-head CI/no-new-flakiness, normal-owner evidence and
 all existing human/device/recovery/export/hosted/paid/cutover gates remain;
 Phase 0 is engineering complete with acceptance open.
+
+## I10a stage1 source increment - 16 September 2026
+
+This section records the first fourteen-path backend/test increment only.
+The accepted PR26 main at
+`bdb48cee783a9eb5be83c52cd8791e5066eba639`, tree
+`248aca28fa5d737f6aaa67ed7bee72db4cfd30ed`, supersedes its historical
+preexecution entries above. It does not supply I10a runtime evidence.
+Requirements: **R04, R12, R20, R23**, blueprint15 I10 and revision 1.3
+photo-first, approved pre-save AI rules.
+
+Authority is the [full plan](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5695610221),
+[A1](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5695944194),
+[coordinator dispositions/approval](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5696162128),
+[own stage1 model/edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5696311665),
+[public retained helper contract](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5696501155),
+[A2 proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5696525488)
+and [A2 dispositions/same-writer resume](https://github.com/drrowdev/stillroom-wardrobe/pull/26#issuecomment-5696691067).
+Independent Anthropic Claude Opus 5/high critiques70/71/72 returned **AMEND**;
+coordinator dispositions, not critic READY or writer self-approval, authorize
+this source scope. The coordinator-observed local attestation belongs only to
+`582a6642-4ebd-440d-a7a6-80c590ecfd65` on
+`drrowdev-laughing-invention`; it is locally recorded usage evidence, not
+tamper-proof or native-platform-equivalent proof.
+
+The proposed tenth migration is
+`20260916100000_image_cleanup.sql`: LF-canonical **30667 bytes**,
+SHA256 `7ac5beaeec7a05074920f866e6153ea19c0cc3a429e9e29070d3e7aa5573c6b1`.
+All nine historical SQL files remain unchanged. It adds owner-scoped
+preview/begin/status/claims/finish RPCs, durable private claims and an exact
+private deletion context. Pending images require strictly more than 24 hours;
+retired images and each present canonical orphan member require strictly more
+than 7 days. Ready images remain ineligible even with missing bytes. Unsupported
+paths and unverifiable metadata are coarse review reasons, not automatic
+deletion authority. Frozen manifest evidence and fresh immutable catalog
+identity checks precede checked metadata deletion and compact completed receipts.
+Catalog absence is not a claim of physical erasure.
+
+The four replacement-body MD5 pins, computed from actual tenth-migration
+function bodies including their original whitespace, are:
+
+| Current function | MD5 |
+| --- | --- |
+| `private.guard_item_image_deletion()` | `3a84bb649cc47fdb09b8217debf27837` |
+| `private.may_create_item_object(text)` | `b2cb4bdec114c45f21e2d0bd607bc4ad` |
+| `private.guard_item_object_publication()` | `5e886ec32267f7992e963a4a0e952708` |
+| `public.begin_item_deletion(uuid,bigint,uuid,text)` | `63974c11678275f25476ec91340e9411` |
+
+A2 changes only old line367 and old383-387 of the lifecycle schema test.
+The replacement loop asserts all eleven unique original bare names, seven
+unchanged historical hashes and exactly four absent superseded hashes. The new
+test derives all four current signature/hash tuples from actual SQL bodies,
+including the publication body rather than using its imported constant as the
+expected oracle. The eleven live catalog pins, grants, native Storage guard
+checks and ALWAYS requirements remain mandatory.
+
+New ordinary integration/security suites do not receive privileged fixture
+flags. A separately guarded CI rehearsal is registered after AI rehearsal and
+before type generation, with both cleanup and legacy preservation opt-ins.
+It declares strict age boundaries, owner isolation, ready-photo preservation,
+partial deletion/resume, multi-page candidates/claims, permanent image markers,
+metadata-insertion orderings, whole-item exclusion/replay, retention and native
+housekeeping checks. Structural synthetic AI/save rows are not evidence that a
+real analyzed Save minted those rows; the existing real B2 gates remain.
+
+Both owners retain their one admitted four-byte native slow-upload denial case.
+The callback begins image cleanup but leaves pending metadata, a live untrashed
+parent and an active cleanup claim until the helper joins denied settlement.
+Catalog-zero and ordinary download/sign/list checks precede finish. These cases
+exclude the named deleted-metadata/whole-item-claim/canceled-AI alternatives,
+but contain neither an identical unclaimed successful slow control nor an exact
+guard trace. HTTP shape alone is not causal proof. The native localhost5000
+boundary is not evidence about gateway/Kong buffering. An active-claim UPDATE
+refusal may expose an earlier housekeeping UPDATE in native DELETE; disabled
+versioning does not waive that runtime check or justify claiming no self-block.
+
+The source declares a 480-second rehearsal budget with 120 seconds reserved for
+teardown, finite request/scan/resume bounds and joined operations. These are
+unexecuted declarations, not measured performance, proof of whole-process-tree
+termination, or guaranteed teardown after runner loss. Normal cleanup preserves
+production-lifetime compact receipts and used-ID records; it does not delete
+profiles/Auth to manufacture retention evidence.
+
+**NOT RUN:** local Node/npm, parser/compiler/formatter, lint/typecheck,
+translation checks, unit/integration/security/browser/a11y tests, build/scans,
+backend/native rehearsals, Docker, generated-type parity or hosted operations.
+Only ordinary Git and PowerShell/.NET source text/byte/hash checks are permitted
+for this source release. No image/archive review or local application execution
+is authorized. Source holds remain in force; hash-only preservation is not
+semantic review.
+
+Original UI and tracked generated database types remain unchanged. No operator,
+browser/config/capture or stage2 work is included. The coordinator owns future
+publication/CI admission, exact-head independent review, expiring artifact
+preservation, actual matching CI-generated type adoption and any stage2 release.
+This entry grants no push, PR, CI, merge, deployment, hosted DDL/account/data,
+paid-provider or private-photo authority.
+
+**I10 remains incomplete:** I10b replacement/recovery with approved pre-save AI
+is still required; I11 is not made eligible by this source increment. Phase 0
+remains engineering complete with acceptance open. All pending normal-owner,
+operator, device, recovery/export, visual and hosted gates remain pending.

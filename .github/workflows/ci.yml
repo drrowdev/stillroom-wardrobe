@@ -151,6 +151,10 @@ jobs:
       - run: npm run test:integration
       - run: npm run test:security
       - run: node scripts/ai-analysis-rehearsal.mjs
+      - run: node scripts/image-cleanup-rehearsal.mjs
+        env:
+          ALLOW_IMAGE_CLEANUP_REHEARSAL: '1'
+          ALLOW_PRESERVATION_REHEARSAL: '1'
       - run: npm run db:types
       - name: Preserve generated schema types, never account fixtures
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -3,7 +3,7 @@ import {
   requireDocker, requireLocalContainer, commandEnvironment, runCommand, privilegedLocalSql, fail,
 } from './local.mjs';
 
-export const PUBLICATION_BODY_MD5 = 'a1e6faa7a53dd540403d8b6e831820b4';
+export const PUBLICATION_BODY_MD5 = '5e886ec32267f7992e963a4a0e952708';
 
 const NOT_RUN = 'NOT RUN: Storage guard installation requires the explicitly approved disposable CI database job.';
 const INSTALL_FAILED = 'FAIL: CI Storage guard finalization was not verified; readiness is blocked.';
