@@ -12,10 +12,8 @@ import { ItemDetail } from '../features/wardrobe/item-detail';
 import { detailRouteId } from '../domain/item-details';
 import { DiscardDialog, type BeforeDiscard } from './dialog';
 import { AiClient } from '../data/ai';
-import { loadWardrobe } from '../data/items';
-import { errorKey, isAborted } from '../data/errors';
 import type { AppClient } from '../data/client';
-import type { WardrobeItem } from '../domain/wardrobe';
+import { useWardrobeBrowse } from '../features/wardrobe/use-wardrobe-browse';
 import { PrivateImages } from '../images/private-images';
 import { ProfileScreen } from '../features/profile/profile-screen';
 import { LanguageSettings } from '../features/settings/language-settings';
@@ -71,16 +69,14 @@ function currentRoute(hash = location.hash): WorkspaceRoute {
 function hashForRoute(route: WorkspaceRoute) { return route.startsWith('detail:') ? route.slice(7) : routeHash[route as keyof typeof routeHash]; }
 function OwnedWardrobe({ client, config, controller, scope, profile, change, busy, unresolved, t, language, online }: { client: AppClient; config: PublicConfig; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; unresolved: boolean; t: Translate; language: Language; online: boolean }) {
   const [route, setRoute] = useState<WorkspaceRoute>(() => currentRoute());
-  const [items, setItems] = useState<WardrobeItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<MessageKey | null>(null);
+  const browse = useWardrobeBrowse(client, scope, language, online);
+  const refresh = browse.refresh;
   const [notice, setNotice] = useState(false);
   const [undo, setUndo] = useState<UndoItem | null>(null);
   const [discard, setDiscard] = useState<{ next: WorkspaceRoute; position?: number } | null>(null);
   const discardFocus = useRef<HTMLElement | null>(null);
   const navigation = useRef({ route: currentRoute(), position: Number.isSafeInteger(history.state?.wardrobePosition) ? Number(history.state.wardrobePosition) : 0, restoring: false });
   const dirty = useRef({ dirty: false, incomplete: false, busy: false });
-  const loadSequence = useRef(0);
   const images = useMemo(() => new PrivateImages(client, scope), [client, scope]);
   const ai = useMemo(() => new AiClient(client, config, scope), [client, config, scope]);
   const lifecycle = useMemo(() => new ItemLifecycleClient(client, config, scope), [client, config, scope]);
@@ -93,18 +89,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   const beforeDiscard = useRef<BeforeDiscard | null>(null);
   const onBeforeDiscard = useCallback((handler: BeforeDiscard | null) => { beforeDiscard.current = handler; }, []);
   const onDirty = useCallback((isDirty: boolean, incomplete: boolean, busy: boolean) => { dirty.current = { dirty: isDirty, incomplete, busy }; }, []);
-  const refresh = useCallback(async () => {
-    const sequence = ++loadSequence.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const next = await loadWardrobe(client, scope);
-      if (!scope.signal.aborted && sequence === loadSequence.current) setItems(next);
-    } catch (problem) {
-      if (!scope.signal.aborted && sequence === loadSequence.current && !isAborted(problem)) setError(errorKey(problem));
-    } finally { if (!scope.signal.aborted && sequence === loadSequence.current) setLoading(false); }
-  }, [client, scope]);
-  useEffect(() => { images.activate(); void refresh(); return () => images.clear(); }, [refresh, images]);
+  useEffect(() => { images.activate(); return () => images.clear(); }, [images]);
   const changeRoute = useCallback((next: WorkspaceRoute) => {
     if (next === navigation.current.route) return;
     if (dirty.current.dirty || dirty.current.busy) {
@@ -165,7 +150,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   useEffect(() => { document.getElementById(route === 'add' ? 'capture-title' : route === 'settings' ? 'settings-title' : route === 'trash' ? 'trash-title' : route.startsWith('detail:') ? 'item-detail-title' : 'wardrobe-title')?.focus(); }, [route]);
   function trashed(item: LifecycleSnapshot) {
     dirty.current = { dirty: false, incomplete: false, busy: false };
-    setItems(old => old.filter(value => value.id !== item.id));
+    browse.remove(item.id);
     setUndo(newUndo(item)); setNotice(false);
     changeRoute('wardrobe'); void refresh();
   }
@@ -191,7 +176,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           : route.startsWith('detail:') ? <ItemDetail key={route} client={client} scope={scope} itemId={detailRouteId(route.slice(7))} images={images}
             lifecycle={lifecycle} onTrashed={trashed}
             t={t} language={language} currency={profile.currency} online={online} onDirty={onDirty} onSaved={() => { void refresh(); }} onBack={() => changeRoute('wardrobe')} />
-          : <WardrobeScreen items={items} images={images} loading={loading} error={error} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={() => { void refresh(); }} />}
+          : <WardrobeScreen browse={browse} images={images} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={refresh} />}
       </main>
       {discard && <DiscardDialog beforeConfirm={route === 'add' ? async () => beforeDiscard.current ? beforeDiscard.current() : 'unresolved' : undefined}
         title={t(route === 'settings' || route.startsWith('detail:') ? 'common.unsaved' : 'capture.discard')} t={t} onCancel={() => {

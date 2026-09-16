@@ -31,6 +31,13 @@ export type WardrobeItem = {
   availability: GarmentValues['availability'];
   lifecycle: GarmentValues['lifecycle'];
   excludeSuggestions: boolean;
+  brand: string | null;
+  tags: string[];
+  colours: string[];
+  seasons: string[];
+  formality: number | null;
+  purchasePrice: string | null;
+  currency: string;
 };
 
 export function eligibleForSuggestions(item: WardrobeItem): boolean {

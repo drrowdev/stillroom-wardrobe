@@ -642,29 +642,46 @@ export async function lifecyclePublicationCases(env, { withLifecycleCatalogMarke
       phase = 'real-late-publication';
       const late = h.track();
       late.p_item.id = '1080' + late.p_item.id.slice(4);
+      phase = 'real-late-publication-reserve';
       const lateReservation = await h.reserve(late), lateIntent = structuredClone(late);
+      phase = 'real-late-publication-child-ready';
       await withLifecycleLateUpload(owner, late, async () => {
+        phase = 'real-late-publication-upload';
         await h.upload(late);
+        phase = 'real-late-publication-intent';
         eq(late, lateIntent);
+        phase = 'real-late-publication-finalize';
         await h.finalize(late, lateReservation);
+        phase = 'real-late-publication-trash';
         await h.trash(late, 1);
+        phase = 'real-late-publication-status';
         const lateArgs = h.beginArgs(late, await h.status(late));
+        phase = 'real-late-publication-begin';
         await h.begin(lateArgs);
+        phase = 'real-late-publication-remove';
         await removePaths(client, owner, h.paths(late));
+        phase = 'real-late-publication-fence';
         await requireLifecycleClaimFence(owner.uid, late.p_item.id, late.p_image.id);
+        phase = 'real-late-publication-finish';
         eq(await h.finish(late, lateArgs.p_request_id), 'completed');
+        phase = 'real-late-publication-child-settlement';
       });
+      phase = 'real-late-publication-prefix-empty';
       await requireLifecyclePrefixEmpty(owner.uid, late.p_item.id);
       for (const path of h.paths(late)) {
+        phase = 'real-late-publication-download-denied';
         requireEvidence(!(await client.request(owner.token, `/storage/v1/object/authenticated/wardrobe/${path}`)).ok);
+        phase = 'real-late-publication-sign-denied';
         requireEvidence(!(await client.request(owner.token, `/storage/v1/object/sign/wardrobe/${path}`, {
           method: 'POST', body: { expiresIn: 60 },
         })).ok);
       }
+      phase = 'real-late-publication-list';
       const listed = await client.request(owner.token, '/storage/v1/object/list/wardrobe', {
         method: 'POST', body: { prefix: `${owner.uid}/${late.p_item.id}/`, limit: 10, offset: 0 },
       });
       requireEvidence(listed.ok); eq(listed.data, []);
+      phase = 'real-late-publication-rows';
       eq(await h.read('items', late.p_item.id), []); eq(await h.read('item_images', late.p_image.id), []);
     } catch (error) {
       primaryFailed = true;

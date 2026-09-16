@@ -1,4 +1,11 @@
 {
+  "wardrobe.lastWornOrder": {"en":"Recently worn first","fi":"Viimeksi käytetyt ensin","sv":"Senast använda först"},
+  "wardrobe.priceOrder": {"en":"Price by currency","fi":"Hinta valuutoittain","sv":"Pris per valuta"},
+  "wardrobe.noPrice": {"en":"No recorded price","fi":"Ei hintatietoa","sv":"Inget angivet pris"},
+  "wardrobe.allFavourites": {"en":"All items","fi":"Kaikki vaatteet","sv":"Alla plagg"},
+  "wardrobe.clearSearchFilters": {"en":"Clear search and filters","fi":"Tyhjennä haku ja suodattimet","sv":"Rensa sökning och filter"},
+  "wardrobe.historyLoading": {"en":"Loading wear history…","fi":"Ladataan käyttöhistoriaa…","sv":"Läser in användningshistorik…"},
+  "wardrobe.historyUnavailable": {"en":"Wear history could not be loaded.","fi":"Käyttöhistoriaa ei voitu ladata.","sv":"Användningshistoriken kunde inte läsas in."},
   "recovery.forgot": { "en": "Forgot your password?", "fi": "Unohditko salasanasi?", "sv": "Glömt ditt lösenord?" },
   "recovery.requestTitle": { "en": "Reset your password", "fi": "Vaihda salasanasi", "sv": "Återställ ditt lösenord" },
   "recovery.requestHelp": { "en": "Enter your account email. Open the link in a new, separately opened tab or another browser.", "fi": "Anna tilisi sähköpostiosoite. Avaa linkki uudessa, erikseen avatussa välilehdessä tai toisessa selaimessa.", "sv": "Ange kontots e-postadress. Öppna länken i en ny, separat öppnad flik eller en annan webbläsare." },
