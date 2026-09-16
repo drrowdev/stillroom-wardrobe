@@ -6613,3 +6613,63 @@ Final exact-head App/type/unit/backend/Apple/visual/independent/normal-owner/
 peer/header/native/manual/device/I10b gates remain. No future pass, physical
 erasure or exhaustive coverage is claimed. Stop after the one ordinary commit:
 no push/PR edit/CI7, other stage2, hosted/provider/private/paid, merge or deployment.
+
+## I10a Linux runner characterization - source only, 16 September 2026
+
+The bounded two-file plan is
+[5704996173](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5704996173),
+8976ASCIIUTF8LFbytes/SHA256
+`248a75e9154e3502bfd252dd8d8def9fa73f029c7e6bf57309ea7e6d0ef3a69b`.
+Actual supplied-text Anthropic Claude Opus5/high review89 returned AMEND;
+the coordinator incorporated A1-A4. This is not approval of the blocked
+27-path product integration or a general runner repair.
+
+Fresh OWN-model edit receipt
+[5705053720](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5705053720)
+matched5521ASCIIUTF8LFbytes/SHA256
+`31737ab506dd6e4eb9469a57ce913000ceaaf003b72c37ba536072bdf01b9342`.
+The coordinator independently verified five OWN582a gpt-6-astra/medium entry rows
+21:44:37.332-21:45:54.243UTC. The same explicitly selected writer continues.
+The read-only entry matched f923/tree610a/parent a1a,237normal clean index entries,
+both complete append prefixes and canonical public PR/main identities.
+Fresh pre-edit ordinary guards passed21:49:19.4010108UTC.
+
+The source appends one CI/GitHub/Linux-gated test with a10000ms timeout and
+zero retries. Dynamic imports remain inside that test; existing imports/tests
+are untouched. Two sequential inert cases use the unchanged runCommand,
+absolute Node, empty child environments and1024-byte capture:
+DIRECT requests2000ms with an8000ms natural exit, requiring elapsed>=2000/<8000;
+INHERITED requests1000ms with a finite2500ms leaf, requiring elapsed>=2000/<10000.
+All success markers use synchronous writes. Exact whole-line integrity,
+empty stderr, code2 and elapsed bounds are checked as booleans under fixed labels,
+without printing child output. A rejected runner promise becomes a fixed failure.
+No permanently wedged child, shell, detachment, network, file, credential,
+fixture, helper rewrite or product operation is introduced.
+
+At most two completed-case lines use I10A-RUNNER-LIFETIME and exactly eight
+ordered fields: schemaVersion,platform,case,requestedTimeoutMs,elapsedMs,
+resultCode,readySeen,endSeen. The platform is linux; integer elapsed is0-9999.
+The source checks the strict512UTF8-byte limit including prefix and LF.
+The coordinator's169-byte maximum over20000 serialized domain combinations
+is static .NET text evidence recorded in the plan, not execution by this writer.
+
+No runtime characterization has run for this source. A future passing inherited
+case would characterize a FOUND Linux deadline gap, not browser quiescence,
+8-minute budget conformance, guaranteed descendant termination or successful
+fixture teardown. The supplied runner contract can settle on error as well as
+close; code2 is not a universal cause decoder. Runner/OS loss and missing
+completion cannot be represented as joined work. Any later repair needs its
+own reviewed scope and suitable conformance assertions.
+
+All61285prior unit LFbytes retain SHA256
+`f587a0ca17b80ea4f69814a97c7dd5c81db1e023327d5c0fc8c1f411c9a5a6e3`;
+all442795prior document LFbytes retain SHA256
+`74e6f9a54bda73d26c1aeed1ac1708f150e035d24d5368e484f51c4b21420730`.
+Final static delta/prefix/pin and ordinary-commit results are reported separately.
+Other235tracked files stay frozen, including39fixtures/25phases/20labels/
+seven ordinals/nine-key rehearsal diagnostics and9828representative shapes.
+No local runtime/parser/compiler/formatter/lint/test/probe/install/version,
+additional source discovery, held-content recovery or Actions access occurred.
+CI8/publication require a separate release. Historical runtime causes, review80,
+the writer read incidents and A/E/peer/header/native/manual/final-review/I10b
+gates remain open. No merge, deployment, hosted, private or paid authority.

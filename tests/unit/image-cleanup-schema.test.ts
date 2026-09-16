@@ -904,3 +904,91 @@ describe('I10a ordinary response validation', () => {
     ]) expect(() => checkCleanupStatus(bad, owner, request)).toThrow();
   });
 });
+
+describe('I10a Linux runner lifetime characterization', () => {
+  it.skipIf(process.env.CI !== 'true' || process.env.GITHUB_ACTIONS !== 'true' || process.platform !== 'linux')(
+    'characterizes direct timeout and inherited-pipe late settlement without claiming browser quiescence',
+    async () => {
+      const { runCommand } = await import('../../scripts/backend/local.mjs');
+      const { isAbsolute } = await import('node:path');
+      expect(isAbsolute(process.execPath), 'runner-absolute-node').toBe(true);
+
+      function emit(kind: 'direct' | 'inherited', elapsedMs: number) {
+        expect(Number.isInteger(elapsedMs) && elapsedMs >= 0 && elapsedMs <= 9999, 'runner-record-domain').toBe(true);
+        const line = `I10A-RUNNER-LIFETIME ${JSON.stringify({
+          schemaVersion: 1,
+          platform: 'linux',
+          case: kind,
+          requestedTimeoutMs: kind === 'direct' ? 2000 : 1000,
+          elapsedMs,
+          resultCode: 2,
+          readySeen: true,
+          endSeen: kind === 'inherited',
+        })}`;
+        expect(Buffer.byteLength(`${line}\n`, 'utf8') < 512, 'runner-record-bound').toBe(true);
+        console.log(line);
+      }
+
+      const directSource = `
+const { writeSync } = require('node:fs');
+writeSync(1, 'DIRECT_READY\\n');
+setTimeout(() => process.exit(0), 8000);
+`;
+      const directStarted = performance.now();
+      let direct;
+      try {
+        direct = await runCommand(process.execPath, ['-e', directSource], {
+          env: {}, timeout: 2000, maxOutputBytes: 1024,
+        });
+      } catch {
+        throw new Error('runner-direct-integrity');
+      }
+      const directElapsed = Math.ceil(performance.now() - directStarted);
+      expect(direct.stdout === 'DIRECT_READY\n' && direct.stderr === '', 'runner-direct-integrity').toBe(true);
+      expect(direct.code === 2 && Number.isInteger(directElapsed)
+        && directElapsed >= 2000 && directElapsed < 8000, 'runner-direct-characterization').toBe(true);
+      emit('direct', directElapsed);
+
+      const leafSource = `
+const { writeSync } = require('node:fs');
+writeSync(1, 'LEAF_READY\\n');
+setTimeout(() => {
+  writeSync(1, 'LEAF_END\\n');
+  process.exit(0);
+}, 2500);
+`;
+      const inheritedSource = `
+const { writeSync } = require('node:fs');
+const { spawn } = require('node:child_process');
+const leaf = spawn(process.execPath, ['-e', ${JSON.stringify(leafSource)}], {
+  env: {}, stdio: ['ignore', 'inherit', 'inherit'], shell: false, windowsHide: true,
+});
+leaf.once('error', () => {
+  writeSync(1, 'LEAF_SPAWN_FAILED\\n');
+  process.exit(1);
+});
+leaf.once('spawn', () => {
+  writeSync(1, 'DIRECT_EXIT\\n');
+  process.exit(0);
+});
+`;
+      const inheritedStarted = performance.now();
+      let inherited;
+      try {
+        inherited = await runCommand(process.execPath, ['-e', inheritedSource], {
+          env: {}, timeout: 1000, maxOutputBytes: 1024,
+        });
+      } catch {
+        throw new Error('runner-inherited-integrity');
+      }
+      const inheritedElapsed = Math.ceil(performance.now() - inheritedStarted);
+      const inheritedLines = inherited.stdout === 'DIRECT_EXIT\nLEAF_READY\nLEAF_END\n'
+        || inherited.stdout === 'LEAF_READY\nDIRECT_EXIT\nLEAF_END\n';
+      expect(inheritedLines && inherited.stderr === '', 'runner-inherited-integrity').toBe(true);
+      expect(inherited.code === 2 && Number.isInteger(inheritedElapsed)
+        && inheritedElapsed >= 2000 && inheritedElapsed < 10000, 'runner-inherited-characterization').toBe(true);
+      emit('inherited', inheritedElapsed);
+    },
+    { timeout: 10000, retry: 0 },
+  );
+});
