@@ -459,7 +459,14 @@ export async function withImageCleanupFixtures(operation) {
   requireCleanup(['ALLOW_IMAGE_CLEANUP_REHEARSAL', 'ALLOW_PRESERVATION_REHEARSAL', 'ALLOW_CI_STORAGE_GUARD_INSTALL']
     .every((key) => !(key in env)), 'ordinary-environment');
   await withCleanupOwners(async ([owner, peer]) => {
-    const fixtures = [];
+    const itemId = `b229${randomUUID().slice(4)}`;
+    const imageId = `b229${randomUUID().slice(4)}`;
+    const empty = newCleanupFixture(owner.uid, { itemId, imageId });
+    requireCleanup(empty !== null && typeof empty === 'object'
+      && empty.ownerId === owner.uid && empty.itemId === itemId && empty.imageId === imageId
+      && empty.main === `${owner.uid}/${itemId}/${imageId}/main.jpg`
+      && empty.thumb === `${owner.uid}/${itemId}/${imageId}/thumb.jpg`, 'profile-lock-fixture-contract');
+    const fixtures = [{ actor: owner, value: empty }];
     const historical = [];
     const track = (actor, options) => {
       const value = newCleanupFixture(actor.uid, options);
@@ -474,7 +481,6 @@ export async function withImageCleanupFixtures(operation) {
       await ageBoundaries(deadline);
       const ready = track(owner);
       const retired = track(owner, { itemId: ready.itemId });
-      const empty = track(owner);
       const pending = track(owner);
       const orphan = track(owner);
       const unmarked = track(owner);

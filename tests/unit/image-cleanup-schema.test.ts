@@ -107,7 +107,7 @@ describe('I10a checked image cleanup SQL source contract', () => {
 
   it('pins the closed registered-image and catalog manifest projections', () => {
     const projection = routine('private.image_cleanup_image');
-    const keys = [...projection.matchAll(/'([a-z_]+)',(?:im\.[a-z_]+|timezone\('UTC',im\.(?:created_at|retired_at)\))/g)]
+    const keys = [...projection.matchAll(/'([a-z_][a-z0-9_]*)',(?:im\.[a-z_][a-z0-9_]*|timezone\('UTC',im\.(?:created_at|retired_at)\))/g)]
       .map((match) => match[1]);
     expect(keys).toEqual([
       'owner_id', 'item_id', 'id', 'state', 'created_at', 'retired_at', 'description_version',
@@ -120,7 +120,7 @@ describe('I10a checked image cleanup SQL source contract', () => {
       expect(projection).not.toContain(`'${field}',im.${field}`);
     }
     const evidence = routine('private.image_cleanup_evidence');
-    expect([...evidence.matchAll(/'([a-z_]+)',(?:member\.[a-z_]+|timezone\('UTC',member\.created_at\))/g)].map((match) => match[1]))
+    expect([...evidence.matchAll(/'([a-z_][a-z0-9_]*)',(?:member\.[a-z_][a-z0-9_]*|timezone\('UTC',member\.created_at\))/g)].map((match) => match[1]))
       .toEqual(['id', 'name', 'version', 'created_at']);
     expect(evidence).toContain("'created_at',timezone('UTC',member.created_at)");
     expect(evidence).not.toContain("'created_at',member.created_at");
@@ -349,6 +349,69 @@ describe('I10a checked image cleanup SQL source contract', () => {
     expect(ordinary).toContain('size <= 4096');
     expect(ordinary).toContain('AbortSignal.timeout(10_000)');
   });
+
+  it('preflights and reuses the real profile-lock fixture before tracking or control', () => {
+    const rehearsal = source('scripts/image-cleanup-rehearsal.mjs');
+    const start = rehearsal.indexOf('await withCleanupOwners(async ([owner, peer]) => {');
+    const end = rehearsal.indexOf('  }, env);', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const callback = rehearsal.slice(start, end);
+    expect(callback).toContain([
+      'await withCleanupOwners(async ([owner, peer]) => {',
+      '    const itemId = `b229${randomUUID().slice(4)}`;',
+      '    const imageId = `b229${randomUUID().slice(4)}`;',
+      '    const empty = newCleanupFixture(owner.uid, { itemId, imageId });',
+      "    requireCleanup(empty !== null && typeof empty === 'object'",
+      '      && empty.ownerId === owner.uid && empty.itemId === itemId && empty.imageId === imageId',
+      '      && empty.main === `${owner.uid}/${itemId}/${imageId}/main.jpg`',
+      "      && empty.thumb === `${owner.uid}/${itemId}/${imageId}/thumb.jpg`, 'profile-lock-fixture-contract');",
+      '    const fixtures = [{ actor: owner, value: empty }];',
+    ].join('\n'));
+    expect(callback.match(/const empty =/g)).toHaveLength(1);
+    expect(callback.match(/newCleanupFixture\(owner\.uid, \{ itemId, imageId \}\)/g)).toHaveLength(1);
+    expect(callback).not.toContain('const empty = track(');
+    const admitted = callback.indexOf('const fixtures = [{ actor: owner, value: empty }];');
+    for (const boundary of ['const track =', 'try {', 'await ageBoundaries(', 'await control(']) {
+      expect(callback.indexOf(boundary)).toBeGreaterThan(admitted);
+    }
+    expect(callback).toContain('[owner, empty, { upload: false }]');
+    expect(callback).toContain('await createCleanupFixture(actor, value, options);');
+    expect(callback).toContain("await ageFixture(empty, 'pending', deadline);");
+    expect(callback).toContain('await housekeeping(owner, ready, empty, deadline);');
+    expect(rehearsal).toContain("await withAnalyzedSaveFixtureLock(owner.uid, pending.itemId, pending.imageId, 'profile', async () => {");
+    expect(callback).toContain('Array.from({ length: 21 }, () => track(owner, { itemId: empty.itemId }))');
+    expect(callback).toContain('candidates.length === expected.length && expected.every');
+    expect(callback).toContain('claimPage.claims.length === 20');
+    expect(callback).toContain('claimTail.claims.length === 1 && claimTail.next === null');
+    expect(callback).toContain('const lateA = track(owner, { itemId: `1080${randomUUID().slice(4)}` });');
+    expect(callback).toContain('const lateB = track(peer, { itemId: `1080${randomUUID().slice(4)}` });');
+    expect(callback).toContain('[[owner, lateA], [peer, lateB]]');
+    expect(callback).toContain('for (const { actor, value } of [...fixtures].reverse())');
+    expect(callback).toContain('await destroyCleanupFixture(actor, value);');
+    expect(rehearsal).toContain('const TOTAL_MS = 480_000;');
+    expect(rehearsal).toContain('const TEARDOWN_MS = 120_000;');
+  });
+});
+
+describe('I10a public fixture contract', () => {
+  it.skipIf(process.env.CI !== 'true' || process.env.GITHUB_ACTIONS !== 'true')(
+    'retains both requested profile-lock identities and their canonical paths',
+    async () => {
+      // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
+      const { newCleanupFixture } = await import('../integration/image-cleanup.sessions.mjs');
+      const ownerId = '10000000-0000-4000-8000-000000000001';
+      const itemId = 'b2290000-0000-4000-8000-000000000002';
+      const imageId = 'b2290000-0000-4000-8000-000000000003';
+      const value = newCleanupFixture(ownerId, { itemId, imageId });
+      expect(value !== null && typeof value === 'object').toBe(true);
+      expect(value.ownerId === ownerId).toBe(true);
+      expect(value.itemId === itemId).toBe(true);
+      expect(value.imageId === imageId).toBe(true);
+      expect(value.main === `${ownerId}/${itemId}/${imageId}/main.jpg`).toBe(true);
+      expect(value.thumb === `${ownerId}/${itemId}/${imageId}/thumb.jpg`).toBe(true);
+    },
+  );
 });
 
 describe('I10a ordinary response validation', () => {

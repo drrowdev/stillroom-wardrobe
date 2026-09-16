@@ -202,7 +202,7 @@ describe('CI-only preservation guards', () => {
   it('retains SOURCE-DERIVED renderer padding, widths and decorative blank lines', () => {
     for (const table of [baseTable, targetTable]) {
       const lines = table.split('\n');
-      expect(lines).toHaveLength(15);
+      expect(lines).toHaveLength(16);
       expect(lines.slice(0, 2)).toEqual(['', '  ']);
       expect(lines.slice(-2)).toEqual(['', '']);
       for (const line of lines.slice(2, -2)) {
@@ -932,10 +932,10 @@ describe('import safety and frozen integration boundary', () => {
     expect(result.stdout).toBe('IMPORT_SAFE\n');
     expect(result.stderr).toBe('');
   });
-  it('keeps CI opt-in step-local, before unchanged final reset and suites', async () => {
+  it('keeps preservation and cleanup CI opt-ins step-local in the exact suite sequence', async () => {
     const workflow = await readFile(path.join(root, '.github/workflows/ci.yml'), 'utf8');
-    expect(workflow).toContain("      - run: npm run db:start\n      - run: npm run db:rehearse\n        env:\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:reset\n      - run: npm run test:integration\n      - run: npm run test:security\n      - run: node scripts/ai-analysis-rehearsal.mjs\n      - run: npm run db:types");
-    expect(workflow.match(/ALLOW_PRESERVATION_REHEARSAL/g)).toHaveLength(1);
+    expect(workflow).toContain("      - run: npm run db:start\n      - run: npm run db:rehearse\n        env:\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:reset\n      - run: npm run test:integration\n      - run: npm run test:security\n      - run: node scripts/ai-analysis-rehearsal.mjs\n      - run: node scripts/image-cleanup-rehearsal.mjs\n        env:\n          ALLOW_IMAGE_CLEANUP_REHEARSAL: '1'\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:types");
+    expect(workflow.match(/ALLOW_PRESERVATION_REHEARSAL/g)).toHaveLength(2);
     expect(workflow.match(/ALLOW_CI_STORAGE_GUARD_INSTALL/g)).toHaveLength(1);
     expect(workflow).toContain("      ALLOW_SECURITY_TESTS: '1'\n      ALLOW_CI_STORAGE_GUARD_INSTALL: '1'");
     expect(workflow.slice(0, workflow.indexOf('\n  database:'))).not.toContain('ALLOW_CI_STORAGE_GUARD_INSTALL');

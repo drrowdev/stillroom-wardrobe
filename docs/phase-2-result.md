@@ -6056,3 +6056,89 @@ execution is permitted or claimed. CI1 evidence above was supplied by the
 coordinator, not queried through Actions by this writer. No passing lint or CI
 result is claimed for R2. No push, CI2/retry, stage2, type adoption, hosted,
 provider/private/paid, deployment or merge authority follows from this record.
+
+## PR27 CI2 failure and A3 fixture/test correction - 16 September 2026
+
+The [complete coordinator CI2 record](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5698931942)
+reports **CI2 FAILED** on source `6eb981229200167016d8b1a7e085f1a18d481ea8`,
+base `bdb48cee783a9eb5be83c52cd8791e5066eba639`. CI35104616934 attempt1
+and Apple35104617293 attempt1 used actual merge checkout
+`6ac0065634e1203ccc3fab1f28a232e9f3a52c69`, tree
+`38baaa6bd72a1ef54e1333f2b73a7c8b23922679`, with exactly that base and feature
+as parents. The merge checkout is not the feature commit or this later repair.
+
+App104822486440 passed installation, lint, typecheck and translations. R2 now
+has actual passing lint evidence. Unit tests failed: 2244 passed, three failed,
+27 passing files and two failing files, 7.76 seconds. Failures were the new
+manifest-key extractor and two stale preservation assertions. The unchanged
+local-backend unit passed all 513 tests. Build, scans, dependency/browser checks
+and all eight visual uploads were skipped; negative-test stdout is not a
+separate failed test.
+
+Backend104822486867 passed installation, start, preservation, reset, ordinary
+integration/security and the old AI rehearsal. Four existing real-local browser
+cases passed in 15.0 seconds. AI readiness returned three successful observations
+(1491/1326/1331ms). CI1's B1 inspect/code1 failure did not recur, but its cause
+remains **UNKNOWN** and the incident/merge hold remains, even after a green run.
+
+The new cleanup rehearsal failed with exit2 and the closed message
+`REFUSED: B2 fixture lock boundary.` The unchanged legacy guard requires both
+item/image UUIDv4 identities in its admitted b229 namespace; its new caller's
+real empty fixture did not request that namespace. Profile-lock admission failed
+before its callback, so the profile-lock photo read did not execute. Reaching
+this point is execution-order evidence that preceding age, setup, private-helper
+timezone and disabled-owner controls returned, not a separately passing cleanup
+suite, ordinary-owner timezone API result or teardown acceptance. Later
+candidate/claim/native deletion/slow-upload work was not completed.
+
+The cleanup step ran 13:56:52-13:56:56 UTC; the 330-second backend job was a
+partial failed run, not a completed cleanup-budget measurement. Type generation,
+upload and parity were skipped. CI2 artifact inventory was zero. Apple104822487543
+passed four generated JPEG cases (16.1 seconds) and three I07 cases (13.5 seconds);
+this is not physical iPhone/HEIC acceptance. No types or visual artifacts from
+this cycle exist to adopt or review.
+
+The [A3 disposition](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5699158450)
+and [controlling approval](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5699294877)
+record actual retained Anthropic Claude Opus5/high critiques76/77, both AMEND,
+and coordinator corrections. Earlier claims that the 16-key extractor held were
+withdrawn. The suggested factory-body read and inaccurate workflow matcher were
+not adopted. The unit already has direct/transitive transport imports; a dynamic
+constructor lookup does not provide collection-time module isolation.
+
+Under the [fresh own-model/edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5699379886),
+A3 changes only the new rehearsal, new schema unit, preservation unit and this
+append. The rehearsal requests two independently fresh b229 UUIDv4 identities,
+calls the existing public factory once, then checks the non-null result and
+five identity/path equalities against requested inputs before tracking, try/finally
+or privileged fixture control. Only the validated real empty fixture is tracked
+and reused in the existing upload:false creation loop and housekeeping call.
+The 21 siblings, both 1080 slow-denial cases, bounds and exact reverse teardown
+remain unchanged; no fake guard-only fixture or helper change is introduced.
+
+The new public-factory contract test uses synthetic IDs, five boolean comparisons
+and an in-body dynamic import. It is explicitly skipped unless both CI and
+GITHUB_ACTIONS are true; unexpected skipping in a later admitted GitHub App job
+is missing evidence. Neither that test nor the new runtime preflight has executed.
+The combined-options contract remains unproven; a mismatch must stop before
+fixture mutation, not authorize a factory edit or weaker checks.
+
+Both manifest extractors now admit digits after the first identifier character,
+preserving the exact ordered 16 registered and four catalog fields, UTC encoding,
+parseback and negative assertions. Preservation retains its widths/decorative
+lines with the corrected 16-line count, and one exact contiguous workflow literal
+including cleanup's IMAGE then PRESERVATION keys with global preservation count2.
+The workflow, all SQL/pins/types, old helpers and other 233 paths are unchanged.
+
+Static Git whitespace/diff/attribute checks and bounded source desk review were
+performed; downstream manifest projections, UTC parseback, renderer widths,
+workflow order/step-local flags and package script remain consistent with the
+edited assertions. Canonical byte/blob and staged-prefix checks preserve the
+entire 406369-byte previous document prefix. These are source checks, not local
+parser/compiler/lint/test/runtime execution or a prediction of green CI.
+The restricted transport remains opaque: only retained HEAD/index identity and
+normal status were checked, with no factory/header/destructor-body read.
+No CI3, push, type adoption or stage2 is released. Final independent exact-head,
+native/normal-owner/production-peer, visual/manual/device and I10b gates remain;
+I10 is incomplete and I11 ineligible. No hosted/private/provider/paid, deployment
+or merge authority follows from this correction.
