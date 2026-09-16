@@ -5989,3 +5989,70 @@ Publication, CI admission, exact-head review, artifacts and stage2 remain
 coordinator gates. This repair authorizes no push, PR, CI operation, hosted
 mutation, provider processing, deployment or merge. I10/I10b and Phase 0
 acceptance limitations above remain unchanged.
+
+## PR27 CI1 failure and R2 source correction - 16 September 2026
+
+The [coordinator's complete CI1 record](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5698289348)
+reports **CI1 FAILED**; its first-cycle allowance is consumed. The following
+results belong to source `0bb17ad477444ede32a242998539c3f064712b21`,
+base `bdb48cee783a9eb5be83c52cd8791e5066eba639`, not this later correction.
+CI run35100624137 attempt1 and Apple run35100624112 attempt1 checked out
+merge commit `e85fcab0de3f7e2d4505e2f23ba31e269fd12fe5`, whose tree
+`2302c9dc80628cc58ddde5e9764d08f377ef14a0` matches the reviewed source.
+Its parents are the stated base and feature head; it is not the feature commit.
+
+App job104808834063 passed dependency installation, then failed `npm run lint`:
+`scripts/image-cleanup-rehearsal.mjs:409:7`, `no-useless-assignment`, one error
+and zero warnings. All subsequent App checks and eight visual uploads were
+SKIPPED, including typecheck, translations, unit/build/scans and browser tests.
+
+Backend job104808834171 passed installation, pinned Chromium, `npm run db:start`,
+`npm run db:rehearse`, `npm run db:reset`, ordinary integration and security.
+This includes the exact ten-source preservation/catalog checks, new I10a
+non-aged protocol/refusals and ordinary peer/anonymous checks, plus four
+existing real-local browser cases. It does not establish aged cleanup or
+timezone/native rehearsal success.
+
+The old AI rehearsal then failed at served-entrypoint after its B1 normal-session
+baseline children passed. Closed evidence reports `inspect-result`,
+`commandCode:1`, `listedState:running`; readiness reports `reader-failed`,
+`elapsedMs:647`, `lastHttp:null`, no transport failure, and no fresh/stable
+readiness. A running container listing preceded a nonzero Docker inspect
+result, before inspect-shape parsing. **The cause remains UNKNOWN.** No raw
+private evidence was recovered, and no container-replacement race, HTTP
+readiness or specific Docker cause is inferred.
+
+The new cleanup rehearsal, type generation/upload and parity were SKIPPED.
+The failed partial backend job took 242 seconds; this is not a completed
+cleanup or stage2 budget measurement. Artifact inventory was zero: no current
+generated types or visual bundles exist to adopt. Stage2/type adoption remains
+blocked, not waived.
+
+Apple job104808833802 passed all four generated JPEG cases (10.9 seconds) and
+three I07 orientation/composition cases (10.5 seconds) on macOS26.6.2,
+build25G83, arm64, image20260907.0351.1. This is generated Mac WebKit evidence,
+not physical iPhone/HEIC or user acceptance.
+
+Under the [matching R2 own-model/edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5698396352),
+the only executable-source change removes the redundant initial assignment:
+`let restored = false;` becomes `let restored;` in `disabledOwner`. Every
+finally path already assigns the flag before its checks. All restoration
+operations, true/false assignments, failure branches and primary-error handling
+remain unchanged; no lint rule or assertion is suppressed.
+
+R2 does **not** diagnose or repair the separate B1 reader incident. Its PR27
+incident/merge hold remains even if a later separately admitted run passes.
+The frozen reader, old AI rehearsal, SQL, pins, tests, types, workflows and
+restricted transport are untouched. The restricted Authorization value and
+exact-transport peer gap remain unreviewed; production-path owner/peer acceptance
+is still required.
+
+R2 local validation is limited to ordinary Git and text/byte identity checks.
+`git diff --check` and `git diff --cached --check` passed. Static hashing
+confirmed the exact one-declaration change and intact 402168-byte prior document
+prefix; the two-file staged diff was inspected. Other 235 paths are unchanged.
+No local lint, compiler/parser/formatter, tests, runtime, backend or Docker
+execution is permitted or claimed. CI1 evidence above was supplied by the
+coordinator, not queried through Actions by this writer. No passing lint or CI
+result is claimed for R2. No push, CI2/retry, stage2, type adoption, hosted,
+provider/private/paid, deployment or merge authority follows from this record.

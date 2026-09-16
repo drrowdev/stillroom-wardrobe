@@ -406,7 +406,7 @@ async function disabledOwner(owner, deadline) {
   let disabled = false;
   let primary;
   let failed = false;
-  let restored = false;
+  let restored;
   try {
     disabled = true;
     await control(`do $enabled$
