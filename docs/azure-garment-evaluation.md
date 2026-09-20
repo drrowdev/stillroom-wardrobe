@@ -11,6 +11,10 @@ Authority: [reviewed pilot](https://github.com/drrowdev/stillroom-wardrobe/pull/
 and [conditional source release/model attestation](https://github.com/drrowdev/stillroom-wardrobe/pull/27#issuecomment-5751394575).
 Those records do not reopen PR #27's deferred cleanup source. Source review and
 owner-specific execution gates remain separate from passing offline tests.
+The [A1 proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5752258564)
+and [reviewed A1 source release](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5752310646)
+authorize bounded metering diagnostics and private unaccepted candidates for
+future observations, not another live request or continuation of a halted pilot.
 
 ## Cost decision and limits
 
@@ -213,6 +217,65 @@ reported (for example, `PHOTO_CHANGED; LOCK_RELEASE_FAILED`), never raw errors
 or paths. The remaining lock still blocks another invocation; no cleanup
 recovery is authorized.
 
+### Invalid metering: diagnostics and unaccepted candidates
+
+New observations include `usageDiagnostic` and `unacceptedCandidate`; both keys
+are always present. `usageDiagnostic` is null except for `USAGE_INVALID`, where
+it contains one fixed `{field, condition}` pair identifying the first failed
+check. It does not report every failure or imply later checks passed.
+
+| Field | Allowed conditions |
+| --- | --- |
+| `USAGE` | `MISSING`, `NOT_OBJECT`, `UNEXPECTED_KEY` |
+| `PROMPT_DETAILS`, `COMPLETION_DETAILS` | `MISSING`, `NOT_OBJECT`, `UNEXPECTED_COMPONENT` |
+| `INPUT`, `OUTPUT`, `CACHE_WRITE` | `MISSING`, `NOT_NONNEGATIVE_SAFE_INTEGER` |
+| `TOTAL` | `MISSING`, `NOT_NONNEGATIVE_SAFE_INTEGER`, `SUM_UNSAFE`, `TOTAL_MISMATCH` |
+| `REASONING` | `MISSING`, `NOT_NONNEGATIVE_SAFE_INTEGER`, `REASONING_EXCEEDS_OUTPUT` |
+| `CACHE_READ` | `MISSING`, `NOT_NONNEGATIVE_SAFE_INTEGER`, `CACHE_READ_EXCEEDS_INPUT` |
+
+Checks proceed through the usage/detail containers, input/output/total/reasoning/
+cache-read/cache-write counters, arithmetic relationships, unexpected top-level
+keys, then unexpected prompt/completion detail components. `MISSING` means the
+property is absent, not that its value is null or malformed. Neither case is
+treated as zero. Unexpected provider keys/values are never copied into the
+diagnostic; only the fixed container and condition are retained. No partial
+counter dump, raw response, error text or invented cost is recorded.
+
+Invalid usage **always remains `HALTED / USAGE_INVALID`**, even when another
+answer gate fails. Accepted `facts`, normalized `usage` and `estimatedMicroUsd`
+remain null. The reservation is held and the next send remains blocked.
+
+Only when all independent answer gates pass may the private ledger retain
+`unacceptedCandidate: {status: "UNACCEPTED_METERING", facts: ...}`. These gates
+require completed HTTP 200, bounded JSON/UTF-8, current-arm identity, unchanged
+control/tool/audio checks, one index-0 assistant choice, no refusal, a stop
+finish, bounded content and the existing exact schema/domain rules. Refusal,
+truncation, filtering, invalid identity/controls/content or transport failure
+cannot produce a candidate. The candidate is **not a successful or accepted
+receipt, an application draft, accuracy evidence or permission to continue**.
+
+An independently valid nonnegative safe-integer input/output counter above
+8192/2048, or a nonzero required cache counter, also suppresses the candidate,
+even if another usage field is invalid. Unknown/malformed counters do not prove
+compliance, supply zero defaults or override a separately demonstrated breach.
+Even entirely absent usage can coexist with an independently validated candidate;
+that says nothing about metering compliance, costs or billing.
+
+Only the existing private ledger holds candidate facts, under the same access
+and retention rules. Status exposes the fixed diagnostic and a scalar
+`candidateStatus` (`UNACCEPTED_METERING` or null), never the candidate object or
+facts. No raw-response capture, export or candidate-to-application path exists.
+
+Legacy eight-key observations remain readable as stored, without added fields,
+rewritten bytes or changed review-token hashes. New observations require both
+extension keys and strict valid combinations; partial extensions are rejected.
+Legacy status shows unavailable diagnostic/candidate information as null. Policy,
+request controls and their digest binding are unchanged. Existing halted ledgers
+remain halted: there is no migration, reset, recovery or second-arm release.
+**A generic historical error cannot reveal its rejected field or recover an
+already discarded answer.** Do not infer a missing cache-write counter merely
+from `USAGE_INVALID`.
+
 This is cooperative single-owner accounting, not tamper resistance against
 an owner resetting files or using the resource key elsewhere. Local abort/
 timeout is not provider quiescence. Keep uncertain reservations held; neither
@@ -234,6 +297,11 @@ They do not read real credentials, decode photos, contact Azure, execute old
 runners or establish production privacy/billing behavior. No third-party
 packages are required. Native HTTPS and owner preparation remain live external
 gates. The import has no network/file/environment-read side effects.
+Synthetic compatibility checks freeze the pre-A1 controls digest and legacy
+HALTED review token and verify unchanged journal bytes after read/status and a
+blocked send. Candidate tests measure the complete serialized result record and
+journal under the unchanged bounds, including wrapper/diagnostic overhead; an
+unaccepted-candidate record is not assumed smaller than a SUCCESS record.
 
 Report actual attempts, failures and unused slots separately. Schema, transport,
 truncation and refusal failures are not invented semantic labels. Inspect useful

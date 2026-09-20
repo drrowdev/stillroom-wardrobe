@@ -209,8 +209,39 @@ const OUTCOMES = ['SUCCESS', 'FAILED', 'HALTED'];
 const REASONS = ['OK', 'REFUSED', 'TRUNCATED', 'FILTERED', 'DOMAIN_INVALID', 'ENVELOPE_INVALID',
   'MODEL_ANOMALY', 'CONTROL_ANOMALY', 'USAGE_INVALID', 'INPUT_ANOMALY', 'OUTPUT_ANOMALY',
   'CACHE_ANOMALY', 'HTTP_FAILURE', 'NETWORK_UNCERTAIN', 'RESPONSE_BOUND', 'INVALID_JSON'];
-function validObservation(o) {
-  return exact(o, ['state', 'reason', 'confirmedResponse', 'httpStatus', 'returnedModel', 'usage', 'facts', 'elapsedMs'])
+const DIAGNOSTICS = {
+  USAGE: ['MISSING', 'NOT_OBJECT', 'UNEXPECTED_KEY'],
+  PROMPT_DETAILS: ['MISSING', 'NOT_OBJECT', 'UNEXPECTED_COMPONENT'],
+  COMPLETION_DETAILS: ['MISSING', 'NOT_OBJECT', 'UNEXPECTED_COMPONENT'],
+  INPUT: ['MISSING', 'NOT_NONNEGATIVE_SAFE_INTEGER'],
+  OUTPUT: ['MISSING', 'NOT_NONNEGATIVE_SAFE_INTEGER'],
+  TOTAL: ['MISSING', 'NOT_NONNEGATIVE_SAFE_INTEGER', 'SUM_UNSAFE', 'TOTAL_MISMATCH'],
+  REASONING: ['MISSING', 'NOT_NONNEGATIVE_SAFE_INTEGER', 'REASONING_EXCEEDS_OUTPUT'],
+  CACHE_READ: ['MISSING', 'NOT_NONNEGATIVE_SAFE_INTEGER', 'CACHE_READ_EXCEEDS_INPUT'],
+  CACHE_WRITE: ['MISSING', 'NOT_NONNEGATIVE_SAFE_INTEGER'],
+};
+function validDiagnostic(value) {
+  return exact(value, ['field', 'condition']) && typeof value.field === 'string'
+    && typeof value.condition === 'string' && Object.hasOwn(DIAGNOSTICS, value.field)
+    && DIAGNOSTICS[value.field].includes(value.condition);
+}
+function currentModel(model, arm) {
+  return ARMS.includes(arm)
+    && [`gpt-5.6-${arm}`, `gpt-5.6-${arm}-${POLICY.snapshot}`, DEPLOYMENTS[arm]].includes(model);
+}
+function validExtensions(o, arm) {
+  const keys = ['state', 'reason', 'confirmedResponse', 'httpStatus', 'returnedModel', 'usage', 'facts', 'elapsedMs'];
+  if (exact(o, keys)) return true;
+  if (!exact(o, [...keys, 'usageDiagnostic', 'unacceptedCandidate'])) return false;
+  if (o.reason !== 'USAGE_INVALID') return o.usageDiagnostic === null && o.unacceptedCandidate === null;
+  if (o.state !== 'HALTED' || !o.confirmedResponse || o.httpStatus !== 200
+    || o.usage !== null || o.facts !== null || !validDiagnostic(o.usageDiagnostic)) return false;
+  return o.unacceptedCandidate === null || (exact(o.unacceptedCandidate, ['status', 'facts'])
+    && o.unacceptedCandidate.status === 'UNACCEPTED_METERING'
+    && currentModel(o.returnedModel, arm) && validFacts(o.unacceptedCandidate.facts));
+}
+function validObservation(o, arm) {
+  return object(o) && validExtensions(o, arm)
     && OUTCOMES.includes(o.state) && REASONS.includes(o.reason) && typeof o.confirmedResponse === 'boolean'
     && uint(o.elapsedMs)
     && (o.httpStatus === null || (uint(o.httpStatus) && o.httpStatus >= 100 && o.httpStatus <= 599))
@@ -255,7 +286,7 @@ export async function readLedger(directory) {
       slots[event.arm] = { intent: event, result: null };
     } else {
       requireThat(event.type === 'result' && exact(event, ['type', 'arm', 'observation', 'time'])
-        && slots[event.arm]?.intent && !slots[event.arm].result && validObservation(event.observation), 'LEDGER_INVALID');
+        && slots[event.arm]?.intent && !slots[event.arm].result && validObservation(event.observation, event.arm), 'LEDGER_INVALID');
       slots[event.arm].result = event.observation;
     }
   }
@@ -281,6 +312,8 @@ export function summary(state) {
         confirmedResponse: slot?.result?.confirmedResponse ?? false,
         returnedModel: slot?.result?.returnedModel ?? null,
         usage: slot?.result?.usage ?? null, reason: slot?.result?.reason ?? null,
+        usageDiagnostic: slot?.result?.usageDiagnostic ?? null,
+        candidateStatus: slot?.result?.unacceptedCandidate?.status ?? null,
         elapsedMs: slot?.result?.elapsedMs ?? null,
         estimatedMicroUsd: slot?.result?.usage && slot.result.usage.cacheRead === 0 && slot.result.usage.cacheWrite === 0
           ? ((BigInt(slot.result.usage.input) * (arm === 'terra' ? 22n : 44n)
@@ -292,23 +325,49 @@ export function summary(state) {
 }
 
 function observation(reason, extra = {}) {
-  return { state: 'HALTED', reason, confirmedResponse: false, httpStatus: null, returnedModel: null, usage: null, facts: null, elapsedMs: 0, ...extra };
+  return { state: 'HALTED', reason, confirmedResponse: false, httpStatus: null, returnedModel: null,
+    usage: null, facts: null, elapsedMs: 0, usageDiagnostic: null, unacceptedCandidate: null, ...extra };
 }
-function usageOf(u) {
-  if (!object(u) || !object(u.prompt_tokens_details) || !object(u.completion_tokens_details)) return null;
+function usageOf(data) {
+  const invalid = (field, condition) => ({ counts: null, diagnostic: { field, condition } });
+  for (const [container, key, field] of [
+    [data, 'usage', 'USAGE'],
+    [data.usage, 'prompt_tokens_details', 'PROMPT_DETAILS'],
+    [data.usage, 'completion_tokens_details', 'COMPLETION_DETAILS'],
+  ]) {
+    if (!Object.hasOwn(container, key)) return invalid(field, 'MISSING');
+    if (!object(container[key])) return invalid(field, 'NOT_OBJECT');
+  }
+  const u = data.usage;
   const p = u.prompt_tokens_details;
   const c = u.completion_tokens_details;
+  for (const [container, key, field] of [
+    [u, 'prompt_tokens', 'INPUT'], [u, 'completion_tokens', 'OUTPUT'], [u, 'total_tokens', 'TOTAL'],
+    [c, 'reasoning_tokens', 'REASONING'], [p, 'cached_tokens', 'CACHE_READ'], [p, 'cache_write_tokens', 'CACHE_WRITE'],
+  ]) {
+    if (!Object.hasOwn(container, key)) return invalid(field, 'MISSING');
+    if (!uint(container[key])) return invalid(field, 'NOT_NONNEGATIVE_SAFE_INTEGER');
+  }
   const counts = { input: u.prompt_tokens, output: u.completion_tokens, total: u.total_tokens,
     reasoning: c.reasoning_tokens, cacheRead: p.cached_tokens, cacheWrite: p.cache_write_tokens };
-  if (!Object.values(counts).every(uint)) return null;
-  if (counts.input + counts.output !== counts.total || !uint(counts.input + counts.output)
-    || counts.reasoning > counts.output || counts.cacheRead > counts.input) return null;
+  if (!uint(counts.input + counts.output)) return invalid('TOTAL', 'SUM_UNSAFE');
+  if (counts.input + counts.output !== counts.total) return invalid('TOTAL', 'TOTAL_MISMATCH');
+  if (counts.reasoning > counts.output) return invalid('REASONING', 'REASONING_EXCEEDS_OUTPUT');
+  if (counts.cacheRead > counts.input) return invalid('CACHE_READ', 'CACHE_READ_EXCEEDS_INPUT');
   const known = ['prompt_tokens', 'completion_tokens', 'total_tokens', 'prompt_tokens_details', 'completion_tokens_details'];
-  if (Object.keys(u).some((k) => !known.includes(k))) return null;
-  for (const [details, keys] of [[p, ['cached_tokens', 'cache_write_tokens']], [c, ['reasoning_tokens']]]) {
-    if (Object.entries(details).some(([k, v]) => !keys.includes(k) && v !== 0 && v !== null)) return null;
+  if (Object.keys(u).some((k) => !known.includes(k))) return invalid('USAGE', 'UNEXPECTED_KEY');
+  for (const [details, keys, field] of [
+    [p, ['cached_tokens', 'cache_write_tokens'], 'PROMPT_DETAILS'], [c, ['reasoning_tokens'], 'COMPLETION_DETAILS'],
+  ]) {
+    if (Object.entries(details).some(([k, v]) => !keys.includes(k) && v !== 0 && v !== null)) return invalid(field, 'UNEXPECTED_COMPONENT');
   }
-  return counts;
+  return { counts, diagnostic: null };
+}
+function knownUsageBreach(u) {
+  if (!object(u)) return false;
+  const p = object(u.prompt_tokens_details) ? u.prompt_tokens_details : {};
+  return [[u.prompt_tokens, POLICY.inputAnomalyTokens], [u.completion_tokens, POLICY.outputTokens],
+    [p.cached_tokens, 0], [p.cache_write_tokens, 0]].some(([value, limit]) => uint(value) && value > limit);
 }
 export function inspectResponse(reply, arm) {
   if (!object(reply)) return observation('ENVELOPE_INVALID');
@@ -323,13 +382,23 @@ export function inspectResponse(reply, arm) {
   catch { return observation('INVALID_JSON', meta); }
   if (!object(data)) return observation('ENVELOPE_INVALID', meta);
   meta.returnedModel = identifier(data.model) ? data.model : null;
-  meta.usage = usageOf(data.usage);
-  if (!meta.usage) return observation('USAGE_INVALID', meta);
+  const usage = usageOf(data);
+  meta.usage = usage.counts;
+  if (!meta.usage) {
+    const answer = knownUsageBreach(data.usage) ? null : inspectAnswer(data, arm, meta);
+    return observation('USAGE_INVALID', {
+      ...meta, usageDiagnostic: usage.diagnostic,
+      unacceptedCandidate: answer?.state === 'SUCCESS' ? { status: 'UNACCEPTED_METERING', facts: answer.facts } : null,
+    });
+  }
   if (meta.usage.input > POLICY.inputAnomalyTokens) return observation('INPUT_ANOMALY', meta);
   if (meta.usage.output > POLICY.outputTokens) return observation('OUTPUT_ANOMALY', meta);
   if (meta.usage.cacheRead !== 0 || meta.usage.cacheWrite !== 0) return observation('CACHE_ANOMALY', meta);
+  return inspectAnswer(data, arm, meta);
+}
+function inspectAnswer(data, arm, meta) {
   // Family identifiers and deployment aliases do not certify the configured snapshot.
-  if (![ `gpt-5.6-${arm}`, `gpt-5.6-${arm}-${POLICY.snapshot}`, DEPLOYMENTS[arm] ].includes(data.model)) return observation('MODEL_ANOMALY', meta);
+  if (!currentModel(data.model, arm)) return observation('MODEL_ANOMALY', meta);
   const echoes = { store: false, stream: false, n: 1, reasoning_effort: 'low', max_completion_tokens: POLICY.outputTokens };
   if (Object.entries(echoes).some(([k, v]) => Object.hasOwn(data, k) && data[k] !== v)
     || (Object.hasOwn(data, 'service_tier') && !['default', null].includes(data.service_tier))

@@ -50,6 +50,39 @@ function options(directory, overrides = {}) {
     readPhoto: async () => SYNTHETIC, sender: async () => reply(), ...overrides };
 }
 
+test('legacy halted journal preserves its bytes, binding and review token', async (t) => {
+  const directory = await fixture(t);
+  const observation = {
+    state: 'HALTED', reason: 'USAGE_INVALID', confirmedResponse: true, httpStatus: 200,
+    returnedModel: 'gpt-5.6-terra', usage: null, facts: null, elapsedMs: 100,
+  };
+  const time = '2026-09-20T00:00:00.000Z';
+  const journal = [
+    { type: 'init', approval: approval(), controls: 'b368446355aad1bfa7132ee63d281e4e88a0f952cf8992abd282796d5928f3af', time },
+    { type: 'intent', arm: 'terra', reservationCentsEur: 250, photoSha256: digest(SYNTHETIC), reviewFirst: null, time },
+    { type: 'result', arm: 'terra', observation, time },
+  ].map((event) => JSON.stringify(event)).join('\n') + '\n';
+  const filename = path.join(directory, 'pilot.jsonl');
+  await writeFile(filename, journal);
+  const state = await readLedger(directory);
+  const report = summary(state);
+  assert.equal(controlsDigest(), 'b368446355aad1bfa7132ee63d281e4e88a0f952cf8992abd282796d5928f3af');
+  assert.equal(report.slots.terra.reviewToken, '90095db49ea4bda0d8a2e8ab4f985e2c421e047a1bc26a74efb988d5eb661c05');
+  const journalHash = digest(journal);
+  assert.deepEqual(state.slots.terra.result, observation);
+  assert.equal(report.slots.terra.state, 'HALTED');
+  assert.equal(report.slots.terra.reservationCentsEur, 250);
+  assert.equal(report.slots.terra.estimatedMicroUsd, null);
+  assert.equal(report.slots.terra.usageDiagnostic, null);
+  assert.equal(report.slots.terra.candidateStatus, null);
+  await assert.rejects(executeSlot(options(directory, {
+    arm: 'sol', reviewFirst: report.slots.terra.reviewToken,
+  })), /PRIOR_UNCERTAINTY_OR_ANOMALY/);
+  assert.equal(await readFile(filename, 'utf8'), journal);
+  assert.equal(digest(await readFile(filename)), journalHash);
+  assert.equal(summary(await readLedger(directory)).slots.terra.reviewToken, '90095db49ea4bda0d8a2e8ab4f985e2c421e047a1bc26a74efb988d5eb661c05');
+});
+
 test('fixed requests are independent and contain only the reviewed controls', () => {
   for (const arm of ['terra', 'sol']) {
     const body = requestBody(arm, '[synthetic inline marker]');
@@ -453,4 +486,271 @@ test('explicit abandonment marks only unused slots NOT_ATTEMPTED and preserves h
   assert.equal(state.slots.sol.consumedIntent, false);
   await assert.rejects(executeSlot(options(directory, { arm: 'sol' })), /ABANDONED/);
   await assert.rejects(abandon(directory), /ALREADY_ABANDONED/);
+});
+
+test('usage diagnostics cover every allowed pair with deterministic presence and check order', () => {
+  const cases = [];
+  for (const [key, field] of [
+    ['usage', 'USAGE'], ['prompt_tokens_details', 'PROMPT_DETAILS'], ['completion_tokens_details', 'COMPLETION_DETAILS'],
+  ]) {
+    const container = (d) => key === 'usage' ? d : d.usage;
+    cases.push([(d) => { delete container(d)[key]; }, field, 'MISSING']);
+    for (const value of [null, [], 0, 'private-value']) {
+      cases.push([(d) => { container(d)[key] = value; }, field, 'NOT_OBJECT']);
+    }
+  }
+  for (const [section, key, field] of [
+    [null, 'prompt_tokens', 'INPUT'], [null, 'completion_tokens', 'OUTPUT'], [null, 'total_tokens', 'TOTAL'],
+    ['completion_tokens_details', 'reasoning_tokens', 'REASONING'],
+    ['prompt_tokens_details', 'cached_tokens', 'CACHE_READ'],
+    ['prompt_tokens_details', 'cache_write_tokens', 'CACHE_WRITE'],
+  ]) {
+    const container = (d) => section ? d.usage[section] : d.usage;
+    cases.push([(d) => { delete container(d)[key]; }, field, 'MISSING']);
+    for (const value of [null, '0', false, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN, {}, []]) {
+      cases.push([(d) => { container(d)[key] = value; }, field, 'NOT_NONNEGATIVE_SAFE_INTEGER']);
+    }
+  }
+  cases.push(
+    [(d) => { d.usage.prompt_tokens = Number.MAX_SAFE_INTEGER; }, 'TOTAL', 'SUM_UNSAFE'],
+    [(d) => { d.usage.total_tokens++; }, 'TOTAL', 'TOTAL_MISMATCH'],
+    [(d) => { d.usage.completion_tokens_details.reasoning_tokens = 501; }, 'REASONING', 'REASONING_EXCEEDS_OUTPUT'],
+    [(d) => { d.usage.prompt_tokens_details.cached_tokens = 3001; }, 'CACHE_READ', 'CACHE_READ_EXCEEDS_INPUT'],
+    [(d) => { d.usage.private_key_name = 'private-value'; }, 'USAGE', 'UNEXPECTED_KEY'],
+    [(d) => { d.usage.prompt_tokens_details.private_key_name = 'private-value'; }, 'PROMPT_DETAILS', 'UNEXPECTED_COMPONENT'],
+    [(d) => { d.usage.completion_tokens_details.private_key_name = 'private-value'; }, 'COMPLETION_DETAILS', 'UNEXPECTED_COMPONENT'],
+    [(d) => {
+      delete d.usage.prompt_tokens;
+      delete d.usage.prompt_tokens_details;
+    }, 'PROMPT_DETAILS', 'MISSING'],
+    [(d) => {
+      delete d.usage.prompt_tokens;
+      delete d.usage.prompt_tokens_details.cache_write_tokens;
+    }, 'INPUT', 'MISSING'],
+  );
+  for (const [change, field, condition] of cases) {
+    const data = envelope(); change(data);
+    const result = inspectResponse(reply(data), 'terra');
+    assert.equal(result.state, 'HALTED');
+    assert.equal(result.reason, 'USAGE_INVALID');
+    assert.equal(result.usage, null);
+    assert.equal(result.facts, null);
+    assert.deepEqual(result.usageDiagnostic, { field, condition });
+    assert.doesNotMatch(JSON.stringify(result), /private_key_name|private-value/);
+  }
+  const tolerated = envelope();
+  tolerated.usage.prompt_tokens_details.extra = 0;
+  tolerated.usage.completion_tokens_details.extra = null;
+  assert.equal(inspectResponse(reply(tolerated), 'terra').state, 'SUCCESS');
+});
+
+test('metering-only candidates stay private, unaccepted, fully reserved and unable to continue', async (t) => {
+  for (const outcome of ['ready', 'unclear']) {
+    const directory = await fixture(t);
+    const data = envelope();
+    delete data.usage;
+    const expected = facts();
+    expected.outcome = outcome;
+    if (outcome === 'unclear') {
+      for (const key of Object.keys(expected.fields)) {
+        expected.fields[key] = ['colours', 'seasons', 'style_tags'].includes(key) ? [] : null;
+      }
+    }
+    data.choices[0].message.content = JSON.stringify(expected);
+    const result = await executeSlot(options(directory, { sender: async () => reply(data) }));
+    assert.equal(result.state, 'HALTED');
+    assert.equal(result.reason, 'USAGE_INVALID');
+    assert.equal(result.facts, null);
+    assert.equal(result.usage, null);
+    assert.deepEqual(result.usageDiagnostic, { field: 'USAGE', condition: 'MISSING' });
+    assert.deepEqual(result.unacceptedCandidate, { status: 'UNACCEPTED_METERING', facts: expected });
+    const state = await readLedger(directory);
+    assert.deepEqual(state.slots.terra.result, result);
+    const report = summary(state);
+    assert.equal(report.slots.terra.candidateStatus, 'UNACCEPTED_METERING');
+    assert.equal(report.slots.terra.estimatedMicroUsd, null);
+    assert.equal(report.slots.terra.reservationCentsEur, 250);
+    assert.equal(report.slots.terra.state, 'HALTED');
+    assert.doesNotMatch(JSON.stringify(report), /"facts"|"fields"|unacceptedCandidate|knitted fabric|navy/);
+    const file = path.join(directory, 'pilot.jsonl');
+    const before = await readFile(file);
+    await assert.rejects(executeSlot(options(directory, {
+      arm: 'sol', reviewFirst: report.slots.terra.reviewToken,
+    })), /PRIOR_UNCERTAINTY_OR_ANOMALY/);
+    assert.deepEqual(await readFile(file), before);
+  }
+});
+
+test('invalid usage cannot bypass any answer gate or change its halt reason', async (t) => {
+  const changes = [
+    (d) => { d.model = 'eval-sol-20260709'; },
+    (d) => { d.model = 'unrecognized'; },
+    (d) => { d.store = true; },
+    (d) => { d.stream = true; },
+    (d) => { d.n = 2; },
+    (d) => { d.reasoning_effort = 'high'; },
+    (d) => { d.max_completion_tokens = 4096; },
+    (d) => { d.service_tier = 'priority'; },
+    (d) => { d.prompt_cache_options = { mode: 'implicit' }; },
+    (d) => { d.tools = [{}]; },
+    (d) => { d.choices = []; },
+    (d) => { d.choices.push(d.choices[0]); },
+    (d) => { d.choices[0].index = 1; },
+    (d) => { d.choices[0].message = null; },
+    (d) => { d.choices[0].message.role = 'user'; },
+    (d) => { d.choices[0].message.tool_calls = [{}]; },
+    (d) => { d.choices[0].message.function_call = {}; },
+    (d) => { d.choices[0].message.audio = {}; },
+    (d) => { d.choices[0].message.refusal = 'private-refusal'; },
+    (d) => { d.choices[0].message.refusal = {}; },
+    (d) => { d.choices[0].finish_reason = 'length'; },
+    (d) => { d.choices[0].finish_reason = 'content_filter'; },
+    (d) => { d.choices[0].finish_reason = 'unknown'; },
+    (d) => { d.choices[0].message.content = null; },
+    (d) => { d.choices[0].message.content = '{'; },
+    (d) => { d.choices[0].message.content = '{}'; },
+    (d) => { d.choices[0].message.content = 'x'.repeat(8193); },
+    (d) => {
+      const invalid = facts(); invalid.fields.warmth = 'private-value';
+      d.choices[0].message.content = JSON.stringify(invalid);
+    },
+  ];
+  for (const change of changes) {
+    const data = envelope();
+    delete data.usage.prompt_tokens_details.cache_write_tokens;
+    change(data);
+    const result = inspectResponse(reply(data), 'terra');
+    assert.equal(result.state, 'HALTED');
+    assert.equal(result.reason, 'USAGE_INVALID');
+    assert.equal(result.usage, null);
+    assert.equal(result.facts, null);
+    assert.equal(result.unacceptedCandidate, null);
+    assert.deepEqual(result.usageDiagnostic, { field: 'CACHE_WRITE', condition: 'MISSING' });
+    assert.doesNotMatch(JSON.stringify(result), /private-refusal|private-value/);
+  }
+  const directory = await fixture(t);
+  const data = envelope(); delete data.usage; data.store = true;
+  await executeSlot(options(directory, { sender: async () => reply(data) }));
+  const report = summary(await readLedger(directory));
+  assert.equal(report.slots.terra.candidateStatus, null);
+  assert.equal(report.slots.terra.reservationCentsEur, 250);
+  assert.equal(report.slots.terra.estimatedMicroUsd, null);
+  await assert.rejects(executeSlot(options(directory, {
+    arm: 'sol', reviewFirst: report.slots.terra.reviewToken,
+  })), /PRIOR_UNCERTAINTY_OR_ANOMALY/);
+});
+
+test('transport and response bounds never retain candidates', () => {
+  for (const response of [
+    null, { ...reply(), status: 500 }, { ...reply(), contentType: 'text/html' },
+    { ...reply(), body: Buffer.from([255]) }, { ...reply(), body: Buffer.from('{') },
+    { ...reply(), body: Buffer.alloc(262145, 32) }, reply(null),
+  ]) {
+    const result = inspectResponse(response, 'terra');
+    assert.equal(result.state, 'HALTED');
+    assert.equal(result.unacceptedCandidate, null);
+    assert.equal(result.usageDiagnostic, null);
+  }
+});
+
+test('independently known limit and cache violations suppress candidates without defaulting unknowns', () => {
+  for (const [section, key, limit] of [
+    [null, 'prompt_tokens', 8192], [null, 'completion_tokens', 2048],
+    ['prompt_tokens_details', 'cached_tokens', 0], ['prompt_tokens_details', 'cache_write_tokens', 0],
+  ]) {
+    for (const value of [limit + 1, undefined, null, -1, NaN, Infinity, '99999', {}, 0.5]) {
+      const data = envelope();
+      delete data.usage.total_tokens;
+      const container = section ? data.usage[section] : data.usage;
+      container[key] = value;
+      const result = inspectResponse(reply(data), 'terra');
+      assert.equal(result.reason, 'USAGE_INVALID');
+      assert.equal(result.usage, null);
+      assert.equal(result.facts, null);
+      assert.equal(result.unacceptedCandidate?.status ?? null, value === limit + 1 ? null : 'UNACCEPTED_METERING');
+    }
+  }
+  const mixed = envelope();
+  mixed.usage.prompt_tokens = 'unknown';
+  mixed.usage.prompt_tokens_details.cache_write_tokens = 1;
+  assert.equal(inspectResponse(reply(mixed), 'terra').unacceptedCandidate, null);
+});
+
+test('arbitrary metering names and values never enter rejected observations or summaries', async (t) => {
+  const directory = await fixture(t);
+  const data = envelope();
+  data.usage['PRIVATE-SENTINEL-KEY'] = { value: 'PRIVATE-SENTINEL-VALUE' };
+  await executeSlot(options(directory, { sender: async () => reply(data) }));
+  const state = await readLedger(directory);
+  assert.deepEqual(state.slots.terra.result.usageDiagnostic, { field: 'USAGE', condition: 'UNEXPECTED_KEY' });
+  assert.equal(state.slots.terra.result.usage, null);
+  assert.doesNotMatch(await readFile(path.join(directory, 'pilot.jsonl'), 'utf8'), /PRIVATE-SENTINEL/);
+  assert.doesNotMatch(JSON.stringify(summary(state)), /PRIVATE-SENTINEL|"facts"|"fields"/);
+});
+
+test('replay accepts only legacy or complete strict extensions with arm-bound candidates', async (t) => {
+  const directory = await fixture(t);
+  const data = envelope(); delete data.usage;
+  await executeSlot(options(directory, { sender: async () => reply(data) }));
+  const filename = path.join(directory, 'pilot.jsonl');
+  const original = await readFile(filename, 'utf8');
+  const changes = [
+    (o) => { delete o.usageDiagnostic; },
+    (o) => { delete o.unacceptedCandidate; },
+    (o) => { o.extra = null; },
+    (o) => { o.usageDiagnostic = null; },
+    (o) => { o.usageDiagnostic.extra = null; },
+    (o) => { o.usageDiagnostic.field = 'UNRECOGNIZED'; },
+    (o) => { o.usageDiagnostic.field = { toString: null }; },
+    (o) => { o.usageDiagnostic.condition = 'UNKNOWN'; },
+    (o) => { o.usageDiagnostic = { field: 'INPUT', condition: 'TOTAL_MISMATCH' }; },
+    (o) => { o.state = 'SUCCESS'; },
+    (o) => { o.reason = 'OK'; },
+    (o) => { o.confirmedResponse = false; },
+    (o) => { o.httpStatus = 500; },
+    (o) => { o.usage = { input: 0, output: 0, total: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 }; },
+    (o) => { o.facts = facts(); },
+    (o) => { o.returnedModel = 'eval-sol-20260709'; },
+    (o) => { o.returnedModel = null; },
+    (o) => { o.unacceptedCandidate.status = 'SUCCESS'; },
+    (o) => { o.unacceptedCandidate.extra = null; },
+    (o) => { o.unacceptedCandidate.facts = null; },
+    (o) => { o.unacceptedCandidate.facts.fields.brand = 'x'.repeat(101); },
+  ];
+  for (const change of changes) {
+    const events = original.trimEnd().split('\n').map((line) => JSON.parse(line));
+    change(events[2].observation);
+    await writeFile(filename, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+    await assert.rejects(readLedger(directory), /LEDGER_INVALID/);
+  }
+  await writeFile(filename, original);
+  assert.equal((await readLedger(directory)).slots.terra.result.unacceptedCandidate.status, 'UNACCEPTED_METERING');
+});
+
+test('maximum-length domain candidate and boundary content fit measured complete journal bounds', async (t) => {
+  const directory = await fixture(t);
+  const candidate = facts();
+  Object.assign(candidate.fields, {
+    category: 'accessory', subcategory: '\u0001'.repeat(60), colours: ['yellow', 'orange', 'purple'],
+    pattern: 'abstract', sleeve_length: 'three_quarter', garment_length: 'regular',
+    brand: '\u0001'.repeat(100), size_label: '\u0001'.repeat(50), material: '\u0001'.repeat(200),
+    seasons: ['spring', 'summer', 'autumn', 'winter'],
+    style_tags: Array.from({ length: 8 }, (_, i) => '\u0001'.repeat(39) + i),
+  });
+  assert.equal(validFacts(candidate), true);
+  const data = envelope(); delete data.usage;
+  data.choices[0].message.content = JSON.stringify(candidate).padEnd(8192);
+  const response = reply(data);
+  assert.equal(Buffer.byteLength(data.choices[0].message.content), 8192);
+  assert.ok(response.body.length <= POLICY.responseBytes);
+  await executeSlot(options(directory, { sender: async () => response }));
+  const journal = await readFile(path.join(directory, 'pilot.jsonl'));
+  const state = await readLedger(directory);
+  const result = state.slots.terra.result;
+  assert.deepEqual(result.unacceptedCandidate.facts, candidate);
+  const record = journal.toString().trimEnd().split('\n').at(-1) + '\n';
+  assert.ok(Buffer.byteLength(record) < 131072);
+  assert.ok(journal.length < 131072);
+  assert.equal(journal.toString().trimEnd().split('\n').length, 3);
+  t.diagnostic(`Synthetic complete result record: ${Buffer.byteLength(record)} bytes; journal: ${journal.length} bytes; response: ${response.body.length} bytes.`);
 });
