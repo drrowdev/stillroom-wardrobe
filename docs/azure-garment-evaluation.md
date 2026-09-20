@@ -137,7 +137,8 @@ before startup. Clear the private process credential after use.
 
 Initialization writes the immutable approval/control binding. It sends nothing.
 Status prints only coarse outcomes, configured snapshot, returned model
-identifier, observed usage, latency, reservations, USD estimates and a result
+identifier, observed usage, latency, reservations (`reservationCentsEur`, also
+used in intent records), USD estimates (`estimatedMicroUsd`) and a result
 review token. **Validated garment facts are stored only in private
 `pilot.jsonl`**, not stdout. The owner may inspect them locally. Do not share
 that ledger or even coarse request metadata without reviewing its privacy.
@@ -146,8 +147,10 @@ Terra runs first. Before the second invocation the owner reviews the private
 facts and first status: identity, usage including reasoning/cache writes, fixed
 request controls, privacy and budget risk. A family-only returned identifier is
 recorded separately from configured July09; it does not verify snapshot equality.
-Only the expected family identifier or its July09-qualified identifier is
-accepted; other identifiers halt. Missing usage details are not assumed zero.
+Only the expected family identifier, its July09-qualified identifier, or the
+current arm's exact fixed deployment alias is accepted. The returned value is
+kept verbatim; an alias does not certify snapshot mapping. Other-arm and arbitrary
+aliases halt. Missing usage details are not assumed zero.
 The review token binds the second invocation to that first recorded result; it
 is not proof a human read it.
 
@@ -192,6 +195,9 @@ Intent, confirmed complete response and unused slot are distinct. The tool
 never labels two planned slots as two actual calls. Results retain safe usage/
 identity observations, validated facts and coarse failure reasons, never raw
 image/base64/key/request/error bodies or reasoning content.
+A completed HTTP response with an invalid envelope retains its safe HTTP status
+and response-received observation while remaining halted with its full
+reservation. Receipt does not establish valid inference, usage or charges.
 
 File `sync()` is requested before dispatch and after recording results. This
 depends on the OS, local filesystem, hardware and directory-entry durability;
@@ -202,6 +208,10 @@ retain evidence. A write error may leave durable intent without a result even
 when a response was received; do not repeat the send.
 Write/sync/close uncertainty retains the lock even if a complete-looking result
 is visible in the file. Visible bytes do not prove successful durable recording.
+If lock cleanup also fails after a primary validation error, both safe codes are
+reported (for example, `PHOTO_CHANGED; LOCK_RELEASE_FAILED`), never raw errors
+or paths. The remaining lock still blocks another invocation; no cleanup
+recovery is authorized.
 
 This is cooperative single-owner accounting, not tamper resistance against
 an owner resetting files or using the resource key elsewhere. Local abort/

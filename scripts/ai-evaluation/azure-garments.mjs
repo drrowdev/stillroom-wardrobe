@@ -9,7 +9,7 @@ export const POLICY = Object.freeze({
   id: 'p2-pilot-1',
   endpoint: 'https://stillroom-ai-eval.openai.azure.com/openai/v1/chat/completions',
   snapshot: '2026-07-09',
-  reservationCents: 250,
+  reservationCentsEur: 250,
   inputAnomalyTokens: 8192,
   outputTokens: 2048,
   responseBytes: 262144,
@@ -43,7 +43,11 @@ const LOCK = 'pilot.lock';
 const LEDGER_LIMIT = 131072;
 
 export class PilotError extends Error {
-  constructor(code) { super(code); this.code = code; }
+  constructor(code, cleanupCode = null) {
+    super(cleanupCode ? `${code}; ${cleanupCode}` : code);
+    this.code = code;
+    this.cleanupCode = cleanupCode;
+  }
 }
 function requireThat(condition, code) {
   if (!condition) throw new PilotError(code);
@@ -164,16 +168,22 @@ async function locked(directory, operation) {
     throw new PilotError('LOCK_FAILED');
   }
   let retainLock = false;
+  let primaryError;
   try { return await operation(); }
   catch (error) {
     // A visible journal tail is not evidence that a failed sync/close was durable.
     retainLock = !(error instanceof PilotError) || error.code === 'LEDGER_WRITE_UNCERTAIN';
+    primaryError = error;
     throw error;
   }
   finally {
     if (!retainLock) {
       try { await rmdir(lock); }
-      catch { throw new PilotError('LOCK_RELEASE_FAILED'); }
+      catch {
+        throw primaryError instanceof PilotError
+          ? new PilotError(primaryError.code, 'LOCK_RELEASE_FAILED')
+          : new PilotError('LOCK_RELEASE_FAILED');
+      }
     }
   }
 }
@@ -234,8 +244,8 @@ export async function readLedger(directory) {
     }
     requireThat(ARMS.includes(event.arm), 'LEDGER_INVALID');
     if (event.type === 'intent') {
-      requireThat(exact(event, ['type', 'arm', 'reservationCents', 'photoSha256', 'reviewFirst', 'time'])
-        && slots[event.arm] === null && event.reservationCents === POLICY.reservationCents
+      requireThat(exact(event, ['type', 'arm', 'reservationCentsEur', 'photoSha256', 'reviewFirst', 'time'])
+        && slots[event.arm] === null && event.reservationCentsEur === POLICY.reservationCentsEur
         && event.photoSha256 === first.approval.photo.sha256, 'LEDGER_INVALID');
       if (event.arm === 'terra') requireThat(slots.sol === null && event.reviewFirst === null, 'LEDGER_INVALID');
       else requireThat(slots.terra?.result && slots.terra.result.state !== 'HALTED'
@@ -264,7 +274,7 @@ export function summary(state) {
       const slot = state.slots[arm];
       return [arm, {
         state: slot ? slot.result?.state ?? 'UNCERTAIN_INTENT' : state.abandoned ? 'NOT_ATTEMPTED' : 'UNUSED',
-        consumedIntent: Boolean(slot), reservationCents: slot ? POLICY.reservationCents : 0,
+        consumedIntent: Boolean(slot), reservationCentsEur: slot ? POLICY.reservationCentsEur : 0,
         configuredSnapshot: POLICY.snapshot,
         confirmedResponse: slot?.result?.confirmedResponse ?? false,
         returnedModel: slot?.result?.returnedModel ?? null,
@@ -299,8 +309,10 @@ function usageOf(u) {
   return counts;
 }
 export function inspectResponse(reply, arm) {
-  const meta = { confirmedResponse: true, httpStatus: reply.status };
-  if (!uint(reply.status) || reply.status < 100 || reply.status > 599) return observation('ENVELOPE_INVALID');
+  if (!object(reply)) return observation('ENVELOPE_INVALID');
+  const safeStatus = uint(reply.status) && reply.status >= 100 && reply.status <= 599;
+  const meta = { confirmedResponse: true, httpStatus: safeStatus ? reply.status : null };
+  if (!safeStatus) return observation('ENVELOPE_INVALID', meta);
   if (reply.status !== 200) return observation('HTTP_FAILURE', meta);
   if (!(reply.body instanceof Uint8Array) || reply.body.length > POLICY.responseBytes) return observation('RESPONSE_BOUND', meta);
   if (typeof reply.contentType !== 'string' || !/^application\/json(?:\s*;|$)/i.test(reply.contentType)) return observation('ENVELOPE_INVALID', meta);
@@ -314,8 +326,8 @@ export function inspectResponse(reply, arm) {
   if (meta.usage.input > POLICY.inputAnomalyTokens) return observation('INPUT_ANOMALY', meta);
   if (meta.usage.output > POLICY.outputTokens) return observation('OUTPUT_ANOMALY', meta);
   if (meta.usage.cacheRead !== 0 || meta.usage.cacheWrite !== 0) return observation('CACHE_ANOMALY', meta);
-  // A family identifier is recorded as such, not certified as the configured snapshot.
-  if (![ `gpt-5.6-${arm}`, `gpt-5.6-${arm}-${POLICY.snapshot}` ].includes(data.model)) return observation('MODEL_ANOMALY', meta);
+  // Family identifiers and deployment aliases do not certify the configured snapshot.
+  if (![ `gpt-5.6-${arm}`, `gpt-5.6-${arm}-${POLICY.snapshot}`, DEPLOYMENTS[arm] ].includes(data.model)) return observation('MODEL_ANOMALY', meta);
   const echoes = { store: false, stream: false, n: 1, reasoning_effort: 'low', max_completion_tokens: POLICY.outputTokens };
   if (Object.entries(echoes).some(([k, v]) => Object.hasOwn(data, k) && data[k] !== v)
     || (Object.hasOwn(data, 'service_tier') && !['default', null].includes(data.service_tier))
@@ -383,7 +395,7 @@ export async function executeSlot({ directory, arm, reviewFirst = null, key, sen
       && digest(photo) === state.approval.photo.sha256, 'PHOTO_CHANGED');
     const body = requestBody(arm, `data:image/jpeg;base64,${Buffer.from(photo).toString('base64')}`);
     await append(directory, {
-      type: 'intent', arm, reservationCents: POLICY.reservationCents,
+      type: 'intent', arm, reservationCentsEur: POLICY.reservationCentsEur,
       photoSha256: state.approval.photo.sha256, reviewFirst, time: new Date().toISOString(),
     });
     const controller = new AbortController();
@@ -455,7 +467,8 @@ export async function main(args) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).catch((error) => {
-    console.error(error instanceof PilotError ? error.code : 'LOCAL_IO_FAILURE');
+    console.error(error instanceof PilotError
+      ? [error.code, error.cleanupCode].filter(Boolean).join('; ') : 'LOCAL_IO_FAILURE');
     process.exitCode = 1;
   });
 }

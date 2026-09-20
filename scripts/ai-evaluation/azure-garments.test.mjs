@@ -162,6 +162,23 @@ test('refusal/truncation/filtering remain failures, not wrong semantic labels', 
   }
 });
 
+test('only the current arm deployment alias is accepted verbatim', () => {
+  for (const arm of ['terra', 'sol']) {
+    const data = envelope(arm);
+    data.model = `eval-${arm}-20260709`;
+    const result = inspectResponse(reply(data), arm);
+    assert.equal(result.state, 'SUCCESS');
+    assert.equal(result.returnedModel, data.model);
+    for (const model of [`eval-${arm === 'terra' ? 'sol' : 'terra'}-20260709`, 'arbitrary-alias']) {
+      data.model = model;
+      const rejected = inspectResponse(reply(data), arm);
+      assert.equal(rejected.state, 'HALTED');
+      assert.equal(rejected.reason, 'MODEL_ANOMALY');
+      assert.equal(rejected.returnedModel, model);
+    }
+  }
+});
+
 test('metering, identity, controls and schema anomalies fail closed', () => {
   const cases = [
     [(d) => { d.usage.prompt_tokens = 8193; d.usage.total_tokens = 8693; }, 'INPUT_ANOMALY'],
@@ -206,6 +223,30 @@ test('bad HTTP, media type, UTF8 and response size do not become success', () =>
   assert.equal(inspectResponse({ ...reply(), body: Buffer.alloc(262145, 32) }, 'terra').reason, 'RESPONSE_BOUND');
 });
 
+test('malformed completed responses retain safe HTTP receipt without inference or usage claims', async (t) => {
+  for (const response of [
+    { ...reply(), status: 'invalid' },
+    { ...reply(), body: Buffer.from('{') },
+    reply(null),
+    reply({}),
+  ]) {
+    const directory = await fixture(t);
+    const result = await executeSlot(options(directory, { sender: async () => response }));
+    assert.equal(result.state, 'HALTED');
+    assert.equal(result.confirmedResponse, true);
+    assert.equal(result.httpStatus, response.status === 200 ? 200 : null);
+    assert.equal(result.usage, null);
+    assert.equal(result.facts, null);
+    const state = summary(await readLedger(directory));
+    assert.equal(state.slots.terra.confirmedResponse, true);
+    assert.equal(state.slots.terra.reservationCentsEur, 250);
+    assert.equal(state.slots.terra.estimatedMicroUsd, null);
+    await assert.rejects(executeSlot(options(directory, {
+      arm: 'sol', reviewFirst: state.slots.terra.reviewToken,
+    })), /PRIOR_UNCERTAINTY_OR_ANOMALY/);
+  }
+});
+
 test('two slots require separate sends/review; intents are durable before the fake sender', async (t) => {
   const directory = await fixture(t);
   let calls = 0;
@@ -215,7 +256,7 @@ test('two slots require separate sends/review; intents are durable before the fa
     assert.equal(signal.aborted, false);
     const state = await readLedger(directory);
     const arm = body.model.includes('terra') ? 'terra' : 'sol';
-    assert.equal(state.slots[arm].intent.reservationCents, 250);
+    assert.equal(state.slots[arm].intent.reservationCentsEur, 250);
     assert.equal(state.slots[arm].result, null);
     return reply(envelope(arm));
   };
@@ -232,7 +273,7 @@ test('two slots require separate sends/review; intents are durable before the fa
   assert.equal(calls, 2);
   await assert.rejects(executeSlot(options(directory, { arm: 'sol', sender })), /SLOT_CONSUMED/);
   const last = summary(await readLedger(directory));
-  assert.equal(last.slots.terra.reservationCents + last.slots.sol.reservationCents, 500);
+  assert.equal(last.slots.terra.reservationCentsEur + last.slots.sol.reservationCentsEur, 500);
   assert.equal(last.slots.terra.configuredSnapshot, '2026-07-09');
   assert.equal(last.slots.terra.returnedModel, 'gpt-5.6-terra');
   assert.equal(last.slots.sol.estimatedMicroUsd, '24200');
@@ -275,7 +316,7 @@ test('network loss, oversized response and input anomaly hold full reservation a
     await executeSlot(options(directory, { sender }));
     const state = summary(await readLedger(directory));
     assert.equal(state.slots.terra.state, 'HALTED');
-    assert.equal(state.slots.terra.reservationCents, 250);
+    assert.equal(state.slots.terra.reservationCentsEur, 250);
     await assert.rejects(executeSlot(options(directory, { arm: 'sol', reviewFirst: state.slots.terra.reviewToken })), /PRIOR_UNCERTAINTY_OR_ANOMALY/);
     assert.doesNotMatch(await readFile(path.join(directory, 'pilot.jsonl'), 'utf8'), /private raw error/);
   }
@@ -302,6 +343,29 @@ test('concurrent and crash-stale locks never auto-expire', async (t) => {
   assert.equal((await readLedger(directory)).slots.terra, null);
 });
 
+test('primary failure and lock-cleanup diagnostic survive together without raw details', async (t) => {
+  const directory = await fixture(t);
+  let calls = 0;
+  await assert.rejects(executeSlot(options(directory, {
+    readPhoto: async () => {
+      await writeFile(path.join(directory, 'pilot.lock', 'synthetic-blocker.txt'), 'synthetic text');
+      return Buffer.from('different synthetic text');
+    },
+    sender: async () => { calls++; return reply(); },
+  })), (error) => {
+    assert.ok(error instanceof PilotError);
+    assert.equal(error.code, 'PHOTO_CHANGED');
+    assert.equal(error.cleanupCode, 'LOCK_RELEASE_FAILED');
+    assert.equal(error.message, 'PHOTO_CHANGED; LOCK_RELEASE_FAILED');
+    assert.doesNotMatch(error.message, /synthetic-blocker|ENOTEMPTY|EPERM/);
+    return true;
+  });
+  assert.equal(calls, 0);
+  assert.equal((await readLedger(directory)).slots.terra, null);
+  assert.equal((await stat(path.join(directory, 'pilot.lock'))).isDirectory(), true);
+  await assert.rejects(executeSlot(options(directory)), /LOCKED_NO_AUTOMATIC_RECOVERY/);
+});
+
 test('another invocation cannot enter while the first fake request is pending', async (t) => {
   const directory = await fixture(t);
   let release;
@@ -321,7 +385,7 @@ test('another invocation cannot enter while the first fake request is pending', 
 test('durable intent without result survives restart as uncertainty', async (t) => {
   const directory = await fixture(t);
   await appendFile(path.join(directory, 'pilot.jsonl'), `${JSON.stringify({
-    type: 'intent', arm: 'terra', reservationCents: 250, photoSha256: digest(SYNTHETIC), reviewFirst: null, time: new Date().toISOString(),
+    type: 'intent', arm: 'terra', reservationCentsEur: 250, photoSha256: digest(SYNTHETIC), reviewFirst: null, time: new Date().toISOString(),
   })}\n`);
   const state = summary(await readLedger(directory));
   assert.equal(state.slots.terra.state, 'UNCERTAIN_INTENT');
@@ -362,7 +426,7 @@ test('explicit abandonment marks only unused slots NOT_ATTEMPTED and preserves h
   await abandon(directory);
   const state = summary(await readLedger(directory));
   assert.equal(state.slots.terra.state, 'HALTED');
-  assert.equal(state.slots.terra.reservationCents, 250);
+  assert.equal(state.slots.terra.reservationCentsEur, 250);
   assert.equal(state.slots.sol.state, 'NOT_ATTEMPTED');
   assert.equal(state.slots.sol.consumedIntent, false);
   await assert.rejects(executeSlot(options(directory, { arm: 'sol' })), /ABANDONED/);
