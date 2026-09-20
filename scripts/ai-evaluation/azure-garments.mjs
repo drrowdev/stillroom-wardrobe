@@ -168,24 +168,26 @@ async function locked(directory, operation) {
     throw new PilotError('LOCK_FAILED');
   }
   let retainLock = false;
+  let failed = false;
   let primaryError;
-  try { return await operation(); }
+  let result;
+  try { result = await operation(); }
   catch (error) {
     // A visible journal tail is not evidence that a failed sync/close was durable.
     retainLock = !(error instanceof PilotError) || error.code === 'LEDGER_WRITE_UNCERTAIN';
+    failed = true;
     primaryError = error;
-    throw error;
   }
-  finally {
-    if (!retainLock) {
-      try { await rmdir(lock); }
-      catch {
-        throw primaryError instanceof PilotError
-          ? new PilotError(primaryError.code, 'LOCK_RELEASE_FAILED')
-          : new PilotError('LOCK_RELEASE_FAILED');
-      }
+  if (!retainLock) {
+    try { await rmdir(lock); }
+    catch {
+      throw primaryError instanceof PilotError
+        ? new PilotError(primaryError.code, 'LOCK_RELEASE_FAILED')
+        : new PilotError('LOCK_RELEASE_FAILED');
     }
   }
+  if (failed) throw primaryError;
+  return result;
 }
 async function append(directory, event, initial = false) {
   let handle;

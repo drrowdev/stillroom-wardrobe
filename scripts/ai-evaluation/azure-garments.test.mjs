@@ -366,6 +366,28 @@ test('primary failure and lock-cleanup diagnostic survive together without raw d
   await assert.rejects(executeSlot(options(directory)), /LOCKED_NO_AUTOMATIC_RECOVERY/);
 });
 
+test('unexpected falsy failures propagate and retain the lock without dispatch', async (t) => {
+  for (const failure of [undefined, null, false, 0, '']) {
+    const directory = await fixture(t);
+    let calls = 0;
+    let rejected = false;
+    try {
+      await executeSlot(options(directory, {
+        readPhoto: async () => { throw failure; },
+        sender: async () => { calls++; return reply(); },
+      }));
+    } catch (error) {
+      rejected = true;
+      assert.equal(error, failure);
+    }
+    assert.equal(rejected, true);
+    assert.equal(calls, 0);
+    assert.equal((await readLedger(directory)).slots.terra, null);
+    assert.equal((await stat(path.join(directory, 'pilot.lock'))).isDirectory(), true);
+    await assert.rejects(executeSlot(options(directory)), /LOCKED_NO_AUTOMATIC_RECOVERY/);
+  }
+});
+
 test('another invocation cannot enter while the first fake request is pending', async (t) => {
   const directory = await fixture(t);
   let release;
