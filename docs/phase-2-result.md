@@ -5978,3 +5978,102 @@ correction. The focused schema/preservation/Azure/endpoint command passed
 The local dependency CRLF failure and unattempted audit remain as recorded
 above. No local backend, paid/private/provider call, hosted operation, Action
 rerun, merge or deployment was performed.
+
+### I29-AZ1 CI attempt 2 and completed-Save recovery
+
+The [reviewed repair publication](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5768379718)
+produced `e920d596a399ec2c5074c6e8d32404b6a10b4e99`, tree
+`da58228e066440cc18ea61e568957b63e2e48004`.
+[CI attempt 2](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/35662863137)
+established the repaired READY path and complete B1 (12 synthetic generations)
+and B2 (22 synthetic generations), including the positive private Azure
+manifest persistence assertions and exact ordinary-owner public projection.
+Both stages restored their baselines. C failed at `SAVE`, owner 2, with child
+exit code 1 and substantial parent headroom; this does not establish a timeout
+cause. C completion and generated-types parity were not reached.
+App job `106541915862` completed as **cancelled**, not passed; its completed
+unit/static/build/canary/dependency steps do not establish full browser or
+artifact acceptance. [Native Apple](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/35662863140)
+passed at this head. No workflow was cancelled or rerun by the writer.
+
+Source diagnosis found both Save transports attempted immutable uploads even
+after a fully checked `completed` reservation. The existing Storage INSERT
+policy admits pending images only; ready-object retries cannot depend on
+receiving a duplicate response. Tightening the SDK unit fixture to reject
+ready POSTs reproduced two analyzed-retry failures and the same manual-retry
+failure before each repair. This is a reproduced source/fixture defect
+consistent with C's failure, not recovered private error evidence or proof
+that it was the sole runtime failure.
+
+Both checked-completed paths now perform authenticated, no-store reads,
+compare exact Blob byte counts before materializing hash input, verify both
+hashes, and invoke their existing idempotent finalizer with the same IDs and
+fingerprint. They issue no ready-object POST or upsert. Reserved paths still
+upload immutably; denial is not treated as a duplicate or completed receipt.
+Missing, forbidden, wrong-size or changed objects and owner/epoch/abort changes
+remain failures. No SQL, RLS, identity, inference count or timeout was relaxed.
+
+The real C test retains exact two generations and real Auth/DB/Storage/Deno
+operations. Owner B now expects seven mutations: three reservations, two
+initial uploads and two finalizers. The removed two mutations were forbidden
+ready-object reuploads. The last reservation payloads and both finalizer
+payloads must match exactly. Fixed SAVE substeps stay within the original
+32-record diagnostic bound and contain no private fields or raw errors.
+
+Local `npm run test:unit -- tests\unit\analyzed-save.test.ts` passed 65 tests,
+including strict ready-POST rejection, exact authenticated GET/finalizer
+behavior, manual recovery and byte/identity/denial negatives.
+`npm run test:browser -- ai-photo-first.spec.ts --grep 'then manual Save|committed first refusal|lost .* ACK'`
+passed 21 tests across Chromium, mobile Chromium and WebKit, including the
+EN/FI/SV refusal accessibility checks. These are fixture tests, not real C.
+A backend-free check of the actual diagnostic parser passed all 32 valid
+prefixes and six malformed/order/overflow cases. Actual repaired C, fresh
+exact-head CI and coordinator artifact review remain pending.
+
+Final `npm run test:unit -- --maxWorkers=1` passed **2287/2287 across 29 suites**;
+lint, typecheck, translations (527 keys) and diff check passed. An intermediate
+full run before the manual-path extension again timed out in the unchanged
+5000-ms local dependency-inventory test (2270 passed, one failed); one bounded
+unchanged rerun passed 2271/2271. No cause is asserted, no timeout was changed,
+and neither that rerun nor the final serial pass waives default-parallel CI.
+The earlier local dependency command's CRLF limitation remains recorded even
+though the dependency step passed on CI attempt 2. Source remains unstaged for
+focused review; no local backend, provider/hosted operation or deployment ran.
+
+### I29-AZ1 CI2 profile-fixture correction
+
+The [reviewed one-path release](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5768975283)
+adds `tests/browser/profile.spec.ts` to the same repair packet. Before edits,
+`npm run test:browser -- profile.spec.ts --project=chromium --retries=0 --grep 'AI consent shares profile/language mutex|settings en: private fields'`
+reproduced both stale expectations: a revision-1 Google agreement selector
+under the configured Azure fixture, and Google disclosures under a null,
+UNCONFIGURED policy. Production settings and shared fixture semantics were
+correct and remain unchanged.
+
+The six consent selectors now use the exact Azure agreement label. The
+configured EN/FI/SV disclosure/private-preferences journey explicitly uses
+the Azure fixture, checks all six approved notice strings and retains the
+required checkbox, 44-pixel target, 14-pixel copy, no-hidden-details and
+owner/preferences/persistence assertions. Separate EN/FI/SV unconfigured
+cases require the neutral inactive state, no Google or Azure agreement,
+notice or training copy, and a visible disabled Enable button. They retain
+readability checks without dereferencing a nonexistent checkbox. All existing
+mutex/CAS, lost-ACK, stale-profile, write-count, dirty-input and timing
+assertions remain intact.
+
+On approved Node 24.19.0, `npm run test:browser -- profile.spec.ts ai-photo-first.spec.ts`
+passed **221 tests**, with four existing photo-first capture/project skips,
+in 4.5 minutes. `npm run test:a11y -- profile.spec.ts ai-photo-first.spec.ts`
+passed **21 tests**. Lint, typecheck, translations (527 keys) and diff check
+passed. No timeout, retry, worker, capture-bound, production or shared-fixture
+configuration changed. The final 2287-unit serial result above remains
+applicable to unchanged production/unit source; these later changes affect
+only the browser fixture and this evidence record.
+
+CI2's App job ran from `2026-09-21T22:28:41Z` to `2026-09-21T22:48:57Z` and was
+cancelled at its existing 20-minute job budget after repeated stale profile
+assertions. Its browser and artifact gates remain unpassed; the passing local
+selection is not a full App CI result or a budget waiver. The combined
+seven-file repair remains unstaged for one focused source review and a new
+publication release. Real C, generated types and all next-head gates remain
+pending; no separate C-only push was made.

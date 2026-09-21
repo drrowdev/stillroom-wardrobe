@@ -7,7 +7,7 @@ import type { OwnerScope } from '../../src/auth/session';
 import { beginAiAnalysis, createAiDraft, editAiDraftField, receiveAiResult, type AiTransition } from '../../src/domain/ai-draft';
 import { newAnalyzedSaveAttempt, newUnverifiedSaveAttempt } from '../../src/domain/analyzed-save';
 import { buildGarmentWrite, editGarmentField, newGarmentDraft } from '../../src/domain/garment-fields';
-import { saveAnalyzedItem } from '../../src/images/upload';
+import { newSaveAttempt, saveAnalyzedItem, saveItem } from '../../src/images/upload';
 import { AnalyzedSaveRefusedError } from '../../src/data/errors';
 
 const owner = '10000000-0000-4000-8000-000000000001';
@@ -80,15 +80,19 @@ describe('separate analyzed and explicitly unverified composition', () => {
 });
 
 describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
-  function api() {
+  function api(mode: 'analyzed' | 'manual' = 'analyzed') {
     const { state, scope, controller } = fixture();
-    const attempt = newAnalyzedSaveAttempt(state, context, '', photo, scope, 1000);
+    const manual = editGarmentField(editGarmentField(newGarmentDraft('EUR', 'en'), 'title', 'Manual title', 'en'), 'category', 'top', 'en');
+    const attempt = mode === 'analyzed' ? newAnalyzedSaveAttempt(state, context, '', photo, scope, 1000)
+      : Object.freeze({ ...newSaveAttempt(manual, '', photo, scope), claim: null });
+    const reservePath = mode === 'analyzed' ? '/reserve_analyzed_item_save' : '/reserve_item_save';
+    const finalizePath = mode === 'analyzed' ? '/finalize-analyzed-item' : '/finalize_item_save';
     const prefix = `${owner}/${attempt.itemId}/${attempt.imageId}`;
     const calls: string[] = [];
     const requests: Array<{ path: string; method: string; cache: RequestCache | undefined;
       hasAuthorization: boolean; hasApiKey: boolean }> = [];
     const bodies: unknown[] = [];
-    let completed = false, lost = false, drift = 0;
+    let completed = false, lost = false, drift = 0, denyWrites = false, denyReads = false;
     let finalizerResponse: (() => Response) | undefined;
     let reserveResponse: (() => Response) | undefined;
     const files = new Map<string, Blob>();
@@ -99,8 +103,8 @@ describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
         hasAuthorization: Boolean(headers.get('authorization')), hasApiKey: Boolean(headers.get('apikey')) });
       calls.push(path); bodies.push(typeof init?.body === 'string' ? JSON.parse(init.body) : null);
       if (drift === calls.length) scope.epoch++;
-      if (path.endsWith('/reserve_analyzed_item_save') && reserveResponse) return reserveResponse();
-      if (path.endsWith('/reserve_analyzed_item_save')) return Response.json([{
+      if (path.endsWith(reservePath) && reserveResponse) return reserveResponse();
+      if (path.endsWith(reservePath)) return Response.json([{
         item: { ...attempt.payload, id: attempt.itemId, owner_id: owner, version: 1, deleted_at: null,
           created_at: '2026-09-12T00:00:00Z', updated_at: '2026-09-12T00:00:00Z' },
         image: { id: attempt.imageId, owner_id: owner, item_id: attempt.itemId, main_path: `${prefix}/main.jpg`,
@@ -109,13 +113,14 @@ describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
           state: completed ? 'ready' : 'pending', retired_at: null, description_version: 1, alt_text: '', created_at: '2026-09-12T00:00:00Z' },
         state: completed ? 'completed' : 'reserved', fingerprint: 'c'.repeat(64),
       }]);
-      if (path.endsWith('/finalize-analyzed-item')) {
+      if (path.endsWith(finalizePath)) {
         if (finalizerResponse) return finalizerResponse();
         completed = true;
         return lost ? Response.json({ code: 'TIMEOUT' }, { status: 504 }) : new Response(null, { status: 204 });
       }
       if (path.includes('/storage/v1/object/')) {
         if (init?.method === 'POST') {
+          if (completed || denyWrites) return Response.json({ statusCode: '403', error: 'Unauthorized' }, { status: 403 });
           if (files.has(path)) return Response.json({ statusCode: '409' }, { status: 409 });
           if (!(init.body instanceof FormData)) throw new Error('Expected upload');
           const body = init.body.get('');
@@ -123,8 +128,9 @@ describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
           expect(new Headers(init.headers).get('x-upsert')).toBe('false');
           files.set(path, body); return Response.json({});
         }
+        if (denyReads) return Response.json({ statusCode: '403', error: 'Unauthorized' }, { status: 403 });
         const file = files.get(path.replace('/authenticated/', '/'));
-        if (!file) throw new Error('Missing fixture object');
+        if (!file) return Response.json({ statusCode: '404', error: 'NotFound' }, { status: 404 });
         return new Response(file);
       }
       throw new Error('Unexpected route');
@@ -134,7 +140,8 @@ describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
     });
     return { client, scope, attempt, calls, requests, bodies, files, controller, lose: (value: boolean) => { lost = value; }, drift: (n: number) => { drift = n; },
       respond: (response: () => Response) => { finalizerResponse = response; },
-      reserveResponse: (response: () => Response) => { reserveResponse = response; }, completed: () => completed };
+      reserveResponse: (response: () => Response) => { reserveResponse = response; }, completed: () => completed,
+      denyWrites: () => { denyWrites = true; }, denyReads: () => { denyReads = true; } };
   }
   function refused(attempt: ReturnType<typeof newAnalyzedSaveAttempt>) {
     return [{ state: 'analysis_unavailable', fingerprint: null,
@@ -180,6 +187,8 @@ describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
     await saveAnalyzedItem(a.client, a.scope, a.attempt, () => {});
     expect(a.bodies[0]).toEqual(a.bodies[4]);
     expect(a.calls.filter((p) => p.endsWith('/finalize-analyzed-item'))).toHaveLength(2);
+    expect(a.bodies[3]).toEqual(a.bodies[7]);
+    expect(a.requests.filter(({ path, method }) => path.includes('/storage/v1/object/') && method === 'POST')).toHaveLength(2);
     expect(a.requests.filter(({ method }) => method === 'GET')).toEqual(['thumb', 'main'].map((variant) => ({
       path: `/storage/v1/object/wardrobe/${owner}/${a.attempt.itemId}/${a.attempt.imageId}/${variant}.jpg`,
       method: 'GET', cache: 'no-store', hasAuthorization: true, hasApiKey: true,
@@ -187,6 +196,65 @@ describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
     expect([...a.files.entries()]).toEqual(stored);
     expect(a.calls.some((p) => /analyze-clothing|finalize_item_save|commit_image/.test(p))).toBe(false);
   });
+  it('retries the same completed manual Save with authenticated byte reads and its ordinary finalizer only', async () => {
+    const a = api('manual'); a.lose(true);
+    await expect(saveItem(a.client, a.scope, a.attempt, () => {})).rejects.toThrow('error.unavailable');
+    expect(a.completed()).toBe(true);
+    const stored = [...a.files.entries()];
+    a.lose(false);
+    await saveItem(a.client, a.scope, a.attempt, () => {});
+    expect(a.bodies[0]).toEqual(a.bodies[4]); expect(a.bodies[3]).toEqual(a.bodies[7]);
+    expect(a.calls.filter((p) => p.endsWith('/reserve_item_save'))).toHaveLength(2);
+    expect(a.calls.filter((p) => p.endsWith('/finalize_item_save'))).toHaveLength(2);
+    expect(a.requests.filter(({ path, method }) => path.includes('/storage/v1/object/') && method === 'POST')).toHaveLength(2);
+    expect(a.requests.filter(({ method }) => method === 'GET')).toEqual(['thumb', 'main'].map((variant) => ({
+      path: `/storage/v1/object/wardrobe/${owner}/${a.attempt.itemId}/${a.attempt.imageId}/${variant}.jpg`,
+      method: 'GET', cache: 'no-store', hasAuthorization: true, hasApiKey: true,
+    })));
+    expect([...a.files.entries()]).toEqual(stored);
+    expect(a.calls.some((p) => /analyze-clothing|reserve_analyzed|finalize-analyzed|commit_image/.test(p))).toBe(false);
+  });
+  it.each((['analyzed', 'manual'] as const).flatMap((mode) =>
+    (['thumb', 'main', 'oversized', 'undersized', 'missing', 'denied'] as const).map((failure) => [mode, failure] as const)))(
+    'does not finalize a completed %s retry with %s byte verification failure', async (mode, failure) => {
+      const a = api(mode), save = mode === 'manual' ? saveItem : saveAnalyzedItem; a.lose(true);
+      await expect(save(a.client, a.scope, a.attempt, () => {})).rejects.toThrow('error.unavailable');
+      expect(a.completed()).toBe(true);
+      const path = `/storage/v1/object/wardrobe/${owner}/${a.attempt.itemId}/${a.attempt.imageId}`;
+      if (failure === 'missing') a.files.delete(`${path}/thumb.jpg`);
+      else if (failure === 'denied') a.denyReads();
+      else if (failure === 'oversized' || failure === 'undersized')
+        a.files.set(`${path}/thumb.jpg`, new Blob([new Uint8Array(photo.thumb.size + (failure === 'oversized' ? 1 : -1))]));
+      else a.files.set(`${path}/${failure}.jpg`, new Blob([new Uint8Array(photo[failure].size)]));
+      a.lose(false);
+      await expect(save(a.client, a.scope, a.attempt, () => {}))
+        .rejects.toThrow(failure === 'missing' || failure === 'denied' ? 'error.unavailable' : 'error.conflict');
+      expect(a.calls.filter((p) => /\/(?:finalize-analyzed-item|finalize_item_save)$/.test(p))).toHaveLength(1);
+      expect(a.requests.filter(({ path, method }) => path.includes('/storage/v1/object/') && method === 'POST')).toHaveLength(2);
+      expect(a.bodies[0]).toEqual(a.bodies[4]);
+    },
+  );
+  it.each(['analyzed', 'manual'] as const)('does not treat a pending %s upload denial as a completed receipt or read fallback', async (mode) => {
+    const a = api(mode), save = mode === 'manual' ? saveItem : saveAnalyzedItem; a.denyWrites();
+    await expect(save(a.client, a.scope, a.attempt, () => {})).rejects.toThrow('error.unavailable');
+    expect(a.completed()).toBe(false);
+    expect(a.requests.filter(({ method }) => method === 'GET')).toHaveLength(0);
+    expect(a.calls.filter((p) => /\/(?:finalize-analyzed-item|finalize_item_save)$/.test(p))).toHaveLength(0);
+  });
+  it.each((['analyzed', 'manual'] as const).flatMap((mode) =>
+    (['owner', 'epoch-during-read', 'abort'] as const).map((change) => [mode, change] as const)))(
+    'stops completed %s recovery after %s scope change', async (mode, change) => {
+      const a = api(mode), save = mode === 'manual' ? saveItem : saveAnalyzedItem; a.lose(true);
+      await expect(save(a.client, a.scope, a.attempt, () => {})).rejects.toThrow('error.unavailable');
+      a.lose(false);
+      if (change === 'owner') a.scope.ownerId = context.draftId;
+      else if (change === 'epoch-during-read') a.drift(6);
+      else a.controller.abort();
+      await expect(save(a.client, a.scope, a.attempt, () => {})).rejects.toThrow();
+      expect(a.calls.filter((p) => /\/(?:finalize-analyzed-item|finalize_item_save)$/.test(p))).toHaveLength(1);
+      expect(a.requests.filter(({ path, method }) => path.includes('/storage/v1/object/') && method === 'POST')).toHaveLength(2);
+    },
+  );
   it('delivers only a fully validated same-attempt fingerprint and re-derives it on explicit retry', async () => {
     const a = api(), reserved = vi.fn();
     a.lose(true);

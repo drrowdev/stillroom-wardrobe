@@ -14,6 +14,7 @@ function check(value: unknown): asserts value { if (!value) throw new Error('C o
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 type PhotoReceipt = { requestId: string; draftId: string; generation: number; imageSha256: string; byteCount: number; width: number; height: number };
 type ProgressStage = 'ENTRY' | 'AUTH' | 'OWNER' | 'INITIALIZE' | 'CONSENT' | 'ANALYSIS' | 'SAVE'
+  | 'SAVE_DISCARD' | 'SAVE_REFUSAL' | 'SAVE_MANUAL' | 'SAVE_WAIT_RETRY' | 'SAVE_RETRY' | 'SAVE_RETURNED'
   | 'VERIFY' | 'CLEANUP' | 'CLOSED' | 'RESTORE' | 'DONE' | 'COMPLETE';
 function progress(stage: ProgressStage, owner: 0 | 1 | 2) {
   console.log(`I29_C_STAGE ${stage} ${owner}`);
@@ -83,6 +84,7 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         let posts = 0;
         let lostAck = false;
         const reservations: unknown[] = [];
+        const finalizations: unknown[] = [];
         await page.route(`${base}/rest/v1/rpc/reserve_analyzed_item_save`, async (route) => {
           if (route.request().method() !== 'POST') { await route.continue(); return; }
           reservations.push(route.request().postDataJSON());
@@ -93,6 +95,7 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         });
         await page.route(`${base}/functions/v1/finalize-analyzed-item`, async (route) => {
           if (route.request().method() !== 'POST') { await route.continue(); return; }
+          finalizations.push(route.request().postDataJSON());
           const response = await route.fetch({ maxRedirects: 0, maxRetries: 0 });
           check(response.status() === 204);
           if (index === 1 && !lostAck) { lostAck = true; await route.abort('failed'); }
@@ -177,9 +180,11 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         await page.locator('#item-title').fill(`Fictional C garment ${label}`);
         progress('SAVE', ownerIndex);
         if (index === 1) {
+          progress('SAVE_DISCARD', ownerIndex);
           const discarded = await client.rpc('ai_request_control', { p_request_id: actual.requestId, p_action: 'discard' });
           check(!discarded.error && isRecord(discarded.data) && discarded.data.code === 'TERMINAL');
           await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
+          progress('SAVE_REFUSAL', ownerIndex);
           await page.getByText(messages['aiC.saveRefused'][language], { exact: true }).waitFor();
           check(await page.locator('#item-title').inputValue() === `Fictional C garment ${label}`
             && await page.locator('#item-category').inputValue() === 'top'
@@ -187,20 +192,26 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
             && posts === 1 && mutations.length === 1);
           check(JSON.stringify((await client.from('items').select('id').eq('owner_id', ownerId).order('id')).data) === JSON.stringify(itemsBefore.data));
           check(JSON.stringify((await client.from('item_images').select('id').eq('owner_id', ownerId).order('id')).data) === JSON.stringify(imagesBefore.data));
+          progress('SAVE_MANUAL', ownerIndex);
           await page.getByRole('button', { name: messages['aiC.continueManual'][language], exact: true }).click();
         }
         await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
+        progress('SAVE_WAIT_RETRY', ownerIndex);
         await page.getByRole('button', { name: messages['common.retry'][language], exact: true }).waitFor();
         check(lostAck && posts === 1
           && await page.getByRole('button', { name: messages['aiC.continueManual'][language], exact: true }).count() === 0);
+        progress('SAVE_RETRY', ownerIndex);
         await page.getByRole('button', { name: messages['common.retry'][language], exact: true }).click();
         await page.locator('#wardrobe-title').waitFor();
+        progress('SAVE_RETURNED', ownerIndex);
         check(reservations.length === (index === 0 ? 2 : 3)
           && JSON.stringify(reservations.at(-2)) === JSON.stringify(reservations.at(-1)));
-        check(mutations.length === (index === 0 ? 5 : 9)
+        check(finalizations.length === (index === 0 ? 1 : 2)
+          && (index === 0 || JSON.stringify(finalizations[0]) === JSON.stringify(finalizations[1])));
+        check(mutations.length === (index === 0 ? 5 : 7)
           && mutations.filter((path) => path.endsWith('/reserve_analyzed_item_save')).length === (index === 0 ? 2 : 3)
           && mutations.filter((path) => path.endsWith('/finalize-analyzed-item')).length === (index === 0 ? 1 : 2)
-          && mutations.filter((path) => path.startsWith('/storage/v1/object/')).length === (index === 0 ? 2 : 4));
+          && mutations.filter((path) => path.startsWith('/storage/v1/object/')).length === 2);
         progress('VERIFY', ownerIndex);
         const own = await client.from('items').select('*').eq('owner_id', ownerId);
         check(!own.error && own.data);

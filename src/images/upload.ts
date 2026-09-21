@@ -51,7 +51,7 @@ function requireCheckedSuccess(error: unknown): void {
 function serverTime(value: unknown): value is string {
   return typeof value === 'string' && Number.isFinite(Date.parse(value));
 }
-function reservationFingerprint(data: unknown, attempt: SaveAttempt): string {
+function reservationReceipt(data: unknown, attempt: SaveAttempt): { fingerprint: string; state: 'reserved' | 'completed' } {
   if (!Array.isArray(data) || data.length !== 1 || !isRecord(data[0])) throw new AppError('error.conflict');
   const { item, image, fingerprint, state } = data[0];
   if (Object.keys(data[0]).length !== 4 || !isRecord(item) || !isRecord(image)
@@ -79,20 +79,25 @@ function reservationFingerprint(data: unknown, attempt: SaveAttempt): string {
     || Object.keys(image).length !== Object.keys(expectedImage).length || !matches(image, expectedImage)) {
     throw new AppError('error.conflict');
   }
-  return fingerprint;
+  return { fingerprint, state };
 }
-async function ensureFile(client: AppClient, path: string, bytes: Blob, expectedHash: string, scope: OwnerScope): Promise<void> {
+async function ensureFile(
+  client: AppClient, path: string, bytes: Blob, expectedHash: string, scope: OwnerScope, state: 'reserved' | 'completed',
+): Promise<void> {
   throwIfAborted(scope.signal);
-  const { error } = await client.storage.from('wardrobe').upload(path, bytes, {
-    contentType: 'image/jpeg', upsert: false, cacheControl: '0',
-  });
-  throwIfAborted(scope.signal);
-  if (!error) return;
-  if (!duplicate(error)) { requireSuccess(error); return; }
+  if (state === 'reserved') {
+    const { error } = await client.storage.from('wardrobe').upload(path, bytes, {
+      contentType: 'image/jpeg', upsert: false, cacheControl: '0',
+    });
+    throwIfAborted(scope.signal);
+    if (!error) return;
+    if (!duplicate(error)) { requireSuccess(error); return; }
+  }
   const existing = await client.storage.from('wardrobe').download(path, {}, { signal: scope.signal, cache: 'no-store' });
   throwIfAborted(scope.signal);
   requireSuccess(existing.error);
   if (!existing.data) throw new AppError('error.uploadIncomplete');
+  if (existing.data.size !== bytes.size) throw new AppError('error.conflict');
   const digest = await crypto.subtle.digest('SHA-256', await existing.data.arrayBuffer());
   const hash = [...new Uint8Array(digest)].map((part) => part.toString(16).padStart(2, '0')).join('');
   if (hash !== expectedHash) throw new AppError('error.conflict');
@@ -119,13 +124,13 @@ export async function saveItem(
   }).abortSignal(scope.signal);
   checkScope();
   requireCheckedSuccess(reserved.error);
-  const fingerprint = reservationFingerprint(reserved.data, attempt);
+  const { fingerprint, state } = reservationReceipt(reserved.data, attempt);
   const prefix = `${scope.ownerId}/${attempt.itemId}/${attempt.imageId}`;
   onStage('capture.uploading');
   checkScope();
-  await ensureFile(client, `${prefix}/thumb.jpg`, photo.thumb, photo.thumbSha256, scope);
+  await ensureFile(client, `${prefix}/thumb.jpg`, photo.thumb, photo.thumbSha256, scope, state);
   checkScope();
-  await ensureFile(client, `${prefix}/main.jpg`, photo.main, photo.mainSha256, scope);
+  await ensureFile(client, `${prefix}/main.jpg`, photo.main, photo.mainSha256, scope, state);
   checkScope();
   onStage('capture.finishing');
   checkScope();
@@ -224,15 +229,15 @@ export async function saveAnalyzedItem(
       throw new AnalyzedSaveRefusedError(attempt.itemId, attempt.imageId);
     }
   }
-  const fingerprint = reservationFingerprint(reserved.data, attempt);
+  const { fingerprint, state } = reservationReceipt(reserved.data, attempt);
   checkScope();
   onReserved?.(attempt, fingerprint);
   const prefix = `${scope.ownerId}/${attempt.itemId}/${attempt.imageId}`;
   onStage('capture.uploading');
   checkScope();
-  await ensureFile(client, `${prefix}/thumb.jpg`, photo.thumb, photo.thumbSha256, scope);
+  await ensureFile(client, `${prefix}/thumb.jpg`, photo.thumb, photo.thumbSha256, scope, state);
   checkScope();
-  await ensureFile(client, `${prefix}/main.jpg`, photo.main, photo.mainSha256, scope);
+  await ensureFile(client, `${prefix}/main.jpg`, photo.main, photo.mainSha256, scope, state);
   checkScope();
   onStage('capture.finishing');
   checkScope();

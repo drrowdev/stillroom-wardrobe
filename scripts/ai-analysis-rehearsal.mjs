@@ -51,8 +51,11 @@ function markedRecords(stdout, stderr, marker, limit, recordLimit, lineLimit = 2
 }
 function cProgress(stdout, stderr) {
   const records = markedRecords(stdout, stderr, 'I29_C_STAGE', 32, 128, 4096);
-  const ownerStages = ['OWNER', 'INITIALIZE', 'CONSENT', 'ANALYSIS', 'SAVE', 'VERIFY', 'CLEANUP', 'CLOSED', 'RESTORE', 'DONE'];
-  const expected = ['ENTRY 0', 'AUTH 0', ...[1, 2].flatMap((owner) => ownerStages.map((stage) => `${stage} ${owner}`)), 'COMPLETE 2'];
+  const ownerStages = ['OWNER', 'INITIALIZE', 'CONSENT', 'ANALYSIS', 'SAVE', 'SAVE_WAIT_RETRY', 'SAVE_RETRY',
+    'SAVE_RETURNED', 'VERIFY', 'CLEANUP', 'CLOSED', 'RESTORE', 'DONE'];
+  const expected = ['ENTRY 0', 'AUTH 0', ...[1, 2].flatMap((owner) => ownerStages.flatMap((stage) =>
+    (owner === 2 && stage === 'SAVE' ? ['SAVE', 'SAVE_DISCARD', 'SAVE_REFUSAL', 'SAVE_MANUAL'] : [stage])
+      .map((step) => `${step} ${owner}`))), 'COMPLETE 2'];
   if (!records?.length || records.length > expected.length || records.some((record, index) => record !== expected[index])) {
     return { stage: 'UNKNOWN', owner: 0 };
   }
