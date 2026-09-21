@@ -5827,3 +5827,93 @@ is claimed.
 Independent review, exact-head CI/no-new-flakiness, normal-owner evidence and
 all existing human/device/recovery/export/hosted/paid/cutover gates remain;
 Phase 0 is engineering complete with acceptance open.
+
+## I29-AZ1 inactive Azure integration - 21 September 2026
+
+Source implementation on `drrowdev-shiny-umbrella`, from reviewed main
+`b4c37ad7848f60d3875e3161e482c33e05abfdc3`, tree
+`42e6ad143c35170883745e91a0f91639d29b5d30`. This is an **unstaged local
+checkpoint**, not publication, fresh backend CI, merge, deployment or acceptance.
+Authority is the [reviewed implementation/model-entry release](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5766659126),
+with the [one-brace schema and closed Deno-key repair](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5766981960).
+The [serve-inventory repair](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5767276863)
+adds Azure to the exact seven-file analysis inventory, retaining all six legacy
+files and rejecting every required omission and any extra file. The finalizer
+inventory, JWT/configuration and process ownership controls are unchanged.
+The latter corrects the malformed historical schema candidate: canonical
+1543 bytes/SHA-256 `84d87dca033cc587c6cae54cc8a0a2936f3dabefa0ab18fb4c3ee03467cc8ff1`;
+the approved prompt, settings and EN/FI/SV notice bytes are unchanged.
+
+I29 / R28 / R04, preserving R01/R03/R11/R12/R15/R19/R23/R26/R27:
+the fixed Azure-only adapter consumes the same prepared main JPEG, uses the
+strict fourteen-field contract and never sends owner preferences or language.
+The additive inactive manifest and profile-bound settlement retain six explicit
+counters, bounded model/control observations, conservative micro-USD arithmetic
+and durable request identity. Missing counters never become zero. Both cache
+reads and writes must be zero: positive applicable counters deactivate new
+admissions and preserve accepted/confirmed accounting or the hold. Cache,
+identity and control anomalies cannot produce ready facts or new estimates;
+valid billing survives invalid facts, and overruns remain unclamped estimates.
+No owner control, consent or allowance is activated by the migration.
+Legacy Google is **READ-AND-FINISH ONLY**: results and accounting remain readable
+and accepted late settlement can finish. The deployed entrypoint cannot dispatch
+Google and reads no Google credentials. New enable/dispatch is Azure-only,
+without a router, retry or fallback.
+
+The connected settings UI selects the correct provider/revision notice and
+binds its checkbox to the current owner, epoch and policy. A committed first
+Save refusal preserves all draft/photo/description values and manual intent,
+then requires explicit manual continuation. Only the exact successful,
+owner/item/image-bound acknowledgment unlocks the form. Unknown/malformed/lost
+acknowledgments retain frozen IDs and payload. Existing accepted Save replays
+precede present-day eligibility checks and still finish after expiry, opt-out
+or deactivation. Private attribution gains a nullable manifest FK; its public
+getter still omits that field entirely and retains explicit null source images.
+
+CI source now includes exact base/prior-main/target inventories (1/9/10 applied),
+actual old Google held/estimated/confirmed/dispatched records, completed history,
+pending frozen Save and stored-byte preservation. The ordinary-owner B2 fixtures
+also check a genuinely completed Azure Save's private manifest attribution and
+the same row's exact five-key ordinary-owner public projection before cleanup.
+The prior-main boundary is explicitly `20260913120000`, with required presence
+checking rather than a positional migration cutoff. The ordinary-owner B2 fixtures
+cover profile-lock overlap, refusal/reconsent/terminal replay and explicit unknown
+Save. Real C retains two synthetic provider generations through the production
+handler: owner A loses a real committed reservation acknowledgment; owner B
+receives a real terminal first refusal, explicitly continues manually, and loses
+a real finalizer acknowledgment. Retries use the same accepted payload and IDs.
+Only delivery is interrupted; Auth, reservation, Storage and finalization are
+not mocked. These are **unexecuted backend fixture changes** until exact-head CI.
+
+Local checks use approved Node 24.19.0 and the locked dependencies. `npm ci
+--no-fund` ran only after the selected unit command reported missing Vitest;
+locked Chromium/WebKit were installed inside this worktree only after actual
+missing-executable browser failures. No global, backend, Docker/WSL or hosted
+setup was performed.
+
+| Command | Observed local result |
+|---|---|
+| `npm run test:unit -- tests\unit\azure-openai.test.ts tests\unit\ai-endpoint.test.ts tests\unit\ai-client.test.ts tests\unit\ai-schema.test.ts tests\unit\ai-draft.test.ts tests\unit\ai-presentation.test.ts tests\unit\analyzed-save.test.ts tests\unit\ai-save-endpoint.test.ts tests\unit\jpeg.test.ts tests\unit\preservation.test.ts` | 643 passed. Includes literal parity, effective SQL source assertions, historical reads, byte binding, refusal/unknown ACKs and exact preservation parser stages; not SQL execution. |
+| `npm run test:unit -- tests\unit\local-backend.test.ts` | 513 passed, including exact analysis/finalizer inventories and rejection guards; no backend startup. Lint and typecheck also passed after this correction. |
+| `npm run test:unit -- tests\unit\preservation.test.ts tests\unit\ai-client.test.ts tests\unit\ai-schema.test.ts tests\unit\azure-openai.test.ts tests\unit\ai-endpoint.test.ts tests\unit\local-backend.test.ts` | Final-review repair batch: 926 passed across six suites. Lint, typecheck, translations and diff check passed again. The positive private-manifest/backend projection check remains unexecuted until CI. |
+| `npm run lint`, `npm run typecheck`, `npm run check:translations` | Passed; 527 EN/FI/SV keys. |
+| `npm run test:browser -- ai-photo-first.spec.ts` | 131 passed; four existing capture/project combinations intentionally skipped. Fixture UI evidence, not real-backend evidence. |
+| `npm run test:a11y -- ai-photo-first.spec.ts` | 18 passed: provider notices and refusal recovery in EN/FI/SV across desktop Chromium, mobile Chromium and WebKit. |
+| `npm run build` | Passed; existing over-500-kB bundle warning retained. |
+| `npm run scan:secrets` | Passed; no local canary supplied, so CI canary verification remains required. |
+| `npm run check:dependencies` | Failed `DEPENDENCY_RECORD_DRIFT`: read-only diagnosis shows exact equality after CRLF-to-LF conversion for the existing inventory, and matching notices. Package/lock and recorded license content are unchanged; this command did not reach its audit. |
+| `git diff --check` | Passed. |
+
+The initial Windows backslash Playwright argument selected no tests; using the
+documented filename-regex selector selected the actual suite. Initial source
+test failures from Windows path separators/CRLF and tenth-migration inventory
+expectations were corrected without weakening guards. Four bounded synthetic
+capture definitions remain unchanged; the writer has not viewed their images.
+
+Independent final source review, publication authorization, unchanged exact-head
+CI (real backend/types/preservation/B1/B2/C), coordinator visual review and
+human/device acceptance remain open. The dependency-check newline limitation
+is not a passing gate. Six-path documented/helper parity is not a successful
+live response: actual Azure wire/control compatibility and quality remain
+activation gates. No private photo, paid/provider call, hosted mutation,
+deployment, frozen PR #27 work or PR #28 reopening occurred.

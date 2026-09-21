@@ -25,6 +25,51 @@ function result() {
 }
 const excluded = ['title', 'warmth', 'min_temp', 'max_temp', 'rain_rating', 'windproof', 'tags', 'purchase_price', 'purchase_date', 'notes'];
 const invalid = { ok: false, code: 'INVALID_RESULT' };
+describe('AZ1 effective additive definitions (source checks, not live SQL proof)', () => {
+  const source = () => readFile(new URL('../../supabase/migrations/20260921193000_azure_terra_analysis.sql', import.meta.url), 'utf8');
+  const definition = (sql: string, name: string) => {
+    const start = sql.indexOf(`function ${name}(`);
+    expect(start).toBeGreaterThan(-1);
+    return sql.slice(start, sql.indexOf('$$;', start));
+  };
+  it('admits only Azure new claims while preserving a private frozen-manifest Google finish', async () => {
+    const sql = await source(), claim = definition(sql, 'public.ai_claim_analysis');
+    expect(claim).toContain("id='azure-eu-terra-devtest-v1'");
+    expect(claim).toContain('c.notice_revision<>2');
+    expect(claim).toContain("'not_observed',jsonb_build_object('draftId'");
+    expect(sql).toContain('alter function public.ai_finish_analysis(uuid,uuid,text,jsonb,jsonb,text) set schema private');
+    expect(sql).toContain('revoke all on function private.ai_finish_google_legacy(uuid,uuid,text,jsonb,jsonb,text) from public,anon,authenticated,service_role');
+    expect(definition(sql, 'public.ai_finish_analysis')).toContain("if e.manifest_id='google-eu-3.8-v1'");
+    expect(sql).not.toMatch(/update public\.profiles set|set ai_enabled|set notice_revision|alter table public\./);
+  });
+  it('settles valid usage before content, requires all14 Azure keys, and preserves accepted evidence on conflict', async () => {
+    const sql = await source(), finish = definition(sql, 'public.ai_finish_analysis');
+    expect(finish.indexOf("'USAGE_CONFLICT'")).toBeLessThan(finish.indexOf('set model_observation='));
+    expect(finish).toContain('e.anomaly and e.normalized_usage is null');
+    expect(finish).toContain("if k in ('cacheRead','cacheWrite') and n>0 and n<=9007199254740991 and n=trunc(n) then v_bad := true");
+    expect(finish).toContain("if not v_valid or v_model='not_observed'");
+    expect(finish.indexOf("charge_state='estimated'")).toBeLessThan(finish.indexOf('not private.ai_valid_facts(p_facts)'));
+    expect(finish).toContain("not coalesce(p_facts->'fields' ?& v_fields,false)");
+    expect(finish).toContain("if u.charge_state<>'settled'");
+  });
+  it('serializes reservation absence, commits terminal identity before ACK and excludes private history metadata', async () => {
+    const sql = await source(), reserve = definition(sql, 'public.reserve_analyzed_item_save');
+    expect(reserve.indexOf('v_owner := private.item_save_owner()')).toBeLessThan(reserve.indexOf('select * into a'));
+    expect(reserve.indexOf('select * into a')).toBeLessThan(reserve.indexOf('v_refuse :='));
+    expect(reserve).toContain('e.claim_identity is distinct from jsonb_build_object');
+    expect(reserve.indexOf("perform private.ai_close(v_owner,u.request_id")).toBeLessThan(reserve.indexOf("'analysis_unavailable'::text"));
+    expect(reserve.slice(reserve.indexOf('if v_refuse then'), reserve.indexOf("for k,v in select key,value from jsonb_each(p_claim"))).not.toContain('raise exception');
+    expect(sql).toContain('add column manifest_id text references private.ai_execution_manifests(id)');
+    const completion = definition(sql, 'public.complete_analyzed_item_save');
+    expect(completion).toContain('item_attribution_history(owner_id,item_id,source_image_id,image_sha256,model_id,prompt_version,fields,manifest_id)');
+    expect(completion.indexOf("p_objects is distinct from current->'objects'")).toBeLessThan(completion.indexOf("set state='ready'"));
+    expect(completion.indexOf("set state='ready'")).toBeLessThan(completion.indexOf('insert into private.item_attribution_history'));
+    expect(completion.indexOf('insert into private.item_attribution_history')).toBeLessThan(completion.indexOf("set state='completed'"));
+    const getter = definition(sql, 'public.item_attribution_history');
+    expect(getter).toContain("to_jsonb(h)-array['owner_id','item_id','manifest_id']");
+    expect(getter).not.toContain('jsonb_strip_nulls');
+  });
+});
 describe('B1 additive SQL source checks, not execution evidence', () => {
   it('extracts the complete legacy admission body without changing its conditions or replies', async () => {
     const legacy = await readFile(new URL('../../supabase/migrations/20260909180000_ai_request_controls.sql', import.meta.url), 'utf8');
@@ -353,9 +398,10 @@ function imports(source: string, filename: string): string[] {
   return found;
 }
 function resolveImport(filename: string, specifier: string): string | undefined {
-  return ts.resolveModuleName(specifier, filename, {
+  const resolved = ts.resolveModuleName(specifier, filename, {
     moduleResolution: ts.ModuleResolutionKind.Bundler, allowImportingTsExtensions: true,
   }, ts.sys).resolvedModule?.resolvedFileName;
+  return resolved === undefined ? undefined : path.normalize(resolved);
 }
 describe('executable reviewed B2/C production import boundary', () => {
   it('non-vacuously resolves static/type/re-export/dynamic imports, extensions and relative paths', () => {

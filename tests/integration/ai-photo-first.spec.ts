@@ -81,6 +81,23 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         }, prefix);
         const page = await context.newPage();
         let posts = 0;
+        let lostAck = false;
+        const reservations: unknown[] = [];
+        await page.route(`${base}/rest/v1/rpc/reserve_analyzed_item_save`, async (route) => {
+          if (route.request().method() !== 'POST') { await route.continue(); return; }
+          reservations.push(route.request().postDataJSON());
+          const response = await route.fetch({ maxRedirects: 0, maxRetries: 0 });
+          check(response.status() === 200);
+          if (index === 0 && !lostAck) { lostAck = true; await route.abort('failed'); }
+          else await route.fulfill({ response });
+        });
+        await page.route(`${base}/functions/v1/finalize-analyzed-item`, async (route) => {
+          if (route.request().method() !== 'POST') { await route.continue(); return; }
+          const response = await route.fetch({ maxRedirects: 0, maxRetries: 0 });
+          check(response.status() === 204);
+          if (index === 1 && !lostAck) { lostAck = true; await route.abort('failed'); }
+          else await route.fulfill({ response });
+        });
         const captured: { value: PhotoReceipt | null } = { value: null };
         const mutations: string[] = [];
         page.on('request', (request) => {
@@ -122,14 +139,14 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
         await page.getByRole('button', { name: messages['aiC.disable'][language], exact: true }).click();
         await page.getByText(messages['aiC.disabled'][language], { exact: true }).waitFor();
-        await page.getByRole('checkbox', { name: messages['aiC.agree'][language] }).check();
+        await page.getByRole('checkbox', { name: messages['aiC.azureAgree'][language] }).check();
         await page.getByRole('button', { name: messages['aiC.enable'][language], exact: true }).click();
         await page.getByText(messages['aiC.enabled'][language], { exact: true }).waitFor();
         const afterConsent = await client.from('profiles').select('owner_id,display_name,ui_language,timezone,currency,version').eq('owner_id', ownerId).single();
         check(!afterConsent.error);
         check(JSON.stringify(parseProfile(afterConsent.data, ownerId)) === JSON.stringify({ ...profile, version: profile.version + 2 }));
         const consentReply = await client.rpc('ai_status'), consent = parseAiStatus(consentReply.data);
-        check(!consentReply.error && consent?.consent.enabled && consent.consent.noticeRevision === 1
+        check(!consentReply.error && consent?.consent.enabled && consent.consent.noticeRevision === 2
           && consent.consent.profileVersion === String(profile.version + 2) && consent.consent.consentedAt !== null);
         consentedAt = consent.consent.consentedAt;
         progress('ANALYSIS', ownerIndex);
@@ -159,18 +176,38 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         check(!analyzedProfile.error && JSON.stringify(parseProfile(analyzedProfile.data, ownerId)) === JSON.stringify(expectedConsentProfile));
         await page.locator('#item-title').fill(`Fictional C garment ${label}`);
         progress('SAVE', ownerIndex);
+        if (index === 1) {
+          const discarded = await client.rpc('ai_request_control', { p_request_id: actual.requestId, p_action: 'discard' });
+          check(!discarded.error && isRecord(discarded.data) && discarded.data.code === 'TERMINAL');
+          await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
+          await page.getByText(messages['aiC.saveRefused'][language], { exact: true }).waitFor();
+          check(await page.locator('#item-title').inputValue() === `Fictional C garment ${label}`
+            && await page.locator('#item-category').inputValue() === 'top'
+            && await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).isDisabled()
+            && posts === 1 && mutations.length === 1);
+          check(JSON.stringify((await client.from('items').select('id').eq('owner_id', ownerId).order('id')).data) === JSON.stringify(itemsBefore.data));
+          check(JSON.stringify((await client.from('item_images').select('id').eq('owner_id', ownerId).order('id')).data) === JSON.stringify(imagesBefore.data));
+          await page.getByRole('button', { name: messages['aiC.continueManual'][language], exact: true }).click();
+        }
         await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
+        await page.getByRole('button', { name: messages['common.retry'][language], exact: true }).waitFor();
+        check(lostAck && posts === 1
+          && await page.getByRole('button', { name: messages['aiC.continueManual'][language], exact: true }).count() === 0);
+        await page.getByRole('button', { name: messages['common.retry'][language], exact: true }).click();
         await page.locator('#wardrobe-title').waitFor();
-        check(mutations.length === 4 && mutations.filter((path) => path.endsWith('/reserve_analyzed_item_save')).length === 1
-          && mutations.filter((path) => path.endsWith('/finalize-analyzed-item')).length === 1
-          && mutations.filter((path) => path.startsWith('/storage/v1/object/')).length === 2);
+        check(reservations.length === (index === 0 ? 2 : 3)
+          && JSON.stringify(reservations.at(-2)) === JSON.stringify(reservations.at(-1)));
+        check(mutations.length === (index === 0 ? 5 : 9)
+          && mutations.filter((path) => path.endsWith('/reserve_analyzed_item_save')).length === (index === 0 ? 2 : 3)
+          && mutations.filter((path) => path.endsWith('/finalize-analyzed-item')).length === (index === 0 ? 1 : 2)
+          && mutations.filter((path) => path.startsWith('/storage/v1/object/')).length === (index === 0 ? 2 : 4));
         progress('VERIFY', ownerIndex);
         const own = await client.from('items').select('*').eq('owner_id', ownerId);
         check(!own.error && own.data);
         const item = own.data.find((row) => row.id.startsWith(prefix));
         check(item && own.data.filter((row) => row.id.startsWith(prefix)).length === 1 && item.title === `Fictional C garment ${label}`);
         check(isRecord(item.field_provenance) && isRecord(item.field_provenance.title) && item.field_provenance.title.kind === 'user'
-          && isRecord(item.field_provenance.category) && item.field_provenance.category.kind === 'ai_observed');
+          && isRecord(item.field_provenance.category) && item.field_provenance.category.kind === (index === 0 ? 'ai_observed' : 'unknown'));
         const imageReply = await client.from('item_images').select('*').eq('owner_id', ownerId).eq('item_id', item.id).single();
         check(!imageReply.error && imageReply.data);
         const image = imageReply.data;
@@ -186,7 +223,7 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
           const denied = await peer.storage.from('wardrobe').download(path); check(denied.error !== null);
         }
         const history = await client.rpc('item_attribution_history', { p_item_id: item.id });
-        check(!history.error && Array.isArray(history.data) && history.data.length === 1);
+        check(!history.error && Array.isArray(history.data) && history.data.length === (index === 0 ? 1 : 0));
         const foreign = await peer.from('items').select('id').eq('id', item.id);
         const foreignHistory = await peer.rpc('item_attribution_history', { p_item_id: item.id });
         check(!foreign.error && foreign.data.length === 0 && foreignHistory.error?.code === '42501');
@@ -239,7 +276,7 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
       check(!restoredReply.error && JSON.stringify(parseProfile(restoredReply.data, ownerId))
         === JSON.stringify({ ...originalProfile, version: expectedVersion }));
       const finalStatusReply = await client.rpc('ai_status'), finalStatus = parseAiStatus(finalStatusReply.data);
-      check(!finalStatusReply.error && finalStatus?.consent.enabled && finalStatus.consent.noticeRevision === 1
+      check(!finalStatusReply.error && finalStatus?.consent.enabled && finalStatus.consent.noticeRevision === 2
         && finalStatus.consent.consentedAt === consentedAt && consentedAt !== null
         && finalStatus.consent.profileVersion === String(expectedVersion));
       progress('DONE', ownerIndex);

@@ -84,14 +84,14 @@ export function validFacts(value: unknown): value is JsonObject {
   }
   return true;
 }
-export function validResult(value: unknown): value is JsonObject {
+export function validResult(value: unknown, modelId = MODEL_ID): value is JsonObject {
   if (!exact(value, ['schemaVersion', 'requestId', 'draftId', 'generation', 'imageSha256', 'modelId',
     'promptVersion', 'createdAtMs', 'expiresAtMs', 'facts'])) return false;
   return value.schemaVersion === 1 && typeof value.requestId === 'string' && UUID.test(value.requestId)
     && typeof value.draftId === 'string' && UUID.test(value.draftId)
     && typeof value.generation === 'number' && Number.isInteger(value.generation) && value.generation >= 1 && value.generation <= 2147483647
     && typeof value.imageSha256 === 'string' && /^[0-9a-f]{64}$/.test(value.imageSha256)
-    && value.modelId === MODEL_ID && value.promptVersion === 1
+    && value.modelId === modelId && value.promptVersion === 1
     && typeof value.createdAtMs === 'number' && Number.isSafeInteger(value.createdAtMs) && value.createdAtMs >= 0
     && typeof value.expiresAtMs === 'number' && Number.isSafeInteger(value.expiresAtMs)
     && value.expiresAtMs > value.createdAtMs && value.expiresAtMs - value.createdAtMs <= 86400000

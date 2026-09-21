@@ -8,7 +8,7 @@ import type { FieldProvenance } from '../domain/attribute-provenance';
 import { validDescription } from '../domain/item-details';
 import { canonicalPrice } from '../i18n/format';
 import type { PreparedPhoto } from './process-jpeg';
-import { AppError, requireSuccess, throwIfAborted } from '../data/errors';
+import { AnalyzedSaveRefusedError, AppError, requireSuccess, throwIfAborted } from '../data/errors';
 import type { AnalyzedSaveAttempt } from '../domain/analyzed-save';
 import type { Json } from '../data/database.types';
 
@@ -213,6 +213,17 @@ export async function saveAnalyzedItem(
   }).abortSignal(scope.signal);
   checkScope();
   requireCheckedSuccess(reserved.error);
+  if (attempt.claim && Array.isArray(reserved.data) && reserved.data.length === 1) {
+    const row: unknown = reserved.data[0];
+    if (isRecord(row) && Object.keys(row).length === 4 && row.state === 'analysis_unavailable'
+      && row.fingerprint === null && isRecord(row.item) && Object.keys(row.item).length === 2
+      && row.item.id === attempt.itemId && row.item.owner_id === scope.ownerId
+      && isRecord(row.image) && Object.keys(row.image).length === 3
+      && row.image.id === attempt.imageId && row.image.item_id === attempt.itemId && row.image.owner_id === scope.ownerId) {
+      checkScope();
+      throw new AnalyzedSaveRefusedError(attempt.itemId, attempt.imageId);
+    }
+  }
   const fingerprint = reservationFingerprint(reserved.data, attempt);
   checkScope();
   onReserved?.(attempt, fingerprint);

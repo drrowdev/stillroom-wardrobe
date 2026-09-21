@@ -18,7 +18,13 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
   const failed = new Set<string>();
   let analysisMode: 'ready' | 'pending' | 'timeout' | 'unclear' | 'failed' = 'ready';
   let ttl = 3600000;
-  const accounting = { basis: 'estimated', amountMicro: '413', currency: 'USD' };
+  let policy = { activated: true, noticeRevision: 2, modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 1,
+    executionManifestId: 'azure-eu-terra-devtest-v1',
+    maxRequestMicro: '4097351', monthlyAllowanceMicro: '100000000', maxRequestsPerHour: 200, resultTtlSeconds: 3600 };
+  const accounting = { basis: 'estimated', amountMicro: '1034', currency: 'USD' };
+  const unknown = { category: null, subcategory: null, colours: [], pattern: null, sleeve_length: null,
+    garment_length: null, brand: null, size_label: null, upper_coverage: null, lower_coverage: null,
+    material: null, seasons: [], formality: null, style_tags: [] };
   const api = await mockBackend(page, { initialLanguage: language, aiResults: results, observeRawAnalysis,
     loseAnalyzedReserveReplyOnce: lost === 'reservation', loseFinalizeReplyOnce: lost === 'finalizer',
     analysis: ({ owner, requestId, draftId, generation, bytes }) => {
@@ -31,9 +37,9 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
         return { body: { code: 'ANALYSIS_FAILED' }, status: 502 };
       }
       const result: AiResult = { schemaVersion: 1, requestId, draftId, generation, imageSha256,
-        modelId: 'gemini-3.8-flash', promptVersion: 1, createdAtMs: Date.now() - 1, expiresAtMs: Date.now() + ttl,
-        facts: analysisMode === 'unclear' ? { outcome: 'unclear', fields: {} }
-          : { outcome: 'ready', fields: { category: 'top', colours: ['green'], formality: 0, material: 'Cotton' } } };
+        modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 1, createdAtMs: Date.now() - 1, expiresAtMs: Date.now() + ttl,
+        facts: analysisMode === 'unclear' ? { outcome: 'unclear', fields: unknown }
+          : { outcome: 'ready', fields: { ...unknown, category: 'top', colours: ['green'], formality: 0, material: 'Cotton' } } };
       results.set(requestId, result);
       if (analysisMode === 'timeout') return { body: { code: 'TIMEOUT' }, status: 504 };
       return { body: { code: 'OK', status: analysisMode === 'pending' ? 'dispatched' : 'ready',
@@ -61,16 +67,15 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
       if (!api.admitAiStatus(request)) { await json({ code: 'UNAUTHENTICATED' }, 401); return; }
       calls.push({ route: path, body: {} });
       await json({ code: consent.get(owner) ? 'OK' : 'CONSENT_REQUIRED', period: new Date().toISOString().slice(0, 7),
-        serverTimeMs: Date.now(), consent: { enabled: consent.get(owner), noticeRevision: consent.get(owner) ? 1 : null,
+        serverTimeMs: Date.now(), consent: { enabled: consent.get(owner), noticeRevision: consent.get(owner) ? 2 : null,
           consentedAt: consent.get(owner) ? '2026-09-12T00:00:00Z' : null, profileVersion: String(profile.version) },
-        policy: { activated: true, noticeRevision: 1, modelId: 'gemini-3.8-flash', promptVersion: 1,
-          maxRequestMicro: '2270823', monthlyAllowanceMicro: '100000000', maxRequestsPerHour: 200, resultTtlSeconds: 3600 },
-        usage: { accountedMicro: String(results.size * 413), requestsLastHour: results.size, warning: false } }); return;
+        policy,
+        usage: { accountedMicro: String(results.size * 1034), requestsLastHour: results.size, warning: false } }); return;
     }
     if (path.endsWith('/ai_set_consent')) {
       const body = request.postDataJSON() as { p_enabled: boolean; p_notice_revision: number | null; p_expected_version: number };
       calls.push({ route: path, body });
-      if (body.p_expected_version !== profile.version || body.p_notice_revision !== (body.p_enabled ? 1 : null)) {
+      if (body.p_expected_version !== profile.version || body.p_notice_revision !== (body.p_enabled ? 2 : null)) {
         await json({ code: 'CONFLICT' }); return;
       }
       consent.set(owner, body.p_enabled); profile.version = Number(profile.version) + 1;
@@ -94,6 +99,7 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
   await page.goto('/'); await signIn(page);
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   return { ...api, results, calls, inputs, consent, mode: (mode: typeof analysisMode) => { analysisMode = mode; },
+    policy: (next: Partial<typeof policy>) => { policy = { ...policy, ...next }; },
     ttl: (milliseconds: number) => { if (milliseconds < 1 || milliseconds > 3600000) throw new Error('Invalid fixture TTL'); ttl = milliseconds; } };
 }
 export async function addAiPhoto(page: Page, fixture: Awaited<ReturnType<typeof aiFixture>>, language: Language = 'en') {

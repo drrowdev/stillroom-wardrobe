@@ -109,7 +109,7 @@ describe('owned B1 function lifecycle', () => {
     });
   const config = '[edge_runtime]\nenabled = true\n\n[functions.analyze-clothing]\nenabled = true\nverify_jwt = true\n'
     + '\n[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = true\n';
-  const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json'];
+  const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json', 'azure-openai.ts'];
   const directories = ['finalize-analyzed-item', 'analyze-clothing'];
   const finalizerFiles = ['index.ts', 'handler.ts', 'deno.json'];
   const help = { code: 0, stdout: '  Serve all Functions locally.\n  supabase functions serve [flags] [<Function name...>]\n', stderr: '' };
@@ -124,6 +124,9 @@ describe('owned B1 function lifecycle', () => {
     }
     expect(() => assertAnalysisServeContract(config, ['other'], files, help, finalizerFiles)).toThrow();
     expect(() => assertAnalysisServeContract(config, directories, [...files, '.env'], help, finalizerFiles)).toThrow();
+    for (const missing of files) {
+      expect(() => assertAnalysisServeContract(config, directories, files.filter((file) => file !== missing), help, finalizerFiles)).toThrow();
+    }
     expect(() => assertAnalysisServeContract(config, directories, files, { ...help, code: 1 }, finalizerFiles)).toThrow();
     expect(() => assertAnalysisServeContract(config, directories, files, { ...help, stdout: '' }, finalizerFiles)).toThrow();
     expect(() => assertAnalysisServeContract(config, directories, files, help, [...finalizerFiles, 'deno.d.ts'])).toThrow();

@@ -1,11 +1,12 @@
 import { assertSanitizedJpeg, readJpegHeader } from '../../../src/images/jpeg.ts';
-import { analyzeGoogle, googleToken, type GoogleConfig, type Transport } from './google-cloud.ts';
+import { analyzeAzure, azureConfigured, validAzureFacts, AZURE_MANIFEST, AZURE_MODEL, AZURE_RESERVATION, AZURE_REVIEW_EXPIRES,
+  type AzureConfig, type AzureTransport } from './azure-openai.ts';
 import {
-  MANIFEST_ID, MAX_IMAGE_BYTES, MODEL_ID, ProtocolError, REQUEST_MS, RESERVATION_MICRO, REVIEW_EXPIRES,
+  MAX_IMAGE_BYTES, MODEL_ID, ProtocolError, REQUEST_MS,
   UUID, exact, object, readBounded, readJson, sha256, validAccounting, validResult, type JsonObject,
 } from './protocol.ts';
 
-export type HandlerConfig = { supabaseUrl: string; publicKey: string; serviceKey: string; google: GoogleConfig };
+export type HandlerConfig = { supabaseUrl: string; publicKey: string; serviceKey: string; azure: AzureConfig };
 const statusCodes: Record<string, number> = {
   INVALID_INPUT: 400, UNAUTHENTICATED: 401, UNAVAILABLE: 403, CONSENT_REQUIRED: 403,
   CONFLICT: 409, ACTIVE_DRAFT: 409, TERMINAL: 409, TOO_LARGE: 413, UNSUPPORTED_MEDIA: 415,
@@ -30,7 +31,7 @@ function serverConfig(config: HandlerConfig): boolean {
     && typeof config.serviceKey === 'string' && config.serviceKey.length > 0 && config.serviceKey.length <= 8192;
 }
 
-export function createHandler(config: HandlerConfig, googleTransport: Transport = fetch) {
+export function createHandler(config: HandlerConfig, azureTransport: AzureTransport = fetch) {
   return async (request: Request): Promise<Response> => {
     const origin = request.headers.get('Origin');
     const headers = new Headers({ 'Cache-Control': 'no-store', Vary: 'Origin', 'X-Content-Type-Options': 'nosniff' });
@@ -87,7 +88,8 @@ export function createHandler(config: HandlerConfig, googleTransport: Transport 
         if (!exact(result, ['code', 'status', 'result', 'accounting']) || !validAccounting(result.accounting)
           || !['dispatched', 'ready'].includes(String(result.status))) throw new ProtocolError('ANALYSIS_FAILED');
         if (result.status === 'ready') {
-          if (!validResult(result.result) || result.result.requestId !== requestId || result.result.draftId !== draftId
+          if (!(validResult(result.result, AZURE_MODEL) && validAzureFacts(result.result.facts) || validResult(result.result, MODEL_ID))
+            || result.result.requestId !== requestId || result.result.draftId !== draftId
             || result.result.generation !== Number(generation) || result.result.imageSha256 !== imageHash) throw new ProtocolError('ANALYSIS_FAILED');
         } else if (result.result !== null) throw new ProtocolError('ANALYSIS_FAILED');
         return reply(result, result.status === 'ready' ? 200 : 202);
@@ -106,24 +108,25 @@ export function createHandler(config: HandlerConfig, googleTransport: Transport 
       if (!object(preflight.consent) || preflight.consent.enabled !== true
         || !Number.isInteger(preflight.policy.noticeRevision) || Number(preflight.policy.noticeRevision) < 1
         || preflight.consent.noticeRevision !== preflight.policy.noticeRevision) return error('CONSENT_REQUIRED');
-      if (!object(preflight.policy) || preflight.policy.modelId !== MODEL_ID || preflight.policy.promptVersion !== 1
+      if (!object(preflight.policy) || preflight.policy.modelId !== AZURE_MODEL || preflight.policy.promptVersion !== 1
+        || preflight.policy.noticeRevision !== 2 || preflight.policy.executionManifestId !== AZURE_MANIFEST
         || typeof preflight.policy.maxRequestMicro !== 'string' || !/^[1-9][0-9]{0,18}$/.test(preflight.policy.maxRequestMicro)
-        || BigInt(preflight.policy.maxRequestMicro) < BigInt(RESERVATION_MICRO) || Date.now() >= REVIEW_EXPIRES) return error('UNCONFIGURED');
-      const token = await googleToken(config.google, stageSignal(signal, 5000), googleTransport);
+        || BigInt(preflight.policy.maxRequestMicro) < BigInt(AZURE_RESERVATION)
+        || Date.now() >= AZURE_REVIEW_EXPIRES || !azureConfigured(config.azure)) return error('UNCONFIGURED');
       const claim = await rpc('ai_claim_analysis', {
         p_owner_id: user.id, p_request_id: requestId, p_draft_id: draftId, p_generation: Number(generation),
-        p_image_sha256: imageHash, p_byte_count: image.length, p_width: width, p_height: height, p_manifest_id: MANIFEST_ID,
+        p_image_sha256: imageHash, p_byte_count: image.length, p_width: width, p_height: height, p_manifest_id: AZURE_MANIFEST,
       }, true);
       if (claim.code === 'ALREADY_CLAIMED' && claim.claimed === false) return await status();
       if (claim.code !== 'OK' || claim.claimed !== true) return error(closedCode(claim.code));
       if (!exact(claim, ['code', 'claimed', 'manifestId', 'resultExpiresAtMs', 'dispatchBeforeMs'])
-        || claim.manifestId !== MANIFEST_ID || typeof claim.dispatchBeforeMs !== 'number' || !Number.isSafeInteger(claim.dispatchBeforeMs)
+        || claim.manifestId !== AZURE_MANIFEST || typeof claim.dispatchBeforeMs !== 'number' || !Number.isSafeInteger(claim.dispatchBeforeMs)
         || typeof claim.resultExpiresAtMs !== 'number' || !Number.isSafeInteger(claim.resultExpiresAtMs)
         || Date.now() >= Math.min(claim.dispatchBeforeMs, claim.resultExpiresAtMs)) return error('TIMEOUT');
       signal.throwIfAborted();
-      const result = await analyzeGoogle(config.google, token, image, signal, googleTransport);
+      const result = await analyzeAzure(config.azure, image, signal, azureTransport);
       const finished = await rpc('ai_finish_analysis', {
-        p_owner_id: user.id, p_request_id: requestId, p_manifest_id: MANIFEST_ID,
+        p_owner_id: user.id, p_request_id: requestId, p_manifest_id: AZURE_MANIFEST,
         p_facts: result.facts, p_usage: result.usage, p_code: result.facts ? 'SUCCESS' : 'FAILED',
       }, true);
       if (finished.code !== 'READY' || finished.stored !== true) return error('ANALYSIS_FAILED');

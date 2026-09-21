@@ -143,7 +143,7 @@ async function full(env, phase) {
       await h.finalize(value, row);
       const history = await client.rpc(owner, 'item_attribution_history', { p_item_id: value.p_item.id });
       requireEvidence(history.length === 1 && history[0].source_image_id === value.p_image.id
-        && history[0].image_sha256 === analysisHash && history[0].model_id === 'gemini-3.8-flash'
+        && history[0].image_sha256 === analysisHash && history[0].model_id === 'gpt-5.6-terra-2026-07-09'
         && history[0].prompt_version === 1);
       eq(Object.keys(history[0].fields).sort(), ['category', 'colours', 'formality']);
       eq(Object.keys(history[0]).sort(), ['fields', 'image_sha256', 'model_id', 'prompt_version', 'source_image_id']);
@@ -197,13 +197,36 @@ async function full(env, phase) {
       const profile = (await client.rows(owner, 'profiles'))[0];
       eq(await client.rpc(owner, 'ai_set_consent', { p_enabled: false, p_notice_revision: null, p_expected_version: profile.version }),
         { code: 'OK', profileVersion: String(profile.version + 1) });
+      const first = analyzedIntent(owner, 31);
+      const refused = await h.call('reserve_analyzed_item_save', first);
+      requireEvidence(refused.ok && refused.status === 200 && refused.data[0].state === 'analysis_unavailable');
+      eq(await h.read('items', first.p_item.id), []);
       await h.finalize(value, row); eq((await h.reserve(value)).state, 'completed');
-      eq(await client.rpc(owner, 'ai_set_consent', { p_enabled: true, p_notice_revision: 1, p_expected_version: profile.version + 1 }),
+      eq(await client.rpc(owner, 'ai_set_consent', { p_enabled: true, p_notice_revision: 2, p_expected_version: profile.version + 1 }),
         { code: 'OK', profileVersion: String(profile.version + 2) });
+      const replays = await Promise.all([h.call('reserve_analyzed_item_save', first), h.call('reserve_analyzed_item_save', first)]);
+      requireEvidence(replays.some((reply) => reply.ok));
+      for (const reply of replays) {
+        if (reply.ok) eq(reply.data, refused.data);
+        else denied(reply);
+      }
+      eq((await h.call('reserve_analyzed_item_save', first)).data, refused.data);
+      for (const key of ['draftId', 'generation', 'imageSha256']) {
+        const malformed = structuredClone(first);
+        malformed.p_claim[key] = key === 'generation' ? 2 : key === 'draftId' ? randomUUID() : 'c'.repeat(64);
+        denied(await h.call('reserve_analyzed_item_save', malformed), key === 'imageSha256' ? 'Invalid input' : 'Request conflict');
+      }
     } else if (phase === 'expired') {
       const [value, row] = await use(24);
       await h.finalize(value, row);
-      denied(await h.call('reserve_analyzed_item_save', analyzedIntent(owner, 31)));
+      const refused = analyzedIntent(owner, 31);
+      const refusal = await h.call('reserve_analyzed_item_save', refused);
+      requireEvidence(refusal.ok && refusal.status === 200);
+      eq(refusal.data, [{ state: 'analysis_unavailable', fingerprint: null,
+        item: { id: refused.p_item.id, owner_id: owner.uid },
+        image: { id: refused.p_image.id, item_id: refused.p_item.id, owner_id: owner.uid } }]);
+      eq(await h.read('items', refused.p_item.id), []);
+      eq((await h.call('reserve_analyzed_item_save', refused)).data, refusal.data);
       const unverified = analyzedIntent(owner, 31); unverified.p_claim = null;
       for (const entry of Object.values(unverified.p_item.field_provenance))
         if (entry.kind.startsWith('ai_')) entry.kind = 'unknown';

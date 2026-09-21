@@ -1,8 +1,10 @@
-import { hasOnlyDataKeys, isAiCounter, isAiTimestamp, parseAiResult, type AiResult } from './ai-analysis';
+import { aiFields, hasOnlyDataKeys, isAiCounter, isAiTimestamp, parseAiResult, type AiResult } from './ai-analysis';
 import { freezeValues } from './garment-fields';
 
 export const aiModel = 'gemini-3.8-flash';
-export const aiReviewExpires = Date.parse('2027-01-01T00:00:00Z');
+export const azureAiModel = 'gpt-5.6-terra-2026-07-09';
+export const azureAiManifest = 'azure-eu-terra-devtest-v1';
+export const azureAiReviewExpires = Date.parse('2026-10-21T00:00:00Z');
 export const aiCodes = ['OK', 'UNAVAILABLE', 'UNAUTHENTICATED', 'INVALID_INPUT', 'CONSENT_REQUIRED',
   'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'CONFLICT', 'ACTIVE_DRAFT', 'RATE_LIMIT',
   'ALLOWANCE', 'TERMINAL', 'TOO_LARGE', 'UNSUPPORTED_MEDIA', 'ANALYSIS_FAILED', 'TIMEOUT'] as const;
@@ -17,6 +19,7 @@ export function isProfileVersion(value: unknown): value is string {
 export type AiPolicy = Readonly<{
   activated: boolean; noticeRevision: number; modelId: string; promptVersion: number;
   maxRequestMicro: string; monthlyAllowanceMicro: string; maxRequestsPerHour: number; resultTtlSeconds: number;
+  executionManifestId?: string | null;
 }>;
 export type AiStatus = Readonly<{
   code: AiCode; period: string; serverTimeMs: number;
@@ -43,13 +46,18 @@ export function parseAiStatus(value: unknown): AiStatus | null {
   let policy: AiPolicy | null = null;
   if (p !== null) {
     if (!hasOnlyDataKeys(p, ['activated', 'noticeRevision', 'modelId', 'promptVersion', 'maxRequestMicro',
-      'monthlyAllowanceMicro', 'maxRequestsPerHour', 'resultTtlSeconds']) || typeof p.activated !== 'boolean'
+      'monthlyAllowanceMicro', 'maxRequestsPerHour', 'resultTtlSeconds', 'executionManifestId'],
+      ['activated', 'noticeRevision', 'modelId', 'promptVersion', 'maxRequestMicro',
+        'monthlyAllowanceMicro', 'maxRequestsPerHour', 'resultTtlSeconds']) || typeof p.activated !== 'boolean'
+      || Object.hasOwn(p, 'executionManifestId') && p.executionManifestId !== null && (typeof p.executionManifestId !== 'string'
+        || !/^[A-Za-z0-9._-]{1,128}$/.test(p.executionManifestId))
       || !isAiCounter(p.noticeRevision) || typeof p.modelId !== 'string' || !/^[A-Za-z0-9._:/-]{1,128}$/.test(p.modelId)
       || !isAiCounter(p.promptVersion) || !isMicro(p.maxRequestMicro) || !isMicro(p.monthlyAllowanceMicro)
       || !isAiCounter(p.maxRequestsPerHour) || !isAiCounter(p.resultTtlSeconds) || p.resultTtlSeconds > 86400) return null;
     policy = { activated: p.activated, noticeRevision: p.noticeRevision, modelId: p.modelId,
       promptVersion: p.promptVersion, maxRequestMicro: p.maxRequestMicro, monthlyAllowanceMicro: p.monthlyAllowanceMicro,
-      maxRequestsPerHour: p.maxRequestsPerHour, resultTtlSeconds: p.resultTtlSeconds };
+      maxRequestsPerHour: p.maxRequestsPerHour, resultTtlSeconds: p.resultTtlSeconds,
+      ...(typeof p.executionManifestId === 'string' || p.executionManifestId === null ? { executionManifestId: p.executionManifestId } : {}) };
   }
   return freezeValues({ code: value.code, period: value.period, serverTimeMs: value.serverTimeMs,
     consent: { enabled: c.enabled, noticeRevision: c.noticeRevision, consentedAt: c.consentedAt, profileVersion: c.profileVersion },
@@ -57,9 +65,16 @@ export function parseAiStatus(value: unknown): AiStatus | null {
 }
 export function supportedAiPolicy(status: AiStatus, now = Date.now()): boolean {
   const p = status.policy;
-  return !!p && p.activated && p.modelId === aiModel && p.promptVersion === 1 && p.noticeRevision === 1
-    && BigInt(p.maxRequestMicro) >= 2270823n && BigInt(p.monthlyAllowanceMicro) > 0n
-    && now < aiReviewExpires && status.serverTimeMs < aiReviewExpires;
+  return !!p && p.activated && p.modelId === azureAiModel && p.promptVersion === 1 && p.noticeRevision === 2
+    && p.executionManifestId === azureAiManifest && BigInt(p.maxRequestMicro) >= 4097351n
+    && BigInt(p.monthlyAllowanceMicro) > 0n && now < azureAiReviewExpires && status.serverTimeMs < azureAiReviewExpires;
+}
+export function aiNoticeProfile(policy: AiPolicy | null): 'google' | 'azure' | null {
+  if (!policy || policy.promptVersion !== 1) return null;
+  if (policy.modelId === azureAiModel && policy.noticeRevision === 2 && policy.executionManifestId === azureAiManifest) return 'azure';
+  if (policy.modelId === aiModel && policy.noticeRevision === 1
+    && (policy.executionManifestId === undefined || policy.executionManifestId === 'google-eu-3.8-v1')) return 'google';
+  return null;
 }
 export function canAnalyze(status: AiStatus, now = Date.now()): boolean {
   return supportedAiPolicy(status, now) && status.code === 'OK' && status.consent.enabled
@@ -81,7 +96,8 @@ export function parseAnalysisReply(value: unknown): AiAnalysisReply | null {
     || !isMicro(a.amountMicro) || a.currency !== 'USD') return null;
   const parsed = value.result === null ? null : parseAiResult(value.result);
   if (value.status === 'ready' ? !parsed?.ok : value.result !== null) return null;
-  if (parsed?.ok && (parsed.value.modelId !== aiModel || parsed.value.promptVersion !== 1)) return null;
+  if (parsed?.ok && (![aiModel, azureAiModel].includes(parsed.value.modelId) || parsed.value.promptVersion !== 1)) return null;
+  if (parsed?.ok && parsed.value.modelId === azureAiModel && !hasOnlyDataKeys(parsed.value.facts.fields, aiFields)) return null;
   return freezeValues({ code: 'OK', status: value.status, result: parsed?.ok ? parsed.value : null,
     accounting: { basis: a.basis, amountMicro: a.amountMicro, currency: 'USD' } });
 }

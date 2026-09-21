@@ -8,6 +8,7 @@ import { beginAiAnalysis, createAiDraft, editAiDraftField, receiveAiResult, type
 import { newAnalyzedSaveAttempt, newUnverifiedSaveAttempt } from '../../src/domain/analyzed-save';
 import { buildGarmentWrite, editGarmentField, newGarmentDraft } from '../../src/domain/garment-fields';
 import { saveAnalyzedItem } from '../../src/images/upload';
+import { AnalyzedSaveRefusedError } from '../../src/data/errors';
 
 const owner = '10000000-0000-4000-8000-000000000001';
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -89,6 +90,7 @@ describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
     const bodies: unknown[] = [];
     let completed = false, lost = false, drift = 0;
     let finalizerResponse: (() => Response) | undefined;
+    let reserveResponse: (() => Response) | undefined;
     const files = new Map<string, Blob>();
     const fetcher = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(url)).pathname;
@@ -97,6 +99,7 @@ describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
         hasAuthorization: Boolean(headers.get('authorization')), hasApiKey: Boolean(headers.get('apikey')) });
       calls.push(path); bodies.push(typeof init?.body === 'string' ? JSON.parse(init.body) : null);
       if (drift === calls.length) scope.epoch++;
+      if (path.endsWith('/reserve_analyzed_item_save') && reserveResponse) return reserveResponse();
       if (path.endsWith('/reserve_analyzed_item_save')) return Response.json([{
         item: { ...attempt.payload, id: attempt.itemId, owner_id: owner, version: 1, deleted_at: null,
           created_at: '2026-09-12T00:00:00Z', updated_at: '2026-09-12T00:00:00Z' },
@@ -130,8 +133,44 @@ describe('connected analyzed Save (actual SDK; synthetic HTTP only)', () => {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: fetcher },
     });
     return { client, scope, attempt, calls, requests, bodies, files, controller, lose: (value: boolean) => { lost = value; }, drift: (n: number) => { drift = n; },
-      respond: (response: () => Response) => { finalizerResponse = response; }, completed: () => completed };
+      respond: (response: () => Response) => { finalizerResponse = response; },
+      reserveResponse: (response: () => Response) => { reserveResponse = response; }, completed: () => completed };
   }
+  function refused(attempt: ReturnType<typeof newAnalyzedSaveAttempt>) {
+    return [{ state: 'analysis_unavailable', fingerprint: null,
+      item: { id: attempt.itemId, owner_id: attempt.ownerId },
+      image: { id: attempt.imageId, item_id: attempt.itemId, owner_id: attempt.ownerId } }];
+  }
+  it('accepts only a committed exact successful refusal before fingerprint parsing and never uploads', async () => {
+    const a = api(), reserved = vi.fn(), stages = vi.fn();
+    a.reserveResponse(() => Response.json(refused(a.attempt)));
+    await expect(saveAnalyzedItem(a.client, a.scope, a.attempt, stages, reserved)).rejects.toMatchObject({
+      name: 'AnalyzedSaveRefusedError', itemId: a.attempt.itemId, imageId: a.attempt.imageId,
+    });
+    expect(reserved).not.toHaveBeenCalled(); expect(a.files.size).toBe(0);
+    expect(stages).toHaveBeenCalledExactlyOnceWith('capture.reserving'); expect(a.calls).toHaveLength(1);
+  });
+  it.each(['extra', 'item-extra', 'wrong-owner', 'wrong-image', 'fingerprint', 'wrong-state', 'http-error', 'lost', 'epoch'])(
+    'does not classify %s as a safe refusal', async (kind) => {
+      const a = api(), row = refused(a.attempt)[0]!;
+      let body: unknown = [row];
+      if (kind === 'extra') body = [{ ...row, extra: true }];
+      if (kind === 'item-extra') body = [{ ...row, item: { ...row.item, extra: true } }];
+      if (kind === 'wrong-owner') row.image.owner_id = context.draftId;
+      if (kind === 'wrong-image') row.image.id = context.draftId;
+      if (kind === 'fingerprint') body = [{ ...row, fingerprint: 'c'.repeat(64) }];
+      if (kind === 'wrong-state') row.state = 'reserved';
+      if (kind === 'epoch') a.drift(1);
+      a.reserveResponse(() => {
+        if (kind === 'lost') throw new TypeError('Synthetic lost response');
+        return Response.json(body, { status: kind === 'http-error' ? 400 : 200 });
+      });
+      const reserved = vi.fn();
+      const failure = await saveAnalyzedItem(a.client, a.scope, a.attempt, () => {}, reserved).then(() => null, (error: unknown) => error);
+      expect(failure).toBeInstanceOf(Error); expect(failure).not.toBeInstanceOf(AnalyzedSaveRefusedError);
+      expect(reserved).not.toHaveBeenCalled(); expect(a.files.size).toBe(0); expect(a.calls).toHaveLength(1);
+    },
+  );
   it('routes only through analyzed reserve, immutable uploads and finalizer, preserving frozen proof on lost-reply retry', async () => {
     const a = api(); a.lose(true);
     await expect(saveAnalyzedItem(a.client, a.scope, a.attempt, () => {})).rejects.toThrow('error.unavailable');

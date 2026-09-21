@@ -17,6 +17,7 @@ export const SOURCE_HASHES = Object.freeze({
   analysis: '27d5e1d5c417cb4cb9eb5e5954794b492f3d94163da87f83777e3afa6fa07dc4',
   analyzedSave: '3b42cfdbf9890c29229893dc8603a86181aea923b63b91bf75b26cf5783844ea',
   lifecycle: '8cc0fc1207737d63b7e1d000fc7471a9941a4833aaebebc75979c498a4d6c476',
+  azure: '33021c6436727dad93c644ba82b1c9761ebe28d4d77a8686a6264c828ba04514',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;

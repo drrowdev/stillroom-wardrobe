@@ -180,6 +180,12 @@ export function continueAiManually(state: AiDraftState, current: unknown): AiTra
   if (state.status === 'invalidated') return { status: 'ignored', state, reason: 'invalidated' };
   return updated({ ...state, status: 'cancelled', result: null });
 }
+export function refuseAiSave(state: AiDraftState, current: unknown): AiTransition {
+  const blocked = guard(state, current);
+  if (blocked) return blocked;
+  if (state.status === 'invalidated') return { status: 'ignored', state, reason: 'invalidated' };
+  return updated({ ...state, status: 'expired', result: null });
+}
 export function invalidateAiDraft(reason: AiInvalidation): AiDraftState {
   return freezeValues({ status: 'invalidated', reason, context: null, draft: null, derivation: null, result: null });
 }

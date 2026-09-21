@@ -645,19 +645,26 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         || !sameValue(Object.keys(image).sort(), [...imageKeys].sort()) || !isUuid(item.id) || !isUuid(image.id)) {
         await invalid(); return;
       }
+      const existing = saves.find((save) => save.owner === owner && (save.itemId === item.id || save.imageId === image.id));
       let fingerprint: string;
       try {
         const provenance = parseFieldProvenance(item.field_provenance);
         if (Object.values(provenance).some((entry) => (!analyzed && entry.kind !== 'user') || entry.revision !== 1)) throw new Error('Invalid fixture intent');
-        if (analyzed) {
+        if (analyzed && !existing) {
           const claim = body.p_claim;
           if (claim !== null) {
             if (!isRecord(claim) || !isRecord(claim.fields) || typeof claim.requestId !== 'string') throw new Error('Invalid fixture claim');
             const result = options.aiResults?.get(claim.requestId);
             if (!result || result.draftId !== claim.draftId || result.generation !== claim.generation
               || result.imageSha256 !== claim.imageSha256 || result.imageSha256 !== image.main_sha256
-              || result.expiresAtMs <= Date.now() || !claim.requestId.startsWith(owner === owners.a ? 'c329a000-' : 'c329b000-')) {
+              || !claim.requestId.startsWith(owner === owners.a ? 'c329a000-' : 'c329b000-')) {
               throw new Error('Invalid fixture claim');
+            }
+            if (result.expiresAtMs <= Date.now()) {
+              options.aiResults?.delete(claim.requestId);
+              await json([{ state: 'analysis_unavailable', fingerprint: null,
+                item: { id: item.id, owner_id: owner }, image: { id: image.id, item_id: item.id, owner_id: owner } }]);
+              return;
             }
             for (const [field, entry] of Object.entries(claim.fields)) {
               if (!isRecord(entry) || !sameValue(entry.value, result.facts.fields[field as keyof typeof result.facts.fields])
@@ -681,7 +688,6 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         }
         fingerprint = fingerprintFor(item, image);
       } catch { await invalid(); return; }
-      const existing = saves.find((save) => save.owner === owner && (save.itemId === item.id || save.imageId === image.id));
       if (existing) {
         if (existing.itemId !== item.id || existing.imageId !== image.id || existing.fingerprint !== fingerprint) { await conflict(); return; }
         const current = currentSave(existing);
