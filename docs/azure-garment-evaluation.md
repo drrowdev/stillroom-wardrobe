@@ -1,7 +1,8 @@
 # Azure garment pilot (P2-PILOT)
 
 This isolated, operator-only I29/R28 evaluation helper supports **one prepared
-photo, once per approved model, at most two sends, with no retries**. It does not
+photo, with no retries**: the original pair has at most two sends, and a separately
+authorized single run has one selected-arm intent maximum. It does not
 integrate Azure into the application, change Google 3.8 or its receipts, or
 constitute the blueprint 20/21 thirty-photo comparison. This unblinded functional
 pilot establishes neither a winner nor 90% accuracy, provider retention, a token
@@ -15,6 +16,12 @@ The [A1 proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issueco
 and [reviewed A1 source release](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5752310646)
 authorize bounded metering diagnostics and private unaccepted candidates for
 future observations, not another live request or continuation of a halted pilot.
+The [A2 proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5756648995),
+[critique dispositions](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5756769191)
+and [selected owner decision/source release](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5756899024)
+add explicit single mode and private metadata-shape capture. Source capability
+is not permission to initialize or send: exact-head source/CI gates and the final
+reviewed owner procedure remain required.
 
 ## Cost decision and limits
 
@@ -176,6 +183,120 @@ or deleting earlier intent/uncertainty:
 node scripts\ai-evaluation\azure-garments.mjs abandon <absolute-private-pilot-directory>
 ```
 
+## Separately authorized single observation (A2)
+
+This is a new, independently approved one-shot run, not a way to resume, reset,
+replace or migrate a halted pair. The chosen future operation is **Sol only**
+with private name/type capture and the same prepared photo. The owner selected
+an additional 250 EUR-cent allocation, bringing the aggregate allocation to
+750 cents while retaining the prior 500-cent commitments. These are operational
+allocations, not measured charges or an invoice ceiling. Nothing is refunded
+because another run halted. No actual initialization or send is authorized by
+this source document.
+
+`init-single` consumes a private JSON object with exactly `approval` and
+`authorization`. `approval` is the exact existing photo-approval object above,
+with owner affirmations and unchanged prepared bytes. `authorization` has exactly:
+
+```json
+{
+  "mode": "single",
+  "selectedArm": "sol",
+  "authorizationRef": "PUBLIC_APPROVAL_LABEL",
+  "priorCommittedCentsEur": 500,
+  "aggregateLimitCentsEur": 750,
+  "shapeCapture": "private-names-types-v1"
+}
+```
+
+Use the actual non-private public authorization label, not a URL, token or
+credential. Its bounded identifier syntax authenticates nothing. The source
+supports only `terra` and `sol`; this does not authorize another Terra call.
+`shapeCapture` must explicitly be `off` or `private-names-types-v1`; omission
+does not mean consent. There is no allowance field, `maxIntents` or consent flag.
+The fixed reservation is 250 cents, and safe nonnegative integer accounting must
+satisfy `priorCommittedCentsEur + 250 <= aggregateLimitCentsEur`.
+Prior commitments are operator-attested, not automatically reconciled. Preserve
+unknown exposure rather than entering zero. The helper does not enforce an
+aggregate across copied directories, external requests or rewritten journals.
+
+The following grammar/examples are for a later reviewed owner procedure only,
+not an instruction or permission to execute now. The private input contains the
+two objects above; no key or photo bytes belong in arguments:
+
+```text
+node scripts\ai-evaluation\azure-garments.mjs init-single <absolute-private-single-directory> <absolute-private-input-json>
+node scripts\ai-evaluation\azure-garments.mjs send <absolute-private-single-directory> sol
+node scripts\ai-evaluation\azure-garments.mjs status <absolute-private-single-directory>
+```
+
+The immutable single init record has exactly `type`, `approval`, `controls`,
+`authorization`, `runBinding`, `time`. The wire field is **`controls`**, not
+`controlsDigest`. The domain-separated binding covers authorization, approval
+and unchanged controls; each single intent includes that `runBinding`. It
+detects inconsistent associations, not malicious rewriting or duplication.
+Legacy `init` keeps its original header and pair rules. An existing journal is
+never overwritten or converted.
+
+Inside the exclusive lock, single sends require the bound arm, no review token
+and both slots still empty. A persisted intent exhausts the run regardless of
+response, failure or uncertainty. An outer CLI read never authorizes mode or
+dispatch. Pair Sol still requires its prior reviewed Terra result; single Sol
+requires no fake Terra record or token. The opposite single arm is `NOT_PLANNED`;
+an abandoned unused selected arm is `NOT_ATTEMPTED`. Single status reports no
+review token (null), and only the public authorization label/mode and explicitly
+operator-attested accounting. Old pair tokens remain unchanged.
+
+### Consented private usage-shape capture
+
+The owner chose capture before this feature was implemented, acknowledging that
+field names can contain sensitive information. Capture is eligible only with
+the immutable `private-names-types-v1` choice, `USAGE/UNEXPECTED_KEY`, and an
+A1-qualified unaccepted candidate after all independent answer gates and known
+breach checks. Unknown fields still **halt**, with null accepted facts/usage/cost
+and the full reservation. No name is assumed harmless or accepted for billing.
+Sol may not reproduce another response's extension; this is not a diagnosis
+guarantee or a completed comparison.
+
+Only the private ledger may hold `usageShape`:
+
+```text
+null
+{status:"CAPTURED", entries:[{name:<bounded name>, type:<fixed type>}]}
+{status:"SUPPRESSED", entries:[]}
+```
+
+Only unknown own top-level usage-key names and the fixed types `null`, `boolean`,
+`number`, `string`, `array`, `object` are captured. No values, nested keys,
+lengths, headers, error bodies or full responses. Names are inert array entries,
+never assigned as object properties. At most eight unique names are retained,
+each matching `[A-Za-z_][A-Za-z0-9_]*` and at most 48 ASCII bytes, with a 1024-byte
+serialized shape cap. Any violation suppresses the whole shape: no truncation,
+prefixes, hashes, omitted counts or detailed suppression reason. Eight maximum
+48-byte names with the longest type label serialize to 649 bytes; the 1024-byte
+limit is defensive, not reached by a valid shape.
+
+Before recording or returning any result, the execution boundary suppresses the
+whole capture if a name literally contains the active key (case-sensitive).
+Parsers remain credential-free. Key suppression uses the identical empty
+SUPPRESSED shape, without a special log, reason or flag. This is **not
+anonymization**: other secrets, personal content or differently encoded/cased
+text may still occur in names. Syntax/length checks do not prove privacy.
+
+Status emits only scalar `captureStatus` (`CAPTURED`, `SUPPRESSED` or null), never
+names, types, entries or shape objects. SUPPRESSED reveals one bit, not zero
+information. Do not export or disclose captures to agents, chat or PRs. New
+single observations have exactly eleven keys, including `usageShape` even when
+null/off; pair observations remain legacy eight or A1 ten keys. Replay validates
+the mode, bound arm, consent choice and strict shape/observation combinations.
+
+Private names must be retained for **no more than seven days from capture/result
+completion**, not from delayed scoring. Unresolved accounting does not justify
+keeping names indefinitely; any accounting exception is limited to necessary
+non-sensitive numeric/financial evidence. Reconcile preservation and cleanup
+through the existing owner approval boundary. No automatic deletion, journal
+rewrite, cleanup framework or new deletion authority is added.
+
 ## Request, persistence and failure boundaries
 
 The request is one fresh v1 Chat Completion, one high-detail inline JPEG,
@@ -219,7 +340,7 @@ recovery is authorized.
 
 ### Invalid metering: diagnostics and unaccepted candidates
 
-New observations include `usageDiagnostic` and `unacceptedCandidate`; both keys
+New pair and single observations include `usageDiagnostic` and `unacceptedCandidate`; both keys
 are always present. `usageDiagnostic` is null except for `USAGE_INVALID`, where
 it contains one fixed `{field, condition}` pair identifying the first failed
 check. It does not report every failure or imply later checks passed.
@@ -237,8 +358,9 @@ Checks proceed through the usage/detail containers, input/output/total/reasoning
 cache-read/cache-write counters, arithmetic relationships, unexpected top-level
 keys, then unexpected prompt/completion detail components. `MISSING` means the
 property is absent, not that its value is null or malformed. Neither case is
-treated as zero. Unexpected provider keys/values are never copied into the
-diagnostic; only the fixed container and condition are retained. No partial
+treated as zero. Unexpected provider keys/values are never copied into this
+diagnostic; only the fixed container and condition are retained. The separate
+consented A2 private shape has the narrow name/type boundary described above. No partial
 counter dump, raw response, error text or invented cost is recorded.
 
 Invalid usage **always remains `HALTED / USAGE_INVALID`**, even when another
@@ -267,7 +389,7 @@ and retention rules. Status exposes the fixed diagnostic and a scalar
 facts. No raw-response capture, export or candidate-to-application path exists.
 
 Legacy eight-key observations remain readable as stored, without added fields,
-rewritten bytes or changed review-token hashes. New observations require both
+rewritten bytes or changed review-token hashes. A1 pair observations require both
 extension keys and strict valid combinations; partial extensions are rejected.
 Legacy status shows unavailable diagnostic/candidate information as null. Policy,
 request controls and their digest binding are unchanged. Existing halted ledgers
@@ -302,6 +424,9 @@ HALTED review token and verify unchanged journal bytes after read/status and a
 blocked send. Candidate tests measure the complete serialized result record and
 journal under the unchanged bounds, including wrapper/diagnostic overhead; an
 unaccepted-candidate record is not assumed smaller than a SUCCESS record.
+A2 tests additionally freeze an A1 pair token, exercise single-mode bindings,
+one-intent/accounting/CLI constraints, private capture/replay and literal-key
+suppression with fake credentials only. Existing pair assertions are retained.
 
 Report actual attempts, failures and unused slots separately. Schema, transport,
 truncation and refusal failures are not invented semantic labels. Inspect useful
@@ -316,6 +441,8 @@ proposal was seven days after scoring/abandonment for evaluation copies/results,
 with nonidentifying accounting retained for reconciliation. Do not erase needed
 uncertainty evidence or original photos. Removing local copies or Azure resources
 does not guarantee deletion of provider abuse-monitoring data.
+For A2 captured names, the stricter seven-day maximum from result completion
+above controls; the accounting exception never extends private-name retention.
 
 On completion or abandonment, reconcile dispatched/uncertain charges, then seek
 fresh user confirmation and inspect exact current membership before deleting

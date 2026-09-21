@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   POLICY, PilotError, digest, schema, validFacts, requestBody, validateApproval,
   controlsDigest, initialize, readLedger, abandon, summary, inspectResponse, executeSlot,
+  initializeSingle, validateSingleAuthorization, parseArguments,
 } from './azure-garments.mjs';
 
 const SYNTHETIC = Buffer.from('synthetic text only; not a JPEG or private input');
@@ -81,6 +82,35 @@ test('legacy halted journal preserves its bytes, binding and review token', asyn
   assert.equal(await readFile(filename, 'utf8'), journal);
   assert.equal(digest(await readFile(filename)), journalHash);
   assert.equal(summary(await readLedger(directory)).slots.terra.reviewToken, '90095db49ea4bda0d8a2e8ab4f985e2c421e047a1bc26a74efb988d5eb661c05');
+});
+
+test('frozen A1 pair observation retains its token and journal bytes', async (t) => {
+  const directory = await fixture(t);
+  const observation = {
+    state: 'HALTED', reason: 'USAGE_INVALID', confirmedResponse: true, httpStatus: 200,
+    returnedModel: 'gpt-5.6-terra', usage: null, facts: null, elapsedMs: 100,
+    usageDiagnostic: { field: 'USAGE', condition: 'UNEXPECTED_KEY' },
+    unacceptedCandidate: { status: 'UNACCEPTED_METERING', facts: facts() },
+  };
+  const time = '2026-09-21T00:00:00.000Z';
+  const filename = path.join(directory, 'pilot.jsonl');
+  await appendFile(filename, [
+    { type: 'intent', arm: 'terra', reservationCentsEur: 250, photoSha256: digest(SYNTHETIC), reviewFirst: null, time },
+    { type: 'result', arm: 'terra', observation, time },
+    { type: 'abandon', time },
+  ].map((event) => JSON.stringify(event)).join('\n') + '\n');
+  const original = await readFile(filename);
+  const state = await readLedger(directory);
+  assert.deepEqual(state.slots.terra.result, observation);
+  const report = summary(state);
+  assert.equal(report.slots.terra.reviewToken, 'a5b91948a0e2766aba0e7d821185c8885ef8e501d8d13918069cc1e7ca19ec8f');
+  assert.equal(report.slots.terra.state, 'HALTED');
+  assert.equal(report.abandoned, true);
+  await assert.rejects(executeSlot(options(directory, {
+    arm: 'sol', reviewFirst: report.slots.terra.reviewToken,
+  })), /ABANDONED/);
+  assert.deepEqual(await readFile(filename), original);
+  assert.equal(summary(await readLedger(directory)).slots.terra.reviewToken, 'a5b91948a0e2766aba0e7d821185c8885ef8e501d8d13918069cc1e7ca19ec8f');
 });
 
 test('fixed requests are independent and contain only the reviewed controls', () => {
@@ -753,4 +783,320 @@ test('maximum-length domain candidate and boundary content fit measured complete
   assert.ok(journal.length < 131072);
   assert.equal(journal.toString().trimEnd().split('\n').length, 3);
   t.diagnostic(`Synthetic complete result record: ${Buffer.byteLength(record)} bytes; journal: ${journal.length} bytes; response: ${response.body.length} bytes.`);
+});
+
+function authorization(overrides = {}) {
+  return { mode: 'single', selectedArm: 'sol', authorizationRef: 'synthetic-a2-approval',
+    priorCommittedCentsEur: 500, aggregateLimitCentsEur: 750, shapeCapture: 'private-names-types-v1', ...overrides };
+}
+async function singleFixture(t, overrides = {}) {
+  const directory = await mkdtemp(path.join(tmpdir(), 'stillroom-p2-offline-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await initializeSingle(directory, { approval: approval(), authorization: authorization(overrides) });
+  return directory;
+}
+function shapeEnvelope(entries = [['extra_meter', 123]], arm = 'sol') {
+  const data = envelope(arm);
+  for (const [name, value] of entries) {
+    Object.defineProperty(data.usage, name, { value, enumerable: true, configurable: true });
+  }
+  return data;
+}
+function singleOptions(directory, overrides = {}) {
+  return options(directory, { arm: 'sol', sender: async () => reply(envelope('sol')), ...overrides });
+}
+
+test('single authorization and CLI grammar are explicit, bounded and credential-free', () => {
+  assert.deepEqual(validateSingleAuthorization(authorization()), authorization());
+  for (const change of [
+    (a) => { delete a.shapeCapture; }, (a) => { a.shapeConsent = true; },
+    (a) => { a.maxIntents = 1; }, (a) => { a.additionalAllowanceCentsEur = 250; },
+    (a) => { a.mode = 'pair'; }, (a) => { a.selectedArm = 'eval-sol-20260709'; },
+    (a) => { a.authorizationRef = 'https://example.test/private'; },
+    (a) => { a.authorizationRef = 'x'.repeat(161); },
+    (a) => { a.shapeCapture = 'histogram'; }, (a) => { a.priorCommittedCentsEur = -1; },
+    (a) => { a.priorCommittedCentsEur = Number.MAX_SAFE_INTEGER; },
+    (a) => { a.aggregateLimitCentsEur = 749; }, (a) => { a.aggregateLimitCentsEur = Infinity; },
+    (a) => { a.aggregateLimitCentsEur = '750'; }, (a) => { a.priorCommittedCentsEur = 500.5; },
+  ]) {
+    const a = authorization(); change(a);
+    assert.throws(() => validateSingleAuthorization(a), /SINGLE_AUTHORIZATION_INVALID/);
+  }
+  for (const args of [
+    ['init', 'private-location', 'approval.json'], ['init-single', 'private-location', 'input.json'],
+    ['send', 'private-location', 'sol'], ['send', 'private-location', 'sol', 'a'.repeat(64)],
+    ['send', 'private-location', 'terra'], ['status', 'private-location'], ['abandon', 'private-location'],
+  ]) assert.equal(parseArguments(args).command, args[0]);
+  for (const args of [
+    ['init-single', 'private-location'], ['init-single', 'private-location', 'input.json', 'sol'],
+    ['send', 'private-location', 'sol', 'invalid'], ['send', 'private-location', 'terra', 'a'.repeat(64)],
+    ['send', 'private-location', 'sol', 'a'.repeat(64), 'extra'], ['status', 'private-location', 'extra'],
+    ['send', 'private-location', 'other'], ['reset', 'private-location'],
+  ]) assert.throws(() => parseArguments(args), /USAGE/);
+});
+
+test('selected single arm sends once without a prior opposite-arm result or token', async (t) => {
+  for (const arm of ['terra', 'sol']) {
+    const directory = await singleFixture(t, { selectedArm: arm, shapeCapture: 'off' });
+    const opposite = arm === 'terra' ? 'sol' : 'terra';
+    let calls = 0;
+    const sender = async () => {
+      calls++;
+      const state = await readLedger(directory);
+      assert.equal(state.slots[opposite], null);
+      assert.equal(state.slots[arm].intent.runBinding, state.runBinding);
+      assert.equal(state.slots[arm].intent.reservationCentsEur, 250);
+      return reply(envelope(arm));
+    };
+    await assert.rejects(executeSlot(singleOptions(directory, { arm: opposite, sender })), /SINGLE_ARM_OR_TOKEN_INVALID/);
+    await assert.rejects(executeSlot(singleOptions(directory, { arm, sender, reviewFirst: 'a'.repeat(64) })), /SINGLE_ARM_OR_TOKEN_INVALID/);
+    assert.equal(calls, 0);
+    const result = await executeSlot(singleOptions(directory, { arm, sender }));
+    assert.equal(result.state, 'SUCCESS');
+    assert.equal(result.usageShape, null);
+    assert.equal(Object.keys(result).length, 11);
+    const report = summary(await readLedger(directory));
+    assert.equal(report.mode, 'single');
+    assert.equal(report.authorizationRef, 'synthetic-a2-approval');
+    assert.deepEqual(report.operatorAttestedAccounting, { priorCommittedCentsEur: 500, aggregateLimitCentsEur: 750 });
+    assert.equal(report.slots[arm].reviewToken, null);
+    assert.equal(report.slots[opposite].state, 'NOT_PLANNED');
+    await assert.rejects(executeSlot(singleOptions(directory, { arm, sender })), /SLOT_CONSUMED/);
+    await assert.rejects(executeSlot(singleOptions(directory, { arm: opposite, sender })), /SINGLE_ARM_OR_TOKEN_INVALID/);
+    assert.equal(calls, 1);
+  }
+});
+
+test('single initialization cannot overwrite pair history or accept ambiguous input', async (t) => {
+  const directory = await fixture(t);
+  const file = path.join(directory, 'pilot.jsonl');
+  const before = await readFile(file);
+  for (const input of [
+    { approval: approval() }, { approval: approval(), authorization: authorization(), extra: true },
+  ]) await assert.rejects(initializeSingle(directory, input), /SINGLE_INPUT_INVALID/);
+  await assert.rejects(initializeSingle(directory, { approval: approval(), authorization: authorization() }), /LEDGER_WRITE_UNCERTAIN/);
+  assert.deepEqual(await readFile(file), before);
+});
+
+test('single mode preserves abandonment, stale locks, intent-only and failure stops', async (t) => {
+  const unused = await singleFixture(t);
+  await abandon(unused);
+  const unusedReport = summary(await readLedger(unused));
+  assert.equal(unusedReport.slots.sol.state, 'NOT_ATTEMPTED');
+  assert.equal(unusedReport.slots.terra.state, 'NOT_PLANNED');
+  await assert.rejects(executeSlot(singleOptions(unused)), /ABANDONED/);
+  const stale = await singleFixture(t);
+  await mkdir(path.join(stale, 'pilot.lock'));
+  await assert.rejects(executeSlot(singleOptions(stale)), /LOCKED_NO_AUTOMATIC_RECOVERY/);
+  for (const sender of [
+    async () => { throw new Error('synthetic private network detail'); },
+    async () => reply({}),
+    async () => { const d = envelope('sol'); d.choices[0].message.refusal = 'refused'; return reply(d); },
+  ]) {
+    const directory = await singleFixture(t);
+    const result = await executeSlot(singleOptions(directory, { sender }));
+    assert.equal(result.usageShape, null);
+    assert.equal(Object.keys(result).length, 11);
+    const state = await readLedger(directory);
+    assert.equal(state.slots.sol.intent.reservationCentsEur, 250);
+    await assert.rejects(executeSlot(singleOptions(directory)), /SLOT_CONSUMED/);
+    const file = path.join(directory, 'pilot.jsonl');
+    const lines = (await readFile(file, 'utf8')).trimEnd().split('\n');
+    await writeFile(file, lines.slice(0, 2).join('\n') + '\n');
+    assert.equal(summary(await readLedger(directory)).slots.sol.state, 'UNCERTAIN_INTENT');
+    await assert.rejects(executeSlot(singleOptions(directory)), /SLOT_CONSUMED/);
+  }
+});
+
+test('locked single authorization is reloaded rather than taken from outer state', async (t) => {
+  const directory = await singleFixture(t);
+  const outer = await readLedger(directory);
+  assert.equal(outer.authorization.selectedArm, 'sol');
+  await abandon(directory);
+  let calls = 0;
+  await assert.rejects(executeSlot(singleOptions(directory, {
+    sender: async () => { calls++; return reply(); },
+  })), /ABANDONED/);
+  assert.equal(calls, 0);
+});
+
+test('single header and intent bindings reject changed mode, arm, photo and control associations', async (t) => {
+  const directory = await singleFixture(t);
+  await executeSlot(singleOptions(directory));
+  const filename = path.join(directory, 'pilot.jsonl');
+  const original = await readFile(filename, 'utf8');
+  for (const change of [
+    (e) => { delete e[0].authorization; }, (e) => { delete e[0].runBinding; },
+    (e) => { e[0].extra = true; }, (e) => { e[0].controlsDigest = e[0].controls; delete e[0].controls; },
+    (e) => { e[0].authorization.selectedArm = 'terra'; },
+    (e) => { e[0].authorization.shapeCapture = 'off'; },
+    (e) => { e[0].approval.photo.sha256 = 'a'.repeat(64); },
+    (e) => { e[0].runBinding = 'a'.repeat(64); },
+    (e) => { e[1].runBinding = 'a'.repeat(64); }, (e) => { delete e[1].runBinding; },
+    (e) => { e[1].arm = 'terra'; }, (e) => { e[1].reviewFirst = 'a'.repeat(64); },
+    (e) => { e.push({ ...e[1], arm: 'terra' }); },
+    (e) => { delete e[2].observation.usageShape; },
+  ]) {
+    const events = original.trimEnd().split('\n').map((line) => JSON.parse(line));
+    change(events);
+    await writeFile(filename, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+    await assert.rejects(readLedger(directory), PilotError);
+  }
+});
+
+test('eligible private shape captures only unknown own names and fixed types, never values or summary names', async (t) => {
+  const directory = await singleFixture(t);
+  const entries = [
+    ['__proto__', { nested_secret: 'PRIVATE_VALUE' }], ['constructor', ['PRIVATE_VALUE']],
+    ['toString', 'PRIVATE_VALUE'], ['unknown_null', null], ['unknown_boolean', true], ['unknown_number', 12345],
+  ];
+  const result = await executeSlot(singleOptions(directory, { sender: async () => reply(shapeEnvelope(entries)) }));
+  assert.deepEqual(result.usageShape, { status: 'CAPTURED', entries: [
+    { name: '__proto__', type: 'object' }, { name: 'constructor', type: 'array' },
+    { name: 'toString', type: 'string' }, { name: 'unknown_null', type: 'null' },
+    { name: 'unknown_boolean', type: 'boolean' }, { name: 'unknown_number', type: 'number' },
+  ] });
+  assert.equal(result.state, 'HALTED');
+  assert.equal(result.reason, 'USAGE_INVALID');
+  assert.equal(result.usage, null);
+  assert.equal(result.facts, null);
+  assert.equal(result.unacceptedCandidate.status, 'UNACCEPTED_METERING');
+  const state = await readLedger(directory);
+  assert.deepEqual(state.slots.sol.result, result);
+  const report = summary(state);
+  assert.equal(report.slots.sol.captureStatus, 'CAPTURED');
+  assert.equal(report.slots.sol.reviewToken, null);
+  assert.equal(report.slots.sol.estimatedMicroUsd, null);
+  assert.equal(report.slots.sol.reservationCentsEur, 250);
+  assert.doesNotMatch(JSON.stringify(report), /__proto__|constructor|toString|unknown_null|"entries"|"usageShape"/);
+  assert.doesNotMatch(await readFile(path.join(directory, 'pilot.jsonl'), 'utf8'), /PRIVATE_VALUE|nested_secret|12345/);
+  await assert.rejects(executeSlot(singleOptions(directory)), /SLOT_CONSUMED/);
+});
+
+test('capture opt-out and all ineligible result paths leave single usageShape null', async (t) => {
+  const off = await singleFixture(t, { shapeCapture: 'off' });
+  const offResult = await executeSlot(singleOptions(off, { sender: async () => reply(shapeEnvelope()) }));
+  assert.equal(offResult.usageShape, null);
+  assert.equal((await readLedger(off)).slots.sol.result.usageShape, null);
+  const pair = inspectResponse(reply(shapeEnvelope([['extra_meter', 123]], 'terra')), 'terra');
+  assert.equal(pair.reason, 'USAGE_INVALID');
+  assert.equal(Object.hasOwn(pair, 'usageShape'), false);
+  for (const change of [
+    (d) => { d.model = 'gpt-5.6-terra'; }, (d) => { d.store = true; },
+    (d) => { d.choices[0].message.refusal = 'refused'; },
+    (d) => { d.choices[0].finish_reason = 'length'; },
+    (d) => { d.choices[0].message.content = '{}'; },
+    (d) => { d.usage.prompt_tokens_details.cache_write_tokens = 1; },
+    (d) => { d.usage.prompt_tokens = 8193; d.usage.total_tokens = 8693; },
+    (d) => { delete d.usage.prompt_tokens_details.cache_write_tokens; },
+  ]) {
+    const directory = await singleFixture(t);
+    const data = shapeEnvelope(); change(data);
+    const result = await executeSlot(singleOptions(directory, { sender: async () => reply(data) }));
+    assert.equal(result.state, 'HALTED');
+    assert.equal(result.reason, 'USAGE_INVALID');
+    assert.equal(result.usageShape, null);
+    assert.equal((await readLedger(directory)).slots.sol.result.usageShape, null);
+  }
+});
+
+test('unsafe names or excessive count suppress the entire private shape without prefixes or counts', async (t) => {
+  for (const entries of [
+    [['safe', 0], ['x'.repeat(49), 0]], [['safe', 0], ['name-with-dash', 0]],
+    [['name\ncontrol', 0]], [['name\n', 0]], [['name\r', 0]], [['name\u2028', 0]],
+    [['\u00e4', 0]], [['', 0]], [['3leading', 0]],
+    Array.from({ length: 9 }, (_, i) => [`field_${i}`, { secret: 'PRIVATE_VALUE' }]),
+  ]) {
+    const directory = await singleFixture(t);
+    const result = await executeSlot(singleOptions(directory, { sender: async () => reply(shapeEnvelope(entries)) }));
+    assert.deepEqual(result.usageShape, { status: 'SUPPRESSED', entries: [] });
+    assert.equal((await readLedger(directory)).slots.sol.result.usageShape.status, 'SUPPRESSED');
+    assert.equal(summary(await readLedger(directory)).slots.sol.captureStatus, 'SUPPRESSED');
+    assert.doesNotMatch(await readFile(path.join(directory, 'pilot.jsonl'), 'utf8'), /PRIVATE_VALUE|name-with-dash|field_0/);
+  }
+});
+
+test('literal active-key suppression mutates returned and persisted results identically to bound suppression', async (t) => {
+  const key = 'SYNTHETIC_KEY_123456';
+  const directory = await singleFixture(t);
+  const data = shapeEnvelope([[`prefix_${key}_suffix`, { ignored: 'PRIVATE_VALUE' }]]);
+  const parsed = inspectResponse(reply(data), 'sol', 'private-names-types-v1');
+  assert.equal(parsed.usageShape.status, 'CAPTURED');
+  const ordinary = inspectResponse(reply(shapeEnvelope([['x'.repeat(49), 0]])), 'sol', 'private-names-types-v1');
+  const returned = await executeSlot(singleOptions(directory, { key, sender: async () => reply(data) }));
+  assert.deepEqual(returned.usageShape, ordinary.usageShape);
+  assert.deepEqual({ ...returned, elapsedMs: 0 }, ordinary);
+  const state = await readLedger(directory);
+  assert.deepEqual(state.slots.sol.result, returned);
+  assert.equal(summary(state).slots.sol.reviewToken, null);
+  assert.doesNotMatch(JSON.stringify(returned), /SYNTHETIC_KEY|prefix_|PRIVATE_VALUE/);
+  assert.doesNotMatch(await readFile(path.join(directory, 'pilot.jsonl'), 'utf8'), /SYNTHETIC_KEY|prefix_|PRIVATE_VALUE/);
+  assert.doesNotMatch(JSON.stringify(summary(state)), /SYNTHETIC_KEY|prefix_|PRIVATE_VALUE/);
+  const caseDirectory = await singleFixture(t);
+  const caseResult = await executeSlot(singleOptions(caseDirectory, {
+    key, sender: async () => reply(shapeEnvelope([[key.toLowerCase(), 0]])),
+  }));
+  assert.equal(caseResult.usageShape.status, 'CAPTURED');
+  const precondition = await singleFixture(t);
+  await assert.rejects(executeSlot(singleOptions(precondition, { key: '' })), /PRIVATE_KEY_REQUIRED/);
+});
+
+test('strict single shape replay rejects partial, forged, duplicate, over-bound and ineligible entries', async (t) => {
+  const directory = await singleFixture(t);
+  await executeSlot(singleOptions(directory, { sender: async () => reply(shapeEnvelope()) }));
+  const file = path.join(directory, 'pilot.jsonl');
+  const original = await readFile(file, 'utf8');
+  for (const change of [
+    (o) => { delete o.usageShape; }, (o) => { delete o.usageDiagnostic; },
+    (o) => { o.usageShape.extra = true; }, (o) => { o.usageShape.status = 'UNKNOWN'; },
+    (o) => { o.usageShape.status = 'SUPPRESSED'; },
+    (o) => { o.usageShape.entries = []; },
+    (o) => { o.usageShape.entries.push(o.usageShape.entries[0]); },
+    (o) => { o.usageShape.entries[0].name = 'prompt_tokens'; },
+    (o) => { o.usageShape.entries[0].name = '__unsafe\n'; },
+    (o) => { o.usageShape.entries[0].name = 'trailing\r'; },
+    (o) => { o.usageShape.entries[0].name = 'x'.repeat(49); },
+    (o) => { o.usageShape.entries[0].type = 'undefined'; },
+    (o) => { o.usageShape.entries[0].value = 'PRIVATE_VALUE'; },
+    (o) => { o.usageShape.entries = Array.from({ length: 9 }, (_, i) => ({ name: `field${i}`, type: 'null' })); },
+    (o) => { o.usageShape.entries[0].name = 'x'.repeat(1100); },
+    (o) => { o.unacceptedCandidate = null; },
+    (o) => { o.returnedModel = 'gpt-5.6-terra'; },
+    (o) => { o.usageDiagnostic = { field: 'CACHE_WRITE', condition: 'MISSING' }; },
+  ]) {
+    const events = original.trimEnd().split('\n').map((line) => JSON.parse(line));
+    change(events[2].observation);
+    await writeFile(file, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+    await assert.rejects(readLedger(directory), /LEDGER_INVALID/);
+  }
+  const off = await singleFixture(t, { shapeCapture: 'off' });
+  await executeSlot(singleOptions(off, { sender: async () => reply(shapeEnvelope()) }));
+  const offFile = path.join(off, 'pilot.jsonl');
+  const offEvents = (await readFile(offFile, 'utf8')).trimEnd().split('\n').map((line) => JSON.parse(line));
+  offEvents[2].observation.usageShape = { status: 'SUPPRESSED', entries: [] };
+  await writeFile(offFile, offEvents.map((event) => JSON.stringify(event)).join('\n') + '\n');
+  await assert.rejects(readLedger(off), /LEDGER_INVALID/);
+  const pairDirectory = await fixture(t);
+  await executeSlot(options(pairDirectory));
+  const pairFile = path.join(pairDirectory, 'pilot.jsonl');
+  const pairEvents = (await readFile(pairFile, 'utf8')).trimEnd().split('\n').map((line) => JSON.parse(line));
+  pairEvents[2].observation.usageShape = null;
+  await writeFile(pairFile, pairEvents.map((event) => JSON.stringify(event)).join('\n') + '\n');
+  await assert.rejects(readLedger(pairDirectory), /LEDGER_INVALID/);
+});
+
+test('largest permitted name/type shape fits measured serialized limits and private roundtrip', async (t) => {
+  const directory = await singleFixture(t);
+  const entries = Array.from({ length: 8 }, (_, i) => [`${'x'.repeat(47)}${i}`, false]);
+  const result = await executeSlot(singleOptions(directory, { sender: async () => reply(shapeEnvelope(entries)) }));
+  const shapeBytes = Buffer.byteLength(JSON.stringify(result.usageShape));
+  assert.equal(result.usageShape.status, 'CAPTURED');
+  assert.equal(shapeBytes, 649);
+  assert.ok(shapeBytes <= 1024);
+  const journal = await readFile(path.join(directory, 'pilot.jsonl'));
+  const record = journal.toString().trimEnd().split('\n').at(-1) + '\n';
+  assert.ok(Buffer.byteLength(record) < 131072);
+  assert.ok(journal.length < 131072);
+  assert.deepEqual((await readLedger(directory)).slots.sol.result, result);
+  t.diagnostic(`Synthetic maximum name/type shape: ${shapeBytes} bytes; result record: ${Buffer.byteLength(record)}; journal: ${journal.length}. The 1024-byte cap is defensive, not reached by valid eight-entry shapes.`);
 });

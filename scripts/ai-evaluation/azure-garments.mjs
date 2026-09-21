@@ -138,6 +138,20 @@ export function validateApproval(value) {
   return value;
 }
 
+export function validateSingleAuthorization(value) {
+  requireThat(exact(value, ['mode', 'selectedArm', 'authorizationRef', 'priorCommittedCentsEur',
+    'aggregateLimitCentsEur', 'shapeCapture'])
+    && value.mode === 'single' && ARMS.includes(value.selectedArm) && identifier(value.authorizationRef)
+    && ['off', 'private-names-types-v1'].includes(value.shapeCapture)
+    && uint(value.priorCommittedCentsEur) && uint(value.aggregateLimitCentsEur)
+    && uint(value.priorCommittedCentsEur + POLICY.reservationCentsEur)
+    && value.priorCommittedCentsEur + POLICY.reservationCentsEur <= value.aggregateLimitCentsEur, 'SINGLE_AUTHORIZATION_INVALID');
+  return value;
+}
+function singleBinding(approval, authorization, controls) {
+  return jsonDigest({ domain: 'p2-pilot-single-v1', approval, authorization, controls });
+}
+
 async function boundedFile(filename, limit) {
   requireThat(!(await lstat(filename)).isSymbolicLink(), 'SYMLINK_REFUSED');
   const handle = await open(filename, 'r');
@@ -204,6 +218,16 @@ export async function initialize(directory, approval) {
     type: 'init', approval, controls: controlsDigest(), time: new Date().toISOString(),
   }, true));
 }
+export async function initializeSingle(directory, input) {
+  requireThat(exact(input, ['approval', 'authorization']), 'SINGLE_INPUT_INVALID');
+  const approval = validateApproval(input.approval);
+  const authorization = validateSingleAuthorization(input.authorization);
+  const controls = controlsDigest();
+  return locked(directory, () => append(directory, {
+    type: 'init', approval, controls, authorization,
+    runBinding: singleBinding(approval, authorization, controls), time: new Date().toISOString(),
+  }, true));
+}
 
 const OUTCOMES = ['SUCCESS', 'FAILED', 'HALTED'];
 const REASONS = ['OK', 'REFUSED', 'TRUNCATED', 'FILTERED', 'DOMAIN_INVALID', 'ENVELOPE_INVALID',
@@ -229,10 +253,44 @@ function currentModel(model, arm) {
   return ARMS.includes(arm)
     && [`gpt-5.6-${arm}`, `gpt-5.6-${arm}-${POLICY.snapshot}`, DEPLOYMENTS[arm]].includes(model);
 }
-function validExtensions(o, arm) {
+const SHAPE_TYPES = ['null', 'boolean', 'number', 'string', 'array', 'object'];
+const USAGE_KEYS = ['prompt_tokens', 'completion_tokens', 'total_tokens', 'prompt_tokens_details', 'completion_tokens_details'];
+function shapeName(name) {
+  return typeof name === 'string' && name.length >= 1 && name.length <= 48
+    && /^[A-Za-z_]/.test(name) && !/[^A-Za-z0-9_]/.test(name);
+}
+function suppressedShape() { return { status: 'SUPPRESSED', entries: [] }; }
+function validShape(shape) {
+  if (!exact(shape, ['status', 'entries']) || !Array.isArray(shape.entries)
+    || Buffer.byteLength(JSON.stringify(shape)) > 1024) return false;
+  if (shape.status === 'SUPPRESSED') return shape.entries.length === 0;
+  return shape.status === 'CAPTURED' && shape.entries.length >= 1 && shape.entries.length <= 8
+    && shape.entries.every((entry) => exact(entry, ['name', 'type'])
+      && shapeName(entry.name) && !USAGE_KEYS.includes(entry.name) && SHAPE_TYPES.includes(entry.type))
+    && new Set(shape.entries.map((entry) => entry.name)).size === shape.entries.length;
+}
+function captureShape(usage) {
+  const names = Object.keys(usage).filter((name) => !USAGE_KEYS.includes(name));
+  if (names.length === 0 || names.length > 8 || names.some((name) => !shapeName(name))) return suppressedShape();
+  // Untrusted names stay inert array entries, never dynamically assigned object properties.
+  const entries = names.map((name) => ({
+    name, type: usage[name] === null ? 'null' : Array.isArray(usage[name]) ? 'array' : typeof usage[name],
+  }));
+  const shape = { status: 'CAPTURED', entries };
+  return validShape(shape) ? shape : suppressedShape();
+}
+function validExtensions(o, arm, authorization) {
   const keys = ['state', 'reason', 'confirmedResponse', 'httpStatus', 'returnedModel', 'usage', 'facts', 'elapsedMs'];
-  if (exact(o, keys)) return true;
-  if (!exact(o, [...keys, 'usageDiagnostic', 'unacceptedCandidate'])) return false;
+  const extended = [...keys, 'usageDiagnostic', 'unacceptedCandidate'];
+  if (authorization) {
+    if (!exact(o, [...extended, 'usageShape'])) return false;
+    if (o.usageShape !== null && (authorization.shapeCapture !== 'private-names-types-v1'
+      || o.usageDiagnostic?.field !== 'USAGE' || o.usageDiagnostic?.condition !== 'UNEXPECTED_KEY'
+      || o.unacceptedCandidate === null || !validShape(o.usageShape))) return false;
+  } else {
+    if (exact(o, keys)) return true;
+    if (!exact(o, extended)) return false;
+  }
   if (o.reason !== 'USAGE_INVALID') return o.usageDiagnostic === null && o.unacceptedCandidate === null;
   if (o.state !== 'HALTED' || !o.confirmedResponse || o.httpStatus !== 200
     || o.usage !== null || o.facts !== null || !validDiagnostic(o.usageDiagnostic)) return false;
@@ -240,8 +298,8 @@ function validExtensions(o, arm) {
     && o.unacceptedCandidate.status === 'UNACCEPTED_METERING'
     && currentModel(o.returnedModel, arm) && validFacts(o.unacceptedCandidate.facts));
 }
-function validObservation(o, arm) {
-  return object(o) && validExtensions(o, arm)
+function validObservation(o, arm, authorization) {
+  return object(o) && validExtensions(o, arm, authorization)
     && OUTCOMES.includes(o.state) && REASONS.includes(o.reason) && typeof o.confirmedResponse === 'boolean'
     && uint(o.elapsedMs)
     && (o.httpStatus === null || (uint(o.httpStatus) && o.httpStatus >= 100 && o.httpStatus <= 599))
@@ -263,9 +321,12 @@ export async function readLedger(directory) {
   requireThat(lines.length >= 1 && lines.length <= 6, 'LEDGER_INVALID');
   const events = lines.map((line) => parseJson(Buffer.from(line)));
   const first = events[0];
-  requireThat(exact(first, ['type', 'approval', 'controls', 'time']) && first.type === 'init'
+  const single = exact(first, ['type', 'approval', 'controls', 'authorization', 'runBinding', 'time']);
+  requireThat((single || exact(first, ['type', 'approval', 'controls', 'time'])) && first.type === 'init'
     && first.controls === controlsDigest(), 'LEDGER_CONFIG_CHANGED');
   validateApproval(first.approval);
+  const authorization = single ? validateSingleAuthorization(first.authorization) : null;
+  if (single) requireThat(first.runBinding === singleBinding(first.approval, authorization, first.controls), 'LEDGER_BINDING_INVALID');
   const slots = { terra: null, sol: null };
   let abandoned = false;
   for (const event of events.slice(1)) {
@@ -277,20 +338,23 @@ export async function readLedger(directory) {
     }
     requireThat(ARMS.includes(event.arm), 'LEDGER_INVALID');
     if (event.type === 'intent') {
-      requireThat(exact(event, ['type', 'arm', 'reservationCentsEur', 'photoSha256', 'reviewFirst', 'time'])
+      const keys = ['type', 'arm', 'reservationCentsEur', 'photoSha256', 'reviewFirst', 'time'];
+      requireThat(exact(event, single ? [...keys, 'runBinding'] : keys)
         && slots[event.arm] === null && event.reservationCentsEur === POLICY.reservationCentsEur
         && event.photoSha256 === first.approval.photo.sha256, 'LEDGER_INVALID');
-      if (event.arm === 'terra') requireThat(slots.sol === null && event.reviewFirst === null, 'LEDGER_INVALID');
+      if (single) requireThat(event.arm === authorization.selectedArm && event.reviewFirst === null
+        && slots.terra === null && slots.sol === null && event.runBinding === first.runBinding, 'LEDGER_INVALID');
+      else if (event.arm === 'terra') requireThat(slots.sol === null && event.reviewFirst === null, 'LEDGER_INVALID');
       else requireThat(slots.terra?.result && slots.terra.result.state !== 'HALTED'
         && event.reviewFirst === jsonDigest(slots.terra.result), 'LEDGER_INVALID');
       slots[event.arm] = { intent: event, result: null };
     } else {
       requireThat(event.type === 'result' && exact(event, ['type', 'arm', 'observation', 'time'])
-        && slots[event.arm]?.intent && !slots[event.arm].result && validObservation(event.observation, event.arm), 'LEDGER_INVALID');
+        && slots[event.arm]?.intent && !slots[event.arm].result && validObservation(event.observation, event.arm, authorization), 'LEDGER_INVALID');
       slots[event.arm].result = event.observation;
     }
   }
-  return { approval: first.approval, slots, abandoned };
+  return { approval: first.approval, slots, abandoned, authorization, runBinding: single ? first.runBinding : null };
 }
 export async function abandon(directory) {
   return locked(directory, async () => {
@@ -302,11 +366,19 @@ export async function abandon(directory) {
 export function summary(state) {
   return {
     policy: POLICY.id, abandoned: state.abandoned,
+    ...(state.authorization ? {
+      mode: 'single', selectedArm: state.authorization.selectedArm, authorizationRef: state.authorization.authorizationRef,
+      operatorAttestedAccounting: {
+        priorCommittedCentsEur: state.authorization.priorCommittedCentsEur,
+        aggregateLimitCentsEur: state.authorization.aggregateLimitCentsEur,
+      },
+    } : {}),
     reservationMeaning: 'Operational allocation only; not a billing ceiling.',
     slots: Object.fromEntries(ARMS.map((arm) => {
       const slot = state.slots[arm];
       return [arm, {
-        state: slot ? slot.result?.state ?? 'UNCERTAIN_INTENT' : state.abandoned ? 'NOT_ATTEMPTED' : 'UNUSED',
+        state: state.authorization && arm !== state.authorization.selectedArm ? 'NOT_PLANNED'
+          : slot ? slot.result?.state ?? 'UNCERTAIN_INTENT' : state.abandoned ? 'NOT_ATTEMPTED' : 'UNUSED',
         consumedIntent: Boolean(slot), reservationCentsEur: slot ? POLICY.reservationCentsEur : 0,
         configuredSnapshot: POLICY.snapshot,
         confirmedResponse: slot?.result?.confirmedResponse ?? false,
@@ -314,11 +386,12 @@ export function summary(state) {
         usage: slot?.result?.usage ?? null, reason: slot?.result?.reason ?? null,
         usageDiagnostic: slot?.result?.usageDiagnostic ?? null,
         candidateStatus: slot?.result?.unacceptedCandidate?.status ?? null,
+        ...(state.authorization ? { captureStatus: slot?.result?.usageShape?.status ?? null } : {}),
         elapsedMs: slot?.result?.elapsedMs ?? null,
         estimatedMicroUsd: slot?.result?.usage && slot.result.usage.cacheRead === 0 && slot.result.usage.cacheWrite === 0
           ? ((BigInt(slot.result.usage.input) * (arm === 'terra' ? 22n : 44n)
             + BigInt(slot.result.usage.output) * (arm === 'terra' ? 132n : 220n) + 9n) / 10n).toString() : null,
-        reviewToken: slot?.result ? jsonDigest(slot.result) : null,
+        reviewToken: !state.authorization && slot?.result ? jsonDigest(slot.result) : null,
       }];
     })),
   };
@@ -354,8 +427,7 @@ function usageOf(data) {
   if (counts.input + counts.output !== counts.total) return invalid('TOTAL', 'TOTAL_MISMATCH');
   if (counts.reasoning > counts.output) return invalid('REASONING', 'REASONING_EXCEEDS_OUTPUT');
   if (counts.cacheRead > counts.input) return invalid('CACHE_READ', 'CACHE_READ_EXCEEDS_INPUT');
-  const known = ['prompt_tokens', 'completion_tokens', 'total_tokens', 'prompt_tokens_details', 'completion_tokens_details'];
-  if (Object.keys(u).some((k) => !known.includes(k))) return invalid('USAGE', 'UNEXPECTED_KEY');
+  if (Object.keys(u).some((k) => !USAGE_KEYS.includes(k))) return invalid('USAGE', 'UNEXPECTED_KEY');
   for (const [details, keys, field] of [
     [p, ['cached_tokens', 'cache_write_tokens'], 'PROMPT_DETAILS'], [c, ['reasoning_tokens'], 'COMPLETION_DETAILS'],
   ]) {
@@ -369,7 +441,7 @@ function knownUsageBreach(u) {
   return [[u.prompt_tokens, POLICY.inputAnomalyTokens], [u.completion_tokens, POLICY.outputTokens],
     [p.cached_tokens, 0], [p.cache_write_tokens, 0]].some(([value, limit]) => uint(value) && value > limit);
 }
-export function inspectResponse(reply, arm) {
+export function inspectResponse(reply, arm, shapeCapture = 'off') {
   if (!object(reply)) return observation('ENVELOPE_INVALID');
   const safeStatus = uint(reply.status) && reply.status >= 100 && reply.status <= 599;
   const meta = { confirmedResponse: true, httpStatus: safeStatus ? reply.status : null };
@@ -386,10 +458,15 @@ export function inspectResponse(reply, arm) {
   meta.usage = usage.counts;
   if (!meta.usage) {
     const answer = knownUsageBreach(data.usage) ? null : inspectAnswer(data, arm, meta);
-    return observation('USAGE_INVALID', {
+    const result = observation('USAGE_INVALID', {
       ...meta, usageDiagnostic: usage.diagnostic,
       unacceptedCandidate: answer?.state === 'SUCCESS' ? { status: 'UNACCEPTED_METERING', facts: answer.facts } : null,
     });
+    if (shapeCapture === 'private-names-types-v1' && result.unacceptedCandidate
+      && usage.diagnostic.field === 'USAGE' && usage.diagnostic.condition === 'UNEXPECTED_KEY') {
+      result.usageShape = captureShape(data.usage);
+    }
+    return result;
   }
   if (meta.usage.input > POLICY.inputAnomalyTokens) return observation('INPUT_ANOMALY', meta);
   if (meta.usage.output > POLICY.outputTokens) return observation('OUTPUT_ANOMALY', meta);
@@ -458,7 +535,10 @@ export async function executeSlot({ directory, arm, reviewFirst = null, key, sen
     requireThat(!state.abandoned, 'ABANDONED');
     requireThat(state.slots[arm] === null, 'SLOT_CONSUMED');
     requireThat(!ARMS.some((a) => state.slots[a] && (!state.slots[a].result || state.slots[a].result.state === 'HALTED')), 'PRIOR_UNCERTAINTY_OR_ANOMALY');
-    if (arm === 'sol') requireThat(state.slots.terra?.result
+    if (state.authorization) {
+      requireThat(arm === state.authorization.selectedArm && reviewFirst === null, 'SINGLE_ARM_OR_TOKEN_INVALID');
+      requireThat(state.slots.terra === null && state.slots.sol === null, 'SINGLE_INTENT_CONSUMED');
+    } else if (arm === 'sol') requireThat(state.slots.terra?.result
       && reviewFirst === jsonDigest(state.slots.terra.result), 'FIRST_RESULT_REVIEW_REQUIRED');
     else requireThat(reviewFirst === null && state.slots.sol === null, 'ORDER_INVALID');
     const photo = await readPhoto(state.approval.photo.path, 512000);
@@ -468,6 +548,7 @@ export async function executeSlot({ directory, arm, reviewFirst = null, key, sen
     await append(directory, {
       type: 'intent', arm, reservationCentsEur: POLICY.reservationCentsEur,
       photoSha256: state.approval.photo.sha256, reviewFirst, time: new Date().toISOString(),
+      ...(state.authorization ? { runBinding: state.runBinding } : {}),
     });
     const controller = new AbortController();
     const started = performance.now();
@@ -481,7 +562,7 @@ export async function executeSlot({ directory, arm, reviewFirst = null, key, sen
         }, timeoutMs);
       });
       const reply = await Promise.race([Promise.resolve().then(() => sender({ body, key, signal: controller.signal })), deadline]);
-      result = inspectResponse(reply, arm);
+      result = inspectResponse(reply, arm, state.authorization?.shapeCapture ?? 'off');
     } catch (error) {
       result = observation(error instanceof PilotError && error.code === 'RESPONSE_BOUND' ? 'RESPONSE_BOUND' : 'NETWORK_UNCERTAIN');
     } finally {
@@ -489,6 +570,11 @@ export async function executeSlot({ directory, arm, reviewFirst = null, key, sen
       controller.abort();
     }
     result.elapsedMs = Math.max(0, Math.ceil(performance.now() - started));
+    if (state.authorization) result.usageShape ??= null;
+    if (result.usageShape?.status === 'CAPTURED'
+      && result.usageShape.entries.some((entry) => entry.name.includes(key))) {
+      result.usageShape = suppressedShape();
+    }
     await append(directory, { type: 'result', arm, observation: result, time: new Date().toISOString() });
     return result;
   });
@@ -506,24 +592,35 @@ async function privatePath(filename, directory = false) {
   return resolved;
 }
 
+export function parseArguments(args) {
+  const [command, location, third, fourth, ...rest] = args;
+  requireThat(['init', 'init-single', 'status', 'send', 'abandon'].includes(command) && location
+    && rest.length === 0, 'USAGE');
+  if (command === 'init' || command === 'init-single') requireThat(third && fourth === undefined, 'USAGE');
+  if (command === 'status' || command === 'abandon') requireThat(third === undefined && fourth === undefined, 'USAGE');
+  if (command === 'send') requireThat(ARMS.includes(third)
+    && (third === 'terra' ? fourth === undefined : fourth === undefined || hash(fourth)), 'USAGE');
+  return { command, location, third, fourth };
+}
 export async function main(args) {
   requireThat(process.versions.node === '24.19.0', 'PINNED_NODE_REQUIRED');
   requireThat(process.execArgv.length === 0 && ['NODE_OPTIONS', 'NODE_DEBUG', 'NODE_DEBUG_NATIVE', 'SSLKEYLOGFILE',
     'NODE_TLS_REJECT_UNAUTHORIZED', 'NODE_EXTRA_CA_CERTS']
     .every((name) => !process.env[name]), 'TRACING_OR_PRELOAD_REFUSED');
-  const [command, location, third, fourth, ...rest] = args;
-  requireThat(['init', 'status', 'send', 'abandon'].includes(command) && location
-    && rest.length === 0, 'USAGE');
-  if (command === 'init') requireThat(third && fourth === undefined, 'USAGE');
-  if (command === 'status' || command === 'abandon') requireThat(third === undefined && fourth === undefined, 'USAGE');
-  if (command === 'send') requireThat(ARMS.includes(third)
-    && (third === 'terra' ? fourth === undefined : hash(fourth)), 'USAGE');
+  const { command, location, third, fourth } = parseArguments(args);
   const directory = await privatePath(location, true);
   if (command === 'init') {
     const approvalPath = await privatePath(third);
     const approval = validateApproval(parseJson(await boundedFile(approvalPath, 16384)));
     approval.photo.path = await privatePath(approval.photo.path);
     await initialize(directory, approval);
+  } else if (command === 'init-single') {
+    const input = parseJson(await boundedFile(await privatePath(third), 16384));
+    requireThat(exact(input, ['approval', 'authorization']), 'SINGLE_INPUT_INVALID');
+    validateApproval(input.approval);
+    validateSingleAuthorization(input.authorization);
+    input.approval.photo.path = await privatePath(input.approval.photo.path);
+    await initializeSingle(directory, input);
   } else if (command === 'send') {
     const state = await readLedger(directory);
     await privatePath(state.approval.photo.path);
