@@ -223,7 +223,7 @@ begin
   elsif not private.ai_analysis_permitted(p,c,r,v_now) then
     perform private.ai_close(p.owner_id,p_request_id,'UNAVAILABLE',v_now); v_reason := 'UNAVAILABLE';
   elsif not private.ai_valid_facts(p_facts) or not coalesce(p_facts->'fields' ?& v_fields,false)
-    or p_facts->'fields'-v_fields<>'{}'::jsonb then
+    or (p_facts->'fields')-v_fields<>'{}'::jsonb then
     if r.status<>'ready' then perform private.ai_close(p.owner_id,p_request_id,'INVALID_FACTS',v_now); end if;
     v_reason := 'INVALID_FACTS';
   else

@@ -5917,3 +5917,64 @@ is not a passing gate. Six-path documented/helper parity is not a successful
 live response: actual Azure wire/control compatibility and quality remain
 activation gates. No private photo, paid/provider call, hosted mutation,
 deployment, frozen PR #27 work or PR #28 reopening occurred.
+
+### I29-AZ1 publication and first CI repair
+
+The checkpoint above is historical. After independent final source review and
+the [publication release](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5767830552),
+the packet was published as draft [PR #29](https://github.com/drrowdev/stillroom-wardrobe/pull/29)
+at `2d3baf4db87aec19d6e91159a94edbccde34a02c`, tree
+`c010899c428802174adbc6e0558d4830e3b8d58e`.
+
+[CI attempt 1](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/35658236191)
+failed overall. Its real-backend job `106527025643` passed startup, preservation
+rehearsal, reset, ordinary integration and security. This includes actual
+prior-main nine-to-ten migration preservation of held/estimated/confirmed/
+dispatched Google records, frozen Save, late Google settlement and ordinary
+finalization, with no provider calls. AI rehearsal passed baseline checks,
+Deno unconfigured/invalid-token probes and B1 validation, then failed at the
+first `ready` stage at `2026-09-21T21:42:33Z`. READY, later B1/B2/C, positive
+private Azure manifest persistence and generated-types parity were not
+established. App job `106527025448` had one unit failure: a total migration
+count still expected nine, although its unchanged ninth-migration pin was
+correct. The separate [native Apple run](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/35658236118),
+job `106527025391`, succeeded at this same published head.
+
+Source diagnosis found a SQL operator-precedence defect on the READY path:
+`p_facts->'fields'-v_fields` must be `(p_facts->'fields')-v_fields` so key
+subtraction applies to the extracted JSON object. The new migration and its
+dependent byte/hash pins are corrected together, with positive and negative
+effective-SQL source assertions. This is a source-established defect consistent
+with the observed failure, not proof of the hidden child error or a successful
+repaired backend run. No installed migration or meaningful runtime assertion
+was changed; the next exact-head CI must establish the repair.
+
+The [reviewed count extension](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5768149950)
+changes only the unit fixture's literal total from nine to ten. Its ninth
+`entries[8]` filename/byte/hash pin, imports and privilege/catalog assertions
+remain unchanged. Inspection of related JSON extraction, subtraction and
+arithmetic expressions in the new migration found no further instance requiring
+this correction; all nine installed migrations remain unchanged.
+
+The initial local full-unit repair run had 2264 passes and two failures: the
+known migration-count expectation and an existing 5000-ms timeout in the
+512-KiB TUS ceiling/cancellation test. After inspecting that test and its bounded
+reader, `npm run test:unit -- tests\unit\preservation.test.ts -t 'retains the exact
+512KiB TUS byte ceiling'` passed the selected test (122 filtered skips), without
+changing its timeout, assertions or implementation. The isolated pass does not
+establish the cause of the full-suite timeout. `npm run lint`, `npm run typecheck`,
+`npm run check:translations` (527 keys) and `git diff --check` then passed.
+Before the count release, `npm run test:unit -- --maxWorkers=1` ran all tests
+with their original assertions/timeouts and reported 2265 passes, with only
+the count assertion failing. After that correction, the first identical
+command reported 2265 passes and an existing dependency-inventory test timing
+out at 5000 ms. Its local-file traversal was inspected; no test, dependency
+checker, configuration or timeout was changed. A bounded full-suite rerun of
+the same command passed **2266/2266 tests across 29 suites**. These observations
+do not prove a timing-failure cause or waive the default-parallel exact-head
+CI requirement. Lint, typecheck and translations also passed after the count
+correction. The focused schema/preservation/Azure/endpoint command passed
+358/358 tests before that correction.
+The local dependency CRLF failure and unattempted audit remain as recorded
+above. No local backend, paid/private/provider call, hosted operation, Action
+rerun, merge or deployment was performed.

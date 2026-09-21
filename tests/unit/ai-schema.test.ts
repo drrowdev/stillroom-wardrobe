@@ -50,6 +50,8 @@ describe('AZ1 effective additive definitions (source checks, not live SQL proof)
     expect(finish).toContain("if not v_valid or v_model='not_observed'");
     expect(finish.indexOf("charge_state='estimated'")).toBeLessThan(finish.indexOf('not private.ai_valid_facts(p_facts)'));
     expect(finish).toContain("not coalesce(p_facts->'fields' ?& v_fields,false)");
+    expect(finish).toContain("(p_facts->'fields')-v_fields<>'{}'::jsonb");
+    expect(finish).not.toContain("p_facts->'fields'-v_fields");
     expect(finish).toContain("if u.charge_state<>'settled'");
   });
   it('serializes reservation absence, commits terminal identity before ACK and excludes private history metadata', async () => {
