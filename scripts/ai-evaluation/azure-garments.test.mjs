@@ -253,7 +253,6 @@ test('metering, identity, controls and schema anomalies fail closed', () => {
     [(d) => { d.usage.prompt_tokens = Number.MAX_SAFE_INTEGER + 1; }, 'USAGE_INVALID'],
     [(d) => { d.usage.completion_tokens_details.reasoning_tokens = 501; }, 'USAGE_INVALID'],
     [(d) => { d.usage.completion_tokens_details.audio_tokens = 1; }, 'USAGE_INVALID'],
-    [(d) => { d.usage.new_meter = 1; }, 'USAGE_INVALID'],
     [(d) => { d.model = 'gpt-5.6-sol'; }, 'MODEL_ANOMALY'],
     [(d) => { d.store = true; }, 'CONTROL_ANOMALY'],
     [(d) => { d.service_tier = 'priority'; }, 'CONTROL_ANOMALY'],
@@ -267,6 +266,7 @@ test('metering, identity, controls and schema anomalies fail closed', () => {
   ];
   for (const [change, reason] of cases) {
     const data = envelope(); change(data);
+    data.usage.new_meter = { synthetic_ignored: 1 };
     const result = inspectResponse(reply(data), 'terra');
     assert.equal(result.state, 'HALTED', reason);
     assert.equal(result.reason, reason);
@@ -518,7 +518,7 @@ test('explicit abandonment marks only unused slots NOT_ATTEMPTED and preserves h
   await assert.rejects(abandon(directory), /ALREADY_ABANDONED/);
 });
 
-test('usage diagnostics cover every allowed pair with deterministic presence and check order', () => {
+test('current usage diagnostics preserve deterministic presence and check order', () => {
   const cases = [];
   for (const [key, field] of [
     ['usage', 'USAGE'], ['prompt_tokens_details', 'PROMPT_DETAILS'], ['completion_tokens_details', 'COMPLETION_DETAILS'],
@@ -546,9 +546,8 @@ test('usage diagnostics cover every allowed pair with deterministic presence and
     [(d) => { d.usage.total_tokens++; }, 'TOTAL', 'TOTAL_MISMATCH'],
     [(d) => { d.usage.completion_tokens_details.reasoning_tokens = 501; }, 'REASONING', 'REASONING_EXCEEDS_OUTPUT'],
     [(d) => { d.usage.prompt_tokens_details.cached_tokens = 3001; }, 'CACHE_READ', 'CACHE_READ_EXCEEDS_INPUT'],
-    [(d) => { d.usage.private_key_name = 'private-value'; }, 'USAGE', 'UNEXPECTED_KEY'],
-    [(d) => { d.usage.prompt_tokens_details.private_key_name = 'private-value'; }, 'PROMPT_DETAILS', 'UNEXPECTED_COMPONENT'],
-    [(d) => { d.usage.completion_tokens_details.private_key_name = 'private-value'; }, 'COMPLETION_DETAILS', 'UNEXPECTED_COMPONENT'],
+    [(d) => { d.usage.prompt_tokens_details.audio_tokens = 'private-value'; }, 'PROMPT_DETAILS', 'UNEXPECTED_COMPONENT'],
+    [(d) => { d.usage.completion_tokens_details.audio_tokens = 'private-value'; }, 'COMPLETION_DETAILS', 'UNEXPECTED_COMPONENT'],
     [(d) => {
       delete d.usage.prompt_tokens;
       delete d.usage.prompt_tokens_details;
@@ -560,6 +559,9 @@ test('usage diagnostics cover every allowed pair with deterministic presence and
   );
   for (const [change, field, condition] of cases) {
     const data = envelope(); change(data);
+    if (data.usage && typeof data.usage === 'object' && !Array.isArray(data.usage)) {
+      data.usage.private_key_name = 'private-value';
+    }
     const result = inspectResponse(reply(data), 'terra');
     assert.equal(result.state, 'HALTED');
     assert.equal(result.reason, 'USAGE_INVALID');
@@ -706,14 +708,15 @@ test('independently known limit and cache violations suppress candidates without
   assert.equal(inspectResponse(reply(mixed), 'terra').unacceptedCandidate, null);
 });
 
-test('arbitrary metering names and values never enter rejected observations or summaries', async (t) => {
+test('ignored metering names and values never enter accepted observations or summaries', async (t) => {
   const directory = await fixture(t);
   const data = envelope();
   data.usage['PRIVATE-SENTINEL-KEY'] = { value: 'PRIVATE-SENTINEL-VALUE' };
   await executeSlot(options(directory, { sender: async () => reply(data) }));
   const state = await readLedger(directory);
-  assert.deepEqual(state.slots.terra.result.usageDiagnostic, { field: 'USAGE', condition: 'UNEXPECTED_KEY' });
-  assert.equal(state.slots.terra.result.usage, null);
+  assert.equal(state.slots.terra.result.state, 'SUCCESS');
+  assert.equal(state.slots.terra.result.usageDiagnostic, null);
+  assert.deepEqual(state.slots.terra.result.usage, inspectResponse(reply(), 'terra').usage);
   assert.doesNotMatch(await readFile(path.join(directory, 'pilot.jsonl'), 'utf8'), /PRIVATE-SENTINEL/);
   assert.doesNotMatch(JSON.stringify(summary(state)), /PRIVATE-SENTINEL|"facts"|"fields"/);
 });
@@ -805,6 +808,66 @@ function shapeEnvelope(entries = [['extra_meter', 123]], arm = 'sol') {
 function singleOptions(directory, overrides = {}) {
   return options(directory, { arm: 'sol', sender: async () => reply(envelope('sol')), ...overrides });
 }
+
+function historicalA2Observation(usageShape) {
+  return {
+    state: 'HALTED', reason: 'USAGE_INVALID', confirmedResponse: true, httpStatus: 200,
+    returnedModel: 'gpt-5.6-sol', usage: null, facts: null, elapsedMs: 0,
+    usageDiagnostic: { field: 'USAGE', condition: 'UNEXPECTED_KEY' },
+    unacceptedCandidate: { status: 'UNACCEPTED_METERING', facts: facts() }, usageShape,
+  };
+}
+const A2_CAPTURED = historicalA2Observation({ status: 'CAPTURED', entries: [
+  { name: '__proto__', type: 'object' }, { name: 'constructor', type: 'array' },
+  { name: 'toString', type: 'string' }, { name: 'unknown_null', type: 'null' },
+  { name: 'unknown_boolean', type: 'boolean' }, { name: 'unknown_number', type: 'number' },
+] });
+const A2_SUPPRESSED = historicalA2Observation({ status: 'SUPPRESSED', entries: [] });
+function historicalA2Record(observation) {
+  return JSON.stringify({ type: 'result', arm: 'sol', observation, time: '2026-09-21T00:00:00.000Z' }) + '\n';
+}
+
+async function historicalA2Fixture(t, observation) {
+  const directory = await singleFixture(t);
+  const state = await readLedger(directory);
+  await appendFile(path.join(directory, 'pilot.jsonl'), JSON.stringify({
+    type: 'intent', arm: 'sol', reservationCentsEur: 250, photoSha256: digest(SYNTHETIC),
+    reviewFirst: null, time: '2026-09-21T00:00:00.000Z', runBinding: state.runBinding,
+  }) + '\n' + historicalA2Record(observation));
+  return directory;
+}
+
+// Produced with unchanged 0b50 helper blob 2ef8b6018c2dcefc4142d785725e19de3fe4528c;
+// synthetic byte definitions and digests were published in PR28 comment5758425825 before refactoring.
+test('frozen A2 captured and suppressed records preserve bytes, holds and stops', async (t) => {
+  for (const [expected, bytes, hash] of [
+    [A2_CAPTURED, 941, '2f60e2eb3fd671ad7d1003e9d3527340eef8aa7909cd7bb84f22a2118731ff5e'],
+    [A2_SUPPRESSED, 709, '0787f9f77b4c5977949b733fc76320cf2344c10232dbc750603c6688e8671d57'],
+  ]) {
+    const record = historicalA2Record(expected);
+    assert.equal(Buffer.byteLength(record), bytes);
+    assert.equal(digest(record), hash);
+    const directory = await historicalA2Fixture(t, expected);
+    const filename = path.join(directory, 'pilot.jsonl');
+    const before = await readFile(filename);
+    assert.ok(before.toString().endsWith(record));
+    const state = await readLedger(directory);
+    assert.deepEqual(state.slots.sol.result, expected);
+    const report = summary(state);
+    assert.equal(report.slots.sol.state, 'HALTED');
+    assert.equal(report.slots.sol.estimatedMicroUsd, null);
+    assert.equal(report.slots.sol.reservationCentsEur, 250);
+    assert.equal(report.slots.sol.reviewToken, null);
+    assert.equal(report.slots.sol.captureStatus, expected.usageShape.status);
+    let calls = 0;
+    const sender = async () => { calls++; return reply(); };
+    await assert.rejects(executeSlot(singleOptions(directory, { sender })), /SLOT_CONSUMED/);
+    await assert.rejects(executeSlot(singleOptions(directory, { arm: 'terra', sender })), /PRIOR_UNCERTAINTY_OR_ANOMALY/);
+    assert.equal(calls, 0);
+    assert.deepEqual(await readFile(filename), before);
+    assert.doesNotMatch(JSON.stringify(report), /__proto__|constructor|toString|unknown_null|"entries"|"usageShape"|"facts"/);
+  }
+});
 
 test('single authorization and CLI grammar are explicit, bounded and credential-free', () => {
   assert.deepEqual(validateSingleAuthorization(authorization()), authorization());
@@ -944,63 +1007,129 @@ test('single header and intent bindings reject changed mode, arm, photo and cont
   }
 });
 
-test('eligible private shape captures only unknown own names and fixed types, never values or summary names', async (t) => {
-  const directory = await singleFixture(t);
-  const entries = [
-    ['__proto__', { nested_secret: 'PRIVATE_VALUE' }], ['constructor', ['PRIVATE_VALUE']],
-    ['toString', 'PRIVATE_VALUE'], ['unknown_null', null], ['unknown_boolean', true], ['unknown_number', 12345],
-  ];
-  const result = await executeSlot(singleOptions(directory, { sender: async () => reply(shapeEnvelope(entries)) }));
-  assert.deepEqual(result.usageShape, { status: 'CAPTURED', entries: [
-    { name: '__proto__', type: 'object' }, { name: 'constructor', type: 'array' },
-    { name: 'toString', type: 'string' }, { name: 'unknown_null', type: 'null' },
-    { name: 'unknown_boolean', type: 'boolean' }, { name: 'unknown_number', type: 'number' },
-  ] });
-  assert.equal(result.state, 'HALTED');
-  assert.equal(result.reason, 'USAGE_INVALID');
-  assert.equal(result.usage, null);
-  assert.equal(result.facts, null);
-  assert.equal(result.unacceptedCandidate.status, 'UNACCEPTED_METERING');
-  const state = await readLedger(directory);
-  assert.deepEqual(state.slots.sol.result, result);
-  const report = summary(state);
-  assert.equal(report.slots.sol.captureStatus, 'CAPTURED');
-  assert.equal(report.slots.sol.reviewToken, null);
-  assert.equal(report.slots.sol.estimatedMicroUsd, null);
-  assert.equal(report.slots.sol.reservationCentsEur, 250);
-  assert.doesNotMatch(JSON.stringify(report), /__proto__|constructor|toString|unknown_null|"entries"|"usageShape"/);
-  assert.doesNotMatch(await readFile(path.join(directory, 'pilot.jsonl'), 'utf8'), /PRIVATE_VALUE|nested_secret|12345/);
-  await assert.rejects(executeSlot(singleOptions(directory)), /SLOT_CONSUMED/);
+test('usage extensions and unconsumed public breakdowns do not change acceptance or estimates', async (t) => {
+  for (const arm of ['terra', 'sol']) {
+    const baseline = inspectResponse(reply(envelope(arm)), arm);
+    const data = envelope(arm);
+    const entries = [
+      ['__proto__', { nested_secret: 'PRIVATE_VALUE' }], ['constructor', ['PRIVATE_VALUE']],
+      ['toString', 'PRIVATE_VALUE'], ['unknown_null', null], ['unknown_boolean', true], ['unknown_number', 12345],
+    ];
+    for (const container of [data.usage, data.usage.prompt_tokens_details, data.usage.completion_tokens_details]) {
+      for (const [name, value] of entries) {
+        Object.defineProperty(container, name, { value, enumerable: true });
+      }
+    }
+    data.usage.prompt_tokens_details.text_tokens = 1000;
+    data.usage.prompt_tokens_details.image_tokens = 2000;
+    data.usage.completion_tokens_details.text_tokens = 300;
+    assert.deepEqual(inspectResponse(reply(data), arm), baseline);
+    const directory = await singleFixture(t, { selectedArm: arm });
+    const result = await executeSlot(singleOptions(directory, { arm, sender: async () => reply(data) }));
+    assert.deepEqual({ ...result, elapsedMs: 0 }, { ...baseline, usageShape: null });
+    const state = await readLedger(directory);
+    assert.deepEqual(state.slots[arm].result, result);
+    const report = summary(state);
+    assert.equal(report.slots[arm].captureStatus, null);
+    assert.equal(report.slots[arm].reviewToken, null);
+    assert.equal(report.slots[arm].estimatedMicroUsd, arm === 'terra' ? '13200' : '24200');
+    assert.equal(report.slots[arm].reservationCentsEur, 250);
+    assert.doesNotMatch(JSON.stringify(report), /__proto__|constructor|toString|unknown_null|"entries"|"usageShape"/);
+    assert.doesNotMatch(await readFile(path.join(directory, 'pilot.jsonl'), 'utf8'), /PRIVATE_VALUE|nested_secret|12345|text_tokens|image_tokens/);
+    await assert.rejects(executeSlot(singleOptions(directory, { arm })), /SLOT_CONSUMED/);
+    for (const value of [null, 'not-a-count', -1, {}, [], 999999]) {
+      data.usage.prompt_tokens_details.text_tokens = value;
+      data.usage.prompt_tokens_details.image_tokens = value;
+      data.usage.completion_tokens_details.text_tokens = value;
+      assert.deepEqual(inspectResponse(reply(data), arm), baseline);
+    }
+  }
 });
 
-test('capture opt-out and all ineligible result paths leave single usageShape null', async (t) => {
+test('only the known audio and prediction detail names require absent, zero or null', () => {
+  for (const [section, field, names] of [
+    ['prompt_tokens_details', 'PROMPT_DETAILS', ['audio_tokens']],
+    ['completion_tokens_details', 'COMPLETION_DETAILS', ['audio_tokens', 'accepted_prediction_tokens', 'rejected_prediction_tokens']],
+  ]) {
+    for (const name of names) {
+      for (const value of [undefined, null, 0]) {
+        const data = envelope();
+        if (value === undefined) delete data.usage[section][name];
+        else data.usage[section][name] = value;
+        assert.equal(inspectResponse(reply(data), 'terra').state, 'SUCCESS');
+      }
+      for (const value of [1, -1, 0.5, '0', false, true, {}, []]) {
+        const data = envelope();
+        data.usage[section][name] = value;
+        data.usage.synthetic_extension = { ignored: 'PRIVATE_VALUE' };
+        const result = inspectResponse(reply(data), 'terra');
+        assert.equal(result.state, 'HALTED');
+        assert.equal(result.reason, 'USAGE_INVALID');
+        assert.equal(result.usage, null);
+        assert.equal(result.facts, null);
+        assert.deepEqual(result.usageDiagnostic, { field, condition: 'UNEXPECTED_COMPONENT' });
+        assert.equal(result.unacceptedCandidate.status, 'UNACCEPTED_METERING');
+        delete data.usage.prompt_tokens_details.cache_write_tokens;
+        assert.deepEqual(inspectResponse(reply(data), 'terra').usageDiagnostic, { field: 'CACHE_WRITE', condition: 'MISSING' });
+      }
+    }
+  }
+  const data = envelope();
+  data.usage.audio_tokens = 1;
+  data.usage.prompt_tokens_details.accepted_prediction_tokens = 1;
+  data.usage.completion_tokens_details.future_audio_tokens = 1;
+  assert.equal(inspectResponse(reply(data), 'terra').state, 'SUCCESS');
+});
+
+test('both bound capture choices leave fresh single usageShape null across response branches', async (t) => {
   const off = await singleFixture(t, { shapeCapture: 'off' });
   const offResult = await executeSlot(singleOptions(off, { sender: async () => reply(shapeEnvelope()) }));
   assert.equal(offResult.usageShape, null);
   assert.equal((await readLedger(off)).slots.sol.result.usageShape, null);
   const pair = inspectResponse(reply(shapeEnvelope([['extra_meter', 123]], 'terra')), 'terra');
-  assert.equal(pair.reason, 'USAGE_INVALID');
+  assert.equal(pair.reason, 'OK');
+  assert.equal(Object.keys(pair).length, 10);
   assert.equal(Object.hasOwn(pair, 'usageShape'), false);
-  for (const change of [
-    (d) => { d.model = 'gpt-5.6-terra'; }, (d) => { d.store = true; },
-    (d) => { d.choices[0].message.refusal = 'refused'; },
-    (d) => { d.choices[0].finish_reason = 'length'; },
-    (d) => { d.choices[0].message.content = '{}'; },
-    (d) => { d.usage.prompt_tokens_details.cache_write_tokens = 1; },
-    (d) => { d.usage.prompt_tokens = 8193; d.usage.total_tokens = 8693; },
-    (d) => { delete d.usage.prompt_tokens_details.cache_write_tokens; },
+  for (const [change, state, reason] of [
+    [(d) => { d.model = 'gpt-5.6-terra'; }, 'HALTED', 'MODEL_ANOMALY'],
+    [(d) => { d.store = true; }, 'HALTED', 'CONTROL_ANOMALY'],
+    [(d) => { d.choices[0].message.refusal = 'refused'; }, 'FAILED', 'REFUSED'],
+    [(d) => { d.choices[0].finish_reason = 'length'; }, 'FAILED', 'TRUNCATED'],
+    [(d) => { d.choices[0].finish_reason = 'content_filter'; }, 'FAILED', 'FILTERED'],
+    [(d) => { d.choices[0].message.content = '{}'; }, 'HALTED', 'DOMAIN_INVALID'],
+    [(d) => { d.usage.prompt_tokens_details.cache_write_tokens = 1; }, 'HALTED', 'CACHE_ANOMALY'],
+    [(d) => { d.usage.prompt_tokens = 8193; d.usage.total_tokens = 8693; }, 'HALTED', 'INPUT_ANOMALY'],
+    [(d) => { delete d.usage.prompt_tokens_details.cache_write_tokens; }, 'HALTED', 'USAGE_INVALID'],
   ]) {
     const directory = await singleFixture(t);
     const data = shapeEnvelope(); change(data);
     const result = await executeSlot(singleOptions(directory, { sender: async () => reply(data) }));
-    assert.equal(result.state, 'HALTED');
-    assert.equal(result.reason, 'USAGE_INVALID');
+    assert.equal(result.state, state);
+    assert.equal(result.reason, reason);
     assert.equal(result.usageShape, null);
+    assert.equal(Object.keys(result).length, 11);
     assert.equal((await readLedger(directory)).slots.sol.result.usageShape, null);
+  }
+  for (const shapeCapture of ['off', 'private-names-types-v1']) {
+    for (const sender of [
+      async () => { throw new Error('PRIVATE_VALUE'); },
+      async () => { throw new PilotError('RESPONSE_BOUND'); },
+      async () => reply(null),
+      async () => ({ ...reply(), body: Buffer.from('{') }),
+      async () => ({ ...reply(), status: 500 }),
+    ]) {
+      const directory = await singleFixture(t, { shapeCapture });
+      const result = await executeSlot(singleOptions(directory, { sender }));
+      assert.equal(result.state, 'HALTED');
+      assert.equal(result.usageShape, null);
+      assert.equal(Object.keys(result).length, 11);
+      assert.deepEqual((await readLedger(directory)).slots.sol.result, result);
+      assert.doesNotMatch(await readFile(path.join(directory, 'pilot.jsonl'), 'utf8'), /PRIVATE_VALUE/);
+    }
   }
 });
 
-test('unsafe names or excessive count suppress the entire private shape without prefixes or counts', async (t) => {
+test('unconsumed names are not captured regardless of old shape bounds', async (t) => {
   for (const entries of [
     [['safe', 0], ['x'.repeat(49), 0]], [['safe', 0], ['name-with-dash', 0]],
     [['name\ncontrol', 0]], [['name\n', 0]], [['name\r', 0]], [['name\u2028', 0]],
@@ -1009,20 +1138,21 @@ test('unsafe names or excessive count suppress the entire private shape without 
   ]) {
     const directory = await singleFixture(t);
     const result = await executeSlot(singleOptions(directory, { sender: async () => reply(shapeEnvelope(entries)) }));
-    assert.deepEqual(result.usageShape, { status: 'SUPPRESSED', entries: [] });
-    assert.equal((await readLedger(directory)).slots.sol.result.usageShape.status, 'SUPPRESSED');
-    assert.equal(summary(await readLedger(directory)).slots.sol.captureStatus, 'SUPPRESSED');
+    assert.equal(result.state, 'SUCCESS');
+    assert.equal(result.usageShape, null);
+    assert.equal((await readLedger(directory)).slots.sol.result.usageShape, null);
+    assert.equal(summary(await readLedger(directory)).slots.sol.captureStatus, null);
     assert.doesNotMatch(await readFile(path.join(directory, 'pilot.jsonl'), 'utf8'), /PRIVATE_VALUE|name-with-dash|field_0/);
   }
 });
 
-test('literal active-key suppression mutates returned and persisted results identically to bound suppression', async (t) => {
+test('fresh results never capture synthetic key-bearing extension names in any casing', async (t) => {
   const key = 'SYNTHETIC_KEY_123456';
   const directory = await singleFixture(t);
   const data = shapeEnvelope([[`prefix_${key}_suffix`, { ignored: 'PRIVATE_VALUE' }]]);
-  const parsed = inspectResponse(reply(data), 'sol', 'private-names-types-v1');
-  assert.equal(parsed.usageShape.status, 'CAPTURED');
-  const ordinary = inspectResponse(reply(shapeEnvelope([['x'.repeat(49), 0]])), 'sol', 'private-names-types-v1');
+  const parsed = inspectResponse(reply(data), 'sol');
+  assert.equal(Object.hasOwn(parsed, 'usageShape'), false);
+  const ordinary = { ...inspectResponse(reply(envelope('sol')), 'sol'), usageShape: null };
   const returned = await executeSlot(singleOptions(directory, { key, sender: async () => reply(data) }));
   assert.deepEqual(returned.usageShape, ordinary.usageShape);
   assert.deepEqual({ ...returned, elapsedMs: 0 }, ordinary);
@@ -1036,14 +1166,16 @@ test('literal active-key suppression mutates returned and persisted results iden
   const caseResult = await executeSlot(singleOptions(caseDirectory, {
     key, sender: async () => reply(shapeEnvelope([[key.toLowerCase(), 0]])),
   }));
-  assert.equal(caseResult.usageShape.status, 'CAPTURED');
+  assert.equal(caseResult.usageShape, null);
+  assert.doesNotMatch(JSON.stringify(caseResult), /synthetic_key/);
+  assert.doesNotMatch(await readFile(path.join(caseDirectory, 'pilot.jsonl'), 'utf8'), /synthetic_key/);
+  assert.doesNotMatch(JSON.stringify(summary(await readLedger(caseDirectory))), /synthetic_key/);
   const precondition = await singleFixture(t);
   await assert.rejects(executeSlot(singleOptions(precondition, { key: '' })), /PRIVATE_KEY_REQUIRED/);
 });
 
 test('strict single shape replay rejects partial, forged, duplicate, over-bound and ineligible entries', async (t) => {
-  const directory = await singleFixture(t);
-  await executeSlot(singleOptions(directory, { sender: async () => reply(shapeEnvelope()) }));
+  const directory = await historicalA2Fixture(t, A2_CAPTURED);
   const file = path.join(directory, 'pilot.jsonl');
   const original = await readFile(file, 'utf8');
   for (const change of [
@@ -1055,6 +1187,11 @@ test('strict single shape replay rejects partial, forged, duplicate, over-bound 
     (o) => { o.usageShape.entries[0].name = 'prompt_tokens'; },
     (o) => { o.usageShape.entries[0].name = '__unsafe\n'; },
     (o) => { o.usageShape.entries[0].name = 'trailing\r'; },
+    (o) => { o.usageShape.entries[0].name = 'trailing\u2028'; },
+    (o) => { o.usageShape.entries[0].name = ''; },
+    (o) => { o.usageShape.entries[0].name = '3leading'; },
+    (o) => { o.usageShape.entries[0].name = 'name-with-dash'; },
+    (o) => { o.usageShape.entries[0].name = '\u00e4'; },
     (o) => { o.usageShape.entries[0].name = 'x'.repeat(49); },
     (o) => { o.usageShape.entries[0].type = 'undefined'; },
     (o) => { o.usageShape.entries[0].value = 'PRIVATE_VALUE'; },
@@ -1073,7 +1210,7 @@ test('strict single shape replay rejects partial, forged, duplicate, over-bound 
   await executeSlot(singleOptions(off, { sender: async () => reply(shapeEnvelope()) }));
   const offFile = path.join(off, 'pilot.jsonl');
   const offEvents = (await readFile(offFile, 'utf8')).trimEnd().split('\n').map((line) => JSON.parse(line));
-  offEvents[2].observation.usageShape = { status: 'SUPPRESSED', entries: [] };
+  offEvents[2].observation = A2_SUPPRESSED;
   await writeFile(offFile, offEvents.map((event) => JSON.stringify(event)).join('\n') + '\n');
   await assert.rejects(readLedger(off), /LEDGER_INVALID/);
   const pairDirectory = await fixture(t);
@@ -1085,10 +1222,10 @@ test('strict single shape replay rejects partial, forged, duplicate, over-bound 
   await assert.rejects(readLedger(pairDirectory), /LEDGER_INVALID/);
 });
 
-test('largest permitted name/type shape fits measured serialized limits and private roundtrip', async (t) => {
-  const directory = await singleFixture(t);
-  const entries = Array.from({ length: 8 }, (_, i) => [`${'x'.repeat(47)}${i}`, false]);
-  const result = await executeSlot(singleOptions(directory, { sender: async () => reply(shapeEnvelope(entries)) }));
+test('largest historical name/type shape fits measured serialized limits and replay', async (t) => {
+  const result = historicalA2Observation({ status: 'CAPTURED',
+    entries: Array.from({ length: 8 }, (_, i) => ({ name: `${'x'.repeat(47)}${i}`, type: 'boolean' })) });
+  const directory = await historicalA2Fixture(t, result);
   const shapeBytes = Buffer.byteLength(JSON.stringify(result.usageShape));
   assert.equal(result.usageShape.status, 'CAPTURED');
   assert.equal(shapeBytes, 649);

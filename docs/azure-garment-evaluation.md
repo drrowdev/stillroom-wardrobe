@@ -19,7 +19,12 @@ future observations, not another live request or continuation of a halted pilot.
 The [A2 proposal](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5756648995),
 [critique dispositions](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5756769191)
 and [selected owner decision/source release](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5756899024)
-add explicit single mode and private metadata-shape capture. Source capability
+added explicit single mode and private metadata-shape capture. The
+[A4 plan](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5758323341),
+[F1-F6 critique dispositions](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5758380283)
+and [owner-approved source release](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5758408874)
+replace extension rejection with required-counter parsing and retire **new**
+name/type capture. Historical records are unchanged. Source capability
 is not permission to initialize or send: exact-head source/CI gates and the final
 reviewed owner procedure remain required.
 
@@ -44,8 +49,11 @@ microUSD, not confirmed billing or EUR conversion. It applies the reviewed
 short-context Standard DataZone rates of USD2.20/13.20 input/output per million
 for Terra and USD4.40/22.00 for Sol. Thinking is already included in output and
 is not charged twice by the estimate. Nonzero cache reads/writes halt rather than
-silently applying discounts. Unexpected/missing metering may leave the estimate
+silently applying discounts. Invalid/missing required metering may leave the estimate
 unavailable; actual billing can remain unknown. There is no VAT assumption.
+Unknown future billing-relevant extensions are ignored, not recorded or
+estimated, and may go unnoticed by this helper. The estimate uses only reported
+required input/output totals and reviewed rates; it is not a complete bill.
 Provider alerts, 20K TPM/20 RPM deployment limits and the monthly Visual Studio
 benefit spending limit do not enforce this EUR5 pilot budget. Credit is dev/test
 only; no cash, Marketplace, production, add-ons or benefit changes are approved.
@@ -186,7 +194,7 @@ node scripts\ai-evaluation\azure-garments.mjs abandon <absolute-private-pilot-di
 ## Separately authorized single observation (A2)
 
 This is a new, independently approved one-shot run, not a way to resume, reset,
-replace or migrate a halted pair. The chosen future operation is **Sol only**
+replace or migrate a halted pair. The historical A2 operation selected **Sol only**
 with private name/type capture and the same prepared photo. The owner selected
 an additional 250 EUR-cent allocation, bringing the aggregate allocation to
 750 cents while retaining the prior 500-cent commitments. These are operational
@@ -212,8 +220,10 @@ with owner affirmations and unchanged prepared bytes. `authorization` has exactl
 Use the actual non-private public authorization label, not a URL, token or
 credential. Its bounded identifier syntax authenticates nothing. The source
 supports only `terra` and `sol`; this does not authorize another Terra call.
-`shapeCapture` must explicitly be `off` or `private-names-types-v1`; omission
-does not mean consent. There is no allowance field, `maxIntents` or consent flag.
+`shapeCapture` must still explicitly be `off` or `private-names-types-v1` for
+binding/read compatibility; omission is invalid. **Neither choice produces new
+capture under A4.** The example preserves the historical wire shape, not a new
+capture instruction. There is no allowance field, `maxIntents` or consent flag.
 The fixed reservation is 250 cents, and safe nonnegative integer accounting must
 satisfy `priorCommittedCentsEur + 250 <= aggregateLimitCentsEur`.
 Prior commitments are operator-attested, not automatically reconciled. Preserve
@@ -247,18 +257,22 @@ an abandoned unused selected arm is `NOT_ATTEMPTED`. Single status reports no
 review token (null), and only the public authorization label/mode and explicitly
 operator-attested accounting. Old pair tokens remain unchanged.
 
-### Consented private usage-shape capture
+### Historical private usage-shape capture (no new capture)
 
-The owner chose capture before this feature was implemented, acknowledging that
-field names can contain sensitive information. Capture is eligible only with
-the immutable `private-names-types-v1` choice, `USAGE/UNEXPECTED_KEY`, and an
-A1-qualified unaccepted candidate after all independent answer gates and known
-breach checks. Unknown fields still **halt**, with null accepted facts/usage/cost
-and the full reservation. No name is assumed harmless or accepted for billing.
-Sol may not reproduce another response's extension; this is not a diagnosis
-guarantee or a completed comparison.
+The owner approved retiring fresh capture in A4. New results never name or
+capture unconsumed usage extensions. Every fresh single result has
+`usageShape: null`, unconditionally set before persistence and return, including
+failures and results under the legacy `private-names-types-v1` choice. Pair
+results keep their original shape. Future diagnostic capture requires a
+separately reviewed packet and fresh privacy consent; this enum is not authority
+to collect new metadata.
 
-Only the private ledger may hold `usageShape`:
+Historical A2 records remain readable without rewriting bytes, hashes, bindings,
+HALTs, null costs or reservations. Their capture eligibility required the bound
+`private-names-types-v1` choice, `USAGE/UNEXPECTED_KEY` and an A1-qualified
+unaccepted candidate. That diagnostic is no longer emitted by fresh parsing.
+No historical extension is retrospectively accepted or declared harmless.
+Only the private ledger may hold these historical `usageShape` values:
 
 ```text
 null
@@ -267,27 +281,29 @@ null
 ```
 
 Only unknown own top-level usage-key names and the fixed types `null`, `boolean`,
-`number`, `string`, `array`, `object` are captured. No values, nested keys,
+`number`, `string`, `array`, `object` were captured. No values, nested keys,
 lengths, headers, error bodies or full responses. Names are inert array entries,
 never assigned as object properties. At most eight unique names are retained,
 each matching `[A-Za-z_][A-Za-z0-9_]*` and at most 48 ASCII bytes, with a 1024-byte
-serialized shape cap. Any violation suppresses the whole shape: no truncation,
+serialized shape cap. The old producer suppressed the whole shape on any violation: no truncation,
 prefixes, hashes, omitted counts or detailed suppression reason. Eight maximum
 48-byte names with the longest type label serialize to 649 bytes; the 1024-byte
 limit is defensive, not reached by a valid shape.
 
-Before recording or returning any result, the execution boundary suppresses the
-whole capture if a name literally contains the active key (case-sensitive).
-Parsers remain credential-free. Key suppression uses the identical empty
-SUPPRESSED shape, without a special log, reason or flag. This is **not
-anonymization**: other secrets, personal content or differently encoded/cased
-text may still occur in names. Syntax/length checks do not prove privacy.
+The old execution boundary suppressed the whole capture when a name literally
+contained the active key (case-sensitive), using the identical empty SUPPRESSED
+shape without a special log, reason or flag. This was **not anonymization**:
+other secrets, personal content or differently encoded/cased text could still
+occur in names. Syntax/length checks do not prove privacy or historical
+authenticity. Fresh-null enforcement replaces that now-unused capture check;
+it proves only that this channel emits no new names, not that no sensitive data
+could exist elsewhere. Parsers remain credential-free.
 
 Status emits only scalar `captureStatus` (`CAPTURED`, `SUPPRESSED` or null), never
 names, types, entries or shape objects. SUPPRESSED reveals one bit, not zero
 information. Do not export or disclose captures to agents, chat or PRs. New
-single observations have exactly eleven keys, including `usageShape` even when
-null/off; pair observations remain legacy eight or A1 ten keys. Replay validates
+single observations have exactly eleven keys, including the always-null
+`usageShape`; pair observations remain legacy eight or A1 ten keys. Replay validates
 the mode, bound arm, consent choice and strict shape/observation combinations.
 
 Private names must be retained for **no more than seven days from capture/result
@@ -338,7 +354,36 @@ reported (for example, `PHOTO_CHANGED; LOCK_RELEASE_FAILED`), never raw errors
 or paths. The remaining lock still blocks another invocation; no cleanup
 recovery is authorized.
 
-### Invalid metering: diagnostics and unaccepted candidates
+### Required-counter compatibility and invalid metering
+
+[Microsoft's v1 lifecycle guidance](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle)
+allows new response objects and recommends parsing only those required.
+The public [completion-usage model](https://github.com/openai/openai-python/blob/main/src/openai/types/completion_usage.py)
+documents text/image/audio/reasoning/cache/prediction breakdowns; the
+[SDK extension guidance](https://github.com/openai/openai-python#undocumented-response-properties)
+supports extra response properties. These public contracts do not establish the
+meaning of any private extension or exact deployed-Azure behavior.
+
+The helper still requires the usage and both detail objects, plus all six own
+counters: `prompt_tokens`, `completion_tokens`, `total_tokens`,
+`reasoning_tokens`, `cached_tokens` and `cache_write_tokens`. SDK optionality
+does not relax these requirements. Every counter must be a nonnegative safe
+integer; input plus output must be safe and equal total, reasoning cannot exceed
+output, and cached tokens cannot exceed input. Input/output ceilings and
+required zero cache reads/writes remain unchanged. Missing is never zero.
+
+Extra top-level usage fields and unconsumed detail fields are ignored, regardless
+of name, type or value. Optional prompt `text_tokens`/`image_tokens` and completion
+`text_tokens` are not validated, added to totals or retained. There is no invented
+breakdown reconciliation, sum requirement or double-counting. Unknown does not
+mean harmless, zero, free or financially understood.
+
+The only additional detail assertions are `audio_tokens` in both detail objects
+and `accepted_prediction_tokens`/`rejected_prediction_tokens` in completion
+details: if present, each must be exactly zero or null. Other values halt with
+`UNEXPECTED_COMPONENT`. These are **name-bound assertions**, not universal
+unsupported-capability detection; different future names are ignored. Required
+counter failures retain precedence. All model/control/answer gates still apply.
 
 New pair and single observations include `usageDiagnostic` and `unacceptedCandidate`; both keys
 are always present. `usageDiagnostic` is null except for `USAGE_INVALID`, where
@@ -347,7 +392,7 @@ check. It does not report every failure or imply later checks passed.
 
 | Field | Allowed conditions |
 | --- | --- |
-| `USAGE` | `MISSING`, `NOT_OBJECT`, `UNEXPECTED_KEY` |
+| `USAGE` | `MISSING`, `NOT_OBJECT`; historical-only `UNEXPECTED_KEY` |
 | `PROMPT_DETAILS`, `COMPLETION_DETAILS` | `MISSING`, `NOT_OBJECT`, `UNEXPECTED_COMPONENT` |
 | `INPUT`, `OUTPUT`, `CACHE_WRITE` | `MISSING`, `NOT_NONNEGATIVE_SAFE_INTEGER` |
 | `TOTAL` | `MISSING`, `NOT_NONNEGATIVE_SAFE_INTEGER`, `SUM_UNSAFE`, `TOTAL_MISMATCH` |
@@ -355,12 +400,14 @@ check. It does not report every failure or imply later checks passed.
 | `CACHE_READ` | `MISSING`, `NOT_NONNEGATIVE_SAFE_INTEGER`, `CACHE_READ_EXCEEDS_INPUT` |
 
 Checks proceed through the usage/detail containers, input/output/total/reasoning/
-cache-read/cache-write counters, arithmetic relationships, unexpected top-level
-keys, then unexpected prompt/completion detail components. `MISSING` means the
+cache-read/cache-write counters, arithmetic relationships, then the named
+audio/prediction assertions. `MISSING` means the
 property is absent, not that its value is null or malformed. Neither case is
 treated as zero. Unexpected provider keys/values are never copied into this
-diagnostic; only the fixed container and condition are retained. The separate
-consented A2 private shape has the narrow name/type boundary described above. No partial
+diagnostic; only the fixed container and condition are retained. Historical
+`UNEXPECTED_KEY`/`UNEXPECTED_COMPONENT` diagnostics and their read-side
+eligibility remain valid without reinterpretation; new unknown extensions
+produce neither diagnostic nor capture. No partial
 counter dump, raw response, error text or invented cost is recorded.
 
 Invalid usage **always remains `HALTED / USAGE_INVALID`**, even when another
@@ -424,9 +471,17 @@ HALTED review token and verify unchanged journal bytes after read/status and a
 blocked send. Candidate tests measure the complete serialized result record and
 journal under the unchanged bounds, including wrapper/diagnostic overhead; an
 unaccepted-candidate record is not assumed smaller than a SUCCESS record.
-A2 tests additionally freeze an A1 pair token, exercise single-mode bindings,
-one-intent/accounting/CLI constraints, private capture/replay and literal-key
-suppression with fake credentials only. Existing pair assertions are retained.
+A2 tests additionally freeze an A1 pair token and exercise single-mode bindings
+and one-intent/accounting/CLI constraints. A4 freezes synthetic captured/suppressed
+result bytes produced with the unchanged committed A2 helper, with
+[pre-refactor provenance and digests](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5758425825).
+The new fixture-generation tests are distinguished from that historical helper.
+Replay tests preserve those bytes, strict shape rejection and consumed slots.
+Old extension-rejection/capture-production assertions intentionally become
+extension-invariance, no-new-capture and historical replay assertions. Required
+counter, named audio/prediction, cache, bounds and other safety tests remain;
+synthetic key-bearing names must not enter new results, ledgers or summaries.
+These fixtures do not represent or reconstruct actual operator records.
 
 Report actual attempts, failures and unused slots separately. Schema, transport,
 truncation and refusal failures are not invented semantic labels. Inspect useful

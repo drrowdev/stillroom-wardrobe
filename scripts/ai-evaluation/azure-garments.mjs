@@ -259,7 +259,6 @@ function shapeName(name) {
   return typeof name === 'string' && name.length >= 1 && name.length <= 48
     && /^[A-Za-z_]/.test(name) && !/[^A-Za-z0-9_]/.test(name);
 }
-function suppressedShape() { return { status: 'SUPPRESSED', entries: [] }; }
 function validShape(shape) {
   if (!exact(shape, ['status', 'entries']) || !Array.isArray(shape.entries)
     || Buffer.byteLength(JSON.stringify(shape)) > 1024) return false;
@@ -268,16 +267,6 @@ function validShape(shape) {
     && shape.entries.every((entry) => exact(entry, ['name', 'type'])
       && shapeName(entry.name) && !USAGE_KEYS.includes(entry.name) && SHAPE_TYPES.includes(entry.type))
     && new Set(shape.entries.map((entry) => entry.name)).size === shape.entries.length;
-}
-function captureShape(usage) {
-  const names = Object.keys(usage).filter((name) => !USAGE_KEYS.includes(name));
-  if (names.length === 0 || names.length > 8 || names.some((name) => !shapeName(name))) return suppressedShape();
-  // Untrusted names stay inert array entries, never dynamically assigned object properties.
-  const entries = names.map((name) => ({
-    name, type: usage[name] === null ? 'null' : Array.isArray(usage[name]) ? 'array' : typeof usage[name],
-  }));
-  const shape = { status: 'CAPTURED', entries };
-  return validShape(shape) ? shape : suppressedShape();
 }
 function validExtensions(o, arm, authorization) {
   const keys = ['state', 'reason', 'confirmedResponse', 'httpStatus', 'returnedModel', 'usage', 'facts', 'elapsedMs'];
@@ -427,11 +416,12 @@ function usageOf(data) {
   if (counts.input + counts.output !== counts.total) return invalid('TOTAL', 'TOTAL_MISMATCH');
   if (counts.reasoning > counts.output) return invalid('REASONING', 'REASONING_EXCEEDS_OUTPUT');
   if (counts.cacheRead > counts.input) return invalid('CACHE_READ', 'CACHE_READ_EXCEEDS_INPUT');
-  if (Object.keys(u).some((k) => !USAGE_KEYS.includes(k))) return invalid('USAGE', 'UNEXPECTED_KEY');
+  // These name-bound assertions do not detect capabilities under future extension names.
   for (const [details, keys, field] of [
-    [p, ['cached_tokens', 'cache_write_tokens'], 'PROMPT_DETAILS'], [c, ['reasoning_tokens'], 'COMPLETION_DETAILS'],
+    [p, ['audio_tokens'], 'PROMPT_DETAILS'],
+    [c, ['audio_tokens', 'accepted_prediction_tokens', 'rejected_prediction_tokens'], 'COMPLETION_DETAILS'],
   ]) {
-    if (Object.entries(details).some(([k, v]) => !keys.includes(k) && v !== 0 && v !== null)) return invalid(field, 'UNEXPECTED_COMPONENT');
+    if (keys.some((key) => Object.hasOwn(details, key) && details[key] !== 0 && details[key] !== null)) return invalid(field, 'UNEXPECTED_COMPONENT');
   }
   return { counts, diagnostic: null };
 }
@@ -441,7 +431,7 @@ function knownUsageBreach(u) {
   return [[u.prompt_tokens, POLICY.inputAnomalyTokens], [u.completion_tokens, POLICY.outputTokens],
     [p.cached_tokens, 0], [p.cache_write_tokens, 0]].some(([value, limit]) => uint(value) && value > limit);
 }
-export function inspectResponse(reply, arm, shapeCapture = 'off') {
+export function inspectResponse(reply, arm) {
   if (!object(reply)) return observation('ENVELOPE_INVALID');
   const safeStatus = uint(reply.status) && reply.status >= 100 && reply.status <= 599;
   const meta = { confirmedResponse: true, httpStatus: safeStatus ? reply.status : null };
@@ -458,15 +448,10 @@ export function inspectResponse(reply, arm, shapeCapture = 'off') {
   meta.usage = usage.counts;
   if (!meta.usage) {
     const answer = knownUsageBreach(data.usage) ? null : inspectAnswer(data, arm, meta);
-    const result = observation('USAGE_INVALID', {
+    return observation('USAGE_INVALID', {
       ...meta, usageDiagnostic: usage.diagnostic,
       unacceptedCandidate: answer?.state === 'SUCCESS' ? { status: 'UNACCEPTED_METERING', facts: answer.facts } : null,
     });
-    if (shapeCapture === 'private-names-types-v1' && result.unacceptedCandidate
-      && usage.diagnostic.field === 'USAGE' && usage.diagnostic.condition === 'UNEXPECTED_KEY') {
-      result.usageShape = captureShape(data.usage);
-    }
-    return result;
   }
   if (meta.usage.input > POLICY.inputAnomalyTokens) return observation('INPUT_ANOMALY', meta);
   if (meta.usage.output > POLICY.outputTokens) return observation('OUTPUT_ANOMALY', meta);
@@ -562,7 +547,7 @@ export async function executeSlot({ directory, arm, reviewFirst = null, key, sen
         }, timeoutMs);
       });
       const reply = await Promise.race([Promise.resolve().then(() => sender({ body, key, signal: controller.signal })), deadline]);
-      result = inspectResponse(reply, arm, state.authorization?.shapeCapture ?? 'off');
+      result = inspectResponse(reply, arm);
     } catch (error) {
       result = observation(error instanceof PilotError && error.code === 'RESPONSE_BOUND' ? 'RESPONSE_BOUND' : 'NETWORK_UNCERTAIN');
     } finally {
@@ -570,11 +555,7 @@ export async function executeSlot({ directory, arm, reviewFirst = null, key, sen
       controller.abort();
     }
     result.elapsedMs = Math.max(0, Math.ceil(performance.now() - started));
-    if (state.authorization) result.usageShape ??= null;
-    if (result.usageShape?.status === 'CAPTURED'
-      && result.usageShape.entries.some((entry) => entry.name.includes(key))) {
-      result.usageShape = suppressedShape();
-    }
+    if (state.authorization) result.usageShape = null;
     await append(directory, { type: 'result', arm, observation: result, time: new Date().toISOString() });
     return result;
   });
