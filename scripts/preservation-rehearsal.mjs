@@ -23,6 +23,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260911040000_ai_analysis_backend.sql', version: '20260911040000', time: '2026-09-11 04:00:00', bytes: 24856, sha256: SOURCE_HASHES.analysis },
   { name: '20260911200000_checked_ai_item_save.sql', version: '20260911200000', time: '2026-09-11 20:00:00', bytes: 29668, sha256: SOURCE_HASHES.analyzedSave },
   { name: '20260913120000_item_lifecycle.sql', version: '20260913120000', time: '2026-09-13 12:00:00', bytes: 20822, sha256: SOURCE_HASHES.lifecycle },
+  { name: '20260916100000_image_cleanup.sql', version: '20260916100000', time: '2026-09-16 10:00:00', bytes: 30839, sha256: SOURCE_HASHES.cleanup },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -134,12 +135,12 @@ select jsonb_build_object(
       ('private.item_lifecycle_manifest(jsonb)','d9b3ad0180f0ecd8585c80966eb3cddd'),
       ('private.item_lifecycle_owner()','5f4e91aa94e250ed1367753d82de73c4'),
       ('private.guard_item_deletion()','a3215f653a4b240d691f7a4a16be4cbd'),
-      ('private.guard_item_image_deletion()','dc3c9d450fb27915b20ac84313acf80e'),
-      ('private.may_create_item_object(text)','93443dd83aaec31f8696ca844331dd83'),
+      ('private.guard_item_image_deletion()','3a84bb649cc47fdb09b8217debf27837'),
+      ('private.may_create_item_object(text)','b2cb4bdec114c45f21e2d0bd607bc4ad'),
       ('private.guard_item_object_publication()','${PUBLICATION_BODY_MD5}'),
       ('public.set_item_trashed(uuid,bigint,boolean)','c27f9c20cb84663278c1b7adc465311e'),
       ('public.item_deletion_status(uuid[])','4b9f170466dcac2472112ea5cb6b3a67'),
-      ('public.begin_item_deletion(uuid,bigint,uuid,text)','c9bb6b0a059b4bd19e7dcbb5800f1151'),
+      ('public.begin_item_deletion(uuid,bigint,uuid,text)','63974c11678275f25476ec91340e9411'),
       ('public.finish_item_deletion(uuid,uuid)','7dbb0841f466bd4b7da3b56e6bb4ad0a')
     ) expected(identity,hash) join pg_catalog.pg_proc p on p.oid=expected.identity::regprocedure),
   'storageReadDelete',(select count(*)=2 and bool_and(
@@ -153,6 +154,61 @@ select jsonb_build_object(
       and (select array_agg(policyname::text order by policyname::text)=array['wardrobe_create','wardrobe_delete','wardrobe_read']::text[]
         from pg_catalog.pg_policies where schemaname='storage' and tablename='objects')
       and not exists(select 1 from pg_catalog.pg_policies where schemaname='storage' and tablename='objects' and cmd in ('UPDATE','ALL'))
+);`;
+
+export const IMAGE_CLEANUP_CATALOG_SQL = `
+select jsonb_build_object(
+  'tables',(select count(*)=2 and bool_and(c.relrowsecurity and c.relkind='r')
+    from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid=c.relnamespace
+    where n.nspname='private' and c.relname in ('image_cleanup_claims','image_cleanup_delete_context')),
+  'noPolicies',not exists(select 1 from pg_catalog.pg_policies where schemaname='private'
+    and tablename in ('image_cleanup_claims','image_cleanup_delete_context')),
+  'noTableGrants',(select bool_and(not has_table_privilege(r,t,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
+    from unnest(array['anon','authenticated','service_role']) r,
+      unnest(array['private.image_cleanup_claims','private.image_cleanup_delete_context']) t),
+  'claimColumns',(select array_agg(a.attname::text order by a.attnum)=array[
+      'owner_id','request_id','item_id','image_id','state','kind','started_at','eligibility_at','manifest_sha256','objects']
+    from pg_catalog.pg_attribute a where a.attrelid='private.image_cleanup_claims'::regclass and a.attnum>0 and not a.attisdropped),
+  'claimKeys',(select count(*)=3 and array_agg(c.contype::text order by c.contype)=array['f','p','u']
+      and bool_and(c.convalidated and not c.condeferrable and case c.contype
+      when 'p' then c.conkey=array[1,2]::smallint[]
+      when 'u' then c.conkey=array[1,3,4]::smallint[]
+      when 'f' then c.conkey=array[1]::smallint[] and c.confrelid='public.profiles'::regclass
+        and c.confkey=array[(select attnum from pg_catalog.pg_attribute
+          where attrelid='public.profiles'::regclass and attname='owner_id')] and c.confdeltype='c' else false end)
+    from pg_catalog.pg_constraint c where c.conrelid='private.image_cleanup_claims'::regclass and c.contype in ('p','u','f')),
+  'contextColumns',(select array_agg(a.attname::text order by a.attnum)=array['owner_id','request_id','item_id','image_id']
+      and bool_and(a.attnotnull and a.atttypid='uuid'::regtype)
+    from pg_catalog.pg_attribute a where a.attrelid='private.image_cleanup_delete_context'::regclass and a.attnum>0 and not a.attisdropped),
+  'contextKeys',(select count(*)=2 and array_agg(c.contype::text order by c.contype)=array['f','p']
+      and bool_and(c.convalidated and not c.condeferrable and case c.contype
+      when 'p' then c.conkey=array[1,2]::smallint[]
+      when 'f' then c.conkey=array[1,2]::smallint[] and c.confrelid='private.image_cleanup_claims'::regclass
+        and c.confkey=array[1,2]::smallint[] and c.confdeltype='c' else false end)
+    from pg_catalog.pg_constraint c where c.conrelid='private.image_cleanup_delete_context'::regclass and c.contype in ('p','u','f')),
+  'rpc',(select count(*)=5 and bool_and(p.prosecdef and p.provolatile='v'
+      and p.prorettype='jsonb'::regtype and 'search_path=""'=any(p.proconfig)
+      and has_function_privilege('authenticated',p.oid,'EXECUTE')
+      and not has_function_privilege('anon',p.oid,'EXECUTE')
+      and not has_function_privilege('service_role',p.oid,'EXECUTE')
+      and not exists(select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+        where a.grantee=0 and a.privilege_type='EXECUTE'))
+    from pg_catalog.pg_proc p where p.oid=any(array[
+      'public.image_cleanup_page(uuid,uuid)'::regprocedure,'public.begin_image_cleanup(uuid,uuid,uuid,text)'::regprocedure,
+      'public.image_cleanup_status(uuid)'::regprocedure,'public.image_cleanup_claims(uuid)'::regprocedure,
+      'public.finish_image_cleanup(uuid)'::regprocedure])),
+  'privateDenied',(select bool_and(not has_function_privilege(r,f,'EXECUTE'))
+    from unnest(array['anon','authenticated','service_role']) r,
+      unnest(array['private.image_cleanup_old_enough(text,timestamptz,timestamptz)',
+        'private.image_cleanup_image(uuid,uuid,uuid)','private.image_cleanup_manifest(uuid,uuid,uuid,text,jsonb,jsonb)',
+        'private.image_cleanup_evidence(uuid,uuid,uuid,timestamptz)',
+        'private.image_cleanup_checked_status(private.image_cleanup_claims)']) f),
+  'pureAge',(select p.provolatile='i' and not p.prosecdef and 'search_path=""'=any(p.proconfig)
+    from pg_catalog.pg_proc p where p.oid='private.image_cleanup_old_enough(text,timestamptz,timestamptz)'::regprocedure),
+  'boundedWrites',(select count(*)=2 and bool_and('lock_timeout=2s'=any(p.proconfig))
+    from pg_catalog.pg_proc p where p.oid=any(array[
+      'public.begin_image_cleanup(uuid,uuid,uuid,text)'::regprocedure,'public.finish_image_cleanup(uuid)'::regprocedure])),
+  'contextEmpty',not exists(select 1 from private.image_cleanup_delete_context)
 );`;
 
 export const STORAGE_CATALOG_INVENTORY_SQL = `
@@ -784,6 +840,10 @@ async function main() {
     requireEvidence(Object.keys(lifecycleCatalog).length === 19 && Object.values(lifecycleCatalog).every((value) => value === true));
     requireStorageCatalogInventory(JSON.parse(await privilegedLocalSql(STORAGE_CATALOG_INVENTORY_SQL)));
     console.log('PASS: I08 private claims, privileged fresh guards and narrow Storage policy catalog');
+    stage = 'S4-image-cleanup-catalog';
+    const cleanupCatalog = JSON.parse(await privilegedLocalSql(IMAGE_CLEANUP_CATALOG_SQL));
+    requireEvidence(Object.keys(cleanupCatalog).length === 12 && Object.values(cleanupCatalog).every((value) => value === true));
+    console.log('PASS: I10a private cleanup claims/context, owner-only RPCs and structural retention catalog');
     stage = 'S4-item-lifecycle-fixtures';
     const { lifecycleFixtureCases, lifecyclePublicationCases } = await import('../tests/integration/item-lifecycle.sessions.mjs');
     await lifecycleFixtureCases(env, { withLifecycleParentLock });

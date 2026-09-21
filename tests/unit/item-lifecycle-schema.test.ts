@@ -364,7 +364,7 @@ describe('I08 SQL source contract, not live database proof', () => {
   });
   it('pins actual ninth bytes and preserves literal privileges plus positive catalog assertions', () => {
     const entries = MIGRATIONS as Array<{ name: string; bytes: number; sha256: string }>;
-    expect(entries).toHaveLength(9);
+    expect(entries).toHaveLength(10);
     const entry = entries[8];
     if (!entry) throw new Error('Missing migration');
     expect(entry.name).toBe('20260913120000_item_lifecycle.sql');
@@ -380,11 +380,33 @@ describe('I08 SQL source contract, not live database proof', () => {
     expect(ITEM_LIFECYCLE_CATALOG_SQL).toContain("cmd in ('UPDATE','ALL')");
     expect(ITEM_LIFECYCLE_CATALOG_SQL).toContain('private.may_delete_storage(name)');
     expect(ITEM_LIFECYCLE_CATALOG_SQL).not.toMatch(/^\s*(delete|update|insert|create|alter|grant)\b/im);
+    const superseded = new Set([
+      'private.guard_item_image_deletion', 'private.may_create_item_object',
+      'private.guard_item_object_publication', 'public.begin_item_deletion',
+    ]);
+    const seenOverrides = new Set<string>();
+    const names: string[] = [];
     for (const match of sql.matchAll(/create function ([\w.]+)\((.*?)\)[\s\S]*?as \$\$([\s\S]*?)\$\$;/g)) {
+      const name = match[1];
       const body = match[3];
-      if (body === undefined) throw new Error('Missing routine body');
-      expect(ITEM_LIFECYCLE_CATALOG_SQL).toContain(createHash('md5').update(body).digest('hex'));
+      if (name === undefined || body === undefined) throw new Error('Missing routine name/body');
+      names.push(name);
+      const hash = createHash('md5').update(body).digest('hex');
+      if (superseded.has(name)) {
+        expect(ITEM_LIFECYCLE_CATALOG_SQL).not.toContain(hash);
+        seenOverrides.add(name);
+      } else {
+        expect(ITEM_LIFECYCLE_CATALOG_SQL).toContain(hash);
+      }
     }
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.sort()).toEqual([
+      'private.record_item_image_identity', 'private.item_lifecycle_manifest', 'private.item_lifecycle_owner',
+      'private.guard_item_deletion', 'private.guard_item_image_deletion', 'private.may_create_item_object',
+      'private.guard_item_object_publication', 'public.set_item_trashed', 'public.item_deletion_status',
+      'public.begin_item_deletion', 'public.finish_item_deletion',
+    ].sort());
+    expect([...seenOverrides].sort()).toEqual([...superseded].sort());
   });
   it('runs new ordinary suites additively without granting normal children CI fixture authority', async () => {
     const runner = await read('scripts/run-local-tests.mjs');
