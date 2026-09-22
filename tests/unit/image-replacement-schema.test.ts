@@ -354,6 +354,43 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
     expect(body(sql, 'private.guard_image_change_image')).toContain('row(new.owner_id,new.item_id,new.id) is distinct from row(old.owner_id,old.item_id,old.id)');
     expect(sql).not.toMatch(/disable trigger|session_replication_role|delete from storage\.objects/);
   });
+  it('CI12 pins the shared helper sole 22023 contention conversion and unchanged RPC definitions', async () => {
+    const sql = await source, lock = body(sql, 'private.image_change_lock');
+    expect(lock.match(/errcode='22023'/g)).toHaveLength(1);
+    expect(lock).toContain("exception when lock_not_available then raise exception using errcode='22023',message='Request conflict';\nend;");
+    expect(lock.match(/errcode='42501'/g)).toHaveLength(3);
+    expect(createHash('sha256').update(lock).digest('hex')).toBe('2309736d7cdee9a737055ea0167ad50182ab410be4d458e7d17e6a2850473dfe');
+    const guard = body(sql, 'private.guard_item_object_publication');
+    const outside = sql.replace(guard, '');
+    expect(Buffer.byteLength(outside)).toBe(77872);
+    expect(createHash('sha256').update(outside).digest('hex')).toBe('8e29e574045ed91daaa60011c28fbc75203cd2a9cc15994591ca4d28a2a85f4e');
+  });
+  it('CI12 translates only the native helper call 22023 and leaves other SQLSTATEs unmatched', async () => {
+    const guard = body(await source, 'private.guard_item_object_publication');
+    const block = "  begin\n    perform private.image_change_lock(u);\n"
+      + "  exception when sqlstate '22023' then\n"
+      + "    raise exception using errcode='55P03',message='The resource is locked';\n  end;";
+    expect(guard).toContain(block);
+    expect(guard.match(/perform private\.image_change_lock\(u\);/g)).toHaveLength(1);
+    expect(guard.match(/exception when[^\n]+/g)).toEqual([
+      "exception when sqlstate '22023' then",
+      "exception when lock_not_available then raise exception using errcode='55P03',message='The resource is locked';",
+    ]);
+    expect(guard).not.toMatch(/when others|sqlerrm|sqlstate '(?:42501|40P01|57014)'/i);
+  });
+  it('CI12 keeps all three later native locks outside the translation and admission before DELETE return', async () => {
+    const sql = await source, guard = body(sql, 'private.guard_item_object_publication');
+    const boundary = guard.indexOf("  exception when sqlstate '22023' then");
+    expect(boundary).toBeGreaterThan(guard.indexOf('perform private.image_change_lock(u);'));
+    const end = guard.indexOf('  end;', boundary);
+    expect(end).toBeGreaterThan(boundary);
+    expect(guard.slice(0, end)).not.toContain('for share nowait');
+    expect(guard.slice(end).match(/for share nowait;/g)).toHaveLength(3);
+    expect(end).toBeLessThan(guard.indexOf('select * into d'));
+    expect(guard.indexOf('select * into d')).toBeLessThan(guard.indexOf("if tg_op='DELETE' then return old; end if;"));
+    expect(guard.trimEnd()).toMatch(/exception when lock_not_available then raise exception using errcode='55P03',message='The resource is locked';\nend;$/);
+    expect(sql).toContain('create or replace trigger item_object_publication_guard after insert or update or delete on storage.objects');
+  });
   it.each(['image_change_attempts', 'item_deletion_targets'])(
     'qualifies native publication image_id references in statements using %s', async (table) => {
       const guard = body(await source, 'private.guard_item_object_publication');

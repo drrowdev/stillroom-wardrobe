@@ -15,6 +15,100 @@ PR [#9](https://github.com/drrowdev/stillroom-wardrobe/pull/9), branch
 `25a268712dc9158259608f5a4f17d11d9b9ad279`. This result update changes no
 executable inputs.
 
+## 22 September 2026 - CI12 native lock boundary and bounded caller evidence
+
+**Unstaged source correction; native behavior and CI12 cause remain unverified.**
+The same local GPT-6 Astra writer implements only the eight paths in
+[release 5775798300](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5775798300),
+after actual retained Anthropic Claude Opus 5 critiques 150/151 and focused
+152 approval, with coordinator R1-R3/D1-D6 conditions and matching local model
+receipt. Starting head `6afbdd71a7a3dce17232413478192f569185ddf7`, tree
+`944404abe3fddc19c09eeac1409645ef31858c00`, remains unpublished by this amendment;
+main remains `1984b848017dd9c22249907fe303d701bcb48440`. This supports the existing
+I10b R03/R12/R15 deletion requirements, not additional feature scope.
+
+The shared `private.image_change_lock` converts `lock_not_available` (`55P03`)
+to RPC `22023`. That is its sole explicit `22023` emitter. The modern native
+publication guard previously called it with only an outer `55P03` handler,
+so the already-converted state escaped that native mapping. A narrow nested
+block now translates `22023` from that one helper call back to native `55P03`
+with the existing `The resource is locked` text. It retains the outer handler,
+the three later `FOR SHARE NOWAIT` locks outside the block, and common
+INSERT/UPDATE/DELETE admission before deletion checks/return. No broad catch,
+message matching, policy change, lock bypass or public RPC change was made.
+Other states, including the helper's owner/isolation/approval `42501`, remain
+unmatched by the new handler. Static assertions pin the sole conversion and
+all source outside this guard; they do not execute PostgreSQL or Storage.
+
+The exception block adds a subtransaction. Successful locks persist to
+transaction end; failed-block effects roll back and the exception propagates
+through the mapping. The helper's lack of explicit business-data DML is not
+evidence about XID allocation, physical effects or measured cost. No zero-cost
+claim is made. Existing `lock_timeout` can also produce `55P03`; this mapping
+does not distinguish timeout from NOWAIT contention.
+
+The coordinator's R2 confirmation is based on this project's recorded
+operations: the owner's 20 September six-row hosted ledger matched the
+coordinator's cited record `5622788324`,
+with no later hosted-DDL authorization/application. This unmerged eleventh
+migration has been exercised only in disposable CI, not this project's
+persistent database. This is not a fresh hosted query or a claim about unknown
+external databases. Contrary persistent-application evidence requires a hold.
+
+Only the existing owner-lock DELETE request now supplies the existing
+`onFailure` hook. It passes through `status5xx-<closed>`, `body-on-204`,
+`no-body-<closed>`, `overflow` and `nonjson-<closed>` under the fixed
+`owner-lock-delete-` prefix; unknown statuses retain the helper's `OTHER`.
+Both loop targets retain indistinguishable labels. Result-class labels remain
+separate. No classifier, catch, await, retry, extra request or validator change
+was added. An absent hook remains unclassified, not a transport diagnosis.
+Known reasons identify only the covered guard category, not a root cause.
+
+New tests execute the real caller through a mocked request/lock/child seam.
+The mock invokes the passed hook before throwing the exact same value,
+including falsy values. Both loop occurrences, all five reason families,
+ordering, short-circuit, cleanup, privacy, default-noop and non-awaited
+observation are covered. These tests do not execute `normalClient.request` or
+prove its runtime hook sequence. That helper and `imageChangeHarness` remain
+byte-frozen; existing preservation tests remain unchanged.
+
+Only three executable pin values change: migration bytes `82243` -> `82456`,
+SHA256 `cebc58134c93590fe178a1a72a4beb77dcabe562803c90a5455cf09acba3e771` ->
+`4709017051095186ac1cf3cdcfe36d81f8afe4da3a78db8628e7369a49690dd5`, and modern
+guard MD5 `628ede8b417fe55094dcd50196b8f353` ->
+`636fb77a3c954f4a23d78c7339ffef95`. SQL outside the guard remains
+77872 bytes/SHA256
+`8e29e574045ed91daaa60011c28fbc75203cd2a9cc15994591ca4d28a2a85f4e`.
+Legacy/policy hashes, all ten predecessors, old I08 caller, child IPC, caps,
+lock modes, deletion oracles, browser files and consumed-probe removal remain
+unchanged. Historical evidence below is retained verbatim.
+
+Local Node 24.19.0 validation used the existing locked dependencies:
+`vitest run tests/unit/image-replacement-schema.test.ts tests/unit/item-lifecycle-schema.test.ts -t CI12 --reporter=dot`
+first produced 32 failures/12 passes/721 filtered tests before the repair.
+After implementation, 43 passed/one failed: the new success assertion counted
+the existing POST upload hook as though it were another DELETE hook. The
+test-only correction explicitly retains POST/DELETE/DELETE hook order.
+The identical selector then passed all 44 selected tests. The existing five
+suites (`item-lifecycle-schema`, `preservation`, `local-backend`,
+`image-replacement-schema`, `ci-storage-guard`) passed all 1774 tests in one
+invocation. Scoped ESLint on all six changed JS/TS files and `tsc --noEmit`
+passed. The secret scan checked 253 text files with no local canary supplied;
+CI still requires its canary. `git diff --check` passed. These are local
+static/mocked checks, not live database evidence.
+
+The [CI12 terminal record](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5775760886)
+remains authoritative: DB stopped at `owner-lock-delete`, without a returned
+result class/status/body/target/trigger outcome. This source mismatch is
+consistent with that signature, not its established cause. App had 2998 unit
+passes and 729 browser passes, four existing skips and one flaky oversized
+source case (first 400 instead of 413; retry passed). Eight successful uploads
+are not visual acceptance; parallel-page non-recurrence is not a fix.
+CI9/other transport causes remain unresolved. This amendment runs no backend,
+browser, native CI, probe, hosted query/mutation or type generation. Native
+mapping, independent candidate closure and separate publication remain pending;
+no Stage C, merge or deployment is authorized.
+
 ## 22 September 2026 - I10b Stage A backend/harness source candidate
 
 This is an **unstaged source handoff**, not PostgreSQL/native acceptance, UI

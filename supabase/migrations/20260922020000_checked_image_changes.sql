@@ -1048,7 +1048,12 @@ begin
     raise exception using errcode='42501',message='Not available';
   end if;
   u := split_part(object.name,'/',1)::uuid; parent_id := split_part(object.name,'/',2)::uuid;
-  perform private.image_change_lock(u);
+  -- Native Storage needs 55P03; the shared RPC helper deliberately emits 22023.
+  begin
+    perform private.image_change_lock(u);
+  exception when sqlstate '22023' then
+    raise exception using errcode='55P03',message='The resource is locked';
+  end;
   select * into d from private.item_deletion_operations where owner_id=u and item_id=parent_id and phase<>'cancelled';
   if found then
     if tg_op<>'DELETE' or d.phase not in ('authorized','removing_registered')

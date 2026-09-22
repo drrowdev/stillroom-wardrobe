@@ -288,7 +288,9 @@ export async function imageDeletionCases(env, { withLifecycleLateUpload, require
         denied(trash);
         for (const path of [h.paths(pending)[0], h.paths({ itemId: unaffected.item.id, imageId: unaffected.image.id })[0]]) {
           mark('owner-lock-delete');
-          const refused = await client.request(owner.token, `/storage/v1/object/wardrobe/${path}`, { method: 'DELETE' });
+          const refused = await client.request(owner.token, `/storage/v1/object/wardrobe/${path}`, {
+            method: 'DELETE', onFailure: (reason) => mark(`owner-lock-delete-${reason}`),
+          });
           mark(`owner-lock-delete-result-${responseClass(refused)}`);
           requireEvidence(!refused.ok && refused.status >= 400 && refused.status < 500);
         }

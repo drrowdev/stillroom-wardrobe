@@ -832,7 +832,7 @@ describe('I10b deletion callback evidence (real caller, mocked client/lock/child
   const other = { uid: '10000000-0000-4000-8000-000000000002', token: 'private-peer-token' };
   type Row = Record<string, unknown>;
   type Step = { name: string; reply?: unknown };
-  type Fault = { at: string; occurrence?: number; value?: unknown; reply?: unknown };
+  type Fault = { at: string; occurrence?: number; value?: unknown; reply?: unknown; reason?: string };
   const conflict = { ok: false, status: 400, data: { code: '22023', details: null, hint: null, message: 'Request conflict' } };
   const removed = { ok: true, status: 200, data: { message: 'Successfully deleted' } };
   const refused = { ok: false, status: 400, data: { code: 'AccessDenied', message: 'private-response-message' } };
@@ -850,24 +850,27 @@ describe('I10b deletion callback evidence (real caller, mocked client/lock/child
   });
   function fixture(fault?: Fault, twoOwners = false) {
     const labels: string[] = [], events: string[] = [], cleanup: string[] = [], expected: Step[] = [];
+    const failureLabels: (string | undefined)[] = [];
     const counts = new Map<string, number>(), originals: { item: Row; image: Row }[] = [];
     let cursor = 0, pending: Row = {}, transport = Buffer.alloc(0), callback = false;
     const mark = vi.fn((label: string) => { labels.push(label); });
-    const visit = (name: string, reply?: unknown) => {
+    const visit = (name: string, reply?: unknown, onFailure?: (reason: string) => void) => {
       events.push(name);
       const count = (counts.get(name) ?? 0) + 1; counts.set(name, count);
       if (fault?.at === name && count === (fault.occurrence ?? 1)) {
         if (Object.hasOwn(fault, 'reply')) return fault.reply;
+        if (fault.reason !== undefined) onFailure?.(fault.reason);
+        failureLabels.push(labels.at(-1));
         throw fault.value;
       }
       return reply;
     };
-    const take = (name: string) => {
+    const take = (name: string, onFailure?: (reason: string) => void) => {
       const step = expected[cursor++];
       expect(step?.name).toBe(name);
-      return visit(name, step?.reply);
+      return visit(name, step?.reply, onFailure);
     };
-    const request = vi.fn(async (token: string, route: string, options: { method?: string; body?: unknown } = {}) => {
+    const request = vi.fn(async (token: string, route: string, options: { method?: string; body?: unknown; onFailure?: (reason: string) => void } = {}) => {
       if (twoOwners && callback && route === '/rest/v1/rpc/reserve_item_save') {
         expect(token).toBe(other.token);
         return visit('next-owner:reserve');
@@ -880,7 +883,7 @@ describe('I10b deletion callback evidence (real caller, mocked client/lock/child
           : route.startsWith('/rest/v1/item_images?') ? 'read:image'
           : route.startsWith('/storage/v1/object/authenticated/') ? 'raw:download'
           : route === '/rest/v1/items' ? 'raw:reinsert' : 'raw:storage-' + method;
-        return take(name);
+        return take(name, options.onFailure);
       }
       if (route === '/rest/v1/rpc/reserve_item_save') {
         const body = record(options.body), item: Row = { ...record(body.p_item), owner_id: owner.uid, version: 1, deleted_at: null };
@@ -979,8 +982,77 @@ describe('I10b deletion callback evidence (real caller, mocked client/lock/child
       for (const secret of [owner.uid, owner.token, other.uid, other.token, 'private', '/storage/', ...originals.flatMap(({ item, image }) => [item.id, image.id]),
         pending.requestId, pending.imageId]) if (typeof secret === 'string') expect(text).not.toContain(secret);
     };
-    return { run, mark, labels, events, cleanup, expected, request, rpc, privacy, get cursor() { return cursor; } };
+    return { run, mark, labels, events, cleanup, expected, request, rpc, privacy, failureLabels, get cursor() { return cursor; } };
   }
+  const requestReasons = ['status5xx-500', 'status5xx-503', 'status5xx-OTHER', 'body-on-204',
+    'no-body-400', 'no-body-OTHER', 'overflow', 'nonjson-400', 'nonjson-OTHER'];
+  it.each(requestReasons.flatMap((reason) => [1, 2].map((occurrence) => ({ reason, occurrence }))))(
+    'CI12 observes passed request hook before exact rejection at held DELETE $occurrence/$reason', async ({ reason, occurrence }) => {
+      const primary = new Error('private response/token/path/body');
+      const f = fixture({ at: 'raw:storage-DELETE', occurrence, reason, value: primary });
+      await expect(f.run()).rejects.toBe(primary);
+      const label = `owner-lock-delete-${reason}`;
+      expect(f.labels.at(-1)).toBe(label);
+      expect(f.failureLabels).toEqual([label]);
+      expect(f.labels.slice(-2)).toEqual(['owner-lock-delete', label]);
+      expect(f.events.at(-1)).toBe('raw:storage-DELETE');
+      expect(f.events.filter((event) => event === 'raw:storage-DELETE')).toHaveLength(occurrence);
+      expect(f.cursor).toBe(f.expected.findIndex(({ name }) => name === 'raw:storage-DELETE') + occurrence);
+      expect(f.cleanup).toEqual(['lock:owner share', 'lock:owner no key update', 'child']);
+      expect(f.events).not.toContain('lock:owner no key update:release');
+      expect(f.events).not.toContain('child:settle');
+      expect(label).not.toContain('owner-lock-delete-result-');
+      expect(label).toMatch(/^owner-lock-delete-(?:status5xx-(?:500|503|OTHER)|body-on-204|no-body-(?:400|OTHER)|overflow|nonjson-(?:400|OTHER))$/);
+      expect(label.length).toBeLessThanOrEqual(35);
+      f.privacy();
+  });
+  it.each([undefined, null, false, 0, ''].flatMap((value) => [1, 2].map((occurrence) => ({ value, occurrence }))))(
+    'CI12 retains falsy hook rejection and cleanup %#', async ({ value, occurrence }) => {
+      const f = fixture({ at: 'raw:storage-DELETE', occurrence, reason: 'overflow', value });
+      await expect(f.run()).rejects.toBe(value);
+      expect(f.failureLabels).toEqual(['owner-lock-delete-overflow']);
+      expect(f.labels.at(-1)).toBe('owner-lock-delete-overflow');
+      expect(f.events.at(-1)).toBe('raw:storage-DELETE');
+      expect(f.cleanup).toEqual(['lock:owner share', 'lock:owner no key update', 'child']); f.privacy();
+  });
+  it.each([1, 2])('CI12 leaves a request rejection without a hook unclassified at occurrence %s', async (occurrence) => {
+    const primary = new Error('private unknown failure'), f = fixture({ at: 'raw:storage-DELETE', occurrence, value: primary });
+    await expect(f.run()).rejects.toBe(primary);
+    expect(f.failureLabels).toEqual(['owner-lock-delete']);
+    expect(f.labels.at(-1)).toBe('owner-lock-delete');
+    expect(f.events.at(-1)).toBe('raw:storage-DELETE'); f.privacy();
+  });
+  it.each(requestReasons)('CI12 preserves default-noop observation with an actual mocked hook fault %s', async (reason) => {
+    const primary = new Error('private failure'), f = fixture({ at: 'raw:storage-DELETE', reason, value: primary });
+    await expect(f.run(false)).rejects.toBe(primary);
+    expect(f.labels).toEqual([]); expect(f.failureLabels).toEqual([undefined]);
+    expect(f.events.at(-1)).toBe('raw:storage-DELETE');
+    expect(f.cleanup).toEqual(['lock:owner share', 'lock:owner no key update', 'child']);
+  });
+  it('CI12 adds observation only to both held DELETE requests without changing success ordering', async () => {
+    const f = fixture(); await f.run();
+    const hooks = f.request.mock.calls.filter(([, , options]) => options?.onFailure !== undefined);
+    expect(hooks.map(([, , options]) => options?.method)).toEqual(['POST', 'DELETE', 'DELETE']);
+    const observed = hooks.filter(([, , options]) => options?.method === 'DELETE');
+    expect(observed).toHaveLength(2);
+    for (const [, , options] of observed) {
+      expect(options?.method).toBe('DELETE');
+      expect(Object.keys(options!).sort()).toEqual(['method', 'onFailure']);
+    }
+    expect(f.events.slice(f.events.indexOf('child:admit'))).toEqual(f.expected.map(({ name }) => name));
+    expect(f.events.filter((event) => event === 'rpc:reconcile_item_deletion_target')).toHaveLength(8);
+    expect(f.failureLabels).toEqual([]);
+    expect(f.labels.filter((label) => label.startsWith('owner-lock-delete-result-'))).toHaveLength(2);
+    const unmarked = fixture(); await unmarked.run(false);
+    expect(unmarked.events).toEqual(f.events); expect(unmarked.labels).toEqual([]); f.privacy();
+  });
+  it('CI12 does not await the held DELETE failure observation', async () => {
+    const primary = new Error('private failure'), f = fixture({ at: 'raw:storage-DELETE', reason: 'overflow', value: primary });
+    f.mark.mockImplementation((label: string) => { f.labels.push(label); return new Promise<void>(() => {}); });
+    await expect(f.run()).rejects.toBe(primary);
+    expect(f.failureLabels).toEqual(['owner-lock-delete-overflow']);
+    expect(f.labels.at(-1)).toBe('owner-lock-delete-overflow'); f.privacy();
+  });
   it('retains the original successful operation order and four target dispatches, with and without mark', async () => {
     const f = fixture(); await f.run();
     expect(f.cursor).toBe(f.expected.length);
