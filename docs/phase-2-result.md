@@ -252,6 +252,67 @@ subsequently supplied CI3 App SUCCESS metadata at 03:51:21Z; no detailed result
 counts or artifact acceptance are inferred, and Apple final results are not
 asserted from earlier heads. DB remains failed; no generated-type release.
 
+### Stage A CI4 - real-client upload observer, 22 September 2026
+
+The [actual CI4 evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771156822)
+records head `5c86cd625bdbf590e8de3745f2fcc2d911dd9ed4`, CI `35686162961`,
+database job `106613296299`. Startup, exact eleven-source inventory,
+historical base->10/9->10 preservation and the ROOT11 ledger passed.
+At 04:18:28.7229772Z the failure was
+`I10b-preservation-replacement-upload`, without a response class. Reservation
+completed; the specific lower-level cause remains unknown. Exact-run snapshot
+cleanup passed. Later backend/security/rehearsal/types/artifact gates were
+skipped, not passed. Apple job `106613295401` passed four generated-JPEG and
+three orientation/composition checks on macOS 26 arm64, as subsequently read
+by the coordinator; this is not physical-device/HEIC acceptance. App was still
+running at the read-only diagnosis release.
+
+Source inspection established a diagnostic integration gap: `normalClient`
+rejects HTTP >=500 before reading or returning its response, so an outer
+upload classifier cannot see it. Malformed 204, absent non-204 body, response
+overflow and nonempty non-JSON response guards also throw before return.
+Fetch/read/cancel can throw, and the runner prints literal `EVIDENCE_REQUIRED`
+for every caught error. The actual CI line therefore does not prove a 5xx,
+SQLSTATE, failing trigger or production defect.
+
+The [reviewed five-path amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771214433)
+records retained Anthropic Claude Opus 5 critique, same-writer model observation
+and A1-A5 with the precise fifth-path correction. The upload helper now marks
+only guarded main/thumb forward attempt boundaries. An optional synchronous
+failure observer in the real request helper reports only the five approved
+invariant reasons immediately before their unchanged assertions. Both helpers
+use one exported 15-status allowlist classifier; the existing 18-code list is
+unchanged. The observer defaults to no-op and is wired only by upload.
+
+The early 5xx guard still runs before any body access; no extra read, parse,
+request, retry, catch, logging stream or fixture input was added. Original
+exceptions and reader cancellation precedence remain: a cancel error can
+still replace an overflow error, but does not replace the observed overflow
+label. A fetch/read/cancel failure without an observed invariant retains only
+the variant attempt boundary. Successful requests emit no invariant class;
+attempt boundaries are distinct from failure classification.
+
+The affected unit suites passed 291 tests (preservation 166, replacement schema
+125), including 43 new composition/real-client fetch/Response-mocked cases and
+the single-classifier source check. They reproduce the previous pre-return
+miss, cover both variants and all four approved 5xx statuses without accessing
+the body, preserve each existing refusal, exact response-size boundary,
+transport sentinel identity/finally precedence, request order/body/headers,
+default callers, unknown-value privacy and no console output. The fifth-path
+changes retain unexpected-variant and three-argument no-mark assertions and
+all reserve/stage/sequence/privacy coverage.
+Scoped ESLint, `tsc --noEmit`, secret scan and whitespace checks passed. The
+scan checked 253 text files without a local canary; the CI canary remains
+required. No local backend/SQL/parser or dependency installation was performed.
+
+This is an unstaged diagnostic candidate, not a native Storage/PostgreSQL pass.
+5xx diagnostics expose status only, with their bodies still unread; arbitrary
+transport failures expose only the variant. Reserve and other real-client
+callers intentionally retain the old observer blind spot. No underlying
+replacement SQL fix is claimed. All eleven SQL files and source/body pins,
+timeouts and B1/B2/C counts are unchanged. Focused closure/publication and
+actual CI remain required; no generated types or Stage C release is implied.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling

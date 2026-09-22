@@ -3,18 +3,17 @@ import { isDeepStrictEqual } from 'node:util';
 import { isMain } from '../../scripts/quality/files.mjs';
 import { LOCAL_API } from '../../scripts/backend/local.mjs';
 import { intent, saveClients, saveHarness, denied, eq, equalAiStatusState } from './item-save.sessions.mjs';
-import { requireEvidence } from './preservation.sessions.mjs';
+import { requireEvidence, diagnosticHttpStatus } from './preservation.sessions.mjs';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
 import { classifyObjectDeletion } from '../../src/data/storage-delete.ts';
 
 const bytes = jpegHeaderFixture();
 const hash = createHash('sha256').update(bytes).digest('hex');
 const stripped = ['id', 'owner_id', 'created_at', 'updated_at', 'deleted_at', 'version'];
-const diagnosticStatuses = new Set([200, 201, 204, 400, 401, 403, 404, 409, 413, 422, 429, 500, 502, 503, 504]);
 const diagnosticCodes = new Set(['22023', '42501', '42601', '42702', '42703', '42883', '23502', '23503', '23505',
   '23514', '55P03', 'PGRST202', 'PGRST204', 'NoSuchKey', 'AccessDenied', 'Duplicate', 'InvalidKey', 'EntityTooLarge']);
 function responseClass(result) {
-  const status = Number.isInteger(result.status) && diagnosticStatuses.has(result.status) ? result.status : 'OTHER';
+  const status = diagnosticHttpStatus(result.status);
   const data = result.data;
   const code = data !== null && typeof data === 'object' && !Array.isArray(data)
     && Object.hasOwn(data, 'code') && typeof data.code === 'string' && diagnosticCodes.has(data.code) ? data.code : 'OTHER';
@@ -60,11 +59,14 @@ export function imageChangeHarness(client, owner, env, mark = () => {}) {
   };
   const upload = async (value, variants = ['main', 'thumb']) => {
     for (const variant of variants) {
+      const knownVariant = variant === 'main' || variant === 'thumb';
+      if (knownVariant) mark(`upload-${variant}-attempt`);
       const result = await client.request(owner.token,
         `/storage/v1/object/wardrobe/${owner.uid}/${value.itemId}/${value.imageId}/${variant}.jpg`, {
         method: 'POST', body: bytes, binary: true, headers: { 'x-upsert': 'false' },
+        ...(knownVariant ? { onFailure: (reason) => mark(`upload-${variant}-${reason}`) } : {}),
         });
-      if (!result.ok && (variant === 'main' || variant === 'thumb')) mark(`upload-${variant}-http-${responseClass(result)}`);
+      if (!result.ok && knownVariant) mark(`upload-${variant}-http-${responseClass(result)}`);
       requireEvidence(result.ok);
     }
   };

@@ -146,6 +146,17 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
         const logs = [vi.spyOn(console, 'error'), vi.spyOn(console, 'log'), vi.spyOn(console, 'warn')];
         return { request, mark, h, logs };
       }
+      it('imports the single shared status classifier rather than duplicating its allowlist', async () => {
+        const [fixtureSource, clientSource] = await Promise.all([
+          readFile(new URL('../integration/image-replacement.sessions.mjs', import.meta.url), 'utf8'),
+          readFile(new URL('../integration/preservation.sessions.mjs', import.meta.url), 'utf8'),
+        ]);
+        expect(fixtureSource).toContain("import { requireEvidence, diagnosticHttpStatus } from './preservation.sessions.mjs';");
+        expect(fixtureSource).toContain('const status = diagnosticHttpStatus(result.status);');
+        expect(fixtureSource).not.toContain('const diagnosticStatuses');
+        expect(clientSource.match(/const diagnosticStatuses = new Set/g)).toHaveLength(1);
+        expect(clientSource).toContain('export function diagnosticHttpStatus(status)');
+      });
       it.each(statuses)('classifies only allowed HTTP status %s immediately before the existing refusal', async (status) => {
         const f = fixture({ ok: false, status, data: { code: '22023' } });
         await expect(f.h.reserve(value)).rejects.toThrow('EVIDENCE_REQUIRED');
@@ -231,7 +242,10 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
         const f = fixture({ ok: false, status: 403, data: { code: 'AccessDenied', message: owner.token } });
         if (variant === 'thumb') f.request.mockResolvedValueOnce({ ok: true, status: 201 });
         await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
-        expect(f.mark.mock.calls).toEqual([[`upload-${variant}-http-403-AccessDenied`]]);
+        expect(f.mark.mock.calls).toEqual([
+          ['upload-main-attempt'], ...(variant === 'thumb' ? [['upload-thumb-attempt']] : []),
+          [`upload-${variant}-http-403-AccessDenied`],
+        ]);
         expect(f.request.mock.calls.map(([, route]) => route)).toEqual(
           (variant === 'main' ? ['main'] : ['main', 'thumb']).map((part) =>
             `/storage/v1/object/wardrobe/${owner.uid}/${value.itemId}/${value.imageId}/${part}.jpg`));
@@ -244,7 +258,7 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
       it('uses the same OTHER classifier for an upload response without supported status/code', async () => {
         const f = fixture({ ok: false, status: 'synthetic-secret-status', data: { code: owner.token } });
         await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
-        expect(f.mark.mock.calls).toEqual([['upload-main-http-OTHER-OTHER']]);
+        expect(f.mark.mock.calls).toEqual([['upload-main-attempt'], ['upload-main-http-OTHER-OTHER']]);
       });
       it('never interpolates an unexpected caller-supplied variant into a diagnostic label', async () => {
         const f = fixture({ ok: false, status: 400 });
@@ -256,7 +270,8 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
         if (operation === 'thumb') f.request.mockResolvedValueOnce({ ok: true, status: 201 });
         f.request.mockRejectedValueOnce(sentinel);
         await expect(operation === 'reserve' ? f.h.reserve(value) : f.h.upload(value)).rejects.toBe(sentinel);
-        expect(f.mark).not.toHaveBeenCalled();
+        expect(f.mark.mock.calls).toEqual(operation === 'reserve' ? []
+          : operation === 'main' ? [['upload-main-attempt']] : [['upload-main-attempt'], ['upload-thumb-attempt']]);
         expect(f.request).toHaveBeenCalledTimes(operation === 'thumb' ? 2 : 1);
         for (const log of f.logs) expect(log).not.toHaveBeenCalled();
       });
@@ -266,13 +281,13 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
         f.request.mockReturnValueOnce(new Promise<Reply>((resolve) => { release = resolve; }));
         const pending = f.h.upload(value);
         expect(f.request).toHaveBeenCalledOnce();
-        expect(f.mark).not.toHaveBeenCalled();
+        expect(f.mark.mock.calls).toEqual([['upload-main-attempt']]);
         release({ ok: true, status: 204 });
         await pending;
         expect(f.request).toHaveBeenCalledTimes(2);
         expect(f.request.mock.calls[0]?.[1]).toMatch(/\/main\.jpg$/);
         expect(f.request.mock.calls[1]?.[1]).toMatch(/\/thumb\.jpg$/);
-        expect(f.mark).not.toHaveBeenCalled();
+        expect(f.mark.mock.calls).toEqual([['upload-main-attempt'], ['upload-thumb-attempt']]);
       });
       it('preserves successful and rejected three-argument callers without a diagnostic callback', async () => {
         const f = fixture(ok, false);

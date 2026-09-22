@@ -21,6 +21,10 @@ export const SOURCE_HASHES = Object.freeze({
   imageChanges: '678873e921f2077c8820a85c1855d432c375269f732bd27bf27daa15cb480596',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
+const diagnosticStatuses = new Set([200, 201, 204, 400, 401, 403, 404, 409, 413, 422, 429, 500, 502, 503, 504]);
+export function diagnosticHttpStatus(status) {
+  return Number.isInteger(status) && diagnosticStatuses.has(status) ? status : 'OTHER';
+}
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const timestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 const hash = /^[0-9a-f]{64}$/;
@@ -278,18 +282,21 @@ export async function cleanupSnapshot(run) {
 export function normalClient(env) {
   validateSessionEnvironment(env);
   const base = assertLocalApi(env.SUPABASE_URL), key = env.SUPABASE_PUBLISHABLE_KEY;
-  async function request(token, route, { method = 'GET', body, binary = false, headers = {} } = {}) {
+  async function request(token, route, { method = 'GET', body, binary = false, headers = {}, onFailure = () => {} } = {}) {
     const response = await fetch(base + route, {
       method, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15_000),
       headers: { apikey: key, ...(token ? { Authorization: 'Bearer ' + token } : {}),
         ...(body === undefined ? {} : { 'Content-Type': binary ? 'image/jpeg' : 'application/json' }), ...headers },
       ...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) }),
     });
+    if (!(response.status < 500)) onFailure(`status5xx-${diagnosticHttpStatus(response.status)}`);
     requireEvidence(response.status < 500);
     if (response.status === 204) {
+      if (response.body !== null) onFailure('body-on-204');
       requireEvidence(response.body === null);
       return { ok: response.ok, status: response.status, data: null, range: response.headers.get('content-range') };
     }
+    if (response.body === null) onFailure(`no-body-${diagnosticHttpStatus(response.status)}`);
     requireEvidence(response.body !== null);
     const reader = response.body.getReader(), chunks = [];
     let length = 0;
@@ -298,6 +305,7 @@ export function normalClient(env) {
         const { done, value } = await reader.read();
         if (done) break;
         length += value.byteLength;
+        if (!(length <= MAX_SNAPSHOT_BYTES)) onFailure('overflow');
         requireEvidence(length <= MAX_SNAPSHOT_BYTES);
         chunks.push(value);
       }
@@ -307,7 +315,10 @@ export function normalClient(env) {
     // binary === true pins the single TUS fixture, not all binary requests.
     const tusFixture = method === 'POST' && route === '/storage/v1/upload/resumable' && binary === true;
     if (!route.startsWith('/storage/v1/object/authenticated/') && !tusFixture) {
-      try { data = JSON.parse(raw.toString('utf8')); } catch { requireEvidence(raw.length === 0); data = null; }
+      try { data = JSON.parse(raw.toString('utf8')); } catch {
+        if (raw.length !== 0) onFailure(`nonjson-${diagnosticHttpStatus(response.status)}`);
+        requireEvidence(raw.length === 0); data = null;
+      }
     }
     return { ok: response.ok, status: response.status, data, range: response.headers.get('content-range') };
   }

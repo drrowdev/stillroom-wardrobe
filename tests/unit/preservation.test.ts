@@ -9,6 +9,8 @@ import { deleteWardrobeObject } from '../../src/data/storage-delete';
 import { MIGRATIONS, assertRehearsalEnvironment, validateInventory, assertMigrationInventory, assertCapabilities, parseMigrationHistory, assertHistory, assertHistoryResult, historyFailureDetail, exportBodyEvidence } from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
 import { SOURCE_HASHES, MAX_SNAPSHOT_BYTES, COLUMNS, TABLES, COUNTS, IMPLICIT_FACTS, EXPLICIT_FACTS, NEW_COLUMNS, parsePhaseArguments, snapshotPath, assertSnapshotPath, validateSnapshotStat, rowIdentity, canonicalRows, validateSnapshot, comparePreservation, normalClient, captureData, functionalProbes } from '../integration/preservation.sessions.mjs';
+// @ts-expect-error Executable integration fixture has no TypeScript declaration.
+import { imageChangeHarness } from '../integration/image-replacement.sessions.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const run = randomUUID(), owners = [randomUUID(), randomUUID()] as const;
@@ -380,6 +382,199 @@ describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
   const json = (value: Value, status = 200) => new Response(JSON.stringify(value), { status });
   const empty = () => new Response(null, { status: 204 });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  describe('real client plus real replacement harness (fetch/Response mocked only)', () => {
+    const variants = ['main', 'thumb'] as const;
+    type Variant = typeof variants[number];
+    const value = { requestId: run, itemId: run, imageId: owners[1] };
+    function composed(response: Response, variant: Variant = 'main', marked = true) {
+      const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response);
+      if (variant === 'thumb') fetch.mockResolvedValueOnce(json({ uploaded: true }, 200));
+      vi.stubGlobal('fetch', fetch);
+      let stage = 'I10b-preservation-replacement-upload';
+      const mark = vi.fn((label: string) => { stage = `I10b-preservation-${label}`; });
+      const transport = client();
+      const h = marked ? imageChangeHarness(transport, owner, env, mark) : imageChangeHarness(transport, owner, env);
+      const logs = [vi.spyOn(console, 'error'), vi.spyOn(console, 'log'), vi.spyOn(console, 'warn')];
+      return { fetch, mark, h, transport, logs, stage: () => stage };
+    }
+    function expectFailure(f: ReturnType<typeof composed>, variant: Variant, reason: string) {
+      expect(f.stage()).toBe(`I10b-preservation-upload-${variant}-${reason}`);
+      expect(f.mark.mock.calls).toEqual([
+        ['upload-main-attempt'], ...(variant === 'thumb' ? [['upload-thumb-attempt']] : []),
+        [`upload-${variant}-${reason}`],
+      ]);
+      expect(f.fetch).toHaveBeenCalledTimes(variant === 'main' ? 1 : 2);
+      for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+      expect(JSON.stringify(f.mark.mock.calls)).not.toMatch(/synthetic-private|fictional-a/);
+      expect(JSON.stringify(f.mark.mock.calls)).not.toContain(owner.uid);
+    }
+    it('demonstrates the old pre-return miss without moving the 5xx guard or reading its body', async () => {
+      const response = json({ code: 'synthetic-private-code', message: 'synthetic-private-body' }, 503);
+      const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+      respond(response);
+      const reachedOuterClassifier = vi.fn();
+      await expect((async () => {
+        const result = await client().request(owner.token, `/storage/v1/object/wardrobe/${owner.uid}/${run}/${run}/main.jpg`,
+          { method: 'POST', binary: true, body: new Uint8Array([0]) });
+        reachedOuterClassifier(result);
+      })()).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(reachedOuterClassifier).not.toHaveBeenCalled();
+      expect(getReader).not.toHaveBeenCalled();
+    });
+    it.each(variants.flatMap((variant) => [500, 502, 503, 504].map((status) => ({ variant, status }))))(
+      'reports $variant status5xx-$status without any body access', async ({ variant, status }) => {
+        const response = json({ code: '22023', message: 'synthetic-private-message',
+          details: { token: 'synthetic-private-token' }, hint: owner.uid }, status);
+        const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+        const body = vi.spyOn(response, 'body', 'get');
+        const f = composed(response, variant);
+        await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expectFailure(f, variant, `status5xx-${status}`);
+        expect(body).not.toHaveBeenCalled(); expect(getReader).not.toHaveBeenCalled();
+      });
+    it.each(variants)('never emits an unlisted 5xx status or secret code for %s', async (variant) => {
+      const response = json({ code: 'synthetic-private-code'.repeat(100), message: owner.token }, 598);
+      const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+      const f = composed(response, variant);
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, variant, 'status5xx-OTHER'); expect(getReader).not.toHaveBeenCalled();
+    });
+    it.each(variants.flatMap((variant) => [400, 422].map((status) => ({ variant, status }))))(
+      'reports $variant nonJSON$status without disclosing the response text', async ({ variant, status }) => {
+        const response = new Response('synthetic-private-nonjson-token-and-path', { status });
+        const f = composed(response, variant);
+        await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expectFailure(f, variant, `nonjson-${status}`);
+      });
+    it('uses OTHER rather than an unlisted nonJSON response status', async () => {
+      const f = composed(new Response('synthetic-private-raw', { status: 418 }));
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, 'main', 'nonjson-OTHER');
+    });
+    it.each(variants)('retains the malformed204 guard before reading %s', async (variant) => {
+      const response = new Response('synthetic-private-body');
+      vi.spyOn(response, 'status', 'get').mockReturnValue(204);
+      const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+      const f = composed(response, variant);
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, variant, 'body-on-204'); expect(getReader).not.toHaveBeenCalled();
+    });
+    it.each(variants)('retains missing non204 body refusal for %s', async (variant) => {
+      const f = composed(new Response(null, { status: 400 }), variant);
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, variant, 'no-body-400');
+    });
+    it('does not emit an unlisted missing-body status', async () => {
+      const f = composed(new Response(null, { status: 418 }));
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, 'main', 'no-body-OTHER');
+    });
+    it.each(variants)('retains the exact response bound and cancellation on %s overflow', async (variant) => {
+      const response = new Response(new Uint8Array(MAX_SNAPSHOT_BYTES + 1));
+      const stream = present(response.body ?? undefined), reader = stream.getReader();
+      const cancel = vi.spyOn(reader, 'cancel');
+      vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+      const f = composed(response, variant);
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, variant, 'overflow'); expect(cancel).toHaveBeenCalledOnce();
+    });
+    it('accepts a valid JSON response at the unchanged exact bound without an invariant class', async () => {
+      const f = composed(new Response(JSON.stringify('x'.repeat(MAX_SNAPSHOT_BYTES - 2))));
+      await expect(f.h.upload(value, ['main'])).resolves.toBeUndefined();
+      expect(f.mark.mock.calls).toEqual([['upload-main-attempt']]);
+      expect(f.fetch).toHaveBeenCalledOnce();
+    });
+    it.each(variants)('leaves parsed JSON400 refusal to the outer %s code classifier', async (variant) => {
+      const f = composed(json({ code: 'AccessDenied', message: 'synthetic-private-message',
+        details: { token: owner.token }, hint: owner.uid }, 400), variant);
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, variant, 'http-400-AccessDenied');
+    });
+    it('does not emit secret or prototype-looking unknown JSON codes', async () => {
+      const f = composed(json({ code: 'synthetic-private-code'.repeat(100),
+        message: 'synthetic-private-message', details: { code: '42501' }, hint: owner.uid,
+        constructor: { code: '23505' }, data: { token: owner.token } }, 400));
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, 'main', 'http-400-OTHER');
+    });
+    it('keeps successful native requests sequential with the same binary body, headers and finalize boundary', async () => {
+      const f = composed(json({ uploaded: true }, 201));
+      let release!: (response: Response) => void;
+      f.fetch.mockReturnValueOnce(new Promise<Response>((resolve) => { release = resolve; }));
+      const pending = f.h.upload(value);
+      expect(f.fetch).toHaveBeenCalledOnce();
+      expect(f.mark.mock.calls).toEqual([['upload-main-attempt']]);
+      release(empty());
+      await pending;
+      expect(f.mark.mock.calls).toEqual([['upload-main-attempt'], ['upload-thumb-attempt']]);
+      const calls = f.fetch.mock.calls;
+      expect(calls).toHaveLength(2);
+      const body = present(calls[0]?.[1]).body;
+      expect(body).toBeInstanceOf(Uint8Array);
+      for (const [index, variant] of variants.entries()) {
+        const [url, init] = present(calls[index]);
+        expect(url).toBe(`${env.SUPABASE_URL}/storage/v1/object/wardrobe/${owner.uid}/${value.itemId}/${value.imageId}/${variant}.jpg`);
+        expect(init).toEqual({ method: 'POST', cache: 'no-store', redirect: 'error', signal: expect.any(AbortSignal),
+          headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${owner.token}`,
+            'Content-Type': 'image/jpeg', 'x-upsert': 'false' }, body });
+        expect(init?.body).toBe(body);
+      }
+      f.mark('replacement-finalize');
+      expect(f.stage()).toBe('I10b-preservation-replacement-finalize');
+      for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+    });
+    it.each([200, 201, 204])('never invokes the synchronous invariant observer on successful%s', async (status) => {
+      respond(status === 204 ? empty() : json({ code: 'AccessDenied' }, status));
+      const onFailure = vi.fn();
+      await client().request(owner.token, '/storage/v1/object/wardrobe/unit',
+        { method: 'POST', binary: true, body: new Uint8Array([0]), onFailure });
+      expect(onFailure).not.toHaveBeenCalled();
+    });
+    it.each(variants.flatMap((variant) => ['fetch', 'read', 'cancel', 'read-and-cancel'].map((failure) => ({ variant, failure }))))(
+      'retains $variant $failure sentinel identity and existing finally precedence', async ({ variant, failure }) => {
+        const response = json({ uploaded: true });
+        const stream = present(response.body ?? undefined), reader = stream.getReader();
+        const read = vi.spyOn(reader, 'read'), cancel = vi.spyOn(reader, 'cancel');
+        vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+        const fetchError = new Error('synthetic-private-fetch'), readError = new Error('synthetic-private-read'),
+          cancelError = new Error('synthetic-private-cancel');
+        const f = composed(response, variant);
+        if (failure === 'fetch') f.fetch.mockRejectedValueOnce(fetchError);
+        if (failure === 'read' || failure === 'read-and-cancel') read.mockRejectedValue(readError);
+        if (failure === 'cancel' || failure === 'read-and-cancel') cancel.mockRejectedValue(cancelError);
+        await expect(f.h.upload(value)).rejects.toBe(failure === 'fetch' ? fetchError : failure === 'read' ? readError : cancelError);
+        expect(f.stage()).toBe(`I10b-preservation-upload-${variant}-attempt`);
+        expect(f.mark.mock.calls).toEqual([['upload-main-attempt'], ...(variant === 'thumb' ? [['upload-thumb-attempt']] : [])]);
+        expect(f.fetch).toHaveBeenCalledTimes(variant === 'main' ? 1 : 2);
+        expect(cancel).toHaveBeenCalledTimes(failure === 'fetch' ? 0 : 1);
+        for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+      });
+    it.each(variants)('retains %s overflow label when finally cancellation replaces the original assertion error', async (variant) => {
+      const response = new Response(new Uint8Array(MAX_SNAPSHOT_BYTES + 1));
+      const stream = present(response.body ?? undefined), reader = stream.getReader();
+      const sentinel = new Error('synthetic-private-cancel');
+      const cancel = vi.spyOn(reader, 'cancel').mockRejectedValue(sentinel);
+      vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+      const f = composed(response, variant);
+      await expect(f.h.upload(value)).rejects.toBe(sentinel);
+      expectFailure(f, variant, 'overflow'); expect(cancel).toHaveBeenCalledOnce();
+    });
+    it('keeps three-argument harness callers silent and failing normally', async () => {
+      const f = composed(json({ code: 'synthetic-private-code' }, 503), 'main', false);
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(f.mark).not.toHaveBeenCalled(); expect(f.fetch).toHaveBeenCalledOnce();
+      for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+    });
+    it('does not silently extend the observer to reserve', async () => {
+      const response = json({ code: 'synthetic-private-code' }, 503);
+      const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+      const f = composed(response);
+      await expect(f.h.reserve(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(f.mark).not.toHaveBeenCalled(); expect(f.fetch).toHaveBeenCalledOnce();
+      expect(getReader).not.toHaveBeenCalled();
+    });
+  });
 
   it('retains fictional TUS 422 bytes and exact outgoing request without recovering a native response', async () => {
     const body = new Uint8Array([0, 255]), raw = Buffer.from('Fictional refusal');
