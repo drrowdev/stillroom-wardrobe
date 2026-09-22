@@ -919,7 +919,7 @@ async function main() {
       await history('target');
       await installCiStorageGuard(); await verifyCiStorageGuard();
       stage = 'I10b-preservation';
-      await verifyImageChangePreservation(ten, privilegedLocalSql);
+      await verifyImageChangePreservation(ten, privilegedLocalSql, (label) => { stage = `I10b-preservation-${label}`; });
       stage = 'I10b-publication-races';
       const { imageDeletionCases, imageChangePagedDeletion, imageChangeOrphanDeletion } = await import('../tests/integration/image-replacement.sessions.mjs');
       await imageDeletionCases(azureEnv, { withLifecycleLateUpload, requireLifecyclePrefixEmpty, withLifecycleParentLock });

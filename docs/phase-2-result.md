@@ -157,6 +157,43 @@ and dependency checks but browser was still running; Apple diagnostic passed.
 Neither is represented as an overall CI pass, physical-device acceptance or
 a generated-type artifact. This repair remains unstaged pending focused review.
 
+### Stage A CI2 - preservation failure localization, 22 September 2026
+
+The [scoped investigation release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5770733860)
+records CI `35682437464`, database job `106602070055`, at
+`cae5f263017f9313396fbb56138954dee1d1c4c1`. Actual PostgreSQL startup passed
+at 03:16:35Z, confirming the preceding syntax repair. Exact eleven-source
+inventory passed. Populated base->10 preserved two owners, ten tables, 30 rows
+and eight objects plus the existing probes; populated9->10 historical
+preservation passed. ROOT reported all eleven migrations applied at 03:18:13Z.
+
+At 03:18:16Z the new `I10b-preservation` verification failed with
+`EVIDENCE_REQUIRED`; exact-run snapshot cleanup passed. This does not establish
+populated10->11 preservation. Subsequent backend/security/rehearsal/type and
+artifact gates were skipped, and no generated-type artifact exists.
+
+Inspection of the actual sanitized log, verification sequence, public/private
+history projections, structural catalogue checks, grants and normal-owner
+callers has not established which inner assertion failed. No data-loss,
+provider-change or harmless-fixture diagnosis is asserted. Under the release's
+diagnostic fallback, the existing runner now retains a fixed failure substage:
+state read/comparison, structural query or one of its ten fixed invariant
+names, empty tables, legacy completion/replay/history, replacement/recovery,
+projection/context probes and restoration. Labels are source constants;
+unknown result keys, rows, receipts, IDs, tokens and SQL/error bodies are not
+reported. Only the existing terminal failure line changes, not log frequency.
+
+Every comparison, SQL statement, expected row/proof/counter, normal-owner call,
+timeout and cleanup operation is retained. All eleven migration bytes and
+modern/legacy pins remain unchanged. Mocked tests check original error
+propagation, changed-state refusal, all ten structural failures, exact result
+shape, all five nonempty initial-table failures and the fixed runner label.
+The targeted three-file unit run passed 170 tests; scoped lint and typecheck
+passed. These are diagnostic/source checks, not a preservation pass.
+The root cause and real10->11 acceptance remain pending focused review and
+fresh authorized CI. No local backend/SQL/parser, publication, types or UI work
+was performed; this diagnostics-only candidate is unstaged.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling

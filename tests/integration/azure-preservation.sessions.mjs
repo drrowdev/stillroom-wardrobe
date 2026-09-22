@@ -177,16 +177,21 @@ export async function captureImageChangePreservation(snapshot, sql) {
   requireEvidence(before.private.ai_item_save_attempts.length === 8 && before.private.item_attribution_history.length === 6);
   return { ...snapshot, imageChangeBefore: before };
 }
-export async function verifyImageChangePreservation(snapshot, sql) {
-  equal(await imageChangePreservationState(snapshot, sql), snapshot.imageChangeBefore);
+export async function verifyImageChangePreservation(snapshot, sql, mark) {
+  mark('state-read');
+  const after = await imageChangePreservationState(snapshot, sql);
+  mark('state-compare');
+  equal(after, snapshot.imageChangeBefore);
   const { client, owners, env } = snapshot;
-  await imageChangeStructure(sql);
+  await imageChangeStructure(sql, mark);
+  mark('empty-tables');
   const empty = JSON.parse(await sql(`select jsonb_build_object(
     'attempts',(select count(*) from private.image_change_attempts),'context',(select count(*) from private.image_change_context),
     'history',(select count(*) from private.image_change_history),'operations',(select count(*) from private.item_deletion_operations),
     'targets',(select count(*) from private.item_deletion_targets));`));
   requireEvidence(Object.keys(empty).length === 5 && Object.values(empty).every((value) => value === 0));
   for (const owner of owners) {
+    mark('consent-expiry');
     const h = analyzedHarness(client, owner, env), profile = (await client.rows(owner, 'profiles'))[0];
     equal(await client.rpc(owner, 'ai_set_consent', { p_enabled: false, p_notice_revision: null, p_expected_version: profile.version }),
       { code: 'OK', profileVersion: String(profile.version + 1) });
@@ -194,15 +199,20 @@ export async function verifyImageChangePreservation(snapshot, sql) {
       update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',expires_at=clock_timestamp()-interval '1 hour'
         where owner_id=${literal(owner.uid)} and request_id=${literal(analysisId(owner.label, 24))};`);
     for (const n of [21, 22, 23, 24]) {
+      mark('legacy-reserve');
       const value = analyzedIntent(owner, n), row = await h.reserve(value);
+      mark('legacy-finalize');
       await h.finalize(value, row);
+      mark('legacy-replay');
       equal((await h.reserve(value)).state, 'completed');
+      mark('legacy-history');
       let history = await client.rpc(owner, 'item_attribution_history', { p_item_id: value.p_item.id });
       requireEvidence(history.length === 1);
       equal(Object.keys(history[0]).sort(), ['fields', 'image_sha256', 'model_id', 'prompt_version', 'source_image_id']);
       equal(history[0].model_id, n < 23 ? 'gemini-3.8-flash' : 'gpt-5.6-terra-2026-07-09');
       let replacement, replacementHarness, recovery;
       if (n === 24) {
+        mark('replacement-analysis-fixture');
         await sql(`update private.ai_controls set activated=true where owner_id=${literal(owner.uid)};`);
         const p = (await client.rows(owner, 'profiles'))[0];
         equal(await client.rpc(owner, 'ai_set_consent', { p_enabled: true, p_notice_revision: 2, p_expected_version: p.version }),
@@ -218,8 +228,11 @@ export async function verifyImageChangePreservation(snapshot, sql) {
         replacement.item.pattern = 'solid'; replacement.item.field_provenance.pattern = { kind: 'ai_observed', revision: 1 };
         replacement.claim = { requestId: id, draftId: id, generation: 1, imageSha256: analysisHash,
           fields: { pattern: { kind: 'ai_observed', value: 'solid' } } };
+        mark('replacement-reserve-upload');
         await replacementHarness.reserve(replacement); await replacementHarness.upload(replacement);
+        mark('replacement-finalize');
         equal(await replacementHarness.endpoint(replacement), { status: 204 });
+        mark('replacement-receipt-history');
         const forgedAdd = analyzedIntent(owner, 25);
         const reused = await h.call('reserve_analyzed_item_save', forgedAdd);
         requireEvidence(!reused.ok && reused.status === 400 && reused.data.message === 'Request conflict');
@@ -231,6 +244,7 @@ export async function verifyImageChangePreservation(snapshot, sql) {
         const oldImage = (await h.read('item_images', value.p_image.id))[0];
         recovery = replacementHarness.make((await h.read('items', value.p_item.id))[0],
           (await h.read('item_images', replacement.imageId))[0], oldImage);
+        mark('recovery-age-refusals');
         for (const age of ["clock_timestamp()+interval '1 minute'", "clock_timestamp()-interval '7 days 1 minute'"]) {
           await sql(`update public.item_images set retired_at=${age}
             where owner_id=${literal(owner.uid)} and item_id=${literal(value.p_item.id)} and id=${literal(oldImage.id)} and state='retired';`);
@@ -239,13 +253,17 @@ export async function verifyImageChangePreservation(snapshot, sql) {
         }
         await sql(`update public.item_images set retired_at=clock_timestamp()-interval '6 days 23 hours 59 minutes'
           where owner_id=${literal(owner.uid)} and item_id=${literal(value.p_item.id)} and id=${literal(oldImage.id)} and state='retired';`);
+        mark('recovery-acceptance');
         const accepted = await replacementHarness.endpoint(recovery, 'accept-recovery');
         requireEvidence(accepted.status === 200 && accepted.data.kind === 'recovery' && accepted.data.state === 'reserved');
         await sql(`update public.item_images set retired_at=clock_timestamp()-interval '7 days 1 minute'
           where owner_id=${literal(owner.uid)} and item_id=${literal(value.p_item.id)} and id=${literal(oldImage.id)} and state='retired';`);
+        mark('recovery-accepted-retry');
         equal(await replacementHarness.endpoint(recovery, 'accept-recovery'), accepted);
+        mark('recovery-upload-finalize');
         await replacementHarness.upload(recovery);
         equal(await replacementHarness.endpoint(recovery), { status: 204 });
+        mark('recovery-history-receipt');
         equal(await client.rpc(owner, 'item_attribution_history', { p_item_id: value.p_item.id }), history);
         const addConsumed = replacementHarness.make((await h.read('items', value.p_item.id))[0],
           (await h.read('item_images', recovery.imageId))[0]);
@@ -255,6 +273,7 @@ export async function verifyImageChangePreservation(snapshot, sql) {
         requireEvidence(!reusedReplacement.ok && reusedReplacement.status === 400 && reusedReplacement.data.message === 'Request conflict');
       }
       // Structural probe only: both actual tables, both public arms, DDL rolled back.
+      mark('projection-probe');
       const probe = await sql(`begin;
         set local statement_timeout='10s'; set local lock_timeout='2s';
         do $identity$ begin perform set_config('request.jwt.claim.sub',${literal(owner.uid)},true); end $identity$;
@@ -269,8 +288,11 @@ export async function verifyImageChangePreservation(snapshot, sql) {
         rollback;
         select 'I10B_PROJECTION_OK';`);
       requireEvidence(probe === 'I10B_PROJECTION_OK');
+      mark('projection-normal-owner');
       equal(await client.rpc(owner, 'item_attribution_history', { p_item_id: value.p_item.id }), history);
+      mark('context-probe');
       if (n === 24) await imageChangeContextProbe(owner, value.p_item.id, sql);
+      mark('item-cleanup');
       if (replacement) {
         await replacementHarness.remove(recovery);
         await replacementHarness.remove(replacement);
@@ -280,6 +302,7 @@ export async function verifyImageChangePreservation(snapshot, sql) {
       }
       await h.remove(value); await h.deleteItem(value);
     }
+    mark('owner-restoration');
     const itemIds = [21, 22, 23, 24].map((n) => analyzedIntent(owner, n).p_item.id);
     const settledProfile = (await client.rows(owner, 'profiles'))[0];
     equal(await client.rpc(owner, 'ai_set_consent', {
@@ -292,11 +315,13 @@ export async function verifyImageChangePreservation(snapshot, sql) {
       delete from private.ai_controls where owner_id=${literal(owner.uid)};`);
     requireEvidence((await client.rows(owner, 'items')).length === 0 && (await client.rows(owner, 'item_images')).length === 0);
   }
+  mark('private-restoration');
   const restored = JSON.parse(await sql(stateSql));
   requireEvidence(tables.every((name) => restored[name].length === 0));
 }
 
-async function imageChangeStructure(sql) {
+async function imageChangeStructure(sql, mark) {
+  mark('structure-query');
   const result = JSON.parse(await sql(`select jsonb_build_object(
     'five_private_tables',(select count(*)=5 and bool_and(c.relrowsecurity
       and not has_table_privilege('authenticated',c.oid,'SELECT,INSERT,UPDATE,DELETE')
@@ -332,6 +357,10 @@ async function imageChangeStructure(sql) {
       from (values ('safe/main.jpg',true),('.',false),('..',false),('a//b',false),('%2f',false),
         ('a?b',false),('a#b',false),(repeat('a',129),false),(repeat('a/',16)||'a',false),
         (repeat(repeat('a',128)||'/',8)||'a',false)) as fixtures(suffix,allowed)));`));
+  const failed = ['five_private_tables', 'auth_lifetime', 'no_profile_item_cascade', 'source_only_set_null',
+    'one_shot_private', 'service_completion_only', 'service_recovery_only', 'revoked_legacy',
+    'empty_context', 'target_key_bounds'].find((key) => result[key] !== true);
+  mark(failed ? `structure-${failed}` : 'structure-shape');
   requireEvidence(Object.keys(result).length === 10 && Object.values(result).every((v) => v === true));
 }
 

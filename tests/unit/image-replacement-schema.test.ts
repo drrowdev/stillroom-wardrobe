@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+// @ts-expect-error Executable preservation fixture has no TypeScript declaration.
+import { verifyImageChangePreservation } from '../integration/azure-preservation.sessions.mjs';
 
 const source = readFile(new URL('../../supabase/migrations/20260922020000_checked_image_changes.sql', import.meta.url), 'utf8');
 function body(sql: string, name: string) {
@@ -21,6 +23,103 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
     }
     expect(sql).not.toMatch(/alter table public\.|delete from storage\.|update private\.ai_controls|insert into private\.ai_execution_manifests/);
     expect(sql).toMatch(/^--[^\n]+\nbegin;[\s\S]*\ncommit;\n$/);
+  });
+
+  describe('I10b preservation failure labels (mocked transports, no SQL execution)', () => {
+    const keys = ['five_private_tables', 'auth_lifetime', 'no_profile_item_cascade', 'source_only_set_null',
+      'one_shot_private', 'service_completion_only', 'service_recovery_only', 'revoked_legacy',
+      'empty_context', 'target_key_bounds'];
+    afterEach(() => vi.restoreAllMocks());
+
+    function fixture() {
+      const stopped = new Error('synthetic-private-error-do-not-emit');
+      const privateState = { preserved: 'synthetic-private-row-do-not-emit' };
+      const structure: Record<string, boolean> = Object.fromEntries(keys.map((key) => [key, true]));
+      const empty = { attempts: 0, context: 0, history: 0, operations: 0, targets: 0 };
+      const owners = [{ uid: '10000000-0000-4000-8000-000000000001', label: 'A' },
+        { uid: '10000000-0000-4000-8000-000000000002', label: 'B' }];
+      const client = {
+        rows: vi.fn(async (_owner: unknown, table: string) => table === 'profiles' ? [{ version: 1 }] : []),
+        rpc: vi.fn(async () => { throw stopped; }),
+      };
+      const snapshot = { owners, client, env: {}, imageChangeBefore: {
+        private: privateState,
+        library: owners.map(() => ({ profile: [{ version: 1 }], items: [], images: [], histories: [], bytes: [] })),
+      } };
+      const sql = vi.fn(async (query: string) => {
+        if (query.includes("'five_private_tables'")) return JSON.stringify(structure);
+        if (query.includes("'attempts'")) return JSON.stringify(empty);
+        return JSON.stringify(privateState);
+      });
+      const mark = vi.fn<(label: string) => void>();
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      return { stopped, structure, empty, client, snapshot, sql, mark, log };
+    }
+
+    it('keeps ordinary RPC rejection and emits only fixed progress labels after unchanged preservation checks', async () => {
+      const f = fixture();
+      await expect(verifyImageChangePreservation(f.snapshot, f.sql, f.mark)).rejects.toBe(f.stopped);
+      expect(f.mark.mock.calls.flat()).toEqual([
+        'state-read', 'state-compare', 'structure-query', 'structure-shape', 'empty-tables', 'consent-expiry',
+      ]);
+      expect(f.client.rows.mock.calls.slice(0, 6).map(([, table]) => table))
+        .toEqual(['items', 'item_images', 'profiles', 'items', 'item_images', 'profiles']);
+      expect(f.client.rpc).toHaveBeenCalledOnce();
+      expect(f.log).not.toHaveBeenCalled();
+    });
+    it('preserves the original state-read error without exposing its message', async () => {
+      const f = fixture();
+      f.client.rows.mockRejectedValueOnce(f.stopped);
+      await expect(verifyImageChangePreservation(f.snapshot, f.sql, f.mark)).rejects.toBe(f.stopped);
+      expect(f.mark.mock.calls.flat()).toEqual(['state-read']);
+      expect(f.sql).not.toHaveBeenCalled(); expect(f.log).not.toHaveBeenCalled();
+    });
+    it('still rejects changed preserved data before structure or owner operations', async () => {
+      const f = fixture();
+      f.snapshot.imageChangeBefore.private = { preserved: 'different-synthetic-private-row' };
+      await expect(verifyImageChangePreservation(f.snapshot, f.sql, f.mark)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(f.mark).toHaveBeenLastCalledWith('state-compare');
+      expect(f.sql).toHaveBeenCalledOnce(); expect(f.client.rpc).not.toHaveBeenCalled();
+      expect(f.log).not.toHaveBeenCalled();
+    });
+    it('preserves an original structural-query rejection', async () => {
+      const f = fixture(), original = f.sql.getMockImplementation()!;
+      f.sql.mockImplementation(async (query) => {
+        if (query.includes("'five_private_tables'")) throw f.stopped;
+        return original(query);
+      });
+      await expect(verifyImageChangePreservation(f.snapshot, f.sql, f.mark)).rejects.toBe(f.stopped);
+      expect(f.mark).toHaveBeenLastCalledWith('structure-query');
+      expect(f.client.rpc).not.toHaveBeenCalled(); expect(f.log).not.toHaveBeenCalled();
+    });
+    it.each(keys)('retains the %s structural assertion with its fixed failure label', async (key) => {
+      const f = fixture();
+      f.structure[key] = false;
+      await expect(verifyImageChangePreservation(f.snapshot, f.sql, f.mark)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(f.mark).toHaveBeenLastCalledWith(`structure-${key}`);
+      expect(f.sql).toHaveBeenCalledTimes(2);
+      expect(f.client.rpc).not.toHaveBeenCalled(); expect(f.log).not.toHaveBeenCalled();
+    });
+    it('retains the exact structural shape check without reporting unknown keys', async () => {
+      const f = fixture();
+      f.structure['synthetic-private-key-do-not-emit'] = true;
+      await expect(verifyImageChangePreservation(f.snapshot, f.sql, f.mark)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(f.mark).toHaveBeenLastCalledWith('structure-shape');
+      expect(JSON.stringify(f.mark.mock.calls)).not.toContain('synthetic-private');
+      expect(f.client.rpc).not.toHaveBeenCalled(); expect(f.log).not.toHaveBeenCalled();
+    });
+    it.each(['attempts', 'context', 'history', 'operations', 'targets'] as const)('still rejects nonempty initial %s', async (key) => {
+      const f = fixture();
+      f.empty[key] = 1;
+      await expect(verifyImageChangePreservation(f.snapshot, f.sql, f.mark)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(f.mark).toHaveBeenLastCalledWith('empty-tables');
+      expect(f.client.rpc).not.toHaveBeenCalled(); expect(f.log).not.toHaveBeenCalled();
+    });
+    it('routes the fixed label into the existing sanitized runner failure stage', async () => {
+      const runner = await readFile(new URL('../../scripts/preservation-rehearsal.mjs', import.meta.url), 'utf8');
+      expect(runner).toContain('await verifyImageChangePreservation(ten, privilegedLocalSql, (label) => { stage = `I10b-preservation-${label}`; });');
+      expect(runner).toContain('FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}; subsequent stages NOT RUN');
+    });
   });
   it('keeps Auth-lifetime tombstones separate from item-lifetime ordered provenance', async () => {
     const sql = await source;
