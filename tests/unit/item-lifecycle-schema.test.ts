@@ -364,7 +364,7 @@ describe('I08 SQL source contract, not live database proof', () => {
   });
   it('pins actual ninth bytes and preserves literal privileges plus positive catalog assertions', () => {
     const entries = MIGRATIONS as Array<{ name: string; bytes: number; sha256: string }>;
-    expect(entries).toHaveLength(10);
+    expect(entries).toHaveLength(11);
     const entry = entries[8];
     if (!entry) throw new Error('Missing migration');
     expect(entry.name).toBe('20260913120000_item_lifecycle.sql');
@@ -527,7 +527,7 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
       stdin: Object.assign(stdin, { write, end, writableEnded: false, destroyed: false }), stdout, stderr, kill,
     }));
     return {
-      child, end, kill,
+      child, write, end, kill,
       assertReleased() {
         expect(closed).toBe(true);
         expect(end).toHaveBeenCalledExactlyOnceWith('rollback;\n');
@@ -548,6 +548,18 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
   it('releases the parent and timer after success', async () => {
     const child = parent(), operation = vi.fn(async () => {});
     await expect(withLifecycleParentLock(owner, item, 'update', operation)).resolves.toBeUndefined();
+    expect(operation).toHaveBeenCalledOnce(); child.assertReleased(); expect(log).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['owner no key update', "private.approved_accounts where user_id='10000000-0000-4000-8000-000000000001' and enabled for no key update nowait"],
+    ['deletion update', "private.item_deletion_operations where owner_id='10000000-0000-4000-8000-000000000001' and item_id='10800000-0000-4000-8000-000000000002' and phase='prepared' for update nowait"],
+  ])('holds the exact %s row before the operation and releases it', async (mode, target) => {
+    const child = parent(), operation = vi.fn(async () => {
+      expect(child.write).toHaveBeenCalledOnce();
+      expect(child.write.mock.calls[0]).toEqual([expect.stringContaining(`perform 1 from ${target}`)]);
+      expect(child.end).not.toHaveBeenCalled();
+    });
+    await expect(withLifecycleParentLock(owner, item, mode, operation)).resolves.toBeUndefined();
     expect(operation).toHaveBeenCalledOnce(); child.assertReleased(); expect(log).not.toHaveBeenCalled();
   });
   it.each(primaryValues)('preserves exact parent operation rejection %# with successful cleanup', async (primary) => {

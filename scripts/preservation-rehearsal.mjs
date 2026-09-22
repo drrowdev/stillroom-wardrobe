@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { lstat, readdir, readFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import {
   ROOT, assertNoServiceSecrets, assertProjectConfig, requireDocker, requireLocalContainer,
@@ -12,9 +13,11 @@ import { isMain } from './quality/files.mjs';
 import {
   SOURCE_HASHES, requireEvidence, assertSnapshotAbsent, cleanupSnapshot,
 } from '../tests/integration/preservation.sessions.mjs';
-import { captureAzurePreservation, verifyAzurePreservation } from '../tests/integration/azure-preservation.sessions.mjs';
+import { captureAzurePreservation, verifyAzurePreservation,
+  captureImageChangePreservation, verifyImageChangePreservation } from '../tests/integration/azure-preservation.sessions.mjs';
 
 const PRIOR_MAIN_VERSION = '20260913120000';
+const AZURE_TARGET_VERSION = '20260921193000';
 
 export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
@@ -27,6 +30,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260911200000_checked_ai_item_save.sql', version: '20260911200000', time: '2026-09-11 20:00:00', bytes: 29668, sha256: SOURCE_HASHES.analyzedSave },
   { name: '20260913120000_item_lifecycle.sql', version: '20260913120000', time: '2026-09-13 12:00:00', bytes: 20822, sha256: SOURCE_HASHES.lifecycle },
   { name: '20260921193000_azure_terra_analysis.sql', version: '20260921193000', time: '2026-09-21 19:30:00', bytes: 29274, sha256: SOURCE_HASHES.azure },
+  { name: '20260922020000_checked_image_changes.sql', version: '20260922020000', time: '2026-09-22 02:00:00', bytes: 82231, sha256: SOURCE_HASHES.imageChanges },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -219,7 +223,12 @@ export function assertLifecycleFixture(env, ownerId, itemId) {
 // CI-only setup, not an access assertion or a general SQL callback.
 export async function withLifecycleParentLock(ownerId, itemId, mode, operation) {
   assertLifecycleFixture(process.env, ownerId, itemId);
-  requireEvidence(['update', 'key share'].includes(mode) && typeof operation === 'function');
+  requireEvidence(['update', 'key share', 'owner share', 'owner no key update', 'deletion update'].includes(mode) && typeof operation === 'function');
+  const lock = mode.startsWith('owner ')
+    ? `private.approved_accounts where user_id='${ownerId}' and enabled for ${mode.slice(6)} nowait`
+    : mode === 'deletion update'
+      ? `private.item_deletion_operations where owner_id='${ownerId}' and item_id='${itemId}' and phase='prepared' for update nowait`
+      : `public.items where owner_id='${ownerId}' and id='${itemId}' for ${mode} nowait`;
   await requireLocalContainer();
   const child = spawn('docker', ['exec', '-i', DB_CONTAINER, 'psql', '-X', '--no-password',
     '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-A'], {
@@ -259,7 +268,7 @@ export async function withLifecycleParentLock(ownerId, itemId, mode, operation) 
   try {
     child.stdin.write(`begin; set local statement_timeout='12s'; set local idle_in_transaction_session_timeout='12s';
       do $$ declare n integer; begin
-        perform 1 from public.items where owner_id='${ownerId}' and id='${itemId}' for ${mode} nowait;
+        perform 1 from ${lock};
         get diagnostics n = row_count; if n<>1 then raise exception 'Fixture absent'; end if;
       end $$;\n\\echo I08_PARENT_HELD\n`);
     await ready;
@@ -694,16 +703,20 @@ export function parseMigrationHistory(output) {
 }
 
 export function assertHistory(output, stage) {
-  requireHistory(stage === 'base' || stage === 'prior-main' || stage === 'target', 'inventory-mismatch');
+  requireHistory(['base', 'prior-main', 'azure-target', 'target'].includes(stage), 'inventory-mismatch');
   const priorMainIndex = MIGRATIONS.findIndex((entry) => entry.version === PRIOR_MAIN_VERSION);
-  requireHistory(priorMainIndex >= 0, 'inventory-mismatch');
+  const azureIndex = MIGRATIONS.findIndex((entry) => entry.version === AZURE_TARGET_VERSION);
+  requireHistory(priorMainIndex >= 0 && azureIndex === priorMainIndex + 1, 'inventory-mismatch');
   const inventory = parseMigrationHistory(output);
   const expected = stage === 'base'
     ? { applied: [MIGRATIONS[0].version], pending: MIGRATIONS.slice(1).map((entry) => entry.version) }
     : stage === 'prior-main'
       ? { applied: MIGRATIONS.slice(0, priorMainIndex + 1).map((entry) => entry.version),
         pending: MIGRATIONS.slice(priorMainIndex + 1).map((entry) => entry.version) }
-      : { applied: MIGRATIONS.map((entry) => entry.version), pending: [] };
+      : stage === 'azure-target'
+        ? { applied: MIGRATIONS.slice(0, azureIndex + 1).map((entry) => entry.version),
+          pending: MIGRATIONS.slice(azureIndex + 1).map((entry) => entry.version) }
+        : { applied: MIGRATIONS.map((entry) => entry.version), pending: [] };
   requireHistory(JSON.stringify(inventory) === JSON.stringify(expected), 'inventory-mismatch');
   return inventory;
 }
@@ -730,6 +743,84 @@ async function history(stage) {
   const result = await cli(['migration', 'list', '--local']);
   const inventory = assertHistoryResult(result, stage);
   console.log(`PASS: history ${stage} applied=${inventory.applied.join(',')} pending=${inventory.pending.join(',') || 'none'}`);
+}
+
+export function preservationStagePath(run) {
+  requireEvidence(typeof run === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(run));
+  return path.join(ROOT, '.supabase', `preservation-stage-${run}`);
+}
+
+async function sameDatabaseIdentity() {
+  await requireLocalContainer();
+  const result = await runCommand('docker', ['container', 'inspect', '--format', '{{.Id}}', DB_CONTAINER], {
+    env: commandEnvironment(), timeout: 30_000, maxOutputBytes: 4096,
+  });
+  requireEvidence(result.code === 0 && result.stderr === '' && /^[0-9a-f]{64}\r?\n?$/.test(result.stdout));
+  return result.stdout.trim();
+}
+
+// Copy-only ten-migration workdir: the existing CLI helper remains ROOT-bound.
+export async function migrateToAzureTarget(run, from) {
+  assertRehearsalEnvironment(process.env, []);
+  assertCiStorageGuardInstall();
+  requireEvidence(['base', 'prior-main'].includes(from));
+  const directory = preservationStagePath(run), cache = path.dirname(directory);
+  const cacheInfo = await lstat(cache);
+  requireEvidence(cacheInfo.isDirectory() && !cacheInfo.isSymbolicLink());
+  await assertProjectConfig(); await assertMigrationInventory(); await history(from);
+  const container = await sameDatabaseIdentity();
+  const configPath = path.join(ROOT, 'supabase', 'config.toml'), configInfo = await lstat(configPath);
+  requireEvidence(configInfo.isFile() && !configInfo.isSymbolicLink() && configInfo.size <= 32768);
+  const config = await readFile(configPath);
+  const last = MIGRATIONS.findIndex((entry) => entry.version === AZURE_TARGET_VERSION);
+  requireEvidence(last === 9);
+  const prefix = MIGRATIONS.slice(0, last + 1);
+  const files = await Promise.all(prefix.map(async (entry) => {
+    const bytes = await readFile(path.join(ROOT, 'supabase', 'migrations', entry.name));
+    requireEvidence(bytes.length === entry.bytes && createHash('sha256').update(bytes).digest('hex') === entry.sha256);
+    return { ...entry, content: bytes };
+  }));
+  // Non-recursive mkdir rejects any existing file, directory or symlink.
+  await mkdir(directory);
+  const created = await lstat(directory);
+  let primary, failed = false;
+  try {
+    await mkdir(path.join(directory, 'supabase'));
+    await mkdir(path.join(directory, 'supabase', 'migrations'));
+    await writeFile(path.join(directory, 'supabase', 'config.toml'), config, { flag: 'wx' });
+    for (const entry of files) await writeFile(path.join(directory, 'supabase', 'migrations', entry.name), entry.content, { flag: 'wx' });
+    const inventory = await readdir(path.join(directory, 'supabase', 'migrations'), { withFileTypes: true });
+    requireEvidence(inventory.every((entry) => entry.isFile() && !entry.isSymbolicLink())
+      && JSON.stringify(inventory.map((entry) => entry.name).sort()) === JSON.stringify(prefix.map((entry) => entry.name)));
+    requireEvidence((await readFile(path.join(directory, 'supabase', 'config.toml'))).equals(config));
+    for (const entry of files) requireEvidence((await readFile(path.join(directory, 'supabase', 'migrations', entry.name))).equals(entry.content));
+    requireEvidence(JSON.stringify((await readdir(directory)).sort()) === '["supabase"]'
+      && JSON.stringify((await readdir(path.join(directory, 'supabase'))).sort()) === '["config.toml","migrations"]');
+    const require = createRequire(import.meta.url), packagePath = require.resolve('supabase/package.json');
+    const pkg = JSON.parse(await readFile(packagePath, 'utf8'));
+    requireEvidence(pkg.version === '2.116.0' && typeof pkg.bin?.supabase === 'string');
+    const entrypoint = path.join(path.dirname(packagePath), pkg.bin.supabase);
+    const version = await runCommand(process.execPath, [entrypoint, '--agent', 'no', '--version']);
+    requireEvidence(version.code === 0 && version.stdout.trim() === '2.116.0');
+    await history(from); requireEvidence(await sameDatabaseIdentity() === container);
+    const result = await runCommand(process.execPath, [entrypoint, '--agent', 'no', '--workdir', directory, 'migration', 'up', '--local'], {
+      timeout: 120_000,
+    });
+    requireEvidence(result.code === 0);
+    await history('azure-target'); requireEvidence(await sameDatabaseIdentity() === container);
+    await assertMigrationInventory();
+  } catch (error) { failed = true; primary = error; }
+  try {
+    const owned = await lstat(directory);
+    requireEvidence(owned.isDirectory() && !owned.isSymbolicLink() && directory === preservationStagePath(run)
+      && owned.dev === created.dev && owned.ino === created.ino);
+    await rm(directory, { recursive: true, force: false });
+  } catch (error) {
+    console.error('FAIL: exact owned preservation stage cleanup; EVIDENCE_REQUIRED');
+    if (!failed) { failed = true; primary = error; }
+    process.exitCode = 1;
+  }
+  if (failed) throw primary;
 }
 
 async function main() {
@@ -776,12 +867,12 @@ async function main() {
     stage = 'S3-base-history';
     await history('base');
     stage = 'S3-migration-up';
-    requireEvidence((await cli(['migration', 'up', '--local'])).code === 0);
+    await migrateToAzureTarget(run, 'base');
     stage = 'S3-storage-guard';
     await installCiStorageGuard();
     await verifyCiStorageGuard();
     stage = 'S3-target-history';
-    await history('target');
+    await history('azure-target');
     stage = 'S4-verify';
     await child('verify');
     stage = 'S4-checked-save-catalog';
@@ -813,13 +904,31 @@ async function main() {
       const priorMain = await captureAzurePreservation(azureEnv, privilegedLocalSql);
       await assertMigrationInventory(); await history('prior-main');
       stage = 'AZ1-upgrade';
-      requireEvidence((await cli(['migration', 'up', '--local'])).code === 0);
-      await history('target');
+      await migrateToAzureTarget(run, 'prior-main');
+      await history('azure-target');
       stage = 'AZ1-preservation';
-      await verifyAzurePreservation(priorMain, privilegedLocalSql);
+      await verifyAzurePreservation(priorMain, privilegedLocalSql, true);
+      console.log('PASS: populated prior-main9/azure-target10 historical preservation; Google proof retained for next upgrade');
+      stage = 'I10b-ten-capture';
+      const ten = await captureImageChangePreservation(priorMain, privilegedLocalSql);
+      await assertMigrationInventory(); await history('azure-target');
+      const container = await sameDatabaseIdentity();
+      stage = 'I10b-ten-to-eleven';
+      requireEvidence((await cli(['migration', 'up', '--local'])).code === 0);
+      requireEvidence(await sameDatabaseIdentity() === container);
+      await history('target');
+      await installCiStorageGuard(); await verifyCiStorageGuard();
+      stage = 'I10b-preservation';
+      await verifyImageChangePreservation(ten, privilegedLocalSql);
+      stage = 'I10b-publication-races';
+      const { imageDeletionCases, imageChangePagedDeletion, imageChangeOrphanDeletion } = await import('../tests/integration/image-replacement.sessions.mjs');
+      await imageDeletionCases(azureEnv, { withLifecycleLateUpload, requireLifecyclePrefixEmpty, withLifecycleParentLock });
+      stage = 'I10b-owner-paging-orphans';
+      await imageChangePagedDeletion(azureEnv); await imageChangeOrphanDeletion(azureEnv);
       finalizer.assertRunning();
     } finally { await finalizer.stop(); }
     console.log('PASS: exact prior-main9/target10; old Google held/estimated/confirmed/dispatched and frozen Save preserved; late settlement and ordinary-owner finalizer; no provider calls');
+    console.log('PASS: populated10/target11; exact Google/Azure private proof, public fields/history and bytes preserved; frozen pending Azure Save completed after opt-out/expiry; projection DDL rolled back');
   } catch (error) {
     console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}; subsequent stages NOT RUN`);
     process.exitCode = 1;

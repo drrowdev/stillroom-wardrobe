@@ -12,6 +12,17 @@ The initial release deliberately has **no background segmentation model**. Autom
 
 ## Deferred Features
 
+**22 September 2026, approved I10 split:** routine pending/retired/orphan
+maintenance and its blocked evidence tools are user-deferred as **I10a-D**,
+not passed. This narrow deferral does not remove R04 capture/privacy, explicit
+Save, checked replacement with current-photo survival, seven-day recovery into
+a new identity without inference, or R03/R12/R15 explicit deletion requirements.
+I10b therefore includes the deletion compatibility needed to handle pending and
+unmanifested objects under an owned item prefix. It is not a general sweeper.
+I22 still requires exhaustive owner-prefix removal in Phase 6; I11 is not yet
+eligible. Minimum-release reconciliation uses this dated decision, not an
+implicit waiver of deletion, backup, recovery or security.
+
 | Feature | Stage / reason |
 |---|---|
 | Trips and packing lists | Optional Phase 8, after MVP acceptance. Useful but adds date/destination/checklist state. Specify owned trips and item references only; no collaborative trip editing. |

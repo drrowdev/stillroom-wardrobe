@@ -29,6 +29,46 @@ Analysis creates no item/image records: photo/title/category are checked only on
 
 ## Entities
 
+### I10b checked image changes - Stage A source, 22 September 2026
+
+The additive eleventh migration `20260922020000_checked_image_changes.sql`
+leaves all ten installed migration files and public row shapes unchanged.
+Its five private, client-inaccessible RLS tables are `image_change_attempts`,
+`image_change_context`, `image_change_history`, `item_deletion_operations`
+and `item_deletion_targets`. Attempts and deletion operations belong to the
+Auth identity, not the profile/item lifetime. Permanent item deletion scrubs
+hashes, object tuples, proof fields and content-bearing target inventories;
+minimal identity/terminal markers remain until actual Auth deletion. Profile
+clearing is not Auth deletion. There is no scheduler or total-growth bound.
+
+Only explicit Save reserves a new pending image. Service completion checks the
+frozen item version, current image/caption revision, native object identities
+and authenticated JPEG proof, then atomically retires the current image,
+readies the destination and updates the reviewed fields once. Recovery accepts
+eligible retired bytes within seven days, creates a new image identity and never
+calls analysis; an accepted retry does not depend on the source remaining young
+or present. No current photo is retired merely by selecting or uploading a draft.
+
+Legacy singleton attribution remains unchanged. The public history projects
+exactly `source_image_id`, `image_sha256`, `model_id`, `prompt_version`, `fields`
+from both tables, including explicit null source links. Legacy sorts at
+synthetic version 1/rank 0; new history uses actual committed version/rank 1
+and request UUID. No internal manifest or future table column is exposed.
+
+Deletion preparation fences publication before bounded inventory of all image
+rows and the literal item-prefix catalogue. A reversible preparation can become
+irreversible only through exact inventory authorization. Native singular
+Storage DELETE and authoritative absence reconciliation precede preserved
+BEGIN/FINISH. Completed operations retain a publication fence after metadata
+disappears. This is logical deletion, not physical-erasure or provider-remnant
+deadline proof. The historical I08 description below remains its original
+contract; I10b adds compatibility rather than rewriting that evidence.
+Specifically, I10b supersedes its statements that there is no completed
+tombstone and that permanent deletion of pre-existing orphan cases must wait
+for separate I10 cleanup. Durable minimal terminal identity and checked native
+logical deletion/reconciliation now provide those source mechanisms; the
+historical I08 text remains unchanged, and actual CI acceptance remains pending.
+
 ### I08 owned-item lifecycle - Stage 1 source candidate
 
 `20260913120000_item_lifecycle.sql` adds a private live deletion claim, a private

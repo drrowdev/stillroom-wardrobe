@@ -29,6 +29,10 @@ const image = 'public.ecr.aws/supabase/postgres:17.6.1.165';
 const metadata = () => ({ name: `/${DB_CONTAINER}`, project: PROJECT_ID, image, running: true });
 const inspection = (): Outcome => ({ code: 0, stdout: JSON.stringify(metadata()), stderr: '' });
 const receipt = (): Outcome => ({ code: 0, stdout: 'CI_STORAGE_GUARD_OK\n', stderr: '' });
+const versions = ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000',
+  '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000'];
+const historyResult = (query: string) => query.includes('supabase_migrations.schema_migrations')
+  ? JSON.stringify(versions.slice(0, 10)) : 'CI_STORAGE_GUARD_VERIFIED';
 const read = (name: string) => readFile(new URL('../../' + name, import.meta.url), 'utf8');
 function ordered(source: string, steps: string[]) {
   let offset = 0;
@@ -55,15 +59,15 @@ beforeEach(() => {
   mocks.project.mockResolvedValue(undefined);
   mocks.docker.mockResolvedValue(undefined);
   mocks.container.mockResolvedValue(undefined);
-  mocks.sql.mockResolvedValue('CI_STORAGE_GUARD_VERIFIED');
+  mocks.sql.mockImplementation(async (query) => historyResult(query));
   mocks.run.mockImplementation(async (_command, args) => args[0] === 'exec' ? receipt() : inspection());
 });
 afterEach(() => vi.unstubAllEnvs());
 
 describe('CI Storage guard scope and transport (mocked, no backend proof)', () => {
-  it('exports only three zero-argument operations and one immutable shared body pin', () => {
+  it('exports three zero-argument operations and separate exact legacy/target body pins', () => {
     expect(Object.keys(guard).sort()).toEqual([
-      'PUBLICATION_BODY_MD5', 'assertCiStorageGuardInstall', 'installCiStorageGuard', 'verifyCiStorageGuard',
+      'IMAGE_CHANGE_PUBLICATION_BODY_MD5', 'PUBLICATION_BODY_MD5', 'assertCiStorageGuardInstall', 'installCiStorageGuard', 'verifyCiStorageGuard',
     ]);
     for (const name of ['assertCiStorageGuardInstall', 'installCiStorageGuard', 'verifyCiStorageGuard']) {
       expect(guard[name].length).toBe(0);
@@ -147,7 +151,8 @@ describe('CI Storage guard scope and transport (mocked, no backend proof)', () =
     expect(mocks.run.mock.calls[0]?.[2]).toEqual({
       env: commandEnvironment(), timeout: 30_000, maxOutputBytes: 4096,
     });
-    expect(mocks.sql).not.toHaveBeenCalled();
+    expect(mocks.sql).toHaveBeenCalledTimes(1);
+    expect(mocks.sql.mock.calls[0]?.[0]).toContain('supabase_migrations.schema_migrations');
   });
   it.each([
     { code: 0, stdout: '', stderr: '' },
@@ -165,7 +170,7 @@ describe('CI Storage guard scope and transport (mocked, no backend proof)', () =
       'FAIL: CI Storage guard finalization was not verified; readiness is blocked.',
     );
     expect(mocks.run).toHaveBeenCalledTimes(2);
-    expect(mocks.sql).not.toHaveBeenCalled();
+    expect(mocks.sql).toHaveBeenCalledTimes(1);
   });
   it('sanitizes thrown transport errors without a retry or generic SQL fallback', async () => {
     mocks.run.mockResolvedValueOnce(inspection()).mockRejectedValueOnce(new Error('PRIVATE_CANARY'));
@@ -173,14 +178,14 @@ describe('CI Storage guard scope and transport (mocked, no backend proof)', () =
       'FAIL: CI Storage guard finalization was not verified; readiness is blocked.',
     );
     expect(mocks.run).toHaveBeenCalledTimes(2);
-    expect(mocks.sql).not.toHaveBeenCalled();
+    expect(mocks.sql).toHaveBeenCalledTimes(1);
   });
   it('keeps verification read-only, under postgres, without installation permission', async () => {
     for (const key of Object.keys(scope)) vi.stubEnv(key, undefined);
     await guard.verifyCiStorageGuard();
     expect(mocks.run).toHaveBeenCalledTimes(1);
-    expect(mocks.sql).toHaveBeenCalledTimes(1);
-    const sql = mocks.sql.mock.calls[0]?.[0];
+    expect(mocks.sql).toHaveBeenCalledTimes(2);
+    const sql = mocks.sql.mock.calls[1]?.[0];
     expect(sql).toContain('begin read only;');
     expect(sql).toContain("observed->>'actor' is distinct from 'postgres'");
     expect(sql).toContain("observed->>'session' is distinct from 'postgres'");
@@ -189,10 +194,10 @@ describe('CI Storage guard scope and transport (mocked, no backend proof)', () =
   });
   it.each(['', 'O', 'D', 'R', 'null', 'CI_STORAGE_GUARD_OK', 'CI_STORAGE_GUARD_VERIFIED\nextra'])(
     'does not turn an unverified catalog reply %s into readiness', async (value) => {
-      mocks.sql.mockResolvedValue(value);
+      mocks.sql.mockImplementation(async (query) => query.includes('supabase_migrations.schema_migrations') ? historyResult(query) : value);
       await expect(guard.verifyCiStorageGuard()).rejects.toThrow(/readiness is blocked/);
       expect(mocks.run).toHaveBeenCalledTimes(1);
-      expect(mocks.sql).toHaveBeenCalledTimes(1);
+      expect(mocks.sql).toHaveBeenCalledTimes(2);
     },
   );
   it('sanitizes verifier errors and rejects extra arguments before target work', async () => {
@@ -220,6 +225,32 @@ describe('CI Storage guard scope and transport (mocked, no backend proof)', () =
 });
 
 describe('fixed SQL/source contracts (not executed PostgreSQL assertions)', () => {
+  it.each([9, 10, 11])('selects the single exact trigger/body pair only from history length %s', async (length) => {
+    mocks.sql.mockImplementation(async (query) => query.includes('supabase_migrations.schema_migrations')
+      ? JSON.stringify(versions.slice(0, length)) : 'CI_STORAGE_GUARD_VERIFIED');
+    const sql = await installSql();
+    expect(sql).toContain(`t.tgtype=${length === 11 ? 29 : 21}`);
+    expect(sql).not.toContain(`t.tgtype=${length === 11 ? 21 : 29}`);
+    expect(sql).toContain(`pg_catalog.md5(p.prosrc)='${length === 11 ? guard.IMAGE_CHANGE_PUBLICATION_BODY_MD5 : guard.PUBLICATION_BODY_MD5}'`);
+    await guard.verifyCiStorageGuard();
+    const verification = mocks.sql.mock.calls.at(-1)?.[0];
+    expect(verification).toContain(`t.tgtype=${length === 11 ? 29 : 21}`);
+  });
+  it.each([[], versions.slice(1), [...versions, '20260923000000'], versions.slice(0, 8),
+    [...versions.slice(0, 9), versions[10]], [...versions.slice(0, 9), versions[8]], null, {}])(
+    'rejects unknown history %# before owner alteration and without observed-body fallback', async (value) => {
+      mocks.sql.mockResolvedValue(JSON.stringify(value));
+      await expect(guard.installCiStorageGuard()).rejects.toThrow(/readiness is blocked/);
+      expect(mocks.run).toHaveBeenCalledTimes(1);
+      expect(mocks.sql).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('pins the replacement-aware body independently from the immutable legacy migration', async () => {
+    const migration = await read('supabase/migrations/20260922020000_checked_image_changes.sql');
+    const body = migration.match(/create or replace function private\.guard_item_object_publication\(\)[\s\S]*?as \$\$([\s\S]*?)\$\$;/)?.[1];
+    if (!body) throw new Error('Missing target publication body');
+    expect(createHash('md5').update(body).digest('hex')).toBe(guard.IMAGE_CHANGE_PUBLICATION_BODY_MD5);
+  });
   it('bounds one transaction, locks before catalog reads, permits only O-to-A or unchanged A, commits before marker', async () => {
     const sql = await installSql();
     ordered(sql, ['begin;', 'set local search_path = pg_catalog;',

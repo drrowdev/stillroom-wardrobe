@@ -16,6 +16,16 @@ No app has been built. **Latest scope: photo-first AI-filled draft, edit any gar
 
 ## Phase completion rules
 
+**22 September 2026 I10b staged gate:** reviewed Stage A contains the additive
+eleventh schema, fixed finalizer and existing CI-harness extensions only.
+Actual CI-generated types (Stage B) must precede typed caller/UI wiring
+(Stage C); generated schema signatures must not be invented locally.
+Current-photo survival, seven-day new-identity recovery without inference and
+necessary explicit-deletion compatibility remain required. I10a-D maintenance
+and its blocked evidence tools are specifically user-deferred, not passed.
+I11 stays ineligible; I22 remains Phase 6 with exhaustive owner-prefix removal
+still required. No Stage A source or local unit pass is Phase 2 acceptance.
+
 English/Finnish/Swedish is required from Phase 0, not a deferred phase. I01 establishes the catalog/helpers/translation gate; I03 localizes login, wardrobe and upload and initializes an unset owner preference; I06 adds the full profile/settings selector. Every feature packet translates its UI in the same PR. I24–I25 review all three languages, long labels, screen-reader language and independent preferences. Run `check:translations` at every phase exit. See `19-LOCALIZATION.md` for exact contracts and migration compatibility.
 
 Each phase produces a short `docs/phase-N-result.md` with commit, implemented issue IDs, commands and exit codes, actual tests/device checks, remaining limitations and rollback point. Redact all account data and credentials. A diagram or “looks correct” is not passing evidence. A skipped security test is a failed completion gate.

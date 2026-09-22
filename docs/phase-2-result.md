@@ -15,6 +15,106 @@ PR [#9](https://github.com/drrowdev/stillroom-wardrobe/pull/9), branch
 `25a268712dc9158259608f5a4f17d11d9b9ad279`. This result update changes no
 executable inputs.
 
+## 22 September 2026 - I10b Stage A backend/harness source candidate
+
+This is an **unstaged source handoff**, not PostgreSQL/native acceptance, UI
+completion or publication. The accepted base/head remains
+`1984b848017dd9c22249907fe303d701bcb48440`, tree
+`532730a435bfe29fc0ea9611688efde1fc2cc1fc`. The sole persistent local writer is
+CLI `9e524647-badc-41a5-ac94-8c91d43b0d49`, branch
+`drrowdev-shiny-umbrella`, explicitly GPT-6 Astra. The immutable 53,227-byte
+[plan](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5769821979)
+has SHA256 `3d77c9f08ae131a9f8fc5259efab655748fff616f522ba78fa291193c1818b19`.
+The [controlling approval](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5769933357)
+records retained Anthropic Claude Opus 5 critique, B1/B2/M1-M7 dispositions,
+own-writer coordinator-observed local model evidence and explicit Stage A limits.
+
+The eleventh migration adds checked replacement/recovery, positive five-key
+ordered attribution, one-shot rollback-scoped context, common approved-account
+locking, reversible inventory/irreversible deletion authorization and durable
+publication fencing. All ten preceding migration files are unchanged. The new
+fixed finalizer reuses authenticated bounded JPEG verification without altering
+Add's production request/RPC contract. Exact serving inventory is 7/4/3 files
+across three declared JWT-verified functions. The historical I08 contract and
+Google/Azure receipt compatibility remain separately testable.
+
+The existing preservation runner now has explicit base->10 and populated9->10
+copy-only staging, then populated10->11 on the same ROOT-verified database.
+The pinned CLI has no migration target flag. Native installation chooses the
+exact legacy21 or target29 trigger/body from the ledger, with no observed-body
+fallback. New CI-only fixtures cover structural grants/lifetimes/context,
+normal-owner replacement/recovery, pending/unmanifested deletion, 41-version/
+84-target paging, native late publication and shared-lock exclusion. They are
+executable source, **not locally executed backend proof**. Original B1=12,
+B2=22 and C=2 inference counts and all deadlines remain unchanged.
+
+Local commands used the already approved Node 24.19.0 executable and this
+workspace's locked packages, with no installation:
+
+| Command (after the pinned Node executable) | Actual result |
+|---|---|
+| `node_modules\vitest\vitest.mjs run tests\unit\ai-save-endpoint.test.ts tests\unit\image-replacement-endpoint.test.ts tests\unit\image-replacement-schema.test.ts tests\unit\image-replacement.test.ts tests\unit\local-backend.test.ts tests\unit\ci-storage-guard.test.ts tests\unit\preservation.test.ts tests\unit\item-lifecycle-schema.test.ts --reporter=default` | Exit 0, eight files / 1,185 tests. |
+| `node_modules\vitest\vitest.mjs run tests\unit\ai-draft.test.ts tests\unit\analyzed-save.test.ts tests\unit\item-lifecycle.test.ts tests\unit\item-save.test.ts tests\unit\ai-schema.test.ts tests\unit\ai-endpoint.test.ts --reporter=default` | Exit 0, six files / 525 tests. |
+| `node_modules\typescript\bin\tsc --noEmit` | Exit 0. No generated-type edit. |
+| `node_modules\vite\bin\vite.js build` | Exit 0; existing >500 kB chunk warning retained. |
+| `node_modules\eslint\bin\eslint.js` with all changed executable/test paths | Exit 0. |
+| `scripts\check-translations.mjs` | Exit 0, 527 EN/FI/SV keys. No UI copy changed. |
+| `scripts\scan-secrets.mjs` | Exit 0; local canary not supplied, so CI canary remains required. |
+| `scripts\check-dependencies.mjs` | Exit 1, `DEPENDENCY_RECORD_DRIFT`; audit not reached. Read-only diagnosis proves exact inventory/notice equality after LF normalization, but raw inventory differs by CRLF. No dependency record, lockfile or package edit was made. |
+
+Earlier local failures were corrected rather than hidden: oversized finalizer
+envelopes needed the shared `TOO_LARGE` mapping; staged cleanup triggered
+`no-unsafe-finally`; old mock call counts and nine/ten-only inventory assertions
+needed the explicit eleventh/ten-stage contract; source-body pins needed the
+repository's required LF bytes. Subsequent targeted results above replace those
+failed local attempts, not real database validation.
+
+Pending gates: retained focused source review/publication release; actual
+fresh/populated PostgreSQL/Auth/Storage/Deno/preservation/security/lock-race
+execution; exact native catalogue acceptance and same-database staging behavior;
+CI-generated public types before Stage B/typed UI; later EN/FI/SV browser/a11y
+and bounded coordinator-reviewed artifacts; hosted/native-device/human gates.
+No local Docker/WSL/backend/SQL fixture, hosted/provider operation, staging,
+commit, push, new PR, merge or deployment occurred. PR29 stays merged and PR27
+and the old writer workspace stay frozen.
+
+I10a-D maintenance is deferred, not passed. Seven-day recovery/no inference,
+explicit Save/current-photo survival and explicit-deletion requirements remain.
+The guarantee is native logical removal with exhaustive authoritative
+reconciliation and publication fencing, not physical erasure or a provider
+remnant deadline. I22 remains Phase 6; I11 is not eligible. Accepted main's
+WebKit zero-byte response-sequence first-attempt failure/retry-pass remains an
+unresolved residual, not a PR16 waiver; no fixture rewrite was made.
+
+### Stage A r1 - retained review corrections, 22 September 2026
+
+The [scoped F1-F5 release](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5770420217)
+records the retained independent Opus review and fresh own-writer model
+observation. This remains the same unstaged 34-path packet at the same base.
+The read-policy helper is now nonlocking; the authoritative native mutation
+trigger still locks and validates the exact operation/object tuple. Existing
+CI lock fixtures now pair ordinary reads of an unaffected same-owner ready
+image with refused native mutations and unchanged state under a held common
+NO KEY UPDATE lock. A separate held preparation-row lock requires authorization
+to return the exact normalized `22023` conflict without cancelling the reserved
+attempt. These are source fixtures, not executed backend evidence.
+
+The unused `removing_extras` phase was removed without a new transition.
+Both finalizers now pass only URL, public key, bearer and signal to the real
+shared verifier, covered by call-through argument assertions. The new data-model
+section explicitly identifies the two superseded historical I08 claims while
+leaving their original text intact. Eleventh-migration byte/hash and both modern
+function-body pins were refreshed; all legacy pins/migrations remain unchanged.
+
+The same combined 14-file unit command above now passes **1,717 tests** (exit 0).
+Scoped ESLint, `tsc --noEmit`, Vite build, translations, secret scan and
+`git diff --check` also exit 0. The existing build-size warning remains.
+No local canary was supplied. The prior CRLF dependency-record failure and
+unreached dependency audit remain unresolved evidence gates, not passes.
+Real native GET behavior, normalized SQL conflict/rollback, backend races,
+fresh/populated preservation and generated types still require authorized CI.
+No local backend, publication or unrelated WebKit change was made.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling

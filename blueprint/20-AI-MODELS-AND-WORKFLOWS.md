@@ -49,6 +49,19 @@ Use a bounded analysis timeout (initial target: 20 seconds). Timeout, refusal, m
 
 ## Attribute contract and uncertainty
 
+**22 September 2026 I10b compatibility:** replacement freezes the reviewed
+item/image/caption-version intent only on explicit Save. A valid current Azure
+attestation may fill eligible unknown fields but cannot overwrite a saved user
+value/clear or silently reclassify it. Add and replacement consume each analysis
+receipt mutually exclusively under the same profile/common lock. Committed
+`analysis_unavailable` remains distinct from an ambiguous transport failure;
+only the former can unlock deliberate manual continuation. Existing accepted
+Add/frozen replacement can complete after opt-out/expiry without reanalysis.
+Legacy Google history and finishing behavior remain read/finish only. Recovery
+copies verified saved bytes into a new identity within the seven-day acceptance
+window, preserves saved fields/provenance, and never calls inference. Stage A
+does not wire the replacement form or activate a provider.
+
 Use a versioned, bounded response schema and canonical taxonomy codes, not arbitrary hashtags or instructions. Google requests use `responseMimeType: application/json` and supported `responseSchema`; OpenAI uses strict JSON-schema Structured Outputs. Parse and validate domain values server-side. Valid JSON is not evidence that an observation is true.
 
 | Attribute | Automatic treatment |

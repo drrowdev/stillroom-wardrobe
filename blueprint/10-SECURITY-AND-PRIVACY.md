@@ -63,6 +63,31 @@ A publishable key is safe only with correctly enforced RLS. Allowlist `VITE_SUPA
 
 ## Deletion and recovery
 
+### I10b deletion guarantee and authority - 22 September 2026
+
+The approved guarantee is native Storage logical removal plus exhaustive
+authoritative application/catalogue reconciliation under a durable publication
+fence. It is **not** physical erasure, provider-backup removal or a cleanup
+deadline for inaccessible interrupted-upload remnants. Retained wear history
+keeps its existing title/category snapshots with null item links. I10a-D routine
+maintenance is deferred, not passed; I22 still needs owner-prefix capability
+for Phase 6 account deletion and is not implemented by this packet.
+
+Stage A adds READ COMMITTED admission using the existing approved-account row:
+ordinary mutations take SHARE NOWAIT; short deletion fence transitions take
+conflicting NO KEY UPDATE NOWAIT before profile/child/parent locks. Fresh
+all-role native INSERT/UPDATE/DELETE guards retain locks through transaction
+completion. A permission probe alone is not publication proof. Completed
+deletion markers survive item/profile clearing until Auth identity deletion.
+
+The private mutation context is transaction/owner/item/target/purpose/version/
+old-hash/new-hash bound and consumed once. Token creation and mutation must
+share the same closed rollback scope: DELETE is not rollback-resistant.
+Replacement, pending-forget and BEGIN/FINISH purposes are not interchangeable.
+No client context table or service shortcut is exposed. Unsupported inventory,
+tuple drift, uncertain native removal and failed reconciliation remain blocked,
+not success. A canceled preparation cannot cancel an already authorized deletion.
+
 ### I08 ordinary-item deletion boundary - unexecuted source candidate
 
 The ninth lifecycle migration uses an owner-only private live-item claim,

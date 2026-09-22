@@ -24,7 +24,7 @@ type OwnerData = { label: string; ownerId: string; tables: TableRows; objects: [
 type ObjectEvidence = { path: string; bytes: number; sha256: string };
 type Snapshot = {
   schemaVersion: number; projectId: string; stage: string; run: string;
-  sources: { base: string; target: string; description: string; collections: string; controls: string; save: string; analysis: string; analyzedSave: string; lifecycle: string; azure: string }; owners: string[];
+  sources: { base: string; target: string; description: string; collections: string; controls: string; save: string; analysis: string; analyzedSave: string; lifecycle: string; azure: string; imageChanges: string }; owners: string[];
   data: [OwnerData, OwnerData];
 };
 const sha = 'a'.repeat(64);
@@ -110,6 +110,7 @@ const baseTable = [
   '   `20260911200000` | ` `              | `2026-09-11 20:00:00` ',
   '   `20260913120000` | ` `              | `2026-09-13 12:00:00` ',
   '   `20260921193000` | ` `              | `2026-09-21 19:30:00` ',
+  '   `20260922020000` | ` `              | `2026-09-22 02:00:00` ',
   '',
   '',
 ].join('\n');
@@ -128,10 +129,12 @@ const targetTable = [
   '   `20260911200000` | `20260911200000` | `2026-09-11 20:00:00` ',
   '   `20260913120000` | `20260913120000` | `2026-09-13 12:00:00` ',
   '   `20260921193000` | `20260921193000` | `2026-09-21 19:30:00` ',
+  '   `20260922020000` | `20260922020000` | `2026-09-22 02:00:00` ',
   '',
   '',
 ].join('\n');
-const priorMainTable = targetTable.replace('`20260921193000` | `20260921193000`', '`20260921193000` | ` `             ');
+const azureTable = targetTable.replace('`20260922020000` | `20260922020000`', '`20260922020000` | ` `             ');
+const priorMainTable = azureTable.replace('`20260921193000` | `20260921193000`', '`20260921193000` | ` `             ');
 const validEnv = { ALLOW_PRESERVATION_REHEARSAL: '1', CI: 'true', GITHUB_ACTIONS: 'true' };
 const inventory = () => (MIGRATIONS as { name: string; version: string; bytes: number; sha256: string }[])
   .map((entry) => ({ ...entry, regular: true, symlink: false }));
@@ -149,11 +152,11 @@ describe('CI-only preservation guards', () => {
       expect(() => assertRehearsalEnvironment({ ...validEnv, [key]: 'fictional-refused' }, [])).toThrow();
     }
   });
-  it('pins exactly ten regular migrations, preserving all nine earlier lengths and hashes', async () => {
-    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000']);
+  it('pins exactly eleven regular migrations, preserving all ten earlier lengths and hashes', async () => {
+    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000']);
     expect(() => validateInventory(inventory())).not.toThrow();
     await expect(assertMigrationInventory()).resolves.toBeUndefined();
-    for (const index of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) for (const [key, value] of [
+    for (const index of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) for (const [key, value] of [
       ['name', 'unexpected.sql'], ['bytes', 0], ['bytes', present(inventory()[index]).bytes + 1],
       ['sha256', 'b'.repeat(64)], ['regular', false], ['symlink', true],
     ]) {
@@ -191,9 +194,14 @@ describe('CI-only preservation guards', () => {
     expect(() => assertCapabilities([{ code: 0, stdout: '  --local\n' }, ...help.slice(1)])).toThrow();
   });
   it('parses source-derived applied/pending tables without claiming execution', () => {
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000'] });
-    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000'], pending: [] });
-    expect(assertHistory(priorMainTable, 'prior-main')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'], pending: ['20260921193000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000'] });
+    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000'], pending: [] });
+    expect(assertHistory(priorMainTable, 'prior-main')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'], pending: ['20260921193000', '20260922020000'] });
+    expect(assertHistory(azureTable, 'azure-target')).toEqual({
+      applied: inventory().slice(0, 10).map((entry) => entry.version), pending: ['20260922020000'],
+    });
+    expect(() => assertHistory(azureTable, 'target')).toThrow();
+    expect(() => assertHistory(targetTable, 'azure-target')).toThrow();
     for (const [table, stage] of [[baseTable, 'prior-main'], [targetTable, 'prior-main'],
       [priorMainTable, 'base'], [priorMainTable, 'target']])
       expect(() => assertHistory(table, stage)).toThrow();
@@ -207,9 +215,9 @@ describe('CI-only preservation guards', () => {
     expect(assertHistoryResult({ code: 0, stdout: baseTable }, 'base')).toEqual(parseMigrationHistory(baseTable));
   });
   it('retains SOURCE-DERIVED renderer padding, widths and decorative blank lines', () => {
-    for (const table of [baseTable, priorMainTable, targetTable]) {
+    for (const table of [baseTable, priorMainTable, azureTable, targetTable]) {
       const lines = table.split('\n');
-      expect(lines).toHaveLength(16);
+      expect(lines).toHaveLength(17);
       expect(lines.slice(0, 2)).toEqual(['', '  ']);
       expect(lines.slice(-2)).toEqual(['', '']);
       for (const line of lines.slice(2, -2)) {
@@ -281,7 +289,7 @@ describe('CI-only preservation guards', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe('EVIDENCE_REQUIRED');
     expect(historyFailureDetail(failure)).toBe(`; reason=${reason}`);
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000'] });
   });
   it('distinguishes history command failure without forwarding command output or arbitrary errors', () => {
     const privateText = 'arbitrary upstream text /private/fixture-path';
@@ -959,22 +967,25 @@ describe('import safety and frozen integration boundary', () => {
     expect(base).not.toContain('await installCiStorageGuard();');
     expect(base).not.toContain('await verifyCiStorageGuard();');
     const finalized = main.indexOf('await installCiStorageGuard();');
-    expect(finalized).toBeGreaterThan(main.indexOf("await cli(['migration', 'up', '--local'])"));
+    expect(finalized).toBeGreaterThan(main.indexOf("await migrateToAzureTarget(run, 'base')"));
     expect(main.indexOf('await verifyCiStorageGuard();')).toBeGreaterThan(finalized);
-    expect(main.indexOf("await history('target');")).toBeGreaterThan(main.indexOf('await verifyCiStorageGuard();'));
-    expect(main.indexOf('ITEM_LIFECYCLE_CATALOG_SQL')).toBeGreaterThan(main.indexOf("await history('target');"));
-    expect(main.match(/await installCiStorageGuard\(\);/g)).toHaveLength(2);
-    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(2);
+    expect(main.indexOf("await history('azure-target');")).toBeGreaterThan(main.indexOf('await verifyCiStorageGuard();'));
+    expect(main.indexOf('ITEM_LIFECYCLE_CATALOG_SQL')).toBeGreaterThan(main.indexOf("await history('azure-target');"));
+    expect(main.match(/await installCiStorageGuard\(\);/g)).toHaveLength(3);
+    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(3);
     const prior = main.slice(main.indexOf("stage = 'AZ1-prior-main-reset'"));
     expect(source).toContain("const PRIOR_MAIN_VERSION = '20260913120000';");
     expect(source).toContain('MIGRATIONS.findIndex((entry) => entry.version === PRIOR_MAIN_VERSION)');
-    expect(source).toContain("requireHistory(priorMainIndex >= 0, 'inventory-mismatch');");
+    expect(source).toContain("requireHistory(priorMainIndex >= 0 && azureIndex === priorMainIndex + 1, 'inventory-mismatch');");
     expect(prior).toContain("'--version', PRIOR_MAIN_VERSION");
     expect(source).not.toContain('MIGRATIONS.slice(0, 9)');
     expect(source).not.toContain('MIGRATIONS[9]');
     expect(prior.indexOf("await history('prior-main');")).toBeLessThan(prior.indexOf('await captureAzurePreservation('));
     expect(prior.indexOf('await captureAzurePreservation(')).toBeLessThan(prior.indexOf("await cli(['migration', 'up', '--local'])"));
-    expect(prior.indexOf("await history('target');")).toBeLessThan(prior.indexOf('await verifyAzurePreservation('));
+    expect(prior.indexOf("await history('azure-target');")).toBeLessThan(prior.indexOf('await verifyAzurePreservation('));
+    expect(prior.indexOf('await verifyAzurePreservation(')).toBeLessThan(prior.indexOf('await captureImageChangePreservation('));
+    expect(prior.indexOf('await captureImageChangePreservation(')).toBeLessThan(prior.indexOf("await cli(['migration', 'up', '--local'])"));
+    expect(prior.indexOf("await history('target');")).toBeLessThan(prior.indexOf('await verifyImageChangePreservation('));
   });
   it('keeps the normal child free of privileged calls and compares before probes', async () => {
     const source = await readFile(path.join(root, 'tests/integration/preservation.sessions.mjs'), 'utf8');
@@ -987,8 +998,8 @@ describe('import safety and frozen integration boundary', () => {
     expect(orchestrator).toContain('validateSessionEnvironment(env)');
     expect(orchestrator.match(/provision-test-users\.mjs/g)).toHaveLength(2);
     expect(orchestrator.match(/\['db', 'reset'/g)).toHaveLength(3); // Help, fixed base and fixed prior-main.
-    for (const [stage, target] of [['S1-base-history', 'base'], ['S3-base-history', 'base'], ['S3-target-history', 'target']]) {
-      expect(orchestrator).toContain(`stage = '${stage}';\n    await history('${target}');`);
+    for (const [stage, target] of [['S1-base-history', 'base'], ['S3-base-history', 'base'], ['S3-target-history', 'azure-target']]) {
+      expect(orchestrator.replaceAll('\r\n', '\n')).toContain(`stage = '${stage}';\n    await history('${target}');`);
     }
     expect(orchestrator).not.toMatch(/--(?:linked|db-url)|migration.*repair/);
     const fixtureBytes = await readFile(path.join(root, 'tests/security/fixture.jpg'));

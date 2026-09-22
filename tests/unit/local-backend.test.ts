@@ -201,29 +201,42 @@ describe('owned B1 function lifecycle', () => {
       child.emit('close', 1); await owned.stop();
     });
   const config = '[edge_runtime]\nenabled = true\n\n[functions.analyze-clothing]\nenabled = true\nverify_jwt = true\n'
-    + '\n[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = true\n';
+    + '\n[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = true\n'
+    + '\n[functions.finalize-image-change]\nenabled = true\nverify_jwt = true\n';
   const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json', 'azure-openai.ts'];
-  const directories = ['finalize-analyzed-item', 'analyze-clothing'];
-  const finalizerFiles = ['index.ts', 'handler.ts', 'deno.json'];
+  const directories = ['finalize-analyzed-item', 'analyze-clothing', 'finalize-image-change'];
+  const finalizerFiles = ['index.ts', 'handler.ts', 'deno.json', 'verify-image.ts'];
+  const imageChangeFiles = ['index.ts', 'handler.ts', 'deno.json'];
   const help = { code: 0, stdout: '  Serve all Functions locally.\n  supabase functions serve [flags] [<Function name...>]\n', stderr: '' };
   it('requires the observed all-functions capability and closed enabled inventory', () => {
-    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles)).not.toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles)).not.toThrow();
     for (const text of [config.replace('verify_jwt = true', 'verify_jwt = false'),
       config.replace('[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = true',
         '[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = false'),
+      config.replace('[functions.finalize-image-change]\nenabled = true\nverify_jwt = true',
+        '[functions.finalize-image-change]\nenabled = true\nverify_jwt = false'),
       config.replace('[edge_runtime]\nenabled = true', '[edge_runtime]\nenabled = false'),
       config + '\n[functions.other]\nenabled = true\n']) {
-      expect(() => assertAnalysisServeContract(text, directories, files, help, finalizerFiles)).toThrow();
+      expect(() => assertAnalysisServeContract(text, directories, files, help, finalizerFiles, imageChangeFiles)).toThrow();
     }
-    expect(() => assertAnalysisServeContract(config, ['other'], files, help, finalizerFiles)).toThrow();
-    expect(() => assertAnalysisServeContract(config, directories, [...files, '.env'], help, finalizerFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['other'], files, help, finalizerFiles, imageChangeFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, [...files, '.env'], help, finalizerFiles, imageChangeFiles)).toThrow();
     for (const missing of files) {
-      expect(() => assertAnalysisServeContract(config, directories, files.filter((file) => file !== missing), help, finalizerFiles)).toThrow();
+      expect(() => assertAnalysisServeContract(config, directories, files.filter((file) => file !== missing), help, finalizerFiles, imageChangeFiles)).toThrow();
     }
-    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, code: 1 }, finalizerFiles)).toThrow();
-    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, stdout: '' }, finalizerFiles)).toThrow();
-    expect(() => assertAnalysisServeContract(config, directories, files, help, [...finalizerFiles, 'deno.d.ts'])).toThrow();
-    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, help, finalizerFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, code: 1 }, finalizerFiles, imageChangeFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, stdout: '' }, finalizerFiles, imageChangeFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, help, [...finalizerFiles, 'deno.d.ts'], imageChangeFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, help, finalizerFiles, imageChangeFiles)).toThrow();
+    for (const missing of finalizerFiles) {
+      expect(() => assertAnalysisServeContract(config, directories, files, help,
+        finalizerFiles.filter((file) => file !== missing), imageChangeFiles)).toThrow();
+    }
+    for (const missing of imageChangeFiles) {
+      expect(() => assertAnalysisServeContract(config, directories, files, help,
+        finalizerFiles, imageChangeFiles.filter((file) => file !== missing))).toThrow();
+    }
+    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, [...imageChangeFiles, '.env'])).toThrow();
   });
   it.each(['stop', 'output', 'startup', 'lifetime', 'exit'] as const)('owns only its child on %s', async (reason) => {
     vi.useFakeTimers();
