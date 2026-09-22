@@ -15,6 +15,79 @@ PR [#9](https://github.com/drrowdev/stillroom-wardrobe/pull/9), branch
 `25a268712dc9158259608f5a4f17d11d9b9ad279`. This result update changes no
 executable inputs.
 
+## 22 September 2026 - CI17 authentic generated type adoption
+
+**Native served gate passed; type adoption remains unstaged for review.**
+The same local GPT-6 Astra writer follows
+[release 5779381981](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5779381981)
+after retained Anthropic Claude Opus 5 review 166 and coordinator corrections.
+Base `f6c2f0d70903db2c08fd69549b6d87931af42849`, tree
+`8810e41ba10dffb89ca27d76e88c888788e6593d`; scope is I10b R04/R28/R03/R12/R15
+schema evidence, not Stage C or deployment.
+
+CI17 run `35744604238`, DB job `106802831201`, used checkout
+`e42422d5e8ad3965dfa9fd5a2892ca2bbee0fe3a` with that exact tree. Preservation,
+reset, integration, security, B1/B2/C and restoration passed. At
+15:09:05.6339058Z the actual Deno/Auth/DB/Storage served replacement and
+new-identity recovery rehearsal passed, including incomplete-upload/caption
+conflicts, completed retries and no additional inference. This does not
+retrospectively identify CI16's original exception or establish paid-provider,
+hosted, visual or human acceptance. CI17 App finished with 3412 unit and
+730 browser passes, four skips; skips remain skips.
+
+Actual local-schema generation passed at 15:09:17.2969059Z; upload of artifact
+`10701143634` passed at 15:09:17.9315120Z. The subsequent workflow Git parity
+check alone failed the DB job. The coordinator verified archive size/digest
+and extracted its single TypeScript entry; the writer accessed only that text.
+This candidate adopts the whole 29078-byte LF artifact, SHA256
+`b07b004ddadf1f512ec208012f042c6798d4b606c54c5f3187c126bff6ae72ba`,
+filtered blob `aee6eb845cd09195c23bc41806ee3649c4a61528`, without curation.
+
+The committed delta is 26875 to 29078 bytes: 2203 bytes, 69 lines and 18 new
+public RPC members, with all previous declarations unchanged. The migration's
+21 public declarations include three unchanged signatures:
+`reserve_analyzed_item_save` delegates to `private.reserve_analyzed_item_save_v10`,
+`finish_item_deletion` to `private.finish_item_deletion_v9`, and
+`item_attribution_history` is replaced in place. Five new tables remain private;
+no public column, helper contamination or version-metadata delta was found.
+The existing `wardrobe-query.spec.ts` Functions-indexed `save_wear_event` Args
+consumer is unchanged and nonexhaustive, not absent.
+
+Generated `Json` includes null and is not a refined receipt; required properties
+do not prove semantic validity. `p_after?: string` allows omission, not null.
+The bigint-to-number mapping cannot represent every 64-bit integer exactly;
+runtime bounds remain necessary. SQL void-to-undefined is a type mapping, not
+an HTTP-response proof. `complete_image_change` and `reserve_image_recovery`
+remain service-role-only: generated membership grants no App permission.
+
+The old Windows raw file was 27802 bytes with 927 CRLFs, distinct from its
+26875-byte committed LF text. The current artifact has 996 LFs and no CRs;
+raw growth of 1276 bytes is not the committed growth of 2203 bytes. Future
+checkout size alone cannot authenticate an EOL change: compare durable blob
+and normalized hash before attributing any difference to line endings.
+
+The first writer transfer failed its raw guard before typecheck: it lost the
+optional owner-id marker and terminal blank line and produced CRLF. Under
+[routine correction 5779518312](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5779518312),
+the marker and blank line were restored with `apply_patch`. A first in-memory
+normalization guard still found the missing final LF and refused writing;
+after the terminal-line correction, proposed normalized bytes matched the
+authenticated artifact exactly before file-only LF formatting. Postwrite
+raw/hash/blob equality passed. These were transfer errors, not artifact defects
+or passing compilation; no Git configuration/attributes or schema changed.
+
+Pinned Node 24.19.0, existing dependencies: `tsc --noEmit` passed, exit 0.
+No consumer/pin repair, runtime units, build, fail-first or local generation
+was needed. The generated file is ESLint-ignored; no lint pass is claimed.
+Secret scan checked 253 text files, exit 0; local canary was absent, so CI
+retains that gate. `git diff --check`, artifact/LF/blob identity, all-18-member
+and old-raw inverses, additive-doc inverse and frozen-surface checks passed.
+`scripts/db.mjs --check` compares raw strings, while `--setup-artifact` reports
+equality separately and normal generation writes output. Adoption removes the
+observed content difference, not a guarantee of future parity. The existing
+automatic CI generation/upload/Git-diff gate, full-head review, Stage C,
+visual/human and rollout gates remain pending; no publication is included here.
+
 ## 22 September 2026 - CI16 served-fixture baseline isolation
 
 **Unstaged fixture correction; CI16's actual failing operation remains unknown.**
