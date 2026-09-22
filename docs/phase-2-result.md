@@ -15,6 +15,56 @@ PR [#9](https://github.com/drrowdev/stillroom-wardrobe/pull/9), branch
 `25a268712dc9158259608f5a4f17d11d9b9ad279`. This result update changes no
 executable inputs.
 
+## 22 September 2026 - CI16 served-fixture baseline isolation
+
+**Unstaged fixture correction; CI16's actual failing operation remains unknown.**
+The same local GPT-6 Astra writer follows
+[release 5778583194](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5778583194),
+after retained Anthropic Claude Opus 5 review 162 and coordinator W1-W4
+dispositions. Base `4687eb0874728f8b2e5b0363a139dfbcda4552b0`, tree
+`d3c4b0f8830c51d11702687992bffe8cc23c0877`. This is I10b R04/R28 fixture
+evidence, not a product/SQL change, publication or native acceptance.
+
+The served caller's nested notes-provenance write also changed its saved
+baseline's shared provenance map. If reservation, thumbnail upload and the
+expected 409 `UPLOAD_INCOMPLETE` assertion succeeded, the following unchanged
+item assertion compared the persisted row with that mutated expectation.
+Reservation does not update the public item before completion. The local
+copy-on-write replacement preserves the intended request values, original
+baseline and strict assertions; all other caller/harness bytes are unchanged.
+`imageChangeIntent` deliberately remains a shallow copy whose nested provenance
+can alias the source; this site now uses copy-on-write, and future nested
+mutations require the same care.
+
+CI16 recorded fresh post-C readiness, not fixture entry or completion; the
+actual exception/status/SQLSTATE remain unavailable. Observed CI15 did not
+enter the served fixture. This packet has no passing native evidence for the
+served stage or its completion/recovery/retry/conflict/race checks. Further
+downstream or expectation failures remain possible; this does not establish
+CI16's cause or predict a passing next run. Earlier CI16 preservation/reset/
+integration/security/B1/B2/C/restoration passes remain valid; types were skipped.
+
+Pinned Node 24.19.0 and existing dependencies, executed sequentially:
+
+- `vitest run tests/unit/item-lifecycle-schema.test.ts -t "I10b served baseline isolation" --reporter=dot`:
+  **9 failed / 29 passed / 920 filtered**, exit 1 before the caller change;
+  the identical selector then **38 passed / 920 filtered**, exit 0.
+- Existing five suites (`item-lifecycle-schema`, `preservation`, `local-backend`,
+  `image-replacement-schema`, `ci-storage-guard`): **2144 passed**, exit 0.
+- Caller/lifecycle-unit ESLint and `tsc --noEmit`: exit 0, after the suites.
+  No test-scaffold correction, timeout change or weakened assertion was needed.
+
+The regressions execute the actual served caller and shared harness with mocked
+ordinary-client/endpoint transport and independent cloned persisted rows.
+They require the exact sentinel thrown at the next main upload, not whole-stage
+success; assert intended notes/provenance, retained title/category entries,
+baseline equality and distinct draft-map identity; and retain strict rejection
+of changed item/image rows. Injected Error/falsy rejections propagate exactly
+at the tested awaits, while failed responses retain `EVIDENCE_REQUIRED`.
+Neither result is a universal claim about all native errors. No backend, SQL,
+server, browser, inference or native probe was run. Candidate remains unstaged
+for retained closure and a separate publication decision.
+
 ## 22 September 2026 - CI15 owned-server entry repair
 
 **Unstaged source-entry correction; served-stage native acceptance remains open.**

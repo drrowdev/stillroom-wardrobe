@@ -19,7 +19,7 @@ import { one, lifecycleObservation, serializeLifecycleObservation, readLifecycle
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { securityObservation, serializeSecurityObservation } from '../security/item-lifecycle.sessions.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
-import { imageDeletionCases, imageChangeOrphanDeletion } from '../integration/image-replacement.sessions.mjs';
+import { imageDeletionCases, imageChangeOrphanDeletion, imageReplacementServed } from '../integration/image-replacement.sessions.mjs';
 
 const fixtureMocks = vi.hoisted(() => ({
   spawn: vi.fn(), requireLocalContainer: vi.fn(), privilegedLocalSql: vi.fn(), commandEnvironment: vi.fn(), saveClients: vi.fn(),
@@ -1176,6 +1176,131 @@ describe('I10b deletion callback evidence (real caller, mocked client/lock/child
     const runner = await read('scripts/preservation-rehearsal.mjs');
     expect(runner.includes('mark: (label) => { stage = `I10b-publication-races-${label}`; }')).toBe(true);
     expect(runner).toContain('FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}${lifecycleFailureDetail(error)}; subsequent stages NOT RUN');
+  });
+});
+
+describe('I10b served baseline isolation (actual caller, bounded mocked transport)', () => {
+  type Row = Record<string, unknown>;
+  type Provenance = Record<string, { kind: string; revision: number }>;
+  type Item = Row & { field_provenance: Provenance };
+  type Change = { item: Item; requestId: string; itemId: string; imageId: string };
+  const owner = { uid: '10000000-0000-4000-8000-000000000001', token: 'synthetic-owner-a' };
+  const env = { SUPABASE_PUBLISHABLE_KEY: 'synthetic-publishable' };
+  const boundary = new Error('bounded next main upload');
+  const stages = ['reserve', 'thumb', 'endpoint', 'read:item', 'read:image', 'main'];
+  const failures = [new Error('synthetic failure'), undefined, null, false, 0, ''];
+  beforeEach(() => { fixtureMocks.saveClients.mockReset(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  function fixture(fault?: { at: string; value: unknown }, drift?: 'item' | 'image', badResponse?: string) {
+    let item: Item = { field_provenance: {} }, image: Row = {}, baseline: Item | undefined;
+    let draft: Change | undefined, itemReads = 0, imageReads = 0;
+    const events: string[] = [];
+    const visit = (at: string) => {
+      events.push(at);
+      if (fault?.at === at) throw fault.value;
+    };
+    const client = {
+      request: vi.fn(async (token: string, route: string, options: { body?: unknown } = {}) => {
+        expect(token).toBe(owner.token);
+        if (route.endsWith('/rpc/reserve_item_save')) {
+          const value = options.body as { p_item: Item; p_image: Row };
+          item = structuredClone({ ...value.p_item, owner_id: owner.uid, version: 1, deleted_at: null });
+          image = structuredClone({ ...value.p_image, owner_id: owner.uid, item_id: item.id,
+            state: 'pending', description_version: 1, retired_at: null });
+          return { ok: true, status: 200, data: [{
+            fingerprint: 'a'.repeat(64), state: 'reserved', item: structuredClone(item), image: structuredClone(image),
+          }] };
+        }
+        if (route.endsWith('/rpc/finalize_item_save')) {
+          image.state = 'ready';
+          return { ok: true, status: 204, data: null };
+        }
+        if (route.endsWith('/rpc/reserve_image_change')) {
+          draft = (options.body as { p_intent: Change }).p_intent;
+          visit('reserve');
+          return { ok: badResponse !== 'reserve', status: badResponse === 'reserve' ? 400 : 200, data: {
+            completedVersion: null, fingerprint: 'b'.repeat(64), imageId: draft.imageId,
+            itemId: draft.itemId, kind: 'replacement', requestId: draft.requestId, state: 'reserved',
+          } };
+        }
+        if (route.startsWith('/storage/v1/object/wardrobe/')) {
+          if (draft) {
+            const variant = route.endsWith('/main.jpg') ? 'main' : 'thumb';
+            visit(variant);
+            if (variant === 'main') throw boundary;
+            return { ok: badResponse !== 'thumb', status: badResponse === 'thumb' ? 400 : 200, data: {} };
+          }
+          return { ok: true, status: 200, data: {} };
+        }
+        const table = new URL(route, 'http://fixture.invalid').pathname;
+        expect(['/rest/v1/items', '/rest/v1/item_images']).toContain(table);
+        const isItem = table === '/rest/v1/items';
+        const count = isItem ? ++itemReads : ++imageReads;
+        const row = structuredClone(isItem ? item : image);
+        if (isItem && count === 2) baseline = row as Item;
+        if (count === 3) {
+          const label = isItem ? 'item' : 'image';
+          visit(`read:${label}`);
+          if (drift === label) row[isItem ? 'notes' : 'alt_text'] = 'unexpected persisted change';
+          if (badResponse === `read:${label}`) return { ok: false, status: 400, data: null };
+        }
+        return { ok: true, status: 200, data: [row] };
+      }),
+      rpc: vi.fn(async (_actor: typeof owner, name: string) => {
+        expect(name).toBe('ai_status');
+        return { serverTimeMs: 1 };
+      }),
+    };
+    const endpoint = vi.fn(async (_url: string, options: RequestInit) => {
+      visit('endpoint');
+      expect(typeof options.body).toBe('string');
+      expect(JSON.parse(String(options.body))).toEqual({ action: 'complete', intent: draft });
+      if (badResponse === 'endpoint') return new Response(null, { status: 503 });
+      return new Response(JSON.stringify({ code: 'UPLOAD_INCOMPLETE' }), { status: 409 });
+    });
+    vi.stubGlobal('fetch', endpoint);
+    fixtureMocks.saveClients.mockResolvedValue({ client, owners: [owner] });
+    return { events, endpoint, snapshots: () => ({ item, baseline, draft }) };
+  }
+
+  it('reaches only the exact next-main sentinel with intended values and an untouched baseline/map', async () => {
+    const f = fixture();
+    await expect(imageReplacementServed(env)).rejects.toBe(boundary);
+    expect(f.events).toEqual(stages);
+    expect(f.endpoint).toHaveBeenCalledOnce();
+    const { item, baseline, draft } = f.snapshots();
+    expect(baseline).toEqual(item);
+    expect(baseline?.notes).toBe('');
+    expect(baseline?.field_provenance).toEqual({
+      title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 },
+    });
+    expect(draft?.item).not.toBe(baseline);
+    expect(draft?.item.field_provenance).not.toBe(baseline?.field_provenance);
+    expect(draft?.item.notes).toBe('Explicit reviewed replacement');
+    expect(draft?.item.field_provenance).toEqual({
+      title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 },
+      notes: { kind: 'user', revision: 1 },
+    });
+    expect(draft?.item.field_provenance.title).toBe(baseline?.field_provenance.title);
+    expect(draft?.item.field_provenance.category).toBe(baseline?.field_provenance.category);
+  });
+  it.each(['item', 'image'] as const)('retains the strict unchanged %s assertion', async (table) => {
+    const f = fixture(undefined, table);
+    await expect(imageReplacementServed(env)).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(f.events).toEqual(stages.slice(0, stages.indexOf(`read:${table}`) + 1));
+  });
+  it.each(stages.slice(0, -1).flatMap((at) => failures.map((value, index) => ({ at, value, index }))))(
+    'stops at rejected $at with exact thrown value $index', async ({ at, value }) => {
+      const f = fixture({ at, value });
+      await expect(imageReplacementServed(env)).rejects.toBe(value);
+      expect(f.events).toEqual(stages.slice(0, stages.indexOf(at) + 1));
+    },
+  );
+  it.each(stages.slice(0, -1))('rejects a failed %s response with the existing evidence error', async (at) => {
+    const f = fixture(undefined, undefined, at);
+    await expect(imageReplacementServed(env)).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(f.events).toEqual(stages.slice(0, stages.indexOf(at) + 1));
   });
 });
 

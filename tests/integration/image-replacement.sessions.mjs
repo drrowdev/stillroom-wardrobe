@@ -143,7 +143,7 @@ export async function imageReplacementServed(env) {
     const before = await client.rpc(owner, 'ai_status', {});
     const value = h.make(base.item, base.image);
     value.item.notes = 'Explicit reviewed replacement';
-    value.item.field_provenance.notes = { kind: 'user', revision: 1 };
+    value.item.field_provenance = { ...value.item.field_provenance, notes: { kind: 'user', revision: 1 } };
     await h.reserve(value); await h.upload(value, ['thumb']);
     eq(await h.endpoint(value), { status: 409, data: { code: 'UPLOAD_INCOMPLETE' } });
     eq(await h.read('items', base.item.id), [base.item]); eq(await h.read('item_images', base.image.id), [base.image]);
