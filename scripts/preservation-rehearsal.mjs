@@ -396,7 +396,7 @@ const LIFECYCLE_CAUSES = Object.freeze(['refusal', 'exception', 'process-error',
 const LIFECYCLE_CONTAINER_GUARDS = Object.freeze(['parse', 'name', 'project', 'running', 'image-tag', 'image-id', 'mount-array',
   'mount-count', 'mount-type', 'mount-name', 'mount-target', 'mount-rw', 'config-array', 'config-count',
   'config-backend', 'config-root', 'config-tenant', 'config-bucket', 'config-sentinel']);
-const LIFECYCLE_CHILD_PHASES = Object.freeze(['input', 'ancestors', 'item-absence', 'request', 'write',
+const LIFECYCLE_CHILD_PHASES = Object.freeze(['input', 'ancestors', 'item-absence', 'target-absence', 'request', 'write',
   'file-poll', 'ready-check', 'ready', 'complete', 'response', 'cleanup']);
 const LIFECYCLE_CHILD_CAUSES = Object.freeze(['refusal', 'exception', 'deadline', 'early-response',
   'request-error', 'response-error', 'response-aborted', 'body-cap', 'response-contract', 'cleanup']);
@@ -506,7 +506,7 @@ export async function lifecycleStorageRuntime(run = runCommand) {
 
 // Executed only inside the verified owned FileBackend container. Its stdin is the sole credential channel.
 export async function lifecycleStreamChild() {
-  const phases = ['input', 'ancestors', 'item-absence', 'request', 'write', 'file-poll', 'ready-check', 'ready', 'complete', 'response', 'cleanup'];
+  const phases = ['input', 'ancestors', 'item-absence', 'target-absence', 'request', 'write', 'file-poll', 'ready-check', 'ready', 'complete', 'response', 'cleanup'];
   const causes = ['refusal', 'exception', 'deadline', 'early-response', 'request-error', 'response-error', 'response-aborted', 'body-cap', 'response-contract', 'cleanup'];
   let phase = 'input', first = null;
   const observe = (cause) => { if (!first) first = {
@@ -536,7 +536,9 @@ export async function lifecycleStreamChild() {
     demand(!input.done && Buffer.byteLength(input.value) <= 8192);
     const value = JSON.parse(input.value);
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-    demand(Object.keys(value).sort().join(',') === 'image,item,owner,token'
+    const keys = Object.keys(value).sort().join(',');
+    demand((keys === 'image,item,owner,token'
+      || (keys === 'image,item,owner,precondition,token' && value.precondition === 'pending-thumb-absent'))
       && uuid.test(value.owner) && uuid.test(value.item) && value.item.startsWith('1080') && uuid.test(value.image)
       && typeof value.token === 'string' && value.token.length <= 4096 && /^[A-Za-z0-9_.-]+$/.test(value.token));
     const directory = `/mnt/stub/stub/wardrobe/${value.owner}/${value.item}/${value.image}/thumb.jpg`;
@@ -553,8 +555,15 @@ export async function lifecycleStreamChild() {
     phase = 'ancestors';
     for (const name of ['/mnt', '/mnt/stub', '/mnt/stub/stub', '/mnt/stub/stub/wardrobe',
       `/mnt/stub/stub/wardrobe/${value.owner}`]) await safeDirectory(name);
-    phase = 'item-absence';
-    demand(!await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}`));
+    if (value.precondition === 'pending-thumb-absent') {
+      demand(await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}`));
+      demand(await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}/${value.image}`));
+      phase = 'target-absence';
+      demand(!await safeDirectory(directory));
+    } else {
+      phase = 'item-absence';
+      demand(!await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}`));
+    }
     responseDone = new Promise((resolve) => { resolveResponse = resolve; });
     phase = 'request';
     req = request({ hostname: '127.0.0.1', port: 5000,
@@ -633,10 +642,10 @@ export async function lifecycleStreamChild() {
   if (primaryFailed || cleanupFailed) process.exitCode = 1;
 }
 
-export async function withLifecycleLateUpload(owner, value, operation) {
+export async function withLifecycleLateUpload(owner, value, operation, precondition = 'item-absent') {
   const state = { phase: 'input', commandCode: null, exitCode: null, guard: null, child: {}, first: null, primitive: null };
   lifecycleActive = state; lifecycleFailure = null;
-  try { return await lifecycleLateUpload(owner, value, operation, state); }
+  try { return await lifecycleLateUpload(owner, value, operation, state, precondition); }
   catch (error) {
     lifecycleFirst(state, 'exception');
     lifecycleFailure = state;
@@ -646,13 +655,15 @@ export async function withLifecycleLateUpload(owner, value, operation) {
   } finally { lifecycleActive = null; }
 }
 
-async function lifecycleLateUpload(owner, value, operation, state) {
+async function lifecycleLateUpload(owner, value, operation, state, precondition) {
+  requireEvidence(precondition === 'item-absent' || precondition === 'pending-thumb-absent');
   assertLifecycleFixture(process.env, owner.uid, value.p_item.id);
   const claims = jwtClaims(owner.token);
   requireEvidence(claims?.role === 'authenticated' && claims.sub === owner.uid && typeof operation === 'function'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.p_image.id));
   const container = await lifecycleStorageRuntime();
-  const input = JSON.stringify({ owner: owner.uid, item: value.p_item.id, image: value.p_image.id, token: owner.token });
+  const input = JSON.stringify({ owner: owner.uid, item: value.p_item.id, image: value.p_image.id, token: owner.token,
+    ...(precondition === 'pending-thumb-absent' ? { precondition } : {}) });
   requireEvidence(Buffer.byteLength(input) <= 8192);
   lifecyclePhase('spawn');
   const child = spawn('docker', ['exec', '-i', container, 'env', '-i', '/usr/local/bin/node', '--input-type=module',

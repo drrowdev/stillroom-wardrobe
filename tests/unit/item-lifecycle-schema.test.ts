@@ -18,6 +18,8 @@ import * as rehearsal from '../../scripts/preservation-rehearsal.mjs';
 import { one, lifecycleObservation, serializeLifecycleObservation, readLifecycleUploadResponse, requireLifecycleUploadConflict, lifecycleFixtureCases, lifecyclePublicationCases, legacyOrphanCase } from '../integration/item-lifecycle.sessions.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { securityObservation, serializeSecurityObservation } from '../security/item-lifecycle.sessions.mjs';
+// @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
+import { imageDeletionCases } from '../integration/image-replacement.sessions.mjs';
 
 const fixtureMocks = vi.hoisted(() => ({
   spawn: vi.fn(), requireLocalContainer: vi.fn(), privilegedLocalSql: vi.fn(), commandEnvironment: vi.fn(), saveClients: vi.fn(),
@@ -511,7 +513,9 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
     expect(text).not.toContain('childPhase'); expect(text).not.toContain('bodyBytes');
   });
 
-  async function realChild(kind: string) {
+  const childInput = { owner: owner.uid, item: value.p_item.id, image: value.p_image.id, token: owner.token };
+  async function realChild(kind: string, inputValue: unknown = childInput) {
+    const started = Date.now();
     const writes: string[] = [], exitCode = process.exitCode;
     const request = new EventEmitter(), response = new EventEmitter();
     const closed = new Error('private fs');
@@ -520,8 +524,19 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
       isDirectory: () => directory, isFile: () => !directory, isSymbolicLink: () => symlink, size,
     });
     fixtureMocks.childLstat.mockReset().mockImplementation(async (name: string) => {
+      if (kind.startsWith('pending-') && !written) {
+        const part = name.endsWith(value.p_item.id) ? 'item' : name.endsWith(value.p_image.id) ? 'image'
+          : name.endsWith('thumb.jpg') ? 'target' : null;
+        if (part) {
+          if (kind === `pending-${part}-missing` || (part === 'target' && !kind.startsWith('pending-target-'))) {
+            throw Object.assign(new Error('private missing'), { code: 'ENOENT' });
+          }
+          if (kind === `pending-${part}-error`) throw closed;
+          return stat(kind !== `pending-${part}-file`, 0, kind === `pending-${part}-symlink`);
+        }
+      }
       if (kind === 'path-error') throw closed;
-      if (name.endsWith(value.p_item.id) && !written && kind !== 'item-exists') throw Object.assign(new Error('private missing'), { code: 'ENOENT' });
+      if (name.endsWith(value.p_item.id) && !written && kind !== 'item-exists' && !kind.startsWith('pending-')) throw Object.assign(new Error('private missing'), { code: 'ENOENT' });
       if (kind === 'poll' && name.endsWith('thumb.jpg')) throw Object.assign(new Error('private missing'), { code: 'ENOENT' });
       if (name.endsWith('/10000000-0000-4000-8000-000000000009')) return stat(false, kind === 'size' ? 3 : 2, kind === 'file-symlink');
       return stat(true, 0, kind === 'symlink');
@@ -550,8 +565,7 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
       destroy: requestClose,
     });
     fixtureMocks.childRequest.mockReset().mockReturnValue(req);
-    const next = vi.fn().mockResolvedValueOnce({ done: false, value: JSON.stringify(kind === 'input' ? { private: true }
-      : { owner: owner.uid, item: value.p_item.id, image: value.p_image.id, token: owner.token }) })
+    const next = vi.fn().mockResolvedValueOnce({ done: false, value: JSON.stringify(kind === 'input' ? { private: true } : inputValue) })
       .mockResolvedValueOnce({ done: false, value: 'complete' });
     const lines = { [Symbol.asyncIterator]: () => ({ next }), close: vi.fn(() => {
       if (kind === 'cleanup') throw new Error('private cleanup');
@@ -563,11 +577,14 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
       const childFunction: unknown = Reflect.get(rehearsal, 'lifecycleStreamChild');
       if (typeof childFunction !== 'function') throw new Error('Missing real child');
       const running = Reflect.apply(childFunction, undefined, []) as Promise<void>;
-      await vi.advanceTimersByTimeAsync(kind === 'poll' ? 5100 : 100);
+      await vi.advanceTimersByTimeAsync(kind.startsWith('pending-') && kind !== 'pending-success' ? 0 : kind === 'poll' ? 5100 : 100);
       await running;
       expect(destroy).toHaveBeenCalledOnce();
-      expect(commandComplete).toBe(['success', 'cleanup'].includes(kind));
+      expect(commandComplete).toBe(['success', 'cleanup', 'pending-success'].includes(kind));
+      if (kind.startsWith('pending-') && !commandComplete) expect(Date.now()).toBe(started);
       expect(vi.getTimerCount()).toBe(0);
+      expect(writes.join('')).not.toMatch(/private|10000000|10800000/);
+      expect(writes.join('')).not.toContain(owner.token);
       return writes;
     } finally { destroy.mockRestore(); output.mockRestore(); process.exitCode = exitCode; }
   }
@@ -625,6 +642,152 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
     expect(operation).toHaveBeenCalledOnce();
     expect(text).toContain('"childPhase":"cleanup","childCause":"cleanup"');
   });
+  it('pending-thumbnail mode is selected by the real I10b caller after the original pair and pending main uploads', async () => {
+    const items: Record<string, unknown>[] = [], images: Record<string, unknown>[] = [], uploads: string[] = [];
+    const events: string[] = [], stopped = new Error('private hook stop');
+    const record = (input: unknown): Record<string, unknown> => {
+      if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Unexpected fixture shape');
+      return input as Record<string, unknown>;
+    };
+    const request = vi.fn(async (token: string, route: string, options: { method?: string; body?: unknown } = {}) => {
+      expect(token).toBe(owner.token);
+      if (route === '/rest/v1/rpc/reserve_item_save') {
+        const body = record(options.body);
+        const item: Record<string, unknown> = { ...record(body.p_item), owner_id: owner.uid, version: 1, deleted_at: null };
+        const image = { ...record(body.p_image), owner_id: owner.uid, item_id: item.id, description_version: 1, retired_at: null };
+        items.push(item); images.push(image); events.push('reserve-original');
+        return { ok: true, status: 200, data: [{ fingerprint: 'a'.repeat(64), state: 'reserved', item, image }] };
+      }
+      if (route.startsWith('/rest/v1/items?')) return { ok: true, status: 200, data: [items.at(-1)] };
+      if (route.startsWith('/rest/v1/item_images?')) return { ok: true, status: 200, data: [images.at(-1)] };
+      if (route.startsWith('/storage/v1/object/wardrobe/') && options.method === 'POST') {
+        uploads.push(route); events.push('upload'); return { ok: true, status: 200, data: {} };
+      }
+      if (route === '/rest/v1/rpc/finalize_item_save') {
+        events.push('finalize-original'); return { ok: true, status: 204, data: null };
+      }
+      if (route === '/rest/v1/rpc/reserve_image_change') {
+        const intent = record(record(options.body).p_intent);
+        events.push('reserve-replacement');
+        return { ok: true, status: 200, data: { completedVersion: null, fingerprint: 'b'.repeat(64),
+          imageId: intent.imageId, itemId: intent.itemId, kind: 'replacement', requestId: intent.requestId, state: 'reserved' } };
+      }
+      throw new Error('Unexpected ordinary-client operation');
+    });
+    fixtureMocks.saveClients.mockResolvedValueOnce({ client: { request }, owners: [owner] });
+    const hook = vi.fn(async (actualOwner: unknown, actual: typeof value, operation: unknown, precondition: unknown) => {
+      expect(actualOwner).toBe(owner); expect(typeof operation).toBe('function');
+      expect(precondition).toBe('pending-thumb-absent');
+      expect(events).toEqual(['reserve-original', 'upload', 'upload', 'finalize-original', 'reserve-replacement', 'upload']);
+      expect(uploads).toEqual([
+        `/storage/v1/object/wardrobe/${owner.uid}/${actual.p_item.id}/${images[0]!.id}/thumb.jpg`,
+        `/storage/v1/object/wardrobe/${owner.uid}/${actual.p_item.id}/${images[0]!.id}/main.jpg`,
+        `/storage/v1/object/wardrobe/${owner.uid}/${actual.p_item.id}/${actual.p_image.id}/main.jpg`,
+      ]);
+      expect(actual.p_image.id).not.toBe(images[0]!.id);
+      throw stopped;
+    });
+    await expect(imageDeletionCases({}, { withLifecycleLateUpload: hook })).rejects.toBe(stopped);
+    expect(hook).toHaveBeenCalledOnce();
+  });
+  it.each([undefined, 'item-absent', 'pending-thumb-absent'] as const)(
+    'pending-thumbnail selector preserves exact serialized stdin and token-only channel for %s', async (precondition) => {
+      const c = child();
+      await withLifecycleLateUpload(owner, value, vi.fn(), precondition);
+      const expected = JSON.stringify({ ...childInput, ...(precondition === 'pending-thumb-absent' ? { precondition } : {}) }) + '\n';
+      expect(c.write).toHaveBeenCalledExactlyOnceWith(expected);
+      expect(c.end).toHaveBeenCalledExactlyOnceWith('complete\n');
+      expect(JSON.stringify(fixtureMocks.spawn.mock.calls)).not.toContain(owner.token);
+    });
+  it.each([null, false, 0, '', 'pending-thumb', 'private mode', {}, ['pending-thumb-absent']])(
+    'pending-thumbnail selector refuses invalid parent mode before commands %#', async (precondition) => {
+      child();
+      const operation = vi.fn();
+      await expect(withLifecycleLateUpload(owner, value, operation, precondition)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(fixtureMocks.requireDocker).not.toHaveBeenCalled();
+      expect(fixtureMocks.runCommand).not.toHaveBeenCalled(); expect(fixtureMocks.spawn).not.toHaveBeenCalled();
+      expect(operation).not.toHaveBeenCalled();
+    });
+  it('pending-thumbnail mode replays real child readiness and success without touching sibling paths', async () => {
+    const emitted = await realChild('pending-success', { ...childInput, precondition: 'pending-thumb-absent' });
+    const bodyBytes = Buffer.byteLength('{"statusCode":"403","code":"AccessDenied","error":"Unauthorized","message":"Not available"}');
+    expect(emitted).toEqual(['{"stage":"ready","partialBytes":2}\n',
+      `{"stage":"settled","status":400,"bodyBytes":${bodyBytes},"denied":true,"failed":false}\n`]);
+    const item = `/mnt/stub/stub/wardrobe/${owner.uid}/${value.p_item.id}`, image = item + '/' + value.p_image.id;
+    const target = image + '/thumb.jpg';
+    expect(fixtureMocks.childLstat.mock.calls.map(([name]) => name)).toEqual([
+      '/mnt', '/mnt/stub', '/mnt/stub/stub', '/mnt/stub/stub/wardrobe', `/mnt/stub/stub/wardrobe/${owner.uid}`,
+      item, image, target, item, image, target, target + '/10000000-0000-4000-8000-000000000009',
+    ]);
+    expect(fixtureMocks.childReaddir).toHaveBeenCalledExactlyOnceWith(target);
+    expect(fixtureMocks.childRequest).toHaveBeenCalledOnce();
+    const c = child(), operation = vi.fn(async () => {
+      expect(c.write).toHaveBeenCalledOnce(); expect(c.end).not.toHaveBeenCalled();
+    });
+    c.write.mockImplementation(() => {
+      expect(operation).not.toHaveBeenCalled();
+      queueMicrotask(() => c.stdout.emit('data', Buffer.from(emitted[0]!))); return true;
+    });
+    c.end.mockImplementation((command: string) => {
+      expect(operation).toHaveBeenCalledOnce(); expect(command).toBe('complete\n');
+      queueMicrotask(() => { c.stdout.emit('data', Buffer.from(emitted[1]!)); c.proc.emit('close', 0); });
+    });
+    await withLifecycleLateUpload(owner, value, operation, 'pending-thumb-absent');
+    expect(operation).toHaveBeenCalledOnce(); expect(detail(undefined)).toBe('');
+  });
+  it.each([
+    ['item-missing', 'ancestors', 'refusal'], ['image-missing', 'ancestors', 'refusal'],
+    ['item-file', 'ancestors', 'refusal'], ['image-file', 'ancestors', 'refusal'],
+    ['item-symlink', 'ancestors', 'refusal'], ['image-symlink', 'ancestors', 'refusal'],
+    ['item-error', 'ancestors', 'exception'], ['image-error', 'ancestors', 'exception'],
+    ['target-directory', 'target-absence', 'refusal'], ['target-file', 'target-absence', 'refusal'],
+    ['target-symlink', 'target-absence', 'refusal'], ['target-error', 'target-absence', 'exception'],
+  ])('pending-thumbnail mode refuses %s before HTTP and replays the first failed IPC', async (kind, phase, cause) => {
+    const emitted = await realChild('pending-' + kind, { ...childInput, precondition: 'pending-thumb-absent' });
+    expect(emitted).toEqual([JSON.stringify({ stage: 'settled', status: null, bodyBytes: 0, denied: false, failed: true, phase, cause }) + '\n']);
+    expect(fixtureMocks.childRequest).not.toHaveBeenCalled(); expect(fixtureMocks.childReaddir).not.toHaveBeenCalled();
+    const c = child(), operation = vi.fn();
+    c.write.mockImplementation(() => { queueMicrotask(() => c.stdout.emit('data', Buffer.from(emitted[0]!))); return true; });
+    const error = await rejected(withLifecycleLateUpload(owner, value, operation, 'pending-thumb-absent'));
+    const text = detail(error);
+    expect(text).toContain(`"childPhase":"${phase}","childCause":"${cause}"`);
+    expect(text).not.toMatch(/private|10000000|10800000/); expect(text).not.toContain(owner.token);
+    expect(operation).not.toHaveBeenCalled(); expect(c.end).toHaveBeenCalledWith('cancel\n');
+  });
+  it.each([
+    { ...childInput, precondition: 'item-absent' }, { ...childInput, precondition: 'private mode' },
+    { ...childInput, precondition: null }, { ...childInput, precondition: 'pending-thumb-absent', extra: true },
+    { ...childInput, extra: true }, { ...childInput, image: undefined, precondition: 'pending-thumb-absent' },
+    { ...childInput, precondition: 'pending-thumb-absent', item: owner.uid },
+    { ...childInput, precondition: 'pending-thumb-absent', token: 'private token!' },
+    { ...childInput, precondition: 'pending-thumb-absent', token: 'a'.repeat(4097) },
+  ])('pending-thumbnail child rejects invalid extended input shape or bounds before FS/HTTP %#', async (input) => {
+    const emitted = await realChild('pending-input', input);
+    expect(emitted).toEqual(['{"stage":"settled","status":null,"bodyBytes":0,"denied":false,"failed":true,"phase":"input","cause":"refusal"}\n']);
+    expect(fixtureMocks.childLstat).not.toHaveBeenCalled();
+    expect(fixtureMocks.childRequest).not.toHaveBeenCalled(); expect(fixtureMocks.childReaddir).not.toHaveBeenCalled();
+  });
+  it('pending-thumbnail extended maximum token payload stays within the unchanged stdin cap', async () => {
+    const token = owner.token + 'a'.repeat(4096 - owner.token.length);
+    const input = { ...childInput, token, precondition: 'pending-thumb-absent' };
+    const serialized = JSON.stringify(input) + '\n';
+    expect(Buffer.byteLength(serialized)).toBe(4287);
+    expect(Buffer.byteLength(serialized)).toBeLessThanOrEqual(8192);
+    const emitted = await realChild('pending-success', input);
+    expect(emitted).toHaveLength(2); expect(emitted.join('')).not.toContain(input.token);
+    expect(fixtureMocks.childRequest).toHaveBeenCalledOnce();
+    const c = child();
+    await withLifecycleLateUpload({ ...owner, token }, value, vi.fn(), 'pending-thumb-absent');
+    expect(c.write).toHaveBeenCalledExactlyOnceWith(serialized);
+    expect(JSON.stringify(fixtureMocks.spawn.mock.calls)).not.toContain(token);
+  });
+  it.each([new Error('Private primary'), undefined, null, false, 0, ''])(
+    'pending-thumbnail mode preserves the exact/falsy primary through cancellation cleanup %#', async (primary) => {
+      const c = child(undefined, { value: new Error('Private secondary') });
+      const result = await withLifecycleLateUpload(owner, value, async () => { throw primary; }, 'pending-thumb-absent')
+        .then(() => ({ rejected: false, value: null }), (value: unknown) => ({ rejected: true, value }));
+      expect(result).toEqual({ rejected: true, value: primary }); expect(c.end).toHaveBeenCalledWith('cancel\n');
+  });
   it('keeps child diagnostics self-contained and IPC below the existing combined cap', async () => {
     const source = await read('scripts/preservation-rehearsal.mjs');
     const body = source.slice(source.indexOf('export async function lifecycleStreamChild()'), source.indexOf('export async function withLifecycleLateUpload('));
@@ -639,6 +802,7 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
     };
     const phases = labels(body, 'phases'), causes = labels(body, 'causes');
     expect(phases).toEqual(labels(source, 'LIFECYCLE_CHILD_PHASES'));
+    expect(phases).toContain('target-absence');
     expect(causes).toEqual(labels(source, 'LIFECYCLE_CHILD_CAUSES'));
     const ready = '{"stage":"ready","partialBytes":2}\n';
     let maximum = 0;
@@ -649,6 +813,7 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
       }
     expect(maximum).toBeLessThanOrEqual(1024);
     expect(maximum).toBeGreaterThan(150);
+    expect(maximum).toBe(168);
     expect(body.includes('}, 15_000);')).toBe(true);
     expect(body.includes('attempt < 100 && Date.now() - started < 5000')).toBe(true);
     expect(body.includes('setTimeout(resolve, 50)')).toBe(true);
@@ -658,6 +823,7 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
     expect(source).toContain("=== 'bodyBytes,denied,failed,stage,status'");
     expect(source).toContain("child.stdin.on('error', () => fail('stdin-error'));");
     expect(source).toContain("child.stderr.on('data', () => fail('stderr'));");
+    expect(new Set([...body.matchAll(/\bfs\.(\w+)/g)].map((match) => match[1]))).toEqual(new Set(['lstat', 'readdir']));
   });
 });
 

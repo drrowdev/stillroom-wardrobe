@@ -309,7 +309,7 @@ export async function imageDeletionCases(env, { withLifecycleLateUpload, require
     requireEvidence(!late.ok && late.status < 500);
     };
     if (withLifecycleLateUpload) {
-      await withLifecycleLateUpload(owner, { p_item: { id: base.item.id }, p_image: { id: pending.imageId } }, deletion);
+      await withLifecycleLateUpload(owner, { p_item: { id: base.item.id }, p_image: { id: pending.imageId } }, deletion, 'pending-thumb-absent');
       await requireLifecyclePrefixEmpty(owner.uid, base.item.id);
       for (const path of h.paths(pending)) requireEvidence(!(await client.request(owner.token,
         `/storage/v1/object/authenticated/wardrobe/${path}`)).ok);

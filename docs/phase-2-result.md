@@ -677,6 +677,102 @@ No browser/probe/backend execution, new CI, publication, types adoption or
 deployment occurred during this amendment; candidate closure and separate
 publication authority remain required.
 
+### Stage A CI10 - populated-item streaming precondition, 22 September 2026
+
+This four-path fixture correction is an **unstaged candidate**, not a product,
+SQL or native-backend acceptance claim. Its starting head is
+`88c81a3833372efb93936212ec2ffeace13ba400`, tree
+`28e48734fc5cca1bc87bd1d4d0dc079987dde88d`, with accepted main unchanged at
+`1984b848017dd9c22249907fe303d701bcb48440`. The
+[edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5774715618)
+records actual retained Anthropic Claude Opus 5 critique 143, the coordinator's
+P1-P8 amendments, same-writer GPT-6 Astra model observation and scoped permission.
+Only the runner, single I10b caller, lifecycle unit suite and this dated section
+change; the original I08 caller remains byte-unchanged.
+
+The [CI10 failure record](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5774489471)
+identifies run `35712460563`, attempt 1, DB job `106696061722`, failed at
+09:51:46Z. Earlier S4/base preservation, B1 readiness and populated-nine to
+Azure-ten preservation passed; all eleven migrations were present with none
+pending before the new `I10b-publication-races` failure. The parent recorded
+`await-ready`/`protocol`, null command/exit codes, and child
+`item-absence`/`refusal`, null status, zero body bytes, denied false and failed
+true. Exact snapshot cleanup passed. Later reset, integration, security,
+analysis and generated-type stages were not run.
+
+The source contract was mismatched: the actual I10b caller finalized the
+original image pair and uploaded the pending replacement's main object before
+invoking a child that required the entire item directory to be absent. The
+failure does not independently identify the physical stat branch: outer
+existence versus inner path-safety refusal was not recovered. Acknowledged
+uploads are not separate proof of mount visibility, and no claim is made that
+every environment must fail. This was one CI10 attempt with two failure lines,
+not two failed attempts. It does not diagnose the earlier CI9 container-shape
+or multipart causes.
+
+The shared wrapper now accepts default `item-absent` or explicit
+`pending-thumb-absent`, rejecting other selectors before runtime commands.
+Default stdin retains the exact original owner/item/image/token serialization
+order and bytes, without a selector field. Only the I10b call supplies the new
+fourth argument. The child accepts either the original exact keyset or the
+extended exact keyset with the explicit new enum, validating it during `input`.
+For the new mode, existing `safeDirectory` checks immediately require safe,
+existing item and pending-image directories during `ancestors`; the sole new
+phase, `target-absence`, requires the exact pending `thumb.jpg` target absent.
+That target is a FileBackend version directory: an existing directory fails
+the absence predicate; a file or symlink fails the existing safety predicate;
+only ENOENT means absent, and other filesystem errors propagate. No sibling
+read/list/removal, new filesystem helper, visibility retry or extra polling was
+added. The original fresh-item refusal, POST/no-upsert request, partial-byte
+checks, successful IPC, limits, locks and all four deletion oracles remain.
+
+Tests exercise the real I10b caller through mocked ordinary-client responses,
+proving the original pair plus pending-main uploads precede the explicit
+selector. Real child output is replayed into the real parent for success and
+missing, unsafe, existing-target and non-ENOENT refusals. Input shape/enum/token
+guards run before FS/HTTP; pre-request refusals settle without advancing fake
+time. Exact stdin/default protocol, token-only transport, callback order,
+private-value omission, cancellation, falsy first errors and cleanup remain
+covered. The unchanged IPC cap test measures the full phase/cause/status/byte
+cross-product: maximum ready-plus-settled output is **168 UTF-8 bytes**, within
+the unchanged <=1024 and >150 assertions. A maximum 4096-character allowed
+token produces **4287 stdin bytes including LF** in the actual parent write,
+within the unchanged 8192-byte bound.
+
+Before the source correction, 35 selected tests reported **25 failed, 10
+passed, 457 filtered**; the same selection then passed. Initial missing mock
+child setup, an inferred test-row type error and a test-clock assertion that
+itself advanced 100 ms were corrected in the test scaffolding, not hidden as
+product passes. Final checks use the already approved Node 24.19.0 executable
+and locked local dependencies, with no installation:
+
+| Command (after the pinned Node executable unless shown otherwise) | Actual result |
+|---|---|
+| `node_modules\vitest\vitest.mjs run tests\unit\item-lifecycle-schema.test.ts tests\unit\preservation.test.ts tests\unit\local-backend.test.ts tests\unit\image-replacement-schema.test.ts tests\unit\ci-storage-guard.test.ts --reporter=dot` | Exit 0; five files, 1,636 tests, no skips. |
+| `node_modules\eslint\bin\eslint.js scripts\preservation-rehearsal.mjs tests\integration\image-replacement.sessions.mjs tests\unit\item-lifecycle-schema.test.ts` | Exit 0. |
+| `node_modules\typescript\bin\tsc --noEmit` | Exit 0. |
+| `scripts\scan-secrets.mjs` | Exit 0; 253 text files, local canary not supplied. |
+| `git diff --check` | Exit 0. |
+
+The [terminal CI10 record](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5774637625)
+separately reports App job `106696061353`: 2,863 unit and 730 browser passes,
+four existing skips, no flaky summary. WebKit ON/OFF ran at retry zero with
+source/blob/form sizes 2/2/5; first receiver envelope/file sizes were 387/2,
+later 390/5, complete. Full multipart envelope bytes are not file-part bytes.
+No recurrence is not a fix. Eight successful uploads are not visual acceptance.
+Apple run `35712460582`, job `106696057282`, passed at 09:49:46Z, not native
+device acceptance. The coordinator verified synthetic checkout
+`2492248ddea539ffc2fcdfc60ad70650492ec0c8` has the exact reviewed source tree.
+
+Fresh/populated native preservation, deletion races and later DB/type gates
+remain blocked pending reviewed publication and authorized execution. A future
+`ancestors` refusal could reflect safety or visibility and must not be assigned
+a cause without evidence. The consumed probe stays removed; workflow/browser
+bytes, SQL/body pins and image-schema failure assertion are unchanged. No
+browser, probe, backend, new CI, staging, commit, push, generated types, Stage C,
+merge or deployment occurred in this correction. Retained focused closure and
+separate publication permission remain required.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling
