@@ -190,7 +190,9 @@ export async function verifyImageChangePreservation(snapshot, sql, mark) {
     'history',(select count(*) from private.image_change_history),'operations',(select count(*) from private.item_deletion_operations),
     'targets',(select count(*) from private.item_deletion_targets));`));
   requireEvidence(Object.keys(empty).length === 5 && Object.values(empty).every((value) => value === 0));
-  for (const owner of owners) {
+  for (const [ownerIndex, owner] of owners.entries()) {
+    const ownerOrdinal = [1, 2][ownerIndex];
+    requireEvidence(ownerOrdinal === 1 || ownerOrdinal === 2);
     mark('consent-expiry');
     const h = analyzedHarness(client, owner, env), profile = (await client.rows(owner, 'profiles'))[0];
     equal(await client.rpc(owner, 'ai_set_consent', { p_enabled: false, p_notice_revision: null, p_expected_version: profile.version }),
@@ -294,15 +296,21 @@ export async function verifyImageChangePreservation(snapshot, sql, mark) {
       equal(await client.rpc(owner, 'item_attribution_history', { p_item_id: value.p_item.id }), history);
       mark('context-probe');
       if (n === 24) await imageChangeContextProbe(owner, value.p_item.id, sql);
-      mark('item-cleanup');
       if (replacement) {
+        mark(`item-cleanup-recovery-object-o${ownerOrdinal}-n${n}`);
         await replacementHarness.remove(recovery);
+        mark(`item-cleanup-replacement-object-o${ownerOrdinal}-n${n}`);
         await replacementHarness.remove(replacement);
+        mark(`item-cleanup-forget-o${ownerOrdinal}-n${n}`);
         await client.rpc(owner, 'forget_image', { p_image_id: replacement.imageId });
+        mark(`item-cleanup-history-unlink-o${ownerOrdinal}-n${n}`);
         const unlinked = await client.rpc(owner, 'item_attribution_history', { p_item_id: value.p_item.id });
         equal(unlinked, [history[0], { ...history[1], source_image_id: null }]);
       }
-      await h.remove(value); await h.deleteItem(value);
+      mark(`item-cleanup-legacy-object-o${ownerOrdinal}-n${n}`);
+      await h.remove(value);
+      mark(`item-cleanup-item-delete-o${ownerOrdinal}-n${n}`);
+      await h.deleteItem(value);
     }
     mark('owner-restoration');
     const itemIds = [21, 22, 23, 24].map((n) => analyzedIntent(owner, n).p_item.id);

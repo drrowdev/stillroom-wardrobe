@@ -437,6 +437,84 @@ every failure in that stage. No local backend/SQL/parser, dependency install,
 type artifact or UI work was performed. The extended hard deadline is
 22 September 2026 at 15:57:28 UTC; scope and actor gates remain unchanged.
 
+### Stage A CI7 - void fixture RPCs and bounded cleanup labels, 22 September 2026
+
+The [actual CI7 release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771898675)
+records head `4e643226473e760cd8cfaf455d4117d43a6c9451`, CI `35692227168`,
+database job `106631465140`. At 05:53:32.7171567Z it failed at
+`I10b-preservation-item-cleanup`; exact-run snapshot cleanup passed.
+That mark is shared by every fixture 21-24 for both owners. CI7's owner,
+fixture and failing statement remain **unknown**. CI6's earlier progress,
+unchanged source and aggregate timing cannot prove fresh CI7 outcomes.
+In particular, the label does not prove CI7 reached recovery or
+`forget_image`, much less full preservation or backend acceptance.
+
+The [four-path amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5772055653)
+records actual retained Anthropic Claude Opus 5 critique 125 and the
+coordinator's controlling evidence correction, with same-writer GPT-6 Astra
+continuity. Source establishes a guaranteed contradiction **if reached**:
+`forget_image` and `retire_image` return void, but the shared helper accepted
+the void response only for `commit_image`. The coordinator records that the
+reviewer enumerated void declarations and shared-client callers; their
+intersection is exactly those three names. `complete_image_change` is also
+void but is not called through this client and remains excluded.
+
+One closed `voidRpcs` set now requires successful bodyless 204/null for all
+three names. There is no 200/null fallback. The four nullable-jsonb names
+remain strict 200/parsed-null-or-nonnull, with their exact parser paths and
+empty-body refusals unchanged. Every other RPC remains 200/non-null.
+Existing passing `commit_image` 204 checks are an empirical control for the
+declared-void class, not direct observation of the other two responses in
+the failing CI7 stage. No production SQL, deletion protocol or caller
+assertion was changed.
+
+The existing cleanup block now marks six forward substeps immediately before
+recovery-object removal, replacement-object removal, forget, history-unlink
+RPC/equality, legacy-object removal and item deletion. Only these labels
+include an owner ordinal and fixture number. Owner ordinals come from a
+fixed `[1, 2]` lookup by the existing loop index, checked before use; fixture
+numbers remain the fixed `[21, 22, 23, 24]` loop. The theoretical vocabulary
+is 6 x 2 x 4 = 48 source-defined labels. It contains no IDs, tokens, paths,
+response fields or arbitrary caller text. Existing owner order/count,
+operation conditions/order, assertions and error propagation remain intact.
+No extra request, response inspection, callback API or logging stream was added.
+
+Fail-first validation added 84 real-client fetch/Response-mocked cases plus
+two static source checks. Against the unchanged helpers, eight failed and
+78 passed, with 310 existing cases filtered out: four retire/forget 204
+successes were rejected; two invalid 200/non-null responses were accepted;
+the new set and labels were absent in the two static checks. After repair,
+all 558 tests passed across preservation (396), replacement schema (128)
+and replacement endpoint (34), with no skips. All 144 earlier nullable
+cases and the previously masked Authorization assertion remain unchanged.
+Scoped ESLint and `tsc --noEmit` passed using the approved locked toolchain.
+Whitespace checks and the 253-text-file secret scan passed; no local canary
+was supplied, so CI must still supply one.
+
+Executed mocks cover exact owner/image forwarding, strict status/body
+contracts, near names, malformed-204 and pre-reader-5xx refusal, and
+fetch/read/cancel identity/finally behavior. Static checks read the actual
+sets, assert disjointness and the three SQL signatures, and pin the six
+label placements, bounded ordinal sources and unchanged cleanup statements.
+They do not execute cleanup SQL or promise automatic discovery of future
+return contracts; actual cleanup-label runtime coverage remains a CI gate.
+
+Unfenced raw item-delete compatibility remains preserved: the existing
+owner DELETE grant and new trigger allow it without an active deletion
+operation; the checked protocol still governs fenced deletion. No raw-delete
+fixture was replaced by an assumed mandatory preparation flow. Age setup,
+409-plus-null negative checks, accepted replay, ordinary-owner isolation,
+all eleven SQL files and all live/historical pins remain unchanged.
+
+The controlling release separately records App 729 PASS / 4 SKIP / 1 FLAKY:
+CI6 received zero raw bytes, while the CI7 slice received 385 multipart bytes
+with zero file part. This repair claims no common cause, browser fix or risk
+waiver. Browser investigation is separate and does not establish this head's
+acceptance. This unstaged candidate needs focused closure, publication
+approval and fresh native gates; no local backend/SQL/parser/browser,
+dependency install, types/UI or deployment was performed. The hard deadline
+remains 22 September 2026 at 15:57:28 UTC.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling

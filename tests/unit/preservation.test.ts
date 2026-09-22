@@ -368,6 +368,61 @@ describe('I29b description SQL contract (static, not database execution)', () =>
   });
 });
 
+describe('I10b void and cleanup source contracts (static, not runtime evidence)', () => {
+  it('pins the actual closed, disjoint RPC sets to the reviewed return classes', async () => {
+    const source = await readFile(path.join(root, 'tests/integration/preservation.sessions.mjs'), 'utf8');
+    const names = (set: string) => {
+      const match = source.match(new RegExp(`const ${set} = new Set\\(\\[([^\\]]+)\\]\\);`));
+      expect(match).not.toBeNull();
+      return [...present(match?.[1]).matchAll(/'([^']+)'/g)].map((entry) => entry[1]);
+    };
+    const voids = names('voidRpcs'), nullable = names('nullableRpcs');
+    expect(voids).toEqual(['commit_image', 'retire_image', 'forget_image']);
+    expect(nullable).toEqual(['image_change_status', 'cancel_image_change', 'item_deletion_operation_status', 'item_deletion_next_target']);
+    expect(voids.filter((name) => nullable.includes(name))).toEqual([]);
+    const sql = await readFile(path.join(root, 'supabase/migrations/20260905000000_initial.sql'), 'utf8');
+    for (const name of voids) expect(sql).toContain(`create function public.${name}(p_image_id uuid) returns void`);
+    expect(source).toContain("new Set([...nullableRpcs].map((name) => `/rest/v1/rpc/${name}`))");
+    expect(source).not.toMatch(/export const (?:voidRpcs|nullableRpcs)/);
+  });
+  it('pins six bounded forward cleanup substeps without changing operations or assertions', async () => {
+    const source = await readFile(path.join(root, 'tests/integration/azure-preservation.sessions.mjs'), 'utf8');
+    const verifier = source.slice(source.indexOf('export async function verifyImageChangePreservation('), source.indexOf('async function imageChangeStructure('));
+    expect(verifier).toContain('for (const [ownerIndex, owner] of owners.entries()) {');
+    expect(verifier).toContain('const ownerOrdinal = [1, 2][ownerIndex];');
+    expect(verifier).toContain('requireEvidence(ownerOrdinal === 1 || ownerOrdinal === 2);');
+    expect(verifier).toContain('for (const n of [21, 22, 23, 24]) {');
+    const start = verifier.indexOf("      if (replacement) {");
+    const end = verifier.indexOf("\n    }\n    mark('owner-restoration');", start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    const block = verifier.slice(start, end);
+    const steps = ['recovery-object', 'replacement-object', 'forget', 'history-unlink', 'legacy-object', 'item-delete'];
+    expect([...block.matchAll(/mark\(`item-cleanup-([^`]+)`\);/g)].map((match) => match[1]))
+      .toEqual(steps.map((step) => `${step}-o\${ownerOrdinal}-n\${n}`));
+    expect(block.replace(/^\s*mark\(`item-cleanup-[^`]+`\);\n/gm, '').trim()).toBe([
+      'if (replacement) {',
+      '        await replacementHarness.remove(recovery);',
+      '        await replacementHarness.remove(replacement);',
+      "        await client.rpc(owner, 'forget_image', { p_image_id: replacement.imageId });",
+      "        const unlinked = await client.rpc(owner, 'item_attribution_history', { p_item_id: value.p_item.id });",
+      '        equal(unlinked, [history[0], { ...history[1], source_image_id: null }]);',
+      '      }',
+      '      await h.remove(value);',
+      '      await h.deleteItem(value);',
+    ].join('\n'));
+    const operations = ['await replacementHarness.remove(recovery);', 'await replacementHarness.remove(replacement);',
+      "await client.rpc(owner, 'forget_image',", "const unlinked = await client.rpc(owner, 'item_attribution_history',",
+      'await h.remove(value);', 'await h.deleteItem(value);'];
+    for (const [index, step] of steps.entries()) {
+      expect(block).toContain(`mark(\`item-cleanup-${step}-o\${ownerOrdinal}-n\${n}\`);\n${index < 4 ? '        ' : '      '}${operations[index]}`);
+    }
+    expect(verifier).not.toContain("mark('item-cleanup')");
+    expect((verifier.match(/\$\{ownerOrdinal\}/g) ?? [])).toHaveLength(6);
+    expect(new Set(steps.flatMap((step) => [1, 2].flatMap((owner) => [21, 22, 23, 24].map((n) =>
+      `item-cleanup-${step}-o${owner}-n${n}`)))).size).toBe(48);
+  });
+});
+
 describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
   const env = {
     ALLOW_SECURITY_TESTS: '1', SUPABASE_URL: 'http://127.0.0.1:54321',
@@ -382,6 +437,66 @@ describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
   const json = (value: Value, status = 200) => new Response(JSON.stringify(value), { status });
   const empty = () => new Response(null, { status: 204 });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  describe('strict void RPC contracts (real client, fetch/Response mocked only)', () => {
+    const names = ['commit_image', 'retire_image', 'forget_image'];
+    const args = { p_image_id: run };
+    describe.each(names)('%s', (name) => {
+      it.each([owner, other])('accepts only bodyless 204 with exact forwarding for $label', async (session) => {
+        const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(empty());
+        vi.stubGlobal('fetch', fetch);
+        await expect(client().rpc(session, name, args)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledOnce();
+        const [url, options] = present(fetch.mock.calls[0]);
+        expect(url).toBe(`${env.SUPABASE_URL}/rest/v1/rpc/${name}`);
+        expect(options?.method).toBe('POST'); expect(options?.body).toBe(JSON.stringify(args));
+        expect(new Headers(options?.headers).get('authorization')).toBe('Bearer '.concat(session.token));
+      });
+      it.each(['null', '', '{"state":"ready"}'])('refuses 200 with %j', async (raw) => {
+        respond(new Response(raw));
+        await expect(client().rpc(owner, name, args)).rejects.toThrow('EVIDENCE_REQUIRED');
+      });
+      it.each([201, 202, 400, 401, 403, 404, 409])('refuses non-204 status %s', async (status) => {
+        respond(json({ code: 'synthetic-private' }, status));
+        await expect(client().rpc(owner, name, args)).rejects.toThrow('EVIDENCE_REQUIRED');
+      });
+      it.each([204, 500, 502, 503, 504])('refuses malformed 204 or server status %s before body reads', async (status) => {
+        const response = new Response('synthetic-private');
+        vi.spyOn(response, 'status', 'get').mockReturnValue(status);
+        const stream = present(response.body ?? undefined), getReader = vi.spyOn(stream, 'getReader');
+        respond(response);
+        const logs = [vi.spyOn(console, 'log'), vi.spyOn(console, 'error'), vi.spyOn(console, 'warn')];
+        await expect(client().rpc(owner, name, args)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(getReader).not.toHaveBeenCalled();
+        for (const log of logs) expect(log).not.toHaveBeenCalled();
+      });
+      it('preserves a fetch rejection without retry', async () => {
+        const error = new Error('synthetic-private-fetch');
+        const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(error);
+        vi.stubGlobal('fetch', fetch);
+        await expect(client().rpc(owner, name, args)).rejects.toBe(error);
+        expect(fetch).toHaveBeenCalledOnce();
+      });
+      it.each(['read', 'cancel', 'read-and-cancel'])('retains %s identity and finally precedence on non-204 responses', async (failure) => {
+        const response = json(null), stream = present(response.body ?? undefined), reader = stream.getReader();
+        const readError = new Error('synthetic-private-read'), cancelError = new Error('synthetic-private-cancel');
+        const read = vi.spyOn(reader, 'read'), cancel = vi.spyOn(reader, 'cancel');
+        if (failure !== 'cancel') read.mockRejectedValue(readError);
+        if (failure !== 'read') cancel.mockRejectedValue(cancelError);
+        vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+        respond(response);
+        await expect(client().rpc(owner, name, args)).rejects.toBe(failure === 'read' ? readError : cancelError);
+        expect(cancel).toHaveBeenCalledOnce();
+      });
+    });
+    it.each(['image_change_status', 'cancel_image_change', 'item_deletion_operation_status', 'item_deletion_next_target',
+      'image_change_requests', 'complete_image_change',
+      ...names.flatMap((name) => [`${name}/`, `${name}?unit=1`, `${name}_other`, `prefix_${name}`, name.toUpperCase()])])(
+      'does not grant the void response contract to %s', async (name) => {
+        respond(empty());
+        await expect(client().rpc(owner, name, args)).rejects.toThrow('EVIDENCE_REQUIRED');
+      });
+  });
 
   describe('strict nullable RPC contracts (real client, fetch/Response mocked only)', () => {
     const names = ['image_change_status', 'cancel_image_change', 'item_deletion_operation_status', 'item_deletion_next_target'];

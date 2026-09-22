@@ -21,6 +21,7 @@ export const SOURCE_HASHES = Object.freeze({
   imageChanges: 'cebc58134c93590fe178a1a72a4beb77dcabe562803c90a5455cf09acba3e771',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
+const voidRpcs = new Set(['commit_image', 'retire_image', 'forget_image']);
 const nullableRpcs = new Set(['image_change_status', 'cancel_image_change', 'item_deletion_operation_status', 'item_deletion_next_target']);
 const nullableRpcPaths = new Set([...nullableRpcs].map((name) => `/rest/v1/rpc/${name}`));
 const diagnosticStatuses = new Set([200, 201, 204, 400, 401, 403, 404, 409, 413, 422, 429, 500, 502, 503, 504]);
@@ -327,7 +328,7 @@ export function normalClient(env) {
   }
   const rpc = async (owner, name, body) => {
     const result = await request(owner.token, `/rest/v1/rpc/${name}`, { method: 'POST', body });
-    requireEvidence(result.ok && (name === 'commit_image'
+    requireEvidence(result.ok && (voidRpcs.has(name)
       ? result.status === 204 && result.data === null
       : result.status === 200 && (result.data !== null || nullableRpcs.has(name))));
     return result.data;
