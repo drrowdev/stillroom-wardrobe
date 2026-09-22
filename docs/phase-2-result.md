@@ -15,6 +15,65 @@ PR [#9](https://github.com/drrowdev/stillroom-wardrobe/pull/9), branch
 `25a268712dc9158259608f5a4f17d11d9b9ad279`. This result update changes no
 executable inputs.
 
+## 22 September 2026 - CI14 legacy orphan fixture and stage boundaries
+
+**Unstaged fixture correction; CI14's failing subcase remains unknown.**
+The same local GPT-6 Astra writer follows
+[release 5776803892](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5776803892),
+after retained Anthropic Claude Opus 5 reviews 156/157 and coordinator
+dispositions. Base `c8964dda9a908e51d59659f2ed6c26530729e6e4`, tree
+`23e09f9bd4571431244426e9268df5e3490c264a`. Scope remains I10b R03/R12/R15;
+this is not publication, native acceptance, generated types or Stage C.
+
+The orphan fixture used checked Save to create its initial item, then raw
+deleted and reinserted that same item ID before calling legacy `commit_image`.
+Successful `reserve_item_save` inserts the durable used-ID marker; it is not
+inserted by finalize, and raw item deletion does not remove it. If reached,
+the later legacy commit conflicts with that marker's item-ID check. This
+source contradiction does not establish which CI14 operation actually failed.
+
+Only this fixture now seeds through ordinary owner-B item/image inserts,
+the existing synthetic upload and legacy commit. Both initial IDs retain the
+I08 `1080` prefix. Its two post-commit readbacks check persisted owner/item/image
+identity, ready state, declared byte counts, hashes, 120x80 dimensions and
+description against the intent. This checks declared metadata, not decoding.
+All existing commit checks remain. The intent-shaped value, same-item
+reinsertion, new image, two unmanifested plus two registered targets, ordered
+native deletion/reconciliation/BEGIN/FINISH and final absence are retained.
+The shared harness, paging fixture, SQL, permissions and validators are unchanged.
+
+The runner assigns only three fixed existing-stage values immediately before
+paging, orphan work and synchronous finalizer liveness checking. Labels describe
+the furthest boundary, not a proven thrower. The unchanged `finally.stop` can
+replace an earlier error: an orphan failure leaves the orphan label, whereas
+successful orphan work reaches the finalizer label before a later stop failure.
+
+Approved local commands used pinned Node 24.19.0 and existing dependencies:
+
+- Focused lifecycle-unit selector
+  `I10b legacy orphan fixture|I10b owner group stage boundaries`: initial
+  286 failures included an accidental returned `beforeEach` cleanup callback.
+  Removing that test-only return yielded **280 failed / 6 passed / 634 filtered**
+  before repair. The identical selector after repair first yielded
+  **219 failed / 67 passed** because the mock incorrectly required Buffer
+  instead of the existing Uint8Array upload. Correcting that test-only guard
+  yielded **286 passed / 634 filtered**.
+- The five approved suites (`item-lifecycle-schema`, `preservation`,
+  `local-backend`, `image-replacement-schema`, `ci-storage-guard`):
+  **2064 passed**. These include actual fixture calls with mocked ordinary
+  clients and extracted runner/finally source with mocked operations; they
+  are not SQL, Storage or full-runner execution.
+- Three-file ESLint, `tsc --noEmit`, `scripts/scan-secrets.mjs` and
+  `git diff --check`: exit 0. Scan checked 253 text files; no local canary
+  was supplied, so CI retains that gate.
+
+CI14's DB failure and skipped downstream gates remain recorded in the release.
+Coordinator-reported App 3046 unit / 730 browser passes with four existing skips
+and no flaky summary do not repair earlier failures. Eight capture uploads
+are not visual acceptance; Apple CI is not device acceptance. No backend,
+browser, Actions, hosted, paid-provider, deployment or publication operation
+was performed for this candidate.
+
 ## 22 September 2026 - CI13 BEGIN manifest alias correction
 
 **Unstaged source correction; CI13's runtime cause remains unobserved.**

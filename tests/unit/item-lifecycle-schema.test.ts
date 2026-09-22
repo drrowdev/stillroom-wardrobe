@@ -19,7 +19,7 @@ import { one, lifecycleObservation, serializeLifecycleObservation, readLifecycle
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { securityObservation, serializeSecurityObservation } from '../security/item-lifecycle.sessions.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
-import { imageDeletionCases } from '../integration/image-replacement.sessions.mjs';
+import { imageDeletionCases, imageChangeOrphanDeletion } from '../integration/image-replacement.sessions.mjs';
 
 const fixtureMocks = vi.hoisted(() => ({
   spawn: vi.fn(), requireLocalContainer: vi.fn(), privilegedLocalSql: vi.fn(), commandEnvironment: vi.fn(), saveClients: vi.fn(),
@@ -1176,6 +1176,253 @@ describe('I10b deletion callback evidence (real caller, mocked client/lock/child
     const runner = await read('scripts/preservation-rehearsal.mjs');
     expect(runner.includes('mark: (label) => { stage = `I10b-publication-races-${label}`; }')).toBe(true);
     expect(runner).toContain('FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}${lifecycleFailureDetail(error)}; subsequent stages NOT RUN');
+  });
+});
+
+describe('I10b legacy orphan fixture (actual caller, mocked ordinary client)', () => {
+  const owner = { uid: '10000000-0000-4000-8000-000000000002', token: 'synthetic-owner-b', label: 'B' };
+  const other = { uid: '10000000-0000-4000-8000-000000000001', token: 'synthetic-owner-a', label: 'A' };
+  type Row = Record<string, unknown> & { id: string; owner_id: string };
+  type Fault = { at: string; value: unknown };
+  type ReadChange = { table: 'items' | 'item_images'; field: string; value: unknown };
+  const expected = [
+    'clients', 'insert:seed-item', 'insert:seed-image', 'upload:seed-main', 'upload:seed-thumb',
+    'commit:seed', 'read:seed-item', 'read:seed-image', 'delete:item',
+    'insert:replacement-item', 'insert:replacement-image', 'upload:replacement-main', 'upload:replacement-thumb',
+    'commit:replacement', 'trash', 'status', 'prepare', 'inventory:1', 'inventory:2', 'authorize',
+    'target:orphan:1', 'delete:orphan:main', 'reconcile:1',
+    'target:orphan:2', 'delete:orphan:thumb', 'reconcile:2', 'target:orphan:none', 'begin',
+    'target:registered:1', 'delete:registered:main', 'reconcile:3',
+    'target:registered:2', 'delete:registered:thumb', 'reconcile:4', 'target:registered:none',
+    'finish', 'read:absent-item',
+  ];
+  const failures = [new Error('synthetic-private-failure'), undefined, null, false, 0, ''];
+  beforeEach(() => { fixtureMocks.saveClients.mockReset(); });
+
+  function fixture(fault?: Fault, change?: ReadChange, receiptChange?: Record<string, unknown>) {
+    const events: string[] = [], items = new Map<string, Row>(), images = new Map<string, Row>();
+    const objects = new Set<string>(), inserts: { table: string; body: Record<string, unknown> }[] = [];
+    const uploads: { path: string; size: number; sha256: string }[] = [];
+    let itemId = '', seedId = '', replacementId = '', inventory = 0, reconciled = 0, begun = false;
+    const visit = (label: string) => {
+      events.push(label);
+      if (fault?.at === label) throw fault.value;
+    };
+    const text = (value: unknown): string => {
+      if (typeof value !== 'string') throw new Error('Expected synthetic string');
+      return value;
+    };
+    const path = (id: string, variant: string) => `${owner.uid}/${itemId}/${id}/${variant}.jpg`;
+    const client = {
+      insert: vi.fn(async (actor: typeof owner, table: string, body: Record<string, unknown>) => {
+        expect(actor).toBe(owner);
+        const id = text(body.id);
+        const initial = table === 'items' ? itemId === '' : seedId === '';
+        visit(`insert:${initial ? 'seed' : 'replacement'}-${table === 'items' ? 'item' : 'image'}`);
+        inserts.push({ table, body: structuredClone(body) });
+        if (table === 'items') {
+          if (!itemId) itemId = id;
+          expect(id).toBe(itemId);
+          items.set(id, { ...body, id, owner_id: owner.uid, version: 1 });
+        } else {
+          expect(table).toBe('item_images'); expect(body.item_id).toBe(itemId);
+          if (!seedId) seedId = id; else replacementId = id;
+          images.set(id, { ...body, id, owner_id: owner.uid, state: 'pending' });
+        }
+      }),
+      request: vi.fn(async (token: string, route: string, options: { method?: string; body?: unknown; binary?: boolean; headers?: Record<string, string> } = {}) => {
+        expect(token).toBe(owner.token);
+        if (route.startsWith('/storage/v1/object/wardrobe/')) {
+          const name = route.slice('/storage/v1/object/wardrobe/'.length);
+          const id = name.split('/')[2]!, variant = name.endsWith('/main.jpg') ? 'main' : 'thumb';
+          expect(name).toBe(path(id, variant));
+          if (options.method === 'POST') {
+            visit(`upload:${id === seedId ? 'seed' : 'replacement'}-${variant}`);
+            expect(options.binary).toBe(true); expect(options.headers).toEqual({ 'x-upsert': 'false' });
+            if (!(options.body instanceof Uint8Array)) throw new Error('Expected synthetic upload bytes');
+            uploads.push({ path: name, size: options.body.length,
+              sha256: createHash('sha256').update(options.body).digest('hex') });
+            expect(objects.has(name)).toBe(false); objects.add(name);
+            return { ok: true, status: 200, data: {} };
+          }
+          expect(options.method).toBe('DELETE');
+          visit(`delete:${id === seedId ? 'orphan' : 'registered'}:${variant}`);
+          expect(objects.delete(name)).toBe(true);
+          return { ok: true, status: 200, data: { message: 'Successfully deleted' } };
+        }
+        const url = new URL(route, 'http://fixture.invalid');
+        const table = url.pathname.slice('/rest/v1/'.length);
+        if (table !== 'items' && table !== 'item_images') throw new Error('Unexpected fixture request');
+        expect(url.searchParams.get('owner_id')).toBe(`eq.${owner.uid}`);
+        const id = text(url.searchParams.get('id')).slice(3);
+        if (options.method === 'DELETE') {
+          visit('delete:item'); expect(table).toBe('items'); expect(id).toBe(itemId);
+          expect(items.delete(id)).toBe(true); images.clear();
+          expect(objects.size).toBe(2);
+          return { ok: true, status: 204, data: null };
+        }
+        visit(table === 'item_images' ? 'read:seed-image' : items.size ? 'read:seed-item' : 'read:absent-item');
+        expect(url.searchParams.get('select')).toBe('*');
+        const row = (table === 'items' ? items : images).get(id);
+        const rows = row ? [structuredClone(row)] : [];
+        if (row && change?.table === table) {
+          if (change.field === '$rows') return { ok: true, status: 200, data: change.value };
+          rows[0] = { ...rows[0]!, [change.field]: change.value };
+        }
+        return { ok: true, status: 200, data: rows };
+      }),
+      rpc: vi.fn(async (actor: typeof owner, name: string, args: Record<string, unknown>) => {
+        expect(actor).toBe(owner);
+        if (name === 'commit_image') {
+          const id = text(args.p_image_id);
+          visit(id === seedId ? 'commit:seed' : 'commit:replacement');
+          expect(objects.has(path(id, 'main')) && objects.has(path(id, 'thumb'))).toBe(true);
+          const row = images.get(id);
+          if (!row) throw new Error('Missing synthetic image');
+          row.state = 'ready'; return null;
+        }
+        expect(args.p_item_id ?? (args.p_item_ids as string[])[0]).toBe(itemId);
+        if (name === 'set_item_trashed') {
+          visit('trash'); expect(args.p_expected_version).toBe(1); expect(args.p_trashed).toBe(true); return [];
+        }
+        if (name === 'item_deletion_status') {
+          visit('status'); expect(objects.size).toBe(4); expect(images.size).toBe(1);
+          return [{ version: 2, image_manifest_sha256: 'a'.repeat(64), unmanifested_count: 2, cleanup_blocked: true }];
+        }
+        if (name === 'prepare_item_deletion') {
+          visit('prepare'); expect(args.p_expected_version).toBe(2);
+          expect(args.p_image_manifest_sha256).toBe('a'.repeat(64)); return {};
+        }
+        if (name === 'inventory_item_deletion') {
+          visit(`inventory:${++inventory}`);
+          return { phase: inventory === 2 ? 'prepared' : 'preparing', targetCount: 4, unmanifestedTargets: 2,
+            pendingTargets: 0, registeredTargets: 2, inventoryHash: 'b'.repeat(64), ...receiptChange };
+        }
+        if (name === 'authorize_item_deletion') {
+          visit('authorize'); expect(args.p_inventory_hash).toBe('b'.repeat(64)); return {};
+        }
+        if (name === 'item_deletion_next_target') {
+          const completed = reconciled === (begun ? 4 : 2);
+          visit(`target:${begun ? 'registered' : 'orphan'}:${completed ? 'none' : reconciled % 2 + 1}`);
+          return completed ? null : { ordinal: reconciled + 1,
+            path: path(begun ? replacementId : seedId, reconciled % 2 ? 'thumb' : 'main') };
+        }
+        if (name === 'reconcile_item_deletion_target') {
+          visit(`reconcile:${reconciled + 1}`); expect(args.p_ordinal).toBe(reconciled + 1);
+          expect(objects.size).toBe(3 - reconciled); reconciled++; return {};
+        }
+        if (name === 'begin_prepared_item_deletion') {
+          visit('begin'); expect(reconciled).toBe(2); expect(objects.size).toBe(2); begun = true; return {};
+        }
+        if (name === 'finish_item_deletion') {
+          visit('finish'); expect(reconciled).toBe(4); expect(objects.size).toBe(0);
+          items.clear(); images.clear(); return [{ state: 'completed' }];
+        }
+        throw new Error('Unexpected fixture RPC');
+      }),
+    };
+    fixtureMocks.saveClients.mockImplementation(async () => { visit('clients'); return { client, owners: [other, owner] }; });
+    return { events, inserts, uploads, client, objects, run: () => imageChangeOrphanDeletion({}) };
+  }
+
+  it('seeds genuine owner-B legacy bytes, reads persisted metadata and retains all two-phase deletion operations', async () => {
+    const f = fixture(); await f.run();
+    expect(f.events).toEqual(expected); expect(f.objects.size).toBe(0);
+    expect(f.inserts).toHaveLength(4); expect(f.uploads).toHaveLength(4);
+    const item = f.inserts[0]!.body, image = f.inserts[1]!.body, replacement = f.inserts[3]!.body;
+    expect(item.id).toMatch(/^1080[0-9a-f-]{32}$/); expect(image.id).toMatch(/^1080[0-9a-f-]{32}$/);
+    expect(item.field_provenance).toEqual({ title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 } });
+    expect(f.inserts[2]!.body).toEqual(item); expect(replacement.item_id).toBe(item.id);
+    expect(replacement.id).not.toBe(image.id);
+    expect(image).toMatchObject({ item_id: item.id, width: 120, height: 80, alt_text: 'Synthetic original' });
+    for (const upload of f.uploads) {
+      expect(upload.size).toBe(image.main_bytes); expect(upload.size).toBe(image.thumb_bytes);
+      expect(upload.sha256).toBe(image.main_sha256); expect(upload.sha256).toBe(image.thumb_sha256);
+    }
+    expect(f.client.rpc.mock.calls.map(([, name]) => name)).not.toContain('reserve_item_save');
+    expect(f.client.rpc.mock.calls.map(([, name]) => name)).not.toContain('finalize_item_save');
+  });
+
+  it.each(expected.flatMap((at) => failures.map((value, index) => ({ at, value, index }))))(
+    'propagates seam failure $at/$index exactly and performs no later operation',
+    async ({ at, value }) => {
+      const f = fixture({ at, value });
+      await expect(f.run()).rejects.toBe(value);
+      expect(f.events).toEqual(expected.slice(0, expected.indexOf(at) + 1));
+    },
+  );
+
+  const changes: ReadChange[] = [
+    { table: 'items', field: '$rows', value: [] }, { table: 'item_images', field: '$rows', value: [] },
+    { table: 'items', field: 'id', value: other.uid }, { table: 'items', field: 'owner_id', value: other.uid },
+    { table: 'item_images', field: 'id', value: other.uid }, { table: 'item_images', field: 'owner_id', value: other.uid },
+    { table: 'item_images', field: 'item_id', value: other.uid }, { table: 'item_images', field: 'state', value: 'pending' },
+    ...['main_bytes', 'thumb_bytes', 'width', 'height'].map((field) => ({ table: 'item_images' as const, field, value: 1 })),
+    ...['main_sha256', 'thumb_sha256', 'alt_text'].map((field) => ({ table: 'item_images' as const, field, value: 'wrong' })),
+  ];
+  it.each(changes)('refuses persisted seed mismatch $table/$field before raw deletion', async (change) => {
+    const f = fixture(undefined, change);
+    await expect(f.run()).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(f.events).not.toContain('delete:item');
+    expect(f.events.filter((event) => event.startsWith('read:'))).toEqual(['read:seed-item', 'read:seed-image']);
+  });
+  it.each([
+    { phase: 'preparing' }, { targetCount: 3 }, { unmanifestedTargets: 1 }, { pendingTargets: 1 }, { registeredTargets: 1 },
+  ])('retains exact two-plus-two inventory refusal %j', async (change) => {
+    const f = fixture(undefined, undefined, change);
+    await expect(f.run()).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(f.events.at(-1)).toBe('inventory:2'); expect(f.events).not.toContain('authorize');
+  });
+});
+
+describe('I10b owner group stage boundaries (extracted source, mocked operations)', () => {
+  const failures = [new Error('synthetic-private-runner-error'), undefined, null, false, 0, ''];
+  type Step = 'paging' | 'orphans' | 'assertRunning' | 'stop';
+  type Fault = { at: Step; value: unknown };
+  async function run(fault?: Fault, stopFault?: { value: unknown }) {
+    const source = await read('scripts/preservation-rehearsal.mjs');
+    const start = source.indexOf("      stage = 'I10b-owner-paging");
+    const end = source.indexOf("\n    console.log('PASS: exact prior-main9", start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    const segment = source.slice(start, end);
+    expect(segment).toContain('} finally { await finalizer.stop(); }');
+    const execute = new Function('imageChangePagedDeletion', 'imageChangeOrphanDeletion', 'finalizer', 'azureEnv',
+      `return (async () => { let stage = 'before'; try { try {\n${segment}\n
+        return { ok: true, stage }; } catch (error) { return { ok: false, stage, error }; } })();`) as (
+          paging: (env: object) => Promise<void>, orphans: (env: object) => Promise<void>,
+          finalizer: { assertRunning: () => void; stop: () => Promise<void> }, env: object,
+        ) => Promise<{ ok: boolean; stage: string; error?: unknown }>;
+    const events: Step[] = [], env = {};
+    const visit = (step: Step) => {
+      events.push(step);
+      if (step === 'stop' && stopFault) throw stopFault.value;
+      if (fault?.at === step) throw fault.value;
+    };
+    const result = await execute(async (actual) => { expect(actual).toBe(env); visit('paging'); },
+      async (actual) => { expect(actual).toBe(env); visit('orphans'); },
+      { assertRunning: () => visit('assertRunning'), stop: async () => visit('stop') }, env);
+    return { events, result };
+  }
+  it('awaits paging then orphans, asserts liveness synchronously, and always stops', async () => {
+    const f = await run();
+    expect(f.events).toEqual(['paging', 'orphans', 'assertRunning', 'stop']);
+    expect(f.result).toEqual({ ok: true, stage: 'I10b-owner-finalizer' });
+  });
+  it.each((['paging', 'orphans', 'assertRunning', 'stop'] as const).flatMap((at) =>
+    failures.map((value, index) => ({ at, value, index }))))('retains exact failure and stage $at/$index', async ({ at, value }) => {
+    const f = await run({ at, value });
+    const beforeStop = ['paging', 'orphans', 'assertRunning'] as const;
+    expect(f.events).toEqual([...beforeStop.slice(0, at === 'stop' ? 3 : beforeStop.indexOf(at) + 1), 'stop']);
+    expect(f.result).toEqual({ ok: false, stage: `I10b-owner-${at === 'paging' ? 'paging' : at === 'orphans' ? 'orphans' : 'finalizer'}`, error: value });
+    expect(f.result.error).toBe(value);
+  });
+  it.each((['paging', 'orphans', 'assertRunning'] as const).flatMap((at) =>
+    failures.map((value, index) => ({ at, value, index }))))('preserves existing stop override under prior boundary $at/$index', async ({ at, value }) => {
+    const first = new Error('synthetic-earlier-error'), f = await run({ at, value: first }, { value });
+    expect(f.result.ok).toBe(false); expect(f.result.error).toBe(value);
+    expect(f.result.stage).toBe(`I10b-owner-${at === 'assertRunning' ? 'finalizer' : at}`);
+    expect(f.events.at(-1)).toBe('stop');
+    expect(f.events).toHaveLength(at === 'paging' ? 2 : at === 'orphans' ? 3 : 4);
   });
 });
 

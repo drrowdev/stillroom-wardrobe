@@ -1072,8 +1072,11 @@ async function main() {
       const { imageDeletionCases, imageChangePagedDeletion, imageChangeOrphanDeletion } = await import('../tests/integration/image-replacement.sessions.mjs');
       await imageDeletionCases(azureEnv, { withLifecycleLateUpload, requireLifecyclePrefixEmpty, withLifecycleParentLock,
         mark: (label) => { stage = `I10b-publication-races-${label}`; } });
-      stage = 'I10b-owner-paging-orphans';
-      await imageChangePagedDeletion(azureEnv); await imageChangeOrphanDeletion(azureEnv);
+      stage = 'I10b-owner-paging';
+      await imageChangePagedDeletion(azureEnv);
+      stage = 'I10b-owner-orphans';
+      await imageChangeOrphanDeletion(azureEnv);
+      stage = 'I10b-owner-finalizer';
       finalizer.assertRunning();
     } finally { await finalizer.stop(); }
     console.log('PASS: exact prior-main9/target10; old Google held/estimated/confirmed/dispatched and frozen Save preserved; late settlement and ordinary-owner finalizer; no provider calls');

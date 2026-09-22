@@ -469,7 +469,21 @@ export async function imageChangePagedDeletion(env) {
 
 export async function imageChangeOrphanDeletion(env) {
   const { client, owners: [, owner] } = await saveClients(env), h = imageChangeHarness(client, owner, env);
-  const base = await h.create();
+  const value = intent();
+  value.p_item.id = '1080' + value.p_item.id.slice(4);
+  value.p_image = { ...value.p_image, id: '1080' + value.p_image.id.slice(4),
+    main_bytes: bytes.length, thumb_bytes: bytes.length, main_sha256: hash, thumb_sha256: hash,
+    width: 120, height: 80, alt_text: 'Synthetic original' };
+  await client.insert(owner, 'items', value.p_item);
+  await client.insert(owner, 'item_images', { ...value.p_image, item_id: value.p_item.id });
+  await h.upload({ itemId: value.p_item.id, imageId: value.p_image.id });
+  await client.rpc(owner, 'commit_image', { p_image_id: value.p_image.id });
+  const items = await h.read('items', value.p_item.id), images = await h.read('item_images', value.p_image.id);
+  eq(items.length, 1); eq(images.length, 1);
+  const base = { value, item: items[0], image: images[0] };
+  eq(base.item.id, value.p_item.id); eq(base.item.owner_id, owner.uid);
+  eq(base.image.owner_id, owner.uid); eq(base.image.item_id, value.p_item.id); eq(base.image.state, 'ready');
+  for (const [key, expected] of Object.entries(value.p_image)) eq(base.image[key], expected);
   // Preserve the existing raw-delete orphan compatibility case; cleanup uses only native DELETE.
   await h.deleteItem(base.value);
   await client.insert(owner, 'items', base.value.p_item);
