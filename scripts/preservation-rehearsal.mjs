@@ -393,6 +393,9 @@ const LIFECYCLE_PHASES = Object.freeze(['input', 'docker', 'container-call', 'co
   'image-call', 'image-result', 'image-shape', 'spawn', 'input-write', 'await-ready', 'callback', 'settlement', 'cleanup']);
 const LIFECYCLE_CAUSES = Object.freeze(['refusal', 'exception', 'process-error', 'process-close', 'stdin-error',
   'stderr', 'output-cap', 'utf8', 'json', 'protocol', 'deadline', 'cleanup']);
+const LIFECYCLE_CONTAINER_GUARDS = Object.freeze(['parse', 'name', 'project', 'running', 'image-tag', 'image-id', 'mount-array',
+  'mount-count', 'mount-type', 'mount-name', 'mount-target', 'mount-rw', 'config-array', 'config-count',
+  'config-backend', 'config-root', 'config-tenant', 'config-bucket', 'config-sentinel']);
 const LIFECYCLE_CHILD_PHASES = Object.freeze(['input', 'ancestors', 'item-absence', 'request', 'write',
   'file-poll', 'ready-check', 'ready', 'complete', 'response', 'cleanup']);
 const LIFECYCLE_CHILD_CAUSES = Object.freeze(['refusal', 'exception', 'deadline', 'early-response',
@@ -404,7 +407,13 @@ const lifecycleInteger = (value, min, max) => Number.isInteger(value) && value >
 const lifecyclePrimitive = (value) => value === undefined ? 'undefined' : value === null ? 'null'
   : value === false ? 'false' : Object.is(value, 0) ? 'zero' : Object.is(value, -0) ? 'negative-zero' : value === '' ? 'empty' : null;
 function lifecyclePhase(phase) {
-  if (lifecycleActive) { lifecycleActive.phase = lifecycleLabel(LIFECYCLE_PHASES, phase); lifecycleActive.commandCode = null; }
+  if (lifecycleActive) {
+    lifecycleActive.phase = lifecycleLabel(LIFECYCLE_PHASES, phase);
+    lifecycleActive.commandCode = null; lifecycleActive.guard = null;
+  }
+}
+function lifecycleGuard(guard) {
+  if (lifecycleActive) lifecycleActive.guard = lifecycleLabel(LIFECYCLE_CONTAINER_GUARDS, guard);
 }
 function lifecycleCommand(result) {
   try {
@@ -415,7 +424,8 @@ function lifecycleCommand(result) {
 }
 function lifecycleFirst(state, cause) {
   if (state && !state.first) state.first = { phase: state.phase, cause: lifecycleLabel(LIFECYCLE_CAUSES, cause),
-    commandCode: state.commandCode, exitCode: state.exitCode, ...state.child };
+    commandCode: state.commandCode, exitCode: state.exitCode,
+    ...(state.phase === 'container-shape' ? { guard: lifecycleLabel(LIFECYCLE_CONTAINER_GUARDS, state.guard) } : {}), ...state.child };
 }
 export function lifecycleFailureDetail(error) {
   const failure = lifecycleFailure;
@@ -442,15 +452,44 @@ export async function lifecycleStorageRuntime(run = runCommand) {
   lifecyclePhase('container-result'); lifecycleCommand(result);
   requireEvidence(result.code === 0);
   lifecyclePhase('container-shape');
+  lifecycleGuard('parse');
   const value = JSON.parse(result.stdout);
-  requireEvidence(value.name === '/' + container && value.project === 'stillroom-wardrobe' && value.running === true
-    && /^(?:public\.ecr\.aws\/supabase|supabase)\/storage-api:v1\.70\.3$/.test(value.image)
-    && /^sha256:[0-9a-f]{64}$/.test(value.id) && Array.isArray(value.mounts) && value.mounts.length === 1
-    && value.mounts[0].type === 'volume' && value.mounts[0].name === container
-    && value.mounts[0].target === '/mnt' && value.mounts[0].rw === true
-    && Array.isArray(value.config) && value.config.length === 5
-    && ['STORAGE_BACKEND=file', 'FILE_STORAGE_BACKEND_PATH=/mnt', 'TENANT_ID=stub', 'GLOBAL_S3_BUCKET=stub', null]
-      .every((entry) => value.config.includes(entry)));
+  lifecycleGuard('name');
+  requireEvidence(value.name === '/' + container);
+  lifecycleGuard('project');
+  requireEvidence(value.project === 'stillroom-wardrobe');
+  lifecycleGuard('running');
+  requireEvidence(value.running === true);
+  lifecycleGuard('image-tag');
+  requireEvidence(/^(?:public\.ecr\.aws\/supabase|supabase)\/storage-api:v1\.70\.3$/.test(value.image));
+  lifecycleGuard('image-id');
+  requireEvidence(/^sha256:[0-9a-f]{64}$/.test(value.id));
+  lifecycleGuard('mount-array');
+  requireEvidence(Array.isArray(value.mounts));
+  lifecycleGuard('mount-count');
+  requireEvidence(value.mounts.length === 1);
+  lifecycleGuard('mount-type');
+  requireEvidence(value.mounts[0].type === 'volume');
+  lifecycleGuard('mount-name');
+  requireEvidence(value.mounts[0].name === container);
+  lifecycleGuard('mount-target');
+  requireEvidence(value.mounts[0].target === '/mnt');
+  lifecycleGuard('mount-rw');
+  requireEvidence(value.mounts[0].rw === true);
+  lifecycleGuard('config-array');
+  requireEvidence(Array.isArray(value.config));
+  lifecycleGuard('config-count');
+  requireEvidence(value.config.length === 5);
+  lifecycleGuard('config-backend');
+  requireEvidence(value.config.includes('STORAGE_BACKEND=file'));
+  lifecycleGuard('config-root');
+  requireEvidence(value.config.includes('FILE_STORAGE_BACKEND_PATH=/mnt'));
+  lifecycleGuard('config-tenant');
+  requireEvidence(value.config.includes('TENANT_ID=stub'));
+  lifecycleGuard('config-bucket');
+  requireEvidence(value.config.includes('GLOBAL_S3_BUCKET=stub'));
+  lifecycleGuard('config-sentinel');
+  requireEvidence(value.config.includes(null));
   lifecyclePhase('image-call');
   const image = await run('docker', ['image', 'inspect', '--format', '{"id":{{json .Id}},"digests":{{json .RepoDigests}}}', value.id],
     { maxOutputBytes: 4096 });
@@ -595,7 +634,7 @@ export async function lifecycleStreamChild() {
 }
 
 export async function withLifecycleLateUpload(owner, value, operation) {
-  const state = { phase: 'input', commandCode: null, exitCode: null, child: {}, first: null, primitive: null };
+  const state = { phase: 'input', commandCode: null, exitCode: null, guard: null, child: {}, first: null, primitive: null };
   lifecycleActive = state; lifecycleFailure = null;
   try { return await lifecycleLateUpload(owner, value, operation, state); }
   catch (error) {

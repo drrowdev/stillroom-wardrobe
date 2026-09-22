@@ -598,6 +598,85 @@ dependency installation, generated types, publication or deployment was
 performed. This unstaged evidence amendment still requires focused closure
 and separate publication authority; neither CI8 cause is proved repaired.
 
+### Stage A CI9 - closed container guards and probe removal, 22 September 2026
+
+[CI9](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/35708098690),
+attempt 1 at `14658dfacf06211492ad1fb20cc88f0d9ee46e72`, failed its
+database job `106681807301` at 09:05:12 UTC. Capture and verify each passed
+with two owners, ten tables, thirty rows and eight objects; both held-parent
+Storage 400 controls passed. The late-publication fixture then failed before
+child readiness. The [closed observation](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5773952549)
+was `container-shape`, cause `exception`, with null command/exit codes.
+The command-code-zero guard had passed; entering that phase explicitly
+cleared the recorded command code. JSON parsing or any subsequent compound
+runtime predicate could explain the observation. No particular field or
+underlying cause was identified. Image inspection and the streaming child
+were not reached, nor were later B1, I10b or generated-type gates. Exact-run
+snapshot cleanup passed. This finding does not explain either CI8 attempt.
+
+The [reviewed release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5774046079)
+records actual independent Anthropic Claude Opus 5 critique G1-G8 and
+approval of the inverse probe-removal companion. All five scoped unit
+surfaces and relevant source/byte/hash pins were checked before edits;
+no external assertion required adjustment. The main failure template,
+image-replacement assertion, SQL, migration inventory and body pins remain
+unchanged.
+
+The existing failure record now adds a closed `guard` only for
+`container-shape`. Nineteen fixed labels cover parsing and the eighteen
+original predicates, including all five expected config members. Labels
+are set before each operation; straight-line original assertions retain
+single evaluation, order, strictness and exception propagation. Unknown
+labels become `OTHER`. Phase transitions clear the guard alongside the
+command code, and other lifecycle records retain their existing shape.
+No actual config, mount, image ID, response or exception text is printed.
+A config label names the missing **expected** member, not the wrong live
+entry or its cause. This is narrower evidence, not a causal repair; a later
+run may have a different environment, and green would not prove a fix.
+No runtime-cost improvement is claimed.
+
+The coordinator's CI9 App disposition records job `106681807610` passing
+at 09:15:58 UTC: 2,831 unit tests in 32 suites and scan253 with canary.
+The browser baseline was **729 passed, one flaky and four existing skips**.
+The diagnostics-off parallel-page/keepalive case at `slice.spec.ts:315`
+first failed after the first close (expected 200, received 400, receiver
+`file-empty`); built-in retry 1 passed. That first failure is not waived.
+The original analysis response sequence passed first attempt. All eight
+artifact uploads succeeded, which does not establish visual acceptance.
+
+The final Linux probe selected exactly three cases and passed all three
+in 3.9 seconds with retries 0 and workers 2. Coordinator-parsed records
+showed twelve 4,096-byte received/accepted bodies (49,152 bytes total), nine
+dispatched-input hash checks, consent-off no dispatch, unchanged storage,
+empty library and successful cleanup. A-retargeted had four absent inspector
+observations despite intact bodies; B/C had zero route records. Exit was 0
+and ports were closed. The actual synthetic merge checkout
+`8374e3771a9dbc3d837446229584a2c1ed9a6fa0` had the same tree
+`f99623ecb02dfd3272196db4b1b125481495899e` as the reviewed source head,
+as verified by the coordinator. Body loss was **not reproduced**, not
+fixed or ruled out. The inert page, later warm-runner phase, different
+port and scheduling remain confounds; these controls do not explain the
+separate multipart failure or join historical failures into one cause.
+
+The one-use allowance is consumed. The exact reviewed patch was applied
+in reverse after its applicability check, removing only the temporary
+step, baseline ID and conditional three-case controls. Working Git-filtered
+workflow/browser blobs match `fd6a03` and `e97dea0`; the corresponding raw
+files are again 6,746 and 53,541 bytes with the approved hashes. Original
+tests, uploads, limits and helper evidence artifacts are preserved.
+
+Fail-first guard tests reported **26 failed, six passed and 426 filtered**
+before implementation; all 32 selected cases then passed. They enter the
+real `withLifecycleLateUpload`/formatter through mocked commands, exercising
+every label, parse/null/property exceptions, first refusal, original access
+order, all expected members, private-canary omission and later-phase output
+noninterference. The full five approved suites passed **1,595 tests**, with
+no skips. Scoped lint, typecheck, scan253 (no local canary) and diff checks
+passed. These remain mock/source checks, not native runtime acceptance.
+No browser/probe/backend execution, new CI, publication, types adoption or
+deployment occurred during this amendment; candidate closure and separate
+publication authority remain required.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling

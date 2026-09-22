@@ -78,13 +78,15 @@ test('actual upload wire preserves binary bytes and the oracle detects corruptio
 
 type WireForm = 'valid' | 'missing' | 'empty' | 'ambiguous' | 'multiple' | 'wrong-name' | 'wrong-type' |
   'duplicate-cache' | 'metadata-file' | 'malformed' | 'truncated' | 'oversized' | 'wrong-key' | 'wrong-bearer' | 'upsert';
+type WireCall = 'first-parallel' | 'second-parallel' | 'after-first-close';
 type WireResult = {
   status: number | null; ok: boolean;
   diagnostic?: { backend: WireBackend | 'none'; stage: WireStage; parse: 'ok' | 'unrecognized' | 'unavailable' | 'no-response' };
+  observation?: { call: WireCall; sourceArrayLength: number | null; blobSize: number | null; formFileSize: number | null };
 };
 async function sendWireForm(page: Page, path: string, formKind: WireForm, bytes = [0, 128, 255, 13, 10],
-  diagnostic = false): Promise<WireResult> {
-  return page.evaluate(async ({ path, formKind, bytes, diagnostic, stages }): Promise<WireResult> => {
+  diagnostic = false, call?: WireCall): Promise<WireResult> {
+  return page.evaluate(async ({ path, formKind, bytes, diagnostic, call, stages }): Promise<WireResult> => {
     const modulePath = '/src/data/client.ts';
     const { makeClient } = await import(modulePath) as typeof import('../../src/data/client');
     const client = makeClient({ url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_browser_fixture_only', version: 'browser-fixture' });
@@ -95,6 +97,9 @@ async function sendWireForm(page: Page, path: string, formKind: WireForm, bytes 
       'x-upsert': formKind === 'upsert' ? 'true' : 'false',
       'x-client-info': 'synthetic-wire-test',
     };
+    const observedCall = call === 'first-parallel' || call === 'second-parallel' || call === 'after-first-close' ? call : undefined;
+    const boundedSize = (size: number): number | null => Number.isSafeInteger(size) && size >= 0 && size <= 1024 * 1024 ? size : null;
+    let blobSize: number | null = null;
     const form = new FormData();
     form.append('cacheControl', '0');
     if (formKind === 'duplicate-cache') form.append('cacheControl', '0');
@@ -102,6 +107,7 @@ async function sendWireForm(page: Page, path: string, formKind: WireForm, bytes 
       const payload = formKind === 'empty' ? new Uint8Array() :
         formKind === 'oversized' ? new Uint8Array(1024 * 1024) : new Uint8Array(bytes);
       const file = new Blob([payload], { type: formKind === 'wrong-type' ? 'text/plain' : 'image/jpeg' });
+      if (observedCall) blobSize = boundedSize(file.size);
       form.append(formKind === 'wrong-name' ? 'file' : '', file);
       if (formKind === 'ambiguous') form.append('', file);
       if (formKind === 'multiple') form.append('other', file);
@@ -114,10 +120,15 @@ async function sendWireForm(page: Page, path: string, formKind: WireForm, bytes 
       body = formKind === 'malformed' ? '--fixture-boundary\r\nnot-a-header\r\n\r\nbytes\r\n--fixture-boundary--\r\n' :
         '--fixture-boundary\r\nContent-Disposition: form-data; name="cacheControl"\r\n\r\n0';
     }
+    const entry = observedCall && body instanceof FormData ? form.get('') : null;
+    const observation = observedCall ? {
+      call: observedCall, sourceArrayLength: boundedSize(bytes.length), blobSize,
+      formFileSize: entry instanceof Blob ? boundedSize(entry.size) : null,
+    } : undefined;
     try {
       const response = await fetch('http://127.0.0.1:54321/storage/v1/object/wardrobe/' + path,
         { method: 'POST', headers, body, credentials: 'omit' });
-      const result = { status: response.status, ok: response.ok };
+      const result = { status: response.status, ok: response.ok, ...(observation ? { observation } : {}) };
       if (!diagnostic) return result;
       try {
         const value: unknown = await response.json();
@@ -128,9 +139,10 @@ async function sendWireForm(page: Page, path: string, formKind: WireForm, bytes 
         return { ...result, diagnostic: { backend, stage: stage ?? 'none', parse: backend !== 'none' && stage ? 'ok' : 'unrecognized' } };
       } catch { return { ...result, diagnostic: { backend: 'none', stage: 'none', parse: 'unavailable' } }; }
     } catch {
-      return { status: null, ok: false, ...(diagnostic ? { diagnostic: { backend: 'none', stage: 'none', parse: 'no-response' } as const } : {}) };
+      return { status: null, ok: false, ...(observation ? { observation } : {}),
+        ...(diagnostic ? { diagnostic: { backend: 'none', stage: 'none', parse: 'no-response' } as const } : {}) };
     }
-  }, { path, formKind, bytes, diagnostic, stages: diagnostic ? wireStages : [] });
+  }, { path, formKind, bytes, diagnostic, call, stages: diagnostic ? wireStages : [] });
 }
 
 for (const formKind of ['missing', 'empty', 'ambiguous', 'multiple', 'wrong-name', 'wrong-type',
@@ -335,12 +347,14 @@ for (const diagnostic of [false, true]) {
       secondBackend.items.push({ ...firstBackend.items[0] });
       secondBackend.images.push({ ...firstBackend.images[0] });
       [observed.first, observed.second] = await Promise.all([
-        sendWireForm(page, path, 'valid', [0, 255], diagnostic ? true : undefined),
-        sendWireForm(second, path, 'valid', [128, 1], diagnostic ? true : undefined),
+        sendWireForm(page, path, 'valid', [0, 255], diagnostic ? true : undefined, 'first-parallel'),
+        sendWireForm(second, path, 'valid', [128, 1], diagnostic ? true : undefined, 'second-parallel'),
       ]);
       expect([observed.first, observed.second]).toEqual([
-        { ok: true, status: 200, ...(diagnostic ? { diagnostic: { backend: 'first', stage: 'none', parse: 'ok' } } : {}) },
-        { ok: true, status: 200, ...(diagnostic ? { diagnostic: { backend: 'second', stage: 'none', parse: 'ok' } } : {}) },
+        { ok: true, status: 200, observation: { call: 'first-parallel', sourceArrayLength: 2, blobSize: 2, formFileSize: 2 },
+          ...(diagnostic ? { diagnostic: { backend: 'first', stage: 'none', parse: 'ok' } } : {}) },
+        { ok: true, status: 200, observation: { call: 'second-parallel', sourceArrayLength: 2, blobSize: 2, formFileSize: 2 },
+          ...(diagnostic ? { diagnostic: { backend: 'second', stage: 'none', parse: 'ok' } } : {}) },
       ]);
       assertWireBytes(firstBackend.files.get(path)!, Buffer.from([0, 255]));
       assertWireBytes(secondBackend.files.get(path)!, Buffer.from([128, 1]));
@@ -358,8 +372,9 @@ for (const diagnostic of [false, true]) {
         .toEqual({ closed: true, listening: false, connections: 0 });
       expect(secondBackend.uploadWire.listening).toBe(true);
       const next = reserveWireImage(secondBackend);
-      observed.afterFirstClose = await sendWireForm(second, next, 'valid', undefined, diagnostic ? true : undefined);
+      observed.afterFirstClose = await sendWireForm(second, next, 'valid', undefined, diagnostic ? true : undefined, 'after-first-close');
       expect(observed.afterFirstClose).toEqual({ ok: true, status: 200,
+        observation: { call: 'after-first-close', sourceArrayLength: 5, blobSize: 5, formFileSize: 5 },
         ...(diagnostic ? { diagnostic: { backend: 'second', stage: 'none', parse: 'ok' } } : {}) });
       if (diagnostic) {
         expect(secondBackend.wireDiagnostic).toMatchObject({ routePosts: 3, receiverPosts: 2, success: 2, routeRejected: 1, receiverRejected: 0 });

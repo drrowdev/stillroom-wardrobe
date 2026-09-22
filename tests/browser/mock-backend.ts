@@ -86,6 +86,7 @@ type WireReceiverFacts = {
   fieldFailure: WireFieldFailure | null;
   boundaryLength: number | null; bodyTrailer: 'crlf' | 'bare' | 'other' | null;
   parsedFileSize: number | null; bodyHighByte: 'present' | 'absent' | null;
+  rawBodyBytes: number | null; streamCompletion: 'complete' | 'incomplete' | null;
 };
 type WireDiagnostic = {
   backend: WireBackend; routePosts: number; receiverPosts: number; success: number;
@@ -302,6 +303,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
       ? { receiverPostOrdinal: diagnostic.receiverPosts, routePostsAtReceipt: diagnostic.routePosts } : null;
     const facts: WireReceiverFacts | null = diagnostic ? {
       fieldFailure: null, boundaryLength: null, bodyTrailer: null, parsedFileSize: null, bodyHighByte: null,
+      rawBodyBytes: null, streamCompletion: null,
     } : null;
     let stage: WireStage = 'receiver-reservation-origin';
     const timer = setTimeout(() => { state.rejected++; recordRejection('receiver-timeout', facts); void close(); }, 5000);
@@ -345,6 +347,10 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
         state.peakBufferedBytes = Math.max(state.peakBufferedBytes, length);
       }
       const body = Buffer.concat(chunks, length);
+      if (facts) {
+        facts.rawBodyBytes = body.length;
+        facts.streamCompletion = request.complete ? 'complete' : 'incomplete';
+      }
       const delimiter = `--${boundary[1] ?? boundary[2]}`;
       const ending = Buffer.from(`\r\n${delimiter}--`);
       stage = 'receiver-envelope';

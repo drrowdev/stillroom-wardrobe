@@ -218,6 +218,149 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
   async function rejected(operation: Promise<unknown>) {
     return operation.then(() => { throw new Error('Expected failure'); }, (error: unknown) => error);
   }
+  const containerGuards = ['parse', 'name', 'project', 'running', 'image-tag', 'image-id', 'mount-array',
+    'mount-count', 'mount-type', 'mount-name', 'mount-target', 'mount-rw', 'config-array', 'config-count',
+    'config-backend', 'config-root', 'config-tenant', 'config-bucket', 'config-sentinel'];
+  const guardCases: Array<[string, unknown]> = [
+    ['name', { ...runtime, name: 'private canary' }],
+    ['project', { ...runtime, project: 'private canary' }],
+    ['running', { ...runtime, running: 'true' }],
+    ['image-tag', { ...runtime, image: 'private canary' }],
+    ['image-id', { ...runtime, id: 'private canary' }],
+    ['mount-array', { ...runtime, mounts: { private: 'canary' } }],
+    ['mount-count', { ...runtime, mounts: [] }],
+    ...(['type', 'name', 'target', 'rw'] as const).map((key): [string, unknown] =>
+      ['mount-' + key, { ...runtime, mounts: [{ ...runtime.mounts[0], [key]: 'private canary' }] }]),
+    ['config-array', { ...runtime, config: { private: 'canary' } }],
+    ['config-count', { ...runtime, config: runtime.config.slice(0, 4) }],
+    ...['backend', 'root', 'tenant', 'bucket', 'sentinel'].map((key, index): [string, unknown] =>
+      ['config-' + key, { ...runtime, config: runtime.config.map((entry, position) =>
+        position === index ? 'private canary' : entry) }]),
+  ];
+  it.each(guardCases)('container guard localizes %s through the real upload seam', async (guard, inspected) => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(inspected) });
+    const operation = vi.fn(), error = await rejected(withLifecycleLateUpload(owner, value, operation));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('EVIDENCE_REQUIRED');
+    expect(detail(error)).toBe('; lifecycle=' + JSON.stringify({
+      phase: 'container-shape', cause: 'exception', commandCode: null, exitCode: null, guard,
+    }));
+    expect(fixtureMocks.runCommand).toHaveBeenCalledOnce();
+    expect(fixtureMocks.spawn).not.toHaveBeenCalled(); expect(operation).not.toHaveBeenCalled();
+    expect(detail(error)).toBe('');
+  });
+  it.each([
+    ['parse', 'private invalid JSON', SyntaxError],
+    ['name', 'null', TypeError],
+    ['name', '[]', Error],
+    ['mount-type', JSON.stringify({ ...runtime, mounts: [null] }), TypeError],
+  ] as const)('container guard keeps %s parse/property failures unchanged %#', async (guard, stdout, errorType) => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout });
+    const operation = vi.fn(), error = await rejected(withLifecycleLateUpload(owner, value, operation));
+    expect(error).toBeInstanceOf(errorType);
+    const text = detail(error);
+    expect(text).toContain(`"guard":"${guard}"`);
+    expect(text).not.toMatch(/private|canary|10000000|10800000/);
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1024);
+    expect(fixtureMocks.runCommand).toHaveBeenCalledOnce();
+    expect(fixtureMocks.spawn).not.toHaveBeenCalled(); expect(operation).not.toHaveBeenCalled();
+  });
+  it('container guard records the first failed predicate, not later invalid fields', async () => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: JSON.stringify({
+      ...runtime, name: 'private canary', running: false, mounts: null, config: null,
+    }) });
+    const error = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    expect(detail(error)).toBe('; lifecycle={"phase":"container-shape","cause":"exception","commandCode":null,"exitCode":null,"guard":"name"}');
+    expect(fixtureMocks.runCommand).toHaveBeenCalledOnce(); expect(fixtureMocks.spawn).not.toHaveBeenCalled();
+  });
+  it('container guard preserves an exact property exception without evaluating successors', async () => {
+    const primary = new Error('private property canary'), encoded = JSON.stringify(runtime), originalParse = JSON.parse;
+    const accessed: PropertyKey[] = [];
+    const inspected = new Proxy(runtime, { get(target, key, receiver) {
+      accessed.push(key);
+      if (key === 'project') throw primary;
+      return Reflect.get(target, key, receiver);
+    } });
+    const parse = vi.spyOn(JSON, 'parse').mockImplementation((text, reviver) =>
+      text === encoded ? inspected : originalParse(text, reviver));
+    try {
+      fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: encoded });
+      const operation = vi.fn(), error = await rejected(withLifecycleLateUpload(owner, value, operation));
+      expect(error).toBe(primary); expect(accessed).toEqual(['name', 'project']);
+      expect(detail(error)).toBe('; lifecycle={"phase":"container-shape","cause":"exception","commandCode":null,"exitCode":null,"guard":"project"}');
+      expect(fixtureMocks.runCommand).toHaveBeenCalledOnce();
+      expect(fixtureMocks.spawn).not.toHaveBeenCalled(); expect(operation).not.toHaveBeenCalled();
+    } finally { parse.mockRestore(); }
+  });
+  it('container guard keeps original property and expected-member evaluation order on a valid tuple', async () => {
+    const encoded = JSON.stringify(runtime), originalParse = JSON.parse, access: string[] = [], members: unknown[] = [];
+    const config = [...runtime.config];
+    const includes = vi.spyOn(config, 'includes').mockImplementation((entry) => {
+      members.push(entry); return runtime.config.includes(entry);
+    });
+    const mount = new Proxy(runtime.mounts[0]!, { get(target, key, receiver) {
+      access.push('mount.' + String(key)); return Reflect.get(target, key, receiver);
+    } });
+    const inspected = new Proxy({ ...runtime, mounts: [mount], config }, { get(target, key, receiver) {
+      access.push(String(key)); return Reflect.get(target, key, receiver);
+    } });
+    const parse = vi.spyOn(JSON, 'parse').mockImplementation((text, reviver) =>
+      text === encoded ? inspected : originalParse(text, reviver));
+    try {
+      child();
+      const operation = vi.fn();
+      await withLifecycleLateUpload(owner, value, operation);
+      expect(access).toEqual(['name', 'project', 'running', 'image', 'id', 'mounts', 'mounts',
+        'mounts', 'mount.type', 'mounts', 'mount.name', 'mounts', 'mount.target', 'mounts', 'mount.rw',
+        'config', 'config', 'config', 'config', 'config', 'config', 'config', 'id', 'id', 'image', 'id']);
+      expect(members).toEqual(runtime.config); expect(includes).toHaveBeenCalledTimes(5);
+      expect(fixtureMocks.runCommand).toHaveBeenCalledTimes(2);
+      expect(fixtureMocks.spawn).toHaveBeenCalledOnce(); expect(operation).toHaveBeenCalledOnce();
+      expect(detail(undefined)).toBe('');
+    } finally { parse.mockRestore(); includes.mockRestore(); }
+  });
+  it.each(['image-call', 'image-result', 'image-shape', 'callback', 'settlement'] as const)(
+    'container guard leaves later %s output byte-identical without a stale guard', async (phase) => {
+      const primary = new Error('private later canary');
+      if (phase === 'image-call') fixtureMocks.runCommand.mockReset()
+        .mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(runtime) }).mockRejectedValueOnce(primary);
+      if (phase === 'image-result' || phase === 'image-shape') fixtureMocks.runCommand.mockReset()
+        .mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(runtime) })
+        .mockResolvedValueOnce({ code: phase === 'image-result' ? 1 : 0, stdout: 'private malformed' });
+      if (phase === 'callback') child();
+      if (phase === 'settlement') child(undefined, { value: primary });
+      const error = await rejected(withLifecycleLateUpload(owner, value, async () => {
+        if (phase === 'callback') throw primary;
+      }));
+      if (['image-call', 'callback', 'settlement'].includes(phase)) expect(error).toBe(primary);
+      expect(detail(error)).toBe('; lifecycle=' + JSON.stringify({
+        phase, cause: 'exception',
+        commandCode: phase === 'image-result' ? 1 : null, exitCode: null,
+      }));
+    });
+  it('container guard clears a previous invocation before a non-container failure', async () => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: 'null' });
+    const first = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    expect(detail(first)).toContain('"guard":"name"');
+    fixtureMocks.requireDocker.mockRejectedValueOnce(new Error('private next canary'));
+    const second = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    expect(detail(second)).toBe('; lifecycle={"phase":"docker","cause":"exception","commandCode":null,"exitCode":null}');
+  });
+  it('container guard source retains a frozen vocabulary, OTHER fallback and phase reset', async () => {
+    const source = await read('scripts/preservation-rehearsal.mjs');
+    const declaration = source.match(/const LIFECYCLE_CONTAINER_GUARDS = Object\.freeze\(\[([\s\S]*?)\]\);/)?.[1];
+    expect(declaration).toBeDefined();
+    expect([...declaration!.matchAll(/'([^']+)'/g)].map((match) => match[1])).toEqual(containerGuards);
+    expect(source).toContain("lifecycleLabel(LIFECYCLE_CONTAINER_GUARDS, guard)");
+    expect(source).toContain("labels.find((label) => label === value) ?? 'OTHER'");
+    const phase = source.slice(source.indexOf('function lifecyclePhase('), source.indexOf('function lifecycleCommand('));
+    expect(phase).toContain('lifecycleActive.guard = null');
+    const runtimeBody = source.slice(source.indexOf("  lifecyclePhase('container-shape');"),
+      source.indexOf("  lifecyclePhase('image-call');"));
+    expect(runtimeBody).not.toMatch(/\b(?:try|catch)\b|=>|\.every\(/);
+    ordered(runtimeBody, containerGuards.map((guard) => `lifecycleGuard('${guard}');`));
+    expect(runtimeBody.match(/requireEvidence\(/g)).toHaveLength(18);
+  });
   it.each(['stderr', 'stdin', 'error', 'close', 'json', 'utf8', 'overflow', 'protocol'] as const)(
     'classifies parent pre-ready %s without exposing listener arguments', async (kind) => {
       const c = child(), privateError = new Error('private listener canary');
