@@ -1122,7 +1122,7 @@ begin
   end loop;
   select * into i from public.items where owner_id=u and id=p_item_id for update nowait;
   if not found or i.version<>d.expected_version then raise exception using errcode='22023',message='Request conflict'; end if;
-  select private.item_lifecycle_manifest(coalesce(jsonb_agg(to_jsonb(im)),'[]')) into manifest from public.item_images im
+  select private.item_lifecycle_manifest(coalesce(jsonb_agg(to_jsonb(remaining_image)),'[]')) into manifest from public.item_images remaining_image
     where owner_id=u and item_id=p_item_id;
   insert into private.image_change_context values(pg_current_xact_id(),u,p_item_id,p_request_id,p_item_id,'begin_deletion',i.version,
     private.image_change_hash(to_jsonb(i)),private.image_change_hash(to_jsonb(i)));

@@ -15,6 +15,74 @@ PR [#9](https://github.com/drrowdev/stillroom-wardrobe/pull/9), branch
 `25a268712dc9158259608f5a4f17d11d9b9ad279`. This result update changes no
 executable inputs.
 
+## 22 September 2026 - CI13 BEGIN manifest alias correction
+
+**Unstaged source correction; CI13's runtime cause remains unobserved.**
+The same local GPT-6 Astra writer follows
+[release 5776270663](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5776270663),
+after retained Anthropic Claude Opus 5 review 154 approved C1-C6 and the
+coordinator's evidence corrections. Starting head
+`19c4d1fbc5702b21032bc487c46e3a4ae6095548`, tree
+`432aa66f1ce428057ab12228b002c09478531c06`, remains unchanged for this handoff.
+This stays within I10b R03/R12/R15 deletion scope; it is not native acceptance,
+publication, Stage C or deployment.
+
+`begin_prepared_item_deletion` declares row variables `i` and `im`. Its
+remaining-image manifest SELECT also used `im` as the relation alias in
+`to_jsonb(im)`. Only that expression and its FROM alias now use the distinct,
+undeclared `remaining_image`. The pending-image loop retains `im`, including
+its sole remaining `to_jsonb(im)`, path/id references and exact one-shot
+`forget_pending` context hash. No predicate, aggregate, cast, lock, old BEGIN
+call, receipt, helper, native guard, RPC validator or diagnostic changed.
+
+The collision is a source defect, not an observed `42702` or measured server
+configuration. Normal error conflict handling rejects ambiguity; variable
+preference can select the loop record rather than the intended relation row.
+That does not mean every input fails downstream: empty aggregates can
+coincide. Column preference retains the intended relation semantics. The
+ordinary success RPC contract is still HTTP 200 with non-null JSONB, not an
+expectation of 400/22023. The caller's `begin` boundary contains no actual
+status/body/SQLSTATE/transaction outcome and does not prove SQL entry.
+
+The SQL change is exactly two identifier substitutions, +13 bytes each:
+whole migration 82456 -> 82482 bytes, BEGIN body 3047 -> 3073 bytes.
+The new migration SHA256 is
+`28f0c87f9db6c643bc68d86843dffc905449280bd26483721503389281d7ec93`.
+Only runner bytecount and preservation source SHA change as executable
+migration pins. The existing unit outside-native-region pin deliberately
+becomes 77898 bytes/SHA256
+`d52909b330786719ac23a8d2c38beff13f5581ef25ff449fa46be3c88061e87e`.
+Inverting only those two manifest references reproduces the prior BEGIN
+and whole migration exactly. All SQL outside BEGIN remains 79409 bytes/SHA256
+`f0ef4c25c8ef71dab06ead009baac5f2710293e8fb677d5c04988f1722eb46e8`.
+The 4584-byte native guard and installer MD5
+`636fb77a3c954f4a23d78c7339ffef95` are frozen, as are the earlier ten
+migrations, callers, request helper, fixtures, caps/IPC and browser/probe state.
+
+Four focused static tests positively assert the intended SELECT, distinct
+alias, unchanged loop context, exact inverse and frozen outside-BEGIN/native
+bytes. Before the SQL edit, the CI13 selector reported three failures and one
+pass (131 tests excluded by the selector). The identical selector then passed
+all four; no test-scaffold correction was needed. The same five approved unit
+suites passed all 1778 tests in one invocation. Three-file scoped ESLint and
+`tsc --noEmit` passed with approved Node 24.19.0 and existing locked dependencies.
+These tests do not parse or execute PostgreSQL, measure its configuration or
+prove native Storage behavior.
+
+The release records terminal CI13: database failed at the furthest `begin`
+boundary, exact cleanup passed, and downstream gates were skipped. The source
+collision is consistent with, not established as, that failure's cause.
+App passed 3042 unit tests and 730 browser tests with four existing skips and
+no flaky summary. Oversized input returned 413 at retry 0; all twelve
+parallel-page records had no first 400. Non-recurrence is not a fix or waiver
+of earlier failures. Eight successful capture steps are not visual acceptance;
+Apple success is not device/HEIC acceptance. R2 remains recorded-project
+disposable-only migration confirmation, not a fresh hosted query or universal
+external assertion; contrary persistent-application evidence requires a hold.
+No backend/browser/Actions/probe, new dependency/parser, hosted operation or
+type generation was run. Focused independent closure and separate publication
+authorization remain pending.
+
 ## 22 September 2026 - CI12 native lock boundary and bounded caller evidence
 
 **Unstaged source correction; native behavior and CI12 cause remain unverified.**

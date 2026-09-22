@@ -362,8 +362,8 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
     expect(createHash('sha256').update(lock).digest('hex')).toBe('2309736d7cdee9a737055ea0167ad50182ab410be4d458e7d17e6a2850473dfe');
     const guard = body(sql, 'private.guard_item_object_publication');
     const outside = sql.replace(guard, '');
-    expect(Buffer.byteLength(outside)).toBe(77872);
-    expect(createHash('sha256').update(outside).digest('hex')).toBe('8e29e574045ed91daaa60011c28fbc75203cd2a9cc15994591ca4d28a2a85f4e');
+    expect(Buffer.byteLength(outside)).toBe(77898);
+    expect(createHash('sha256').update(outside).digest('hex')).toBe('d52909b330786719ac23a8d2c38beff13f5581ef25ff449fa46be3c88061e87e');
   });
   it('CI12 translates only the native helper call 22023 and leaves other SQLSTATEs unmatched', async () => {
     const guard = body(await source, 'private.guard_item_object_publication');
@@ -455,6 +455,48 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
     expect(finish).toContain('private.finish_item_deletion_v9');
     expect(finish).toContain("phase='completed'");
     expect(body(sql, 'public.reconcile_item_deletion_target')).not.toMatch(/p_removed|p_success|p_verified|p_status/);
+  });
+  it('CI13 uses a distinct relation alias for the exact remaining-image manifest SELECT', async () => {
+    const begin = body(await source, 'public.begin_prepared_item_deletion');
+    expect(begin).toContain("select private.item_lifecycle_manifest(coalesce(jsonb_agg(to_jsonb(remaining_image)),'[]')) into manifest from public.item_images remaining_image\n"
+      + '    where owner_id=u and item_id=p_item_id;');
+    const declarations = begin.slice(0, begin.indexOf('\nbegin\n'));
+    expect(declarations).toContain('i public.items; im public.item_images;');
+    expect(declarations).not.toMatch(/\bremaining_image\b/);
+    expect(begin.match(/\bremaining_image\b/g)).toHaveLength(2);
+    expect(begin.match(/to_jsonb\(remaining_image\)/g)).toHaveLength(1);
+  });
+  it('CI13 retains the pending-loop record and exact forget-pending context hash', async () => {
+    const begin = body(await source, 'public.begin_prepared_item_deletion');
+    expect(begin.match(/to_jsonb\(im\)/g)).toHaveLength(1);
+    expect(begin).toContain("for im in select * from public.item_images where owner_id=u and item_id=p_item_id and state='pending' order by id for update nowait loop");
+    expect(begin).toContain('name in(im.main_path,im.thumb_path)');
+    expect(begin).toContain("and image_id=im.id and category='pending' and reconciled_absent)<>2");
+    expect(begin).toContain("insert into private.image_change_context values(pg_current_xact_id(),u,p_item_id,p_request_id,im.id,'forget_pending',null,\n"
+      + "      private.image_change_hash(to_jsonb(im)-array['main_path','thumb_path']),null);\n"
+      + '    delete from public.item_images where owner_id=u and id=im.id;');
+  });
+  it('CI13 changes exactly two manifest identifiers and preserves every other SQL byte', async () => {
+    const sql = await source, begin = body(sql, 'public.begin_prepared_item_deletion');
+    expect(Buffer.byteLength(sql)).toBe(82482);
+    expect(Buffer.byteLength(begin)).toBe(3073);
+    const original = begin.replace('to_jsonb(remaining_image)', 'to_jsonb(im)')
+      .replace('from public.item_images remaining_image', 'from public.item_images im');
+    expect(Buffer.byteLength(original)).toBe(3047);
+    expect(createHash('sha256').update(original).digest('hex')).toBe('e6d7e2781caa09b9fb31b4d5d567de12129c2d1f4279026e880ba0a3d6223ed8');
+    const restored = sql.replace(begin, original);
+    expect(Buffer.byteLength(restored)).toBe(82456);
+    expect(createHash('sha256').update(restored).digest('hex')).toBe('4709017051095186ac1cf3cdcfe36d81f8afe4da3a78db8628e7369a49690dd5');
+  });
+  it('CI13 freezes all SQL outside BEGIN including the native lock boundary repair', async () => {
+    const sql = await source, begin = body(sql, 'public.begin_prepared_item_deletion');
+    const outside = sql.replace(begin, '');
+    expect(Buffer.byteLength(outside)).toBe(79409);
+    expect(createHash('sha256').update(outside).digest('hex')).toBe('f0ef4c25c8ef71dab06ead009baac5f2710293e8fb677d5c04988f1722eb46e8');
+    const native = body(sql, 'private.guard_item_object_publication');
+    expect(Buffer.byteLength(native)).toBe(4584);
+    expect(createHash('sha256').update(native).digest('hex')).toBe('ed9fe5188328be9582ef6a7f48dd028e4301996b244c9f54591130548ca31f29');
+    expect(createHash('md5').update(native).digest('hex')).toBe('636fb77a3c954f4a23d78c7339ffef95');
   });
   it('contains explicit byte verification metadata comparisons at preflight and service completion', async () => {
     const sql = await source;
