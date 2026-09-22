@@ -208,6 +208,8 @@ export function describeStartupOrResetFailure(result, elapsedMs) {
     '20260911040000_ai_analysis_backend.sql',
     '20260911200000_checked_ai_item_save.sql',
     '20260913120000_item_lifecycle.sql',
+    '20260921193000_azure_terra_analysis.sql',
+    '20260922020000_checked_image_changes.sql',
   ];
   let lastAnnouncement = -1;
   for (const [index, filename] of migrations.entries()) {

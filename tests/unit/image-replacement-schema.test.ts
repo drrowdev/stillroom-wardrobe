@@ -83,6 +83,16 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
     expect(body(sql, 'public.complete_image_change')).not.toContain("interval '7 days'");
     expect(body(sql, 'public.image_recovery_versions')).toContain('order by id limit 40');
   });
+  it.each([
+    ['private.reserve_image_change', "a.kind<>(case when recovery then 'recovery' else 'replacement' end)"],
+    ['public.image_change_preflight', "image.state<>(case when a.state='reserved' then 'pending' else 'ready' end)"],
+  ])('keeps CASE operands parenthesized in the PL/pgSQL IF condition of %s', async (name, comparison) => {
+    const definition = body(await source, name);
+    expect(definition).toContain(comparison);
+    expect(definition).not.toMatch(/<>\s*case\b/i);
+    const predecessor = await readFile(new URL('../../supabase/migrations/20260910070000_checked_item_save.sql', import.meta.url), 'utf8');
+    expect(body(predecessor, 'private.item_save_current')).toContain("im.state<>(case a.state when 'reserved' then 'pending' else 'ready' end)");
+  });
   it('keeps read-policy admission nonlocking while the authoritative native mutation guard retains its lock', async () => {
     const sql = await source, policy = body(sql, 'private.may_delete_storage');
     expect(policy).not.toMatch(/image_change_lock|\bfor (?:share|update|no key update|key share)\b/i);

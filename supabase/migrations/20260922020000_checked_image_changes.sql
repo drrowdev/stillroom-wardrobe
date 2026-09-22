@@ -522,7 +522,7 @@ begin
   select * into a from private.image_change_attempts where owner_id=p_owner and request_id=(p_intent->>'requestId')::uuid for update nowait;
   if found then
     if a.fingerprint is distinct from fingerprint or a.state='cancelled'
-      or a.kind<>case when recovery then 'recovery' else 'replacement' end
+      or a.kind<>(case when recovery then 'recovery' else 'replacement' end)
       or private.image_change_fenced(p_owner,a.item_id) then
       raise exception using errcode='22023',message='Request conflict';
     end if;
@@ -683,7 +683,7 @@ begin
     or private.image_change_fenced(u,a.item_id) then raise exception using errcode='22023',message='Request conflict'; end if;
   if a.state='reserved' then perform private.image_change_intent(u,p_intent); end if;
   select * into image from public.item_images where owner_id=u and item_id=a.item_id and id=a.image_id for share nowait;
-  if not found or image.state<>case when a.state='reserved' then 'pending' else 'ready' end
+  if not found or image.state<>(case when a.state='reserved' then 'pending' else 'ready' end)
     or image.description_version<>1 or image.retired_at is not null
     or to_jsonb(image)-array['owner_id','item_id','state','retired_at','main_path','thumb_path','created_at','description_version']
       is distinct from p_intent->'image' then

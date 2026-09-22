@@ -115,6 +115,48 @@ Real native GET behavior, normalized SQL conflict/rollback, backend races,
 fresh/populated preservation and generated types still require authorized CI.
 No local backend, publication or unrelated WebKit change was made.
 
+### Stage A CI1 - startup syntax repair candidate, 22 September 2026
+
+Draft PR [#30](https://github.com/drrowdev/stillroom-wardrobe/pull/30) published
+the reviewed candidate as `c8cb642d8a0e5b2f698c90cfd06f7525e2b55d6c`.
+The [scoped repair release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5770594807)
+records actual CI run `35681262229`, database job `106598507584`, failing
+`npm run db:start` at 02:57:12Z with SQLSTATE `42601` and statement index 36.
+All later backend, preservation, security, rehearsal and generated-type/artifact
+gates were skipped, not passed. The generic Docker warning is not a diagnosis.
+The exact known-name classifier stopped at migration nine, so its count/last
+index of nine could not attribute this failure to the ninth migration.
+
+Source inspection maps the new migration's zero-based statement 36 to
+`private.reserve_image_change`. Its `IF` comparison used an unparenthesized
+SQL `CASE`, allowing the inner `THEN` to terminate PL/pgSQL's condition scan.
+`public.image_change_preflight` contained the same defect. Both operands are
+now parenthesized, matching the accepted `private.item_save_current` pattern.
+Only these two SQL lines changed; the ten predecessors, predicates, lock order,
+grants and state transitions are unchanged. This is a source-established
+syntax correction consistent with CI's ordinal, not a local SQL execution or
+claim to have recovered the withheld raw error.
+
+The diagnostic allowlist now includes exactly migrations ten and eleven;
+unknown/near-miss names remain excluded, with the same closed report, byte
+limits and statement-index parsing. The eleventh migration is 82,235 bytes,
+SHA256 `678873e921f2077c8820a85c1855d432c375269f732bd27bf27daa15cb480596`;
+its inventory pins were refreshed. Both modern guard/policy body MD5s and all
+legacy pins remain unchanged.
+
+Four new focused source/diagnostic regressions failed against the published
+source before the correction (expected exit 1). Afterward, the approved Node
+unit command selecting `image-replacement-schema`, `local-backend`,
+`preservation`, `ci-storage-guard`, `image-replacement` and
+`item-lifecycle-schema` passed all **1,134 tests across six files** (exit 0).
+Scoped ESLint and `tsc --noEmit` also exited 0. No local SQL, backend, parser
+package or new tool was used. Actual migration compilation and all skipped
+backend/type gates still require reviewed publication and fresh authorized CI.
+At the repair release, App had passed its pre-browser gates including canary
+and dependency checks but browser was still running; Apple diagnostic passed.
+Neither is represented as an overall CI pass, physical-device acceptance or
+a generated-type artifact. This repair remains unstaged pending focused review.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling
