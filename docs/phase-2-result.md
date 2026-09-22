@@ -15,6 +15,108 @@ PR [#9](https://github.com/drrowdev/stillroom-wardrobe/pull/9), branch
 `25a268712dc9158259608f5a4f17d11d9b9ad279`. This result update changes no
 executable inputs.
 
+## 22 September 2026 - CI19 prepared-deletion integration amendment
+
+**Two-path unstaged amendment; the real backend journey is not yet revalidated.**
+The same persistent local GPT-6 Astra writer follows
+[proposal 5783644168](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5783644168)
+and [release 5783775439](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5783775439),
+including all A1-A6 corrections from actual retained Anthropic Claude Opus 5
+critique 181. Base `e225fe77a892b57b90eda4c2539ea794c2ad052d`, tree
+`1757fd1cbe7e82a18632d7ec19779e41f435b230`. Only the existing integration
+lifecycle test and this additive result section are changed; production,
+schema, types, dependencies, configuration, workflows, browser tests and unit
+tests remain fixed. This prospectively releases the integration test, without
+rewriting its historical freeze or the published 38-entry manifest.
+
+Coordinator-observed CI19 `35778282583`, attempt 1, failed in DB job
+`106916953079` at `npm run test:integration`. The closed lifecycle record at
+20:13:11.490 UTC reports `resume`, checkpoint `delete.dialog`, last completed
+`delete.route`, timeout, verified cleanup, and all three interception flags
+false. Three other page cases passed. The unchanged test was clicking the row's
+old "Delete permanently" control; Stage C exposes "Review deletion" there and
+reserves irreversible confirmation for the subsequently prepared dialog.
+This explains the observed failure before preparation or DELETE. The later
+completion-copy, redundant-DELETE and cleanup mismatches were source-predicted,
+not separately executed failures.
+
+The amended journey checks the named prepared dialog, zero DELETEs before
+authorization, unchanged item version, and the original durable inventory:
+two registered targets, no pending/unmanifested targets, no begin receipt.
+It retains exact-main upstream removal followed by one-shot delivery abort,
+all three interception flags, the quiet interval, denied restore, and original
+nonce, inventory, claim, version and manifest checks through reload/status.
+Resume must not redispatch the already-removed main file. One synchronous
+monotonic sequence shared with the existing DELETE request listener reserves
+each reconciliation-response slot before awaiting its body. After all tracked
+proof work settles, the exact interleaving must be main ordinal 1 absent,
+thumbnail ordinal 2 present, thumbnail DELETE, then ordinal 2 absent.
+Together with the initial exact-main dispatch and two-target prepared inventory,
+this proves the ordinal/path mapping rather than inferring it from the parser.
+There must be exactly two DELETEs overall, three post-resume reconciliation
+responses and one removed-thumbnail response.
+
+The new response observer checks origin/RPC path and bounded successful
+two-key responses through the existing typed parser. It reads no request body
+or nonce. The surrounding operation/status/claim/completion assertions bind
+the original item/request; the observer does not independently prove that
+identity. No raw body, header, URL, ID or error text is emitted. Existing
+4096-byte response guards remain. Durable same-request completion and actual
+item/status absence are required alongside the unchanged history and peer
+isolation checks; generic absence is not success.
+
+Failure cleanup closes the page first and uses only ordinary fixture sessions.
+It reuses `reversibleDeletion()` including its null-begin guard, checks
+cancellation, and never authorizes a reversible preparation to clean it.
+Already-authorized cleanup handles at most the two unique known targets,
+reconciles before removing present bytes, verifies no remaining target, then
+checks finish and the durable completed receipt. An already-completed operation
+requires item/status absence and the existing clean end-state checks, with no
+finish replay or legacy fallback. Missing/cancelled operations retain the
+exact-path legacy cleanup. Successful cancellation after ordinary preparation
+expiry is handled, not automatically a cleanup failure; inconsistent state,
+actual cleanup failure or exhaustion of the unchanged deadline remains failure.
+Original main/proof errors and peer/profile/history/Auth cleanup are preserved.
+
+This explicitly replaces the page's redundant native missing-DELETE assertion
+with real page reconciliation and no redispatch; it is not identical coverage.
+Unchanged `item-lifecycle.sessions.mjs` and `image-replacement.sessions.mjs`
+retain native missing-response classification and ordinal reconciliation and
+run before these page cases. No extra HTTP call or case manufactures that
+old page outcome. The original two lifecycle tests remain, with unchanged
+120000-ms test, 110000-ms fixture, 35000-ms cleanup reserve, 5000-ms action and
+10000-ms navigation limits, zero retries and one worker. No marker field,
+1024-byte limit or fallback changes; new checkpoint tags are closed and no
+longer than the original longest tag.
+
+With hash-verified pinned Node 24.19.0, actual sequential local commands
+`node node_modules/eslint/bin/eslint.js tests/integration/item-lifecycle.spec.ts`
+and `node node_modules/typescript/bin/tsc --noEmit` both exited 0
+(20:42:55.962-20:45:33.786 UTC). `node scripts/scan-secrets.mjs` exited 0,
+checking 257 text files; no local canary was supplied, so this is not a new
+canary test. `git diff --check` and the two-path/frozen-identity checks passed:
+all 37 other published raw/filtered entries remain exact, and removing only
+this additive section restores the prior result document byte-for-byte.
+The failure-marker source is unchanged, including fields, fallback and bound.
+The maximum checkpoint-tag length remains 23; a worst-case combination of
+allowed longest tags/reasons, longest case label and false booleans encodes to
+437 UTF-8 bytes including its newline, within the unchanged 1024-byte bound.
+Both lifecycle cases and all configuration/action/deadline limits remain.
+No local browser/list/server/backend/SQL operation, test execution, Actions
+access or publication was performed. Source checks cannot establish repaired
+live behavior. Focused closure, separate publication and fresh ordinary native
+validation remain required.
+
+[Coordinator CI19 evaluation 5783707561](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5783707561)
+records App success (3476 units in 33 files, 757 browser passes, four existing
+skips, quality/dependencies/canary), Apple success and actual 27-frame static
+review without an observed blocker. These are not live journey acceptance.
+Native backend security, served rehearsal and generated-type gates after the
+failed integration step did not run. The original local 756-pass/four-skip/
+one-failure raw-boundary result and local dependency CRLF guard/audit block
+remain open; native nonrecurrence does not fix or supersede them. No merge,
+deployment, hosted or private-photo/paid-provider activation authority follows.
+
 ## 22 September 2026 - I10b Stage C local candidate
 
 **Unstaged frontend candidate; full browser validation remains blocked.**
