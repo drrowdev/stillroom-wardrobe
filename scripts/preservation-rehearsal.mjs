@@ -389,16 +389,59 @@ export async function requireLifecycleClaimFence(ownerId, itemId, imageId) {
   console.log('PASS: I08 labelled privileged post-claim publication refusal; not ordinary upload proof');
 }
 
+const LIFECYCLE_PHASES = Object.freeze(['input', 'docker', 'container-call', 'container-result', 'container-shape',
+  'image-call', 'image-result', 'image-shape', 'spawn', 'input-write', 'await-ready', 'callback', 'settlement', 'cleanup']);
+const LIFECYCLE_CAUSES = Object.freeze(['refusal', 'exception', 'process-error', 'process-close', 'stdin-error',
+  'stderr', 'output-cap', 'utf8', 'json', 'protocol', 'deadline', 'cleanup']);
+const LIFECYCLE_CHILD_PHASES = Object.freeze(['input', 'ancestors', 'item-absence', 'request', 'write',
+  'file-poll', 'ready-check', 'ready', 'complete', 'response', 'cleanup']);
+const LIFECYCLE_CHILD_CAUSES = Object.freeze(['refusal', 'exception', 'deadline', 'early-response',
+  'request-error', 'response-error', 'response-aborted', 'body-cap', 'response-contract', 'cleanup']);
+const lifecycleErrorAssociations = new WeakMap();
+let lifecycleActive = null, lifecycleFailure = null;
+const lifecycleLabel = (labels, value) => labels.find((label) => label === value) ?? 'OTHER';
+const lifecycleInteger = (value, min, max) => Number.isInteger(value) && value >= min && value <= max ? value : null;
+const lifecyclePrimitive = (value) => value === undefined ? 'undefined' : value === null ? 'null'
+  : value === false ? 'false' : Object.is(value, 0) ? 'zero' : Object.is(value, -0) ? 'negative-zero' : value === '' ? 'empty' : null;
+function lifecyclePhase(phase) {
+  if (lifecycleActive) { lifecycleActive.phase = lifecycleLabel(LIFECYCLE_PHASES, phase); lifecycleActive.commandCode = null; }
+}
+function lifecycleCommand(result) {
+  try {
+    const descriptor = result && typeof result === 'object' ? Object.getOwnPropertyDescriptor(result, 'code') : undefined;
+    if (lifecycleActive) lifecycleActive.commandCode = descriptor && Object.hasOwn(descriptor, 'value')
+      ? lifecycleInteger(descriptor.value, 0, 255) : null;
+  } catch { /* Diagnostic reflection cannot change the original result guard. */ }
+}
+function lifecycleFirst(state, cause) {
+  if (state && !state.first) state.first = { phase: state.phase, cause: lifecycleLabel(LIFECYCLE_CAUSES, cause),
+    commandCode: state.commandCode, exitCode: state.exitCode, ...state.child };
+}
+export function lifecycleFailureDetail(error) {
+  const failure = lifecycleFailure;
+  lifecycleFailure = null;
+  if (!failure) return '';
+  const associated = error !== null && (typeof error === 'object' || typeof error === 'function')
+    ? lifecycleErrorAssociations.get(error) === failure
+    : failure.primitive !== null && lifecyclePrimitive(error) === failure.primitive;
+  try { return associated ? '; lifecycle=' + JSON.stringify(failure.first) : ''; }
+  catch { return ''; }
+}
+
 export async function lifecycleStorageRuntime(run = runCommand) {
   assertRehearsalEnvironment(process.env, []);
+  lifecyclePhase('docker');
   await requireDocker(run);
   const container = 'supabase_storage_stillroom-wardrobe';
   const template = '{"name":{{json .Name}},"project":{{json (index .Config.Labels "com.supabase.cli.project")}},'
     + '"image":{{json .Config.Image}},"id":{{json .Image}},"running":{{json .State.Running}},'
     + '"mounts":[{{range $i,$m := .Mounts}}{{if $i}},{{end}}{"type":{{json $m.Type}},"name":{{json $m.Name}},"target":{{json $m.Destination}},"rw":{{$m.RW}}}{{end}}],'
     + '"config":[{{range .Config.Env}}{{if or (eq (index (split . "=") 0) "STORAGE_BACKEND") (eq (index (split . "=") 0) "FILE_STORAGE_BACKEND_PATH") (eq (index (split . "=") 0) "TENANT_ID") (eq (index (split . "=") 0) "GLOBAL_S3_BUCKET")}}{{json .}},{{end}}{{end}}null]}';
+  lifecyclePhase('container-call');
   const result = await run('docker', ['container', 'inspect', '--format', template, container], { maxOutputBytes: 4096 });
+  lifecyclePhase('container-result'); lifecycleCommand(result);
   requireEvidence(result.code === 0);
+  lifecyclePhase('container-shape');
   const value = JSON.parse(result.stdout);
   requireEvidence(value.name === '/' + container && value.project === 'stillroom-wardrobe' && value.running === true
     && /^(?:public\.ecr\.aws\/supabase|supabase)\/storage-api:v1\.70\.3$/.test(value.image)
@@ -408,9 +451,12 @@ export async function lifecycleStorageRuntime(run = runCommand) {
     && Array.isArray(value.config) && value.config.length === 5
     && ['STORAGE_BACKEND=file', 'FILE_STORAGE_BACKEND_PATH=/mnt', 'TENANT_ID=stub', 'GLOBAL_S3_BUCKET=stub', null]
       .every((entry) => value.config.includes(entry)));
+  lifecyclePhase('image-call');
   const image = await run('docker', ['image', 'inspect', '--format', '{"id":{{json .Id}},"digests":{{json .RepoDigests}}}', value.id],
     { maxOutputBytes: 4096 });
+  lifecyclePhase('image-result'); lifecycleCommand(image);
   requireEvidence(image.code === 0);
+  lifecyclePhase('image-shape');
   const pinned = JSON.parse(image.stdout);
   requireEvidence(pinned.id === value.id && Array.isArray(pinned.digests) && pinned.digests.length >= 1
     && pinned.digests.length <= 4 && pinned.digests.every((entry) =>
@@ -421,6 +467,12 @@ export async function lifecycleStorageRuntime(run = runCommand) {
 
 // Executed only inside the verified owned FileBackend container. Its stdin is the sole credential channel.
 export async function lifecycleStreamChild() {
+  const phases = ['input', 'ancestors', 'item-absence', 'request', 'write', 'file-poll', 'ready-check', 'ready', 'complete', 'response', 'cleanup'];
+  const causes = ['refusal', 'exception', 'deadline', 'early-response', 'request-error', 'response-error', 'response-aborted', 'body-cap', 'response-contract', 'cleanup'];
+  let phase = 'input', first = null;
+  const observe = (cause) => { if (!first) first = {
+    phase: phases.find((label) => label === phase) ?? 'OTHER', cause: causes.find((label) => label === cause) ?? 'OTHER',
+  }; };
   const { request } = await import('node:http');
   const fs = await import('node:fs/promises');
   const { createInterface } = await import('node:readline');
@@ -430,11 +482,12 @@ export async function lifecycleStreamChild() {
   let requestClosed = Promise.resolve(), responseDone = Promise.resolve();
   let resolveResponse;
   let status = null, denied = false, released = false;
-  const demand = (condition) => { if (!condition) throw new Error('EVIDENCE_REQUIRED'); };
+  const demand = (condition) => { if (!condition) { observe('refusal'); throw new Error('EVIDENCE_REQUIRED'); } };
   const emit = (value) => process.stdout.write(JSON.stringify(value) + '\n');
-  const cleanup = (action) => { try { action(); } catch { cleanupFailed = true; } };
+  const cleanup = (action) => { try { action(); } catch { observe('cleanup'); cleanupFailed = true; } };
   try {
     timer = setTimeout(() => {
+      observe('deadline');
       primaryFailed = true;
       cleanup(() => req?.destroy(new Error('EVIDENCE_REQUIRED')));
       cleanup(() => response?.destroy());
@@ -458,26 +511,29 @@ export async function lifecycleStreamChild() {
         throw error;
       }
     };
+    phase = 'ancestors';
     for (const name of ['/mnt', '/mnt/stub', '/mnt/stub/stub', '/mnt/stub/stub/wardrobe',
       `/mnt/stub/stub/wardrobe/${value.owner}`]) await safeDirectory(name);
+    phase = 'item-absence';
     demand(!await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}`));
     responseDone = new Promise((resolve) => { resolveResponse = resolve; });
+    phase = 'request';
     req = request({ hostname: '127.0.0.1', port: 5000,
       path: `/object/wardrobe/${value.owner}/${value.item}/${value.image}/thumb.jpg`, method: 'POST',
       headers: { Authorization: `Bearer ${value.token}`, 'Content-Type': 'image/jpeg', 'Content-Length': '4', 'x-upsert': 'false' } });
     requestClosed = new Promise((resolve) => req.once('close', resolve));
-    req.once('error', () => { primaryFailed = true; resolveResponse(); });
+    req.once('error', () => { observe('request-error'); primaryFailed = true; resolveResponse(); });
     req.once('response', (incoming) => {
       response = incoming; status = incoming.statusCode ?? null;
-      if (!released) primaryFailed = true;
+      if (!released) { observe('early-response'); primaryFailed = true; }
       const chunks = [];
       incoming.on('data', (chunk) => {
         bytes += chunk.length;
-        if (bytes > 4096) { primaryFailed = true; incoming.destroy(); }
+        if (bytes > 4096) { observe('body-cap'); primaryFailed = true; incoming.destroy(); }
         else chunks.push(chunk);
       });
-      incoming.once('error', () => { primaryFailed = true; resolveResponse(); });
-      incoming.once('aborted', () => { primaryFailed = true; resolveResponse(); });
+      incoming.once('error', () => { observe('response-error'); primaryFailed = true; resolveResponse(); });
+      incoming.once('aborted', () => { observe('response-aborted'); primaryFailed = true; resolveResponse(); });
       incoming.once('end', () => {
         try {
           const body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
@@ -486,13 +542,15 @@ export async function lifecycleStreamChild() {
             && body.statusCode === '403' && body.code === 'AccessDenied' && body.error === 'Unauthorized'
             && body.message === 'Not available';
           demand(denied);
-        } catch { primaryFailed = true; }
+        } catch { observe('response-contract'); primaryFailed = true; }
         resolveResponse();
       });
     });
+    phase = 'write';
     req.write(Buffer.from([255, 216]));
     let ready = false;
     const started = Date.now();
+    phase = 'file-poll';
     for (let attempt = 0; attempt < 100 && Date.now() - started < 5000 && !primaryFailed; attempt++) {
       await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}`);
       await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}/${value.image}`);
@@ -508,29 +566,48 @@ export async function lifecycleStreamChild() {
       }
       await new Promise((resolve) => { pollTimer = setTimeout(resolve, 50); });
     }
+    phase = 'ready-check';
     demand(ready && Date.now() - started < 5000 && !primaryFailed && !response);
+    phase = 'ready';
     emit({ stage: 'ready', partialBytes: 2 });
+    phase = 'complete';
     const command = await iterator.next();
     demand(!command.done && command.value === 'complete' && !primaryFailed);
     released = true;
+    phase = 'response';
     req.end(Buffer.from([255, 217]));
     await responseDone; await requestClosed;
     demand(denied && !primaryFailed);
-  } catch { primaryFailed = true; }
+  } catch { observe('exception'); primaryFailed = true; }
+  phase = 'cleanup';
   cleanup(() => req?.destroy());
   cleanup(() => response?.destroy());
   if (!req) cleanup(() => resolveResponse?.());
-  try { await responseDone; await requestClosed; } catch { cleanupFailed = true; }
+  try { await responseDone; await requestClosed; } catch { observe('cleanup'); cleanupFailed = true; }
   cleanup(() => clearTimeout(timer));
   cleanup(() => clearTimeout(pollTimer));
   cleanup(() => lines.close());
   cleanup(() => process.stdin.destroy());
-  try { emit({ stage: 'settled', status, bodyBytes: bytes > 4096 ? null : bytes, denied, failed: primaryFailed || cleanupFailed }); }
+  try { emit({ stage: 'settled', status, bodyBytes: bytes > 4096 ? null : bytes, denied, failed: primaryFailed || cleanupFailed,
+    ...(primaryFailed || cleanupFailed ? first : {}) }); }
   catch { cleanupFailed = true; }
   if (primaryFailed || cleanupFailed) process.exitCode = 1;
 }
 
 export async function withLifecycleLateUpload(owner, value, operation) {
+  const state = { phase: 'input', commandCode: null, exitCode: null, child: {}, first: null, primitive: null };
+  lifecycleActive = state; lifecycleFailure = null;
+  try { return await lifecycleLateUpload(owner, value, operation, state); }
+  catch (error) {
+    lifecycleFirst(state, 'exception');
+    lifecycleFailure = state;
+    if (error !== null && (typeof error === 'object' || typeof error === 'function')) lifecycleErrorAssociations.set(error, state);
+    else state.primitive = lifecyclePrimitive(error);
+    throw error;
+  } finally { lifecycleActive = null; }
+}
+
+async function lifecycleLateUpload(owner, value, operation, state) {
   assertLifecycleFixture(process.env, owner.uid, value.p_item.id);
   const claims = jwtClaims(owner.token);
   requireEvidence(claims?.role === 'authenticated' && claims.sub === owner.uid && typeof operation === 'function'
@@ -538,44 +615,60 @@ export async function withLifecycleLateUpload(owner, value, operation) {
   const container = await lifecycleStorageRuntime();
   const input = JSON.stringify({ owner: owner.uid, item: value.p_item.id, image: value.p_image.id, token: owner.token });
   requireEvidence(Buffer.byteLength(input) <= 8192);
+  lifecyclePhase('spawn');
   const child = spawn('docker', ['exec', '-i', container, 'env', '-i', '/usr/local/bin/node', '--input-type=module',
     '-e', `await (${lifecycleStreamChild.toString()})();`], {
     cwd: ROOT, env: commandEnvironment(), shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
   });
   let primaryFailed = false, primaryValue, cleanupFailed = false, cleanupValue, failed = false;
   let readySeen = false, settled = false, buffer = '', outputBytes = 0, rejectReady, resolveReady, resolveClosed;
-  const capture = (error) => { if (!cleanupFailed) { cleanupFailed = true; cleanupValue = error; } };
+  const capture = (error) => { lifecycleFirst(state, 'cleanup'); if (!cleanupFailed) { cleanupFailed = true; cleanupValue = error; } };
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   void ready.catch(() => {});
-  const fail = () => { failed = true; rejectReady(new Error('EVIDENCE_REQUIRED')); };
+  const fail = (cause) => { lifecycleFirst(state, cause); failed = true; rejectReady(new Error('EVIDENCE_REQUIRED')); };
   const closed = new Promise((resolve) => {
     resolveClosed = resolve;
-    child.once('error', () => { fail(); resolve(1); });
-    child.once('close', (code) => { if (!settled) fail(); resolve(code); });
+    child.once('error', () => { fail('process-error'); resolve(1); });
+    child.once('close', (code) => { state.exitCode = lifecycleInteger(code, 0, 255); if (!settled) fail('process-close'); resolve(code); });
   });
   const terminate = () => {
     try { if (!child.stdin.writableEnded && !child.stdin.destroyed) child.stdin.end('cancel\n'); } catch (error) { capture(error); }
   };
   // Child independently bounds its request to 15s, even if the docker client is interrupted.
   const timer = setTimeout(() => {
-    fail(); terminate();
+    fail('deadline'); terminate();
     try { child.kill('SIGTERM'); } catch (error) { capture(error); }
     // Failure, never successful settlement: an unacknowledged closure blocks this fixture.
     resolveClosed(1);
   }, 15_000);
-  child.stdin.on('error', fail);
-  child.stderr.on('data', fail);
+  child.stdin.on('error', () => fail('stdin-error'));
+  child.stderr.on('data', () => fail('stderr'));
   child.stdout.on('data', (chunk) => {
+    let cause = 'output-cap';
     try {
       outputBytes += chunk.length;
       requireEvidence(outputBytes <= 1024);
+      cause = 'utf8';
       buffer += new TextDecoder('utf-8', { fatal: true }).decode(chunk);
       let newline;
       while ((newline = buffer.indexOf('\n')) >= 0) {
+        cause = 'json';
         const record = JSON.parse(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1);
+        cause = 'protocol';
         if (!readySeen && record.stage === 'ready' && record.partialBytes === 2 && Object.keys(record).length === 2) {
           readySeen = true; resolveReady();
         } else {
+          if (record !== null && typeof record === 'object' && !Array.isArray(record)
+            && Object.hasOwn(record, 'stage') && record.stage === 'settled'
+            && Object.hasOwn(record, 'failed') && record.failed === true && !state.first) {
+            const own = (key) => Object.hasOwn(record, key) ? record[key] : undefined;
+            state.child = {
+              childPhase: lifecycleLabel(LIFECYCLE_CHILD_PHASES, own('phase')),
+              childCause: lifecycleLabel(LIFECYCLE_CHILD_CAUSES, own('cause')),
+              status: lifecycleInteger(own('status'), 100, 599), bodyBytes: lifecycleInteger(own('bodyBytes'), 0, 1024),
+              denied: typeof own('denied') === 'boolean' ? own('denied') : null, failed: true,
+            };
+          }
           requireEvidence(!settled && readySeen && record.stage === 'settled' && Object.keys(record).sort().join(',')
             === 'bodyBytes,denied,failed,stage,status');
           settled = true;
@@ -583,16 +676,21 @@ export async function withLifecycleLateUpload(owner, value, operation) {
             && Number.isSafeInteger(record.bodyBytes) && record.bodyBytes >= 0 && record.bodyBytes <= 4096);
         }
       }
-    } catch { fail(); terminate(); }
+    } catch { fail(cause); terminate(); }
   });
   try {
+    lifecyclePhase('input-write');
     child.stdin.write(input + '\n');
+    lifecyclePhase('await-ready');
     await ready;
+    lifecyclePhase('callback');
     await operation();
     requireEvidence(!failed);
+    lifecyclePhase('settlement');
     child.stdin.end('complete\n');
     requireEvidence(await closed === 0 && settled && !failed && buffer === '');
-  } catch (error) { primaryFailed = true; primaryValue = error; }
+  } catch (error) { lifecycleFirst(state, 'exception'); primaryFailed = true; primaryValue = error; }
+  lifecyclePhase('cleanup');
   if (primaryFailed) terminate();
   try { requireEvidence(await closed === 0 && settled && !failed); } catch (error) { capture(error); }
   try { clearTimeout(timer); } catch (error) { capture(error); }
@@ -930,7 +1028,7 @@ async function main() {
     console.log('PASS: exact prior-main9/target10; old Google held/estimated/confirmed/dispatched and frozen Save preserved; late settlement and ordinary-owner finalizer; no provider calls');
     console.log('PASS: populated10/target11; exact Google/Azure private proof, public fields/history and bytes preserved; frozen pending Azure Save completed after opt-out/expiry; projection DDL rolled back');
   } catch (error) {
-    console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}; subsequent stages NOT RUN`);
+    console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}${lifecycleFailureDetail(error)}; subsequent stages NOT RUN`);
     process.exitCode = 1;
   } finally {
     if (ownsSnapshot) {

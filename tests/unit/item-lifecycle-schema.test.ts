@@ -12,6 +12,8 @@ import { classifyObjectDeletion, deleteWardrobeObject, wardrobeDeleteRoute } fro
 import type { DeleteReply, DeleteRequest } from '../../src/data/storage-delete';
 // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
 import { ITEM_LIFECYCLE_CATALOG_SQL, assertLifecycleFixture, MIGRATIONS, withLifecycleParentLock, withLifecycleCatalogMarker as catalogMarker, lifecycleStorageRuntime, withLifecycleLateUpload, requireStorageCatalogInventory } from '../../scripts/preservation-rehearsal.mjs';
+// @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
+import * as rehearsal from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { one, lifecycleObservation, serializeLifecycleObservation, readLifecycleUploadResponse, requireLifecycleUploadConflict, lifecycleFixtureCases, lifecyclePublicationCases, legacyOrphanCase } from '../integration/item-lifecycle.sessions.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
@@ -20,6 +22,17 @@ import { securityObservation, serializeSecurityObservation } from '../security/i
 const fixtureMocks = vi.hoisted(() => ({
   spawn: vi.fn(), requireLocalContainer: vi.fn(), privilegedLocalSql: vi.fn(), commandEnvironment: vi.fn(), saveClients: vi.fn(),
   markerRemove: vi.fn(), runCommand: vi.fn(), requireDocker: vi.fn(),
+  childRequest: vi.fn(), childLstat: vi.fn(), childReaddir: vi.fn(), childReadline: vi.fn(),
+}));
+vi.mock('node:http', async () => ({
+  ...await vi.importActual<Record<string, unknown>>('node:http'), request: fixtureMocks.childRequest,
+}));
+vi.mock('node:fs/promises', async () => ({
+  ...await vi.importActual<Record<string, unknown>>('node:fs/promises'),
+  lstat: fixtureMocks.childLstat, readdir: fixtureMocks.childReaddir,
+}));
+vi.mock('node:readline', async () => ({
+  ...await vi.importActual<Record<string, unknown>>('node:readline'), createInterface: fixtureMocks.childReadline,
 }));
 vi.mock('node:child_process', async () => ({
   ...await vi.importActual<Record<string, unknown>>('node:child_process'), spawn: fixtureMocks.spawn,
@@ -195,6 +208,313 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
     for (const input of [null, {}, { deleteProtected: true }, { triggers: new Array(17).fill({}) }]) {
       expect(() => requireStorageCatalogInventory(input)).toThrow('EVIDENCE_REQUIRED');
     }
+  });
+
+  function detail(error: unknown) {
+    const formatter: unknown = Reflect.get(rehearsal, 'lifecycleFailureDetail');
+    if (typeof formatter !== 'function') throw new Error('Missing lifecycle failure formatter');
+    return Reflect.apply(formatter, undefined, [error]) as string;
+  }
+  async function rejected(operation: Promise<unknown>) {
+    return operation.then(() => { throw new Error('Expected failure'); }, (error: unknown) => error);
+  }
+  it.each(['stderr', 'stdin', 'error', 'close', 'json', 'utf8', 'overflow', 'protocol'] as const)(
+    'classifies parent pre-ready %s without exposing listener arguments', async (kind) => {
+      const c = child(), privateError = new Error('private listener canary');
+      c.write.mockImplementation(() => {
+        queueMicrotask(() => {
+          const spawned = fixtureMocks.spawn.mock.results[0]!.value;
+          if (kind === 'stderr') spawned.stderr.emit('data', Buffer.from('private stderr canary'));
+          else if (kind === 'stdin') spawned.stdin.emit('error', privateError);
+          else if (kind === 'error') c.proc.emit('error', privateError);
+          else if (kind === 'close') c.proc.emit('close', 1);
+          else c.stdout.emit('data', kind === 'json' ? Buffer.from('private invalid JSON\n')
+            : kind === 'utf8' ? Buffer.from([255]) : kind === 'overflow' ? Buffer.alloc(1025, 65)
+              : Buffer.from('{"stage":"private","private":"canary"}\n'));
+          if (['stderr', 'stdin'].includes(kind)) c.proc.emit('close', 1);
+        });
+        return true;
+      });
+      const operation = vi.fn();
+      const error = await rejected(withLifecycleLateUpload(owner, value, operation));
+      const text = detail(error);
+      expect(text).toContain('; lifecycle=');
+      expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1024);
+      expect(text).toContain('"phase":"await-ready"');
+      const causes = { stderr: 'stderr', stdin: 'stdin-error', error: 'process-error', close: 'process-close',
+        json: 'json', utf8: 'utf8', overflow: 'output-cap', protocol: 'protocol' };
+      expect(text).toContain(`"cause":"${causes[kind]}"`);
+      expect(text).not.toMatch(/private|canary|10000000|10800000/);
+      expect(operation).not.toHaveBeenCalled();
+      expect(detail(error)).toBe('');
+      expect(console.log).toHaveBeenCalledTimes(1);
+    });
+  it.each(['container-code', 'container-shape', 'image-code', 'image-shape', 'docker', 'input'] as const)(
+    'localizes pre-spawn %s and leaves no stale detail', async (kind) => {
+      if (kind === 'container-code') fixtureMocks.runCommand.mockReset().mockResolvedValue({ code: 1, stdout: 'private', stderr: 'private' });
+      if (kind === 'container-shape') fixtureMocks.runCommand.mockReset().mockResolvedValue({ code: 0, stdout: '{"private":true}' });
+      if (kind === 'image-code' || kind === 'image-shape') {
+        fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(runtime) })
+          .mockResolvedValueOnce({ code: kind === 'image-code' ? 1 : 0, stdout: '{"private":true}' });
+      }
+      if (kind === 'docker') fixtureMocks.requireDocker.mockRejectedValueOnce(new Error('private docker'));
+      const error = await rejected(withLifecycleLateUpload(kind === 'input' ? { ...owner, uid: 'private' } : owner, value, vi.fn()));
+      const text = detail(error);
+      expect(text).toContain('; lifecycle=');
+      const phases = { 'container-code': 'container-result', 'container-shape': 'container-shape',
+        'image-code': 'image-result', 'image-shape': 'image-shape', docker: 'docker', input: 'input' };
+      expect(text).toContain(`"phase":"${phases[kind]}"`);
+      if (kind.endsWith('code')) expect(text).toContain('"commandCode":1');
+      expect(text).not.toMatch(/private|10000000|10800000/);
+      expect(fixtureMocks.spawn).not.toHaveBeenCalled();
+      expect(detail(new Error('unrelated'))).toBe('');
+    });
+  it.each([undefined, null, false, 0, ''])('associates falsy callback failure without wrapping or stale reuse %#', async (primary) => {
+    child(undefined, { value: new Error('private cleanup') });
+    const error = await rejected(withLifecycleLateUpload(owner, value, async () => { throw primary; }));
+    expect(error).toBe(primary);
+    expect(detail(error)).toContain('"phase":"callback"');
+    expect(detail(error)).toBe('');
+  });
+  it('omits unrelated causes and resets metadata at the next invocation', async () => {
+    fixtureMocks.requireDocker.mockRejectedValueOnce(new Error('private first'));
+    const error = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    expect(detail(new Error('unrelated'))).toBe('');
+    child();
+    await withLifecycleLateUpload(owner, value, async () => {});
+    expect(detail(error)).toBe('');
+  });
+  it.each(['spawn', 'input-write'] as const)('preserves synchronous %s error identity', async (kind) => {
+    const primary = new Error('private synchronous canary');
+    if (kind === 'spawn') fixtureMocks.spawn.mockImplementation(() => { throw primary; });
+    else {
+      const c = child();
+      c.write.mockImplementation(() => { throw primary; });
+    }
+    const error = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    expect(error).toBe(primary);
+    expect(detail(error)).toContain(`"phase":"${kind}"`);
+  });
+  it('retains the first pre-ready deadline and never invokes the callback', async () => {
+    const c = child(), operation = vi.fn();
+    c.write.mockImplementation(() => true);
+    const failure = rejected(withLifecycleLateUpload(owner, value, operation));
+    await vi.advanceTimersByTimeAsync(15_000);
+    const text = detail(await failure);
+    expect(text).toContain('"phase":"await-ready","cause":"deadline"');
+    expect(operation).not.toHaveBeenCalled();
+    expect(c.end).toHaveBeenCalledWith('cancel\n');
+    expect(c.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+  it.each([0, 1, 255, 256, -1, 1.5, 'private', null])('bounds own command code %j only for printing', async (code) => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValue({ code, stdout: 'private malformed', stderr: '' });
+    const error = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    const text = detail(error);
+    if (code === 0) expect(text).toContain('"phase":"container-shape"');
+    else expect(text).toContain(`"commandCode":${typeof code === 'number' && Number.isInteger(code) && code >= 0 && code <= 255 ? code : 'null'}`);
+    expect(text).not.toContain('private');
+  });
+  it('does not replace the original guard error when diagnostic reflection throws', async () => {
+    const code = vi.fn(() => 1);
+    const result = new Proxy({ code: 1, stdout: '', stderr: '' }, {
+      getOwnPropertyDescriptor() { throw new Error('private diagnostic'); },
+      get(target, name, receiver) { return name === 'code' ? code() : Reflect.get(target, name, receiver); },
+    });
+    fixtureMocks.runCommand.mockReset().mockResolvedValue(result);
+    const error = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('EVIDENCE_REQUIRED');
+    expect(code).toHaveBeenCalledOnce();
+    expect(detail(error)).toContain('"commandCode":null');
+  });
+  it('does not let formatter serialization replace a primary failure', async () => {
+    const primary = new Error('private primary');
+    fixtureMocks.requireDocker.mockRejectedValueOnce(primary);
+    const error = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    const stringify = vi.spyOn(JSON, 'stringify').mockImplementation(() => { throw new Error('private serialize'); });
+    try { expect(detail(error)).toBe(''); } finally { stringify.mockRestore(); }
+    expect(error).toBe(primary); expect(detail(error)).toBe('');
+  });
+  it.each([
+    { status: 99, bodyBytes: -1, denied: 'private', phase: 'private', cause: { private: true } },
+    { status: 600, bodyBytes: 1025, denied: null, phase: null, cause: ['private'] },
+    { status: '400', bodyBytes: '10', denied: 1, phase: {}, cause: '__proto__' },
+    { status: 400, bodyBytes: 1024, denied: false, phase: 'file-poll', cause: 'refusal' },
+  ])('harvests only bounded own failed-record fields without accepting the record %#', async (fields) => {
+    const c = child(), operation = vi.fn();
+    const line = JSON.stringify({ stage: 'settled', ...fields, failed: true, private: 'never print' }) + '\n';
+    c.write.mockImplementation(() => { queueMicrotask(() => c.stdout.emit('data', Buffer.from(line))); return true; });
+    const error = await rejected(withLifecycleLateUpload(owner, value, operation));
+    const text = detail(error);
+    const output = JSON.parse(text.slice('; lifecycle='.length)) as Record<string, unknown>;
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1024);
+    expect(output.status).toBe(typeof fields.status === 'number' && fields.status >= 100 && fields.status <= 599 ? fields.status : null);
+    expect(output.bodyBytes).toBe(typeof fields.bodyBytes === 'number' && fields.bodyBytes >= 0 && fields.bodyBytes <= 1024 ? fields.bodyBytes : null);
+    expect(output.denied).toBe(typeof fields.denied === 'boolean' ? fields.denied : null);
+    expect(output.childPhase).toBe(fields.phase === 'file-poll' ? 'file-poll' : 'OTHER');
+    expect(output.childCause).toBe(fields.cause === 'refusal' ? 'refusal' : 'OTHER');
+    expect(text).not.toMatch(/private|never print|__proto__/);
+    expect(operation).not.toHaveBeenCalled(); expect(c.end).toHaveBeenCalledWith('cancel\n');
+  });
+  it.each([false, 'true', null])('does not harvest a record lacking actual failed=true: %j', async (failed) => {
+    const c = child();
+    c.write.mockImplementation(() => {
+      queueMicrotask(() => c.stdout.emit('data', Buffer.from(JSON.stringify({
+        stage: 'settled', failed, phase: 'file-poll', cause: 'refusal', status: 400, bodyBytes: 2, denied: false,
+      }) + '\n')));
+      return true;
+    });
+    const text = detail(await rejected(withLifecycleLateUpload(owner, value, vi.fn())));
+    expect(text).not.toContain('childPhase'); expect(text).not.toContain('bodyBytes');
+  });
+
+  async function realChild(kind: string) {
+    const writes: string[] = [], exitCode = process.exitCode;
+    const request = new EventEmitter(), response = new EventEmitter();
+    const closed = new Error('private fs');
+    let written = false, commandComplete = false, responseEnded = false, requestEnded = false;
+    const stat = (directory: boolean, size = 0, symlink = false) => ({
+      isDirectory: () => directory, isFile: () => !directory, isSymbolicLink: () => symlink, size,
+    });
+    fixtureMocks.childLstat.mockReset().mockImplementation(async (name: string) => {
+      if (kind === 'path-error') throw closed;
+      if (name.endsWith(value.p_item.id) && !written && kind !== 'item-exists') throw Object.assign(new Error('private missing'), { code: 'ENOENT' });
+      if (kind === 'poll' && name.endsWith('thumb.jpg')) throw Object.assign(new Error('private missing'), { code: 'ENOENT' });
+      if (name.endsWith('/10000000-0000-4000-8000-000000000009')) return stat(false, kind === 'size' ? 3 : 2, kind === 'file-symlink');
+      return stat(true, 0, kind === 'symlink');
+    });
+    fixtureMocks.childReaddir.mockReset().mockResolvedValue(kind === 'entries' ? ['private', 'private2'] : kind === 'entry-name' ? ['private']
+      : ['10000000-0000-4000-8000-000000000009']);
+    const requestClose = vi.fn(() => {
+      if (!requestEnded) { requestEnded = true; request.emit('error', new Error('private socket closed')); }
+      request.emit('close'); return request;
+    });
+    const responseDestroy = vi.fn(() => { if (!responseEnded) response.emit('aborted'); return response; });
+    const emitResponse = () => {
+      Object.assign(response, { statusCode: 400, destroy: responseDestroy });
+      request.emit('response', response);
+      response.emit('data', Buffer.from('{"statusCode":"403","code":"AccessDenied","error":"Unauthorized","message":"Not available"}'));
+      responseEnded = true; requestEnded = true; response.emit('end');
+    };
+    const req = Object.assign(request, {
+      write: vi.fn(() => {
+        written = true;
+        if (kind === 'request-error') queueMicrotask(() => { request.emit('error', new Error('private request')); request.emit('close'); });
+        if (kind === 'early-response') queueMicrotask(emitResponse);
+        return true;
+      }),
+      end: vi.fn(() => { commandComplete = true; emitResponse(); request.emit('close'); return request; }),
+      destroy: requestClose,
+    });
+    fixtureMocks.childRequest.mockReset().mockReturnValue(req);
+    const next = vi.fn().mockResolvedValueOnce({ done: false, value: JSON.stringify(kind === 'input' ? { private: true }
+      : { owner: owner.uid, item: value.p_item.id, image: value.p_image.id, token: owner.token }) })
+      .mockResolvedValueOnce({ done: false, value: 'complete' });
+    const lines = { [Symbol.asyncIterator]: () => ({ next }), close: vi.fn(() => {
+      if (kind === 'cleanup') throw new Error('private cleanup');
+    }) };
+    fixtureMocks.childReadline.mockReset().mockReturnValue(lines);
+    const destroy = vi.spyOn(process.stdin, 'destroy').mockImplementation(() => process.stdin);
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { writes.push(String(chunk)); return true; });
+    try {
+      const childFunction: unknown = Reflect.get(rehearsal, 'lifecycleStreamChild');
+      if (typeof childFunction !== 'function') throw new Error('Missing real child');
+      const running = Reflect.apply(childFunction, undefined, []) as Promise<void>;
+      await vi.advanceTimersByTimeAsync(kind === 'poll' ? 5100 : 100);
+      await running;
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(commandComplete).toBe(['success', 'cleanup'].includes(kind));
+      expect(vi.getTimerCount()).toBe(0);
+      return writes;
+    } finally { destroy.mockRestore(); output.mockRestore(); process.exitCode = exitCode; }
+  }
+  it.each(['input', 'path-error', 'symlink', 'item-exists', 'early-response', 'request-error', 'poll', 'size', 'entries', 'entry-name', 'file-symlink'])(
+    'captures real child %s failure and replays its exact IPC into the real parent', async (kind) => {
+      const emitted = await realChild(kind);
+      expect(emitted).toHaveLength(1);
+      const record = JSON.parse(emitted[0]!) as Record<string, unknown>;
+      expect(record.failed).toBe(true);
+      expect(typeof record.phase).toBe('string'); expect(typeof record.cause).toBe('string');
+      const expected: Record<string, [string, string]> = {
+        input: ['input', 'refusal'], 'path-error': ['ancestors', 'exception'], symlink: ['ancestors', 'refusal'],
+        'item-exists': ['item-absence', 'refusal'], 'early-response': ['file-poll', 'early-response'],
+        'request-error': ['file-poll', 'request-error'], poll: ['ready-check', 'refusal'],
+        size: ['file-poll', 'refusal'], entries: ['file-poll', 'refusal'], 'entry-name': ['file-poll', 'refusal'],
+        'file-symlink': ['file-poll', 'refusal'],
+      };
+      expect([record.phase, record.cause]).toEqual(expected[kind]);
+      expect(emitted.join('')).not.toMatch(/private|10000000|10800000/);
+      const c = child();
+      c.write.mockImplementation(() => { queueMicrotask(() => { for (const line of emitted) c.stdout.emit('data', Buffer.from(line)); }); return true; });
+      const operation = vi.fn();
+      const error = await rejected(withLifecycleLateUpload(owner, value, operation));
+      const text = detail(error);
+      expect(text).toContain(`"childPhase":"${String(record.phase)}"`);
+      expect(text).toContain(`"childCause":"${String(record.cause)}"`);
+      expect(operation).not.toHaveBeenCalled();
+    });
+  it('replays byte-identical real child success IPC without diagnostic output', async () => {
+    const emitted = await realChild('success');
+    const bodyBytes = Buffer.byteLength('{"statusCode":"403","code":"AccessDenied","error":"Unauthorized","message":"Not available"}');
+    expect(emitted).toEqual(['{"stage":"ready","partialBytes":2}\n',
+      `{"stage":"settled","status":400,"bodyBytes":${bodyBytes},"denied":true,"failed":false}\n`]);
+    const c = child();
+    c.write.mockImplementation(() => { queueMicrotask(() => c.stdout.emit('data', Buffer.from(emitted[0]!))); return true; });
+    c.end.mockImplementation((command: string) => {
+      queueMicrotask(() => { c.stdout.emit('data', Buffer.from(emitted[1]!)); c.proc.emit('close', 0); });
+      expect(command).toBe('complete\n');
+    });
+    await withLifecycleLateUpload(owner, value, async () => {});
+    expect(detail(undefined)).toBe('');
+  });
+  it('keeps post-ready child cleanup failure a failed settlement with the first child class', async () => {
+    const emitted = await realChild('cleanup'), c = child(), operation = vi.fn();
+    expect(emitted).toHaveLength(2);
+    expect(JSON.parse(emitted[1]!)).toMatchObject({ phase: 'cleanup', cause: 'cleanup', failed: true });
+    c.write.mockImplementation(() => { queueMicrotask(() => c.stdout.emit('data', Buffer.from(emitted[0]!))); return true; });
+    c.end.mockImplementation((command: string) => {
+      queueMicrotask(() => {
+        if (command === 'complete\n') c.stdout.emit('data', Buffer.from(emitted[1]!));
+        c.proc.emit('close', 1);
+      });
+    });
+    const text = detail(await rejected(withLifecycleLateUpload(owner, value, operation)));
+    expect(operation).toHaveBeenCalledOnce();
+    expect(text).toContain('"childPhase":"cleanup","childCause":"cleanup"');
+  });
+  it('keeps child diagnostics self-contained and IPC below the existing combined cap', async () => {
+    const source = await read('scripts/preservation-rehearsal.mjs');
+    const body = source.slice(source.indexOf('export async function lifecycleStreamChild()'), source.indexOf('export async function withLifecycleLateUpload('));
+    expect(body.includes('const phases =')).toBe(true);
+    expect(body.includes('const causes =')).toBe(true);
+    expect(body).not.toContain('lifecycleFailureDetail');
+    expect(body).not.toMatch(/\b(?:LIFECYCLE_|lifecycleFirst|lifecycleLabel|lifecycleActive|lifecycleInteger)/);
+    const labels = (text: string, name: string) => {
+      const declaration = text.match(new RegExp(`const ${name} = (?:Object.freeze\\()?\\[([^\\]]+)\\]`))?.[1];
+      if (!declaration) throw new Error('Missing closed labels');
+      return [...declaration.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+    };
+    const phases = labels(body, 'phases'), causes = labels(body, 'causes');
+    expect(phases).toEqual(labels(source, 'LIFECYCLE_CHILD_PHASES'));
+    expect(causes).toEqual(labels(source, 'LIFECYCLE_CHILD_CAUSES'));
+    const ready = '{"stage":"ready","partialBytes":2}\n';
+    let maximum = 0;
+    for (const phase of [...phases, 'OTHER']) for (const cause of [...causes, 'OTHER'])
+      for (const status of [100, 599, null]) for (const bodyBytes of [0, 1024, 4096, null]) {
+        const settled = JSON.stringify({ stage: 'settled', status, bodyBytes, denied: false, failed: true, phase, cause }) + '\n';
+        maximum = Math.max(maximum, Buffer.byteLength(ready + settled));
+      }
+    expect(maximum).toBeLessThanOrEqual(1024);
+    expect(maximum).toBeGreaterThan(150);
+    expect(body.includes('}, 15_000);')).toBe(true);
+    expect(body.includes('attempt < 100 && Date.now() - started < 5000')).toBe(true);
+    expect(body.includes('setTimeout(resolve, 50)')).toBe(true);
+    expect(body.includes('Buffer.byteLength(input.value) <= 8192')).toBe(true);
+    expect(body.includes('bytes > 4096')).toBe(true);
+    expect(source).toContain('requireEvidence(outputBytes <= 1024);');
+    expect(source).toContain("=== 'bodyBytes,denied,failed,stage,status'");
+    expect(source).toContain("child.stdin.on('error', () => fail('stdin-error'));");
+    expect(source).toContain("child.stderr.on('data', () => fail('stderr'));");
   });
 });
 

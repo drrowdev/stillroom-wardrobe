@@ -120,7 +120,7 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
     it('routes the fixed label into the existing sanitized runner failure stage', async () => {
       const runner = await readFile(new URL('../../scripts/preservation-rehearsal.mjs', import.meta.url), 'utf8');
       expect(runner).toContain('await verifyImageChangePreservation(ten, privilegedLocalSql, (label) => { stage = `I10b-preservation-${label}`; });');
-      expect(runner).toContain('FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}; subsequent stages NOT RUN');
+      expect(runner).toContain('FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}${lifecycleFailureDetail(error)}; subsequent stages NOT RUN');
     });
     it('distinguishes replacement reservation from upload without advancing the label before either awaited call', async () => {
       const fixtureSource = await readFile(new URL('../integration/azure-preservation.sessions.mjs', import.meta.url), 'utf8');

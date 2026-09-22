@@ -515,6 +515,89 @@ approval and fresh native gates; no local backend/SQL/parser/browser,
 dependency install, types/UI or deployment was performed. The hard deadline
 remains 22 September 2026 at 15:57:28 UTC.
 
+### Stage A CI8 - S4 failure observations, 22 September 2026
+
+Both attempts at `fd6a03a4588fb7c0541f72c36080d281e2047b7e` remain
+failed evidence, not evidence that the void-RPC repair passed:
+[attempt 1](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5772326057)
+stopped at the historical prior-main capture prerequisite with B1
+`inspect-result`, command code 1 and listed state `running`;
+[attempt 2](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5772569413)
+stopped earlier at `S4-item-lifecycle-fixtures`, specifically
+`real-late-publication-child-ready`. Their exact snapshot cleanup passed.
+Attempt 2 did not reach B1 or I10b, so it neither reproduced nor fixed
+attempt 1. No common cause, transient failure or owner ordinal is known.
+The original App result is carried-forward evidence, not a fresh App run
+under the second attempt. Earlier browser transport failures remain open.
+
+The [conditional amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5773301600)
+records retained Anthropic Claude Opus 5 critique 130 and accepted S1-S9.
+The mandatory five-suite source-pin preflight found an exact main-failure
+template assertion outside the three-path allowlist. No edits occurred
+until [critique 132 and the fourth-path release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5773383866).
+Only that one complete template assertion changes in the replacement
+schema suite; its adjacent stage mapping and all other lines are retained.
+The history formatter remains first, the new lifecycle formatter second,
+and the existing `; subsequent stages NOT RUN` suffix is unchanged.
+Migration bytes, hashes, SQL-body pins, historical rendered output and
+the existing history vocabulary/formatter are unchanged.
+
+The runner now attaches a closed lifecycle observation to its existing
+main failure line, without another console channel or success stream.
+Runtime verification, spawn, input write, ready wait, callback, settlement
+and cleanup phases identify where a failure was first observed. First
+observations are retained across later cleanup failures, not interpreted
+as underlying causes. Object/function failures are associated by weak
+identity without wrapping the original thrown value; the closed falsy
+primitive cases also retain exact propagation. Unsupported primitive
+causes have no detail. A new invocation or formatter consumption clears
+the pending association, and successful/unrelated failures produce no
+lifecycle detail. Diagnostic state contains only closed labels and bounded
+primitives, not raw errors, stderr buffers, credentials or response bodies.
+
+The self-contained child adds only phase/cause to its existing failed
+settled record. Its successful ready and settled strings are unchanged.
+The parent harvests bounded own fields only from an already-parsed failed
+settled record before the original refusal. It does not accept that
+extended shape, resolve readiness or alter settled/ready state while
+harvesting. Child failure before any record remains unknown. Existing
+status/body-byte/boolean fields are bounded for printing only: integral
+HTTP 100-599, integral body bytes 0-1024, actual booleans, or null.
+Unknown labels become `OTHER`; no arbitrary value is stringified.
+
+Enumerating the actual child phase/cause vocabularies and longest
+permitted existing fields gives **166 UTF-8 bytes** for ready plus failed
+settled messages, including both LFs, below the unchanged 1024-byte parent
+stdout cap. Child stdin remains 8192 bytes, response capture 4096 bytes,
+both lifetimes 15 seconds, and file polling remains at most 100 attempts
+within five seconds with 50 ms sleeps. The same native request, two-byte
+partial-file requirement, completion/cancellation, lock, deletion, absence
+and cleanup assertions remain authoritative.
+
+The initial fail-first run reported 30 failures, 20 passes and 352 filtered
+cases. Twenty-six failures exposed absent formatter/child labels/source
+placement. Four exposed defects in the new HTTP test doubles: unfinished
+request destruction did not settle its response promise, and destruction
+of an ended response incorrectly emitted an abort. The doubles were
+corrected to model those events; production lifecycle behavior was not
+changed to accommodate them. The initial focused group then passed all
+50 selected cases. Further privacy, event, first-failure, falsy-primary,
+cap and source-pin cases were added before the complete five-suite run.
+
+All **1,563 tests in five suites passed**: lifecycle schema, preservation,
+local backend, replacement schema and CI Storage guard. Scoped ESLint,
+`tsc --noEmit`, whitespace checks and the 253-text-file secret scan passed;
+the local scan had no canary, so CI must still supply one. Real child code
+ran with mocked HTTP/FS/readline and explicitly stubbed worker stdin
+destruction/stdout writes. Its actual emitted strings were captured and
+replayed verbatim into the real parent parser for success and failures,
+including pre-ready refusal and post-ready cleanup. These are mock
+composition/source checks, not native FileBackend, Docker or ordinary-owner
+runtime evidence. No third CI retry, backend/SQL/browser execution,
+dependency installation, generated types, publication or deployment was
+performed. This unstaged evidence amendment still requires focused closure
+and separate publication authority; neither CI8 cause is proved repaired.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling
