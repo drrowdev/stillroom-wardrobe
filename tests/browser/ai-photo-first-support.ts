@@ -2,7 +2,7 @@ import { expect, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import type { AiResult } from '../../src/domain/ai-analysis';
 import { messages, type Language } from '../../src/i18n';
-import { mockBackend, owners, signIn } from './mock-backend';
+import { mockBackend, owners, signIn, type MockOptions } from './mock-backend';
 
 export async function manualEntry(page: Page) {
   const language = await page.locator('html').getAttribute('lang') as Language;
@@ -10,7 +10,7 @@ export async function manualEntry(page: Page) {
   await page.getByRole('button', { name: messages['aiC.continueManual'][language], exact: true }).click();
 }
 export async function aiFixture(page: Page, language: Language = 'en', enabled = true, lost?: 'reservation' | 'finalizer',
-  observeRawAnalysis = false) {
+  observeRawAnalysis = false, imageChangeLoss?: MockOptions['imageChangeLoss']) {
   const results = new Map<string, AiResult>();
   const consent = new Map<string, boolean>([[owners.a, enabled], [owners.b, false]]);
   const calls: Array<{ route: string; body: unknown }> = [];
@@ -25,7 +25,7 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
   const unknown = { category: null, subcategory: null, colours: [], pattern: null, sleeve_length: null,
     garment_length: null, brand: null, size_label: null, upper_coverage: null, lower_coverage: null,
     material: null, seasons: [], formality: null, style_tags: [] };
-  const api = await mockBackend(page, { initialLanguage: language, aiResults: results, observeRawAnalysis,
+  const api = await mockBackend(page, { initialLanguage: language, aiResults: results, observeRawAnalysis, imageChangeLoss,
     loseAnalyzedReserveReplyOnce: lost === 'reservation', loseFinalizeReplyOnce: lost === 'finalizer',
     analysis: ({ owner, requestId, draftId, generation, bytes }) => {
       if (!consent.get(owner)) return { body: { code: 'CONSENT_REQUIRED' }, status: 403 };

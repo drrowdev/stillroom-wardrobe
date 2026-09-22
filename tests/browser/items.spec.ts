@@ -28,6 +28,81 @@ async function move(page: Page, id: string, language: Language = 'en') {
   await expect(page.locator('.item-card')).toHaveCount(0);
 }
 test.beforeEach(({ page }, info) => { checkRetry(page, info.retry); });
+test('I10b deletion stops at forty dispatches and resumes explicitly; Swedish mobile accessibility capture', async ({ page }, info) => {
+  const { api, item, peer } = await setup(page, 'sv');
+  const other = structuredClone(peer);
+  for (let n = 0; n < 41; n++) api.files.set(`${owners.a}/${item.id}/unfinished-${String(n).padStart(3, '0')}.jpg`, api.fixture);
+  await move(page, item.id, 'sv'); await trashPage(page, 'sv');
+  await button(page, 'deletion.prepare', 'sv').click();
+  await expect(page.getByRole('dialog')).toContainText(item.title);
+  expect(api.requests.filter(call => call.method === 'DELETE')).toHaveLength(0);
+  await page.getByRole('dialog').getByRole('button', { name: messages['lifecycle.delete'].sv, exact: true }).click();
+  await expect(button(page, 'lifecycle.resume', 'sv')).toBeEnabled();
+  expect(api.requests.filter(call => call.method === 'DELETE')).toHaveLength(40);
+  expect(api.deletionClaims.size).toBe(0);
+  expect(api.images.some(row => row.item_id === item.id)).toBe(true);
+  await expect(button(page, 'deletion.cancel', 'sv')).toHaveCount(0);
+  await expect(button(page, 'trash.restore', 'sv')).toHaveCount(0);
+  await page.setViewportSize({ width: 320, height: 1200 });
+  expect(await page.evaluate(origin => location.origin === origin && location.hash === '#/trash'
+    && document.documentElement.lang === 'sv' && document.documentElement.scrollWidth <= innerWidth
+    && !document.querySelector('#email,input[type=password]'), new URL(info.project.use.baseURL!).origin)).toBe(true);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  if (info.project.name === 'chromium') {
+    const directory = path.resolve('test-results', 'i10b-visual');
+    await mkdir(directory, { recursive: true });
+    const buffer = await page.screenshot({ path: path.join(directory, 'deletion-resume-sv-mobile.png'), fullPage: false });
+    expect(buffer.length).toBeLessThanOrEqual(1024 * 1024);
+    expect(buffer.readUInt32BE(16)).toBe(320); expect(buffer.readUInt32BE(20)).toBe(1200);
+  }
+  await page.addStyleTag({ content: 'html { font-size: 200%; }' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await button(page, 'lifecycle.resume', 'sv').click();
+  await expect(page.getByText(messages['deletion.deleted'].sv, { exact: true })).toBeVisible();
+  expect(api.requests.filter(call => call.method === 'DELETE')).toHaveLength(43);
+  expect(api.deletionOperations[0]?.receipt.phase).toBe('completed');
+  expect(peer).toEqual(other);
+});
+test('I10b unsupported target blocks preparation; missing durable receipt never proves deletion', async ({ page }) => {
+  const { api, item } = await setup(page);
+  api.files.set(`${owners.a}/${item.id}/unsafe name.jpg`, api.fixture);
+  await move(page, item.id); await trashPage(page);
+  await button(page, 'deletion.prepare').click();
+  await expect(page.getByText(messages['deletion.blocked'].en, { exact: true })).toBeVisible();
+  expect(api.deletionOperations[0]?.receipt.phase).toBe('blocked_preflight');
+  expect(api.requests.some(call => call.method === 'DELETE')).toBe(false);
+  await page.route('**/rest/v1/rpc/item_deletion_operation_status', route => route.fulfill({ json: null }));
+  await page.locator('.lifecycle-resume').getByRole('button', { name: messages['lifecycle.check'].en, exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText(messages['lifecycle.unconfirmed'].en);
+  await expect(page.getByText(messages['deletion.deleted'].en, { exact: true })).toHaveCount(0);
+  expect(api.items.some(row => row.id === item.id)).toBe(true);
+});
+test('I10b preparation stays reversible but an ambiguous authorization removes the earlier Undo', async ({ page }) => {
+  const { api, item } = await setup(page);
+  const instant = new Date('2026-09-22T12:00:00Z');
+  await page.clock.install({ time: instant });
+  await page.clock.pauseAt(new Date(instant.getTime() + 1000));
+  await move(page, item.id);
+  await expect(button(page, 'common.undo')).toBeVisible();
+  await trashPage(page);
+  await button(page, 'deletion.prepare').click();
+  await page.getByRole('dialog').getByRole('button', { name: messages['common.cancel'].en, exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(button(page, 'trash.restore')).toBeEnabled();
+  await button(page, 'common.back').click();
+  await expect(button(page, 'common.undo')).toBeVisible();
+  await trashPage(page);
+  await button(page, 'deletion.prepare').click();
+  await page.route('**/rest/v1/rpc/authorize_item_deletion', route => route.abort('failed'));
+  await page.getByRole('dialog').getByRole('button', { name: messages['lifecycle.delete'].en, exact: true }).click();
+  await expect(page.getByText(messages['deletion.uncertain'].en, { exact: true })).toBeVisible();
+  await expect(button(page, 'deletion.cancel')).toHaveCount(0);
+  await button(page, 'common.back').click();
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  await expect(button(page, 'common.undo')).toHaveCount(0);
+  expect(api.requests.filter(call => call.method === 'DELETE')).toHaveLength(0);
+  expect(api.items.some(row => row.id === item.id)).toBe(true);
+});
 function checkRetry(page: Page, retry: number) {
   expect(!page.isClosed() && retry === 0, 'New lifecycle flakiness blocks acceptance').toBe(true);
 }
@@ -102,7 +177,7 @@ for (const loss of ['begin', 'delete', 'finish'] as const) {
     const { api, item, image, peer } = await setup(page, 'en', { lifecycleLoss: loss });
     const other = structuredClone(peer);
     await move(page, item.id); await trashPage(page);
-    await page.locator('.trash-list').getByRole('button', { name: messages['lifecycle.delete'].en, exact: true }).click();
+    await page.locator('.trash-list').getByRole('button', { name: messages['deletion.prepare'].en, exact: true }).click();
     await expect(page.getByRole('dialog')).toContainText(item.title);
     await page.getByRole('dialog').getByRole('button', { name: messages['lifecycle.delete'].en, exact: true }).click();
     await expect(page.getByRole('alert')).toHaveText(messages['lifecycle.unconfirmed'].en);
@@ -111,17 +186,20 @@ for (const loss of ['begin', 'delete', 'finish'] as const) {
     await page.waitForTimeout(250);
     expect(api.requests.filter(request => request.method === 'DELETE')).toHaveLength(deletes);
     const claimBeforeRefresh = structuredClone(api.deletionClaims.get(item.id));
-    const writesBeforeRefresh = api.requests.filter(request => request.method !== 'GET' && !request.path.endsWith('/item_deletion_status'));
+    const mutating = (request: typeof api.requests[number]) => request.method !== 'GET'
+      && !['item_deletion_status', 'item_deletion_operations', 'item_deletion_operation_status'].some(name => request.path.endsWith(`/${name}`));
+    const writesBeforeRefresh = api.requests.filter(mutating);
     await expect(button(page, 'common.refresh')).toBeEnabled();
     await button(page, 'common.refresh').click();
     await expect(button(page, 'common.refresh')).toBeEnabled();
     await expect(page.locator('.lifecycle-resume')).toContainText(item.title);
     await expect(page.locator('.trash-list button:enabled')).toHaveCount(0);
     expect(api.deletionClaims.get(item.id)).toEqual(claimBeforeRefresh);
-    expect(api.requests.filter(request => request.method !== 'GET' && !request.path.endsWith('/item_deletion_status'))).toEqual(writesBeforeRefresh);
+    expect(api.requests.filter(mutating)).toEqual(writesBeforeRefresh);
     if (loss === 'finish') {
       await page.locator('.lifecycle-resume').getByRole('button', { name: messages['lifecycle.check'].en }).click();
-      await expect(page.getByText(messages['lifecycle.deleted'].en, { exact: true })).toHaveCount(0);
+      await expect(page.getByText(messages['deletion.deleted'].en, { exact: true })).toBeVisible();
+      expect(api.deletionOperations[0]?.receipt.phase).toBe('completed');
       await expect(button(page, 'lifecycle.resume')).toHaveCount(0);
     } else {
       const original = { ...api.deletionClaims.get(item.id)! };
@@ -135,45 +213,57 @@ for (const loss of ['begin', 'delete', 'finish'] as const) {
       expect(api.deletionClaims.get(item.id)).toEqual(original);
       expect(api.requests.filter(request => request.method === 'DELETE')).toHaveLength(deletes);
       await button(page, 'lifecycle.resume').click();
-      await expect(page.getByText(messages['lifecycle.deleted'].en, { exact: true })).toBeVisible();
+      await expect(page.getByText(messages['deletion.deleted'].en, { exact: true })).toBeVisible();
       expect(api.files.has(image.main_path) || api.files.has(image.thumb_path)).toBe(false);
     }
     expect(peer).toEqual(other);
   });
 }
-test('named confirmation refuses stale name/manifest and pending or unmanifested photos', async ({ page }) => {
-  const { api, item, image } = await setup(page);
+test('named confirmation refuses stale name or inventory before any deletion', async ({ page }) => {
+  const { api, item } = await setup(page);
   await move(page, item.id); await trashPage(page);
-  const open = () => page.locator('.trash-list').getByRole('button', { name: messages['lifecycle.delete'].en, exact: true }).click();
+  const open = async () => {
+    await page.locator('.trash-list').getByRole('button', { name: messages['deletion.prepare'].en, exact: true }).click();
+    await expect(page.getByRole('dialog')).toContainText(item.title);
+  };
   await open();
   item.title = 'Changed elsewhere'; item.version++;
   await page.getByRole('dialog').getByRole('button', { name: messages['lifecycle.delete'].en }).click();
   await expect(page.getByRole('alert')).toHaveText(messages['error.conflict'].en);
   expect(api.deletionClaims.size).toBe(0);
   expect(api.requests.some(request => request.method === 'DELETE')).toBe(false);
-  await page.reload(); await expect(page.locator('.trash-list li')).toHaveCount(1);
-  api.files.set(`${owners.a}/${item.id}/orphan.jpg`, api.fixture);
-  await open(); await expect(page.getByRole('alert')).toHaveText(messages['lifecycle.blocked'].en);
-  api.files.delete(`${owners.a}/${item.id}/orphan.jpg`); image.state = 'pending';
+  await page.locator('.lifecycle-resume').getByRole('button', { name: messages['lifecycle.check'].en }).click();
+  await button(page, 'deletion.cancel').click();
+  await expect(button(page, 'trash.restore')).toBeEnabled();
   await open();
+  api.files.set(`${owners.a}/${item.id}/orphan.jpg`, api.fixture);
   await page.getByRole('dialog').getByRole('button', { name: messages['lifecycle.delete'].en }).click();
   await expect(page.getByRole('alert')).toHaveText(messages['error.conflict'].en);
   expect(api.deletionClaims.size).toBe(0);
 });
 for (const language of ['en', 'fi', 'sv'] as const) {
-  test(`known blocked deletion ${language} is a neutral limitation with no claim or byte attempt`, async ({ page }) => {
+  test(`pending and unmanifested deletion ${language} requires full preparation and explicit authorization`, async ({ page }) => {
     const { api, item } = await setup(page, language);
     await move(page, item.id, language); await trashPage(page, language);
     await expect(page.locator('.trash-list li')).toHaveCount(1);
     for (let n = 0; n < 3; n++) api.files.set(`${owners.a}/${item.id}/unmanifested-${n}.jpg`, api.fixture);
     const response = page.waitForResponse(value => value.url().endsWith('/rest/v1/rpc/item_deletion_status'));
-    await button(page, 'lifecycle.delete', language).click();
+    const pendingId = '31000000-0000-4000-8000-000000000001';
+    const pending = { ...api.images.find(image => image.item_id === item.id)!, id: pendingId, state: 'pending',
+      main_path: `${owners.a}/${item.id}/${pendingId}/main.jpg`, thumb_path: `${owners.a}/${item.id}/${pendingId}/thumb.jpg` };
+    api.images.push(pending); api.files.set(String(pending.main_path), api.fixture);
+    await button(page, 'deletion.prepare', language).click();
     const rows: unknown = await (await response).json();
     expect(rows).toEqual([expect.objectContaining({ id: item.id, cleanup_blocked: true, unmanifested_count: 3 })]);
-    await expect(page.getByRole('alert')).toHaveText(messages['lifecycle.blocked'][language]);
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toContainText(item.title);
+    expect(api.deletionOperations[0]?.receipt).toMatchObject({ phase: 'prepared', pendingTargets: 2, unmanifestedTargets: 3, registeredTargets: 2 });
     expect(api.deletionClaims.size).toBe(0);
     expect(api.requests.some(request => request.path.endsWith('/begin_item_deletion') || request.method === 'DELETE')).toBe(false);
+    await page.getByRole('dialog').getByRole('button', { name: messages['lifecycle.delete'][language], exact: true }).click();
+    await expect(page.getByText(messages['deletion.deleted'][language], { exact: true })).toBeVisible();
+    expect(api.images.some(image => image.item_id === item.id)).toBe(false);
+    expect([...api.files.keys()].some(path => path.startsWith(`${owners.a}/${item.id}/`))).toBe(false);
+    expect(api.deletionOperations[0]?.receipt.phase).toBe('completed');
   });
 }
 test('failed confirmation construction closes the dialog and reports an error without a partial intent', async ({ page }) => {
@@ -181,12 +271,11 @@ test('failed confirmation construction closes the dialog and reports an error wi
   const pageErrors: Error[] = [];
   page.on('pageerror', error => pageErrors.push(error));
   await move(page, item.id); await trashPage(page);
-  await button(page, 'lifecycle.delete').click();
   await page.evaluate(() => {
     const original = crypto.randomUUID.bind(crypto);
     crypto.randomUUID = () => { crypto.randomUUID = original; throw new Error('Fictional nonce failure'); };
   });
-  await page.getByRole('dialog').getByRole('button', { name: messages['lifecycle.delete'].en }).click();
+  await button(page, 'deletion.prepare').click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveText(messages['error.unavailable'].en);
   await expect(page.getByRole('alert')).toBeFocused();
@@ -195,9 +284,9 @@ test('failed confirmation construction closes the dialog and reports an error wi
   expect(api.deletionClaims.size).toBe(0);
   expect(api.requests.some(request => request.path.endsWith('/begin_item_deletion') || request.method === 'DELETE')).toBe(false);
   expect(pageErrors).toEqual([]);
-  await button(page, 'lifecycle.delete').click();
+  await button(page, 'deletion.prepare').click();
   await button(page, 'common.cancel').click();
-  await expect(button(page, 'lifecycle.delete')).toBeFocused();
+  await expect(button(page, 'deletion.prepare')).toBeFocused();
 });
 test('Refresh retains an uncertain Restore snapshot and Check confirms without another write', async ({ page }) => {
   const { api, item } = await setup(page, 'en', { lifecycleLoss: 'change' });
@@ -288,14 +377,14 @@ test('bounded synthetic Trash and named-delete captures with functional/a11y ass
       }
     };
     await captureFile(capture.trash);
-    await page.locator('.trash-list').getByRole('button', { name: messages['lifecycle.delete'][capture.language], exact: true }).click();
+    await page.locator('.trash-list').getByRole('button', { name: messages['deletion.prepare'][capture.language], exact: true }).click();
     await expect(page.getByRole('dialog')).toContainText(item.title);
-    await expect(page.getByRole('dialog')).toContainText(messages['lifecycle.noUndo'][capture.language]);
+    await expect(page.getByRole('dialog')).toContainText(messages['deletion.garmentWarning'][capture.language]);
     await expect(button(page, 'common.cancel', capture.language)).toBeFocused();
     await captureFile(capture.deletion);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(page.locator('.trash-list').getByRole('button', { name: messages['lifecycle.delete'][capture.language], exact: true })).toBeFocused();
+    await expect(page.locator('.trash-list').getByRole('button', { name: messages['deletion.prepare'][capture.language], exact: true })).toBeFocused();
     expect(api.deletionClaims.size).toBe(0);
   }
   await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 2rem; }' });

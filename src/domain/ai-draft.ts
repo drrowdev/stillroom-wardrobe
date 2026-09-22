@@ -1,5 +1,6 @@
 import { isUuid } from './wardrobe';
 import { presentAiFacts } from './ai-presentation';
+import { fieldAssertion, provenanceFields, type FieldProvenance } from './attribute-provenance';
 import {
   editGarmentField, freezeValues, garmentFields, initialRawFields, sameValue, validateGarmentDraft,
   type GarmentDraft, type GarmentField, type GarmentValues, type RawFields,
@@ -19,10 +20,19 @@ export type AiSaveClaim = DeepReadonly<{
   requestId: string; draftId: string; generation: number; imageSha256: string; fields: AiDerivation;
 }>;
 export type AiInvalidation = 'logout' | 'owner_changed' | 'discarded' | 'saved';
+export type SavedAiBaseline = { values: GarmentValues; provenance: FieldProvenance };
+export function savedAiEligibility(baseline: SavedAiBaseline): Partial<Record<GarmentField, true>> {
+  return Object.fromEntries(provenanceFields.filter((field) => {
+    const value = baseline.values[field];
+    return (value === null || value === '' || Array.isArray(value) && value.length === 0)
+      && fieldAssertion(baseline.provenance, field).kind === 'unknown';
+  }).map((field) => [field, true]));
+}
 type ActiveDraft = DeepReadonly<{
   status: 'idle' | 'pending' | 'ready' | 'unclear' | 'failed' | 'cancelled' | 'expired';
   context: AiContext; draft: GarmentDraft; derivation: AiDerivation; result: AiResult | null;
   presentation?: { title: string; tags: string[] };
+  eligibility?: Partial<Record<GarmentField, true>>;
 }>;
 export type AiDraftState = ActiveDraft | Readonly<{
   status: 'invalidated'; reason: AiInvalidation; context: null; draft: null; derivation: null; result: null;
@@ -65,7 +75,7 @@ function updated(state: AiDraftState): AiTransition {
 function projectedValue(value: DeepReadonly<NonNullable<GarmentValues[AiField]>>): string | string[] {
   return Array.isArray(value) ? [...value] : String(value);
 }
-export function createAiDraft(draft: GarmentDraft, context: unknown):
+export function createAiDraft(draft: GarmentDraft, context: unknown, baseline?: SavedAiBaseline):
   { ok: true; state: AiDraftState } | { ok: false; code: 'INVALID_CONTEXT' | 'INVALID_DRAFT' } {
   if (!validContext(context)) return { ok: false, code: 'INVALID_CONTEXT' };
   try {
@@ -80,6 +90,7 @@ export function createAiDraft(draft: GarmentDraft, context: unknown):
     }
     return { ok: true, state: freezeValues({
       status: 'idle', context: { ...context }, draft: copyDraft(draft), derivation: {}, result: null,
+      ...(baseline ? { eligibility: savedAiEligibility(baseline) } : {}),
     }) };
   } catch {
     return { ok: false, code: 'INVALID_DRAFT' };
@@ -109,7 +120,8 @@ export function receiveAiResult(state: AiDraftState, current: unknown, input: un
   const derivation: AiDerivation = {};
   for (const field of aiFields) {
     const value = result.facts.fields[field];
-    if (!isAssertedAiValue(value) || draft.intent[field] || !sameValue(draft.raw[field], defaults[field])) continue;
+    if (!isAssertedAiValue(value) || draft.intent[field] || state.eligibility && !state.eligibility[field]
+      || !sameValue(draft.raw[field], defaults[field])) continue;
     Object.assign(draft.raw, { [field]: projectedValue(value!) });
     Object.assign(derivation, { [field]: { value: Array.isArray(value) ? [...value] : value, kind: aiKind(field) } });
   }
@@ -132,8 +144,8 @@ export function presentAiDraft(state: AiDraftState, current: AiContext, language
   if (state.status !== 'ready' || !state.result || state.presentation) return { status: 'ignored', state, reason: 'ineligible_state' };
   const presentation = presentAiFacts(state.result.facts, language);
   const draft = copyDraft(state.draft);
-  if (!draft.intent.title && draft.raw.title === '') draft.raw.title = presentation.title;
-  if (!draft.intent.tags && draft.raw.tags.length === 0) draft.raw.tags = [...presentation.tags];
+  if (!draft.intent.title && draft.raw.title === '' && (!state.eligibility || state.eligibility.title)) draft.raw.title = presentation.title;
+  if (!draft.intent.tags && draft.raw.tags.length === 0 && (!state.eligibility || state.eligibility.tags)) draft.raw.tags = [...presentation.tags];
   return updated({ ...state, draft, presentation: { title: presentation.title, tags: presentation.tags } });
 }
 // An explicit new generation is also required for retry; no request is allocated here.
@@ -155,10 +167,11 @@ export function prepareAiGeneration(state: AiDraftState, current: unknown, next:
     }
   }
   if (state.presentation) {
-    if (!draft.intent.title && draft.raw.title === state.presentation.title) draft.raw.title = '';
-    if (!draft.intent.tags && sameValue(draft.raw.tags, state.presentation.tags)) draft.raw.tags = [];
+    if (!draft.intent.title && draft.raw.title === state.presentation.title && (!state.eligibility || state.eligibility.title)) draft.raw.title = '';
+    if (!draft.intent.tags && sameValue(draft.raw.tags, state.presentation.tags) && (!state.eligibility || state.eligibility.tags)) draft.raw.tags = [];
   }
-  return updated({ status: 'idle', context: { ...next }, draft, derivation: {}, result: null });
+  return updated({ status: 'idle', context: { ...next }, draft, derivation: {}, result: null,
+    ...(state.eligibility ? { eligibility: state.eligibility } : {}) });
 }
 export function expireAiDraft(state: AiDraftState, current: unknown, nowMs: number): AiTransition {
   if (!isAiTimestamp(nowMs)) return { status: 'invalid', state, code: 'INVALID_CONTEXT' };

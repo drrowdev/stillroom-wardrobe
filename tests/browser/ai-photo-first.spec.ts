@@ -36,7 +36,7 @@ function snapshotRawAnalysis(evidence: RawAnalysisEvidence, api: AiFixture | und
         evidence.captureError = true;
         return null;
       }
-      if (evidence.case === 'response-sequence') {
+      if (evidence.case === 'response-sequence' || evidence.case === 'boundaries') {
         if (typeof client.constructedBytes !== 'number' || !Number.isSafeInteger(client.constructedBytes)
           || client.constructedBytes < 0 || client.constructedBytes > 512001) {
           evidence.captureError = true;
@@ -49,10 +49,11 @@ function snapshotRawAnalysis(evidence: RawAnalysisEvidence, api: AiFixture | und
     if (clients.length > 4) evidence.captureError = true;
     if (api?.rawAnalysisObservation) {
       const observation = api.rawAnalysisObservation;
-      const { detail, ...baseObservation } = observation;
+      const { detail, boundaryDetail, ...baseObservation } = observation;
       evidence.observation = { ...baseObservation, posts: observation.posts.slice(0, 4).map((post) => ({
         ...post, firstPostTerminalReject: post.firstPostTerminalReject ? { ...post.firstPostTerminalReject } : null,
       })), firstAttemptedPost400: observation.firstAttemptedPost400 ? { ...observation.firstAttemptedPost400 } : null };
+      evidence.cumulative = { ...api.analysisWire };
       if (evidence.case === 'response-sequence') {
         if (detail) {
           evidence.observation.detail = { ...detail,
@@ -63,7 +64,26 @@ function snapshotRawAnalysis(evidence: RawAnalysisEvidence, api: AiFixture | und
           }
         } else evidence.captureError = true;
       }
-      evidence.cumulative = { ...api.analysisWire };
+      if (evidence.case === 'boundaries') {
+        if (!boundaryDetail || boundaryDetail.mode !== 'boundary-framing-v1'
+          || Object.keys(boundaryDetail).sort().join(',') !== 'evidenceError,mode,overflow,receivers'
+          || typeof boundaryDetail.overflow !== 'boolean' || typeof boundaryDetail.evidenceError !== 'boolean'
+          || !Array.isArray(boundaryDetail.receivers)) throw new Error('Invalid boundary observation');
+        evidence.observation.boundaryDetail = {
+          mode: 'boundary-framing-v1', overflow: boundaryDetail.overflow, evidenceError: boundaryDetail.evidenceError,
+          receivers: boundaryDetail.receivers.slice(0, 2).map(record => {
+            if (!record || Object.keys(record).sort().join(',') !== 'complete,contentLength,ordinal,readableEnded,readableLength,transferEncoding'
+              || (record.ordinal !== 1 && record.ordinal !== 2)
+              || !['absent', 'zero', '1', '512000', 'other', 'invalid'].includes(record.contentLength)
+              || !['absent', 'chunked', 'other'].includes(record.transferEncoding)
+              || !['zero', '1', '512000', 'other', 'invalid'].includes(record.readableLength)
+              || typeof record.complete !== 'boolean' || typeof record.readableEnded !== 'boolean') throw new Error('Invalid boundary record');
+            return { ordinal: record.ordinal, contentLength: record.contentLength, transferEncoding: record.transferEncoding,
+              complete: record.complete, readableEnded: record.readableEnded, readableLength: record.readableLength };
+          }),
+        };
+        if (boundaryDetail.overflow || boundaryDetail.evidenceError || boundaryDetail.receivers.length > 2) evidence.captureError = true;
+      }
       if (observation.overflow || observation.evidenceError || observation.posts.length > 4) evidence.captureError = true;
     } else evidence.captureError = true;
   } catch { evidence.captureError = true; }
@@ -219,11 +239,13 @@ test('analysis browser wire admits exactly the one-byte and 512000-byte boundari
   try {
     try {
       api = await aiFixture(page, 'en', true, undefined, true);
+      if (!api.rawAnalysisObservation) throw new Error('Missing raw analysis observation');
+      api.rawAnalysisObservation.boundaryDetail = { mode: 'boundary-framing-v1', overflow: false, evidenceError: false, receivers: [] };
       const before = storageCounts(api);
       for (const size of [1, 512000]) {
         const sent = Buffer.alloc(size, 197), index = size === 1 ? 0 : 1;
-        results[index] = await sendBrowserAnalysis(page, api, 'valid', sent);
-        expect(results[index]).toEqual({ status: 200, outcome: 'response' });
+        results[index] = await sendBrowserAnalysis(page, api, 'valid', sent, true);
+        expect(results[index]).toEqual({ status: 200, outcome: 'response', constructedBytes: size });
         assertAnalysisBytes(api.inputs.at(-1)!, sent);
       }
       expect(api.analysisWire).toMatchObject({ posts: 2, callbacks: 2, payloadBytes: 512001, rejected: 0 });

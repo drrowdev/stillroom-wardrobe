@@ -1,9 +1,17 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Executable CI runner has no TypeScript declaration.
 import { MIGRATIONS, migrateToAzureTarget, preservationStagePath } from '../../scripts/preservation-rehearsal.mjs';
 import { ROOT } from '../../scripts/backend/local.mjs';
+import { newImageChangeAttempt, parseImageChangeReceipt, parseRecoveryVersions, type ImageChangeReceipt } from '../../src/domain/image-replacement';
+import { newGarmentDraft, editGarmentField, validateGarmentDraft } from '../../src/domain/garment-fields';
+import type { ItemBaseline, ImageBaseline } from '../../src/domain/item-details';
+import type { OwnerScope } from '../../src/auth/session';
+import type { AppClient } from '../../src/data/client';
+import { ImageChangeClient } from '../../src/images/replace';
+import { createAiDraft, beginAiAnalysis, receiveAiResult } from '../../src/domain/ai-draft';
 
 const mocks = vi.hoisted(() => ({
   read: vi.fn(), stat: vi.fn(), mkdir: vi.fn(), list: vi.fn(), write: vi.fn(), rm: vi.fn(),
@@ -100,6 +108,240 @@ describe('copy-only populated ten-migration stage (mocked filesystem/processes; 
     expect(mocks.rm).toHaveBeenCalledExactlyOnceWith(stage, { recursive: true, force: false });
     expect(files.get(path.join(stage, 'supabase', 'config.toml'))).toEqual(files.get(path.join(ROOT, 'supabase', 'config.toml')));
     expect(files.has(path.join(stage, 'supabase', 'migrations', migrations[10]!.name))).toBe(false);
+  });
+
+  const ownerId = '10000000-0000-4000-8000-000000000001';
+  const itemId = '20000000-0000-4000-8000-000000000001';
+  const imageId = '30000000-0000-4000-8000-000000000001';
+  function imageFixture() {
+    const draft = newGarmentDraft('EUR', 'en');
+    Object.assign(draft.raw, { title: '  Kept title  ', category: 'top', material: 'Cotton' });
+    const values = validateGarmentDraft(draft).values!;
+    values.title = '  Kept title  ';
+    const item: ItemBaseline = { id: itemId, ownerId, version: 7, title: values.title, category: 'top',
+      values, provenance: { material: { kind: 'ai_estimated', revision: 4 }, notes: { kind: 'user', revision: 2 } }, facts: {} };
+    const image: ImageBaseline = { id: imageId, ownerId, itemId, version: 2, altText: 'Old photo',
+      mainPath: `${ownerId}/${itemId}/${imageId}/main.jpg`, thumbPath: `${ownerId}/${itemId}/${imageId}/thumb.jpg` };
+    const scope: OwnerScope = { ownerId, epoch: 2, signal: new AbortController().signal };
+    const photo = { main: new Blob(['main']), thumb: new Blob(['thumb']), width: 120, height: 80,
+      mainSha256: 'a'.repeat(64), thumbSha256: 'b'.repeat(64) };
+    return { item, image, scope, photo, draft: newGarmentDraft('EUR', 'en', values) };
+  }
+  function imageAttempt() {
+    const f = imageFixture();
+    return newImageChangeAttempt(f.item, f.image, f.draft, 'New photo', f.photo, f.scope);
+  }
+  function changeReceipt(attempt = imageAttempt(), state: ImageChangeReceipt['state'] = 'reserved'): ImageChangeReceipt {
+    return { requestId: attempt.intent.requestId, itemId, imageId: attempt.intent.imageId, kind: 'replacement',
+      state, fingerprint: 'f'.repeat(64), completedVersion: state === 'completed' ? 8 : null };
+  }
+  describe('saved photo replacement domain', () => {
+    it('freezes a full exact saved projection with new identities and unchanged revisions', () => {
+      const f = imageFixture();
+      const attempt = newImageChangeAttempt(f.item, f.image, f.draft, ' New photo ', f.photo, f.scope);
+      expect(attempt.intent.item).toMatchObject({ title: '  Kept title  ', material: 'Cotton', field_provenance: f.item.provenance });
+      expect(attempt.intent.imageId).not.toBe(imageId);
+      expect(attempt.intent.requestId).not.toBe(attempt.intent.imageId);
+      expect(attempt.intent).toMatchObject({ expectedVersion: 7, currentImageId: imageId, descriptionVersion: 2, claim: null, sourceImageId: null });
+      expect(attempt.intent.image.alt_text).toBe('New photo');
+      expect(Object.isFrozen(attempt.intent.item.field_provenance)).toBe(true);
+      expect(f.draft.intent).toEqual({});
+    });
+    it('advances exactly once for an estimate confirmation and an explicit clear', () => {
+      const f = imageFixture();
+      let draft = editGarmentField(f.draft, 'material', 'Cotton', 'en');
+      draft = editGarmentField(draft, 'notes', '', 'en');
+      const attempt = newImageChangeAttempt(f.item, f.image, draft, '', f.photo, f.scope);
+      expect(attempt.intent.item.field_provenance).toEqual({ material: { kind: 'user', revision: 5 }, notes: { kind: 'user', revision: 3 } });
+      expect(f.item.provenance.material).toEqual({ kind: 'ai_estimated', revision: 4 });
+    });
+    it('admits only actually derived empty untouched facts and advances the prior revision', () => {
+      const f = imageFixture();
+      f.item.provenance.pattern = { kind: 'unknown', revision: 3 };
+      const context = { ownerId, epoch: 2, draftId: crypto.randomUUID(), generation: 1, requestId: crypto.randomUUID(), imageSha256: f.photo.mainSha256 };
+      const created = createAiDraft(f.draft, context, { values: f.item.values, provenance: f.item.provenance });
+      if (!created.ok) throw new Error('Fixture');
+      const pending = beginAiAnalysis(created.state, context);
+      const state = receiveAiResult(pending.state, context, {
+        schemaVersion: 1, requestId: context.requestId, draftId: context.draftId, generation: context.generation,
+        imageSha256: context.imageSha256, modelId: 'fictional:model/v1', promptVersion: 1,
+        createdAtMs: Date.now() - 1000, expiresAtMs: Date.now() + 60000,
+        facts: { outcome: 'ready', fields: { pattern: 'solid', material: 'Wool' } },
+      }, Date.now()).state;
+      expect(state.status).toBe('ready');
+      const savedDraft = state.draft!;
+      const attempt = newImageChangeAttempt(f.item, f.image, {
+        raw: { ...savedDraft.raw, colours: [...savedDraft.raw.colours], seasons: [...savedDraft.raw.seasons],
+          style_tags: [...savedDraft.raw.style_tags], tags: [...savedDraft.raw.tags] },
+        intent: { ...savedDraft.intent }, priceLanguage: savedDraft.priceLanguage,
+      }, '', f.photo, f.scope, state);
+      expect(attempt.intent.item.pattern).toBe('solid');
+      expect(attempt.intent.item.material).toBe('Cotton');
+      expect(attempt.intent.item.field_provenance).toMatchObject({ pattern: { kind: 'ai_observed', revision: 4 } });
+    });
+    it.each(['owner', 'version', 'revision', 'caption', 'hidden-change'])('rejects %s drift', (failure) => {
+      const f = imageFixture();
+      if (failure === 'owner') f.item.ownerId = crypto.randomUUID();
+      if (failure === 'version') f.item.version = Number.MAX_SAFE_INTEGER;
+      if (failure === 'revision') { f.item.provenance.material!.revision = 2147483647; f.draft = editGarmentField(f.draft, 'material', 'Wool', 'en'); }
+      if (failure === 'caption') f.image.version = 0;
+      if (failure === 'hidden-change') f.draft.raw.title = 'Not an edit';
+      expect(() => newImageChangeAttempt(f.item, f.image, f.draft, '', f.photo, f.scope)).toThrow();
+    });
+    it('requires exact receipt keys, identities, states and safe versions', () => {
+      const receipt = changeReceipt();
+      expect(parseImageChangeReceipt(receipt, itemId)).toEqual(receipt);
+      for (const wrong of [{ ...receipt, extra: true }, { ...receipt, itemId: imageId }, { ...receipt, state: 'absent' },
+        { ...receipt, completedVersion: 8 }, { ...receipt, state: 'completed', completedVersion: 9007199254740992 }]) {
+        expect(() => parseImageChangeReceipt(wrong, itemId)).toThrow();
+      }
+    });
+    it('parses server eligibility, exact retired metadata, ordering and forty-row boundary', () => {
+      const row = { image: { id: imageId, owner_id: ownerId, item_id: itemId, state: 'retired',
+        main_path: `${ownerId}/${itemId}/${imageId}/main.jpg`, thumb_path: `${ownerId}/${itemId}/${imageId}/thumb.jpg`,
+        main_bytes: 4, thumb_bytes: 5, main_sha256: 'a'.repeat(64), thumb_sha256: 'b'.repeat(64),
+        width: 120, height: 80, alt_text: 'Old photo', description_version: 2,
+        retired_at: '2026-09-20T10:00:00Z', created_at: '2026-09-01T10:00:00Z' }, eligible: true };
+      const [source] = parseRecoveryVersions([row], ownerId, itemId);
+      expect(source!.eligible).toBe(true);
+      const f = imageFixture();
+      f.image.id = '30000000-0000-4000-8000-000000000002';
+      const recovered = newImageChangeAttempt(f.item, f.image, editGarmentField(f.draft, 'title', 'Ignored', 'en'),
+        'Edited caption', f.photo, f.scope, undefined, source);
+      expect(recovered.intent.item.title).toBe(f.item.title);
+      expect(recovered.intent.item.field_provenance).toEqual(f.item.provenance);
+      expect(recovered.intent.sourceImageId).toBe(imageId);
+      expect(recovered.intent.imageId).not.toBe(imageId);
+      expect(recovered.intent.claim).toBeNull();
+      expect(() => parseRecoveryVersions([row, row], ownerId, itemId)).toThrow();
+      expect(() => parseRecoveryVersions([row], ownerId, itemId, imageId)).toThrow();
+      expect(() => parseRecoveryVersions(Array(41).fill(row), ownerId, itemId)).toThrow();
+      expect(() => parseRecoveryVersions([{ ...row, eligible: 1 }], ownerId, itemId)).toThrow();
+    });
+  });
+
+  describe('image change client (mocked ordinary client, not native evidence)', () => {
+    function transport(attempt = imageAttempt()) {
+      const f = imageFixture();
+      let stored: ImageChangeReceipt | null = null;
+      const calls: string[] = [];
+      const rpc = vi.fn((name: string): { abortSignal: () => Promise<{ error: unknown; data: unknown }> } => ({ abortSignal: async () => {
+        calls.push(name);
+        if (name === 'image_change_status') return { error: null, data: stored };
+        if (name === 'reserve_image_change') { stored = changeReceipt(attempt); return { error: null, data: stored }; }
+        throw new Error('Unexpected fixture RPC');
+      } }));
+      const upload = vi.fn(async () => ({ error: null }));
+      const download = vi.fn(async (path: string) => ({ error: null, data: path.endsWith('main.jpg') ? attempt.photo.main : attempt.photo.thumb }));
+      const invoke = vi.fn(async (): Promise<{ error: unknown; data: unknown }> => {
+        calls.push('complete'); stored = changeReceipt(attempt, 'completed'); return { error: null, data: null };
+      });
+      const client = { rpc, storage: { from: () => ({ upload, download }) }, functions: { invoke } } as unknown as AppClient;
+      return { ...f, attempt, calls, rpc, upload, download, invoke, client: new ImageChangeClient(client, f.scope),
+        stored: (value: ImageChangeReceipt | null) => { stored = value; } };
+    }
+    it('checks status, reserves only on explicit Save, uploads immutable paths and confirms completion', async () => {
+      const f = transport();
+      expect(f.rpc).not.toHaveBeenCalled();
+      const receipt = await f.client.save(f.attempt, vi.fn(), vi.fn());
+      expect(receipt.state).toBe('completed');
+      expect(f.calls).toEqual(['image_change_status', 'reserve_image_change', 'complete', 'image_change_status']);
+      expect(f.upload).toHaveBeenCalledTimes(2);
+      expect(f.upload.mock.calls[0]).toEqual([`${ownerId}/${itemId}/${f.attempt.intent.imageId}/thumb.jpg`, f.attempt.photo.thumb,
+        { contentType: 'image/jpeg', upsert: false, cacheControl: '0' }]);
+    });
+    it('retains an accepted reservation on retry without a second reserve or inference', async () => {
+      const f = transport(); f.stored(changeReceipt(f.attempt));
+      await f.client.save(f.attempt, vi.fn(), vi.fn());
+      expect(f.calls).toEqual(['image_change_status', 'complete', 'image_change_status']);
+    });
+    it('uses only status and authenticated GET for completed retries, with no POST even on bad bytes', async () => {
+      const f = transport(); f.stored(changeReceipt(f.attempt, 'completed'));
+      await expect(f.client.save(f.attempt, vi.fn(), vi.fn())).rejects.toThrow('error.conflict');
+      expect(f.calls).toEqual(['image_change_status']);
+      expect(f.download).toHaveBeenCalledTimes(1);
+      expect(f.upload).not.toHaveBeenCalled(); expect(f.invoke).not.toHaveBeenCalled();
+    });
+    it('rejects cancelled receipt and cross-owner attempts before upload', async () => {
+      const f = transport(); f.stored(changeReceipt(f.attempt, 'cancelled'));
+      await expect(f.client.save(f.attempt, vi.fn(), vi.fn())).rejects.toThrow();
+      await expect(f.client.save({ ...f.attempt, ownerId: imageId }, vi.fn(), vi.fn())).rejects.toThrow();
+      expect(f.upload).not.toHaveBeenCalled();
+    });
+    it('does not treat missing status as successful cancellation', async () => {
+      const f = transport();
+      await expect(f.client.cancel(changeReceipt(f.attempt))).rejects.toThrow();
+      expect(f.calls).toEqual(['image_change_status']);
+    });
+    it('verifies both completed byte copies without repeating any write', async () => {
+      const source = imageFixture();
+      const digest = async (blob: Blob) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))]
+        .map(value => value.toString(16).padStart(2, '0')).join('');
+      source.photo.mainSha256 = await digest(source.photo.main);
+      source.photo.thumbSha256 = await digest(source.photo.thumb);
+      const attempt = newImageChangeAttempt(source.item, source.image, source.draft, '', source.photo, source.scope);
+      const f = transport(attempt); f.stored(changeReceipt(attempt, 'completed'));
+      await expect(f.client.save(attempt, vi.fn(), vi.fn())).resolves.toEqual(changeReceipt(attempt, 'completed'));
+      expect(f.calls).toEqual(['image_change_status']);
+      expect(f.download.mock.calls.map(([path]) => path)).toEqual([
+        `${ownerId}/${itemId}/${attempt.intent.imageId}/thumb.jpg`, `${ownerId}/${itemId}/${attempt.intent.imageId}/main.jpg`,
+      ]);
+      expect(f.upload).not.toHaveBeenCalled(); expect(f.invoke).not.toHaveBeenCalled();
+    });
+    it('omits the initial recovery cursor and sends only the subsequent exact cursor', async () => {
+      const f = transport();
+      f.rpc.mockImplementation(() => ({ abortSignal: async () => ({ error: null, data: [] }) }));
+      await expect(f.client.versions(itemId)).resolves.toEqual([]);
+      await expect(f.client.versions(itemId, imageId)).resolves.toEqual([]);
+      expect(f.rpc).toHaveBeenNthCalledWith(1, 'image_recovery_versions', { p_item_id: itemId });
+      expect(f.rpc).toHaveBeenNthCalledWith(2, 'image_recovery_versions', { p_item_id: itemId, p_after: imageId });
+      expect(f.invoke).not.toHaveBeenCalled(); expect(f.download).not.toHaveBeenCalled();
+    });
+    it.each(['completed', 'cancelled'] as const)('reconciles %s before cancellation without another mutation', async state => {
+      const f = transport(); f.stored(changeReceipt(f.attempt, state));
+      await expect(f.client.cancel(changeReceipt(f.attempt))).resolves.toEqual(changeReceipt(f.attempt, state));
+      expect(f.calls).toEqual(['image_change_status']);
+      expect(f.upload).not.toHaveBeenCalled(); expect(f.invoke).not.toHaveBeenCalled();
+    });
+    it('rejects changed fingerprint on cancellation before issuing the cancel RPC', async () => {
+      const f = transport(); f.stored({ ...changeReceipt(f.attempt), fingerprint: 'e'.repeat(64) });
+      await expect(f.client.cancel(changeReceipt(f.attempt))).rejects.toThrow('error.conflict');
+      expect(f.calls).toEqual(['image_change_status']);
+    });
+    it.each([
+      ['CONFLICT', 'error.conflict'], ['UPLOAD_INCOMPLETE', 'error.uploadIncomplete'],
+    ])('preserves the exact bounded finalizer %s error', async (code, message) => {
+      const f = transport();
+      f.invoke.mockResolvedValue({ data: null, error: new FunctionsHttpError(new Response(JSON.stringify({ code }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } })) });
+      await expect(f.client.save(f.attempt, vi.fn(), vi.fn())).rejects.toThrow(message);
+      expect(f.calls).toEqual(['image_change_status', 'reserve_image_change']);
+      expect(f.upload).toHaveBeenCalledTimes(2);
+    });
+    it.each([
+      { body: { code: 'CONFLICT', extra: true }, status: 409, type: 'application/json' },
+      { body: { code: 'CONFLICT' }, status: 500, type: 'application/json' },
+      { body: { code: 'CONFLICT' }, status: 409, type: 'text/plain' },
+      { body: { code: 'x'.repeat(1024) }, status: 409, type: 'application/json' },
+    ])('rejects unrecognized finalizer errors without confirming completion: %j', async ({ body, status, type }) => {
+      const f = transport();
+      f.invoke.mockResolvedValue({ data: null, error: new FunctionsHttpError(new Response(JSON.stringify(body),
+        { status, headers: { 'Content-Type': type } })) });
+      await expect(f.client.save(f.attempt, vi.fn(), vi.fn())).rejects.toThrow('error.unavailable');
+      expect(f.calls).toEqual(['image_change_status', 'reserve_image_change']);
+    });
+    it('bounds a stalled status by thirty seconds without starting reservation or upload', async () => {
+      vi.useFakeTimers();
+      try {
+        const f = transport();
+        f.rpc.mockImplementation(() => ({ abortSignal: () => new Promise(() => {}) }));
+        const failure = expect(f.client.save(f.attempt, vi.fn(), vi.fn())).rejects.toThrow();
+        await vi.advanceTimersByTimeAsync(30000);
+        await failure;
+        expect(f.rpc).toHaveBeenCalledTimes(1);
+        expect(f.upload).not.toHaveBeenCalled(); expect(f.invoke).not.toHaveBeenCalled();
+      } finally { vi.useRealTimers(); }
+    });
   });
   it.each(['../escape', '', '510b0000-0000-4000-8000-000000000001/child'])('rejects unsafe stage identity %s', (id) => {
     expect(() => preservationStagePath(id)).toThrow(); expect(mocks.write).not.toHaveBeenCalled();

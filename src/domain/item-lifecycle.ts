@@ -140,3 +140,60 @@ export function parseLifecycleImages(value: unknown, owner: string, item: string
     return freezeValues({ id: row.id, mainPath: String(row.main_path), thumbPath: String(row.thumb_path), state: row.state, retiredAt: row.retired_at as string | null });
   });
 }
+
+export const deletionPhases = ['preparing', 'blocked_preflight', 'prepared', 'authorized', 'removing_registered', 'completed', 'cancelled'] as const;
+export type DeletionOperation = Readonly<{
+  requestId: string; itemId: string; phase: typeof deletionPhases[number]; expectedVersion: number | null;
+  inventoryHash: string | null; targetCount: number; reason: 'UNSUPPORTED_TARGET' | 'INVARIANT' | null;
+  begin: { request_id: string; expected_version: number; version: number; started_at: string; image_manifest_sha256: string } | null;
+  pendingTargets: number; unmanifestedTargets: number; registeredTargets: number;
+}>;
+export type PreparedDeletionIntent = Readonly<{ preview: DeletionStatus; requestId: string; epoch: number }>;
+export type DeletionTarget = Readonly<{ ordinal: number; path: string; objectId: string | null; version: string | null }>;
+export function preparedDeletionIntent(preview: DeletionStatus, epoch: number): PreparedDeletionIntent {
+  if (!preview.deleted_at || !safeVersion(preview.version, true) || !Number.isSafeInteger(epoch) || epoch < 0) throw invalid();
+  return freezeValues({ preview, epoch, requestId: preview.request_id ?? crypto.randomUUID() });
+}
+export function parseDeletionOperation(value: unknown, itemId: string, requestId?: string): DeletionOperation {
+  if (!canonicalId(itemId) || !exact(value, ['requestId', 'itemId', 'phase', 'expectedVersion', 'inventoryHash', 'targetCount',
+    'reason', 'begin', 'pendingTargets', 'unmanifestedTargets', 'registeredTargets'])
+    || value.itemId !== itemId || !canonicalId(value.requestId) || requestId !== undefined && value.requestId !== requestId
+    || !deletionPhases.some(phase => phase === value.phase)
+    || !count(value.targetCount) || !count(value.pendingTargets) || !count(value.unmanifestedTargets) || !count(value.registeredTargets)
+    || value.pendingTargets + value.unmanifestedTargets + value.registeredTargets !== value.targetCount) throw invalid();
+  const phase = value.phase as DeletionOperation['phase'];
+  const terminal = phase === 'completed' || phase === 'cancelled';
+  if (phase === 'completed' ? value.expectedVersion !== null : !safeVersion(value.expectedVersion, true)) throw invalid();
+  if (['prepared', 'authorized', 'removing_registered'].includes(phase) ? !hash(value.inventoryHash) : value.inventoryHash !== null) throw invalid();
+  if (phase === 'blocked_preflight' ? value.reason !== 'UNSUPPORTED_TARGET' && value.reason !== 'INVARIANT' : value.reason !== null) throw invalid();
+  if (terminal && (value.targetCount !== 0 || value.begin !== null)) throw invalid();
+  let begin: DeletionOperation['begin'] = null;
+  if (value.begin !== null) {
+    const row = value.begin;
+    if (!exact(row, ['request_id', 'expected_version', 'version', 'started_at', 'image_manifest_sha256'])
+      || row.request_id !== value.requestId || !safeVersion(row.expected_version, true) || row.version !== row.expected_version + 1
+      || !stamp(row.started_at) || !hash(row.image_manifest_sha256)
+      || (row.version !== value.expectedVersion && row.expected_version !== value.expectedVersion)) throw invalid();
+    begin = { request_id: row.request_id, expected_version: row.expected_version, version: row.version,
+      started_at: row.started_at, image_manifest_sha256: row.image_manifest_sha256 };
+  }
+  if (phase === 'removing_registered' && begin === null) throw invalid();
+  return freezeValues({ requestId: value.requestId, itemId, phase, expectedVersion: value.expectedVersion as number | null,
+    inventoryHash: value.inventoryHash as string | null, targetCount: value.targetCount, reason: value.reason as DeletionOperation['reason'],
+    begin, pendingTargets: value.pendingTargets, unmanifestedTargets: value.unmanifestedTargets, registeredTargets: value.registeredTargets });
+}
+export function reversibleDeletion(operation: DeletionOperation): boolean {
+  return operation.begin === null && ['preparing', 'prepared', 'blocked_preflight'].includes(operation.phase);
+}
+export function parseDeletionTarget(value: unknown): DeletionTarget | null {
+  if (value === null) return null;
+  if (!exact(value, ['ordinal', 'path', 'objectId', 'version']) || !safeVersion(value.ordinal)
+    || typeof value.path !== 'string' || (value.objectId === null ? value.version !== null
+      : !canonicalId(value.objectId) || typeof value.version !== 'string' || !value.version.length || value.version.length > 1024)) throw invalid();
+  return freezeValues({ ordinal: value.ordinal, path: value.path, objectId: value.objectId as string | null, version: value.version as string | null });
+}
+export function parseTargetReconciliation(value: unknown, target: DeletionTarget): 'present' | 'reconciled_absent' {
+  if (!exact(value, ['ordinal', 'state']) || value.ordinal !== target.ordinal
+    || value.state !== 'present' && value.state !== 'reconciled_absent') throw invalid();
+  return value.state;
+}

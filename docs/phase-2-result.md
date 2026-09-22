@@ -15,6 +15,217 @@ PR [#9](https://github.com/drrowdev/stillroom-wardrobe/pull/9), branch
 `25a268712dc9158259608f5a4f17d11d9b9ad279`. This result update changes no
 executable inputs.
 
+## 22 September 2026 - I10b Stage C local candidate
+
+**Unstaged frontend candidate; full browser validation remains blocked.**
+The same persistent local GPT-6 Astra writer follows
+[implementation release 5780330650](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5780330650)
+and [narrow amendment 5781047825](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5781047825),
+after retained Anthropic Claude Opus 5 critique 170 for the latter.
+Base `0ea54733a90f5380f2f16a6a1634cb42e1b93b9b`, tree
+`43b489917590af3b1cb1682e5fe186cdc559b6af`; R04/R28/R03/R12/R15 scope.
+No staging, publication, backend execution, hosted operation or deployment.
+
+[CI18 receipt 5780203902](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5780203902)
+records completed Stage B engineering prerequisites: run `35752261632`,
+App `106829137937`, DB `106829138512` and Apple `35752261519` passed.
+Its merge checkout had the exact base tree above. Native served I10b passed at
+16:16:13.230Z; generation, upload and parity passed, and the coordinator's
+authenticated extracted text matched the adopted types. This is real earlier
+exact-head evidence, not Stage C, visual, device or hosted acceptance.
+
+Replacement now requires both saved editors to be clean and resolved. Optional
+AI fills only empty, unknown, untouched fields, preserving existing values,
+clears and new edits. Its own revision composer retains unchanged provenance.
+Explicit Save retains request/image identities through ambiguous outcomes;
+completed retries verify status and bytes without another finalizer POST.
+Recovery copies verified previous bytes to a new identity, preserves current
+garment fields/provenance, permits caption edits and performs no AI calls.
+Seven-day eligibility remains server-checked; listing uses bounded pages.
+
+Permanent deletion now prepares an exact inventory before irreversible
+authorization. Pending, unmanifested and registered targets use checked
+reconciliation; each deliberate action has a 30-second/40-DELETE-dispatch cap,
+including retries, and requires explicit continuation. Uncertain authorization
+removes only that item's convenience Undo. Cancelling reversible preparation
+preserves Undo and restores focus after the enabled review control commits.
+EN/FI/SV copy distinguishes logical removal from physical provider erasure.
+
+Local fixture corrections preserved assertions: reload after synthetic seeding,
+open the existing optional caption section, and await the actual preparation
+dialog before simulating an external edit. A subsequent full run had 753 passes,
+four existing skips and one WebKit recovery conflict. Its text snapshot retained
+the draft and showed conflict before an attempt existed. The reload path could
+reuse the old editor baseline; it now clears detail synchronously before reload.
+Six recovery/consecutive-caption checks passed across all three projects, and
+those cases also passed in the following full run. This does not prove every
+earlier failure had the same cause or change any timeout/retry setting.
+
+Final local commands used pinned Node 24.19.0 and existing locked dependencies:
+`vitest run --reporter=dot` passed 3452 tests in 32 files; `eslint .`,
+`tsc --noEmit` and `scripts/check-translations.mjs` passed (547 keys, EN/FI/SV).
+`vite build` passed with the retained >500 kB warning (main JS 719.22 kB,
+208.54 kB gzip). `playwright test --grep accessibility` passed 60 cases.
+The full `playwright test --max-failures=3` finished with **756 passed,
+four existing skips and one failure**, not a pass or accepted flaky result.
+
+That sole remaining failure is the unchanged WebKit analysis-wire boundary
+case in `ai-photo-first.spec.ts`: the one-byte request returned 200, but the
+512000-byte request returned 400. All nine raw-analysis, twelve upload-wire and
+three reservation-localization scalar records were retained. The failing
+record reports `end-empty`, ordinal 2, zero received/accepted bytes, completed
+cleanup, no timeout, and retry/repeat zero; the other eight raw records report
+no first attempted 400. No raw headers/bodies or new probe were collected.
+The exact frozen receiver/forwarder region and frozen browser specs remain
+unchanged. These observations do not identify why the body arrived empty, prove
+a CI18 causal difference or authorize repair of that held surface. No further
+full or targeted wire rerun was performed.
+
+The earlier unit boundary failure was resolved only by the approved exact
+eighth import pair, count/label and negative-pair amendment. The first browser
+attempt matched no tests; the next failed before test-body entry because the
+pinned browser was absent. The separately approved one-time stock installation
+in the writer's isolated session cache passed, followed by headless readiness
+and a pinned live Vite-process check. No shared cache, package pin or config
+changed. Local `check-dependencies.mjs` still stops at
+`DEPENDENCY_RECORD_DRIFT`: read-only comparison found normalized inventory and
+notices equal, but the unchanged Windows inventory has CRLF. No rewrite or
+audit pass is claimed; the earlier failure remains recorded.
+
+Only three new synthetic viewport frames are produced: replacement EN
+1280x900, recovery FI 320x1200 and deletion-resume SV 320x1200, each below
+1 MiB. The workflow adds only their exact paths/current-head artifact/one-day
+retention; the original 24 capture paths remain. The writer did not view images.
+Coordinator exact-final-head artifact review, independent candidate closure,
+full-head CI and human/device gates remain open. I10a-D remains deferred, I22
+remains Phase 6, I11 remains ineligible, and no physical-erasure, paid-provider,
+hosted or deployment claim follows from these local mock-backend journeys.
+
+### 22 September 2026 - temporary boundary observation stopped at discovery
+
+[Release 5781871538](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5781871538)
+approved proposal 5781788697 after retained Anthropic Claude Opus 5 critique
+172 and controlling D1-D6 amendments. The writer authenticated all 36
+candidate/migration/type identities and the separately frozen browser spec.
+Temporary edits were limited to the two observation files: boundary-only
+constructed-size retention and at most two closed request-entry categories.
+Nine extracted-source synthetic groups passed, including zero/rejection
+retention, runtime non-opt-in absence, exact existing 4096/default snapshots,
+first-400 first-wins, distinct two/four-record bounds, privacy and raw inverses.
+These were not browser, stream, unit-suite or engine-behaviour passes.
+Scoped lint, typecheck and diff checks passed before discovery.
+
+The single authorized `--list` with the supplied anchored file/title selectors,
+WebKit project, two workers, zero retries and repeat-each one returned exit 1:
+`No tests found`, zero tests in zero files. The wrapper stopped before launching
+the execution process. No browser/server, analysis POST, fresh live-Vite proof
+or three-minute execution clock followed; the cause was not inferred and no
+alternative selector or discovery retry was attempted.
+
+Both diagnostic edits were surgically removed, recovering the exact prior
+53541-byte spec and 87762-byte Stage C mock fixture, including their filtered
+blobs. All existing Stage C changes remain. Instrumented source, synthetic
+checks and the failed discovery output are retained as text evidence only.
+This failed prerequisite supplies no new boundary-runtime evidence and changes
+neither the original full-browser failure nor the remaining acceptance gates.
+
+### 22 September 2026 - corrected discovery and one bounded observation
+
+[Correction 5782070176](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5782070176)
+records the coordinator's selector error: Playwright matches parent suite titles
+as well as the bare title. The first failed discovery remains preserved.
+One replacement discovery used the authorized `(?:^| )` title-suffix selector
+with all other arguments unchanged and selected exactly one existing WebKit
+case, exit 0. No third discovery occurred. The identical approved temporary
+source was reapplied and matched the earlier instrumented raw bytes exactly;
+earlier synthetic/lint/typecheck passes were explicitly reused, not re-executed.
+
+The sole browser execution ran at 18:54:40.536Z, exit 0: one case passed
+(21.3 seconds reported by Playwright), with exactly two analysis POSTs and
+retry/repeat index zero. The external owned-process interval was 28.30 seconds;
+the 180-second ceiling was not reached. Fresh live proof tied Vite PID 50636
+to owned launcher 45308 and the exact pinned Node executable. All 12 observed
+owned descendants had exited, the owned listener was absent, stderr was empty,
+and the existing receiver cleanup assertion and evidence flag both passed.
+
+Constructed sizes were 1 and 512000. Entry Content-Length categories were
+`1` and `512000`, with Transfer-Encoding absent; entry complete/readableEnded
+were false and readableLength was zero for both. The existing collector later
+received and accepted the exact respective bytes; both responses were 200.
+There was no first attempted 400, capture error, overflow or timeout.
+Entry readableLength zero is therefore not an empty-body conclusion.
+**Non-recurrence in this single instrumented sample is inconclusive**, not a
+repair, probability estimate, full-browser pass or acceptance of the candidate.
+
+Both temporary test-file edits were again removed by exact hunks, restoring
+their pre-diagnostic raw bytes and filtered blobs. Restored-source scoped lint
+and typecheck had already passed after the first removal; their identical-input
+results were reused after the final identity check. Diff checks were run again.
+Only additive documentation remains from this observation. The original
+756-pass/four-skip/one-failure full run, dependency/audit block, independent
+closure, exact-head CI and visual/human gates remain unchanged.
+
+### 22 September 2026 - reviewed durable boundary evidence and deletion copy
+
+**Unstaged amendment; the local full-browser failure remains open.**
+[Release 5782761005](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5782761005)
+approves plan 5782591787 after retained Anthropic Claude Opus 5 critique 177,
+with E1-E7 controlling conditions. The candidate now has 26 paths: the previous
+24 plus the existing browser-spec diff and one new durable unit file.
+Only the two observation files, that unit, the existing three-language
+`deletion.blocked` values and this additive result section changed.
+The other 21 candidate files, migrations, generated types and dependencies
+remain unchanged. Prior broad source closure still applies to unchanged inputs.
+
+The existing boundary case now retains constructed sizes, including zero, and
+at most two ordinal-correlated closed request-entry framing/buffer categories.
+Its two existing HTTP calls, sender, timeouts, retry policy and assertions remain;
+no browser case, matrix, observer, logging channel or production telemetry was
+added. Default/OPTIONS runtime absence, max-four base accounting, first-400
+first-wins, privacy and exact existing 4096 evidence shape remain covered.
+The accepted E1 move copies cumulative totals before case-specific validation,
+so malformed boundary evidence still sets captureError without losing totals.
+The final spec is therefore **not byte-identical** to the earlier temporary
+spec that ran once. That run remains inconclusive; no local browser/list/server
+execution was made against this durable candidate.
+
+`tests/unit/raw-analysis-observation.test.ts` extracts uniquely matched,
+non-vacuous source functions/receiver statements using the installed TypeScript
+AST and executes only those snippets with bounded VM evaluation. It never
+imports the Playwright test module, starts a receiver or accesses the network.
+Before browser edits, the identical Vitest selector produced 18 behavioural
+failures and six passes: missing sizes/entry records/integration were exposed,
+while extraction, sender/default, first-400 and existing 4096 controls worked.
+After the approved browser hunks and E1, all 24 tests passed. Negative tests
+also verify copied cumulative totals survive malformed-boundary capture errors.
+
+Two earlier new-test authoring failures remain recorded: deprecated
+`module=None` diagnostics required the supported ESNext transpiler option,
+and a misplaced brace while separating default controls caused a transform
+failure. Neither was counted as meaningful red or product failure. After those
+test-only corrections, the final red/green runs used the same test source.
+Scoped ESLint for the three test files and `tsc --noEmit` passed.
+Translation checks passed for 547 EN/FI/SV keys; the secret scan passed for
+257 text files, with the local canary absent, not a canary assertion.
+
+F1 removes the nonexistent wardrobe-administrator role and internal preparation
+noun from the existing EN/FI/SV message. The user is told that deletion cannot
+proceed yet and to cancel and try later; no automatic retry or promised outcome
+is introduced. F2-F5 remain deferred. E7 remains an explicit coverage limit:
+reviewed code counts failed/retried DELETE dispatches toward the 40-dispatch
+budget, but no existing test specifically proves a failed DELETE consumes a
+slot. Lost-acknowledgement/reconciliation tests are not that proof; no lifecycle
+test or production deletion change was added under this amendment.
+
+This later reviewed retention authority supersedes temporary removal-only
+authority for these precise observation hunks; both earlier removals remain
+historical facts. Unit VM results are not stream/engine evidence or a wire fix.
+The original 756-pass/four-existing-skip/one-failure full run and dependency
+record CRLF guard failure/audit-not-run remain open. Independent focused closure
+and a separate guarded publication grant precede any new ordinary native CI.
+Native green would not itself resolve the local failure or waive exact-head
+visual, human/device, hosted or rollout gates.
+
 ## 22 September 2026 - CI17 authentic generated type adoption
 
 **Native served gate passed; type adoption remains unstaged for review.**

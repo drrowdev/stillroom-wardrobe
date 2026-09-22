@@ -79,6 +79,59 @@ const mismatches = [
   ['photo', { imageSha256: 'b'.repeat(64) }],
 ] as const;
 
+describe('saved replacement eligibility', () => {
+  function saved() {
+    const draft = newGarmentDraft('EUR', 'en');
+    draft.raw.title = 'Saved shirt'; draft.raw.category = 'top'; draft.raw.brand = 'Legacy brand';
+    draft.raw.material = 'Saved estimate';
+    const values = validateGarmentDraft(draft).values!;
+    const baseline = { values, provenance: {
+      material: { kind: 'ai_estimated' as const, revision: 3 },
+      subcategory: { kind: 'user' as const, revision: 2 },
+      tags: { kind: 'user' as const, revision: 4 },
+    } };
+    const created = createAiDraft(newGarmentDraft('EUR', 'en', values), context, baseline);
+    if (!created.ok) throw new Error('Expected saved draft');
+    return { baseline, state: changed(beginAiAnalysis(created.state, context)) };
+  }
+  it('protects saved nonempty values and user clears without marking them manual', () => {
+    const state = changed(presentAiDraft(changed(receiveAiResult(saved().state, context, result(), 1000)), context, 'en'));
+    expect(state.draft?.raw).toMatchObject({ title: 'Saved shirt', category: 'top', brand: 'Legacy brand',
+      material: 'Saved estimate', subcategory: '', tags: [], pattern: 'checked', formality: '0' });
+    expect(state.draft?.intent).toEqual({});
+    expect(claim(state).fields).not.toHaveProperty('category');
+    expect(claim(state).fields).not.toHaveProperty('brand');
+    expect(claim(state).fields).not.toHaveProperty('material');
+    expect(claim(state).fields).not.toHaveProperty('subcategory');
+    expect(claim(state).fields.pattern).toEqual({ value: 'checked', kind: 'ai_observed' });
+  });
+  it('retains eligibility across generations and protects edits/clears made while pending', () => {
+    let state = saved().state;
+    state = changed(editAiDraftField(state, context, 'pattern', '', 'en'));
+    state = changed(receiveAiResult(state, context, result(), 1000));
+    state = changed(presentAiDraft(state, context, 'en'));
+    state = changed(prepareAiGeneration(state, context, nextContext));
+    state = changed(beginAiAnalysis(state, nextContext));
+    state = changed(receiveAiResult(state, nextContext, result(allFields, nextContext), 1000));
+    expect(state.draft?.raw.pattern).toBe('');
+    expect(state.draft?.raw.brand).toBe('Legacy brand');
+    expect(state.draft?.raw.subcategory).toBe('');
+    expect(state.draft?.raw.title).toBe('Saved shirt');
+    expect(state.draft?.intent).toEqual({ pattern: true });
+    expect(receiveAiResult(state, context, result(), 1000).status).toBe('ignored');
+  });
+  it('does not clear a protected title that happens to equal generated presentation on a new photo', () => {
+    const shown = changed(presentAiDraft(ready(), context, 'en'));
+    const savedValue = saved();
+    savedValue.baseline.values.title = shown.draft!.raw.title;
+    const created = createAiDraft(newGarmentDraft('EUR', 'en', savedValue.baseline.values), context, savedValue.baseline);
+    if (!created.ok) throw new Error('Expected saved draft');
+    const projected = changed(presentAiDraft(changed(receiveAiResult(changed(beginAiAnalysis(created.state, context)),
+      context, result(), 1000)), context, 'en'));
+    expect(changed(prepareAiGeneration(projected, context, nextContext)).draft?.raw.title).toBe(shown.draft!.raw.title);
+  });
+});
+
 describe('pure bound draft projection', () => {
   it('creates local text once, preserves language invariance and removes only untouched presentation on replacement', () => {
     const first = changed(presentAiDraft(ready(), context, 'fi'));

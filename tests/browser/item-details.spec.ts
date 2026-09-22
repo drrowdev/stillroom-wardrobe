@@ -1,10 +1,148 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { createHash } from 'node:crypto';
 import { mkdir, open, readdir, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
+import { aiFixture } from './ai-photo-first-support';
+
+async function imageChangeSetup(page: Page, language: Language = 'en', loss?: 'reservation' | 'finalizer') {
+  const api = await aiFixture(page, language, true, undefined, false, loss);
+  const saved = api.seedSavedItem(), foreign = api.seedSavedItem('b', 'Robin private');
+  Object.assign(saved.item, { brand: 'Legacy brand' });
+  saved.item.field_provenance = { subcategory: { kind: 'user', revision: 3 }, material: { kind: 'unknown', revision: 2 } };
+  await page.reload();
+  await expect(page.locator('.item-card')).toHaveCount(1);
+  await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+  await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
+  return { api, ...saved, foreign };
+}
+async function replacementPhoto(page: Page, api: Awaited<ReturnType<typeof aiFixture>>, language: Language = 'en') {
+  await page.getByRole('button', { name: messages['imageChange.replace'][language], exact: true }).click();
+  await expect(page.locator('.image-change input[type=file]').first()).toBeEnabled();
+  await page.locator('.image-change input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
+  await expect(page.getByText(messages['aiC.ready'][language], { exact: true })).toBeVisible();
+}
+async function saveReplacement(page: Page, language: Language = 'en') {
+  await page.getByRole('button', { name: messages['imageChange.save'][language], exact: true }).click();
+  await expect(page.locator('#detail-title')).toBeVisible();
+}
+async function captureImageChange(page: Page, info: TestInfo, language: Language, file: string, width: number, height: number) {
+  await page.setViewportSize({ width, height });
+  expect(await page.evaluate(({ origin, language }) => location.origin === origin && location.hash.startsWith('#/items/')
+    && document.documentElement.lang === language && !document.querySelector('#email,input[type=password]')
+    && document.documentElement.scrollWidth <= innerWidth, { origin: new URL(info.project.use.baseURL!).origin, language })).toBe(true);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  if (info.project.name === 'chromium') {
+    const directory = path.resolve('test-results', 'i10b-visual');
+    await mkdir(directory, { recursive: true });
+    const buffer = await page.screenshot({ path: path.join(directory, file), fullPage: false });
+    expect(buffer.length).toBeLessThanOrEqual(1024 * 1024);
+    expect(buffer.readUInt32BE(16)).toBe(width); expect(buffer.readUInt32BE(20)).toBe(height);
+  }
+}
+test('I10b replacement protects saved fields and clears, explicit Save atomically swaps; accessibility capture', async ({ page }, info) => {
+  const { api, item, image, foreign } = await imageChangeSetup(page);
+  const before = structuredClone(item), oldImage = structuredClone(image), peer = structuredClone(foreign);
+  await page.locator('#detail-description').fill('Unsaved sibling');
+  await expect(page.getByRole('button', { name: messages['imageChange.replace'].en, exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: messages['imageChange.recover'].en, exact: true })).toBeDisabled();
+  await page.locator('#detail-description').fill(oldImage.alt_text);
+  await replacementPhoto(page, api);
+  await expect(page.locator('#item-title')).toHaveValue(before.title);
+  await expect(page.locator('#item-category')).toHaveValue('top');
+  expect(item).toEqual(before); expect(image).toEqual(oldImage); expect(api.images).toHaveLength(2);
+  expect(api.requests.filter(call => call.path.endsWith('/reserve_image_change'))).toHaveLength(0);
+  await captureImageChange(page, info, 'en', 'replacement-en-desktop.png', 1280, 900);
+  await page.locator('#item-title').fill('My saved replacement');
+  await page.locator('.image-change .optional-details > summary').click();
+  await page.locator('#image-change-caption').fill('A new view of the same shirt');
+  await saveReplacement(page);
+  expect(item.title).toBe('My saved replacement'); expect(item.brand).toBe('Legacy brand'); expect(item.subcategory).toBeNull();
+  expect(item.field_provenance).toMatchObject({ title: { kind: 'user', revision: 1 }, material: { kind: 'ai_estimated', revision: 3 },
+    subcategory: { kind: 'user', revision: 3 } });
+  expect(image.state).toBe('retired'); expect(image.id).toBe(oldImage.id);
+  const ready = api.images.find(row => row.item_id === item.id && row.state === 'ready')!;
+  expect(ready.id).not.toBe(image.id); expect(ready.description_version).toBe(1);
+  expect(api.files.has(String(ready.main_path)) && api.files.has(String(ready.thumb_path))).toBe(true);
+  expect(api.files.has(image.main_path) && api.files.has(image.thumb_path)).toBe(true);
+  expect(api.inputs).toHaveLength(1); expect(foreign).toEqual(peer);
+  expect(api.imageChanges[0]?.receipt.state).toBe('completed');
+});
+for (const loss of ['reservation', 'finalizer'] as const) {
+  test(`I10b lost ${loss} retains exact identity and completed retry never POSTs`, async ({ page }) => {
+    const { api, item } = await imageChangeSetup(page, 'en', loss);
+    await replacementPhoto(page, api);
+    await page.getByRole('button', { name: messages['imageChange.save'].en, exact: true }).click();
+    await expect(page.getByText(messages['imageChange.uncertain'].en, { exact: true })).toBeVisible();
+    const before = structuredClone(api.imageChanges[0]!.receipt);
+    const uploads = api.uploadWire.posts, analyses = api.inputs.length;
+    await page.getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
+    await expect(page.locator('#detail-title')).toHaveValue(item.title);
+    expect(api.imageChanges).toHaveLength(1); expect(api.imageChanges[0]!.receipt.requestId).toBe(before.requestId);
+    expect(api.imageChanges[0]!.receipt.imageId).toBe(before.imageId); expect(api.imageChanges[0]!.receipt.state).toBe('completed');
+    expect(api.inputs).toHaveLength(analyses);
+    expect(api.uploadWire.posts).toBe(loss === 'finalizer' ? uploads : uploads + 2);
+    expect(api.requests.filter(call => call.path.endsWith('/reserve_image_change'))).toHaveLength(1);
+    expect(api.requests.filter(call => call.path.endsWith('/finalize-image-change'))).toHaveLength(1);
+  });
+}
+test('I10b recovery copies verified bytes to a new identity, leaves fields untouched and makes no AI calls; accessibility capture', async ({ page }, info) => {
+  const { api, item } = await imageChangeSetup(page, 'fi');
+  await replacementPhoto(page, api, 'fi'); await saveReplacement(page, 'fi');
+  const source = api.images.find(row => row.item_id === item.id && row.state === 'ready')!;
+  const sourceBytes = api.files.get(String(source.main_path))!;
+  await replacementPhoto(page, api, 'fi'); await saveReplacement(page, 'fi');
+  const before = structuredClone(item), calls = api.calls.length, analyses = api.inputs.length;
+  await page.getByRole('button', { name: messages['imageChange.recover'].fi, exact: true }).click();
+  await page.getByRole('button', { name: messages['imageChange.loadVersions'].fi, exact: true }).click();
+  await expect(page.locator('.recovery-versions button')).toHaveCount(2);
+  const ordinal = api.images.filter(row => row.item_id === item.id && row.state === 'retired')
+    .sort((a, b) => String(a.id).localeCompare(String(b.id))).findIndex(row => row.id === source.id);
+  await page.locator('.recovery-versions button').nth(ordinal).click();
+  await expect(page.locator('.recovery-preview img')).toBeVisible();
+  await page.locator('#image-change-caption').fill('Palautettu kuva');
+  await captureImageChange(page, info, 'fi', 'recovery-fi-mobile.png', 320, 1200);
+  await page.addStyleTag({ content: 'html { font-size: 200%; }' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: messages['imageChange.saveRecovery'].fi, exact: true }).click();
+  await expect(page.locator('#detail-description')).toHaveValue('Palautettu kuva');
+  expect(item).toEqual({ ...before, version: before.version + 1, updated_at: item.updated_at });
+  const restored = api.images.find(row => row.item_id === item.id && row.state === 'ready')!;
+  expect(restored.id).not.toBe(source.id);
+  expect(restored.main_sha256).toBe(source.main_sha256);
+  expect(api.files.get(String(restored.main_path))).toEqual(sourceBytes);
+  expect(source.state).toBe('retired');
+  expect(api.calls).toHaveLength(calls); expect(api.inputs).toHaveLength(analyses);
+});
+test('I10b draft cancellation publishes nothing and saved user clears survive analysis', async ({ page }) => {
+  const { api, item, image } = await imageChangeSetup(page);
+  const before = structuredClone(item), oldImage = structuredClone(image);
+  await replacementPhoto(page, api);
+  await page.getByRole('button', { name: messages['common.cancel'].en, exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: messages['common.discard'].en, exact: true }).click();
+  await expect(page.locator('#detail-title')).toHaveValue(before.title);
+  expect(item).toEqual(before); expect(image).toEqual(oldImage); expect(api.images).toHaveLength(2);
+  expect(api.imageChanges).toHaveLength(0);
+  expect(api.uploadWire.posts).toBe(0);
+});
+test('I10b consecutive replacements reload the current saved caption before another image action', async ({ page }) => {
+  const { api, item } = await imageChangeSetup(page);
+  const initialVersion = item.version;
+  for (const caption of ['First replacement view', 'Second replacement view']) {
+    await replacementPhoto(page, api);
+    await page.locator('.image-change .optional-details > summary').click();
+    await page.locator('#image-change-caption').fill(caption);
+    await saveReplacement(page);
+    await expect(page.locator('#detail-description')).toHaveValue(caption);
+    await expect(page.getByRole('button', { name: messages['imageChange.recover'].en, exact: true })).toBeEnabled();
+  }
+  expect(item.version).toBe(initialVersion + 2);
+  expect(api.imageChanges).toHaveLength(2);
+  expect(api.imageChanges.every(change => change.receipt.state === 'completed')).toBe(true);
+  expect(api.imageChanges[1]!.intent.currentImageId).toBe(api.imageChanges[0]!.receipt.imageId);
+});
 
 const itemUrl = 'http://127.0.0.1:54321/rest/v1/items*';
 const descriptionUrl = 'http://127.0.0.1:54321/rest/v1/rpc/update_image_description';

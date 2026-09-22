@@ -4,7 +4,9 @@ import {
   confirmsTrash, deletionIntent, lifecycleBudgetMs, matchesClaim, parseBeginReply, parseDeletionStatuses,
   parseFinishReply, parseLifecycleImages, parseLifecycleSnapshot, parseTrashReply, requireLifecycleIds, safeVersion,
   type DeletionStatus,
+  parseDeletionOperation, preparedDeletionIntent, reversibleDeletion, type DeletionOperation,
 } from '../../src/domain/item-lifecycle';
+import { wardrobeTargetDeleteRoute } from '../../src/data/storage-delete';
 import { ItemLifecycleClient } from '../../src/data/item-lifecycle';
 import type { Database } from '../../src/data/database.types';
 import { newGarmentDraft, editGarmentField, validateGarmentDraft } from '../../src/domain/garment-fields';
@@ -63,6 +65,119 @@ function harness(options: { deleteReply?: () => Promise<Response> | Response; lo
   return { client, api, requests, controller, scope, session, transport, intent: deletionIntent(initial, 1, nonce) };
 }
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+function operationReceipt(phase: DeletionOperation['phase'] = 'prepared', total = 2): DeletionOperation {
+  return { itemId: id, requestId: nonce, phase, expectedVersion: phase === 'completed' ? null : 2,
+    inventoryHash: ['prepared', 'authorized', 'removing_registered'].includes(phase) ? hash : null,
+    targetCount: phase === 'completed' ? 0 : total, reason: null,
+    begin: phase === 'removing_registered' ? begin[0]! : null, pendingTargets: 0, unmanifestedTargets: 0,
+    registeredTargets: phase === 'completed' ? 0 : total };
+}
+function preparedHarness(total = 2, loss?: 'delete' | 'finish', forbidden = false) {
+  const h = harness();
+  const original = h.transport.getMockImplementation()!;
+  let operation = operationReceipt('prepared', total), next = 1, lost = false;
+  const present = new Set(Array.from({ length: total }, (_, index) => index + 1));
+  const targets = Array.from({ length: total }, (_, index) => ({ ordinal: index + 1,
+    path: `${owner}/${id}/file-${index + 1}.jpg`, objectId: imageId, version: 'v1' }));
+  h.transport.mockImplementation(async (input, init = {}) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    const name = url.pathname.split('/').at(-1);
+    const body = typeof init.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {};
+    if (url.pathname.startsWith('/storage/')) {
+      await original(input, init);
+      if (forbidden) return json(denied, 400);
+      const target = targets.find(target => url.pathname.endsWith(target.path))!;
+      present.delete(target.ordinal);
+      if (loss === 'delete' && !lost) { lost = true; throw new TypeError('Fictional lost deletion response'); }
+      return json({ message: 'Successfully deleted' });
+    }
+    h.requests.push({ url, method: init.method ?? 'GET', body: typeof init.body === 'string' ? init.body : null, headers: new Headers(init.headers), init });
+    if (name === 'item_deletion_operation_status') return json(operation);
+    if (name === 'authorize_item_deletion') { operation = { ...operation, phase: 'authorized' }; return json(operation); }
+    if (name === 'item_deletion_next_target') return json(operation.phase === 'authorized' ? null : targets[next - 1] ?? null);
+    if (name === 'begin_prepared_item_deletion') { operation = { ...operation, phase: 'removing_registered', begin: begin[0]! }; return json(operation); }
+    if (name === 'reconcile_item_deletion_target') {
+      const ordinal = Number(body.p_ordinal);
+      if (!present.has(ordinal)) next = ordinal + 1;
+      return json({ ordinal, state: present.has(ordinal) ? 'present' : 'reconciled_absent' });
+    }
+    if (name === 'finish_item_deletion') {
+      expect(present.size).toBe(0); operation = operationReceipt('completed', 0);
+      if (loss === 'finish' && !lost) { lost = true; throw new TypeError('Fictional lost finish response'); }
+      return json([{ state: 'completed' }]);
+    }
+    throw new Error('Unexpected prepared fixture call');
+  });
+  return { ...h, present, operation: () => operation };
+}
+describe('prepared deletion exact protocol and bounded deliberate actions', () => {
+  it('admits pending/unmanifested preparation but never treats it as authorization', () => {
+    expect(preparedDeletionIntent({ ...status, cleanup_blocked: true, unmanifested_count: 1 }, 1).preview.unmanifested_count).toBe(1);
+    expect(reversibleDeletion(parseDeletionOperation(operationReceipt(), id))).toBe(true);
+    expect(reversibleDeletion(parseDeletionOperation(operationReceipt('authorized'), id))).toBe(false);
+    expect(reversibleDeletion(parseDeletionOperation(operationReceipt('removing_registered'), id))).toBe(false);
+    expect(parseDeletionOperation(operationReceipt('completed', 0), id).phase).toBe('completed');
+    for (const patch of [{ extra: true }, { expectedVersion: 9007199254740992 }, { targetCount: 3 }, { pendingTargets: -1 },
+      { inventoryHash: null }, { itemId: nonce }, { requestId: null }, { reason: 'INVARIANT' }, { phase: 'done' }]) {
+      expect(() => parseDeletionOperation({ ...operationReceipt(), ...patch }, id)).toThrow();
+    }
+  });
+  it('supports only exact owner/item paths, never encoded traversal, another owner, query or bulk', () => {
+    const route = wardrobeTargetDeleteRoute(owner, id, `${owner}/${id}/legacy/a_b-c.jpg`);
+    expect(route).toBe(`/storage/v1/object/wardrobe/${owner}/${id}/legacy/a_b-c.jpg`);
+    for (const tail of ['../a', './a', 'a//b', 'a?x=1', 'a#b', '%2e%2e/a', 'a\\b', 'x'.repeat(129), 'é.jpg', Array(18).fill('a').join('/')]) {
+      expect(() => wardrobeTargetDeleteRoute(owner, id, `${owner}/${id}/${tail}`)).toThrow();
+    }
+    expect(() => wardrobeTargetDeleteRoute(owner, id, `${nonce}/${id}/a.jpg`)).toThrow();
+    expect(() => wardrobeTargetDeleteRoute(owner, id, `${owner}/${nonce}/a.jpg`)).toThrow();
+  });
+  it('stops at forty actual DELETE dispatches, then resumes only on a new deliberate action', async () => {
+    const h = preparedHarness(41);
+    const invalidated: string[][] = [];
+    const paused = await h.api.continueDeletion(operationReceipt('prepared', 41), true, paths => invalidated.push(paths));
+    expect(paused.phase).toBe('removing_registered'); expect(h.present.size).toBe(1);
+    expect(h.requests.filter(r => r.method === 'DELETE')).toHaveLength(40);
+    expect(h.requests.some(r => r.url.pathname.endsWith('/finish_item_deletion'))).toBe(false);
+    expect(invalidated).toHaveLength(40);
+    const done = await h.api.continueDeletion(paused, false, paths => invalidated.push(paths));
+    expect(done.phase).toBe('completed'); expect(h.requests.filter(r => r.method === 'DELETE')).toHaveLength(41);
+    const writes = h.requests.filter(r => !r.url.pathname.endsWith('/item_deletion_operation_status')).length;
+    await expect(h.api.continueDeletion(done, false, vi.fn())).resolves.toMatchObject({ phase: 'completed' });
+    expect(h.requests.filter(r => !r.url.pathname.endsWith('/item_deletion_operation_status'))).toHaveLength(writes);
+  });
+  it('does not dispatch a single deletion before explicit irreversible authorization', async () => {
+    const h = preparedHarness();
+    await expect(h.api.continueDeletion(operationReceipt(), false, vi.fn())).rejects.toThrow();
+    expect(h.requests.filter(r => r.method === 'DELETE')).toHaveLength(0);
+    expect(h.requests.some(r => r.url.pathname.endsWith('/authorize_item_deletion'))).toBe(false);
+  });
+  it.each(['delete', 'finish'] as const)('reconciles a lost %s using retained durable identity, not generic absence', async loss => {
+    const h = preparedHarness(2, loss);
+    await expect(h.api.continueDeletion(operationReceipt(), true, vi.fn())).rejects.toThrow('lifecycle.unconfirmed');
+    const after = await h.api.operationStatus(id, nonce);
+    expect(after).not.toBeNull();
+    await expect(h.api.continueDeletion(after!, false, vi.fn())).resolves.toMatchObject({ phase: 'completed' });
+    expect(h.requests.filter(r => r.method === 'DELETE')).toHaveLength(2);
+    expect(h.requests.filter(r => r.url.pathname.endsWith('/authorize_item_deletion'))).toHaveLength(1);
+  });
+  it('leaves forbidden deletion explicit with no false reconciliation or FINISH', async () => {
+    const h = preparedHarness(2, undefined, true);
+    await expect(h.api.continueDeletion(operationReceipt(), true, vi.fn())).rejects.toThrow();
+    expect(h.present.size).toBe(2);
+    expect(h.requests.filter(r => r.method === 'DELETE')).toHaveLength(1);
+    expect(h.requests.some(r => r.url.pathname.endsWith('/finish_item_deletion'))).toBe(false);
+  });
+  it('includes status reads in the thirty-second action budget and never dispatches after timeout', async () => {
+    vi.useFakeTimers();
+    const h = preparedHarness();
+    h.transport.mockImplementation(() => new Promise(() => {}));
+    const action = h.api.continueDeletion(operationReceipt(), true, vi.fn());
+    const failed = expect(action).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(lifecycleBudgetMs);
+    await failed;
+    expect(h.transport).toHaveBeenCalledTimes(1);
+  });
+});
 describe('strict lifecycle domain contracts', () => {
   it('validates bounded canonical IDs, safe versions and real nullable coherence', () => {
     expect(parseDeletionStatuses([status], owner, [id])).toEqual([status]);

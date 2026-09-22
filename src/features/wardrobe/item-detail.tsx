@@ -11,11 +11,13 @@ import { garmentDraftDirty, newGarmentDraft, sameValue } from '../../domain/garm
 import { ItemForm } from './item-form';
 import type { Language, MessageKey, Translate } from '../../i18n';
 import type { PrivateImages } from '../../images/private-images';
-import { DiscardDialog } from '../../app/dialog';
+import { DiscardDialog, type BeforeDiscard } from '../../app/dialog';
 import { Icon } from '../../app/icon';
 import type { ItemLifecycleClient } from '../../data/item-lifecycle';
 import type { LifecycleSnapshot } from '../../domain/item-lifecycle';
 import { TrashAction } from '../settings/trash';
+import type { AiClient } from '../../data/ai';
+import { ReplacePhoto } from './replace-photo';
 
 type Dirty = { dirty: boolean; busy: boolean };
 type Shared = {
@@ -166,21 +168,33 @@ function SavedPhoto({ image, images, t }: { image: ImageBaseline; images: Privat
   return <div className="detail-photo">{url ? <img src={url} alt={image.altText} /> :
     <p role="status">{failed ? <><Icon name="photo" />{t('photo.missing')}</> : t('common.loading')}</p>}</div>;
 }
-function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecycle: ItemLifecycleClient; onTrashed: (item: LifecycleSnapshot) => void; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void }) {
+function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecycle: ItemLifecycleClient; onTrashed: (item: LifecycleSnapshot) => void; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void;
+  ai: AiClient; onBeforeDiscard: (handler: BeforeDiscard | null) => void; onReload: () => void }) {
   const [nameState, setNameState] = useState<Dirty>({ dirty: false, busy: false });
   const [descriptionState, setDescriptionState] = useState<Dirty>({ dirty: false, busy: false });
   const [image, setImage] = useState(props.detail.image);
   const [item, setItem] = useState(props.detail.item);
   const [lifecycleState, setLifecycleState] = useState({ busy: false, pending: false });
+  const [mode, setMode] = useState<'replacement' | 'recovery' | null>(null);
+  const [photoState, setPhotoState] = useState({ dirty: false, incomplete: false, busy: false });
+  const onPhotoState = useCallback((dirty: boolean, incomplete: boolean, busy: boolean) => setPhotoState({ dirty, incomplete, busy }), []);
   const onLifecycleState = useCallback((busy: boolean, pending: boolean) => setLifecycleState({ busy, pending }), []);
   const { onDirty } = props;
   useEffect(() => {
-    onDirty(nameState.dirty || descriptionState.dirty || lifecycleState.pending, false, nameState.busy || descriptionState.busy || lifecycleState.busy);
+    onDirty(nameState.dirty || descriptionState.dirty || lifecycleState.pending || photoState.dirty,
+      photoState.incomplete, nameState.busy || descriptionState.busy || lifecycleState.busy || photoState.busy);
     return () => onDirty(false, false, false);
-  }, [nameState, descriptionState, lifecycleState, onDirty]);
+  }, [nameState, descriptionState, lifecycleState, photoState, onDirty]);
+  const blocked = nameState.dirty || descriptionState.dirty || nameState.busy || descriptionState.busy || lifecycleState.busy || lifecycleState.pending;
+  if (mode) return <ReplacePhoto {...props} item={item} image={image} mode={mode} onDirty={onPhotoState}
+    onClose={() => { setMode(null); props.onReload(); }} />;
   return <div className="detail-layout">
     <SavedPhoto image={image} images={props.images} t={props.t} />
     <div className="detail-sections">
+      <div className="photo-actions">
+        <button className="button button-secondary" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('replacement'); }}>{props.t('imageChange.replace')}</button>
+        <button className="text-button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('recovery'); }}>{props.t('imageChange.recover')}</button>
+      </div>
       <fieldset className="lifecycle-edit-lock" disabled={lifecycleState.busy || lifecycleState.pending}>
         <NameSection {...props} base={props.detail.item} onState={setNameState} onItem={setItem} />
         <DescriptionSection {...props} base={props.detail.image} onState={setDescriptionState} onImage={setImage} />
@@ -193,6 +207,7 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
 export function ItemDetail(props: Shared & {
   itemId: string | null; images: PrivateImages; lifecycle: ItemLifecycleClient; onTrashed: (item: LifecycleSnapshot) => void; onBack: () => void;
   onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void;
+  ai: AiClient; onBeforeDiscard: (handler: BeforeDiscard | null) => void;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
@@ -215,6 +230,6 @@ export function ItemDetail(props: Shared & {
     <header className="settings-heading"><h1 id="item-detail-title" tabIndex={-1}>{t('detail.title')}</h1></header>
     {error ? <div className="notice notice-error" role="alert"><p>{t(error)}</p>
       <button className="text-button" disabled={!props.online} onClick={() => setReload((value) => value + 1)}>{t('common.retry')}</button></div>
-      : detail ? <Editor {...props} detail={detail} /> : <p role="status">{t('common.loading')}</p>}
+      : detail ? <Editor {...props} detail={detail} onReload={() => { setDetail(null); setReload(value => value + 1); }} /> : <p role="status">{t('common.loading')}</p>}
   </section>;
 }
