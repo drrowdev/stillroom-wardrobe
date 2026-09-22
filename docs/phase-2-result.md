@@ -773,6 +773,106 @@ browser, probe, backend, new CI, staging, commit, push, generated types, Stage C
 merge or deployment occurred in this correction. Retained focused closure and
 separate publication permission remain required.
 
+### Stage A CI11 - callback evidence boundaries, 22 September 2026
+
+This is an **unstaged four-path evidence candidate**, not a causal, product or
+SQL repair. Starting head is `6144feb53ed63d463ee70ca7c2a82459ab9ef937`, tree
+`4a8d4bb4387ab1c8b2591a40f75f7898cda5dafe`; accepted main remains
+`1984b848017dd9c22249907fe303d701bcb48440`. The
+[edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5775271824)
+records actual retained Anthropic Claude Opus 5 reviews 146/147, adopted E1-E6
+and the corrected post-callback boundary convention, plus the same persistent
+GPT-6 Astra writer's coordinator-observed local model evidence.
+
+The [CI11 diagnosis record](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5775090451)
+identifies run `35716633419`, attempt 1, DB job `106709549058`, failed at
+10:37:07Z. Base controls/preservation passed at 10:36:05Z, B1 reported
+replacement/running/fresh/stable true and HTTP 204 in 1320 ms at 10:36:39Z,
+and prior-nine to Azure-ten preservation passed at 10:36:51Z. At 10:37:04Z,
+`I10b-publication-races` recorded lifecycle phase `callback`, cause `exception`,
+with null command/exit codes. The preceding child-settlement failure can follow
+cancellation after a callback rejection; it is not proof of the primary cause.
+Exact snapshot cleanup passed. Downstream DB/reset/integration/security/
+analysis/types gates were not reached.
+
+The runner accepted exact ready2 before invoking the callback. That establishes
+progress beyond CI10's precondition boundary for this invocation, not completion
+of the callback or its deletion/race assertions. The first callback rejection
+retains its original value; the printed EVIDENCE_REQUIRED is a fixed template.
+Null codes are not process-success evidence. No assertion, RPC, owner or SQL
+cause was recovered. Read-only tracing of the actual callback, ordinary RPC
+validation, denied oracle, SQL sequencing and lock modes found no unconditional
+source contradiction warranting a corrective SQL or fixture-behavior edit.
+
+The existing integration function now accepts a synchronous, non-awaited,
+default-no-op `mark`. Fixed labels precede entry/setup, callback operations and
+distinct checks; pending and registered removal sites are separate. Where the
+function already holds a raw response, it uses the unchanged
+`responseClass`/`diagnosticHttpStatus` closed vocabularies and OTHER fallbacks
+before the original assertion. No bodies, messages, identities, paths, hashes,
+tokens or per-target ordinals enter labels. RPC calls and nullable/void
+validation are unchanged; a rejected `client.rpc` supplies only its site label.
+No additional request/read, retry, catch, shared observer API or validator was
+added. Response helper implementations and allowlists remain unchanged.
+
+Each successful lock callback ends with its fixed release boundary. The late
+upload callback likewise ends at child settlement. Post-child prefix and GET
+checks and unaffected-object/item cleanup have their own labels and remain
+outside that callback. Entry and per-owner setup labels prevent a previous
+invocation or owner's final label from leaking into new setup. No empty/done
+reset or new state framework was introduced. The runner changes only its
+existing invocation, assigning `I10b-publication-races-` plus the supplied
+label; the main FAIL template and lifecycle formatter remain unchanged.
+**A label reports the furthest boundary reached, not the proven thrower.**
+Asynchronous/settlement failures can surface later; no strict bound on that
+distance is established. Labels alone do not resolve the CI11 root cause.
+
+The real-caller unit seam now executes the complete existing callback through
+mocked ordinary-client, lock and child interfaces. Its ordered script includes
+all original setup uploads, three lock callbacks, pending/registered target
+replays, four target DELETE dispatches and eight reconciliation calls, terminal
+checks, post-child checks and unaffected cleanup. Marked and default-no-op
+runs preserve the same operation order and cleanup. Actual client/lock/child
+seams inject exact and falsy failures; mark itself is not the failure shortcut.
+Tests cover admission, inner checks, release after success, late settlement,
+post-child work, subsequent invocation/owner setup, held-response
+allowlisted/OTHER classification, private-value exclusion and non-awaited
+observation. These mocks prove no native filesystem, SQL or Storage behavior.
+
+Fail-first selected **81 tests: 76 failed, five passed, 499 filtered** before
+source implementation. All 81 then passed. Expanded boundary/reinvocation
+coverage adds 94 cases in total without removing earlier checks. Final commands
+use the already approved Node 24.19.0 executable and this workspace's locked
+dependencies, without installation:
+
+| Command (after the pinned Node executable unless shown otherwise) | Actual result |
+|---|---|
+| `node_modules\vitest\vitest.mjs run tests\unit\item-lifecycle-schema.test.ts tests\unit\preservation.test.ts tests\unit\local-backend.test.ts tests\unit\image-replacement-schema.test.ts tests\unit\ci-storage-guard.test.ts --reporter=dot` | Exit 0; five files, 1,730 tests, no skips. |
+| `node_modules\eslint\bin\eslint.js scripts\preservation-rehearsal.mjs tests\integration\image-replacement.sessions.mjs tests\unit\item-lifecycle-schema.test.ts` | Exit 0. |
+| `node_modules\typescript\bin\tsc --noEmit` | Exit 0. |
+| `scripts\scan-secrets.mjs` | Exit 0; 253 text files; local canary absent, CI must supply one. |
+| `git diff --check` | Exit 0. |
+
+The [terminal CI11 record](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5775182234)
+reports App job `106709549209` succeeded at 10:47:05Z with 2,904 unit and
+730 browser passes, four existing skips and no flaky summary. All twelve
+parallel-page localization records were retry zero with no first-400 snapshot.
+WebKit both modes showed 2/2/2 construction and 5/5/5 after first close;
+receiver first full-envelope/file sizes were 387/2, later 390/5, complete.
+Envelope bytes are not file-part bytes. This is no recurrence, not a fix of
+the earlier multipart failure. Eight successful uploads are not visual
+acceptance. Apple run `35716633446`, job `106709549333`, passed at 10:34:37Z,
+not physical-device/HEIC acceptance. Coordinator-verified synthetic checkout
+`4942ae52a6771f369c7c00275f65836e55e1f366` has the exact source tree above.
+
+Original I08/default/pending protocols, all caps/lifetimes, locks, deletion
+oracles, SQL/body/policy/inventory pins, normal-client validation and frozen
+workflow/browser files remain unchanged. The consumed probe stays removed.
+CI9 shape and multipart causes remain unresolved. No native/backend/browser
+experiment, new CI, staging, commit, push, types, Stage C, merge or deployment
+occurred here. Retained focused closure and separate publication authorization
+are still required; downstream native acceptance remains pending.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling

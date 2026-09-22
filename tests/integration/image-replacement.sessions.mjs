@@ -210,112 +210,208 @@ export async function imageReplacementServed(env) {
   }
 }
 
-export async function imageDeletionCases(env, { withLifecycleLateUpload, requireLifecyclePrefixEmpty, withLifecycleParentLock } = {}) {
+export async function imageDeletionCases(env, { withLifecycleLateUpload, requireLifecyclePrefixEmpty, withLifecycleParentLock, mark = () => {} } = {}) {
+  mark('entry');
   const { client, owners } = await saveClients(env);
   for (const owner of owners) {
+    mark('owner-create');
     const h = imageChangeHarness(client, owner, env), base = await h.create();
+    mark('unaffected-create');
     const unaffected = withLifecycleParentLock ? await h.create() : null;
+    mark('pending-intent');
     const pending = h.make(base.item, base.image);
-    await h.reserve(pending); await h.upload(pending, ['main']);
+    mark('pending-reserve');
+    await h.reserve(pending);
+    mark('pending-upload');
+    await h.upload(pending, ['main']);
     const deletion = async () => {
+    mark('trash');
     await client.rpc(owner, 'set_item_trashed', { p_item_id: base.item.id, p_expected_version: base.item.version, p_trashed: true });
+    mark('preview');
     const preview = (await client.rpc(owner, 'item_deletion_status', { p_item_ids: [base.item.id] }))[0];
+    mark('prepare-arguments');
     const args = { p_item_id: base.item.id, p_request_id: randomUUID() };
     const prepare = () => client.rpc(owner, 'prepare_item_deletion', {
       ...args, p_expected_version: preview.version, p_image_manifest_sha256: preview.image_manifest_sha256,
     });
     if (withLifecycleParentLock) {
+      mark('prepare-lock-admit');
       await withLifecycleParentLock(owner.uid, base.item.id, 'owner share', async () => {
-        denied(await h.call('prepare_item_deletion', { ...args, p_expected_version: preview.version,
-          p_image_manifest_sha256: preview.image_manifest_sha256 }));
+        mark('prepare-lock-call');
+        const refused = await h.call('prepare_item_deletion', { ...args, p_expected_version: preview.version,
+          p_image_manifest_sha256: preview.image_manifest_sha256 });
+        mark(`prepare-lock-result-${responseClass(refused)}`);
+        denied(refused);
+        mark('prepare-lock-status');
         eq(await client.rpc(owner, 'item_deletion_operation_status', args), null);
+        mark('prepare-lock-release');
       });
     }
-    const prepared = await prepare(); eq(await prepare(), prepared);
+    mark('prepare');
+    const prepared = await prepare();
+    mark('prepare-replay');
+    eq(await prepare(), prepared);
+    mark('prepare-result');
     requireEvidence(prepared.phase === 'preparing');
-    denied(await h.call('authorize_item_deletion', { ...args, p_inventory_hash: 'a'.repeat(64) }));
+    mark('authorize-bad-hash');
+    const invalidHash = await h.call('authorize_item_deletion', { ...args, p_inventory_hash: 'a'.repeat(64) });
+    mark(`authorize-bad-hash-result-${responseClass(invalidHash)}`);
+    denied(invalidHash);
     let operation = prepared;
     for (let page = 0; page < 4 && operation.phase === 'preparing'; page++) {
+      mark('inventory');
       operation = await client.rpc(owner, 'inventory_item_deletion', args);
     }
+    mark('inventory-result');
     requireEvidence(operation.phase === 'prepared' && operation.targetCount === 4 && /^[0-9a-f]{64}$/.test(operation.inventoryHash));
     if (withLifecycleParentLock) {
-      const frozenItem = await h.read('items', base.item.id), frozenPending = await h.read('item_images', pending.imageId);
+      mark('freeze-item');
+      const frozenItem = await h.read('items', base.item.id);
+      mark('freeze-pending');
+      const frozenPending = await h.read('item_images', pending.imageId);
       const readUnaffected = async () => {
         for (const path of h.paths({ itemId: unaffected.item.id, imageId: unaffected.image.id })) {
+          mark('unaffected-read');
           const result = await client.request(owner.token, `/storage/v1/object/authenticated/wardrobe/${path}`);
+          mark(`unaffected-read-result-${responseClass(result)}`);
           requireEvidence(result.ok && result.status === 200 && Buffer.isBuffer(result.data) && result.data.length === bytes.length);
+          mark('unaffected-read-hash');
           eq(createHash('sha256').update(result.data).digest('hex'), hash);
         }
       };
+      mark('owner-lock-admit');
       await withLifecycleParentLock(owner.uid, base.item.id, 'owner no key update', async () => {
         await readUnaffected();
-        denied(await h.call('set_item_trashed', { p_item_id: base.item.id, p_expected_version: preview.version, p_trashed: false }));
+        mark('owner-lock-trash');
+        const trash = await h.call('set_item_trashed', { p_item_id: base.item.id, p_expected_version: preview.version, p_trashed: false });
+        mark(`owner-lock-trash-result-${responseClass(trash)}`);
+        denied(trash);
         for (const path of [h.paths(pending)[0], h.paths({ itemId: unaffected.item.id, imageId: unaffected.image.id })[0]]) {
+          mark('owner-lock-delete');
           const refused = await client.request(owner.token, `/storage/v1/object/wardrobe/${path}`, { method: 'DELETE' });
+          mark(`owner-lock-delete-result-${responseClass(refused)}`);
           requireEvidence(!refused.ok && refused.status >= 400 && refused.status < 500);
         }
         await readUnaffected();
-        eq(await h.read('items', base.item.id), frozenItem); eq(await h.read('item_images', pending.imageId), frozenPending);
+        mark('owner-lock-item');
+        eq(await h.read('items', base.item.id), frozenItem);
+        mark('owner-lock-pending');
+        eq(await h.read('item_images', pending.imageId), frozenPending);
+        mark('owner-lock-unaffected-item');
         eq(await h.read('items', unaffected.item.id), [unaffected.item]);
+        mark('owner-lock-unaffected-image');
         eq(await h.read('item_images', unaffected.image.id), [unaffected.image]);
+        mark('owner-lock-release');
       });
+      mark('owner-lock-status');
       eq(await client.rpc(owner, 'item_deletion_operation_status', args), operation);
+      mark('authorize-lock-admit');
       await withLifecycleParentLock(owner.uid, base.item.id, 'deletion update', async () => {
+        mark('authorize-lock-call');
         const refused = await h.call('authorize_item_deletion', { ...args, p_inventory_hash: operation.inventoryHash });
+        mark(`authorize-lock-result-${responseClass(refused)}`);
         requireEvidence(!refused.ok); eq(refused.status, 400);
         eq(refused.data, { code: '22023', details: null, hint: null, message: 'Request conflict' });
+        mark('authorize-lock-status');
         eq(await client.rpc(owner, 'item_deletion_operation_status', args), operation);
+        mark('authorize-lock-reservation');
         eq((await h.status(pending)).state, 'reserved');
+        mark('authorize-lock-release');
       });
-      eq(await h.read('items', base.item.id), frozenItem); eq(await h.read('item_images', pending.imageId), frozenPending);
+      mark('after-lock-item');
+      eq(await h.read('items', base.item.id), frozenItem);
+      mark('after-lock-pending');
+      eq(await h.read('item_images', pending.imageId), frozenPending);
     }
+    mark('authorize');
     const authorized = await client.rpc(owner, 'authorize_item_deletion', { ...args, p_inventory_hash: operation.inventoryHash });
+    mark('authorize-result');
     requireEvidence(authorized.phase === 'authorized');
-    denied(await h.call('cancel_item_deletion_preparation', args));
+    mark('cancel-refusal');
+    const cancelled = await h.call('cancel_item_deletion_preparation', args);
+    mark(`cancel-result-${responseClass(cancelled)}`);
+    denied(cancelled);
+    mark('cancelled-reservation');
     eq((await h.status(pending)).state, 'cancelled');
     let dispatches = 0;
-    const removePhase = async (expected) => {
+    const removePhase = async (expected, registered) => {
       for (let n = 0; n < expected; n++) {
+        mark(registered ? 'registered-next' : 'pending-next');
         const target = await client.rpc(owner, 'item_deletion_next_target', args);
+        mark(registered ? 'registered-target' : 'pending-target');
         requireEvidence(target !== null && Number.isInteger(target.ordinal) && target.path.startsWith(`${owner.uid}/${base.item.id}/`));
+        mark(registered ? 'registered-next-replay' : 'pending-next-replay');
         eq(await client.rpc(owner, 'item_deletion_next_target', args), target);
+        mark(registered ? 'registered-remove' : 'pending-remove');
         const result = await client.request(owner.token, `/storage/v1/object/wardrobe/${target.path}`, { method: 'DELETE' });
+        mark(registered ? `registered-remove-result-${responseClass(result)}` : `pending-remove-result-${responseClass(result)}`);
         requireEvidence(['removed', 'missing'].includes(classifyObjectDeletion(result))); dispatches++;
+        mark(registered ? 'registered-reconcile' : 'pending-reconcile');
         const reconciled = await client.rpc(owner, 'reconcile_item_deletion_target', { ...args, p_ordinal: target.ordinal });
+        mark(registered ? 'registered-reconcile-result' : 'pending-reconcile-result');
         eq(reconciled, { ordinal: target.ordinal, state: 'reconciled_absent' });
+        mark(registered ? 'registered-reconcile-replay' : 'pending-reconcile-replay');
         eq(await client.rpc(owner, 'reconcile_item_deletion_target', { ...args, p_ordinal: target.ordinal }), reconciled);
       }
+      mark(registered ? 'registered-empty' : 'pending-empty');
       eq(await client.rpc(owner, 'item_deletion_next_target', args), null);
     };
-    await removePhase(2);
+    await removePhase(2, false);
+    mark('begin');
     const begun = await client.rpc(owner, 'begin_prepared_item_deletion', args);
+    mark('begin-result');
     requireEvidence(begun.phase === 'removing_registered' && begun.begin.version === preview.version + 1);
+    mark('begin-replay');
     eq(await client.rpc(owner, 'begin_prepared_item_deletion', args), begun);
+    mark('pending-row-absent');
     eq(await h.read('item_images', pending.imageId), []);
-    denied(await h.call('finish_item_deletion', args));
-    await removePhase(2); eq(dispatches, 4);
+    mark('finish-premature');
+    const premature = await h.call('finish_item_deletion', args);
+    mark(`finish-premature-result-${responseClass(premature)}`);
+    denied(premature);
+    await removePhase(2, true);
+    mark('dispatch-count');
+    eq(dispatches, 4);
+    mark('finish');
     eq(await client.rpc(owner, 'finish_item_deletion', args), [{ state: 'completed' }]);
+    mark('finish-replay');
     eq(await client.rpc(owner, 'finish_item_deletion', args), [{ state: 'absent' }]);
+    mark('terminal-status');
     const terminal = await client.rpc(owner, 'item_deletion_operation_status', args);
+    mark('terminal-result');
     requireEvidence(terminal.phase === 'completed' && terminal.inventoryHash === null && terminal.begin === null && terminal.targetCount === 0);
+    mark('terminal-other-request');
     eq(await client.rpc(owner, 'item_deletion_operation_status', { ...args, p_request_id: randomUUID() }), null);
+    mark('item-absent');
     eq(await h.read('items', base.item.id), []);
+    mark('reinsert-refusal');
     const reinsert = await client.request(owner.token, '/rest/v1/items', { method: 'POST', body: base.value.p_item });
+    mark(`reinsert-result-${responseClass(reinsert)}`);
     requireEvidence(!reinsert.ok && reinsert.status < 500);
+    mark('late-post-refusal');
     const late = await client.request(owner.token, `/storage/v1/object/wardrobe/${h.paths(pending)[0]}`, {
       method: 'POST', binary: true, body: bytes, headers: { 'x-upsert': 'false' },
     });
+    mark(`late-post-result-${responseClass(late)}`);
     requireEvidence(!late.ok && late.status < 500);
+    mark('child-settlement');
     };
     if (withLifecycleLateUpload) {
+      mark('child-admit');
       await withLifecycleLateUpload(owner, { p_item: { id: base.item.id }, p_image: { id: pending.imageId } }, deletion, 'pending-thumb-absent');
+      mark('post-child-prefix');
       await requireLifecyclePrefixEmpty(owner.uid, base.item.id);
-      for (const path of h.paths(pending)) requireEvidence(!(await client.request(owner.token,
-        `/storage/v1/object/authenticated/wardrobe/${path}`)).ok);
+      for (const path of h.paths(pending)) {
+        mark('post-child-get');
+        const result = await client.request(owner.token, `/storage/v1/object/authenticated/wardrobe/${path}`);
+        mark(`post-child-get-result-${responseClass(result)}`);
+        requireEvidence(!result.ok);
+      }
     } else await deletion();
     if (unaffected) {
+      mark('unaffected-remove');
       await h.remove({ itemId: unaffected.item.id, imageId: unaffected.image.id });
+      mark('unaffected-delete-item');
       await h.deleteItem(unaffected.value);
     }
   }

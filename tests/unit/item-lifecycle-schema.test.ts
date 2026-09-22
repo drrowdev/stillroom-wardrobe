@@ -827,6 +827,286 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
   });
 });
 
+describe('I10b deletion callback evidence (real caller, mocked client/lock/child)', () => {
+  const owner = { uid: '10000000-0000-4000-8000-000000000001', token: 'private-owner-token' };
+  const other = { uid: '10000000-0000-4000-8000-000000000002', token: 'private-peer-token' };
+  type Row = Record<string, unknown>;
+  type Step = { name: string; reply?: unknown };
+  type Fault = { at: string; occurrence?: number; value?: unknown; reply?: unknown };
+  const conflict = { ok: false, status: 400, data: { code: '22023', details: null, hint: null, message: 'Request conflict' } };
+  const removed = { ok: true, status: 200, data: { message: 'Successfully deleted' } };
+  const refused = { ok: false, status: 400, data: { code: 'AccessDenied', message: 'private-response-message' } };
+  const record = (value: unknown): Row => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Unexpected mock record');
+    return value as Row;
+  };
+  beforeEach(() => {
+    fixtureMocks.saveClients.mockReset();
+    vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Unexpected network'); }));
+  });
+  afterEach(() => {
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    vi.unstubAllGlobals(); vi.restoreAllMocks();
+  });
+  function fixture(fault?: Fault, twoOwners = false) {
+    const labels: string[] = [], events: string[] = [], cleanup: string[] = [], expected: Step[] = [];
+    const counts = new Map<string, number>(), originals: { item: Row; image: Row }[] = [];
+    let cursor = 0, pending: Row = {}, transport = Buffer.alloc(0), callback = false;
+    const mark = vi.fn((label: string) => { labels.push(label); });
+    const visit = (name: string, reply?: unknown) => {
+      events.push(name);
+      const count = (counts.get(name) ?? 0) + 1; counts.set(name, count);
+      if (fault?.at === name && count === (fault.occurrence ?? 1)) {
+        if (Object.hasOwn(fault, 'reply')) return fault.reply;
+        throw fault.value;
+      }
+      return reply;
+    };
+    const take = (name: string) => {
+      const step = expected[cursor++];
+      expect(step?.name).toBe(name);
+      return visit(name, step?.reply);
+    };
+    const request = vi.fn(async (token: string, route: string, options: { method?: string; body?: unknown } = {}) => {
+      if (twoOwners && callback && route === '/rest/v1/rpc/reserve_item_save') {
+        expect(token).toBe(other.token);
+        return visit('next-owner:reserve');
+      }
+      expect(token).toBe(owner.token);
+      const method = options.method ?? 'GET';
+      if (callback) {
+        const name = route.startsWith('/rest/v1/rpc/') ? 'raw:' + route.split('/').at(-1)
+          : route.startsWith('/rest/v1/items?') ? (method === 'DELETE' ? 'raw:delete-item' : 'read:item')
+          : route.startsWith('/rest/v1/item_images?') ? 'read:image'
+          : route.startsWith('/storage/v1/object/authenticated/') ? 'raw:download'
+          : route === '/rest/v1/items' ? 'raw:reinsert' : 'raw:storage-' + method;
+        return take(name);
+      }
+      if (route === '/rest/v1/rpc/reserve_item_save') {
+        const body = record(options.body), item: Row = { ...record(body.p_item), owner_id: owner.uid, version: 1, deleted_at: null };
+        const image: Row = { ...record(body.p_image), owner_id: owner.uid, item_id: item.id,
+          description_version: 1, retired_at: null, state: 'ready' };
+        originals.push({ item, image });
+        return visit('setup:reserve', { ok: true, status: 200, data: [{ fingerprint: 'a'.repeat(64), state: 'reserved', item, image }] });
+      }
+      if (route.startsWith('/rest/v1/items?')) return visit('setup:read-item', { ok: true, data: [originals.at(-1)!.item] });
+      if (route.startsWith('/rest/v1/item_images?')) return visit('setup:read-image', { ok: true, data: [originals.at(-1)!.image] });
+      if (route.startsWith('/storage/v1/object/wardrobe/') && method === 'POST') {
+        expect(options.body).toBeInstanceOf(Uint8Array);
+        transport = Buffer.from(options.body as Uint8Array);
+        return visit('setup:upload', { ok: true, status: 200, data: {} });
+      }
+      if (route === '/rest/v1/rpc/finalize_item_save') return visit('setup:finalize', { ok: true, status: 204, data: null });
+      if (route === '/rest/v1/rpc/reserve_image_change') {
+        pending = record(record(options.body).p_intent);
+        return visit('setup:replacement', { ok: true, status: 200, data: { completedVersion: null,
+          fingerprint: 'b'.repeat(64), imageId: pending.imageId, itemId: pending.itemId,
+          kind: 'replacement', requestId: pending.requestId, state: 'reserved' } });
+      }
+      throw new Error('Unexpected setup request');
+    });
+    const rpc = vi.fn(async (actual: unknown, name: string) => { expect(actual).toBe(owner); return take('rpc:' + name); });
+    const client = { request, rpc };
+    fixtureMocks.saveClients.mockImplementation(async () => visit('setup:clients', { client, owners: twoOwners ? [owner, other] : [owner] }));
+    const plan = () => {
+      const base = originals[0]!, unaffected = originals[1]!;
+      const item = { ...base.item, version: 2, deleted_at: 'synthetic-trash' }, image = { id: pending.imageId };
+      const prepared = { phase: 'preparing' }, operation = { phase: 'prepared', targetCount: 4, inventoryHash: 'c'.repeat(64) };
+      const begun = { phase: 'removing_registered', begin: { version: 3 } };
+      const add = (name: string, reply?: unknown) => { expected.push({ name, reply }); };
+      const readItem = (row: Row) => add('read:item', { ok: true, data: [row] });
+      const readImage = (row: Row) => add('read:image', { ok: true, data: [row] });
+      const download = () => add('raw:download', { ok: true, status: 200, data: transport });
+      add('child:admit');
+      add('rpc:set_item_trashed', [{ ...item }]);
+      add('rpc:item_deletion_status', [{ version: 2, image_manifest_sha256: 'd'.repeat(64) }]);
+      add('lock:owner share:admit'); add('raw:prepare_item_deletion', conflict);
+      add('rpc:item_deletion_operation_status', null); add('lock:owner share:release');
+      add('rpc:prepare_item_deletion', prepared); add('rpc:prepare_item_deletion', prepared);
+      add('raw:authorize_item_deletion', conflict);
+      add('rpc:inventory_item_deletion', prepared); add('rpc:inventory_item_deletion', operation);
+      readItem(item); readImage(image); add('lock:owner no key update:admit');
+      download(); download(); add('raw:set_item_trashed', conflict);
+      add('raw:storage-DELETE', refused); add('raw:storage-DELETE', refused);
+      download(); download(); readItem(item); readImage(image); readItem(unaffected.item); readImage(unaffected.image);
+      add('lock:owner no key update:release'); add('rpc:item_deletion_operation_status', operation);
+      add('lock:deletion update:admit'); add('raw:authorize_item_deletion', conflict);
+      add('rpc:item_deletion_operation_status', operation); add('rpc:image_change_status', { state: 'reserved' });
+      add('lock:deletion update:release'); readItem(item); readImage(image);
+      add('rpc:authorize_item_deletion', { phase: 'authorized' });
+      add('raw:cancel_item_deletion_preparation', conflict); add('rpc:image_change_status', { state: 'cancelled' });
+      for (const phase of ['pending', 'registered']) {
+        for (let n = 0; n < 2; n++) {
+          const ordinal = (phase === 'pending' ? 1 : 3) + n;
+          const target = { ordinal, path: `${owner.uid}/${base.item.id}/${phase === 'pending' ? pending.imageId : base.image.id}/${n ? 'thumb' : 'main'}.jpg` };
+          add('rpc:item_deletion_next_target', target); add('rpc:item_deletion_next_target', target);
+          add('raw:storage-DELETE', removed);
+          const reconciled = { ordinal, state: 'reconciled_absent' };
+          add('rpc:reconcile_item_deletion_target', reconciled); add('rpc:reconcile_item_deletion_target', reconciled);
+        }
+        add('rpc:item_deletion_next_target', null);
+        if (phase === 'pending') {
+          add('rpc:begin_prepared_item_deletion', begun); add('rpc:begin_prepared_item_deletion', begun);
+          add('read:image', { ok: true, data: [] }); add('raw:finish_item_deletion', conflict);
+        }
+      }
+      add('rpc:finish_item_deletion', [{ state: 'completed' }]); add('rpc:finish_item_deletion', [{ state: 'absent' }]);
+      add('rpc:item_deletion_operation_status', { phase: 'completed', inventoryHash: null, begin: null, targetCount: 0 });
+      add('rpc:item_deletion_operation_status', null); add('read:item', { ok: true, data: [] });
+      add('raw:reinsert', refused); add('raw:storage-POST', refused);
+      add('child:settle'); add('prefix:empty'); add('raw:download', refused); add('raw:download', refused);
+      add('raw:storage-DELETE', removed); add('raw:storage-DELETE', removed);
+      add('raw:delete-item', { ok: true });
+    };
+    const lock = vi.fn(async (uid: string, item: string, mode: string, operation: () => Promise<void>) => {
+      expect(uid).toBe(owner.uid); expect(item).toBe(originals[0]!.item.id);
+      take(`lock:${mode}:admit`);
+      try { await operation(); take(`lock:${mode}:release`); }
+      finally { cleanup.push('lock:' + mode); }
+    });
+    const child = vi.fn(async (actual: unknown, value: { p_item: Row; p_image: Row }, operation: () => Promise<void>, mode: string) => {
+      expect(actual).toBe(owner); expect(value.p_item.id).toBe(originals[0]!.item.id);
+      expect(value.p_image.id).toBe(pending.imageId); expect(mode).toBe('pending-thumb-absent');
+      callback = true; plan(); take('child:admit');
+      try { await operation(); take('child:settle'); }
+      finally { cleanup.push('child'); }
+    });
+    const prefix = vi.fn(async () => { take('prefix:empty'); });
+    const run = (marked = true) => imageDeletionCases({}, { withLifecycleLateUpload: child,
+      withLifecycleParentLock: lock, requireLifecyclePrefixEmpty: prefix, ...(marked ? { mark } : {}) });
+    const privacy = () => {
+      const text = labels.join('|');
+      for (const secret of [owner.uid, owner.token, other.uid, other.token, 'private', '/storage/', ...originals.flatMap(({ item, image }) => [item.id, image.id]),
+        pending.requestId, pending.imageId]) if (typeof secret === 'string') expect(text).not.toContain(secret);
+    };
+    return { run, mark, labels, events, cleanup, expected, request, rpc, privacy, get cursor() { return cursor; } };
+  }
+  it('retains the original successful operation order and four target dispatches, with and without mark', async () => {
+    const f = fixture(); await f.run();
+    expect(f.cursor).toBe(f.expected.length);
+    expect(f.events.slice(f.events.indexOf('child:admit'))).toEqual(f.expected.map(({ name }) => name));
+    expect(f.events.filter((e) => e === 'raw:storage-DELETE')).toHaveLength(8); // Two held refusals, four targets, two unaffected cleanup.
+    expect(f.events.filter((e) => e === 'rpc:reconcile_item_deletion_target')).toHaveLength(8);
+    expect(f.events.filter((e) => e === 'setup:upload')).toHaveLength(5);
+    expect(f.cleanup).toEqual(['lock:owner share', 'lock:owner no key update', 'lock:deletion update', 'child']);
+    expect(f.labels.at(-1)).toBe('unaffected-delete-item');
+    expect(f.labels).toContain('pending-remove-result-200-OTHER');
+    expect(f.labels).toContain('registered-remove-result-200-OTHER');
+    f.privacy();
+    const unmarked = fixture(); await unmarked.run(false);
+    expect(unmarked.labels).toEqual([]); expect(unmarked.events).toEqual(f.events); expect(unmarked.cleanup).toEqual(f.cleanup);
+  });
+  const boundaries = [
+    ['setup:clients', 1, 'entry'], ['setup:reserve', 1, 'owner-create'], ['setup:reserve', 2, 'unaffected-create'],
+    ['setup:replacement', 1, 'pending-reserve'], ['setup:upload', 5, 'pending-upload'],
+    ['child:admit', 1, 'child-admit'], ['rpc:set_item_trashed', 1, 'trash'],
+    ['rpc:item_deletion_status', 1, 'preview'],
+    ['lock:owner share:admit', 1, 'prepare-lock-admit'], ['raw:prepare_item_deletion', 1, 'prepare-lock-call'],
+    ['rpc:item_deletion_operation_status', 1, 'prepare-lock-status'], ['lock:owner share:release', 1, 'prepare-lock-release'],
+    ['rpc:prepare_item_deletion', 1, 'prepare'], ['rpc:prepare_item_deletion', 2, 'prepare-replay'],
+    ['raw:authorize_item_deletion', 1, 'authorize-bad-hash'], ['rpc:inventory_item_deletion', 2, 'inventory'],
+    ['read:item', 1, 'freeze-item'], ['read:image', 1, 'freeze-pending'],
+    ['lock:owner no key update:admit', 1, 'owner-lock-admit'], ['raw:download', 1, 'unaffected-read'],
+    ['raw:set_item_trashed', 1, 'owner-lock-trash'], ['raw:storage-DELETE', 1, 'owner-lock-delete'],
+    ['read:item', 2, 'owner-lock-item'], ['read:image', 2, 'owner-lock-pending'],
+    ['read:item', 3, 'owner-lock-unaffected-item'], ['read:image', 3, 'owner-lock-unaffected-image'],
+    ['lock:owner no key update:release', 1, 'owner-lock-release'],
+    ['rpc:item_deletion_operation_status', 2, 'owner-lock-status'],
+    ['lock:deletion update:admit', 1, 'authorize-lock-admit'], ['raw:authorize_item_deletion', 2, 'authorize-lock-call'],
+    ['rpc:item_deletion_operation_status', 3, 'authorize-lock-status'],
+    ['rpc:image_change_status', 1, 'authorize-lock-reservation'], ['lock:deletion update:release', 1, 'authorize-lock-release'],
+    ['read:item', 4, 'after-lock-item'], ['read:image', 4, 'after-lock-pending'],
+    ['rpc:authorize_item_deletion', 1, 'authorize'], ['raw:cancel_item_deletion_preparation', 1, 'cancel-refusal'],
+    ['rpc:image_change_status', 2, 'cancelled-reservation'],
+    ['rpc:item_deletion_next_target', 1, 'pending-next'], ['rpc:item_deletion_next_target', 2, 'pending-next-replay'],
+    ['raw:storage-DELETE', 3, 'pending-remove'], ['rpc:reconcile_item_deletion_target', 1, 'pending-reconcile'],
+    ['rpc:reconcile_item_deletion_target', 2, 'pending-reconcile-replay'], ['rpc:item_deletion_next_target', 5, 'pending-empty'],
+    ['rpc:begin_prepared_item_deletion', 1, 'begin'], ['rpc:begin_prepared_item_deletion', 2, 'begin-replay'],
+    ['read:image', 5, 'pending-row-absent'],
+    ['raw:finish_item_deletion', 1, 'finish-premature'],
+    ['rpc:item_deletion_next_target', 6, 'registered-next'], ['raw:storage-DELETE', 5, 'registered-remove'],
+    ['rpc:reconcile_item_deletion_target', 5, 'registered-reconcile'], ['rpc:item_deletion_next_target', 10, 'registered-empty'],
+    ['rpc:finish_item_deletion', 1, 'finish'], ['rpc:finish_item_deletion', 2, 'finish-replay'],
+    ['rpc:item_deletion_operation_status', 4, 'terminal-status'], ['rpc:item_deletion_operation_status', 5, 'terminal-other-request'],
+    ['read:item', 5, 'item-absent'],
+    ['raw:reinsert', 1, 'reinsert-refusal'], ['raw:storage-POST', 1, 'late-post-refusal'],
+    ['child:settle', 1, 'child-settlement'], ['prefix:empty', 1, 'post-child-prefix'],
+    ['raw:download', 5, 'post-child-get'], ['raw:storage-DELETE', 7, 'unaffected-remove'],
+    ['raw:delete-item', 1, 'unaffected-delete-item'],
+  ] as const;
+  it.each(boundaries)('preserves exact seam failure and furthest boundary at %s/%s', async (at, occurrence, label) => {
+    const failure = new Error('private failure'), f = fixture({ at, occurrence, value: failure });
+    await expect(f.run()).rejects.toBe(failure);
+    expect(f.events.at(-1)).toBe(at); expect(f.labels.at(-1)).toBe(label);
+    expect(f.events.filter((e) => e === at)).toHaveLength(occurrence); f.privacy();
+    if (f.events.includes('child:admit') && at !== 'child:admit') expect(f.cleanup).toContain('child');
+    for (const mode of ['owner share', 'owner no key update', 'deletion update']) {
+      const admitted = f.events.includes(`lock:${mode}:admit`) && at !== `lock:${mode}:admit`;
+      expect(f.cleanup.includes('lock:' + mode)).toBe(admitted);
+    }
+    if (f.cursor) expect(f.events.slice(f.events.indexOf('child:admit'))).toEqual(f.expected.slice(0, f.cursor).map(({ name }) => name));
+  });
+  it.each([undefined, null, false, 0, ''])('does not replace falsy client or wrapper rejection %#', async (value) => {
+    for (const at of ['rpc:set_item_trashed', 'lock:owner share:release', 'child:settle', 'prefix:empty', 'raw:delete-item']) {
+      const f = fixture({ at, value });
+      const outcome = await f.run().then(() => ({ rejected: false, value: 'unexpected' }),
+        (value: unknown) => ({ rejected: true, value }));
+      expect(outcome).toEqual({ rejected: true, value }); expect(f.events.at(-1)).toBe(at); f.privacy();
+    }
+  });
+  it.each([
+    ['raw:prepare_item_deletion', 1, 'prepare-lock-result'], ['raw:authorize_item_deletion', 1, 'authorize-bad-hash-result'],
+    ['raw:download', 1, 'unaffected-read-result'], ['raw:set_item_trashed', 1, 'owner-lock-trash-result'],
+    ['raw:storage-DELETE', 1, 'owner-lock-delete-result'], ['raw:authorize_item_deletion', 2, 'authorize-lock-result'],
+    ['raw:cancel_item_deletion_preparation', 1, 'cancel-result'], ['raw:storage-DELETE', 3, 'pending-remove-result'],
+    ['raw:finish_item_deletion', 1, 'finish-premature-result'], ['raw:storage-DELETE', 5, 'registered-remove-result'],
+    ['raw:reinsert', 1, 'reinsert-result'], ['raw:storage-POST', 1, 'late-post-result'],
+    ['raw:download', 5, 'post-child-get-result'],
+  ] as const)('classifies held raw response before unchanged refusal at %s/%s', async (at, occurrence, label) => {
+    for (const [status, code, suffix] of [[200, '22023', '200-22023'], [599, 'private-code', 'OTHER-OTHER']] as const) {
+      const f = fixture({ at, occurrence, reply: { ok: true, status, data: { code, message: 'private-message', path: owner.uid } } });
+      await expect(f.run()).rejects.toThrow();
+      expect(f.events.at(-1)).toBe(at); expect(f.labels.at(-1)).toBe(`${label}-${suffix}`); f.privacy();
+    }
+  });
+  it.each([
+    ['rpc:prepare_item_deletion', 2, {}, 'prepare-replay'],
+    ['rpc:inventory_item_deletion', 2, { phase: 'private-phase', targetCount: 4 }, 'inventory-result'],
+    ['rpc:authorize_item_deletion', 1, { phase: 'private-phase' }, 'authorize-result'],
+    ['rpc:item_deletion_next_target', 1, null, 'pending-target'],
+    ['rpc:reconcile_item_deletion_target', 1, {}, 'pending-reconcile-result'],
+    ['rpc:begin_prepared_item_deletion', 1, { phase: 'wrong' }, 'begin-result'],
+    ['rpc:item_deletion_operation_status', 4, {}, 'terminal-result'],
+  ] as const)('retains RPC result assertions and private-free boundary at %s', async (at, occurrence, reply, label) => {
+    const f = fixture({ at, occurrence, reply });
+    await expect(f.run()).rejects.toThrow();
+    expect(f.events.at(-1)).toBe(at); expect(f.labels.at(-1)).toBe(label); f.privacy();
+  });
+  it('replaces prior invocation boundary before a fresh setup failure', async () => {
+    const first = fixture(); await first.run(); expect(first.labels.at(-1)).toBe('unaffected-delete-item');
+    const error = new Error('private setup'), second = fixture({ at: 'setup:clients', value: error });
+    await expect(second.run()).rejects.toBe(error);
+    expect(second.labels).toEqual(['entry']); expect(second.events).toEqual(['setup:clients']);
+  });
+  it('does not await the synchronous observation hook or leak response data through it', async () => {
+    const f = fixture();
+    f.mark.mockImplementation((label: string) => { f.labels.push(label); return new Promise<void>(() => {}); });
+    await f.run();
+    expect(f.cursor).toBe(f.expected.length); expect(f.labels.at(-1)).toBe('unaffected-delete-item'); f.privacy();
+  });
+  it('replaces a successful prior owner cleanup label before the next owner setup', async () => {
+    const error = new Error('private next-owner setup'), f = fixture({ at: 'next-owner:reserve', value: error }, true);
+    await expect(f.run()).rejects.toBe(error);
+    expect(f.cursor).toBe(f.expected.length); expect(f.labels.slice(-2)).toEqual(['unaffected-delete-item', 'owner-create']);
+    expect(f.events.at(-1)).toBe('next-owner:reserve'); f.privacy();
+  });
+  it('wires only the existing runner stage and preserves the main failure template', async () => {
+    const runner = await read('scripts/preservation-rehearsal.mjs');
+    expect(runner.includes('mark: (label) => { stage = `I10b-publication-races-${label}`; }')).toBe(true);
+    expect(runner).toContain('FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}${lifecycleFailureDetail(error)}; subsequent stages NOT RUN');
+  });
+});
+
 describe('I08 SQL source contract, not live database proof', () => {
   it('has only four public RPCs and no public table/fingerprint/export edits', () => {
     expect([...sql.matchAll(/create function public\.(\w+)/g)].map((match) => match[1])).toEqual([
