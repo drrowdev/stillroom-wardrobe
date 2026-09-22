@@ -313,6 +313,62 @@ replacement SQL fix is claimed. All eleven SQL files and source/body pins,
 timeouts and B1/B2/C counts are unchanged. Focused closure/publication and
 actual CI remain required; no generated types or Stage C release is implied.
 
+### Stage A CI5 - native publication column qualification, 22 September 2026
+
+The [actual CI5 evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771355357)
+records head `56db392c0608c12c84e6d4ae0dfff7a56afd00e4`, CI `35687937262`,
+database job `106618661569`. At 04:46:49.2181470Z the failure was
+`I10b-preservation-upload-main-status5xx-500`; the database job failed at
+04:46:52Z. Startup, exact eleven-source inventory, historical base->10/9->10
+preservation, the ROOT11 ledger and exact snapshot cleanup passed. The native
+main upload returned HTTP 500; its body remained deliberately unread. This
+does not establish a SQLSTATE or the underlying trigger cause. Full 10->11
+preservation and later backend/type gates remain unproved.
+
+The [reviewed six-path repair release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771403783)
+records actual retained Anthropic Claude Opus 5 critique and same-writer
+GPT-6 Astra model/source continuity. Source inspection found that the modern
+`private.guard_item_object_publication` declares a local `image_id`, while its
+cancelled-attempt subquery used unqualified `image_id` from
+`private.image_change_attempts`, which also has that column. Under the default
+PL/pgSQL variable-conflict policy, preparing that expression is ambiguous
+(`42702`). INSERT and UPDATE reaching the enclosing IF are affected before
+SQL short-circuit evaluation; DELETE returns earlier. This is source
+diagnosis, not a claim that CI returned `42702`.
+
+The only SQL change aliases that subquery as `a` and qualifies
+`a.owner_id`, `a.image_id` and `a.state`. The cancellation comparison remains
+`a.image_id=image.id`; the cancellation refusal, owner checks, locks,
+publication/deletion guards and grants are unchanged. Legitimate local
+`im.id=image_id` comparisons elsewhere remain unchanged. No conflict-policy
+override, diagnostic change, fixture change or assertion weakening was made.
+
+Three bounded source-regression cases reject bare `image_id` in guard
+statements referencing either `image_change_attempts` or
+`item_deletion_targets`, retain the legitimate local-variable comparison and
+require the qualified cancellation predicate. Before the SQL repair,
+`vitest run tests/unit/image-replacement-schema.test.ts -t "qualifies native publication" --reporter=default`
+failed as intended: two failures, one pass, 125 tests excluded by the filter.
+After the repair, the five selected suites passed all 921 tests:
+image-replacement-schema 128, ci-storage-guard 73, preservation 166,
+local-backend 540 and image-replacement 14. Scoped ESLint and
+`tsc --noEmit` also passed using the approved pinned Node and locked packages.
+These source/mocked tests do not execute PostgreSQL or the native backend.
+
+The new migration's current raw LF bytes are **82,243**, SHA-256
+`cebc58134c93590fe178a1a72a4beb77dcabe562803c90a5455cf09acba3e771`.
+Its modern publication-body MD5 is `628ede8b417fe55094dcd50196b8f353`.
+Only those live inventory/source/body pins were refreshed. The modern policy
+MD5 remains `507ef6c28f1732df5d6141f730258062`; legacy pins and all ten prior
+migrations are unchanged. Earlier 82,235-byte/`678873e9...` and CI1
+`42601` evidence above remains historical and has not been replaced.
+
+This repair is necessary but may not be sufficient: fresh CI must exercise
+the corrected expression and may expose later failures. The candidate remains
+unstaged pending focused closure and a separate publication release. No local
+backend, SQL execution/parser, dependency installation, generated types or UI
+work was performed; no backend acceptance or Stage C release is implied.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling

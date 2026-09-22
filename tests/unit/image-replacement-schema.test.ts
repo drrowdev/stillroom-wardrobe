@@ -354,6 +354,18 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
     expect(body(sql, 'private.guard_image_change_image')).toContain('row(new.owner_id,new.item_id,new.id) is distinct from row(old.owner_id,old.item_id,old.id)');
     expect(sql).not.toMatch(/disable trigger|session_replication_role|delete from storage\.objects/);
   });
+  it.each(['image_change_attempts', 'item_deletion_targets'])(
+    'qualifies native publication image_id references in statements using %s', async (table) => {
+      const guard = body(await source, 'private.guard_item_object_publication');
+      const statements = guard.split(';').filter((statement) => statement.includes(`private.${table}`));
+      expect(statements.length).toBeGreaterThan(0);
+      for (const statement of statements) expect(statement).not.toMatch(/(?<![\w.])image_id\b/i);
+      expect(guard).toContain('im.id=image_id');
+    });
+  it('qualifies native publication cancellation owner, image and state without dropping the refusal', async () => {
+    const guard = body(await source, 'private.guard_item_object_publication');
+    expect(guard).toContain("from private.image_change_attempts a where a.owner_id=u and a.image_id=image.id and a.state='cancelled'");
+  });
   it('retains inclusive seven-day source acceptance and does not recheck accepted recovery age', async () => {
     const sql = await source, reserve = body(sql, 'private.reserve_image_change');
     expect(reserve.indexOf("return private.image_change_receipt(a)")).toBeLessThan(reserve.indexOf("interval '7 days'"));

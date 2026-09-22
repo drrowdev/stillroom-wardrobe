@@ -1082,7 +1082,7 @@ begin
     or exists(select 1 from private.item_deletion_claims where owner_id=u and item_id=parent_id)
     or (tg_op='INSERT' and (image.state<>'pending' or image.retired_at is not null or item.deleted_at is not null
       or exists(select 1 from private.ai_item_save_attempts where owner_id=u and item_id=parent_id and cancelled)
-      or exists(select 1 from private.image_change_attempts where owner_id=u and image_id=image.id and state='cancelled'))) then
+      or exists(select 1 from private.image_change_attempts a where a.owner_id=u and a.image_id=image.id and a.state='cancelled'))) then
     raise exception using errcode='42501',message='Not available';
   end if;
   return new;

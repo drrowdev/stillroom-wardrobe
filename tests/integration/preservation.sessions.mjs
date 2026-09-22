@@ -18,7 +18,7 @@ export const SOURCE_HASHES = Object.freeze({
   analyzedSave: '3b42cfdbf9890c29229893dc8603a86181aea923b63b91bf75b26cf5783844ea',
   lifecycle: '8cc0fc1207737d63b7e1d000fc7471a9941a4833aaebebc75979c498a4d6c476',
   azure: 'ce66f9585f21badd978597d3ccbf94d7b9ff227687aa787faa860b05f86d02b5',
-  imageChanges: '678873e921f2077c8820a85c1855d432c375269f732bd27bf27daa15cb480596',
+  imageChanges: 'cebc58134c93590fe178a1a72a4beb77dcabe562803c90a5455cf09acba3e771',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const diagnosticStatuses = new Set([200, 201, 204, 400, 401, 403, 404, 409, 413, 422, 429, 500, 502, 503, 504]);
