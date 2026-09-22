@@ -5,7 +5,7 @@ import type { Language, MessageKey } from '../../i18n';
 import type { PreparedPhoto } from '../../images/process-jpeg';
 import {
   beginAiAnalysis, continueAiManually, createAiDraft, editAiDraftField, expireAiDraft, failAiAnalysis,
-  prepareAiGeneration, presentAiDraft, receiveAiResult, aiSaveClaim, type AiDraftState, type AiTransition,
+  prepareAiGeneration, presentAiDraft, receiveAiResult, refuseAiSave, aiSaveClaim, type AiDraftState, type AiTransition,
 } from '../../domain/ai-draft';
 import { garmentFields, newGarmentDraft, sameValue, type GarmentDraft } from '../../domain/garment-fields';
 import { canAnalyze, type AiAccounting, type AiAnalysisReply } from '../../domain/ai-controls';
@@ -148,6 +148,12 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language) {
     put({ ...current.current, state, draft: next });
   }
   return { ...view, commitPhoto, checkStatus, continueManual: manual, edit,
+    refuseSave: () => {
+      work.current?.abort();
+      const state = current.current.state;
+      if (state?.context) apply(refuseAiSave(state, state.context));
+      put({ ...current.current, manual: false, working: false, notice: 'aiC.saveRefused' });
+    },
     editDescription: (description: string) => put({ ...current.current, description, descriptionEdited: true }),
     snapshot: () => current.current,
     stop: () => {

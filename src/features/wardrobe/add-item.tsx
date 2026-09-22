@@ -12,7 +12,7 @@ import { CropEditor } from '../../images/crop-editor';
 import { ORIGINAL_EDIT, type PhotoEdit } from '../../images/crop';
 import type { ImagePreparationDetails, ImagePreparationStage } from '../../images/jpeg';
 import { newSaveAttempt, saveItem, saveAnalyzedItem, type SaveStage } from '../../images/upload';
-import { errorKey, isAborted } from '../../data/errors';
+import { AnalyzedSaveRefusedError, errorKey, isAborted } from '../../data/errors';
 import { newAnalyzedSaveAttempt, newUnverifiedSaveAttempt, type AnalyzedSaveAttempt } from '../../domain/analyzed-save';
 import type { AiClient } from '../../data/ai';
 import { useAiDraft } from './use-ai-draft';
@@ -194,6 +194,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     submitLatch.current = true;
     setInvalid(false);
     setError(null);
+    let saving: AnalyzedSaveAttempt | null = null;
     try {
       const state = analysis.snapshot();
       if (!attempt) manualTransport.current = state.manual && state.state?.status !== 'invalidated'
@@ -204,6 +205,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
         : state.state?.context ? newAnalyzedSaveAttempt(state.state, state.state.context, state.description, photo, scope, Date.now())
           : null);
       if (!current) return;
+      saving = current;
       setAttempt(current);
       if (manualTransport.current) await saveItem(client, scope, current, setStage);
       else await saveAnalyzedItem(client, scope, current, setStage, (reserved, fingerprint) => {
@@ -216,7 +218,13 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
         onSaved();
       }
     } catch (problem) {
-      if (!scope.signal.aborted && !isAborted(problem)) setError(errorKey(problem));
+      if (!scope.signal.aborted && !isAborted(problem)) {
+        if (problem instanceof AnalyzedSaveRefusedError && saving?.claim
+          && problem.itemId === saving.itemId && problem.imageId === saving.imageId && receipt.current === null) {
+          setAttempt(null);
+          analysis.refuseSave();
+        } else setError(errorKey(problem));
+      }
     } finally { if (!scope.signal.aborted) { submitLatch.current = false; setStage(null); } }
   }
   return (

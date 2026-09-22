@@ -23,7 +23,7 @@ test('AI consent shares profile/language mutex and rebases only its own exact pl
   const api = await aiFixture(page, 'en', false);
   await settings(page);
   await page.locator('#profile-display_name').fill('Preserved unsaved name');
-  await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
+  await page.getByRole('checkbox', { name: messages['aiC.azureAgree'].en, exact: true }).check();
   let held: Route | undefined;
   await page.route('**/rest/v1/rpc/ai_set_consent', (route) => { held = route; });
   await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
@@ -55,7 +55,7 @@ for (const failure of ['lost-ack', 'stale-profile'] as const) {
         else await route.fallback();
       });
     }
-    await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
+    await page.getByRole('checkbox', { name: messages['aiC.azureAgree'].en, exact: true }).check();
     await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
     await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: messages['aiC.enable'].en, exact: true })).toBeDisabled();
@@ -84,10 +84,10 @@ for (const action of ['save', 'reconcile'] as const) {
         api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
         await route.abort('failed');
       });
-      await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
+      await page.getByRole('checkbox', { name: messages['aiC.azureAgree'].en, exact: true }).check();
       await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
       await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
-    } else await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
+    } else await page.getByRole('checkbox', { name: messages['aiC.azureAgree'].en, exact: true }).check();
     const timings = new Map<PlaywrightRequest, { path: string; start: number; elapsed?: number; status?: number }>();
     const recordResponse = (response: PlaywrightResponse) => {
       const timing = timings.get(response.request());
@@ -160,10 +160,10 @@ for (const action of ['save', 'reconcile'] as const) {
         api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
         await route.abort('failed');
       });
-      await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
+      await page.getByRole('checkbox', { name: messages['aiC.azureAgree'].en, exact: true }).check();
       await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
       await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
-    } else await page.getByRole('checkbox', { name: messages['aiC.agree'].en }).check();
+    } else await page.getByRole('checkbox', { name: messages['aiC.azureAgree'].en, exact: true }).check();
     await page.route(profileUrl, async (route) => {
       expect(route.request().method()).toBe('GET');
       await route.fulfill({ json: { ...api.profiles[owners.a], display_name: 'Late unconfirmed profile' } });
@@ -216,13 +216,30 @@ for (const action of ['save', 'reconcile'] as const) {
   });
 }
 for (const language of ['en', 'fi', 'sv'] as const) {
-  test(`settings ${language}: private fields, preferences, clearing and persistence`, async ({ page }) => {
+  test(`unconfigured settings ${language}: neutral status without fabricated provider consent`, async ({ page }) => {
     const api = await setup(page, language);
     const consent = page.locator('section[aria-labelledby="ai-consent-title"]');
-    for (const key of ['aiC.notice', 'aiC.trainingNotice', 'aiC.retentionNotice', 'aiC.allowanceNotice', 'aiC.optOutNotice', 'aiC.reviewNotice'] as const) {
+    await expect(consent.getByText(messages['aiC.inactive'][language], { exact: true })).toBeVisible();
+    for (const key of ['aiC.notice', 'aiC.azureNotice', 'aiC.trainingNotice', 'aiC.azureTrainingNotice'] as const)
+      await expect(consent.getByText(messages[key][language], { exact: true })).toHaveCount(0);
+    for (const key of ['aiC.agree', 'aiC.azureAgree'] as const)
+      await expect(consent.getByRole('checkbox', { name: messages[key][language], exact: true })).toHaveCount(0);
+    await expect(consent.getByText(messages['aiC.reviewNotice'][language], { exact: true })).toBeVisible();
+    const enable = consent.getByRole('button', { name: messages['aiC.enable'][language], exact: true });
+    await expect(enable).toBeVisible();
+    await expect(enable).toBeDisabled();
+    expect(await consent.evaluate((element) => !element.querySelector('details')
+      && [...element.querySelectorAll('.fine')].every((copy) => parseFloat(getComputedStyle(copy).fontSize) >= 14))).toBe(true);
+    expect(api.requests.filter((request) => request.path.endsWith('/ai_set_consent'))).toHaveLength(0);
+  });
+  test(`settings ${language}: private fields, preferences, clearing and persistence`, async ({ page }) => {
+    const api = await aiFixture(page, language);
+    await settings(page, language);
+    const consent = page.locator('section[aria-labelledby="ai-consent-title"]');
+    for (const key of ['aiC.azureNotice', 'aiC.azureTrainingNotice', 'aiC.retentionNotice', 'aiC.allowanceNotice', 'aiC.optOutNotice', 'aiC.reviewNotice'] as const) {
       await expect(consent.getByText(messages[key][language], { exact: true })).toBeVisible();
     }
-    await expect(consent.getByRole('checkbox', { name: messages['aiC.agree'][language], exact: true })).toHaveCount(1);
+    await expect(consent.getByRole('checkbox', { name: messages['aiC.azureAgree'][language], exact: true })).toHaveCount(1);
     await expect(consent.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toBeVisible();
     await expect(consent.getByRole('button', { name: messages['aiC.disable'][language], exact: true })).toBeVisible();
     expect(await consent.evaluate((element) =>

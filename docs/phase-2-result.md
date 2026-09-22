@@ -5827,3 +5827,302 @@ is claimed.
 Independent review, exact-head CI/no-new-flakiness, normal-owner evidence and
 all existing human/device/recovery/export/hosted/paid/cutover gates remain;
 Phase 0 is engineering complete with acceptance open.
+
+## I29-AZ1 inactive Azure integration - 21 September 2026
+
+Source implementation on `drrowdev-shiny-umbrella`, from reviewed main
+`b4c37ad7848f60d3875e3161e482c33e05abfdc3`, tree
+`42e6ad143c35170883745e91a0f91639d29b5d30`. This is an **unstaged local
+checkpoint**, not publication, fresh backend CI, merge, deployment or acceptance.
+Authority is the [reviewed implementation/model-entry release](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5766659126),
+with the [one-brace schema and closed Deno-key repair](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5766981960).
+The [serve-inventory repair](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5767276863)
+adds Azure to the exact seven-file analysis inventory, retaining all six legacy
+files and rejecting every required omission and any extra file. The finalizer
+inventory, JWT/configuration and process ownership controls are unchanged.
+The latter corrects the malformed historical schema candidate: canonical
+1543 bytes/SHA-256 `84d87dca033cc587c6cae54cc8a0a2936f3dabefa0ab18fb4c3ee03467cc8ff1`;
+the approved prompt, settings and EN/FI/SV notice bytes are unchanged.
+
+I29 / R28 / R04, preserving R01/R03/R11/R12/R15/R19/R23/R26/R27:
+the fixed Azure-only adapter consumes the same prepared main JPEG, uses the
+strict fourteen-field contract and never sends owner preferences or language.
+The additive inactive manifest and profile-bound settlement retain six explicit
+counters, bounded model/control observations, conservative micro-USD arithmetic
+and durable request identity. Missing counters never become zero. Both cache
+reads and writes must be zero: positive applicable counters deactivate new
+admissions and preserve accepted/confirmed accounting or the hold. Cache,
+identity and control anomalies cannot produce ready facts or new estimates;
+valid billing survives invalid facts, and overruns remain unclamped estimates.
+No owner control, consent or allowance is activated by the migration.
+Legacy Google is **READ-AND-FINISH ONLY**: results and accounting remain readable
+and accepted late settlement can finish. The deployed entrypoint cannot dispatch
+Google and reads no Google credentials. New enable/dispatch is Azure-only,
+without a router, retry or fallback.
+
+The connected settings UI selects the correct provider/revision notice and
+binds its checkbox to the current owner, epoch and policy. A committed first
+Save refusal preserves all draft/photo/description values and manual intent,
+then requires explicit manual continuation. Only the exact successful,
+owner/item/image-bound acknowledgment unlocks the form. Unknown/malformed/lost
+acknowledgments retain frozen IDs and payload. Existing accepted Save replays
+precede present-day eligibility checks and still finish after expiry, opt-out
+or deactivation. Private attribution gains a nullable manifest FK; its public
+getter still omits that field entirely and retains explicit null source images.
+
+CI source now includes exact base/prior-main/target inventories (1/9/10 applied),
+actual old Google held/estimated/confirmed/dispatched records, completed history,
+pending frozen Save and stored-byte preservation. The ordinary-owner B2 fixtures
+also check a genuinely completed Azure Save's private manifest attribution and
+the same row's exact five-key ordinary-owner public projection before cleanup.
+The prior-main boundary is explicitly `20260913120000`, with required presence
+checking rather than a positional migration cutoff. The ordinary-owner B2 fixtures
+cover profile-lock overlap, refusal/reconsent/terminal replay and explicit unknown
+Save. Real C retains two synthetic provider generations through the production
+handler: owner A loses a real committed reservation acknowledgment; owner B
+receives a real terminal first refusal, explicitly continues manually, and loses
+a real finalizer acknowledgment. Retries use the same accepted payload and IDs.
+Only delivery is interrupted; Auth, reservation, Storage and finalization are
+not mocked. These are **unexecuted backend fixture changes** until exact-head CI.
+
+Local checks use approved Node 24.19.0 and the locked dependencies. `npm ci
+--no-fund` ran only after the selected unit command reported missing Vitest;
+locked Chromium/WebKit were installed inside this worktree only after actual
+missing-executable browser failures. No global, backend, Docker/WSL or hosted
+setup was performed.
+
+| Command | Observed local result |
+|---|---|
+| `npm run test:unit -- tests\unit\azure-openai.test.ts tests\unit\ai-endpoint.test.ts tests\unit\ai-client.test.ts tests\unit\ai-schema.test.ts tests\unit\ai-draft.test.ts tests\unit\ai-presentation.test.ts tests\unit\analyzed-save.test.ts tests\unit\ai-save-endpoint.test.ts tests\unit\jpeg.test.ts tests\unit\preservation.test.ts` | 643 passed. Includes literal parity, effective SQL source assertions, historical reads, byte binding, refusal/unknown ACKs and exact preservation parser stages; not SQL execution. |
+| `npm run test:unit -- tests\unit\local-backend.test.ts` | 513 passed, including exact analysis/finalizer inventories and rejection guards; no backend startup. Lint and typecheck also passed after this correction. |
+| `npm run test:unit -- tests\unit\preservation.test.ts tests\unit\ai-client.test.ts tests\unit\ai-schema.test.ts tests\unit\azure-openai.test.ts tests\unit\ai-endpoint.test.ts tests\unit\local-backend.test.ts` | Final-review repair batch: 926 passed across six suites. Lint, typecheck, translations and diff check passed again. The positive private-manifest/backend projection check remains unexecuted until CI. |
+| `npm run lint`, `npm run typecheck`, `npm run check:translations` | Passed; 527 EN/FI/SV keys. |
+| `npm run test:browser -- ai-photo-first.spec.ts` | 131 passed; four existing capture/project combinations intentionally skipped. Fixture UI evidence, not real-backend evidence. |
+| `npm run test:a11y -- ai-photo-first.spec.ts` | 18 passed: provider notices and refusal recovery in EN/FI/SV across desktop Chromium, mobile Chromium and WebKit. |
+| `npm run build` | Passed; existing over-500-kB bundle warning retained. |
+| `npm run scan:secrets` | Passed; no local canary supplied, so CI canary verification remains required. |
+| `npm run check:dependencies` | Failed `DEPENDENCY_RECORD_DRIFT`: read-only diagnosis shows exact equality after CRLF-to-LF conversion for the existing inventory, and matching notices. Package/lock and recorded license content are unchanged; this command did not reach its audit. |
+| `git diff --check` | Passed. |
+
+The initial Windows backslash Playwright argument selected no tests; using the
+documented filename-regex selector selected the actual suite. Initial source
+test failures from Windows path separators/CRLF and tenth-migration inventory
+expectations were corrected without weakening guards. Four bounded synthetic
+capture definitions remain unchanged; the writer has not viewed their images.
+
+Independent final source review, publication authorization, unchanged exact-head
+CI (real backend/types/preservation/B1/B2/C), coordinator visual review and
+human/device acceptance remain open. The dependency-check newline limitation
+is not a passing gate. Six-path documented/helper parity is not a successful
+live response: actual Azure wire/control compatibility and quality remain
+activation gates. No private photo, paid/provider call, hosted mutation,
+deployment, frozen PR #27 work or PR #28 reopening occurred.
+
+### I29-AZ1 publication and first CI repair
+
+The checkpoint above is historical. After independent final source review and
+the [publication release](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5767830552),
+the packet was published as draft [PR #29](https://github.com/drrowdev/stillroom-wardrobe/pull/29)
+at `2d3baf4db87aec19d6e91159a94edbccde34a02c`, tree
+`c010899c428802174adbc6e0558d4830e3b8d58e`.
+
+[CI attempt 1](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/35658236191)
+failed overall. Its real-backend job `106527025643` passed startup, preservation
+rehearsal, reset, ordinary integration and security. This includes actual
+prior-main nine-to-ten migration preservation of held/estimated/confirmed/
+dispatched Google records, frozen Save, late Google settlement and ordinary
+finalization, with no provider calls. AI rehearsal passed baseline checks,
+Deno unconfigured/invalid-token probes and B1 validation, then failed at the
+first `ready` stage at `2026-09-21T21:42:33Z`. READY, later B1/B2/C, positive
+private Azure manifest persistence and generated-types parity were not
+established. App job `106527025448` had one unit failure: a total migration
+count still expected nine, although its unchanged ninth-migration pin was
+correct. The separate [native Apple run](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/35658236118),
+job `106527025391`, succeeded at this same published head.
+
+Source diagnosis found a SQL operator-precedence defect on the READY path:
+`p_facts->'fields'-v_fields` must be `(p_facts->'fields')-v_fields` so key
+subtraction applies to the extracted JSON object. The new migration and its
+dependent byte/hash pins are corrected together, with positive and negative
+effective-SQL source assertions. This is a source-established defect consistent
+with the observed failure, not proof of the hidden child error or a successful
+repaired backend run. No installed migration or meaningful runtime assertion
+was changed; the next exact-head CI must establish the repair.
+
+The [reviewed count extension](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5768149950)
+changes only the unit fixture's literal total from nine to ten. Its ninth
+`entries[8]` filename/byte/hash pin, imports and privilege/catalog assertions
+remain unchanged. Inspection of related JSON extraction, subtraction and
+arithmetic expressions in the new migration found no further instance requiring
+this correction; all nine installed migrations remain unchanged.
+
+The initial local full-unit repair run had 2264 passes and two failures: the
+known migration-count expectation and an existing 5000-ms timeout in the
+512-KiB TUS ceiling/cancellation test. After inspecting that test and its bounded
+reader, `npm run test:unit -- tests\unit\preservation.test.ts -t 'retains the exact
+512KiB TUS byte ceiling'` passed the selected test (122 filtered skips), without
+changing its timeout, assertions or implementation. The isolated pass does not
+establish the cause of the full-suite timeout. `npm run lint`, `npm run typecheck`,
+`npm run check:translations` (527 keys) and `git diff --check` then passed.
+Before the count release, `npm run test:unit -- --maxWorkers=1` ran all tests
+with their original assertions/timeouts and reported 2265 passes, with only
+the count assertion failing. After that correction, the first identical
+command reported 2265 passes and an existing dependency-inventory test timing
+out at 5000 ms. Its local-file traversal was inspected; no test, dependency
+checker, configuration or timeout was changed. A bounded full-suite rerun of
+the same command passed **2266/2266 tests across 29 suites**. These observations
+do not prove a timing-failure cause or waive the default-parallel exact-head
+CI requirement. Lint, typecheck and translations also passed after the count
+correction. The focused schema/preservation/Azure/endpoint command passed
+358/358 tests before that correction.
+The local dependency CRLF failure and unattempted audit remain as recorded
+above. No local backend, paid/private/provider call, hosted operation, Action
+rerun, merge or deployment was performed.
+
+### I29-AZ1 CI attempt 2 and completed-Save recovery
+
+The [reviewed repair publication](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5768379718)
+produced `e920d596a399ec2c5074c6e8d32404b6a10b4e99`, tree
+`da58228e066440cc18ea61e568957b63e2e48004`.
+[CI attempt 2](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/35662863137)
+established the repaired READY path and complete B1 (12 synthetic generations)
+and B2 (22 synthetic generations), including the positive private Azure
+manifest persistence assertions and exact ordinary-owner public projection.
+Both stages restored their baselines. C failed at `SAVE`, owner 2, with child
+exit code 1 and substantial parent headroom; this does not establish a timeout
+cause. C completion and generated-types parity were not reached.
+App job `106541915862` completed as **cancelled**, not passed; its completed
+unit/static/build/canary/dependency steps do not establish full browser or
+artifact acceptance. [Native Apple](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/35662863140)
+passed at this head. No workflow was cancelled or rerun by the writer.
+
+Source diagnosis found both Save transports attempted immutable uploads even
+after a fully checked `completed` reservation. The existing Storage INSERT
+policy admits pending images only; ready-object retries cannot depend on
+receiving a duplicate response. Tightening the SDK unit fixture to reject
+ready POSTs reproduced two analyzed-retry failures and the same manual-retry
+failure before each repair. This is a reproduced source/fixture defect
+consistent with C's failure, not recovered private error evidence or proof
+that it was the sole runtime failure.
+
+Both checked-completed paths now perform authenticated, no-store reads,
+compare exact Blob byte counts before materializing hash input, verify both
+hashes, and invoke their existing idempotent finalizer with the same IDs and
+fingerprint. They issue no ready-object POST or upsert. Reserved paths still
+upload immutably; denial is not treated as a duplicate or completed receipt.
+Missing, forbidden, wrong-size or changed objects and owner/epoch/abort changes
+remain failures. No SQL, RLS, identity, inference count or timeout was relaxed.
+
+The real C test retains exact two generations and real Auth/DB/Storage/Deno
+operations. Owner B now expects seven mutations: three reservations, two
+initial uploads and two finalizers. The removed two mutations were forbidden
+ready-object reuploads. The last reservation payloads and both finalizer
+payloads must match exactly. Fixed SAVE substeps stay within the original
+32-record diagnostic bound and contain no private fields or raw errors.
+
+Local `npm run test:unit -- tests\unit\analyzed-save.test.ts` passed 65 tests,
+including strict ready-POST rejection, exact authenticated GET/finalizer
+behavior, manual recovery and byte/identity/denial negatives.
+`npm run test:browser -- ai-photo-first.spec.ts --grep 'then manual Save|committed first refusal|lost .* ACK'`
+passed 21 tests across Chromium, mobile Chromium and WebKit, including the
+EN/FI/SV refusal accessibility checks. These are fixture tests, not real C.
+A backend-free check of the actual diagnostic parser passed all 32 valid
+prefixes and six malformed/order/overflow cases. Actual repaired C, fresh
+exact-head CI and coordinator artifact review remain pending.
+
+Final `npm run test:unit -- --maxWorkers=1` passed **2287/2287 across 29 suites**;
+lint, typecheck, translations (527 keys) and diff check passed. An intermediate
+full run before the manual-path extension again timed out in the unchanged
+5000-ms local dependency-inventory test (2270 passed, one failed); one bounded
+unchanged rerun passed 2271/2271. No cause is asserted, no timeout was changed,
+and neither that rerun nor the final serial pass waives default-parallel CI.
+The earlier local dependency command's CRLF limitation remains recorded even
+though the dependency step passed on CI attempt 2. Source remains unstaged for
+focused review; no local backend, provider/hosted operation or deployment ran.
+
+### I29-AZ1 CI2 profile-fixture correction
+
+The [reviewed one-path release](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5768975283)
+adds `tests/browser/profile.spec.ts` to the same repair packet. Before edits,
+`npm run test:browser -- profile.spec.ts --project=chromium --retries=0 --grep 'AI consent shares profile/language mutex|settings en: private fields'`
+reproduced both stale expectations: a revision-1 Google agreement selector
+under the configured Azure fixture, and Google disclosures under a null,
+UNCONFIGURED policy. Production settings and shared fixture semantics were
+correct and remain unchanged.
+
+The six consent selectors now use the exact Azure agreement label. The
+configured EN/FI/SV disclosure/private-preferences journey explicitly uses
+the Azure fixture, checks all six approved notice strings and retains the
+required checkbox, 44-pixel target, 14-pixel copy, no-hidden-details and
+owner/preferences/persistence assertions. Separate EN/FI/SV unconfigured
+cases require the neutral inactive state, no Google or Azure agreement,
+notice or training copy, and a visible disabled Enable button. They retain
+readability checks without dereferencing a nonexistent checkbox. All existing
+mutex/CAS, lost-ACK, stale-profile, write-count, dirty-input and timing
+assertions remain intact.
+
+On approved Node 24.19.0, `npm run test:browser -- profile.spec.ts ai-photo-first.spec.ts`
+passed **221 tests**, with four existing photo-first capture/project skips,
+in 4.5 minutes. `npm run test:a11y -- profile.spec.ts ai-photo-first.spec.ts`
+passed **21 tests**. Lint, typecheck, translations (527 keys) and diff check
+passed. No timeout, retry, worker, capture-bound, production or shared-fixture
+configuration changed. The final 2287-unit serial result above remains
+applicable to unchanged production/unit source; these later changes affect
+only the browser fixture and this evidence record.
+
+CI2's App job ran from `2026-09-21T22:28:41Z` to `2026-09-21T22:48:57Z` and was
+cancelled at its existing 20-minute job budget after repeated stale profile
+assertions. Its browser and artifact gates remain unpassed; the passing local
+selection is not a full App CI result or a budget waiver. The combined
+seven-file repair remains unstaged for one focused source review and a new
+publication release. Real C, generated types and all next-head gates remain
+pending; no separate C-only push was made.
+
+### I29-AZ1 CI3 parent attestation absence correction
+
+At `c6dfb0752d5cd7bb3a9513247a46c967455aae46`,
+[CI3](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/35668916013)
+passed preservation, ordinary integration/security, B1 (12 generations) and
+B2 (22 generations). The C child reached `COMPLETE`, owner index 2, exit 0;
+the parent's reported elapsed time was 10159 ms with 553485 ms remaining.
+The parent then failed at `C-ui-child`. That establishes successful child
+journeys, not overall C restoration, rehearsal success or generated-type
+parity. The withheld private error was not recovered, and no timeout cause
+is asserted.
+
+Source inspection found an independent, deterministic parent defect: owner B's
+explicit discard deletes its request and cascades its attestation. The parent's
+`select to_jsonb(t) from ...` therefore returns zero rows, whose trimmed psql
+output is empty, while `db` requires JSON. `JSON.parse('')` throws before the
+intended `equal(attestation, null)` assertion. The query now uses a scalar
+subquery with an explicit JSON `null` for absence. Empty or malformed SQL
+output still fails; there is no generic fallback. Owner A's positive private
+attestation, owner B's absence plus terminal identity/accounting, the closed
+receipt contract, two generations, owner bindings and restoration gates are
+unchanged. Real CI must confirm this correction; source evidence does not
+identify the exact withheld runtime throw.
+
+`npm run test:unit -- tests\unit\local-backend.test.ts` passed **533/533**.
+The explicit-null source regression failed before the query correction
+(532 passed, one failed). Added tests execute only the existing production
+parser and pre-SQL receipt contract, extracted without executing the backend
+rehearsal: the child's ten-key report is accepted, while malformed, duplicate,
+truncated, over-bound, wrong-owner, identity/hash/dimension and generation
+drift/replay reports fail. No production parser abstraction was introduced.
+The SQL assertion is structural, not live absence-query proof. Lint, typecheck
+and diff check passed on the approved Node 24.19.0 toolchain.
+
+CI3 App passed in 11m28s within the unchanged 20-minute limit; its 734-test
+browser result was **729 passed, four existing capture skips and one flaky
+test that passed its existing retry**. Native Apple also passed. The WebKit
+oversized-analysis first attempt returned 400 instead of 413: bounded
+diagnostics recorded `end-empty`, zero received/accepted bytes, a complete
+request and zero analysis callbacks. The retry received 512001 bytes and
+returned 413. Assertions after the failed status check were not executed on
+that first attempt. Local unchanged
+`npm run test:browser -- ai-photo-first.spec.ts --project=webkit-photo --retries=0 --repeat-each=10 --grep 'analysis source forwarding refuses oversized'`
+passed **10/10** with all original zero-traffic, bounds and cleanup assertions.
+This does not explain or waive the CI failure: its empty forwarded body remains
+unresolved, and no speculative fixture, retry or timeout change was made.
+No local backend, provider, hosted operation, deployment or publication ran
+for this unstaged repair.

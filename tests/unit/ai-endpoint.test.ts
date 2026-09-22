@@ -1,7 +1,8 @@
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHandler } from '../../supabase/functions/analyze-clothing/handler';
+import { AZURE_MODEL, AZURE_MANIFEST } from '../../supabase/functions/analyze-clothing/azure-openai';
 import { analyzeGoogle, estimatedMicro, googleToken, normalizeUsage, TOKEN_URL } from '../../supabase/functions/analyze-clothing/google-cloud';
 import {
   GENERATION_CONFIG, MANIFEST_ID, MODEL_ID, PROMPT, RESPONSE_SCHEMA, SAFETY_SETTINGS, readBounded, validFacts,
@@ -9,7 +10,7 @@ import {
 import { exifSegment, insertSegments, jpegHeaderFixture, joinBytes } from '../fixtures/jpeg-helpers';
 // @ts-expect-error Existing executable fixture vectors have no declaration.
 import { AI_FACT_VECTORS } from '../integration/ai-controls.sessions.mjs';
-const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service', google: {} };
+const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service', azure: {} };
 const id = 'b1290000-0000-4000-8000-000000000001';
 function request(changes: RequestInit = {}, suffix = '') {
   return new Request(`http://127.0.0.1:54321/functions/v1/analyze-clothing${suffix}`, {
@@ -95,11 +96,12 @@ describe('B1 source runtime and fixed protocol', () => {
       expect(fetcher).toHaveBeenCalledTimes(1);
     }
   });
-  it('leaves the DB untouched when Google configuration is missing', async () => {
+  it('leaves the DB untouched when Azure configuration is missing', async () => {
     const fetcher = vi.fn(async (url: string) => Response.json(url.endsWith('/user')
       ? { id, role: 'authenticated', is_anonymous: false }
-      : { code: 'OK', consent: { enabled: true, noticeRevision: 1 },
-        policy: { activated: true, noticeRevision: 1, modelId: MODEL_ID, promptVersion: 1, maxRequestMicro: '2270823' } }));
+      : { code: 'OK', consent: { enabled: true, noticeRevision: 2 },
+        policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 1,
+          executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' } }));
     vi.stubGlobal('fetch', fetcher);
     const google = vi.fn();
     expect(await (await createHandler(config, google)(request())).json()).toEqual({ code: 'UNCONFIGURED' });
@@ -138,29 +140,28 @@ describe('B1 source runtime and fixed protocol', () => {
   });
   it.each(['lost-ack', 'expired-claim', 'config-changed', 'provider-timeout'])(
     'never retries or dispatches without a valid acknowledgement: %s (unit transport)', async (failure) => {
-      const privateKey = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
       const calls: string[] = [];
       vi.stubGlobal('fetch', vi.fn(async (url: string) => {
         calls.push(url.split('/').at(-1)!);
         if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
-        if (url.endsWith('/ai_status')) return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 1 },
-          policy: { activated: true, noticeRevision: 1, modelId: MODEL_ID, promptVersion: 1, maxRequestMicro: '2270823' } });
+        if (url.endsWith('/ai_status')) return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 2 },
+          policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 1,
+            executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' } });
         expect(url.endsWith('/ai_claim_analysis')).toBe(true);
         if (failure === 'lost-ack') throw new Error('private transport failure');
         if (failure === 'config-changed') return Response.json({ code: 'CONFIG_CHANGED', claimed: false });
-        return Response.json({ code: 'OK', claimed: true, manifestId: MANIFEST_ID,
+        return Response.json({ code: 'OK', claimed: true, manifestId: AZURE_MANIFEST,
           resultExpiresAtMs: Date.now() + 10000, dispatchBeforeMs: Date.now() + (failure === 'expired-claim' ? -1 : 1000) });
       }));
-      const google = vi.fn(async (url: string) => {
-        if (url === TOKEN_URL) return Response.json({ access_token: 'fictional-only', token_type: 'Bearer', expires_in: 300 });
+      const provider = vi.fn(async () => {
         throw new DOMException('fixture timeout', 'TimeoutError');
       });
       const response = await createHandler({ ...config,
-        google: { projectId: 'fictional-project', clientEmail: 'fixture@fictional-project.iam.gserviceaccount.com', privateKey } }, google)(request());
+        azure: { apiKey: 'fictional-local-only' } }, provider)(request());
       expect(await response.json()).toEqual({ code: failure === 'lost-ack' ? 'ANALYSIS_FAILED'
         : failure === 'config-changed' ? 'CONFIG_CHANGED' : 'TIMEOUT' });
       expect(calls).toEqual(['user', 'ai_status', 'ai_claim_analysis']);
-      expect(google).toHaveBeenCalledTimes(failure === 'provider-timeout' ? 2 : 1);
+      expect(provider).toHaveBeenCalledTimes(failure === 'provider-timeout' ? 1 : 0);
     },
   );
 });

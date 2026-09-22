@@ -5,13 +5,16 @@ import path from 'node:path';
 import {
   ROOT, assertNoServiceSecrets, assertProjectConfig, requireDocker, requireLocalContainer,
   cli, runCommand, normalSessionEnvironment, readCredentialCache, validateSessionEnvironment, privilegedLocalSql,
-  DB_CONTAINER, commandEnvironment, jwtClaims, reportError,
+  DB_CONTAINER, commandEnvironment, jwtClaims, reportError, startAnalysisServer,
 } from './backend/local.mjs';
 import { PUBLICATION_BODY_MD5, assertCiStorageGuardInstall, installCiStorageGuard, verifyCiStorageGuard } from './backend/ci-storage-guard.mjs';
 import { isMain } from './quality/files.mjs';
 import {
   SOURCE_HASHES, requireEvidence, assertSnapshotAbsent, cleanupSnapshot,
 } from '../tests/integration/preservation.sessions.mjs';
+import { captureAzurePreservation, verifyAzurePreservation } from '../tests/integration/azure-preservation.sessions.mjs';
+
+const PRIOR_MAIN_VERSION = '20260913120000';
 
 export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
@@ -23,6 +26,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260911040000_ai_analysis_backend.sql', version: '20260911040000', time: '2026-09-11 04:00:00', bytes: 24856, sha256: SOURCE_HASHES.analysis },
   { name: '20260911200000_checked_ai_item_save.sql', version: '20260911200000', time: '2026-09-11 20:00:00', bytes: 29668, sha256: SOURCE_HASHES.analyzedSave },
   { name: '20260913120000_item_lifecycle.sql', version: '20260913120000', time: '2026-09-13 12:00:00', bytes: 20822, sha256: SOURCE_HASHES.lifecycle },
+  { name: '20260921193000_azure_terra_analysis.sql', version: '20260921193000', time: '2026-09-21 19:30:00', bytes: 29274, sha256: SOURCE_HASHES.azure },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -690,11 +694,16 @@ export function parseMigrationHistory(output) {
 }
 
 export function assertHistory(output, stage) {
-  requireHistory(stage === 'base' || stage === 'target', 'inventory-mismatch');
+  requireHistory(stage === 'base' || stage === 'prior-main' || stage === 'target', 'inventory-mismatch');
+  const priorMainIndex = MIGRATIONS.findIndex((entry) => entry.version === PRIOR_MAIN_VERSION);
+  requireHistory(priorMainIndex >= 0, 'inventory-mismatch');
   const inventory = parseMigrationHistory(output);
   const expected = stage === 'base'
     ? { applied: [MIGRATIONS[0].version], pending: MIGRATIONS.slice(1).map((entry) => entry.version) }
-    : { applied: MIGRATIONS.map((entry) => entry.version), pending: [] };
+    : stage === 'prior-main'
+      ? { applied: MIGRATIONS.slice(0, priorMainIndex + 1).map((entry) => entry.version),
+        pending: MIGRATIONS.slice(priorMainIndex + 1).map((entry) => entry.version) }
+      : { applied: MIGRATIONS.map((entry) => entry.version), pending: [] };
   requireHistory(JSON.stringify(inventory) === JSON.stringify(expected), 'inventory-mismatch');
   return inventory;
 }
@@ -790,6 +799,27 @@ async function main() {
     await lifecyclePublicationCases(env, { withLifecycleCatalogMarker, withLifecycleLateUpload, requireLifecyclePrefixEmpty, requireLifecycleClaimFence });
     console.log('PASS: I08 CI-only exact-parent overlap and catalog-marker setup; ordinary-owner assertions; no physical erasure claim');
     console.log('PASS: populated base-to-target preservation and bounded post-comparison probes');
+    stage = 'AZ1-prior-main-reset';
+    requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', PRIOR_MAIN_VERSION], 10 * 60_000)).code === 0);
+    await history('prior-main');
+    await installCiStorageGuard(); await verifyCiStorageGuard();
+    requireEvidence((await runCommand(process.execPath, [path.join(ROOT, 'scripts', 'provision-test-users.mjs')])).code === 0);
+    const azureEnv = normalSessionEnvironment(process.env, await readCredentialCache());
+    validateSessionEnvironment(azureEnv);
+    stage = 'AZ1-prior-main-capture';
+    const finalizer = await startAnalysisServer();
+    try {
+      finalizer.assertRunning();
+      const priorMain = await captureAzurePreservation(azureEnv, privilegedLocalSql);
+      await assertMigrationInventory(); await history('prior-main');
+      stage = 'AZ1-upgrade';
+      requireEvidence((await cli(['migration', 'up', '--local'])).code === 0);
+      await history('target');
+      stage = 'AZ1-preservation';
+      await verifyAzurePreservation(priorMain, privilegedLocalSql);
+      finalizer.assertRunning();
+    } finally { await finalizer.stop(); }
+    console.log('PASS: exact prior-main9/target10; old Google held/estimated/confirmed/dispatched and frozen Save preserved; late settlement and ordinary-owner finalizer; no provider calls');
   } catch (error) {
     console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}; subsequent stages NOT RUN`);
     process.exitCode = 1;

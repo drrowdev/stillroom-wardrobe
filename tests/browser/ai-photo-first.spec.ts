@@ -597,12 +597,107 @@ test('late result after explicit manual continuation cannot overwrite edits or c
   await expect(page.locator('#item-category')).toHaveValue('');
   expect(api.items).toHaveLength(0); expect(api.files.size).toBe(0);
 });
+for (const language of ['en', 'fi', 'sv'] as const) {
+  test(`provider-correct notices and accessibility ${language}: agreement is reset by changed policy`, async ({ page }) => {
+    const api = await aiFixture(page, language, false);
+    await page.getByRole('button', { name: messages['account.menu'][language] }).click();
+    await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
+    await expect(page.getByText(messages['aiC.azureNotice'][language], { exact: true })).toBeVisible();
+    await expect(page.getByText(messages['aiC.azureTrainingNotice'][language], { exact: true })).toBeVisible();
+    await expect(page.getByText(messages['aiC.notice'][language], { exact: true })).toHaveCount(0);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    const agreement = page.getByRole('checkbox', { name: messages['aiC.azureAgree'][language] });
+    await agreement.check();
+    await expect(page.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toBeEnabled();
+    api.policy({ maxRequestMicro: '4097352' });
+    await page.getByRole('button', { name: messages['aiC.checkConsent'][language], exact: true }).click();
+    await expect(agreement).not.toBeChecked();
+    await expect(page.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toBeDisabled();
+    api.policy({ noticeRevision: 1, modelId: 'gemini-3.8-flash', executionManifestId: 'google-eu-3.8-v1' });
+    await page.getByRole('button', { name: messages['aiC.checkConsent'][language], exact: true }).click();
+    await expect(page.getByText(messages['aiC.notice'][language], { exact: true })).toBeVisible();
+    await expect(page.getByText(messages['aiC.azureNotice'][language], { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toBeDisabled();
+    api.policy({ modelId: 'unrecognized-model' });
+    await page.getByRole('button', { name: messages['aiC.checkConsent'][language], exact: true }).click();
+    await expect(page.getByText(messages['aiC.notice'][language], { exact: true })).toHaveCount(0);
+    await expect(page.getByText(messages['aiC.azureNotice'][language], { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('checkbox', { name: messages['aiC.agree'][language] })).toHaveCount(0);
+    expect(api.calls.filter((call) => call.route.endsWith('/ai_set_consent'))).toHaveLength(0);
+  });
+  test(`committed first refusal and accessibility ${language}: preserve edits and require explicit unknown Save`, async ({ page }) => {
+    const api = await aiFixture(page, language); await addAiPhoto(page, api, language);
+    await expect(page.getByText(messages['aiC.ready'][language], { exact: true })).toBeVisible();
+    await page.locator('#item-title').fill('My retained title');
+    const category = await page.locator('#item-category').inputValue();
+    for (const [id, result] of api.results) api.results.set(id, { ...result, expiresAtMs: Date.now() - 1 });
+    await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
+    await expect(page.getByText(messages['aiC.saveRefused'][language], { exact: true })).toBeVisible();
+    await expect(page.locator('#item-title')).toHaveValue('My retained title');
+    await expect(page.locator('#item-category')).toHaveValue(category);
+    await expect(page.getByRole('button', { name: messages['capture.save'][language], exact: true })).toBeDisabled();
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+    await page.getByRole('button', { name: messages['aiC.continueManual'][language], exact: true }).click();
+    await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    expect(api.items).toHaveLength(1);
+    expect(api.items[0]!.field_provenance).toMatchObject({
+      title: { kind: 'user', revision: 1 }, category: { kind: 'unknown', revision: 1 },
+    });
+    expect(api.calls.filter((call) => call.route.endsWith('/analyze-clothing'))).toHaveLength(1);
+  });
+}
+for (const entry of ['refused analysis', 'inactive analysis'] as const) test(
+  `${entry} then manual Save retries a lost finalizer ACK without writing ready objects`, async ({ page }) => {
+  const enabled = entry === 'refused analysis';
+  const api = await aiFixture(page, 'en', enabled, 'finalizer'); await addAiPhoto(page, api);
+  await expect(page.getByText(messages[enabled ? 'aiC.ready' : 'aiC.manualRequired'].en, { exact: true })).toBeVisible();
+  if (enabled) {
+    await page.locator('#item-title').fill('Retained manual title');
+    for (const [id, result] of api.results) api.results.set(id, { ...result, expiresAtMs: Date.now() - 1 });
+  }
+  let readyWrites = 0;
+  await page.route('**/storage/v1/object/wardrobe/**', async (route) => {
+    if (route.request().method() === 'POST' && api.images.some((image) => image.state === 'ready')) {
+      readyWrites++;
+      await route.fulfill({ status: 403, json: { statusCode: '403', error: 'Unauthorized' } });
+    } else await route.fallback();
+  });
+  if (enabled) {
+    await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
+    await expect(page.getByText(messages['aiC.saveRefused'].en, { exact: true })).toBeVisible();
+  }
+  expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+  await page.getByRole('button', { name: messages['aiC.continueManual'].en, exact: true }).click();
+  if (!enabled) {
+    await page.locator('#item-title').fill('Retained manual title');
+    await page.locator('#item-category').selectOption('top');
+  }
+  await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
+  await expect(page.getByRole('button', { name: messages['common.retry'].en, exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: messages['aiC.continueManual'].en, exact: true })).toHaveCount(0);
+  const items = structuredClone(api.items), images = structuredClone(api.images);
+  const requestsBefore = api.requests.length;
+  expect(images).toHaveLength(1); expect(images[0]!.state).toBe('ready');
+  await page.getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  expect(readyWrites).toBe(0);
+  expect(api.requests.slice(requestsBefore).filter((call) => call.method === 'POST' && call.path.startsWith('/storage/v1/object/'))).toHaveLength(0);
+  expect(api.requests.filter((call) => call.path.endsWith(enabled ? '/reserve_analyzed_item_save' : '/reserve_item_save'))).toHaveLength(enabled ? 3 : 2);
+  expect(api.requests.filter((call) => call.path.endsWith(enabled ? '/finalize-analyzed-item' : '/finalize_item_save'))).toHaveLength(2);
+  expect(api.items).toEqual(items); expect(api.images).toEqual(images);
+  expect(api.items[0]).toMatchObject({ title: 'Retained manual title',
+    field_provenance: { title: { kind: 'user', revision: 1 }, category: { kind: enabled ? 'unknown' : 'user', revision: 1 } } });
+  expect(api.calls.filter((call) => call.route.endsWith('/analyze-clothing'))).toHaveLength(enabled ? 1 : 0);
+});
 for (const lost of ['reservation', 'finalizer'] as const) {
   test(`lost ${lost} ACK: Cancel never reserves; retry preserves the frozen Save`, async ({ page }) => {
     const api = await aiFixture(page, 'en', true, lost); await addAiPhoto(page, api);
     await expect(page.getByText(messages['aiC.ready'].en, { exact: true })).toBeVisible();
     await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
     await expect(page.getByRole('button', { name: messages['common.retry'].en, exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: messages['aiC.continueManual'].en, exact: true })).toHaveCount(0);
     const frozen = structuredClone(api.items);
     await page.getByRole('button', { name: messages['common.cancel'].en, exact: true }).click();
     const before = api.requests.length;

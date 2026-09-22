@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   aiSaveClaim, beginAiAnalysis, continueAiManually, createAiDraft, editAiDraftField, expireAiDraft,
-  failAiAnalysis, invalidateAiDraft, prepareAiGeneration, receiveAiResult, presentAiDraft,
+  failAiAnalysis, invalidateAiDraft, prepareAiGeneration, receiveAiResult, presentAiDraft, refuseAiSave,
   type AiContext, type AiDraftState, type AiTransition,
 } from '../../src/domain/ai-draft';
 import { aiFields, aiKind, type AiFacts, type AiField } from '../../src/domain/ai-analysis';
@@ -56,6 +56,20 @@ function claim(state: AiDraftState) {
   if (prepared.status !== 'ready') throw new Error('Expected fixture claim');
   return prepared.claim;
 }
+describe('definitive first Save refusal', () => {
+  it('invalidates proof, never values, intent or presentation, without choosing manual provenance', () => {
+    const shown = changed(presentAiDraft(ready(), context, 'fi'));
+    const edited = changed(editAiDraftField(shown, context, 'brand', '', 'fi'));
+    const refused = changed(refuseAiSave(edited, context));
+    expect(refused.status).toBe('expired');
+    expect(refused.draft).toEqual(edited.draft);
+    expect(refused.derivation).toEqual(edited.derivation);
+    expect(refused.result).toBeNull();
+    expect(aiSaveClaim(refused, context, 1500).status).toBe('none');
+    expect(continueAiManually(refused, context).state.status).toBe('cancelled');
+    expect(refuseAiSave(edited, { ...context, epoch: 4 }).status).toBe('ignored');
+  });
+});
 const mismatches = [
   ['owner', { ownerId: '10000000-0000-4000-8000-000000000002' }],
   ['epoch', { epoch: 4 }],

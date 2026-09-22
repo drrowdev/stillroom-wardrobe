@@ -11,9 +11,11 @@ export const analysisId = (label, n) => {
   requireEvidence(['A', 'B'].includes(label) && Number.isInteger(n) && n >= 1 && n <= 32);
   return `b129${label.toLowerCase()}000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 };
-export const analysisFacts = { outcome: 'ready', fields: { category: 'top', colours: ['green'], formality: 0 } };
-export const analysisUsage = { modelVersion: 'gemini-3.8-flash', trafficType: 'ON_DEMAND',
-  promptTokenCount: 100, totalTokenCount: 130, candidatesTokenCount: 10, thoughtsTokenCount: 20 };
+export const analysisFacts = { outcome: 'ready', fields: { category: 'top', subcategory: null, colours: ['green'],
+  pattern: null, sleeve_length: null, garment_length: null, brand: null, size_label: null,
+  upper_coverage: null, lower_coverage: null, material: null, seasons: [], formality: 0, style_tags: [] } };
+export const analysisUsage = { modelObservation: 'expected_snapshot', controlObservation: 'ordinary',
+  input: 100, output: 30, total: 130, reasoning: 20, cacheRead: 0, cacheWrite: 0 };
 export const analysisStatus = (client, owner, id) => client.rpc(owner, 'ai_analysis_status', { p_request_id: id });
 export const equal = (a, b) => requireEvidence(isDeepStrictEqual(a, b));
 export const analysisHash = createHash('sha256').update(jpegHeaderFixture()).digest('hex');
@@ -89,7 +91,7 @@ export async function baseline(client, owners) {
 }
 async function consent(client, owner, enabled) {
   const before = (await client.rows(owner, 'profiles'))[0];
-  const args = { p_enabled: enabled, p_notice_revision: enabled ? 1 : null, p_expected_version: before.version };
+  const args = { p_enabled: enabled, p_notice_revision: enabled ? 2 : null, p_expected_version: before.version };
   equal(await client.rpc(owner, 'ai_set_consent', args), { code: 'OK', profileVersion: String(before.version + 1) });
   equal(await client.rpc(owner, 'ai_set_consent', args), { code: 'CONFLICT' });
   const after = (await client.rows(owner, 'profiles'))[0];
@@ -130,9 +132,9 @@ export async function runAnalysisStage(stage, origin, env) {
       const persisted = await analysisStatus(client, owner, analysisId(owner.label, n));
       equal((await call(n)).data, persisted);
       requireEvidence(persisted.status === 'ready' && persisted.result.imageSha256 === analysisHash
-        && persisted.result.requestId === analysisId(owner.label, n) && persisted.result.modelId === 'gemini-3.8-flash');
+        && persisted.result.requestId === analysisId(owner.label, n) && persisted.result.modelId === 'gpt-5.6-terra-2026-07-09');
       equal(persisted.result.facts, analysisFacts);
-      equal(persisted.accounting, { basis: 'estimated', amountMicro: '413', currency: 'USD' });
+      equal(persisted.accounting, { basis: 'estimated', amountMicro: '1034', currency: 'USD' });
       equal(await analysisStatus(client, owners[1 - index], analysisId(owner.label, n)), { code: 'UNAVAILABLE' });
       equal(await analysisStatus(client, owners[1 - index], analysisId(owner.label, 32)), { code: 'UNAVAILABLE' });
       equal(await call(n, { body: jpegHeaderFixture(121) }), { status: 409, data: { code: 'CONFLICT' } });
@@ -145,16 +147,18 @@ export async function runAnalysisStage(stage, origin, env) {
     } else if (stage === 'lost') {
       const response = await call(4);
       requireEvidence(response.status === 202 && response.data.status === 'dispatched' && response.data.result === null);
-      equal(response.data.accounting, { basis: 'held', amountMicro: '2270823', currency: 'USD' });
+      equal(response.data.accounting, { basis: 'held', amountMicro: '4097351', currency: 'USD' });
       equal(await call(16, { headers: { 'X-Stillroom-Draft-Id': analysisId(owner.label, 4) } }),
         { status: 409, data: { code: 'ACTIVE_DRAFT' } });
     } else if (['failed', 'http-failed'].includes(stage)) {
       equal(await call(stage === 'failed' ? 5 : 20), { status: 502, data: { code: 'ANALYSIS_FAILED' } });
     } else if (['unknown', 'zero'].includes(stage)) {
       const response = await call(stage === 'unknown' ? 6 : 7);
-      requireEvidence(response.status === 200 && response.data.status === 'ready');
-      equal(response.data.accounting, { basis: stage === 'unknown' ? 'held' : 'estimated',
-        amountMicro: stage === 'unknown' ? '2270823' : '0', currency: 'USD' });
+      if (stage === 'unknown') equal(response, { status: 502, data: { code: 'ANALYSIS_FAILED' } });
+      else {
+        requireEvidence(response.status === 200 && response.data.status === 'ready');
+        equal(response.data.accounting, { basis: 'estimated', amountMicro: '0', currency: 'USD' });
+      }
     } else if (stage === 'discard') {
       equal(await aiControl(client, owner, analysisId(owner.label, 8), 'discard'), { code: 'TERMINAL', reason: 'DISCARDED' });
       equal(await call(8), { status: 409, data: { code: 'TERMINAL' } });

@@ -546,7 +546,7 @@ export function assertAnalysisServeContract(config, directories, files, help, fi
     if (JSON.stringify(sections.sort()) !== '["analyze-clothing","finalize-analyzed-item"]'
       || JSON.stringify([...directories].sort()) !== '["analyze-clothing","finalize-analyzed-item"]'
       || JSON.stringify([...files].sort()) !== JSON.stringify([
-        'deno.d.ts', 'deno.json', 'google-cloud.ts', 'handler.ts', 'index.ts', 'protocol.ts',
+        'azure-openai.ts', 'deno.d.ts', 'deno.json', 'google-cloud.ts', 'handler.ts', 'index.ts', 'protocol.ts',
       ])
       || !Array.isArray(finalizerFiles)
       || JSON.stringify([...finalizerFiles].sort()) !== '["deno.json","handler.ts","index.ts"]'

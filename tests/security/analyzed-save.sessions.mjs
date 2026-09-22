@@ -49,6 +49,11 @@ async function main() {
       const foreign = await peer.call('item_attribution_history', { p_item_id: value.p_item.id });
       requireEvidence(!foreign.ok && foreign.data.code === '42501');
       if (phase === 'full') {
+        const unreserved = analyzedIntent(owner, 31);
+        denied(await peer.call('reserve_analyzed_item_save', unreserved));
+        const anonymous = await h.call('reserve_analyzed_item_save', unreserved, null);
+        requireEvidence(!anonymous.ok && anonymous.status === 401 && anonymous.data.code === '42501');
+        eq(await h.read('items', unreserved.p_item.id), []);
         for (const [token, extras, status] of [
           [owners[1 - index].token, {}, 409], [owner.token, { ownerId: owner.uid }, 400],
           [owner.token, { url: 'https://example.test' }, 400], ['invalid.jwt.token', {}, 401],

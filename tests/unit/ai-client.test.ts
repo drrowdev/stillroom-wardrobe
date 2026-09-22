@@ -9,9 +9,10 @@ const context = { ownerId: owner, epoch: 1, requestId: '30000000-0000-4000-8000-
   draftId: '20000000-0000-4000-8000-000000000001', generation: 1, imageSha256: 'a'.repeat(64) };
 function status() {
   return { code: 'OK', period: '2026-09', serverTimeMs: Date.now(),
-    consent: { enabled: true, noticeRevision: 1, consentedAt: '2026-09-12T00:00:00Z', profileVersion: '1' },
-    policy: { activated: true, modelId: 'gemini-3.8-flash', promptVersion: 1, noticeRevision: 1,
-      maxRequestMicro: '2270823', monthlyAllowanceMicro: '100000000', maxRequestsPerHour: 200, resultTtlSeconds: 3600 },
+    consent: { enabled: true, noticeRevision: 2, consentedAt: '2026-09-12T00:00:00Z', profileVersion: '1' },
+    policy: { activated: true, modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 1, noticeRevision: 2,
+      executionManifestId: 'azure-eu-terra-devtest-v1',
+      maxRequestMicro: '4097351', monthlyAllowanceMicro: '100000000', maxRequestsPerHour: 200, resultTtlSeconds: 3600 },
     usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } };
 }
 function fixture() {
@@ -254,8 +255,9 @@ describe('status validation and current policy', () => {
   it('refuses unknown notice/model, inactive controls and expired review', () => {
     const good = parseAiStatus(status())!;
     expect(supportedAiPolicy(good, Date.parse('2026-09-12T00:00:00Z'))).toBe(true);
-    expect(supportedAiPolicy(good, Date.parse('2027-01-01T00:00:00Z'))).toBe(false);
-    for (const policy of [{ ...good.policy!, noticeRevision: 2 }, { ...good.policy!, modelId: 'other' }, { ...good.policy!, activated: false }])
+    expect(supportedAiPolicy(good, Date.parse('2026-10-21T00:00:00Z'))).toBe(false);
+    for (const policy of [{ ...good.policy!, noticeRevision: 1 }, { ...good.policy!, modelId: 'other' },
+      { ...good.policy!, executionManifestId: 'other' }, { ...good.policy!, activated: false }])
       expect(supportedAiPolicy({ ...good, policy })).toBe(false);
   });
 });

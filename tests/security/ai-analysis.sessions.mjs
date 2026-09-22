@@ -12,8 +12,8 @@ async function main() {
       const id = analysisId(owner.label, 32);
       const calls = [
         ['ai_claim_analysis', { p_owner_id: owner.uid, p_request_id: id, p_draft_id: id, p_generation: 1,
-          p_image_sha256: 'a'.repeat(64), p_byte_count: 1, p_width: 1, p_height: 1, p_manifest_id: 'google-eu-3.8-v1' }],
-        ['ai_finish_analysis', { p_owner_id: owner.uid, p_request_id: id, p_manifest_id: 'google-eu-3.8-v1',
+          p_image_sha256: 'a'.repeat(64), p_byte_count: 1, p_width: 1, p_height: 1, p_manifest_id: 'azure-eu-terra-devtest-v1' }],
+        ['ai_finish_analysis', { p_owner_id: owner.uid, p_request_id: id, p_manifest_id: 'azure-eu-terra-devtest-v1',
           p_facts: analysisFacts, p_usage: analysisUsage, p_code: 'SUCCESS' }],
       ];
       for (const token of [owner.token, null]) {
@@ -25,7 +25,7 @@ async function main() {
           const denied = await client.request(token, `/rest/v1/${table}?select=*`, { headers: { 'Accept-Profile': 'private' } });
           requireEvidence(!denied.ok && denied.status === 406 && denied.data.code === 'PGRST106');
         }
-        for (const name of ['ai_begin_owner', 'ai_settle_core', 'ai_normal_usage', 'ai_analysis_permitted', 'ai_accounting']) {
+        for (const name of ['ai_begin_owner', 'ai_settle_core', 'ai_normal_usage', 'ai_analysis_permitted', 'ai_accounting', 'ai_finish_google_legacy']) {
           const denied = await client.request(token, `/rest/v1/rpc/${name}`, {
             method: 'POST', body: {}, headers: { 'Content-Profile': 'private' },
           });

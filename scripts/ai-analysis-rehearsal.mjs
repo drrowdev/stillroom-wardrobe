@@ -1,13 +1,13 @@
 import { createServer } from 'node:http';
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ROOT, LOCAL_API, assertNoServiceSecrets, readCredentialCache, normalSessionEnvironment,
   localStatus, privilegedLocalSql, runCommand, startAnalysisServer, parseServedDiagnostics, withAnalyzedSaveFixtureLock } from './backend/local.mjs';
 import { isMain } from './quality/files.mjs';
 import { createHandler } from '../supabase/functions/analyze-clothing/handler.ts';
-import { TOKEN_URL, GOOGLE_ORIGIN } from '../supabase/functions/analyze-clothing/google-cloud.ts';
-import { MODEL_ID, readJson, GENERATION_CONFIG, SAFETY_SETTINGS, PROMPT } from '../supabase/functions/analyze-clothing/protocol.ts';
+import { AZURE_MODEL, AZURE_ENDPOINT, azureRequest } from '../supabase/functions/analyze-clothing/azure-openai.ts';
+import { readJson } from '../supabase/functions/analyze-clothing/protocol.ts';
 import { aiClients, requireReady, AI_FACT_VECTORS } from '../tests/integration/ai-controls.sessions.mjs';
 import { baseline, analysisId, analysisFacts, analysisUsage, analysisHash, equal } from '../tests/integration/ai-analysis.sessions.mjs';
 import { TABLES, requireEvidence } from '../tests/integration/preservation.sessions.mjs';
@@ -17,7 +17,7 @@ import { assertSanitizedJpeg, readJpegHeader } from '../src/images/jpeg.ts';
 const literal = (value) => "'" + String(value).replaceAll("'", "''") + "'";
 const json = (value) => `${literal(JSON.stringify(value))}::jsonb`;
 const db = async (sql) => JSON.parse(await privilegedLocalSql(sql));
-const manifest = 'google-eu-3.8-v1';
+const manifest = 'azure-eu-terra-devtest-v1';
 const privateTables = ['ai_controls', 'ai_usage', 'ai_requests', 'ai_usage_evidence', 'ai_analysis_attestations'];
 const rowsSql = (table, where = 'true') =>
   `coalesce((select jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text) from ${table} t where ${where}),'[]'::jsonb)`;
@@ -51,8 +51,11 @@ function markedRecords(stdout, stderr, marker, limit, recordLimit, lineLimit = 2
 }
 function cProgress(stdout, stderr) {
   const records = markedRecords(stdout, stderr, 'I29_C_STAGE', 32, 128, 4096);
-  const ownerStages = ['OWNER', 'INITIALIZE', 'CONSENT', 'ANALYSIS', 'SAVE', 'VERIFY', 'CLEANUP', 'CLOSED', 'RESTORE', 'DONE'];
-  const expected = ['ENTRY 0', 'AUTH 0', ...[1, 2].flatMap((owner) => ownerStages.map((stage) => `${stage} ${owner}`)), 'COMPLETE 2'];
+  const ownerStages = ['OWNER', 'INITIALIZE', 'CONSENT', 'ANALYSIS', 'SAVE', 'SAVE_WAIT_RETRY', 'SAVE_RETRY',
+    'SAVE_RETURNED', 'VERIFY', 'CLEANUP', 'CLOSED', 'RESTORE', 'DONE'];
+  const expected = ['ENTRY 0', 'AUTH 0', ...[1, 2].flatMap((owner) => ownerStages.flatMap((stage) =>
+    (owner === 2 && stage === 'SAVE' ? ['SAVE', 'SAVE_DISCARD', 'SAVE_REFUSAL', 'SAVE_MANUAL'] : [stage])
+      .map((step) => `${step} ${owner}`))), 'COMPLETE 2'];
   if (!records?.length || records.length > expected.length || records.some((record, index) => record !== expected[index])) {
     return { stage: 'UNKNOWN', owner: 0 };
   }
@@ -105,11 +108,11 @@ select jsonb_build_object(
    from unnest(array['anon','authenticated','service_role']) r,
    unnest(array['private.ai_execution_manifests','private.ai_usage_evidence','private.ai_analysis_attestations',
      'private.ai_save_used_receipts','private.ai_item_save_attempts','private.ai_item_save_context','private.item_attribution_history']) t),
- 'privateDenied',(select count(*)=11 and bool_and(not has_function_privilege('anon',p.oid,'EXECUTE')
+ 'privateDenied',(select count(*)=12 and bool_and(not has_function_privilege('anon',p.oid,'EXECUTE')
    and not has_function_privilege('authenticated',p.oid,'EXECUTE') and not has_function_privilege('service_role',p.oid,'EXECUTE')
    and not exists(select 1 from aclexplode(p.proacl) a where a.grantee=0 and a.privilege_type='EXECUTE'))
    from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='private'
-   and p.proname in ('ai_manifest_immutable','ai_begin_owner','ai_settle_core','ai_normal_usage','ai_analysis_permitted','ai_accounting',
+   and p.proname in ('ai_manifest_immutable','ai_begin_owner','ai_settle_core','ai_normal_usage','ai_analysis_permitted','ai_accounting','ai_finish_google_legacy',
      'item_save_value_hash','item_field_provenance','reserve_item_save','finalize_manual_item_save','analyzed_item_save_current')),
  'serviceOnly',(select count(*)=4 and bool_and(p.prosecdef
    and p.proconfig=(case when p.proname='complete_analyzed_item_save' then array['search_path=""','lock_timeout=2s'] else array['search_path=""'] end)
@@ -139,6 +142,8 @@ select jsonb_build_object(
    and confrelid='private.item_save_attempts'::regclass and confdeltype='c'),
  'historyNullableImage',exists(select 1 from pg_constraint where conrelid='private.item_attribution_history'::regclass
    and pg_get_constraintdef(oid)='FOREIGN KEY (owner_id, item_id, source_image_id) REFERENCES item_images(owner_id, item_id, id) ON DELETE SET NULL (source_image_id)'),
+ 'historyPrivateManifest',exists(select 1 from pg_constraint where conrelid='private.item_attribution_history'::regclass
+   and confrelid='private.ai_execution_manifests'::regclass and confdeltype='a'),
  'contextEmpty',not exists(select 1 from private.ai_item_save_context),
  'storageIdentity',exists(select 1 from pg_attribute where attrelid='storage.objects'::regclass and attname='id' and atttypid='uuid'::regtype)
    and exists(select 1 from pg_attribute where attrelid='storage.objects'::regclass and attname='version' and not attisdropped)
@@ -156,6 +161,16 @@ async function main() {
     const ready = await baseline(client, owners);
     const before = await snapshot(), preserved = await inventory(client, owners);
     const versions = await Promise.all(owners.map(async (o) => (await client.rows(o, 'profiles'))[0].version));
+    const consentRevision = async (revision) => {
+      for (const owner of owners) {
+        const previous = (await client.rows(owner, 'profiles'))[0];
+        equal(await client.rpc(owner, 'ai_set_consent', { p_enabled: true, p_notice_revision: revision,
+          p_expected_version: previous.version }), { code: 'OK', profileVersion: String(previous.version + 1) });
+        const next = (await client.rows(owner, 'profiles'))[0];
+        requireEvidence(next.ai_enabled && next.ai_notice_revision === revision && next.version === previous.version + 1);
+        equal(nonAiProfile(next), nonAiProfile(previous));
+      }
+    };
     requireEvidence(before.ai_controls.length === 2 && before.ai_usage.length === 14 && before.ai_requests.length === 2
       && before.ai_requests.every((r) => r.status === 'ready' && Date.parse(r.expires_at) - Date.now() > 1_200_000)
       && before.ai_usage.every((u) => !['held', 'reserved'].includes(u.charge_state))
@@ -226,42 +241,40 @@ async function main() {
       requireEvidence(r.usage.length === 1 && r.usage[0].charge_state === state
         && String(r.usage[0].accounted_micro) === amount && (r.request.length === 1) === resultPresent);
     };
-    const key = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' });
-    let mode = 'ready', generations = 0, oauth = 0;
+    let mode = 'ready', generations = 0;
     const cRequestContext = new AsyncLocalStorage();
     const cRequests = [];
     const handler = createHandler({ supabaseUrl: LOCAL_API, publicKey: local.key, serviceKey: local.serviceKey,
-      google: { projectId: 'fictional-b1', clientEmail: 'fixture@fictional-b1.iam.gserviceaccount.com', privateKey: key } },
+      azure: { apiKey: 'fictional-local-only' } },
     async (url, init) => {
       requireEvidence(init.method === 'POST' && init.redirect === 'error' && init.cache === 'no-store');
-      if (url === TOKEN_URL) {
-        oauth++;
-        return Response.json({ access_token: 'fictional-local-only', token_type: 'Bearer', expires_in: 300 });
-      }
-      requireEvidence(url === `${GOOGLE_ORIGIN}/v1/projects/fictional-b1/locations/eu/publishers/google/models/${MODEL_ID}:generateContent`);
+      requireEvidence(url === AZURE_ENDPOINT);
       generations++;
       const sent = JSON.parse(init.body);
-      equal(Object.keys(sent).sort(), ['contents', 'generationConfig', 'safetySettings', 'systemInstruction'].sort());
-      equal(sent.generationConfig, GENERATION_CONFIG); equal(sent.safetySettings, SAFETY_SETTINGS);
-      equal(sent.systemInstruction, { parts: [{ text: PROMPT }] });
-      const image = sent.contents[0].parts[0].inlineData;
+      const image = sent.messages[1].content[0].image_url;
+      requireEvidence(image.url.startsWith('data:image/jpeg;base64,'));
+      const bytes = Buffer.from(image.url.slice('data:image/jpeg;base64,'.length), 'base64');
+      equal(sent, azureRequest(bytes));
       const cRequest = cRequestContext.getStore();
       if (cRequest) {
-        const bytes = Buffer.from(image.data, 'base64');
         const dimensions = readJpegHeader(bytes);
-        requireEvidence(image.mimeType === 'image/jpeg' && bytes.length === cRequest.byteCount
+        requireEvidence(bytes.length === cRequest.byteCount
           && dimensions.width === cRequest.width && dimensions.height === cRequest.height
           && createHash('sha256').update(bytes).digest('hex') === cRequest.imageSha256
           && cRequest.generations === 0);
         cRequest.generations++;
       } else {
-        requireEvidence(image.mimeType === 'image/jpeg' && createHash('sha256').update(Buffer.from(image.data, 'base64')).digest('hex') === analysisHash);
+        requireEvidence(createHash('sha256').update(bytes).digest('hex') === analysisHash);
       }
-      return Response.json({ modelVersion: MODEL_ID,
-        usageMetadata: mode === 'unknown' ? { trafficType: 'ON_DEMAND' } : mode === 'zero'
-          ? { trafficType: 'ON_DEMAND', promptTokenCount: 0, totalTokenCount: 0 } : { ...analysisUsage, modelVersion: undefined },
-        candidates: [{ finishReason: 'STOP', content: { role: 'model',
-          parts: [{ text: JSON.stringify(mode === 'failed' ? { ...analysisFacts, fields: { title: 'not allowed' } } : analysisFacts) }] } }],
+      return Response.json({ model: AZURE_MODEL,
+        usage: mode === 'unknown' ? {} : {
+          prompt_tokens: mode === 'zero' ? 0 : 100, completion_tokens: mode === 'zero' ? 0 : 30,
+          total_tokens: mode === 'zero' ? 0 : 130,
+          prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+          completion_tokens_details: { reasoning_tokens: mode === 'zero' ? 0 : 20 },
+        },
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', refusal: null,
+          content: JSON.stringify(mode === 'failed' ? { ...analysisFacts, fields: { title: 'not allowed' } } : analysisFacts) } }],
       }, { status: mode === 'http-failed' ? 500 : 200 });
     });
     server = createServer(async (req, res) => {
@@ -299,9 +312,10 @@ async function main() {
     server.listen(0, '127.0.0.1'); await once(server, 'listening');
     const origin = `http://127.0.0.1:${server.address().port}`;
     stage = 'temporary-policy';
-    await privilegedLocalSql(`update private.ai_controls set activated=true,notice_revision=1,model_id='gemini-3.8-flash',
-      prompt_version=1,max_request_micro=2270823,monthly_allowance_micro=100000000,max_requests_per_hour=200,
+    await privilegedLocalSql(`update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.6-terra-2026-07-09',
+      prompt_version=1,max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,
       result_ttl_seconds=3600,execution_manifest_id=${literal(manifest)} where ${ownerWhere};`);
+    await consentRevision(2);
     const run = async (phase, expectedGenerations = 0) => {
       mode = phase; const count = generations;
       await child('integration', phase, origin);
@@ -311,7 +325,7 @@ async function main() {
         && ids.includes(u.request_id)).length <= 32));
     };
     await run('validation');
-    requireEvidence(oauth === 0); equal((await snapshot()).ai_usage, before.ai_usage);
+    requireEvidence(generations === 0); equal((await snapshot()).ai_usage, before.ai_usage);
     await run('ready', 2); await run('concurrent', 2); await run('legacy');
     stage = 'constraint-negatives';
     const allRows = await snapshot();
@@ -363,18 +377,19 @@ async function main() {
       requireEvidence(result.code === 'OK' && result.claimed === true);
       equal(await claim(owner, 4), { code: 'ALREADY_CLAIMED', claimed: false });
       const saved = await record(owner, 1);
-      requireEvidence((await finish(owner, 1, analysisUsage, 'SUCCESS', { outcome: 'ready', fields: {} })).code === 'FACTS_CONFLICT');
+      requireEvidence((await finish(owner, 1, analysisUsage, 'SUCCESS',
+        { ...analysisFacts, fields: { ...analysisFacts.fields, category: 'bottom' } })).code === 'FACTS_CONFLICT');
       equal(await record(owner, 1), saved);
     }
     await run('lost');
     await run('failed', 2); await run('unknown', 2); await run('zero', 2); await run('http-failed', 2);
     stage = 'accounting-and-terminal-fixtures';
     for (const owner of owners) {
-      await accounting(owner, 5, 'estimated', '413', false);
-      await accounting(owner, 6, 'held', '2270823', true);
+      await accounting(owner, 5, 'estimated', '1034', false);
+      await accounting(owner, 6, 'held', '4097351', false);
       await accounting(owner, 7, 'estimated', '0', true);
-      await accounting(owner, 20, 'estimated', '413', false);
-      for (const n of [8, 9, 10, 11, 12, 13, 14, 15, 17]) requireEvidence((await claim(owner, n)).claimed === true);
+      await accounting(owner, 20, 'estimated', '1034', false);
+      for (const n of [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 32]) requireEvidence((await claim(owner, n)).claimed === true);
       const saved = await record(owner, 4);
       for (const code of ['SUCCESS', 'FAILED']) equal(await bill(owner, 4, 0, code), { code: 'UNAVAILABLE', stored: false });
       equal(await record(owner, 4), saved);
@@ -392,7 +407,7 @@ async function main() {
     for (const owner of owners) for (const n of [8, 9, 10]) {
       const result = await finish(owner, n);
       requireEvidence(result.stored === false && result.code === 'TERMINAL');
-      await accounting(owner, n, 'estimated', '413', false);
+      await accounting(owner, n, 'estimated', '1034', false);
     }
     stage = 'manifest-status-guard';
     await privilegedLocalSql(`update private.ai_controls set execution_manifest_id=null where ${ownerWhere};`);
@@ -405,7 +420,7 @@ async function main() {
       const old = await client.rpc(owner, 'ai_status', {});
       await finish(owner, 11, analysisUsage, 'USAGE_ONLY');
       const after = await client.rpc(owner, 'ai_status', {});
-      requireEvidence(BigInt(old.usage.accountedMicro) - BigInt(after.usage.accountedMicro) === 2270823n);
+      requireEvidence(BigInt(old.usage.accountedMicro) - BigInt(after.usage.accountedMicro) === 4097351n);
       for (const n of [12, 13]) {
         if (n === 13) await finish(owner, n, analysisUsage, 'USAGE_ONLY');
         await bill(owner, n, 500);
@@ -415,16 +430,38 @@ async function main() {
       }
       await finish(owner, 14, analysisUsage, 'USAGE_ONLY');
       const saved = await record(owner, 14);
-      equal((await finish(owner, 14, { ...analysisUsage, totalTokenCount: 131 })).code, 'USAGE_CONFLICT');
+      equal((await finish(owner, 14, { ...analysisUsage, total: 131 })).code, 'USAGE_CONFLICT');
       equal(await record(owner, 14), saved);
-      for (const usage of [null, {}, { ...analysisUsage, totalTokenCount: 1 }, { ...analysisUsage, thoughtsTokenCount: 31 },
-        { ...analysisUsage, trafficType: 'OTHER' }, { ...analysisUsage, extra: true }]) {
+      for (const usage of [null, {}, { ...analysisUsage, total: 1 }, { ...analysisUsage, reasoning: 31 },
+        { ...analysisUsage, input: null }, { ...analysisUsage, cacheRead: 0.5 },
+        { ...analysisUsage, cacheWrite: 9007199254740992 }, { ...analysisUsage, extra: true }]) {
         const held = await finish(owner, 4, usage, 'USAGE_ONLY');
-        equal(held.accounting, { basis: 'held', amountMicro: '2270823', currency: 'USD' });
+        equal(held.accounting, { basis: 'held', amountMicro: '4097351', currency: 'USD' });
+        equal((await client.rpc(owner, 'ai_status', {})).policy.activated, true);
       }
-      const overrun = await finish(owner, 15, { ...analysisUsage, totalTokenCount: 1_000_100 });
+      for (const [n, usage] of [
+        [16, { ...analysisUsage, input: null, cacheRead: 1, controlObservation: 'cache_read' }],
+        [18, { ...analysisUsage, modelObservation: 'response_missing_model' }],
+        [19, { ...analysisUsage, cacheWrite: 1, controlObservation: 'cache_write' }],
+      ]) {
+        const anomaly = await finish(owner, n, usage);
+        equal(anomaly, { code: 'USAGE_ANOMALY', stored: false,
+          accounting: { basis: 'held', amountMicro: '4097351', currency: 'USD' } });
+        const saved = await record(owner, n);
+        requireEvidence(saved.evidence[0].anomaly && saved.evidence[0].normalized_usage === null
+          && saved.request.length === 0);
+        equal((await client.rpc(owner, 'ai_status', {})).policy.activated, false);
+        equal((await finish(owner, n)).code, 'USAGE_CONFLICT');
+        equal(await record(owner, n), saved);
+        await privilegedLocalSql(`update private.ai_controls set activated=true where owner_id=${literal(owner.uid)};`);
+      }
+      const invalidFacts = await finish(owner, 32, analysisUsage, 'SUCCESS', { outcome: 'ready', fields: {} });
+      equal(invalidFacts, { code: 'INVALID_FACTS', stored: false,
+        accounting: { basis: 'estimated', amountMicro: '1034', currency: 'USD' } });
+      equal((await finish(owner, 32)).code, 'TERMINAL');
+      const overrun = await finish(owner, 15, { ...analysisUsage, input: 922001, output: 2049, total: 924050 });
       requireEvidence(overrun.code === 'USAGE_ANOMALY' && overrun.stored === false);
-      equal(overrun.accounting, { basis: 'estimated', amountMicro: '8250165', currency: 'USD' });
+      equal(overrun.accounting, { basis: 'estimated', amountMicro: '4097375', currency: 'USD' });
     }
     await run('overrun');
     stage = 'success-only-restoration';
@@ -432,7 +469,7 @@ async function main() {
     equal(await inventory(client, owners), preserved);
     for (const [index, owner] of owners.entries()) {
       const p = (await client.rows(owner, 'profiles'))[0];
-      requireEvidence(p.version === versions[index] + 2 && p.ai_enabled && p.ai_notice_revision === 1);
+      requireEvidence(p.version === versions[index] + 3 && p.ai_enabled && p.ai_notice_revision === 2);
     }
     const final = await snapshot();
     for (const table of ['ai_usage', 'ai_requests'])
@@ -441,11 +478,12 @@ async function main() {
       ${columns.map((col) => `${col}=v.${col}`).join(',')} from jsonb_populate_record(null::private.ai_controls,${json(c)}) v
       where c.owner_id=v.owner_id;`).join('\n');
     await privilegedLocalSql(`begin; delete from private.ai_usage where ${namespace}; ${restore} commit;`);
+    await consentRevision(1);
     equal(await snapshot(), before);
     equal(await requireReady(client, owners), ready);
     await baseline(client, owners);
     await child('integration'); await child('security');
-    console.log(`PASS: B1 real Auth/DB and Google-only synthetic transport; generations=${generations}; exact 14-ledger/2-ready baseline restored; profile CAS versions advanced twice`);
+    console.log(`PASS: AZ1 B1 real Auth/DB and Azure-only synthetic transport; generations=${generations}; exact 14-ledger/2-ready baseline restored; consent migration/restoration plus withdraw/enable CAS=4`);
     stage = 'B2-entry';
     requireEvidence(generations === 12);
     const b2Tables = ['ai_save_used_receipts', 'ai_item_save_attempts', 'ai_item_save_context', 'item_attribution_history', 'item_save_used_ids'];
@@ -459,9 +497,10 @@ async function main() {
       requireEvidence(result.code === 0);
       console.log(`PASS: B2 ${suite}/${phase} normal-session child`);
     };
-    await privilegedLocalSql(`update private.ai_controls set activated=true,notice_revision=1,model_id='gemini-3.8-flash',
-      prompt_version=1,max_request_micro=2270823,monthly_allowance_micro=100000000,max_requests_per_hour=200,
+    await privilegedLocalSql(`update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.6-terra-2026-07-09',
+      prompt_version=1,max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,
       result_ttl_seconds=3600,execution_manifest_id=${literal(manifest)} where ${ownerWhere};`);
+    await consentRevision(2);
     mode = 'ready';
     owned = await startAnalysisServer();
     await b2Child('integration', 'prepare', origin);
@@ -506,7 +545,40 @@ async function main() {
     }
     await b2Child('security', 'full');
     await b2Child('integration', 'full');
+    for (const owner of owners) {
+      const h = analyzedHarness(client, owner, env), completed = analyzedIntent(owner, 23);
+      requireEvidence((await h.reserve(completed)).state === 'completed');
+      const history = await db(`select coalesce(jsonb_agg(to_jsonb(h)),'[]'::jsonb)
+        from private.item_attribution_history h where owner_id=${literal(owner.uid)}
+          and item_id=${literal(completed.p_item.id)} and source_image_id=${literal(completed.p_image.id)};`);
+      requireEvidence(history.length === 1 && history[0].manifest_id === 'azure-eu-terra-devtest-v1');
+      const publicHistory = await client.rpc(owner, 'item_attribution_history', { p_item_id: completed.p_item.id });
+      requireEvidence(publicHistory.length === 1);
+      equal(Object.keys(publicHistory[0]).sort(), ['fields', 'image_sha256', 'model_id', 'prompt_version', 'source_image_id']);
+      equal(publicHistory[0], Object.fromEntries(Object.entries(history[0])
+        .filter(([key]) => !['owner_id', 'item_id', 'manifest_id'].includes(key))));
+    }
+    for (const owner of owners) {
+      const h = analyzedHarness(client, owner, env), first = analyzedIntent(owner, 31), accepted = analyzedIntent(owner, 24);
+      const beforeLock = await record(owner, 31);
+      await withAnalyzedSaveFixtureLock(owner.uid, first.p_item.id, first.p_image.id, 'profile', async () => {
+        for (const value of [first, accepted]) {
+          const response = await h.call('reserve_analyzed_item_save', value);
+          requireEvidence(!response.ok && response.status === 400 && response.data.code === '22023');
+        }
+      });
+      equal(await record(owner, 31), beforeLock);
+      equal(await h.read('items', first.p_item.id), []);
+      requireEvidence((await h.reserve(accepted)).state === 'reserved');
+    }
     await b2Child('integration', 'withdraw');
+    for (const owner of owners) {
+      const refused = await record(owner, 31);
+      requireEvidence(refused.request.length === 0 && refused.evidence[0].claim_identity !== null);
+      equal(await claim(owner, 31), { code: 'TERMINAL', claimed: false });
+      equal((await finish(owner, 31)).code, 'TERMINAL');
+      equal(await record(owner, 31), refused);
+    }
     const expiring = owners.flatMap((o) => [24, 31].map((n) => analysisId(o.label, n)));
     await privilegedLocalSql(`update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',
       expires_at=clock_timestamp()-interval '1 hour' where ${ownerWhere} and request_id in (${expiring.map(literal).join(',')});`);
@@ -525,14 +597,15 @@ async function main() {
     requireEvidence(now.ai_item_save_context.length === 0 && now.ai_item_save_attempts.length === 0
       && now.item_attribution_history.length === 0);
     for (const [index, owner] of owners.entries())
-      requireEvidence((await client.rows(owner, 'profiles'))[0].version === versions[index] + 4);
+      requireEvidence((await client.rows(owner, 'profiles'))[0].version === versions[index] + 7);
     await privilegedLocalSql(`begin; delete from private.ai_usage where ${namespace};
       delete from private.ai_save_used_receipts where ${ownerWhere} and item_id in (${b2Ids.map(literal).join(',')});
       delete from private.item_save_used_ids where ${ownerWhere} and item_id in (${b2Ids.map(literal).join(',')});
       ${restore} commit;`);
+    await consentRevision(1);
     equal(await snapshot(), before); equal(await b2Snapshot(), b2Before);
     equal(await requireReady(client, owners), ready); await baseline(client, owners);
-    console.log('PASS: B2 actual Deno/Auth/DB/Storage; synthetic Google generations=22 separately from B1=12; exact private/14-ledger/2-ready baseline restored; B2 profile CAS advances=2 per owner');
+    console.log('PASS: AZ1 B2 actual Deno/Auth/DB/Storage; synthetic Azure generations=22 separately from B1=12; exact private/14-ledger/2-ready baseline restored; B2 profile CAS advances=4 per owner');
     stage = 'C-entry';
     const cStarted = Date.now(), cCountBefore = generations;
     const headroom = () => deadline - Date.now();
@@ -540,7 +613,7 @@ async function main() {
     requireEvidence(headroom() > 150_000 && cRequests.length === 0 && cCountBefore === 34);
     const cEntryProfiles = await Promise.all(owners.map(async (owner) => (await client.rows(owner, 'profiles'))[0]));
     for (const [index, profile] of cEntryProfiles.entries()) {
-      requireEvidence(profile.owner_id === owners[index].uid && profile.version === versions[index] + 4
+      requireEvidence(profile.owner_id === owners[index].uid && profile.version === versions[index] + 8
         && (profile.ui_language === null || ['en', 'fi', 'sv'].includes(profile.ui_language)));
     }
     for (const table of ['public.items', 'public.item_images', 'private.ai_usage', 'private.ai_requests',
@@ -548,9 +621,10 @@ async function main() {
       const field = table.startsWith('public.') ? 'id' : table.includes('ai_usage') || table.includes('ai_requests') ? 'request_id' : 'item_id';
       requireEvidence(await db(`select to_jsonb(not exists(select 1 from ${table} where ${field}::text like 'c329a000-%' or ${field}::text like 'c329b000-%'));`));
     }
-    await privilegedLocalSql(`update private.ai_controls set activated=true,notice_revision=1,model_id='gemini-3.8-flash',
-      prompt_version=1,max_request_micro=2270823,monthly_allowance_micro=100000000,max_requests_per_hour=200,
+    await privilegedLocalSql(`update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.6-terra-2026-07-09',
+      prompt_version=1,max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,
       result_ttl_seconds=3600,execution_manifest_id=${literal(manifest)} where ${ownerWhere};`);
+    await consentRevision(2);
     mode = 'ready';
     owned = await startAnalysisServer();
     owned.assertRunning();
@@ -580,14 +654,24 @@ async function main() {
       requireEvidence(['requestId', 'draftId', 'itemId', 'imageId'].every((key) =>
         new RegExp(`^${prefix}[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).test(receipt[key]))
         && new Set(['requestId', 'draftId', 'itemId', 'imageId'].map((key) => receipt[key])).size === 4);
-      const attestation = await db(`select to_jsonb(t) from private.ai_analysis_attestations t
-        where owner_id=${literal(owner.uid)} and request_id=${literal(receipt.requestId)};`);
-      requireEvidence(attestation && attestation.image_sha256 === receipt.imageSha256 && attestation.byte_count === receipt.byteCount
+      const attestation = await db(`select coalesce((select to_jsonb(t) from private.ai_analysis_attestations t
+        where owner_id=${literal(owner.uid)} and request_id=${literal(receipt.requestId)}),'null'::jsonb);`);
+      if (index === 0) requireEvidence(attestation && attestation.image_sha256 === receipt.imageSha256 && attestation.byte_count === receipt.byteCount
         && attestation.width === receipt.width && attestation.height === receipt.height && attestation.manifest_id === manifest);
+      else {
+        equal(attestation, null);
+        const terminal = await db(`select jsonb_build_object('usage',to_jsonb(u),'identity',e.claim_identity)
+          from private.ai_usage u join private.ai_usage_evidence e using(owner_id,request_id)
+          where u.owner_id=${literal(owner.uid)} and u.request_id=${literal(receipt.requestId)};`);
+        requireEvidence(terminal.usage.closed_reason === 'DISCARDED' && terminal.usage.charge_state === 'estimated'
+          && terminal.usage.accounted_micro === 1034);
+        equal(terminal.identity, { draftId: receipt.draftId, generation: receipt.generation,
+          imageSha256: receipt.imageSha256, bytes: receipt.byteCount, width: receipt.width, height: receipt.height });
+      }
       const p = (await client.rows(owner, 'profiles'))[0];
       const original = cEntryProfiles[index], languageWrites = original.ui_language === null ? 2 : 0;
-      requireEvidence(p.version === versions[index] + 6 + languageWrites
-        && p.version === original.version + 2 + languageWrites && p.ai_enabled === true && p.ai_notice_revision === 1
+      requireEvidence(p.version === versions[index] + 11 + languageWrites
+        && p.version === original.version + 3 + languageWrites && p.ai_enabled === true && p.ai_notice_revision === 2
         && typeof p.ai_consented_at === 'string' && Number.isFinite(Date.parse(p.ai_consented_at)));
       equal(nonAiProfile(p), nonAiProfile(original));
     }
@@ -598,18 +682,19 @@ async function main() {
     const cFinal = await snapshot(), cB2Final = await b2Snapshot();
     const requestIds = receipts.map((row) => row.requestId), itemIds = receipts.map((row) => row.itemId);
     for (const table of ['ai_usage', 'ai_requests', 'ai_usage_evidence', 'ai_analysis_attestations']) {
-      requireEvidence(cFinal[table].length === before[table].length + 2);
+      requireEvidence(cFinal[table].length === before[table].length
+        + (['ai_requests', 'ai_analysis_attestations'].includes(table) ? 1 : 2));
       equal(cFinal[table].filter((row) => !requestIds.includes(row.request_id)), before[table]);
     }
     for (const table of b2Tables) equal(cB2Final[table].filter((row) => !itemIds.includes(row.item_id)), b2Before[table]);
-    requireEvidence(cB2Final.ai_save_used_receipts.length === b2Before.ai_save_used_receipts.length + 2
+    requireEvidence(cB2Final.ai_save_used_receipts.length === b2Before.ai_save_used_receipts.length + 1
       && cB2Final.item_save_used_ids.length === b2Before.item_save_used_ids.length + 2
       && cB2Final.ai_item_save_attempts.length === b2Before.ai_item_save_attempts.length
       && cB2Final.item_attribution_history.length === b2Before.item_attribution_history.length
       && cB2Final.ai_item_save_context.length === 0);
-    for (const receipt of receipts) {
-      requireEvidence(cB2Final.ai_save_used_receipts.some((row) => row.owner_id === receipt.ownerId && row.request_id === receipt.requestId
-        && row.item_id === receipt.itemId && row.image_id === receipt.imageId));
+    for (const [index, receipt] of receipts.entries()) {
+      equal(cB2Final.ai_save_used_receipts.some((row) => row.owner_id === receipt.ownerId && row.request_id === receipt.requestId
+        && row.item_id === receipt.itemId && row.image_id === receipt.imageId), index === 0);
     }
     requireEvidence(headroom() > 0);
     await privilegedLocalSql(`begin; ${receipts.map((row) => `
@@ -618,10 +703,11 @@ async function main() {
         and item_id=${literal(row.itemId)} and image_id=${literal(row.imageId)};
       delete from private.item_save_used_ids where owner_id=${literal(row.ownerId)} and item_id=${literal(row.itemId)} and image_id=${literal(row.imageId)};`).join('\n')}
       ${restore} commit;`);
+    await consentRevision(1);
     equal(await snapshot(), before); equal(await b2Snapshot(), b2Before);
     equal(await requireReady(client, owners), ready); await baseline(client, owners);
     requireEvidence(headroom() > 0);
-    console.log(`PASS: C ordinary-owner UI; generations=2; AI consent CAS=2 per owner; language initialization/restoration CAS=2 only for originally-null language; exact cleanup/restoration; elapsedMs=${Date.now() - cStarted}; remainingMs=${headroom()}`);
+    console.log(`PASS: AZ1 C ordinary-owner UI; generations=2; consent migration/restoration plus UI CAS=4 per owner; language initialization/restoration CAS=2 only for originally-null language; exact cleanup/restoration; elapsedMs=${Date.now() - cStarted}; remainingMs=${headroom()}`);
   } catch {
     console.error(`FAIL: AI rehearsal at ${stage}; private evidence withheld; fixture state preserved, no automatic recovery`);
     process.exitCode = 1;

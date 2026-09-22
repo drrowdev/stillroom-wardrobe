@@ -4,6 +4,11 @@ import { isRecord } from '../domain/wardrobe';
 export class AppError extends Error {
   constructor(public readonly messageKey: MessageKey) { super(messageKey); this.name = 'AppError'; }
 }
+export class AnalyzedSaveRefusedError extends AppError {
+  constructor(public readonly itemId: string, public readonly imageId: string) {
+    super('aiC.saveRefused'); this.name = 'AnalyzedSaveRefusedError';
+  }
+}
 export function errorKey(error: unknown): MessageKey {
   if (error instanceof AppError) return error.messageKey;
   return 'error.unavailable';

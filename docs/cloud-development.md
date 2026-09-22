@@ -493,6 +493,59 @@ If the ephemeral canary is absent in a later CI process, generate a new random
 build-only `STILLROOM_SECRET_CANARY` without printing its value before build
 and scan. It is a leak-detection fixture, never a production credential.
 
+## I29-AZ1 inactive Azure source contract
+
+The [reviewed AZ1 release](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5766659126)
+and [literal/declaration repair](https://github.com/drrowdev/stillroom-wardrobe/pull/28#issuecomment-5766981960)
+cover one integrated source packet, not activation or deployment. The additive
+`20260921193000_azure_terra_analysis.sql` inserts the immutable
+`azure-eu-terra-devtest-v1` manifest without changing any owner's controls,
+consent or allowance. All nine installed migration files remain unchanged.
+
+New analysis uses only the fixed Azure OpenAI EU DataZoneStandard DEV/TEST
+deployment `eval-terra-20260709` at
+`https://stillroom-ai-eval.openai.azure.com/openai/v1/chat/completions`.
+Only the server reads `AI_AZURE_OPENAI_API_KEY`; there is no browser key,
+endpoint/model router, Google impersonation, automatic retry or fallback.
+The requested snapshot is `gpt-5.6-terra-2026-07-09`. A returned family name or
+deployment alias is recorded as that observation, not proof of snapshot execution.
+The profile review expires on 21 October 2026 at 00:00 UTC.
+
+The six explicit input/output/total/reasoning/cache-read/cache-write counters
+have no missing-to-zero defaults. Input/output rates are respectively
+USD 4.40/19.80 per million tokens; their combined estimate is rounded up once
+to micro-USD. The 4,097,351 micro-USD reservation is allowance arithmetic, not
+an invoice ceiling. Both cache reads and writes must be zero. Positive applicable
+cache counters or identity/control anomalies deny new admissions and ready facts,
+preserve accepted/confirmed accounting (or the hold), and deactivate the affected
+control. Valid billing with invalid facts still produces an estimate; valid
+overruns retain the unclamped estimate. No raw provider extensions are retained.
+
+Legacy Google is **READ-AND-FINISH ONLY**: known receipts remain readable and late
+settlement retains its original accounting rules. The deployed entrypoint cannot
+dispatch Google and reads no Google credentials. New dispatch/enable is Azure-only. Accepted frozen
+Save attempts can still finish after expiry, opt-out or deactivation. A first
+reservation can unlock the form only on the exact committed
+`analysis_unavailable` acknowledgment with matching owner/item/image identities.
+The profile lock and durable terminal request identity prevent a delayed same
+claim from succeeding after that refusal. Lost/malformed responses and lock
+failures keep the original frozen IDs and payload. Explicit manual continuation
+preserves values and user edits without promoting inferred facts to user intent.
+
+Local fixture browser tests are not the real backend gate. Unchanged CI runs
+the normal-owner Auth/REST/Storage/Deno-finalizer vehicle and production Node
+analysis handler with only the provider synthetic, plus exact base/prior-main/
+target upgrade preservation and actual generated-public-type parity.
+`npm run db:types -- --check` exists and compares actual generated text; this
+writer does not run it without backend authority. Prior-main means exactly
+nine applied migrations and the Azure migration pending; target means all ten.
+
+Six-path helper/documentation parity and synthetic metering are not successful
+live Azure normalization. Deployment wire/control compatibility, quality,
+privacy/retention and human/device acceptance remain live-activation gates.
+No private capture, paid call, hosted mutation, production deployment or owner
+activation is implied by this source packet.
+
 ## Delivery rules
 
 Delivery uses the persistent isolated local writer and own-model attestation
