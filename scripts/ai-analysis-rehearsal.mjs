@@ -710,6 +710,7 @@ async function main() {
     requireEvidence(headroom() > 0);
     console.log(`PASS: AZ1 C ordinary-owner UI; generations=2; consent migration/restoration plus UI CAS=4 per owner; language initialization/restoration CAS=2 only for originally-null language; exact cleanup/restoration; elapsedMs=${Date.now() - cStarted}; remainingMs=${headroom()}`);
     stage = 'I10b-real-finalizer';
+    owned = await startAnalysisServer();
     owned.assertRunning();
     const finalGenerationCount = generations;
     await imageReplacementServed(env);

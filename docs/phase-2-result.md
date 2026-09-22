@@ -15,6 +15,64 @@ PR [#9](https://github.com/drrowdev/stillroom-wardrobe/pull/9), branch
 `25a268712dc9158259608f5a4f17d11d9b9ad279`. This result update changes no
 executable inputs.
 
+## 22 September 2026 - CI15 owned-server entry repair
+
+**Unstaged source-entry correction; served-stage native acceptance remains open.**
+The same local GPT-6 Astra writer follows
+[release 5777799907](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5777799907),
+after retained Anthropic Claude Opus 5 review 159 and coordinator V1-V5
+dispositions. Base `98e4c3251e22d58fc15a495cc503ca09c6b9f309`, tree
+`89883a19b3307ec9446b2c0a2ef6482d994f9f7e`. Scope remains I10b R04/R28
+replacement and seven-day new-identity recovery evidence, not publication,
+generated types, Stage C, deployment or full Phase 2 acceptance.
+
+The observed CI15 AI rehearsal completed C restoration, which stops its owned
+server and sets the handle to `undefined`. No reassignment occurred before
+the I10b stage's immediate `owned.assertRunning()`, before its served fixture
+call. This source control flow, not the log timing gap, establishes the
+entry defect. The actual thrown object/message/status/SQLSTATE remain withheld.
+The served fixture was not entered on that observed path; this packet provides
+no passing native result for that stage.
+
+The runner adds only the 41-byte line `owned = await startAnalysisServer();`
+after the I10b stage assignment. Its existing helper retains fresh readiness,
+ownership and startup-failure cleanup. C shutdown/restoration, pre/post liveness,
+snapshot/ready/baseline/headroom checks, catch/finally and all budgets are
+unchanged. Startup must succeed before entry; a later native run may reveal
+another failure. Stage duration against the fresh 600000ms lifetime and
+remaining headroom is unmeasured. The in-process synthetic-provider server and
+generation counter are not restarted; the existing before/after comparison
+requires **no additional** stage inference, not zero inference across B1/B2/C.
+The adjacent unit's first-occurrence startup pin survives unchanged and still
+selects the earlier runner line 203.
+
+Local evidence uses pinned Node 24.19.0 and existing dependencies:
+
+- Identical focused selector `I10b owned-server entry after C restoration`:
+  **40 failed / 2 passed / 540 filtered** before insertion, then
+  **42 passed / 540 filtered** after. No regression-scaffold logic correction
+  was needed. Typecheck subsequently required an explicit `Row[]` annotation
+  for an empty synthetic inventory; focused cases still passed afterward.
+- The five approved unit suites initially passed **2106** cases. Following
+  that type annotation, a repeat recorded **2105 passed / 1 failed**: the
+  unchanged preservation HTTP 512KiB TUS test exceeded its existing 5000ms
+  timeout. Source inspection found no changes to that test or HTTP helper.
+  The identical five-suite command, without overlapping lint/typecheck work,
+  then passed **2106** cases. The timeout's cause is unproven; no assertion,
+  timeout or source behavior was weakened, and nonrecurrence is not a fix.
+- Two-file ESLint and final `tsc --noEmit`: exit 0. Initial typecheck exit 2
+  for the synthetic array annotation is retained as a corrected test defect.
+- Secret scan: 253 text files, exit 0; no local canary was supplied, so CI
+  retains that gate. `git diff --check`: exit 0.
+
+The regressions execute extracted actual C restoration, I10b entry and
+catch/finally code with mocked dependencies, including Error/falsy failures,
+exact stop-error propagation, cleanup order and unchanged inference/snapshot/
+headroom refusals. They do not run Docker, SQL, Storage, a server, browser or
+the full rehearsal. Earlier CI15 preservation/reset/integration/security and
+B1/B2/C passes remain valid exact-head evidence; types and downstream
+acceptance remain pending. No staging or publication is included here.
+
 ## 22 September 2026 - CI14 legacy orphan fixture and stage boundaries
 
 **Unstaged fixture correction; CI14's failing subcase remains unknown.**

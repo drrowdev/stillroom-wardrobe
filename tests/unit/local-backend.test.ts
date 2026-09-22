@@ -134,6 +134,161 @@ describe('B2 fixture lock boundary', () => {
   });
 });
 
+describe('I10b owned-server entry after C restoration (extracted source, mocked lifecycle)', () => {
+  type Fault = { at: string; value: unknown };
+  type Row = Record<string, string>;
+  type Snapshot = Record<string, Row[]>;
+  type Result = { stage: string; generations: number; owned: unknown };
+  let execute: (f: Record<string, unknown>) => Promise<Result>;
+  beforeAll(async () => {
+    const source = await readFile(path.join(ROOT, 'scripts', 'ai-analysis-rehearsal.mjs'), 'utf8');
+    const start = source.indexOf("    stage = 'C-success-only-restoration';");
+    const end = source.indexOf('\n}\nif (isMain(import.meta.url)) await main();', start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    const segment = source.slice(start, end);
+    expect(segment).toContain('await owned.stop(); owned = undefined;');
+    expect(segment).toContain('await owned?.stop();');
+    expect(segment).toContain('equal(generations, finalGenerationCount);');
+    // Run the unchanged restoration, entry, catch and finally with synthetic dependencies only.
+    execute = new Function('f', `return (async () => {
+      const { headroom, inventory, client, owners, preserved, snapshot, b2Snapshot,
+        before, b2Before, b2Tables, receipts, privilegedLocalSql, literal, restore,
+        consentRevision, requireReady, ready, baseline, env, startAnalysisServer,
+        requireEvidence, equal, console, process, server, Date } = f;
+      let stage = 'C-ui-child', owned = f.previous, generations = 36;
+      const cStarted = 0;
+      const imageReplacementServed = async (value) => {
+        await f.served(value); generations += f.additionalGenerations;
+      };
+      try {
+      ${segment}
+      return { stage, generations, owned };
+    })();`) as typeof execute;
+  });
+  const expected = ['c:assert', 'c:stop', 'headroom:1', 'inventory', 'snapshot:1', 'b2:1',
+    'headroom:2', 'restore:sql', 'restore:consent', 'snapshot:2', 'b2:2',
+    'ready:1', 'baseline:1', 'headroom:3', 'headroom:4', 'start',
+    'new:assert:1', 'fixture', 'new:assert:2', 'snapshot:3', 'ready:2', 'baseline:2',
+    'headroom:5', 'new:stop', 'server:connections', 'server:close'];
+  const values = [new Error('private synthetic lifecycle detail'), undefined, null, false, 0, ''];
+  function fixture(fault?: Fault, stopFault?: { value: unknown }, drift?: string) {
+    const events: string[] = [], thrown: unknown[] = [];
+    const visit = (at: string) => {
+      events.push(at);
+      if (fault?.at === at) { thrown.push(fault.value); throw fault.value; }
+    };
+    const receipts = [1, 2].map((n) => ({ ownerId: `owner-${n}`, requestId: `request-${n}`, itemId: `item-${n}`, imageId: `image-${n}` }));
+    const before: Snapshot = { ai_usage: [], ai_requests: [], ai_usage_evidence: [], ai_analysis_attestations: [] };
+    const b2Before: Snapshot = { ai_save_used_receipts: [], item_save_used_ids: [], ai_item_save_attempts: [],
+      item_attribution_history: [], ai_item_save_context: [] };
+    const cFinal = Object.fromEntries(Object.keys(before).map((table) => [table,
+      receipts.slice(0, ['ai_requests', 'ai_analysis_attestations'].includes(table) ? 1 : 2)
+        .map((row) => ({ request_id: row.requestId }))]));
+    const b2Final = { ...b2Before,
+      ai_save_used_receipts: receipts.slice(0, 1).map((row) => ({ owner_id: row.ownerId, request_id: row.requestId,
+        item_id: row.itemId, image_id: row.imageId })),
+      item_save_used_ids: receipts.map((row) => ({ item_id: row.itemId })),
+    };
+    const client = {}, owners = receipts.map((row) => ({ uid: row.ownerId })), env = {}, ready = {};
+    const preserved: Row[] = [];
+    let asserts = 0, snapshots = 0, b2Snapshots = 0, readyCalls = 0, baselineCalls = 0, budgets = 0, stopped = false;
+    const previous = {
+      assertRunning: vi.fn(() => { visit('c:assert'); expect(stopped).toBe(false); }),
+      stop: vi.fn(async () => { visit('c:stop'); expect(stopped).toBe(false); stopped = true; }),
+    };
+    const fresh = {
+      assertRunning: vi.fn(() => { visit(`new:assert:${++asserts}`); }),
+      stop: vi.fn(async () => {
+        visit('new:stop');
+        if (stopFault) { thrown.push(stopFault.value); throw stopFault.value; }
+      }),
+    };
+    const sameActors = (actualClient: unknown, actualOwners: unknown) => {
+      expect(actualClient).toBe(client); expect(actualOwners).toBe(owners);
+    };
+    const output = { log: vi.fn(), error: vi.fn() }, process = { exitCode: undefined as number | undefined };
+    const startAnalysisServer = vi.fn(async () => { visit('start'); expect(stopped).toBe(true); return fresh; });
+    const f = {
+      client, owners, env, preserved, ready, receipts, before, b2Before, b2Tables: Object.keys(b2Before),
+      previous, startAnalysisServer, additionalGenerations: drift === 'generation' ? 1 : 0,
+      headroom: () => { visit(`headroom:${++budgets}`); return drift === `headroom:${budgets}` ? 0 : 1000; },
+      inventory: async (c: unknown, o: unknown) => { visit('inventory'); sameActors(c, o); return preserved; },
+      snapshot: async () => {
+        visit(`snapshot:${++snapshots}`);
+        if (snapshots === 1) return cFinal;
+        return drift === `snapshot:${snapshots}` ? { changed: [] } : before;
+      },
+      b2Snapshot: async () => { visit(`b2:${++b2Snapshots}`); return b2Snapshots === 1 ? b2Final : b2Before; },
+      privilegedLocalSql: vi.fn(async (sql: string) => {
+        visit('restore:sql'); expect(sql).toContain('begin;'); expect(sql).toContain('synthetic_restore; commit;');
+        for (const receipt of receipts) expect(sql).toContain(`request_id='${receipt.requestId}'`);
+      }),
+      literal: (value: string) => `'${value}'`, restore: 'synthetic_restore;',
+      consentRevision: async (revision: number) => { visit('restore:consent'); expect(revision).toBe(1); },
+      requireReady: async (c: unknown, o: unknown) => { visit(`ready:${++readyCalls}`); sameActors(c, o); return ready; },
+      baseline: async (c: unknown, o: unknown) => { visit(`baseline:${++baselineCalls}`); sameActors(c, o); },
+      served: vi.fn(async (actual: unknown) => { visit('fixture'); expect(actual).toBe(env); }),
+      requireEvidence: (value: unknown) => { if (!value) throw new Error('Synthetic evidence required'); },
+      equal: (actual: unknown, wanted: unknown) => { if (!isDeepStrictEqual(actual, wanted)) throw new Error('Synthetic mismatch'); },
+      console: output, process, Date: { now: () => 0 },
+      server: {
+        closeAllConnections: () => { visit('server:connections'); },
+        close: (done: () => void) => { visit('server:close'); done(); },
+      },
+    };
+    return { run: () => execute(f), events, thrown, previous, fresh, startAnalysisServer, f, output, process };
+  }
+  const failureMessage = 'FAIL: AI rehearsal at I10b-real-finalizer; private evidence withheld; fixture state preserved, no automatic recovery';
+  it('stops C, restores its baseline, starts a distinct owned server and checks no additional inference', async () => {
+    const f = fixture(), result = await f.run();
+    expect(f.events).toEqual(expected); expect(result).toEqual({ stage: 'I10b-real-finalizer', generations: 36, owned: f.fresh });
+    expect(f.previous.stop).toHaveBeenCalledOnce(); expect(f.startAnalysisServer).toHaveBeenCalledOnce();
+    expect(f.fresh.stop).toHaveBeenCalledOnce(); expect(f.f.served).toHaveBeenCalledOnce();
+    expect(f.output.error).not.toHaveBeenCalled(); expect(f.process.exitCode).toBeUndefined();
+    expect(f.output.log).toHaveBeenCalledTimes(2);
+  });
+  it.each(['start', 'new:assert:1', 'fixture', 'new:assert:2'].flatMap((at) =>
+    values.map((value, index) => ({ at, value, index }))))('retains catch/finally for $at failure $index', async ({ at, value }) => {
+    const f = fixture({ at, value }); await f.run();
+    expect(f.thrown).toHaveLength(1); expect(f.thrown[0]).toBe(value);
+    expect(f.events).toEqual([...expected.slice(0, expected.indexOf(at) + 1),
+      ...(at === 'start' ? [] : ['new:stop']), 'server:connections', 'server:close']);
+    expect(f.previous.stop).toHaveBeenCalledOnce();
+    expect(f.fresh.stop).toHaveBeenCalledTimes(at === 'start' ? 0 : 1);
+    expect(f.f.served).toHaveBeenCalledTimes(at === 'fixture' || at === 'new:assert:2' ? 1 : 0);
+    expect(f.output.error.mock.calls).toEqual([[failureMessage]]); expect(f.process.exitCode).toBe(1);
+    expect(f.output.log).toHaveBeenCalledTimes(1);
+  });
+  it.each(values.map((value, index) => ({ value, index })))('propagates finally stop failure exactly $index after success', async ({ value }) => {
+    const f = fixture(undefined, { value });
+    await expect(f.run()).rejects.toBe(value);
+    expect(f.events).toEqual(expected.slice(0, expected.indexOf('new:stop') + 1));
+    expect(f.output.error).not.toHaveBeenCalled(); expect(f.process.exitCode).toBeUndefined();
+    expect(f.previous.stop).toHaveBeenCalledOnce(); expect(f.fresh.stop).toHaveBeenCalledOnce();
+  });
+  it.each(values.map((value, index) => ({ value, index })))('preserves stop failure after the fixture error was caught $index', async ({ value }) => {
+    const initial = new Error('private original fixture failure'), f = fixture({ at: 'fixture', value: initial }, { value });
+    await expect(f.run()).rejects.toBe(value);
+    expect(f.thrown[0]).toBe(initial); expect(f.thrown[1]).toBe(value);
+    expect(f.events).toEqual([...expected.slice(0, expected.indexOf('fixture') + 1), 'new:stop']);
+    expect(f.output.error.mock.calls).toEqual([[failureMessage]]); expect(f.process.exitCode).toBe(1);
+  });
+  it.each(['generation', 'snapshot:3', 'headroom:5'])('keeps the postfixture %s gate and owned cleanup', async (drift) => {
+    const f = fixture(undefined, undefined, drift); await f.run();
+    expect(f.startAnalysisServer).toHaveBeenCalledOnce(); expect(f.f.served).toHaveBeenCalledOnce();
+    expect(f.output.error.mock.calls).toEqual([[failureMessage]]); expect(f.process.exitCode).toBe(1);
+    expect(f.fresh.stop).toHaveBeenCalledOnce(); expect(f.events.slice(-3)).toEqual(['new:stop', 'server:connections', 'server:close']);
+    expect(f.output.log).toHaveBeenCalledTimes(1);
+  });
+  it.each(['snapshot:2', 'headroom:3'])('does not enter the new stage after failed C restoration %s', async (drift) => {
+    const f = fixture(undefined, undefined, drift); await f.run();
+    expect(f.startAnalysisServer).not.toHaveBeenCalled(); expect(f.f.served).not.toHaveBeenCalled();
+    expect(f.previous.stop).toHaveBeenCalledOnce(); expect(f.fresh.stop).not.toHaveBeenCalled();
+    expect(f.output.error.mock.calls).toEqual([['FAIL: AI rehearsal at C-success-only-restoration; private evidence withheld; fixture state preserved, no automatic recovery']]);
+    expect(f.process.exitCode).toBe(1); expect(f.events.slice(-2)).toEqual(['server:connections', 'server:close']);
+  });
+});
+
 describe('owned B1 function lifecycle', () => {
   const signature = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Methods': 'POST' };
   it('textually guards against direct fetch between startup and the authoritative served child', async () => {
