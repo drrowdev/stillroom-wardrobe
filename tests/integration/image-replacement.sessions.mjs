@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { isMain } from '../../scripts/quality/files.mjs';
 import { LOCAL_API } from '../../scripts/backend/local.mjs';
 import { intent, saveClients, saveHarness, denied, eq, equalAiStatusState } from './item-save.sessions.mjs';
@@ -9,6 +10,16 @@ import { classifyObjectDeletion } from '../../src/data/storage-delete.ts';
 const bytes = jpegHeaderFixture();
 const hash = createHash('sha256').update(bytes).digest('hex');
 const stripped = ['id', 'owner_id', 'created_at', 'updated_at', 'deleted_at', 'version'];
+const diagnosticStatuses = new Set([200, 201, 204, 400, 401, 403, 404, 409, 413, 422, 429, 500, 502, 503, 504]);
+const diagnosticCodes = new Set(['22023', '42501', '42601', '42702', '42703', '42883', '23502', '23503', '23505',
+  '23514', '55P03', 'PGRST202', 'PGRST204', 'NoSuchKey', 'AccessDenied', 'Duplicate', 'InvalidKey', 'EntityTooLarge']);
+function responseClass(result) {
+  const status = Number.isInteger(result.status) && diagnosticStatuses.has(result.status) ? result.status : 'OTHER';
+  const data = result.data;
+  const code = data !== null && typeof data === 'object' && !Array.isArray(data)
+    && Object.hasOwn(data, 'code') && typeof data.code === 'string' && diagnosticCodes.has(data.code) ? data.code : 'OTHER';
+  return `${status}-${code}`;
+}
 export function imageChangeIntent(item, current, source = null) {
   const fields = Object.fromEntries(Object.entries(item).filter(([key]) => !stripped.includes(key)));
   return {
@@ -19,7 +30,7 @@ export function imageChangeIntent(item, current, source = null) {
     sourceImageId: source?.id ?? null, claim: null,
   };
 }
-export function imageChangeHarness(client, owner, env) {
+export function imageChangeHarness(client, owner, env, mark = () => {}) {
   const h = saveHarness(client, owner);
   const paths = (value) => ['main', 'thumb'].map((variant) => `${owner.uid}/${value.itemId}/${value.imageId}/${variant}.jpg`);
   const create = async () => {
@@ -36,17 +47,26 @@ export function imageChangeHarness(client, owner, env) {
   };
   const reserve = async (value) => {
     const result = await h.call('reserve_image_change', { p_intent: value });
+    if (!(result.ok && result.status === 200)) mark(`reserve-http-${responseClass(result)}`);
     requireEvidence(result.ok && result.status === 200);
-    eq(Object.keys(result.data).sort(), ['completedVersion', 'fingerprint', 'imageId', 'itemId', 'kind', 'requestId', 'state']);
-    requireEvidence(result.data.requestId === value.requestId && result.data.itemId === value.itemId
-      && result.data.imageId === value.imageId && /^[0-9a-f]{64}$/.test(result.data.fingerprint));
+    const receiptKeys = ['completedVersion', 'fingerprint', 'imageId', 'itemId', 'kind', 'requestId', 'state'];
+    if (result.data == null || !isDeepStrictEqual(Object.keys(result.data).sort(), receiptKeys)) mark('reserve-receipt-keys');
+    eq(Object.keys(result.data).sort(), receiptKeys);
+    const sameIdentity = result.data.requestId === value.requestId && result.data.itemId === value.itemId
+      && result.data.imageId === value.imageId && /^[0-9a-f]{64}$/.test(result.data.fingerprint);
+    if (!sameIdentity) mark('reserve-receipt-identity');
+    requireEvidence(sameIdentity);
     return result.data;
   };
   const upload = async (value, variants = ['main', 'thumb']) => {
-    for (const variant of variants) requireEvidence((await client.request(owner.token,
-      `/storage/v1/object/wardrobe/${owner.uid}/${value.itemId}/${value.imageId}/${variant}.jpg`, {
+    for (const variant of variants) {
+      const result = await client.request(owner.token,
+        `/storage/v1/object/wardrobe/${owner.uid}/${value.itemId}/${value.imageId}/${variant}.jpg`, {
         method: 'POST', body: bytes, binary: true, headers: { 'x-upsert': 'false' },
-      })).ok);
+        });
+      if (!result.ok && (variant === 'main' || variant === 'thumb')) mark(`upload-${variant}-http-${responseClass(result)}`);
+      requireEvidence(result.ok);
+    }
   };
   const endpoint = async (value, action = 'complete', token = owner.token) => {
     const result = await fetch(`${LOCAL_API}/functions/v1/finalize-image-change`, {

@@ -194,6 +194,64 @@ The root cause and real10->11 acceptance remain pending focused review and
 fresh authorized CI. No local backend/SQL/parser, publication, types or UI work
 was performed; this diagnostics-only candidate is unstaged.
 
+### Stage A CI3 - replacement reserve/upload boundary, 22 September 2026
+
+The [scoped continuation](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5770888581)
+records CI `35683854072`, database job `106606403678`, at
+`122f7243955df6fd691b3923598a32843c6a54f8`. Startup, exact eleven-source
+inventory, historical base->10/9->10 preservation and the ROOT11 ledger passed
+again. At 03:40:58Z verification failed at
+`I10b-preservation-replacement-reserve-upload`; exact-run snapshot cleanup
+passed. This does not establish full populated10->11 preservation. Later
+backend/type/artifact gates remain unexecuted, not passed.
+
+The label covers both the checked reserve RPC and the subsequent native
+uploads. Inspection of the actual intent/defaults, normal-owner helper,
+provenance/receipt checks, pending-image insertion, image identity/deletion
+triggers and native upload authorization has not established a definite
+contract deviation. The failing call and root cause remain unknown; no
+production or fixture-input correction is claimed.
+
+The bounded diagnostic distinction replaces the combined label with
+`replacement-reserve` immediately before the awaited reservation, then
+`replacement-upload` only after reservation succeeds and before the awaited
+upload helper. `replacement-finalize` still follows successful upload. This
+retains every call/assertion, original failure propagation, cleanup and logging
+frequency. The plain boundary-only candidate was held rather than published.
+
+The [reviewed diagnostic amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771004785)
+records retained Anthropic Claude Opus 5 critique, same-writer model observation
+and explicit authority for failure-only response classes. The existing helper
+now takes an optional fourth stage callback, defaulting to no-op; only the
+preservation caller supplies it. Already-awaited failed responses select from
+the approved 15 integer HTTP statuses and 18 exact code strings, otherwise
+literal `OTHER`. A code must be an own string property of a non-null, non-array
+object. Receipt failures select only the fixed keys/identity invariant labels.
+Failed uploads distinguish only guarded `main`/`thumb` constants. There is no
+owner or iteration token, raw response/code fallback, message/details/hint/data
+inspection, extra output/request/parsing, catch, retry or success-path class.
+The existing three reserve assertions, upload assertion, request order,
+transport-error identity and primary-label/cleanup behavior are retained.
+All eleven SQL files and all source/body pins remain unchanged.
+
+The initial boundary-only command passed 34 source/mock tests. After the
+approved amendment, the command selecting `image-replacement-schema`,
+`preservation` and `image-replacement` passed 261 tests across three files.
+This includes 90 new mocked cases for all approved status/code classes,
+malformed/unknown/prototype-related/sensitive-looking values, unchanged
+receipt refusals (including nullish TypeError), main/thumb failures,
+transport-sentinel identity, sequential uploads, no success class and
+three-argument callers. The held sequencing and earlier privacy/refusal
+coverage remain. Scoped ESLint and `tsc --noEmit` exited 0. These are local
+source/mock checks, not actual reserve/upload evidence.
+
+This four-path diagnostic candidate is unstaged pending retained focused
+closure and separate publication release. No local backend/SQL, provider,
+types, UI, workflow or dependency operation was performed. The coordinator
+subsequently supplied CI3 App SUCCESS metadata at 03:51:21Z; no detailed result
+counts or artifact acceptance are inferred, and Apple final results are not
+asserted from earlier heads. DB remains failed; no generated-type release.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling

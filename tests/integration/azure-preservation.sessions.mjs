@@ -223,13 +223,15 @@ export async function verifyImageChangePreservation(snapshot, sql, mark) {
         const facts = { ...analysisFacts, fields: { ...analysisFacts.fields, pattern: 'solid' } };
         requireEvidence(JSON.parse(await sql(`select public.ai_finish_analysis(${literal(owner.uid)},${literal(id)},'azure-eu-terra-devtest-v1',
           ${json(facts)},${json(analysisUsage)},'SUCCESS');`)).stored === true);
-        replacementHarness = imageChangeHarness(client, owner, env);
+        replacementHarness = imageChangeHarness(client, owner, env, mark);
         replacement = replacementHarness.make((await h.read('items', value.p_item.id))[0], (await h.read('item_images', value.p_image.id))[0]);
         replacement.item.pattern = 'solid'; replacement.item.field_provenance.pattern = { kind: 'ai_observed', revision: 1 };
         replacement.claim = { requestId: id, draftId: id, generation: 1, imageSha256: analysisHash,
           fields: { pattern: { kind: 'ai_observed', value: 'solid' } } };
-        mark('replacement-reserve-upload');
-        await replacementHarness.reserve(replacement); await replacementHarness.upload(replacement);
+        mark('replacement-reserve');
+        await replacementHarness.reserve(replacement);
+        mark('replacement-upload');
+        await replacementHarness.upload(replacement);
         mark('replacement-finalize');
         equal(await replacementHarness.endpoint(replacement), { status: 204 });
         mark('replacement-receipt-history');

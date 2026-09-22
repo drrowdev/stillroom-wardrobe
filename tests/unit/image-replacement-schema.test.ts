@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Executable preservation fixture has no TypeScript declaration.
 import { verifyImageChangePreservation } from '../integration/azure-preservation.sessions.mjs';
+// @ts-expect-error Executable integration fixture has no TypeScript declaration.
+import { imageChangeHarness } from '../integration/image-replacement.sessions.mjs';
 
 const source = readFile(new URL('../../supabase/migrations/20260922020000_checked_image_changes.sql', import.meta.url), 'utf8');
 function body(sql: string, name: string) {
@@ -119,6 +121,169 @@ describe('I10b SQL source contracts (not PostgreSQL execution evidence)', () => 
       const runner = await readFile(new URL('../../scripts/preservation-rehearsal.mjs', import.meta.url), 'utf8');
       expect(runner).toContain('await verifyImageChangePreservation(ten, privilegedLocalSql, (label) => { stage = `I10b-preservation-${label}`; });');
       expect(runner).toContain('FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}; subsequent stages NOT RUN');
+    });
+    it('distinguishes replacement reservation from upload without advancing the label before either awaited call', async () => {
+      const fixtureSource = await readFile(new URL('../integration/azure-preservation.sessions.mjs', import.meta.url), 'utf8');
+      expect(fixtureSource).not.toContain("mark('replacement-reserve-upload')");
+      expect(fixtureSource).toContain('replacementHarness = imageChangeHarness(client, owner, env, mark);');
+      expect(fixtureSource).toMatch(/mark\('replacement-reserve'\);\s*await replacementHarness\.reserve\(replacement\);\s*mark\('replacement-upload'\);\s*await replacementHarness\.upload\(replacement\);\s*mark\('replacement-finalize'\);/);
+    });
+    describe('replacement failure response classes (mocked transport, no backend)', () => {
+      const statuses = [200, 201, 204, 400, 401, 403, 404, 409, 413, 422, 429, 500, 502, 503, 504];
+      const codes = ['22023', '42501', '42601', '42702', '42703', '42883', '23502', '23503', '23505',
+        '23514', '55P03', 'PGRST202', 'PGRST204', 'NoSuchKey', 'AccessDenied', 'Duplicate', 'InvalidKey', 'EntityTooLarge'];
+      const value = { requestId: '10000000-0000-4000-8000-000000000001',
+        itemId: '10000000-0000-4000-8000-000000000002', imageId: '10000000-0000-4000-8000-000000000003' };
+      const owner = { uid: '10000000-0000-4000-8000-000000000004', token: 'synthetic-token-do-not-emit', label: 'A' };
+      const receipt = { ...value, fingerprint: 'a'.repeat(64), completedVersion: null, kind: 'replacement', state: 'reserved' };
+      type Reply = { ok: boolean; status: unknown; data?: unknown };
+      const ok: Reply = { ok: true, status: 200, data: receipt };
+      afterEach(() => vi.restoreAllMocks());
+      function fixture(reply: Reply = ok, marked = true) {
+        const request = vi.fn<(token: string, route: string, options: unknown) => Promise<Reply>>().mockResolvedValue(reply);
+        const mark = vi.fn<(label: string) => void>();
+        const h = marked ? imageChangeHarness({ request }, owner, {}, mark) : imageChangeHarness({ request }, owner, {});
+        const logs = [vi.spyOn(console, 'error'), vi.spyOn(console, 'log'), vi.spyOn(console, 'warn')];
+        return { request, mark, h, logs };
+      }
+      it.each(statuses)('classifies only allowed HTTP status %s immediately before the existing refusal', async (status) => {
+        const f = fixture({ ok: false, status, data: { code: '22023' } });
+        await expect(f.h.reserve(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(f.mark.mock.calls).toEqual([[`reserve-http-${status}-22023`]]);
+        expect(f.request).toHaveBeenCalledExactlyOnceWith(owner.token, '/rest/v1/rpc/reserve_image_change',
+          { method: 'POST', body: { p_intent: value } });
+        for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+      });
+      it.each(codes)('classifies only allowlisted code %s without reading response detail fields', async (code) => {
+        const f = fixture({ ok: false, status: 400, data: { code,
+          message: 'synthetic-message-secret', details: 'synthetic-details-secret', hint: 'synthetic-hint-secret',
+          data: { code: 'nested-secret', token: owner.token }, id: owner.uid, receipt } });
+        await expect(f.h.reserve(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(f.mark.mock.calls).toEqual([[`reserve-http-400-${code}`]]);
+        expect(JSON.stringify(f.mark.mock.calls)).not.toMatch(/synthetic|secret|10000000/);
+        for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+      });
+      it.each([
+        ['absent', undefined], ['null', null], ['array', [{ code: '22023' }]],
+        ['string', '22023'], ['number', 22023], ['boolean', true], ['missing', {}],
+        ['null code', { code: null }], ['number code', { code: 22023 }],
+        ['array code', { code: ['22023'] }], ['object code', { code: { value: '22023' } }],
+        ['boolean code', { code: true }], ['unknown code', { code: 'UNKNOWN' }],
+        ['sensitive code', { code: owner.token }], ['long code', { code: 'sensitive'.repeat(2048) }],
+        ['lowercase code', { code: '55p03' }], ['whitespace code', { code: ' 22023' }],
+        ['inherited code', Object.create({ code: '22023' })],
+        ['prototype key', JSON.parse('{"__proto__":{"code":"22023"}}')],
+        ['constructor key', { constructor: { code: '22023' } }],
+        ['prototype name code', { code: '__proto__' }], ['constructor name code', { code: 'constructor' }],
+        ['nested code', { data: { code: '22023' }, message: owner.token, details: receipt, hint: owner.uid }],
+      ])('maps %s to OTHER without disclosing its value or changing refusal', async (_name, data) => {
+        const f = fixture({ ok: false, status: 400, data });
+        await expect(f.h.reserve(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(f.mark.mock.calls).toEqual([['reserve-http-400-OTHER']]);
+        expect(f.request).toHaveBeenCalledOnce();
+        for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+      });
+      it.each([undefined, null, '400', 400.5, NaN, Infinity, -1, 418, {}, [400]])(
+        'maps unknown/noninteger status %# to OTHER', async (status) => {
+          const f = fixture({ ok: false, status, data: { code: '42501' } });
+          await expect(f.h.reserve(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+          expect(f.mark.mock.calls).toEqual([['reserve-http-OTHER-42501']]);
+        });
+      it('accepts an own allowlisted code on a null-prototype object', async () => {
+        const data = Object.assign(Object.create(null), { code: '42702' });
+        const f = fixture({ ok: false, status: 400, data });
+        await expect(f.h.reserve(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(f.mark.mock.calls).toEqual([['reserve-http-400-42702']]);
+      });
+      it.each([201, 204])('still refuses an ok response with non-200 reserve status %s', async (status) => {
+        const f = fixture({ ...ok, status });
+        await expect(f.h.reserve(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(f.mark.mock.calls).toEqual([[`reserve-http-${status}-OTHER`]]);
+      });
+      it.each([
+        ['empty object', {}], ['array', []], ['primitive', 'secret'],
+        ['missing key', { ...value, fingerprint: receipt.fingerprint, kind: 'replacement', state: 'reserved' }],
+        ['extra secret key', { ...receipt, 'synthetic-private-key': owner.token }],
+      ])('keeps exact receipt-key refusal for %s', async (_name, data) => {
+        const f = fixture({ ...ok, data });
+        await expect(f.h.reserve(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(f.mark.mock.calls).toEqual([['reserve-receipt-keys']]);
+        expect(f.request).toHaveBeenCalledOnce();
+      });
+      it.each([null, undefined])('preserves nullish receipt TypeError %# instead of substituting an assertion error', async (data) => {
+        const f = fixture({ ...ok, data });
+        await expect(f.h.reserve(value)).rejects.toBeInstanceOf(TypeError);
+        expect(f.mark.mock.calls).toEqual([['reserve-receipt-keys']]);
+      });
+      it.each(['requestId', 'itemId', 'imageId', 'fingerprint'])('retains receipt identity refusal for %s', async (key) => {
+        const f = fixture({ ...ok, data: { ...receipt, [key]: 'synthetic-private-mismatch' } });
+        await expect(f.h.reserve(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(f.mark.mock.calls).toEqual([['reserve-receipt-identity']]);
+        expect(f.request).toHaveBeenCalledOnce();
+      });
+      it('returns the unchanged successful receipt with no classification, regardless of key order', async () => {
+        const data = Object.fromEntries(Object.entries(receipt).reverse()), f = fixture({ ...ok, data });
+        await expect(f.h.reserve(value)).resolves.toBe(data);
+        expect(f.mark).not.toHaveBeenCalled(); expect(f.request).toHaveBeenCalledOnce();
+        for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+      });
+      it.each(['main', 'thumb'])('classifies only failed native %s upload and stops at the unchanged assertion', async (variant) => {
+        const f = fixture({ ok: false, status: 403, data: { code: 'AccessDenied', message: owner.token } });
+        if (variant === 'thumb') f.request.mockResolvedValueOnce({ ok: true, status: 201 });
+        await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(f.mark.mock.calls).toEqual([[`upload-${variant}-http-403-AccessDenied`]]);
+        expect(f.request.mock.calls.map(([, route]) => route)).toEqual(
+          (variant === 'main' ? ['main'] : ['main', 'thumb']).map((part) =>
+            `/storage/v1/object/wardrobe/${owner.uid}/${value.itemId}/${value.imageId}/${part}.jpg`));
+        for (const [token, , options] of f.request.mock.calls) {
+          expect(token).toBe(owner.token);
+          expect(options).toMatchObject({ method: 'POST', binary: true, headers: { 'x-upsert': 'false' } });
+        }
+        for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+      });
+      it('uses the same OTHER classifier for an upload response without supported status/code', async () => {
+        const f = fixture({ ok: false, status: 'synthetic-secret-status', data: { code: owner.token } });
+        await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(f.mark.mock.calls).toEqual([['upload-main-http-OTHER-OTHER']]);
+      });
+      it('never interpolates an unexpected caller-supplied variant into a diagnostic label', async () => {
+        const f = fixture({ ok: false, status: 400 });
+        await expect(f.h.upload(value, ['synthetic-secret-variant'])).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(f.mark).not.toHaveBeenCalled(); expect(f.request).toHaveBeenCalledOnce();
+      });
+      it.each(['reserve', 'main', 'thumb'])('propagates the exact thrown %s transport sentinel without classification or retry', async (operation) => {
+        const f = fixture(), sentinel = { message: 'synthetic-private-transport-error', token: owner.token };
+        if (operation === 'thumb') f.request.mockResolvedValueOnce({ ok: true, status: 201 });
+        f.request.mockRejectedValueOnce(sentinel);
+        await expect(operation === 'reserve' ? f.h.reserve(value) : f.h.upload(value)).rejects.toBe(sentinel);
+        expect(f.mark).not.toHaveBeenCalled();
+        expect(f.request).toHaveBeenCalledTimes(operation === 'thumb' ? 2 : 1);
+        for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+      });
+      it('awaits main before requesting thumb and emits no classification on success', async () => {
+        const f = fixture({ ok: true, status: 201, data: { code: 'Duplicate' } });
+        let release!: (reply: Reply) => void;
+        f.request.mockReturnValueOnce(new Promise<Reply>((resolve) => { release = resolve; }));
+        const pending = f.h.upload(value);
+        expect(f.request).toHaveBeenCalledOnce();
+        expect(f.mark).not.toHaveBeenCalled();
+        release({ ok: true, status: 204 });
+        await pending;
+        expect(f.request).toHaveBeenCalledTimes(2);
+        expect(f.request.mock.calls[0]?.[1]).toMatch(/\/main\.jpg$/);
+        expect(f.request.mock.calls[1]?.[1]).toMatch(/\/thumb\.jpg$/);
+        expect(f.mark).not.toHaveBeenCalled();
+      });
+      it('preserves successful and rejected three-argument callers without a diagnostic callback', async () => {
+        const f = fixture(ok, false);
+        await expect(f.h.reserve(value)).resolves.toBe(receipt);
+        await expect(f.h.upload(value)).resolves.toBeUndefined();
+        f.request.mockResolvedValue({ ok: false, status: 400, data: { code: '22023' } });
+        await expect(f.h.reserve(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(f.request).toHaveBeenCalledTimes(5);
+        expect(f.mark).not.toHaveBeenCalled();
+      });
     });
   });
   it('keeps Auth-lifetime tombstones separate from item-lifetime ordered provenance', async () => {
