@@ -21,6 +21,8 @@ export const SOURCE_HASHES = Object.freeze({
   imageChanges: 'cebc58134c93590fe178a1a72a4beb77dcabe562803c90a5455cf09acba3e771',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
+const nullableRpcs = new Set(['image_change_status', 'cancel_image_change', 'item_deletion_operation_status', 'item_deletion_next_target']);
+const nullableRpcPaths = new Set([...nullableRpcs].map((name) => `/rest/v1/rpc/${name}`));
 const diagnosticStatuses = new Set([200, 201, 204, 400, 401, 403, 404, 409, 413, 422, 429, 500, 502, 503, 504]);
 export function diagnosticHttpStatus(status) {
   return Number.isInteger(status) && diagnosticStatuses.has(status) ? status : 'OTHER';
@@ -316,8 +318,9 @@ export function normalClient(env) {
     const tusFixture = method === 'POST' && route === '/storage/v1/upload/resumable' && binary === true;
     if (!route.startsWith('/storage/v1/object/authenticated/') && !tusFixture) {
       try { data = JSON.parse(raw.toString('utf8')); } catch {
-        if (raw.length !== 0) onFailure(`nonjson-${diagnosticHttpStatus(response.status)}`);
-        requireEvidence(raw.length === 0); data = null;
+        const emptyAllowed = raw.length === 0 && !nullableRpcPaths.has(route);
+        if (!emptyAllowed) onFailure(`nonjson-${diagnosticHttpStatus(response.status)}`);
+        requireEvidence(emptyAllowed); data = null;
       }
     }
     return { ok: response.ok, status: response.status, data, range: response.headers.get('content-range') };
@@ -326,7 +329,7 @@ export function normalClient(env) {
     const result = await request(owner.token, `/rest/v1/rpc/${name}`, { method: 'POST', body });
     requireEvidence(result.ok && (name === 'commit_image'
       ? result.status === 204 && result.data === null
-      : result.status === 200 && result.data !== null));
+      : result.status === 200 && (result.data !== null || nullableRpcs.has(name))));
     return result.data;
   };
   const rows = async (owner, table) => {

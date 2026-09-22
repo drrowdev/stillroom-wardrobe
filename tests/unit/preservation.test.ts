@@ -383,6 +383,126 @@ describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
   const empty = () => new Response(null, { status: 204 });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  describe('strict nullable RPC contracts (real client, fetch/Response mocked only)', () => {
+    const names = ['image_change_status', 'cancel_image_change', 'item_deletion_operation_status', 'item_deletion_next_target'];
+    const value = { itemId: run, requestId: owners[1] };
+    const args = { p_item_id: value.itemId, p_request_id: value.requestId };
+    function invoke(name: string, session = owner) {
+      const transport = client(), h = imageChangeHarness(transport, session, env);
+      return name === 'image_change_status' ? h.status(value)
+        : name === 'cancel_image_change' ? h.cancel(value) : transport.rpc(session, name, args);
+    }
+    describe.each(names)('%s', (name) => {
+      const route = `/rest/v1/rpc/${name}`;
+      it.each(['null', ' \nnull\t\r\n'])('accepts parsed JSON %j through the real caller', async (raw) => {
+        const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(raw));
+        vi.stubGlobal('fetch', fetch);
+        const logs = [vi.spyOn(console, 'log'), vi.spyOn(console, 'warn'), vi.spyOn(console, 'error')];
+        await expect(invoke(name)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledOnce();
+        const [url, options] = present(fetch.mock.calls[0]);
+        expect(url).toBe(env.SUPABASE_URL + route);
+        expect(options?.method).toBe('POST');
+        expect(options?.body).toBe(JSON.stringify(args));
+        const headers = new Headers(options?.headers);
+        expect(headers.get('authorization')).toBe('Bearer '.concat(owner.token));
+        expect(headers.get('apikey')).toBe(env.SUPABASE_PUBLISHABLE_KEY);
+        for (const log of logs) expect(log).not.toHaveBeenCalled();
+      });
+      it.each([owner, other])('preserves non-null values and session forwarding for $label', async (session) => {
+        const receipt = { requestId: value.requestId, itemId: value.itemId, state: 'reserved' };
+        const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json(receipt));
+        vi.stubGlobal('fetch', fetch);
+        await expect(invoke(name, session)).resolves.toEqual(receipt);
+        expect(fetch).toHaveBeenCalledOnce();
+        const [url, options] = present(fetch.mock.calls[0]);
+        expect(url).toBe(env.SUPABASE_URL + route);
+        expect(options?.body).toBe(JSON.stringify(args));
+        expect(new Headers(options?.headers).get('authorization')).toBe('Bearer '.concat(session.token));
+      });
+      it('emits no observer label for successfully parsed null', async () => {
+        respond(json(null));
+        const onFailure = vi.fn();
+        await expect(client().request(owner.token, route, { method: 'POST', body: args, onFailure }))
+          .resolves.toEqual({ ok: true, status: 200, data: null, range: null });
+        expect(onFailure).not.toHaveBeenCalled();
+      });
+      it.each(['', ' ', 'synthetic-private-not-json'])('refuses blank or malformed bytes %j at the parser', async (raw) => {
+        respond(new Response(raw));
+        const onFailure = vi.fn(), logs = [vi.spyOn(console, 'log'), vi.spyOn(console, 'error'), vi.spyOn(console, 'warn')];
+        await expect(client().request(owner.token, route, { method: 'POST', body: args, onFailure }))
+          .rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(onFailure.mock.calls).toEqual([['nonjson-200']]);
+        for (const log of logs) expect(log).not.toHaveBeenCalled();
+        expect(JSON.stringify(onFailure.mock.calls)).not.toMatch(/synthetic-private|fictional-a/);
+      });
+      it('refuses an absent 200 body before parsing', async () => {
+        respond(new Response(null));
+        await expect(invoke(name)).rejects.toThrow('EVIDENCE_REQUIRED');
+      });
+      it.each([201, 202, 204, 400, 401, 403, 404, 409])('refuses status %s even with null data', async (status) => {
+        respond(status === 204 ? empty() : json(null, status));
+        await expect(invoke(name)).rejects.toThrow('EVIDENCE_REQUIRED');
+      });
+      it.each([500, 502, 503, 504])('refuses %s before body access', async (status) => {
+        const response = json({ message: 'synthetic-private-body' }, status);
+        const body = vi.spyOn(response, 'body', 'get');
+        respond(response);
+        await expect(invoke(name)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(body).not.toHaveBeenCalled();
+      });
+      it('retains the exact byte bound and cancels an oversized response', async () => {
+        respond(new Response(' '.repeat(MAX_SNAPSHOT_BYTES - 4) + 'null'));
+        await expect(invoke(name)).resolves.toBeNull();
+        const response = new Response(' '.repeat(MAX_SNAPSHOT_BYTES - 3) + 'null');
+        const stream = present(response.body ?? undefined), reader = stream.getReader();
+        const cancel = vi.spyOn(reader, 'cancel');
+        vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+        respond(response);
+        await expect(invoke(name)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(cancel).toHaveBeenCalledOnce();
+      });
+      it('preserves the exact fetch rejection without retry', async () => {
+        const error = new Error('synthetic-private-fetch');
+        const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(error);
+        vi.stubGlobal('fetch', fetch);
+        await expect(invoke(name)).rejects.toBe(error);
+        expect(fetch).toHaveBeenCalledOnce();
+      });
+      it.each(['read', 'cancel', 'read-and-cancel'])('preserves %s rejection and finally precedence', async (failure) => {
+        const response = json(null), stream = present(response.body ?? undefined), reader = stream.getReader();
+        const readError = new Error('synthetic-private-read'), cancelError = new Error('synthetic-private-cancel');
+        const read = vi.spyOn(reader, 'read'), cancel = vi.spyOn(reader, 'cancel');
+        if (failure !== 'cancel') read.mockRejectedValue(readError);
+        if (failure !== 'read') cancel.mockRejectedValue(cancelError);
+        vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+        respond(response);
+        await expect(invoke(name)).rejects.toBe(failure === 'read' ? readError : cancelError);
+        expect(cancel).toHaveBeenCalledOnce();
+      });
+    });
+    it.each(['image_change_requests', 'ai_status', 'save_outfit',
+      ...names.flatMap((name) => [`${name}_other`, `${name}/`, `${name}?unit=1`, `prefix_${name}`, name.toUpperCase()])])(
+      'does not make %s nullable', async (name) => {
+        respond(json(null));
+        await expect(client().rpc(owner, name, args)).rejects.toThrow('EVIDENCE_REQUIRED');
+      });
+    it.each(names.flatMap((name) => [`${name}/`, `${name}?unit=1`, `${name}_other`, `prefix_${name}`]))(
+      'does not expand empty-body parser tightening to near route %s', async (name) => {
+        respond(new Response(''));
+        await expect(client().request(owner.token, `/rest/v1/rpc/${name}`, { method: 'POST', body: args }))
+          .resolves.toEqual({ ok: true, status: 200, data: null, range: null });
+      });
+    it('retains commit_image as exactly bodyless 204, not a nullable 200 RPC', async () => {
+      respond(empty());
+      await expect(client().rpc(owner, 'commit_image', { p_image_id: run })).resolves.toBeNull();
+      for (const data of [null, { state: 'ready' }]) {
+        respond(json(data));
+        await expect(client().rpc(owner, 'commit_image', { p_image_id: run })).rejects.toThrow('EVIDENCE_REQUIRED');
+      }
+    });
+  });
+
   describe('real client plus real replacement harness (fetch/Response mocked only)', () => {
     const variants = ['main', 'thumb'] as const;
     type Variant = typeof variants[number];

@@ -369,6 +369,74 @@ unstaged pending focused closure and a separate publication release. No local
 backend, SQL execution/parser, dependency installation, generated types or UI
 work was performed; no backend acceptance or Stage C release is implied.
 
+### Stage A CI6 - strict nullable fixture RPC contracts, 22 September 2026
+
+The [actual CI6 evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771587836)
+records head `e97dea0048725727ebe8cee220d34cfa2fe5b999`, CI `35689956046`,
+database job `106624623878`. At 05:18:22.4447187Z preservation failed at
+`I10b-preservation-recovery-age-refusals`; exact snapshot cleanup passed.
+Startup, exact eleven-source inventory, historical base->10/9->10 and the
+ROOT11 ledger passed. The path progressed beyond the earlier upload and
+replacement failure, not through all owners or full preservation. The stage
+contains privileged age setup, an endpoint 409 assertion and a missing-request
+status assertion; the log does not identify which statement failed.
+
+The [reviewed three-path release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771708615)
+records retained Anthropic Claude Opus 5 critique 122 and the same GPT-6 Astra
+writer's own-model/source observation. Source inspection established that
+four existing SQL contracts permit NULL: `image_change_status`,
+`cancel_image_change`, `item_deletion_operation_status` and
+`item_deletion_next_target`. Existing fixture assertions expect those results,
+but the shared normal-session RPC helper rejected all non-`commit_image`
+nulls. This is a newly reached source contradiction, not a demonstrated
+regression from the preceding SQL alias repair or proof of the exact CI throw.
+
+One closed name set now permits status 200 with parsed JSON null for those
+four RPCs only. Their exact canonical paths are derived from the same set;
+the existing empty-stream JSON fallback is refused on those paths so it
+cannot masquerade as an absent receipt. The existing `nonjson` observer
+condition follows the tightened assertion without new labels or API.
+Other RPCs remain status 200/non-null; `commit_image` remains bodyless
+204/null. No prefix, query, trailing-slash or near-name nullable match exists.
+No additional response read, parse, request, catch or returned field was added.
+
+The coordinator explicitly chose strict 200/JSON-null, not a speculative
+204 fallback. Its receipt records directly read upstream
+[scalar NULL coverage](https://github.com/PostgREST/postgrest/blob/main/test/spec/Feature/Query/RpcSpec.hs)
+(blob `25776cb25e3553e5d12efc7229a3f01e20e3d484`, integer scalar) and the
+[void-specific 204 response branch](https://github.com/PostgREST/postgrest/blob/819e812ce83a6d5d16cbd39d5383ad8256aa3ef5/src/library/PostgREST/Response.hs#L184-L209)
+(blob `9f69e9ec0522e6f1acff0aeafdd9d3f3c4db363f`). These support the conservative
+choice but are not a pinned-CI jsonb wire observation; the writer did not
+independently fetch or execute that upstream evidence.
+
+Before repairing the helper, 144 new fetch/Response-mocked cases exercised
+the real client and, for status/cancellation, the real image-change harness.
+The filtered fail-first run produced 16 failures and 128 passes, with 166
+unrelated tests excluded: all four names rejected literal/whitespace JSON
+null and boundary-sized valid null; all four empty-stream parser refusal
+tests exposed the old successful-null fallback. After repair, all 472 tests
+in the existing preservation (310), image-replacement-schema (128) and
+image-replacement-endpoint (34) suites passed with no skips.
+Scoped ESLint, `tsc --noEmit` and `git diff --check` passed with the approved
+Node and locked packages. The secret scan checked 253 text files; no local
+canary was supplied, so the CI canary remains required. These are source and
+mocked-transport results, not a live RPC or PostgreSQL pass.
+
+Coverage retains non-null values, owner/token/item/request forwarding,
+non-allowlisted and near-name refusal, strict 204/wrong-status/error refusal,
+absent/blank/non-JSON body refusal, the exact 512 KiB bound, pre-reader 5xx
+refusal, fetch/read/cancel error identity and finally precedence. Successful
+parsing emits no observer label; tested failures emit no private values or
+console output. The previously masked Authorization assertion is untouched.
+
+No SQL, live or historical pins, age setup, actual 409-plus-null negative
+assertions, inclusive seven-day predicates, accepted-replay precedence or
+ordinary-owner isolation changed. This unstaged class repair still requires
+focused closure, separate publication and fresh real CI; it may not resolve
+every failure in that stage. No local backend/SQL/parser, dependency install,
+type artifact or UI work was performed. The extended hard deadline is
+22 September 2026 at 15:57:28 UTC; scope and actor gates remain unchanged.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling
