@@ -654,8 +654,8 @@ async function main() {
       requireEvidence(['requestId', 'draftId', 'itemId', 'imageId'].every((key) =>
         new RegExp(`^${prefix}[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).test(receipt[key]))
         && new Set(['requestId', 'draftId', 'itemId', 'imageId'].map((key) => receipt[key])).size === 4);
-      const attestation = await db(`select to_jsonb(t) from private.ai_analysis_attestations t
-        where owner_id=${literal(owner.uid)} and request_id=${literal(receipt.requestId)};`);
+      const attestation = await db(`select coalesce((select to_jsonb(t) from private.ai_analysis_attestations t
+        where owner_id=${literal(owner.uid)} and request_id=${literal(receipt.requestId)}),'null'::jsonb);`);
       if (index === 0) requireEvidence(attestation && attestation.image_sha256 === receipt.imageSha256 && attestation.byte_count === receipt.byteCount
         && attestation.width === receipt.width && attestation.height === receipt.height && attestation.manifest_id === manifest);
       else {

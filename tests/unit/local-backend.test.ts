@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { AssertionError } from 'node:assert';
@@ -15,6 +16,98 @@ import {
 } from '../../scripts/backend/local.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { analysisRequest, servedInvalidTokenRequest } from '../integration/ai-analysis.sessions.mjs';
+
+describe('C parent receipt contract', () => {
+  let cReceipts: (stdout: string, stderr: string, requests: unknown, owners: unknown, generations: number) => unknown;
+  beforeAll(async () => {
+    const source = await readFile(path.join(ROOT, 'scripts', 'ai-analysis-rehearsal.mjs'), 'utf8');
+    const parserStart = source.indexOf('function markedRecords('), parserEnd = source.indexOf('function cProgress(');
+    const contractStart = source.indexOf("    const lines = markedRecords(result.stdout, result.stderr, 'I29_C_RECEIPT'");
+    const contractEnd = source.indexOf('      const attestation = await db(', contractStart);
+    expect(parserStart).toBeGreaterThanOrEqual(0); expect(parserEnd).toBeGreaterThan(parserStart);
+    expect(contractStart).toBeGreaterThan(parserEnd); expect(contractEnd).toBeGreaterThan(contractStart);
+    // Execute only the production parser and pre-SQL contract, never the backend rehearsal.
+    const validate = new Function('Buffer', 'requireEvidence', 'equal', 'result', 'cRequests', 'owners', 'generations', 'cCountBefore',
+      source.slice(parserStart, parserEnd) + source.slice(contractStart, contractEnd) + '\n}\nreturn receipts;');
+    cReceipts = (stdout, stderr, requests, owners, generations) => validate(Buffer,
+      (value: unknown) => { if (!value) throw new Error('Invalid C evidence'); },
+      (a: unknown, b: unknown) => { if (!isDeepStrictEqual(a, b)) throw new Error('C evidence differs'); },
+      { stdout, stderr }, requests, owners, generations, 0);
+  });
+  const owners = [{ uid: '10000000-0000-4000-8000-000000000001' }, { uid: '20000000-0000-4000-8000-000000000001' }];
+  const fixture = () => {
+    const receipts = owners.map((owner, index) => {
+      const id = (n: number) => `c329${index === 0 ? 'a' : 'b'}000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+      return { ownerId: owner.uid, requestId: id(1), draftId: id(2), generation: 1,
+        imageSha256: (index === 0 ? 'a' : 'b').repeat(64), byteCount: 2048, width: 160, height: 120,
+        itemId: id(3), imageId: id(4) };
+    });
+    const requests = receipts.map(({ itemId, imageId, ...request }) => {
+      void itemId; void imageId;
+      return { ...request, generations: 1 };
+    });
+    return { receipts, requests };
+  };
+  const report = (receipts: unknown) => `I29_C_RECEIPT ${JSON.stringify(receipts)}\n`;
+  it('accepts the child ten-key report and binds both owners to exactly two observed generations', () => {
+    const { receipts, requests } = fixture();
+    expect(cReceipts(`I29_C_STAGE COMPLETE 2\n${report(receipts)}\n  1 passed\n`, '', requests, owners, 2)).toEqual(receipts);
+    expect(cReceipts('', `\u001b[32m·${report(receipts).trimEnd()}\u001b[0m\n`, requests, owners, 2)).toEqual(receipts);
+  });
+  it.each(['extra', 'missing', 'owner', 'request', 'draft', 'generation', 'hash', 'bytes', 'width', 'height',
+    'namespace', 'same-id', 'replayed-owner', 'reversed', 'missing-owner', 'extra-owner'])('rejects receipt drift: %s', (change) => {
+    const { receipts, requests } = fixture();
+    const altered: Array<Record<string, unknown>> = structuredClone(receipts);
+    const first = altered[0]!;
+    if (change === 'extra') first.extra = true;
+    if (change === 'missing') delete first.width;
+    if (change === 'owner') first.ownerId = owners[1]!.uid;
+    if (change === 'request') first.requestId = receipts[1]!.requestId;
+    if (change === 'draft') first.draftId = receipts[1]!.draftId;
+    if (change === 'generation') first.generation = 2;
+    if (change === 'hash') first.imageSha256 = 'c'.repeat(64);
+    if (change === 'bytes') first.byteCount = 2049;
+    if (change === 'width') first.width = 161;
+    if (change === 'height') first.height = 121;
+    if (change === 'namespace') first.itemId = receipts[1]!.itemId;
+    if (change === 'same-id') first.imageId = first.itemId;
+    if (change === 'replayed-owner') altered[1] = first;
+    if (change === 'reversed') altered.reverse();
+    if (change === 'missing-owner') altered.pop();
+    if (change === 'extra-owner') altered.push(first);
+    expect(() => cReceipts(report(altered), '', requests, owners, 2)).toThrow();
+  });
+  it('rejects malformed, duplicate, truncated and over-bound reports instead of trusting exit zero', () => {
+    const { receipts, requests } = fixture(), valid = report(receipts);
+    for (const output of ['', 'I29_C_STAGE COMPLETE 2\n', 'I29_C_RECEIPT {\n', report(null), report({}),
+      report([null, null]), valid + valid, valid.trimEnd(), `unexpected ${valid}`,
+      valid.replace('"ownerId"', '"owner\u001b[31mId"'), report('x'.repeat(4096)), 'x'.repeat(262145) + valid]) {
+      expect(() => cReceipts(output, '', requests, owners, 2)).toThrow();
+    }
+    expect(() => cReceipts(valid, valid, requests, owners, 2)).toThrow();
+  });
+  it('rejects changed parent observations, replayed inference and matching-image reports', () => {
+    const { receipts, requests } = fixture(), valid = report(receipts);
+    for (const count of [0, 1, 3]) expect(() => cReceipts(valid, '', requests, owners, count)).toThrow();
+    for (const changed of [requests.slice(0, 1), [...requests, requests[0]],
+      requests.map((request) => ({ ...request, generations: 2 })),
+      requests.map((request) => ({ ...request, ownerId: owners[0]!.uid }))]) {
+      expect(() => cReceipts(valid, '', changed, owners, 2)).toThrow();
+    }
+    receipts[1]!.imageSha256 = receipts[0]!.imageSha256;
+    requests[1]!.imageSha256 = requests[0]!.imageSha256;
+    expect(() => cReceipts(report(receipts), '', requests, owners, 2)).toThrow();
+  });
+  it('encodes absent attestation as JSON null without accepting empty SQL output', async () => {
+    const source = await readFile(path.join(ROOT, 'scripts', 'ai-analysis-rehearsal.mjs'), 'utf8');
+    expect(source).toContain("const db = async (sql) => JSON.parse(await privilegedLocalSql(sql));");
+    expect(source).toContain("select coalesce((select to_jsonb(t) from private.ai_analysis_attestations t\n"
+      + "        where owner_id=${literal(owner.uid)} and request_id=${literal(receipt.requestId)}),'null'::jsonb);");
+    expect(source).toContain('else {\n        equal(attestation, null);');
+    expect(() => JSON.parse('')).toThrow();
+    expect(JSON.parse('null')).toBeNull();
+  });
+});
 
 describe('B2 fixture lock boundary', () => {
   it('rejects identities outside the B2 namespace before any backend command', async () => {

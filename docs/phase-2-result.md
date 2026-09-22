@@ -6077,3 +6077,52 @@ selection is not a full App CI result or a budget waiver. The combined
 seven-file repair remains unstaged for one focused source review and a new
 publication release. Real C, generated types and all next-head gates remain
 pending; no separate C-only push was made.
+
+### I29-AZ1 CI3 parent attestation absence correction
+
+At `c6dfb0752d5cd7bb3a9513247a46c967455aae46`,
+[CI3](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/35668916013)
+passed preservation, ordinary integration/security, B1 (12 generations) and
+B2 (22 generations). The C child reached `COMPLETE`, owner index 2, exit 0;
+the parent's reported elapsed time was 10159 ms with 553485 ms remaining.
+The parent then failed at `C-ui-child`. That establishes successful child
+journeys, not overall C restoration, rehearsal success or generated-type
+parity. The withheld private error was not recovered, and no timeout cause
+is asserted.
+
+Source inspection found an independent, deterministic parent defect: owner B's
+explicit discard deletes its request and cascades its attestation. The parent's
+`select to_jsonb(t) from ...` therefore returns zero rows, whose trimmed psql
+output is empty, while `db` requires JSON. `JSON.parse('')` throws before the
+intended `equal(attestation, null)` assertion. The query now uses a scalar
+subquery with an explicit JSON `null` for absence. Empty or malformed SQL
+output still fails; there is no generic fallback. Owner A's positive private
+attestation, owner B's absence plus terminal identity/accounting, the closed
+receipt contract, two generations, owner bindings and restoration gates are
+unchanged. Real CI must confirm this correction; source evidence does not
+identify the exact withheld runtime throw.
+
+`npm run test:unit -- tests\unit\local-backend.test.ts` passed **533/533**.
+The explicit-null source regression failed before the query correction
+(532 passed, one failed). Added tests execute only the existing production
+parser and pre-SQL receipt contract, extracted without executing the backend
+rehearsal: the child's ten-key report is accepted, while malformed, duplicate,
+truncated, over-bound, wrong-owner, identity/hash/dimension and generation
+drift/replay reports fail. No production parser abstraction was introduced.
+The SQL assertion is structural, not live absence-query proof. Lint, typecheck
+and diff check passed on the approved Node 24.19.0 toolchain.
+
+CI3 App passed in 11m28s within the unchanged 20-minute limit; its 734-test
+browser result was **729 passed, four existing capture skips and one flaky
+test that passed its existing retry**. Native Apple also passed. The WebKit
+oversized-analysis first attempt returned 400 instead of 413: bounded
+diagnostics recorded `end-empty`, zero received/accepted bytes, a complete
+request and zero analysis callbacks. The retry received 512001 bytes and
+returned 413. Assertions after the failed status check were not executed on
+that first attempt. Local unchanged
+`npm run test:browser -- ai-photo-first.spec.ts --project=webkit-photo --retries=0 --repeat-each=10 --grep 'analysis source forwarding refuses oversized'`
+passed **10/10** with all original zero-traffic, bounds and cleanup assertions.
+This does not explain or waive the CI failure: its empty forwarded body remains
+unresolved, and no speculative fixture, retry or timeout change was made.
+No local backend, provider, hosted operation, deployment or publication ran
+for this unstaged repair.
