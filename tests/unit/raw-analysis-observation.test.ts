@@ -47,6 +47,7 @@ function entryText() {
   expect(fragment.statements.some(ts.isIfStatement)).toBe(true);
   return text;
 }
+const copier = functionText(spec, 'copyRawAnalysisClient', 100);
 const factory = functionText(spec, 'rawAnalysisEvidence', 30);
 const mapper = functionText(spec, 'snapshotRawAnalysis', 300);
 const sender = functionText(spec, 'sendBrowserAnalysis', 200);
@@ -82,7 +83,7 @@ function capture(observation: Record<string, unknown>, req: object) {
 }
 const totals = () => ({ forwarded: 2, posts: 2, callbacks: 2, receivedBytes: 512001, payloadBytes: 512001, active: 0, timedOut: 0 });
 function snapshot(kind: string, observation: Record<string, unknown>, clients: unknown[], counts = totals()) {
-  return record(execute(`${factory}\n${mapper}
+  return record(execute(`${copier}\n${factory}\n${mapper}
     const evidence=rawAnalysisEvidence(kind);
     snapshotRawAnalysis(evidence,{rawAnalysisObservation:observation,analysisWire:counts},clients);
     evidence;`, { kind, observation, clients, counts }));
@@ -97,7 +98,7 @@ const canary = 'private-synthetic-observation-canary';
 
 describe('durable raw analysis boundary observation (extracted source only)', () => {
   it('extracts unique real functions, initializer, reject arrow and non-vacuous receiver entry', () => {
-    expect([factory, mapper, sender, rejection, initializer, reject, entry].every(text => text.length > 50)).toBe(true);
+    expect([copier, factory, mapper, sender, rejection, initializer, reject, entry].every(text => text.length > 50)).toBe(true);
     expect(base()).toEqual({ postCount: 0, overflow: false, evidenceError: false, posts: [], firstAttemptedPost400: null });
     expect(Object.hasOwn(base(), 'boundaryDetail')).toBe(false);
   });
@@ -238,7 +239,7 @@ describe('durable raw analysis boundary observation (extracted source only)', ()
     expect(result.captureError).toBe(true);
     expect(array(record(record(result.observation).boundaryDetail).receivers)).toHaveLength(2);
   });
-  it.each(['oversized', 'response-sequence'])('preserves exact existing %s serialization and deep copy', kind => {
+  it.each(['oversized', 'response-sequence'])('preserves exact %s serialization and deep copy', kind => {
     const observation = base();
     const detail = { routePosts: 4, receiverPosts: 4, overflow: false, evidenceError: false,
       routes: Array.from({ length: 4 }, (_, i) => ({ ordinal: i + 1, body: '4096' })),
@@ -249,7 +250,7 @@ describe('durable raw analysis boundary observation (extracted source only)', ()
       () => ({ status: 200, outcome: 'response', constructedBytes: 4096 }));
     const expected = { case: kind, project: null, retry: null, repeat: null, fixturePresent: true,
       snapshotPhase: 'before-cleanup', cleanupStarted: false, cleanupCompleted: false, captureError: false,
-      client: kind === 'response-sequence' ? clients : [{ status: 200, outcome: 'response' }],
+      client: clients,
       observation: { postCount: 0, overflow: false, evidenceError: false, posts: [], firstAttemptedPost400: null,
         ...(kind === 'response-sequence' ? { detail } : {}) }, cumulative: totals() };
     expect(JSON.stringify(snapshot(kind, observation, clients))).toBe(JSON.stringify(expected));

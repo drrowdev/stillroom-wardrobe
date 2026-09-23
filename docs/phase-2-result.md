@@ -7804,3 +7804,212 @@ quiescence and admitted-request drain, coherent recovery, Auth/API/Edge EU and
 Cloudflare gates remain separate. No backend/browser/hosted/provider operation,
 Actions dispatch/approval, commit/push/PR/merge or deployment ran here. PR27,
 I10a-D/I11/I22 and private-provider/paid holds are unchanged.
+
+## CI-D1 failure evidence and truthful flaky gate - 23 September 2026
+
+**Unstaged seven-path source candidate; native and independent closure pending.**
+This isolated persistent local writer entered at main
+`bfcf9f754e898bee735c4db12a3a5e3ad7601055`, tree
+`f2f16ed454b0faebff883083df9a2a7bd2b438cd`, on
+`drrowdev-ci-failure-evidence`. Full
+[failure5793600025](https://github.com/drrowdev/stillroom-wardrobe/pull/31#issuecomment-5793600025),
+[corrected plan/actual Anthropic Claude Opus 5 critique and binding B1-B10](https://github.com/drrowdev/stillroom-wardrobe/pull/31#issuecomment-5793998514),
+and [own-model/context attestation and local release5794149757](https://github.com/drrowdev/stillroom-wardrobe/pull/31#issuecomment-5794149757)
+were read before edits. The coordinator independently observed this new writer's
+twelve own GPT-6 Astra/OpenAI usage rows and exact clean workspace/base; this is
+local telemetry, not tamper-proof native-platform proof. PR31 stays merged/closed
+as the historical authority location. No previous writer's usage was substituted.
+
+HC1's initial PR cycle at `018a8aa` passed populated6->11, native races, actual
+types/parity and757 browser cases with four skips and no flaky cases. The later
+automatic main run35847285830 attempt1 failed: preceding DB stages passed, but
+type generation returned CLI1/wrapper2, stdout0/stderr312bytes/7LF/firstline21,
+connecttrue/run-container/exit125. Type artifact and parity were skipped.
+Its green App job instead contained755passes, two recovered first failures and
+four skips, not clean acceptance. These are coordinator-recorded historical
+results, not new local executions or transferable successful type evidence.
+
+The first oversized WebKit analysis received zero bytes/end-empty400, versus
+retry512001/413; that call's construction size was unobserved. The first valid
+five-byte reserved upload independently measured raw385bytes/highbyte absent
+before parsing/file0/400, versus retry390/highbyte present/file5/200, then409.
+No body is reconstructed from those lengths. Neither cause is established.
+The excluded upstream blob-routing explanation is not reopened, and this packet
+does not alter body/parser/routing/status/engine/retry/deadline behavior.
+
+CI now uses `failOnFlakyTests: Boolean(process.env.CI)` while retaining retry1
+and first/retry evidence. Apple selections have explicit retries0; test:a11y is
+not currently a CI command. Existing success-only visual uploads skip on flaky
+failure, leaving visual acceptance pending rather than weakening the workflow.
+Only oversized analysis adds exact413/response/constructed512001; other shared
+authorization/envelope cases retain their exact two-key results. Only the first
+reserved upload opts into reservation-first-upload with exact200/oktrue/5/5/5,
+without response parsing or receiver changes. Closed same-spec copiers retain
+actual zero, null observation gaps, fixed fields, bounded sizes and explicit
+capture errors. Scripted503, fresh senders, duplicate409, old labels/defaults
+and all byte/hash/auth/storage/cleanup assertions remain.
+
+Generation adds only a bounded stderrDockerErrorMarker enum to the existing
+valid nonzero-with-stderr branch. The literal algorithm accepts LF and exactly
+one framing CR before LF, rejects remaining CR and ignores unterminated tails;
+it strips at most one docker prefix and requires the exact daemon envelope.
+Recognized plus unknown eligible categories produce sticky multiple. Prefix
+tails remain unvalidated and canonical-looking text unauthenticated; no private
+text or identifier is returned. At over4096 UTF-8 bytes only the new marker is
+unclassified; the old fixed-priority operation remains independent. Existing
+keys/order/values, descriptor behavior, byte/LF observations, exit regex, sibling
+startup/reset function, generator argv/deadline/capture and authentic types
+requirement are unchanged. The related stale strict-A documentation now states
+HC1 publication O/origin plus identity A, without changing that existing contract.
+
+### Released local checks
+
+All executable checks used the hash-verified absolute Node24.19.0 executable,
+the existing npm11.6.2 CLI through that Node, and process-local PATH only.
+The first chosen unit command returned exit1 because Vitest was absent.
+Exactly one conditionally released `npm ci --no-fund` then returned exit0:
+200packages added,201audited, zero reported vulnerabilities. No package/lock
+change, copied dependency/service state or global toolchain change occurred.
+
+| Command | Actual local result |
+|---|---|
+| `npm run test:unit -- tests\unit\local-backend.test.ts` | After restore,596/596 passed. Subsequent widest-case coverage passed and wrote one inline numeric snapshot; final repeat596/596 passed,10.53s, exit0. |
+| `node node_modules\eslint\bin\eslint.js playwright.config.ts tests\browser\ai-photo-first.spec.ts tests\browser\slice.spec.ts scripts\backend\local.mjs tests\unit\local-backend.test.ts` | Exact five-path lint passed, including final observer coverage, exit0. |
+| `npm run typecheck` | Passed after final observer coverage, exit0. |
+| `npm run scan:secrets` |251text files checked, exit0; no canary supplied, not a canary pass. |
+| `git diff --check` | Passed; scope/frozen/history identities are separately recorded with the unstaged handoff. |
+
+Actual producer regressions cover canonical/CRLF and malformed framing, all
+category pairs/orders/duplicates and known+unknown ambiguity, UTF8 4096/4097,
+overbound old-operation independence, legacy metadata equivalence and hostile
+accessor/proxy/coercion/toJSON/key-shaped canaries. The widest-case test uses
+safe-integer extremes,16MiB capture-sized inputs and longest labels; its observed
+maximum is **406 UTF-8 bytes**, persisted as an inline numeric snapshot and
+independently constrained below512. This is measured synthetic producer evidence,
+not recovered historical stderr or a claim of the tight mathematical maximum.
+
+One pure no-page/network Playwright observer-contract test was added to each
+touched spec and typechecked, **not executed locally**. They await separately
+authorized native Playwright along with unchanged functional suites, real backend
+generation/parity, Apple and coordinator-owned visual evidence. No local browser,
+server, discovery/list/import workaround, backend, Actions or provider call ran.
+Future expected sizes with empty receive only narrow the interval; null/missing/
+invalid capture remains an observation gap. Instrumentation can perturb timing,
+and nonrecurrence is inconclusive about either old cause, not a fix or waiver.
+
+All eleven SQL migrations, application/public types, lock/configuration outside
+the one Playwright flag, workflows, receivers and other fixtures stay frozen.
+Earlier Phase2 history is preserved as the complete prefix above. No stage,
+commit, push, PR creation, merge, hosted/private-input/provider action, deployment
+or further agent was authorized or performed. Independent closure, publication
+and any new native cycle remain separately gated; Phase0 acceptance and other
+operator/human/product holds remain open.
+
+### CI-D1 F1 extracted-source harness repair - 23 September 2026
+
+Actual independent Anthropic Claude Opus5 review found that the existing
+`tests/unit/raw-analysis-observation.test.ts` VM extracted the mapper but not
+its new `copyRawAnalysisClient` dependency. The swallowed ReferenceError made
+nonnull client observations null and set `captureError`. Coordinator amendment
+[5794521315](https://github.com/drrowdev/stillroom-wardrobe/pull/31#issuecomment-5794521315)
+authorized this eighth existing path, with the other candidate source frozen.
+The one pre-edit unit run reproduced **17 passed,7 failed**, exit1,1.42s.
+Earlier seven-path checks did not cover this extraction harness regression.
+
+The repair extracts exactly one real copier through `functionText`/`unique`,
+prepends it before the factory/mapper in the VM, and includes it in the existing
+non-vacuous extraction assertion. Actual TypeScript body-node counts were
+229 for the copier and592 for the mapper; floors100 and300 remain enforced.
+The coordinator explicitly clarified the intentional oversized oracle alignment:
+both expected client arrays retain the supplied `constructedBytes:4096`, not a
+substituted512001 or a value derived from the result. Full JSON equality,
+`captureError:false`, status/default metadata, deep-copy and receiver assertions
+remain. No browser/helper/receiver change or weakened failure assertion occurred.
+
+Using the same pinned absolute Node24.19.0/npm CLI and process-only PATH:
+`npm run test:unit -- tests\unit\local-backend.test.ts tests\unit\raw-analysis-observation.test.ts`
+passed **620/620 in two files**, exit0,9.29s. Installed ESLint on the previous five
+paths plus `tests\unit\raw-analysis-observation.test.ts` and `npm run typecheck`
+both passed, exit0. No dependency reinstall occurred. Final secret/scope/hash
+checks are recorded with the eight-path unstaged receipt.
+
+This source-extracted unit result does not execute either new in-spec Playwright
+observer test or establish browser behavior, native/backend acceptance or a
+historical failure cause. Focused independent delta review and all previously
+pending gates remain separate; the entire historical prefix is preserved.
+
+### GD1 type-generation Docker diagnostics - 23 September 2026
+
+Base and start head `b32fc01cf38f1062d468fe41bfa00394442049c3` (PR #32
+`drrowdev-ci-failure-evidence`), writer branch
+`drrowdev-type-generation-diagnosis`. Writer session
+`fad5b110-c1bb-4946-842c-1f7e207e089f`, actual model `claude-opus-5.5`, verified
+by the coordinator from its own session events.
+
+Trigger: PR #32 CI 35860365016 and post-merge main CI 35847285830 failed only at
+`npm run db:types` with `run-container`/`exit-125`, 312 stderr bytes, 7 LFs and
+a 21-byte first line; the same tree passed on PR #31 CI 35843817699. Source
+correction: pinned CLI 2.116.0 stable releases run the TypeScript legacy handler,
+not the Go `DockerRunOnceWaitWithConfig` path. It spawns `docker run --rm …
+node dist/server/server.js` and forwards the child's output, so exit 125 may be
+the `docker run` command's own failure. A 312-byte shape of connect line,
+image-missing line, one daemon message, blank line, run-help trailer, exit line
+and rerun hint fits the counters. That is an **unestablished hypothesis**; the
+unit fixture proves only parser behaviour.
+
+Plan rev1 (15053 B, SHA256 `acf295d4…f78b0`) received an actual read-only
+OpenAI GPT-6 Astra critique, verdict AMEND; coordinator disposition SHA256
+`74F562F0…104081` set amendments A1–A9. Rev2 (14474 B, SHA256
+`6c1ba8ad01d1ea2b17af0447bd2bf45fe5450eab782094df463ae5f628a9fc42`) received a
+GPT-6 Astra delta critique, verdict AMEND with D1–D4. The coordinator approved rev2
+with binding D1–D4 and released edits (release file 3077 B, SHA256
+`08EBBCBCCA980AD0E3898A41A6E8C3D39DB3D74AA879511E22A64BAF7D504852`).
+
+Changes, within exactly the five released paths:
+
+- `describeGenerationResult` appends `dockerDiag:{h,i,s,f}` only to valid
+  `nonzero-with-stderr` reports, after the existing keys, which are unchanged.
+  The closed literal classification is documented in `docs/local-backend.md`.
+  `describeStartupOrResetFailure`, `scripts/db.mjs` and the type declaration
+  file are unchanged.
+- The Database job adds one pull step before `db:start`. It asserts `SUPABASE_ENV`
+  is unset, the eight legacy-CLI dotenv paths and `supabase/.temp/pgmeta-version`
+  are absent, then runs a single
+  `docker pull public.ecr.aws/supabase/postgres-meta:v0.98.0`. Ambient overrides
+  are filtered; project dotenv overrides remain possible, but are absent in this
+  checkout/current CI. No `pgmeta-version` writer was found in the legacy
+  TypeScript sources (negative search result).
+- `h:false` means no eligible exact help-trailer line was observed; it does not
+  establish that pg-meta ran. `i:false` means no eligible image-missing line was
+  observed; it does not prove absence of acquisition activity. The separately
+  successful pull step, not either boolean, is the acquisition evidence.
+- Retry policy R0: no retry of the pull or of `db:types`. A failed pull or
+  failed generation fails the job exactly as before.
+- Tests cover the synthetic 312-byte shape, none versus unknown, every family
+  with each prefix kind and framing, fixed order overlaps, duplicate and pair
+  aggregation, one-time prefix stripping, CR/tail rejection, exact trailer and
+  image lines, the 4096/4097 UTF-8 bound with multibyte padding, canaries
+  (fake connection string, password and image name never serialized), and a
+  repository-root workflow/pin sync test. The widest-producer test now covers the
+  new families and kinds with attainable old markers, mixed padding that keeps
+  first-line bytes and LF count wide together, and bounded and overbound branches.
+  The earlier ~472-byte figure was an estimate; the **measured widest report is
+  470 UTF-8 bytes**, independently asserted below 512.
+- Whenever the `supabase` CLI pin changes, the image reference must be re-derived
+  by hand from that version's source; the sync test only pins current text.
+
+Local validation used the coordinator-released pinned Node 24.19.0 executable
+(SHA256 `3602f2bb…0237`), npm 11.6.2 and process-only PATH. The first unit
+attempt found Vitest absent, so one `npm ci --no-fund` ran (200 added, 201
+audited, 0 vulnerabilities; it ran under system Node 24.11.1 before the pinned
+executable was located, with no package or lock change).
+`npm run test:unit -- tests/unit/local-backend.test.ts tests/unit/raw-analysis-observation.test.ts`
+passed 651/651 in two files, exit 0. ESLint on `scripts\backend\local.mjs` and
+`tests\unit\local-backend.test.ts`, `npm run typecheck`, `npm run scan:secrets`
+and `git diff --check` passed, exit 0.
+
+Not run: Docker, `db:start`, `db:types`, browser tests and Actions. The pull
+step and diagnostics are unexercised in CI. A later green run proves nothing
+about the cause or its elimination; the next failing run's `dockerDiag` is
+evidence to interpret, not a diagnosis. No stage, commit, push, PR, hosted
+action, deployment or other agent occurred; publication remains separately gated.

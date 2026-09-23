@@ -78,12 +78,32 @@ test('actual upload wire preserves binary bytes and the oracle detects corruptio
 
 type WireForm = 'valid' | 'missing' | 'empty' | 'ambiguous' | 'multiple' | 'wrong-name' | 'wrong-type' |
   'duplicate-cache' | 'metadata-file' | 'malformed' | 'truncated' | 'oversized' | 'wrong-key' | 'wrong-bearer' | 'upsert';
-type WireCall = 'first-parallel' | 'second-parallel' | 'after-first-close';
+type WireCall = 'first-parallel' | 'second-parallel' | 'after-first-close' | 'reservation-first-upload';
 type WireResult = {
   status: number | null; ok: boolean;
   diagnostic?: { backend: WireBackend | 'none'; stage: WireStage; parse: 'ok' | 'unrecognized' | 'unavailable' | 'no-response' };
   observation?: { call: WireCall; sourceArrayLength: number | null; blobSize: number | null; formFileSize: number | null };
 };
+function copyWireObservation(value: unknown, call?: WireCall): WireResult['observation'] {
+  if (call === undefined) return undefined;
+  if (!['first-parallel', 'second-parallel', 'after-first-close', 'reservation-first-upload'].includes(call)) {
+    throw new Error('Invalid upload client observation');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid upload client observation');
+  const fields = ['call', 'sourceArrayLength', 'blobSize', 'formFileSize'];
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== fields.length || keys.some(key => typeof key !== 'string' || !fields.includes(key))) {
+    throw new Error('Invalid upload client observation');
+  }
+  const observedCall: unknown = Object.getOwnPropertyDescriptor(value, 'call')?.value;
+  if (observedCall !== call) throw new Error('Invalid upload client observation');
+  const size = (field: string): number | null => {
+    const result: unknown = Object.getOwnPropertyDescriptor(value, field)?.value;
+    if (result === null || typeof result === 'number' && Number.isSafeInteger(result) && result >= 0 && result <= 1048576) return result;
+    throw new Error('Invalid upload client observation');
+  };
+  return { call, sourceArrayLength: size('sourceArrayLength'), blobSize: size('blobSize'), formFileSize: size('formFileSize') };
+}
 async function sendWireForm(page: Page, path: string, formKind: WireForm, bytes = [0, 128, 255, 13, 10],
   diagnostic = false, call?: WireCall): Promise<WireResult> {
   return page.evaluate(async ({ path, formKind, bytes, diagnostic, call, stages }): Promise<WireResult> => {
@@ -97,7 +117,8 @@ async function sendWireForm(page: Page, path: string, formKind: WireForm, bytes 
       'x-upsert': formKind === 'upsert' ? 'true' : 'false',
       'x-client-info': 'synthetic-wire-test',
     };
-    const observedCall = call === 'first-parallel' || call === 'second-parallel' || call === 'after-first-close' ? call : undefined;
+    const observedCall = call === 'first-parallel' || call === 'second-parallel' || call === 'after-first-close'
+      || call === 'reservation-first-upload' ? call : undefined;
     const boundedSize = (size: number): number | null => Number.isSafeInteger(size) && size >= 0 && size <= 1024 * 1024 ? size : null;
     let blobSize: number | null = null;
     const form = new FormData();
@@ -144,6 +165,47 @@ async function sendWireForm(page: Page, path: string, formKind: WireForm, bytes 
     }
   }, { path, formKind, bytes, diagnostic, call, stages: diagnostic ? wireStages : [] });
 }
+test('upload client copier preserves closed opt-in sizes and leaves unobserved calls unchanged', () => {
+  let invoked = 0;
+  const hostile = () => { invoked++; throw new Error('private-upload-observation-canary'); };
+  for (const call of ['first-parallel', 'second-parallel', 'after-first-close', 'reservation-first-upload'] as const) {
+    for (const sourceArrayLength of [null, 0, 5, 1048576]) {
+      for (const blobSize of [null, 0, 5, 1048576]) {
+        for (const formFileSize of [null, 0, 5, 1048576]) {
+          const input = Object.freeze({ call, sourceArrayLength, blobSize, formFileSize });
+          const copied = copyWireObservation(input, call);
+          expect(copied).toEqual(input);
+          expect(copied).not.toBe(input);
+          expect(Object.keys(copied!)).toEqual(['call', 'sourceArrayLength', 'blobSize', 'formFileSize']);
+        }
+      }
+    }
+  }
+  const call = 'reservation-first-upload', valid = { call, sourceArrayLength: 5, blobSize: 5, formFileSize: 5 };
+  const invalid: unknown[] = [
+    null, undefined, false, [], 'private-upload-observation-canary', Object.create(valid),
+    { ...valid, extra: 'private-upload-observation-canary' }, { ...valid, [Symbol('private')]: 1 },
+    { ...valid, toJSON: hostile },
+    ...['first-parallel', 'second-parallel', 'after-first-close', 'reservation', '', null, { toString: hostile }]
+      .map(call => ({ ...valid, call })),
+    ...Object.keys(valid).map(field => Object.defineProperty({ ...valid }, field, { get: hostile })),
+    ...Object.keys(valid).map(field => Object.fromEntries(Object.entries(valid).filter(([key]) => key !== field))),
+    new Proxy(valid, { ownKeys: () => { throw new Error('private-upload-observation-canary'); } }),
+  ];
+  for (const field of ['sourceArrayLength', 'blobSize', 'formFileSize']) {
+    for (const value of [-1, 1048577, 0.5, NaN, Infinity, -Infinity, '5', undefined, { valueOf: hostile }]) {
+      invalid.push({ ...valid, [field]: value });
+    }
+  }
+  const revoked = Proxy.revocable(valid, {}); revoked.revoke(); invalid.push(revoked.proxy);
+  for (const input of invalid) expect(() => copyWireObservation(input, call)).toThrow();
+  for (const input of [undefined, valid, ...invalid]) expect(copyWireObservation(input)).toBeUndefined();
+  const copied = copyWireObservation(valid, call)!;
+  valid.blobSize = 0;
+  expect(copied.blobSize).toBe(5);
+  expect(JSON.stringify(copied)).not.toContain('private-upload-observation-canary');
+  expect(invoked).toBe(0);
+});
 
 for (const formKind of ['missing', 'empty', 'ambiguous', 'multiple', 'wrong-name', 'wrong-type',
   'duplicate-cache', 'metadata-file', 'malformed', 'truncated', 'oversized'] satisfies WireForm[]) {
@@ -283,8 +345,9 @@ test('actual upload wire restricts reservations and synthetic credentials withou
     observed.scripted503 = await sendWireForm(page, own, 'valid');
     expect(observed.scripted503).toEqual({ ok: false, status: 503 });
     expect(backend.uploadWire.posts).toBe(0);
-    observed.firstUpload = await sendWireForm(page, own, 'valid');
-    expect(observed.firstUpload).toEqual({ ok: true, status: 200 });
+    observed.firstUpload = await sendWireForm(page, own, 'valid', undefined, false, 'reservation-first-upload');
+    expect(observed.firstUpload).toEqual({ ok: true, status: 200,
+      observation: { call: 'reservation-first-upload', sourceArrayLength: 5, blobSize: 5, formFileSize: 5 } });
     assertWireBytes(backend.files.get(own)!, Buffer.from([0, 128, 255, 13, 10]));
     observed.duplicate409 = await sendWireForm(page, own, 'valid');
     expect(observed.duplicate409).toEqual({ ok: false, status: 409 });
@@ -302,7 +365,14 @@ test('actual upload wire restricts reservations and synthetic credentials withou
         evidence.captureError = true;
       } else {
         evidence.retry = testInfo.retry;
-        evidence.client = { ...observed };
+        evidence.client = { ...observed, firstUpload: observed.firstUpload
+          ? { status: observed.firstUpload.status, ok: observed.firstUpload.ok } : null };
+        if (observed.firstUpload && evidence.client.firstUpload) {
+          try {
+            evidence.client.firstUpload.observation = copyWireObservation(
+              Object.getOwnPropertyDescriptor(observed.firstUpload, 'observation')?.value, 'reservation-first-upload');
+          } catch { evidence.captureError = true; }
+        }
         if (backend?.wireDiagnostic) evidence.server = {
           ...backend.wireDiagnostic, rejections: { ...backend.wireDiagnostic.rejections },
           receiverFacts: backend.wireDiagnostic.receiverFacts ? { ...backend.wireDiagnostic.receiverFacts } : null,

@@ -108,6 +108,80 @@ export function describeGenerationResult(result, elapsedMs) {
           }
         }
       }
+      report.stderrDockerErrorMarker = 'unclassified';
+      if (report.stderrBytes <= 4096) {
+        let marker = 'none', lineStart = 0;
+        for (let lf = stderr.indexOf('\n'); lf !== -1; lf = stderr.indexOf('\n', lineStart)) {
+          let line = stderr.slice(lineStart, stderr[lf - 1] === '\r' ? lf - 1 : lf);
+          lineStart = lf + 1;
+          if (line.includes('\r')) continue;
+          if (line.startsWith('docker: ')) line = line.slice('docker: '.length);
+          const envelope = 'Error response from daemon: ';
+          if (!line.startsWith(envelope)) continue;
+          const message = line.slice(envelope.length);
+          let category = 'unclassified';
+          if (message.startsWith('pull access denied for ') || message.startsWith('manifest for ')
+            || message.startsWith('failed to resolve reference ')) category = 'image-resolution-or-registry';
+          else if (message.startsWith('network ') && message.endsWith(' not found')
+            && message.length > 'network '.length + ' not found'.length) category = 'missing-network';
+          else if (message.startsWith('Conflict. The container name ')) category = 'container-name-conflict';
+          else if (message.startsWith('failed to create task for container: ')
+            || message.startsWith('OCI runtime create failed: ')
+            || message.startsWith('OCI runtime start failed: ')) category = 'oci-runtime-start';
+          marker = marker === 'none' ? category : marker === category ? marker : 'multiple';
+        }
+        report.stderrDockerErrorMarker = marker === 'none' ? 'unclassified' : marker;
+      }
+      // Literal text shapes only, never causes. h:false does not establish that pg-meta ran;
+      // i:false does not prove absence of acquisition activity. The separate CI pull step,
+      // not either boolean, is the acquisition evidence.
+      const diag = { h: null, i: null, s: 'over', f: 'over' };
+      if (report.stderrBytes <= 4096) {
+        diag.h = false; diag.i = false; diag.s = 'none'; diag.f = 'none';
+        const trailer = "Run 'docker run --help' for more information";
+        const imageHead = "Unable to find image '", imageTail = "' locally";
+        const envelope = 'Error response from daemon: ';
+        const request = (text) => text.startsWith('Get "https://') || text.startsWith('Head "https://');
+        const ends = (text, suffixes) => suffixes.some((suffix) => text.endsWith(suffix));
+        const families = [
+          [(text) => text.startsWith('failed to resolve reference "') && text.endsWith('429 Too Many Requests'), 'rate'],
+          [(text) => text.startsWith('toomanyrequests: '), 'rate'],
+          [(text) => text.startsWith('unauthorized: ') || text.startsWith('denied: '), 'auth'],
+          [(text) => text.startsWith('manifest unknown'), 'nomanifest'],
+          [(text) => text.startsWith('pull access denied for ') || text.startsWith('manifest for ')
+            || text.startsWith('failed to resolve reference '), 'img-ref'],
+          [(text) => text.startsWith('network ') && text.endsWith(' not found')
+            && text.length > 'network '.length + ' not found'.length, 'net-missing'],
+          [(text) => text.startsWith('Conflict. The container name '), 'conflict'],
+          [(text) => text.startsWith('failed to create task for container: ')
+            || text.startsWith('OCI runtime create failed: ') || text.startsWith('OCI runtime start failed: '), 'oci'],
+          [(text) => request(text) && text.endsWith(': no such host'), 'net-dns'],
+          [(text) => request(text) && ends(text, [': i/o timeout',
+            '(Client.Timeout exceeded while awaiting headers)', ': context deadline exceeded']), 'net-timeout'],
+          [(text) => request(text) && text.endsWith(': connect: connection refused'), 'net-refused'],
+          [(text) => request(text) && text.endsWith(': TLS handshake timeout'), 'net-tls'],
+          [(text) => text.endsWith(': no space left on device'), 'disk'],
+          [(text) => text === 'context canceled', 'canceled'],
+          [(text) => text.startsWith('Cannot connect to the Docker daemon at '), 'daemon-down'],
+        ];
+        const merge = (current, value) => current === 'none' ? value : current === value ? current : 'multi';
+        let lineStart = 0;
+        for (let lf = stderr.indexOf('\n'); lf !== -1; lf = stderr.indexOf('\n', lineStart)) {
+          const line = stderr.slice(lineStart, stderr[lf - 1] === '\r' ? lf - 1 : lf);
+          lineStart = lf + 1;
+          if (line.includes('\r')) continue;
+          if (line === trailer) diag.h = true;
+          if (line.startsWith(imageHead) && line.endsWith(imageTail)
+            && line.length > imageHead.length + imageTail.length) diag.i = true;
+          let rest = line, kind = 'none';
+          if (rest.startsWith('docker: ')) { rest = rest.slice('docker: '.length); kind = 'docker'; }
+          if (rest.startsWith(envelope)) { rest = rest.slice(envelope.length); kind = 'daemon'; }
+          if (kind === 'none') continue;
+          diag.s = merge(diag.s, kind);
+          diag.f = merge(diag.f, families.find(([test]) => test(rest))?.[1] ?? 'unknown');
+        }
+      }
+      report.dockerDiag = diag;
     }
   } catch {
     // Even malformed objects must yield only the fixed observational fields.
