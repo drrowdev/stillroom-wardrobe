@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { lstat, readdir, readFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import {
   ROOT, assertNoServiceSecrets, assertProjectConfig, requireDocker, requireLocalContainer,
@@ -12,9 +13,11 @@ import { isMain } from './quality/files.mjs';
 import {
   SOURCE_HASHES, requireEvidence, assertSnapshotAbsent, cleanupSnapshot,
 } from '../tests/integration/preservation.sessions.mjs';
-import { captureAzurePreservation, verifyAzurePreservation } from '../tests/integration/azure-preservation.sessions.mjs';
+import { captureAzurePreservation, verifyAzurePreservation,
+  captureImageChangePreservation, verifyImageChangePreservation } from '../tests/integration/azure-preservation.sessions.mjs';
 
 const PRIOR_MAIN_VERSION = '20260913120000';
+const AZURE_TARGET_VERSION = '20260921193000';
 
 export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
@@ -27,6 +30,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260911200000_checked_ai_item_save.sql', version: '20260911200000', time: '2026-09-11 20:00:00', bytes: 29668, sha256: SOURCE_HASHES.analyzedSave },
   { name: '20260913120000_item_lifecycle.sql', version: '20260913120000', time: '2026-09-13 12:00:00', bytes: 20822, sha256: SOURCE_HASHES.lifecycle },
   { name: '20260921193000_azure_terra_analysis.sql', version: '20260921193000', time: '2026-09-21 19:30:00', bytes: 29274, sha256: SOURCE_HASHES.azure },
+  { name: '20260922020000_checked_image_changes.sql', version: '20260922020000', time: '2026-09-22 02:00:00', bytes: 82482, sha256: SOURCE_HASHES.imageChanges },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -219,7 +223,12 @@ export function assertLifecycleFixture(env, ownerId, itemId) {
 // CI-only setup, not an access assertion or a general SQL callback.
 export async function withLifecycleParentLock(ownerId, itemId, mode, operation) {
   assertLifecycleFixture(process.env, ownerId, itemId);
-  requireEvidence(['update', 'key share'].includes(mode) && typeof operation === 'function');
+  requireEvidence(['update', 'key share', 'owner share', 'owner no key update', 'deletion update'].includes(mode) && typeof operation === 'function');
+  const lock = mode.startsWith('owner ')
+    ? `private.approved_accounts where user_id='${ownerId}' and enabled for ${mode.slice(6)} nowait`
+    : mode === 'deletion update'
+      ? `private.item_deletion_operations where owner_id='${ownerId}' and item_id='${itemId}' and phase='prepared' for update nowait`
+      : `public.items where owner_id='${ownerId}' and id='${itemId}' for ${mode} nowait`;
   await requireLocalContainer();
   const child = spawn('docker', ['exec', '-i', DB_CONTAINER, 'psql', '-X', '--no-password',
     '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-A'], {
@@ -259,7 +268,7 @@ export async function withLifecycleParentLock(ownerId, itemId, mode, operation) 
   try {
     child.stdin.write(`begin; set local statement_timeout='12s'; set local idle_in_transaction_session_timeout='12s';
       do $$ declare n integer; begin
-        perform 1 from public.items where owner_id='${ownerId}' and id='${itemId}' for ${mode} nowait;
+        perform 1 from ${lock};
         get diagnostics n = row_count; if n<>1 then raise exception 'Fixture absent'; end if;
       end $$;\n\\echo I08_PARENT_HELD\n`);
     await ready;
@@ -380,28 +389,113 @@ export async function requireLifecycleClaimFence(ownerId, itemId, imageId) {
   console.log('PASS: I08 labelled privileged post-claim publication refusal; not ordinary upload proof');
 }
 
+const LIFECYCLE_PHASES = Object.freeze(['input', 'docker', 'container-call', 'container-result', 'container-shape',
+  'image-call', 'image-result', 'image-shape', 'spawn', 'input-write', 'await-ready', 'callback', 'settlement', 'cleanup']);
+const LIFECYCLE_CAUSES = Object.freeze(['refusal', 'exception', 'process-error', 'process-close', 'stdin-error',
+  'stderr', 'output-cap', 'utf8', 'json', 'protocol', 'deadline', 'cleanup']);
+const LIFECYCLE_CONTAINER_GUARDS = Object.freeze(['parse', 'name', 'project', 'running', 'image-tag', 'image-id', 'mount-array',
+  'mount-count', 'mount-type', 'mount-name', 'mount-target', 'mount-rw', 'config-array', 'config-count',
+  'config-backend', 'config-root', 'config-tenant', 'config-bucket', 'config-sentinel']);
+const LIFECYCLE_CHILD_PHASES = Object.freeze(['input', 'ancestors', 'item-absence', 'target-absence', 'request', 'write',
+  'file-poll', 'ready-check', 'ready', 'complete', 'response', 'cleanup']);
+const LIFECYCLE_CHILD_CAUSES = Object.freeze(['refusal', 'exception', 'deadline', 'early-response',
+  'request-error', 'response-error', 'response-aborted', 'body-cap', 'response-contract', 'cleanup']);
+const lifecycleErrorAssociations = new WeakMap();
+let lifecycleActive = null, lifecycleFailure = null;
+const lifecycleLabel = (labels, value) => labels.find((label) => label === value) ?? 'OTHER';
+const lifecycleInteger = (value, min, max) => Number.isInteger(value) && value >= min && value <= max ? value : null;
+const lifecyclePrimitive = (value) => value === undefined ? 'undefined' : value === null ? 'null'
+  : value === false ? 'false' : Object.is(value, 0) ? 'zero' : Object.is(value, -0) ? 'negative-zero' : value === '' ? 'empty' : null;
+function lifecyclePhase(phase) {
+  if (lifecycleActive) {
+    lifecycleActive.phase = lifecycleLabel(LIFECYCLE_PHASES, phase);
+    lifecycleActive.commandCode = null; lifecycleActive.guard = null;
+  }
+}
+function lifecycleGuard(guard) {
+  if (lifecycleActive) lifecycleActive.guard = lifecycleLabel(LIFECYCLE_CONTAINER_GUARDS, guard);
+}
+function lifecycleCommand(result) {
+  try {
+    const descriptor = result && typeof result === 'object' ? Object.getOwnPropertyDescriptor(result, 'code') : undefined;
+    if (lifecycleActive) lifecycleActive.commandCode = descriptor && Object.hasOwn(descriptor, 'value')
+      ? lifecycleInteger(descriptor.value, 0, 255) : null;
+  } catch { /* Diagnostic reflection cannot change the original result guard. */ }
+}
+function lifecycleFirst(state, cause) {
+  if (state && !state.first) state.first = { phase: state.phase, cause: lifecycleLabel(LIFECYCLE_CAUSES, cause),
+    commandCode: state.commandCode, exitCode: state.exitCode,
+    ...(state.phase === 'container-shape' ? { guard: lifecycleLabel(LIFECYCLE_CONTAINER_GUARDS, state.guard) } : {}), ...state.child };
+}
+export function lifecycleFailureDetail(error) {
+  const failure = lifecycleFailure;
+  lifecycleFailure = null;
+  if (!failure) return '';
+  const associated = error !== null && (typeof error === 'object' || typeof error === 'function')
+    ? lifecycleErrorAssociations.get(error) === failure
+    : failure.primitive !== null && lifecyclePrimitive(error) === failure.primitive;
+  try { return associated ? '; lifecycle=' + JSON.stringify(failure.first) : ''; }
+  catch { return ''; }
+}
+
 export async function lifecycleStorageRuntime(run = runCommand) {
   assertRehearsalEnvironment(process.env, []);
+  lifecyclePhase('docker');
   await requireDocker(run);
   const container = 'supabase_storage_stillroom-wardrobe';
   const template = '{"name":{{json .Name}},"project":{{json (index .Config.Labels "com.supabase.cli.project")}},'
     + '"image":{{json .Config.Image}},"id":{{json .Image}},"running":{{json .State.Running}},'
     + '"mounts":[{{range $i,$m := .Mounts}}{{if $i}},{{end}}{"type":{{json $m.Type}},"name":{{json $m.Name}},"target":{{json $m.Destination}},"rw":{{$m.RW}}}{{end}}],'
     + '"config":[{{range .Config.Env}}{{if or (eq (index (split . "=") 0) "STORAGE_BACKEND") (eq (index (split . "=") 0) "FILE_STORAGE_BACKEND_PATH") (eq (index (split . "=") 0) "TENANT_ID") (eq (index (split . "=") 0) "GLOBAL_S3_BUCKET")}}{{json .}},{{end}}{{end}}null]}';
+  lifecyclePhase('container-call');
   const result = await run('docker', ['container', 'inspect', '--format', template, container], { maxOutputBytes: 4096 });
+  lifecyclePhase('container-result'); lifecycleCommand(result);
   requireEvidence(result.code === 0);
+  lifecyclePhase('container-shape');
+  lifecycleGuard('parse');
   const value = JSON.parse(result.stdout);
-  requireEvidence(value.name === '/' + container && value.project === 'stillroom-wardrobe' && value.running === true
-    && /^(?:public\.ecr\.aws\/supabase|supabase)\/storage-api:v1\.70\.3$/.test(value.image)
-    && /^sha256:[0-9a-f]{64}$/.test(value.id) && Array.isArray(value.mounts) && value.mounts.length === 1
-    && value.mounts[0].type === 'volume' && value.mounts[0].name === container
-    && value.mounts[0].target === '/mnt' && value.mounts[0].rw === true
-    && Array.isArray(value.config) && value.config.length === 5
-    && ['STORAGE_BACKEND=file', 'FILE_STORAGE_BACKEND_PATH=/mnt', 'TENANT_ID=stub', 'GLOBAL_S3_BUCKET=stub', null]
-      .every((entry) => value.config.includes(entry)));
+  lifecycleGuard('name');
+  requireEvidence(value.name === '/' + container);
+  lifecycleGuard('project');
+  requireEvidence(value.project === 'stillroom-wardrobe');
+  lifecycleGuard('running');
+  requireEvidence(value.running === true);
+  lifecycleGuard('image-tag');
+  requireEvidence(/^(?:public\.ecr\.aws\/supabase|supabase)\/storage-api:v1\.70\.3$/.test(value.image));
+  lifecycleGuard('image-id');
+  requireEvidence(/^sha256:[0-9a-f]{64}$/.test(value.id));
+  lifecycleGuard('mount-array');
+  requireEvidence(Array.isArray(value.mounts));
+  lifecycleGuard('mount-count');
+  requireEvidence(value.mounts.length === 1);
+  lifecycleGuard('mount-type');
+  requireEvidence(value.mounts[0].type === 'volume');
+  lifecycleGuard('mount-name');
+  requireEvidence(value.mounts[0].name === container);
+  lifecycleGuard('mount-target');
+  requireEvidence(value.mounts[0].target === '/mnt');
+  lifecycleGuard('mount-rw');
+  requireEvidence(value.mounts[0].rw === true);
+  lifecycleGuard('config-array');
+  requireEvidence(Array.isArray(value.config));
+  lifecycleGuard('config-count');
+  requireEvidence(value.config.length === 5);
+  lifecycleGuard('config-backend');
+  requireEvidence(value.config.includes('STORAGE_BACKEND=file'));
+  lifecycleGuard('config-root');
+  requireEvidence(value.config.includes('FILE_STORAGE_BACKEND_PATH=/mnt'));
+  lifecycleGuard('config-tenant');
+  requireEvidence(value.config.includes('TENANT_ID=stub'));
+  lifecycleGuard('config-bucket');
+  requireEvidence(value.config.includes('GLOBAL_S3_BUCKET=stub'));
+  lifecycleGuard('config-sentinel');
+  requireEvidence(value.config.includes(null));
+  lifecyclePhase('image-call');
   const image = await run('docker', ['image', 'inspect', '--format', '{"id":{{json .Id}},"digests":{{json .RepoDigests}}}', value.id],
     { maxOutputBytes: 4096 });
+  lifecyclePhase('image-result'); lifecycleCommand(image);
   requireEvidence(image.code === 0);
+  lifecyclePhase('image-shape');
   const pinned = JSON.parse(image.stdout);
   requireEvidence(pinned.id === value.id && Array.isArray(pinned.digests) && pinned.digests.length >= 1
     && pinned.digests.length <= 4 && pinned.digests.every((entry) =>
@@ -412,6 +506,12 @@ export async function lifecycleStorageRuntime(run = runCommand) {
 
 // Executed only inside the verified owned FileBackend container. Its stdin is the sole credential channel.
 export async function lifecycleStreamChild() {
+  const phases = ['input', 'ancestors', 'item-absence', 'target-absence', 'request', 'write', 'file-poll', 'ready-check', 'ready', 'complete', 'response', 'cleanup'];
+  const causes = ['refusal', 'exception', 'deadline', 'early-response', 'request-error', 'response-error', 'response-aborted', 'body-cap', 'response-contract', 'cleanup'];
+  let phase = 'input', first = null;
+  const observe = (cause) => { if (!first) first = {
+    phase: phases.find((label) => label === phase) ?? 'OTHER', cause: causes.find((label) => label === cause) ?? 'OTHER',
+  }; };
   const { request } = await import('node:http');
   const fs = await import('node:fs/promises');
   const { createInterface } = await import('node:readline');
@@ -421,11 +521,12 @@ export async function lifecycleStreamChild() {
   let requestClosed = Promise.resolve(), responseDone = Promise.resolve();
   let resolveResponse;
   let status = null, denied = false, released = false;
-  const demand = (condition) => { if (!condition) throw new Error('EVIDENCE_REQUIRED'); };
+  const demand = (condition) => { if (!condition) { observe('refusal'); throw new Error('EVIDENCE_REQUIRED'); } };
   const emit = (value) => process.stdout.write(JSON.stringify(value) + '\n');
-  const cleanup = (action) => { try { action(); } catch { cleanupFailed = true; } };
+  const cleanup = (action) => { try { action(); } catch { observe('cleanup'); cleanupFailed = true; } };
   try {
     timer = setTimeout(() => {
+      observe('deadline');
       primaryFailed = true;
       cleanup(() => req?.destroy(new Error('EVIDENCE_REQUIRED')));
       cleanup(() => response?.destroy());
@@ -435,7 +536,9 @@ export async function lifecycleStreamChild() {
     demand(!input.done && Buffer.byteLength(input.value) <= 8192);
     const value = JSON.parse(input.value);
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-    demand(Object.keys(value).sort().join(',') === 'image,item,owner,token'
+    const keys = Object.keys(value).sort().join(',');
+    demand((keys === 'image,item,owner,token'
+      || (keys === 'image,item,owner,precondition,token' && value.precondition === 'pending-thumb-absent'))
       && uuid.test(value.owner) && uuid.test(value.item) && value.item.startsWith('1080') && uuid.test(value.image)
       && typeof value.token === 'string' && value.token.length <= 4096 && /^[A-Za-z0-9_.-]+$/.test(value.token));
     const directory = `/mnt/stub/stub/wardrobe/${value.owner}/${value.item}/${value.image}/thumb.jpg`;
@@ -449,26 +552,36 @@ export async function lifecycleStreamChild() {
         throw error;
       }
     };
+    phase = 'ancestors';
     for (const name of ['/mnt', '/mnt/stub', '/mnt/stub/stub', '/mnt/stub/stub/wardrobe',
       `/mnt/stub/stub/wardrobe/${value.owner}`]) await safeDirectory(name);
-    demand(!await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}`));
+    if (value.precondition === 'pending-thumb-absent') {
+      demand(await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}`));
+      demand(await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}/${value.image}`));
+      phase = 'target-absence';
+      demand(!await safeDirectory(directory));
+    } else {
+      phase = 'item-absence';
+      demand(!await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}`));
+    }
     responseDone = new Promise((resolve) => { resolveResponse = resolve; });
+    phase = 'request';
     req = request({ hostname: '127.0.0.1', port: 5000,
       path: `/object/wardrobe/${value.owner}/${value.item}/${value.image}/thumb.jpg`, method: 'POST',
       headers: { Authorization: `Bearer ${value.token}`, 'Content-Type': 'image/jpeg', 'Content-Length': '4', 'x-upsert': 'false' } });
     requestClosed = new Promise((resolve) => req.once('close', resolve));
-    req.once('error', () => { primaryFailed = true; resolveResponse(); });
+    req.once('error', () => { observe('request-error'); primaryFailed = true; resolveResponse(); });
     req.once('response', (incoming) => {
       response = incoming; status = incoming.statusCode ?? null;
-      if (!released) primaryFailed = true;
+      if (!released) { observe('early-response'); primaryFailed = true; }
       const chunks = [];
       incoming.on('data', (chunk) => {
         bytes += chunk.length;
-        if (bytes > 4096) { primaryFailed = true; incoming.destroy(); }
+        if (bytes > 4096) { observe('body-cap'); primaryFailed = true; incoming.destroy(); }
         else chunks.push(chunk);
       });
-      incoming.once('error', () => { primaryFailed = true; resolveResponse(); });
-      incoming.once('aborted', () => { primaryFailed = true; resolveResponse(); });
+      incoming.once('error', () => { observe('response-error'); primaryFailed = true; resolveResponse(); });
+      incoming.once('aborted', () => { observe('response-aborted'); primaryFailed = true; resolveResponse(); });
       incoming.once('end', () => {
         try {
           const body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
@@ -477,13 +590,15 @@ export async function lifecycleStreamChild() {
             && body.statusCode === '403' && body.code === 'AccessDenied' && body.error === 'Unauthorized'
             && body.message === 'Not available';
           demand(denied);
-        } catch { primaryFailed = true; }
+        } catch { observe('response-contract'); primaryFailed = true; }
         resolveResponse();
       });
     });
+    phase = 'write';
     req.write(Buffer.from([255, 216]));
     let ready = false;
     const started = Date.now();
+    phase = 'file-poll';
     for (let attempt = 0; attempt < 100 && Date.now() - started < 5000 && !primaryFailed; attempt++) {
       await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}`);
       await safeDirectory(`/mnt/stub/stub/wardrobe/${value.owner}/${value.item}/${value.image}`);
@@ -499,74 +614,111 @@ export async function lifecycleStreamChild() {
       }
       await new Promise((resolve) => { pollTimer = setTimeout(resolve, 50); });
     }
+    phase = 'ready-check';
     demand(ready && Date.now() - started < 5000 && !primaryFailed && !response);
+    phase = 'ready';
     emit({ stage: 'ready', partialBytes: 2 });
+    phase = 'complete';
     const command = await iterator.next();
     demand(!command.done && command.value === 'complete' && !primaryFailed);
     released = true;
+    phase = 'response';
     req.end(Buffer.from([255, 217]));
     await responseDone; await requestClosed;
     demand(denied && !primaryFailed);
-  } catch { primaryFailed = true; }
+  } catch { observe('exception'); primaryFailed = true; }
+  phase = 'cleanup';
   cleanup(() => req?.destroy());
   cleanup(() => response?.destroy());
   if (!req) cleanup(() => resolveResponse?.());
-  try { await responseDone; await requestClosed; } catch { cleanupFailed = true; }
+  try { await responseDone; await requestClosed; } catch { observe('cleanup'); cleanupFailed = true; }
   cleanup(() => clearTimeout(timer));
   cleanup(() => clearTimeout(pollTimer));
   cleanup(() => lines.close());
   cleanup(() => process.stdin.destroy());
-  try { emit({ stage: 'settled', status, bodyBytes: bytes > 4096 ? null : bytes, denied, failed: primaryFailed || cleanupFailed }); }
+  try { emit({ stage: 'settled', status, bodyBytes: bytes > 4096 ? null : bytes, denied, failed: primaryFailed || cleanupFailed,
+    ...(primaryFailed || cleanupFailed ? first : {}) }); }
   catch { cleanupFailed = true; }
   if (primaryFailed || cleanupFailed) process.exitCode = 1;
 }
 
-export async function withLifecycleLateUpload(owner, value, operation) {
+export async function withLifecycleLateUpload(owner, value, operation, precondition = 'item-absent') {
+  const state = { phase: 'input', commandCode: null, exitCode: null, guard: null, child: {}, first: null, primitive: null };
+  lifecycleActive = state; lifecycleFailure = null;
+  try { return await lifecycleLateUpload(owner, value, operation, state, precondition); }
+  catch (error) {
+    lifecycleFirst(state, 'exception');
+    lifecycleFailure = state;
+    if (error !== null && (typeof error === 'object' || typeof error === 'function')) lifecycleErrorAssociations.set(error, state);
+    else state.primitive = lifecyclePrimitive(error);
+    throw error;
+  } finally { lifecycleActive = null; }
+}
+
+async function lifecycleLateUpload(owner, value, operation, state, precondition) {
+  requireEvidence(precondition === 'item-absent' || precondition === 'pending-thumb-absent');
   assertLifecycleFixture(process.env, owner.uid, value.p_item.id);
   const claims = jwtClaims(owner.token);
   requireEvidence(claims?.role === 'authenticated' && claims.sub === owner.uid && typeof operation === 'function'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.p_image.id));
   const container = await lifecycleStorageRuntime();
-  const input = JSON.stringify({ owner: owner.uid, item: value.p_item.id, image: value.p_image.id, token: owner.token });
+  const input = JSON.stringify({ owner: owner.uid, item: value.p_item.id, image: value.p_image.id, token: owner.token,
+    ...(precondition === 'pending-thumb-absent' ? { precondition } : {}) });
   requireEvidence(Buffer.byteLength(input) <= 8192);
+  lifecyclePhase('spawn');
   const child = spawn('docker', ['exec', '-i', container, 'env', '-i', '/usr/local/bin/node', '--input-type=module',
     '-e', `await (${lifecycleStreamChild.toString()})();`], {
     cwd: ROOT, env: commandEnvironment(), shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
   });
   let primaryFailed = false, primaryValue, cleanupFailed = false, cleanupValue, failed = false;
   let readySeen = false, settled = false, buffer = '', outputBytes = 0, rejectReady, resolveReady, resolveClosed;
-  const capture = (error) => { if (!cleanupFailed) { cleanupFailed = true; cleanupValue = error; } };
+  const capture = (error) => { lifecycleFirst(state, 'cleanup'); if (!cleanupFailed) { cleanupFailed = true; cleanupValue = error; } };
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   void ready.catch(() => {});
-  const fail = () => { failed = true; rejectReady(new Error('EVIDENCE_REQUIRED')); };
+  const fail = (cause) => { lifecycleFirst(state, cause); failed = true; rejectReady(new Error('EVIDENCE_REQUIRED')); };
   const closed = new Promise((resolve) => {
     resolveClosed = resolve;
-    child.once('error', () => { fail(); resolve(1); });
-    child.once('close', (code) => { if (!settled) fail(); resolve(code); });
+    child.once('error', () => { fail('process-error'); resolve(1); });
+    child.once('close', (code) => { state.exitCode = lifecycleInteger(code, 0, 255); if (!settled) fail('process-close'); resolve(code); });
   });
   const terminate = () => {
     try { if (!child.stdin.writableEnded && !child.stdin.destroyed) child.stdin.end('cancel\n'); } catch (error) { capture(error); }
   };
   // Child independently bounds its request to 15s, even if the docker client is interrupted.
   const timer = setTimeout(() => {
-    fail(); terminate();
+    fail('deadline'); terminate();
     try { child.kill('SIGTERM'); } catch (error) { capture(error); }
     // Failure, never successful settlement: an unacknowledged closure blocks this fixture.
     resolveClosed(1);
   }, 15_000);
-  child.stdin.on('error', fail);
-  child.stderr.on('data', fail);
+  child.stdin.on('error', () => fail('stdin-error'));
+  child.stderr.on('data', () => fail('stderr'));
   child.stdout.on('data', (chunk) => {
+    let cause = 'output-cap';
     try {
       outputBytes += chunk.length;
       requireEvidence(outputBytes <= 1024);
+      cause = 'utf8';
       buffer += new TextDecoder('utf-8', { fatal: true }).decode(chunk);
       let newline;
       while ((newline = buffer.indexOf('\n')) >= 0) {
+        cause = 'json';
         const record = JSON.parse(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1);
+        cause = 'protocol';
         if (!readySeen && record.stage === 'ready' && record.partialBytes === 2 && Object.keys(record).length === 2) {
           readySeen = true; resolveReady();
         } else {
+          if (record !== null && typeof record === 'object' && !Array.isArray(record)
+            && Object.hasOwn(record, 'stage') && record.stage === 'settled'
+            && Object.hasOwn(record, 'failed') && record.failed === true && !state.first) {
+            const own = (key) => Object.hasOwn(record, key) ? record[key] : undefined;
+            state.child = {
+              childPhase: lifecycleLabel(LIFECYCLE_CHILD_PHASES, own('phase')),
+              childCause: lifecycleLabel(LIFECYCLE_CHILD_CAUSES, own('cause')),
+              status: lifecycleInteger(own('status'), 100, 599), bodyBytes: lifecycleInteger(own('bodyBytes'), 0, 1024),
+              denied: typeof own('denied') === 'boolean' ? own('denied') : null, failed: true,
+            };
+          }
           requireEvidence(!settled && readySeen && record.stage === 'settled' && Object.keys(record).sort().join(',')
             === 'bodyBytes,denied,failed,stage,status');
           settled = true;
@@ -574,16 +726,21 @@ export async function withLifecycleLateUpload(owner, value, operation) {
             && Number.isSafeInteger(record.bodyBytes) && record.bodyBytes >= 0 && record.bodyBytes <= 4096);
         }
       }
-    } catch { fail(); terminate(); }
+    } catch { fail(cause); terminate(); }
   });
   try {
+    lifecyclePhase('input-write');
     child.stdin.write(input + '\n');
+    lifecyclePhase('await-ready');
     await ready;
+    lifecyclePhase('callback');
     await operation();
     requireEvidence(!failed);
+    lifecyclePhase('settlement');
     child.stdin.end('complete\n');
     requireEvidence(await closed === 0 && settled && !failed && buffer === '');
-  } catch (error) { primaryFailed = true; primaryValue = error; }
+  } catch (error) { lifecycleFirst(state, 'exception'); primaryFailed = true; primaryValue = error; }
+  lifecyclePhase('cleanup');
   if (primaryFailed) terminate();
   try { requireEvidence(await closed === 0 && settled && !failed); } catch (error) { capture(error); }
   try { clearTimeout(timer); } catch (error) { capture(error); }
@@ -694,16 +851,20 @@ export function parseMigrationHistory(output) {
 }
 
 export function assertHistory(output, stage) {
-  requireHistory(stage === 'base' || stage === 'prior-main' || stage === 'target', 'inventory-mismatch');
+  requireHistory(['base', 'prior-main', 'azure-target', 'target'].includes(stage), 'inventory-mismatch');
   const priorMainIndex = MIGRATIONS.findIndex((entry) => entry.version === PRIOR_MAIN_VERSION);
-  requireHistory(priorMainIndex >= 0, 'inventory-mismatch');
+  const azureIndex = MIGRATIONS.findIndex((entry) => entry.version === AZURE_TARGET_VERSION);
+  requireHistory(priorMainIndex >= 0 && azureIndex === priorMainIndex + 1, 'inventory-mismatch');
   const inventory = parseMigrationHistory(output);
   const expected = stage === 'base'
     ? { applied: [MIGRATIONS[0].version], pending: MIGRATIONS.slice(1).map((entry) => entry.version) }
     : stage === 'prior-main'
       ? { applied: MIGRATIONS.slice(0, priorMainIndex + 1).map((entry) => entry.version),
         pending: MIGRATIONS.slice(priorMainIndex + 1).map((entry) => entry.version) }
-      : { applied: MIGRATIONS.map((entry) => entry.version), pending: [] };
+      : stage === 'azure-target'
+        ? { applied: MIGRATIONS.slice(0, azureIndex + 1).map((entry) => entry.version),
+          pending: MIGRATIONS.slice(azureIndex + 1).map((entry) => entry.version) }
+        : { applied: MIGRATIONS.map((entry) => entry.version), pending: [] };
   requireHistory(JSON.stringify(inventory) === JSON.stringify(expected), 'inventory-mismatch');
   return inventory;
 }
@@ -730,6 +891,84 @@ async function history(stage) {
   const result = await cli(['migration', 'list', '--local']);
   const inventory = assertHistoryResult(result, stage);
   console.log(`PASS: history ${stage} applied=${inventory.applied.join(',')} pending=${inventory.pending.join(',') || 'none'}`);
+}
+
+export function preservationStagePath(run) {
+  requireEvidence(typeof run === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(run));
+  return path.join(ROOT, '.supabase', `preservation-stage-${run}`);
+}
+
+async function sameDatabaseIdentity() {
+  await requireLocalContainer();
+  const result = await runCommand('docker', ['container', 'inspect', '--format', '{{.Id}}', DB_CONTAINER], {
+    env: commandEnvironment(), timeout: 30_000, maxOutputBytes: 4096,
+  });
+  requireEvidence(result.code === 0 && result.stderr === '' && /^[0-9a-f]{64}\r?\n?$/.test(result.stdout));
+  return result.stdout.trim();
+}
+
+// Copy-only ten-migration workdir: the existing CLI helper remains ROOT-bound.
+export async function migrateToAzureTarget(run, from) {
+  assertRehearsalEnvironment(process.env, []);
+  assertCiStorageGuardInstall();
+  requireEvidence(['base', 'prior-main'].includes(from));
+  const directory = preservationStagePath(run), cache = path.dirname(directory);
+  const cacheInfo = await lstat(cache);
+  requireEvidence(cacheInfo.isDirectory() && !cacheInfo.isSymbolicLink());
+  await assertProjectConfig(); await assertMigrationInventory(); await history(from);
+  const container = await sameDatabaseIdentity();
+  const configPath = path.join(ROOT, 'supabase', 'config.toml'), configInfo = await lstat(configPath);
+  requireEvidence(configInfo.isFile() && !configInfo.isSymbolicLink() && configInfo.size <= 32768);
+  const config = await readFile(configPath);
+  const last = MIGRATIONS.findIndex((entry) => entry.version === AZURE_TARGET_VERSION);
+  requireEvidence(last === 9);
+  const prefix = MIGRATIONS.slice(0, last + 1);
+  const files = await Promise.all(prefix.map(async (entry) => {
+    const bytes = await readFile(path.join(ROOT, 'supabase', 'migrations', entry.name));
+    requireEvidence(bytes.length === entry.bytes && createHash('sha256').update(bytes).digest('hex') === entry.sha256);
+    return { ...entry, content: bytes };
+  }));
+  // Non-recursive mkdir rejects any existing file, directory or symlink.
+  await mkdir(directory);
+  const created = await lstat(directory);
+  let primary, failed = false;
+  try {
+    await mkdir(path.join(directory, 'supabase'));
+    await mkdir(path.join(directory, 'supabase', 'migrations'));
+    await writeFile(path.join(directory, 'supabase', 'config.toml'), config, { flag: 'wx' });
+    for (const entry of files) await writeFile(path.join(directory, 'supabase', 'migrations', entry.name), entry.content, { flag: 'wx' });
+    const inventory = await readdir(path.join(directory, 'supabase', 'migrations'), { withFileTypes: true });
+    requireEvidence(inventory.every((entry) => entry.isFile() && !entry.isSymbolicLink())
+      && JSON.stringify(inventory.map((entry) => entry.name).sort()) === JSON.stringify(prefix.map((entry) => entry.name)));
+    requireEvidence((await readFile(path.join(directory, 'supabase', 'config.toml'))).equals(config));
+    for (const entry of files) requireEvidence((await readFile(path.join(directory, 'supabase', 'migrations', entry.name))).equals(entry.content));
+    requireEvidence(JSON.stringify((await readdir(directory)).sort()) === '["supabase"]'
+      && JSON.stringify((await readdir(path.join(directory, 'supabase'))).sort()) === '["config.toml","migrations"]');
+    const require = createRequire(import.meta.url), packagePath = require.resolve('supabase/package.json');
+    const pkg = JSON.parse(await readFile(packagePath, 'utf8'));
+    requireEvidence(pkg.version === '2.116.0' && typeof pkg.bin?.supabase === 'string');
+    const entrypoint = path.join(path.dirname(packagePath), pkg.bin.supabase);
+    const version = await runCommand(process.execPath, [entrypoint, '--agent', 'no', '--version']);
+    requireEvidence(version.code === 0 && version.stdout.trim() === '2.116.0');
+    await history(from); requireEvidence(await sameDatabaseIdentity() === container);
+    const result = await runCommand(process.execPath, [entrypoint, '--agent', 'no', '--workdir', directory, 'migration', 'up', '--local'], {
+      timeout: 120_000,
+    });
+    requireEvidence(result.code === 0);
+    await history('azure-target'); requireEvidence(await sameDatabaseIdentity() === container);
+    await assertMigrationInventory();
+  } catch (error) { failed = true; primary = error; }
+  try {
+    const owned = await lstat(directory);
+    requireEvidence(owned.isDirectory() && !owned.isSymbolicLink() && directory === preservationStagePath(run)
+      && owned.dev === created.dev && owned.ino === created.ino);
+    await rm(directory, { recursive: true, force: false });
+  } catch (error) {
+    console.error('FAIL: exact owned preservation stage cleanup; EVIDENCE_REQUIRED');
+    if (!failed) { failed = true; primary = error; }
+    process.exitCode = 1;
+  }
+  if (failed) throw primary;
 }
 
 async function main() {
@@ -776,12 +1015,12 @@ async function main() {
     stage = 'S3-base-history';
     await history('base');
     stage = 'S3-migration-up';
-    requireEvidence((await cli(['migration', 'up', '--local'])).code === 0);
+    await migrateToAzureTarget(run, 'base');
     stage = 'S3-storage-guard';
     await installCiStorageGuard();
     await verifyCiStorageGuard();
     stage = 'S3-target-history';
-    await history('target');
+    await history('azure-target');
     stage = 'S4-verify';
     await child('verify');
     stage = 'S4-checked-save-catalog';
@@ -813,15 +1052,37 @@ async function main() {
       const priorMain = await captureAzurePreservation(azureEnv, privilegedLocalSql);
       await assertMigrationInventory(); await history('prior-main');
       stage = 'AZ1-upgrade';
-      requireEvidence((await cli(['migration', 'up', '--local'])).code === 0);
-      await history('target');
+      await migrateToAzureTarget(run, 'prior-main');
+      await history('azure-target');
       stage = 'AZ1-preservation';
-      await verifyAzurePreservation(priorMain, privilegedLocalSql);
+      await verifyAzurePreservation(priorMain, privilegedLocalSql, true);
+      console.log('PASS: populated prior-main9/azure-target10 historical preservation; Google proof retained for next upgrade');
+      stage = 'I10b-ten-capture';
+      const ten = await captureImageChangePreservation(priorMain, privilegedLocalSql);
+      await assertMigrationInventory(); await history('azure-target');
+      const container = await sameDatabaseIdentity();
+      stage = 'I10b-ten-to-eleven';
+      requireEvidence((await cli(['migration', 'up', '--local'])).code === 0);
+      requireEvidence(await sameDatabaseIdentity() === container);
+      await history('target');
+      await installCiStorageGuard(); await verifyCiStorageGuard();
+      stage = 'I10b-preservation';
+      await verifyImageChangePreservation(ten, privilegedLocalSql, (label) => { stage = `I10b-preservation-${label}`; });
+      stage = 'I10b-publication-races';
+      const { imageDeletionCases, imageChangePagedDeletion, imageChangeOrphanDeletion } = await import('../tests/integration/image-replacement.sessions.mjs');
+      await imageDeletionCases(azureEnv, { withLifecycleLateUpload, requireLifecyclePrefixEmpty, withLifecycleParentLock,
+        mark: (label) => { stage = `I10b-publication-races-${label}`; } });
+      stage = 'I10b-owner-paging';
+      await imageChangePagedDeletion(azureEnv);
+      stage = 'I10b-owner-orphans';
+      await imageChangeOrphanDeletion(azureEnv);
+      stage = 'I10b-owner-finalizer';
       finalizer.assertRunning();
     } finally { await finalizer.stop(); }
     console.log('PASS: exact prior-main9/target10; old Google held/estimated/confirmed/dispatched and frozen Save preserved; late settlement and ordinary-owner finalizer; no provider calls');
+    console.log('PASS: populated10/target11; exact Google/Azure private proof, public fields/history and bytes preserved; frozen pending Azure Save completed after opt-out/expiry; projection DDL rolled back');
   } catch (error) {
-    console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}; subsequent stages NOT RUN`);
+    console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}${lifecycleFailureDetail(error)}; subsequent stages NOT RUN`);
     process.exitCode = 1;
   } finally {
     if (ownsSnapshot) {

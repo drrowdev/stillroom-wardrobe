@@ -81,7 +81,7 @@ function reservationReceipt(data: unknown, attempt: SaveAttempt): { fingerprint:
   }
   return { fingerprint, state };
 }
-async function ensureFile(
+export async function ensureFile(
   client: AppClient, path: string, bytes: Blob, expectedHash: string, scope: OwnerScope, state: 'reserved' | 'completed',
 ): Promise<void> {
   throwIfAborted(scope.signal);

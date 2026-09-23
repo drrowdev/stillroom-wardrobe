@@ -27,6 +27,19 @@ Implementation choices are proposed unless user-approved. On **2026-09-06**, the
 
 ## Explicit assumptions
 
+**22 September 2026 I10b decision:** the user deferred routine I10a maintenance
+and its blocked evidence tools, not replacement, recovery or explicit deletion.
+The approved compatibility-first schema locks the existing approved-account row;
+it does not add another owner-lock table. Five private tables provide frozen
+replacement/recovery attempts, one-shot context, ordered attribution and durable
+deletion operations/targets. The deletion promise is native Storage logical
+removal with exhaustive authoritative reconciliation and publication fencing,
+not physical erasure or a provider-remnant deadline. The reviewed
+[Stage A release](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5769933357)
+settles the implementation dispositions; actual SQL/native/type evidence remains
+CI-pending. I22 still needs owner-prefix removal; no Phase 6 waiver or early I11
+authority follows from the maintenance deferral.
+
 * One common app deployment and Supabase project is acceptable **provided user profiles/data have no relationship and remain invisible to one another**. The instruction is interpreted as application/data separation, not a request for separate infrastructure accounts. Administrative operators remain trusted. This boundary is documented, not silently equated with end-to-end encryption.
 * The operator is the user setting up the project; their normal application login is still unprivileged. Each person receives their own login through an existing secure channel, never through the other person's app.
 * English, Finnish and Swedish are supported. Initial language follows the owner/sign-in/browser/English precedence in `19`; each account's saved preference is independent. Europe/Helsinki and EUR stay separate defaults. City weather is off. No body or health information is needed.

@@ -172,13 +172,15 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           ? <AddItem client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} />
           : route === 'settings' ? <ProfileScreen client={client} ai={ai} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} />
           : route === 'trash' ? <Trash lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
+            onDeleting={itemId => setUndo(current => current?.item.id === itemId ? null : current)}
             onBack={() => changeRoute('wardrobe')} onChanged={() => { setUndo(null); void refresh(); }} />
           : route.startsWith('detail:') ? <ItemDetail key={route} client={client} scope={scope} itemId={detailRouteId(route.slice(7))} images={images}
-            lifecycle={lifecycle} onTrashed={trashed}
+            lifecycle={lifecycle} onTrashed={trashed} ai={ai} onBeforeDiscard={onBeforeDiscard}
             t={t} language={language} currency={profile.currency} online={online} onDirty={onDirty} onSaved={() => { void refresh(); }} onBack={() => changeRoute('wardrobe')} />
           : <WardrobeScreen browse={browse} images={images} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={refresh} />}
       </main>
-      {discard && <DiscardDialog beforeConfirm={route === 'add' ? async () => beforeDiscard.current ? beforeDiscard.current() : 'unresolved' : undefined}
+      {discard && <DiscardDialog beforeConfirm={route === 'add' || route.startsWith('detail:')
+        ? async () => beforeDiscard.current ? beforeDiscard.current() : route === 'add' ? 'unresolved' : 'cancelled' : undefined}
         title={t(route === 'settings' || route.startsWith('detail:') ? 'common.unsaved' : 'capture.discard')} t={t} onCancel={() => {
         setDiscard(null);
         if (route.startsWith('detail:')) requestAnimationFrame(() => { if (discardFocus.current?.isConnected) discardFocus.current.focus(); });

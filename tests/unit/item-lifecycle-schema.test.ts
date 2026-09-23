@@ -12,14 +12,29 @@ import { classifyObjectDeletion, deleteWardrobeObject, wardrobeDeleteRoute } fro
 import type { DeleteReply, DeleteRequest } from '../../src/data/storage-delete';
 // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
 import { ITEM_LIFECYCLE_CATALOG_SQL, assertLifecycleFixture, MIGRATIONS, withLifecycleParentLock, withLifecycleCatalogMarker as catalogMarker, lifecycleStorageRuntime, withLifecycleLateUpload, requireStorageCatalogInventory } from '../../scripts/preservation-rehearsal.mjs';
+// @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
+import * as rehearsal from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { one, lifecycleObservation, serializeLifecycleObservation, readLifecycleUploadResponse, requireLifecycleUploadConflict, lifecycleFixtureCases, lifecyclePublicationCases, legacyOrphanCase } from '../integration/item-lifecycle.sessions.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { securityObservation, serializeSecurityObservation } from '../security/item-lifecycle.sessions.mjs';
+// @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
+import { imageDeletionCases, imageChangeOrphanDeletion, imageReplacementServed } from '../integration/image-replacement.sessions.mjs';
 
 const fixtureMocks = vi.hoisted(() => ({
   spawn: vi.fn(), requireLocalContainer: vi.fn(), privilegedLocalSql: vi.fn(), commandEnvironment: vi.fn(), saveClients: vi.fn(),
   markerRemove: vi.fn(), runCommand: vi.fn(), requireDocker: vi.fn(),
+  childRequest: vi.fn(), childLstat: vi.fn(), childReaddir: vi.fn(), childReadline: vi.fn(),
+}));
+vi.mock('node:http', async () => ({
+  ...await vi.importActual<Record<string, unknown>>('node:http'), request: fixtureMocks.childRequest,
+}));
+vi.mock('node:fs/promises', async () => ({
+  ...await vi.importActual<Record<string, unknown>>('node:fs/promises'),
+  lstat: fixtureMocks.childLstat, readdir: fixtureMocks.childReaddir,
+}));
+vi.mock('node:readline', async () => ({
+  ...await vi.importActual<Record<string, unknown>>('node:readline'), createInterface: fixtureMocks.childReadline,
 }));
 vi.mock('node:child_process', async () => ({
   ...await vi.importActual<Record<string, unknown>>('node:child_process'), spawn: fixtureMocks.spawn,
@@ -196,6 +211,1344 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
       expect(() => requireStorageCatalogInventory(input)).toThrow('EVIDENCE_REQUIRED');
     }
   });
+
+  function detail(error: unknown) {
+    const formatter: unknown = Reflect.get(rehearsal, 'lifecycleFailureDetail');
+    if (typeof formatter !== 'function') throw new Error('Missing lifecycle failure formatter');
+    return Reflect.apply(formatter, undefined, [error]) as string;
+  }
+  async function rejected(operation: Promise<unknown>) {
+    return operation.then(() => { throw new Error('Expected failure'); }, (error: unknown) => error);
+  }
+  const containerGuards = ['parse', 'name', 'project', 'running', 'image-tag', 'image-id', 'mount-array',
+    'mount-count', 'mount-type', 'mount-name', 'mount-target', 'mount-rw', 'config-array', 'config-count',
+    'config-backend', 'config-root', 'config-tenant', 'config-bucket', 'config-sentinel'];
+  const guardCases: Array<[string, unknown]> = [
+    ['name', { ...runtime, name: 'private canary' }],
+    ['project', { ...runtime, project: 'private canary' }],
+    ['running', { ...runtime, running: 'true' }],
+    ['image-tag', { ...runtime, image: 'private canary' }],
+    ['image-id', { ...runtime, id: 'private canary' }],
+    ['mount-array', { ...runtime, mounts: { private: 'canary' } }],
+    ['mount-count', { ...runtime, mounts: [] }],
+    ...(['type', 'name', 'target', 'rw'] as const).map((key): [string, unknown] =>
+      ['mount-' + key, { ...runtime, mounts: [{ ...runtime.mounts[0], [key]: 'private canary' }] }]),
+    ['config-array', { ...runtime, config: { private: 'canary' } }],
+    ['config-count', { ...runtime, config: runtime.config.slice(0, 4) }],
+    ...['backend', 'root', 'tenant', 'bucket', 'sentinel'].map((key, index): [string, unknown] =>
+      ['config-' + key, { ...runtime, config: runtime.config.map((entry, position) =>
+        position === index ? 'private canary' : entry) }]),
+  ];
+  it.each(guardCases)('container guard localizes %s through the real upload seam', async (guard, inspected) => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(inspected) });
+    const operation = vi.fn(), error = await rejected(withLifecycleLateUpload(owner, value, operation));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('EVIDENCE_REQUIRED');
+    expect(detail(error)).toBe('; lifecycle=' + JSON.stringify({
+      phase: 'container-shape', cause: 'exception', commandCode: null, exitCode: null, guard,
+    }));
+    expect(fixtureMocks.runCommand).toHaveBeenCalledOnce();
+    expect(fixtureMocks.spawn).not.toHaveBeenCalled(); expect(operation).not.toHaveBeenCalled();
+    expect(detail(error)).toBe('');
+  });
+  it.each([
+    ['parse', 'private invalid JSON', SyntaxError],
+    ['name', 'null', TypeError],
+    ['name', '[]', Error],
+    ['mount-type', JSON.stringify({ ...runtime, mounts: [null] }), TypeError],
+  ] as const)('container guard keeps %s parse/property failures unchanged %#', async (guard, stdout, errorType) => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout });
+    const operation = vi.fn(), error = await rejected(withLifecycleLateUpload(owner, value, operation));
+    expect(error).toBeInstanceOf(errorType);
+    const text = detail(error);
+    expect(text).toContain(`"guard":"${guard}"`);
+    expect(text).not.toMatch(/private|canary|10000000|10800000/);
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1024);
+    expect(fixtureMocks.runCommand).toHaveBeenCalledOnce();
+    expect(fixtureMocks.spawn).not.toHaveBeenCalled(); expect(operation).not.toHaveBeenCalled();
+  });
+  it('container guard records the first failed predicate, not later invalid fields', async () => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: JSON.stringify({
+      ...runtime, name: 'private canary', running: false, mounts: null, config: null,
+    }) });
+    const error = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    expect(detail(error)).toBe('; lifecycle={"phase":"container-shape","cause":"exception","commandCode":null,"exitCode":null,"guard":"name"}');
+    expect(fixtureMocks.runCommand).toHaveBeenCalledOnce(); expect(fixtureMocks.spawn).not.toHaveBeenCalled();
+  });
+  it('container guard preserves an exact property exception without evaluating successors', async () => {
+    const primary = new Error('private property canary'), encoded = JSON.stringify(runtime), originalParse = JSON.parse;
+    const accessed: PropertyKey[] = [];
+    const inspected = new Proxy(runtime, { get(target, key, receiver) {
+      accessed.push(key);
+      if (key === 'project') throw primary;
+      return Reflect.get(target, key, receiver);
+    } });
+    const parse = vi.spyOn(JSON, 'parse').mockImplementation((text, reviver) =>
+      text === encoded ? inspected : originalParse(text, reviver));
+    try {
+      fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: encoded });
+      const operation = vi.fn(), error = await rejected(withLifecycleLateUpload(owner, value, operation));
+      expect(error).toBe(primary); expect(accessed).toEqual(['name', 'project']);
+      expect(detail(error)).toBe('; lifecycle={"phase":"container-shape","cause":"exception","commandCode":null,"exitCode":null,"guard":"project"}');
+      expect(fixtureMocks.runCommand).toHaveBeenCalledOnce();
+      expect(fixtureMocks.spawn).not.toHaveBeenCalled(); expect(operation).not.toHaveBeenCalled();
+    } finally { parse.mockRestore(); }
+  });
+  it('container guard keeps original property and expected-member evaluation order on a valid tuple', async () => {
+    const encoded = JSON.stringify(runtime), originalParse = JSON.parse, access: string[] = [], members: unknown[] = [];
+    const config = [...runtime.config];
+    const includes = vi.spyOn(config, 'includes').mockImplementation((entry) => {
+      members.push(entry); return runtime.config.includes(entry);
+    });
+    const mount = new Proxy(runtime.mounts[0]!, { get(target, key, receiver) {
+      access.push('mount.' + String(key)); return Reflect.get(target, key, receiver);
+    } });
+    const inspected = new Proxy({ ...runtime, mounts: [mount], config }, { get(target, key, receiver) {
+      access.push(String(key)); return Reflect.get(target, key, receiver);
+    } });
+    const parse = vi.spyOn(JSON, 'parse').mockImplementation((text, reviver) =>
+      text === encoded ? inspected : originalParse(text, reviver));
+    try {
+      child();
+      const operation = vi.fn();
+      await withLifecycleLateUpload(owner, value, operation);
+      expect(access).toEqual(['name', 'project', 'running', 'image', 'id', 'mounts', 'mounts',
+        'mounts', 'mount.type', 'mounts', 'mount.name', 'mounts', 'mount.target', 'mounts', 'mount.rw',
+        'config', 'config', 'config', 'config', 'config', 'config', 'config', 'id', 'id', 'image', 'id']);
+      expect(members).toEqual(runtime.config); expect(includes).toHaveBeenCalledTimes(5);
+      expect(fixtureMocks.runCommand).toHaveBeenCalledTimes(2);
+      expect(fixtureMocks.spawn).toHaveBeenCalledOnce(); expect(operation).toHaveBeenCalledOnce();
+      expect(detail(undefined)).toBe('');
+    } finally { parse.mockRestore(); includes.mockRestore(); }
+  });
+  it.each(['image-call', 'image-result', 'image-shape', 'callback', 'settlement'] as const)(
+    'container guard leaves later %s output byte-identical without a stale guard', async (phase) => {
+      const primary = new Error('private later canary');
+      if (phase === 'image-call') fixtureMocks.runCommand.mockReset()
+        .mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(runtime) }).mockRejectedValueOnce(primary);
+      if (phase === 'image-result' || phase === 'image-shape') fixtureMocks.runCommand.mockReset()
+        .mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(runtime) })
+        .mockResolvedValueOnce({ code: phase === 'image-result' ? 1 : 0, stdout: 'private malformed' });
+      if (phase === 'callback') child();
+      if (phase === 'settlement') child(undefined, { value: primary });
+      const error = await rejected(withLifecycleLateUpload(owner, value, async () => {
+        if (phase === 'callback') throw primary;
+      }));
+      if (['image-call', 'callback', 'settlement'].includes(phase)) expect(error).toBe(primary);
+      expect(detail(error)).toBe('; lifecycle=' + JSON.stringify({
+        phase, cause: 'exception',
+        commandCode: phase === 'image-result' ? 1 : null, exitCode: null,
+      }));
+    });
+  it('container guard clears a previous invocation before a non-container failure', async () => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: 'null' });
+    const first = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    expect(detail(first)).toContain('"guard":"name"');
+    fixtureMocks.requireDocker.mockRejectedValueOnce(new Error('private next canary'));
+    const second = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    expect(detail(second)).toBe('; lifecycle={"phase":"docker","cause":"exception","commandCode":null,"exitCode":null}');
+  });
+  it('container guard source retains a frozen vocabulary, OTHER fallback and phase reset', async () => {
+    const source = await read('scripts/preservation-rehearsal.mjs');
+    const declaration = source.match(/const LIFECYCLE_CONTAINER_GUARDS = Object\.freeze\(\[([\s\S]*?)\]\);/)?.[1];
+    expect(declaration).toBeDefined();
+    expect([...declaration!.matchAll(/'([^']+)'/g)].map((match) => match[1])).toEqual(containerGuards);
+    expect(source).toContain("lifecycleLabel(LIFECYCLE_CONTAINER_GUARDS, guard)");
+    expect(source).toContain("labels.find((label) => label === value) ?? 'OTHER'");
+    const phase = source.slice(source.indexOf('function lifecyclePhase('), source.indexOf('function lifecycleCommand('));
+    expect(phase).toContain('lifecycleActive.guard = null');
+    const runtimeBody = source.slice(source.indexOf("  lifecyclePhase('container-shape');"),
+      source.indexOf("  lifecyclePhase('image-call');"));
+    expect(runtimeBody).not.toMatch(/\b(?:try|catch)\b|=>|\.every\(/);
+    ordered(runtimeBody, containerGuards.map((guard) => `lifecycleGuard('${guard}');`));
+    expect(runtimeBody.match(/requireEvidence\(/g)).toHaveLength(18);
+  });
+  it.each(['stderr', 'stdin', 'error', 'close', 'json', 'utf8', 'overflow', 'protocol'] as const)(
+    'classifies parent pre-ready %s without exposing listener arguments', async (kind) => {
+      const c = child(), privateError = new Error('private listener canary');
+      c.write.mockImplementation(() => {
+        queueMicrotask(() => {
+          const spawned = fixtureMocks.spawn.mock.results[0]!.value;
+          if (kind === 'stderr') spawned.stderr.emit('data', Buffer.from('private stderr canary'));
+          else if (kind === 'stdin') spawned.stdin.emit('error', privateError);
+          else if (kind === 'error') c.proc.emit('error', privateError);
+          else if (kind === 'close') c.proc.emit('close', 1);
+          else c.stdout.emit('data', kind === 'json' ? Buffer.from('private invalid JSON\n')
+            : kind === 'utf8' ? Buffer.from([255]) : kind === 'overflow' ? Buffer.alloc(1025, 65)
+              : Buffer.from('{"stage":"private","private":"canary"}\n'));
+          if (['stderr', 'stdin'].includes(kind)) c.proc.emit('close', 1);
+        });
+        return true;
+      });
+      const operation = vi.fn();
+      const error = await rejected(withLifecycleLateUpload(owner, value, operation));
+      const text = detail(error);
+      expect(text).toContain('; lifecycle=');
+      expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1024);
+      expect(text).toContain('"phase":"await-ready"');
+      const causes = { stderr: 'stderr', stdin: 'stdin-error', error: 'process-error', close: 'process-close',
+        json: 'json', utf8: 'utf8', overflow: 'output-cap', protocol: 'protocol' };
+      expect(text).toContain(`"cause":"${causes[kind]}"`);
+      expect(text).not.toMatch(/private|canary|10000000|10800000/);
+      expect(operation).not.toHaveBeenCalled();
+      expect(detail(error)).toBe('');
+      expect(console.log).toHaveBeenCalledTimes(1);
+    });
+  it.each(['container-code', 'container-shape', 'image-code', 'image-shape', 'docker', 'input'] as const)(
+    'localizes pre-spawn %s and leaves no stale detail', async (kind) => {
+      if (kind === 'container-code') fixtureMocks.runCommand.mockReset().mockResolvedValue({ code: 1, stdout: 'private', stderr: 'private' });
+      if (kind === 'container-shape') fixtureMocks.runCommand.mockReset().mockResolvedValue({ code: 0, stdout: '{"private":true}' });
+      if (kind === 'image-code' || kind === 'image-shape') {
+        fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(runtime) })
+          .mockResolvedValueOnce({ code: kind === 'image-code' ? 1 : 0, stdout: '{"private":true}' });
+      }
+      if (kind === 'docker') fixtureMocks.requireDocker.mockRejectedValueOnce(new Error('private docker'));
+      const error = await rejected(withLifecycleLateUpload(kind === 'input' ? { ...owner, uid: 'private' } : owner, value, vi.fn()));
+      const text = detail(error);
+      expect(text).toContain('; lifecycle=');
+      const phases = { 'container-code': 'container-result', 'container-shape': 'container-shape',
+        'image-code': 'image-result', 'image-shape': 'image-shape', docker: 'docker', input: 'input' };
+      expect(text).toContain(`"phase":"${phases[kind]}"`);
+      if (kind.endsWith('code')) expect(text).toContain('"commandCode":1');
+      expect(text).not.toMatch(/private|10000000|10800000/);
+      expect(fixtureMocks.spawn).not.toHaveBeenCalled();
+      expect(detail(new Error('unrelated'))).toBe('');
+    });
+  it.each([undefined, null, false, 0, ''])('associates falsy callback failure without wrapping or stale reuse %#', async (primary) => {
+    child(undefined, { value: new Error('private cleanup') });
+    const error = await rejected(withLifecycleLateUpload(owner, value, async () => { throw primary; }));
+    expect(error).toBe(primary);
+    expect(detail(error)).toContain('"phase":"callback"');
+    expect(detail(error)).toBe('');
+  });
+  it('omits unrelated causes and resets metadata at the next invocation', async () => {
+    fixtureMocks.requireDocker.mockRejectedValueOnce(new Error('private first'));
+    const error = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    expect(detail(new Error('unrelated'))).toBe('');
+    child();
+    await withLifecycleLateUpload(owner, value, async () => {});
+    expect(detail(error)).toBe('');
+  });
+  it.each(['spawn', 'input-write'] as const)('preserves synchronous %s error identity', async (kind) => {
+    const primary = new Error('private synchronous canary');
+    if (kind === 'spawn') fixtureMocks.spawn.mockImplementation(() => { throw primary; });
+    else {
+      const c = child();
+      c.write.mockImplementation(() => { throw primary; });
+    }
+    const error = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    expect(error).toBe(primary);
+    expect(detail(error)).toContain(`"phase":"${kind}"`);
+  });
+  it('retains the first pre-ready deadline and never invokes the callback', async () => {
+    const c = child(), operation = vi.fn();
+    c.write.mockImplementation(() => true);
+    const failure = rejected(withLifecycleLateUpload(owner, value, operation));
+    await vi.advanceTimersByTimeAsync(15_000);
+    const text = detail(await failure);
+    expect(text).toContain('"phase":"await-ready","cause":"deadline"');
+    expect(operation).not.toHaveBeenCalled();
+    expect(c.end).toHaveBeenCalledWith('cancel\n');
+    expect(c.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+  it.each([0, 1, 255, 256, -1, 1.5, 'private', null])('bounds own command code %j only for printing', async (code) => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValue({ code, stdout: 'private malformed', stderr: '' });
+    const error = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    const text = detail(error);
+    if (code === 0) expect(text).toContain('"phase":"container-shape"');
+    else expect(text).toContain(`"commandCode":${typeof code === 'number' && Number.isInteger(code) && code >= 0 && code <= 255 ? code : 'null'}`);
+    expect(text).not.toContain('private');
+  });
+  it('does not replace the original guard error when diagnostic reflection throws', async () => {
+    const code = vi.fn(() => 1);
+    const result = new Proxy({ code: 1, stdout: '', stderr: '' }, {
+      getOwnPropertyDescriptor() { throw new Error('private diagnostic'); },
+      get(target, name, receiver) { return name === 'code' ? code() : Reflect.get(target, name, receiver); },
+    });
+    fixtureMocks.runCommand.mockReset().mockResolvedValue(result);
+    const error = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('EVIDENCE_REQUIRED');
+    expect(code).toHaveBeenCalledOnce();
+    expect(detail(error)).toContain('"commandCode":null');
+  });
+  it('does not let formatter serialization replace a primary failure', async () => {
+    const primary = new Error('private primary');
+    fixtureMocks.requireDocker.mockRejectedValueOnce(primary);
+    const error = await rejected(withLifecycleLateUpload(owner, value, vi.fn()));
+    const stringify = vi.spyOn(JSON, 'stringify').mockImplementation(() => { throw new Error('private serialize'); });
+    try { expect(detail(error)).toBe(''); } finally { stringify.mockRestore(); }
+    expect(error).toBe(primary); expect(detail(error)).toBe('');
+  });
+  it.each([
+    { status: 99, bodyBytes: -1, denied: 'private', phase: 'private', cause: { private: true } },
+    { status: 600, bodyBytes: 1025, denied: null, phase: null, cause: ['private'] },
+    { status: '400', bodyBytes: '10', denied: 1, phase: {}, cause: '__proto__' },
+    { status: 400, bodyBytes: 1024, denied: false, phase: 'file-poll', cause: 'refusal' },
+  ])('harvests only bounded own failed-record fields without accepting the record %#', async (fields) => {
+    const c = child(), operation = vi.fn();
+    const line = JSON.stringify({ stage: 'settled', ...fields, failed: true, private: 'never print' }) + '\n';
+    c.write.mockImplementation(() => { queueMicrotask(() => c.stdout.emit('data', Buffer.from(line))); return true; });
+    const error = await rejected(withLifecycleLateUpload(owner, value, operation));
+    const text = detail(error);
+    const output = JSON.parse(text.slice('; lifecycle='.length)) as Record<string, unknown>;
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1024);
+    expect(output.status).toBe(typeof fields.status === 'number' && fields.status >= 100 && fields.status <= 599 ? fields.status : null);
+    expect(output.bodyBytes).toBe(typeof fields.bodyBytes === 'number' && fields.bodyBytes >= 0 && fields.bodyBytes <= 1024 ? fields.bodyBytes : null);
+    expect(output.denied).toBe(typeof fields.denied === 'boolean' ? fields.denied : null);
+    expect(output.childPhase).toBe(fields.phase === 'file-poll' ? 'file-poll' : 'OTHER');
+    expect(output.childCause).toBe(fields.cause === 'refusal' ? 'refusal' : 'OTHER');
+    expect(text).not.toMatch(/private|never print|__proto__/);
+    expect(operation).not.toHaveBeenCalled(); expect(c.end).toHaveBeenCalledWith('cancel\n');
+  });
+  it.each([false, 'true', null])('does not harvest a record lacking actual failed=true: %j', async (failed) => {
+    const c = child();
+    c.write.mockImplementation(() => {
+      queueMicrotask(() => c.stdout.emit('data', Buffer.from(JSON.stringify({
+        stage: 'settled', failed, phase: 'file-poll', cause: 'refusal', status: 400, bodyBytes: 2, denied: false,
+      }) + '\n')));
+      return true;
+    });
+    const text = detail(await rejected(withLifecycleLateUpload(owner, value, vi.fn())));
+    expect(text).not.toContain('childPhase'); expect(text).not.toContain('bodyBytes');
+  });
+
+  const childInput = { owner: owner.uid, item: value.p_item.id, image: value.p_image.id, token: owner.token };
+  async function realChild(kind: string, inputValue: unknown = childInput) {
+    const started = Date.now();
+    const writes: string[] = [], exitCode = process.exitCode;
+    const request = new EventEmitter(), response = new EventEmitter();
+    const closed = new Error('private fs');
+    let written = false, commandComplete = false, responseEnded = false, requestEnded = false;
+    const stat = (directory: boolean, size = 0, symlink = false) => ({
+      isDirectory: () => directory, isFile: () => !directory, isSymbolicLink: () => symlink, size,
+    });
+    fixtureMocks.childLstat.mockReset().mockImplementation(async (name: string) => {
+      if (kind.startsWith('pending-') && !written) {
+        const part = name.endsWith(value.p_item.id) ? 'item' : name.endsWith(value.p_image.id) ? 'image'
+          : name.endsWith('thumb.jpg') ? 'target' : null;
+        if (part) {
+          if (kind === `pending-${part}-missing` || (part === 'target' && !kind.startsWith('pending-target-'))) {
+            throw Object.assign(new Error('private missing'), { code: 'ENOENT' });
+          }
+          if (kind === `pending-${part}-error`) throw closed;
+          return stat(kind !== `pending-${part}-file`, 0, kind === `pending-${part}-symlink`);
+        }
+      }
+      if (kind === 'path-error') throw closed;
+      if (name.endsWith(value.p_item.id) && !written && kind !== 'item-exists' && !kind.startsWith('pending-')) throw Object.assign(new Error('private missing'), { code: 'ENOENT' });
+      if (kind === 'poll' && name.endsWith('thumb.jpg')) throw Object.assign(new Error('private missing'), { code: 'ENOENT' });
+      if (name.endsWith('/10000000-0000-4000-8000-000000000009')) return stat(false, kind === 'size' ? 3 : 2, kind === 'file-symlink');
+      return stat(true, 0, kind === 'symlink');
+    });
+    fixtureMocks.childReaddir.mockReset().mockResolvedValue(kind === 'entries' ? ['private', 'private2'] : kind === 'entry-name' ? ['private']
+      : ['10000000-0000-4000-8000-000000000009']);
+    const requestClose = vi.fn(() => {
+      if (!requestEnded) { requestEnded = true; request.emit('error', new Error('private socket closed')); }
+      request.emit('close'); return request;
+    });
+    const responseDestroy = vi.fn(() => { if (!responseEnded) response.emit('aborted'); return response; });
+    const emitResponse = () => {
+      Object.assign(response, { statusCode: 400, destroy: responseDestroy });
+      request.emit('response', response);
+      response.emit('data', Buffer.from('{"statusCode":"403","code":"AccessDenied","error":"Unauthorized","message":"Not available"}'));
+      responseEnded = true; requestEnded = true; response.emit('end');
+    };
+    const req = Object.assign(request, {
+      write: vi.fn(() => {
+        written = true;
+        if (kind === 'request-error') queueMicrotask(() => { request.emit('error', new Error('private request')); request.emit('close'); });
+        if (kind === 'early-response') queueMicrotask(emitResponse);
+        return true;
+      }),
+      end: vi.fn(() => { commandComplete = true; emitResponse(); request.emit('close'); return request; }),
+      destroy: requestClose,
+    });
+    fixtureMocks.childRequest.mockReset().mockReturnValue(req);
+    const next = vi.fn().mockResolvedValueOnce({ done: false, value: JSON.stringify(kind === 'input' ? { private: true } : inputValue) })
+      .mockResolvedValueOnce({ done: false, value: 'complete' });
+    const lines = { [Symbol.asyncIterator]: () => ({ next }), close: vi.fn(() => {
+      if (kind === 'cleanup') throw new Error('private cleanup');
+    }) };
+    fixtureMocks.childReadline.mockReset().mockReturnValue(lines);
+    const destroy = vi.spyOn(process.stdin, 'destroy').mockImplementation(() => process.stdin);
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { writes.push(String(chunk)); return true; });
+    try {
+      const childFunction: unknown = Reflect.get(rehearsal, 'lifecycleStreamChild');
+      if (typeof childFunction !== 'function') throw new Error('Missing real child');
+      const running = Reflect.apply(childFunction, undefined, []) as Promise<void>;
+      await vi.advanceTimersByTimeAsync(kind.startsWith('pending-') && kind !== 'pending-success' ? 0 : kind === 'poll' ? 5100 : 100);
+      await running;
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(commandComplete).toBe(['success', 'cleanup', 'pending-success'].includes(kind));
+      if (kind.startsWith('pending-') && !commandComplete) expect(Date.now()).toBe(started);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(writes.join('')).not.toMatch(/private|10000000|10800000/);
+      expect(writes.join('')).not.toContain(owner.token);
+      return writes;
+    } finally { destroy.mockRestore(); output.mockRestore(); process.exitCode = exitCode; }
+  }
+  it.each(['input', 'path-error', 'symlink', 'item-exists', 'early-response', 'request-error', 'poll', 'size', 'entries', 'entry-name', 'file-symlink'])(
+    'captures real child %s failure and replays its exact IPC into the real parent', async (kind) => {
+      const emitted = await realChild(kind);
+      expect(emitted).toHaveLength(1);
+      const record = JSON.parse(emitted[0]!) as Record<string, unknown>;
+      expect(record.failed).toBe(true);
+      expect(typeof record.phase).toBe('string'); expect(typeof record.cause).toBe('string');
+      const expected: Record<string, [string, string]> = {
+        input: ['input', 'refusal'], 'path-error': ['ancestors', 'exception'], symlink: ['ancestors', 'refusal'],
+        'item-exists': ['item-absence', 'refusal'], 'early-response': ['file-poll', 'early-response'],
+        'request-error': ['file-poll', 'request-error'], poll: ['ready-check', 'refusal'],
+        size: ['file-poll', 'refusal'], entries: ['file-poll', 'refusal'], 'entry-name': ['file-poll', 'refusal'],
+        'file-symlink': ['file-poll', 'refusal'],
+      };
+      expect([record.phase, record.cause]).toEqual(expected[kind]);
+      expect(emitted.join('')).not.toMatch(/private|10000000|10800000/);
+      const c = child();
+      c.write.mockImplementation(() => { queueMicrotask(() => { for (const line of emitted) c.stdout.emit('data', Buffer.from(line)); }); return true; });
+      const operation = vi.fn();
+      const error = await rejected(withLifecycleLateUpload(owner, value, operation));
+      const text = detail(error);
+      expect(text).toContain(`"childPhase":"${String(record.phase)}"`);
+      expect(text).toContain(`"childCause":"${String(record.cause)}"`);
+      expect(operation).not.toHaveBeenCalled();
+    });
+  it('replays byte-identical real child success IPC without diagnostic output', async () => {
+    const emitted = await realChild('success');
+    const bodyBytes = Buffer.byteLength('{"statusCode":"403","code":"AccessDenied","error":"Unauthorized","message":"Not available"}');
+    expect(emitted).toEqual(['{"stage":"ready","partialBytes":2}\n',
+      `{"stage":"settled","status":400,"bodyBytes":${bodyBytes},"denied":true,"failed":false}\n`]);
+    const c = child();
+    c.write.mockImplementation(() => { queueMicrotask(() => c.stdout.emit('data', Buffer.from(emitted[0]!))); return true; });
+    c.end.mockImplementation((command: string) => {
+      queueMicrotask(() => { c.stdout.emit('data', Buffer.from(emitted[1]!)); c.proc.emit('close', 0); });
+      expect(command).toBe('complete\n');
+    });
+    await withLifecycleLateUpload(owner, value, async () => {});
+    expect(detail(undefined)).toBe('');
+  });
+  it('keeps post-ready child cleanup failure a failed settlement with the first child class', async () => {
+    const emitted = await realChild('cleanup'), c = child(), operation = vi.fn();
+    expect(emitted).toHaveLength(2);
+    expect(JSON.parse(emitted[1]!)).toMatchObject({ phase: 'cleanup', cause: 'cleanup', failed: true });
+    c.write.mockImplementation(() => { queueMicrotask(() => c.stdout.emit('data', Buffer.from(emitted[0]!))); return true; });
+    c.end.mockImplementation((command: string) => {
+      queueMicrotask(() => {
+        if (command === 'complete\n') c.stdout.emit('data', Buffer.from(emitted[1]!));
+        c.proc.emit('close', 1);
+      });
+    });
+    const text = detail(await rejected(withLifecycleLateUpload(owner, value, operation)));
+    expect(operation).toHaveBeenCalledOnce();
+    expect(text).toContain('"childPhase":"cleanup","childCause":"cleanup"');
+  });
+  it('pending-thumbnail mode is selected by the real I10b caller after the original pair and pending main uploads', async () => {
+    const items: Record<string, unknown>[] = [], images: Record<string, unknown>[] = [], uploads: string[] = [];
+    const events: string[] = [], stopped = new Error('private hook stop');
+    const record = (input: unknown): Record<string, unknown> => {
+      if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Unexpected fixture shape');
+      return input as Record<string, unknown>;
+    };
+    const request = vi.fn(async (token: string, route: string, options: { method?: string; body?: unknown } = {}) => {
+      expect(token).toBe(owner.token);
+      if (route === '/rest/v1/rpc/reserve_item_save') {
+        const body = record(options.body);
+        const item: Record<string, unknown> = { ...record(body.p_item), owner_id: owner.uid, version: 1, deleted_at: null };
+        const image = { ...record(body.p_image), owner_id: owner.uid, item_id: item.id, description_version: 1, retired_at: null };
+        items.push(item); images.push(image); events.push('reserve-original');
+        return { ok: true, status: 200, data: [{ fingerprint: 'a'.repeat(64), state: 'reserved', item, image }] };
+      }
+      if (route.startsWith('/rest/v1/items?')) return { ok: true, status: 200, data: [items.at(-1)] };
+      if (route.startsWith('/rest/v1/item_images?')) return { ok: true, status: 200, data: [images.at(-1)] };
+      if (route.startsWith('/storage/v1/object/wardrobe/') && options.method === 'POST') {
+        uploads.push(route); events.push('upload'); return { ok: true, status: 200, data: {} };
+      }
+      if (route === '/rest/v1/rpc/finalize_item_save') {
+        events.push('finalize-original'); return { ok: true, status: 204, data: null };
+      }
+      if (route === '/rest/v1/rpc/reserve_image_change') {
+        const intent = record(record(options.body).p_intent);
+        events.push('reserve-replacement');
+        return { ok: true, status: 200, data: { completedVersion: null, fingerprint: 'b'.repeat(64),
+          imageId: intent.imageId, itemId: intent.itemId, kind: 'replacement', requestId: intent.requestId, state: 'reserved' } };
+      }
+      throw new Error('Unexpected ordinary-client operation');
+    });
+    fixtureMocks.saveClients.mockResolvedValueOnce({ client: { request }, owners: [owner] });
+    const hook = vi.fn(async (actualOwner: unknown, actual: typeof value, operation: unknown, precondition: unknown) => {
+      expect(actualOwner).toBe(owner); expect(typeof operation).toBe('function');
+      expect(precondition).toBe('pending-thumb-absent');
+      expect(events).toEqual(['reserve-original', 'upload', 'upload', 'finalize-original', 'reserve-replacement', 'upload']);
+      expect(uploads).toEqual([
+        `/storage/v1/object/wardrobe/${owner.uid}/${actual.p_item.id}/${images[0]!.id}/thumb.jpg`,
+        `/storage/v1/object/wardrobe/${owner.uid}/${actual.p_item.id}/${images[0]!.id}/main.jpg`,
+        `/storage/v1/object/wardrobe/${owner.uid}/${actual.p_item.id}/${actual.p_image.id}/main.jpg`,
+      ]);
+      expect(actual.p_image.id).not.toBe(images[0]!.id);
+      throw stopped;
+    });
+    await expect(imageDeletionCases({}, { withLifecycleLateUpload: hook })).rejects.toBe(stopped);
+    expect(hook).toHaveBeenCalledOnce();
+  });
+  it.each([undefined, 'item-absent', 'pending-thumb-absent'] as const)(
+    'pending-thumbnail selector preserves exact serialized stdin and token-only channel for %s', async (precondition) => {
+      const c = child();
+      await withLifecycleLateUpload(owner, value, vi.fn(), precondition);
+      const expected = JSON.stringify({ ...childInput, ...(precondition === 'pending-thumb-absent' ? { precondition } : {}) }) + '\n';
+      expect(c.write).toHaveBeenCalledExactlyOnceWith(expected);
+      expect(c.end).toHaveBeenCalledExactlyOnceWith('complete\n');
+      expect(JSON.stringify(fixtureMocks.spawn.mock.calls)).not.toContain(owner.token);
+    });
+  it.each([null, false, 0, '', 'pending-thumb', 'private mode', {}, ['pending-thumb-absent']])(
+    'pending-thumbnail selector refuses invalid parent mode before commands %#', async (precondition) => {
+      child();
+      const operation = vi.fn();
+      await expect(withLifecycleLateUpload(owner, value, operation, precondition)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(fixtureMocks.requireDocker).not.toHaveBeenCalled();
+      expect(fixtureMocks.runCommand).not.toHaveBeenCalled(); expect(fixtureMocks.spawn).not.toHaveBeenCalled();
+      expect(operation).not.toHaveBeenCalled();
+    });
+  it('pending-thumbnail mode replays real child readiness and success without touching sibling paths', async () => {
+    const emitted = await realChild('pending-success', { ...childInput, precondition: 'pending-thumb-absent' });
+    const bodyBytes = Buffer.byteLength('{"statusCode":"403","code":"AccessDenied","error":"Unauthorized","message":"Not available"}');
+    expect(emitted).toEqual(['{"stage":"ready","partialBytes":2}\n',
+      `{"stage":"settled","status":400,"bodyBytes":${bodyBytes},"denied":true,"failed":false}\n`]);
+    const item = `/mnt/stub/stub/wardrobe/${owner.uid}/${value.p_item.id}`, image = item + '/' + value.p_image.id;
+    const target = image + '/thumb.jpg';
+    expect(fixtureMocks.childLstat.mock.calls.map(([name]) => name)).toEqual([
+      '/mnt', '/mnt/stub', '/mnt/stub/stub', '/mnt/stub/stub/wardrobe', `/mnt/stub/stub/wardrobe/${owner.uid}`,
+      item, image, target, item, image, target, target + '/10000000-0000-4000-8000-000000000009',
+    ]);
+    expect(fixtureMocks.childReaddir).toHaveBeenCalledExactlyOnceWith(target);
+    expect(fixtureMocks.childRequest).toHaveBeenCalledOnce();
+    const c = child(), operation = vi.fn(async () => {
+      expect(c.write).toHaveBeenCalledOnce(); expect(c.end).not.toHaveBeenCalled();
+    });
+    c.write.mockImplementation(() => {
+      expect(operation).not.toHaveBeenCalled();
+      queueMicrotask(() => c.stdout.emit('data', Buffer.from(emitted[0]!))); return true;
+    });
+    c.end.mockImplementation((command: string) => {
+      expect(operation).toHaveBeenCalledOnce(); expect(command).toBe('complete\n');
+      queueMicrotask(() => { c.stdout.emit('data', Buffer.from(emitted[1]!)); c.proc.emit('close', 0); });
+    });
+    await withLifecycleLateUpload(owner, value, operation, 'pending-thumb-absent');
+    expect(operation).toHaveBeenCalledOnce(); expect(detail(undefined)).toBe('');
+  });
+  it.each([
+    ['item-missing', 'ancestors', 'refusal'], ['image-missing', 'ancestors', 'refusal'],
+    ['item-file', 'ancestors', 'refusal'], ['image-file', 'ancestors', 'refusal'],
+    ['item-symlink', 'ancestors', 'refusal'], ['image-symlink', 'ancestors', 'refusal'],
+    ['item-error', 'ancestors', 'exception'], ['image-error', 'ancestors', 'exception'],
+    ['target-directory', 'target-absence', 'refusal'], ['target-file', 'target-absence', 'refusal'],
+    ['target-symlink', 'target-absence', 'refusal'], ['target-error', 'target-absence', 'exception'],
+  ])('pending-thumbnail mode refuses %s before HTTP and replays the first failed IPC', async (kind, phase, cause) => {
+    const emitted = await realChild('pending-' + kind, { ...childInput, precondition: 'pending-thumb-absent' });
+    expect(emitted).toEqual([JSON.stringify({ stage: 'settled', status: null, bodyBytes: 0, denied: false, failed: true, phase, cause }) + '\n']);
+    expect(fixtureMocks.childRequest).not.toHaveBeenCalled(); expect(fixtureMocks.childReaddir).not.toHaveBeenCalled();
+    const c = child(), operation = vi.fn();
+    c.write.mockImplementation(() => { queueMicrotask(() => c.stdout.emit('data', Buffer.from(emitted[0]!))); return true; });
+    const error = await rejected(withLifecycleLateUpload(owner, value, operation, 'pending-thumb-absent'));
+    const text = detail(error);
+    expect(text).toContain(`"childPhase":"${phase}","childCause":"${cause}"`);
+    expect(text).not.toMatch(/private|10000000|10800000/); expect(text).not.toContain(owner.token);
+    expect(operation).not.toHaveBeenCalled(); expect(c.end).toHaveBeenCalledWith('cancel\n');
+  });
+  it.each([
+    { ...childInput, precondition: 'item-absent' }, { ...childInput, precondition: 'private mode' },
+    { ...childInput, precondition: null }, { ...childInput, precondition: 'pending-thumb-absent', extra: true },
+    { ...childInput, extra: true }, { ...childInput, image: undefined, precondition: 'pending-thumb-absent' },
+    { ...childInput, precondition: 'pending-thumb-absent', item: owner.uid },
+    { ...childInput, precondition: 'pending-thumb-absent', token: 'private token!' },
+    { ...childInput, precondition: 'pending-thumb-absent', token: 'a'.repeat(4097) },
+  ])('pending-thumbnail child rejects invalid extended input shape or bounds before FS/HTTP %#', async (input) => {
+    const emitted = await realChild('pending-input', input);
+    expect(emitted).toEqual(['{"stage":"settled","status":null,"bodyBytes":0,"denied":false,"failed":true,"phase":"input","cause":"refusal"}\n']);
+    expect(fixtureMocks.childLstat).not.toHaveBeenCalled();
+    expect(fixtureMocks.childRequest).not.toHaveBeenCalled(); expect(fixtureMocks.childReaddir).not.toHaveBeenCalled();
+  });
+  it('pending-thumbnail extended maximum token payload stays within the unchanged stdin cap', async () => {
+    const token = owner.token + 'a'.repeat(4096 - owner.token.length);
+    const input = { ...childInput, token, precondition: 'pending-thumb-absent' };
+    const serialized = JSON.stringify(input) + '\n';
+    expect(Buffer.byteLength(serialized)).toBe(4287);
+    expect(Buffer.byteLength(serialized)).toBeLessThanOrEqual(8192);
+    const emitted = await realChild('pending-success', input);
+    expect(emitted).toHaveLength(2); expect(emitted.join('')).not.toContain(input.token);
+    expect(fixtureMocks.childRequest).toHaveBeenCalledOnce();
+    const c = child();
+    await withLifecycleLateUpload({ ...owner, token }, value, vi.fn(), 'pending-thumb-absent');
+    expect(c.write).toHaveBeenCalledExactlyOnceWith(serialized);
+    expect(JSON.stringify(fixtureMocks.spawn.mock.calls)).not.toContain(token);
+  });
+  it.each([new Error('Private primary'), undefined, null, false, 0, ''])(
+    'pending-thumbnail mode preserves the exact/falsy primary through cancellation cleanup %#', async (primary) => {
+      const c = child(undefined, { value: new Error('Private secondary') });
+      const result = await withLifecycleLateUpload(owner, value, async () => { throw primary; }, 'pending-thumb-absent')
+        .then(() => ({ rejected: false, value: null }), (value: unknown) => ({ rejected: true, value }));
+      expect(result).toEqual({ rejected: true, value: primary }); expect(c.end).toHaveBeenCalledWith('cancel\n');
+  });
+  it('keeps child diagnostics self-contained and IPC below the existing combined cap', async () => {
+    const source = await read('scripts/preservation-rehearsal.mjs');
+    const body = source.slice(source.indexOf('export async function lifecycleStreamChild()'), source.indexOf('export async function withLifecycleLateUpload('));
+    expect(body.includes('const phases =')).toBe(true);
+    expect(body.includes('const causes =')).toBe(true);
+    expect(body).not.toContain('lifecycleFailureDetail');
+    expect(body).not.toMatch(/\b(?:LIFECYCLE_|lifecycleFirst|lifecycleLabel|lifecycleActive|lifecycleInteger)/);
+    const labels = (text: string, name: string) => {
+      const declaration = text.match(new RegExp(`const ${name} = (?:Object.freeze\\()?\\[([^\\]]+)\\]`))?.[1];
+      if (!declaration) throw new Error('Missing closed labels');
+      return [...declaration.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+    };
+    const phases = labels(body, 'phases'), causes = labels(body, 'causes');
+    expect(phases).toEqual(labels(source, 'LIFECYCLE_CHILD_PHASES'));
+    expect(phases).toContain('target-absence');
+    expect(causes).toEqual(labels(source, 'LIFECYCLE_CHILD_CAUSES'));
+    const ready = '{"stage":"ready","partialBytes":2}\n';
+    let maximum = 0;
+    for (const phase of [...phases, 'OTHER']) for (const cause of [...causes, 'OTHER'])
+      for (const status of [100, 599, null]) for (const bodyBytes of [0, 1024, 4096, null]) {
+        const settled = JSON.stringify({ stage: 'settled', status, bodyBytes, denied: false, failed: true, phase, cause }) + '\n';
+        maximum = Math.max(maximum, Buffer.byteLength(ready + settled));
+      }
+    expect(maximum).toBeLessThanOrEqual(1024);
+    expect(maximum).toBeGreaterThan(150);
+    expect(maximum).toBe(168);
+    expect(body.includes('}, 15_000);')).toBe(true);
+    expect(body.includes('attempt < 100 && Date.now() - started < 5000')).toBe(true);
+    expect(body.includes('setTimeout(resolve, 50)')).toBe(true);
+    expect(body.includes('Buffer.byteLength(input.value) <= 8192')).toBe(true);
+    expect(body.includes('bytes > 4096')).toBe(true);
+    expect(source).toContain('requireEvidence(outputBytes <= 1024);');
+    expect(source).toContain("=== 'bodyBytes,denied,failed,stage,status'");
+    expect(source).toContain("child.stdin.on('error', () => fail('stdin-error'));");
+    expect(source).toContain("child.stderr.on('data', () => fail('stderr'));");
+    expect(new Set([...body.matchAll(/\bfs\.(\w+)/g)].map((match) => match[1]))).toEqual(new Set(['lstat', 'readdir']));
+  });
+});
+
+describe('I10b deletion callback evidence (real caller, mocked client/lock/child)', () => {
+  const owner = { uid: '10000000-0000-4000-8000-000000000001', token: 'private-owner-token' };
+  const other = { uid: '10000000-0000-4000-8000-000000000002', token: 'private-peer-token' };
+  type Row = Record<string, unknown>;
+  type Step = { name: string; reply?: unknown };
+  type Fault = { at: string; occurrence?: number; value?: unknown; reply?: unknown; reason?: string };
+  const conflict = { ok: false, status: 400, data: { code: '22023', details: null, hint: null, message: 'Request conflict' } };
+  const removed = { ok: true, status: 200, data: { message: 'Successfully deleted' } };
+  const refused = { ok: false, status: 400, data: { code: 'AccessDenied', message: 'private-response-message' } };
+  const record = (value: unknown): Row => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Unexpected mock record');
+    return value as Row;
+  };
+  beforeEach(() => {
+    fixtureMocks.saveClients.mockReset();
+    vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Unexpected network'); }));
+  });
+  afterEach(() => {
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    vi.unstubAllGlobals(); vi.restoreAllMocks();
+  });
+  function fixture(fault?: Fault, twoOwners = false) {
+    const labels: string[] = [], events: string[] = [], cleanup: string[] = [], expected: Step[] = [];
+    const failureLabels: (string | undefined)[] = [];
+    const counts = new Map<string, number>(), originals: { item: Row; image: Row }[] = [];
+    let cursor = 0, pending: Row = {}, transport = Buffer.alloc(0), callback = false;
+    const mark = vi.fn((label: string) => { labels.push(label); });
+    const visit = (name: string, reply?: unknown, onFailure?: (reason: string) => void) => {
+      events.push(name);
+      const count = (counts.get(name) ?? 0) + 1; counts.set(name, count);
+      if (fault?.at === name && count === (fault.occurrence ?? 1)) {
+        if (Object.hasOwn(fault, 'reply')) return fault.reply;
+        if (fault.reason !== undefined) onFailure?.(fault.reason);
+        failureLabels.push(labels.at(-1));
+        throw fault.value;
+      }
+      return reply;
+    };
+    const take = (name: string, onFailure?: (reason: string) => void) => {
+      const step = expected[cursor++];
+      expect(step?.name).toBe(name);
+      return visit(name, step?.reply, onFailure);
+    };
+    const request = vi.fn(async (token: string, route: string, options: { method?: string; body?: unknown; onFailure?: (reason: string) => void } = {}) => {
+      if (twoOwners && callback && route === '/rest/v1/rpc/reserve_item_save') {
+        expect(token).toBe(other.token);
+        return visit('next-owner:reserve');
+      }
+      expect(token).toBe(owner.token);
+      const method = options.method ?? 'GET';
+      if (callback) {
+        const name = route.startsWith('/rest/v1/rpc/') ? 'raw:' + route.split('/').at(-1)
+          : route.startsWith('/rest/v1/items?') ? (method === 'DELETE' ? 'raw:delete-item' : 'read:item')
+          : route.startsWith('/rest/v1/item_images?') ? 'read:image'
+          : route.startsWith('/storage/v1/object/authenticated/') ? 'raw:download'
+          : route === '/rest/v1/items' ? 'raw:reinsert' : 'raw:storage-' + method;
+        return take(name, options.onFailure);
+      }
+      if (route === '/rest/v1/rpc/reserve_item_save') {
+        const body = record(options.body), item: Row = { ...record(body.p_item), owner_id: owner.uid, version: 1, deleted_at: null };
+        const image: Row = { ...record(body.p_image), owner_id: owner.uid, item_id: item.id,
+          description_version: 1, retired_at: null, state: 'ready' };
+        originals.push({ item, image });
+        return visit('setup:reserve', { ok: true, status: 200, data: [{ fingerprint: 'a'.repeat(64), state: 'reserved', item, image }] });
+      }
+      if (route.startsWith('/rest/v1/items?')) return visit('setup:read-item', { ok: true, data: [originals.at(-1)!.item] });
+      if (route.startsWith('/rest/v1/item_images?')) return visit('setup:read-image', { ok: true, data: [originals.at(-1)!.image] });
+      if (route.startsWith('/storage/v1/object/wardrobe/') && method === 'POST') {
+        expect(options.body).toBeInstanceOf(Uint8Array);
+        transport = Buffer.from(options.body as Uint8Array);
+        return visit('setup:upload', { ok: true, status: 200, data: {} });
+      }
+      if (route === '/rest/v1/rpc/finalize_item_save') return visit('setup:finalize', { ok: true, status: 204, data: null });
+      if (route === '/rest/v1/rpc/reserve_image_change') {
+        pending = record(record(options.body).p_intent);
+        return visit('setup:replacement', { ok: true, status: 200, data: { completedVersion: null,
+          fingerprint: 'b'.repeat(64), imageId: pending.imageId, itemId: pending.itemId,
+          kind: 'replacement', requestId: pending.requestId, state: 'reserved' } });
+      }
+      throw new Error('Unexpected setup request');
+    });
+    const rpc = vi.fn(async (actual: unknown, name: string) => { expect(actual).toBe(owner); return take('rpc:' + name); });
+    const client = { request, rpc };
+    fixtureMocks.saveClients.mockImplementation(async () => visit('setup:clients', { client, owners: twoOwners ? [owner, other] : [owner] }));
+    const plan = () => {
+      const base = originals[0]!, unaffected = originals[1]!;
+      const item = { ...base.item, version: 2, deleted_at: 'synthetic-trash' }, image = { id: pending.imageId };
+      const prepared = { phase: 'preparing' }, operation = { phase: 'prepared', targetCount: 4, inventoryHash: 'c'.repeat(64) };
+      const begun = { phase: 'removing_registered', begin: { version: 3 } };
+      const add = (name: string, reply?: unknown) => { expected.push({ name, reply }); };
+      const readItem = (row: Row) => add('read:item', { ok: true, data: [row] });
+      const readImage = (row: Row) => add('read:image', { ok: true, data: [row] });
+      const download = () => add('raw:download', { ok: true, status: 200, data: transport });
+      add('child:admit');
+      add('rpc:set_item_trashed', [{ ...item }]);
+      add('rpc:item_deletion_status', [{ version: 2, image_manifest_sha256: 'd'.repeat(64) }]);
+      add('lock:owner share:admit'); add('raw:prepare_item_deletion', conflict);
+      add('rpc:item_deletion_operation_status', null); add('lock:owner share:release');
+      add('rpc:prepare_item_deletion', prepared); add('rpc:prepare_item_deletion', prepared);
+      add('raw:authorize_item_deletion', conflict);
+      add('rpc:inventory_item_deletion', prepared); add('rpc:inventory_item_deletion', operation);
+      readItem(item); readImage(image); add('lock:owner no key update:admit');
+      download(); download(); add('raw:set_item_trashed', conflict);
+      add('raw:storage-DELETE', refused); add('raw:storage-DELETE', refused);
+      download(); download(); readItem(item); readImage(image); readItem(unaffected.item); readImage(unaffected.image);
+      add('lock:owner no key update:release'); add('rpc:item_deletion_operation_status', operation);
+      add('lock:deletion update:admit'); add('raw:authorize_item_deletion', conflict);
+      add('rpc:item_deletion_operation_status', operation); add('rpc:image_change_status', { state: 'reserved' });
+      add('lock:deletion update:release'); readItem(item); readImage(image);
+      add('rpc:authorize_item_deletion', { phase: 'authorized' });
+      add('raw:cancel_item_deletion_preparation', conflict); add('rpc:image_change_status', { state: 'cancelled' });
+      for (const phase of ['pending', 'registered']) {
+        for (let n = 0; n < 2; n++) {
+          const ordinal = (phase === 'pending' ? 1 : 3) + n;
+          const target = { ordinal, path: `${owner.uid}/${base.item.id}/${phase === 'pending' ? pending.imageId : base.image.id}/${n ? 'thumb' : 'main'}.jpg` };
+          add('rpc:item_deletion_next_target', target); add('rpc:item_deletion_next_target', target);
+          add('raw:storage-DELETE', removed);
+          const reconciled = { ordinal, state: 'reconciled_absent' };
+          add('rpc:reconcile_item_deletion_target', reconciled); add('rpc:reconcile_item_deletion_target', reconciled);
+        }
+        add('rpc:item_deletion_next_target', null);
+        if (phase === 'pending') {
+          add('rpc:begin_prepared_item_deletion', begun); add('rpc:begin_prepared_item_deletion', begun);
+          add('read:image', { ok: true, data: [] }); add('raw:finish_item_deletion', conflict);
+        }
+      }
+      add('rpc:finish_item_deletion', [{ state: 'completed' }]); add('rpc:finish_item_deletion', [{ state: 'absent' }]);
+      add('rpc:item_deletion_operation_status', { phase: 'completed', inventoryHash: null, begin: null, targetCount: 0 });
+      add('rpc:item_deletion_operation_status', null); add('read:item', { ok: true, data: [] });
+      add('raw:reinsert', refused); add('raw:storage-POST', refused);
+      add('child:settle'); add('prefix:empty'); add('raw:download', refused); add('raw:download', refused);
+      add('raw:storage-DELETE', removed); add('raw:storage-DELETE', removed);
+      add('raw:delete-item', { ok: true });
+    };
+    const lock = vi.fn(async (uid: string, item: string, mode: string, operation: () => Promise<void>) => {
+      expect(uid).toBe(owner.uid); expect(item).toBe(originals[0]!.item.id);
+      take(`lock:${mode}:admit`);
+      try { await operation(); take(`lock:${mode}:release`); }
+      finally { cleanup.push('lock:' + mode); }
+    });
+    const child = vi.fn(async (actual: unknown, value: { p_item: Row; p_image: Row }, operation: () => Promise<void>, mode: string) => {
+      expect(actual).toBe(owner); expect(value.p_item.id).toBe(originals[0]!.item.id);
+      expect(value.p_image.id).toBe(pending.imageId); expect(mode).toBe('pending-thumb-absent');
+      callback = true; plan(); take('child:admit');
+      try { await operation(); take('child:settle'); }
+      finally { cleanup.push('child'); }
+    });
+    const prefix = vi.fn(async () => { take('prefix:empty'); });
+    const run = (marked = true) => imageDeletionCases({}, { withLifecycleLateUpload: child,
+      withLifecycleParentLock: lock, requireLifecyclePrefixEmpty: prefix, ...(marked ? { mark } : {}) });
+    const privacy = () => {
+      const text = labels.join('|');
+      for (const secret of [owner.uid, owner.token, other.uid, other.token, 'private', '/storage/', ...originals.flatMap(({ item, image }) => [item.id, image.id]),
+        pending.requestId, pending.imageId]) if (typeof secret === 'string') expect(text).not.toContain(secret);
+    };
+    return { run, mark, labels, events, cleanup, expected, request, rpc, privacy, failureLabels, get cursor() { return cursor; } };
+  }
+  const requestReasons = ['status5xx-500', 'status5xx-503', 'status5xx-OTHER', 'body-on-204',
+    'no-body-400', 'no-body-OTHER', 'overflow', 'nonjson-400', 'nonjson-OTHER'];
+  it.each(requestReasons.flatMap((reason) => [1, 2].map((occurrence) => ({ reason, occurrence }))))(
+    'CI12 observes passed request hook before exact rejection at held DELETE $occurrence/$reason', async ({ reason, occurrence }) => {
+      const primary = new Error('private response/token/path/body');
+      const f = fixture({ at: 'raw:storage-DELETE', occurrence, reason, value: primary });
+      await expect(f.run()).rejects.toBe(primary);
+      const label = `owner-lock-delete-${reason}`;
+      expect(f.labels.at(-1)).toBe(label);
+      expect(f.failureLabels).toEqual([label]);
+      expect(f.labels.slice(-2)).toEqual(['owner-lock-delete', label]);
+      expect(f.events.at(-1)).toBe('raw:storage-DELETE');
+      expect(f.events.filter((event) => event === 'raw:storage-DELETE')).toHaveLength(occurrence);
+      expect(f.cursor).toBe(f.expected.findIndex(({ name }) => name === 'raw:storage-DELETE') + occurrence);
+      expect(f.cleanup).toEqual(['lock:owner share', 'lock:owner no key update', 'child']);
+      expect(f.events).not.toContain('lock:owner no key update:release');
+      expect(f.events).not.toContain('child:settle');
+      expect(label).not.toContain('owner-lock-delete-result-');
+      expect(label).toMatch(/^owner-lock-delete-(?:status5xx-(?:500|503|OTHER)|body-on-204|no-body-(?:400|OTHER)|overflow|nonjson-(?:400|OTHER))$/);
+      expect(label.length).toBeLessThanOrEqual(35);
+      f.privacy();
+  });
+  it.each([undefined, null, false, 0, ''].flatMap((value) => [1, 2].map((occurrence) => ({ value, occurrence }))))(
+    'CI12 retains falsy hook rejection and cleanup %#', async ({ value, occurrence }) => {
+      const f = fixture({ at: 'raw:storage-DELETE', occurrence, reason: 'overflow', value });
+      await expect(f.run()).rejects.toBe(value);
+      expect(f.failureLabels).toEqual(['owner-lock-delete-overflow']);
+      expect(f.labels.at(-1)).toBe('owner-lock-delete-overflow');
+      expect(f.events.at(-1)).toBe('raw:storage-DELETE');
+      expect(f.cleanup).toEqual(['lock:owner share', 'lock:owner no key update', 'child']); f.privacy();
+  });
+  it.each([1, 2])('CI12 leaves a request rejection without a hook unclassified at occurrence %s', async (occurrence) => {
+    const primary = new Error('private unknown failure'), f = fixture({ at: 'raw:storage-DELETE', occurrence, value: primary });
+    await expect(f.run()).rejects.toBe(primary);
+    expect(f.failureLabels).toEqual(['owner-lock-delete']);
+    expect(f.labels.at(-1)).toBe('owner-lock-delete');
+    expect(f.events.at(-1)).toBe('raw:storage-DELETE'); f.privacy();
+  });
+  it.each(requestReasons)('CI12 preserves default-noop observation with an actual mocked hook fault %s', async (reason) => {
+    const primary = new Error('private failure'), f = fixture({ at: 'raw:storage-DELETE', reason, value: primary });
+    await expect(f.run(false)).rejects.toBe(primary);
+    expect(f.labels).toEqual([]); expect(f.failureLabels).toEqual([undefined]);
+    expect(f.events.at(-1)).toBe('raw:storage-DELETE');
+    expect(f.cleanup).toEqual(['lock:owner share', 'lock:owner no key update', 'child']);
+  });
+  it('CI12 adds observation only to both held DELETE requests without changing success ordering', async () => {
+    const f = fixture(); await f.run();
+    const hooks = f.request.mock.calls.filter(([, , options]) => options?.onFailure !== undefined);
+    expect(hooks.map(([, , options]) => options?.method)).toEqual(['POST', 'DELETE', 'DELETE']);
+    const observed = hooks.filter(([, , options]) => options?.method === 'DELETE');
+    expect(observed).toHaveLength(2);
+    for (const [, , options] of observed) {
+      expect(options?.method).toBe('DELETE');
+      expect(Object.keys(options!).sort()).toEqual(['method', 'onFailure']);
+    }
+    expect(f.events.slice(f.events.indexOf('child:admit'))).toEqual(f.expected.map(({ name }) => name));
+    expect(f.events.filter((event) => event === 'rpc:reconcile_item_deletion_target')).toHaveLength(8);
+    expect(f.failureLabels).toEqual([]);
+    expect(f.labels.filter((label) => label.startsWith('owner-lock-delete-result-'))).toHaveLength(2);
+    const unmarked = fixture(); await unmarked.run(false);
+    expect(unmarked.events).toEqual(f.events); expect(unmarked.labels).toEqual([]); f.privacy();
+  });
+  it('CI12 does not await the held DELETE failure observation', async () => {
+    const primary = new Error('private failure'), f = fixture({ at: 'raw:storage-DELETE', reason: 'overflow', value: primary });
+    f.mark.mockImplementation((label: string) => { f.labels.push(label); return new Promise<void>(() => {}); });
+    await expect(f.run()).rejects.toBe(primary);
+    expect(f.failureLabels).toEqual(['owner-lock-delete-overflow']);
+    expect(f.labels.at(-1)).toBe('owner-lock-delete-overflow'); f.privacy();
+  });
+  it('retains the original successful operation order and four target dispatches, with and without mark', async () => {
+    const f = fixture(); await f.run();
+    expect(f.cursor).toBe(f.expected.length);
+    expect(f.events.slice(f.events.indexOf('child:admit'))).toEqual(f.expected.map(({ name }) => name));
+    expect(f.events.filter((e) => e === 'raw:storage-DELETE')).toHaveLength(8); // Two held refusals, four targets, two unaffected cleanup.
+    expect(f.events.filter((e) => e === 'rpc:reconcile_item_deletion_target')).toHaveLength(8);
+    expect(f.events.filter((e) => e === 'setup:upload')).toHaveLength(5);
+    expect(f.cleanup).toEqual(['lock:owner share', 'lock:owner no key update', 'lock:deletion update', 'child']);
+    expect(f.labels.at(-1)).toBe('unaffected-delete-item');
+    expect(f.labels).toContain('pending-remove-result-200-OTHER');
+    expect(f.labels).toContain('registered-remove-result-200-OTHER');
+    f.privacy();
+    const unmarked = fixture(); await unmarked.run(false);
+    expect(unmarked.labels).toEqual([]); expect(unmarked.events).toEqual(f.events); expect(unmarked.cleanup).toEqual(f.cleanup);
+  });
+  const boundaries = [
+    ['setup:clients', 1, 'entry'], ['setup:reserve', 1, 'owner-create'], ['setup:reserve', 2, 'unaffected-create'],
+    ['setup:replacement', 1, 'pending-reserve'], ['setup:upload', 5, 'pending-upload'],
+    ['child:admit', 1, 'child-admit'], ['rpc:set_item_trashed', 1, 'trash'],
+    ['rpc:item_deletion_status', 1, 'preview'],
+    ['lock:owner share:admit', 1, 'prepare-lock-admit'], ['raw:prepare_item_deletion', 1, 'prepare-lock-call'],
+    ['rpc:item_deletion_operation_status', 1, 'prepare-lock-status'], ['lock:owner share:release', 1, 'prepare-lock-release'],
+    ['rpc:prepare_item_deletion', 1, 'prepare'], ['rpc:prepare_item_deletion', 2, 'prepare-replay'],
+    ['raw:authorize_item_deletion', 1, 'authorize-bad-hash'], ['rpc:inventory_item_deletion', 2, 'inventory'],
+    ['read:item', 1, 'freeze-item'], ['read:image', 1, 'freeze-pending'],
+    ['lock:owner no key update:admit', 1, 'owner-lock-admit'], ['raw:download', 1, 'unaffected-read'],
+    ['raw:set_item_trashed', 1, 'owner-lock-trash'], ['raw:storage-DELETE', 1, 'owner-lock-delete'],
+    ['read:item', 2, 'owner-lock-item'], ['read:image', 2, 'owner-lock-pending'],
+    ['read:item', 3, 'owner-lock-unaffected-item'], ['read:image', 3, 'owner-lock-unaffected-image'],
+    ['lock:owner no key update:release', 1, 'owner-lock-release'],
+    ['rpc:item_deletion_operation_status', 2, 'owner-lock-status'],
+    ['lock:deletion update:admit', 1, 'authorize-lock-admit'], ['raw:authorize_item_deletion', 2, 'authorize-lock-call'],
+    ['rpc:item_deletion_operation_status', 3, 'authorize-lock-status'],
+    ['rpc:image_change_status', 1, 'authorize-lock-reservation'], ['lock:deletion update:release', 1, 'authorize-lock-release'],
+    ['read:item', 4, 'after-lock-item'], ['read:image', 4, 'after-lock-pending'],
+    ['rpc:authorize_item_deletion', 1, 'authorize'], ['raw:cancel_item_deletion_preparation', 1, 'cancel-refusal'],
+    ['rpc:image_change_status', 2, 'cancelled-reservation'],
+    ['rpc:item_deletion_next_target', 1, 'pending-next'], ['rpc:item_deletion_next_target', 2, 'pending-next-replay'],
+    ['raw:storage-DELETE', 3, 'pending-remove'], ['rpc:reconcile_item_deletion_target', 1, 'pending-reconcile'],
+    ['rpc:reconcile_item_deletion_target', 2, 'pending-reconcile-replay'], ['rpc:item_deletion_next_target', 5, 'pending-empty'],
+    ['rpc:begin_prepared_item_deletion', 1, 'begin'], ['rpc:begin_prepared_item_deletion', 2, 'begin-replay'],
+    ['read:image', 5, 'pending-row-absent'],
+    ['raw:finish_item_deletion', 1, 'finish-premature'],
+    ['rpc:item_deletion_next_target', 6, 'registered-next'], ['raw:storage-DELETE', 5, 'registered-remove'],
+    ['rpc:reconcile_item_deletion_target', 5, 'registered-reconcile'], ['rpc:item_deletion_next_target', 10, 'registered-empty'],
+    ['rpc:finish_item_deletion', 1, 'finish'], ['rpc:finish_item_deletion', 2, 'finish-replay'],
+    ['rpc:item_deletion_operation_status', 4, 'terminal-status'], ['rpc:item_deletion_operation_status', 5, 'terminal-other-request'],
+    ['read:item', 5, 'item-absent'],
+    ['raw:reinsert', 1, 'reinsert-refusal'], ['raw:storage-POST', 1, 'late-post-refusal'],
+    ['child:settle', 1, 'child-settlement'], ['prefix:empty', 1, 'post-child-prefix'],
+    ['raw:download', 5, 'post-child-get'], ['raw:storage-DELETE', 7, 'unaffected-remove'],
+    ['raw:delete-item', 1, 'unaffected-delete-item'],
+  ] as const;
+  it.each(boundaries)('preserves exact seam failure and furthest boundary at %s/%s', async (at, occurrence, label) => {
+    const failure = new Error('private failure'), f = fixture({ at, occurrence, value: failure });
+    await expect(f.run()).rejects.toBe(failure);
+    expect(f.events.at(-1)).toBe(at); expect(f.labels.at(-1)).toBe(label);
+    expect(f.events.filter((e) => e === at)).toHaveLength(occurrence); f.privacy();
+    if (f.events.includes('child:admit') && at !== 'child:admit') expect(f.cleanup).toContain('child');
+    for (const mode of ['owner share', 'owner no key update', 'deletion update']) {
+      const admitted = f.events.includes(`lock:${mode}:admit`) && at !== `lock:${mode}:admit`;
+      expect(f.cleanup.includes('lock:' + mode)).toBe(admitted);
+    }
+    if (f.cursor) expect(f.events.slice(f.events.indexOf('child:admit'))).toEqual(f.expected.slice(0, f.cursor).map(({ name }) => name));
+  });
+  it.each([undefined, null, false, 0, ''])('does not replace falsy client or wrapper rejection %#', async (value) => {
+    for (const at of ['rpc:set_item_trashed', 'lock:owner share:release', 'child:settle', 'prefix:empty', 'raw:delete-item']) {
+      const f = fixture({ at, value });
+      const outcome = await f.run().then(() => ({ rejected: false, value: 'unexpected' }),
+        (value: unknown) => ({ rejected: true, value }));
+      expect(outcome).toEqual({ rejected: true, value }); expect(f.events.at(-1)).toBe(at); f.privacy();
+    }
+  });
+  it.each([
+    ['raw:prepare_item_deletion', 1, 'prepare-lock-result'], ['raw:authorize_item_deletion', 1, 'authorize-bad-hash-result'],
+    ['raw:download', 1, 'unaffected-read-result'], ['raw:set_item_trashed', 1, 'owner-lock-trash-result'],
+    ['raw:storage-DELETE', 1, 'owner-lock-delete-result'], ['raw:authorize_item_deletion', 2, 'authorize-lock-result'],
+    ['raw:cancel_item_deletion_preparation', 1, 'cancel-result'], ['raw:storage-DELETE', 3, 'pending-remove-result'],
+    ['raw:finish_item_deletion', 1, 'finish-premature-result'], ['raw:storage-DELETE', 5, 'registered-remove-result'],
+    ['raw:reinsert', 1, 'reinsert-result'], ['raw:storage-POST', 1, 'late-post-result'],
+    ['raw:download', 5, 'post-child-get-result'],
+  ] as const)('classifies held raw response before unchanged refusal at %s/%s', async (at, occurrence, label) => {
+    for (const [status, code, suffix] of [[200, '22023', '200-22023'], [599, 'private-code', 'OTHER-OTHER']] as const) {
+      const f = fixture({ at, occurrence, reply: { ok: true, status, data: { code, message: 'private-message', path: owner.uid } } });
+      await expect(f.run()).rejects.toThrow();
+      expect(f.events.at(-1)).toBe(at); expect(f.labels.at(-1)).toBe(`${label}-${suffix}`); f.privacy();
+    }
+  });
+  it.each([
+    ['rpc:prepare_item_deletion', 2, {}, 'prepare-replay'],
+    ['rpc:inventory_item_deletion', 2, { phase: 'private-phase', targetCount: 4 }, 'inventory-result'],
+    ['rpc:authorize_item_deletion', 1, { phase: 'private-phase' }, 'authorize-result'],
+    ['rpc:item_deletion_next_target', 1, null, 'pending-target'],
+    ['rpc:reconcile_item_deletion_target', 1, {}, 'pending-reconcile-result'],
+    ['rpc:begin_prepared_item_deletion', 1, { phase: 'wrong' }, 'begin-result'],
+    ['rpc:item_deletion_operation_status', 4, {}, 'terminal-result'],
+  ] as const)('retains RPC result assertions and private-free boundary at %s', async (at, occurrence, reply, label) => {
+    const f = fixture({ at, occurrence, reply });
+    await expect(f.run()).rejects.toThrow();
+    expect(f.events.at(-1)).toBe(at); expect(f.labels.at(-1)).toBe(label); f.privacy();
+  });
+  it('replaces prior invocation boundary before a fresh setup failure', async () => {
+    const first = fixture(); await first.run(); expect(first.labels.at(-1)).toBe('unaffected-delete-item');
+    const error = new Error('private setup'), second = fixture({ at: 'setup:clients', value: error });
+    await expect(second.run()).rejects.toBe(error);
+    expect(second.labels).toEqual(['entry']); expect(second.events).toEqual(['setup:clients']);
+  });
+  it('does not await the synchronous observation hook or leak response data through it', async () => {
+    const f = fixture();
+    f.mark.mockImplementation((label: string) => { f.labels.push(label); return new Promise<void>(() => {}); });
+    await f.run();
+    expect(f.cursor).toBe(f.expected.length); expect(f.labels.at(-1)).toBe('unaffected-delete-item'); f.privacy();
+  });
+  it('replaces a successful prior owner cleanup label before the next owner setup', async () => {
+    const error = new Error('private next-owner setup'), f = fixture({ at: 'next-owner:reserve', value: error }, true);
+    await expect(f.run()).rejects.toBe(error);
+    expect(f.cursor).toBe(f.expected.length); expect(f.labels.slice(-2)).toEqual(['unaffected-delete-item', 'owner-create']);
+    expect(f.events.at(-1)).toBe('next-owner:reserve'); f.privacy();
+  });
+  it('wires only the existing runner stage and preserves the main failure template', async () => {
+    const runner = await read('scripts/preservation-rehearsal.mjs');
+    expect(runner.includes('mark: (label) => { stage = `I10b-publication-races-${label}`; }')).toBe(true);
+    expect(runner).toContain('FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}${lifecycleFailureDetail(error)}; subsequent stages NOT RUN');
+  });
+});
+
+describe('I10b served baseline isolation (actual caller, bounded mocked transport)', () => {
+  type Row = Record<string, unknown>;
+  type Provenance = Record<string, { kind: string; revision: number }>;
+  type Item = Row & { field_provenance: Provenance };
+  type Change = { item: Item; requestId: string; itemId: string; imageId: string };
+  const owner = { uid: '10000000-0000-4000-8000-000000000001', token: 'synthetic-owner-a' };
+  const env = { SUPABASE_PUBLISHABLE_KEY: 'synthetic-publishable' };
+  const boundary = new Error('bounded next main upload');
+  const stages = ['reserve', 'thumb', 'endpoint', 'read:item', 'read:image', 'main'];
+  const failures = [new Error('synthetic failure'), undefined, null, false, 0, ''];
+  beforeEach(() => { fixtureMocks.saveClients.mockReset(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  function fixture(fault?: { at: string; value: unknown }, drift?: 'item' | 'image', badResponse?: string) {
+    let item: Item = { field_provenance: {} }, image: Row = {}, baseline: Item | undefined;
+    let draft: Change | undefined, itemReads = 0, imageReads = 0;
+    const events: string[] = [];
+    const visit = (at: string) => {
+      events.push(at);
+      if (fault?.at === at) throw fault.value;
+    };
+    const client = {
+      request: vi.fn(async (token: string, route: string, options: { body?: unknown } = {}) => {
+        expect(token).toBe(owner.token);
+        if (route.endsWith('/rpc/reserve_item_save')) {
+          const value = options.body as { p_item: Item; p_image: Row };
+          item = structuredClone({ ...value.p_item, owner_id: owner.uid, version: 1, deleted_at: null });
+          image = structuredClone({ ...value.p_image, owner_id: owner.uid, item_id: item.id,
+            state: 'pending', description_version: 1, retired_at: null });
+          return { ok: true, status: 200, data: [{
+            fingerprint: 'a'.repeat(64), state: 'reserved', item: structuredClone(item), image: structuredClone(image),
+          }] };
+        }
+        if (route.endsWith('/rpc/finalize_item_save')) {
+          image.state = 'ready';
+          return { ok: true, status: 204, data: null };
+        }
+        if (route.endsWith('/rpc/reserve_image_change')) {
+          draft = (options.body as { p_intent: Change }).p_intent;
+          visit('reserve');
+          return { ok: badResponse !== 'reserve', status: badResponse === 'reserve' ? 400 : 200, data: {
+            completedVersion: null, fingerprint: 'b'.repeat(64), imageId: draft.imageId,
+            itemId: draft.itemId, kind: 'replacement', requestId: draft.requestId, state: 'reserved',
+          } };
+        }
+        if (route.startsWith('/storage/v1/object/wardrobe/')) {
+          if (draft) {
+            const variant = route.endsWith('/main.jpg') ? 'main' : 'thumb';
+            visit(variant);
+            if (variant === 'main') throw boundary;
+            return { ok: badResponse !== 'thumb', status: badResponse === 'thumb' ? 400 : 200, data: {} };
+          }
+          return { ok: true, status: 200, data: {} };
+        }
+        const table = new URL(route, 'http://fixture.invalid').pathname;
+        expect(['/rest/v1/items', '/rest/v1/item_images']).toContain(table);
+        const isItem = table === '/rest/v1/items';
+        const count = isItem ? ++itemReads : ++imageReads;
+        const row = structuredClone(isItem ? item : image);
+        if (isItem && count === 2) baseline = row as Item;
+        if (count === 3) {
+          const label = isItem ? 'item' : 'image';
+          visit(`read:${label}`);
+          if (drift === label) row[isItem ? 'notes' : 'alt_text'] = 'unexpected persisted change';
+          if (badResponse === `read:${label}`) return { ok: false, status: 400, data: null };
+        }
+        return { ok: true, status: 200, data: [row] };
+      }),
+      rpc: vi.fn(async (_actor: typeof owner, name: string) => {
+        expect(name).toBe('ai_status');
+        return { serverTimeMs: 1 };
+      }),
+    };
+    const endpoint = vi.fn(async (_url: string, options: RequestInit) => {
+      visit('endpoint');
+      expect(typeof options.body).toBe('string');
+      expect(JSON.parse(String(options.body))).toEqual({ action: 'complete', intent: draft });
+      if (badResponse === 'endpoint') return new Response(null, { status: 503 });
+      return new Response(JSON.stringify({ code: 'UPLOAD_INCOMPLETE' }), { status: 409 });
+    });
+    vi.stubGlobal('fetch', endpoint);
+    fixtureMocks.saveClients.mockResolvedValue({ client, owners: [owner] });
+    return { events, endpoint, snapshots: () => ({ item, baseline, draft }) };
+  }
+
+  it('reaches only the exact next-main sentinel with intended values and an untouched baseline/map', async () => {
+    const f = fixture();
+    await expect(imageReplacementServed(env)).rejects.toBe(boundary);
+    expect(f.events).toEqual(stages);
+    expect(f.endpoint).toHaveBeenCalledOnce();
+    const { item, baseline, draft } = f.snapshots();
+    expect(baseline).toEqual(item);
+    expect(baseline?.notes).toBe('');
+    expect(baseline?.field_provenance).toEqual({
+      title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 },
+    });
+    expect(draft?.item).not.toBe(baseline);
+    expect(draft?.item.field_provenance).not.toBe(baseline?.field_provenance);
+    expect(draft?.item.notes).toBe('Explicit reviewed replacement');
+    expect(draft?.item.field_provenance).toEqual({
+      title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 },
+      notes: { kind: 'user', revision: 1 },
+    });
+    expect(draft?.item.field_provenance.title).toBe(baseline?.field_provenance.title);
+    expect(draft?.item.field_provenance.category).toBe(baseline?.field_provenance.category);
+  });
+  it.each(['item', 'image'] as const)('retains the strict unchanged %s assertion', async (table) => {
+    const f = fixture(undefined, table);
+    await expect(imageReplacementServed(env)).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(f.events).toEqual(stages.slice(0, stages.indexOf(`read:${table}`) + 1));
+  });
+  it.each(stages.slice(0, -1).flatMap((at) => failures.map((value, index) => ({ at, value, index }))))(
+    'stops at rejected $at with exact thrown value $index', async ({ at, value }) => {
+      const f = fixture({ at, value });
+      await expect(imageReplacementServed(env)).rejects.toBe(value);
+      expect(f.events).toEqual(stages.slice(0, stages.indexOf(at) + 1));
+    },
+  );
+  it.each(stages.slice(0, -1))('rejects a failed %s response with the existing evidence error', async (at) => {
+    const f = fixture(undefined, undefined, at);
+    await expect(imageReplacementServed(env)).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(f.events).toEqual(stages.slice(0, stages.indexOf(at) + 1));
+  });
+});
+
+describe('I10b legacy orphan fixture (actual caller, mocked ordinary client)', () => {
+  const owner = { uid: '10000000-0000-4000-8000-000000000002', token: 'synthetic-owner-b', label: 'B' };
+  const other = { uid: '10000000-0000-4000-8000-000000000001', token: 'synthetic-owner-a', label: 'A' };
+  type Row = Record<string, unknown> & { id: string; owner_id: string };
+  type Fault = { at: string; value: unknown };
+  type ReadChange = { table: 'items' | 'item_images'; field: string; value: unknown };
+  const expected = [
+    'clients', 'insert:seed-item', 'insert:seed-image', 'upload:seed-main', 'upload:seed-thumb',
+    'commit:seed', 'read:seed-item', 'read:seed-image', 'delete:item',
+    'insert:replacement-item', 'insert:replacement-image', 'upload:replacement-main', 'upload:replacement-thumb',
+    'commit:replacement', 'trash', 'status', 'prepare', 'inventory:1', 'inventory:2', 'authorize',
+    'target:orphan:1', 'delete:orphan:main', 'reconcile:1',
+    'target:orphan:2', 'delete:orphan:thumb', 'reconcile:2', 'target:orphan:none', 'begin',
+    'target:registered:1', 'delete:registered:main', 'reconcile:3',
+    'target:registered:2', 'delete:registered:thumb', 'reconcile:4', 'target:registered:none',
+    'finish', 'read:absent-item',
+  ];
+  const failures = [new Error('synthetic-private-failure'), undefined, null, false, 0, ''];
+  beforeEach(() => { fixtureMocks.saveClients.mockReset(); });
+
+  function fixture(fault?: Fault, change?: ReadChange, receiptChange?: Record<string, unknown>) {
+    const events: string[] = [], items = new Map<string, Row>(), images = new Map<string, Row>();
+    const objects = new Set<string>(), inserts: { table: string; body: Record<string, unknown> }[] = [];
+    const uploads: { path: string; size: number; sha256: string }[] = [];
+    let itemId = '', seedId = '', replacementId = '', inventory = 0, reconciled = 0, begun = false;
+    const visit = (label: string) => {
+      events.push(label);
+      if (fault?.at === label) throw fault.value;
+    };
+    const text = (value: unknown): string => {
+      if (typeof value !== 'string') throw new Error('Expected synthetic string');
+      return value;
+    };
+    const path = (id: string, variant: string) => `${owner.uid}/${itemId}/${id}/${variant}.jpg`;
+    const client = {
+      insert: vi.fn(async (actor: typeof owner, table: string, body: Record<string, unknown>) => {
+        expect(actor).toBe(owner);
+        const id = text(body.id);
+        const initial = table === 'items' ? itemId === '' : seedId === '';
+        visit(`insert:${initial ? 'seed' : 'replacement'}-${table === 'items' ? 'item' : 'image'}`);
+        inserts.push({ table, body: structuredClone(body) });
+        if (table === 'items') {
+          if (!itemId) itemId = id;
+          expect(id).toBe(itemId);
+          items.set(id, { ...body, id, owner_id: owner.uid, version: 1 });
+        } else {
+          expect(table).toBe('item_images'); expect(body.item_id).toBe(itemId);
+          if (!seedId) seedId = id; else replacementId = id;
+          images.set(id, { ...body, id, owner_id: owner.uid, state: 'pending' });
+        }
+      }),
+      request: vi.fn(async (token: string, route: string, options: { method?: string; body?: unknown; binary?: boolean; headers?: Record<string, string> } = {}) => {
+        expect(token).toBe(owner.token);
+        if (route.startsWith('/storage/v1/object/wardrobe/')) {
+          const name = route.slice('/storage/v1/object/wardrobe/'.length);
+          const id = name.split('/')[2]!, variant = name.endsWith('/main.jpg') ? 'main' : 'thumb';
+          expect(name).toBe(path(id, variant));
+          if (options.method === 'POST') {
+            visit(`upload:${id === seedId ? 'seed' : 'replacement'}-${variant}`);
+            expect(options.binary).toBe(true); expect(options.headers).toEqual({ 'x-upsert': 'false' });
+            if (!(options.body instanceof Uint8Array)) throw new Error('Expected synthetic upload bytes');
+            uploads.push({ path: name, size: options.body.length,
+              sha256: createHash('sha256').update(options.body).digest('hex') });
+            expect(objects.has(name)).toBe(false); objects.add(name);
+            return { ok: true, status: 200, data: {} };
+          }
+          expect(options.method).toBe('DELETE');
+          visit(`delete:${id === seedId ? 'orphan' : 'registered'}:${variant}`);
+          expect(objects.delete(name)).toBe(true);
+          return { ok: true, status: 200, data: { message: 'Successfully deleted' } };
+        }
+        const url = new URL(route, 'http://fixture.invalid');
+        const table = url.pathname.slice('/rest/v1/'.length);
+        if (table !== 'items' && table !== 'item_images') throw new Error('Unexpected fixture request');
+        expect(url.searchParams.get('owner_id')).toBe(`eq.${owner.uid}`);
+        const id = text(url.searchParams.get('id')).slice(3);
+        if (options.method === 'DELETE') {
+          visit('delete:item'); expect(table).toBe('items'); expect(id).toBe(itemId);
+          expect(items.delete(id)).toBe(true); images.clear();
+          expect(objects.size).toBe(2);
+          return { ok: true, status: 204, data: null };
+        }
+        visit(table === 'item_images' ? 'read:seed-image' : items.size ? 'read:seed-item' : 'read:absent-item');
+        expect(url.searchParams.get('select')).toBe('*');
+        const row = (table === 'items' ? items : images).get(id);
+        const rows = row ? [structuredClone(row)] : [];
+        if (row && change?.table === table) {
+          if (change.field === '$rows') return { ok: true, status: 200, data: change.value };
+          rows[0] = { ...rows[0]!, [change.field]: change.value };
+        }
+        return { ok: true, status: 200, data: rows };
+      }),
+      rpc: vi.fn(async (actor: typeof owner, name: string, args: Record<string, unknown>) => {
+        expect(actor).toBe(owner);
+        if (name === 'commit_image') {
+          const id = text(args.p_image_id);
+          visit(id === seedId ? 'commit:seed' : 'commit:replacement');
+          expect(objects.has(path(id, 'main')) && objects.has(path(id, 'thumb'))).toBe(true);
+          const row = images.get(id);
+          if (!row) throw new Error('Missing synthetic image');
+          row.state = 'ready'; return null;
+        }
+        expect(args.p_item_id ?? (args.p_item_ids as string[])[0]).toBe(itemId);
+        if (name === 'set_item_trashed') {
+          visit('trash'); expect(args.p_expected_version).toBe(1); expect(args.p_trashed).toBe(true); return [];
+        }
+        if (name === 'item_deletion_status') {
+          visit('status'); expect(objects.size).toBe(4); expect(images.size).toBe(1);
+          return [{ version: 2, image_manifest_sha256: 'a'.repeat(64), unmanifested_count: 2, cleanup_blocked: true }];
+        }
+        if (name === 'prepare_item_deletion') {
+          visit('prepare'); expect(args.p_expected_version).toBe(2);
+          expect(args.p_image_manifest_sha256).toBe('a'.repeat(64)); return {};
+        }
+        if (name === 'inventory_item_deletion') {
+          visit(`inventory:${++inventory}`);
+          return { phase: inventory === 2 ? 'prepared' : 'preparing', targetCount: 4, unmanifestedTargets: 2,
+            pendingTargets: 0, registeredTargets: 2, inventoryHash: 'b'.repeat(64), ...receiptChange };
+        }
+        if (name === 'authorize_item_deletion') {
+          visit('authorize'); expect(args.p_inventory_hash).toBe('b'.repeat(64)); return {};
+        }
+        if (name === 'item_deletion_next_target') {
+          const completed = reconciled === (begun ? 4 : 2);
+          visit(`target:${begun ? 'registered' : 'orphan'}:${completed ? 'none' : reconciled % 2 + 1}`);
+          return completed ? null : { ordinal: reconciled + 1,
+            path: path(begun ? replacementId : seedId, reconciled % 2 ? 'thumb' : 'main') };
+        }
+        if (name === 'reconcile_item_deletion_target') {
+          visit(`reconcile:${reconciled + 1}`); expect(args.p_ordinal).toBe(reconciled + 1);
+          expect(objects.size).toBe(3 - reconciled); reconciled++; return {};
+        }
+        if (name === 'begin_prepared_item_deletion') {
+          visit('begin'); expect(reconciled).toBe(2); expect(objects.size).toBe(2); begun = true; return {};
+        }
+        if (name === 'finish_item_deletion') {
+          visit('finish'); expect(reconciled).toBe(4); expect(objects.size).toBe(0);
+          items.clear(); images.clear(); return [{ state: 'completed' }];
+        }
+        throw new Error('Unexpected fixture RPC');
+      }),
+    };
+    fixtureMocks.saveClients.mockImplementation(async () => { visit('clients'); return { client, owners: [other, owner] }; });
+    return { events, inserts, uploads, client, objects, run: () => imageChangeOrphanDeletion({}) };
+  }
+
+  it('seeds genuine owner-B legacy bytes, reads persisted metadata and retains all two-phase deletion operations', async () => {
+    const f = fixture(); await f.run();
+    expect(f.events).toEqual(expected); expect(f.objects.size).toBe(0);
+    expect(f.inserts).toHaveLength(4); expect(f.uploads).toHaveLength(4);
+    const item = f.inserts[0]!.body, image = f.inserts[1]!.body, replacement = f.inserts[3]!.body;
+    expect(item.id).toMatch(/^1080[0-9a-f-]{32}$/); expect(image.id).toMatch(/^1080[0-9a-f-]{32}$/);
+    expect(item.field_provenance).toEqual({ title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 } });
+    expect(f.inserts[2]!.body).toEqual(item); expect(replacement.item_id).toBe(item.id);
+    expect(replacement.id).not.toBe(image.id);
+    expect(image).toMatchObject({ item_id: item.id, width: 120, height: 80, alt_text: 'Synthetic original' });
+    for (const upload of f.uploads) {
+      expect(upload.size).toBe(image.main_bytes); expect(upload.size).toBe(image.thumb_bytes);
+      expect(upload.sha256).toBe(image.main_sha256); expect(upload.sha256).toBe(image.thumb_sha256);
+    }
+    expect(f.client.rpc.mock.calls.map(([, name]) => name)).not.toContain('reserve_item_save');
+    expect(f.client.rpc.mock.calls.map(([, name]) => name)).not.toContain('finalize_item_save');
+  });
+
+  it.each(expected.flatMap((at) => failures.map((value, index) => ({ at, value, index }))))(
+    'propagates seam failure $at/$index exactly and performs no later operation',
+    async ({ at, value }) => {
+      const f = fixture({ at, value });
+      await expect(f.run()).rejects.toBe(value);
+      expect(f.events).toEqual(expected.slice(0, expected.indexOf(at) + 1));
+    },
+  );
+
+  const changes: ReadChange[] = [
+    { table: 'items', field: '$rows', value: [] }, { table: 'item_images', field: '$rows', value: [] },
+    { table: 'items', field: 'id', value: other.uid }, { table: 'items', field: 'owner_id', value: other.uid },
+    { table: 'item_images', field: 'id', value: other.uid }, { table: 'item_images', field: 'owner_id', value: other.uid },
+    { table: 'item_images', field: 'item_id', value: other.uid }, { table: 'item_images', field: 'state', value: 'pending' },
+    ...['main_bytes', 'thumb_bytes', 'width', 'height'].map((field) => ({ table: 'item_images' as const, field, value: 1 })),
+    ...['main_sha256', 'thumb_sha256', 'alt_text'].map((field) => ({ table: 'item_images' as const, field, value: 'wrong' })),
+  ];
+  it.each(changes)('refuses persisted seed mismatch $table/$field before raw deletion', async (change) => {
+    const f = fixture(undefined, change);
+    await expect(f.run()).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(f.events).not.toContain('delete:item');
+    expect(f.events.filter((event) => event.startsWith('read:'))).toEqual(['read:seed-item', 'read:seed-image']);
+  });
+  it.each([
+    { phase: 'preparing' }, { targetCount: 3 }, { unmanifestedTargets: 1 }, { pendingTargets: 1 }, { registeredTargets: 1 },
+  ])('retains exact two-plus-two inventory refusal %j', async (change) => {
+    const f = fixture(undefined, undefined, change);
+    await expect(f.run()).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(f.events.at(-1)).toBe('inventory:2'); expect(f.events).not.toContain('authorize');
+  });
+});
+
+describe('I10b owner group stage boundaries (extracted source, mocked operations)', () => {
+  const failures = [new Error('synthetic-private-runner-error'), undefined, null, false, 0, ''];
+  type Step = 'paging' | 'orphans' | 'assertRunning' | 'stop';
+  type Fault = { at: Step; value: unknown };
+  async function run(fault?: Fault, stopFault?: { value: unknown }) {
+    const source = await read('scripts/preservation-rehearsal.mjs');
+    const start = source.indexOf("      stage = 'I10b-owner-paging");
+    const end = source.indexOf("\n    console.log('PASS: exact prior-main9", start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    const segment = source.slice(start, end);
+    expect(segment).toContain('} finally { await finalizer.stop(); }');
+    const execute = new Function('imageChangePagedDeletion', 'imageChangeOrphanDeletion', 'finalizer', 'azureEnv',
+      `return (async () => { let stage = 'before'; try { try {\n${segment}\n
+        return { ok: true, stage }; } catch (error) { return { ok: false, stage, error }; } })();`) as (
+          paging: (env: object) => Promise<void>, orphans: (env: object) => Promise<void>,
+          finalizer: { assertRunning: () => void; stop: () => Promise<void> }, env: object,
+        ) => Promise<{ ok: boolean; stage: string; error?: unknown }>;
+    const events: Step[] = [], env = {};
+    const visit = (step: Step) => {
+      events.push(step);
+      if (step === 'stop' && stopFault) throw stopFault.value;
+      if (fault?.at === step) throw fault.value;
+    };
+    const result = await execute(async (actual) => { expect(actual).toBe(env); visit('paging'); },
+      async (actual) => { expect(actual).toBe(env); visit('orphans'); },
+      { assertRunning: () => visit('assertRunning'), stop: async () => visit('stop') }, env);
+    return { events, result };
+  }
+  it('awaits paging then orphans, asserts liveness synchronously, and always stops', async () => {
+    const f = await run();
+    expect(f.events).toEqual(['paging', 'orphans', 'assertRunning', 'stop']);
+    expect(f.result).toEqual({ ok: true, stage: 'I10b-owner-finalizer' });
+  });
+  it.each((['paging', 'orphans', 'assertRunning', 'stop'] as const).flatMap((at) =>
+    failures.map((value, index) => ({ at, value, index }))))('retains exact failure and stage $at/$index', async ({ at, value }) => {
+    const f = await run({ at, value });
+    const beforeStop = ['paging', 'orphans', 'assertRunning'] as const;
+    expect(f.events).toEqual([...beforeStop.slice(0, at === 'stop' ? 3 : beforeStop.indexOf(at) + 1), 'stop']);
+    expect(f.result).toEqual({ ok: false, stage: `I10b-owner-${at === 'paging' ? 'paging' : at === 'orphans' ? 'orphans' : 'finalizer'}`, error: value });
+    expect(f.result.error).toBe(value);
+  });
+  it.each((['paging', 'orphans', 'assertRunning'] as const).flatMap((at) =>
+    failures.map((value, index) => ({ at, value, index }))))('preserves existing stop override under prior boundary $at/$index', async ({ at, value }) => {
+    const first = new Error('synthetic-earlier-error'), f = await run({ at, value: first }, { value });
+    expect(f.result.ok).toBe(false); expect(f.result.error).toBe(value);
+    expect(f.result.stage).toBe(`I10b-owner-${at === 'assertRunning' ? 'finalizer' : at}`);
+    expect(f.events.at(-1)).toBe('stop');
+    expect(f.events).toHaveLength(at === 'paging' ? 2 : at === 'orphans' ? 3 : 4);
+  });
 });
 
 describe('I08 SQL source contract, not live database proof', () => {
@@ -364,7 +1717,7 @@ describe('I08 SQL source contract, not live database proof', () => {
   });
   it('pins actual ninth bytes and preserves literal privileges plus positive catalog assertions', () => {
     const entries = MIGRATIONS as Array<{ name: string; bytes: number; sha256: string }>;
-    expect(entries).toHaveLength(10);
+    expect(entries).toHaveLength(11);
     const entry = entries[8];
     if (!entry) throw new Error('Missing migration');
     expect(entry.name).toBe('20260913120000_item_lifecycle.sql');
@@ -527,7 +1880,7 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
       stdin: Object.assign(stdin, { write, end, writableEnded: false, destroyed: false }), stdout, stderr, kill,
     }));
     return {
-      child, end, kill,
+      child, write, end, kill,
       assertReleased() {
         expect(closed).toBe(true);
         expect(end).toHaveBeenCalledExactlyOnceWith('rollback;\n');
@@ -548,6 +1901,18 @@ describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)'
   it('releases the parent and timer after success', async () => {
     const child = parent(), operation = vi.fn(async () => {});
     await expect(withLifecycleParentLock(owner, item, 'update', operation)).resolves.toBeUndefined();
+    expect(operation).toHaveBeenCalledOnce(); child.assertReleased(); expect(log).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['owner no key update', "private.approved_accounts where user_id='10000000-0000-4000-8000-000000000001' and enabled for no key update nowait"],
+    ['deletion update', "private.item_deletion_operations where owner_id='10000000-0000-4000-8000-000000000001' and item_id='10800000-0000-4000-8000-000000000002' and phase='prepared' for update nowait"],
+  ])('holds the exact %s row before the operation and releases it', async (mode, target) => {
+    const child = parent(), operation = vi.fn(async () => {
+      expect(child.write).toHaveBeenCalledOnce();
+      expect(child.write.mock.calls[0]).toEqual([expect.stringContaining(`perform 1 from ${target}`)]);
+      expect(child.end).not.toHaveBeenCalled();
+    });
+    await expect(withLifecycleParentLock(owner, item, mode, operation)).resolves.toBeUndefined();
     expect(operation).toHaveBeenCalledOnce(); child.assertReleased(); expect(log).not.toHaveBeenCalled();
   });
   it.each(primaryValues)('preserves exact parent operation rejection %# with successful cleanup', async (primary) => {

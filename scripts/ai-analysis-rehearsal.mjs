@@ -13,6 +13,7 @@ import { baseline, analysisId, analysisFacts, analysisUsage, analysisHash, equal
 import { TABLES, requireEvidence } from '../tests/integration/preservation.sessions.mjs';
 import { analyzedHarness, analyzedIntent, saveId } from '../tests/integration/analyzed-save.sessions.mjs';
 import { assertSanitizedJpeg, readJpegHeader } from '../src/images/jpeg.ts';
+import { imageReplacementServed } from '../tests/integration/image-replacement.sessions.mjs';
 
 const literal = (value) => "'" + String(value).replaceAll("'", "''") + "'";
 const json = (value) => `${literal(JSON.stringify(value))}::jsonb`;
@@ -708,6 +709,16 @@ async function main() {
     equal(await requireReady(client, owners), ready); await baseline(client, owners);
     requireEvidence(headroom() > 0);
     console.log(`PASS: AZ1 C ordinary-owner UI; generations=2; consent migration/restoration plus UI CAS=4 per owner; language initialization/restoration CAS=2 only for originally-null language; exact cleanup/restoration; elapsedMs=${Date.now() - cStarted}; remainingMs=${headroom()}`);
+    stage = 'I10b-real-finalizer';
+    owned = await startAnalysisServer();
+    owned.assertRunning();
+    const finalGenerationCount = generations;
+    await imageReplacementServed(env);
+    owned.assertRunning();
+    equal(generations, finalGenerationCount);
+    equal(await snapshot(), before); equal(await requireReady(client, owners), ready); await baseline(client, owners);
+    requireEvidence(headroom() > 0);
+    console.log('PASS: I10b actual Deno/Auth/DB/Storage replacement and new-identity recovery; incomplete-upload/caption conflicts, completed retries and no inference');
   } catch {
     console.error(`FAIL: AI rehearsal at ${stage}; private evidence withheld; fixture state preserved, no automatic recovery`);
     process.exitCode = 1;

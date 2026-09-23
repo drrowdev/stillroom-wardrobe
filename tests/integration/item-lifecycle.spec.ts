@@ -5,8 +5,8 @@ import { readFile } from 'node:fs/promises';
 import { assertLocalApi, validateSessionEnvironment } from '../../scripts/backend/local.mjs';
 import { classifyObjectDeletion, deleteWardrobeObject } from '../../src/data/storage-delete';
 import { parseProfile } from '../../src/data/profile';
-import { messages } from '../../src/i18n';
-import { parseDeletionStatuses } from '../../src/domain/item-lifecycle';
+import { messages, translate } from '../../src/i18n';
+import { parseDeletionOperation, parseDeletionStatuses, parseDeletionTarget, parseTargetReconciliation, reversibleDeletion, type DeletionOperation } from '../../src/domain/item-lifecycle';
 
 const root = 'http://127.0.0.1:5173/';
 const projection = 'owner_id,display_name,ui_language,timezone,currency,version';
@@ -22,13 +22,14 @@ async function journey(browser: Browser, resume: boolean) {
     | 'trash.detail' | 'trash.click' | 'trash.wardrobe' | 'trash.status'
     | 'undo.click' | 'undo.visible' | 'undo.status' | 'second.detail' | 'second.trash' | 'second.wardrobe'
     | 'menu.open' | 'menu.link' | 'menu.heading' | 'restore.click' | 'restore.notice' | 'restore.values'
-    | 'delete.route' | 'delete.dialog' | 'delete.confirm' | 'delete.unconfirmed' | 'delete.interception'
+    | 'delete.route' | 'delete.dialog' | 'delete.prepared' | 'delete.confirm' | 'delete.unconfirmed' | 'delete.interception'
     | 'delete.quiet' | 'claim.status' | 'claim.restore-refused' | 'resume.reload' | 'resume.heading'
     | 'resume.row-check' | 'resume.claim-check' | 'resume.visible' | 'resume.status' | 'resume.click'
     | 'resume.notice' | 'resume.proofs' | 'finish.absent' | 'finish.history' | 'peer.values' | 'peer.download' | 'peer.bytes' | 'peer.foreign'
     | 'request.path' | 'request.headers' | 'request.owner' | 'intercept.deadline' | 'intercept.fetch'
     | 'intercept.body' | 'intercept.classify' | 'intercept.abort' | 'intercept.dispose' | 'intercept.unroute' | 'intercept.failure-abort'
-    | 'response.body' | 'response.classify' | 'cleanup.context' | 'cleanup.status' | 'cleanup.session'
+    | 'response.body' | 'response.classify' | 'resume.reconcile' | 'cleanup.context' | 'cleanup.status' | 'cleanup.session'
+    | 'cleanup.operation' | 'cleanup.cancel' | 'cleanup.begin' | 'cleanup.target' | 'cleanup.reconcile'
     | 'cleanup.bytes' | 'cleanup.finish' | 'cleanup.image' | 'cleanup.item' | 'cleanup.absent'
     | 'cleanup.history-read' | 'cleanup.history-delete' | 'cleanup.profile-read' | 'cleanup.profile-restore' | 'cleanup.auth';
   type Reason = 'timeout' | 'abort' | 'fixture-assertion' | 'other' | 'unknown';
@@ -71,7 +72,7 @@ async function journey(browser: Browser, resume: boolean) {
   const clients: SupabaseClient[] = [];
   const fixtures: {
     client: SupabaseClient; owner: string; item: string; image: string; paths: string[];
-    original: ReturnType<typeof parseProfile>; event: string | null; outfit: string | null;
+    original: ReturnType<typeof parseProfile>; event: string | null; outfit: string | null; operation: DeletionOperation | null;
   }[] = [];
   const jpg = await readFile(new URL('../security/fixture.jpg', import.meta.url));
   async function transport(input: RequestInfo | URL, init: RequestInit = {}) {
@@ -94,7 +95,7 @@ async function journey(browser: Browser, resume: boolean) {
     const login = await c.auth.signInWithPassword({ email: env[`TEST_${label}_EMAIL`]!, password: env[`TEST_${label}_PASSWORD`]! });
     check(!login.error && login.data.user && login.data.session);
     const owner = login.data.user.id, original = await profile(c, owner);
-    const value = { client: c, owner, original, item: randomUUID(), image: randomUUID(), paths: [] as string[], event: null as string | null, outfit: null as string | null };
+    const value = { client: c, owner, original, item: randomUUID(), image: randomUUID(), paths: [] as string[], event: null as string | null, outfit: null as string | null, operation: null as DeletionOperation | null };
     fixtures.push(value);
     if (original.ui_language !== 'en') {
       const changed = await c.from('profiles').update({ ui_language: 'en' }).eq('owner_id', owner).eq('version', original.version).select(projection).single();
@@ -129,6 +130,16 @@ async function journey(browser: Browser, resume: boolean) {
     const result = await value.client.rpc('item_deletion_status', { p_item_ids: [value.item] });
     check(!result.error);
     return parseDeletionStatuses(result.data, value.owner, [value.item]);
+  }
+  async function nodeOperation(value: typeof fixtures[number], requestId?: string): Promise<DeletionOperation | null> {
+    if (requestId) {
+      const result = await value.client.rpc('item_deletion_operation_status', { p_item_id: value.item, p_request_id: requestId });
+      check(!result.error);
+      return result.data === null ? null : parseDeletionOperation(result.data, value.item, requestId);
+    }
+    const result = await value.client.rpc('item_deletion_operations', { p_item_ids: [value.item] });
+    check(!result.error && Array.isArray(result.data) && result.data.length <= 1);
+    return result.data.length ? parseDeletionOperation(result.data[0], value.item) : null;
   }
   try {
     stage = 'fresh independent ordinary sessions and fixtures';
@@ -201,10 +212,16 @@ async function journey(browser: Browser, resume: boolean) {
       const calls: string[] = [], proofs: Promise<void>[] = [];
       let proofFailed = false, latched = false, interception: Promise<void> | null = null;
       const outcomes: ('removed' | 'missing')[] = [];
+      type Reconciliation = { ordinal: number; state: 'present' | 'reconciled_absent' };
+      type Arrival = { sequence: number; kind: 'delete'; path: string }
+        | { sequence: number; kind: 'reconcile'; result: Reconciliation | null };
+      const arrivals: Arrival[] = [];
+      let sequence = 0, reconciliationCount = 0;
       page.on('request', request => {
         if (request.method() !== 'DELETE') return;
         const url = new URL(request.url());
         calls.push(url.pathname);
+        arrivals.push({ sequence: ++sequence, kind: 'delete', path: url.pathname });
         proofs.push((async () => {
           await proofStep('request.path', () => check(url.origin === base && a.paths.some(path => url.pathname === `/storage/v1/object/wardrobe/${path}`)
             && !url.search && !url.hash && request.postData() === null));
@@ -252,44 +269,92 @@ async function journey(browser: Browser, resume: boolean) {
       await page.route(exact, intercept);
       complete(); start('delete.dialog');
       const selected = page.locator('.trash-list li').filter({ hasText: 'Fictional lifecycle A' });
-      await selected.getByRole('button', { name: messages['lifecycle.delete'].en, exact: true }).click();
+      await selected.getByRole('button', { name: messages['deletion.prepare'].en, exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: translate('en', 'lifecycle.deleteTitle', { name: 'Fictional lifecycle A' }), exact: true });
+      await dialog.waitFor();
+      complete(); start('delete.prepared');
+      const prepared = await nodeOperation(a);
+      check(prepared !== null);
+      a.operation = prepared;
+      check(prepared.phase === 'prepared' && prepared.expectedVersion === trashed.version && prepared.begin === null
+        && prepared.targetCount === 2 && prepared.registeredTargets === 2 && prepared.pendingTargets === 0 && prepared.unmanifestedTargets === 0);
+      const beforeAuthorization = (await nodeStatus(a))[0];
+      check(beforeAuthorization?.version === trashed.version && beforeAuthorization.request_id === null
+        && beforeAuthorization.image_manifest_sha256 === trashed.image_manifest_sha256 && calls.length === 0);
       complete(); start('delete.confirm');
-      await page.getByRole('dialog').getByRole('button', { name: messages['lifecycle.delete'].en, exact: true }).click();
+      await dialog.getByRole('button', { name: messages['lifecycle.delete'].en, exact: true }).click();
       complete(); start('delete.unconfirmed');
       await page.getByRole('alert').filter({ hasText: messages['lifecycle.unconfirmed'].en }).waitFor();
       complete(); start('delete.interception');
       if (interception) await interception;
-      check(upstreamRemoved && !proofFailed && calls.length === 1);
+      check(interceptionEntered && upstreamRemoved && deliveryAbortCompleted && !proofFailed && Number(calls.length) === 1
+        && calls[0] === `/storage/v1/object/wardrobe/${a.paths[0]!}`);
       complete(); start('delete.quiet');
       await page.waitForTimeout(300);
-      check(calls.length === 1);
+      check(Number(calls.length) === 1);
       complete(); start('claim.status');
-      const claim = (await nodeStatus(a))[0]; check(claim?.request_id && claim.expected_version === trashed.version);
+      const claim = (await nodeStatus(a))[0];
+      check(claim?.request_id === prepared.requestId && claim.expected_version === trashed.version
+        && claim.version === trashed.version + 1 && claim.image_manifest_sha256 === trashed.image_manifest_sha256);
+      const interrupted = await nodeOperation(a, prepared.requestId);
+      check(interrupted?.phase === 'removing_registered' && interrupted.inventoryHash === prepared.inventoryHash
+        && interrupted.expectedVersion === prepared.expectedVersion && interrupted.targetCount === prepared.targetCount
+        && interrupted.begin?.request_id === claim.request_id && interrupted.begin.expected_version === claim.expected_version
+        && interrupted.begin.version === claim.version && interrupted.begin.started_at === claim.started_at
+        && interrupted.begin.image_manifest_sha256 === claim.image_manifest_sha256);
       complete(); start('claim.restore-refused');
       const deniedRestore = await a.client.rpc('set_item_trashed', { p_item_id: a.item, p_expected_version: claim.version, p_trashed: false });
       check(deniedRestore.error);
       complete();
-      stage = 'reload revisits missing path, explicit resume and actual checked finish';
+      stage = 'reload reconciles missing target, explicit resume and actual checked finish';
       start('resume.reload');
       await page.reload();
       complete(); start('resume.heading');
       await page.locator('#trash-title').waitFor();
-      check(calls.length === 1);
+      check(Number(calls.length) === 1);
       complete(); start('resume.row-check');
       await selected.getByRole('button', { name: messages['lifecycle.check'].en }).click();
       complete(); start('resume.claim-check');
       await page.locator('.lifecycle-resume').getByRole('button', { name: messages['lifecycle.check'].en }).click();
       complete(); start('resume.visible');
       await button('lifecycle.resume').waitFor();
-      check(calls.length === 1);
+      check(Number(calls.length) === 1);
       complete(); start('resume.status');
       const observed = (await nodeStatus(a))[0];
-      check(observed?.request_id === claim.request_id && observed.expected_version === claim.expected_version && observed.version === claim.version);
+      check(observed?.request_id === claim.request_id && observed.expected_version === claim.expected_version && observed.version === claim.version
+        && observed.started_at === claim.started_at && observed.image_manifest_sha256 === claim.image_manifest_sha256);
+      const reloaded = await nodeOperation(a, prepared.requestId);
+      check(JSON.stringify(reloaded) === JSON.stringify(interrupted) && Number(calls.length) === 1);
       complete();
       page.on('response', response => {
+        const url = new URL(response.url());
+        if (url.pathname === '/rest/v1/rpc/reconcile_item_deletion_target') {
+          const slot: Arrival & { kind: 'reconcile' } = { sequence: ++sequence, kind: 'reconcile', result: null };
+          arrivals.push(slot);
+          const ordinalIndex = reconciliationCount++;
+          proofs.push((async () => {
+            const bytes = await proofStep('resume.reconcile', async () => {
+              check(ordinalIndex < 3 && url.origin === base && !url.search && !url.hash
+                && response.request().method() === 'POST' && response.status() === 200 && response.ok());
+              const bytes = await response.body();
+              check(bytes.length <= 4096);
+              return bytes;
+            });
+            await proofStep('resume.reconcile', () => {
+              const ordinal = ordinalIndex === 0 ? 1 : 2;
+              const data: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+              const state = parseTargetReconciliation(data, { ordinal, path: '', objectId: null, version: null });
+              slot.result = { ordinal, state };
+            });
+          })().catch(() => { proofFailed = true; }));
+          return;
+        }
         if (response.request().method() !== 'DELETE') return;
         proofs.push((async () => {
-          const bytes = await proofStep('response.body', async () => { const bytes = await response.body(); check(bytes.length <= 4096); return bytes; });
+          const bytes = await proofStep('response.body', async () => {
+            check(url.origin === base && url.pathname === `/storage/v1/object/wardrobe/${a.paths[1]!}` && !url.search && !url.hash);
+            const bytes = await response.body(); check(bytes.length <= 4096); return bytes;
+          });
           await proofStep('response.classify', () => {
             const data: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
             outcomes.push(classifyObjectDeletion({ status: response.status(), ok: response.ok(), data }));
@@ -299,12 +364,28 @@ async function journey(browser: Browser, resume: boolean) {
       start('resume.click');
       await click(page, 'lifecycle.resume');
       complete(); start('resume.notice');
-      await page.getByText(messages['lifecycle.deleted'].en, { exact: true }).waitFor();
+      await page.getByText(messages['deletion.deleted'].en, { exact: true }).waitFor();
       complete(); start('resume.proofs');
-      await Promise.all(proofs);
-      check(!proofFailed && Number(calls.length) === 3 && outcomes.length === 2 && outcomes.includes('missing') && outcomes.includes('removed'));
+      for (let offset = 0; offset < proofs.length;) {
+        const pending = proofs.slice(offset); offset = proofs.length;
+        await Promise.all(pending);
+      }
+      const mainPath = `/storage/v1/object/wardrobe/${a.paths[0]!}`, thumbPath = `/storage/v1/object/wardrobe/${a.paths[1]!}`;
+      check(!proofFailed && Number(calls.length) === 2 && calls[0] === mainPath && calls[1] === thumbPath
+        && outcomes.length === 1 && outcomes[0] === 'removed' && reconciliationCount === 3);
+      check(JSON.stringify(arrivals) === JSON.stringify([
+        { sequence: 1, kind: 'delete', path: mainPath },
+        { sequence: 2, kind: 'reconcile', result: { ordinal: 1, state: 'reconciled_absent' } },
+        { sequence: 3, kind: 'reconcile', result: { ordinal: 2, state: 'present' } },
+        { sequence: 4, kind: 'delete', path: thumbPath },
+        { sequence: 5, kind: 'reconcile', result: { ordinal: 2, state: 'reconciled_absent' } },
+      ]));
       complete(); start('finish.absent');
+      const finished = await nodeOperation(a, prepared.requestId);
+      check(finished?.phase === 'completed');
       check((await nodeStatus(a)).length === 0);
+      const absent = await a.client.from('items').select('id').eq('owner_id', a.owner).eq('id', a.item).maybeSingle();
+      check(!absent.error && absent.data === null);
       complete(); start('finish.history');
       const history = await a.client.from('wear_event_items').select('item_id,title_snapshot,category_snapshot').eq('owner_id', a.owner).eq('event_id', a.event);
       const snapshot = history.data?.[0];
@@ -338,28 +419,103 @@ async function journey(browser: Browser, resume: boolean) {
       try {
         cleanup.checkpoint = 'cleanup.status';
         const c = value.client, status = (await nodeStatus(value))[0];
-        if (status) {
+        cleanup.checkpoint = 'cleanup.operation';
+        let operation = await nodeOperation(value, value.operation?.requestId);
+        check(!value.operation || operation !== null);
+        if (operation?.phase === 'completed') {
+          check(!status);
+        } else if (status) {
           cleanup.checkpoint = 'cleanup.session';
           const cached = await c.auth.getSession();
           check(!cached.error && cached.data.session?.user.id === value.owner);
-          cleanup.checkpoint = 'cleanup.bytes';
-          for (const path of value.paths) await deleteWardrobeObject(async (route, options) => {
+          const removePath = (path: string) => deleteWardrobeObject(async (route, options) => {
             const response = await transport(base + route, { ...options, headers: { apikey: key, Authorization: `Bearer ${cached.data.session!.access_token}` } });
             return { status: response.status, ok: response.ok, data: await response.json() as unknown };
           }, value.owner, path);
-          if (status.request_id) {
-            cleanup.checkpoint = 'cleanup.finish';
-            const result = await c.rpc('finish_item_deletion', { p_item_id: value.item, p_request_id: status.request_id });
-            check(!result.error && result.data?.length === 1 && result.data[0].state === 'completed');
-          } else {
-            cleanup.checkpoint = 'cleanup.image';
-            if (value.paths.length) check(!(await c.rpc('forget_image', { p_image_id: value.image })).error);
-            cleanup.checkpoint = 'cleanup.item';
-            check(!(await c.from('items').delete().eq('owner_id', value.owner).eq('id', value.item).eq('version', status.version)).error);
+          if (operation && operation.phase !== 'cancelled') {
+            check(!value.operation || operation.inventoryHash === value.operation.inventoryHash
+              && operation.expectedVersion === value.operation.expectedVersion);
           }
-        }
+          if (operation && reversibleDeletion(operation)) {
+            cleanup.checkpoint = 'cleanup.cancel';
+            check(status.request_id === null && status.version === operation.expectedVersion);
+            const expectedVersion = operation.expectedVersion;
+            const cancelled = await c.rpc('cancel_item_deletion_preparation', { p_item_id: value.item, p_request_id: operation.requestId });
+            check(!cancelled.error);
+            operation = parseDeletionOperation(cancelled.data, value.item, operation.requestId);
+            check(operation.phase === 'cancelled' && operation.expectedVersion === expectedVersion);
+          }
+          if (operation && operation.phase !== 'cancelled') {
+            cleanup.checkpoint = 'cleanup.operation';
+            check(value.paths.length === 2 && operation.targetCount === 2 && operation.registeredTargets === 2
+              && operation.pendingTargets === 0 && operation.unmanifestedTargets === 0
+              && (operation.phase === 'authorized' || operation.phase === 'removing_registered'));
+            check(!value.operation || operation.requestId === value.operation.requestId
+              && operation.inventoryHash === value.operation.inventoryHash && operation.expectedVersion === value.operation.expectedVersion);
+            const args = { p_item_id: value.item, p_request_id: operation.requestId };
+            if (operation.phase === 'authorized') {
+              check(status.request_id === null && status.version === operation.expectedVersion);
+              cleanup.checkpoint = 'cleanup.begin';
+              const next = await c.rpc('item_deletion_next_target', args);
+              check(!next.error && parseDeletionTarget(next.data) === null);
+              const begun = await c.rpc('begin_prepared_item_deletion', args);
+              check(!begun.error);
+              const current = parseDeletionOperation(begun.data, value.item, operation.requestId);
+              check(current.phase === 'removing_registered' && current.inventoryHash === operation.inventoryHash
+                && current.expectedVersion === operation.expectedVersion && current.targetCount === 2
+                && current.registeredTargets === 2 && current.pendingTargets === 0 && current.unmanifestedTargets === 0);
+              operation = current;
+            }
+            const claim = (await nodeStatus(value))[0], begin = operation.begin;
+            check(begin && claim?.request_id === operation.requestId && claim.expected_version === operation.expectedVersion
+              && claim.request_id === begin.request_id && claim.version === begin.version && claim.expected_version === begin.expected_version
+              && claim.started_at === begin.started_at && claim.image_manifest_sha256 === begin.image_manifest_sha256);
+            const seen = new Set<string>();
+            for (let n = 0; n < 2; n++) {
+              cleanup.checkpoint = 'cleanup.target';
+              const next = await c.rpc('item_deletion_next_target', args);
+              check(!next.error);
+              const target = parseDeletionTarget(next.data);
+              if (!target) break;
+              check((target.ordinal === 1 || target.ordinal === 2) && target.path === value.paths[target.ordinal - 1] && !seen.has(target.path));
+              seen.add(target.path);
+              cleanup.checkpoint = 'cleanup.reconcile';
+              const before = await c.rpc('reconcile_item_deletion_target', { ...args, p_ordinal: target.ordinal });
+              check(!before.error);
+              if (parseTargetReconciliation(before.data, target) === 'present') {
+                cleanup.checkpoint = 'cleanup.bytes';
+                await removePath(target.path);
+                cleanup.checkpoint = 'cleanup.reconcile';
+                const after = await c.rpc('reconcile_item_deletion_target', { ...args, p_ordinal: target.ordinal });
+                check(!after.error && parseTargetReconciliation(after.data, target) === 'reconciled_absent');
+              }
+            }
+            cleanup.checkpoint = 'cleanup.target';
+            const next = await c.rpc('item_deletion_next_target', args);
+            check(!next.error && parseDeletionTarget(next.data) === null);
+            cleanup.checkpoint = 'cleanup.finish';
+            const result = await c.rpc('finish_item_deletion', args);
+            check(!result.error && result.data?.length === 1 && result.data[0].state === 'completed');
+            check((await nodeOperation(value, operation.requestId))?.phase === 'completed');
+          } else {
+            cleanup.checkpoint = 'cleanup.bytes';
+            for (const path of value.paths) await removePath(path);
+            if (status.request_id) {
+              cleanup.checkpoint = 'cleanup.finish';
+              const result = await c.rpc('finish_item_deletion', { p_item_id: value.item, p_request_id: status.request_id });
+              check(!result.error && result.data?.length === 1 && result.data[0].state === 'completed');
+            } else {
+              cleanup.checkpoint = 'cleanup.image';
+              if (value.paths.length) check(!(await c.rpc('forget_image', { p_image_id: value.image })).error);
+              cleanup.checkpoint = 'cleanup.item';
+              check(!(await c.from('items').delete().eq('owner_id', value.owner).eq('id', value.item).eq('version', status.version)).error);
+            }
+          }
+        } else check(operation === null || operation.phase === 'cancelled');
         cleanup.checkpoint = 'cleanup.absent';
         check((await nodeStatus(value)).length === 0);
+        const absent = await c.from('items').select('id').eq('owner_id', value.owner).eq('id', value.item).maybeSingle();
+        check(!absent.error && absent.data === null);
         for (const [table, id] of [['wear_events', value.event], ['outfits', value.outfit]] as const) if (id) {
           cleanup.checkpoint = 'cleanup.history-read';
           const current = await c.from(table).select('version').eq('owner_id', value.owner).eq('id', id).maybeSingle();
@@ -399,4 +555,4 @@ async function journey(browser: Browser, resume: boolean) {
   }
 }
 test('LOCAL I08 real page Trash, Undo and Restore with independent ordinary fixtures', async ({ browser }) => { await journey(browser, false); });
-test('LOCAL I08 real page singular deletion, lost delivery, reload and missing-on-resume', async ({ browser }) => { await journey(browser, true); });
+test('LOCAL I08 real page singular deletion, lost delivery, reload and missing-target reconciliation', async ({ browser }) => { await journey(browser, true); });

@@ -434,6 +434,44 @@ Never persist private images in Cache Storage, IndexedDB or the service worker. 
 
 ## Complete image flow
 
+### I10b Stage A checked replacement/deletion contract - 22 September 2026
+
+The eleventh migration and `finalize-image-change` are source candidates, not
+deployed APIs or wired UI. The function has only `complete` and
+`accept-recovery` actions, a 49,152-byte closed envelope, the existing 20-second
+deadline, server-verified ordinary Auth and bounded authenticated main/thumb
+JPEG GET/hash/dimension checks. Only subsequent fixed completion/recovery RPCs
+use the service credential. No provider transport, arbitrary RPC dispatch,
+Storage upsert or automatic inference is added.
+
+`reserve_image_change(intent)` freezes owner/item/new-image/request identity,
+item version, current image and description revision, reviewed fields/provenance
+and immutable media metadata. `image_change_preflight` and
+`complete_image_change` recheck the full fingerprint and native object tuple.
+`image_change_status`/`image_change_requests` resolve ambiguous outcomes;
+`cancel_image_change` never infers cancellation from an aborted HTTP request.
+Completed retries verify existing ready objects rather than uploading them again.
+`image_recovery_versions(item,after)` returns at most 40 ordered retired versions;
+`image_recovery_preflight` and service-only `reserve_image_recovery` accept a
+new destination only after source proof. Accepted recovery survives source
+expiry/removal and preserves the current saved fields without inference.
+
+Explicit deletion uses `prepare_item_deletion` (version/manifest), repeated
+`inventory_item_deletion` (40 image rows or 40 catalogue rows per call), then
+`authorize_item_deletion` with the exact inventory hash. Preparation, including
+unsupported targets, remains reversible through
+`cancel_item_deletion_preparation`; authorization does not.
+`item_deletion_next_target` authorizes one immutable ordinal/path/native tuple.
+Only native singular DELETE removes bytes. `reconcile_item_deletion_target`
+reads authoritative catalogue absence; it does not trust a client success flag.
+Pending/unmanifested targets precede `begin_prepared_item_deletion`; registered
+targets precede the preserved checked `finish_item_deletion`. Reload/status
+uses the durable operation, not generic item absence as a deletion receipt.
+
+The existing general flow below is retained. Its legacy `commit_image` step is
+not a bypass for checked Add or I10b reservations. Routine step-15 maintenance
+is user-deferred I10a-D, not a background component of I10b.
+
 | Step | Implementation contract |
 |---|---|
 | 1. Select | Separate camera and library controls. Cancellation is not an error. Keep the original Blob in memory only. |

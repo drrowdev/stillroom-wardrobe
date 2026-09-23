@@ -146,6 +146,12 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .detail-photo img { display: block; width: 100%; max-height: 640px; object-fit: contain; }
 .detail-photo p { padding: 24px; }
 .detail-sections { display: grid; gap: 24px; min-width: 0; }
+.image-change, .image-change .photo-panel, .image-change .details-panel { min-width: 0; overflow-wrap: anywhere; }
+.image-change .button, .image-change .text-button { min-height: 44px; max-width: 100%; white-space: normal; }
+.recovery-versions { list-style: none; padding: 0; display: grid; gap: 12px; }
+.recovery-versions li { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.recovery-preview { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; max-width: 520px; }
+.recovery-preview img { display: block; width: 100%; max-height: 360px; object-fit: contain; background: var(--surface); border-radius: 12px; }
 .lifecycle-edit-lock { display: grid; gap: 24px; padding: 0; margin: 0; border: 0; min-width: 0; }
 .trash-list { list-style: none; padding: 0; display: grid; gap: 16px; }
 .trash-page, .lifecycle-dialog, .lifecycle-undo, .lifecycle-actions { min-width: 0; overflow-wrap: anywhere; }

@@ -36,3 +36,16 @@ export async function deleteWardrobeObject(request: DeleteRequest, ownerId: stri
   const route = wardrobeDeleteRoute(ownerId, path);
   return classifyObjectDeletion(await request(route, { method: 'DELETE' }));
 }
+
+export function wardrobeTargetDeleteRoute(ownerId: string, itemId: string, path: string): string {
+  const identity = new RegExp(`^${uuid}$`);
+  if (!identity.test(ownerId) || !identity.test(itemId) || typeof path !== 'string'
+    || !path.startsWith(`${ownerId}/${itemId}/`) || new TextEncoder().encode(path).byteLength > 1024) throw unavailable();
+  const segments = path.split('/');
+  if (segments.length < 3 || segments.length > 18 || segments.some(segment =>
+    !/^[A-Za-z0-9._-]{1,128}$/.test(segment) || segment === '.' || segment === '..')) throw unavailable();
+  return `/storage/v1/object/wardrobe/${segments.map(encodeURIComponent).join('/')}`;
+}
+export async function deleteWardrobeTarget(request: DeleteRequest, ownerId: string, itemId: string, path: string): Promise<ObjectDeletion> {
+  return classifyObjectDeletion(await request(wardrobeTargetDeleteRoute(ownerId, itemId, path), { method: 'DELETE' }));
+}

@@ -134,6 +134,161 @@ describe('B2 fixture lock boundary', () => {
   });
 });
 
+describe('I10b owned-server entry after C restoration (extracted source, mocked lifecycle)', () => {
+  type Fault = { at: string; value: unknown };
+  type Row = Record<string, string>;
+  type Snapshot = Record<string, Row[]>;
+  type Result = { stage: string; generations: number; owned: unknown };
+  let execute: (f: Record<string, unknown>) => Promise<Result>;
+  beforeAll(async () => {
+    const source = await readFile(path.join(ROOT, 'scripts', 'ai-analysis-rehearsal.mjs'), 'utf8');
+    const start = source.indexOf("    stage = 'C-success-only-restoration';");
+    const end = source.indexOf('\n}\nif (isMain(import.meta.url)) await main();', start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    const segment = source.slice(start, end);
+    expect(segment).toContain('await owned.stop(); owned = undefined;');
+    expect(segment).toContain('await owned?.stop();');
+    expect(segment).toContain('equal(generations, finalGenerationCount);');
+    // Run the unchanged restoration, entry, catch and finally with synthetic dependencies only.
+    execute = new Function('f', `return (async () => {
+      const { headroom, inventory, client, owners, preserved, snapshot, b2Snapshot,
+        before, b2Before, b2Tables, receipts, privilegedLocalSql, literal, restore,
+        consentRevision, requireReady, ready, baseline, env, startAnalysisServer,
+        requireEvidence, equal, console, process, server, Date } = f;
+      let stage = 'C-ui-child', owned = f.previous, generations = 36;
+      const cStarted = 0;
+      const imageReplacementServed = async (value) => {
+        await f.served(value); generations += f.additionalGenerations;
+      };
+      try {
+      ${segment}
+      return { stage, generations, owned };
+    })();`) as typeof execute;
+  });
+  const expected = ['c:assert', 'c:stop', 'headroom:1', 'inventory', 'snapshot:1', 'b2:1',
+    'headroom:2', 'restore:sql', 'restore:consent', 'snapshot:2', 'b2:2',
+    'ready:1', 'baseline:1', 'headroom:3', 'headroom:4', 'start',
+    'new:assert:1', 'fixture', 'new:assert:2', 'snapshot:3', 'ready:2', 'baseline:2',
+    'headroom:5', 'new:stop', 'server:connections', 'server:close'];
+  const values = [new Error('private synthetic lifecycle detail'), undefined, null, false, 0, ''];
+  function fixture(fault?: Fault, stopFault?: { value: unknown }, drift?: string) {
+    const events: string[] = [], thrown: unknown[] = [];
+    const visit = (at: string) => {
+      events.push(at);
+      if (fault?.at === at) { thrown.push(fault.value); throw fault.value; }
+    };
+    const receipts = [1, 2].map((n) => ({ ownerId: `owner-${n}`, requestId: `request-${n}`, itemId: `item-${n}`, imageId: `image-${n}` }));
+    const before: Snapshot = { ai_usage: [], ai_requests: [], ai_usage_evidence: [], ai_analysis_attestations: [] };
+    const b2Before: Snapshot = { ai_save_used_receipts: [], item_save_used_ids: [], ai_item_save_attempts: [],
+      item_attribution_history: [], ai_item_save_context: [] };
+    const cFinal = Object.fromEntries(Object.keys(before).map((table) => [table,
+      receipts.slice(0, ['ai_requests', 'ai_analysis_attestations'].includes(table) ? 1 : 2)
+        .map((row) => ({ request_id: row.requestId }))]));
+    const b2Final = { ...b2Before,
+      ai_save_used_receipts: receipts.slice(0, 1).map((row) => ({ owner_id: row.ownerId, request_id: row.requestId,
+        item_id: row.itemId, image_id: row.imageId })),
+      item_save_used_ids: receipts.map((row) => ({ item_id: row.itemId })),
+    };
+    const client = {}, owners = receipts.map((row) => ({ uid: row.ownerId })), env = {}, ready = {};
+    const preserved: Row[] = [];
+    let asserts = 0, snapshots = 0, b2Snapshots = 0, readyCalls = 0, baselineCalls = 0, budgets = 0, stopped = false;
+    const previous = {
+      assertRunning: vi.fn(() => { visit('c:assert'); expect(stopped).toBe(false); }),
+      stop: vi.fn(async () => { visit('c:stop'); expect(stopped).toBe(false); stopped = true; }),
+    };
+    const fresh = {
+      assertRunning: vi.fn(() => { visit(`new:assert:${++asserts}`); }),
+      stop: vi.fn(async () => {
+        visit('new:stop');
+        if (stopFault) { thrown.push(stopFault.value); throw stopFault.value; }
+      }),
+    };
+    const sameActors = (actualClient: unknown, actualOwners: unknown) => {
+      expect(actualClient).toBe(client); expect(actualOwners).toBe(owners);
+    };
+    const output = { log: vi.fn(), error: vi.fn() }, process = { exitCode: undefined as number | undefined };
+    const startAnalysisServer = vi.fn(async () => { visit('start'); expect(stopped).toBe(true); return fresh; });
+    const f = {
+      client, owners, env, preserved, ready, receipts, before, b2Before, b2Tables: Object.keys(b2Before),
+      previous, startAnalysisServer, additionalGenerations: drift === 'generation' ? 1 : 0,
+      headroom: () => { visit(`headroom:${++budgets}`); return drift === `headroom:${budgets}` ? 0 : 1000; },
+      inventory: async (c: unknown, o: unknown) => { visit('inventory'); sameActors(c, o); return preserved; },
+      snapshot: async () => {
+        visit(`snapshot:${++snapshots}`);
+        if (snapshots === 1) return cFinal;
+        return drift === `snapshot:${snapshots}` ? { changed: [] } : before;
+      },
+      b2Snapshot: async () => { visit(`b2:${++b2Snapshots}`); return b2Snapshots === 1 ? b2Final : b2Before; },
+      privilegedLocalSql: vi.fn(async (sql: string) => {
+        visit('restore:sql'); expect(sql).toContain('begin;'); expect(sql).toContain('synthetic_restore; commit;');
+        for (const receipt of receipts) expect(sql).toContain(`request_id='${receipt.requestId}'`);
+      }),
+      literal: (value: string) => `'${value}'`, restore: 'synthetic_restore;',
+      consentRevision: async (revision: number) => { visit('restore:consent'); expect(revision).toBe(1); },
+      requireReady: async (c: unknown, o: unknown) => { visit(`ready:${++readyCalls}`); sameActors(c, o); return ready; },
+      baseline: async (c: unknown, o: unknown) => { visit(`baseline:${++baselineCalls}`); sameActors(c, o); },
+      served: vi.fn(async (actual: unknown) => { visit('fixture'); expect(actual).toBe(env); }),
+      requireEvidence: (value: unknown) => { if (!value) throw new Error('Synthetic evidence required'); },
+      equal: (actual: unknown, wanted: unknown) => { if (!isDeepStrictEqual(actual, wanted)) throw new Error('Synthetic mismatch'); },
+      console: output, process, Date: { now: () => 0 },
+      server: {
+        closeAllConnections: () => { visit('server:connections'); },
+        close: (done: () => void) => { visit('server:close'); done(); },
+      },
+    };
+    return { run: () => execute(f), events, thrown, previous, fresh, startAnalysisServer, f, output, process };
+  }
+  const failureMessage = 'FAIL: AI rehearsal at I10b-real-finalizer; private evidence withheld; fixture state preserved, no automatic recovery';
+  it('stops C, restores its baseline, starts a distinct owned server and checks no additional inference', async () => {
+    const f = fixture(), result = await f.run();
+    expect(f.events).toEqual(expected); expect(result).toEqual({ stage: 'I10b-real-finalizer', generations: 36, owned: f.fresh });
+    expect(f.previous.stop).toHaveBeenCalledOnce(); expect(f.startAnalysisServer).toHaveBeenCalledOnce();
+    expect(f.fresh.stop).toHaveBeenCalledOnce(); expect(f.f.served).toHaveBeenCalledOnce();
+    expect(f.output.error).not.toHaveBeenCalled(); expect(f.process.exitCode).toBeUndefined();
+    expect(f.output.log).toHaveBeenCalledTimes(2);
+  });
+  it.each(['start', 'new:assert:1', 'fixture', 'new:assert:2'].flatMap((at) =>
+    values.map((value, index) => ({ at, value, index }))))('retains catch/finally for $at failure $index', async ({ at, value }) => {
+    const f = fixture({ at, value }); await f.run();
+    expect(f.thrown).toHaveLength(1); expect(f.thrown[0]).toBe(value);
+    expect(f.events).toEqual([...expected.slice(0, expected.indexOf(at) + 1),
+      ...(at === 'start' ? [] : ['new:stop']), 'server:connections', 'server:close']);
+    expect(f.previous.stop).toHaveBeenCalledOnce();
+    expect(f.fresh.stop).toHaveBeenCalledTimes(at === 'start' ? 0 : 1);
+    expect(f.f.served).toHaveBeenCalledTimes(at === 'fixture' || at === 'new:assert:2' ? 1 : 0);
+    expect(f.output.error.mock.calls).toEqual([[failureMessage]]); expect(f.process.exitCode).toBe(1);
+    expect(f.output.log).toHaveBeenCalledTimes(1);
+  });
+  it.each(values.map((value, index) => ({ value, index })))('propagates finally stop failure exactly $index after success', async ({ value }) => {
+    const f = fixture(undefined, { value });
+    await expect(f.run()).rejects.toBe(value);
+    expect(f.events).toEqual(expected.slice(0, expected.indexOf('new:stop') + 1));
+    expect(f.output.error).not.toHaveBeenCalled(); expect(f.process.exitCode).toBeUndefined();
+    expect(f.previous.stop).toHaveBeenCalledOnce(); expect(f.fresh.stop).toHaveBeenCalledOnce();
+  });
+  it.each(values.map((value, index) => ({ value, index })))('preserves stop failure after the fixture error was caught $index', async ({ value }) => {
+    const initial = new Error('private original fixture failure'), f = fixture({ at: 'fixture', value: initial }, { value });
+    await expect(f.run()).rejects.toBe(value);
+    expect(f.thrown[0]).toBe(initial); expect(f.thrown[1]).toBe(value);
+    expect(f.events).toEqual([...expected.slice(0, expected.indexOf('fixture') + 1), 'new:stop']);
+    expect(f.output.error.mock.calls).toEqual([[failureMessage]]); expect(f.process.exitCode).toBe(1);
+  });
+  it.each(['generation', 'snapshot:3', 'headroom:5'])('keeps the postfixture %s gate and owned cleanup', async (drift) => {
+    const f = fixture(undefined, undefined, drift); await f.run();
+    expect(f.startAnalysisServer).toHaveBeenCalledOnce(); expect(f.f.served).toHaveBeenCalledOnce();
+    expect(f.output.error.mock.calls).toEqual([[failureMessage]]); expect(f.process.exitCode).toBe(1);
+    expect(f.fresh.stop).toHaveBeenCalledOnce(); expect(f.events.slice(-3)).toEqual(['new:stop', 'server:connections', 'server:close']);
+    expect(f.output.log).toHaveBeenCalledTimes(1);
+  });
+  it.each(['snapshot:2', 'headroom:3'])('does not enter the new stage after failed C restoration %s', async (drift) => {
+    const f = fixture(undefined, undefined, drift); await f.run();
+    expect(f.startAnalysisServer).not.toHaveBeenCalled(); expect(f.f.served).not.toHaveBeenCalled();
+    expect(f.previous.stop).toHaveBeenCalledOnce(); expect(f.fresh.stop).not.toHaveBeenCalled();
+    expect(f.output.error.mock.calls).toEqual([['FAIL: AI rehearsal at C-success-only-restoration; private evidence withheld; fixture state preserved, no automatic recovery']]);
+    expect(f.process.exitCode).toBe(1); expect(f.events.slice(-2)).toEqual(['server:connections', 'server:close']);
+  });
+});
+
 describe('owned B1 function lifecycle', () => {
   const signature = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Methods': 'POST' };
   it('textually guards against direct fetch between startup and the authoritative served child', async () => {
@@ -201,29 +356,42 @@ describe('owned B1 function lifecycle', () => {
       child.emit('close', 1); await owned.stop();
     });
   const config = '[edge_runtime]\nenabled = true\n\n[functions.analyze-clothing]\nenabled = true\nverify_jwt = true\n'
-    + '\n[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = true\n';
+    + '\n[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = true\n'
+    + '\n[functions.finalize-image-change]\nenabled = true\nverify_jwt = true\n';
   const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json', 'azure-openai.ts'];
-  const directories = ['finalize-analyzed-item', 'analyze-clothing'];
-  const finalizerFiles = ['index.ts', 'handler.ts', 'deno.json'];
+  const directories = ['finalize-analyzed-item', 'analyze-clothing', 'finalize-image-change'];
+  const finalizerFiles = ['index.ts', 'handler.ts', 'deno.json', 'verify-image.ts'];
+  const imageChangeFiles = ['index.ts', 'handler.ts', 'deno.json'];
   const help = { code: 0, stdout: '  Serve all Functions locally.\n  supabase functions serve [flags] [<Function name...>]\n', stderr: '' };
   it('requires the observed all-functions capability and closed enabled inventory', () => {
-    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles)).not.toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles)).not.toThrow();
     for (const text of [config.replace('verify_jwt = true', 'verify_jwt = false'),
       config.replace('[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = true',
         '[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = false'),
+      config.replace('[functions.finalize-image-change]\nenabled = true\nverify_jwt = true',
+        '[functions.finalize-image-change]\nenabled = true\nverify_jwt = false'),
       config.replace('[edge_runtime]\nenabled = true', '[edge_runtime]\nenabled = false'),
       config + '\n[functions.other]\nenabled = true\n']) {
-      expect(() => assertAnalysisServeContract(text, directories, files, help, finalizerFiles)).toThrow();
+      expect(() => assertAnalysisServeContract(text, directories, files, help, finalizerFiles, imageChangeFiles)).toThrow();
     }
-    expect(() => assertAnalysisServeContract(config, ['other'], files, help, finalizerFiles)).toThrow();
-    expect(() => assertAnalysisServeContract(config, directories, [...files, '.env'], help, finalizerFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['other'], files, help, finalizerFiles, imageChangeFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, [...files, '.env'], help, finalizerFiles, imageChangeFiles)).toThrow();
     for (const missing of files) {
-      expect(() => assertAnalysisServeContract(config, directories, files.filter((file) => file !== missing), help, finalizerFiles)).toThrow();
+      expect(() => assertAnalysisServeContract(config, directories, files.filter((file) => file !== missing), help, finalizerFiles, imageChangeFiles)).toThrow();
     }
-    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, code: 1 }, finalizerFiles)).toThrow();
-    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, stdout: '' }, finalizerFiles)).toThrow();
-    expect(() => assertAnalysisServeContract(config, directories, files, help, [...finalizerFiles, 'deno.d.ts'])).toThrow();
-    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, help, finalizerFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, code: 1 }, finalizerFiles, imageChangeFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, stdout: '' }, finalizerFiles, imageChangeFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, help, [...finalizerFiles, 'deno.d.ts'], imageChangeFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, help, finalizerFiles, imageChangeFiles)).toThrow();
+    for (const missing of finalizerFiles) {
+      expect(() => assertAnalysisServeContract(config, directories, files, help,
+        finalizerFiles.filter((file) => file !== missing), imageChangeFiles)).toThrow();
+    }
+    for (const missing of imageChangeFiles) {
+      expect(() => assertAnalysisServeContract(config, directories, files, help,
+        finalizerFiles, imageChangeFiles.filter((file) => file !== missing))).toThrow();
+    }
+    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, [...imageChangeFiles, '.env'])).toThrow();
   });
   it.each(['stop', 'output', 'startup', 'lifetime', 'exit'] as const)('owns only its child on %s', async (reason) => {
     vi.useFakeTimers();
@@ -1334,6 +1502,7 @@ describe('safe startup/reset failure description', () => {
     '20260909180000_ai_request_controls.sql', '20260910070000_checked_item_save.sql',
     '20260911040000_ai_analysis_backend.sql',
     '20260911200000_checked_ai_item_save.sql', '20260913120000_item_lifecycle.sql',
+    '20260921193000_azure_terra_analysis.sql', '20260922020000_checked_image_changes.sql',
   ]);
 
   function report(result: unknown, ...elapsed: [] | [unknown]) {
@@ -1349,10 +1518,10 @@ describe('safe startup/reset failure description', () => {
     }
     if (value.exitCode !== null) expect(value.exitCode).toBeLessThanOrEqual(255);
     expect(value.announcedKnownMigrationCount).not.toBeNull();
-    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(9);
+    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(11);
     if (value.lastAnnouncedKnownMigrationIndex !== null) {
       expect(value.lastAnnouncedKnownMigrationIndex).toBeGreaterThanOrEqual(1);
-      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(9);
+      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(11);
     }
     expect(['none', 'multiple', ...operations.map(([, operation]) => operation)]).toContain(value.stderrDockerOperation);
     expect(['unclassified', 'exit-125', 'exit-126-or-127', 'other-nonzero']).toContain(value.stderrContainerExitBucket);
@@ -1460,15 +1629,23 @@ describe('safe startup/reset failure description', () => {
   it('counts distinct announcements and uses stderr order rather than version order', () => {
     const lines = [...migrations, migrations[1], migrations[0]];
     expect(failure(lines.map((name) => `Applying migration ${name}...\n`).join('')))
-      .toMatchObject({ announcedKnownMigrationCount: 9, lastAnnouncedKnownMigrationIndex: 1 });
+      .toMatchObject({ announcedKnownMigrationCount: 11, lastAnnouncedKnownMigrationIndex: 1 });
   });
 
   it('keeps eighth/ninth announcements distinct from the observed statement ordinal', () => {
     const announcements = migrations.map((name) => `Applying migration ${name}...\n`);
     expect(failure(announcements.slice(0, 8).join('') + 'At statement: 0\n'))
       .toMatchObject({ announcedKnownMigrationCount: 8, lastAnnouncedKnownMigrationIndex: 8, stderrStatementIndex: 0 });
-    expect(failure(announcements.join('') + 'At statement: 9999\n'))
+    expect(failure(announcements.slice(0, 9).join('') + 'At statement: 9999\n'))
       .toMatchObject({ announcedKnownMigrationCount: 9, lastAnnouncedKnownMigrationIndex: 9, stderrStatementIndex: 9999 });
+  });
+
+  it.each([10, 11])('keeps exact tenth/eleventh migration %s distinct from syntax statement 36', (count) => {
+    const announcements = migrations.slice(0, count).map((name) => `Applying migration ${name}...\n`).join('');
+    const repeated = `Applying migration ${migrations[count - 1]}...\n`;
+    expect(failure(announcements + repeated + 'ERROR: synthetic syntax failure (SQLSTATE 42601)\nAt statement: 36\n'))
+      .toMatchObject({ announcedKnownMigrationCount: count, lastAnnouncedKnownMigrationIndex: count,
+        stderrSqlState: '42601', stderrStatementIndex: 36 });
   });
 
   it.each([0, 1, 9, 10, 999, 9999])('observes zero-based statement %s only in whole LF/CRLF lines', (index) => {
@@ -1587,7 +1764,7 @@ describe('safe startup/reset failure description', () => {
     const maximum = { ...defaults, tag: 'nonzero-with-stderr', exitCode: 255, elapsedMs: Number.MAX_SAFE_INTEGER,
       stdoutBytes: 16777216, stderrBytes: 16777216, stderrDockerOperation: 'inspect-container',
       stderrContainerExitBucket: 'other-nonzero', stderrSqlState: 'unclassified',
-      announcedKnownMigrationCount: 9, lastAnnouncedKnownMigrationIndex: 9, stderrPortAllocationMarker: false,
+      announcedKnownMigrationCount: 11, lastAnnouncedKnownMigrationIndex: 11, stderrPortAllocationMarker: false,
       stderrStatementIndex: 9999, stderrPermissionMarker: 'rls-policy-violation' };
     expect(Reflect.ownKeys(maximum)).toEqual(keys);
     expect(Buffer.byteLength(JSON.stringify(maximum), 'utf8')).toBeLessThan(512);
@@ -1595,6 +1772,9 @@ describe('safe startup/reset failure description', () => {
 
   it.each([
     'Applying migration private.sql...\n', 'Applying migration /private/20260905000000_initial.sql...\n',
+    'Applying migration 20260922030000_unknown.sql...\n',
+    'Applying migration 20260921193000_azure_terra_analysis.sql... trailing\n',
+    'Applying migration 20260922020000_checked_image_changes.sql...\r',
     'prefix Applying migration 20260905000000_initial.sql...\n',
     'Applying migration 20260905000000_initial.sql....\n',
     'Applying migration 20260905000000_initial.sql...\r',

@@ -18,8 +18,16 @@ export const SOURCE_HASHES = Object.freeze({
   analyzedSave: '3b42cfdbf9890c29229893dc8603a86181aea923b63b91bf75b26cf5783844ea',
   lifecycle: '8cc0fc1207737d63b7e1d000fc7471a9941a4833aaebebc75979c498a4d6c476',
   azure: 'ce66f9585f21badd978597d3ccbf94d7b9ff227687aa787faa860b05f86d02b5',
+  imageChanges: '28f0c87f9db6c643bc68d86843dffc905449280bd26483721503389281d7ec93',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
+const voidRpcs = new Set(['commit_image', 'retire_image', 'forget_image']);
+const nullableRpcs = new Set(['image_change_status', 'cancel_image_change', 'item_deletion_operation_status', 'item_deletion_next_target']);
+const nullableRpcPaths = new Set([...nullableRpcs].map((name) => `/rest/v1/rpc/${name}`));
+const diagnosticStatuses = new Set([200, 201, 204, 400, 401, 403, 404, 409, 413, 422, 429, 500, 502, 503, 504]);
+export function diagnosticHttpStatus(status) {
+  return Number.isInteger(status) && diagnosticStatuses.has(status) ? status : 'OTHER';
+}
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const timestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 const hash = /^[0-9a-f]{64}$/;
@@ -277,18 +285,21 @@ export async function cleanupSnapshot(run) {
 export function normalClient(env) {
   validateSessionEnvironment(env);
   const base = assertLocalApi(env.SUPABASE_URL), key = env.SUPABASE_PUBLISHABLE_KEY;
-  async function request(token, route, { method = 'GET', body, binary = false, headers = {} } = {}) {
+  async function request(token, route, { method = 'GET', body, binary = false, headers = {}, onFailure = () => {} } = {}) {
     const response = await fetch(base + route, {
       method, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15_000),
       headers: { apikey: key, ...(token ? { Authorization: 'Bearer ' + token } : {}),
         ...(body === undefined ? {} : { 'Content-Type': binary ? 'image/jpeg' : 'application/json' }), ...headers },
       ...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) }),
     });
+    if (!(response.status < 500)) onFailure(`status5xx-${diagnosticHttpStatus(response.status)}`);
     requireEvidence(response.status < 500);
     if (response.status === 204) {
+      if (response.body !== null) onFailure('body-on-204');
       requireEvidence(response.body === null);
       return { ok: response.ok, status: response.status, data: null, range: response.headers.get('content-range') };
     }
+    if (response.body === null) onFailure(`no-body-${diagnosticHttpStatus(response.status)}`);
     requireEvidence(response.body !== null);
     const reader = response.body.getReader(), chunks = [];
     let length = 0;
@@ -297,6 +308,7 @@ export function normalClient(env) {
         const { done, value } = await reader.read();
         if (done) break;
         length += value.byteLength;
+        if (!(length <= MAX_SNAPSHOT_BYTES)) onFailure('overflow');
         requireEvidence(length <= MAX_SNAPSHOT_BYTES);
         chunks.push(value);
       }
@@ -306,15 +318,19 @@ export function normalClient(env) {
     // binary === true pins the single TUS fixture, not all binary requests.
     const tusFixture = method === 'POST' && route === '/storage/v1/upload/resumable' && binary === true;
     if (!route.startsWith('/storage/v1/object/authenticated/') && !tusFixture) {
-      try { data = JSON.parse(raw.toString('utf8')); } catch { requireEvidence(raw.length === 0); data = null; }
+      try { data = JSON.parse(raw.toString('utf8')); } catch {
+        const emptyAllowed = raw.length === 0 && !nullableRpcPaths.has(route);
+        if (!emptyAllowed) onFailure(`nonjson-${diagnosticHttpStatus(response.status)}`);
+        requireEvidence(emptyAllowed); data = null;
+      }
     }
     return { ok: response.ok, status: response.status, data, range: response.headers.get('content-range') };
   }
   const rpc = async (owner, name, body) => {
     const result = await request(owner.token, `/rest/v1/rpc/${name}`, { method: 'POST', body });
-    requireEvidence(result.ok && (name === 'commit_image'
+    requireEvidence(result.ok && (voidRpcs.has(name)
       ? result.status === 204 && result.data === null
-      : result.status === 200 && result.data !== null));
+      : result.status === 200 && (result.data !== null || nullableRpcs.has(name))));
     return result.data;
   };
   const rows = async (owner, table) => {

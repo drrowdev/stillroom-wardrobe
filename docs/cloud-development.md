@@ -548,6 +548,43 @@ activation is implied by this source packet.
 
 ## Delivery rules
 
+### I10b staged local source authority - 22 September 2026
+
+[Approval, retained independent critique and own-writer local model attestation](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5769933357)
+release Stage A only on clean accepted main
+`1984b848017dd9c22249907fe303d701bcb48440` / tree
+`532730a435bfe29fc0ea9611688efde1fc2cc1fc`, in the persistent
+`drrowdev-shiny-umbrella` local writer. All ten existing migrations are immutable.
+The eleventh checked-image migration, fixed finalizer and existing test/harness
+extensions do not authorize local Docker/backend/SQL fixtures, hosted operations,
+provider activation, another actor or source publication.
+
+The pinned Supabase CLI 2.116.0 has no target-version `migration up` flag.
+The CI-only preservation owner copies verified config and exactly the first ten
+verified migrations into `.supabase/preservation-stage-<run UUID>`. The config is
+verbatim; no speculative function stripping is implemented. Nonrecursive
+creation rejects existing paths; exact inventory/content and directory ownership
+guard cleanup. ROOT-bound history and container identity are checked before
+and after the fixed staged CLI command. This proves actual populated base->10
+and 9->10 before ROOT applies populated10->11. No migration hiding, moving,
+manual ledger write, history repair or reset/reseed substitute is permitted.
+The preceding AZ1 nine/ten terminology is historical; I10b adds the separately
+named `azure-target` ten-migration stage and final eleven-migration `target`.
+
+Guard installation selects only the exact historical type-21/body pair at
+nine/ten or the reviewed type-29/body pair at eleven, using the actual ledger.
+Unknown histories/body drift fail; observed code is never adopted as a pin.
+The serving inventory is exactly three directories with 7/4/3 files and three
+JWT-verified declarations. B1=12/B2=22/C=2 remain unchanged; new I10b real-Deno
+and ordinary-session fixtures are separately labeled and add no inference.
+
+Actual CI-generated public types are the Stage B handoff before typed caller/UI
+work. This text-only writer does not fabricate them or view image artifacts.
+Required later bounded UX artifacts remain coordinator-owned exact-head review.
+I10a-D maintenance is deferred, not passed; I22 owner-prefix deletion is still
+required in Phase 6. Deletion promises logical native removal/reconciliation and
+durable publication fencing, not physical erasure or provider-remnant deadlines.
+
 Delivery uses the persistent isolated local writer and own-model attestation
 contract above, not cloud/native allocation or historical setup/intake authority.
 The dated PR #2 handoff, PR #3 recovery and completed I06/PR #7 restrictions

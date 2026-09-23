@@ -644,6 +644,14 @@ export type Database = {
         Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
         Returns: Json
       }
+      authorize_item_deletion: {
+        Args: {
+          p_inventory_hash: string
+          p_item_id: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
       begin_item_deletion: {
         Args: {
           p_expected_version: number
@@ -659,9 +667,21 @@ export type Database = {
           version: number
         }[]
       }
+      begin_prepared_item_deletion: {
+        Args: { p_item_id: string; p_request_id: string }
+        Returns: Json
+      }
       cancel_analyzed_item_save: {
         Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
         Returns: undefined
+      }
+      cancel_image_change: {
+        Args: { p_item_id: string; p_request_id: string }
+        Returns: Json
+      }
+      cancel_item_deletion_preparation: {
+        Args: { p_item_id: string; p_request_id: string }
+        Returns: Json
       }
       commit_image: { Args: { p_image_id: string }; Returns: undefined }
       complete_analyzed_item_save: {
@@ -672,6 +692,10 @@ export type Database = {
           p_objects: Json
           p_owner_id: string
         }
+        Returns: undefined
+      }
+      complete_image_change: {
+        Args: { p_intent: Json; p_objects: Json; p_owner_id: string }
         Returns: undefined
       }
       deletion_control: {
@@ -690,7 +714,34 @@ export type Database = {
         }[]
       }
       forget_image: { Args: { p_image_id: string }; Returns: undefined }
+      image_change_preflight: { Args: { p_intent: Json }; Returns: Json }
+      image_change_requests: { Args: { p_item_id: string }; Returns: Json }
+      image_change_status: {
+        Args: { p_item_id: string; p_request_id: string }
+        Returns: Json
+      }
+      image_recovery_preflight: { Args: { p_intent: Json }; Returns: Json }
+      image_recovery_versions: {
+        Args: { p_after?: string; p_item_id: string }
+        Returns: Json
+      }
+      inventory_item_deletion: {
+        Args: { p_item_id: string; p_request_id: string }
+        Returns: Json
+      }
       item_attribution_history: { Args: { p_item_id: string }; Returns: Json }
+      item_deletion_next_target: {
+        Args: { p_item_id: string; p_request_id: string }
+        Returns: Json
+      }
+      item_deletion_operation_status: {
+        Args: { p_item_id: string; p_request_id: string }
+        Returns: Json
+      }
+      item_deletion_operations: {
+        Args: { p_item_ids: string[] }
+        Returns: Json
+      }
       item_deletion_status: {
         Args: { p_item_ids: string[] }
         Returns: {
@@ -710,6 +761,19 @@ export type Database = {
           version: number
         }[]
       }
+      prepare_item_deletion: {
+        Args: {
+          p_expected_version: number
+          p_image_manifest_sha256: string
+          p_item_id: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
+      reconcile_item_deletion_target: {
+        Args: { p_item_id: string; p_ordinal: number; p_request_id: string }
+        Returns: Json
+      }
       reserve_analyzed_item_save: {
         Args: { p_claim: Json; p_image: Json; p_item: Json }
         Returns: {
@@ -718,6 +782,11 @@ export type Database = {
           item: Json
           state: string
         }[]
+      }
+      reserve_image_change: { Args: { p_intent: Json }; Returns: Json }
+      reserve_image_recovery: {
+        Args: { p_intent: Json; p_objects: Json; p_owner_id: string }
+        Returns: Json
       }
       reserve_item_save: {
         Args: { p_image: Json; p_item: Json }

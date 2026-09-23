@@ -8,6 +8,9 @@ import type { Language } from '../../src/i18n';
 import { garmentFields, garmentPayload, parseGarmentValues, sameValue } from '../../src/domain/garment-fields';
 import { parseFieldProvenance, provenanceFields } from '../../src/domain/attribute-provenance';
 import { isRecord, isUuid } from '../../src/domain/wardrobe';
+import type { ImageChangeReceipt } from '../../src/domain/image-replacement';
+import type { DeletionOperation } from '../../src/domain/item-lifecycle';
+import { wardrobeTargetDeleteRoute } from '../../src/data/storage-delete';
 
 export const owners = {
   a: '10000000-0000-4000-8000-000000000001',
@@ -57,6 +60,14 @@ export type RawAnalysisObservation = {
       readableLength: 'zero' | '4096' | 'other' | 'invalid';
     }>;
   };
+  boundaryDetail?: {
+    mode: 'boundary-framing-v1'; overflow: boolean; evidenceError: boolean;
+    receivers: Array<{
+      ordinal: 1 | 2; contentLength: 'absent' | 'zero' | '1' | '512000' | 'other' | 'invalid';
+      transferEncoding: 'absent' | 'chunked' | 'other'; complete: boolean; readableEnded: boolean;
+      readableLength: 'zero' | '1' | '512000' | 'other' | 'invalid';
+    }>;
+  };
 };
 function rawAnalysisStatus(status: number) {
   switch (status) {
@@ -86,6 +97,7 @@ type WireReceiverFacts = {
   fieldFailure: WireFieldFailure | null;
   boundaryLength: number | null; bodyTrailer: 'crlf' | 'bare' | 'other' | null;
   parsedFileSize: number | null; bodyHighByte: 'present' | 'absent' | null;
+  rawBodyBytes: number | null; streamCompletion: 'complete' | 'incomplete' | null;
 };
 type WireDiagnostic = {
   backend: WireBackend; routePosts: number; receiverPosts: number; success: number;
@@ -180,6 +192,28 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
             postTerminalRejects: 0, firstPostTerminalReject: null };
           rawObservation.posts.push(observedPost);
         } else { rawObservation.overflow = true; rawObservation.evidenceError = true; }
+      }
+      const boundaryDetail = rawObservation?.boundaryDetail;
+      if (boundaryDetail?.mode === 'boundary-framing-v1' && request.method === 'POST' && observedPost) {
+        if ((observedPost.ordinal !== 1 && observedPost.ordinal !== 2) || boundaryDetail.receivers.length >= 2) {
+          boundaryDetail.overflow = true; boundaryDetail.evidenceError = true;
+        } else {
+          try {
+            const length = request.headers['content-length'], transfer = request.headers['transfer-encoding'];
+            const validLength = typeof length === 'string' && /^[0-9]+$/.test(length)
+              && Number.isSafeInteger(Number(length)) && Number(length) >= 0;
+            const readable = request.readableLength;
+            boundaryDetail.receivers.push({
+              ordinal: observedPost.ordinal,
+              contentLength: length === undefined ? 'absent' : !validLength ? 'invalid'
+                : Number(length) === 0 ? 'zero' : Number(length) === 1 ? '1' : Number(length) === 512000 ? '512000' : 'other',
+              transferEncoding: transfer === undefined ? 'absent' : transfer === 'chunked' ? 'chunked' : 'other',
+              complete: request.complete, readableEnded: request.readableEnded,
+              readableLength: typeof readable !== 'number' || !Number.isSafeInteger(readable) || readable < 0 ? 'invalid'
+                : readable === 0 ? 'zero' : readable === 1 ? '1' : readable === 512000 ? '512000' : 'other',
+            });
+          } catch { boundaryDetail.evidenceError = true; }
+        }
       }
       let terminal = false;
       const timer = setTimeout(() => {
@@ -302,6 +336,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
       ? { receiverPostOrdinal: diagnostic.receiverPosts, routePostsAtReceipt: diagnostic.routePosts } : null;
     const facts: WireReceiverFacts | null = diagnostic ? {
       fieldFailure: null, boundaryLength: null, bodyTrailer: null, parsedFileSize: null, bodyHighByte: null,
+      rawBodyBytes: null, streamCompletion: null,
     } : null;
     let stage: WireStage = 'receiver-reservation-origin';
     const timer = setTimeout(() => { state.rejected++; recordRejection('receiver-timeout', facts); void close(); }, 5000);
@@ -345,6 +380,10 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
         state.peakBufferedBytes = Math.max(state.peakBufferedBytes, length);
       }
       const body = Buffer.concat(chunks, length);
+      if (facts) {
+        facts.rawBodyBytes = body.length;
+        facts.streamCompletion = request.complete ? 'complete' : 'incomplete';
+      }
       const delimiter = `--${boundary[1] ?? boundary[2]}`;
       const ending = Buffer.from(`\r\n${delimiter}--`);
       stage = 'receiver-envelope';
@@ -439,6 +478,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
   }
 }
 export type MockOptions = {
+  imageChangeLoss?: 'reservation' | 'finalizer' | 'cancel';
   lifecycleLoss?: 'begin' | 'delete' | 'finish' | 'change';
   initialLanguage?: Language | null; failCommitOnce?: boolean; failLanguageSave?: boolean;
   loseFinalizeReplyOnce?: boolean;
@@ -488,6 +528,18 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       request_id: null, expected_version: null, started_at: null, ...deletionClaims.get(String(item.id)) };
   };
   const saves: Array<{ owner: string; itemId: string; imageId: string; fingerprint: string; state: 'reserved' | 'completed'; analyzed?: boolean; cancelled?: boolean }> = [];
+  const imageChanges: Array<{ owner: string; intent: JsonRow; itemBefore: JsonRow; imageBefore: JsonRow; receipt: ImageChangeReceipt }> = [];
+  type Target = { ordinal: number; path: string; category: 'pending' | 'registered' | 'unmanifested';
+    objectId: string | null; version: string | null; authorized: boolean; absent: boolean };
+  type Operation = { owner: string; manifest: string; receipt: DeletionOperation; targets: Target[]; imagePage: number; objectPage: number; imagesDone: boolean };
+  const deletionOperations: Operation[] = [];
+  let imageChangeLost = false;
+  const fenced = (owner: string, itemId: unknown) => deletionOperations.some(value => value.owner === owner
+    && value.receipt.itemId === itemId && value.receipt.phase !== 'cancelled');
+  const imageBytesMatch = (image: JsonRow) => ['main', 'thumb'].every(kind => {
+    const bytes = files.get(String(image[`${kind}_path`]));
+    return bytes && bytes.length === image[`${kind}_bytes`] && createHash('sha256').update(bytes).digest('hex') === image[`${kind}_sha256`];
+  });
   const imageKeys = ['id', 'main_bytes', 'thumb_bytes', 'main_sha256', 'thumb_sha256', 'width', 'height', 'alt_text'];
   const fingerprintFor = (item: JsonRow, image: JsonRow) => {
     const values = garmentPayload(parseGarmentValues(item)), provenance = parseFieldProvenance(item.field_provenance);
@@ -633,6 +685,115 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         consent: { enabled: false, noticeRevision: null, consentedAt: null, profileVersion: String(profiles[owner]!.version) },
         policy: null, usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } }); return;
     }
+    if (['image_change_status', 'image_change_requests', 'image_recovery_versions', 'cancel_image_change'].some(name => url.pathname === `/rest/v1/rpc/${name}`)) {
+      const body: unknown = request.postDataJSON();
+      const invalid = () => json({ code: '22023', message: 'Invalid input', details: null, hint: null }, 400);
+      const name = url.pathname.split('/').at(-1)!;
+      const keys = name === 'image_recovery_versions' ? ['p_item_id', ...(isRecord(body) && Object.hasOwn(body, 'p_after') ? ['p_after'] : [])]
+        : name === 'image_change_requests' ? ['p_item_id'] : ['p_item_id', 'p_request_id'];
+      if (method !== 'POST' || !isRecord(body) || !sameValue(Object.keys(body).sort(), keys.sort())
+        || !isUuid(body.p_item_id) || keys.includes('p_request_id') && !isUuid(body.p_request_id)
+        || keys.includes('p_after') && !isUuid(body.p_after)) { await invalid(); return; }
+      const own = imageChanges.filter(value => value.owner === owner && value.receipt.itemId === body.p_item_id);
+      if (name === 'image_change_requests') { await json(own.filter(value => value.receipt.state === 'reserved').map(value => value.receipt).sort((a, b) => a.requestId.localeCompare(b.requestId))); return; }
+      if (name === 'image_recovery_versions') {
+        if (fenced(owner, body.p_item_id) || !items.some(row => row.owner_id === owner && row.id === body.p_item_id && row.deleted_at === null)) { await invalid(); return; }
+        await json(images.filter(row => row.owner_id === owner && row.item_id === body.p_item_id && row.state === 'retired'
+          && (body.p_after === undefined || String(row.id) > String(body.p_after))).sort((a, b) => String(a.id).localeCompare(String(b.id))).slice(0, 40)
+          .map(image => ({ image, eligible: Date.parse(String(image.retired_at)) <= Date.now() && Date.parse(String(image.retired_at)) >= Date.now() - 7 * 86400000 })));
+        return;
+      }
+      const found = own.find(value => value.receipt.requestId === body.p_request_id);
+      if (name === 'cancel_image_change' && found?.receipt.state === 'reserved') {
+        found.receipt = { ...found.receipt, state: 'cancelled' };
+        if (options.imageChangeLoss === 'cancel' && !imageChangeLost) { imageChangeLost = true; await route.abort('failed'); return; }
+      }
+      await json(found?.receipt ?? null); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/reserve_image_change' || url.pathname === '/functions/v1/finalize-image-change') {
+      const finalizer = url.pathname.endsWith('/finalize-image-change');
+      const body: unknown = request.postDataJSON();
+      const fail = (message: 'Invalid input' | 'Request conflict' | 'Upload incomplete') =>
+        json(finalizer ? { code: message === 'Request conflict' ? 'CONFLICT' : message === 'Upload incomplete' ? 'UPLOAD_INCOMPLETE' : 'INVALID_INPUT' }
+          : { code: '22023', message, details: null, hint: null }, finalizer ? 409 : 400);
+      if (method !== 'POST' || !isRecord(body) || !sameValue(Object.keys(body).sort(), finalizer ? ['action', 'intent'] : ['p_intent'])) { await fail('Invalid input'); return; }
+      const intent = finalizer ? body.intent : body.p_intent;
+      const action = finalizer ? body.action : 'reserve';
+      if (!isRecord(intent) || !sameValue(Object.keys(intent).sort(),
+        ['requestId', 'itemId', 'imageId', 'expectedVersion', 'currentImageId', 'descriptionVersion', 'item', 'image', 'claim', 'sourceImageId'].sort())
+        || ![intent.requestId, intent.itemId, intent.imageId, intent.currentImageId].every(isUuid)
+        || !isRecord(intent.item) || !isRecord(intent.image) || !['reserve', 'complete', 'accept-recovery'].includes(String(action))
+        || !sameValue(Object.keys(intent.item).sort(), [...garmentFields, 'field_provenance'].sort())
+        || !sameValue(Object.keys(intent.image).sort(), [...imageKeys].sort()) || intent.image.id !== intent.imageId) { await fail('Invalid input'); return; }
+      const item = items.find(row => row.owner_id === owner && row.id === intent.itemId);
+      const currentImage = images.find(row => row.owner_id === owner && row.item_id === intent.itemId && row.id === intent.currentImageId);
+      const fingerprint = createHash('sha256').update(JSON.stringify(intent)).digest('hex');
+      let existing = imageChanges.find(row => row.owner === owner && row.receipt.requestId === intent.requestId);
+      if (!item || !currentImage || fenced(owner, item.id) || existing && (existing.receipt.fingerprint !== fingerprint || existing.receipt.state === 'cancelled')) { await fail('Request conflict'); return; }
+      if (!existing || existing.receipt.state !== 'completed') {
+        if (item.deleted_at !== null || item.version !== intent.expectedVersion || currentImage.state !== 'ready'
+          || currentImage.description_version !== intent.descriptionVersion
+          || existing && (!sameValue(item, existing.itemBefore) || !sameValue(currentImage, existing.imageBefore))) { await fail('Request conflict'); return; }
+      }
+      if (action === 'complete') {
+        const next = existing && images.find(row => row.owner_id === owner && row.id === intent.imageId && row.item_id === item.id);
+        if (!existing || !next || !imageBytesMatch(next)) { await fail('Upload incomplete'); return; }
+        if (existing.receipt.state === 'reserved') {
+          currentImage.state = 'retired'; currentImage.retired_at = new Date().toISOString(); next.state = 'ready';
+          Object.assign(item, structuredClone(intent.item), { version: Number(item.version) + 1, updated_at: new Date().toISOString() });
+          existing.receipt = { ...existing.receipt, state: 'completed', completedVersion: Number(item.version) };
+        }
+        if (options.imageChangeLoss === 'finalizer' && !imageChangeLost) { imageChangeLost = true; await route.abort('failed'); return; }
+        await route.fulfill({ status: 204 }); return;
+      }
+      if (existing) { await json(existing.receipt); return; }
+      if (images.some(row => row.id === intent.imageId) || intent.imageId === intent.currentImageId
+        || imageChanges.some(row => row.owner === owner && row.receipt.imageId === intent.imageId)) { await fail('Request conflict'); return; }
+      const recovery = action === 'accept-recovery';
+      if (recovery) {
+        const source = images.find(row => row.id === intent.sourceImageId && row.owner_id === owner && row.item_id === item.id && row.state === 'retired');
+        const fields = Object.fromEntries([...garmentFields, 'field_provenance'].map(key => [key, item[key]]));
+        const image = intent.image;
+        if (!source || intent.claim !== null || !sameValue(fields, intent.item)
+          || Date.parse(String(source.retired_at)) > Date.now() || Date.parse(String(source.retired_at)) < Date.now() - 7 * 86400000
+          || !imageBytesMatch(source) || imageKeys.filter(key => key !== 'id' && key !== 'alt_text').some(key => !sameValue(source[key], image[key]))) { await fail('Request conflict'); return; }
+      } else if (intent.sourceImageId !== null) { await fail('Invalid input'); return; }
+      try {
+        parseGarmentValues(intent.item);
+        const before = parseFieldProvenance(item.field_provenance), after = parseFieldProvenance(intent.item.field_provenance);
+        for (const field of provenanceFields) {
+          if (!sameValue(before[field], after[field]) && after[field]?.revision !== (before[field]?.revision ?? 0) + 1
+            || !sameValue(item[field], intent.item[field]) && sameValue(before[field], after[field])) throw new Error('Fixture revision');
+        }
+        if (intent.claim !== null) {
+          const claim = intent.claim;
+          if (!isRecord(claim) || !isRecord(claim.fields) || typeof claim.requestId !== 'string') throw new Error('Fixture claim');
+          const result = options.aiResults?.get(claim.requestId);
+          if (!result || result.imageSha256 !== intent.image.main_sha256 || result.draftId !== claim.draftId
+            || result.generation !== claim.generation || !claim.requestId.startsWith(owner === owners.a ? 'c329a000-' : 'c329b000-')) throw new Error('Fixture claim');
+          if (result.expiresAtMs <= Date.now()) {
+            await json({ requestId: intent.requestId, itemId: intent.itemId, imageId: intent.imageId, state: 'analysis_unavailable' }); return;
+          }
+          for (const [field, entry] of Object.entries(claim.fields)) {
+            if (!isRecord(entry) || !sameValue(entry.value, result.facts.fields[field as keyof typeof result.facts.fields])
+              || !sameValue(intent.item[field], entry.value) || before[field as keyof typeof before]?.kind === 'user'
+              || !(item[field] === null || item[field] === '' || Array.isArray(item[field]) && item[field].length === 0)
+              || after[field as keyof typeof after]?.kind !== entry.kind) throw new Error('Fixture claim');
+          }
+        }
+        for (const [field, entry] of Object.entries(after)) if (entry.kind.startsWith('ai_') && !sameValue(entry, before[field as keyof typeof before])
+          && (!isRecord(intent.claim) || !isRecord(intent.claim.fields) || !Object.hasOwn(intent.claim.fields, field))) throw new Error('Fixture proof');
+      } catch { await fail('Invalid input'); return; }
+      const prefix = `${owner}/${item.id}/${intent.imageId}`;
+      images.push({ ...structuredClone(intent.image), owner_id: owner, item_id: item.id, state: 'pending', retired_at: null,
+        description_version: 1, created_at: new Date().toISOString(), main_path: `${prefix}/main.jpg`, thumb_path: `${prefix}/thumb.jpg` });
+      existing = { owner, intent: structuredClone(intent), itemBefore: structuredClone(item), imageBefore: structuredClone(currentImage),
+        receipt: { requestId: String(intent.requestId), itemId: String(item.id), imageId: String(intent.imageId), kind: recovery ? 'recovery' : 'replacement',
+          state: 'reserved', fingerprint, completedVersion: null } };
+      imageChanges.push(existing);
+      if (options.imageChangeLoss === 'reservation' && !imageChangeLost) { imageChangeLost = true; await route.abort('failed'); return; }
+      await json(existing.receipt); return;
+    }
     if (url.pathname === '/rest/v1/rpc/reserve_item_save' || url.pathname === '/rest/v1/rpc/reserve_analyzed_item_save') {
       const analyzed = url.pathname.endsWith('/reserve_analyzed_item_save');
       const body: unknown = request.postDataJSON();
@@ -739,6 +900,117 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (options.loseFinalizeReplyOnce && !commitFailed) { commitFailed = true; await route.abort('failed'); return; }
       await route.fulfill({ status: 204 }); return;
     }
+    if (['item_deletion_operations', 'item_deletion_operation_status', 'prepare_item_deletion', 'inventory_item_deletion',
+      'cancel_item_deletion_preparation', 'authorize_item_deletion', 'item_deletion_next_target', 'reconcile_item_deletion_target',
+      'begin_prepared_item_deletion'].some(name => url.pathname === `/rest/v1/rpc/${name}`)) {
+      const body: unknown = request.postDataJSON(), name = url.pathname.split('/').at(-1)!;
+      const fail = () => json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400);
+      if (method !== 'POST' || !isRecord(body)) { await fail(); return; }
+      if (name === 'item_deletion_operations') {
+        const ids = body.p_item_ids;
+        if (Object.keys(body).length !== 1 || !Array.isArray(ids) || !ids.length || ids.length > 40 || !ids.every(isUuid)
+          || new Set(ids).size !== ids.length) { await fail(); return; }
+        await json(deletionOperations.filter(value => value.owner === owner && ids.includes(value.receipt.itemId)
+          && value.receipt.phase !== 'cancelled').map(value => value.receipt)); return;
+      }
+      const keys = ['p_item_id', 'p_request_id', ...(name === 'prepare_item_deletion' ? ['p_expected_version', 'p_image_manifest_sha256']
+        : name === 'authorize_item_deletion' ? ['p_inventory_hash'] : name === 'reconcile_item_deletion_target' ? ['p_ordinal'] : [])];
+      if (!sameValue(Object.keys(body).sort(), keys.sort()) || !isUuid(body.p_item_id) || !isUuid(body.p_request_id)) { await fail(); return; }
+      const id = body.p_item_id, requestId = body.p_request_id;
+      let operation = deletionOperations.find(value => value.owner === owner && value.receipt.requestId === requestId && value.receipt.itemId === id);
+      if (name === 'item_deletion_operation_status') { await json(operation?.receipt ?? null); return; }
+      const item = items.find(row => row.id === id && row.owner_id === owner);
+      if (name === 'prepare_item_deletion') {
+        if (operation) {
+          if (operation.receipt.phase === 'cancelled' || operation.receipt.expectedVersion !== body.p_expected_version
+            || operation.manifest !== body.p_image_manifest_sha256) { await fail(); return; }
+          await json(operation.receipt); return;
+        }
+        if (!item || !item.deleted_at || item.version !== body.p_expected_version || body.p_image_manifest_sha256 !== manifest(id, owner)
+          || fenced(owner, id) || deletionOperations.some(value => value.owner === owner && value.receipt.requestId === requestId)) { await fail(); return; }
+        const claim = deletionClaims.get(id);
+        if (claim && claim.request_id !== requestId) { await fail(); return; }
+        operation = { owner, manifest: String(body.p_image_manifest_sha256), targets: [], imagePage: 0, objectPage: 0, imagesDone: false,
+          receipt: { itemId: id, requestId, phase: 'preparing', expectedVersion: Number(item.version), inventoryHash: null,
+            targetCount: 0, reason: null, begin: claim ? { ...claim, version: Number(item.version), image_manifest_sha256: manifest(id, owner) } : null,
+            pendingTargets: 0, unmanifestedTargets: 0, registeredTargets: 0 } };
+        deletionOperations.push(operation); await json(operation.receipt); return;
+      }
+      if (!operation || !item) { await fail(); return; }
+      const op = operation;
+      const coherent = () => ![...files.keys()].some(path => path.startsWith(`${owner}/${id}/`) && !op.targets.some(target => target.path === path))
+        && op.targets.every(target => {
+          const data = files.get(target.path);
+          return data ? !target.absent && createHash('sha256').update(data).digest('hex') === target.version
+            : ['authorized', 'removing_registered'].includes(op.receipt.phase) || target.objectId === null;
+        });
+      if (name === 'inventory_item_deletion') {
+        if (op.receipt.phase !== 'preparing') { await fail(); return; }
+        let done = false, supported = true;
+        const enroll = (path: string, category: Target['category']) => {
+          try { wardrobeTargetDeleteRoute(owner, id, path); } catch { supported = false; }
+          if (op.targets.some(target => target.path === path)) return;
+          const data = files.get(path);
+          op.targets.push({ ordinal: op.targets.length + 1, path, category, objectId: data ? randomUUID() : null,
+            version: data ? createHash('sha256').update(data).digest('hex') : null, authorized: false, absent: false });
+        };
+        if (!op.imagesDone) {
+          const rows = images.filter(row => row.owner_id === owner && row.item_id === id).sort((a, b) => String(a.id).localeCompare(String(b.id)))
+            .slice(op.imagePage, op.imagePage + 40);
+          for (const image of rows) for (const path of [image.main_path, image.thumb_path]) enroll(String(path), image.state === 'pending' ? 'pending' : 'registered');
+          op.imagePage += rows.length; op.imagesDone = rows.length < 40;
+        } else {
+          const paths = [...files.keys()].filter(path => path.startsWith(`${owner}/${id}/`)).sort().slice(op.objectPage, op.objectPage + 40);
+          for (const path of paths) enroll(path, 'unmanifested');
+          op.objectPage += paths.length; done = paths.length < 40;
+        }
+        const reason = !supported ? 'UNSUPPORTED_TARGET' : done && (manifest(id, owner) !== op.manifest || !coherent()) ? 'INVARIANT' : null;
+        op.receipt = { ...op.receipt, phase: reason ? 'blocked_preflight' : done ? 'prepared' : 'preparing', reason,
+          targetCount: op.targets.length, pendingTargets: op.targets.filter(t => t.category === 'pending').length,
+          unmanifestedTargets: op.targets.filter(t => t.category === 'unmanifested').length,
+          registeredTargets: op.targets.filter(t => t.category === 'registered').length,
+          inventoryHash: done && !reason ? createHash('sha256').update(JSON.stringify(op.targets)).digest('hex') : null };
+        await json(op.receipt); return;
+      }
+      if (name === 'cancel_item_deletion_preparation') {
+        if (!['preparing', 'prepared', 'blocked_preflight', 'cancelled'].includes(op.receipt.phase) || op.receipt.begin) { await fail(); return; }
+        op.targets = []; op.receipt = { ...op.receipt, phase: 'cancelled', reason: null, inventoryHash: null,
+          targetCount: 0, pendingTargets: 0, unmanifestedTargets: 0, registeredTargets: 0 };
+        await json(op.receipt); return;
+      }
+      if (name === 'authorize_item_deletion') {
+        if (!['prepared', 'authorized', 'removing_registered'].includes(op.receipt.phase) || body.p_inventory_hash !== op.receipt.inventoryHash
+          || !coherent() || op.receipt.phase === 'prepared' && (manifest(id, owner) !== op.manifest || item.version !== op.receipt.expectedVersion)) { await fail(); return; }
+        if (op.receipt.phase === 'prepared') op.receipt = { ...op.receipt, phase: op.receipt.begin ? 'removing_registered' : 'authorized' };
+        for (const change of imageChanges) if (change.owner === owner && change.receipt.itemId === id && change.receipt.state === 'reserved') change.receipt = { ...change.receipt, state: 'cancelled' };
+        await json(op.receipt); return;
+      }
+      if (!['authorized', 'removing_registered'].includes(op.receipt.phase) || !coherent()) { await fail(); return; }
+      const registered = op.receipt.phase === 'removing_registered';
+      if (name === 'item_deletion_next_target') {
+        const target = op.targets.find(target => !target.absent && (target.category === 'registered') === registered);
+        if (target) target.authorized = true;
+        await json(target ? { ordinal: target.ordinal, path: target.path, objectId: target.objectId, version: target.version } : null); return;
+      }
+      if (name === 'reconcile_item_deletion_target') {
+        const target = op.targets.find(target => target.ordinal === body.p_ordinal && target.authorized && (target.category === 'registered') === registered);
+        if (!target) { await fail(); return; }
+        if (!files.has(target.path)) target.absent = true;
+        await json({ ordinal: target.ordinal, state: target.absent ? 'reconciled_absent' : 'present' }); return;
+      }
+      if (name === 'begin_prepared_item_deletion') {
+        if (!registered) {
+          if (op.targets.some(target => target.category !== 'registered' && !target.absent) || item.version !== op.receipt.expectedVersion) { await fail(); return; }
+          for (let i = images.length - 1; i >= 0; i--) if (images[i]!.owner_id === owner && images[i]!.item_id === id && images[i]!.state === 'pending') images.splice(i, 1);
+          const claim = { request_id: requestId, expected_version: Number(item.version), started_at: new Date().toISOString() };
+          deletionClaims.set(id, claim); item.version = Number(item.version) + 1; item.updated_at = new Date().toISOString();
+          op.receipt = { ...op.receipt, phase: 'removing_registered', begin: { ...claim, version: Number(item.version), image_manifest_sha256: manifest(id, owner) } };
+        }
+        if (options.lifecycleLoss === 'begin' && !lifecycleReplyLost) { lifecycleReplyLost = true; await route.abort('failed'); return; }
+        await json(op.receipt); return;
+      }
+      await fail(); return;
+    }
     if (url.pathname === '/rest/v1/rpc/item_deletion_status') {
       const body = request.postDataJSON() as JsonRow;
       const ids = body.p_item_ids;
@@ -756,15 +1028,21 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         if (!item) { await json([{ state: 'absent' }]); return; }
         if (!claim || claim.request_id !== body.p_request_id || item.version !== claim.expected_version + 1
           || [...files.keys()].some(path => path.startsWith(`${owner}/${id}/`))) { await conflict(); return; }
+        const op = deletionOperations.find(value => value.owner === owner && value.receipt.itemId === id && value.receipt.phase !== 'cancelled');
+        if (op && (op.receipt.requestId !== body.p_request_id || op.receipt.phase !== 'removing_registered' || op.targets.some(target => !target.absent))) { await conflict(); return; }
         items.splice(items.indexOf(item), 1);
         for (let i = images.length - 1; i >= 0; i--) if (images[i]!.owner_id === owner && images[i]!.item_id === id) images.splice(i, 1);
         deletionClaims.delete(id);
+        if (op) {
+          op.targets = []; op.receipt = { ...op.receipt, phase: 'completed', expectedVersion: null, inventoryHash: null,
+            targetCount: 0, pendingTargets: 0, unmanifestedTargets: 0, registeredTargets: 0, reason: null, begin: null };
+        }
         if (options.lifecycleLoss === 'finish' && !lifecycleReplyLost) { lifecycleReplyLost = true; await route.abort('failed'); return; }
         await json([{ state: 'completed' }]); return;
       }
       if (!item || !Number.isSafeInteger(body.p_expected_version)) { await conflict(); return; }
       if (url.pathname.endsWith('/set_item_trashed')) {
-        if (claim || item.version !== body.p_expected_version || typeof body.p_trashed !== 'boolean'
+        if (claim || fenced(owner, id) || item.version !== body.p_expected_version || typeof body.p_trashed !== 'boolean'
           || (body.p_trashed ? item.deleted_at !== null || !images.some(row => row.item_id === id && row.owner_id === owner && row.state === 'ready')
             : !item.deleted_at || Date.parse(String(item.deleted_at)) > Date.now() || Date.parse(String(item.deleted_at)) < Date.now() - 7 * 86400000)) {
           await conflict(); return;
@@ -929,7 +1207,11 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       }
       if (method === 'DELETE') {
         const item = items.find(row => row.id === path.split('/')[1] && row.owner_id === owner);
-        if (!item || !images.some(row => row.owner_id === owner && row.item_id === item.id && [row.main_path, row.thumb_path].includes(path))) {
+        const op = deletionOperations.find(value => value.owner === owner && value.receipt.itemId === item?.id && value.receipt.phase !== 'cancelled');
+        const target = op?.targets.find(target => target.path === path);
+        if (!item || (op ? !['authorized', 'removing_registered'].includes(op.receipt.phase) || !target?.authorized || target.absent
+          || (target.category === 'registered') !== (op.receipt.phase === 'removing_registered')
+          : !images.some(row => row.owner_id === owner && row.item_id === item.id && [row.main_path, row.thumb_path].includes(path)))) {
           await json({ statusCode: '403', code: 'AccessDenied', error: 'Unauthorized', message: 'Access denied' }, 400); return;
         }
         if (request.postData() !== null) { await json({ message: 'Invalid fixture delete' }, 400); return; }
@@ -944,7 +1226,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { profiles, preferences, items, images, wearEvents, wearLinks, files, requests, fixture, deletionClaims, uploadWire: receiver.state, wireDiagnostic,
+  return { profiles, preferences, items, images, wearEvents, wearLinks, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

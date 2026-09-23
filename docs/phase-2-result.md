@@ -15,6 +15,1579 @@ PR [#9](https://github.com/drrowdev/stillroom-wardrobe/pull/9), branch
 `25a268712dc9158259608f5a4f17d11d9b9ad279`. This result update changes no
 executable inputs.
 
+## 22 September 2026 - CI19 prepared-deletion integration amendment
+
+**Two-path unstaged amendment; the real backend journey is not yet revalidated.**
+The same persistent local GPT-6 Astra writer follows
+[proposal 5783644168](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5783644168)
+and [release 5783775439](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5783775439),
+including all A1-A6 corrections from actual retained Anthropic Claude Opus 5
+critique 181. Base `e225fe77a892b57b90eda4c2539ea794c2ad052d`, tree
+`1757fd1cbe7e82a18632d7ec19779e41f435b230`. Only the existing integration
+lifecycle test and this additive result section are changed; production,
+schema, types, dependencies, configuration, workflows, browser tests and unit
+tests remain fixed. This prospectively releases the integration test, without
+rewriting its historical freeze or the published 38-entry manifest.
+
+Coordinator-observed CI19 `35778282583`, attempt 1, failed in DB job
+`106916953079` at `npm run test:integration`. The closed lifecycle record at
+20:13:11.490 UTC reports `resume`, checkpoint `delete.dialog`, last completed
+`delete.route`, timeout, verified cleanup, and all three interception flags
+false. Three other page cases passed. The unchanged test was clicking the row's
+old "Delete permanently" control; Stage C exposes "Review deletion" there and
+reserves irreversible confirmation for the subsequently prepared dialog.
+This explains the observed failure before preparation or DELETE. The later
+completion-copy, redundant-DELETE and cleanup mismatches were source-predicted,
+not separately executed failures.
+
+The amended journey checks the named prepared dialog, zero DELETEs before
+authorization, unchanged item version, and the original durable inventory:
+two registered targets, no pending/unmanifested targets, no begin receipt.
+It retains exact-main upstream removal followed by one-shot delivery abort,
+all three interception flags, the quiet interval, denied restore, and original
+nonce, inventory, claim, version and manifest checks through reload/status.
+Resume must not redispatch the already-removed main file. One synchronous
+monotonic sequence shared with the existing DELETE request listener reserves
+each reconciliation-response slot before awaiting its body. After all tracked
+proof work settles, the exact interleaving must be main ordinal 1 absent,
+thumbnail ordinal 2 present, thumbnail DELETE, then ordinal 2 absent.
+Together with the initial exact-main dispatch and two-target prepared inventory,
+this proves the ordinal/path mapping rather than inferring it from the parser.
+There must be exactly two DELETEs overall, three post-resume reconciliation
+responses and one removed-thumbnail response.
+
+The new response observer checks origin/RPC path and bounded successful
+two-key responses through the existing typed parser. It reads no request body
+or nonce. The surrounding operation/status/claim/completion assertions bind
+the original item/request; the observer does not independently prove that
+identity. No raw body, header, URL, ID or error text is emitted. Existing
+4096-byte response guards remain. Durable same-request completion and actual
+item/status absence are required alongside the unchanged history and peer
+isolation checks; generic absence is not success.
+
+Failure cleanup closes the page first and uses only ordinary fixture sessions.
+It reuses `reversibleDeletion()` including its null-begin guard, checks
+cancellation, and never authorizes a reversible preparation to clean it.
+Already-authorized cleanup handles at most the two unique known targets,
+reconciles before removing present bytes, verifies no remaining target, then
+checks finish and the durable completed receipt. An already-completed operation
+requires item/status absence and the existing clean end-state checks, with no
+finish replay or legacy fallback. Missing/cancelled operations retain the
+exact-path legacy cleanup. Successful cancellation after ordinary preparation
+expiry is handled, not automatically a cleanup failure; inconsistent state,
+actual cleanup failure or exhaustion of the unchanged deadline remains failure.
+Original main/proof errors and peer/profile/history/Auth cleanup are preserved.
+
+This explicitly replaces the page's redundant native missing-DELETE assertion
+with real page reconciliation and no redispatch; it is not identical coverage.
+Unchanged `item-lifecycle.sessions.mjs` and `image-replacement.sessions.mjs`
+retain native missing-response classification and ordinal reconciliation and
+run before these page cases. No extra HTTP call or case manufactures that
+old page outcome. The original two lifecycle tests remain, with unchanged
+120000-ms test, 110000-ms fixture, 35000-ms cleanup reserve, 5000-ms action and
+10000-ms navigation limits, zero retries and one worker. No marker field,
+1024-byte limit or fallback changes; new checkpoint tags are closed and no
+longer than the original longest tag.
+
+With hash-verified pinned Node 24.19.0, actual sequential local commands
+`node node_modules/eslint/bin/eslint.js tests/integration/item-lifecycle.spec.ts`
+and `node node_modules/typescript/bin/tsc --noEmit` both exited 0
+(20:42:55.962-20:45:33.786 UTC). `node scripts/scan-secrets.mjs` exited 0,
+checking 257 text files; no local canary was supplied, so this is not a new
+canary test. `git diff --check` and the two-path/frozen-identity checks passed:
+all 37 other published raw/filtered entries remain exact, and removing only
+this additive section restores the prior result document byte-for-byte.
+The failure-marker source is unchanged, including fields, fallback and bound.
+The maximum checkpoint-tag length remains 23; a worst-case combination of
+allowed longest tags/reasons, longest case label and false booleans encodes to
+437 UTF-8 bytes including its newline, within the unchanged 1024-byte bound.
+Both lifecycle cases and all configuration/action/deadline limits remain.
+No local browser/list/server/backend/SQL operation, test execution, Actions
+access or publication was performed. Source checks cannot establish repaired
+live behavior. Focused closure, separate publication and fresh ordinary native
+validation remain required.
+
+[Coordinator CI19 evaluation 5783707561](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5783707561)
+records App success (3476 units in 33 files, 757 browser passes, four existing
+skips, quality/dependencies/canary), Apple success and actual 27-frame static
+review without an observed blocker. These are not live journey acceptance.
+Native backend security, served rehearsal and generated-type gates after the
+failed integration step did not run. The original local 756-pass/four-skip/
+one-failure raw-boundary result and local dependency CRLF guard/audit block
+remain open; native nonrecurrence does not fix or supersede them. No merge,
+deployment, hosted or private-photo/paid-provider activation authority follows.
+
+## 22 September 2026 - I10b Stage C local candidate
+
+**Unstaged frontend candidate; full browser validation remains blocked.**
+The same persistent local GPT-6 Astra writer follows
+[implementation release 5780330650](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5780330650)
+and [narrow amendment 5781047825](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5781047825),
+after retained Anthropic Claude Opus 5 critique 170 for the latter.
+Base `0ea54733a90f5380f2f16a6a1634cb42e1b93b9b`, tree
+`43b489917590af3b1cb1682e5fe186cdc559b6af`; R04/R28/R03/R12/R15 scope.
+No staging, publication, backend execution, hosted operation or deployment.
+
+[CI18 receipt 5780203902](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5780203902)
+records completed Stage B engineering prerequisites: run `35752261632`,
+App `106829137937`, DB `106829138512` and Apple `35752261519` passed.
+Its merge checkout had the exact base tree above. Native served I10b passed at
+16:16:13.230Z; generation, upload and parity passed, and the coordinator's
+authenticated extracted text matched the adopted types. This is real earlier
+exact-head evidence, not Stage C, visual, device or hosted acceptance.
+
+Replacement now requires both saved editors to be clean and resolved. Optional
+AI fills only empty, unknown, untouched fields, preserving existing values,
+clears and new edits. Its own revision composer retains unchanged provenance.
+Explicit Save retains request/image identities through ambiguous outcomes;
+completed retries verify status and bytes without another finalizer POST.
+Recovery copies verified previous bytes to a new identity, preserves current
+garment fields/provenance, permits caption edits and performs no AI calls.
+Seven-day eligibility remains server-checked; listing uses bounded pages.
+
+Permanent deletion now prepares an exact inventory before irreversible
+authorization. Pending, unmanifested and registered targets use checked
+reconciliation; each deliberate action has a 30-second/40-DELETE-dispatch cap,
+including retries, and requires explicit continuation. Uncertain authorization
+removes only that item's convenience Undo. Cancelling reversible preparation
+preserves Undo and restores focus after the enabled review control commits.
+EN/FI/SV copy distinguishes logical removal from physical provider erasure.
+
+Local fixture corrections preserved assertions: reload after synthetic seeding,
+open the existing optional caption section, and await the actual preparation
+dialog before simulating an external edit. A subsequent full run had 753 passes,
+four existing skips and one WebKit recovery conflict. Its text snapshot retained
+the draft and showed conflict before an attempt existed. The reload path could
+reuse the old editor baseline; it now clears detail synchronously before reload.
+Six recovery/consecutive-caption checks passed across all three projects, and
+those cases also passed in the following full run. This does not prove every
+earlier failure had the same cause or change any timeout/retry setting.
+
+Final local commands used pinned Node 24.19.0 and existing locked dependencies:
+`vitest run --reporter=dot` passed 3452 tests in 32 files; `eslint .`,
+`tsc --noEmit` and `scripts/check-translations.mjs` passed (547 keys, EN/FI/SV).
+`vite build` passed with the retained >500 kB warning (main JS 719.22 kB,
+208.54 kB gzip). `playwright test --grep accessibility` passed 60 cases.
+The full `playwright test --max-failures=3` finished with **756 passed,
+four existing skips and one failure**, not a pass or accepted flaky result.
+
+That sole remaining failure is the unchanged WebKit analysis-wire boundary
+case in `ai-photo-first.spec.ts`: the one-byte request returned 200, but the
+512000-byte request returned 400. All nine raw-analysis, twelve upload-wire and
+three reservation-localization scalar records were retained. The failing
+record reports `end-empty`, ordinal 2, zero received/accepted bytes, completed
+cleanup, no timeout, and retry/repeat zero; the other eight raw records report
+no first attempted 400. No raw headers/bodies or new probe were collected.
+The exact frozen receiver/forwarder region and frozen browser specs remain
+unchanged. These observations do not identify why the body arrived empty, prove
+a CI18 causal difference or authorize repair of that held surface. No further
+full or targeted wire rerun was performed.
+
+The earlier unit boundary failure was resolved only by the approved exact
+eighth import pair, count/label and negative-pair amendment. The first browser
+attempt matched no tests; the next failed before test-body entry because the
+pinned browser was absent. The separately approved one-time stock installation
+in the writer's isolated session cache passed, followed by headless readiness
+and a pinned live Vite-process check. No shared cache, package pin or config
+changed. Local `check-dependencies.mjs` still stops at
+`DEPENDENCY_RECORD_DRIFT`: read-only comparison found normalized inventory and
+notices equal, but the unchanged Windows inventory has CRLF. No rewrite or
+audit pass is claimed; the earlier failure remains recorded.
+
+Only three new synthetic viewport frames are produced: replacement EN
+1280x900, recovery FI 320x1200 and deletion-resume SV 320x1200, each below
+1 MiB. The workflow adds only their exact paths/current-head artifact/one-day
+retention; the original 24 capture paths remain. The writer did not view images.
+Coordinator exact-final-head artifact review, independent candidate closure,
+full-head CI and human/device gates remain open. I10a-D remains deferred, I22
+remains Phase 6, I11 remains ineligible, and no physical-erasure, paid-provider,
+hosted or deployment claim follows from these local mock-backend journeys.
+
+### 22 September 2026 - temporary boundary observation stopped at discovery
+
+[Release 5781871538](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5781871538)
+approved proposal 5781788697 after retained Anthropic Claude Opus 5 critique
+172 and controlling D1-D6 amendments. The writer authenticated all 36
+candidate/migration/type identities and the separately frozen browser spec.
+Temporary edits were limited to the two observation files: boundary-only
+constructed-size retention and at most two closed request-entry categories.
+Nine extracted-source synthetic groups passed, including zero/rejection
+retention, runtime non-opt-in absence, exact existing 4096/default snapshots,
+first-400 first-wins, distinct two/four-record bounds, privacy and raw inverses.
+These were not browser, stream, unit-suite or engine-behaviour passes.
+Scoped lint, typecheck and diff checks passed before discovery.
+
+The single authorized `--list` with the supplied anchored file/title selectors,
+WebKit project, two workers, zero retries and repeat-each one returned exit 1:
+`No tests found`, zero tests in zero files. The wrapper stopped before launching
+the execution process. No browser/server, analysis POST, fresh live-Vite proof
+or three-minute execution clock followed; the cause was not inferred and no
+alternative selector or discovery retry was attempted.
+
+Both diagnostic edits were surgically removed, recovering the exact prior
+53541-byte spec and 87762-byte Stage C mock fixture, including their filtered
+blobs. All existing Stage C changes remain. Instrumented source, synthetic
+checks and the failed discovery output are retained as text evidence only.
+This failed prerequisite supplies no new boundary-runtime evidence and changes
+neither the original full-browser failure nor the remaining acceptance gates.
+
+### 22 September 2026 - corrected discovery and one bounded observation
+
+[Correction 5782070176](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5782070176)
+records the coordinator's selector error: Playwright matches parent suite titles
+as well as the bare title. The first failed discovery remains preserved.
+One replacement discovery used the authorized `(?:^| )` title-suffix selector
+with all other arguments unchanged and selected exactly one existing WebKit
+case, exit 0. No third discovery occurred. The identical approved temporary
+source was reapplied and matched the earlier instrumented raw bytes exactly;
+earlier synthetic/lint/typecheck passes were explicitly reused, not re-executed.
+
+The sole browser execution ran at 18:54:40.536Z, exit 0: one case passed
+(21.3 seconds reported by Playwright), with exactly two analysis POSTs and
+retry/repeat index zero. The external owned-process interval was 28.30 seconds;
+the 180-second ceiling was not reached. Fresh live proof tied Vite PID 50636
+to owned launcher 45308 and the exact pinned Node executable. All 12 observed
+owned descendants had exited, the owned listener was absent, stderr was empty,
+and the existing receiver cleanup assertion and evidence flag both passed.
+
+Constructed sizes were 1 and 512000. Entry Content-Length categories were
+`1` and `512000`, with Transfer-Encoding absent; entry complete/readableEnded
+were false and readableLength was zero for both. The existing collector later
+received and accepted the exact respective bytes; both responses were 200.
+There was no first attempted 400, capture error, overflow or timeout.
+Entry readableLength zero is therefore not an empty-body conclusion.
+**Non-recurrence in this single instrumented sample is inconclusive**, not a
+repair, probability estimate, full-browser pass or acceptance of the candidate.
+
+Both temporary test-file edits were again removed by exact hunks, restoring
+their pre-diagnostic raw bytes and filtered blobs. Restored-source scoped lint
+and typecheck had already passed after the first removal; their identical-input
+results were reused after the final identity check. Diff checks were run again.
+Only additive documentation remains from this observation. The original
+756-pass/four-skip/one-failure full run, dependency/audit block, independent
+closure, exact-head CI and visual/human gates remain unchanged.
+
+### 22 September 2026 - reviewed durable boundary evidence and deletion copy
+
+**Unstaged amendment; the local full-browser failure remains open.**
+[Release 5782761005](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5782761005)
+approves plan 5782591787 after retained Anthropic Claude Opus 5 critique 177,
+with E1-E7 controlling conditions. The candidate now has 26 paths: the previous
+24 plus the existing browser-spec diff and one new durable unit file.
+Only the two observation files, that unit, the existing three-language
+`deletion.blocked` values and this additive result section changed.
+The other 21 candidate files, migrations, generated types and dependencies
+remain unchanged. Prior broad source closure still applies to unchanged inputs.
+
+The existing boundary case now retains constructed sizes, including zero, and
+at most two ordinal-correlated closed request-entry framing/buffer categories.
+Its two existing HTTP calls, sender, timeouts, retry policy and assertions remain;
+no browser case, matrix, observer, logging channel or production telemetry was
+added. Default/OPTIONS runtime absence, max-four base accounting, first-400
+first-wins, privacy and exact existing 4096 evidence shape remain covered.
+The accepted E1 move copies cumulative totals before case-specific validation,
+so malformed boundary evidence still sets captureError without losing totals.
+The final spec is therefore **not byte-identical** to the earlier temporary
+spec that ran once. That run remains inconclusive; no local browser/list/server
+execution was made against this durable candidate.
+
+`tests/unit/raw-analysis-observation.test.ts` extracts uniquely matched,
+non-vacuous source functions/receiver statements using the installed TypeScript
+AST and executes only those snippets with bounded VM evaluation. It never
+imports the Playwright test module, starts a receiver or accesses the network.
+Before browser edits, the identical Vitest selector produced 18 behavioural
+failures and six passes: missing sizes/entry records/integration were exposed,
+while extraction, sender/default, first-400 and existing 4096 controls worked.
+After the approved browser hunks and E1, all 24 tests passed. Negative tests
+also verify copied cumulative totals survive malformed-boundary capture errors.
+
+Two earlier new-test authoring failures remain recorded: deprecated
+`module=None` diagnostics required the supported ESNext transpiler option,
+and a misplaced brace while separating default controls caused a transform
+failure. Neither was counted as meaningful red or product failure. After those
+test-only corrections, the final red/green runs used the same test source.
+Scoped ESLint for the three test files and `tsc --noEmit` passed.
+Translation checks passed for 547 EN/FI/SV keys; the secret scan passed for
+257 text files, with the local canary absent, not a canary assertion.
+
+F1 removes the nonexistent wardrobe-administrator role and internal preparation
+noun from the existing EN/FI/SV message. The user is told that deletion cannot
+proceed yet and to cancel and try later; no automatic retry or promised outcome
+is introduced. F2-F5 remain deferred. E7 remains an explicit coverage limit:
+reviewed code counts failed/retried DELETE dispatches toward the 40-dispatch
+budget, but no existing test specifically proves a failed DELETE consumes a
+slot. Lost-acknowledgement/reconciliation tests are not that proof; no lifecycle
+test or production deletion change was added under this amendment.
+
+This later reviewed retention authority supersedes temporary removal-only
+authority for these precise observation hunks; both earlier removals remain
+historical facts. Unit VM results are not stream/engine evidence or a wire fix.
+The original 756-pass/four-existing-skip/one-failure full run and dependency
+record CRLF guard failure/audit-not-run remain open. Independent focused closure
+and a separate guarded publication grant precede any new ordinary native CI.
+Native green would not itself resolve the local failure or waive exact-head
+visual, human/device, hosted or rollout gates.
+
+## 22 September 2026 - CI17 authentic generated type adoption
+
+**Native served gate passed; type adoption remains unstaged for review.**
+The same local GPT-6 Astra writer follows
+[release 5779381981](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5779381981)
+after retained Anthropic Claude Opus 5 review 166 and coordinator corrections.
+Base `f6c2f0d70903db2c08fd69549b6d87931af42849`, tree
+`8810e41ba10dffb89ca27d76e88c888788e6593d`; scope is I10b R04/R28/R03/R12/R15
+schema evidence, not Stage C or deployment.
+
+CI17 run `35744604238`, DB job `106802831201`, used checkout
+`e42422d5e8ad3965dfa9fd5a2892ca2bbee0fe3a` with that exact tree. Preservation,
+reset, integration, security, B1/B2/C and restoration passed. At
+15:09:05.6339058Z the actual Deno/Auth/DB/Storage served replacement and
+new-identity recovery rehearsal passed, including incomplete-upload/caption
+conflicts, completed retries and no additional inference. This does not
+retrospectively identify CI16's original exception or establish paid-provider,
+hosted, visual or human acceptance. CI17 App finished with 3412 unit and
+730 browser passes, four skips; skips remain skips.
+
+Actual local-schema generation passed at 15:09:17.2969059Z; upload of artifact
+`10701143634` passed at 15:09:17.9315120Z. The subsequent workflow Git parity
+check alone failed the DB job. The coordinator verified archive size/digest
+and extracted its single TypeScript entry; the writer accessed only that text.
+This candidate adopts the whole 29078-byte LF artifact, SHA256
+`b07b004ddadf1f512ec208012f042c6798d4b606c54c5f3187c126bff6ae72ba`,
+filtered blob `aee6eb845cd09195c23bc41806ee3649c4a61528`, without curation.
+
+The committed delta is 26875 to 29078 bytes: 2203 bytes, 69 lines and 18 new
+public RPC members, with all previous declarations unchanged. The migration's
+21 public declarations include three unchanged signatures:
+`reserve_analyzed_item_save` delegates to `private.reserve_analyzed_item_save_v10`,
+`finish_item_deletion` to `private.finish_item_deletion_v9`, and
+`item_attribution_history` is replaced in place. Five new tables remain private;
+no public column, helper contamination or version-metadata delta was found.
+The existing `wardrobe-query.spec.ts` Functions-indexed `save_wear_event` Args
+consumer is unchanged and nonexhaustive, not absent.
+
+Generated `Json` includes null and is not a refined receipt; required properties
+do not prove semantic validity. `p_after?: string` allows omission, not null.
+The bigint-to-number mapping cannot represent every 64-bit integer exactly;
+runtime bounds remain necessary. SQL void-to-undefined is a type mapping, not
+an HTTP-response proof. `complete_image_change` and `reserve_image_recovery`
+remain service-role-only: generated membership grants no App permission.
+
+The old Windows raw file was 27802 bytes with 927 CRLFs, distinct from its
+26875-byte committed LF text. The current artifact has 996 LFs and no CRs;
+raw growth of 1276 bytes is not the committed growth of 2203 bytes. Future
+checkout size alone cannot authenticate an EOL change: compare durable blob
+and normalized hash before attributing any difference to line endings.
+
+The first writer transfer failed its raw guard before typecheck: it lost the
+optional owner-id marker and terminal blank line and produced CRLF. Under
+[routine correction 5779518312](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5779518312),
+the marker and blank line were restored with `apply_patch`. A first in-memory
+normalization guard still found the missing final LF and refused writing;
+after the terminal-line correction, proposed normalized bytes matched the
+authenticated artifact exactly before file-only LF formatting. Postwrite
+raw/hash/blob equality passed. These were transfer errors, not artifact defects
+or passing compilation; no Git configuration/attributes or schema changed.
+
+Pinned Node 24.19.0, existing dependencies: `tsc --noEmit` passed, exit 0.
+No consumer/pin repair, runtime units, build, fail-first or local generation
+was needed. The generated file is ESLint-ignored; no lint pass is claimed.
+Secret scan checked 253 text files, exit 0; local canary was absent, so CI
+retains that gate. `git diff --check`, artifact/LF/blob identity, all-18-member
+and old-raw inverses, additive-doc inverse and frozen-surface checks passed.
+`scripts/db.mjs --check` compares raw strings, while `--setup-artifact` reports
+equality separately and normal generation writes output. Adoption removes the
+observed content difference, not a guarantee of future parity. The existing
+automatic CI generation/upload/Git-diff gate, full-head review, Stage C,
+visual/human and rollout gates remain pending; no publication is included here.
+
+## 22 September 2026 - CI16 served-fixture baseline isolation
+
+**Unstaged fixture correction; CI16's actual failing operation remains unknown.**
+The same local GPT-6 Astra writer follows
+[release 5778583194](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5778583194),
+after retained Anthropic Claude Opus 5 review 162 and coordinator W1-W4
+dispositions. Base `4687eb0874728f8b2e5b0363a139dfbcda4552b0`, tree
+`d3c4b0f8830c51d11702687992bffe8cc23c0877`. This is I10b R04/R28 fixture
+evidence, not a product/SQL change, publication or native acceptance.
+
+The served caller's nested notes-provenance write also changed its saved
+baseline's shared provenance map. If reservation, thumbnail upload and the
+expected 409 `UPLOAD_INCOMPLETE` assertion succeeded, the following unchanged
+item assertion compared the persisted row with that mutated expectation.
+Reservation does not update the public item before completion. The local
+copy-on-write replacement preserves the intended request values, original
+baseline and strict assertions; all other caller/harness bytes are unchanged.
+`imageChangeIntent` deliberately remains a shallow copy whose nested provenance
+can alias the source; this site now uses copy-on-write, and future nested
+mutations require the same care.
+
+CI16 recorded fresh post-C readiness, not fixture entry or completion; the
+actual exception/status/SQLSTATE remain unavailable. Observed CI15 did not
+enter the served fixture. This packet has no passing native evidence for the
+served stage or its completion/recovery/retry/conflict/race checks. Further
+downstream or expectation failures remain possible; this does not establish
+CI16's cause or predict a passing next run. Earlier CI16 preservation/reset/
+integration/security/B1/B2/C/restoration passes remain valid; types were skipped.
+
+Pinned Node 24.19.0 and existing dependencies, executed sequentially:
+
+- `vitest run tests/unit/item-lifecycle-schema.test.ts -t "I10b served baseline isolation" --reporter=dot`:
+  **9 failed / 29 passed / 920 filtered**, exit 1 before the caller change;
+  the identical selector then **38 passed / 920 filtered**, exit 0.
+- Existing five suites (`item-lifecycle-schema`, `preservation`, `local-backend`,
+  `image-replacement-schema`, `ci-storage-guard`): **2144 passed**, exit 0.
+- Caller/lifecycle-unit ESLint and `tsc --noEmit`: exit 0, after the suites.
+  No test-scaffold correction, timeout change or weakened assertion was needed.
+
+The regressions execute the actual served caller and shared harness with mocked
+ordinary-client/endpoint transport and independent cloned persisted rows.
+They require the exact sentinel thrown at the next main upload, not whole-stage
+success; assert intended notes/provenance, retained title/category entries,
+baseline equality and distinct draft-map identity; and retain strict rejection
+of changed item/image rows. Injected Error/falsy rejections propagate exactly
+at the tested awaits, while failed responses retain `EVIDENCE_REQUIRED`.
+Neither result is a universal claim about all native errors. No backend, SQL,
+server, browser, inference or native probe was run. Candidate remains unstaged
+for retained closure and a separate publication decision.
+
+## 22 September 2026 - CI15 owned-server entry repair
+
+**Unstaged source-entry correction; served-stage native acceptance remains open.**
+The same local GPT-6 Astra writer follows
+[release 5777799907](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5777799907),
+after retained Anthropic Claude Opus 5 review 159 and coordinator V1-V5
+dispositions. Base `98e4c3251e22d58fc15a495cc503ca09c6b9f309`, tree
+`89883a19b3307ec9446b2c0a2ef6482d994f9f7e`. Scope remains I10b R04/R28
+replacement and seven-day new-identity recovery evidence, not publication,
+generated types, Stage C, deployment or full Phase 2 acceptance.
+
+The observed CI15 AI rehearsal completed C restoration, which stops its owned
+server and sets the handle to `undefined`. No reassignment occurred before
+the I10b stage's immediate `owned.assertRunning()`, before its served fixture
+call. This source control flow, not the log timing gap, establishes the
+entry defect. The actual thrown object/message/status/SQLSTATE remain withheld.
+The served fixture was not entered on that observed path; this packet provides
+no passing native result for that stage.
+
+The runner adds only the 41-byte line `owned = await startAnalysisServer();`
+after the I10b stage assignment. Its existing helper retains fresh readiness,
+ownership and startup-failure cleanup. C shutdown/restoration, pre/post liveness,
+snapshot/ready/baseline/headroom checks, catch/finally and all budgets are
+unchanged. Startup must succeed before entry; a later native run may reveal
+another failure. Stage duration against the fresh 600000ms lifetime and
+remaining headroom is unmeasured. The in-process synthetic-provider server and
+generation counter are not restarted; the existing before/after comparison
+requires **no additional** stage inference, not zero inference across B1/B2/C.
+The adjacent unit's first-occurrence startup pin survives unchanged and still
+selects the earlier runner line 203.
+
+Local evidence uses pinned Node 24.19.0 and existing dependencies:
+
+- Identical focused selector `I10b owned-server entry after C restoration`:
+  **40 failed / 2 passed / 540 filtered** before insertion, then
+  **42 passed / 540 filtered** after. No regression-scaffold logic correction
+  was needed. Typecheck subsequently required an explicit `Row[]` annotation
+  for an empty synthetic inventory; focused cases still passed afterward.
+- The five approved unit suites initially passed **2106** cases. Following
+  that type annotation, a repeat recorded **2105 passed / 1 failed**: the
+  unchanged preservation HTTP 512KiB TUS test exceeded its existing 5000ms
+  timeout. Source inspection found no changes to that test or HTTP helper.
+  The identical five-suite command, without overlapping lint/typecheck work,
+  then passed **2106** cases. The timeout's cause is unproven; no assertion,
+  timeout or source behavior was weakened, and nonrecurrence is not a fix.
+- Two-file ESLint and final `tsc --noEmit`: exit 0. Initial typecheck exit 2
+  for the synthetic array annotation is retained as a corrected test defect.
+- Secret scan: 253 text files, exit 0; no local canary was supplied, so CI
+  retains that gate. `git diff --check`: exit 0.
+
+The regressions execute extracted actual C restoration, I10b entry and
+catch/finally code with mocked dependencies, including Error/falsy failures,
+exact stop-error propagation, cleanup order and unchanged inference/snapshot/
+headroom refusals. They do not run Docker, SQL, Storage, a server, browser or
+the full rehearsal. Earlier CI15 preservation/reset/integration/security and
+B1/B2/C passes remain valid exact-head evidence; types and downstream
+acceptance remain pending. No staging or publication is included here.
+
+## 22 September 2026 - CI14 legacy orphan fixture and stage boundaries
+
+**Unstaged fixture correction; CI14's failing subcase remains unknown.**
+The same local GPT-6 Astra writer follows
+[release 5776803892](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5776803892),
+after retained Anthropic Claude Opus 5 reviews 156/157 and coordinator
+dispositions. Base `c8964dda9a908e51d59659f2ed6c26530729e6e4`, tree
+`23e09f9bd4571431244426e9268df5e3490c264a`. Scope remains I10b R03/R12/R15;
+this is not publication, native acceptance, generated types or Stage C.
+
+The orphan fixture used checked Save to create its initial item, then raw
+deleted and reinserted that same item ID before calling legacy `commit_image`.
+Successful `reserve_item_save` inserts the durable used-ID marker; it is not
+inserted by finalize, and raw item deletion does not remove it. If reached,
+the later legacy commit conflicts with that marker's item-ID check. This
+source contradiction does not establish which CI14 operation actually failed.
+
+Only this fixture now seeds through ordinary owner-B item/image inserts,
+the existing synthetic upload and legacy commit. Both initial IDs retain the
+I08 `1080` prefix. Its two post-commit readbacks check persisted owner/item/image
+identity, ready state, declared byte counts, hashes, 120x80 dimensions and
+description against the intent. This checks declared metadata, not decoding.
+All existing commit checks remain. The intent-shaped value, same-item
+reinsertion, new image, two unmanifested plus two registered targets, ordered
+native deletion/reconciliation/BEGIN/FINISH and final absence are retained.
+The shared harness, paging fixture, SQL, permissions and validators are unchanged.
+
+The runner assigns only three fixed existing-stage values immediately before
+paging, orphan work and synchronous finalizer liveness checking. Labels describe
+the furthest boundary, not a proven thrower. The unchanged `finally.stop` can
+replace an earlier error: an orphan failure leaves the orphan label, whereas
+successful orphan work reaches the finalizer label before a later stop failure.
+
+Approved local commands used pinned Node 24.19.0 and existing dependencies:
+
+- Focused lifecycle-unit selector
+  `I10b legacy orphan fixture|I10b owner group stage boundaries`: initial
+  286 failures included an accidental returned `beforeEach` cleanup callback.
+  Removing that test-only return yielded **280 failed / 6 passed / 634 filtered**
+  before repair. The identical selector after repair first yielded
+  **219 failed / 67 passed** because the mock incorrectly required Buffer
+  instead of the existing Uint8Array upload. Correcting that test-only guard
+  yielded **286 passed / 634 filtered**.
+- The five approved suites (`item-lifecycle-schema`, `preservation`,
+  `local-backend`, `image-replacement-schema`, `ci-storage-guard`):
+  **2064 passed**. These include actual fixture calls with mocked ordinary
+  clients and extracted runner/finally source with mocked operations; they
+  are not SQL, Storage or full-runner execution.
+- Three-file ESLint, `tsc --noEmit`, `scripts/scan-secrets.mjs` and
+  `git diff --check`: exit 0. Scan checked 253 text files; no local canary
+  was supplied, so CI retains that gate.
+
+CI14's DB failure and skipped downstream gates remain recorded in the release.
+Coordinator-reported App 3046 unit / 730 browser passes with four existing skips
+and no flaky summary do not repair earlier failures. Eight capture uploads
+are not visual acceptance; Apple CI is not device acceptance. No backend,
+browser, Actions, hosted, paid-provider, deployment or publication operation
+was performed for this candidate.
+
+## 22 September 2026 - CI13 BEGIN manifest alias correction
+
+**Unstaged source correction; CI13's runtime cause remains unobserved.**
+The same local GPT-6 Astra writer follows
+[release 5776270663](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5776270663),
+after retained Anthropic Claude Opus 5 review 154 approved C1-C6 and the
+coordinator's evidence corrections. Starting head
+`19c4d1fbc5702b21032bc487c46e3a4ae6095548`, tree
+`432aa66f1ce428057ab12228b002c09478531c06`, remains unchanged for this handoff.
+This stays within I10b R03/R12/R15 deletion scope; it is not native acceptance,
+publication, Stage C or deployment.
+
+`begin_prepared_item_deletion` declares row variables `i` and `im`. Its
+remaining-image manifest SELECT also used `im` as the relation alias in
+`to_jsonb(im)`. Only that expression and its FROM alias now use the distinct,
+undeclared `remaining_image`. The pending-image loop retains `im`, including
+its sole remaining `to_jsonb(im)`, path/id references and exact one-shot
+`forget_pending` context hash. No predicate, aggregate, cast, lock, old BEGIN
+call, receipt, helper, native guard, RPC validator or diagnostic changed.
+
+The collision is a source defect, not an observed `42702` or measured server
+configuration. Normal error conflict handling rejects ambiguity; variable
+preference can select the loop record rather than the intended relation row.
+That does not mean every input fails downstream: empty aggregates can
+coincide. Column preference retains the intended relation semantics. The
+ordinary success RPC contract is still HTTP 200 with non-null JSONB, not an
+expectation of 400/22023. The caller's `begin` boundary contains no actual
+status/body/SQLSTATE/transaction outcome and does not prove SQL entry.
+
+The SQL change is exactly two identifier substitutions, +13 bytes each:
+whole migration 82456 -> 82482 bytes, BEGIN body 3047 -> 3073 bytes.
+The new migration SHA256 is
+`28f0c87f9db6c643bc68d86843dffc905449280bd26483721503389281d7ec93`.
+Only runner bytecount and preservation source SHA change as executable
+migration pins. The existing unit outside-native-region pin deliberately
+becomes 77898 bytes/SHA256
+`d52909b330786719ac23a8d2c38beff13f5581ef25ff449fa46be3c88061e87e`.
+Inverting only those two manifest references reproduces the prior BEGIN
+and whole migration exactly. All SQL outside BEGIN remains 79409 bytes/SHA256
+`f0ef4c25c8ef71dab06ead009baac5f2710293e8fb677d5c04988f1722eb46e8`.
+The 4584-byte native guard and installer MD5
+`636fb77a3c954f4a23d78c7339ffef95` are frozen, as are the earlier ten
+migrations, callers, request helper, fixtures, caps/IPC and browser/probe state.
+
+Four focused static tests positively assert the intended SELECT, distinct
+alias, unchanged loop context, exact inverse and frozen outside-BEGIN/native
+bytes. Before the SQL edit, the CI13 selector reported three failures and one
+pass (131 tests excluded by the selector). The identical selector then passed
+all four; no test-scaffold correction was needed. The same five approved unit
+suites passed all 1778 tests in one invocation. Three-file scoped ESLint and
+`tsc --noEmit` passed with approved Node 24.19.0 and existing locked dependencies.
+These tests do not parse or execute PostgreSQL, measure its configuration or
+prove native Storage behavior.
+
+The release records terminal CI13: database failed at the furthest `begin`
+boundary, exact cleanup passed, and downstream gates were skipped. The source
+collision is consistent with, not established as, that failure's cause.
+App passed 3042 unit tests and 730 browser tests with four existing skips and
+no flaky summary. Oversized input returned 413 at retry 0; all twelve
+parallel-page records had no first 400. Non-recurrence is not a fix or waiver
+of earlier failures. Eight successful capture steps are not visual acceptance;
+Apple success is not device/HEIC acceptance. R2 remains recorded-project
+disposable-only migration confirmation, not a fresh hosted query or universal
+external assertion; contrary persistent-application evidence requires a hold.
+No backend/browser/Actions/probe, new dependency/parser, hosted operation or
+type generation was run. Focused independent closure and separate publication
+authorization remain pending.
+
+## 22 September 2026 - CI12 native lock boundary and bounded caller evidence
+
+**Unstaged source correction; native behavior and CI12 cause remain unverified.**
+The same local GPT-6 Astra writer implements only the eight paths in
+[release 5775798300](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5775798300),
+after actual retained Anthropic Claude Opus 5 critiques 150/151 and focused
+152 approval, with coordinator R1-R3/D1-D6 conditions and matching local model
+receipt. Starting head `6afbdd71a7a3dce17232413478192f569185ddf7`, tree
+`944404abe3fddc19c09eeac1409645ef31858c00`, remains unpublished by this amendment;
+main remains `1984b848017dd9c22249907fe303d701bcb48440`. This supports the existing
+I10b R03/R12/R15 deletion requirements, not additional feature scope.
+
+The shared `private.image_change_lock` converts `lock_not_available` (`55P03`)
+to RPC `22023`. That is its sole explicit `22023` emitter. The modern native
+publication guard previously called it with only an outer `55P03` handler,
+so the already-converted state escaped that native mapping. A narrow nested
+block now translates `22023` from that one helper call back to native `55P03`
+with the existing `The resource is locked` text. It retains the outer handler,
+the three later `FOR SHARE NOWAIT` locks outside the block, and common
+INSERT/UPDATE/DELETE admission before deletion checks/return. No broad catch,
+message matching, policy change, lock bypass or public RPC change was made.
+Other states, including the helper's owner/isolation/approval `42501`, remain
+unmatched by the new handler. Static assertions pin the sole conversion and
+all source outside this guard; they do not execute PostgreSQL or Storage.
+
+The exception block adds a subtransaction. Successful locks persist to
+transaction end; failed-block effects roll back and the exception propagates
+through the mapping. The helper's lack of explicit business-data DML is not
+evidence about XID allocation, physical effects or measured cost. No zero-cost
+claim is made. Existing `lock_timeout` can also produce `55P03`; this mapping
+does not distinguish timeout from NOWAIT contention.
+
+The coordinator's R2 confirmation is based on this project's recorded
+operations: the owner's 20 September six-row hosted ledger matched the
+coordinator's cited record `5622788324`,
+with no later hosted-DDL authorization/application. This unmerged eleventh
+migration has been exercised only in disposable CI, not this project's
+persistent database. This is not a fresh hosted query or a claim about unknown
+external databases. Contrary persistent-application evidence requires a hold.
+
+Only the existing owner-lock DELETE request now supplies the existing
+`onFailure` hook. It passes through `status5xx-<closed>`, `body-on-204`,
+`no-body-<closed>`, `overflow` and `nonjson-<closed>` under the fixed
+`owner-lock-delete-` prefix; unknown statuses retain the helper's `OTHER`.
+Both loop targets retain indistinguishable labels. Result-class labels remain
+separate. No classifier, catch, await, retry, extra request or validator change
+was added. An absent hook remains unclassified, not a transport diagnosis.
+Known reasons identify only the covered guard category, not a root cause.
+
+New tests execute the real caller through a mocked request/lock/child seam.
+The mock invokes the passed hook before throwing the exact same value,
+including falsy values. Both loop occurrences, all five reason families,
+ordering, short-circuit, cleanup, privacy, default-noop and non-awaited
+observation are covered. These tests do not execute `normalClient.request` or
+prove its runtime hook sequence. That helper and `imageChangeHarness` remain
+byte-frozen; existing preservation tests remain unchanged.
+
+Only three executable pin values change: migration bytes `82243` -> `82456`,
+SHA256 `cebc58134c93590fe178a1a72a4beb77dcabe562803c90a5455cf09acba3e771` ->
+`4709017051095186ac1cf3cdcfe36d81f8afe4da3a78db8628e7369a49690dd5`, and modern
+guard MD5 `628ede8b417fe55094dcd50196b8f353` ->
+`636fb77a3c954f4a23d78c7339ffef95`. SQL outside the guard remains
+77872 bytes/SHA256
+`8e29e574045ed91daaa60011c28fbc75203cd2a9cc15994591ca4d28a2a85f4e`.
+Legacy/policy hashes, all ten predecessors, old I08 caller, child IPC, caps,
+lock modes, deletion oracles, browser files and consumed-probe removal remain
+unchanged. Historical evidence below is retained verbatim.
+
+Local Node 24.19.0 validation used the existing locked dependencies:
+`vitest run tests/unit/image-replacement-schema.test.ts tests/unit/item-lifecycle-schema.test.ts -t CI12 --reporter=dot`
+first produced 32 failures/12 passes/721 filtered tests before the repair.
+After implementation, 43 passed/one failed: the new success assertion counted
+the existing POST upload hook as though it were another DELETE hook. The
+test-only correction explicitly retains POST/DELETE/DELETE hook order.
+The identical selector then passed all 44 selected tests. The existing five
+suites (`item-lifecycle-schema`, `preservation`, `local-backend`,
+`image-replacement-schema`, `ci-storage-guard`) passed all 1774 tests in one
+invocation. Scoped ESLint on all six changed JS/TS files and `tsc --noEmit`
+passed. The secret scan checked 253 text files with no local canary supplied;
+CI still requires its canary. `git diff --check` passed. These are local
+static/mocked checks, not live database evidence.
+
+The [CI12 terminal record](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5775760886)
+remains authoritative: DB stopped at `owner-lock-delete`, without a returned
+result class/status/body/target/trigger outcome. This source mismatch is
+consistent with that signature, not its established cause. App had 2998 unit
+passes and 729 browser passes, four existing skips and one flaky oversized
+source case (first 400 instead of 413; retry passed). Eight successful uploads
+are not visual acceptance; parallel-page non-recurrence is not a fix.
+CI9/other transport causes remain unresolved. This amendment runs no backend,
+browser, native CI, probe, hosted query/mutation or type generation. Native
+mapping, independent candidate closure and separate publication remain pending;
+no Stage C, merge or deployment is authorized.
+
+## 22 September 2026 - I10b Stage A backend/harness source candidate
+
+This is an **unstaged source handoff**, not PostgreSQL/native acceptance, UI
+completion or publication. The accepted base/head remains
+`1984b848017dd9c22249907fe303d701bcb48440`, tree
+`532730a435bfe29fc0ea9611688efde1fc2cc1fc`. The sole persistent local writer is
+CLI `9e524647-badc-41a5-ac94-8c91d43b0d49`, branch
+`drrowdev-shiny-umbrella`, explicitly GPT-6 Astra. The immutable 53,227-byte
+[plan](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5769821979)
+has SHA256 `3d77c9f08ae131a9f8fc5259efab655748fff616f522ba78fa291193c1818b19`.
+The [controlling approval](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5769933357)
+records retained Anthropic Claude Opus 5 critique, B1/B2/M1-M7 dispositions,
+own-writer coordinator-observed local model evidence and explicit Stage A limits.
+
+The eleventh migration adds checked replacement/recovery, positive five-key
+ordered attribution, one-shot rollback-scoped context, common approved-account
+locking, reversible inventory/irreversible deletion authorization and durable
+publication fencing. All ten preceding migration files are unchanged. The new
+fixed finalizer reuses authenticated bounded JPEG verification without altering
+Add's production request/RPC contract. Exact serving inventory is 7/4/3 files
+across three declared JWT-verified functions. The historical I08 contract and
+Google/Azure receipt compatibility remain separately testable.
+
+The existing preservation runner now has explicit base->10 and populated9->10
+copy-only staging, then populated10->11 on the same ROOT-verified database.
+The pinned CLI has no migration target flag. Native installation chooses the
+exact legacy21 or target29 trigger/body from the ledger, with no observed-body
+fallback. New CI-only fixtures cover structural grants/lifetimes/context,
+normal-owner replacement/recovery, pending/unmanifested deletion, 41-version/
+84-target paging, native late publication and shared-lock exclusion. They are
+executable source, **not locally executed backend proof**. Original B1=12,
+B2=22 and C=2 inference counts and all deadlines remain unchanged.
+
+Local commands used the already approved Node 24.19.0 executable and this
+workspace's locked packages, with no installation:
+
+| Command (after the pinned Node executable) | Actual result |
+|---|---|
+| `node_modules\vitest\vitest.mjs run tests\unit\ai-save-endpoint.test.ts tests\unit\image-replacement-endpoint.test.ts tests\unit\image-replacement-schema.test.ts tests\unit\image-replacement.test.ts tests\unit\local-backend.test.ts tests\unit\ci-storage-guard.test.ts tests\unit\preservation.test.ts tests\unit\item-lifecycle-schema.test.ts --reporter=default` | Exit 0, eight files / 1,185 tests. |
+| `node_modules\vitest\vitest.mjs run tests\unit\ai-draft.test.ts tests\unit\analyzed-save.test.ts tests\unit\item-lifecycle.test.ts tests\unit\item-save.test.ts tests\unit\ai-schema.test.ts tests\unit\ai-endpoint.test.ts --reporter=default` | Exit 0, six files / 525 tests. |
+| `node_modules\typescript\bin\tsc --noEmit` | Exit 0. No generated-type edit. |
+| `node_modules\vite\bin\vite.js build` | Exit 0; existing >500 kB chunk warning retained. |
+| `node_modules\eslint\bin\eslint.js` with all changed executable/test paths | Exit 0. |
+| `scripts\check-translations.mjs` | Exit 0, 527 EN/FI/SV keys. No UI copy changed. |
+| `scripts\scan-secrets.mjs` | Exit 0; local canary not supplied, so CI canary remains required. |
+| `scripts\check-dependencies.mjs` | Exit 1, `DEPENDENCY_RECORD_DRIFT`; audit not reached. Read-only diagnosis proves exact inventory/notice equality after LF normalization, but raw inventory differs by CRLF. No dependency record, lockfile or package edit was made. |
+
+Earlier local failures were corrected rather than hidden: oversized finalizer
+envelopes needed the shared `TOO_LARGE` mapping; staged cleanup triggered
+`no-unsafe-finally`; old mock call counts and nine/ten-only inventory assertions
+needed the explicit eleventh/ten-stage contract; source-body pins needed the
+repository's required LF bytes. Subsequent targeted results above replace those
+failed local attempts, not real database validation.
+
+Pending gates: retained focused source review/publication release; actual
+fresh/populated PostgreSQL/Auth/Storage/Deno/preservation/security/lock-race
+execution; exact native catalogue acceptance and same-database staging behavior;
+CI-generated public types before Stage B/typed UI; later EN/FI/SV browser/a11y
+and bounded coordinator-reviewed artifacts; hosted/native-device/human gates.
+No local Docker/WSL/backend/SQL fixture, hosted/provider operation, staging,
+commit, push, new PR, merge or deployment occurred. PR29 stays merged and PR27
+and the old writer workspace stay frozen.
+
+I10a-D maintenance is deferred, not passed. Seven-day recovery/no inference,
+explicit Save/current-photo survival and explicit-deletion requirements remain.
+The guarantee is native logical removal with exhaustive authoritative
+reconciliation and publication fencing, not physical erasure or a provider
+remnant deadline. I22 remains Phase 6; I11 is not eligible. Accepted main's
+WebKit zero-byte response-sequence first-attempt failure/retry-pass remains an
+unresolved residual, not a PR16 waiver; no fixture rewrite was made.
+
+### Stage A r1 - retained review corrections, 22 September 2026
+
+The [scoped F1-F5 release](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5770420217)
+records the retained independent Opus review and fresh own-writer model
+observation. This remains the same unstaged 34-path packet at the same base.
+The read-policy helper is now nonlocking; the authoritative native mutation
+trigger still locks and validates the exact operation/object tuple. Existing
+CI lock fixtures now pair ordinary reads of an unaffected same-owner ready
+image with refused native mutations and unchanged state under a held common
+NO KEY UPDATE lock. A separate held preparation-row lock requires authorization
+to return the exact normalized `22023` conflict without cancelling the reserved
+attempt. These are source fixtures, not executed backend evidence.
+
+The unused `removing_extras` phase was removed without a new transition.
+Both finalizers now pass only URL, public key, bearer and signal to the real
+shared verifier, covered by call-through argument assertions. The new data-model
+section explicitly identifies the two superseded historical I08 claims while
+leaving their original text intact. Eleventh-migration byte/hash and both modern
+function-body pins were refreshed; all legacy pins/migrations remain unchanged.
+
+The same combined 14-file unit command above now passes **1,717 tests** (exit 0).
+Scoped ESLint, `tsc --noEmit`, Vite build, translations, secret scan and
+`git diff --check` also exit 0. The existing build-size warning remains.
+No local canary was supplied. The prior CRLF dependency-record failure and
+unreached dependency audit remain unresolved evidence gates, not passes.
+Real native GET behavior, normalized SQL conflict/rollback, backend races,
+fresh/populated preservation and generated types still require authorized CI.
+No local backend, publication or unrelated WebKit change was made.
+
+### Stage A CI1 - startup syntax repair candidate, 22 September 2026
+
+Draft PR [#30](https://github.com/drrowdev/stillroom-wardrobe/pull/30) published
+the reviewed candidate as `c8cb642d8a0e5b2f698c90cfd06f7525e2b55d6c`.
+The [scoped repair release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5770594807)
+records actual CI run `35681262229`, database job `106598507584`, failing
+`npm run db:start` at 02:57:12Z with SQLSTATE `42601` and statement index 36.
+All later backend, preservation, security, rehearsal and generated-type/artifact
+gates were skipped, not passed. The generic Docker warning is not a diagnosis.
+The exact known-name classifier stopped at migration nine, so its count/last
+index of nine could not attribute this failure to the ninth migration.
+
+Source inspection maps the new migration's zero-based statement 36 to
+`private.reserve_image_change`. Its `IF` comparison used an unparenthesized
+SQL `CASE`, allowing the inner `THEN` to terminate PL/pgSQL's condition scan.
+`public.image_change_preflight` contained the same defect. Both operands are
+now parenthesized, matching the accepted `private.item_save_current` pattern.
+Only these two SQL lines changed; the ten predecessors, predicates, lock order,
+grants and state transitions are unchanged. This is a source-established
+syntax correction consistent with CI's ordinal, not a local SQL execution or
+claim to have recovered the withheld raw error.
+
+The diagnostic allowlist now includes exactly migrations ten and eleven;
+unknown/near-miss names remain excluded, with the same closed report, byte
+limits and statement-index parsing. The eleventh migration is 82,235 bytes,
+SHA256 `678873e921f2077c8820a85c1855d432c375269f732bd27bf27daa15cb480596`;
+its inventory pins were refreshed. Both modern guard/policy body MD5s and all
+legacy pins remain unchanged.
+
+Four new focused source/diagnostic regressions failed against the published
+source before the correction (expected exit 1). Afterward, the approved Node
+unit command selecting `image-replacement-schema`, `local-backend`,
+`preservation`, `ci-storage-guard`, `image-replacement` and
+`item-lifecycle-schema` passed all **1,134 tests across six files** (exit 0).
+Scoped ESLint and `tsc --noEmit` also exited 0. No local SQL, backend, parser
+package or new tool was used. Actual migration compilation and all skipped
+backend/type gates still require reviewed publication and fresh authorized CI.
+At the repair release, App had passed its pre-browser gates including canary
+and dependency checks but browser was still running; Apple diagnostic passed.
+Neither is represented as an overall CI pass, physical-device acceptance or
+a generated-type artifact. This repair remains unstaged pending focused review.
+
+### Stage A CI2 - preservation failure localization, 22 September 2026
+
+The [scoped investigation release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5770733860)
+records CI `35682437464`, database job `106602070055`, at
+`cae5f263017f9313396fbb56138954dee1d1c4c1`. Actual PostgreSQL startup passed
+at 03:16:35Z, confirming the preceding syntax repair. Exact eleven-source
+inventory passed. Populated base->10 preserved two owners, ten tables, 30 rows
+and eight objects plus the existing probes; populated9->10 historical
+preservation passed. ROOT reported all eleven migrations applied at 03:18:13Z.
+
+At 03:18:16Z the new `I10b-preservation` verification failed with
+`EVIDENCE_REQUIRED`; exact-run snapshot cleanup passed. This does not establish
+populated10->11 preservation. Subsequent backend/security/rehearsal/type and
+artifact gates were skipped, and no generated-type artifact exists.
+
+Inspection of the actual sanitized log, verification sequence, public/private
+history projections, structural catalogue checks, grants and normal-owner
+callers has not established which inner assertion failed. No data-loss,
+provider-change or harmless-fixture diagnosis is asserted. Under the release's
+diagnostic fallback, the existing runner now retains a fixed failure substage:
+state read/comparison, structural query or one of its ten fixed invariant
+names, empty tables, legacy completion/replay/history, replacement/recovery,
+projection/context probes and restoration. Labels are source constants;
+unknown result keys, rows, receipts, IDs, tokens and SQL/error bodies are not
+reported. Only the existing terminal failure line changes, not log frequency.
+
+Every comparison, SQL statement, expected row/proof/counter, normal-owner call,
+timeout and cleanup operation is retained. All eleven migration bytes and
+modern/legacy pins remain unchanged. Mocked tests check original error
+propagation, changed-state refusal, all ten structural failures, exact result
+shape, all five nonempty initial-table failures and the fixed runner label.
+The targeted three-file unit run passed 170 tests; scoped lint and typecheck
+passed. These are diagnostic/source checks, not a preservation pass.
+The root cause and real10->11 acceptance remain pending focused review and
+fresh authorized CI. No local backend/SQL/parser, publication, types or UI work
+was performed; this diagnostics-only candidate is unstaged.
+
+### Stage A CI3 - replacement reserve/upload boundary, 22 September 2026
+
+The [scoped continuation](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5770888581)
+records CI `35683854072`, database job `106606403678`, at
+`122f7243955df6fd691b3923598a32843c6a54f8`. Startup, exact eleven-source
+inventory, historical base->10/9->10 preservation and the ROOT11 ledger passed
+again. At 03:40:58Z verification failed at
+`I10b-preservation-replacement-reserve-upload`; exact-run snapshot cleanup
+passed. This does not establish full populated10->11 preservation. Later
+backend/type/artifact gates remain unexecuted, not passed.
+
+The label covers both the checked reserve RPC and the subsequent native
+uploads. Inspection of the actual intent/defaults, normal-owner helper,
+provenance/receipt checks, pending-image insertion, image identity/deletion
+triggers and native upload authorization has not established a definite
+contract deviation. The failing call and root cause remain unknown; no
+production or fixture-input correction is claimed.
+
+The bounded diagnostic distinction replaces the combined label with
+`replacement-reserve` immediately before the awaited reservation, then
+`replacement-upload` only after reservation succeeds and before the awaited
+upload helper. `replacement-finalize` still follows successful upload. This
+retains every call/assertion, original failure propagation, cleanup and logging
+frequency. The plain boundary-only candidate was held rather than published.
+
+The [reviewed diagnostic amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771004785)
+records retained Anthropic Claude Opus 5 critique, same-writer model observation
+and explicit authority for failure-only response classes. The existing helper
+now takes an optional fourth stage callback, defaulting to no-op; only the
+preservation caller supplies it. Already-awaited failed responses select from
+the approved 15 integer HTTP statuses and 18 exact code strings, otherwise
+literal `OTHER`. A code must be an own string property of a non-null, non-array
+object. Receipt failures select only the fixed keys/identity invariant labels.
+Failed uploads distinguish only guarded `main`/`thumb` constants. There is no
+owner or iteration token, raw response/code fallback, message/details/hint/data
+inspection, extra output/request/parsing, catch, retry or success-path class.
+The existing three reserve assertions, upload assertion, request order,
+transport-error identity and primary-label/cleanup behavior are retained.
+All eleven SQL files and all source/body pins remain unchanged.
+
+The initial boundary-only command passed 34 source/mock tests. After the
+approved amendment, the command selecting `image-replacement-schema`,
+`preservation` and `image-replacement` passed 261 tests across three files.
+This includes 90 new mocked cases for all approved status/code classes,
+malformed/unknown/prototype-related/sensitive-looking values, unchanged
+receipt refusals (including nullish TypeError), main/thumb failures,
+transport-sentinel identity, sequential uploads, no success class and
+three-argument callers. The held sequencing and earlier privacy/refusal
+coverage remain. Scoped ESLint and `tsc --noEmit` exited 0. These are local
+source/mock checks, not actual reserve/upload evidence.
+
+This four-path diagnostic candidate is unstaged pending retained focused
+closure and separate publication release. No local backend/SQL, provider,
+types, UI, workflow or dependency operation was performed. The coordinator
+subsequently supplied CI3 App SUCCESS metadata at 03:51:21Z; no detailed result
+counts or artifact acceptance are inferred, and Apple final results are not
+asserted from earlier heads. DB remains failed; no generated-type release.
+
+### Stage A CI4 - real-client upload observer, 22 September 2026
+
+The [actual CI4 evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771156822)
+records head `5c86cd625bdbf590e8de3745f2fcc2d911dd9ed4`, CI `35686162961`,
+database job `106613296299`. Startup, exact eleven-source inventory,
+historical base->10/9->10 preservation and the ROOT11 ledger passed.
+At 04:18:28.7229772Z the failure was
+`I10b-preservation-replacement-upload`, without a response class. Reservation
+completed; the specific lower-level cause remains unknown. Exact-run snapshot
+cleanup passed. Later backend/security/rehearsal/types/artifact gates were
+skipped, not passed. Apple job `106613295401` passed four generated-JPEG and
+three orientation/composition checks on macOS 26 arm64, as subsequently read
+by the coordinator; this is not physical-device/HEIC acceptance. App was still
+running at the read-only diagnosis release.
+
+Source inspection established a diagnostic integration gap: `normalClient`
+rejects HTTP >=500 before reading or returning its response, so an outer
+upload classifier cannot see it. Malformed 204, absent non-204 body, response
+overflow and nonempty non-JSON response guards also throw before return.
+Fetch/read/cancel can throw, and the runner prints literal `EVIDENCE_REQUIRED`
+for every caught error. The actual CI line therefore does not prove a 5xx,
+SQLSTATE, failing trigger or production defect.
+
+The [reviewed five-path amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771214433)
+records retained Anthropic Claude Opus 5 critique, same-writer model observation
+and A1-A5 with the precise fifth-path correction. The upload helper now marks
+only guarded main/thumb forward attempt boundaries. An optional synchronous
+failure observer in the real request helper reports only the five approved
+invariant reasons immediately before their unchanged assertions. Both helpers
+use one exported 15-status allowlist classifier; the existing 18-code list is
+unchanged. The observer defaults to no-op and is wired only by upload.
+
+The early 5xx guard still runs before any body access; no extra read, parse,
+request, retry, catch, logging stream or fixture input was added. Original
+exceptions and reader cancellation precedence remain: a cancel error can
+still replace an overflow error, but does not replace the observed overflow
+label. A fetch/read/cancel failure without an observed invariant retains only
+the variant attempt boundary. Successful requests emit no invariant class;
+attempt boundaries are distinct from failure classification.
+
+The affected unit suites passed 291 tests (preservation 166, replacement schema
+125), including 43 new composition/real-client fetch/Response-mocked cases and
+the single-classifier source check. They reproduce the previous pre-return
+miss, cover both variants and all four approved 5xx statuses without accessing
+the body, preserve each existing refusal, exact response-size boundary,
+transport sentinel identity/finally precedence, request order/body/headers,
+default callers, unknown-value privacy and no console output. The fifth-path
+changes retain unexpected-variant and three-argument no-mark assertions and
+all reserve/stage/sequence/privacy coverage.
+Scoped ESLint, `tsc --noEmit`, secret scan and whitespace checks passed. The
+scan checked 253 text files without a local canary; the CI canary remains
+required. No local backend/SQL/parser or dependency installation was performed.
+
+This is an unstaged diagnostic candidate, not a native Storage/PostgreSQL pass.
+5xx diagnostics expose status only, with their bodies still unread; arbitrary
+transport failures expose only the variant. Reserve and other real-client
+callers intentionally retain the old observer blind spot. No underlying
+replacement SQL fix is claimed. All eleven SQL files and source/body pins,
+timeouts and B1/B2/C counts are unchanged. Focused closure/publication and
+actual CI remain required; no generated types or Stage C release is implied.
+
+### Stage A CI5 - native publication column qualification, 22 September 2026
+
+The [actual CI5 evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771355357)
+records head `56db392c0608c12c84e6d4ae0dfff7a56afd00e4`, CI `35687937262`,
+database job `106618661569`. At 04:46:49.2181470Z the failure was
+`I10b-preservation-upload-main-status5xx-500`; the database job failed at
+04:46:52Z. Startup, exact eleven-source inventory, historical base->10/9->10
+preservation, the ROOT11 ledger and exact snapshot cleanup passed. The native
+main upload returned HTTP 500; its body remained deliberately unread. This
+does not establish a SQLSTATE or the underlying trigger cause. Full 10->11
+preservation and later backend/type gates remain unproved.
+
+The [reviewed six-path repair release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771403783)
+records actual retained Anthropic Claude Opus 5 critique and same-writer
+GPT-6 Astra model/source continuity. Source inspection found that the modern
+`private.guard_item_object_publication` declares a local `image_id`, while its
+cancelled-attempt subquery used unqualified `image_id` from
+`private.image_change_attempts`, which also has that column. Under the default
+PL/pgSQL variable-conflict policy, preparing that expression is ambiguous
+(`42702`). INSERT and UPDATE reaching the enclosing IF are affected before
+SQL short-circuit evaluation; DELETE returns earlier. This is source
+diagnosis, not a claim that CI returned `42702`.
+
+The only SQL change aliases that subquery as `a` and qualifies
+`a.owner_id`, `a.image_id` and `a.state`. The cancellation comparison remains
+`a.image_id=image.id`; the cancellation refusal, owner checks, locks,
+publication/deletion guards and grants are unchanged. Legitimate local
+`im.id=image_id` comparisons elsewhere remain unchanged. No conflict-policy
+override, diagnostic change, fixture change or assertion weakening was made.
+
+Three bounded source-regression cases reject bare `image_id` in guard
+statements referencing either `image_change_attempts` or
+`item_deletion_targets`, retain the legitimate local-variable comparison and
+require the qualified cancellation predicate. Before the SQL repair,
+`vitest run tests/unit/image-replacement-schema.test.ts -t "qualifies native publication" --reporter=default`
+failed as intended: two failures, one pass, 125 tests excluded by the filter.
+After the repair, the five selected suites passed all 921 tests:
+image-replacement-schema 128, ci-storage-guard 73, preservation 166,
+local-backend 540 and image-replacement 14. Scoped ESLint and
+`tsc --noEmit` also passed using the approved pinned Node and locked packages.
+These source/mocked tests do not execute PostgreSQL or the native backend.
+
+The new migration's current raw LF bytes are **82,243**, SHA-256
+`cebc58134c93590fe178a1a72a4beb77dcabe562803c90a5455cf09acba3e771`.
+Its modern publication-body MD5 is `628ede8b417fe55094dcd50196b8f353`.
+Only those live inventory/source/body pins were refreshed. The modern policy
+MD5 remains `507ef6c28f1732df5d6141f730258062`; legacy pins and all ten prior
+migrations are unchanged. Earlier 82,235-byte/`678873e9...` and CI1
+`42601` evidence above remains historical and has not been replaced.
+
+This repair is necessary but may not be sufficient: fresh CI must exercise
+the corrected expression and may expose later failures. The candidate remains
+unstaged pending focused closure and a separate publication release. No local
+backend, SQL execution/parser, dependency installation, generated types or UI
+work was performed; no backend acceptance or Stage C release is implied.
+
+### Stage A CI6 - strict nullable fixture RPC contracts, 22 September 2026
+
+The [actual CI6 evidence](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771587836)
+records head `e97dea0048725727ebe8cee220d34cfa2fe5b999`, CI `35689956046`,
+database job `106624623878`. At 05:18:22.4447187Z preservation failed at
+`I10b-preservation-recovery-age-refusals`; exact snapshot cleanup passed.
+Startup, exact eleven-source inventory, historical base->10/9->10 and the
+ROOT11 ledger passed. The path progressed beyond the earlier upload and
+replacement failure, not through all owners or full preservation. The stage
+contains privileged age setup, an endpoint 409 assertion and a missing-request
+status assertion; the log does not identify which statement failed.
+
+The [reviewed three-path release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771708615)
+records retained Anthropic Claude Opus 5 critique 122 and the same GPT-6 Astra
+writer's own-model/source observation. Source inspection established that
+four existing SQL contracts permit NULL: `image_change_status`,
+`cancel_image_change`, `item_deletion_operation_status` and
+`item_deletion_next_target`. Existing fixture assertions expect those results,
+but the shared normal-session RPC helper rejected all non-`commit_image`
+nulls. This is a newly reached source contradiction, not a demonstrated
+regression from the preceding SQL alias repair or proof of the exact CI throw.
+
+One closed name set now permits status 200 with parsed JSON null for those
+four RPCs only. Their exact canonical paths are derived from the same set;
+the existing empty-stream JSON fallback is refused on those paths so it
+cannot masquerade as an absent receipt. The existing `nonjson` observer
+condition follows the tightened assertion without new labels or API.
+Other RPCs remain status 200/non-null; `commit_image` remains bodyless
+204/null. No prefix, query, trailing-slash or near-name nullable match exists.
+No additional response read, parse, request, catch or returned field was added.
+
+The coordinator explicitly chose strict 200/JSON-null, not a speculative
+204 fallback. Its receipt records directly read upstream
+[scalar NULL coverage](https://github.com/PostgREST/postgrest/blob/main/test/spec/Feature/Query/RpcSpec.hs)
+(blob `25776cb25e3553e5d12efc7229a3f01e20e3d484`, integer scalar) and the
+[void-specific 204 response branch](https://github.com/PostgREST/postgrest/blob/819e812ce83a6d5d16cbd39d5383ad8256aa3ef5/src/library/PostgREST/Response.hs#L184-L209)
+(blob `9f69e9ec0522e6f1acff0aeafdd9d3f3c4db363f`). These support the conservative
+choice but are not a pinned-CI jsonb wire observation; the writer did not
+independently fetch or execute that upstream evidence.
+
+Before repairing the helper, 144 new fetch/Response-mocked cases exercised
+the real client and, for status/cancellation, the real image-change harness.
+The filtered fail-first run produced 16 failures and 128 passes, with 166
+unrelated tests excluded: all four names rejected literal/whitespace JSON
+null and boundary-sized valid null; all four empty-stream parser refusal
+tests exposed the old successful-null fallback. After repair, all 472 tests
+in the existing preservation (310), image-replacement-schema (128) and
+image-replacement-endpoint (34) suites passed with no skips.
+Scoped ESLint, `tsc --noEmit` and `git diff --check` passed with the approved
+Node and locked packages. The secret scan checked 253 text files; no local
+canary was supplied, so the CI canary remains required. These are source and
+mocked-transport results, not a live RPC or PostgreSQL pass.
+
+Coverage retains non-null values, owner/token/item/request forwarding,
+non-allowlisted and near-name refusal, strict 204/wrong-status/error refusal,
+absent/blank/non-JSON body refusal, the exact 512 KiB bound, pre-reader 5xx
+refusal, fetch/read/cancel error identity and finally precedence. Successful
+parsing emits no observer label; tested failures emit no private values or
+console output. The previously masked Authorization assertion is untouched.
+
+No SQL, live or historical pins, age setup, actual 409-plus-null negative
+assertions, inclusive seven-day predicates, accepted-replay precedence or
+ordinary-owner isolation changed. This unstaged class repair still requires
+focused closure, separate publication and fresh real CI; it may not resolve
+every failure in that stage. No local backend/SQL/parser, dependency install,
+type artifact or UI work was performed. The extended hard deadline is
+22 September 2026 at 15:57:28 UTC; scope and actor gates remain unchanged.
+
+### Stage A CI7 - void fixture RPCs and bounded cleanup labels, 22 September 2026
+
+The [actual CI7 release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5771898675)
+records head `4e643226473e760cd8cfaf455d4117d43a6c9451`, CI `35692227168`,
+database job `106631465140`. At 05:53:32.7171567Z it failed at
+`I10b-preservation-item-cleanup`; exact-run snapshot cleanup passed.
+That mark is shared by every fixture 21-24 for both owners. CI7's owner,
+fixture and failing statement remain **unknown**. CI6's earlier progress,
+unchanged source and aggregate timing cannot prove fresh CI7 outcomes.
+In particular, the label does not prove CI7 reached recovery or
+`forget_image`, much less full preservation or backend acceptance.
+
+The [four-path amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5772055653)
+records actual retained Anthropic Claude Opus 5 critique 125 and the
+coordinator's controlling evidence correction, with same-writer GPT-6 Astra
+continuity. Source establishes a guaranteed contradiction **if reached**:
+`forget_image` and `retire_image` return void, but the shared helper accepted
+the void response only for `commit_image`. The coordinator records that the
+reviewer enumerated void declarations and shared-client callers; their
+intersection is exactly those three names. `complete_image_change` is also
+void but is not called through this client and remains excluded.
+
+One closed `voidRpcs` set now requires successful bodyless 204/null for all
+three names. There is no 200/null fallback. The four nullable-jsonb names
+remain strict 200/parsed-null-or-nonnull, with their exact parser paths and
+empty-body refusals unchanged. Every other RPC remains 200/non-null.
+Existing passing `commit_image` 204 checks are an empirical control for the
+declared-void class, not direct observation of the other two responses in
+the failing CI7 stage. No production SQL, deletion protocol or caller
+assertion was changed.
+
+The existing cleanup block now marks six forward substeps immediately before
+recovery-object removal, replacement-object removal, forget, history-unlink
+RPC/equality, legacy-object removal and item deletion. Only these labels
+include an owner ordinal and fixture number. Owner ordinals come from a
+fixed `[1, 2]` lookup by the existing loop index, checked before use; fixture
+numbers remain the fixed `[21, 22, 23, 24]` loop. The theoretical vocabulary
+is 6 x 2 x 4 = 48 source-defined labels. It contains no IDs, tokens, paths,
+response fields or arbitrary caller text. Existing owner order/count,
+operation conditions/order, assertions and error propagation remain intact.
+No extra request, response inspection, callback API or logging stream was added.
+
+Fail-first validation added 84 real-client fetch/Response-mocked cases plus
+two static source checks. Against the unchanged helpers, eight failed and
+78 passed, with 310 existing cases filtered out: four retire/forget 204
+successes were rejected; two invalid 200/non-null responses were accepted;
+the new set and labels were absent in the two static checks. After repair,
+all 558 tests passed across preservation (396), replacement schema (128)
+and replacement endpoint (34), with no skips. All 144 earlier nullable
+cases and the previously masked Authorization assertion remain unchanged.
+Scoped ESLint and `tsc --noEmit` passed using the approved locked toolchain.
+Whitespace checks and the 253-text-file secret scan passed; no local canary
+was supplied, so CI must still supply one.
+
+Executed mocks cover exact owner/image forwarding, strict status/body
+contracts, near names, malformed-204 and pre-reader-5xx refusal, and
+fetch/read/cancel identity/finally behavior. Static checks read the actual
+sets, assert disjointness and the three SQL signatures, and pin the six
+label placements, bounded ordinal sources and unchanged cleanup statements.
+They do not execute cleanup SQL or promise automatic discovery of future
+return contracts; actual cleanup-label runtime coverage remains a CI gate.
+
+Unfenced raw item-delete compatibility remains preserved: the existing
+owner DELETE grant and new trigger allow it without an active deletion
+operation; the checked protocol still governs fenced deletion. No raw-delete
+fixture was replaced by an assumed mandatory preparation flow. Age setup,
+409-plus-null negative checks, accepted replay, ordinary-owner isolation,
+all eleven SQL files and all live/historical pins remain unchanged.
+
+The controlling release separately records App 729 PASS / 4 SKIP / 1 FLAKY:
+CI6 received zero raw bytes, while the CI7 slice received 385 multipart bytes
+with zero file part. This repair claims no common cause, browser fix or risk
+waiver. Browser investigation is separate and does not establish this head's
+acceptance. This unstaged candidate needs focused closure, publication
+approval and fresh native gates; no local backend/SQL/parser/browser,
+dependency install, types/UI or deployment was performed. The hard deadline
+remains 22 September 2026 at 15:57:28 UTC.
+
+### Stage A CI8 - S4 failure observations, 22 September 2026
+
+Both attempts at `fd6a03a4588fb7c0541f72c36080d281e2047b7e` remain
+failed evidence, not evidence that the void-RPC repair passed:
+[attempt 1](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5772326057)
+stopped at the historical prior-main capture prerequisite with B1
+`inspect-result`, command code 1 and listed state `running`;
+[attempt 2](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5772569413)
+stopped earlier at `S4-item-lifecycle-fixtures`, specifically
+`real-late-publication-child-ready`. Their exact snapshot cleanup passed.
+Attempt 2 did not reach B1 or I10b, so it neither reproduced nor fixed
+attempt 1. No common cause, transient failure or owner ordinal is known.
+The original App result is carried-forward evidence, not a fresh App run
+under the second attempt. Earlier browser transport failures remain open.
+
+The [conditional amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5773301600)
+records retained Anthropic Claude Opus 5 critique 130 and accepted S1-S9.
+The mandatory five-suite source-pin preflight found an exact main-failure
+template assertion outside the three-path allowlist. No edits occurred
+until [critique 132 and the fourth-path release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5773383866).
+Only that one complete template assertion changes in the replacement
+schema suite; its adjacent stage mapping and all other lines are retained.
+The history formatter remains first, the new lifecycle formatter second,
+and the existing `; subsequent stages NOT RUN` suffix is unchanged.
+Migration bytes, hashes, SQL-body pins, historical rendered output and
+the existing history vocabulary/formatter are unchanged.
+
+The runner now attaches a closed lifecycle observation to its existing
+main failure line, without another console channel or success stream.
+Runtime verification, spawn, input write, ready wait, callback, settlement
+and cleanup phases identify where a failure was first observed. First
+observations are retained across later cleanup failures, not interpreted
+as underlying causes. Object/function failures are associated by weak
+identity without wrapping the original thrown value; the closed falsy
+primitive cases also retain exact propagation. Unsupported primitive
+causes have no detail. A new invocation or formatter consumption clears
+the pending association, and successful/unrelated failures produce no
+lifecycle detail. Diagnostic state contains only closed labels and bounded
+primitives, not raw errors, stderr buffers, credentials or response bodies.
+
+The self-contained child adds only phase/cause to its existing failed
+settled record. Its successful ready and settled strings are unchanged.
+The parent harvests bounded own fields only from an already-parsed failed
+settled record before the original refusal. It does not accept that
+extended shape, resolve readiness or alter settled/ready state while
+harvesting. Child failure before any record remains unknown. Existing
+status/body-byte/boolean fields are bounded for printing only: integral
+HTTP 100-599, integral body bytes 0-1024, actual booleans, or null.
+Unknown labels become `OTHER`; no arbitrary value is stringified.
+
+Enumerating the actual child phase/cause vocabularies and longest
+permitted existing fields gives **166 UTF-8 bytes** for ready plus failed
+settled messages, including both LFs, below the unchanged 1024-byte parent
+stdout cap. Child stdin remains 8192 bytes, response capture 4096 bytes,
+both lifetimes 15 seconds, and file polling remains at most 100 attempts
+within five seconds with 50 ms sleeps. The same native request, two-byte
+partial-file requirement, completion/cancellation, lock, deletion, absence
+and cleanup assertions remain authoritative.
+
+The initial fail-first run reported 30 failures, 20 passes and 352 filtered
+cases. Twenty-six failures exposed absent formatter/child labels/source
+placement. Four exposed defects in the new HTTP test doubles: unfinished
+request destruction did not settle its response promise, and destruction
+of an ended response incorrectly emitted an abort. The doubles were
+corrected to model those events; production lifecycle behavior was not
+changed to accommodate them. The initial focused group then passed all
+50 selected cases. Further privacy, event, first-failure, falsy-primary,
+cap and source-pin cases were added before the complete five-suite run.
+
+All **1,563 tests in five suites passed**: lifecycle schema, preservation,
+local backend, replacement schema and CI Storage guard. Scoped ESLint,
+`tsc --noEmit`, whitespace checks and the 253-text-file secret scan passed;
+the local scan had no canary, so CI must still supply one. Real child code
+ran with mocked HTTP/FS/readline and explicitly stubbed worker stdin
+destruction/stdout writes. Its actual emitted strings were captured and
+replayed verbatim into the real parent parser for success and failures,
+including pre-ready refusal and post-ready cleanup. These are mock
+composition/source checks, not native FileBackend, Docker or ordinary-owner
+runtime evidence. No third CI retry, backend/SQL/browser execution,
+dependency installation, generated types, publication or deployment was
+performed. This unstaged evidence amendment still requires focused closure
+and separate publication authority; neither CI8 cause is proved repaired.
+
+### Stage A CI9 - closed container guards and probe removal, 22 September 2026
+
+[CI9](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/35708098690),
+attempt 1 at `14658dfacf06211492ad1fb20cc88f0d9ee46e72`, failed its
+database job `106681807301` at 09:05:12 UTC. Capture and verify each passed
+with two owners, ten tables, thirty rows and eight objects; both held-parent
+Storage 400 controls passed. The late-publication fixture then failed before
+child readiness. The [closed observation](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5773952549)
+was `container-shape`, cause `exception`, with null command/exit codes.
+The command-code-zero guard had passed; entering that phase explicitly
+cleared the recorded command code. JSON parsing or any subsequent compound
+runtime predicate could explain the observation. No particular field or
+underlying cause was identified. Image inspection and the streaming child
+were not reached, nor were later B1, I10b or generated-type gates. Exact-run
+snapshot cleanup passed. This finding does not explain either CI8 attempt.
+
+The [reviewed release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5774046079)
+records actual independent Anthropic Claude Opus 5 critique G1-G8 and
+approval of the inverse probe-removal companion. All five scoped unit
+surfaces and relevant source/byte/hash pins were checked before edits;
+no external assertion required adjustment. The main failure template,
+image-replacement assertion, SQL, migration inventory and body pins remain
+unchanged.
+
+The existing failure record now adds a closed `guard` only for
+`container-shape`. Nineteen fixed labels cover parsing and the eighteen
+original predicates, including all five expected config members. Labels
+are set before each operation; straight-line original assertions retain
+single evaluation, order, strictness and exception propagation. Unknown
+labels become `OTHER`. Phase transitions clear the guard alongside the
+command code, and other lifecycle records retain their existing shape.
+No actual config, mount, image ID, response or exception text is printed.
+A config label names the missing **expected** member, not the wrong live
+entry or its cause. This is narrower evidence, not a causal repair; a later
+run may have a different environment, and green would not prove a fix.
+No runtime-cost improvement is claimed.
+
+The coordinator's CI9 App disposition records job `106681807610` passing
+at 09:15:58 UTC: 2,831 unit tests in 32 suites and scan253 with canary.
+The browser baseline was **729 passed, one flaky and four existing skips**.
+The diagnostics-off parallel-page/keepalive case at `slice.spec.ts:315`
+first failed after the first close (expected 200, received 400, receiver
+`file-empty`); built-in retry 1 passed. That first failure is not waived.
+The original analysis response sequence passed first attempt. All eight
+artifact uploads succeeded, which does not establish visual acceptance.
+
+The final Linux probe selected exactly three cases and passed all three
+in 3.9 seconds with retries 0 and workers 2. Coordinator-parsed records
+showed twelve 4,096-byte received/accepted bodies (49,152 bytes total), nine
+dispatched-input hash checks, consent-off no dispatch, unchanged storage,
+empty library and successful cleanup. A-retargeted had four absent inspector
+observations despite intact bodies; B/C had zero route records. Exit was 0
+and ports were closed. The actual synthetic merge checkout
+`8374e3771a9dbc3d837446229584a2c1ed9a6fa0` had the same tree
+`f99623ecb02dfd3272196db4b1b125481495899e` as the reviewed source head,
+as verified by the coordinator. Body loss was **not reproduced**, not
+fixed or ruled out. The inert page, later warm-runner phase, different
+port and scheduling remain confounds; these controls do not explain the
+separate multipart failure or join historical failures into one cause.
+
+The one-use allowance is consumed. The exact reviewed patch was applied
+in reverse after its applicability check, removing only the temporary
+step, baseline ID and conditional three-case controls. Working Git-filtered
+workflow/browser blobs match `fd6a03` and `e97dea0`; the corresponding raw
+files are again 6,746 and 53,541 bytes with the approved hashes. Original
+tests, uploads, limits and helper evidence artifacts are preserved.
+
+Fail-first guard tests reported **26 failed, six passed and 426 filtered**
+before implementation; all 32 selected cases then passed. They enter the
+real `withLifecycleLateUpload`/formatter through mocked commands, exercising
+every label, parse/null/property exceptions, first refusal, original access
+order, all expected members, private-canary omission and later-phase output
+noninterference. The full five approved suites passed **1,595 tests**, with
+no skips. Scoped lint, typecheck, scan253 (no local canary) and diff checks
+passed. These remain mock/source checks, not native runtime acceptance.
+No browser/probe/backend execution, new CI, publication, types adoption or
+deployment occurred during this amendment; candidate closure and separate
+publication authority remain required.
+
+### Stage A CI10 - populated-item streaming precondition, 22 September 2026
+
+This four-path fixture correction is an **unstaged candidate**, not a product,
+SQL or native-backend acceptance claim. Its starting head is
+`88c81a3833372efb93936212ec2ffeace13ba400`, tree
+`28e48734fc5cca1bc87bd1d4d0dc079987dde88d`, with accepted main unchanged at
+`1984b848017dd9c22249907fe303d701bcb48440`. The
+[edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5774715618)
+records actual retained Anthropic Claude Opus 5 critique 143, the coordinator's
+P1-P8 amendments, same-writer GPT-6 Astra model observation and scoped permission.
+Only the runner, single I10b caller, lifecycle unit suite and this dated section
+change; the original I08 caller remains byte-unchanged.
+
+The [CI10 failure record](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5774489471)
+identifies run `35712460563`, attempt 1, DB job `106696061722`, failed at
+09:51:46Z. Earlier S4/base preservation, B1 readiness and populated-nine to
+Azure-ten preservation passed; all eleven migrations were present with none
+pending before the new `I10b-publication-races` failure. The parent recorded
+`await-ready`/`protocol`, null command/exit codes, and child
+`item-absence`/`refusal`, null status, zero body bytes, denied false and failed
+true. Exact snapshot cleanup passed. Later reset, integration, security,
+analysis and generated-type stages were not run.
+
+The source contract was mismatched: the actual I10b caller finalized the
+original image pair and uploaded the pending replacement's main object before
+invoking a child that required the entire item directory to be absent. The
+failure does not independently identify the physical stat branch: outer
+existence versus inner path-safety refusal was not recovered. Acknowledged
+uploads are not separate proof of mount visibility, and no claim is made that
+every environment must fail. This was one CI10 attempt with two failure lines,
+not two failed attempts. It does not diagnose the earlier CI9 container-shape
+or multipart causes.
+
+The shared wrapper now accepts default `item-absent` or explicit
+`pending-thumb-absent`, rejecting other selectors before runtime commands.
+Default stdin retains the exact original owner/item/image/token serialization
+order and bytes, without a selector field. Only the I10b call supplies the new
+fourth argument. The child accepts either the original exact keyset or the
+extended exact keyset with the explicit new enum, validating it during `input`.
+For the new mode, existing `safeDirectory` checks immediately require safe,
+existing item and pending-image directories during `ancestors`; the sole new
+phase, `target-absence`, requires the exact pending `thumb.jpg` target absent.
+That target is a FileBackend version directory: an existing directory fails
+the absence predicate; a file or symlink fails the existing safety predicate;
+only ENOENT means absent, and other filesystem errors propagate. No sibling
+read/list/removal, new filesystem helper, visibility retry or extra polling was
+added. The original fresh-item refusal, POST/no-upsert request, partial-byte
+checks, successful IPC, limits, locks and all four deletion oracles remain.
+
+Tests exercise the real I10b caller through mocked ordinary-client responses,
+proving the original pair plus pending-main uploads precede the explicit
+selector. Real child output is replayed into the real parent for success and
+missing, unsafe, existing-target and non-ENOENT refusals. Input shape/enum/token
+guards run before FS/HTTP; pre-request refusals settle without advancing fake
+time. Exact stdin/default protocol, token-only transport, callback order,
+private-value omission, cancellation, falsy first errors and cleanup remain
+covered. The unchanged IPC cap test measures the full phase/cause/status/byte
+cross-product: maximum ready-plus-settled output is **168 UTF-8 bytes**, within
+the unchanged <=1024 and >150 assertions. A maximum 4096-character allowed
+token produces **4287 stdin bytes including LF** in the actual parent write,
+within the unchanged 8192-byte bound.
+
+Before the source correction, 35 selected tests reported **25 failed, 10
+passed, 457 filtered**; the same selection then passed. Initial missing mock
+child setup, an inferred test-row type error and a test-clock assertion that
+itself advanced 100 ms were corrected in the test scaffolding, not hidden as
+product passes. Final checks use the already approved Node 24.19.0 executable
+and locked local dependencies, with no installation:
+
+| Command (after the pinned Node executable unless shown otherwise) | Actual result |
+|---|---|
+| `node_modules\vitest\vitest.mjs run tests\unit\item-lifecycle-schema.test.ts tests\unit\preservation.test.ts tests\unit\local-backend.test.ts tests\unit\image-replacement-schema.test.ts tests\unit\ci-storage-guard.test.ts --reporter=dot` | Exit 0; five files, 1,636 tests, no skips. |
+| `node_modules\eslint\bin\eslint.js scripts\preservation-rehearsal.mjs tests\integration\image-replacement.sessions.mjs tests\unit\item-lifecycle-schema.test.ts` | Exit 0. |
+| `node_modules\typescript\bin\tsc --noEmit` | Exit 0. |
+| `scripts\scan-secrets.mjs` | Exit 0; 253 text files, local canary not supplied. |
+| `git diff --check` | Exit 0. |
+
+The [terminal CI10 record](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5774637625)
+separately reports App job `106696061353`: 2,863 unit and 730 browser passes,
+four existing skips, no flaky summary. WebKit ON/OFF ran at retry zero with
+source/blob/form sizes 2/2/5; first receiver envelope/file sizes were 387/2,
+later 390/5, complete. Full multipart envelope bytes are not file-part bytes.
+No recurrence is not a fix. Eight successful uploads are not visual acceptance.
+Apple run `35712460582`, job `106696057282`, passed at 09:49:46Z, not native
+device acceptance. The coordinator verified synthetic checkout
+`2492248ddea539ffc2fcdfc60ad70650492ec0c8` has the exact reviewed source tree.
+
+Fresh/populated native preservation, deletion races and later DB/type gates
+remain blocked pending reviewed publication and authorized execution. A future
+`ancestors` refusal could reflect safety or visibility and must not be assigned
+a cause without evidence. The consumed probe stays removed; workflow/browser
+bytes, SQL/body pins and image-schema failure assertion are unchanged. No
+browser, probe, backend, new CI, staging, commit, push, generated types, Stage C,
+merge or deployment occurred in this correction. Retained focused closure and
+separate publication permission remain required.
+
+### Stage A CI11 - callback evidence boundaries, 22 September 2026
+
+This is an **unstaged four-path evidence candidate**, not a causal, product or
+SQL repair. Starting head is `6144feb53ed63d463ee70ca7c2a82459ab9ef937`, tree
+`4a8d4bb4387ab1c8b2591a40f75f7898cda5dafe`; accepted main remains
+`1984b848017dd9c22249907fe303d701bcb48440`. The
+[edit release](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5775271824)
+records actual retained Anthropic Claude Opus 5 reviews 146/147, adopted E1-E6
+and the corrected post-callback boundary convention, plus the same persistent
+GPT-6 Astra writer's coordinator-observed local model evidence.
+
+The [CI11 diagnosis record](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5775090451)
+identifies run `35716633419`, attempt 1, DB job `106709549058`, failed at
+10:37:07Z. Base controls/preservation passed at 10:36:05Z, B1 reported
+replacement/running/fresh/stable true and HTTP 204 in 1320 ms at 10:36:39Z,
+and prior-nine to Azure-ten preservation passed at 10:36:51Z. At 10:37:04Z,
+`I10b-publication-races` recorded lifecycle phase `callback`, cause `exception`,
+with null command/exit codes. The preceding child-settlement failure can follow
+cancellation after a callback rejection; it is not proof of the primary cause.
+Exact snapshot cleanup passed. Downstream DB/reset/integration/security/
+analysis/types gates were not reached.
+
+The runner accepted exact ready2 before invoking the callback. That establishes
+progress beyond CI10's precondition boundary for this invocation, not completion
+of the callback or its deletion/race assertions. The first callback rejection
+retains its original value; the printed EVIDENCE_REQUIRED is a fixed template.
+Null codes are not process-success evidence. No assertion, RPC, owner or SQL
+cause was recovered. Read-only tracing of the actual callback, ordinary RPC
+validation, denied oracle, SQL sequencing and lock modes found no unconditional
+source contradiction warranting a corrective SQL or fixture-behavior edit.
+
+The existing integration function now accepts a synchronous, non-awaited,
+default-no-op `mark`. Fixed labels precede entry/setup, callback operations and
+distinct checks; pending and registered removal sites are separate. Where the
+function already holds a raw response, it uses the unchanged
+`responseClass`/`diagnosticHttpStatus` closed vocabularies and OTHER fallbacks
+before the original assertion. No bodies, messages, identities, paths, hashes,
+tokens or per-target ordinals enter labels. RPC calls and nullable/void
+validation are unchanged; a rejected `client.rpc` supplies only its site label.
+No additional request/read, retry, catch, shared observer API or validator was
+added. Response helper implementations and allowlists remain unchanged.
+
+Each successful lock callback ends with its fixed release boundary. The late
+upload callback likewise ends at child settlement. Post-child prefix and GET
+checks and unaffected-object/item cleanup have their own labels and remain
+outside that callback. Entry and per-owner setup labels prevent a previous
+invocation or owner's final label from leaking into new setup. No empty/done
+reset or new state framework was introduced. The runner changes only its
+existing invocation, assigning `I10b-publication-races-` plus the supplied
+label; the main FAIL template and lifecycle formatter remain unchanged.
+**A label reports the furthest boundary reached, not the proven thrower.**
+Asynchronous/settlement failures can surface later; no strict bound on that
+distance is established. Labels alone do not resolve the CI11 root cause.
+
+The real-caller unit seam now executes the complete existing callback through
+mocked ordinary-client, lock and child interfaces. Its ordered script includes
+all original setup uploads, three lock callbacks, pending/registered target
+replays, four target DELETE dispatches and eight reconciliation calls, terminal
+checks, post-child checks and unaffected cleanup. Marked and default-no-op
+runs preserve the same operation order and cleanup. Actual client/lock/child
+seams inject exact and falsy failures; mark itself is not the failure shortcut.
+Tests cover admission, inner checks, release after success, late settlement,
+post-child work, subsequent invocation/owner setup, held-response
+allowlisted/OTHER classification, private-value exclusion and non-awaited
+observation. These mocks prove no native filesystem, SQL or Storage behavior.
+
+Fail-first selected **81 tests: 76 failed, five passed, 499 filtered** before
+source implementation. All 81 then passed. Expanded boundary/reinvocation
+coverage adds 94 cases in total without removing earlier checks. Final commands
+use the already approved Node 24.19.0 executable and this workspace's locked
+dependencies, without installation:
+
+| Command (after the pinned Node executable unless shown otherwise) | Actual result |
+|---|---|
+| `node_modules\vitest\vitest.mjs run tests\unit\item-lifecycle-schema.test.ts tests\unit\preservation.test.ts tests\unit\local-backend.test.ts tests\unit\image-replacement-schema.test.ts tests\unit\ci-storage-guard.test.ts --reporter=dot` | Exit 0; five files, 1,730 tests, no skips. |
+| `node_modules\eslint\bin\eslint.js scripts\preservation-rehearsal.mjs tests\integration\image-replacement.sessions.mjs tests\unit\item-lifecycle-schema.test.ts` | Exit 0. |
+| `node_modules\typescript\bin\tsc --noEmit` | Exit 0. |
+| `scripts\scan-secrets.mjs` | Exit 0; 253 text files; local canary absent, CI must supply one. |
+| `git diff --check` | Exit 0. |
+
+The [terminal CI11 record](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5775182234)
+reports App job `106709549209` succeeded at 10:47:05Z with 2,904 unit and
+730 browser passes, four existing skips and no flaky summary. All twelve
+parallel-page localization records were retry zero with no first-400 snapshot.
+WebKit both modes showed 2/2/2 construction and 5/5/5 after first close;
+receiver first full-envelope/file sizes were 387/2, later 390/5, complete.
+Envelope bytes are not file-part bytes. This is no recurrence, not a fix of
+the earlier multipart failure. Eight successful uploads are not visual
+acceptance. Apple run `35716633446`, job `106709549333`, passed at 10:34:37Z,
+not physical-device/HEIC acceptance. Coordinator-verified synthetic checkout
+`4942ae52a6771f369c7c00275f65836e55e1f366` has the exact source tree above.
+
+Original I08/default/pending protocols, all caps/lifetimes, locks, deletion
+oracles, SQL/body/policy/inventory pins, normal-client validation and frozen
+workflow/browser files remain unchanged. The consumed probe stays removed.
+CI9 shape and multipart causes remain unresolved. No native/backend/browser
+experiment, new CI, staging, commit, push, types, Stage C, merge or deployment
+occurred here. Retained focused closure and separate publication authorization
+are still required; downstream native acceptance remains pending.
+
 ## Original implementation authority and context
 
 Before edits, read the full controlling

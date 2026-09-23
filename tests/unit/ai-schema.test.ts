@@ -364,6 +364,7 @@ describe('I29e SQL/shared contract parity', () => {
 const modules = ['ai-analysis', 'ai-draft'].map((name) => path.join(root, 'src/domain', `${name}.ts`));
 const incoming: readonly (readonly [string, string])[] = [
   [path.join(root, 'src/domain/analyzed-save.ts'), path.join(root, 'src/domain/ai-draft.ts')],
+  [path.join(root, 'src/domain/image-replacement.ts'), path.join(root, 'src/domain/ai-draft.ts')],
   [path.join(root, 'src/data/ai.ts'), path.join(root, 'src/domain/ai-draft.ts')],
   [path.join(root, 'src/data/ai.ts'), path.join(root, 'src/domain/ai-analysis.ts')],
   [path.join(root, 'src/domain/ai-controls.ts'), path.join(root, 'src/domain/ai-analysis.ts')],
@@ -435,6 +436,7 @@ describe('executable reviewed B2/C production import boundary', () => {
     expect(admits(importer, resolved)).toBe(true);
   });
   it.each([
+    [path.join(root, 'src/domain/image-replacement.ts'), path.join(root, 'src/domain/ai-analysis.ts')],
     [path.join(root, 'src/domain/ai-controls.ts'), path.join(root, 'src/domain/ai-draft.ts')],
     [path.join(root, 'src/features/wardrobe/item-form.tsx'), path.join(root, 'src/domain/ai-analysis.ts')],
     [path.join(root, 'src/features/boundary-probe.tsx'), path.join(root, 'src/domain/ai-analysis.ts')],
@@ -452,11 +454,11 @@ describe('executable reviewed B2/C production import boundary', () => {
       expect(admits(importer, resolved)).toBe(false);
     }
   });
-  it('walks every other source TS/TSX file and admits exactly the seven reviewed incoming pairs', async () => {
+  it('walks every other source TS/TSX file and admits exactly the eight reviewed incoming pairs', async () => {
     const files: string[] = await walkFiles(path.join(root, 'src'));
     const existing = files.filter((filename) => /\.tsx?$/.test(filename) && !modules.includes(filename));
     expect(existing.length).toBeGreaterThan(30);
-    expect(incoming).toHaveLength(7);
+    expect(incoming).toHaveLength(8);
     const admitted = new Set<string>();
     let count = 0;
     for (const filename of existing) {

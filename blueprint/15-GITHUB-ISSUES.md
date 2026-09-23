@@ -194,6 +194,18 @@ Done: implement only this packet, run its named tests plus affected CI gates, an
 
 ## I10 — Complete image replacement and orphan cleanup
 
+**22 September 2026 approved split:** I10a-D routine maintenance is deferred,
+not passed. I10b owns checked replacement/recovery and the necessary explicit
+item-deletion compatibility for pending/unmanifested objects (R03/R04/R12/R15/
+R28 as well as the original requirements below). The current Stage A adds
+`20260922020000_checked_image_changes.sql`, `finalize-image-change`, shared
+authenticated JPEG verification and the existing preservation/integration/
+security/unit harness extensions. Source scope and staged authority are in
+[the controlling release](https://github.com/drrowdev/stillroom-wardrobe/pull/29#issuecomment-5769933357).
+Actual CI types must precede typed client/UI work; no generic sweeper, I11 or
+Phase 6 I22 implementation is included. The original issue text below is
+historical allocation, not permission to revive deferred maintenance.
+
 Phase: **2** · Requirements: **R04 R12 R20 R23** · Depends on: **I09**
 
 Goal: Implement pending/ready/retired transitions, seven-day retired recovery and safe owner-prefix orphan removal.

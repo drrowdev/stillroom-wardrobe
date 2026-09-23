@@ -9,6 +9,8 @@ import { deleteWardrobeObject } from '../../src/data/storage-delete';
 import { MIGRATIONS, assertRehearsalEnvironment, validateInventory, assertMigrationInventory, assertCapabilities, parseMigrationHistory, assertHistory, assertHistoryResult, historyFailureDetail, exportBodyEvidence } from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
 import { SOURCE_HASHES, MAX_SNAPSHOT_BYTES, COLUMNS, TABLES, COUNTS, IMPLICIT_FACTS, EXPLICIT_FACTS, NEW_COLUMNS, parsePhaseArguments, snapshotPath, assertSnapshotPath, validateSnapshotStat, rowIdentity, canonicalRows, validateSnapshot, comparePreservation, normalClient, captureData, functionalProbes } from '../integration/preservation.sessions.mjs';
+// @ts-expect-error Executable integration fixture has no TypeScript declaration.
+import { imageChangeHarness } from '../integration/image-replacement.sessions.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const run = randomUUID(), owners = [randomUUID(), randomUUID()] as const;
@@ -24,7 +26,7 @@ type OwnerData = { label: string; ownerId: string; tables: TableRows; objects: [
 type ObjectEvidence = { path: string; bytes: number; sha256: string };
 type Snapshot = {
   schemaVersion: number; projectId: string; stage: string; run: string;
-  sources: { base: string; target: string; description: string; collections: string; controls: string; save: string; analysis: string; analyzedSave: string; lifecycle: string; azure: string }; owners: string[];
+  sources: { base: string; target: string; description: string; collections: string; controls: string; save: string; analysis: string; analyzedSave: string; lifecycle: string; azure: string; imageChanges: string }; owners: string[];
   data: [OwnerData, OwnerData];
 };
 const sha = 'a'.repeat(64);
@@ -110,6 +112,7 @@ const baseTable = [
   '   `20260911200000` | ` `              | `2026-09-11 20:00:00` ',
   '   `20260913120000` | ` `              | `2026-09-13 12:00:00` ',
   '   `20260921193000` | ` `              | `2026-09-21 19:30:00` ',
+  '   `20260922020000` | ` `              | `2026-09-22 02:00:00` ',
   '',
   '',
 ].join('\n');
@@ -128,10 +131,12 @@ const targetTable = [
   '   `20260911200000` | `20260911200000` | `2026-09-11 20:00:00` ',
   '   `20260913120000` | `20260913120000` | `2026-09-13 12:00:00` ',
   '   `20260921193000` | `20260921193000` | `2026-09-21 19:30:00` ',
+  '   `20260922020000` | `20260922020000` | `2026-09-22 02:00:00` ',
   '',
   '',
 ].join('\n');
-const priorMainTable = targetTable.replace('`20260921193000` | `20260921193000`', '`20260921193000` | ` `             ');
+const azureTable = targetTable.replace('`20260922020000` | `20260922020000`', '`20260922020000` | ` `             ');
+const priorMainTable = azureTable.replace('`20260921193000` | `20260921193000`', '`20260921193000` | ` `             ');
 const validEnv = { ALLOW_PRESERVATION_REHEARSAL: '1', CI: 'true', GITHUB_ACTIONS: 'true' };
 const inventory = () => (MIGRATIONS as { name: string; version: string; bytes: number; sha256: string }[])
   .map((entry) => ({ ...entry, regular: true, symlink: false }));
@@ -149,11 +154,11 @@ describe('CI-only preservation guards', () => {
       expect(() => assertRehearsalEnvironment({ ...validEnv, [key]: 'fictional-refused' }, [])).toThrow();
     }
   });
-  it('pins exactly ten regular migrations, preserving all nine earlier lengths and hashes', async () => {
-    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000']);
+  it('pins exactly eleven regular migrations, preserving all ten earlier lengths and hashes', async () => {
+    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000']);
     expect(() => validateInventory(inventory())).not.toThrow();
     await expect(assertMigrationInventory()).resolves.toBeUndefined();
-    for (const index of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) for (const [key, value] of [
+    for (const index of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) for (const [key, value] of [
       ['name', 'unexpected.sql'], ['bytes', 0], ['bytes', present(inventory()[index]).bytes + 1],
       ['sha256', 'b'.repeat(64)], ['regular', false], ['symlink', true],
     ]) {
@@ -191,9 +196,14 @@ describe('CI-only preservation guards', () => {
     expect(() => assertCapabilities([{ code: 0, stdout: '  --local\n' }, ...help.slice(1)])).toThrow();
   });
   it('parses source-derived applied/pending tables without claiming execution', () => {
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000'] });
-    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000'], pending: [] });
-    expect(assertHistory(priorMainTable, 'prior-main')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'], pending: ['20260921193000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000'] });
+    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000'], pending: [] });
+    expect(assertHistory(priorMainTable, 'prior-main')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'], pending: ['20260921193000', '20260922020000'] });
+    expect(assertHistory(azureTable, 'azure-target')).toEqual({
+      applied: inventory().slice(0, 10).map((entry) => entry.version), pending: ['20260922020000'],
+    });
+    expect(() => assertHistory(azureTable, 'target')).toThrow();
+    expect(() => assertHistory(targetTable, 'azure-target')).toThrow();
     for (const [table, stage] of [[baseTable, 'prior-main'], [targetTable, 'prior-main'],
       [priorMainTable, 'base'], [priorMainTable, 'target']])
       expect(() => assertHistory(table, stage)).toThrow();
@@ -207,9 +217,9 @@ describe('CI-only preservation guards', () => {
     expect(assertHistoryResult({ code: 0, stdout: baseTable }, 'base')).toEqual(parseMigrationHistory(baseTable));
   });
   it('retains SOURCE-DERIVED renderer padding, widths and decorative blank lines', () => {
-    for (const table of [baseTable, priorMainTable, targetTable]) {
+    for (const table of [baseTable, priorMainTable, azureTable, targetTable]) {
       const lines = table.split('\n');
-      expect(lines).toHaveLength(16);
+      expect(lines).toHaveLength(17);
       expect(lines.slice(0, 2)).toEqual(['', '  ']);
       expect(lines.slice(-2)).toEqual(['', '']);
       for (const line of lines.slice(2, -2)) {
@@ -281,7 +291,7 @@ describe('CI-only preservation guards', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe('EVIDENCE_REQUIRED');
     expect(historyFailureDetail(failure)).toBe(`; reason=${reason}`);
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000'] });
   });
   it('distinguishes history command failure without forwarding command output or arbitrary errors', () => {
     const privateText = 'arbitrary upstream text /private/fixture-path';
@@ -358,6 +368,61 @@ describe('I29b description SQL contract (static, not database execution)', () =>
   });
 });
 
+describe('I10b void and cleanup source contracts (static, not runtime evidence)', () => {
+  it('pins the actual closed, disjoint RPC sets to the reviewed return classes', async () => {
+    const source = await readFile(path.join(root, 'tests/integration/preservation.sessions.mjs'), 'utf8');
+    const names = (set: string) => {
+      const match = source.match(new RegExp(`const ${set} = new Set\\(\\[([^\\]]+)\\]\\);`));
+      expect(match).not.toBeNull();
+      return [...present(match?.[1]).matchAll(/'([^']+)'/g)].map((entry) => entry[1]);
+    };
+    const voids = names('voidRpcs'), nullable = names('nullableRpcs');
+    expect(voids).toEqual(['commit_image', 'retire_image', 'forget_image']);
+    expect(nullable).toEqual(['image_change_status', 'cancel_image_change', 'item_deletion_operation_status', 'item_deletion_next_target']);
+    expect(voids.filter((name) => nullable.includes(name))).toEqual([]);
+    const sql = await readFile(path.join(root, 'supabase/migrations/20260905000000_initial.sql'), 'utf8');
+    for (const name of voids) expect(sql).toContain(`create function public.${name}(p_image_id uuid) returns void`);
+    expect(source).toContain("new Set([...nullableRpcs].map((name) => `/rest/v1/rpc/${name}`))");
+    expect(source).not.toMatch(/export const (?:voidRpcs|nullableRpcs)/);
+  });
+  it('pins six bounded forward cleanup substeps without changing operations or assertions', async () => {
+    const source = await readFile(path.join(root, 'tests/integration/azure-preservation.sessions.mjs'), 'utf8');
+    const verifier = source.slice(source.indexOf('export async function verifyImageChangePreservation('), source.indexOf('async function imageChangeStructure('));
+    expect(verifier).toContain('for (const [ownerIndex, owner] of owners.entries()) {');
+    expect(verifier).toContain('const ownerOrdinal = [1, 2][ownerIndex];');
+    expect(verifier).toContain('requireEvidence(ownerOrdinal === 1 || ownerOrdinal === 2);');
+    expect(verifier).toContain('for (const n of [21, 22, 23, 24]) {');
+    const start = verifier.indexOf("      if (replacement) {");
+    const end = verifier.indexOf("\n    }\n    mark('owner-restoration');", start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    const block = verifier.slice(start, end);
+    const steps = ['recovery-object', 'replacement-object', 'forget', 'history-unlink', 'legacy-object', 'item-delete'];
+    expect([...block.matchAll(/mark\(`item-cleanup-([^`]+)`\);/g)].map((match) => match[1]))
+      .toEqual(steps.map((step) => `${step}-o\${ownerOrdinal}-n\${n}`));
+    expect(block.replace(/^\s*mark\(`item-cleanup-[^`]+`\);\n/gm, '').trim()).toBe([
+      'if (replacement) {',
+      '        await replacementHarness.remove(recovery);',
+      '        await replacementHarness.remove(replacement);',
+      "        await client.rpc(owner, 'forget_image', { p_image_id: replacement.imageId });",
+      "        const unlinked = await client.rpc(owner, 'item_attribution_history', { p_item_id: value.p_item.id });",
+      '        equal(unlinked, [history[0], { ...history[1], source_image_id: null }]);',
+      '      }',
+      '      await h.remove(value);',
+      '      await h.deleteItem(value);',
+    ].join('\n'));
+    const operations = ['await replacementHarness.remove(recovery);', 'await replacementHarness.remove(replacement);',
+      "await client.rpc(owner, 'forget_image',", "const unlinked = await client.rpc(owner, 'item_attribution_history',",
+      'await h.remove(value);', 'await h.deleteItem(value);'];
+    for (const [index, step] of steps.entries()) {
+      expect(block).toContain(`mark(\`item-cleanup-${step}-o\${ownerOrdinal}-n\${n}\`);\n${index < 4 ? '        ' : '      '}${operations[index]}`);
+    }
+    expect(verifier).not.toContain("mark('item-cleanup')");
+    expect((verifier.match(/\$\{ownerOrdinal\}/g) ?? [])).toHaveLength(6);
+    expect(new Set(steps.flatMap((step) => [1, 2].flatMap((owner) => [21, 22, 23, 24].map((n) =>
+      `item-cleanup-${step}-o${owner}-n${n}`)))).size).toBe(48);
+  });
+});
+
 describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
   const env = {
     ALLOW_SECURITY_TESTS: '1', SUPABASE_URL: 'http://127.0.0.1:54321',
@@ -372,6 +437,379 @@ describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
   const json = (value: Value, status = 200) => new Response(JSON.stringify(value), { status });
   const empty = () => new Response(null, { status: 204 });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  describe('strict void RPC contracts (real client, fetch/Response mocked only)', () => {
+    const names = ['commit_image', 'retire_image', 'forget_image'];
+    const args = { p_image_id: run };
+    describe.each(names)('%s', (name) => {
+      it.each([owner, other])('accepts only bodyless 204 with exact forwarding for $label', async (session) => {
+        const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(empty());
+        vi.stubGlobal('fetch', fetch);
+        await expect(client().rpc(session, name, args)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledOnce();
+        const [url, options] = present(fetch.mock.calls[0]);
+        expect(url).toBe(`${env.SUPABASE_URL}/rest/v1/rpc/${name}`);
+        expect(options?.method).toBe('POST'); expect(options?.body).toBe(JSON.stringify(args));
+        expect(new Headers(options?.headers).get('authorization')).toBe('Bearer '.concat(session.token));
+      });
+      it.each(['null', '', '{"state":"ready"}'])('refuses 200 with %j', async (raw) => {
+        respond(new Response(raw));
+        await expect(client().rpc(owner, name, args)).rejects.toThrow('EVIDENCE_REQUIRED');
+      });
+      it.each([201, 202, 400, 401, 403, 404, 409])('refuses non-204 status %s', async (status) => {
+        respond(json({ code: 'synthetic-private' }, status));
+        await expect(client().rpc(owner, name, args)).rejects.toThrow('EVIDENCE_REQUIRED');
+      });
+      it.each([204, 500, 502, 503, 504])('refuses malformed 204 or server status %s before body reads', async (status) => {
+        const response = new Response('synthetic-private');
+        vi.spyOn(response, 'status', 'get').mockReturnValue(status);
+        const stream = present(response.body ?? undefined), getReader = vi.spyOn(stream, 'getReader');
+        respond(response);
+        const logs = [vi.spyOn(console, 'log'), vi.spyOn(console, 'error'), vi.spyOn(console, 'warn')];
+        await expect(client().rpc(owner, name, args)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(getReader).not.toHaveBeenCalled();
+        for (const log of logs) expect(log).not.toHaveBeenCalled();
+      });
+      it('preserves a fetch rejection without retry', async () => {
+        const error = new Error('synthetic-private-fetch');
+        const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(error);
+        vi.stubGlobal('fetch', fetch);
+        await expect(client().rpc(owner, name, args)).rejects.toBe(error);
+        expect(fetch).toHaveBeenCalledOnce();
+      });
+      it.each(['read', 'cancel', 'read-and-cancel'])('retains %s identity and finally precedence on non-204 responses', async (failure) => {
+        const response = json(null), stream = present(response.body ?? undefined), reader = stream.getReader();
+        const readError = new Error('synthetic-private-read'), cancelError = new Error('synthetic-private-cancel');
+        const read = vi.spyOn(reader, 'read'), cancel = vi.spyOn(reader, 'cancel');
+        if (failure !== 'cancel') read.mockRejectedValue(readError);
+        if (failure !== 'read') cancel.mockRejectedValue(cancelError);
+        vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+        respond(response);
+        await expect(client().rpc(owner, name, args)).rejects.toBe(failure === 'read' ? readError : cancelError);
+        expect(cancel).toHaveBeenCalledOnce();
+      });
+    });
+    it.each(['image_change_status', 'cancel_image_change', 'item_deletion_operation_status', 'item_deletion_next_target',
+      'image_change_requests', 'complete_image_change',
+      ...names.flatMap((name) => [`${name}/`, `${name}?unit=1`, `${name}_other`, `prefix_${name}`, name.toUpperCase()])])(
+      'does not grant the void response contract to %s', async (name) => {
+        respond(empty());
+        await expect(client().rpc(owner, name, args)).rejects.toThrow('EVIDENCE_REQUIRED');
+      });
+  });
+
+  describe('strict nullable RPC contracts (real client, fetch/Response mocked only)', () => {
+    const names = ['image_change_status', 'cancel_image_change', 'item_deletion_operation_status', 'item_deletion_next_target'];
+    const value = { itemId: run, requestId: owners[1] };
+    const args = { p_item_id: value.itemId, p_request_id: value.requestId };
+    function invoke(name: string, session = owner) {
+      const transport = client(), h = imageChangeHarness(transport, session, env);
+      return name === 'image_change_status' ? h.status(value)
+        : name === 'cancel_image_change' ? h.cancel(value) : transport.rpc(session, name, args);
+    }
+    describe.each(names)('%s', (name) => {
+      const route = `/rest/v1/rpc/${name}`;
+      it.each(['null', ' \nnull\t\r\n'])('accepts parsed JSON %j through the real caller', async (raw) => {
+        const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(raw));
+        vi.stubGlobal('fetch', fetch);
+        const logs = [vi.spyOn(console, 'log'), vi.spyOn(console, 'warn'), vi.spyOn(console, 'error')];
+        await expect(invoke(name)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledOnce();
+        const [url, options] = present(fetch.mock.calls[0]);
+        expect(url).toBe(env.SUPABASE_URL + route);
+        expect(options?.method).toBe('POST');
+        expect(options?.body).toBe(JSON.stringify(args));
+        const headers = new Headers(options?.headers);
+        expect(headers.get('authorization')).toBe('Bearer '.concat(owner.token));
+        expect(headers.get('apikey')).toBe(env.SUPABASE_PUBLISHABLE_KEY);
+        for (const log of logs) expect(log).not.toHaveBeenCalled();
+      });
+      it.each([owner, other])('preserves non-null values and session forwarding for $label', async (session) => {
+        const receipt = { requestId: value.requestId, itemId: value.itemId, state: 'reserved' };
+        const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json(receipt));
+        vi.stubGlobal('fetch', fetch);
+        await expect(invoke(name, session)).resolves.toEqual(receipt);
+        expect(fetch).toHaveBeenCalledOnce();
+        const [url, options] = present(fetch.mock.calls[0]);
+        expect(url).toBe(env.SUPABASE_URL + route);
+        expect(options?.body).toBe(JSON.stringify(args));
+        expect(new Headers(options?.headers).get('authorization')).toBe('Bearer '.concat(session.token));
+      });
+      it('emits no observer label for successfully parsed null', async () => {
+        respond(json(null));
+        const onFailure = vi.fn();
+        await expect(client().request(owner.token, route, { method: 'POST', body: args, onFailure }))
+          .resolves.toEqual({ ok: true, status: 200, data: null, range: null });
+        expect(onFailure).not.toHaveBeenCalled();
+      });
+      it.each(['', ' ', 'synthetic-private-not-json'])('refuses blank or malformed bytes %j at the parser', async (raw) => {
+        respond(new Response(raw));
+        const onFailure = vi.fn(), logs = [vi.spyOn(console, 'log'), vi.spyOn(console, 'error'), vi.spyOn(console, 'warn')];
+        await expect(client().request(owner.token, route, { method: 'POST', body: args, onFailure }))
+          .rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(onFailure.mock.calls).toEqual([['nonjson-200']]);
+        for (const log of logs) expect(log).not.toHaveBeenCalled();
+        expect(JSON.stringify(onFailure.mock.calls)).not.toMatch(/synthetic-private|fictional-a/);
+      });
+      it('refuses an absent 200 body before parsing', async () => {
+        respond(new Response(null));
+        await expect(invoke(name)).rejects.toThrow('EVIDENCE_REQUIRED');
+      });
+      it.each([201, 202, 204, 400, 401, 403, 404, 409])('refuses status %s even with null data', async (status) => {
+        respond(status === 204 ? empty() : json(null, status));
+        await expect(invoke(name)).rejects.toThrow('EVIDENCE_REQUIRED');
+      });
+      it.each([500, 502, 503, 504])('refuses %s before body access', async (status) => {
+        const response = json({ message: 'synthetic-private-body' }, status);
+        const body = vi.spyOn(response, 'body', 'get');
+        respond(response);
+        await expect(invoke(name)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(body).not.toHaveBeenCalled();
+      });
+      it('retains the exact byte bound and cancels an oversized response', async () => {
+        respond(new Response(' '.repeat(MAX_SNAPSHOT_BYTES - 4) + 'null'));
+        await expect(invoke(name)).resolves.toBeNull();
+        const response = new Response(' '.repeat(MAX_SNAPSHOT_BYTES - 3) + 'null');
+        const stream = present(response.body ?? undefined), reader = stream.getReader();
+        const cancel = vi.spyOn(reader, 'cancel');
+        vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+        respond(response);
+        await expect(invoke(name)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expect(cancel).toHaveBeenCalledOnce();
+      });
+      it('preserves the exact fetch rejection without retry', async () => {
+        const error = new Error('synthetic-private-fetch');
+        const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(error);
+        vi.stubGlobal('fetch', fetch);
+        await expect(invoke(name)).rejects.toBe(error);
+        expect(fetch).toHaveBeenCalledOnce();
+      });
+      it.each(['read', 'cancel', 'read-and-cancel'])('preserves %s rejection and finally precedence', async (failure) => {
+        const response = json(null), stream = present(response.body ?? undefined), reader = stream.getReader();
+        const readError = new Error('synthetic-private-read'), cancelError = new Error('synthetic-private-cancel');
+        const read = vi.spyOn(reader, 'read'), cancel = vi.spyOn(reader, 'cancel');
+        if (failure !== 'cancel') read.mockRejectedValue(readError);
+        if (failure !== 'read') cancel.mockRejectedValue(cancelError);
+        vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+        respond(response);
+        await expect(invoke(name)).rejects.toBe(failure === 'read' ? readError : cancelError);
+        expect(cancel).toHaveBeenCalledOnce();
+      });
+    });
+    it.each(['image_change_requests', 'ai_status', 'save_outfit',
+      ...names.flatMap((name) => [`${name}_other`, `${name}/`, `${name}?unit=1`, `prefix_${name}`, name.toUpperCase()])])(
+      'does not make %s nullable', async (name) => {
+        respond(json(null));
+        await expect(client().rpc(owner, name, args)).rejects.toThrow('EVIDENCE_REQUIRED');
+      });
+    it.each(names.flatMap((name) => [`${name}/`, `${name}?unit=1`, `${name}_other`, `prefix_${name}`]))(
+      'does not expand empty-body parser tightening to near route %s', async (name) => {
+        respond(new Response(''));
+        await expect(client().request(owner.token, `/rest/v1/rpc/${name}`, { method: 'POST', body: args }))
+          .resolves.toEqual({ ok: true, status: 200, data: null, range: null });
+      });
+    it('retains commit_image as exactly bodyless 204, not a nullable 200 RPC', async () => {
+      respond(empty());
+      await expect(client().rpc(owner, 'commit_image', { p_image_id: run })).resolves.toBeNull();
+      for (const data of [null, { state: 'ready' }]) {
+        respond(json(data));
+        await expect(client().rpc(owner, 'commit_image', { p_image_id: run })).rejects.toThrow('EVIDENCE_REQUIRED');
+      }
+    });
+  });
+
+  describe('real client plus real replacement harness (fetch/Response mocked only)', () => {
+    const variants = ['main', 'thumb'] as const;
+    type Variant = typeof variants[number];
+    const value = { requestId: run, itemId: run, imageId: owners[1] };
+    function composed(response: Response, variant: Variant = 'main', marked = true) {
+      const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response);
+      if (variant === 'thumb') fetch.mockResolvedValueOnce(json({ uploaded: true }, 200));
+      vi.stubGlobal('fetch', fetch);
+      let stage = 'I10b-preservation-replacement-upload';
+      const mark = vi.fn((label: string) => { stage = `I10b-preservation-${label}`; });
+      const transport = client();
+      const h = marked ? imageChangeHarness(transport, owner, env, mark) : imageChangeHarness(transport, owner, env);
+      const logs = [vi.spyOn(console, 'error'), vi.spyOn(console, 'log'), vi.spyOn(console, 'warn')];
+      return { fetch, mark, h, transport, logs, stage: () => stage };
+    }
+    function expectFailure(f: ReturnType<typeof composed>, variant: Variant, reason: string) {
+      expect(f.stage()).toBe(`I10b-preservation-upload-${variant}-${reason}`);
+      expect(f.mark.mock.calls).toEqual([
+        ['upload-main-attempt'], ...(variant === 'thumb' ? [['upload-thumb-attempt']] : []),
+        [`upload-${variant}-${reason}`],
+      ]);
+      expect(f.fetch).toHaveBeenCalledTimes(variant === 'main' ? 1 : 2);
+      for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+      expect(JSON.stringify(f.mark.mock.calls)).not.toMatch(/synthetic-private|fictional-a/);
+      expect(JSON.stringify(f.mark.mock.calls)).not.toContain(owner.uid);
+    }
+    it('demonstrates the old pre-return miss without moving the 5xx guard or reading its body', async () => {
+      const response = json({ code: 'synthetic-private-code', message: 'synthetic-private-body' }, 503);
+      const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+      respond(response);
+      const reachedOuterClassifier = vi.fn();
+      await expect((async () => {
+        const result = await client().request(owner.token, `/storage/v1/object/wardrobe/${owner.uid}/${run}/${run}/main.jpg`,
+          { method: 'POST', binary: true, body: new Uint8Array([0]) });
+        reachedOuterClassifier(result);
+      })()).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(reachedOuterClassifier).not.toHaveBeenCalled();
+      expect(getReader).not.toHaveBeenCalled();
+    });
+    it.each(variants.flatMap((variant) => [500, 502, 503, 504].map((status) => ({ variant, status }))))(
+      'reports $variant status5xx-$status without any body access', async ({ variant, status }) => {
+        const response = json({ code: '22023', message: 'synthetic-private-message',
+          details: { token: 'synthetic-private-token' }, hint: owner.uid }, status);
+        const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+        const body = vi.spyOn(response, 'body', 'get');
+        const f = composed(response, variant);
+        await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expectFailure(f, variant, `status5xx-${status}`);
+        expect(body).not.toHaveBeenCalled(); expect(getReader).not.toHaveBeenCalled();
+      });
+    it.each(variants)('never emits an unlisted 5xx status or secret code for %s', async (variant) => {
+      const response = json({ code: 'synthetic-private-code'.repeat(100), message: owner.token }, 598);
+      const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+      const f = composed(response, variant);
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, variant, 'status5xx-OTHER'); expect(getReader).not.toHaveBeenCalled();
+    });
+    it.each(variants.flatMap((variant) => [400, 422].map((status) => ({ variant, status }))))(
+      'reports $variant nonJSON$status without disclosing the response text', async ({ variant, status }) => {
+        const response = new Response('synthetic-private-nonjson-token-and-path', { status });
+        const f = composed(response, variant);
+        await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+        expectFailure(f, variant, `nonjson-${status}`);
+      });
+    it('uses OTHER rather than an unlisted nonJSON response status', async () => {
+      const f = composed(new Response('synthetic-private-raw', { status: 418 }));
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, 'main', 'nonjson-OTHER');
+    });
+    it.each(variants)('retains the malformed204 guard before reading %s', async (variant) => {
+      const response = new Response('synthetic-private-body');
+      vi.spyOn(response, 'status', 'get').mockReturnValue(204);
+      const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+      const f = composed(response, variant);
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, variant, 'body-on-204'); expect(getReader).not.toHaveBeenCalled();
+    });
+    it.each(variants)('retains missing non204 body refusal for %s', async (variant) => {
+      const f = composed(new Response(null, { status: 400 }), variant);
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, variant, 'no-body-400');
+    });
+    it('does not emit an unlisted missing-body status', async () => {
+      const f = composed(new Response(null, { status: 418 }));
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, 'main', 'no-body-OTHER');
+    });
+    it.each(variants)('retains the exact response bound and cancellation on %s overflow', async (variant) => {
+      const response = new Response(new Uint8Array(MAX_SNAPSHOT_BYTES + 1));
+      const stream = present(response.body ?? undefined), reader = stream.getReader();
+      const cancel = vi.spyOn(reader, 'cancel');
+      vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+      const f = composed(response, variant);
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, variant, 'overflow'); expect(cancel).toHaveBeenCalledOnce();
+    });
+    it('accepts a valid JSON response at the unchanged exact bound without an invariant class', async () => {
+      const f = composed(new Response(JSON.stringify('x'.repeat(MAX_SNAPSHOT_BYTES - 2))));
+      await expect(f.h.upload(value, ['main'])).resolves.toBeUndefined();
+      expect(f.mark.mock.calls).toEqual([['upload-main-attempt']]);
+      expect(f.fetch).toHaveBeenCalledOnce();
+    });
+    it.each(variants)('leaves parsed JSON400 refusal to the outer %s code classifier', async (variant) => {
+      const f = composed(json({ code: 'AccessDenied', message: 'synthetic-private-message',
+        details: { token: owner.token }, hint: owner.uid }, 400), variant);
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, variant, 'http-400-AccessDenied');
+    });
+    it('does not emit secret or prototype-looking unknown JSON codes', async () => {
+      const f = composed(json({ code: 'synthetic-private-code'.repeat(100),
+        message: 'synthetic-private-message', details: { code: '42501' }, hint: owner.uid,
+        constructor: { code: '23505' }, data: { token: owner.token } }, 400));
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expectFailure(f, 'main', 'http-400-OTHER');
+    });
+    it('keeps successful native requests sequential with the same binary body, headers and finalize boundary', async () => {
+      const f = composed(json({ uploaded: true }, 201));
+      let release!: (response: Response) => void;
+      f.fetch.mockReturnValueOnce(new Promise<Response>((resolve) => { release = resolve; }));
+      const pending = f.h.upload(value);
+      expect(f.fetch).toHaveBeenCalledOnce();
+      expect(f.mark.mock.calls).toEqual([['upload-main-attempt']]);
+      release(empty());
+      await pending;
+      expect(f.mark.mock.calls).toEqual([['upload-main-attempt'], ['upload-thumb-attempt']]);
+      const calls = f.fetch.mock.calls;
+      expect(calls).toHaveLength(2);
+      const body = present(calls[0]?.[1]).body;
+      expect(body).toBeInstanceOf(Uint8Array);
+      for (const [index, variant] of variants.entries()) {
+        const [url, init] = present(calls[index]);
+        expect(url).toBe(`${env.SUPABASE_URL}/storage/v1/object/wardrobe/${owner.uid}/${value.itemId}/${value.imageId}/${variant}.jpg`);
+        expect(init).toEqual({ method: 'POST', cache: 'no-store', redirect: 'error', signal: expect.any(AbortSignal),
+          headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${owner.token}`,
+            'Content-Type': 'image/jpeg', 'x-upsert': 'false' }, body });
+        expect(init?.body).toBe(body);
+      }
+      f.mark('replacement-finalize');
+      expect(f.stage()).toBe('I10b-preservation-replacement-finalize');
+      for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+    });
+    it.each([200, 201, 204])('never invokes the synchronous invariant observer on successful%s', async (status) => {
+      respond(status === 204 ? empty() : json({ code: 'AccessDenied' }, status));
+      const onFailure = vi.fn();
+      await client().request(owner.token, '/storage/v1/object/wardrobe/unit',
+        { method: 'POST', binary: true, body: new Uint8Array([0]), onFailure });
+      expect(onFailure).not.toHaveBeenCalled();
+    });
+    it.each(variants.flatMap((variant) => ['fetch', 'read', 'cancel', 'read-and-cancel'].map((failure) => ({ variant, failure }))))(
+      'retains $variant $failure sentinel identity and existing finally precedence', async ({ variant, failure }) => {
+        const response = json({ uploaded: true });
+        const stream = present(response.body ?? undefined), reader = stream.getReader();
+        const read = vi.spyOn(reader, 'read'), cancel = vi.spyOn(reader, 'cancel');
+        vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+        const fetchError = new Error('synthetic-private-fetch'), readError = new Error('synthetic-private-read'),
+          cancelError = new Error('synthetic-private-cancel');
+        const f = composed(response, variant);
+        if (failure === 'fetch') f.fetch.mockRejectedValueOnce(fetchError);
+        if (failure === 'read' || failure === 'read-and-cancel') read.mockRejectedValue(readError);
+        if (failure === 'cancel' || failure === 'read-and-cancel') cancel.mockRejectedValue(cancelError);
+        await expect(f.h.upload(value)).rejects.toBe(failure === 'fetch' ? fetchError : failure === 'read' ? readError : cancelError);
+        expect(f.stage()).toBe(`I10b-preservation-upload-${variant}-attempt`);
+        expect(f.mark.mock.calls).toEqual([['upload-main-attempt'], ...(variant === 'thumb' ? [['upload-thumb-attempt']] : [])]);
+        expect(f.fetch).toHaveBeenCalledTimes(variant === 'main' ? 1 : 2);
+        expect(cancel).toHaveBeenCalledTimes(failure === 'fetch' ? 0 : 1);
+        for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+      });
+    it.each(variants)('retains %s overflow label when finally cancellation replaces the original assertion error', async (variant) => {
+      const response = new Response(new Uint8Array(MAX_SNAPSHOT_BYTES + 1));
+      const stream = present(response.body ?? undefined), reader = stream.getReader();
+      const sentinel = new Error('synthetic-private-cancel');
+      const cancel = vi.spyOn(reader, 'cancel').mockRejectedValue(sentinel);
+      vi.spyOn(stream, 'getReader').mockReturnValue(reader);
+      const f = composed(response, variant);
+      await expect(f.h.upload(value)).rejects.toBe(sentinel);
+      expectFailure(f, variant, 'overflow'); expect(cancel).toHaveBeenCalledOnce();
+    });
+    it('keeps three-argument harness callers silent and failing normally', async () => {
+      const f = composed(json({ code: 'synthetic-private-code' }, 503), 'main', false);
+      await expect(f.h.upload(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(f.mark).not.toHaveBeenCalled(); expect(f.fetch).toHaveBeenCalledOnce();
+      for (const log of f.logs) expect(log).not.toHaveBeenCalled();
+    });
+    it('does not silently extend the observer to reserve', async () => {
+      const response = json({ code: 'synthetic-private-code' }, 503);
+      const getReader = vi.spyOn(present(response.body ?? undefined), 'getReader');
+      const f = composed(response);
+      await expect(f.h.reserve(value)).rejects.toThrow('EVIDENCE_REQUIRED');
+      expect(f.mark).not.toHaveBeenCalled(); expect(f.fetch).toHaveBeenCalledOnce();
+      expect(getReader).not.toHaveBeenCalled();
+    });
+  });
 
   it('retains fictional TUS 422 bytes and exact outgoing request without recovering a native response', async () => {
     const body = new Uint8Array([0, 255]), raw = Buffer.from('Fictional refusal');
@@ -959,22 +1397,25 @@ describe('import safety and frozen integration boundary', () => {
     expect(base).not.toContain('await installCiStorageGuard();');
     expect(base).not.toContain('await verifyCiStorageGuard();');
     const finalized = main.indexOf('await installCiStorageGuard();');
-    expect(finalized).toBeGreaterThan(main.indexOf("await cli(['migration', 'up', '--local'])"));
+    expect(finalized).toBeGreaterThan(main.indexOf("await migrateToAzureTarget(run, 'base')"));
     expect(main.indexOf('await verifyCiStorageGuard();')).toBeGreaterThan(finalized);
-    expect(main.indexOf("await history('target');")).toBeGreaterThan(main.indexOf('await verifyCiStorageGuard();'));
-    expect(main.indexOf('ITEM_LIFECYCLE_CATALOG_SQL')).toBeGreaterThan(main.indexOf("await history('target');"));
-    expect(main.match(/await installCiStorageGuard\(\);/g)).toHaveLength(2);
-    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(2);
+    expect(main.indexOf("await history('azure-target');")).toBeGreaterThan(main.indexOf('await verifyCiStorageGuard();'));
+    expect(main.indexOf('ITEM_LIFECYCLE_CATALOG_SQL')).toBeGreaterThan(main.indexOf("await history('azure-target');"));
+    expect(main.match(/await installCiStorageGuard\(\);/g)).toHaveLength(3);
+    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(3);
     const prior = main.slice(main.indexOf("stage = 'AZ1-prior-main-reset'"));
     expect(source).toContain("const PRIOR_MAIN_VERSION = '20260913120000';");
     expect(source).toContain('MIGRATIONS.findIndex((entry) => entry.version === PRIOR_MAIN_VERSION)');
-    expect(source).toContain("requireHistory(priorMainIndex >= 0, 'inventory-mismatch');");
+    expect(source).toContain("requireHistory(priorMainIndex >= 0 && azureIndex === priorMainIndex + 1, 'inventory-mismatch');");
     expect(prior).toContain("'--version', PRIOR_MAIN_VERSION");
     expect(source).not.toContain('MIGRATIONS.slice(0, 9)');
     expect(source).not.toContain('MIGRATIONS[9]');
     expect(prior.indexOf("await history('prior-main');")).toBeLessThan(prior.indexOf('await captureAzurePreservation('));
     expect(prior.indexOf('await captureAzurePreservation(')).toBeLessThan(prior.indexOf("await cli(['migration', 'up', '--local'])"));
-    expect(prior.indexOf("await history('target');")).toBeLessThan(prior.indexOf('await verifyAzurePreservation('));
+    expect(prior.indexOf("await history('azure-target');")).toBeLessThan(prior.indexOf('await verifyAzurePreservation('));
+    expect(prior.indexOf('await verifyAzurePreservation(')).toBeLessThan(prior.indexOf('await captureImageChangePreservation('));
+    expect(prior.indexOf('await captureImageChangePreservation(')).toBeLessThan(prior.indexOf("await cli(['migration', 'up', '--local'])"));
+    expect(prior.indexOf("await history('target');")).toBeLessThan(prior.indexOf('await verifyImageChangePreservation('));
   });
   it('keeps the normal child free of privileged calls and compares before probes', async () => {
     const source = await readFile(path.join(root, 'tests/integration/preservation.sessions.mjs'), 'utf8');
@@ -987,8 +1428,8 @@ describe('import safety and frozen integration boundary', () => {
     expect(orchestrator).toContain('validateSessionEnvironment(env)');
     expect(orchestrator.match(/provision-test-users\.mjs/g)).toHaveLength(2);
     expect(orchestrator.match(/\['db', 'reset'/g)).toHaveLength(3); // Help, fixed base and fixed prior-main.
-    for (const [stage, target] of [['S1-base-history', 'base'], ['S3-base-history', 'base'], ['S3-target-history', 'target']]) {
-      expect(orchestrator).toContain(`stage = '${stage}';\n    await history('${target}');`);
+    for (const [stage, target] of [['S1-base-history', 'base'], ['S3-base-history', 'base'], ['S3-target-history', 'azure-target']]) {
+      expect(orchestrator.replaceAll('\r\n', '\n')).toContain(`stage = '${stage}';\n    await history('${target}');`);
     }
     expect(orchestrator).not.toMatch(/--(?:linked|db-url)|migration.*repair/);
     const fixtureBytes = await readFile(path.join(root, 'tests/security/fixture.jpg'));

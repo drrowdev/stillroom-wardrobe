@@ -7,11 +7,13 @@ import {
   matchesClaim, parseBeginReply, parseDeletionStatuses, parseFinishReply, parseLifecycleImages, parseLifecycleSnapshot,
   parseTrashReply, requireLifecycleIds, safeVersion, samePreview, sameSavedBaseline,
   type DeletionIntent, type DeletionStatus, type LifecycleSnapshot, type TrashIntent,
+  parseDeletionOperation, parseDeletionTarget, parseTargetReconciliation, reversibleDeletion,
+  type DeletionOperation, type PreparedDeletionIntent,
 } from '../domain/item-lifecycle';
 import type { AppClient } from './client';
 import { readConfiguration, type PublicConfig } from './config';
 import { AppError } from './errors';
-import { deleteWardrobeObject } from './storage-delete';
+import { deleteWardrobeObject, deleteWardrobeTarget, wardrobeTargetDeleteRoute, type DeleteRequest } from './storage-delete';
 
 export type LifecycleStage = 'read' | 'change' | 'begin' | 'bytes' | 'finish';
 export class LifecycleError extends AppError {
@@ -21,6 +23,7 @@ export class LifecycleError extends AppError {
 }
 type Work = {
   signal: AbortSignal; stage: LifecycleStage; changed: boolean;
+  dispatches?: number;
   check: () => void;
   wait: <T>(operation: () => PromiseLike<T>) => Promise<T>;
 };
@@ -136,13 +139,19 @@ export class ItemLifecycleClient {
     if (intent.epoch !== this.epoch || intent.preview.owner_id !== this.owner || !canonicalId(intent.requestId)
       || !safeVersion(intent.expectedVersion, true)) throw new AppError('error.unavailable');
   }
-  private async remove(work: Work, path: string): Promise<'removed' | 'missing'> {
-    return deleteWardrobeObject(async (route, options) => {
+  private async remove(work: Work, path: string, itemId?: string): Promise<'removed' | 'missing'> {
+    const remove = itemId === undefined ? deleteWardrobeObject
+      : (request: DeleteRequest, owner: string, target: string) => deleteWardrobeTarget(request, owner, itemId, target);
+    return remove(async (route, options) => {
       const auth = await work.wait(() => this.client.auth.getSession());
       const session = auth.data.session;
       if (auth.error || !session || session.user.id !== this.owner) throw new LifecycleError(work.stage, false, 'error.unavailable');
       work.check();
       work.stage = 'bytes'; work.changed = true;
+      if (work.dispatches !== undefined) {
+        if (work.dispatches >= lifecyclePageSize) throw failure(work);
+        work.dispatches++;
+      }
       const response = await work.wait(() => fetch(`${this.config.url}${route}`, {
         method: options.method, headers: { apikey: this.config.publishableKey, Authorization: `Bearer ${session.access_token}`, Accept: 'application/json' },
         signal: work.signal, cache: 'no-store', credentials: 'omit', redirect: 'error',
@@ -175,6 +184,131 @@ export class ItemLifecycleClient {
       if (failed) throw failure(work, primary);
       return { status: response.status, ok: response.ok, data };
     }, this.owner, path);
+  }
+  private async operation(work: Work, itemId: string, requestId: string): Promise<DeletionOperation | null> {
+    requireLifecycleIds([itemId], this.owner);
+    if (!canonicalId(requestId)) throw new AppError('error.conflict');
+    const result = await work.wait(() => this.client.rpc('item_deletion_operation_status', { p_item_id: itemId, p_request_id: requestId }).abortSignal(work.signal));
+    rpcError(work, result.error);
+    return result.data === null ? null : parseDeletionOperation(result.data, itemId, requestId);
+  }
+  operationStatus(itemId: string, requestId: string, signal?: AbortSignal) {
+    return this.bounded(signal, work => this.operation(work, itemId, requestId));
+  }
+  operations(ids: string[], signal?: AbortSignal): Promise<DeletionOperation[]> {
+    return this.bounded(signal, async work => {
+      requireLifecycleIds(ids, this.owner);
+      const result = await work.wait(() => this.client.rpc('item_deletion_operations', { p_item_ids: ids }).abortSignal(work.signal));
+      rpcError(work, result.error);
+      if (!Array.isArray(result.data) || result.data.length > ids.length) throw new AppError('error.conflict');
+      const seen = new Set<string>();
+      return result.data.map(value => {
+        if (!isRecord(value) || typeof value.itemId !== 'string' || !ids.includes(value.itemId) || seen.has(value.itemId)) throw new AppError('error.conflict');
+        seen.add(value.itemId);
+        const operation = parseDeletionOperation(value, value.itemId);
+        if (operation.phase === 'cancelled') throw new AppError('error.conflict');
+        return operation;
+      });
+    });
+  }
+  prepareDeletion(intent: PreparedDeletionIntent, signal?: AbortSignal): Promise<DeletionOperation> {
+    return this.bounded(signal, async work => {
+      if (intent.epoch !== this.epoch || intent.preview.owner_id !== this.owner) throw new AppError('error.conflict');
+      requireLifecycleIds([intent.preview.id], this.owner);
+      if (!canonicalId(intent.requestId)) throw new AppError('error.conflict');
+      const known = await this.operation(work, intent.preview.id, intent.requestId);
+      let operation = known;
+      if (!operation) {
+        const current = await this.status(work, intent.preview.id);
+        if (!samePreview(current, intent.preview)) throw new AppError('error.conflict');
+        work.changed = true; work.stage = 'begin';
+        const result = await work.wait(() => this.client.rpc('prepare_item_deletion', {
+          p_item_id: current.id, p_request_id: intent.requestId, p_expected_version: current.version,
+          p_image_manifest_sha256: current.image_manifest_sha256,
+        }).abortSignal(work.signal));
+        rpcError(work, result.error);
+        operation = parseDeletionOperation(result.data, current.id, intent.requestId);
+      }
+      for (let page = 0; operation.phase === 'preparing' && page < lifecyclePageSize; page++) {
+        work.changed = true;
+        const args = { p_item_id: operation.itemId, p_request_id: operation.requestId };
+        const result = await work.wait(() => this.client.rpc('inventory_item_deletion', {
+          ...args,
+        }).abortSignal(work.signal));
+        rpcError(work, result.error);
+        operation = parseDeletionOperation(result.data, intent.preview.id, intent.requestId);
+      }
+      return operation;
+    });
+  }
+  cancelPreparation(receipt: DeletionOperation, signal?: AbortSignal): Promise<DeletionOperation> {
+    return this.bounded(signal, async work => {
+      const current = await this.operation(work, receipt.itemId, receipt.requestId);
+      if (!current || !reversibleDeletion(current)) throw new AppError('error.conflict');
+      work.changed = true;
+      const result = await work.wait(() => this.client.rpc('cancel_item_deletion_preparation', {
+        p_item_id: current.itemId, p_request_id: current.requestId,
+      }).abortSignal(work.signal));
+      rpcError(work, result.error);
+      const cancelled = parseDeletionOperation(result.data, current.itemId, current.requestId);
+      if (cancelled.phase !== 'cancelled') throw failure(work);
+      return cancelled;
+    });
+  }
+  continueDeletion(receipt: DeletionOperation, authorize: boolean, invalidate: (paths: string[]) => void, signal?: AbortSignal): Promise<DeletionOperation> {
+    return this.bounded(signal, async work => {
+      work.dispatches = 0;
+      let current = await this.operation(work, receipt.itemId, receipt.requestId);
+      if (!current) throw failure(work);
+      if (current.phase === 'completed') return current;
+      if (current.inventoryHash !== receipt.inventoryHash || current.expectedVersion !== receipt.expectedVersion) throw new AppError('error.conflict');
+      const args = { p_item_id: current.itemId, p_request_id: current.requestId };
+      if (current.phase === 'prepared') {
+        if (!authorize || !current.inventoryHash) throw new AppError('error.conflict');
+        work.changed = true; work.stage = 'begin';
+        const result = await work.wait(() => this.client.rpc('authorize_item_deletion', { ...args, p_inventory_hash: current!.inventoryHash! }).abortSignal(work.signal));
+        rpcError(work, result.error);
+        current = parseDeletionOperation(result.data, receipt.itemId, receipt.requestId);
+      }
+      if (current.phase !== 'authorized' && current.phase !== 'removing_registered') throw new AppError('error.conflict');
+      work.changed = true;
+      while (work.dispatches < lifecyclePageSize) {
+        const next = await work.wait(() => this.client.rpc('item_deletion_next_target', args).abortSignal(work.signal));
+        rpcError(work, next.error);
+        const target = parseDeletionTarget(next.data);
+        if (!target) {
+          if (current.phase === 'authorized') {
+            const result = await work.wait(() => this.client.rpc('begin_prepared_item_deletion', args).abortSignal(work.signal));
+            rpcError(work, result.error);
+            current = parseDeletionOperation(result.data, receipt.itemId, receipt.requestId);
+            if (current.phase !== 'removing_registered') throw failure(work);
+            continue;
+          }
+          work.stage = 'finish';
+          const result = await work.wait(() => this.client.rpc('finish_item_deletion', args).abortSignal(work.signal));
+          rpcError(work, result.error);
+          if (parseFinishReply(result.data) !== 'completed') throw failure(work);
+          const completed = await this.operation(work, receipt.itemId, receipt.requestId);
+          if (!completed || completed.phase !== 'completed') throw failure(work);
+          return completed;
+        }
+        wardrobeTargetDeleteRoute(this.owner, receipt.itemId, target.path);
+        if (target.ordinal > current.targetCount) throw new AppError('error.conflict');
+        const reconcile = async () => {
+          const result = await work.wait(() => this.client.rpc('reconcile_item_deletion_target', { ...args, p_ordinal: target.ordinal }).abortSignal(work.signal));
+          rpcError(work, result.error);
+          return parseTargetReconciliation(result.data, target);
+        };
+        // A prior DELETE may have completed without its acknowledgement.
+        if (await reconcile() === 'reconciled_absent') continue;
+        work.check(); invalidate([target.path]); work.check();
+        await this.remove(work, target.path, receipt.itemId);
+        if (await reconcile() !== 'reconciled_absent') throw failure(work);
+      }
+      const paused = await this.operation(work, receipt.itemId, receipt.requestId);
+      if (!paused || paused.phase !== 'authorized' && paused.phase !== 'removing_registered') throw failure(work);
+      return paused;
+    });
   }
   delete(intent: DeletionIntent, start: boolean, invalidate: (paths: string[]) => void, signal?: AbortSignal): Promise<{ removed: number; missing: number }> {
     return this.bounded(signal, async work => {

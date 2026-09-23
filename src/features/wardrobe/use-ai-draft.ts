@@ -5,7 +5,7 @@ import type { Language, MessageKey } from '../../i18n';
 import type { PreparedPhoto } from '../../images/process-jpeg';
 import {
   beginAiAnalysis, continueAiManually, createAiDraft, editAiDraftField, expireAiDraft, failAiAnalysis,
-  prepareAiGeneration, presentAiDraft, receiveAiResult, refuseAiSave, aiSaveClaim, type AiDraftState, type AiTransition,
+  prepareAiGeneration, presentAiDraft, receiveAiResult, refuseAiSave, aiSaveClaim, type AiDraftState, type AiTransition, type SavedAiBaseline,
 } from '../../domain/ai-draft';
 import { garmentFields, newGarmentDraft, sameValue, type GarmentDraft } from '../../domain/garment-fields';
 import { canAnalyze, type AiAccounting, type AiAnalysisReply } from '../../domain/ai-controls';
@@ -22,8 +22,8 @@ function mutable(state: AiDraftState): GarmentDraft {
     style_tags: [...state.draft.raw.style_tags], tags: [...state.draft.raw.tags] },
     intent: { ...state.draft.intent }, priceLanguage: state.draft.priceLanguage };
 }
-export function useAiDraft(ai: AiClient, currency: string, language: Language) {
-  const [view, setView] = useState<View>(() => ({ state: null, draft: newGarmentDraft(currency, language),
+export function useAiDraft(ai: AiClient, currency: string, language: Language, baseline?: SavedAiBaseline) {
+  const [view, setView] = useState<View>(() => ({ state: null, draft: newGarmentDraft(currency, language, baseline?.values),
     description: '', descriptionEdited: false, descriptionDerived: null, manual: false, working: false,
     notice: null, accounting: null }));
   const current = useRef(view);
@@ -89,7 +89,7 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language) {
       generation: (previous?.context?.generation ?? 0) + 1, imageSha256: photo.mainSha256 };
     if (previous?.context) apply(prepareAiGeneration(previous, previous.context, context));
     else {
-      const created = createAiDraft(current.current.draft, context);
+      const created = createAiDraft(current.current.draft, context, baseline);
       if (!created.ok) { put({ ...current.current, notice: 'aiC.unavailable' }); return; }
       put({ ...current.current, state: created.state });
     }
