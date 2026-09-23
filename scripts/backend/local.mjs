@@ -108,6 +108,30 @@ export function describeGenerationResult(result, elapsedMs) {
           }
         }
       }
+      report.stderrDockerErrorMarker = 'unclassified';
+      if (report.stderrBytes <= 4096) {
+        let marker = 'none', lineStart = 0;
+        for (let lf = stderr.indexOf('\n'); lf !== -1; lf = stderr.indexOf('\n', lineStart)) {
+          let line = stderr.slice(lineStart, stderr[lf - 1] === '\r' ? lf - 1 : lf);
+          lineStart = lf + 1;
+          if (line.includes('\r')) continue;
+          if (line.startsWith('docker: ')) line = line.slice('docker: '.length);
+          const envelope = 'Error response from daemon: ';
+          if (!line.startsWith(envelope)) continue;
+          const message = line.slice(envelope.length);
+          let category = 'unclassified';
+          if (message.startsWith('pull access denied for ') || message.startsWith('manifest for ')
+            || message.startsWith('failed to resolve reference ')) category = 'image-resolution-or-registry';
+          else if (message.startsWith('network ') && message.endsWith(' not found')
+            && message.length > 'network '.length + ' not found'.length) category = 'missing-network';
+          else if (message.startsWith('Conflict. The container name ')) category = 'container-name-conflict';
+          else if (message.startsWith('failed to create task for container: ')
+            || message.startsWith('OCI runtime create failed: ')
+            || message.startsWith('OCI runtime start failed: ')) category = 'oci-runtime-start';
+          marker = marker === 'none' ? category : marker === category ? marker : 'multiple';
+        }
+        report.stderrDockerErrorMarker = marker === 'none' ? 'unclassified' : marker;
+      }
     }
   } catch {
     // Even malformed objects must yield only the fixed observational fields.

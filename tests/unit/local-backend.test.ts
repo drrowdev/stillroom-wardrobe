@@ -1115,6 +1115,8 @@ declare module '../../scripts/backend/local.mjs' {
     stderrFirstLineBytes: number | null;
     stderrDockerOperation: 'none' | 'inspect-image' | 'pull-image' | 'create-container' | 'start-container'
       | 'inspect-container' | 'read-logs' | 'copy-logs' | 'run-container';
+    stderrDockerErrorMarker?: 'unclassified' | 'image-resolution-or-registry' | 'missing-network'
+      | 'container-name-conflict' | 'oci-runtime-start' | 'multiple';
   };
 }
 
@@ -1147,9 +1149,14 @@ describe('safe local type-generation description', () => {
   };
 
   function expectFixedReport(report: ReturnType<typeof describeGenerationResult>) {
-    expect(Object.keys(report)).toEqual(report.tag === 'nonzero-with-stderr' ? [...keys, 'stderrContainerExitBucket'] : keys);
+    expect(Object.keys(report)).toEqual(report.tag === 'nonzero-with-stderr'
+      ? [...keys, 'stderrContainerExitBucket', 'stderrDockerErrorMarker'] : keys);
     if ('stderrContainerExitBucket' in report) {
       expect(['exit-125', 'exit-126-or-127', 'other-nonzero', 'unclassified']).toContain(report.stderrContainerExitBucket);
+    }
+    if ('stderrDockerErrorMarker' in report) {
+      expect(['unclassified', 'image-resolution-or-registry', 'missing-network',
+        'container-name-conflict', 'oci-runtime-start', 'multiple']).toContain(report.stderrDockerErrorMarker);
     }
     expect(tags).toContain(report.tag);
     for (const field of ['exitCode', 'elapsedMs', 'stdoutBytes', 'stderrBytes', 'stderrLines', 'stderrFirstLineBytes'] as const) {
@@ -1162,7 +1169,7 @@ describe('safe local type-generation description', () => {
     expect(typeof report.stderrMentionsConnectPhase).toBe('boolean');
     expect(['none', ...operations.map(([, operation]) => operation)]).toContain(report.stderrDockerOperation);
     if (report.tag !== 'nonzero-with-stderr') expect(report).toMatchObject(inactive);
-    expect(JSON.stringify(report).length).toBeLessThan(512);
+    expect(Buffer.byteLength(JSON.stringify(report), 'utf8')).toBeLessThan(512);
   }
 
   it('describes the exact successful tuple without changing or returning it', () => {
@@ -1205,7 +1212,7 @@ describe('safe local type-generation description', () => {
       tag: 'nonzero-with-stderr', exitCode: 1, elapsedMs: 0, stdoutBytes: 6, stderrBytes: 4,
       hasDatabaseOutput: false, hasImagesOutput: false,
       stderrMentionsConnectPhase: false, stderrLines: 0, stderrFirstLineBytes: 4, stderrDockerOperation: 'none',
-      stderrContainerExitBucket: 'unclassified',
+      stderrContainerExitBucket: 'unclassified', stderrDockerErrorMarker: 'unclassified',
     });
   });
 
@@ -1252,7 +1259,8 @@ describe('safe local type-generation description', () => {
   });
 
   it('keeps observations inactive for every other tag even with matching text', () => {
-    const stderr = `Connecting to\n${operations.map(([literal]) => literal).join('\r\n')}\nerror running container: exit 125\n`;
+    const stderr = `Connecting to\n${operations.map(([literal]) => literal).join('\r\n')}\nerror running container: exit 125\n`
+      + 'docker: Error response from daemon: OCI runtime create failed: synthetic\n';
     const cases = [
       { code: 0, stdout, stderr }, { code: 0, stdout: '', stderr },
       { code: 0, stdout: 'export type Database = {}', stderr },
@@ -1281,7 +1289,8 @@ describe('safe local type-generation description', () => {
       const report = describeGenerationResult(Object.freeze({ code: 1, stdout: '', stderr }), 12.75);
       expectFixedReport(report);
       expect(report).toHaveProperty('stderrContainerExitBucket', bucket);
-      const legacy = Object.fromEntries(Object.entries(report).filter(([key]) => key !== 'stderrContainerExitBucket'));
+      const legacy = Object.fromEntries(Object.entries(report)
+        .filter(([key]) => key !== 'stderrContainerExitBucket' && key !== 'stderrDockerErrorMarker'));
       expect(JSON.stringify(legacy)).toBe(JSON.stringify({
         tag: 'nonzero-with-stderr', exitCode: 1, elapsedMs: 12, stdoutBytes: 0,
         stderrBytes: Buffer.byteLength(stderr), hasDatabaseOutput: false, hasImagesOutput: false,
@@ -1389,6 +1398,7 @@ describe('safe local type-generation description', () => {
     }
     const result = { code: 1, stdout, stderr: 'error running container: exit 125\n', toJSON: accessor };
     Object.defineProperty(result, 'stderrContainerExitBucket', { get: accessor });
+    Object.defineProperty(result, 'stderrDockerErrorMarker', { get: accessor });
     expect(describeGenerationResult(result, 1)).toHaveProperty('stderrContainerExitBucket', 'exit-125');
     for (const field of ['code', 'stdout', 'stderr']) {
       const report = describeGenerationResult(Object.defineProperty({ ...result }, field, { get: accessor }), 1);
@@ -1396,6 +1406,158 @@ describe('safe local type-generation description', () => {
       expect(report.tag).toBe('invalid-result');
     }
     expect(accessor).not.toHaveBeenCalled();
+  });
+
+  const daemonEnvelope = 'Error response from daemon: ';
+  const markerFamilies = [
+    ['pull access denied for ', 'image-resolution-or-registry'],
+    ['manifest for ', 'image-resolution-or-registry'],
+    ['failed to resolve reference ', 'image-resolution-or-registry'],
+    ['network synthetic not found', 'missing-network'],
+    ['Conflict. The container name ', 'container-name-conflict'],
+    ['failed to create task for container: ', 'oci-runtime-start'],
+    ['OCI runtime create failed: ', 'oci-runtime-start'],
+    ['OCI runtime start failed: ', 'oci-runtime-start'],
+  ] as const;
+  function markerReport(stderr: string) {
+    const report = describeGenerationResult(Object.freeze({ code: 1, stdout: '', stderr }), 12.75);
+    expectFixedReport(report);
+    return report;
+  }
+
+  it.each(markerFamilies)('observes only the literal daemon family %s with LF or one framing CR', (message, marker) => {
+    for (const prefix of ['', 'docker: ']) {
+      for (const ending of ['\n', '\r\n']) {
+        const stderr = `${prefix}${daemonEnvelope}${message}${ending}`;
+        expect(markerReport(stderr).stderrDockerErrorMarker).toBe(marker);
+        expect(markerReport(stderr)).toMatchObject({
+          stderrLines: 1, stderrFirstLineBytes: Buffer.byteLength(stderr.slice(0, -1), 'utf8'),
+          stderrBytes: Buffer.byteLength(stderr, 'utf8'), stderrDockerOperation: 'none',
+        });
+      }
+    }
+  });
+
+  it('does not validate or disclose recognized message tails', () => {
+    for (const [prefix, marker] of markerFamilies.filter(([, marker]) => marker !== 'missing-network')) {
+      for (const tail of ['', 'unfinished "synthetic-private-tail', '\u001b[31msynthetic-private-tail', '\u0000synthetic-private-tail']) {
+        const report = markerReport(`${daemonEnvelope}${prefix}${tail}\n`);
+        expect(report.stderrDockerErrorMarker).toBe(marker);
+        expect(JSON.stringify(report)).not.toContain('synthetic-private-tail');
+      }
+    }
+    expect(markerReport(`${daemonEnvelope}network   not found\n`).stderrDockerErrorMarker).toBe('missing-network');
+  });
+
+  it('rejects unsupported envelopes, prefixes, CR framing and unterminated tails without normalization', () => {
+    const canonical = `${daemonEnvelope}OCI runtime create failed: synthetic`;
+    const negatives = [
+      'error running container: exit 125\n', 'Unable to find image locally\n',
+      'network with name x already exists\n', `${daemonEnvelope}network with name x already exists\n`,
+      `${daemonEnvelope}network  not found\n`, `${daemonEnvelope}network x not found suffix\n`,
+      `${daemonEnvelope}network x not found \n`, `${daemonEnvelope}Network x not found\n`,
+      `${canonical}`, `${canonical}\r`, `${canonical}\r\r\n`,
+      `${daemonEnvelope}OCI runtime create failed: syn\rthetic\n`, `\r${canonical}\n`,
+      ` ${canonical}\n`, `\t${canonical}\n`, `Docker: ${canonical}\n`,
+      `docker: docker: ${canonical}\n`, `"${canonical}"\n`, `\`${canonical}\`\n`,
+      `{"message":"${canonical}"}\n`, `\u001b[31m${canonical}\u001b[0m\n`,
+      `docker: \u001b[31m${canonical}\n`, 'Error response from daemon:\n',
+      'error response from daemon: OCI runtime create failed: synthetic\n',
+      ...markerFamilies.filter(([, marker]) => marker !== 'missing-network')
+        .map(([prefix]) => `${daemonEnvelope}${prefix.slice(0, -1)}\n`),
+    ];
+    for (const stderr of negatives) expect(markerReport(stderr).stderrDockerErrorMarker).toBe('unclassified');
+    const known = `${canonical}\n`;
+    for (const ignored of [canonical, ` ${canonical}\n`, `docker: docker: ${canonical}\n`, `${canonical}\r\r\n`]) {
+      expect(markerReport(known + ignored).stderrDockerErrorMarker).toBe('oci-runtime-start');
+    }
+  });
+
+  it('collapses duplicate categories and preserves all distinct-category pairs including eligible unknown lines', () => {
+    const messages = [...markerFamilies, ['unknown daemon wording', 'unclassified'] as const,
+      ['', 'unclassified'] as const];
+    for (const [first, firstMarker] of messages) {
+      const a = `${daemonEnvelope}${first}\n`;
+      expect(markerReport(a + a).stderrDockerErrorMarker).toBe(firstMarker);
+      for (const [second, secondMarker] of messages) {
+        const b = `docker: ${daemonEnvelope}${second}\r\n`;
+        const expected = firstMarker === secondMarker ? firstMarker : 'multiple';
+        for (const stderr of [a + b, b + a, a + b + a, a + b + b, 'non-daemon\n' + a + b + 'other\n']) {
+          expect(markerReport(stderr).stderrDockerErrorMarker).toBe(expected);
+        }
+      }
+    }
+  });
+
+  it('bounds the new marker at 4096 UTF-8 bytes without changing old operation or raw metadata', () => {
+    const line = `${daemonEnvelope}network synthetic not found\n`;
+    const operation = 'error running container: exit 125\n';
+    for (const [fill, width] of [['x', 1], ['\u00e4', 2], ['\u{1f642}', 4]] as const) {
+      const remaining = 4096 - Buffer.byteLength(operation + line) - 1;
+      const padding = fill.repeat(Math.floor(remaining / width)) + 'x'.repeat(remaining % width) + '\n';
+      const bounded = operation + padding + line;
+      expect(Buffer.byteLength(bounded, 'utf8')).toBe(4096);
+      for (const [stderr, marker] of [
+        [bounded, 'missing-network'], [bounded + 'x', 'unclassified'],
+        ['x'.repeat(4097) + '\n' + line + operation, 'unclassified'],
+        [line + operation + 'x'.repeat(4097), 'unclassified'],
+      ]) {
+        const report = markerReport(stderr!);
+        expect(report.stderrDockerErrorMarker).toBe(marker);
+        expect(report.stderrDockerOperation).toBe('run-container');
+        expect(report.stderrBytes).toBe(Buffer.byteLength(stderr!, 'utf8'));
+        expect(report.stderrLines).toBe(stderr!.split('\n').length - 1);
+        expect(report.stderrFirstLineBytes).toBe(Buffer.byteLength(stderr!.split('\n')[0]!, 'utf8'));
+      }
+      expect(Buffer.byteLength(bounded + 'x', 'utf8')).toBe(4097);
+    }
+  });
+
+  it('keeps all legacy observations equivalent after removing only the two additive keys', () => {
+    const unknown = `${daemonEnvelope}\n`;
+    for (const [message] of markerFamilies) {
+      for (const [literal, operation] of operations) {
+        const recognized = `${daemonEnvelope}${message}\n`;
+        expect(Buffer.byteLength(recognized)).toBeGreaterThan(Buffer.byteLength(unknown));
+        const neutral = unknown + 'x'.repeat(Buffer.byteLength(recognized) - Buffer.byteLength(unknown));
+        for (const code of [Number.MIN_SAFE_INTEGER, 1, Number.MAX_SAFE_INTEGER]) {
+          const make = (middle: string) => describeGenerationResult({ code, stdout,
+            stderr: `Connecting to\n${middle}${literal}\nerror running container: exit 126\n` }, Number.MAX_SAFE_INTEGER);
+          const actual = make(recognized), baseline = make(neutral);
+          expectFixedReport(actual); expectFixedReport(baseline);
+          const old = (report: ReturnType<typeof describeGenerationResult>) => Object.fromEntries(Object.entries(report)
+            .filter(([key]) => key !== 'stderrContainerExitBucket' && key !== 'stderrDockerErrorMarker'));
+          expect(JSON.stringify(old(actual))).toBe(JSON.stringify(old(baseline)));
+          expect(actual.stderrDockerOperation).toBe(operation);
+        }
+      }
+    }
+  });
+
+  it('measures actual widest producer reports below 512 UTF-8 bytes without serializing inputs', () => {
+    let maximum = 0;
+    const limit = 16 * 1024 * 1024;
+    for (const [message] of markerFamilies) {
+      const tail = `error running container: exit 126\n${daemonEnvelope}${message}\n`;
+      const head = 'failed to inspect docker container:';
+      for (const fill of ['x', '\n']) {
+        const stderr = head + fill.repeat(4096 - Buffer.byteLength(head + '\n' + tail)) + '\n' + tail;
+        const report = describeGenerationResult({ code: Number.MIN_SAFE_INTEGER,
+          stdout: 'x'.repeat(limit - Buffer.byteLength(stderr)), stderr }, Number.MAX_SAFE_INTEGER);
+        expectFixedReport(report);
+        maximum = Math.max(maximum, Buffer.byteLength(JSON.stringify(report), 'utf8'));
+      }
+    }
+    for (const fill of ['x', '\n']) {
+      const head = 'failed to inspect docker container:';
+      const report = describeGenerationResult({ code: Number.MIN_SAFE_INTEGER, stdout: '',
+        stderr: head + fill.repeat(limit - head.length) },
+        Number.MAX_SAFE_INTEGER);
+      expectFixedReport(report);
+      maximum = Math.max(maximum, Buffer.byteLength(JSON.stringify(report), 'utf8'));
+    }
+    expect(maximum).toBeLessThan(512);
+    expect(maximum).toMatchInlineSnapshot(`406`);
   });
 
   it.each([undefined, null, false, '0', 1n, NaN, Infinity, -Infinity, 0.5,
@@ -1453,6 +1615,11 @@ describe('safe local type-generation description', () => {
         code: 1, stdout: text, stderr: `${text}\nerror running container: exit ${token}\n${text}\n`,
         stderrContainerExitBucket: text, toJSON: accessor,
       })),
+      ...markerFamilies.map(([message]) => ({
+        code: 1, stdout: text, stderr: `${daemonEnvelope}${message}${text}\n`,
+        stderrDockerErrorMarker: text, toJSON: accessor,
+      })),
+      { code: 1, stdout: '', stderr: 'unrelated\n', stderrDockerErrorMarker: 'missing-network' },
       { code: 1, stdout, stderr: 'unknown', stderrMentionsConnectPhase: true,
         stderrLines: 999, stderrFirstLineBytes: 999, stderrDockerOperation: 'inspect-image' },
       Object.defineProperty({ code: 1, stdout }, 'stderr', { get: accessor }),

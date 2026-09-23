@@ -24,27 +24,35 @@ function rawAnalysisEvidence(kind: RawAnalysisEvidence['case']): RawAnalysisEvid
     snapshotPhase: 'not-captured', cleanupStarted: false, cleanupCompleted: false, captureError: false,
     client: [], observation: null, cumulative: null };
 }
+function copyRawAnalysisClient(client: unknown, kind?: RawAnalysisEvidence['case']): RawAnalysisClient | null {
+  if (client === null) return null;
+  if (!client || typeof client !== 'object' || Array.isArray(client)) throw new Error('Invalid analysis client observation');
+  const fields = kind === undefined ? ['status', 'outcome'] : ['status', 'outcome', 'constructedBytes'];
+  const keys = Reflect.ownKeys(client);
+  if (keys.length !== fields.length || keys.some(key => typeof key !== 'string' || !fields.includes(key))) {
+    throw new Error('Invalid analysis client observation');
+  }
+  const status: unknown = Object.getOwnPropertyDescriptor(client, 'status')?.value;
+  const outcome: unknown = Object.getOwnPropertyDescriptor(client, 'outcome')?.value;
+  if ((status !== null && (typeof status !== 'number' || ![200, 400, 403, 413, 502, 504].includes(status)))
+    || (outcome !== 'response' && outcome !== 'network-rejection')) throw new Error('Invalid analysis client observation');
+  if (kind === undefined) return { status, outcome };
+  const constructedBytes: unknown = Object.getOwnPropertyDescriptor(client, 'constructedBytes')?.value;
+  if (typeof constructedBytes !== 'number' || !Number.isSafeInteger(constructedBytes)
+    || constructedBytes < 0 || constructedBytes > 512001) throw new Error('Invalid analysis client observation');
+  return { status, outcome, constructedBytes };
+}
 function snapshotRawAnalysis(evidence: RawAnalysisEvidence, api: AiFixture | undefined,
   clients: readonly (Awaited<ReturnType<typeof sendBrowserAnalysis>> | null)[]) {
   try {
     evidence.fixturePresent = api !== undefined;
     evidence.snapshotPhase = api ? 'before-cleanup' : 'fixture-unavailable';
     evidence.client = clients.slice(0, 4).map((client) => {
-      if (client === null) return null;
-      if ((client.outcome !== 'response' && client.outcome !== 'network-rejection')
-        || (client.status !== null && ![200, 400, 403, 413, 502, 504].includes(client.status))) {
+      try { return copyRawAnalysisClient(client, evidence.case); }
+      catch {
         evidence.captureError = true;
         return null;
       }
-      if (evidence.case === 'response-sequence' || evidence.case === 'boundaries') {
-        if (typeof client.constructedBytes !== 'number' || !Number.isSafeInteger(client.constructedBytes)
-          || client.constructedBytes < 0 || client.constructedBytes > 512001) {
-          evidence.captureError = true;
-          return null;
-        }
-        return { status: client.status, outcome: client.outcome, constructedBytes: client.constructedBytes };
-      }
-      return { status: client.status, outcome: client.outcome };
     });
     if (clients.length > 4) evidence.captureError = true;
     if (api?.rawAnalysisObservation) {
@@ -151,6 +159,51 @@ async function sendBrowserAnalysis(page: Page, api: AiFixture, kind: BrowserAnal
   return { status: result.status, outcome: result.outcome,
     ...(captureSize ? { constructedBytes: result.constructedBytes } : {}) };
 }
+test('raw analysis client copier preserves closed pre-fetch observations without reading content', () => {
+  let invoked = 0;
+  const hostile = () => { invoked++; throw new Error('private-analysis-observation-canary'); };
+  for (const kind of ['boundaries', 'response-sequence', 'oversized'] as const) {
+    for (const constructedBytes of [0, 1, 512000, 512001]) {
+      for (const status of [null, 200, 400, 403, 413, 502, 504]) {
+        const input = Object.freeze({ status, outcome: status === null ? 'network-rejection' : 'response', constructedBytes });
+        const copied = copyRawAnalysisClient(input, kind);
+        expect(copied).toEqual(input);
+        expect(copied).not.toBe(input);
+        expect(Object.keys(copied!)).toEqual(['status', 'outcome', 'constructedBytes']);
+      }
+    }
+    expect(copyRawAnalysisClient({ status: 400, outcome: 'response', constructedBytes: 0 }, kind))
+      .toEqual({ status: 400, outcome: 'response', constructedBytes: 0 });
+    expect(copyRawAnalysisClient(null, kind)).toBeNull();
+    const valid = { status: 413, outcome: 'response', constructedBytes: 512001 };
+    const invalid: unknown[] = [
+      undefined, false, [], 'private-analysis-observation-canary', Object.create(valid),
+      { status: 413, outcome: 'response' }, { ...valid, extra: 'private-analysis-observation-canary' },
+      { ...valid, [Symbol('private')]: 1 }, { ...valid, toJSON: hostile },
+      { ...valid, status: 404 }, { ...valid, status: '413' }, { ...valid, status: undefined },
+      { ...valid, outcome: 'timeout' }, { ...valid, outcome: { toString: hostile } },
+      ...[-1, 512002, 0.5, NaN, Infinity, -Infinity, '512001', null, undefined, { valueOf: hostile }]
+        .map(constructedBytes => ({ ...valid, constructedBytes })),
+      ...Object.keys(valid).map(field => Object.defineProperty({ ...valid }, field, { get: hostile })),
+      ...Object.keys(valid).map(field => Object.fromEntries(Object.entries(valid).filter(([key]) => key !== field))),
+      new Proxy(valid, { ownKeys: () => { throw new Error('private-analysis-observation-canary'); } }),
+    ];
+    const revoked = Proxy.revocable(valid, {}); revoked.revoke(); invalid.push(revoked.proxy);
+    for (const input of invalid) expect(() => copyRawAnalysisClient(input, kind)).toThrow();
+  }
+  for (const input of [{ status: 200, outcome: 'response' }, { status: null, outcome: 'network-rejection' }]) {
+    const copied = copyRawAnalysisClient(input);
+    expect(copied).toEqual(input);
+    expect(Object.keys(copied!)).toEqual(['status', 'outcome']);
+  }
+  expect(() => copyRawAnalysisClient({ status: 200, outcome: 'response', constructedBytes: 5 })).toThrow();
+  const input = { status: 400, outcome: 'response', constructedBytes: 0 };
+  const copied = copyRawAnalysisClient(input, 'oversized');
+  input.constructedBytes = 5;
+  expect(copied).toEqual({ status: 400, outcome: 'response', constructedBytes: 0 });
+  expect(JSON.stringify(copied)).not.toContain('private-analysis-observation-canary');
+  expect(invoked).toBe(0);
+});
 function analysisTarget(page: Page, api: AiFixture) {
   const target = new URL(api.uploadWireUrl), origin = new URL(page.url()).origin;
   if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1' || !target.port
@@ -317,9 +370,9 @@ for (const kind of ['wrong-key', 'wrong-bearer', 'wrong-owner', 'request-id', 'd
       try {
         api = await aiFixture(page, 'en', true, undefined, kind === 'oversized');
         const before = storageCounts(api);
-        result = await sendBrowserAnalysis(page, api, kind);
+        result = await sendBrowserAnalysis(page, api, kind, undefined, kind === 'oversized');
         expect(result).toEqual({ status: kind === 'path' ? 404 : kind === 'empty' ? 400 : kind === 'oversized' ? 413 : 403,
-          outcome: 'response' });
+          outcome: 'response', ...(kind === 'oversized' ? { constructedBytes: 512001 } : {}) });
         expect(api.analysisWire.callbacks).toBe(0);
         expect(api.analysisWire.peakBufferedBytes).toBeLessThanOrEqual(512000);
         if (!['empty', 'oversized'].includes(kind)) expect(api.analysisWire.forwarded).toBe(0);

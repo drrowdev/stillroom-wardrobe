@@ -652,7 +652,7 @@ This Phase 0 harness does not claim physical-device behavior, account-freeze orc
 
 ## Actual database type generation
 
-`npm run db:types` requires the real running local container and read-only strict-A Storage guard verification before invoking the pinned CLI `gen types typescript --local --schema public`. It never installs the guard. Only successful plausible generator output is atomically written to `src/data/database.types.ts`. `--check` compares the exact output, including line endings, and fails on a missing or differing file. Nothing is hand-generated from the SQL and failures never replace a previous file.
+`npm run db:types` requires the real running local container and read-only strict O/origin Storage publication verification plus identity A before invoking the pinned CLI `gen types typescript --local --schema public`. It never installs the guard. Only successful plausible generator output is atomically written to `src/data/database.types.ts`. `--check` compares the exact output, including line endings, and fails on a missing or differing file. Nothing is hand-generated from the SQL and failures never replace a previous file.
 
 The actual generated file is now committed and used by `AppClient` and the
 `src/data/rows.ts` projections. Runtime guards remain, but are not schema
@@ -675,6 +675,84 @@ setup artifact is generation evidence, not tracked parity or an integration pass
 Child-process unit refusals do not prove generation, atomicity or runtime
 non-mutation; the modified setup run must demonstrate its ignored artifact and
 clean tracked/staged tree, alongside unchanged Database CI parity.
+
+### CI-D1 bounded generation and browser evidence
+
+[Corrected plan and independent critique](https://github.com/drrowdev/stillroom-wardrobe/pull/31#issuecomment-5793998514)
+and [local source release](https://github.com/drrowdev/stillroom-wardrobe/pull/31#issuecomment-5794149757)
+add evidence and enforce the existing no-flakiness gate, not a causal repair of
+the [post-merge failure](https://github.com/drrowdev/stillroom-wardrobe/pull/31#issuecomment-5793600025).
+The failed generation's run-container/exit-125 category neither identifies its
+cause nor proves the container never started. Missing generated types/parity
+remain missing; earlier successful output is not a replacement.
+
+Only a valid nonzero result with nonempty stderr gains
+`stderrDockerErrorMarker`. It is one of `unclassified`,
+`image-resolution-or-registry`, `missing-network`, `container-name-conflict`,
+`oci-runtime-start` or `multiple`. The new scan reads only already-captured
+primitive stderr at **at most 4096 UTF-8 bytes**. Longer input is unclassified,
+even when the unchanged old operation field still classifies it. Actual producer
+regressions require serialized JSON below512 UTF-8 bytes. All old fields/order,
+tag/descriptor handling, raw byte/LF counts and exit-bucket rules remain.
+
+Only LF-terminated lines participate. Remove exactly one framing CR before LF,
+reject any remaining CR and ignore an unterminated tail. Strip at most one exact
+leading `docker: `, then require exact `Error response from daemon: `.
+There is no trimming, case folding, ANSI removal, regex or arbitrary cleanup in
+this new classifier. Case-sensitive remainder families are:
+
+| Remainder | Marker |
+|---|---|
+| Starts with `pull access denied for `, `manifest for ` or `failed to resolve reference ` | `image-resolution-or-registry` |
+| Starts with `network ` and ends with ` not found`, with a nonempty middle | `missing-network` |
+| Starts with `Conflict. The container name ` | `container-name-conflict` |
+| Starts with `failed to create task for container: `, `OCI runtime create failed: ` or `OCI runtime start failed: ` | `oci-runtime-start` |
+
+Tails after recognized prefixes are not validated. These are literal families,
+not complete/authenticated Docker messages. Each eligible daemon line contributes
+its category or unclassified; duplicates collapse, different categories including
+known plus unknown yield sticky multiple. Non-daemon lines are ignored; no eligible
+line yields unclassified. Generic125, `Unable to find image locally` and network
+already-exists wording alone do not identify a family. Canonical-looking text
+can be echoed or injected, so no automated recovery follows. No raw line,
+identifier, URL, message hash, exception or credential is returned.
+The old `stderrDockerOperation` deliberately retains fixed-priority first-match
+semantics, not the new marker's ambiguity rule or an operation count.
+Generation argv/180-second deadline, Docker/image/network selection,16MiB capture,
+stdout checks, TypeScript parsing, atomic writes and parity stay unchanged.
+
+`failOnFlakyTests: Boolean(process.env.CI)` makes the main CI browser command
+fail when a first failure passes on the existing retry. Unset/empty CI remains
+false. Projects, workers, engines, retries, timeouts and capture bounds are
+unchanged. Apple selections explicitly use retries0, so cannot produce a
+retried-pass flaky outcome. A separate `test:a11y` invocation uses this config,
+but CI does not currently invoke that command. Existing success-only visual
+uploads skip after a flaky failure; absent visual review stays pending.
+
+Only the existing oversized analysis call adds its pre-fetch `constructedBytes`,
+expecting exactly413/response/512001. The other eleven authorization/envelope
+results retain two keys and their original statuses. The closed copier retains
+at most four clients and status allowlist `[200,400,403,413,502,504]`, including
+actual400 plus size0. It also preserves existing boundaries/response-sequence
+capture and safe integer sizes0..512001; malformed evidence sets captureError.
+
+Only the reserved first upload adds `reservation-first-upload` and its existing
+pre-fetch source-array/Blob/form-file sizes, expecting200/oktrue/5/5/5.
+The finally record closed-copies the four own data fields rather than sharing
+the nested observation. Sizes are null or safe integers0..1048576; malformed
+observations set captureError without replacing actual status/ok. Diagnostic
+parsing stays off; scripted503, fresh senders, duplicate409, old labels/default
+shapes and authorization/byte/hash/storage/cleanup assertions remain. This adds
+no claim that the reservation record proves final listener closure.
+
+Each touched spec has one pure no-page/network test of its actually used copier.
+They run in the separately authorized native Playwright suite, not via a local
+import/list workaround that starts the configured server. Numeric zero means
+that measured value; null/missing/invalid capture is an **observation gap**, not
+zero construction or proof of a source defect. Expected sizes with empty receive
+only narrow the interval, not distinguish engine/interception/serialization/
+transport/collection. Observations can perturb timing. Future nonrecurrence
+is inconclusive about either historical cause, never a fix or acceptance waiver.
 
 ## Targeted local validation
 

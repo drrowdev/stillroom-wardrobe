@@ -7804,3 +7804,136 @@ quiescence and admitted-request drain, coherent recovery, Auth/API/Edge EU and
 Cloudflare gates remain separate. No backend/browser/hosted/provider operation,
 Actions dispatch/approval, commit/push/PR/merge or deployment ran here. PR27,
 I10a-D/I11/I22 and private-provider/paid holds are unchanged.
+
+## CI-D1 failure evidence and truthful flaky gate - 23 September 2026
+
+**Unstaged seven-path source candidate; native and independent closure pending.**
+This isolated persistent local writer entered at main
+`bfcf9f754e898bee735c4db12a3a5e3ad7601055`, tree
+`f2f16ed454b0faebff883083df9a2a7bd2b438cd`, on
+`drrowdev-ci-failure-evidence`. Full
+[failure5793600025](https://github.com/drrowdev/stillroom-wardrobe/pull/31#issuecomment-5793600025),
+[corrected plan/actual Anthropic Claude Opus 5 critique and binding B1-B10](https://github.com/drrowdev/stillroom-wardrobe/pull/31#issuecomment-5793998514),
+and [own-model/context attestation and local release5794149757](https://github.com/drrowdev/stillroom-wardrobe/pull/31#issuecomment-5794149757)
+were read before edits. The coordinator independently observed this new writer's
+twelve own GPT-6 Astra/OpenAI usage rows and exact clean workspace/base; this is
+local telemetry, not tamper-proof native-platform proof. PR31 stays merged/closed
+as the historical authority location. No previous writer's usage was substituted.
+
+HC1's initial PR cycle at `018a8aa` passed populated6->11, native races, actual
+types/parity and757 browser cases with four skips and no flaky cases. The later
+automatic main run35847285830 attempt1 failed: preceding DB stages passed, but
+type generation returned CLI1/wrapper2, stdout0/stderr312bytes/7LF/firstline21,
+connecttrue/run-container/exit125. Type artifact and parity were skipped.
+Its green App job instead contained755passes, two recovered first failures and
+four skips, not clean acceptance. These are coordinator-recorded historical
+results, not new local executions or transferable successful type evidence.
+
+The first oversized WebKit analysis received zero bytes/end-empty400, versus
+retry512001/413; that call's construction size was unobserved. The first valid
+five-byte reserved upload independently measured raw385bytes/highbyte absent
+before parsing/file0/400, versus retry390/highbyte present/file5/200, then409.
+No body is reconstructed from those lengths. Neither cause is established.
+The excluded upstream blob-routing explanation is not reopened, and this packet
+does not alter body/parser/routing/status/engine/retry/deadline behavior.
+
+CI now uses `failOnFlakyTests: Boolean(process.env.CI)` while retaining retry1
+and first/retry evidence. Apple selections have explicit retries0; test:a11y is
+not currently a CI command. Existing success-only visual uploads skip on flaky
+failure, leaving visual acceptance pending rather than weakening the workflow.
+Only oversized analysis adds exact413/response/constructed512001; other shared
+authorization/envelope cases retain their exact two-key results. Only the first
+reserved upload opts into reservation-first-upload with exact200/oktrue/5/5/5,
+without response parsing or receiver changes. Closed same-spec copiers retain
+actual zero, null observation gaps, fixed fields, bounded sizes and explicit
+capture errors. Scripted503, fresh senders, duplicate409, old labels/defaults
+and all byte/hash/auth/storage/cleanup assertions remain.
+
+Generation adds only a bounded stderrDockerErrorMarker enum to the existing
+valid nonzero-with-stderr branch. The literal algorithm accepts LF and exactly
+one framing CR before LF, rejects remaining CR and ignores unterminated tails;
+it strips at most one docker prefix and requires the exact daemon envelope.
+Recognized plus unknown eligible categories produce sticky multiple. Prefix
+tails remain unvalidated and canonical-looking text unauthenticated; no private
+text or identifier is returned. At over4096 UTF-8 bytes only the new marker is
+unclassified; the old fixed-priority operation remains independent. Existing
+keys/order/values, descriptor behavior, byte/LF observations, exit regex, sibling
+startup/reset function, generator argv/deadline/capture and authentic types
+requirement are unchanged. The related stale strict-A documentation now states
+HC1 publication O/origin plus identity A, without changing that existing contract.
+
+### Released local checks
+
+All executable checks used the hash-verified absolute Node24.19.0 executable,
+the existing npm11.6.2 CLI through that Node, and process-local PATH only.
+The first chosen unit command returned exit1 because Vitest was absent.
+Exactly one conditionally released `npm ci --no-fund` then returned exit0:
+200packages added,201audited, zero reported vulnerabilities. No package/lock
+change, copied dependency/service state or global toolchain change occurred.
+
+| Command | Actual local result |
+|---|---|
+| `npm run test:unit -- tests\unit\local-backend.test.ts` | After restore,596/596 passed. Subsequent widest-case coverage passed and wrote one inline numeric snapshot; final repeat596/596 passed,10.53s, exit0. |
+| `node node_modules\eslint\bin\eslint.js playwright.config.ts tests\browser\ai-photo-first.spec.ts tests\browser\slice.spec.ts scripts\backend\local.mjs tests\unit\local-backend.test.ts` | Exact five-path lint passed, including final observer coverage, exit0. |
+| `npm run typecheck` | Passed after final observer coverage, exit0. |
+| `npm run scan:secrets` |251text files checked, exit0; no canary supplied, not a canary pass. |
+| `git diff --check` | Passed; scope/frozen/history identities are separately recorded with the unstaged handoff. |
+
+Actual producer regressions cover canonical/CRLF and malformed framing, all
+category pairs/orders/duplicates and known+unknown ambiguity, UTF8 4096/4097,
+overbound old-operation independence, legacy metadata equivalence and hostile
+accessor/proxy/coercion/toJSON/key-shaped canaries. The widest-case test uses
+safe-integer extremes,16MiB capture-sized inputs and longest labels; its observed
+maximum is **406 UTF-8 bytes**, persisted as an inline numeric snapshot and
+independently constrained below512. This is measured synthetic producer evidence,
+not recovered historical stderr or a claim of the tight mathematical maximum.
+
+One pure no-page/network Playwright observer-contract test was added to each
+touched spec and typechecked, **not executed locally**. They await separately
+authorized native Playwright along with unchanged functional suites, real backend
+generation/parity, Apple and coordinator-owned visual evidence. No local browser,
+server, discovery/list/import workaround, backend, Actions or provider call ran.
+Future expected sizes with empty receive only narrow the interval; null/missing/
+invalid capture remains an observation gap. Instrumentation can perturb timing,
+and nonrecurrence is inconclusive about either old cause, not a fix or waiver.
+
+All eleven SQL migrations, application/public types, lock/configuration outside
+the one Playwright flag, workflows, receivers and other fixtures stay frozen.
+Earlier Phase2 history is preserved as the complete prefix above. No stage,
+commit, push, PR creation, merge, hosted/private-input/provider action, deployment
+or further agent was authorized or performed. Independent closure, publication
+and any new native cycle remain separately gated; Phase0 acceptance and other
+operator/human/product holds remain open.
+
+### CI-D1 F1 extracted-source harness repair - 23 September 2026
+
+Actual independent Anthropic Claude Opus5 review found that the existing
+`tests/unit/raw-analysis-observation.test.ts` VM extracted the mapper but not
+its new `copyRawAnalysisClient` dependency. The swallowed ReferenceError made
+nonnull client observations null and set `captureError`. Coordinator amendment
+[5794521315](https://github.com/drrowdev/stillroom-wardrobe/pull/31#issuecomment-5794521315)
+authorized this eighth existing path, with the other candidate source frozen.
+The one pre-edit unit run reproduced **17 passed,7 failed**, exit1,1.42s.
+Earlier seven-path checks did not cover this extraction harness regression.
+
+The repair extracts exactly one real copier through `functionText`/`unique`,
+prepends it before the factory/mapper in the VM, and includes it in the existing
+non-vacuous extraction assertion. Actual TypeScript body-node counts were
+229 for the copier and592 for the mapper; floors100 and300 remain enforced.
+The coordinator explicitly clarified the intentional oversized oracle alignment:
+both expected client arrays retain the supplied `constructedBytes:4096`, not a
+substituted512001 or a value derived from the result. Full JSON equality,
+`captureError:false`, status/default metadata, deep-copy and receiver assertions
+remain. No browser/helper/receiver change or weakened failure assertion occurred.
+
+Using the same pinned absolute Node24.19.0/npm CLI and process-only PATH:
+`npm run test:unit -- tests\unit\local-backend.test.ts tests\unit\raw-analysis-observation.test.ts`
+passed **620/620 in two files**, exit0,9.29s. Installed ESLint on the previous five
+paths plus `tests\unit\raw-analysis-observation.test.ts` and `npm run typecheck`
+both passed, exit0. No dependency reinstall occurred. Final secret/scope/hash
+checks are recorded with the eight-path unstaged receipt.
+
+This source-extracted unit result does not execute either new in-spec Playwright
+observer test or establish browser behavior, native/backend acceptance or a
+historical failure cause. Focused independent delta review and all previously
+pending gates remain separate; the entire historical prefix is preserved.
