@@ -7937,3 +7937,79 @@ This source-extracted unit result does not execute either new in-spec Playwright
 observer test or establish browser behavior, native/backend acceptance or a
 historical failure cause. Focused independent delta review and all previously
 pending gates remain separate; the entire historical prefix is preserved.
+
+### GD1 type-generation Docker diagnostics - 23 September 2026
+
+Base and start head `b32fc01cf38f1062d468fe41bfa00394442049c3` (PR #32
+`drrowdev-ci-failure-evidence`), writer branch
+`drrowdev-type-generation-diagnosis`. Writer session
+`fad5b110-c1bb-4946-842c-1f7e207e089f`, actual model `claude-opus-5.5`, verified
+by the coordinator from its own session events.
+
+Trigger: PR #32 CI 35860365016 and post-merge main CI 35847285830 failed only at
+`npm run db:types` with `run-container`/`exit-125`, 312 stderr bytes, 7 LFs and
+a 21-byte first line; the same tree passed on PR #31 CI 35843817699. Source
+correction: pinned CLI 2.116.0 stable releases run the TypeScript legacy handler,
+not the Go `DockerRunOnceWaitWithConfig` path. It spawns `docker run --rm …
+node dist/server/server.js` and forwards the child's output, so exit 125 may be
+the `docker run` command's own failure. A 312-byte shape of connect line,
+image-missing line, one daemon message, blank line, run-help trailer, exit line
+and rerun hint fits the counters. That is an **unestablished hypothesis**; the
+unit fixture proves only parser behaviour.
+
+Plan rev1 (15053 B, SHA256 `acf295d4…f78b0`) received an actual read-only
+OpenAI GPT-6 Astra critique, verdict AMEND; coordinator disposition SHA256
+`74F562F0…104081` set amendments A1–A9. Rev2 (14474 B, SHA256
+`6c1ba8ad01d1ea2b17af0447bd2bf45fe5450eab782094df463ae5f628a9fc42`) received a
+GPT-6 Astra delta critique, verdict AMEND with D1–D4. The coordinator approved rev2
+with binding D1–D4 and released edits (release file 3077 B, SHA256
+`08EBBCBCCA980AD0E3898A41A6E8C3D39DB3D74AA879511E22A64BAF7D504852`).
+
+Changes, within exactly the five released paths:
+
+- `describeGenerationResult` appends `dockerDiag:{h,i,s,f}` only to valid
+  `nonzero-with-stderr` reports, after the existing keys, which are unchanged.
+  The closed literal classification is documented in `docs/local-backend.md`.
+  `describeStartupOrResetFailure`, `scripts/db.mjs` and the type declaration
+  file are unchanged.
+- The Database job adds one pull step before `db:start`. It asserts `SUPABASE_ENV`
+  is unset, the eight legacy-CLI dotenv paths and `supabase/.temp/pgmeta-version`
+  are absent, then runs a single
+  `docker pull public.ecr.aws/supabase/postgres-meta:v0.98.0`. Ambient overrides
+  are filtered; project dotenv overrides remain possible, but are absent in this
+  checkout/current CI. No `pgmeta-version` writer was found in the legacy
+  TypeScript sources (negative search result).
+- `h:false` means no eligible exact help-trailer line was observed; it does not
+  establish that pg-meta ran. `i:false` means no eligible image-missing line was
+  observed; it does not prove absence of acquisition activity. The separately
+  successful pull step, not either boolean, is the acquisition evidence.
+- Retry policy R0: no retry of the pull or of `db:types`. A failed pull or
+  failed generation fails the job exactly as before.
+- Tests cover the synthetic 312-byte shape, none versus unknown, every family
+  with each prefix kind and framing, fixed order overlaps, duplicate and pair
+  aggregation, one-time prefix stripping, CR/tail rejection, exact trailer and
+  image lines, the 4096/4097 UTF-8 bound with multibyte padding, canaries
+  (fake connection string, password and image name never serialized), and a
+  repository-root workflow/pin sync test. The widest-producer test now covers the
+  new families and kinds with attainable old markers, mixed padding that keeps
+  first-line bytes and LF count wide together, and bounded and overbound branches.
+  The earlier ~472-byte figure was an estimate; the **measured widest report is
+  470 UTF-8 bytes**, independently asserted below 512.
+- Whenever the `supabase` CLI pin changes, the image reference must be re-derived
+  by hand from that version's source; the sync test only pins current text.
+
+Local validation used the coordinator-released pinned Node 24.19.0 executable
+(SHA256 `3602f2bb…0237`), npm 11.6.2 and process-only PATH. The first unit
+attempt found Vitest absent, so one `npm ci --no-fund` ran (200 added, 201
+audited, 0 vulnerabilities; it ran under system Node 24.11.1 before the pinned
+executable was located, with no package or lock change).
+`npm run test:unit -- tests/unit/local-backend.test.ts tests/unit/raw-analysis-observation.test.ts`
+passed 651/651 in two files, exit 0. ESLint on `scripts\backend\local.mjs` and
+`tests\unit\local-backend.test.ts`, `npm run typecheck`, `npm run scan:secrets`
+and `git diff --check` passed, exit 0.
+
+Not run: Docker, `db:start`, `db:types`, browser tests and Actions. The pull
+step and diagnostics are unexercised in CI. A later green run proves nothing
+about the cause or its elimination; the next failing run's `dockerDiag` is
+evidence to interpret, not a diagnosis. No stage, commit, push, PR, hosted
+action, deployment or other agent occurred; publication remains separately gated.

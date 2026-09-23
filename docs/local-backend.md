@@ -754,6 +754,78 @@ only narrow the interval, not distinguish engine/interception/serialization/
 transport/collection. Observations can perturb timing. Future nonrecurrence
 is inconclusive about either historical cause, never a fix or acceptance waiver.
 
+### GD1 type-generation Docker diagnostics
+
+GD1 adds evidence for the intermittent `db:types` exit 125. It is not a causal
+repair. In pinned CLI 2.116.0, stable releases run the TypeScript legacy
+`gen types` handler. It writes `Connecting to db 5432`, runs
+`docker run --rm … <pg-meta image> node dist/server/server.js`, forwards the
+child's stdout/stderr and then reports `error running container: exit N`.
+Exit 125 can therefore come from the `docker run` command itself, before or
+without the pg-meta process. Nothing in the report proves which.
+
+Only a valid `nonzero-with-stderr` report appends `dockerDiag: {h,i,s,f}` after
+`stderrDockerErrorMarker`. All earlier keys, order and values are unchanged.
+Above 4096 UTF-8 bytes of stderr there is no scan and the value is
+`{h:null,i:null,s:"over",f:"over"}`. Otherwise line framing matches the marker
+scan: only LF-terminated lines, one framing CR removed, any remaining CR rejected,
+unterminated tail ignored, and only exact `===`/`startsWith`/`endsWith` literals.
+
+- `h` is true when a line is exactly `Run 'docker run --help' for more information`.
+- `i` is true when a line starts with `Unable to find image '`, ends with
+  `' locally` and has a nonempty middle.
+- `h:false` means no eligible exact help-trailer line was observed; it does not
+  establish that pg-meta ran. `i:false` means no eligible image-missing line was
+  observed; it does not prove absence of acquisition activity. The separately
+  successful pull step, not either boolean, is the acquisition evidence.
+- An eligible line strips one leading `docker: ` (`s` kind `docker`) and then, at
+  most once, `Error response from daemon: ` (kind `daemon`). A line with
+  neither prefix is ignored. `s` is `none`, `docker`, `daemon`, `multi` or `over`.
+- `f` classifies each eligible remainder by the first matching rule below, or
+  `unknown`. No eligible line gives `none`. Duplicates collapse; distinct values,
+  including known plus `unknown`, give sticky `multi`. `s` aggregates the same way.
+
+| Order | Remainder | `f` |
+|---|---|---|
+| 1 | Starts `failed to resolve reference "` and ends `429 Too Many Requests` | `rate` |
+| 2 | Starts `toomanyrequests: ` | `rate` |
+| 3 | Starts `unauthorized: ` or `denied: ` | `auth` |
+| 4 | Starts `manifest unknown` | `nomanifest` |
+| 5 | Starts `pull access denied for `, `manifest for ` or `failed to resolve reference ` | `img-ref` |
+| 6 | Starts `network `, ends ` not found`, nonempty middle | `net-missing` |
+| 7 | Starts `Conflict. The container name ` | `conflict` |
+| 8 | Starts `failed to create task for container: `, `OCI runtime create failed: ` or `OCI runtime start failed: ` | `oci` |
+| 9 | Starts `Get "https://` or `Head "https://`, ends `: no such host` | `net-dns` |
+| 10 | Same starts, ends `: i/o timeout`, `(Client.Timeout exceeded while awaiting headers)` or `: context deadline exceeded` | `net-timeout` |
+| 11 | Same starts, ends `: connect: connection refused` | `net-refused` |
+| 12 | Same starts, ends `: TLS handshake timeout` | `net-tls` |
+| 13 | Ends `: no space left on device` | `disk` |
+| 14 | Exactly `context canceled` | `canceled` |
+| 15 | Starts `Cannot connect to the Docker daemon at ` | `daemon-down` |
+
+These are literal text shapes, not authenticated Docker messages or causes;
+text can be echoed or injected. No raw line, image name, URL, connection string
+or tail is returned. The measured widest producer report is 470 UTF-8 bytes,
+below the 512-byte limit.
+
+The Database CI job runs one visible step before `db:start`: it asserts that
+`SUPABASE_ENV` is unset, that none of the eight project dotenv files the legacy
+CLI loads (`.env.development.local`, `.env.local`, `.env.development` and `.env`,
+in `supabase/` and the project root) exist, and that
+`supabase/.temp/pgmeta-version` is absent. It then runs a single
+`docker pull public.ecr.aws/supabase/postgres-meta:v0.98.0`. That reference is
+the pinned CLI's Dockerfile pg-meta tag with its default public.ecr.aws registry.
+Ambient overrides are filtered; project dotenv overrides remain possible, but are
+absent in this checkout/current CI. No writer for `pgmeta-version` was found in
+the legacy TypeScript sources; that is a negative search result. A failing pull
+fails the job; there is no retry, suppression or fallback, and `db:types` itself
+is never retried. The pull can change the timing or path of the failure; a later
+green run proves nothing about the cause or its elimination.
+`tests/unit/local-backend.test.ts` pins the step text, its order and the
+`supabase` 2.116.0 pin. **Whenever the CLI pin changes, re-derive the image
+reference by hand from that version's source**; the test cannot do it. Any
+introduced override file or variable also requires stopping and re-deriving it.
+
 ## Targeted local validation
 
 ```powershell

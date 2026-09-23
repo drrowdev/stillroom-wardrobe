@@ -1117,6 +1117,7 @@ declare module '../../scripts/backend/local.mjs' {
       | 'inspect-container' | 'read-logs' | 'copy-logs' | 'run-container';
     stderrDockerErrorMarker?: 'unclassified' | 'image-resolution-or-registry' | 'missing-network'
       | 'container-name-conflict' | 'oci-runtime-start' | 'multiple';
+    dockerDiag?: { h: boolean | null; i: boolean | null; s: string; f: string };
   };
 }
 
@@ -1147,10 +1148,48 @@ describe('safe local type-generation description', () => {
   const inactive = {
     stderrMentionsConnectPhase: false, stderrLines: null, stderrFirstLineBytes: null, stderrDockerOperation: 'none',
   };
+  // Synthetic literal shapes for the closed dockerDiag.f families; never observed CI text.
+  const diagFamilies = [
+    ['failed to resolve reference "example.test/x:1": 429 Too Many Requests', 'rate'],
+    ['toomanyrequests: synthetic', 'rate'],
+    ['unauthorized: synthetic', 'auth'],
+    ['denied: synthetic', 'auth'],
+    ['manifest unknown', 'nomanifest'],
+    ['pull access denied for synthetic', 'img-ref'],
+    ['manifest for synthetic not found', 'img-ref'],
+    ['failed to resolve reference "example.test/x:1"', 'img-ref'],
+    ['network synthetic not found', 'net-missing'],
+    ['Conflict. The container name synthetic', 'conflict'],
+    ['failed to create task for container: synthetic', 'oci'],
+    ['OCI runtime create failed: synthetic', 'oci'],
+    ['OCI runtime start failed: synthetic', 'oci'],
+    ['Get "https://example.test/v2/": dial tcp: lookup example.test: no such host', 'net-dns'],
+    ['Head "https://example.test/v2/": dial tcp 192.0.2.1:443: i/o timeout', 'net-timeout'],
+    ['Get "https://example.test/v2/": net/http: request canceled (Client.Timeout exceeded while awaiting headers)', 'net-timeout'],
+    ['Get "https://example.test/v2/": context deadline exceeded', 'net-timeout'],
+    ['Get "https://example.test/v2/": dial tcp 192.0.2.1:443: connect: connection refused', 'net-refused'],
+    ['Get "https://example.test/v2/": net/http: TLS handshake timeout', 'net-tls'],
+    ['write /var/lib/docker/tmp/x: no space left on device', 'disk'],
+    ['context canceled', 'canceled'],
+    ['Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?', 'daemon-down'],
+  ] as const;
 
   function expectFixedReport(report: ReturnType<typeof describeGenerationResult>) {
     expect(Object.keys(report)).toEqual(report.tag === 'nonzero-with-stderr'
-      ? [...keys, 'stderrContainerExitBucket', 'stderrDockerErrorMarker'] : keys);
+      ? [...keys, 'stderrContainerExitBucket', 'stderrDockerErrorMarker', 'dockerDiag'] : keys);
+    if ('dockerDiag' in report) {
+      const diag = report.dockerDiag!;
+      expect(Object.keys(diag)).toEqual(['h', 'i', 's', 'f']);
+      const over = diag.s === 'over';
+      expect(diag).toMatchObject(over ? { h: null, i: null, f: 'over' } : {});
+      if (!over) {
+        expect(typeof diag.h).toBe('boolean');
+        expect(typeof diag.i).toBe('boolean');
+        expect(['none', 'daemon', 'docker', 'multi']).toContain(diag.s);
+        expect(['none', 'multi', 'unknown', ...diagFamilies.map(([, family]) => family)]).toContain(diag.f);
+        expect(diag.s === 'none').toBe(diag.f === 'none');
+      }
+    }
     if ('stderrContainerExitBucket' in report) {
       expect(['exit-125', 'exit-126-or-127', 'other-nonzero', 'unclassified']).toContain(report.stderrContainerExitBucket);
     }
@@ -1213,6 +1252,7 @@ describe('safe local type-generation description', () => {
       hasDatabaseOutput: false, hasImagesOutput: false,
       stderrMentionsConnectPhase: false, stderrLines: 0, stderrFirstLineBytes: 4, stderrDockerOperation: 'none',
       stderrContainerExitBucket: 'unclassified', stderrDockerErrorMarker: 'unclassified',
+      dockerDiag: { h: false, i: false, s: 'none', f: 'none' },
     });
   });
 
@@ -1290,7 +1330,7 @@ describe('safe local type-generation description', () => {
       expectFixedReport(report);
       expect(report).toHaveProperty('stderrContainerExitBucket', bucket);
       const legacy = Object.fromEntries(Object.entries(report)
-        .filter(([key]) => key !== 'stderrContainerExitBucket' && key !== 'stderrDockerErrorMarker'));
+        .filter(([key]) => !['stderrContainerExitBucket', 'stderrDockerErrorMarker', 'dockerDiag'].includes(key)));
       expect(JSON.stringify(legacy)).toBe(JSON.stringify({
         tag: 'nonzero-with-stderr', exitCode: 1, elapsedMs: 12, stdoutBytes: 0,
         stderrBytes: Buffer.byteLength(stderr), hasDatabaseOutput: false, hasImagesOutput: false,
@@ -1399,6 +1439,7 @@ describe('safe local type-generation description', () => {
     const result = { code: 1, stdout, stderr: 'error running container: exit 125\n', toJSON: accessor };
     Object.defineProperty(result, 'stderrContainerExitBucket', { get: accessor });
     Object.defineProperty(result, 'stderrDockerErrorMarker', { get: accessor });
+    Object.defineProperty(result, 'dockerDiag', { get: accessor });
     expect(describeGenerationResult(result, 1)).toHaveProperty('stderrContainerExitBucket', 'exit-125');
     for (const field of ['code', 'stdout', 'stderr']) {
       const report = describeGenerationResult(Object.defineProperty({ ...result }, field, { get: accessor }), 1);
@@ -1513,7 +1554,7 @@ describe('safe local type-generation description', () => {
     }
   });
 
-  it('keeps all legacy observations equivalent after removing only the two additive keys', () => {
+  it('keeps all legacy observations equivalent after removing only the three additive keys', () => {
     const unknown = `${daemonEnvelope}\n`;
     for (const [message] of markerFamilies) {
       for (const [literal, operation] of operations) {
@@ -1526,7 +1567,7 @@ describe('safe local type-generation description', () => {
           const actual = make(recognized), baseline = make(neutral);
           expectFixedReport(actual); expectFixedReport(baseline);
           const old = (report: ReturnType<typeof describeGenerationResult>) => Object.fromEntries(Object.entries(report)
-            .filter(([key]) => key !== 'stderrContainerExitBucket' && key !== 'stderrDockerErrorMarker'));
+            .filter(([key]) => !['stderrContainerExitBucket', 'stderrDockerErrorMarker', 'dockerDiag'].includes(key)));
           expect(JSON.stringify(old(actual))).toBe(JSON.stringify(old(baseline)));
           expect(actual.stderrDockerOperation).toBe(operation);
         }
@@ -1537,27 +1578,227 @@ describe('safe local type-generation description', () => {
   it('measures actual widest producer reports below 512 UTF-8 bytes without serializing inputs', () => {
     let maximum = 0;
     const limit = 16 * 1024 * 1024;
-    for (const [message] of markerFamilies) {
-      const tail = `error running container: exit 126\n${daemonEnvelope}${message}\n`;
-      const head = 'failed to inspect docker container:';
-      for (const fill of ['x', '\n']) {
-        const stderr = head + fill.repeat(4096 - Buffer.byteLength(head + '\n' + tail)) + '\n' + tail;
-        const report = describeGenerationResult({ code: Number.MIN_SAFE_INTEGER,
-          stdout: 'x'.repeat(limit - Buffer.byteLength(stderr)), stderr }, Number.MAX_SAFE_INTEGER);
-        expectFixedReport(report);
-        maximum = Math.max(maximum, Buffer.byteLength(JSON.stringify(report), 'utf8'));
-      }
-    }
-    for (const fill of ['x', '\n']) {
-      const head = 'failed to inspect docker container:';
-      const report = describeGenerationResult({ code: Number.MIN_SAFE_INTEGER, stdout: '',
-        stderr: head + fill.repeat(limit - head.length) },
-        Number.MAX_SAFE_INTEGER);
+    const head = 'failed to inspect docker container:';
+    const boundedStdout = 'x'.repeat(limit - 4096);
+    const measure = (result: unknown) => {
+      const report = describeGenerationResult(result, Number.MAX_SAFE_INTEGER);
       expectFixedReport(report);
       maximum = Math.max(maximum, Buffer.byteLength(JSON.stringify(report), 'utf8'));
+      return report;
+    };
+    const candidates = [...diagFamilies.map(([message]) => message), 'synthetic unknown wording']
+      .flatMap((message) => [`docker: ${message}`, `${daemonEnvelope}${message}`, `docker: ${daemonEnvelope}${message}`]);
+    const extras = ['', "Unable to find image 'example.test/x:1' locally\nRun 'docker run --help' for more information\n"];
+    const tails = [
+      ...markerFamilies.map(([message]) => `${daemonEnvelope}${message}\n`),
+      ...candidates.flatMap((line) => extras.map((extra) => `${line}\n${extra}`)),
+      ...markerFamilies.map(([message]) => `${daemonEnvelope}${markerFamilies[0][0]}\n${daemonEnvelope}${message}\n`),
+      `docker: synthetic\n${daemonEnvelope}synthetic\n`,
+    ];
+    const seen = { f: new Set<string>(), s: new Set<string>(), marker: new Set<unknown>() };
+    for (const tail of tails) {
+      const suffix = `error running container: exit 126\n${tail}`;
+      // Mixed padding keeps first-line bytes and LF count at four digits in one report.
+      const room = 4096 - Buffer.byteLength(head + suffix);
+      const stderr = head + 'x'.repeat(1100) + '\n'.repeat(room - 1100) + suffix;
+      expect(Buffer.byteLength(stderr, 'utf8')).toBe(4096);
+      const report = measure({ code: Number.MIN_SAFE_INTEGER, stdout: boundedStdout, stderr });
+      expect(report.stderrFirstLineBytes).toBeGreaterThanOrEqual(1000);
+      expect(report.stderrLines).toBeGreaterThanOrEqual(1000);
+      expect(report).toMatchObject({ stderrDockerOperation: 'inspect-container', stderrContainerExitBucket: 'exit-126-or-127' });
+      seen.f.add(report.dockerDiag!.f); seen.s.add(report.dockerDiag!.s); seen.marker.add(report.stderrDockerErrorMarker);
+    }
+    expect([...seen.f].sort()).toEqual(['multi', 'unknown', ...new Set(diagFamilies.map(([, family]) => family))].sort());
+    expect([...seen.s].sort()).toEqual(['daemon', 'docker', 'multi']);
+    expect([...seen.marker]).toContain('image-resolution-or-registry');
+    expect([...seen.marker]).toContain('multiple');
+    // Overbound: stdout, stderr, first-line and LF counts are all wide together.
+    for (const stdoutLength of [1_000_000, 6_000_000]) {
+      const stderrLength = limit - stdoutLength;
+      const firstLine = 1_000_000;
+      const report = measure({ code: Number.MIN_SAFE_INTEGER, stdout: 'x'.repeat(stdoutLength),
+        stderr: head + 'x'.repeat(firstLine) + '\n'.repeat(stderrLength - head.length - firstLine) });
+      expect(report.dockerDiag).toEqual({ h: null, i: null, s: 'over', f: 'over' });
+      expect(report.stderrLines).toBeGreaterThanOrEqual(1_000_000);
+    }
+    for (const fill of ['x', '\n']) {
+      measure({ code: Number.MIN_SAFE_INTEGER, stdout: '', stderr: head + fill.repeat(limit - head.length) });
     }
     expect(maximum).toBeLessThan(512);
-    expect(maximum).toMatchInlineSnapshot(`406`);
+    expect(maximum).toMatchInlineSnapshot(`470`);
+  });
+
+  function diagOf(stderr: string) {
+    const report = describeGenerationResult(Object.freeze({ code: 1, stdout: '', stderr }), 1);
+    expectFixedReport(report);
+    return report.dockerDiag;
+  }
+
+  // SYNTHETIC and UNESTABLISHED: one source-derived 312-byte, 7-LF shape that fits the
+  // observed counters. It proves only parser behaviour, never the CI cause.
+  it('describes the synthetic length-fit hypothesis without claiming a cause', () => {
+    const stderr = [
+      'Connecting to db 5432',
+      "Unable to find image 'public.ecr.aws/supabase/postgres-meta:v0.98.0' locally",
+      `docker: ${daemonEnvelope}synthetic unknown daemon text!`,
+      '',
+      "Run 'docker run --help' for more information",
+      'error running container: exit 125',
+      'Try rerunning the command with --debug to troubleshoot the error.',
+      '',
+    ].join('\n');
+    const report = describeGenerationResult(Object.freeze({ code: 1, stdout: '', stderr }), 1);
+    expectFixedReport(report);
+    expect(report).toMatchObject({
+      tag: 'nonzero-with-stderr', stdoutBytes: 0, stderrBytes: 312, stderrLines: 7, stderrFirstLineBytes: 21,
+      stderrMentionsConnectPhase: true, stderrDockerOperation: 'run-container',
+      stderrContainerExitBucket: 'exit-125', stderrDockerErrorMarker: 'unclassified',
+      dockerDiag: { h: true, i: true, s: 'daemon', f: 'unknown' },
+    });
+    expect(JSON.stringify(report)).not.toContain('postgres-meta');
+  });
+
+  it('distinguishes no eligible line from an eligible unknown line', () => {
+    expect(diagOf('plain failure\nerror running container: exit 125\n')).toEqual({ h: false, i: false, s: 'none', f: 'none' });
+    expect(diagOf('docker: synthetic unknown\n')).toEqual({ h: false, i: false, s: 'docker', f: 'unknown' });
+    expect(diagOf(`${daemonEnvelope}\n`)).toEqual({ h: false, i: false, s: 'daemon', f: 'unknown' });
+    expect(diagOf('docker: \n')).toEqual({ h: false, i: false, s: 'docker', f: 'unknown' });
+  });
+
+  it.each(diagFamilies)('observes the closed family literal %s for every prefix kind and framing', (message, family) => {
+    for (const [prefix, kind] of [['docker: ', 'docker'], [daemonEnvelope, 'daemon'], [`docker: ${daemonEnvelope}`, 'daemon']]) {
+      for (const ending of ['\n', '\r\n']) {
+        expect(diagOf(`${prefix}${message}${ending}`)).toEqual({ h: false, i: false, s: kind, f: family });
+        expect(diagOf(`${prefix}${message}${ending}${prefix}${message}\n`)).toEqual({ h: false, i: false, s: kind, f: family });
+      }
+    }
+    expect(diagOf(`${message}\n`)).toEqual({ h: false, i: false, s: 'none', f: 'none' });
+  });
+
+  it('applies the fixed family order to overlapping literals', () => {
+    const f = (message: string) => diagOf(`docker: ${message}\n`)!.f;
+    expect(f('failed to resolve reference "x": 429 Too Many Requests')).toBe('rate');
+    expect(f('failed to resolve reference "x": 500 Internal Server Error')).toBe('img-ref');
+    expect(f('failed to resolve reference x: 429 Too Many Requests')).toBe('img-ref');
+    expect(f('Get "https://x": dial tcp: no space left on device')).toBe('disk');
+    expect(f('Get "https://x": synthetic: no such host')).toBe('net-dns');
+    expect(f('Get "http://x": synthetic: no such host')).toBe('unknown');
+    expect(f('Post "https://x": synthetic: i/o timeout')).toBe('unknown');
+    expect(f('network  not found')).toBe('unknown');
+    expect(f('network x not found')).toBe('net-missing');
+    expect(f('manifest unknown: synthetic')).toBe('nomanifest');
+    expect(f('context canceled ')).toBe('unknown');
+    expect(f('Context canceled')).toBe('unknown');
+    expect(f(' toomanyrequests: x')).toBe('unknown');
+  });
+
+  it('collapses duplicates and makes every distinct pair sticky multi', () => {
+    const values = [...diagFamilies, ['synthetic unknown', 'unknown'] as const];
+    for (const [first, firstFamily] of values) {
+      for (const [second, secondFamily] of values) {
+        const expected = firstFamily === secondFamily ? firstFamily : 'multi';
+        for (const stderr of [`docker: ${first}\ndocker: ${second}\n`,
+          `docker: ${first}\ndocker: ${second}\ndocker: ${first}\n`]) {
+          expect(diagOf(stderr)!.f).toBe(expected);
+        }
+      }
+    }
+    expect(diagOf('docker: context canceled\ndocker: x\ndocker: context canceled\n')!.f).toBe('multi');
+    expect(diagOf(`docker: context canceled\n${daemonEnvelope}context canceled\n`)).toMatchObject({ s: 'multi', f: 'canceled' });
+    expect(diagOf(`${daemonEnvelope}x\ndocker: ${daemonEnvelope}y\n`)).toMatchObject({ s: 'daemon', f: 'unknown' });
+  });
+
+  it('strips each prefix at most once and never normalizes other framing', () => {
+    expect(diagOf(`docker: docker: ${daemonEnvelope}context canceled\n`)).toMatchObject({ s: 'docker', f: 'unknown' });
+    expect(diagOf(`${daemonEnvelope}${daemonEnvelope}context canceled\n`)).toMatchObject({ s: 'daemon', f: 'unknown' });
+    for (const stderr of ['Docker: context canceled\n', ' docker: context canceled\n', 'docker:context canceled\n',
+      'error response from daemon: context canceled\n', '"docker: context canceled"\n',
+      '\u001b[31mdocker: context canceled\n', 'docker: context canceled', 'docker: context canceled\r',
+      'docker: context canceled\r\r\n', 'docker: context\rcanceled\n', '\rdocker: context canceled\n']) {
+      expect(diagOf(stderr)).toEqual({ h: false, i: false, s: 'none', f: 'none' });
+    }
+    expect(diagOf('docker: context canceled\ndocker: x')).toMatchObject({ s: 'docker', f: 'canceled' });
+  });
+
+  it('observes only exact help-trailer and image-missing lines', () => {
+    const trailer = "Run 'docker run --help' for more information";
+    const image = "Unable to find image 'example.test/x:1' locally";
+    expect(diagOf(`${trailer}\n${image}\r\n`)).toEqual({ h: true, i: true, s: 'none', f: 'none' });
+    for (const stderr of [`${trailer}.\n`, ` ${trailer}\n`, `${trailer}`, `${trailer}\r`, `docker: ${trailer}\n`,
+      "Unable to find image '' locally\n", `${image} \n`, `${image}`, "Unable to find image 'x'\n",
+      `run 'docker run --help' for more information\n`]) {
+      const diag = diagOf(stderr)!;
+      expect(diag.h).toBe(false);
+      expect(diag.i).toBe(false);
+    }
+  });
+
+  it('bounds the diagnostic scan at 4096 UTF-8 bytes without changing old observations', () => {
+    const line = 'docker: context canceled\n';
+    for (const [fill, width] of [['x', 1], ['\u00e4', 2], ['\u{1f642}', 4]] as const) {
+      const remaining = 4096 - Buffer.byteLength(line) - 1;
+      const bounded = fill.repeat(Math.floor(remaining / width)) + 'x'.repeat(remaining % width) + '\n' + line;
+      expect(Buffer.byteLength(bounded, 'utf8')).toBe(4096);
+      expect(diagOf(bounded)).toEqual({ h: false, i: false, s: 'docker', f: 'canceled' });
+      const over = describeGenerationResult({ code: 1, stdout: '', stderr: bounded + 'x' }, 1);
+      expectFixedReport(over);
+      expect(over.dockerDiag).toEqual({ h: null, i: null, s: 'over', f: 'over' });
+      const old = (report: ReturnType<typeof describeGenerationResult>) => Object.fromEntries(Object.entries(report)
+        .filter(([key]) => !['stderrContainerExitBucket', 'stderrDockerErrorMarker', 'dockerDiag', 'stderrBytes'].includes(key)));
+      expect(old(over)).toEqual(old(describeGenerationResult({ code: 1, stdout: '', stderr: bounded }, 1)));
+    }
+  });
+
+  it('never serializes connection strings, image names or recognized message tails', () => {
+    const secret = ['postgresql://postgres:', 'fictional-diag-password', '@supabase_db_example:5432/postgres'].join('');
+    const canaries = [secret, 'fictional-diag-password', 'PG_META_DB_URL', 'postgres-meta', 'example.test', 'diag-tail-canary'];
+    for (const [message] of diagFamilies) {
+      for (const prefix of ['docker: ', daemonEnvelope]) {
+        const stderr = `Connecting to db 5432\nPG_META_DB_URL=${secret}\n`
+          + "Unable to find image 'public.ecr.aws/supabase/postgres-meta:v0.98.0' locally\n"
+          + `${prefix}${message}\n${prefix}${message.slice(0, 3)}diag-tail-canary\nerror running container: exit 125\n`;
+        const report = describeGenerationResult({ code: 1, stdout: secret, stderr }, 1);
+        expectFixedReport(report);
+        const json = JSON.stringify(report);
+        for (const canary of canaries) expect(json).not.toContain(canary);
+      }
+    }
+  });
+
+  it('keeps the CI pg-meta pull step synchronized with the pinned CLI and before startup', async () => {
+    // Windows checkouts may use CRLF; compare the LF-normalized committed text.
+    const workflow = (await readFile(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8')).replaceAll('\r\n', '\n');
+    const manifest = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
+    // Re-derive this reference by hand from the pinned CLI source whenever the pin changes.
+    expect(manifest.devDependencies.supabase).toBe('2.116.0');
+    const image = 'public.ecr.aws/supabase/postgres-meta:v0.98.0';
+    const step = [
+      '      - name: Pull the pg-meta image used by type generation (single attempt)',
+      '        run: |',
+      '          test -z "${SUPABASE_ENV:-}"',
+      ...['supabase/', ''].flatMap((dir) => ['.env.development.local', '.env.local', '.env.development', '.env']
+        .map((name) => `          test ! -e ${dir}${name}`)),
+      '          test ! -e supabase/.temp/pgmeta-version',
+      `          docker pull ${image}`,
+      '',
+    ].join('\n');
+    const start = workflow.indexOf('\n  database:\n');
+    expect(start).toBeGreaterThan(-1);
+    const after = workflow.slice(start + 1);
+    const next = after.slice(1).search(/\n {2}[A-Za-z0-9_-]+:\n/);
+    const job = next === -1 ? after : after.slice(0, next + 1);
+    expect(workflow.split(image).length - 1).toBe(1);
+    expect(workflow.split('docker pull').length - 1).toBe(1);
+    expect(job.split(step).length - 1).toBe(1);
+    const stepIndex = job.indexOf(step);
+    const startup = job.indexOf('      - run: npm run db:start\n');
+    expect(startup).toBeGreaterThan(-1);
+    expect(stepIndex).toBeLessThan(startup);
+    expect(job.slice(stepIndex + step.length).startsWith('      - run: npm run db:start\n')).toBe(true);
+    for (const suppression of ['|| true', 'continue-on-error', 'set +e', '||', 'retry']) {
+      expect(step.includes(suppression)).toBe(false);
+    }
+    expect(job.split('continue-on-error').length - 1).toBe(0);
   });
 
   it.each([undefined, null, false, '0', 1n, NaN, Infinity, -Infinity, 0.5,

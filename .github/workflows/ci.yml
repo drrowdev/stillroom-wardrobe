@@ -154,6 +154,19 @@ jobs:
           cache: npm
       - run: npm ci --no-fund
       - run: npx playwright install --with-deps chromium
+      - name: Pull the pg-meta image used by type generation (single attempt)
+        run: |
+          test -z "${SUPABASE_ENV:-}"
+          test ! -e supabase/.env.development.local
+          test ! -e supabase/.env.local
+          test ! -e supabase/.env.development
+          test ! -e supabase/.env
+          test ! -e .env.development.local
+          test ! -e .env.local
+          test ! -e .env.development
+          test ! -e .env
+          test ! -e supabase/.temp/pgmeta-version
+          docker pull public.ecr.aws/supabase/postgres-meta:v0.98.0
       - run: npm run db:start
       - run: npm run db:rehearse
         env:
