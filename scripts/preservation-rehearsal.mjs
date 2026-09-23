@@ -2,22 +2,25 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { isDeepStrictEqual } from 'node:util';
 import path from 'node:path';
 import {
   ROOT, assertNoServiceSecrets, assertProjectConfig, requireDocker, requireLocalContainer,
   cli, runCommand, normalSessionEnvironment, readCredentialCache, validateSessionEnvironment, privilegedLocalSql,
   DB_CONTAINER, commandEnvironment, jwtClaims, reportError, startAnalysisServer,
 } from './backend/local.mjs';
-import { PUBLICATION_BODY_MD5, assertCiStorageGuardInstall, installCiStorageGuard, verifyCiStorageGuard } from './backend/ci-storage-guard.mjs';
+import { PUBLICATION_BODY_MD5, assertCiDatabaseMutationAllowed, verifyCiStorageGuard } from './backend/ci-storage-guard.mjs';
 import { isMain } from './quality/files.mjs';
 import {
-  SOURCE_HASHES, requireEvidence, assertSnapshotAbsent, cleanupSnapshot,
+  SOURCE_HASHES, MAX_SNAPSHOT_BYTES, requireEvidence, assertSnapshotAbsent, cleanupSnapshot,
+  captureSixPreservation, readSixPreservation, probeSixPreservation,
 } from '../tests/integration/preservation.sessions.mjs';
 import { captureAzurePreservation, verifyAzurePreservation,
   captureImageChangePreservation, verifyImageChangePreservation } from '../tests/integration/azure-preservation.sessions.mjs';
 
 const PRIOR_MAIN_VERSION = '20260913120000';
 const AZURE_TARGET_VERSION = '20260921193000';
+const HOSTED_SOURCE_VERSION = '20260910070000';
 
 export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
@@ -123,7 +126,7 @@ select jsonb_build_object(
   'identityTrigger',(select count(*)=1 and bool_and(t.tgenabled='A' and not t.tgisinternal and not t.tgdeferrable
       and t.tgtype=5 and t.tgrelid='public.item_images'::regclass and t.tgfoid='private.record_item_image_identity()'::regprocedure)
     from pg_catalog.pg_trigger t where t.tgname='item_image_identity_guard'),
-  'publicationTrigger',(select count(*)=1 and bool_and(t.tgenabled='A' and not t.tgisinternal and not t.tgdeferrable
+  'publicationTrigger',(select count(*)=1 and bool_and(t.tgenabled='O' and not t.tgisinternal and not t.tgdeferrable
       and t.tgtype=21 and t.tgrelid='storage.objects'::regclass and t.tgfoid='private.guard_item_object_publication()'::regprocedure)
     from pg_catalog.pg_trigger t where t.tgname='item_object_publication_guard'),
   'nativeOperation',(select p.provolatile='s' and p.prorettype='boolean'::regtype
@@ -851,14 +854,19 @@ export function parseMigrationHistory(output) {
 }
 
 export function assertHistory(output, stage) {
-  requireHistory(['base', 'prior-main', 'azure-target', 'target'].includes(stage), 'inventory-mismatch');
+  requireHistory(['base', 'hosted-source', 'prior-main', 'azure-target', 'target'].includes(stage), 'inventory-mismatch');
   const priorMainIndex = MIGRATIONS.findIndex((entry) => entry.version === PRIOR_MAIN_VERSION);
   const azureIndex = MIGRATIONS.findIndex((entry) => entry.version === AZURE_TARGET_VERSION);
+  const hostedIndex = MIGRATIONS.findIndex((entry) => entry.version === HOSTED_SOURCE_VERSION);
   requireHistory(priorMainIndex >= 0 && azureIndex === priorMainIndex + 1, 'inventory-mismatch');
+  requireHistory(hostedIndex === 5, 'inventory-mismatch');
   const inventory = parseMigrationHistory(output);
   const expected = stage === 'base'
     ? { applied: [MIGRATIONS[0].version], pending: MIGRATIONS.slice(1).map((entry) => entry.version) }
-    : stage === 'prior-main'
+    : stage === 'hosted-source'
+      ? { applied: MIGRATIONS.slice(0, hostedIndex + 1).map((entry) => entry.version),
+        pending: MIGRATIONS.slice(hostedIndex + 1).map((entry) => entry.version) }
+      : stage === 'prior-main'
       ? { applied: MIGRATIONS.slice(0, priorMainIndex + 1).map((entry) => entry.version),
         pending: MIGRATIONS.slice(priorMainIndex + 1).map((entry) => entry.version) }
       : stage === 'azure-target'
@@ -910,7 +918,7 @@ async function sameDatabaseIdentity() {
 // Copy-only ten-migration workdir: the existing CLI helper remains ROOT-bound.
 export async function migrateToAzureTarget(run, from) {
   assertRehearsalEnvironment(process.env, []);
-  assertCiStorageGuardInstall();
+  assertCiDatabaseMutationAllowed();
   requireEvidence(['base', 'prior-main'].includes(from));
   const directory = preservationStagePath(run), cache = path.dirname(directory);
   const cacheInfo = await lstat(cache);
@@ -971,8 +979,116 @@ export async function migrateToAzureTarget(run, from) {
   if (failed) throw primary;
 }
 
+const SIX_PRIVATE_COLUMNS = Object.freeze({
+  item_save_attempts: 'owner_id item_id image_id fingerprint state created_at completed_at',
+  item_save_used_ids: 'owner_id item_id image_id',
+  ai_controls: 'owner_id activated notice_revision model_id prompt_version max_request_micro monthly_allowance_micro max_requests_per_hour result_ttl_seconds created_at updated_at',
+});
+const SIX_EMPTY_TABLES = Object.freeze(['image_change_attempts', 'image_change_context', 'image_change_history',
+  'item_deletion_claims', 'item_deletion_operations', 'item_deletion_targets']);
+const sortedJson = (rows) => rows.map((row) => JSON.stringify(Object.fromEntries(Object.entries(row).sort())))
+  .sort();
+
+function sixOwnerList(owners) {
+  const ids = owners.map((owner) => owner.uid);
+  requireEvidence(ids.length === 2 && ids[0] !== ids[1]
+    && ids.every((id) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)));
+  return ids.map((id) => `'${id}'`).join(',');
+}
+
+export function sixPrivateCaptureSql(owners, target = false) {
+  const ownerList = sixOwnerList(owners);
+  requireEvidence(typeof target === 'boolean');
+  const rows = (table) => `coalesce((select jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text)
+    from (select * from private.${table} where owner_id in (${ownerList}) order by owner_id,to_jsonb(${table})::text limit 33) t),'[]'::jsonb)`;
+  return `select jsonb_build_object(
+    ${[...Object.keys(SIX_PRIVATE_COLUMNS), 'ai_requests', 'ai_usage'].map((table) => `'${table}',${rows(table)}`).join(',')}
+    ${target ? `,'registry',${rows('item_image_used_ids')},'empty',jsonb_build_object(
+      ${SIX_EMPTY_TABLES.map((table) => `'${table}',(select count(*)=0 from private.${table})`).join(',')})` : ''}
+  );`;
+}
+
+export function validateSixPrivate(value, owners, tombstones) {
+  const ids = owners.map((owner) => owner.uid);
+  sixOwnerList(owners);
+  requireEvidence(value && typeof value === 'object' && !Array.isArray(value)
+    && Buffer.byteLength(JSON.stringify(value)) <= MAX_SNAPSHOT_BYTES
+    && Object.keys(value).sort().join(',') === 'ai_controls,ai_requests,ai_usage,item_save_attempts,item_save_used_ids'
+    && Array.isArray(value.ai_requests) && value.ai_requests.length === 0
+    && Array.isArray(value.ai_usage) && value.ai_usage.length === 0
+    && Array.isArray(tombstones) && tombstones.length === 2);
+  for (const [table, columns] of Object.entries(SIX_PRIVATE_COLUMNS)) {
+    const rows = value[table];
+    const count = table === 'item_save_attempts' ? 4 : table === 'item_save_used_ids' ? 6 : 2;
+    requireEvidence(Array.isArray(rows) && rows.length === count && rows.length <= 32);
+    for (const row of rows) requireEvidence(row && typeof row === 'object' && !Array.isArray(row)
+      && isDeepStrictEqual(Object.keys(row).sort(), columns.split(' ').sort()) && ids.includes(row.owner_id));
+    requireEvidence(new Set(rows.map((row) => `${row.owner_id}/${row.item_id ?? ''}`)).size === rows.length);
+    for (const id of ids) requireEvidence(rows.filter((row) => row.owner_id === id).length === count / 2);
+  }
+  for (const [index, owner] of owners.entries()) {
+    const tombstone = tombstones[index];
+    requireEvidence(tombstone && tombstone.owner_id === owner.uid
+      && Object.keys(tombstone).sort().join(',') === 'image_id,item_id,owner_id'
+      && value.item_save_used_ids.some((row) => isDeepStrictEqual(row, tombstone))
+      && !value.item_save_attempts.some((row) => row.item_id === tombstone.item_id || row.image_id === tombstone.image_id));
+    const attempts = value.item_save_attempts.filter((row) => row.owner_id === owner.uid);
+    requireEvidence(attempts.filter((row) => row.state === 'reserved' && row.completed_at === null).length === 1
+      && attempts.filter((row) => row.state === 'completed' && typeof row.completed_at === 'string').length === 1);
+    for (const row of attempts) requireEvidence(value.item_save_used_ids.some((used) => used.owner_id === row.owner_id
+      && used.item_id === row.item_id && used.image_id === row.image_id));
+  }
+  requireEvidence(value.ai_controls.every((row) => row.activated === false));
+}
+
+export function compareSixPrivate(before, after, snapshot) {
+  validateSixPrivate(before, snapshot.owners, snapshot.tombstones);
+  requireEvidence(after && typeof after === 'object' && !Array.isArray(after)
+    && Buffer.byteLength(JSON.stringify(after)) <= MAX_SNAPSHOT_BYTES
+    && Object.keys(after).sort().join(',') === 'ai_controls,ai_requests,ai_usage,empty,item_save_attempts,item_save_used_ids,registry');
+  const { registry, empty, ...preserved } = structuredClone(after);
+  requireEvidence(Array.isArray(preserved.ai_controls));
+  for (const row of preserved.ai_controls) {
+    requireEvidence(Object.hasOwn(row, 'execution_manifest_id') && row.execution_manifest_id === null);
+    delete row.execution_manifest_id;
+  }
+  validateSixPrivate(preserved, snapshot.owners, snapshot.tombstones);
+  for (const table of Object.keys(before)) requireEvidence(isDeepStrictEqual(sortedJson(before[table]), sortedJson(preserved[table])));
+  requireEvidence(empty && typeof empty === 'object' && !Array.isArray(empty)
+    && isDeepStrictEqual(Object.keys(empty).sort(), [...SIX_EMPTY_TABLES].sort())
+    && Object.values(empty).every((value) => value === true));
+  const expected = new Set([
+    ...snapshot.before.data.flatMap((data) => data.tables.item_images.map((image) => `${image.owner_id}/${image.id}`)),
+    ...before.item_save_used_ids.map((row) => `${row.owner_id}/${row.image_id}`),
+  ]);
+  requireEvidence(expected.size === 10 && Array.isArray(registry) && registry.length === 10);
+  for (const row of registry) {
+    requireEvidence(row && typeof row === 'object' && !Array.isArray(row)
+      && Object.keys(row).sort().join(',') === 'image_id,owner_id'
+      && expected.delete(`${row.owner_id}/${row.image_id}`));
+  }
+  requireEvidence(expected.size === 0);
+}
+
+async function sixFixtureSql(query, deadline) {
+  assertCiDatabaseMutationAllowed();
+  assertRehearsalEnvironment(process.env, []);
+  await requireLocalContainer();
+  const remaining = Math.floor(deadline - performance.now());
+  requireEvidence(remaining > 0 && remaining <= 120_000);
+  const result = await runCommand('docker', [
+    'exec', '-i', DB_CONTAINER, 'psql', '-X', '--no-password', '-h', '127.0.0.1',
+    '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-A',
+  ], { input: `begin; set local statement_timeout='10s'; set local lock_timeout='2s';
+    set local idle_in_transaction_session_timeout='10s'; ${query} commit;`,
+  env: commandEnvironment(), timeout: remaining, maxOutputBytes: MAX_SNAPSHOT_BYTES });
+  requireEvidence(performance.now() < deadline && result.code === 0 && result.stderr === ''
+    && typeof result.stdout === 'string' && Buffer.byteLength(result.stdout) <= MAX_SNAPSHOT_BYTES);
+  return result.stdout.trim();
+}
+
 async function main() {
-  try { assertCiStorageGuardInstall(); }
+  try { assertCiDatabaseMutationAllowed(); }
   catch (error) { reportError(error); return; }
   let stage = 'guards', run, ownsSnapshot = false;
   try {
@@ -1017,7 +1133,6 @@ async function main() {
     stage = 'S3-migration-up';
     await migrateToAzureTarget(run, 'base');
     stage = 'S3-storage-guard';
-    await installCiStorageGuard();
     await verifyCiStorageGuard();
     stage = 'S3-target-history';
     await history('azure-target');
@@ -1041,7 +1156,7 @@ async function main() {
     stage = 'AZ1-prior-main-reset';
     requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', PRIOR_MAIN_VERSION], 10 * 60_000)).code === 0);
     await history('prior-main');
-    await installCiStorageGuard(); await verifyCiStorageGuard();
+    await verifyCiStorageGuard();
     requireEvidence((await runCommand(process.execPath, [path.join(ROOT, 'scripts', 'provision-test-users.mjs')])).code === 0);
     const azureEnv = normalSessionEnvironment(process.env, await readCredentialCache());
     validateSessionEnvironment(azureEnv);
@@ -1054,6 +1169,7 @@ async function main() {
       stage = 'AZ1-upgrade';
       await migrateToAzureTarget(run, 'prior-main');
       await history('azure-target');
+      await verifyCiStorageGuard();
       stage = 'AZ1-preservation';
       await verifyAzurePreservation(priorMain, privilegedLocalSql, true);
       console.log('PASS: populated prior-main9/azure-target10 historical preservation; Google proof retained for next upgrade');
@@ -1065,7 +1181,7 @@ async function main() {
       requireEvidence((await cli(['migration', 'up', '--local'])).code === 0);
       requireEvidence(await sameDatabaseIdentity() === container);
       await history('target');
-      await installCiStorageGuard(); await verifyCiStorageGuard();
+      await verifyCiStorageGuard();
       stage = 'I10b-preservation';
       await verifyImageChangePreservation(ten, privilegedLocalSql, (label) => { stage = `I10b-preservation-${label}`; });
       stage = 'I10b-publication-races';
@@ -1081,6 +1197,44 @@ async function main() {
     } finally { await finalizer.stop(); }
     console.log('PASS: exact prior-main9/target10; old Google held/estimated/confirmed/dispatched and frozen Save preserved; late settlement and ordinary-owner finalizer; no provider calls');
     console.log('PASS: populated10/target11; exact Google/Azure private proof, public fields/history and bytes preserved; frozen pending Azure Save completed after opt-out/expiry; projection DDL rolled back');
+    stage = 'HC1-six-reset';
+    requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', HOSTED_SOURCE_VERSION], 10 * 60_000)).code === 0);
+    await assertMigrationInventory(); await history('hosted-source');
+    requireEvidence((await runCommand(process.execPath, [path.join(ROOT, 'scripts', 'provision-test-users.mjs')])).code === 0);
+    const sixEnv = normalSessionEnvironment(process.env, await readCredentialCache());
+    validateSessionEnvironment(sixEnv);
+    stage = 'HC1-six-capture';
+    let deadline = performance.now() + 120_000;
+    const six = await captureSixPreservation(sixEnv, run, deadline, async (owners, tombstones) => {
+      const ownerList = sixOwnerList(owners);
+      await sixFixtureSql(`insert into private.ai_controls(owner_id,activated,notice_revision,model_id,prompt_version,
+        max_request_micro,monthly_allowance_micro,max_requests_per_hour,result_ttl_seconds)
+        select id,false,1,'fictional-inactive',1,123,4567,2,3600 from unnest(array[${ownerList}]::uuid[]) id;`, deadline);
+      const captured = JSON.parse(await sixFixtureSql(sixPrivateCaptureSql(owners), deadline));
+      validateSixPrivate(captured, owners, tombstones);
+      return captured;
+    });
+    requireEvidence(performance.now() < deadline);
+    await assertMigrationInventory(); await history('hosted-source');
+    const sixContainer = await sameDatabaseIdentity();
+    stage = 'HC1-six-to-eleven';
+    requireEvidence((await cli(['migration', 'up', '--local'], 120_000)).code === 0);
+    requireEvidence(await sameDatabaseIdentity() === sixContainer);
+    await assertMigrationInventory(); await history('target'); await verifyCiStorageGuard();
+    stage = 'HC1-eleven-compare';
+    deadline = performance.now() + 120_000;
+    const sixAfter = await readSixPreservation(six, sixEnv, deadline);
+    const privateAfter = JSON.parse(await sixFixtureSql(sixPrivateCaptureSql(six.owners, true), deadline));
+    compareSixPrivate(six.privateBefore, privateAfter, six);
+    requireEvidence(performance.now() < deadline);
+    stage = 'HC1-eleven-probes';
+    deadline = performance.now() + 120_000;
+    await probeSixPreservation(six, sixAfter, sixEnv, deadline);
+    requireEvidence(performance.now() < deadline);
+    stage = 'HC1-eleven-publication';
+    await lifecyclePublicationCases(sixEnv, { withLifecycleCatalogMarker, withLifecycleLateUpload,
+      requireLifecyclePrefixEmpty, requireLifecycleClaimFence });
+    console.log('PASS: populated6/target11; owners=2 publicRows=38 objects=16 attempts=4 usedIds=6 registry=10; exact preservation before replay and original late-publication/catalog-zero cases; no provider calls');
   } catch (error) {
     console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}${lifecycleFailureDetail(error)}; subsequent stages NOT RUN`);
     process.exitCode = 1;

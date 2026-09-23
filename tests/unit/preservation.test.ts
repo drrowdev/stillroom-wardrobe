@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deleteWardrobeObject } from '../../src/data/storage-delete';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
-import { MIGRATIONS, assertRehearsalEnvironment, validateInventory, assertMigrationInventory, assertCapabilities, parseMigrationHistory, assertHistory, assertHistoryResult, historyFailureDetail, exportBodyEvidence } from '../../scripts/preservation-rehearsal.mjs';
+import { MIGRATIONS, assertRehearsalEnvironment, validateInventory, assertMigrationInventory, assertCapabilities, parseMigrationHistory, assertHistory, assertHistoryResult, historyFailureDetail, exportBodyEvidence, sixPrivateCaptureSql, validateSixPrivate, compareSixPrivate } from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
-import { SOURCE_HASHES, MAX_SNAPSHOT_BYTES, COLUMNS, TABLES, COUNTS, IMPLICIT_FACTS, EXPLICIT_FACTS, NEW_COLUMNS, parsePhaseArguments, snapshotPath, assertSnapshotPath, validateSnapshotStat, rowIdentity, canonicalRows, validateSnapshot, comparePreservation, normalClient, captureData, functionalProbes } from '../integration/preservation.sessions.mjs';
+import { SOURCE_HASHES, MAX_SNAPSHOT_BYTES, COLUMNS, TABLES, COUNTS, IMPLICIT_FACTS, EXPLICIT_FACTS, NEW_COLUMNS, parsePhaseArguments, snapshotPath, assertSnapshotPath, validateSnapshotStat, rowIdentity, canonicalRows, validateSnapshot, comparePreservation, normalClient, captureData, functionalProbes, SIX_COUNTS, SIX_COLUMNS, validateSixSnapshot, compareSixPreservation } from '../integration/preservation.sessions.mjs';
 // @ts-expect-error Executable integration fixture has no TypeScript declaration.
 import { imageChangeHarness } from '../integration/image-replacement.sessions.mjs';
 
@@ -140,6 +140,216 @@ const priorMainTable = azureTable.replace('`20260921193000` | `20260921193000`',
 const validEnv = { ALLOW_PRESERVATION_REHEARSAL: '1', CI: 'true', GITHUB_ACTIONS: 'true' };
 const inventory = () => (MIGRATIONS as { name: string; version: string; bytes: number; sha256: string }[])
   .map((entry) => ({ ...entry, regular: true, symlink: false }));
+
+type SixSnapshot = Omit<Snapshot, 'data'> & {
+  data: { label: string; ownerId: string; tables: Record<Table, Row[]>; objects: ObjectEvidence[] }[];
+};
+function sixFixture(): SixSnapshot {
+  const value: SixSnapshot = upgraded(fixture());
+  value.stage = 'six';
+  for (const data of value.data) {
+    Object.assign(present(data.tables.profiles[0]), { ai_enabled: false, ai_notice_revision: null, ai_consented_at: null });
+    const implicit = present(data.tables.items.find((row) => row.title === 'Fictional implicit facts'));
+    for (const key of Object.keys(IMPLICIT_FACTS)) implicit[key] = null;
+    const explicit = present(data.tables.items.find((row) => row.title === 'Fictional explicit facts'));
+    Object.assign(explicit, { pattern: 'checked', sleeve_length: 'long', garment_length: 'long',
+      field_provenance: { title: { kind: 'user', revision: 1 }, pattern: { kind: 'user', revision: 2 },
+        warmth: { kind: 'unknown', revision: 1 } } });
+    for (const image of data.tables.item_images) Object.assign(image, { width: 2, height: 2, description_version: 2 });
+    for (const state of ['ready', 'pending']) {
+      const item = { ...structuredClone(implicit), id: randomUUID(), title: `Fictional checked ${state}`, version: 1 };
+      const image: Row = { ...structuredClone(present(data.tables.item_images[0])),
+        id: randomUUID(), item_id: item.id, state, retired_at: null, description_version: 1 };
+      for (const variant of ['main', 'thumb']) {
+        image[`${variant}_path`] = `${data.ownerId}/${item.id}/${image.id}/${variant}.jpg`;
+        data.objects.push({ path: String(image[`${variant}_path`]), bytes: 632, sha256: sha });
+      }
+      data.tables.items.push(item); data.tables.item_images.push(image);
+    }
+  }
+  return value;
+}
+function sixPrivateFixture() {
+  const before = sixFixture(), localOwners = before.owners.map((uid) => ({ uid }));
+  const tombstones = before.owners.map((owner_id) => ({ owner_id, item_id: randomUUID(), image_id: randomUUID() }));
+  const attempts: Row[] = [], used: Row[] = [], controls: Row[] = [], registry: Row[] = [];
+  for (const data of before.data) {
+    for (const image of data.tables.item_images) {
+      registry.push({ owner_id: data.ownerId, image_id: image.id ?? null });
+      if (image.description_version !== 1) continue;
+      const ids = { owner_id: data.ownerId, item_id: image.item_id ?? null, image_id: image.id ?? null };
+      attempts.push({ ...ids, fingerprint: sha, state: image.state === 'ready' ? 'completed' : 'reserved',
+        created_at: time, completed_at: image.state === 'ready' ? time : null });
+      used.push(ids);
+    }
+    const tombstone = present(tombstones.find((row) => row.owner_id === data.ownerId));
+    used.push(tombstone); registry.push({ owner_id: data.ownerId, image_id: tombstone.image_id });
+    controls.push({ owner_id: data.ownerId, activated: false, notice_revision: 1, model_id: 'fictional-inactive',
+      prompt_version: 1, max_request_micro: 123, monthly_allowance_micro: 4567, max_requests_per_hour: 2,
+      result_ttl_seconds: 3600, created_at: time, updated_at: time });
+  }
+  const old = { item_save_attempts: attempts, item_save_used_ids: used, ai_controls: controls, ai_requests: [], ai_usage: [] };
+  const after = { ...structuredClone(old), ai_controls: controls.map((row) => ({ ...row, execution_manifest_id: null })),
+    registry, empty: { image_change_attempts: true, image_change_context: true, image_change_history: true,
+      item_deletion_claims: true, item_deletion_operations: true, item_deletion_targets: true } };
+  return { old, after, snapshot: { before, owners: localOwners, tombstones } };
+}
+
+describe('HC1 populated six-to-eleven preservation (synthetic, no backend proof)', () => {
+  it('recognizes only exact six-applied/five-pending history for fixture setup', () => {
+    const sixTable = baseTable.replace(/`(202609(?:06000000|09070000|09110000|09180000|10070000))` \| ` `/g, '`$1` | `$1`');
+    expect(assertHistory(sixTable, 'hosted-source')).toEqual({
+      applied: inventory().slice(0, 6).map((entry) => entry.version),
+      pending: inventory().slice(6).map((entry) => entry.version),
+    });
+    for (const wrong of [baseTable, priorMainTable, azureTable, targetTable]) {
+      expect(() => assertHistory(wrong, 'hosted-source')).toThrow();
+    }
+    for (const stage of ['base', 'prior-main', 'azure-target', 'target', 'seven', 'eight']) {
+      expect(() => assertHistory(sixTable, stage)).toThrow();
+    }
+  });
+  it('retains every schema-six column and all38rows/16objects without base normalization', () => {
+    const before = sixFixture();
+    expect(SIX_COUNTS).toEqual([1, 1, 5, 4, 1, 2, 1, 2, 1, 1]);
+    expect(SIX_COLUMNS.profiles).toBe(COLUMNS.profiles + ' ai_enabled ai_notice_revision ai_consented_at');
+    expect(SIX_COLUMNS.items).toBe(COLUMNS.items + ' ' + NEW_COLUMNS.join(' '));
+    expect(SIX_COLUMNS.item_images).toBe(COLUMNS.item_images + ' description_version');
+    expect(() => validateSixSnapshot(before, run, [...owners])).not.toThrow();
+    const after = structuredClone(before);
+    for (const data of after.data) {
+      for (const table of tables) data.tables[table].reverse();
+      data.objects.reverse();
+    }
+    expect(() => compareSixPreservation(before, after, run, [...owners])).not.toThrow();
+    expect(before.data.reduce((sum, data) => sum + tables.reduce((n, table) => n + data.tables[table].length, 0), 0)).toBe(38);
+    expect(before.data.flatMap((data) => data.objects)).toHaveLength(16);
+  });
+  it.each(tables)('rejects dropped, added, changed and foreign rows/fields in %s', (table) => {
+    for (const kind of ['drop', 'extra-row', 'extra-column', 'changed', 'foreign']) {
+      const before = sixFixture(), after = structuredClone(before), data = present(after.data[0]);
+      const row = present(data.tables[table][0]);
+      if (kind === 'drop') data.tables[table].pop();
+      else if (kind === 'extra-row') data.tables[table].push(structuredClone(row));
+      else if (kind === 'extra-column') row.unexpected = null;
+      else if (kind === 'foreign') row.owner_id = owners[1];
+      else {
+        const field = table === 'outfit_items' ? 'position' : table === 'combination_rules' ? 'created_at'
+          : table === 'suggestion_feedback' ? 'vote' : table === 'wear_event_items' ? 'title_snapshot'
+            : table === 'item_images' ? 'alt_text' : 'version';
+        row[field] = typeof row[field] === 'number' ? Number(row[field]) + 1 : 'changed';
+      }
+      expect(() => compareSixPreservation(before, after, run, [...owners])).toThrow();
+    }
+  });
+  it('rejects changed bytes/hash/path, duplicate objects, provenance/counter loss, wrong identity and oversized snapshots', () => {
+    const changes: ((value: SixSnapshot) => void)[] = [
+      (v) => { present(present(v.data[0]).objects[0]).bytes = 4; },
+      (v) => { present(present(v.data[0]).objects[0]).sha256 = 'b'.repeat(64); },
+      (v) => { present(present(v.data[0]).objects[0]).path += '/extra'; },
+      (v) => { const d = present(v.data[0]); d.objects[0] = present(d.objects[1]); },
+      (v) => { present(present(v.data[0]).tables.item_images[0]).description_version = 1; },
+      (v) => { present(present(v.data[0]).tables.items.find((r) => r.title === 'Fictional explicit facts')).field_provenance = {}; },
+      (v) => { v.run = randomUUID(); },
+      (v) => { v.stage = 'base'; },
+      (v) => { present(present(v.data[0]).tables.items[0]).notes = 'x'.repeat(MAX_SNAPSHOT_BYTES); },
+    ];
+    for (const change of changes) {
+      const before = sixFixture(), after = structuredClone(before); change(after);
+      expect(() => compareSixPreservation(before, after, run, [...owners])).toThrow();
+    }
+  });
+  it('preserves exactly three private tables with only null execution_manifest_id added', () => {
+    const { old, after, snapshot } = sixPrivateFixture();
+    expect(() => validateSixPrivate(old, snapshot.owners, snapshot.tombstones)).not.toThrow();
+    expect(() => compareSixPrivate(old, after, snapshot)).not.toThrow();
+    expect(old.item_save_attempts).toHaveLength(4); expect(old.item_save_used_ids).toHaveLength(6);
+    expect(snapshot.before.data.flatMap((data) => data.tables.item_images)).toHaveLength(8);
+    expect(after.registry).toHaveLength(10);
+    for (const table of ['item_save_attempts', 'item_save_used_ids', 'ai_controls'] as const) {
+      for (const field of Object.keys(present(old[table][0]))) {
+        const changed = structuredClone(after);
+        Object.assign(present(changed[table][0]), { [field]: 'changed' });
+        expect(() => compareSixPrivate(old, changed, snapshot)).toThrow();
+      }
+      const missing = structuredClone(after); missing[table].pop();
+      expect(() => compareSixPrivate(old, missing, snapshot)).toThrow();
+      const extra = structuredClone(after), rows: Row[] = extra[table];
+      rows.push(present(rows[0]));
+      expect(() => compareSixPrivate(old, extra, snapshot)).toThrow();
+    }
+    for (const value of ['manifest', undefined, 0]) {
+      const changed = structuredClone(after);
+      Object.assign(present(changed.ai_controls[0]), { execution_manifest_id: value });
+      expect(() => compareSixPrivate(old, changed, snapshot)).toThrow();
+    }
+    const extraField = structuredClone(after);
+    Object.assign(present(extraField.ai_controls[0]), { unexpected: null });
+    expect(() => compareSixPrivate(old, extraField, snapshot)).toThrow();
+    expect(() => compareSixPrivate(old, { ...after, ai_requests: [{ owner_id: owners[0] }] }, snapshot)).toThrow();
+    expect(() => compareSixPrivate(old, { ...after, ai_usage: [{ owner_id: owners[0] }] }, snapshot)).toThrow();
+  });
+  it('distinguishes exact image/used-ID union from image-only, duplicate, foreign or equal-count wrong registries', () => {
+    const { old, after, snapshot } = sixPrivateFixture();
+    const images = snapshot.before.data.flatMap((data) => data.tables.item_images.map((row) =>
+      ({ owner_id: row.owner_id, image_id: row.id })));
+    expect(() => compareSixPrivate(old, { ...after, registry: images }, snapshot)).toThrow();
+    for (const replacement of [after.registry[1], { owner_id: owners[0], image_id: randomUUID() },
+      { owner_id: randomUUID(), image_id: present(after.registry[0]).image_id }]) {
+      expect(() => compareSixPrivate(old, { ...after, registry: [replacement, ...after.registry.slice(1)] }, snapshot)).toThrow();
+    }
+    const absentUsed = structuredClone(old); absentUsed.item_save_used_ids.pop();
+    expect(() => validateSixPrivate(absentUsed, snapshot.owners, snapshot.tombstones)).toThrow();
+    const liveTombstone = structuredClone(snapshot.tombstones);
+    Object.assign(present(liveTombstone[0]), present(old.item_save_used_ids[0]));
+    expect(() => validateSixPrivate(old, snapshot.owners, liveTombstone)).toThrow();
+    for (const name of Object.keys(after.empty)) expect(() =>
+      compareSixPrivate(old, { ...after, empty: { ...after.empty, [name]: false } }, snapshot)).toThrow();
+    expect(() => compareSixPrivate(old, { ...after, empty: { ...after.empty, ai_execution_manifests: true } }, snapshot)).toThrow();
+  });
+  it('scopes private capture to two checked fictional owners,33-row detection and enumerated new tables', () => {
+    const ids = owners.map((uid) => ({ uid }));
+    const sql = sixPrivateCaptureSql(ids), target = sixPrivateCaptureSql(ids, true);
+    expect(sql.match(/limit 33/g)).toHaveLength(5);
+    expect(target.match(/limit 33/g)).toHaveLength(6);
+    for (const id of owners) expect(sql).toContain(`'${id}'`);
+    expect(target).toContain('private.item_image_used_ids');
+    expect(target).toContain('private.image_change_context');
+    expect(target).not.toContain('private.ai_execution_manifests');
+    expect(sql).not.toMatch(/delete|insert|update|from private\.image_change/);
+    for (const bad of [[], [ids[0]], [ids[0], ids[0]], [{ uid: "';select" }, ids[1]]]) {
+      expect(() => sixPrivateCaptureSql(bad)).toThrow();
+    }
+  });
+  it('orders one fixed6->11 upgrade after finalizer shutdown, compares before probes and retains original races', async () => {
+    const source = await readFile(path.join(root, 'scripts/preservation-rehearsal.mjs'), 'utf8');
+    const normal = await readFile(path.join(root, 'tests/integration/preservation.sessions.mjs'), 'utf8');
+    const six = source.slice(source.indexOf("stage = 'HC1-six-reset'"));
+    expect(source.indexOf('await finalizer.stop();')).toBeLessThan(source.indexOf("stage = 'HC1-six-reset'"));
+    let offset = 0;
+    for (const step of ["'--version', HOSTED_SOURCE_VERSION", "await history('hosted-source')",
+      'await captureSixPreservation(', "await history('hosted-source')", 'await sameDatabaseIdentity()',
+      "await cli(['migration', 'up', '--local'], 120_000)", "await history('target')", 'await verifyCiStorageGuard()',
+      'await readSixPreservation(', 'compareSixPrivate(', 'await probeSixPreservation(', 'await lifecyclePublicationCases(']) {
+      const next = six.indexOf(step, offset); expect(next).toBeGreaterThanOrEqual(offset); offset = next + step.length;
+    }
+    expect(six.match(/await cli\(\['migration', 'up'/g)).toHaveLength(1);
+    expect(six.slice(0, six.indexOf("stage = 'HC1-six-to-eleven'"))).not.toContain('verifyCiStorageGuard');
+    expect(six.match(/performance\.now\(\) \+ 120_000/g)).toHaveLength(3);
+    expect(six).toContain('requireLifecyclePrefixEmpty, requireLifecycleClaimFence');
+    const capture = normal.slice(normal.indexOf('export async function captureSixPreservation'), normal.indexOf('export async function readSixPreservation'));
+    expect(capture).toContain('requireEvidence(jpg.length === 632)');
+    expect(capture).toContain('main_sha256: sha256(jpg), thumb_sha256: sha256(jpg)');
+    expect(capture).toContain('body: jpg, binary: true');
+    expect(capture).not.toContain('h.upload');
+    expect(capture.indexOf('await h.deleteItem(tombstone)')).toBeLessThan(capture.indexOf('await capturePrivate('));
+    expect(capture.indexOf('await capturePrivate(')).toBeLessThan(capture.indexOf('await captureData('));
+    const probes = normal.slice(normal.indexOf('export async function probeSixPreservation'), normal.indexOf('export async function functionalProbes'));
+    expect(probes.indexOf('sha256(found.data)')).toBeLessThan(probes.indexOf('await h.finalize('));
+    expect(probes).toContain('isDeepStrictEqual(await h.reserve(value), receipt)');
+    expect(probes).not.toMatch(/h\.upload|analyz|provider/);
+  });
+});
 
 describe('CI-only preservation guards', () => {
   it('requires all literal opt-ins and zero arguments', () => {
@@ -1153,13 +1363,17 @@ describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
       row[key] = prior!;
     }
   });
-  it('keeps full export shape, owner and table equality assertions after the HTTP reader', async () => {
-    const after = upgraded(fixture());
+  it.each(['base', 'six'])('keeps exact export projection, owner and table equality for %s', async (stage) => {
+    const after = stage === 'six' ? sixFixture() : upgraded(fixture());
+    const unchanged = structuredClone(after);
     const manifest = vi.fn<(id: string, uid: string) => Response>();
-    const validManifest = (id: string, uid: string) => ({
-      schema_version: 2, export_id: id, owner_id: uid, created_at: time,
-      tables: present(after.data.find((data) => data.ownerId === uid)).tables,
-    });
+    const validManifest = (id: string, uid: string) => {
+      const exported = structuredClone(present(after.data.find((data) => data.ownerId === uid)).tables);
+      if (stage === 'six') for (const profile of exported.profiles) {
+        delete profile.ai_enabled; delete profile.ai_notice_revision; delete profile.ai_consented_at;
+      }
+      return { schema_version: 2, export_id: id, owner_id: uid, created_at: time, tables: exported };
+    };
     vi.stubGlobal('fetch', vi.fn(async (input: string, init: RequestInit) => {
       const url = new URL(input);
       const token = new Headers(init.headers).get('Authorization');
@@ -1184,7 +1398,7 @@ describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
     const changes: Record<string, Value>[] = [
       { schema_version: 1 }, { owner_id: randomUUID() }, { export_id: randomUUID() },
       { created_at: 'invalid' }, { tables: {} }, { extra: true },
-      { tables: { ...after.data[0].tables, items: [] } },
+      { tables: { ...present(after.data[0]).tables, items: [] } },
     ];
     for (const change of changes) {
       manifest.mockImplementationOnce((id, uid) => json({ ...validManifest(id, uid), ...change }));
@@ -1192,6 +1406,17 @@ describe('preservation HTTP boundary (stubbed, not live evidence)', () => {
     }
     manifest.mockImplementation((id, uid) => json(validManifest(id, uid)));
     await expect(functionalProbes(client(), [owner, other], after)).resolves.toBeUndefined();
+    expect(after).toEqual(unchanged);
+    const profileChanged = structuredClone(validManifest(run, owner.uid).tables);
+    present(profileChanged.profiles[0]).display_name = 'Changed export';
+    manifest.mockImplementationOnce((id, uid) => json({ ...validManifest(id, uid), tables: profileChanged }));
+    await expect(functionalProbes(client(), [owner, other], after)).rejects.toThrow('EVIDENCE_REQUIRED');
+    if (stage === 'six') {
+      manifest.mockImplementationOnce((id, uid) => json({
+        ...validManifest(id, uid), tables: present(after.data.find((data) => data.ownerId === uid)).tables,
+      }));
+      await expect(functionalProbes(client(), [owner, other], after)).rejects.toThrow('EVIDENCE_REQUIRED');
+    }
   });
 });
 
@@ -1380,29 +1605,28 @@ describe('import safety and frozen integration boundary', () => {
     const workflow = (await readFile(path.join(root, '.github/workflows/ci.yml'), 'utf8')).replaceAll('\r\n', '\n');
     expect(workflow).toContain("      - run: npm run db:start\n      - run: npm run db:rehearse\n        env:\n          ALLOW_PRESERVATION_REHEARSAL: '1'\n      - run: npm run db:reset\n      - run: npm run test:integration\n      - run: npm run test:security\n      - run: node scripts/ai-analysis-rehearsal.mjs\n      - run: npm run db:types");
     expect(workflow.match(/ALLOW_PRESERVATION_REHEARSAL/g)).toHaveLength(1);
-    expect(workflow.match(/ALLOW_CI_STORAGE_GUARD_INSTALL/g)).toHaveLength(1);
-    expect(workflow).toContain("      ALLOW_SECURITY_TESTS: '1'\n      ALLOW_CI_STORAGE_GUARD_INSTALL: '1'");
-    expect(workflow.slice(0, workflow.indexOf('\n  database:'))).not.toContain('ALLOW_CI_STORAGE_GUARD_INSTALL');
+    expect(workflow.match(/ALLOW_CI_DATABASE_MUTATION/g)).toHaveLength(1);
+    expect(workflow).toContain("      ALLOW_SECURITY_TESTS: '1'\n      ALLOW_CI_DATABASE_MUTATION: '1'");
+    expect(workflow.slice(0, workflow.indexOf('\n  database:'))).not.toContain('ALLOW_CI_DATABASE_MUTATION');
+    expect(workflow).not.toContain('ALLOW_CI_STORAGE_GUARD_INSTALL');
     expect(workflow).not.toContain('GITHUB_JOB:');
     expect(workflow).toContain('timeout-minutes: 30');
     const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     expect(pkg.scripts['db:rehearse']).toBe('node scripts/preservation-rehearsal.mjs');
   });
-  it('preflights before CLI mutation, skips base S1 installation and finalizes S3 before target traffic', async () => {
+  it('preflights before mutation and verifies every observed nine/ten/eleven transition before traffic', async () => {
     const source = await readFile(path.join(root, 'scripts/preservation-rehearsal.mjs'), 'utf8');
     const main = source.slice(source.indexOf('async function main()'));
-    expect(main.indexOf('assertCiStorageGuardInstall();')).toBeLessThan(main.indexOf('await assertProjectConfig();'));
-    expect(main.indexOf('assertCiStorageGuardInstall();')).toBeLessThan(main.indexOf('await cli(args)'));
+    expect(main.indexOf('assertCiDatabaseMutationAllowed();')).toBeLessThan(main.indexOf('await assertProjectConfig();'));
+    expect(main.indexOf('assertCiDatabaseMutationAllowed();')).toBeLessThan(main.indexOf('await cli(args)'));
     const base = main.slice(0, main.indexOf("stage = 'S3-migration-up'"));
     expect(base).not.toContain('await installCiStorageGuard();');
     expect(base).not.toContain('await verifyCiStorageGuard();');
-    const finalized = main.indexOf('await installCiStorageGuard();');
-    expect(finalized).toBeGreaterThan(main.indexOf("await migrateToAzureTarget(run, 'base')"));
-    expect(main.indexOf('await verifyCiStorageGuard();')).toBeGreaterThan(finalized);
+    expect(main).not.toContain('installCiStorageGuard');
+    expect(main.indexOf('await verifyCiStorageGuard();')).toBeGreaterThan(main.indexOf("await migrateToAzureTarget(run, 'base')"));
     expect(main.indexOf("await history('azure-target');")).toBeGreaterThan(main.indexOf('await verifyCiStorageGuard();'));
     expect(main.indexOf('ITEM_LIFECYCLE_CATALOG_SQL')).toBeGreaterThan(main.indexOf("await history('azure-target');"));
-    expect(main.match(/await installCiStorageGuard\(\);/g)).toHaveLength(3);
-    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(3);
+    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(5);
     const prior = main.slice(main.indexOf("stage = 'AZ1-prior-main-reset'"));
     expect(source).toContain("const PRIOR_MAIN_VERSION = '20260913120000';");
     expect(source).toContain('MIGRATIONS.findIndex((entry) => entry.version === PRIOR_MAIN_VERSION)');
@@ -1413,6 +1637,8 @@ describe('import safety and frozen integration boundary', () => {
     expect(prior.indexOf("await history('prior-main');")).toBeLessThan(prior.indexOf('await captureAzurePreservation('));
     expect(prior.indexOf('await captureAzurePreservation(')).toBeLessThan(prior.indexOf("await cli(['migration', 'up', '--local'])"));
     expect(prior.indexOf("await history('azure-target');")).toBeLessThan(prior.indexOf('await verifyAzurePreservation('));
+    const nineToTen = prior.slice(prior.indexOf("await migrateToAzureTarget(run, 'prior-main')"), prior.indexOf('await verifyAzurePreservation('));
+    expect(nineToTen).toContain("await history('azure-target');\n      await verifyCiStorageGuard();");
     expect(prior.indexOf('await verifyAzurePreservation(')).toBeLessThan(prior.indexOf('await captureImageChangePreservation('));
     expect(prior.indexOf('await captureImageChangePreservation(')).toBeLessThan(prior.indexOf("await cli(['migration', 'up', '--local'])"));
     expect(prior.indexOf("await history('target');")).toBeLessThan(prior.indexOf('await verifyImageChangePreservation('));
@@ -1426,8 +1652,8 @@ describe('import safety and frozen integration boundary', () => {
     const orchestrator = await readFile(path.join(root, 'scripts/preservation-rehearsal.mjs'), 'utf8');
     expect(orchestrator).toContain('normalSessionEnvironment(process.env, await readCredentialCache())');
     expect(orchestrator).toContain('validateSessionEnvironment(env)');
-    expect(orchestrator.match(/provision-test-users\.mjs/g)).toHaveLength(2);
-    expect(orchestrator.match(/\['db', 'reset'/g)).toHaveLength(3); // Help, fixed base and fixed prior-main.
+    expect(orchestrator.match(/provision-test-users\.mjs/g)).toHaveLength(3);
+    expect(orchestrator.match(/\['db', 'reset'/g)).toHaveLength(4); // Help, fixed base, prior-main and schema six.
     for (const [stage, target] of [['S1-base-history', 'base'], ['S3-base-history', 'base'], ['S3-target-history', 'azure-target']]) {
       expect(orchestrator.replaceAll('\r\n', '\n')).toContain(`stage = '${stage}';\n    await history('${target}');`);
     }

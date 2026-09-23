@@ -76,7 +76,8 @@ for Phase 6 account deletion and is not implemented by this packet.
 Stage A adds READ COMMITTED admission using the existing approved-account row:
 ordinary mutations take SHARE NOWAIT; short deletion fence transitions take
 conflicting NO KEY UPDATE NOWAIT before profile/child/parent locks. Fresh
-all-role native INSERT/UPDATE/DELETE guards retain locks through transaction
+native INSERT/UPDATE/DELETE guards for every role in the supported origin-mode
+runtime retain locks through transaction
 completion. A permission probe alone is not publication proof. Completed
 deletion markers survive item/profile clearing until Auth identity deletion.
 
@@ -101,7 +102,7 @@ After explicit BEGIN, item/image mutation and Restore are refused; partial byte
 removal retains the frozen metadata and can resume using the same nonce and
 original/current versions. Private SECURITY DEFINER guards use fresh visibility
 of claims and Storage even for ordinary raw DELETE, so RLS-hidden orphan objects
-cannot masquerade as an empty prefix. An all-role immediate AFTER/ALWAYS
+cannot masquerade as an empty prefix. An immediate AFTER/origin-mode
 publication guard holds profile/approval/image/parent SHARE locks through commit,
 not merely through the earlier permission probe. It checks the exact pending
 image/path/owner and live parent, cancellation and claim state; identity/version/
@@ -169,12 +170,26 @@ The source-only vendor-table trigger exception is approved; actual catalog,
 backend identity, upgrade behavior and hosted privilege/cutover evidence remain
 separate gates. No hosted DDL or privileged bypass is authorized.
 
-The T26 disposable-CI installer uses one fixed Storage-owner connection solely
-to finalize and verify the exact ALWAYS guard; ordinary-session assertions
-remain separate. Docker/loopback trust is superuser-equivalent capability:
-selecting the owner constrains reviewed code, not authentication authority.
-An ordinary-only intermediate trigger is incomplete setup, never readiness
-or a production waiver. Hosted owner/quiescence cutover remains blocked.
+**23 September2026 HC1:** the
+[owner amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5791405199)
+and [reviewed A1-A6 plan](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5791784903)
+replace the historical T26 Storage-owner installer with one strict O/origin
+verifier. All eleven migration bytes, publication/deletion function bodies,
+locks, RLS and pending-object download/hash retry remain unchanged. Image identity
+protection on app-owned `item_images` remains A/ALWAYS; vendor `protect_delete`
+retains its O-or-A allowance. Application publication A is rejected, not accepted
+as an optional profile or automatically downgraded.
+
+O and A are not equivalent. Privileged replica-mode bulk operations are unsupported
+while live and are not protected by this publication guard. Checking the
+verifier's own postgres session does not establish every Storage connection's
+runtime mode. Actual hosted version/privilege/runtime, quiescence/admitted-request
+drain, coherent recovery, Auth/API/Edge EU and Cloudflare gates remain pending.
+Docker/loopback structural checks remain privileged evidence, not ordinary-owner
+access assertions. The original native late-upload/FINISH race must still reject
+late publication and prove zero actual catalog-prefix objects, not merely hidden
+reads. No read predicate is tightened to conceal a failure or break interrupted
+Save. No reset, deployment, provider activation or private-input permission follows.
 
 The reviewed PR #17/A1 checked-manual-Save source candidate retains a minimal
 private retry guard after item/image cleanup: exactly three UUIDs
