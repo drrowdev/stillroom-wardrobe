@@ -7,7 +7,7 @@ import {
   confirmsDescription, confirmsItem, prepareDescriptionAttempt, prepareGarmentAttempt, validDescription,
   type DescriptionAttempt, type ImageBaseline, type ItemAttempt, type ItemBaseline, type ItemDetail as Detail,
 } from '../../domain/item-details';
-import { garmentDraftDirty, newGarmentDraft, sameValue } from '../../domain/garment-fields';
+import { editGarmentField, enumFields, garmentDraftDirty, newGarmentDraft, sameValue } from '../../domain/garment-fields';
 import { ItemForm } from './item-form';
 import type { Language, MessageKey, Translate } from '../../i18n';
 import type { PrivateImages } from '../../images/private-images';
@@ -19,7 +19,7 @@ import { TrashAction } from '../settings/trash';
 import type { AiClient } from '../../data/ai';
 import { ReplacePhoto } from './replace-photo';
 
-type Dirty = { dirty: boolean; busy: boolean };
+type Outcome = 'confirmed' | 'rejected' | 'unknown' | 'skipped';
 type Shared = {
   client: AppClient; scope: OwnerScope; online: boolean; t: Translate; language: Language; currency: string; onSaved: () => void;
 };
@@ -27,12 +27,11 @@ function useSection<Base, Draft, Attempt>(initial: Base, initialDraft: (base: Ba
   prepare: (base: Base, draft: Draft, epoch: number) => Attempt,
   save: (client: AppClient, scope: OwnerScope, attempt: Attempt) => Promise<Base>,
   read: (detail: Detail) => Base, confirms: (row: Base, attempt: Attempt) => boolean,
-  itemId: string, props: Shared, onState: (state: Dirty) => void, isDirty?: (base: Base, draft: Draft) => boolean) {
+  itemId: string, props: Shared, onChecked: () => void, isDirty?: (base: Base, draft: Draft) => boolean) {
   const [base, setBase] = useState(initial);
   const [draft, setDraft] = useState(() => initialDraft(initial));
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
-  const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [discard, setDiscard] = useState(false);
   const latch = useRef(false);
@@ -46,51 +45,54 @@ function useSection<Base, Draft, Attempt>(initial: Base, initialDraft: (base: Ba
   const dirty = isDirty ? isDirty(base, draft) : JSON.stringify(draft) !== JSON.stringify(initialDraft(base));
   let valid = true;
   try { prepare(base, draft, props.scope.epoch); } catch { valid = false; }
-  useEffect(() => {
-    onState({ dirty: dirty || attempt !== null, busy });
-    return () => onState({ dirty: false, busy: false });
-  }, [dirty, attempt, busy, onState]);
   useEffect(() => { if (error) summary.current?.focus(); }, [error, busy]);
-  async function run(action: 'save' | 'check' | 'reload') {
+  // 'unknown' keeps the attempt frozen: only a read-only check or discard follows, never a resend.
+  async function run(action: 'save' | 'check' | 'reload', nextDraft?: Draft): Promise<Outcome> {
     if (latch.current || !props.online || props.scope.signal.aborted
-      || action === 'save' && (!valid || attempt !== null) || action === 'check' && !attempt) return;
+      || action === 'save' && attempt !== null || action === 'check' && !attempt) return 'skipped';
+    const sending = nextDraft ?? draft;
+    let frozenAttempt = attempt;
+    if (action === 'save') {
+      try { frozenAttempt = prepare(base, sending, props.scope.epoch); } catch { return 'skipped'; }
+    }
     const scope = { ...props.scope, signal: AbortSignal.any([props.scope.signal, lifetime.current.signal]) };
     latch.current = true;
-    setBusy(true); setSaved(false); setError(null);
-    let frozenAttempt = attempt;
+    setBusy(true); setError(null);
     try {
       let row: Base;
-      if (action === 'save') {
-        frozenAttempt = prepare(base, draft, scope.epoch);
+      if (action === 'save' && frozenAttempt) {
+        if (nextDraft !== undefined) setDraft(nextDraft);
         setAttempt(frozenAttempt);
         row = await save(props.client, scope, frozenAttempt);
       } else {
         row = read(await loadItemDetail(props.client, scope, itemId));
         if (action === 'check' && frozenAttempt && !confirms(row, frozenAttempt)) {
           if (!scope.signal.aborted) setError('detail.conflicting');
-          return;
+          return 'rejected';
         }
       }
-      if (scope.signal.aborted) return;
+      if (scope.signal.aborted) return 'skipped';
       setBase(row); setDraft(initialDraft(row)); setAttempt(null); setError(null);
-      setSaved(action !== 'reload');
-      props.onSaved();
+      if (action !== 'reload') props.onSaved();
+      return action === 'reload' ? 'skipped' : 'confirmed';
     } catch (problem) {
-      if (!scope.signal.aborted && !isAborted(problem)) setError(errorKey(problem));
+      if (scope.signal.aborted || isAborted(problem)) return 'skipped';
+      const key = errorKey(problem);
+      setError(key);
+      return key === 'detail.unconfirmed' || key === 'error.unavailable' ? 'unknown' : 'rejected';
     } finally {
       if (!scope.signal.aborted) { latch.current = false; setBusy(false); }
     }
   }
   return {
-    base, draft, setDraft: (next: Draft) => { setDraft(next); setSaved(false); }, dirty, saved, busy, error, summary,
-    locked: busy || attempt !== null, canSave: props.online && valid && !busy && attempt === null,
-    save: () => { void run('save'); },
+    base, draft, setDraft, dirty, busy, error, valid, attempt, run,
+    locked: busy || attempt !== null,
     controls: <>
       {error && <div ref={summary} tabIndex={-1} role="alert" className="notice notice-error">
         <p>{props.t(error)}</p>
         {attempt !== null && <div className="settings-actions">
           {(error === 'detail.unconfirmed' || error === 'detail.conflicting' || error === 'error.unavailable') &&
-            <button type="button" className="text-button" disabled={!props.online || busy} onClick={() => { void run('check'); }}>{props.t('detail.check')}</button>}
+            <button type="button" className="text-button" disabled={!props.online || busy} onClick={() => { void run('check').then((outcome) => { if (outcome === 'confirmed') onChecked(); }); }}>{props.t('detail.check')}</button>}
           <button type="button" className="text-button" disabled={!props.online || busy} onClick={(event) => { discardFocus.current = event.currentTarget; setDiscard(true); }}>{props.t('detail.reload')}</button>
         </div>}
       </div>}
@@ -108,51 +110,16 @@ const prepareFields = (base: ItemBaseline, draft: ReturnType<typeof itemDraft>, 
 const dirtyFields = (base: ItemBaseline, draft: ReturnType<typeof itemDraft>) => garmentDraftDirty(draft, base.values, base.provenance);
 const readItem = (detail: Detail) => detail.item;
 const readImage = (detail: Detail) => detail.image;
-
-function NameSection(props: Shared & { base: ItemBaseline; onState: (state: Dirty) => void; onItem: (item: ItemBaseline) => void }) {
-  const section = useSection<ItemBaseline, ReturnType<typeof itemDraft>, ItemAttempt>(
-    props.base, itemDraft, prepareFields, saveItemFields, readItem, confirmsItem, props.base.id, props, props.onState, dirtyFields);
-  const formattingOnly = !section.dirty && !section.locked && !section.error
-    && !sameValue(section.draft.raw, itemDraft(section.base).raw);
-  const { t } = props;
-  const { onItem } = props;
-  useEffect(() => { onItem(section.base); }, [section.base, onItem]);
-  return <section className="settings-card detail-name" aria-labelledby="detail-name-heading">
-    <h2 id="detail-name-heading">{t('detail.nameSection')}</h2>
-    <p className="muted fine">{t('detail.provenance')}</p>
-    <form className="stack" onSubmit={(event) => { event.preventDefault(); section.save(); }}>
-      <ItemForm draft={section.draft} onChange={section.setDraft} baseline={section.base.values} provenance={section.base.provenance}
-        language={props.language} t={t} prefix="detail" locked={section.locked} currency={props.currency} />
-      {section.controls}
-      <button className="button button-primary" disabled={!section.canSave}>{t(section.busy ? 'common.saving' : 'detail.saveName')}</button>
-      {formattingOnly && <p role="status" className="notice">{t('detail.noChanges')}</p>}
-      {section.saved && <p role="status" className="settings-success">{t('detail.nameSaved')}</p>}
-    </form>
-  </section>;
-}
-function DescriptionSection(props: Shared & { base: ImageBaseline; onState: (state: Dirty) => void; onImage: (image: ImageBaseline) => void }) {
-  const section = useSection<ImageBaseline, string, DescriptionAttempt>(
-    props.base, descriptionDraft, prepareDescriptionAttempt, saveImageDescription, readImage, confirmsDescription, props.base.itemId, props, props.onState);
-  const invalid = validDescription(section.draft) === null;
-  const { onImage } = props;
-  useEffect(() => { onImage(section.base); }, [section.base, onImage]);
-  const { t } = props;
-  return <section className="settings-card detail-description" aria-labelledby="detail-description-heading">
-    <h2 id="detail-description-heading">{t('detail.descriptionSection')}</h2>
-    <p className="muted fine">{t('detail.descriptionHint')}</p>
-    <form className="stack" onSubmit={(event) => { event.preventDefault(); section.save(); }}>
-      <div className="field"><label htmlFor="detail-description">{t('item.altText')}</label>
-        <textarea id="detail-description" value={section.draft} rows={4} disabled={section.locked}
-          aria-invalid={invalid} aria-describedby={invalid ? 'detail-description-error' : undefined}
-          onChange={(event) => section.setDraft(event.target.value)} />
-        {invalid && <p id="detail-description-error" role="alert" className="notice notice-error">{t('detail.invalidDescription')}</p>}
-        <button className="text-button" type="button" disabled={section.locked || !section.draft} onClick={() => section.setDraft('')}>{t('detail.clearDescription')}</button>
-      </div>
-      {section.controls}
-      <button className="button button-primary" disabled={!section.canSave}>{t(section.busy ? 'common.saving' : 'detail.saveDescription')}</button>
-      {section.saved && <p role="status" className="settings-success">{t('detail.descriptionSaved')}</p>}
-    </form>
-  </section>;
+const lifecycleLabels: Record<string, MessageKey> = { donated: 'lifecycle.donated', sold: 'lifecycle.sold' };
+const availabilityLabels: Record<typeof enumFields.availability[number], MessageKey> = {
+  ready: 'availability.ready', laundry: 'availability.laundry', repair: 'availability.repair', lent: 'availability.lent',
+};
+function focusFirstInvalid(form: HTMLFormElement | null) {
+  const input = form?.querySelector<HTMLElement>('[aria-invalid="true"]');
+  for (let ancestor = input?.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+  }
+  requestAnimationFrame(() => input?.focus());
 }
 function SavedPhoto({ image, images, t }: { image: ImageBaseline; images: PrivateImages; t: Translate }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -169,38 +136,108 @@ function SavedPhoto({ image, images, t }: { image: ImageBaseline; images: Privat
     <p role="status">{failed ? <><Icon name="photo" />{t('photo.missing')}</> : t('common.loading')}</p>}</div>;
 }
 function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecycle: ItemLifecycleClient; onTrashed: (item: LifecycleSnapshot) => void; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void;
-  ai: AiClient; onBeforeDiscard: (handler: BeforeDiscard | null) => void; onReload: () => void }) {
-  const [nameState, setNameState] = useState<Dirty>({ dirty: false, busy: false });
-  const [descriptionState, setDescriptionState] = useState<Dirty>({ dirty: false, busy: false });
-  const [image, setImage] = useState(props.detail.image);
-  const [item, setItem] = useState(props.detail.item);
+  ai: AiClient; onBeforeDiscard: (handler: BeforeDiscard | null) => void; onReload: () => void; onTitle: (title: string) => void }) {
+  const [outcome, setOutcome] = useState<'saved' | 'partial' | null>(null);
+  // A confirmed read-only check reports "Saved" only when the other section has nothing unsaved or outstanding.
+  const outstanding = useRef({ item: false, description: false });
+  const itemChecked = useCallback(() => { if (!outstanding.current.description) setOutcome('saved'); }, []);
+  const descriptionChecked = useCallback(() => { if (!outstanding.current.item) setOutcome('saved'); }, []);
+  const item = useSection<ItemBaseline, ReturnType<typeof itemDraft>, ItemAttempt>(
+    props.detail.item, itemDraft, prepareFields, saveItemFields, readItem, confirmsItem, props.detail.item.id, props, itemChecked, dirtyFields);
+  const description = useSection<ImageBaseline, string, DescriptionAttempt>(
+    props.detail.image, descriptionDraft, prepareDescriptionAttempt, saveImageDescription, readImage, confirmsDescription, props.detail.item.id, props, descriptionChecked);
   const [lifecycleState, setLifecycleState] = useState({ busy: false, pending: false });
   const [mode, setMode] = useState<'replacement' | 'recovery' | null>(null);
   const [photoState, setPhotoState] = useState({ dirty: false, incomplete: false, busy: false });
+  const [saving, setSaving] = useState(false);
+  const saveLatch = useRef(false);
+  const form = useRef<HTMLFormElement>(null);
   const onPhotoState = useCallback((dirty: boolean, incomplete: boolean, busy: boolean) => setPhotoState({ dirty, incomplete, busy }), []);
   const onLifecycleState = useCallback((busy: boolean, pending: boolean) => setLifecycleState({ busy, pending }), []);
-  const { onDirty } = props;
+  const { onDirty, onTitle, t } = props;
+  const sectionsDirty = item.dirty || description.dirty || item.attempt !== null || description.attempt !== null;
+  const sectionsBusy = item.busy || description.busy || saving;
+  const itemOutstanding = item.dirty || item.attempt !== null, descriptionOutstanding = description.dirty || description.attempt !== null;
+  useEffect(() => { outstanding.current = { item: itemOutstanding, description: descriptionOutstanding }; }, [itemOutstanding, descriptionOutstanding]);
   useEffect(() => {
-    onDirty(nameState.dirty || descriptionState.dirty || lifecycleState.pending || photoState.dirty,
-      photoState.incomplete, nameState.busy || descriptionState.busy || lifecycleState.busy || photoState.busy);
+    onDirty(sectionsDirty || lifecycleState.pending || photoState.dirty,
+      photoState.incomplete, sectionsBusy || lifecycleState.busy || photoState.busy);
     return () => onDirty(false, false, false);
-  }, [nameState, descriptionState, lifecycleState, photoState, onDirty]);
-  const blocked = nameState.dirty || descriptionState.dirty || nameState.busy || descriptionState.busy || lifecycleState.busy || lifecycleState.pending;
-  if (mode) return <ReplacePhoto {...props} item={item} image={image} mode={mode} onDirty={onPhotoState}
+  }, [sectionsDirty, sectionsBusy, lifecycleState, photoState, onDirty]);
+  useEffect(() => { onTitle(item.base.title); }, [item.base.title, onTitle]);
+  const blocked = sectionsDirty || sectionsBusy || lifecycleState.busy || lifecycleState.pending;
+  const quickReady = props.online && !blocked;
+  const formattingOnly = !item.dirty && !item.locked && !item.error
+    && !sameValue(item.draft.raw, itemDraft(item.base).raw);
+  const invalidDescription = validDescription(description.draft) === null;
+  const canSave = props.online && !sectionsBusy && item.attempt === null && description.attempt === null && (item.dirty || description.dirty);
+  // One Save: the item goes first; the description is sent only after the item is confirmed. Nothing is ever resent.
+  async function saveAll() {
+    if (saveLatch.current || !canSave) return;
+    const itemDirty = item.dirty, descriptionDirty = description.dirty;
+    if (itemDirty && !item.valid || descriptionDirty && !description.valid) { focusFirstInvalid(form.current); return; }
+    const text = description.draft;
+    saveLatch.current = true; setSaving(true); setOutcome(null);
+    try {
+      if (itemDirty && await item.run('save') !== 'confirmed') return;
+      if (descriptionDirty && await description.run('save', text) !== 'confirmed') {
+        if (itemDirty) setOutcome('partial');
+        return;
+      }
+      setOutcome('saved');
+    } finally { saveLatch.current = false; setSaving(false); }
+  }
+  async function quick(field: 'availability' | 'lifecycle', value: string) {
+    if (!quickReady || saveLatch.current) return;
+    saveLatch.current = true; setOutcome(null);
+    try { if (await item.run('save', editGarmentField(item.draft, field, value, props.language)) === 'confirmed') setOutcome('saved'); }
+    finally { saveLatch.current = false; }
+  }
+  if (mode) return <ReplacePhoto {...props} item={item.base} image={description.base} mode={mode} onDirty={onPhotoState}
     onClose={() => { setMode(null); props.onReload(); }} />;
+  const lifecycle = item.draft.raw.lifecycle;
   return <div className="detail-layout">
-    <SavedPhoto image={image} images={props.images} t={props.t} />
+    <SavedPhoto image={description.base} images={props.images} t={t} />
     <div className="detail-sections">
       <div className="photo-actions">
-        <button className="button button-secondary" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('replacement'); }}>{props.t('imageChange.replace')}</button>
-        <button className="text-button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('recovery'); }}>{props.t('imageChange.recover')}</button>
+        <button className="button button-secondary" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('replacement'); }}>{t('imageChange.replace')}</button>
+        <button className="text-button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('recovery'); }}>{t('imageChange.recover')}</button>
       </div>
       <fieldset className="lifecycle-edit-lock" disabled={lifecycleState.busy || lifecycleState.pending}>
-        <NameSection {...props} base={props.detail.item} onState={setNameState} onItem={setItem} />
-        <DescriptionSection {...props} base={props.detail.image} onState={setDescriptionState} onImage={setImage} />
+        <fieldset className="detail-availability" disabled={!quickReady}>
+          <legend>{t('detail.availability')}</legend>
+          {enumFields.availability.map((value) => <label key={value} className="choice">
+            <input type="radio" name="detail-availability" value={value} checked={item.draft.raw.availability === value}
+              onChange={() => { void quick('availability', value); }} />{t(availabilityLabels[value])}
+          </label>)}
+        </fieldset>
+        <section className="settings-card detail-name" aria-label={t('capture.detailsTitle')}>
+          <form ref={form} className="stack" onSubmit={(event) => { event.preventDefault(); void saveAll(); }}>
+            <ItemForm draft={item.draft} onChange={(next) => { item.setDraft(next); setOutcome(null); }} baseline={item.base.values} provenance={item.base.provenance}
+              language={props.language} t={t} prefix="detail" locked={item.locked || saving} currency={props.currency}>
+              <div className="field"><label htmlFor="detail-description">{t('item.altText')}</label>
+                <textarea id="detail-description" value={description.draft} rows={3} disabled={description.locked || saving}
+                  aria-invalid={invalidDescription} aria-describedby={invalidDescription ? 'detail-description-error' : undefined}
+                  onChange={(event) => { description.setDraft(event.target.value); setOutcome(null); }} />
+                {invalidDescription && <p id="detail-description-error" role="alert" className="notice notice-error">{t('detail.invalidDescription')}</p>}
+              </div>
+            </ItemForm>
+            {item.controls}
+            {outcome === 'partial' && <p role="alert" className="notice notice-error">{t('detail.descriptionFailed')}</p>}
+            {description.controls}
+            <button className="button button-primary" disabled={!canSave}>{t(sectionsBusy ? 'common.saving' : 'detail.saveChanges')}</button>
+            {formattingOnly && <p role="status" className="notice">{t('detail.noChanges')}</p>}
+            {outcome === 'saved' && !sectionsDirty && <p role="status" className="settings-success">{t('detail.saved')}</p>}
+          </form>
+        </section>
+        <div className="detail-archive">
+          {lifecycle === 'active'
+            ? <button type="button" className="button button-secondary" disabled={!quickReady} onClick={() => { void quick('lifecycle', 'archived'); }}>{t('detail.archive')}</button>
+            : <><p>{t(lifecycleLabels[lifecycle] ?? 'detail.archived')}</p>
+              <button type="button" className="button button-secondary" disabled={!quickReady} onClick={() => { void quick('lifecycle', 'active'); }}>{t('detail.unarchive')}</button></>}
+        </div>
       </fieldset>
-      <TrashAction {...props} item={item} image={image} onState={onLifecycleState}
-        blocked={nameState.dirty || descriptionState.dirty || nameState.busy || descriptionState.busy} />
+      <TrashAction {...props} item={item.base} image={description.base} onState={onLifecycleState} blocked={sectionsDirty || sectionsBusy} />
     </div>
   </div>;
 }
@@ -212,11 +249,12 @@ export function ItemDetail(props: Shared & {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
   const [reload, setReload] = useState(0);
+  const [title, setTitle] = useState<string | null>(null);
   const { client, scope, itemId, t } = props;
   useEffect(() => {
     const controller = new AbortController();
     const current = { ...scope, signal: AbortSignal.any([scope.signal, controller.signal]) };
-    setDetail(null); setError(null);
+    setDetail(null); setError(null); setTitle(null);
     if (!itemId) setError('detail.unavailable');
     else void loadItemDetail(client, current, itemId).then((row) => {
       if (!current.signal.aborted) setDetail(row);
@@ -227,9 +265,9 @@ export function ItemDetail(props: Shared & {
   }, [client, scope, itemId, reload]);
   return <section className="detail-page" aria-labelledby="item-detail-title">
     <button className="text-button" onClick={(event) => { event.currentTarget.focus(); props.onBack(); }}>{t('common.back')}</button>
-    <header className="settings-heading"><h1 id="item-detail-title" tabIndex={-1}>{t('detail.title')}</h1></header>
+    <header className="settings-heading"><h1 id="item-detail-title" tabIndex={-1}>{title || t('detail.title')}</h1></header>
     {error ? <div className="notice notice-error" role="alert"><p>{t(error)}</p>
       <button className="text-button" disabled={!props.online} onClick={() => setReload((value) => value + 1)}>{t('common.retry')}</button></div>
-      : detail ? <Editor {...props} detail={detail} onReload={() => { setDetail(null); setReload(value => value + 1); }} /> : <p role="status">{t('common.loading')}</p>}
+      : detail ? <Editor {...props} detail={detail} onTitle={setTitle} onReload={() => { setDetail(null); setReload(value => value + 1); }} /> : <p role="status">{t('common.loading')}</p>}
   </section>;
 }

@@ -6,8 +6,10 @@ import { mockBackend, owners, signIn, type MockOptions } from './mock-backend';
 
 export async function manualEntry(page: Page) {
   const language = await page.locator('html').getAttribute('lang') as Language;
-  await expect(page.getByText(messages['aiC.checking'][language], { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: messages['aiC.continueManual'][language], exact: true }).click();
+  // Manual entry is implicit: once the AI check settles without filling anything, Save is available directly.
+  await expect(page.getByText(messages['aiC.filling'][language], { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: messages['capture.save'][language], exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: messages['aiC.keep'][language], exact: true })).toHaveCount(0);
 }
 export async function aiFixture(page: Page, language: Language = 'en', enabled = true, lost?: 'reservation' | 'finalizer',
   observeRawAnalysis = false, imageChangeLoss?: MockOptions['imageChangeLoss']) {
@@ -39,7 +41,7 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
       const result: AiResult = { schemaVersion: 1, requestId, draftId, generation, imageSha256,
         modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 1, createdAtMs: Date.now() - 1, expiresAtMs: Date.now() + ttl,
         facts: analysisMode === 'unclear' ? { outcome: 'unclear', fields: unknown }
-          : { outcome: 'ready', fields: { ...unknown, category: 'top', colours: ['green'], formality: 0, material: 'Cotton' } } };
+          : { outcome: 'ready', fields: { ...unknown, category: 'top', colours: ['green'], formality: 0, material: 'Cotton', sleeve_length: 'long', style_tags: ['relaxed'] } } };
       results.set(requestId, result);
       if (analysisMode === 'timeout') return { body: { code: 'TIMEOUT' }, status: 504 };
       return { body: { code: 'OK', status: analysisMode === 'pending' ? 'dispatched' : 'ready',

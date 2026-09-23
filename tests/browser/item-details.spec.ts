@@ -10,19 +10,24 @@ import { aiFixture } from './ai-photo-first-support';
 async function imageChangeSetup(page: Page, language: Language = 'en', loss?: 'reservation' | 'finalizer') {
   const api = await aiFixture(page, language, true, undefined, false, loss);
   const saved = api.seedSavedItem(), foreign = api.seedSavedItem('b', 'Robin private');
-  Object.assign(saved.item, { brand: 'Legacy brand' });
-  saved.item.field_provenance = { subcategory: { kind: 'user', revision: 3 }, material: { kind: 'unknown', revision: 2 } };
+  Object.assign(saved.item, { brand: 'Legacy brand', sleeve_length: 'short' });
+  saved.item.field_provenance = { subcategory: { kind: 'user', revision: 3 }, material: { kind: 'unknown', revision: 2 },
+    sleeve_length: { kind: 'user', revision: 3 } };
   await page.reload();
   await expect(page.locator('.item-card')).toHaveCount(1);
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
   await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
+  await openMore(page);
   return { api, ...saved, foreign };
 }
 async function replacementPhoto(page: Page, api: Awaited<ReturnType<typeof aiFixture>>, language: Language = 'en') {
   await page.getByRole('button', { name: messages['imageChange.replace'][language], exact: true }).click();
   await expect(page.locator('.image-change input[type=file]').first()).toBeEnabled();
+  const analyses = api.inputs.length;
   await page.locator('.image-change input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
-  await expect(page.getByText(messages['aiC.ready'][language], { exact: true })).toBeVisible();
+  await expect.poll(() => api.inputs.length).toBe(analyses + 1);
+  await expect(page.getByRole('button', { name: messages['imageChange.save'][language], exact: true })).toBeEnabled();
+  await expect(page.locator('#analysis-status')).toHaveCount(0);
 }
 async function saveReplacement(page: Page, language: Language = 'en') {
   await page.getByRole('button', { name: messages['imageChange.save'][language], exact: true }).click();
@@ -62,6 +67,9 @@ test('I10b replacement protects saved fields and clears, explicit Save atomicall
   expect(item.title).toBe('My saved replacement'); expect(item.brand).toBe('Legacy brand'); expect(item.subcategory).toBeNull();
   expect(item.field_provenance).toMatchObject({ title: { kind: 'user', revision: 1 }, material: { kind: 'ai_estimated', revision: 3 },
     subcategory: { kind: 'user', revision: 3 } });
+  expect(item.sleeve_length).toBe('short');
+  expect((item.field_provenance as Record<string, unknown>).sleeve_length).toEqual((before.field_provenance as Record<string, unknown>).sleeve_length);
+  expect(item.garment_length).toBe(before.garment_length); expect(item.style_tags).toEqual(before.style_tags);
   expect(image.state).toBe('retired'); expect(image.id).toBe(oldImage.id);
   const ready = api.images.find(row => row.item_id === item.id && row.state === 'ready')!;
   expect(ready.id).not.toBe(image.id); expect(ready.description_version).toBe(1);
@@ -146,8 +154,11 @@ test('I10b consecutive replacements reload the current saved caption before anot
 
 const itemUrl = 'http://127.0.0.1:54321/rest/v1/items*';
 const descriptionUrl = 'http://127.0.0.1:54321/rest/v1/rpc/update_image_description';
-const nameSave = (page: Page, language: Language = 'en') => page.getByRole('button', { name: messages['detail.saveName'][language], exact: true });
-const descriptionSave = (page: Page, language: Language = 'en') => page.getByRole('button', { name: messages['detail.saveDescription'][language], exact: true });
+const save = (page: Page, language: Language = 'en') => page.getByRole('button', { name: messages['detail.saveChanges'][language], exact: true });
+async function openMore(page: Page) {
+  await expect(page.locator('#detail-title')).toBeVisible();
+  await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
+}
 async function setup(page: Page, language: Language = 'en') {
   const api = await mockBackend(page, { initialLanguage: language });
   const saved = api.seedSavedItem();
@@ -155,6 +166,7 @@ async function setup(page: Page, language: Language = 'en') {
   await page.goto('/'); await signIn(page);
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
   await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
+  await openMore(page);
   return { api, ...saved, foreign };
 }
 function writes(page: Page) {
@@ -168,46 +180,43 @@ function writes(page: Page) {
   return calls;
 }
 for (const language of ['en', 'fi', 'sv'] as const) {
-  test(`saved editor ${language}: independent explicit saves, clear and persisted reload`, async ({ page }) => {
+  test(`saved editor ${language}: one Save sends the item first, then the description; clear and persisted reload`, async ({ page }) => {
     const { api, item, image, foreign } = await setup(page, language);
     const oldItem = structuredClone(item), oldImage = structuredClone(image), oldForeign = structuredClone(foreign);
     const oldFiles = [...api.files].map(([key, value]) => [key, createHash('sha256').update(value).digest('hex')]);
     const calls = writes(page);
-    await expect(nameSave(page, language)).toBeDisabled();
-    await expect(descriptionSave(page, language)).toBeDisabled();
-    await expect(page.getByRole('heading', { name: messages['detail.title'][language], exact: true })).toBeVisible();
+    await expect(save(page, language)).toBeDisabled();
+    await expect(page.getByRole('heading', { level: 1, name: item.title, exact: true })).toBeVisible();
     await page.locator('#detail-title').fill('Å overshirt 🌿');
     await page.locator('#detail-category').selectOption('layer');
     await page.locator('#detail-description').fill('Oma kuvaus / egen beskrivning');
     expect(calls).toHaveLength(0);
-    await nameSave(page, language).click();
-    await expect(page.getByText(messages['detail.nameSaved'][language], { exact: true })).toBeVisible();
+    await save(page, language).click();
+    await expect(page.getByText(messages['detail.saved'][language], { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Å overshirt 🌿', exact: true })).toBeVisible();
     await expect(page.locator('#detail-description')).toHaveValue('Oma kuvaus / egen beskrivning');
-    await expect(page.getByText(messages['detail.descriptionSaved'][language], { exact: true })).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`#/items/${item.id}$`));
     expect(item).toEqual({ ...oldItem, title: 'Å overshirt 🌿', category: 'layer', version: 2, updated_at: item.updated_at,
       field_provenance: { title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 } } });
-    expect(image).toEqual(oldImage);
-    await page.locator('#detail-title').fill('Sibling draft');
-    await descriptionSave(page, language).click();
-    await expect(page.getByText(messages['detail.descriptionSaved'][language], { exact: true })).toBeVisible();
-    await expect(page.locator('#detail-title')).toHaveValue('Sibling draft');
     expect(image).toEqual({ ...oldImage, alt_text: 'Oma kuvaus / egen beskrivning', description_version: 2 });
     expect(calls).toHaveLength(2);
+    expect(calls[0]!.method).toBe('PATCH');
     expect(calls[0]!.query.get('id')).toBe(`eq.${item.id}`);
     expect(calls[0]!.query.get('owner_id')).toBe(`eq.${owners.a}`);
     expect(calls[0]!.query.get('version')).toBe('eq.1');
     expect(Object.keys(calls[0]!.body).sort()).toEqual(['category', 'field_provenance', 'title']);
     expect(calls[1]!.body).toEqual({ p_image_id: image.id, p_expected_description_version: 1, p_alt_text: 'Oma kuvaus / egen beskrivning' });
-    page.once('dialog', (dialog) => { void dialog.accept(); });
+    await expect(save(page, language)).toBeDisabled();
     await page.reload();
+    await openMore(page);
     await expect(page.locator('#detail-title')).toHaveValue('Å overshirt 🌿');
     await expect(page.locator('#detail-description')).toHaveValue('Oma kuvaus / egen beskrivning');
-    await page.getByRole('button', { name: messages['detail.clearDescription'][language], exact: true }).click();
-    await descriptionSave(page, language).click();
-    await expect(page.getByText(messages['detail.descriptionSaved'][language], { exact: true })).toBeVisible();
+    await page.locator('#detail-description').fill('');
+    await save(page, language).click();
+    await expect(page.getByText(messages['detail.saved'][language], { exact: true })).toBeVisible();
     expect(image.alt_text).toBe('');
     expect(item.version).toBe(2);
+    expect(calls).toHaveLength(3);
     await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
     await expect(page.locator('.item-card')).toHaveCount(1);
     await expect(page.locator('.item-card h2')).toHaveText('Å overshirt 🌿');
@@ -218,90 +227,74 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(api.requests.some((call) => call.path.startsWith('/functions/') || call.path.startsWith('/storage/') && call.method !== 'GET')).toBe(false);
     expect(api.uploadWire.posts).toBe(0);
   });
-  test(`saved editor ${language}: Unicode limits preserve input, sibling drafts and saved reload`, async ({ page }) => {
+  test(`saved editor ${language}: Unicode limits preserve input and a blocked Save sends nothing`, async ({ page }) => {
     const api = await mockBackend(page, { initialLanguage: language });
     const { item, image } = api.seedSavedItem('a', '🌿'.repeat(100));
     image.alt_text = '🌿'.repeat(240);
     await page.goto('/'); await signIn(page);
     await page.locator(`a[href="#/items/${item.id}"]`).click();
+    await openMore(page);
     const title = page.locator('#detail-title'), description = page.locator('#detail-description');
     const titleError = page.locator('#detail-title-error'), descriptionError = page.locator('#detail-description-error');
     const calls = writes(page);
     await expect(title).toHaveValue('🌿'.repeat(100));
     await expect(description).toHaveValue('🌿'.repeat(240));
-    await expect(nameSave(page, language)).toBeDisabled();
-    await expect(descriptionSave(page, language)).toBeDisabled();
+    await expect(save(page, language)).toBeDisabled();
     await expect(title).toHaveAttribute('aria-invalid', 'false');
     await expect(description).toHaveAttribute('aria-invalid', 'false');
 
     await title.fill('🍂'.repeat(100));
-    await expect(title).toHaveValue('🍂'.repeat(100));
-    await expect(nameSave(page, language)).toBeEnabled();
+    await expect(save(page, language)).toBeEnabled();
     await page.keyboard.insertText('🍂');
     await expect(title).toHaveValue('🍂'.repeat(101));
     await expect(titleError).toHaveText(messages['detail.invalidFields'][language]);
-    await expect(titleError).toBeVisible();
     await expect(title).toHaveAttribute('aria-invalid', 'true');
     await expect(title).toHaveAttribute('aria-describedby', 'detail-title-error');
-    await expect(nameSave(page, language)).toBeDisabled();
-
     await description.fill('🍂'.repeat(240));
-    await expect(description).toHaveValue('🍂'.repeat(240));
-    await expect(descriptionSave(page, language)).toBeEnabled();
     await page.keyboard.insertText('🍂');
     await expect(description).toHaveValue('🍂'.repeat(241));
     await expect(descriptionError).toHaveText(messages['detail.invalidDescription'][language]);
-    await expect(descriptionError).toBeVisible();
     await expect(description).toHaveAttribute('aria-invalid', 'true');
     await expect(description).toHaveAttribute('aria-describedby', 'detail-description-error');
-    await expect(descriptionSave(page, language)).toBeDisabled();
+    await save(page, language).click();
+    await expect(title).toBeFocused();
     expect(calls).toHaveLength(0);
 
     await title.fill('');
     await page.keyboard.insertText('🍂'.repeat(100));
-    await expect(title).toHaveValue('🍂'.repeat(100));
     await expect(titleError).toHaveCount(0);
     await expect(title).toHaveAttribute('aria-invalid', 'false');
     await expect(title).not.toHaveAttribute('aria-describedby');
-    await expect(nameSave(page, language)).toBeEnabled();
-    await nameSave(page, language).click();
-    await expect(page.getByText(messages['detail.nameSaved'][language], { exact: true })).toBeVisible();
-    expect(item.title).toBe('🍂'.repeat(100));
+    await save(page, language).click();
+    await expect(description).toBeFocused();
     await expect(description).toHaveValue('🍂'.repeat(241));
-    await expect(descriptionSave(page, language)).toBeDisabled();
+    expect(calls).toHaveLength(0);
 
-    await title.fill('');
-    await page.keyboard.insertText('🌿'.repeat(101));
-    await expect(title).toHaveValue('🌿'.repeat(101));
-    await expect(titleError).toBeVisible();
-    await expect(nameSave(page, language)).toBeDisabled();
-    await description.fill('');
-    await page.keyboard.insertText('🌿'.repeat(241));
-    await expect(description).toHaveValue('🌿'.repeat(241));
-    await expect(descriptionError).toBeVisible();
-    await expect(descriptionSave(page, language)).toBeDisabled();
     await description.fill('');
     await page.keyboard.insertText('🍂'.repeat(240));
-    await expect(description).toHaveValue('🍂'.repeat(240));
     await expect(descriptionError).toHaveCount(0);
     await expect(description).toHaveAttribute('aria-invalid', 'false');
     await expect(description).not.toHaveAttribute('aria-describedby');
-    await expect(descriptionSave(page, language)).toBeEnabled();
-    await descriptionSave(page, language).click();
-    await expect(page.getByText(messages['detail.descriptionSaved'][language], { exact: true })).toBeVisible();
+    await save(page, language).click();
+    await expect(page.getByText(messages['detail.saved'][language], { exact: true })).toBeVisible();
+    expect(item.title).toBe('🍂'.repeat(100));
     expect(image.alt_text).toBe('🍂'.repeat(240));
-    await expect(title).toHaveValue('🌿'.repeat(101));
-    await expect(nameSave(page, language)).toBeDisabled();
     expect(calls).toHaveLength(2);
+    await expect(save(page, language)).toBeDisabled();
 
+    await title.fill('');
+    await page.keyboard.insertText('🌿'.repeat(101));
+    await expect(titleError).toBeVisible();
+    await save(page, language).click();
+    await expect(title).toBeFocused();
+    expect(calls).toHaveLength(2);
     await title.fill('🍂'.repeat(100));
-    await expect(nameSave(page, language)).toBeDisabled();
-    await expect(descriptionSave(page, language)).toBeDisabled();
+    await expect(save(page, language)).toBeDisabled();
     await page.reload();
+    await openMore(page);
     await expect(title).toHaveValue('🍂'.repeat(100));
     await expect(description).toHaveValue('🍂'.repeat(240));
-    await expect(nameSave(page, language)).toBeDisabled();
-    await expect(descriptionSave(page, language)).toBeDisabled();
+    await expect(save(page, language)).toBeDisabled();
     await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
     await expect(page.locator('.item-card h2')).toHaveText('🍂'.repeat(100));
     expect(calls).toHaveLength(2);
@@ -311,14 +304,17 @@ test('saved editor keeps required validation, literal XSS text and no implicit w
   const { item } = await setup(page);
   const calls = writes(page);
   await page.locator('#detail-title').fill('   ');
-  await expect(nameSave(page)).toBeDisabled();
+  await save(page).click();
+  await expect(page.locator('#detail-title')).toBeFocused();
+  await expect(page.locator('#detail-title')).toHaveAttribute('aria-invalid', 'true');
   await page.locator('#detail-title').fill('x'.repeat(101));
   await expect(page.locator('#detail-title')).toHaveValue('x'.repeat(101));
   await expect(page.getByText(messages['detail.invalidFields'].en, { exact: true })).toBeVisible();
-  await expect(nameSave(page)).toBeDisabled();
+  await save(page).click();
+  expect(calls).toHaveLength(0);
   await page.locator('#detail-title').fill('<img src=x onerror=alert(1)>');
-  await nameSave(page).click();
-  await expect(page.getByText(messages['detail.nameSaved'].en, { exact: true })).toBeVisible();
+  await save(page).click();
+  await expect(page.getByText(messages['detail.saved'].en, { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(page.locator('.item-card h2')).toHaveText('<img src=x onerror=alert(1)>');
   await expect(page.locator('.item-card h2 img')).toHaveCount(0);
@@ -336,11 +332,10 @@ test('language and offline changes preserve both drafts and disable offline writ
   await expect(page.locator('#detail-title')).toHaveValue('Oma nimi');
   await expect(page.locator('#detail-description')).toHaveValue('Egen beskrivning');
   await context.setOffline(true);
-  await expect(nameSave(page, 'fi')).toBeDisabled();
-  await expect(descriptionSave(page, 'fi')).toBeDisabled();
+  await expect(save(page, 'fi')).toBeDisabled();
+  await expect(page.locator('.detail-availability input').first()).toBeDisabled();
   await context.setOffline(false);
-  await expect(nameSave(page, 'fi')).toBeEnabled();
-  await expect(descriptionSave(page, 'fi')).toBeEnabled();
+  await expect(save(page, 'fi')).toBeEnabled();
 });
 test('dirty Back navigation and hash changes require explicit discard and preserve cancel focus', async ({ page }) => {
   const { api, item } = await setup(page);
@@ -366,16 +361,16 @@ test('conflict retains frozen draft and section reload never discards the siblin
   await page.locator('#detail-title').fill('My attempt');
   await page.locator('#detail-description').fill('Sibling description');
   Object.assign(item, { title: 'Another saved name', version: 2 });
-  await nameSave(page).click();
+  await save(page).click();
   await expect(page.locator('.detail-name [role="alert"]')).toBeFocused();
   await expect(page.locator('#detail-title')).toHaveValue('My attempt');
-  await expect(nameSave(page)).toBeDisabled();
+  await expect(save(page)).toBeDisabled();
   await expect(page.getByRole('button', { name: messages['detail.check'].en })).toHaveCount(0);
   await page.getByRole('button', { name: messages['detail.reload'].en }).click();
   await page.getByRole('button', { name: messages['common.continueEditing'].en }).click();
   await expect(page.locator('#detail-title')).toHaveValue('My attempt');
   await page.getByRole('button', { name: messages['detail.reload'].en }).click();
-  await page.getByRole('button', { name: messages['common.discard'].en }).click();
+  await page.getByRole('dialog').getByRole('button', { name: messages['common.discard'].en }).click();
   await expect(page.locator('#detail-title')).toHaveValue('Another saved name');
   await expect(page.locator('#detail-description')).toHaveValue('Sibling description');
 });
@@ -386,7 +381,8 @@ for (const section of ['name', 'description'] as const) {
     const target = section === 'name' ? '#detail-title' : '#detail-description';
     const sibling = section === 'name' ? '#detail-description' : '#detail-title';
     await page.locator(target).fill('Attempted text');
-    await page.locator(sibling).fill('Sibling draft');
+    // An unconfirmed item keeps its sibling description unsent; a lone description attempt leaves the name untouched.
+    if (section === 'name') await page.locator(sibling).fill('Sibling draft');
     await page.route(section === 'name' ? itemUrl : descriptionUrl, async (route) => {
       if (route.request().method() === 'GET') { await route.fallback(); return; }
       const body = route.request().postDataJSON() as Record<string, unknown>;
@@ -394,16 +390,34 @@ for (const section of ['name', 'description'] as const) {
       else Object.assign(image, { alt_text: body.p_alt_text, description_version: 2 });
       await route.fulfill({ status: 503, json: { message: 'Private upstream error' } });
     });
-    await (section === 'name' ? nameSave(page) : descriptionSave(page)).click();
+    await save(page).click();
     await expect(page.getByText(messages['detail.unconfirmed'].en, { exact: true })).toBeVisible();
     await expect(page.locator(target)).toBeDisabled();
-    await expect(page.locator(sibling)).toHaveValue('Sibling draft');
+    const siblingValue = section === 'name' ? 'Sibling draft' : item.title;
+    await expect(page.locator(sibling)).toHaveValue(siblingValue);
+    await expect(save(page)).toBeDisabled();
+    await expect(page.locator('.detail-availability input').first()).toBeDisabled();
     await expect(page.getByText('Private upstream error')).toHaveCount(0);
-    await page.getByRole('button', { name: messages['detail.check'].en }).click();
-    await expect(page.getByText(messages[section === 'name' ? 'detail.nameSaved' : 'detail.descriptionSaved'].en, { exact: true })).toBeVisible();
     expect(calls).toHaveLength(1);
-    await expect(page.locator(sibling)).toHaveValue('Sibling draft');
+    await page.getByRole('button', { name: messages['detail.check'].en }).click();
     await expect(page.locator(target)).toBeEnabled();
+    expect(calls).toHaveLength(1);
+    await expect(page.locator(sibling)).toHaveValue(siblingValue);
+    if (section === 'description') {
+      await expect(page.getByText(messages['detail.saved'].en, { exact: true })).toBeVisible();
+      return;
+    }
+    // Only the item was confirmed: the unsaved description waits for the next explicit Save, with no full-success message.
+    await expect(save(page)).toBeEnabled();
+    await expect(page.getByText(messages['detail.saved'].en, { exact: true })).toHaveCount(0);
+    expect(image.alt_text).toBe('An olive overshirt');
+    await page.unroute(itemUrl);
+    await save(page).click();
+    await expect(page.getByText(messages['detail.saved'].en, { exact: true })).toBeVisible();
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.path).toBe('/rest/v1/rpc/update_image_description');
+    expect(calls[1]!.body.p_alt_text).toBe('Sibling draft');
+    expect(image.alt_text).toBe('Sibling draft');
   });
 }
 for (const mismatch of ['later version', 'unchanged version', 'untouched physical fact', 'untouched provenance', 'replacement image'] as const) {
@@ -426,20 +440,20 @@ for (const mismatch of ['later version', 'unchanged version', 'untouched physica
       }
       await route.fulfill({ status: 503, json: {} });
     });
-    await (description ? descriptionSave(page) : nameSave(page)).click();
+    await save(page).click();
     await expect(page.getByRole('button', { name: messages['detail.check'].en })).toBeVisible();
     await page.getByRole('button', { name: messages['detail.check'].en }).click();
     await expect(page.getByText(messages['detail.conflicting'].en, { exact: true })).toBeVisible();
     await expect(page.locator(description ? '#detail-description' : '#detail-title')).toHaveValue('Attempted text');
     expect(calls).toHaveLength(1);
-    await expect(description ? descriptionSave(page) : nameSave(page)).toBeDisabled();
+    await expect(save(page)).toBeDisabled();
   });
 }
 test('known description rejection is not reported as an ambiguous success', async ({ page }) => {
   await setup(page);
   await page.route(descriptionUrl, (route) => route.fulfill({ status: 403, json: { code: '42501', message: 'Private SQL message' } }));
   await page.locator('#detail-description').fill('Attempt');
-  await descriptionSave(page).click();
+  await save(page).click();
   await expect(page.getByText(messages['detail.rejected'].en, { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: messages['detail.check'].en })).toHaveCount(0);
   await expect(page.getByText('Private SQL message')).toHaveCount(0);
@@ -464,8 +478,8 @@ test('missing image bytes show the existing treatment without disabling saved te
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
   await expect(page.getByText(messages['photo.missing'].en, { exact: true })).toBeVisible();
   await page.locator('#detail-title').fill('Text correction');
-  await nameSave(page).click();
-  await expect(page.getByText(messages['detail.nameSaved'].en, { exact: true })).toBeVisible();
+  await save(page).click();
+  await expect(page.getByText(messages['detail.saved'].en, { exact: true })).toBeVisible();
 });
 test('late item reads cannot populate a different item editor', async ({ page }) => {
   const { api, item } = await setup(page);
@@ -493,7 +507,7 @@ test('pending writes are single-flight and block navigation, but logout clears t
     else await route.fallback();
   });
   await page.locator('#detail-title').fill('Never show to Robin');
-  await nameSave(page).focus(); await page.keyboard.press('Enter');
+  await save(page).focus(); await page.keyboard.press('Enter');
   await expect.poll(() => Boolean(held)).toBe(true);
   await page.locator('.detail-name form').evaluate((form: HTMLFormElement) => form.requestSubmit());
   expect(calls).toHaveLength(1);
@@ -509,27 +523,49 @@ test('pending writes are single-flight and block navigation, but logout clears t
   await expect(page.locator('#detail-title')).toHaveValue('Robin private');
   await held!.fulfill({ json: { ...item, title: 'Never show to Robin', version: 2 } }).catch(() => {});
   await expect(page.locator('#detail-title')).toHaveValue('Robin private');
-  await expect(page.getByText(messages['detail.nameSaved'].sv, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(messages['detail.saved'].sv, { exact: true })).toHaveCount(0);
 });
-test('a description save can finish while the independent item attempt remains pending', async ({ page }) => {
+test('an unconfirmed item keeps the description unsent; Check again is read-only and Discard reloads', async ({ page }) => {
   const { item, image } = await setup(page);
-  let held: Route | undefined;
+  const calls = writes(page);
+  let fail = true;
   await page.route(itemUrl, async (route) => {
-    if (route.request().method() === 'PATCH') held = route; else await route.fallback();
+    if (route.request().method() !== 'PATCH' || !fail) { await route.fallback(); return; }
+    await route.fulfill({ status: 503, json: {} });
   });
-  await page.locator('#detail-title').fill('Pending name');
-  await nameSave(page).click();
-  await expect.poll(() => Boolean(held)).toBe(true);
-  await page.locator('#detail-description').fill('Saved description');
-  await descriptionSave(page).click();
-  await expect(page.getByText(messages['detail.descriptionSaved'].en, { exact: true })).toBeVisible();
-  await expect(page.locator('#detail-title')).toHaveValue('Pending name');
-  await page.getByRole('button', { name: 'Back', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`#/items/${item.id}$`));
-  expect(image.alt_text).toBe('Saved description');
-  await held!.fallback();
-  await expect(page.getByText(messages['detail.nameSaved'].en, { exact: true })).toBeVisible();
-  expect(item.title).toBe('Pending name');
+  await page.locator('#detail-title').fill('Unconfirmed name');
+  await page.locator('#detail-description').fill('Waiting description');
+  await save(page).click();
+  await expect(page.getByText(messages['detail.unconfirmed'].en, { exact: true })).toBeVisible();
+  await expect(save(page)).toBeDisabled();
+  expect(calls.map((call) => call.method)).toEqual(['PATCH']);
+  fail = false;
+  await page.getByRole('button', { name: messages['detail.check'].en }).click();
+  await expect(page.getByText(messages['detail.conflicting'].en, { exact: true })).toBeVisible();
+  expect(calls).toHaveLength(1);
+  await page.getByRole('button', { name: messages['detail.reload'].en }).click();
+  await page.getByRole('dialog').getByRole('button', { name: messages['common.discard'].en }).click();
+  await expect(page.locator('#detail-title')).toHaveValue(item.title);
+  await expect(page.locator('#detail-description')).toHaveValue('Waiting description');
+  expect(calls).toHaveLength(1);
+  expect(image.alt_text).toBe('An olive overshirt');
+  expect(image.description_version).toBe(1);
+});
+test('a confirmed item with a failed description reports the partial save and never resends the item', async ({ page }) => {
+  const { item, image } = await setup(page);
+  const calls = writes(page);
+  await page.route(descriptionUrl, (route) => route.fulfill({ status: 403, json: { code: '42501', message: 'Private SQL message' } }));
+  await page.locator('#detail-title').fill('Confirmed name');
+  await page.locator('#detail-description').fill('Rejected description');
+  await save(page).click();
+  await expect(page.getByText(messages['detail.descriptionFailed'].en, { exact: true })).toBeVisible();
+  await expect(page.getByText('Private SQL message')).toHaveCount(0);
+  expect(item.title).toBe('Confirmed name'); expect(item.version).toBe(2);
+  expect(image.alt_text).toBe('An olive overshirt');
+  expect(calls.map((call) => call.method)).toEqual(['PATCH', 'POST']);
+  await expect(page.locator('#detail-title')).toHaveValue('Confirmed name');
+  await expect(page.locator('#detail-description')).toHaveValue('Rejected description');
+  await expect(page.getByRole('heading', { level: 1, name: 'Confirmed name', exact: true })).toBeVisible();
 });
 for (const pending of ['read', 'description write'] as const) {
   test(`UID change clears saved editor and ignores its late ${pending}`, async ({ page }) => {
@@ -545,7 +581,7 @@ for (const pending of ['read', 'description write'] as const) {
       await page.locator(`a[href="#/items/${item.id}"]`).click();
     } else {
       await page.locator('#detail-description').fill('Never show to next owner');
-      await descriptionSave(page).click();
+      await save(page).click();
     }
     await expect.poll(() => Boolean(held)).toBe(true);
     expect(await page.evaluate(async () => {
@@ -562,7 +598,7 @@ for (const pending of ['read', 'description write'] as const) {
       [{ id: image.id, owner_id: owners.a, item_id: item.id, alt_text: 'Never show to next owner', description_version: 2 }] }).catch(() => {});
     await expect(page.locator('#detail-title')).toHaveValue('Robin private');
     await expect(page.locator('#detail-description')).toHaveValue('An olive overshirt');
-    await expect(page.getByText(messages['detail.descriptionSaved'].sv, { exact: true })).toHaveCount(0);
+    await expect(page.getByText(messages['detail.saved'].sv, { exact: true })).toHaveCount(0);
   });
 }
 test('saved detail accessibility: keyboard, 320px and 200% text', async ({ page }) => {
@@ -579,7 +615,6 @@ test('synthetic saved detail visual evidence retains functional assertions in ev
   const { api, item } = await setup(page);
   await expect(page.locator('.detail-photo img')).toBeVisible();
   await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
-  for (const button of await page.locator('.detail-name .garment-toggle').all()) await button.click();
   const directory = path.resolve('test-results/i29b-visual');
   const origin = new URL(testInfo.project.use.baseURL!).origin;
   const captures = [
@@ -610,8 +645,8 @@ test('synthetic saved detail visual evidence retains functional assertions in ev
         && !document.querySelector('input[type="password"], #email, #password')
         && !credentialLike.test(document.body.innerText) && !credentialLike.test(values);
     }, { origin, language: capture.language, id: item.id }), 'Synthetic saved detail capture guard').toBe(true);
-    await expect(nameSave(page, capture.language)).toBeDisabled();
-    await expect(descriptionSave(page, capture.language)).toBeDisabled();
+    await expect(save(page, capture.language)).toBeDisabled();
+    await expect(save(page, capture.language)).toBeDisabled();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= 11000)).toBe(true);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

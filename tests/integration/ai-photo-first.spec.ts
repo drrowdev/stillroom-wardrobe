@@ -167,7 +167,7 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
           return [...new Uint8Array(await blob.arrayBuffer())];
         }, index);
         await page.locator('input[type=file]').first().setInputFiles({ name: 'fictional.png', mimeType: 'image/png', buffer: Buffer.from(pixels) });
-        await page.getByText(messages['aiC.ready'][language], { exact: true }).waitFor();
+        await page.locator('.field-marker', { hasText: messages['aiC.markSuggested'][language] }).first().waitFor();
         const actual = captured.value;
         check(actual && posts === 1 && mutations.slice().length === 0);
         check(JSON.stringify((await client.from('items').select('id').eq('owner_id', ownerId).order('id')).data) === JSON.stringify(itemsBefore.data));
@@ -185,7 +185,7 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
           check(!discarded.error && isRecord(discarded.data) && discarded.data.code === 'TERMINAL');
           await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
           progress('SAVE_REFUSAL', ownerIndex);
-          await page.getByText(messages['aiC.saveRefused'][language], { exact: true }).waitFor();
+          await page.locator('#analysis-status').getByText(messages['aiC.needsCheck'][language], { exact: true }).waitFor();
           check(await page.locator('#item-title').inputValue() === `Fictional C garment ${label}`
             && await page.locator('#item-category').inputValue() === 'top'
             && await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).isDisabled()
@@ -193,13 +193,13 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
           check(JSON.stringify((await client.from('items').select('id').eq('owner_id', ownerId).order('id')).data) === JSON.stringify(itemsBefore.data));
           check(JSON.stringify((await client.from('item_images').select('id').eq('owner_id', ownerId).order('id')).data) === JSON.stringify(imagesBefore.data));
           progress('SAVE_MANUAL', ownerIndex);
-          await page.getByRole('button', { name: messages['aiC.continueManual'][language], exact: true }).click();
+          await page.locator('#analysis-status').getByRole('button', { name: messages['aiC.keep'][language], exact: true }).click();
         }
         await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
         progress('SAVE_WAIT_RETRY', ownerIndex);
         await page.getByRole('button', { name: messages['common.retry'][language], exact: true }).waitFor();
         check(lostAck && posts === 1
-          && await page.getByRole('button', { name: messages['aiC.continueManual'][language], exact: true }).count() === 0);
+          && await page.getByRole('button', { name: messages['aiC.keep'][language], exact: true }).count() === 0);
         progress('SAVE_RETRY', ownerIndex);
         await page.getByRole('button', { name: messages['common.retry'][language], exact: true }).click();
         await page.locator('#wardrobe-title').waitFor();
@@ -219,6 +219,10 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         check(item && own.data.filter((row) => row.id.startsWith(prefix)).length === 1 && item.title === `Fictional C garment ${label}`);
         check(isRecord(item.field_provenance) && isRecord(item.field_provenance.title) && item.field_provenance.title.kind === 'user'
           && isRecord(item.field_provenance.category) && item.field_provenance.category.kind === (index === 0 ? 'ai_observed' : 'unknown'));
+        check(item.sleeve_length === null && isRecord(item.field_provenance) && !Object.hasOwn(item.field_provenance, 'sleeve_length'));
+        check(reservations.every((body) => isRecord(body) && (body.p_claim === null
+          || (isRecord(body.p_claim) && isRecord(body.p_claim.fields) && !Object.hasOwn(body.p_claim.fields, 'sleeve_length'))))
+          && (index === 1 || reservations.some((body) => isRecord(body) && isRecord(body.p_claim))));
         const imageReply = await client.from('item_images').select('*').eq('owner_id', ownerId).eq('item_id', item.id).single();
         check(!imageReply.error && imageReply.data);
         const image = imageReply.data;
@@ -234,7 +238,8 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
           const denied = await peer.storage.from('wardrobe').download(path); check(denied.error !== null);
         }
         const history = await client.rpc('item_attribution_history', { p_item_id: item.id });
-        check(!history.error && Array.isArray(history.data) && history.data.length === (index === 0 ? 1 : 0));
+        check(!history.error && Array.isArray(history.data) && history.data.length === (index === 0 ? 1 : 0)
+          && !JSON.stringify(history.data).includes('sleeve_length'));
         const foreign = await peer.from('items').select('id').eq('id', item.id);
         const foreignHistory = await peer.rpc('item_attribution_history', { p_item_id: item.id });
         check(!foreign.error && foreign.data.length === 0 && foreignHistory.error?.code === '42501');

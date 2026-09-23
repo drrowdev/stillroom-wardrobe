@@ -1,26 +1,20 @@
 import type { AiFacts } from './ai-analysis';
-import { translate, locales, type Language, type MessageKey } from '../i18n';
+import { locales, type Language } from '../i18n';
+import { defaultDescription, defaultItemName } from './item-details';
 import { isMicro } from './ai-controls';
 import { AppError } from '../data/errors';
 
-const categories: Record<string, MessageKey> = {
-  top: 'category.top', bottom: 'category.bottom', one_piece: 'category.one_piece', footwear: 'category.footwear',
-  layer: 'category.layer', outerwear: 'category.outerwear', accessory: 'category.accessory',
-};
-const colours: Record<string, MessageKey> = {
-  black: 'colour.black', white: 'colour.white', grey: 'colour.grey', navy: 'colour.navy', blue: 'colour.blue',
-  green: 'colour.green', olive: 'colour.olive', beige: 'colour.beige', brown: 'colour.brown', red: 'colour.red',
-  yellow: 'colour.yellow', orange: 'colour.orange', pink: 'colour.pink', purple: 'colour.purple',
-};
+// A short suggested name ("Black top") and local tag suggestions from style words; tags are never a saved claim.
 export function presentAiFacts(facts: AiFacts, language: Language): { title: string; description: string; tags: string[] } {
   if (facts.outcome !== 'ready') return { title: '', description: '', tags: [] };
-  const labels = [facts.fields.category ? categories[facts.fields.category] : undefined,
-    ...(facts.fields.colours ?? []).map((colour) => colours[colour])]
-    .filter((key): key is MessageKey => key !== undefined).map((key) => translate(language, key));
-  const title = labels.join(' · ');
-  return { title: [...title].slice(0, 100).join(''),
-    description: title ? [...translate(language, 'aiC.description', { details: title })].slice(0, 240).join('') : '',
-    tags: [...new Set(labels)].filter((label) => [...label].length <= 40) };
+  const title = [...defaultItemName(facts.fields.category, facts.fields.colours ?? [], language)].slice(0, 100).join('');
+  const seen = new Set<string>();
+  const tags = (facts.fields.style_tags ?? []).map((tag) => tag.trim()).filter((tag) => {
+    const key = tag.toLocaleLowerCase();
+    if (!tag || [...tag].length > 40 || seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+  return { title, description: defaultDescription(title, facts.fields.colours ?? [], language), tags };
 }
 // Never convert money to a floating-point number or the garment's currency.
 export function microUsd(value: string, language: Language): string {

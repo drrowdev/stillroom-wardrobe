@@ -16,7 +16,7 @@ import { AnalyzedSaveRefusedError, errorKey, isAborted } from '../../data/errors
 import { newAnalyzedSaveAttempt, newUnverifiedSaveAttempt, type AnalyzedSaveAttempt } from '../../domain/analyzed-save';
 import type { AiClient } from '../../data/ai';
 import { useAiDraft } from './use-ai-draft';
-import { microUsd } from '../../domain/ai-presentation';
+import { AnalysisStatus } from './analysis-status';
 import type { BeforeDiscard } from '../../app/dialog';
 
 const preparationErrors: Record<ImagePreparationError['code'], MessageKey> = {
@@ -40,7 +40,6 @@ function focusGarmentField(id: string): void {
     if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
     ancestor = ancestor.parentElement;
   }
-  input?.closest('.garment-group')?.querySelector<HTMLButtonElement>('.garment-toggle[aria-expanded="false"]')?.click();
   requestAnimationFrame(() => input?.focus());
 }
 type Props = {
@@ -196,8 +195,10 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     setError(null);
     let saving: AnalyzedSaveAttempt | null = null;
     try {
+      // With no AI values in the form, Save becomes a plain manual save: checking stops before anything is awaited.
+      if (!attempt && analysis.implicitManual) analysis.continueManual();
       const state = analysis.snapshot();
-      if (!attempt) manualTransport.current = state.manual && state.state?.status !== 'invalidated'
+      if (!attempt) manualTransport.current = state.manual && !state.applied && state.state?.status !== 'invalidated'
         && !state.state?.presentation && Object.keys(state.state?.derivation ?? {}).length === 0;
       const current = attempt ?? (state.manual
         ? manualTransport.current ? Object.freeze({ ...newSaveAttempt(state.draft, state.description, photo, scope), claim: null })
@@ -253,7 +254,6 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
             }} />}
           {(editing || preparing) && <p id="photo-pending" tabIndex={-1} role="status" className="notice">{t(preparing ? 'photo.pendingPreparation' : 'photo.pendingCrop')}</p>}
           {invalid && !photo && <p className="field-error">{t('common.required')}</p>}
-          <p className="privacy-note"><Icon name="lock" />{t('aiC.photoNotice')}</p>
           <details className="copy-details"><summary>{t('photo.cameraHelp')}</summary><p>{t('photo.cameraFallback')}</p></details>
           {preparationDetails && <>
             <button className="text-button" type="button" aria-expanded={showPreparationDetails} aria-controls="preparation-details" onClick={() => setShowPreparationDetails(!showPreparationDetails)}>{t(showPreparationDetails ? 'photo.hideDetails' : 'photo.showDetails')}</button>
@@ -264,20 +264,12 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           </>}
         </div>
         <div className="details-panel">
-          <div className="details-heading"><span className="section-number" aria-hidden="true">01</span><h2>{t('capture.detailsTitle')}</h2></div>
-          <p className="fine muted">{t('aiC.draftNotice')}</p>
-          {analysis.notice && <p role="status" className="notice">{t(analysis.notice)}</p>}
-          {analysis.accounting && <p className="fine muted">{t(analysis.accounting.basis === 'held' ? 'aiC.held' : analysis.accounting.basis === 'estimated' ? 'aiC.estimated' : 'aiC.confirmed',
-            { amount: microUsd(analysis.accounting.amountMicro, language) })}</p>}
-          {photo && !frozen && <div className="settings-actions">
-            <button type="button" className="text-button" disabled={!online || analysis.working || analysis.manual}
-              onClick={() => { void analysis.checkStatus(); }}>{t('aiC.checkStatus')}</button>
-            <button type="button" className="button button-secondary" disabled={analysis.manual}
-              onClick={() => { void analysis.continueManual(); }}>{t('aiC.continueManual')}</button>
-            <button type="button" className="text-button" disabled={!online || analysis.working || preparing || editing}
-              onClick={() => { void analysis.commitPhoto(photo); }}>{t('aiC.newAnalysis')}</button>
-          </div>}
-          <a href="#/settings" className="text-button">{t('aiC.settings')}</a>
+          <div className="details-heading"><h2>{t('capture.detailsTitle')}</h2></div>
+          {photo && !frozen && <AnalysisStatus phase={analysis.phase} checking={analysis.checking} t={t}
+            disabled={!online || busy || preparing || editing}
+            onRetry={() => { if (!submitLatch.current) void analysis.commitPhoto(photo); }}
+            onCheck={() => { void analysis.checkStatus(); }}
+            onKeep={() => { if (!submitLatch.current) analysis.continueManual(); }} />}
           <ItemForm draft={draft} onChange={(next) => { if (!submitLatch.current && !frozen) analysis.edit(next); }} language={language} t={t} prefix="item" locked={frozen} currency={initialCurrency} showErrors={invalid}
             aiDerived={analysis.state?.status === 'ready' ? analysis.state.derivation : analysis.state ? {} : undefined}>
             <div className="field"><label htmlFor="item-alt">{t('item.altText')}</label>

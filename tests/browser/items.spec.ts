@@ -124,11 +124,12 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await page.locator(`a[href="#/items/${item.id}"]`).click();
     await page.locator('#detail-title').fill('Edited saved shirt');
     await expect(button(page, 'item.trash', language)).toBeDisabled();
-    await button(page, 'detail.saveName', language).click();
+    await button(page, 'detail.saveChanges', language).click();
     await expect(button(page, 'item.trash', language)).toBeEnabled();
+    await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
     await page.locator('#detail-description').fill('Unsaved image description');
     await expect(button(page, 'item.trash', language)).toBeDisabled();
-    await button(page, 'detail.saveDescription', language).click();
+    await button(page, 'detail.saveChanges', language).click();
     await expect(button(page, 'item.trash', language)).toBeEnabled();
     const saved = structuredClone(item);
     await button(page, 'item.trash', language).evaluate(element => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click(); });

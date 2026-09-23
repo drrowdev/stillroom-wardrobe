@@ -16,6 +16,17 @@ describe('local presentation, not a second inference', () => {
     expect(presentAiFacts({ outcome: 'unclear', fields: {} }, 'en')).toEqual({ title: '', description: '', tags: [] });
     expect(presentAiFacts({ outcome: 'ready', fields: {} }, 'fi')).toEqual({ title: '', description: '', tags: [] });
   });
+  it('names the item by singular category and first colour, and suggests style words as tags only', () => {
+    const fields = { category: 'top', colours: ['green', 'navy'], style_tags: [' Relaxed ', 'relaxed', 'Minimal'] } as const;
+    expect(presentAiFacts({ outcome: 'ready', fields }, 'en')).toEqual({
+      title: 'Green top', description: 'Green top', tags: ['Relaxed', 'Minimal'] });
+    expect(presentAiFacts({ outcome: 'ready', fields }, 'fi')).toMatchObject({ title: 'Vihreä yläosa', description: 'Vihreä yläosa' });
+    expect(presentAiFacts({ outcome: 'ready', fields }, 'sv')).toMatchObject({ title: 'Grön överdel', description: 'Grön överdel' });
+    expect(JSON.stringify(presentAiFacts({ outcome: 'ready', fields }, 'en'))).not.toMatch(/·|navy/iu);
+    expect(presentAiFacts({ outcome: 'ready', fields: { category: 'footwear' } }, 'en').title).toBe('Footwear');
+    expect(presentAiFacts({ outcome: 'ready', fields: { colours: ['navy'] } }, 'sv').title).toBe('Marinblå');
+    expect(presentAiFacts({ outcome: 'ready', fields: { category: 'top', colours: ['green'] } }, 'en').tags).toEqual([]);
+  });
   it('formats exact microUSD without floating-point loss or garment conversion', () => {
     expect(microUsd('9007199254740993', 'en')).toBe('9,007,199,254.740993 USD');
     expect(microUsd('1', 'fi')).toBe('0,000001 USD');

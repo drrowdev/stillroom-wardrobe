@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 import { lstat, mkdir, open, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
-import { garmentFields } from '../../src/domain/garment-fields';
 import { provenanceFields } from '../../src/domain/attribute-provenance';
+import { moreFields, visibleFields } from '../../src/domain/item-details';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { manualEntry } from './ai-photo-first-support';
 
@@ -19,10 +19,9 @@ async function expand(page: Page, prefix: 'item' | 'detail') {
   await expect(page.locator(`#${prefix}-title`)).toBeVisible();
   const selector = prefix === 'item' ? '.capture-page details' : '.detail-name details';
   await page.locator(selector).evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
-  for (const button of await page.locator(`${prefix === 'item' ? '.capture-page' : '.detail-name'} .garment-toggle`).all()) {
-    if (await button.getAttribute('aria-expanded') !== 'true') await button.click();
-  }
 }
+const shownFields = [...visibleFields, ...moreFields];
+const shownProvenance = provenanceFields.filter((field) => shownFields.some((shown) => shown === field));
 async function photo(page: Page, api: Awaited<ReturnType<typeof mockBackend>>) {
   await page.locator('input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
   await expect(page.locator('.capture-photo img')).toBeVisible();
@@ -32,19 +31,17 @@ async function photo(page: Page, api: Awaited<ReturnType<typeof mockBackend>>) {
 async function fillFields(page: Page, language: Language) {
   const text = {
     title: 'Å manual overshirt 🌿', subcategory: 'Overshirt', brand: 'Fictional brand', size_label: 'M',
-    material: 'Cotton', formality: '2', warmth: '3', min_temp: '-5', max_temp: '20', rain_rating: '1',
-    upper_coverage: '2', lower_coverage: '0', purchase_date: '2024-02-29',
-    purchase_price: language === 'en' ? '1,234.50' : '1 234,50', notes: '  Oma teksti\nEgen text  ', currency: 'USD',
+    material: 'Cotton', purchase_date: '2024-02-29',
+    purchase_price: language === 'en' ? '1,234.50' : '1 234,50', notes: '  Oma teksti\nEgen text  ',
   };
   for (const [key, value] of Object.entries(text)) await page.locator(`#item-${key}`).fill(value);
-  const selections = { category: 'layer', pattern: 'checked', sleeve_length: 'long', garment_length: 'regular',
-    windproof: 'false', favourite: 'true', availability: 'laundry', lifecycle: 'archived', exclude_suggestions: 'true', wear_more: 'true' };
+  const selections = { category: 'layer', pattern: 'checked', formality: '2', warmth: '3' };
   for (const [key, value] of Object.entries(selections)) await page.locator(`#item-${key}`).selectOption(value);
-  for (const [key, value] of [['colours', 'olive'], ['seasons', 'autumn']]) await page.locator(`#item-${key} select`).selectOption(value!);
-  for (const [key, value] of [['style_tags', 'calm'], ['tags', 'weekday']]) {
-    await page.locator(`#item-${key}`).getByRole('button').click();
-    await page.locator(`#item-${key} input`).fill(value!);
-  }
+  await page.locator('#item-colours-add').selectOption('olive');
+  await page.locator('#item-seasons-autumn').check();
+  await page.locator('#item-tags-new').fill('weekday');
+  await page.locator('#item-tags-new').press('Enter');
+  await page.locator('#item-favourite').check();
   await page.locator('#item-alt').fill('  Fictional prepared overshirt  ');
 }
 for (const language of ['en', 'fi', 'sv'] as const) {
@@ -57,8 +54,14 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(await page.locator('.capture-page').evaluate((element) =>
       [...element.querySelectorAll('[aria-describedby]')].every((control) =>
         control.getAttribute('aria-describedby')!.split(/\s+/).every((id) => document.getElementById(id))))).toBe(true);
+    await expect(page.locator('#item-alt')).toHaveValue('');
     await page.locator('#item-title').fill('Fictional shirt');
     await page.locator('#item-category').selectOption('top');
+    // The description follows the name until it is edited; clearing it keeps it empty.
+    await expect(page.locator('#item-alt')).toHaveValue('Fictional shirt');
+    await page.locator('#item-alt').fill('');
+    await page.locator('#item-title').fill('Fictional shirt ');
+    await page.locator('#item-title').fill('Fictional shirt');
     await expect(page.locator('#item-alt')).toHaveValue('');
     await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
     await expect(page.locator('#wardrobe-title')).toBeVisible();
@@ -73,7 +76,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
       [...element.querySelectorAll('[aria-describedby]')].every((control) =>
         control.getAttribute('aria-describedby')!.split(/\s+/).every((id) => document.getElementById(id))))).toBe(true);
   });
-  test(`all thirty manual fields ${language}: exact explicit capture Save, owned edit and clear`, async ({ page }) => {
+  test(`every shown field ${language}: exact explicit capture Save, owned edit and clear, hidden columns untouched`, async ({ page }) => {
     const api = await setup(page, language);
     const foreign = api.seedSavedItem('b'), originalForeign = structuredClone(foreign);
     const profiles = structuredClone(api.profiles);
@@ -83,7 +86,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(api.items).toHaveLength(1);
     expect(api.images).toHaveLength(1);
     const count = api.files.size;
-    for (const field of garmentFields) {
+    for (const field of shownFields) {
       await page.locator(`#item-${field}`).focus();
       await expect(page.locator(`#item-${field}`)).toBeFocused();
     }
@@ -93,10 +96,14 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     const item = api.items.find((row) => row.owner_id === owners.a)!;
     const image = api.images.find((row) => row.owner_id === owners.a)!;
     expect(item).toMatchObject({ title: 'Å manual overshirt 🌿', category: 'layer', colours: ['olive'], seasons: ['autumn'],
-      purchase_price: 1234.5, currency: 'USD', windproof: false, lower_coverage: 0,
-      notes: '  Oma teksti\nEgen text  ', favourite: true, availability: 'laundry', lifecycle: 'archived' });
-    expect(Object.keys(item.field_provenance as object)).toHaveLength(24);
-    for (const field of provenanceFields) expect((item.field_provenance as Record<string, unknown>)[field]).toEqual({ kind: 'user', revision: 1 });
+      subcategory: 'Overshirt', pattern: 'checked', brand: 'Fictional brand', size_label: 'M', material: 'Cotton',
+      formality: 2, warmth: 3, purchase_date: '2024-02-29', purchase_price: 1234.5, tags: ['weekday'],
+      notes: '  Oma teksti\nEgen text  ', favourite: true,
+      currency: 'EUR', windproof: null, min_temp: null, max_temp: null, rain_rating: null, upper_coverage: null, lower_coverage: null,
+      sleeve_length: null, garment_length: null, style_tags: [], availability: 'ready', lifecycle: 'active',
+      exclude_suggestions: false, wear_more: false });
+    expect(Object.keys(item.field_provenance as object).sort()).toEqual([...shownProvenance].sort());
+    for (const field of shownProvenance) expect((item.field_provenance as Record<string, unknown>)[field]).toEqual({ kind: 'user', revision: 1 });
     expect(image.alt_text).toBe('Fictional prepared overshirt');
     const bytes = [...api.files].map(([key, buffer]) => [key, createHash('sha256').update(buffer).digest('hex')]);
     for (const variant of ['main', 'thumb']) {
@@ -107,23 +114,23 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await page.locator(`a[href="#/items/${item.id}"]`).click();
     await expand(page, 'detail');
     await page.locator('#detail-description').fill('Sibling draft');
-    for (const field of provenanceFields.filter((key) => key !== 'title' && key !== 'category')) {
-      await page.locator(`#detail-${field}`).locator('xpath=..').getByRole('button', { name: new RegExp(`^${language === 'en' ? 'Clear' : language === 'fi' ? 'Tyhjennä' : 'Rensa'} `) }).click();
-    }
+    for (const key of ['subcategory', 'brand', 'size_label', 'material', 'purchase_price', 'purchase_date', 'notes']) await page.locator(`#detail-${key}`).fill('');
+    for (const key of ['pattern', 'formality', 'warmth']) await page.locator(`#detail-${key}`).selectOption('');
+    await page.getByRole('button', { name: messages['item.removeColour'][language].replace('{colour}', messages['colour.olive'][language]), exact: true }).click();
+    await page.locator('#detail-seasons-autumn').uncheck();
+    await page.getByRole('button', { name: messages['item.removeTag'][language].replace('{tag}', 'weekday'), exact: true }).click();
+    await page.locator('#detail-favourite').uncheck();
     await page.locator('#detail-title').fill('Corrected name');
     await page.locator('#detail-category').selectOption('top');
-    for (const [key, value] of [['currency', 'EUR'], ['favourite', 'false'], ['availability', 'ready'], ['lifecycle', 'active'], ['exclude_suggestions', 'false'], ['wear_more', 'false']]) {
-      if (key === 'currency') await page.locator(`#detail-${key}`).fill(value!);
-      else await page.locator(`#detail-${key}`).selectOption(value!);
-    }
-    await page.getByRole('button', { name: messages['detail.saveName'][language], exact: true }).click();
-    await expect(page.getByText(messages['detail.nameSaved'][language], { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: messages['detail.saveChanges'][language], exact: true }).click();
+    await expect(page.getByText(messages['detail.saved'][language], { exact: true })).toBeVisible();
     await expect(page.locator('#detail-description')).toHaveValue('Sibling draft');
-    expect(item).toMatchObject({ colours: [], seasons: [], notes: '', material: null, purchase_price: null, purchase_date: null,
-      warmth: null, windproof: null, currency: 'EUR', favourite: false, availability: 'ready', lifecycle: 'active' });
-    for (const field of provenanceFields) expect((item.field_provenance as Record<string, unknown>)[field]).toEqual({ kind: 'user', revision: 2 });
-    await page.getByRole('button', { name: messages['detail.saveDescription'][language], exact: true }).click();
-    await expect(page.getByText(messages['detail.descriptionSaved'][language], { exact: true })).toBeVisible();
+    expect(image.alt_text).toBe('Sibling draft');
+    expect(item).toMatchObject({ title: 'Corrected name', category: 'top', colours: [], seasons: [], tags: [], notes: '',
+      subcategory: null, pattern: null, brand: null, size_label: null, material: null, formality: null, purchase_price: null,
+      purchase_date: null, warmth: null, windproof: null, currency: 'EUR', favourite: false, availability: 'ready', lifecycle: 'active' });
+    expect(Object.keys(item.field_provenance as object).sort()).toEqual([...shownProvenance].sort());
+    for (const field of shownProvenance) expect((item.field_provenance as Record<string, unknown>)[field]).toEqual({ kind: 'user', revision: 2 });
     await page.reload();
     await expect(page.locator('#detail-title')).toHaveValue('Corrected name');
     await expect(page.locator('#detail-description')).toHaveValue('Sibling draft');
@@ -147,18 +154,17 @@ for (const language of ['fi', 'sv'] as const) {
     await expect(page.locator('#detail-purchase_price')).toHaveValue('12.50');
     const requestStart = api.requests.length;
     await page.locator('#detail-purchase_price').fill('12,50');
-    await page.locator('#detail-min_temp').fill('007');
     await page.locator('#detail-title').fill(`  ${item.title}  `);
-    for (const field of ['purchase_price', 'min_temp', 'title']) {
+    await expect(page.locator('#detail-min_temp')).toHaveCount(0);
+    for (const field of ['purchase_price', 'title']) {
       await expect(page.locator(`#detail-${field}`)).toHaveAttribute('aria-invalid', 'false');
     }
     await expect(notice).toBeVisible();
     await expect(notice).toHaveAttribute('role', 'status');
     await expect(page.locator('.detail-name [role="alert"]')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: messages['detail.saveName'][language], exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: messages['detail.saveChanges'][language], exact: true })).toBeDisabled();
     await page.locator('.detail-name form').evaluate((form) => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     await expect(page.locator('#detail-purchase_price')).toHaveValue('12,50');
-    await expect(page.locator('#detail-min_temp')).toHaveValue('007');
     await expect(page.locator('#detail-title')).toHaveValue(`  ${item.title}  `);
     await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
     await expect(page.locator('#wardrobe-title')).toBeVisible();
@@ -175,8 +181,8 @@ for (const language of ['fi', 'sv'] as const) {
     await expect(page.locator('#detail-purchase_price')).toHaveValue('12,50');
     await expect(page.locator('#detail-description')).toHaveValue('Independent description');
     await expect(notice).toBeVisible();
-    await page.getByRole('button', { name: messages['detail.saveDescription'][language], exact: true }).click();
-    await expect(page.getByText(messages['detail.descriptionSaved'][language], { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: messages['detail.saveChanges'][language], exact: true }).click();
+    await expect(page.getByText(messages['detail.saved'][language], { exact: true })).toBeVisible();
     await expect(page.locator('#detail-purchase_price')).toHaveValue('12,50');
     await expect(notice).toBeVisible();
     expect(image.alt_text).toBe('Independent description');
@@ -188,16 +194,52 @@ for (const language of ['fi', 'sv'] as const) {
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 }
+test('hidden saved values and their provenance survive a name-only edit as a sparse version-checked patch', async ({ page }) => {
+  const api = await mockBackend(page, { initialLanguage: 'en' });
+  const { item } = api.seedSavedItem(), foreign = api.seedSavedItem('b', 'Robin private').item;
+  Object.assign(item, { min_temp: -5, max_temp: 25, rain_rating: 1, windproof: true, upper_coverage: 2, lower_coverage: 1,
+    sleeve_length: 'long', garment_length: 'regular', currency: 'USD', lifecycle: 'archived', availability: 'laundry',
+    exclude_suggestions: true, wear_more: true, style_tags: ['relaxed'], warmth: 4,
+    field_provenance: { title: { kind: 'user', revision: 1 }, min_temp: { kind: 'user', revision: 2 },
+      sleeve_length: { kind: 'unknown', revision: 3 }, style_tags: { kind: 'unknown', revision: 1 },
+      windproof: { kind: 'user', revision: 1 }, warmth: { kind: 'user', revision: 1 } } });
+  const before = structuredClone(item), peer = structuredClone(foreign);
+  const patches: Array<{ url: string; body: Record<string, unknown> }> = [];
+  page.on('request', (request) => {
+    if (request.method() === 'PATCH' && new URL(request.url()).pathname === '/rest/v1/items') {
+      patches.push({ url: request.url(), body: request.postDataJSON() as Record<string, unknown> });
+    }
+  });
+  await page.goto('/'); await signIn(page);
+  await page.evaluate((id) => { location.hash = `#/items/${id}`; }, item.id); await expand(page, 'detail');
+  await expect(page.locator('#detail-warmth')).toHaveValue('4');
+  for (const hidden of ['min_temp', 'max_temp', 'rain_rating', 'windproof', 'sleeve_length', 'garment_length', 'currency',
+    'lifecycle', 'availability', 'exclude_suggestions', 'wear_more', 'style_tags', 'upper_coverage', 'lower_coverage']) {
+    await expect(page.locator(`#detail-${hidden}`)).toHaveCount(0);
+  }
+  await page.locator('#detail-title').fill('Renamed overshirt');
+  await page.getByRole('button', { name: messages['detail.saveChanges'].en, exact: true }).click();
+  await expect(page.getByText(messages['detail.saved'].en, { exact: true })).toBeVisible();
+  expect(patches).toHaveLength(1);
+  expect(Object.keys(patches[0]!.body).sort()).toEqual(['field_provenance', 'title']);
+  expect(new URL(patches[0]!.url).searchParams.get('version')).toBe(`eq.${before.version}`);
+  const changed = ['title', 'version', 'updated_at', 'field_provenance'];
+  const unchanged = (row: Record<string, unknown>) => Object.fromEntries(Object.entries(row).filter(([key]) => !changed.includes(key)));
+  expect(item.title).toBe('Renamed overshirt'); expect(item.version).toBe(before.version + 1);
+  expect(unchanged(item)).toEqual(unchanged(before));
+  expect(item.field_provenance).toEqual({ ...before.field_provenance, title: { kind: 'user', revision: 2 } });
+  expect(foreign).toEqual(peer);
+});
 test('invalid saved input, manual confirmations and explicit empty clears remain protected, not formatting notices', async ({ page }, testInfo) => {
   let interceptedItemPatches = 0;
   type Count = 0 | 1 | 'more' | null;
-  type Field = 'title' | 'purchase_price' | 'min_temp' | 'other';
-  type Stage = 'setup' | 'open-detail' | `${'purchase_price' | 'min_temp'}-${'invalid' | 'back' | 'continue' | 'restore'}`
+  type Field = 'title' | 'purchase_price' | 'size_label' | 'other';
+  type Stage = 'setup' | 'open-detail' | `${'purchase_price' | 'size_label'}-${'invalid' | 'back' | 'continue' | 'restore'}`
     | 'title-fill' | 'title-save-enabled' | 'clear-notes' | 'notes-save-enabled' | 'register-patch' | 'save' | 'pending-write' | 'failed-write';
   type Failure = 'metadata' | 'clock' | 'fixture' | 'presentation' | 'serialization' | 'oversize' | 'emission';
   type FieldState = { expectedValue: boolean | null; ariaInvalid: boolean | null; disabled: boolean | null };
   type Presentation = {
-    title: FieldState; price: FieldState; minTemp: FieldState; saveDisabled: boolean | null;
+    title: FieldState; price: FieldState; sizeLabel: FieldState; saveDisabled: boolean | null;
     errorPresent: boolean | null; checkPresent: boolean | null; reloadPresent: boolean | null;
     navigatorOnline: boolean | null; offlineVisible: boolean | null;
     invalidFields: Field[] | null; focus: Field | 'save' | 'dialog' | 'none' | null; visibleDialogs: Count;
@@ -254,7 +296,7 @@ test('invalid saved input, manual confirmations and explicit empty clears remain
     try {
       const result = await page.evaluate(({ checkName, reloadName }) => {
         let captureError = false;
-        const field = (key: 'title' | 'purchase_price' | 'min_temp', expected: string): FieldState => {
+        const field = (key: 'title' | 'purchase_price' | 'size_label', expected: string): FieldState => {
           const matches = document.querySelectorAll(`#detail-${key}`);
           const input = matches.length === 1 ? matches[0] : null;
           if (!(input instanceof HTMLInputElement)) {
@@ -276,11 +318,11 @@ test('invalid saved input, manual confirmations and explicit empty clears remain
         const buttonPresent = (name: string) => section
           ? [...section.querySelectorAll('button')].some((button) => button.textContent === name) : null;
         const classify = (element: Element): Field => element.id === 'detail-title' ? 'title'
-          : element.id === 'detail-purchase_price' ? 'purchase_price' : element.id === 'detail-min_temp' ? 'min_temp' : 'other';
+          : element.id === 'detail-purchase_price' ? 'purchase_price' : element.id === 'detail-size_label' ? 'size_label' : 'other';
         const active = document.activeElement;
         const dialogs = [...document.querySelectorAll('dialog[open], [role="dialog"]')].filter(visible);
         const presentation: Presentation = {
-          title: field('title', ' Olive overshirt '), price: field('purchase_price', '12.50'), minTemp: field('min_temp', ''),
+          title: field('title', ' Olive overshirt '), price: field('purchase_price', '12.50'), sizeLabel: field('size_label', ''),
           saveDisabled: save ? save.disabled : null,
           errorPresent: section ? section.querySelector('[role="alert"]') !== null : null,
           checkPresent: buttonPresent(checkName), reloadPresent: buttonPresent(reloadName),
@@ -327,12 +369,13 @@ test('invalid saved input, manual confirmations and explicit empty clears remain
     stage = 'open-detail';
     await page.locator(`a[href="#/items/${item.id}"]`).click(); await expand(page, 'detail');
     const notice = page.getByText(messages['detail.noChanges'].en, { exact: true });
-    const save = page.getByRole('button', { name: messages['detail.saveName'].en, exact: true });
-    for (const [field, raw, original] of [['purchase_price', '12.', '12.50'], ['min_temp', '51', '']] as const) {
+    const save = page.getByRole('button', { name: messages['detail.saveChanges'].en, exact: true });
+    for (const [field, raw, original] of [['purchase_price', '12.', '12.50'], ['size_label', 'x'.repeat(51), '']] as const) {
       stage = `${field}-invalid`;
       await page.locator(`#detail-${field}`).fill(raw);
       await expect(page.locator(`#detail-${field}`)).toHaveAttribute('aria-invalid', 'true');
-      await expect(notice).toHaveCount(0); await expect(save).toBeDisabled();
+      await expect(notice).toHaveCount(0);
+      await save.click(); await expect(page.locator(`#detail-${field}`)).toBeFocused();
       stage = `${field}-back`;
       await page.getByRole('button', { name: messages['common.back'].en, exact: true }).click();
       await expect(page.getByRole('dialog')).toBeVisible();
@@ -347,7 +390,7 @@ test('invalid saved input, manual confirmations and explicit empty clears remain
     stage = 'title-save-enabled';
     await expect(save).toBeEnabled(); await expect(notice).toHaveCount(0);
     stage = 'clear-notes';
-    await page.getByRole('button', { name: messages['item.clearField'].en.replace('{field}', messages['item.notes'].en), exact: true }).click();
+    await page.locator('#detail-notes').fill('');
     stage = 'notes-save-enabled';
     await expect(save).toBeEnabled(); await expect(notice).toHaveCount(0);
     let release: () => void = () => {};
@@ -383,21 +426,23 @@ test('unknown defaults, invalid raw input and manual empty clears remain distinc
   await page.locator('#item-title').fill('🌿'.repeat(100));
   await page.locator('#item-category').selectOption('top');
   await expand(page, 'item');
-  await page.locator('#item-warmth').fill('invalid');
-  await page.locator('[aria-controls="item-seasons-group"]').click();
+  await page.locator('#item-size_label').fill('x'.repeat(51));
   await expect(page.locator('details.optional-details summary')).toHaveCount(1);
   await page.locator('details.optional-details summary').click();
+  await expect(page.locator('details.optional-details')).not.toHaveAttribute('open', '');
   await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
-  await expect(page.locator('#item-warmth')).toBeFocused();
-  await expect(page.locator('#item-warmth')).toHaveValue('invalid');
+  await expect(page.locator('details.optional-details')).toHaveAttribute('open', '');
+  await expect(page.locator('#item-size_label')).toBeFocused();
+  await expect(page.locator('#item-size_label')).toHaveValue('x'.repeat(51));
   expect(api.items).toHaveLength(0);
-  await page.getByRole('button', { name: messages['item.clearField'].en.replace('{field}', messages['item.warmth'].en), exact: true }).click();
+  await page.locator('#item-size_label').fill('');
   await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
   await expect(page.locator('#wardrobe-title')).toBeVisible();
-  expect(api.items[0]).toMatchObject({ colours: [], seasons: [], warmth: null, rain_rating: null, windproof: null,
-    field_provenance: { title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 }, warmth: { kind: 'user', revision: 1 } } });
+  expect(api.items[0]).toMatchObject({ colours: [], seasons: [], size_label: null, warmth: null, rain_rating: null, windproof: null,
+    field_provenance: { title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 }, size_label: { kind: 'user', revision: 1 } } });
   expect(Object.keys(api.items[0]!.field_provenance as object)).toHaveLength(3);
-  expect(api.images[0]!.alt_text).toBe('');
+  // An untouched description is the name-based default.
+  expect(api.images[0]!.alt_text).toBe('🌿'.repeat(100));
 });
 test('price entry locale and raw incomplete text survive language changes', async ({ page }) => {
   await setup(page);
@@ -546,7 +591,7 @@ test('complete creation form accessibility and bounded synthetic visual evidence
         && !document.querySelector('input[type="password"], #email, #password')
         && !credentialLike.test(document.body.innerText) && !credentialLike.test(values);
     }, { origin, language: capture.language }), 'Synthetic complete-form capture guard').toBe(true);
-    for (const field of garmentFields) await expect(page.locator(`#item-${field}`)).toBeVisible();
+    for (const field of shownFields) await expect(page.locator(`#item-${field}`)).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= 11000)).toBe(true);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     if (testInfo.project.name === 'chromium') {

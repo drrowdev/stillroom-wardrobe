@@ -3,9 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 import type { Database } from '../../src/data/database.types';
 import type { OwnerScope } from '../../src/auth/session';
 import {
-  confirmsDescription, confirmsItem, detailRouteId, imageDetailColumns, itemDetailColumns, itemFactColumns,
-  parseImageBaseline, parseItemBaseline, prepareDescriptionAttempt, prepareItemAttempt, validDescription, validItemFields,
+  addTag, defaultItemName, fitsTagBudget, tagBudgetFull, confirmsDescription, defaultDescription, confirmsItem, detailRouteId, imageDetailColumns, itemDetailColumns, itemFactColumns, moreFields,
+  parseImageBaseline, parseItemBaseline, prepareDescriptionAttempt, prepareGarmentAttempt, prepareItemAttempt, validDescription,
+  validItemFields, visibleFields, warmthOptions,
 } from '../../src/domain/item-details';
+import { editGarmentField, garmentFields, newGarmentDraft } from '../../src/domain/garment-fields';
 import { loadItemDetail, saveImageDescription, saveItemFields } from '../../src/data/item-details';
 import { maximumFieldRevision } from '../../src/domain/attribute-provenance';
 
@@ -45,6 +47,123 @@ function client(fetcher: (url: URL, init: RequestInit | undefined) => Promise<Re
   });
   return { value, fetch };
 }
+describe('simplified form over the full saved row (UX L1a)', () => {
+  const hidden = {
+    min_temp: -5, max_temp: 25, rain_rating: 1, windproof: true, upper_coverage: 2, lower_coverage: 1,
+    sleeve_length: 'long', garment_length: 'regular', currency: 'USD', lifecycle: 'archived', availability: 'laundry',
+    exclude_suggestions: true, wear_more: true, style_tags: ['relaxed'],
+  };
+  const provenance = {
+    title: { kind: 'user', revision: 3 }, sleeve_length: { kind: 'ai_observed', revision: 1 },
+    min_temp: { kind: 'user', revision: 2 }, upper_coverage: { kind: 'unknown', revision: 1 },
+    style_tags: { kind: 'ai_estimated', revision: 1 }, warmth: { kind: 'unknown', revision: 2 },
+  };
+  it('partitions shown fields and leaves every other column unrendered', () => {
+    const shown = new Set<string>([...visibleFields, ...moreFields]);
+    expect(visibleFields).toEqual(['title', 'category', 'colours', 'seasons']);
+    expect(garmentFields.filter((field) => !shown.has(field)).sort()).toEqual([
+      'availability', 'currency', 'exclude_suggestions', 'garment_length', 'lifecycle', 'lower_coverage', 'max_temp',
+      'min_temp', 'rain_rating', 'sleeve_length', 'style_tags', 'upper_coverage', 'wear_more', 'windproof']);
+  });
+  it('sends only the edited name and keeps every hidden value and provenance entry exactly', () => {
+    const base = parseItemBaseline(item({ ...hidden, field_provenance: provenance }), owner, id);
+    const draft = editGarmentField(newGarmentDraft(base.values.currency, 'en', base.values), 'title', 'Renamed', 'en');
+    const attempt = prepareGarmentAttempt(base, draft, 4);
+    expect(Object.keys(attempt.patch).sort()).toEqual(['field_provenance', 'title']);
+    expect(attempt.patch.field_provenance).toEqual({ ...provenance, title: { kind: 'user', revision: 4 } });
+    for (const [key, value] of Object.entries(hidden)) expect(attempt.fields[key as keyof typeof attempt.fields]).toEqual(value);
+    expect(confirmsItem(parseItemBaseline(item({ ...hidden, ...attempt.patch, version: 8 }), owner, id), attempt)).toBe(true);
+  });
+  it.each([0, 1, 2, 3, 4])('keeps stored warmth %i on an untouched save and maps it to one of three options', (warmth) => {
+    const base = parseItemBaseline(item({ warmth }), owner, id);
+    const draft = editGarmentField(newGarmentDraft('EUR', 'en', base.values), 'title', 'Renamed', 'en');
+    const attempt = prepareGarmentAttempt(base, draft, 4);
+    expect(attempt.patch).not.toHaveProperty('warmth');
+    expect(attempt.fields.warmth).toBe(warmth);
+    const options = warmthOptions(String(warmth));
+    expect(options.map(([, key]) => key)).toEqual(['warmth.light', 'warmth.medium', 'warmth.warm']);
+    expect(options.filter(([value]) => value === String(warmth)).map(([, key]) => key))
+      .toEqual([warmth < 2 ? 'warmth.light' : warmth === 2 ? 'warmth.medium' : 'warmth.warm']);
+  });
+  it('maps new warmth choices to 1, 2 and 3', () => {
+    expect(warmthOptions('').map(([value]) => value)).toEqual(['1', '2', '3']);
+  });
+  it('adds new tags to tags only, refusing duplicates across both lists and respecting limits', () => {
+    expect(addTag('  Linen  ', ['work'], ['relaxed'])).toEqual({ status: 'added', tags: ['work', 'Linen'] });
+    expect(addTag('RELAXED', [], ['relaxed'])).toEqual({ status: 'duplicate' });
+    expect(addTag('Work', ['work'], [])).toEqual({ status: 'duplicate' });
+    expect(addTag(' ', [], [])).toEqual({ status: 'empty' });
+    expect(addTag('x'.repeat(41), [], [])).toEqual({ status: 'invalid' });
+    expect(addTag('x'.repeat(40), [], [])).toEqual({ status: 'added', tags: ['x'.repeat(40)] });
+    expect(addTag('new', Array.from({ length: 12 }, (_, index) => `t${index}`), [])).toEqual({ status: 'full' });
+    expect(addTag('ä'.repeat(20), Array.from({ length: 6 }, (_, index) => 'ä'.repeat(39) + index), []))
+      .toEqual({ status: 'full' });
+  });
+  it('shares one count and byte budget across tags and style words (R4)', () => {
+    const names = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => `${prefix}${index}`);
+    expect(addTag('new', names('t', 10), names('s', 1))).toEqual({ status: 'added', tags: [...names('t', 10), 'new'] });
+    expect(addTag('new', names('t', 11), names('s', 1))).toEqual({ status: 'full' });
+    expect(addTag('new', names('t', 4), names('s', 8))).toEqual({ status: 'full' });
+    expect(tagBudgetFull(names('t', 10), names('s', 1))).toBe(false);
+    expect(tagBudgetFull(names('t', 4), names('s', 8))).toBe(true);
+    // 6 × 80-byte words + 5 commas = 485 bytes; one more comma leaves exactly 26 bytes.
+    const wide = (count: number) => Array.from({ length: count }, (_, index) => 'ä'.repeat(39) + String.fromCharCode(0xe0 + index));
+    const [tags, style] = [wide(3), wide(6).slice(3)];
+    expect(fitsTagBudget([...tags, ...style, 'x'.repeat(26)])).toBe(true);
+    expect(addTag('x'.repeat(26), tags, style)).toEqual({ status: 'added', tags: [...tags, 'x'.repeat(26)] });
+    expect(addTag('x'.repeat(27), tags, style)).toEqual({ status: 'full' });
+    expect(addTag('x'.repeat(27), tags, [])).toMatchObject({ status: 'added' });
+  });
+  it('leaves saved lists already over the combined budget unchanged and only refuses additions', () => {
+    const tags = Object.freeze(Array.from({ length: 10 }, (_, index) => `t${index}`));
+    const style = Object.freeze(Array.from({ length: 8 }, (_, index) => `s${index}`));
+    expect(fitsTagBudget([...tags, ...style])).toBe(false);
+    expect(addTag('new', tags, style)).toEqual({ status: 'full' });
+    expect(tagBudgetFull(tags, style)).toBe(true);
+    expect(tags).toHaveLength(10);
+    expect(style).toHaveLength(8);
+  });
+});
+describe('default photo description', () => {
+  it('uses the name and only the first colour, when the name does not already mention it', () => {
+    expect(defaultDescription('  Linen shirt ', ['blue', 'white'], 'en')).toBe('Linen shirt in blue');
+    expect(defaultDescription('Blue linen shirt', ['blue', 'white'], 'en')).toBe('Blue linen shirt');
+    expect(defaultDescription('Shirt', [], 'en')).toBe('Shirt');
+    expect(defaultDescription('   ', ['blue'], 'en')).toBe('');
+    expect(defaultDescription('Paita', ['blue', 'white'], 'fi')).toBe('Paita, väriltään sininen');
+    expect(defaultDescription('Skjorta', ['blue', 'white'], 'sv')).toBe('Skjorta i blått');
+    expect(defaultDescription('Gröna skor', ['green'], 'sv')).toBe('Gröna skor');
+    expect(defaultDescription('Grönt helplagg', ['green'], 'sv')).toBe('Grönt helplagg');
+    expect(defaultDescription('Vihreät kengät', ['green'], 'fi')).toBe('Vihreät kengät');
+  });
+  it('names the item naturally from the category and the first colour in each language (V1)', () => {
+    expect(defaultItemName('top', ['green', 'navy'], 'en')).toBe('Green top');
+    expect(defaultItemName('top', ['green', 'navy'], 'fi')).toBe('Vihreä yläosa');
+    expect(defaultItemName('top', ['green', 'navy'], 'sv')).toBe('Grön överdel');
+    expect(defaultItemName('footwear', ['black'], 'en')).toBe('Black shoes');
+    expect(defaultItemName('footwear', ['black'], 'fi')).toBe('Mustat kengät');
+    expect(defaultItemName('footwear', ['white'], 'sv')).toBe('Vita skor');
+    expect(defaultItemName('one_piece', ['red'], 'sv')).toBe('Rött helplagg');
+    expect(defaultItemName('outerwear', ['beige'], 'sv')).toBe('Beige ytterplagg');
+    expect(defaultItemName('bottom', ['navy'], 'en')).toBe('Navy bottoms');
+    expect(defaultItemName('top', [], 'sv')).toBe('Överdel');
+    expect(defaultItemName(null, ['olive'], 'fi')).toBe('Oliivinvihreä');
+    expect(defaultItemName(null, [], 'en')).toBe('');
+    for (const language of ['en', 'fi', 'sv'] as const) {
+      for (const category of ['top', 'bottom', 'one_piece', 'footwear', 'layer', 'outerwear', 'accessory']) {
+        for (const colour of ['black', 'white', 'grey', 'navy', 'blue', 'green', 'olive', 'beige', 'brown', 'red', 'yellow', 'orange', 'pink', 'purple']) {
+          const name = defaultItemName(category, [colour], language);
+          expect(name).toMatch(/^\p{Lu}\S* \p{Ll}/u);
+          expect(name).not.toMatch(/·|\{|\}/u);
+          expect(defaultDescription(name, [colour], language)).toBe(name);
+        }
+      }
+    }
+  });
+  it('stays within the description limit', () => {
+    expect([...defaultDescription('x'.repeat(300), ['blue'], 'en')]).toHaveLength(240);
+  });
+});
 describe('saved detail domain boundaries', () => {
   it('accepts only canonical complete UUID routes, keeping creation distinct', () => {
     expect(detailRouteId(`#/items/${id}`)).toBe(id);

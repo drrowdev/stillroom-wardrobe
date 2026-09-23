@@ -90,6 +90,22 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Preserve bounded synthetic UX L1a visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ux-l1a-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/ux-l1a-visual/add-ready-en-desktop.png
+            test-results/ux-l1a-visual/add-ready-fi-mobile.png
+            test-results/ux-l1a-visual/add-failed-en-desktop.png
+            test-results/ux-l1a-visual/add-failed-fi-mobile.png
+            test-results/ux-l1a-visual/more-details-en-desktop.png
+            test-results/ux-l1a-visual/more-details-fi-mobile.png
+            test-results/ux-l1a-visual/saved-item-en-desktop.png
+            test-results/ux-l1a-visual/saved-item-fi-mobile.png
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Preserve bounded synthetic UX-copy visual evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

@@ -14,6 +14,7 @@ import { TABLES, requireEvidence } from '../tests/integration/preservation.sessi
 import { analyzedHarness, analyzedIntent, saveId } from '../tests/integration/analyzed-save.sessions.mjs';
 import { assertSanitizedJpeg, readJpegHeader } from '../src/images/jpeg.ts';
 import { imageReplacementServed } from '../tests/integration/image-replacement.sessions.mjs';
+const cAnalysisFacts = { ...analysisFacts, fields: { ...analysisFacts.fields, sleeve_length: 'long' } };
 
 const literal = (value) => "'" + String(value).replaceAll("'", "''") + "'";
 const json = (value) => `${literal(JSON.stringify(value))}::jsonb`;
@@ -275,7 +276,8 @@ async function main() {
           completion_tokens_details: { reasoning_tokens: mode === 'zero' ? 0 : 20 },
         },
         choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', refusal: null,
-          content: JSON.stringify(mode === 'failed' ? { ...analysisFacts, fields: { title: 'not allowed' } } : analysisFacts) } }],
+          content: JSON.stringify(mode === 'failed' ? { ...analysisFacts, fields: { title: 'not allowed' } }
+            : cRequest && mode === 'ready' ? cAnalysisFacts : analysisFacts) } }],
       }, { status: mode === 'http-failed' ? 500 : 200 });
     });
     server = createServer(async (req, res) => {

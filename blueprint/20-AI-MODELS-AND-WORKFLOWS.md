@@ -173,6 +173,20 @@ independent source/coordinator visual review remain required. Human/device
 acceptance, saved-only backup/history restoration, hosted changes and paid
 activation remain separate pending release gates.
 
+### UX L1a simplified status - 23 September 2026
+
+The add and replacement screens show one short status line (`#analysis-status`) instead of internal lifecycle text. The data-layer guarantees above are unchanged: explicit revision-bound consent, checked Save, no resend of a paid request without a user action, stale-result guards and bounded receipts.
+
+- **Phases** (`src/features/wardrobe/use-ai-draft.ts`, exhaustive `switch` over every `AiCode`, terminal reason and draft status):
+  - precedence is applied AI values (`needsCheck`: Keep these details / Try again), then a dispatched request (`working`, then `stillWorking` after polling ends), then the terminal reason, then the reply code;
+  - codes: `CONSENT_REQUIRED`/`UNCONFIGURED`/`INACTIVE`/`CONFIG_CHANGED` show "off" with a Settings link; `ALLOWANCE` shows the monthly limit; `RATE_LIMIT` and every other code use the neutral failure line;
+  - terminal reasons `DISCARDED`, `EXPIRED`, `FAILED`, `UNAVAILABLE` and `INVALID_FACTS` all use the failure line.
+- **Same-request status checks** run automatically: single-flight, at most five calls at 2, 4, 8, 8 and 7 s (the fifth delay is 7 s so all five fit inside the deadline), with a hard 30 s deadline that aborts any open call and ignores late replies. Stopping on discard, photo change, owner change or unmount aborts the open call. After the deadline, Try again checks the **same** request; it never sends a new analysis.
+- **Ambiguous replies after the analysis request has started** (`TIMEOUT`, or `UNAVAILABLE` from a connection reset, a truncated reply or a malformed reply) keep the request pending and start the same bounded status checks. Only a definitive rejection or a terminal outcome offers a new-analysis Try again.
+- A ready draft shows no status line; AI-filled fields carry a small "Suggested"/"Estimated" marker. If the checked Save is refused for the current analysis, the screen shows the needs-check line rather than a separate alert.
+- The suggested name comes from per-language templates over the category and the **first** colour only (`defaultItemName`: "Green top", "Vihreä yläosa", "Grön överdel"). The draft description follows the name, adding the first colour when the name does not already mention it (`defaultDescription`: "Linen shirt in blue"). Both stop following after any user edit or clear, and the description stays editable under More details.
+- Tags additions (manual entry and suggestions from style words) share one budget across `tags` and `style_tags` (12 entries, 512 bytes joined). Saved lists already over that budget are kept unchanged; only additions that would exceed it are refused.
+
 ## Privacy and cost controls
 
 Send the sanitized photo, fixed instructions and taxonomy only, before library Save. No history, account email, location, notes, other photos or peer data. EXIF removal does not hide identifying pixels. Use inline bytes, not a public bucket, persistent vendor file or reusable signed link. Temporary validated results are owner-only and excluded from wardrobe queries/exports.

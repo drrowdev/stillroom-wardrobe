@@ -1,8 +1,10 @@
 import { maximumFieldRevision, parseFieldProvenance, sameFieldProvenance, type FieldProvenance } from './attribute-provenance';
 import { isCategory, isRecord, isUuid, type Category } from './wardrobe';
 import { AppError } from '../data/errors';
+import { locales, translate, type Language, type MessageKey } from '../i18n';
+import { styleTagLimit } from './preferences';
 import {
-  buildGarmentWrite, editGarmentField, freezeValues, newGarmentDraft, parseGarmentValues, sameValue,
+  buildGarmentWrite, collectionLimits, editGarmentField, freezeValues, newGarmentDraft, parseGarmentValues, sameValue,
   type GarmentDraft, type GarmentPatch, type GarmentValues,
 } from './garment-fields';
 
@@ -44,6 +46,76 @@ export function validItemFields(title: string, category: string): ItemFields | n
 export function validDescription(text: string): string | null {
   const value = text.trim();
   return [...value].length <= 240 && !value.includes('\0') ? value : null;
+}
+const colourCodes = [
+  'black', 'white', 'grey', 'navy', 'blue', 'green', 'olive', 'beige', 'brown', 'red', 'yellow', 'orange', 'pink', 'purple',
+] as const;
+type ColourCode = typeof colourCodes[number];
+const isColourCode = (value: string): value is ColourCode => colourCodes.some((code) => code === value);
+// Which colour form each name template needs (Swedish neuter nouns, Finnish and Swedish plural shoes). English repeats one form.
+const nameForms: Record<Category, 'base' | 'neuter' | 'plural'> = {
+  top: 'base', bottom: 'base', accessory: 'base', one_piece: 'neuter', layer: 'neuter', outerwear: 'neuter', footwear: 'plural',
+};
+function colourWord(colour: ColourCode, form: 'base' | 'neuter' | 'plural', language: Language): string {
+  const key: MessageKey = form === 'base' ? `colour.${colour}` : form === 'neuter' ? `colourNeuter.${colour}` : `colourPlural.${colour}`;
+  return translate(language, key).toLocaleLowerCase(locales[language]);
+}
+function capitalise(text: string, language: Language): string {
+  const [first = '', ...rest] = [...text];
+  return first.toLocaleUpperCase(locales[language]) + rest.join('');
+}
+const firstColour = (colours: readonly string[]) => colours.find(isColourCode);
+// "Green top" / "Vihreä yläosa" / "Grön överdel" from the category and the first colour only.
+export function defaultItemName(category: string | null | undefined, colours: readonly string[], language: Language): string {
+  const colour = firstColour(colours);
+  const known = category && isCategory(category) ? category : null;
+  if (known && colour) return capitalise(translate(language, `itemName.${known}`, { colour: colourWord(colour, nameForms[known], language) }), language);
+  if (known) return translate(language, `categoryOne.${known}`);
+  return colour ? translate(language, `colour.${colour}`) : '';
+}
+// "Linen shirt in blue": the name, plus the first colour when the name does not already mention it, within 240 characters.
+export function defaultDescription(title: string, colours: readonly string[], language: Language): string {
+  const name = title.trim();
+  if (!name) return '';
+  const colour = firstColour(colours);
+  const lower = name.toLocaleLowerCase(locales[language]);
+  const named = !colour || (['base', 'neuter', 'plural'] as const).some((form) => lower.includes(colourWord(colour, form, language)));
+  const text = named ? name : translate(language, 'item.photoDescription', { name, colour: colourWord(colour, 'neuter', language) });
+  return [...text].slice(0, 240).join('').trim();
+}
+export const visibleFields = ['title', 'category', 'colours', 'seasons'] as const;
+export const moreFields = [
+  'subcategory', 'pattern', 'brand', 'size_label', 'material', 'formality', 'warmth',
+  'purchase_price', 'purchase_date', 'notes', 'tags', 'favourite',
+] as const;
+export const occasionOptions = [
+  ['0', 'occasion.home'], ['1', 'occasion.everyday'], ['2', 'occasion.smart'], ['3', 'occasion.business'], ['4', 'occasion.formal'],
+] as const satisfies ReadonlyArray<readonly [string, MessageKey]>;
+// Three display steps over the stored 0–4 scale. A stored 0 or 4 keeps its value until the user picks another option.
+export function warmthOptions(raw: string): ReadonlyArray<readonly [string, MessageKey]> {
+  return [[raw === '0' || raw === '1' ? raw : '1', 'warmth.light'], ['2', 'warmth.medium'],
+    [raw === '3' || raw === '4' ? raw : '3', 'warmth.warm']];
+}
+export const tagLength = styleTagLimit;
+export type TagResult = { status: 'added'; tags: string[] } | { status: 'duplicate' | 'full' | 'invalid' | 'empty' };
+// One Tags area shows both saved lists, so additions share one count and byte budget across tags and style words.
+// Saved lists already over the budget stay as they are; only additions that would exceed it are refused.
+export const tagBudget = { count: collectionLimits.tags, bytes: 512 } as const;
+export function fitsTagBudget(entries: readonly string[]): boolean {
+  return entries.length <= tagBudget.count && new TextEncoder().encode(entries.join(',')).byteLength <= tagBudget.bytes;
+}
+// True when not even a one-character tag would fit.
+export function tagBudgetFull(tags: readonly string[], styleTags: readonly string[]): boolean {
+  return !fitsTagBudget([...tags, ...styleTags, 'x']);
+}
+// New entries always go to `tags`; style words stay where they are. Duplicates across both lists are refused.
+export function addTag(entry: string, tags: readonly string[], styleTags: readonly string[]): TagResult {
+  const value = entry.trim();
+  if (!value) return { status: 'empty' };
+  if ([...value].length > tagLength || value.includes('\0')) return { status: 'invalid' };
+  if ([...tags, ...styleTags].some((tag) => tag.toLocaleLowerCase() === value.toLocaleLowerCase())) return { status: 'duplicate' };
+  if (!fitsTagBudget([...tags, ...styleTags, value])) return { status: 'full' };
+  return { status: 'added', tags: [...tags, value] };
 }
 function version(value: unknown, maximum: number): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= maximum;

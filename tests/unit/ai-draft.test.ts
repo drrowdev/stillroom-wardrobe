@@ -1,10 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   aiSaveClaim, beginAiAnalysis, continueAiManually, createAiDraft, editAiDraftField, expireAiDraft,
   failAiAnalysis, invalidateAiDraft, prepareAiGeneration, receiveAiResult, presentAiDraft, refuseAiSave,
-  type AiContext, type AiDraftState, type AiTransition,
+  formAiFields, hiddenAiFields, prefillTags, type AiContext, type AiDraftState, type AiTransition,
 } from '../../src/domain/ai-draft';
+import { newAnalyzedSaveAttempt } from '../../src/domain/analyzed-save';
 import { aiFields, aiKind, type AiFacts, type AiField } from '../../src/domain/ai-analysis';
+import { aiCodes } from '../../src/domain/ai-controls';
+import {
+  aiPhase, phaseForCode, phaseForTerminal, pollStatus, statusPollDeadlineMs, statusPollDelaysMs, terminalReasons,
+  type AiPhaseInput,
+} from '../../src/features/wardrobe/use-ai-draft';
 import {
   buildGarmentWrite, editGarmentField, initialRawFields, newGarmentDraft, validateGarmentDraft,
   type GarmentDraft, type RawFields,
@@ -161,26 +167,35 @@ describe('pure bound draft projection', () => {
     expect(beginAiAnalysis(started, context)).toEqual({ status: 'ignored', state: started, reason: 'ineligible_state' });
     expect(idle.status).toBe('idle');
   });
-  it('fills all 14 fields without manual intent, formatting side effects or invented basics', () => {
+  it('fills the nine form fields, never the five hidden ones, without manual intent or invented basics', () => {
     const state = ready();
     const draft = raw(state);
     const defaults = initialRawFields('EUR');
     expect(draft.intent).toEqual({});
     expect(draft.priceLanguage).toBe('fi');
-    for (const field of aiFields) {
+    expect([...formAiFields].sort()).toEqual(['brand', 'category', 'colours', 'formality', 'material', 'pattern', 'seasons', 'size_label', 'subcategory']);
+    for (const field of formAiFields) {
       const value = allFields[field];
       expect(draft.raw[field]).toEqual(Array.isArray(value) ? value : String(value));
       expect(state.derivation?.[field]).toEqual({ value, kind: aiKind(field) });
     }
     for (const field of Object.keys(defaults) as (keyof RawFields)[]) {
-      if (!aiFields.some((key) => key === field)) expect(draft.raw[field]).toEqual(defaults[field]);
+      if (!formAiFields.some((key) => key === field)) expect(draft.raw[field]).toEqual(defaults[field]);
     }
     const validation = validateGarmentDraft(draft);
     expect(validation.values).toBeNull();
     expect(validation.errors).toEqual({ title: true });
     expect(claim(state).fields).toEqual(state.derivation);
   });
-  it.each(aiFields)('applies %s without introducing a new error, leaving missing basics honest', (field) => {
+  it.each(hiddenAiFields)('never applies, derives or claims hidden %s', (field) => {
+    const state = changed(receiveAiResult(pending(), context, result({ category: 'top', [field]: allFields[field] }), 1500));
+    expect(state.draft?.raw[field]).toEqual(initialRawFields('EUR')[field]);
+    expect(state.draft?.intent).toEqual({});
+    expect(state.derivation).not.toHaveProperty(field);
+    expect(claim(state).fields).not.toHaveProperty(field);
+    expect(Object.keys(claim(state).fields)).toEqual(['category']);
+  });
+  it.each(formAiFields)('applies %s without introducing a new error, leaving missing basics honest', (field) => {
     const state = changed(receiveAiResult(pending(), context, result({ [field]: allFields[field] }), 1500));
     const validation = validateGarmentDraft(raw(state));
     expect(validation.errors[field]).toBeUndefined();
@@ -275,7 +290,7 @@ describe('pure bound draft projection', () => {
 });
 
 describe('derivation, trust and explicit lifecycle', () => {
-  it.each(aiFields)('manual %s edit or clear removes its AI attribution, even for identical content', (field) => {
+  it.each(formAiFields)('manual %s edit or clear removes its AI attribution, even for identical content', (field) => {
     const original = ready();
     const draft = raw(original);
     for (const value of [draft.raw[field], initialRawFields('EUR')[field]]) {
@@ -384,10 +399,11 @@ describe('immutable untrusted Save preparation, not a new write path', () => {
     const prepared = claim(state);
     expect(Object.keys(prepared).sort()).toEqual(['draftId', 'fields', 'generation', 'imageSha256', 'requestId']);
     expect(prepared).toMatchObject({ draftId: context.draftId, generation: 1, imageSha256: context.imageSha256, requestId: context.requestId });
-    expect(prepared.fields.lower_coverage).toEqual({ value: 0, kind: 'ai_observed' });
+    expect(Object.keys(prepared.fields).sort()).toEqual([...formAiFields].sort());
+    for (const field of hiddenAiFields) expect(prepared.fields).not.toHaveProperty(field);
     expect(prepared.fields.formality).toEqual({ value: 0, kind: 'ai_estimated' });
     expect(prepared.fields.brand?.value).toBe(allFields.brand);
-    for (const field of aiFields) {
+    for (const field of formAiFields) {
       expect(Object.keys(prepared.fields[field]!)).toEqual(['value', 'kind']);
       expect(prepared.fields[field]).toEqual({ value: allFields[field], kind: aiKind(field) });
     }
@@ -412,7 +428,7 @@ describe('immutable untrusted Save preparation, not a new write path', () => {
     expect(() => Object.assign(prepared.fields.brand!, { kind: 'user' })).toThrow();
     expect(() => Object.assign(prepared, { requestId: nextContext.requestId })).toThrow();
     expect(() => (state.draft!.raw.colours as string[]).push('blue')).toThrow();
-    expect(Object.isFrozen(state.derivation?.style_tags)).toBe(true);
+    expect(Object.isFrozen(state.derivation?.colours)).toBe(true);
     expect(Object.isFrozen(state.result?.facts.fields)).toBe(true);
     expect(claim(state)).toEqual(prepared);
   });
@@ -438,11 +454,177 @@ describe('immutable untrusted Save preparation, not a new write path', () => {
     expect(expired.draft).toEqual(state.draft);
     expect(aiSaveClaim(expired, context, 2000).status).toBe('none');
   });
-  it.each(aiFields)('does not mutate the original result when manual input removes %s from the claim', (field: AiField) => {
+  it.each(formAiFields)('does not mutate the original result when manual input removes %s from the claim', (field: AiField) => {
     const state = ready();
     const edited = changed(editAiDraftField(state, context, field, initialRawFields('EUR')[field], 'en'));
     expect(edited.result?.facts.fields[field]).toEqual(allFields[field]);
     expect(claim(edited).fields).not.toHaveProperty(field);
     expect(claim(state).fields).toHaveProperty(field);
+  });
+});
+
+describe('local tag suggestions from style words (G1)', () => {
+  const owner = context.ownerId;
+  const photo = { main: new Blob(['main'], { type: 'image/jpeg' }), thumb: new Blob(['thumb'], { type: 'image/jpeg' }),
+    mainSha256: context.imageSha256, thumbSha256: 'c'.repeat(64), width: 120, height: 80 };
+  const scope = { ownerId: owner, epoch: context.epoch, signal: new AbortController().signal };
+  it('prefills untouched empty tags in order, deduplicated and bounded, never as category or colour labels', () => {
+    const shown = changed(presentAiDraft(ready(), context, 'en'));
+    expect(shown.draft?.raw.tags).toEqual(['Soft Lines', 'fictional style']);
+    expect(shown.draft?.raw.tags).not.toContain('Top');
+    expect(shown.draft?.raw.style_tags).toEqual([]);
+    expect(shown.draft?.intent).toEqual({});
+    expect(prefillTags(['a', 'A', 'b', 'x'.repeat(41), ' '], [], ['B'])).toEqual(['a']);
+    expect(prefillTags(Array.from({ length: 20 }, (_, index) => `t${index}`), [], [])).toHaveLength(12);
+  });
+  it('bounds suggestions by the combined tags and style words budget (R4)', () => {
+    const names = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => `${prefix}${index}`);
+    expect(prefillTags(names('n', 5), names('t', 4), names('s', 6))).toEqual(['n0', 'n1']);
+    expect(prefillTags(names('n', 5), names('t', 4), names('s', 8))).toEqual([]);
+    expect(prefillTags(names('n', 5), names('t', 10), names('s', 8))).toEqual([]);
+    const wide = (count: number) => Array.from({ length: count }, (_, index) => 'ä'.repeat(39) + String.fromCharCode(0xe0 + index));
+    expect(prefillTags(['x'.repeat(26), 'y'], wide(3), wide(6).slice(3))).toEqual(['x'.repeat(26)]);
+    expect(prefillTags(['x'.repeat(27), 'y'], wide(3), wide(6).slice(3))).toEqual([]);
+  });
+  it('analysed Add accepts prefilled tags as unknown provenance and claims neither tags nor style_tags', () => {
+    let state = changed(presentAiDraft(ready(), context, 'en'));
+    state = changed(editAiDraftField(state, context, 'title', 'My shirt', 'en'));
+    const attempt = newAnalyzedSaveAttempt(state, context, '', photo, scope, 1500);
+    expect(attempt.values.tags).toEqual(['Soft Lines', 'fictional style']);
+    expect(attempt.values.style_tags).toEqual([]);
+    expect(attempt.payload.field_provenance.tags).toEqual({ kind: 'unknown', revision: 1 });
+    expect(attempt.payload.field_provenance).not.toHaveProperty('style_tags');
+    expect(attempt.payload.field_provenance).not.toHaveProperty('sleeve_length');
+    expect(attempt.claim?.fields).not.toHaveProperty('tags');
+    expect(attempt.claim?.fields).not.toHaveProperty('style_tags');
+    expect(attempt.values.sleeve_length).toBeNull();
+  });
+  it('does not prefill after a tags edit or clear', () => {
+    const cleared = changed(editAiDraftField(ready(), context, 'tags', [], 'en'));
+    expect(changed(presentAiDraft(cleared, context, 'en')).draft?.raw.tags).toEqual([]);
+  });
+  function replacement(tags: string[], kind?: 'user' | 'unknown') {
+    const draft = newGarmentDraft('EUR', 'en');
+    draft.raw.title = 'Saved shirt'; draft.raw.category = 'top'; draft.raw.tags = tags;
+    const values = validateGarmentDraft(draft).values!;
+    const baseline = { values, provenance: kind ? { tags: { kind, revision: 2 } } : {} };
+    const created = createAiDraft(newGarmentDraft('EUR', 'en', values), context, baseline);
+    if (!created.ok) throw new Error('Expected saved draft');
+    return changed(presentAiDraft(changed(receiveAiResult(changed(beginAiAnalysis(created.state, context)), context, result(), 1000)), context, 'en'));
+  }
+  it('replacement prefills only eligible (empty and unknown) tags', () => {
+    expect(replacement([]).draft?.raw.tags).toEqual(['Soft Lines', 'fictional style']);
+    expect(replacement([], 'unknown').draft?.raw.tags).toEqual(['Soft Lines', 'fictional style']);
+    expect(replacement([], 'user').draft?.raw.tags).toEqual([]);
+    expect(replacement(['kept'], 'user').draft?.raw.tags).toEqual(['kept']);
+    expect(replacement(['kept'], 'unknown').draft?.raw.tags).toEqual(['kept']);
+    expect(replacement([], 'user').draft?.intent).toEqual({});
+  });
+});
+
+describe('AI status phases', () => {
+  const base: AiPhaseInput = { status: 'idle', code: null, reason: null, working: false, polling: null, manual: false, applied: false };
+  it('maps every reply code to off, limit or the neutral failure', () => {
+    const off = ['CONSENT_REQUIRED', 'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED'];
+    for (const code of aiCodes) {
+      expect(phaseForCode(code)).toBe(off.includes(code) ? 'off' : code === 'ALLOWANCE' ? 'limit' : 'failed');
+    }
+    expect(phaseForCode('RATE_LIMIT')).toBe('failed');
+  });
+  it('maps every terminal reason to the neutral failure', () => {
+    for (const reason of terminalReasons) expect(phaseForTerminal(reason)).toBe('failed');
+  });
+  it('applies the documented precedence', () => {
+    expect(aiPhase({ ...base, status: null })).toBe('none');
+    expect(aiPhase({ ...base, status: 'invalidated', manual: true })).toBe('none');
+    expect(aiPhase({ ...base, status: 'failed', manual: true, applied: true })).toBe('manual');
+    expect(aiPhase({ ...base, status: 'ready', code: 'ALLOWANCE' })).toBe('ready');
+    for (const status of ['expired', 'cancelled', 'failed', 'unclear', 'pending'] as const) {
+      expect(aiPhase({ ...base, status, applied: true, code: 'ALLOWANCE', polling: 'active' })).toBe('needsCheck');
+    }
+    expect(aiPhase({ ...base, status: 'unclear', code: 'ALLOWANCE' })).toBe('unclear');
+    expect(aiPhase({ ...base, status: 'pending', working: true, code: 'INACTIVE' })).toBe('working');
+    expect(aiPhase({ ...base, status: 'pending', polling: 'active', code: 'TIMEOUT' })).toBe('working');
+    expect(aiPhase({ ...base, status: 'pending', polling: 'exhausted', code: 'ALLOWANCE' })).toBe('stillWorking');
+    expect(aiPhase({ ...base, status: 'pending' })).toBe('stillWorking');
+    expect(aiPhase({ ...base, status: 'idle', working: true })).toBe('working');
+    expect(aiPhase({ ...base, status: 'idle', code: 'CONSENT_REQUIRED' })).toBe('off');
+    expect(aiPhase({ ...base, status: 'idle', code: 'ALLOWANCE' })).toBe('limit');
+    expect(aiPhase({ ...base, status: 'idle' })).toBe('none');
+    expect(aiPhase({ ...base, status: 'failed', code: 'RATE_LIMIT' })).toBe('failed');
+    expect(aiPhase({ ...base, status: 'failed', reason: 'EXPIRED', code: 'ALLOWANCE' })).toBe('failed');
+    expect(aiPhase({ ...base, status: 'expired' })).toBe('failed');
+  });
+});
+describe('same-request status polling', () => {
+  afterEach(() => { vi.useRealTimers(); });
+  const total = statusPollDelaysMs.reduce((sum, delay) => sum + delay, 0);
+  it('keeps five delays inside the hard deadline', () => {
+    expect(statusPollDelaysMs).toHaveLength(5);
+    expect(total).toBeLessThan(statusPollDeadlineMs);
+  });
+  it('makes at most five calls, then reports exhaustion once', async () => {
+    vi.useFakeTimers();
+    const check = vi.fn(async () => 'continue' as const);
+    const exhausted = vi.fn();
+    pollStatus(check, exhausted);
+    await vi.advanceTimersByTimeAsync(statusPollDeadlineMs + 60000);
+    expect(check).toHaveBeenCalledTimes(5);
+    expect(exhausted).toHaveBeenCalledTimes(1);
+  });
+  it('treats errors as another try and stops when done', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const check = vi.fn(async () => { calls += 1; if (calls === 1) throw new Error('offline'); return calls === 2 ? 'done' as const : 'continue' as const; });
+    const exhausted = vi.fn();
+    pollStatus(check, exhausted);
+    await vi.advanceTimersByTimeAsync(statusPollDeadlineMs + 1000);
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(exhausted).not.toHaveBeenCalled();
+  });
+  it('is single-flight and aborts a hanging call at the deadline', async () => {
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    let open = 0, most = 0;
+    const check = vi.fn((signal: AbortSignal) => {
+      signals.push(signal); open += 1; most = Math.max(most, open);
+      return new Promise<'continue'>(() => { signal.addEventListener('abort', () => { open -= 1; }); });
+    });
+    const exhausted = vi.fn();
+    pollStatus(check, exhausted);
+    await vi.advanceTimersByTimeAsync(statusPollDeadlineMs - 1);
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(exhausted).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(signals[0]!.aborted).toBe(true);
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    expect(most).toBe(1);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+  it('ignores a slow reply that lands after the deadline', async () => {
+    vi.useFakeTimers();
+    let settle: ((value: 'done') => void) | undefined;
+    const check = vi.fn(() => new Promise<'done'>((resolve) => { settle = resolve; }));
+    const exhausted = vi.fn();
+    pollStatus(check, exhausted);
+    await vi.advanceTimersByTimeAsync(statusPollDeadlineMs);
+    settle?.('done');
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(exhausted).toHaveBeenCalledTimes(1);
+  });
+  it('stops without reporting exhaustion and aborts the open call', async () => {
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    const check = vi.fn((signal: AbortSignal) => { signals.push(signal); return new Promise<'continue'>(() => {}); });
+    const exhausted = vi.fn();
+    const stop = pollStatus(check, exhausted);
+    await vi.advanceTimersByTimeAsync(statusPollDelaysMs[0]);
+    stop();
+    expect(signals[0]!.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(statusPollDeadlineMs + 60000);
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(exhausted).not.toHaveBeenCalled();
   });
 });
