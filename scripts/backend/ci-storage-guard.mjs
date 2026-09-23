@@ -1,6 +1,6 @@
 import {
   DB_CONTAINER, PROJECT_ID, assertNoServiceSecrets, assertProjectConfig,
-  requireDocker, requireLocalContainer, commandEnvironment, runCommand, privilegedLocalSql, fail,
+  requireDocker, requireLocalContainer, commandEnvironment, runCommand, fail,
 } from './local.mjs';
 
 export const PUBLICATION_BODY_MD5 = 'a1e6faa7a53dd540403d8b6e831820b4';
@@ -8,24 +8,26 @@ export const IMAGE_CHANGE_PUBLICATION_BODY_MD5 = '636fb77a3c954f4a23d78c7339ffef
 
 const HISTORY = ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000',
   '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000'];
-const HISTORY_SQL = 'select coalesce(json_agg(version order by version),\'[]\'::json) from supabase_migrations.schema_migrations;';
 async function historyMode() {
-  const output = await privilegedLocalSql(HISTORY_SQL);
-  if (typeof output !== 'string' || Buffer.byteLength(output) > 1024) fail(VERIFY_FAILED, 1);
+  const output = await readOnlySql(HISTORY_SQL, 1024);
   const versions = JSON.parse(output);
   if (!Array.isArray(versions) || ![9, 10, 11].includes(versions.length)
     || JSON.stringify(versions) !== JSON.stringify(HISTORY.slice(0, versions.length))) fail(VERIFY_FAILED, 1);
   return versions.length === 11 ? 'image-change' : 'legacy';
 }
 
-const NOT_RUN = 'NOT RUN: Storage guard installation requires the explicitly approved disposable CI database job.';
-const INSTALL_FAILED = 'FAIL: CI Storage guard finalization was not verified; readiness is blocked.';
-const VERIFY_FAILED = 'FAIL: Storage guard ALWAYS installation was not verified; readiness is blocked.';
+const NOT_RUN = 'NOT RUN: database mutation requires the explicitly approved disposable CI database job.';
+const VERIFY_FAILED = 'FAIL: Storage guard O/origin contract was not verified; readiness is blocked.';
 const DEADLINES = `
 set local search_path = pg_catalog;
 set local statement_timeout = '10s';
 set local lock_timeout = '2s';
 set local idle_in_transaction_session_timeout = '10s';`;
+const HISTORY_SQL = `
+begin read only;
+${DEADLINES}
+select coalesce(json_agg(version order by version),'[]'::json) from supabase_migrations.schema_migrations;
+commit;`;
 
 // Catalog joins require no USAGE on private. No application row or function body is returned to Node.
 const readCatalog = (mode) => `
@@ -79,36 +81,6 @@ join pg_catalog.pg_roles po on po.oid=p.proowner
 join pg_catalog.pg_language l on l.oid=p.prolang
 where n.nspname='storage' and c.relname='objects';`;
 
-const installSql = (mode) => `
-begin;
-${DEADLINES}
-lock table storage.objects in share row exclusive mode;
-do $guard$
-declare observed jsonb; before_state jsonb;
-begin
-  ${readCatalog(mode)}
-  if observed->>'valid' is distinct from 'true'
-    or observed->>'database' is distinct from 'postgres'
-    or observed->>'actor' is distinct from 'supabase_storage_admin'
-    or observed->>'session' is distinct from 'supabase_storage_admin'
-    or coalesce(observed#>>'{trigger,tgenabled}','') not in ('O','A') then
-    raise exception 'CI_STORAGE_GUARD_INVALID';
-  end if;
-  before_state := observed #- '{trigger,tgenabled}';
-  if observed#>>'{trigger,tgenabled}'='O' then
-    alter table storage.objects enable always trigger item_object_publication_guard;
-  end if;
-  ${readCatalog(mode)}
-  if observed->>'valid' is distinct from 'true'
-    or observed#>>'{trigger,tgenabled}' is distinct from 'A'
-    or (observed #- '{trigger,tgenabled}') is distinct from before_state then
-    raise exception 'CI_STORAGE_GUARD_INVALID';
-  end if;
-end;
-$guard$;
-commit;
-select 'CI_STORAGE_GUARD_OK';`;
-
 const verifySql = (mode) => `
 begin read only;
 ${DEADLINES}
@@ -120,7 +92,16 @@ begin
     or observed->>'database' is distinct from 'postgres'
     or observed->>'actor' is distinct from 'postgres'
     or observed->>'session' is distinct from 'postgres'
-    or observed#>>'{trigger,tgenabled}' is distinct from 'A' then
+    or observed->>'replication' is distinct from 'origin'
+    or observed#>>'{trigger,tgenabled}' is distinct from 'O'
+    or not (select count(*)=1 and bool_and(t.tgenabled='A' and not t.tgisinternal and not t.tgdeferrable
+      and t.tgtype=5 and n.nspname='public' and c.relname='item_images'
+      and pn.nspname='private' and p.proname='record_item_image_identity' and p.pronargs=0)
+      from pg_catalog.pg_trigger t join pg_catalog.pg_class c on c.oid=t.tgrelid
+      join pg_catalog.pg_namespace n on n.oid=c.relnamespace
+      join pg_catalog.pg_proc p on p.oid=t.tgfoid
+      join pg_catalog.pg_namespace pn on pn.oid=p.pronamespace
+      where t.tgname='item_image_identity_guard') then
     raise exception 'CI_STORAGE_GUARD_INVALID';
   end if;
 end;
@@ -128,8 +109,8 @@ $guard$;
 commit;
 select 'CI_STORAGE_GUARD_VERIFIED';`;
 
-export function assertCiStorageGuardInstall() {
-  if (arguments.length !== 0 || process.env.ALLOW_CI_STORAGE_GUARD_INSTALL !== '1'
+export function assertCiDatabaseMutationAllowed() {
+  if (arguments.length !== 0 || process.env.ALLOW_CI_DATABASE_MUTATION !== '1'
     || process.env.CI !== 'true' || process.env.GITHUB_ACTIONS !== 'true'
     || process.env.GITHUB_REPOSITORY !== 'drrowdev/stillroom-wardrobe'
     || process.env.GITHUB_JOB !== 'database') fail(NOT_RUN);
@@ -157,23 +138,14 @@ async function requireTarget() {
     || value.running !== true || !images.includes(value.image)) fail(VERIFY_FAILED, 1);
 }
 
-export async function installCiStorageGuard() {
-  assertCiStorageGuardInstall();
-  if (arguments.length !== 0) fail(NOT_RUN);
-  try {
-    await requireTarget();
-    const mode = await historyMode();
-    const result = await runCommand('docker', [
-      'exec', '-i', DB_CONTAINER, 'psql', '-X', '--no-password', '-h', '127.0.0.1',
-      '-p', '5432', '-U', 'supabase_storage_admin', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-A',
-    ], { input: installSql(mode), env: commandEnvironment(), timeout: 30_000, maxOutputBytes: 4096 });
-    if (result.code !== 0 || result.stderr !== '' || typeof result.stdout !== 'string'
-      || Buffer.byteLength(result.stdout) > 4096 || result.stdout.trim() !== 'CI_STORAGE_GUARD_OK') {
-      fail(INSTALL_FAILED, 1);
-    }
-  } catch {
-    fail(INSTALL_FAILED, 1);
-  }
+async function readOnlySql(sql, maxOutputBytes) {
+  const result = await runCommand('docker', [
+    'exec', '-i', DB_CONTAINER, 'psql', '-X', '--no-password', '-h', '127.0.0.1',
+    '-p', '5432', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-A',
+  ], { input: sql, env: commandEnvironment(), timeout: 30_000, maxOutputBytes });
+  if (result.code !== 0 || result.stderr !== '' || typeof result.stdout !== 'string'
+    || Buffer.byteLength(result.stdout) > maxOutputBytes) fail(VERIFY_FAILED, 1);
+  return result.stdout.trim();
 }
 
 export async function verifyCiStorageGuard() {
@@ -181,7 +153,7 @@ export async function verifyCiStorageGuard() {
   try {
     await requireTarget();
     const mode = await historyMode();
-    if (await privilegedLocalSql(verifySql(mode)) !== 'CI_STORAGE_GUARD_VERIFIED') fail(VERIFY_FAILED, 1);
+    if (await readOnlySql(verifySql(mode), 4096) !== 'CI_STORAGE_GUARD_VERIFIED') fail(VERIFY_FAILED, 1);
   } catch {
     fail(VERIFY_FAILED, 1);
   }

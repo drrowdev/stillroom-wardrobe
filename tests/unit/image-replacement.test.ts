@@ -47,7 +47,7 @@ beforeEach(async () => {
   vi.resetAllMocks(); files = new Map(); directories = new Set([path.dirname(stage)]); applied = 9;
   for (const key of Object.keys(process.env)) if (/(?:SERVICE[_-]?ROLE|SECRET[_-]?KEY|SUPABASE.*(?:SERVICE|SECRET|TOKEN)|DATABASE_URL|DB_PASSWORD|PGPASSWORD)/i.test(key)) vi.stubEnv(key, undefined);
   for (const [key, value] of Object.entries({
-    ALLOW_CI_STORAGE_GUARD_INSTALL: '1', ALLOW_PRESERVATION_REHEARSAL: '1', CI: 'true',
+    ALLOW_CI_DATABASE_MUTATION: '1', ALLOW_PRESERVATION_REHEARSAL: '1', CI: 'true',
     GITHUB_ACTIONS: 'true', GITHUB_JOB: 'database', GITHUB_REPOSITORY: 'drrowdev/stillroom-wardrobe',
   })) vi.stubEnv(key, value);
   const configPath = path.join(ROOT, 'supabase', 'config.toml');

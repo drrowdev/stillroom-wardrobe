@@ -2,6 +2,57 @@
 
 ## Implemented scope and current evidence
 
+### HC1 hosted Storage compatibility - 23 September 2026
+
+[Owner amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5791405199)
+and [reviewed plan with binding A1-A6](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5791784903)
+replace the historical T20/T26 publication-ALWAYS installation requirement below
+with one strict **O/origin** contract. The executable reserved-owner installer is
+removed. All eleven migration bytes, publication/deletion function bodies, locks,
+RLS and pending-object read/hash retry behavior are unchanged. Historical SQL
+comments and earlier evidence remain historical, not the active installation rule.
+The app-owned `item_image_identity_guard` still requires **A/ALWAYS**.
+
+O is not equivalent to A: privileged replica-mode bulk operations are unsupported
+while the application is live. The verifier proves its own postgres connection is
+in origin mode, not that every hosted Storage connection uses it. Actual hosted
+Storage version/runtime/privilege compatibility, quiescence and admitted-request
+drainage, coherent recovery, Auth/API/Edge EU and Cloudflare gates remain separate.
+No local command or source change authorizes hosted writes, reset or deployment.
+
+The serial preservation rehearsal retains populated1->10,9->10 and10->11 lanes.
+After their served finalizer shuts down, one additional fixed reset creates
+schema6 fixtures, followed by one existing `migration up --local` through7..11.
+Exact six-applied/five-pending and final eleven-applied histories, immutable source
+hashes and unchanged container identity are required. Six/seven/eight are not
+verifier readiness profiles; no intermediate pause within migration-up is claimed.
+
+Both fictional owners retain nondefault provenance, revised description counters,
+profile/preferences/history/link values and ready/retired images, plus completed
+and pending checked Saves. All16 preserved objects use the existing632-byte JPEG.
+One further ordinary never-uploaded reservation/deletion per owner proves
+item/image/attempt absence and used-ID retention before capture. Public inventory
+is38rows, with4 live attempts,6 used IDs and8 images; the exact image/used-ID UNION
+contains10 registry entries, including two used-only identities.
+
+The closed memory-only public snapshot and owner-scoped private comparison retain
+32-row/table and512-KiB bounds. Private preservation covers exactly
+`item_save_attempts`, `item_save_used_ids` and inactive `ai_controls`; only the new
+null `execution_manifest_id` is allowed. Requests/usage must be empty in this lane.
+Only enumerated new image-change/deletion tables must start empty; the two
+source-installed execution manifests are not unexpected data. Existing later-schema
+AI preservation lanes remain distinct. Full public/byte/private comparison precedes
+completed replay and pending-byte/hash verification/resume. The original normal-owner
+publication cases run again at eleven, including rejection of an admitted slow
+upload after FINISH and actual literal Storage-catalog prefix count zero.
+
+Capture, comparison and replay/probes each have120-second phase budgets; ordinary
+requests retain15-second limits and the existing race/settlement/cleanup bounds
+remain unchanged. There is one owned stack, no extra job/matrix/retry and no
+increase to the30-minute CI job cap. Accepted-main run35817276066/job107041392123
+took6m35s overall and1m53s for rehearsal; these are prior measurements, not new
+lane execution evidence or a performance prediction. Native HC1 proof is pending.
+
 ### I08 Stage 1 source-only candidate (13 September 2026)
 
 The initial 13 September I08 candidate added a strictly pinned ninth migration,
@@ -463,51 +514,54 @@ No receiver, retry, cleanup or response assertion is relaxed.
 
 ### T26 CI-only Storage installation boundary
 
+**Historical T26, superseded by HC1 on23September2026.**
 The [reviewed T26 amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5659205055)
-moves only the ninth migration's owner-required Storage `ENABLE ALWAYS` statement
-to `scripts/backend/ci-storage-guard.mjs`. The migration alone leaves an
-**incomplete installation**, not a ready stack or an atomic production cutover.
-The all-role publication body, image-ID trigger, nineteen catalog conditions and
-native pins are unchanged. Final readiness still requires the exact ALWAYS guard.
+moved the Storage-owner `ENABLE ALWAYS` step out of the ninth migration.
+HC1 deletes that installer rather than keeping an optional privileged profile.
+Current readiness requires publication **O**, identity **A**, and the verifier's
+own postgres session in **origin** mode. Vendor `protect_delete` retains its
+existing O-or-A allowance; it is not an application-trigger fallback.
 
 `db:start`, `db:reset` and the preservation parent now refuse before CLI mutation
 unless the approved disposable database job has literal
-`ALLOW_CI_STORAGE_GUARD_INSTALL=1`, `CI=true`, `GITHUB_ACTIONS=true`,
+`ALLOW_CI_DATABASE_MUTATION=1`, `CI=true`, `GITHUB_ACTIONS=true`,
 `GITHUB_REPOSITORY=drrowdev/stillroom-wardrobe` and `GITHUB_JOB=database`.
-Only Database CI sets the new flag. Do not spoof CI variables for local use;
-the local command examples below do not authorize a weaker installation.
-Normal children and stripped command environments inherit none of this scope.
+The pure zero-argument `assertCiDatabaseMutationAllowed` also rejects service
+secrets and extra arguments. The old installer flag alone cannot admit mutation.
+Only Database CI sets the current flag. Do not spoof CI variables for local use;
+normal children and stripped command environments inherit none of this scope.
 
-The fixed installer checks project, local daemon, named running container and
+The fixed read-only verifier checks project, local daemon, named running container and
 the pinned `supabase/postgres:17.6.1.165` image's CLI-default ECR/GHCR/Hub names.
 It never pulls or selects a fallback. These names come from CLI
 `997a1e69a4a83466964ed874d3a604c88a7b3866`'s Dockerfile and registry resolver,
-not measured image/HBA compatibility. It uses only container TCP127.0.0.1:5432,
-database `postgres`, actor/session `supabase_storage_admin`, `psql -X`,
-`--no-password`, `ON_ERROR_STOP=1` and SQL stdin. Docker/loopback trust grants
-superuser-equivalent capability; this fixed owner path constrains reviewed code,
-not the authentication capability. No role switch, grant or ownership transfer
-is permitted. The generic postgres fixture helper remains unchanged.
+not proof of hosted image/HBA compatibility. Both history and catalog calls use
+fixed container TCP127.0.0.1:5432, database/actor/session `postgres`, `psql -X`,
+`--no-password`, `ON_ERROR_STOP=1`, stripped environment and SQL stdin.
+Docker/loopback trust remains privileged; this is structural evidence, never
+an ordinary-user access assertion. No role switch, grant, owner connection,
+ownership transfer or trigger alteration remains in the verifier.
 
 Catalog joins validate actual table/function ownership, exact trigger identity,
-body/config/ACLs and metadata. Under a SHARE ROW EXCLUSIVE relation lock, one
-transaction changes only O to A or verifies existing A; absent/D/R/null/mismatched
-state fails. Relevant ownership/ACL/replica identity, full function/trigger
-metadata and session/effective/replication state must remain unchanged.
-Statement/lock/idle-transaction deadlines are10s/2s/10s; the owner process has
-30s and4096-byte bounds. Only exit0, empty stderr and the exact trimmed marker
-emitted **after COMMIT** succeed. Uncertain outcomes fail without retry;
-client closure or a receipt fragment is not server-termination evidence.
+body/config/ACLs and metadata. Exact history prefixes9/10/11 choose only the
+reviewed legacy/final body/type pairs. Unknown histories or missing/A/D/R/null
+publication state fail closed. An existing A stack is not repaired or downgraded;
+only a separately approved disposable recreation/reset can replace it.
+No automatic reset or production-reset remedy is authorized.
 
-Start finalizes and verifies before status/Auth health; reset does so before
-account/AI fixture provisioning. Preservation S1 remains base-only with no
-installer; S3 finalizes before target history, comparison, catalog and fixtures.
-Types performs only strict-A read-only catalog verification through the existing
-postgres helper before generation, never installation. No ordinary-user access
-assertion runs under the owner. Actual owner/image/HBA/trigger compatibility,
-ordinary-session and downstream gates remain unverified. Hosted installation
-requires separately reviewed owner/quiescence cutover; no production waiver,
-retry budget or backend execution is granted by this source change.
+Each SQL call has a30-second process bound, successful exit and empty stderr:
+history output is capped at1024bytes and verification at4096bytes. Both use
+read-only transactions with10s statement/2s lock/10s idle limits. Catalog JSON
+and full function bodies stay inside the DO block; only the fixed verification
+receipt emitted **after COMMIT** returns. The generic120s/16MiB privileged SQL
+helper is unchanged and is not used by these two calls. This is not a30-second
+bound for the entire Docker/preflight/two-call operation.
+
+Start verifies before status/Auth health; reset verifies before account/AI
+fixture provisioning; types verifies before authentic generation.
+Preservation verifies each observed applicable9/10/11 transition before traffic,
+including9->10. Base and schema6 fixture setup are not readiness assertions.
+Failure is nonzero without retry, observed-body adoption or success fallback.
 
 Install/start Docker separately, using a local Unix socket or Docker Desktop Windows named pipe. Ensure ports 54320–54322 and 54324 are free. Docker contexts pointing to SSH/TCP daemons and `DOCKER_HOST`/`DOCKER_CONTEXT` overrides are deliberately refused. Use the Docker CLI's selected local context.
 
@@ -539,7 +593,7 @@ npm run db:types -- --check
 npm run dev
 ```
 
-After the T26 permission preflight, `db:start` launches the actual local services, finalizes and verifies the Storage guard, checks the known database container, and verifies a healthy Auth HTTP response. Initial Docker image downloads can take several minutes. CLI output is captured rather than printed because startup/status can include credentials.
+After the HC1 mutation preflight, `db:start` launches the actual local services, verifies the strict O/origin Storage contract and identity A, checks the known database container, and verifies a healthy Auth HTTP response. Initial Docker image downloads can take several minutes. CLI output is captured rather than printed because startup/status can include credentials.
 
 The [T23 startup-diagnostic amendment](https://github.com/drrowdev/stillroom-wardrobe/pull/25#issuecomment-5656047462)
 defines thirteen closed fields; marker observations activate only on failed
@@ -564,7 +618,7 @@ amendment does not repair privileges or authorize a retry, execution or cutover.
 
 `db:reset` is destructive **only to the disposable local stack**. It checks Docker locality and the database container's exact name, Supabase project label, Postgres image and running state. It invokes `db reset --local --no-seed`, never `--linked`, `--db-url` or `--project-ref`; extra arguments are rejected. A changed initial migration hash also aborts the reset.
 
-After successful migration and strict Storage guard finalization/verification, a separate Node process runs `scripts/provision-test-users.mjs`:
+After successful migration and strict Storage guard verification, a separate Node process runs `scripts/provision-test-users.mjs`:
 
 1. Read CLI status JSON into setup-only memory, never console output.
 2. Through local container `psql`, reserve two independent fictional approval slots using `scripts/reserve-accounts.sql`. Refuse unexpected existing identities. No password is passed in SQL, a process argument or a command log.

@@ -282,12 +282,13 @@ export async function cleanupSnapshot(run) {
   await unlink(filename);
 }
 
-export function normalClient(env) {
+export function normalClient(env, phaseSignal) {
   validateSessionEnvironment(env);
   const base = assertLocalApi(env.SUPABASE_URL), key = env.SUPABASE_PUBLISHABLE_KEY;
   async function request(token, route, { method = 'GET', body, binary = false, headers = {}, onFailure = () => {} } = {}) {
     const response = await fetch(base + route, {
-      method, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15_000),
+      method, cache: 'no-store', redirect: 'error',
+      signal: phaseSignal ? AbortSignal.any([phaseSignal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
       headers: { apikey: key, ...(token ? { Authorization: 'Bearer ' + token } : {}),
         ...(body === undefined ? {} : { 'Content-Type': binary ? 'image/jpeg' : 'application/json' }), ...headers },
       ...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) }),
@@ -379,11 +380,12 @@ export function normalClient(env) {
   return { request, rpc, rows, insert, patch, save, signIn };
 }
 
-async function seed(client, owner) {
+async function seed(client, owner, six = false) {
   const { request, rpc, rows, insert, save } = client;
   for (const table of TABLES) requireEvidence((await rows(owner, table)).length === (['profiles', 'style_preferences'].includes(table) ? 1 : 0));
   const absent = await request(owner.token, '/rest/v1/items?select=field_provenance&limit=1');
-  requireEvidence(!absent.ok && absent.status === 400 && absent.data.code === '42703');
+  requireEvidence(six ? absent.ok && isDeepStrictEqual(absent.data, [])
+    : !absent.ok && absent.status === 400 && absent.data.code === '42703');
   let profile = (await rows(owner, 'profiles'))[0];
   profile = await save(owner, 'profiles', profile, { display_name: 'Fictional preservation owner', timezone: 'Europe/Stockholm', currency: 'SEK' });
   await save(owner, 'profiles', profile, { ui_language: owner.label === 'A' ? 'fi' : 'sv' });
@@ -398,10 +400,16 @@ async function seed(client, owner) {
     size_label: 'M', material: 'Owner supplied', min_temp: -10, max_temp: 15, style_tags: ['relaxed'],
     tags: ['fictional', 'preservation'], purchase_price: 123.45, purchase_date: '2024-02-29', currency: 'SEK',
     notes: 'Fictional note\nSecond line 🌿', availability: 'laundry', lifecycle: 'archived', exclude_suggestions: true,
+    ...(six ? { pattern: 'checked', sleeve_length: 'long', garment_length: 'long',
+      field_provenance: { title: { kind: 'user', revision: 1 }, pattern: { kind: 'user', revision: 1 } } } : {}),
   });
   const imageless = await insert(owner, 'items', { id: randomUUID(), title: 'Fictional imageless item', category: 'bottom' });
   implicit = await save(owner, 'items', implicit, { wear_more: true });
   explicit = await save(owner, 'items', explicit, { favourite: true });
+  if (six) explicit = await save(owner, 'items', explicit, {
+    field_provenance: { ...explicit.field_provenance, pattern: { kind: 'user', revision: 2 },
+      warmth: { kind: 'unknown', revision: 1 } },
+  });
   await save(owner, 'items', imageless, { favourite: true });
   const jpg = await readFile(new URL('../security/fixture.jpg', import.meta.url));
   requireEvidence(jpg.length === 632);
@@ -418,6 +426,13 @@ async function seed(client, owner) {
       })).ok);
     }
     await rpc(owner, 'commit_image', { p_image_id: image.id });
+    if (six) {
+      const changed = await rpc(owner, 'update_image_description', {
+        p_image_id: image.id, p_expected_description_version: 1, p_alt_text: 'Fictional revised preservation image',
+      });
+      requireEvidence(Array.isArray(changed) && changed.length === 1 && changed[0].id === image.id
+        && changed[0].description_version === 2 && changed[0].alt_text === 'Fictional revised preservation image');
+    }
   }
   const outfit = { p_id: randomUUID(), p_title: 'Fictional preservation outfit', p_occasion: 'everyday',
     p_notes: 'Fictional outfit note', p_favourite: false, p_item_ids: [explicit.id, implicit.id], p_expected_version: null };
@@ -462,6 +477,156 @@ export async function captureData(client, owners, run, aiDefaults = false) {
   return { schemaVersion: 1, projectId: PROJECT_ID, stage: 'base', run, sources: SOURCE_HASHES, owners: owners.map((owner) => owner.uid), data };
 }
 
+export const SIX_COUNTS = Object.freeze([1, 1, 5, 4, 1, 2, 1, 2, 1, 1]);
+export const SIX_COLUMNS = Object.freeze({
+  ...COLUMNS,
+  profiles: COLUMNS.profiles + ' ai_enabled ai_notice_revision ai_consented_at',
+  items: COLUMNS.items + ' ' + NEW_COLUMNS.join(' '),
+  item_images: COLUMNS.item_images + ' description_version',
+});
+
+export function validateSixSnapshot(snapshot, run, owners) {
+  requireEvidence(typeof run === 'string' && uuid.test(run) && Array.isArray(owners)
+    && owners.length === 2 && owners.every((id) => typeof id === 'string' && uuid.test(id)) && owners[0] !== owners[1]);
+  requireEvidence(Buffer.byteLength(JSON.stringify(snapshot)) <= MAX_SNAPSHOT_BYTES);
+  noCredentials(snapshot);
+  closed(snapshot, ['schemaVersion', 'projectId', 'stage', 'run', 'sources', 'owners', 'data']);
+  requireEvidence(snapshot.schemaVersion === 1 && snapshot.projectId === PROJECT_ID
+    && snapshot.stage === 'six' && snapshot.run === run
+    && isDeepStrictEqual(snapshot.sources, SOURCE_HASHES) && isDeepStrictEqual(snapshot.owners, owners)
+    && Array.isArray(snapshot.data) && snapshot.data.length === 2);
+  for (const [index, data] of snapshot.data.entries()) {
+    closed(data, ['label', 'ownerId', 'tables', 'objects']);
+    requireEvidence(data.ownerId === owners[index] && data.label === ['A', 'B'][index]);
+    closed(data.tables, TABLES);
+    for (const [tableIndex, table] of TABLES.entries()) {
+      const rows = canonicalRows(table, data.tables[table]);
+      requireEvidence(rows.length === SIX_COUNTS[tableIndex]);
+      for (const row of rows) {
+        closed(row, SIX_COLUMNS[table].split(' '));
+        requireEvidence(row.owner_id === data.ownerId);
+      }
+    }
+    const profile = data.tables.profiles[0];
+    requireEvidence(profile.ai_enabled === false && profile.ai_notice_revision === null && profile.ai_consented_at === null);
+    const explicit = data.tables.items.filter((row) => row.title === 'Fictional explicit facts');
+    const implicit = data.tables.items.filter((row) => row.title === 'Fictional implicit facts');
+    requireEvidence(explicit.length === 1 && implicit.length === 1 && explicit[0].pattern === 'checked'
+      && explicit[0].sleeve_length === 'long' && explicit[0].garment_length === 'long'
+      && isDeepStrictEqual(explicit[0].field_provenance, {
+        title: { kind: 'user', revision: 1 }, pattern: { kind: 'user', revision: 2 }, warmth: { kind: 'unknown', revision: 1 },
+      }));
+    for (const key of Object.keys(IMPLICIT_FACTS)) requireEvidence(implicit[0][key] === null);
+    const images = data.tables.item_images;
+    requireEvidence(images.filter((row) => row.state === 'ready').length === 2
+      && images.filter((row) => row.state === 'retired').length === 1
+      && images.filter((row) => row.state === 'pending').length === 1);
+    const expected = new Map();
+    for (const image of images) {
+      requireEvidence(data.tables.items.some((item) => item.id === image.item_id)
+        && image.width === 2 && image.height === 2
+        && image.description_version === (image.item_id === explicit[0].id ? 2 : 1));
+      for (const variant of ['main', 'thumb']) {
+        const objectPath = `${data.ownerId}/${image.item_id}/${image.id}/${variant}.jpg`;
+        requireEvidence(image[`${variant}_path`] === objectPath && image[`${variant}_bytes`] === 632
+          && hash.test(image[`${variant}_sha256`]));
+        expected.set(objectPath, image[`${variant}_sha256`]);
+      }
+    }
+    requireEvidence(Array.isArray(data.objects) && data.objects.length === 8);
+    for (const object of data.objects) {
+      closed(object, ['path', 'bytes', 'sha256']);
+      requireEvidence(expected.has(object.path) && object.bytes === 632 && object.sha256 === expected.get(object.path));
+      expected.delete(object.path);
+    }
+    requireEvidence(expected.size === 0);
+  }
+  return snapshot;
+}
+
+export function compareSixPreservation(before, after, run, owners) {
+  validateSixSnapshot(before, run, owners);
+  validateSixSnapshot(after, run, owners);
+  for (const [index, data] of before.data.entries()) {
+    for (const table of TABLES) requireEvidence(isDeepStrictEqual(
+      canonicalRows(table, data.tables[table]), canonicalRows(table, after.data[index].tables[table])));
+    const sorted = (objects) => [...objects].sort((a, b) => a.path.localeCompare(b.path));
+    requireEvidence(isDeepStrictEqual(sorted(data.objects), sorted(after.data[index].objects)));
+  }
+}
+
+function sixClient(env, deadline) {
+  const remaining = Math.floor(deadline - performance.now());
+  requireEvidence(Number.isSafeInteger(remaining) && remaining > 0 && remaining <= 120_000);
+  return normalClient(env, AbortSignal.timeout(remaining));
+}
+
+export async function captureSixPreservation(env, run, deadline, capturePrivate) {
+  const client = sixClient(env, deadline), owners = [await client.signIn('A'), await client.signIn('B')];
+  requireEvidence(owners[0].uid !== owners[1].uid);
+  const { saveHarness, intent } = await import('./item-save.sessions.mjs');
+  const jpg = await readFile(new URL('../security/fixture.jpg', import.meta.url));
+  requireEvidence(jpg.length === 632);
+  const saves = [], tombstones = [];
+  for (const owner of owners) {
+    await seed(client, owner, true);
+    const h = saveHarness(client, owner);
+    for (const completed of [true, false]) {
+      const value = intent();
+      Object.assign(value.p_image, { main_bytes: jpg.length, thumb_bytes: jpg.length,
+        main_sha256: sha256(jpg), thumb_sha256: sha256(jpg), width: 2, height: 2 });
+      let receipt = await h.reserve(value);
+      for (const objectPath of h.paths(value)) requireEvidence((await client.request(owner.token,
+        `/storage/v1/object/wardrobe/${objectPath}`, {
+          method: 'POST', body: jpg, binary: true, headers: { 'Cache-Control': 'max-age=0', 'x-upsert': 'false' },
+        })).ok);
+      if (completed) { await h.finalize(value, receipt); receipt = await h.reserve(value); }
+      requireEvidence(receipt.state === (completed ? 'completed' : 'reserved'));
+      saves.push({ ownerId: owner.uid, value, receipt });
+    }
+    const tombstone = intent();
+    await h.reserve(tombstone);
+    await h.deleteItem(tombstone);
+    requireEvidence((await h.read('items', tombstone.p_item.id)).length === 0
+      && (await h.read('item_images', tombstone.p_image.id)).length === 0);
+    tombstones.push({ owner_id: owner.uid, item_id: tombstone.p_item.id, image_id: tombstone.p_image.id });
+  }
+  const privateBefore = await capturePrivate(owners, tombstones);
+  const before = { ...await captureData(client, owners, run), stage: 'six' };
+  validateSixSnapshot(before, run, owners.map((owner) => owner.uid));
+  requireEvidence(Buffer.byteLength(JSON.stringify({ before, privateBefore, saves, tombstones })) <= MAX_SNAPSHOT_BYTES);
+  return { before, privateBefore, owners, saves, tombstones };
+}
+
+export async function readSixPreservation(snapshot, env, deadline) {
+  const client = sixClient(env, deadline);
+  const after = { ...await captureData(client, snapshot.owners, snapshot.before.run), stage: 'six' };
+  compareSixPreservation(snapshot.before, after, snapshot.before.run, snapshot.before.owners);
+  return after;
+}
+
+export async function probeSixPreservation(snapshot, after, env, deadline) {
+  const client = sixClient(env, deadline);
+  const { saveHarness } = await import('./item-save.sessions.mjs');
+  await functionalProbes(client, snapshot.owners, after);
+  for (const { ownerId, value, receipt } of snapshot.saves) {
+    const owner = snapshot.owners.find((entry) => entry.uid === ownerId);
+    requireEvidence(owner !== undefined);
+    const h = saveHarness(client, owner);
+    requireEvidence(isDeepStrictEqual(await h.reserve(value), receipt));
+    for (const [index, objectPath] of h.paths(value).entries()) {
+      const variant = ['thumb', 'main'][index];
+      const found = await client.request(owner.token, `/storage/v1/object/authenticated/wardrobe/${objectPath}`);
+      requireEvidence(found.ok && Buffer.isBuffer(found.data) && found.data.length === value.p_image[`${variant}_bytes`]
+        && sha256(found.data) === value.p_image[`${variant}_sha256`]);
+    }
+    await h.finalize(value, receipt);
+    const completed = await h.reserve(value);
+    requireEvidence(completed.state === 'completed' && completed.fingerprint === receipt.fingerprint
+      && completed.item.id === value.p_item.id && completed.image.id === value.p_image.id);
+  }
+}
+
 export async function functionalProbes(client, owners, after) {
   for (const [index, owner] of owners.entries()) {
     const other = owners[1 - index], tables = after.data[index].tables, row = tables.items[0];
@@ -491,7 +656,14 @@ export async function functionalProbes(client, owners, after) {
     requireEvidence(manifest.schema_version === 2 && manifest.export_id === exportId && manifest.owner_id === owner.uid
       && typeof manifest.created_at === 'string' && timestamp.test(manifest.created_at));
     closed(manifest.tables, TABLES);
-    for (const table of TABLES) requireEvidence(isDeepStrictEqual(canonicalRows(table, manifest.tables[table]), canonicalRows(table, tables[table])));
+    for (const table of TABLES) {
+      // Export excludes consent; the full schema-six profile was already compared unchanged.
+      const expected = table === 'profiles' && after.stage === 'six'
+        ? tables[table].map((row) => Object.fromEntries(Object.entries(row)
+          .filter(([key]) => !['ai_enabled', 'ai_notice_revision', 'ai_consented_at'].includes(key))))
+        : tables[table];
+      requireEvidence(isDeepStrictEqual(canonicalRows(table, manifest.tables[table]), canonicalRows(table, expected)));
+    }
   }
 }
 

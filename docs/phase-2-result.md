@@ -7699,3 +7699,108 @@ This does not explain or waive the CI failure: its empty forwarded body remains
 unresolved, and no speculative fixture, retry or timeout change was made.
 No local backend, provider, hosted operation, deployment or publication ran
 for this unstaged repair.
+
+## HC1 hosted Storage origin compatibility - local source candidate (23 September 2026)
+
+This is a new, isolated continuation from accepted main
+`3e3898b27ac5575523e69dc7f3c6b0ff3f316e33`, tree
+`3e0850395f9c76acc343ffbfa8d2a40447d2e278`, on
+`drrowdev-hosted-storage-origin`. PR30 is closed/merged and is only the historical
+authority location, not a reopened implementation PR. The
+[owner amendment5791405199](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5791405199),
+[Opus critique190/coordinator approval5791784903 with binding A1-A6](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5791784903),
+[corrected placement5791862931](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5791862931)
+and [own-model/edit release5791938171](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5791938171)
+govern the exact thirteen existing paths. The coordinator observed twelve fresh
+own-session GPT-6 Astra/OpenAI usage rows, not the held prior writer's receipt.
+This source candidate remains unstaged for independent closure; publication,
+native execution and rollout need their separate gates.
+
+HC1 removes the reserved-owner ALWAYS installer and admits only publication **O**
+with the verifier's own postgres connection in **origin** mode. Image identity
+remains **A**; native vendor `protect_delete` retains its O-or-A predicate.
+`ALLOW_CI_DATABASE_MUTATION` replaces only the CI mutation opt-in; its pure
+preflight retains literal CI/job/repository, service-secret and extra-argument
+refusals before side effects. Normal child environments strip the flag. Both
+history and verification now use fixed read-only postgres calls with separate
+30-second process limits,1024/4096-byte caps, empty stderr/exit0 and10s/2s/10s SQL
+deadlines. Exact9/10/11 history selects pinned bodies/types; full observed function
+bodies remain in the DO block. No installer, generic-SQL fallback, automatic
+A downgrade, reset, repair or extra readiness profile remains.
+
+One serial populated6->11 fixture lane follows prior finalizer shutdown, without
+changing the existing1->10,9->10,10->11 lanes or original publication cases.
+The closed memory-only full-schema-six snapshot retains38public rows/16objects
+using the existing632-byte fixture, nondefault provenance, description counters,
+timestamps, preferences, history and links. Completed/pending ordinary checked
+Saves produce4attempts/6used IDs/8images. Two additional ordinary never-uploaded
+reserve/delete tombstones prove absent item/image/attempt rows with retained used
+IDs before capture. The exact target image/used-ID UNION requires10identities,
+including both historical-only entries.
+
+Scoped private comparison preserves only the known owners' attempts, used IDs
+and inactive controls, permitting only new null `execution_manifest_id`.
+Requests/usage are empty here, not claimed as populated schema-six AI proof.
+Enumerated operation/context tables must be empty, not every new private table:
+the two migration-installed manifests are intentional. Public/object/private
+comparison precedes replay/resume. Full profiles are compared unchanged; only
+the later export probe expects the existing consent-excluding export projection.
+The original admitted slow-upload/FINISH case still requires failed late
+publication and actual literal Storage-catalog prefix zero for both owners.
+New capture/comparison/probe phases have120-second bounds;15-second requests,
+existing race/cleanup bounds, one owned stack and30-minute job cap remain.
+
+### Executed targeted local checks
+
+System Node was24.11.1 and was not substituted for the required24.19.0.
+[Toolchain permission5791979900](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5791979900)
+released the existing pinned executable (SHA256
+`3602f2bb1a10f2cbab4c36886218a33c1ab3db87290e73b033c46c77147d0237`).
+All npm commands below used that Node and the installed npm11.6.2 CLI, with only
+per-process PATH adjustment. No machine/global install or version-pin change ran.
+The first selected unit command failed exit1 because Vitest was absent. Exactly
+one conditionally authorized `npm ci --no-fund` then passed exit0:200packages
+added,201audited, zero reported vulnerabilities, no dependency/lock change.
+
+The first substantive seven-file run failed exit1:2313passed/11failed of2324.
+It exposed a missed old preflight name and obsolete installer/sequence expectations;
+both were corrected within scope. A subsequent typecheck failed exit2 on a new
+test-fixture union-array type, corrected without a type-safety bypass. Targeted
+reruns passed. Source inspection also caught the existing export function's
+deliberate consent omission; a discriminating schema-six export test now verifies
+that projection without normalizing or mutating the preservation snapshot.
+
+```text
+npm run test:unit -- tests\unit\ci-storage-guard.test.ts tests\unit\preservation.test.ts tests\unit\image-replacement.test.ts tests\unit\item-lifecycle-schema.test.ts tests\unit\image-replacement-schema.test.ts tests\unit\local-backend.test.ts tests\unit\item-save.test.ts
+node node_modules\eslint\bin\eslint.js scripts\backend\ci-storage-guard.mjs scripts\db.mjs scripts\preservation-rehearsal.mjs tests\integration\preservation.sessions.mjs tests\unit\ci-storage-guard.test.ts tests\unit\item-lifecycle-schema.test.ts tests\unit\preservation.test.ts tests\unit\image-replacement.test.ts
+npm run typecheck
+npm run scan:secrets
+git diff --check
+```
+
+The final selected unit run passed **2342/2342 in seven files**, exit0 (6.71s).
+Exact-eight-file installed ESLint and typecheck passed exit0. The source secret
+scan passed exit0 over251text files **without a supplied canary**; this is not a
+canary pass. Whitespace/scope/hash checks accompany the separate source receipt.
+These are local unit/mock/static results, not executed PostgreSQL or native
+Storage preservation/late-publication evidence.
+
+### Remaining independent and runtime gates
+
+O is not A. Owner-approved privileged replica-mode administrative bulk operations
+are unsupported while live and are not protected by this publication guard.
+The verifier's own origin session is not evidence of every hosted Storage session.
+All eleven migration bytes, app/UI/provider code, dependencies/lock, public types,
+generic local SQL helper and other fixtures remain frozen. Historical SQL comments,
+earlier evidence and historical outcomes above are preserved, not retroactively
+relabelled HC1 results.
+
+Native O-configuration/start/reset/types parity, populated6->11 execution, unchanged
+native races/negative/cleanup assertions, App and Apple checks are still pending.
+Accepted-main run35817276066/job107041392123 took6m35s total and1m53s rehearsal;
+neither is new-lane timing evidence. No automatic budget extension or rerun is
+authorized on failure. Actual hosted version/privilege/runtime readiness,
+quiescence and admitted-request drain, coherent recovery, Auth/API/Edge EU and
+Cloudflare gates remain separate. No backend/browser/hosted/provider operation,
+Actions dispatch/approval, commit/push/PR/merge or deployment ran here. PR27,
+I10a-D/I11/I22 and private-provider/paid holds are unchanged.

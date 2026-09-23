@@ -92,7 +92,8 @@ unsupported; move already lacks UPDATE permission. S3 mapped-user operations
 are distinct from separately privileged administrative S3 credentials.
 
 Permission probes roll back before transfer. The app-owned immediate AFTER
-INSERT/UPDATE ALWAYS guard rechecks final publication for every role, with
+INSERT/UPDATE origin-mode guard rechecks final publication for every role in
+the supported origin-mode runtime, with
 profile/approval/image/parent SHARE NOWAIT locks held through commit, fresh
 stable-ID reads, authoritative text owner_id and nullable-or-matching deprecated
 owner. Native probe version1 is valid; identity/version and dark versioning flags
@@ -106,11 +107,33 @@ Public/image RPC conflicts still use22023. HTTP5xx remains failure. Existing
 the same draft/photo/IDs and offers explicit retry. It is not photo rejection or
 an automatic resend; capture/transport source stays frozen.
 
-The reviewed CI-only owner installer must verify this exact guard as ALWAYS
-before stack readiness, target-schema fixture traffic or type generation; ordinary migration
-completion alone is an incomplete installation. Hosted installation remains
-blocked pending separately reviewed owner/quiescence cutover, not an atomic
-migration guarantee or a weaker production boundary.
+**23 September2026 HC1 amendment:** the
+[owner-approved administrator-mode limitation](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5791405199)
+and [reviewed A1-A6 plan](https://github.com/drrowdev/stillroom-wardrobe/pull/30#issuecomment-5791784903)
+supersede T20/T26's publication-ALWAYS requirement and historical SQL installation
+comment without changing any of the eleven migration bodies. The reserved-owner
+installer is removed. One strict verifier requires publication O and its own
+postgres session in origin mode, separately from the app-owned image identity
+trigger's A/ALWAYS requirement. Vendor `protect_delete` retains its existing
+O-or-A predicate. No optional application A profile or automatic downgrade exists.
+
+O is not A. Privileged replica-mode administrative bulk operations are unsupported
+while serving the app; the publication guard does not protect those operations.
+The verifier's connection state does not prove all hosted Storage connections use
+origin mode. Hosted backend/version/privilege/runtime readiness, quiescence and
+drainage of already-admitted requests, coherent recovery, Auth/API/Edge EU and
+Cloudflare remain separate gates. Pending duplicate-object download/hash retry
+must continue unchanged for manual/analyzed Save and replacement. Hiding a late
+Storage row is not success: the unchanged native race must reject publication
+after FINISH and prove the entire literal catalog prefix actually empty.
+
+The CI mutation preflight uses only `ALLOW_CI_DATABASE_MUTATION` plus its existing
+literal CI/job/repository/secret/argument guards. Both fixed postgres history and
+verification calls are read-only, each bounded to30seconds, with1024/4096-byte
+outputs, empty stderr, exit0 and10s/2s/10s SQL deadlines. Exact history prefixes
+9/10/11 alone select readiness; source6->11 rehearsal checks six then eleven
+without inventing pauses at7/8. An existing A stack fails closed; only separately
+approved disposable recreation/reset is a remedy, never hosted or automatic reset.
 
 Initial pending images or unmanifested item-prefix objects refuse BEGIN before
 any irreversible claim/version change. Restore remains available in its window.
