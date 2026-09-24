@@ -147,7 +147,17 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .detail-photo { min-width: 0; background: var(--surface); border-radius: 16px; overflow: hidden; }
 .detail-photo img { display: block; width: 100%; max-height: 640px; object-fit: contain; }
 .detail-photo p { padding: 24px; }
-.detail-sections { display: grid; gap: 24px; min-width: 0; }
+.detail-sections { display: grid; gap: 16px; min-width: 0; }
+.detail-media { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.detail-media .photo-actions { margin-top: 0; }
+.detail-name .optional-details { margin: 0; }
+.detail-name form > .notice { margin-bottom: 0; }
+.detail-name form > button.button-primary + [role="status"] { margin-top: -8px; }
+.detail-item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-width: 0; }
+.detail-item-actions .lifecycle-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 0; border: 0; border-radius: 0; background: none; }
+.detail-item-actions .button { min-height: 44px; padding-inline: 12px; background: transparent; border-color: transparent; color: var(--secondary); }
+.detail-item-actions .button:hover:not(:disabled) { background: var(--well); color: var(--ink); }
+.detail-item-actions .notice { flex-basis: 100%; margin: 0; }
 .image-change, .image-change .photo-panel, .image-change .details-panel { min-width: 0; overflow-wrap: anywhere; }
 .image-change .button, .image-change .text-button { min-height: 44px; max-width: 100%; white-space: normal; }
 .recovery-versions { list-style: none; padding: 0; display: grid; gap: 12px; }

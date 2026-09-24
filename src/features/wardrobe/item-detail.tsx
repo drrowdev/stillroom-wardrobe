@@ -194,12 +194,14 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
     onClose={() => { setMode(null); props.onReload(); }} />;
   const lifecycle = item.draft.raw.lifecycle;
   return <div className="detail-layout">
-    <SavedPhoto image={description.base} images={props.images} t={t} />
-    <div className="detail-sections">
+    <div className="detail-media">
+      <SavedPhoto image={description.base} images={props.images} t={t} />
       <div className="photo-actions">
         <button className="button button-secondary" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('replacement'); }}>{t('imageChange.replace')}</button>
         <button className="text-button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('recovery'); }}>{t('imageChange.recover')}</button>
       </div>
+    </div>
+    <div className="detail-sections">
       <fieldset className="lifecycle-edit-lock" disabled={lifecycleState.busy || lifecycleState.pending}>
         <section className="settings-card detail-name" aria-label={t('capture.detailsTitle')}>
           <form ref={form} className="stack" onSubmit={(event) => { event.preventDefault(); void saveAll(); }}>
@@ -220,14 +222,16 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
             {outcome === 'saved' && !sectionsDirty && <p role="status" className="settings-success">{t('detail.saved')}</p>}
           </form>
         </section>
+      </fieldset>
+      <div className="detail-item-actions">
         <div className="detail-archive">
           {lifecycle === 'active'
             ? <button type="button" className="button button-secondary" disabled={!quickReady} onClick={() => { void quick('lifecycle', 'archived'); }}>{t('detail.archive')}</button>
             : <><p>{t(lifecycleLabels[lifecycle] ?? 'detail.archived')}</p>
               <button type="button" className="button button-secondary" disabled={!quickReady} onClick={() => { void quick('lifecycle', 'active'); }}>{t('detail.unarchive')}</button></>}
         </div>
-      </fieldset>
-      <TrashAction {...props} item={item.base} image={description.base} onState={onLifecycleState} blocked={sectionsDirty || sectionsBusy} />
+        <TrashAction {...props} item={item.base} image={description.base} onState={onLifecycleState} blocked={sectionsDirty || sectionsBusy} />
+      </div>
     </div>
   </div>;
 }
