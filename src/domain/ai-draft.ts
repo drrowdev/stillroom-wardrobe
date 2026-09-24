@@ -2,19 +2,24 @@ import { isUuid } from './wardrobe';
 import { presentAiFacts } from './ai-presentation';
 import { fieldAssertion, provenanceFields, type FieldProvenance } from './attribute-provenance';
 import {
-  editGarmentField, freezeValues, garmentFields, initialRawFields, sameValue, validateGarmentDraft,
+  collectionLimits, editGarmentField, freezeValues, garmentFields, initialRawFields, sameValue, validateGarmentDraft,
   type GarmentDraft, type GarmentField, type GarmentValues, type RawFields,
 } from './garment-fields';
 import {
   aiFields, aiKind, hasOnlyDataKeys, isAiCounter, isAiTimestamp, isAssertedAiValue, isImageSha256, parseAiResult,
   type AiField, type AiKind, type AiResult, type DeepReadonly,
 } from './ai-analysis';
-import { fitsTagBudget, tagLength } from './item-details';
+import { styleTagLimit } from './preferences';
 
 // Owner decision (UX L1a): suggestions are applied only to fields the form shows. Hidden facts are never applied or claimed.
 export const hiddenAiFields = ['sleeve_length', 'garment_length', 'upper_coverage', 'lower_coverage', 'style_tags'] as const;
 export const formAiFields = aiFields.filter((field): field is Exclude<AiField, typeof hiddenAiFields[number]> =>
   !hiddenAiFields.some((hidden) => hidden === field));
+// The same combined tags + style words budget as manual additions (`addTag` in item-details); the unit tests pin both
+// to identical boundaries. Kept here because this reviewed core imports only its approved domain modules.
+function fitsTagBudget(entries: readonly string[]): boolean {
+  return entries.length <= collectionLimits.tags && new TextEncoder().encode(entries.join(',')).byteLength <= 512;
+}
 // Local suggestion text for the Tags area: never a claim, deduplicated against both saved tag lists and bounded by
 // the combined tags + style words budget the Tags area uses for manual additions.
 export function prefillTags(suggested: readonly string[], tags: readonly string[], styleTags: readonly string[]): string[] {
@@ -22,7 +27,7 @@ export function prefillTags(suggested: readonly string[], tags: readonly string[
   const added: string[] = [];
   for (const entry of suggested) {
     const key = entry.toLocaleLowerCase();
-    if (!entry.trim() || [...entry].length > tagLength || entry.includes('\0') || seen.has(key)) continue;
+    if (!entry.trim() || [...entry].length > styleTagLimit || entry.includes('\0') || seen.has(key)) continue;
     if (!fitsTagBudget([...tags, ...styleTags, ...added, entry])) break;
     added.push(entry); seen.add(key);
   }
