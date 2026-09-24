@@ -163,13 +163,15 @@ function coverRequirement(context: EngineContext, buckets: ReadonlyMap<Category,
 }
 
 type Step = { categories: Category[]; optional: boolean; accepts?: (item: EngineItem) => boolean };
+// Rejections applied before a beam is trimmed: `core` once every template slot is filled, `final` after the last step.
+type Filters = { core: (state: State) => boolean; final: (state: State) => boolean };
 
 function search(template: readonly Category[], extra: readonly Step[], buckets: ReadonlyMap<Category, EngineItem[]>, cap: number,
-  score: (pieces: EngineItem[]) => number, excluded: ReadonlySet<string>, budget: { left: number }): State[] {
+  score: (pieces: EngineItem[]) => number, excluded: ReadonlySet<string>, budget: { left: number }, filters: Filters): State[] {
   const steps: Step[] = [...template.map(category => ({ categories: [category], optional: false })), ...extra];
   let beam: State[] = [{ pieces: [], score: 0, key: '' }];
-  for (const step of steps) {
-    const next: State[] = [];
+  for (const [index, step] of steps.entries()) {
+    let next: State[] = [];
     for (const state of beam) {
       if (step.optional) next.push(state);
       for (const category of step.categories) {
@@ -186,6 +188,8 @@ function search(template: readonly Category[], extra: readonly Step[], buckets: 
         }
       }
     }
+    if (index === template.length - 1) next = next.filter(filters.core);
+    if (index === steps.length - 1) next = next.filter(filters.final);
     beam = next.sort(byRank).slice(0, limits.beam);
     if (!beam.length) return [];
   }
@@ -238,17 +242,22 @@ export function recommend(input: EngineInput): SuggestionResult {
     };
   };
 
+  const score = (pieces: EngineItem[]) => combineScore(componentsFor(pieces, context, liked));
+  const skip = input.skip ?? new Set<string>();
+  const unshown = (state: State) => !skip.has(combinationKey(coreIds(state.pieces)));
+  const notDisliked = (state: State) => !disliked.has(state.key);
+
   const fillable = templates.filter(template => template.every(category => all.get(category)?.length));
   if (!fillable.length) {
     const best = [...templates].sort((a, b) => b.filter(c => all.get(c)?.length).length - a.filter(c => all.get(c)?.length).length)[0]!;
-    const pieces: EngineItem[] = [];
-    for (const category of best) {
-      const item = all.get(category)?.find(candidate => pieces.every(piece => !excluded.has(pairKey(piece.id, candidate.id))));
-      if (item) pieces.push(item);
-    }
-    if (!pieces.length) return { status: 'empty', suggestions: [], missingDetails: [], ...base };
-    const missingSlots = best.filter(category => !pieces.some(piece => piece.category === category));
-    return { status: 'partial', suggestions: [make(pieces, { completeness: 'partial', missingSlots, missingDetails: [] })], missingDetails: [], ...base };
+    const present = best.filter(category => all.get(category)?.length);
+    if (!present.length) return { status: 'empty', suggestions: [], missingDetails: [], ...base };
+    const budget = { left: limits.passBudget };
+    const [state] = search(present, [], all, limits.perCategory, score, excluded, budget, { core: unshown, final: notDisliked });
+    const counters = { expansions: limits.passBudget - budget.left, passes: 1 };
+    if (!state) return { status: 'none', suggestions: [], missingDetails: [], ...counters };
+    const missingSlots = best.filter(category => !present.includes(category));
+    return { status: 'partial', suggestions: [make(state.pieces, { completeness: 'partial', missingSlots, missingDetails: [] })], missingDetails: [], ...counters };
   }
 
   const target = formalityTargets[context.occasion];
@@ -263,15 +272,14 @@ export function recommend(input: EngineInput): SuggestionResult {
   if (!cover && (context.season === 'autumn' || context.season === 'winter' || context.temperatureC !== undefined)) {
     extra.push({ categories: ['layer'], optional: true }, { categories: ['outerwear'], optional: true });
   }
-  const score = (pieces: EngineItem[]) => combineScore(componentsFor(pieces, context, liked));
-  const skip = input.skip ?? new Set<string>();
   let valid: Suggestion[] = [];
   let expansions = 0, passes = 0;
+  const filters: Filters = { core: state => unshown(state) && (!strict || formalityGate(state.pieces, target)), final: notDisliked };
   for (const cap of [limits.perCategory, limits.perCategory * 2]) {
     if (passes && ![...buckets.values()].some(list => list.length > limits.perCategory)) break;
     passes++;
     const budget = { left: limits.passBudget };
-    const states = templates.flatMap(template => search(template, extra, buckets, cap, score, excluded, budget));
+    const states = templates.flatMap(template => search(template, extra, buckets, cap, score, excluded, budget, filters));
     expansions += limits.passBudget - budget.left;
     const seen = new Set<string>();
     valid = [];

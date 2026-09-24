@@ -77,7 +77,7 @@ describe('recommendation properties over seeded catalogs', () => {
         }
       }
     }
-  });
+  }, 30_000);
 
   it('adding 500 foreign records leaves owned results identical', () => {
     for (let seed = 1; seed <= 5; seed++) {

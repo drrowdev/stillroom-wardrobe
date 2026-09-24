@@ -156,6 +156,22 @@ describe('templates, partial and empty results', () => {
     expect(result.suggestions[0]).toMatchObject({ itemIds: [top.id], completeness: 'partial', missingSlots: ['bottom', 'footwear'] });
   });
 
+  it('never repeats a disliked or already shown partial start, and moves on to another piece', () => {
+    const top = item('top');
+    expect(recommend({ items: [top], context, feedback: [{ itemIds: [top.id], vote: -1 }] }).status).toBe('none');
+    expect(recommend({ items: [top], context, skip: new Set([combinationKey([top.id])]) }).status).toBe('none');
+    const second = item('top', { colours: ['green'] });
+    const first = recommend({ items: [top, second], context }).suggestions[0]!;
+    const shown = new Set([first.coreKey]);
+    const next = recommend({ items: [top, second], context, skip: shown });
+    expect(next.status).toBe('partial');
+    expect(next.suggestions[0]!.itemIds).not.toEqual(first.itemIds);
+    shown.add(next.suggestions[0]!.coreKey);
+    expect(recommend({ items: [top, second], context, skip: shown }).status).toBe('none');
+    const disliked = recommend({ items: [top, second], context, feedback: [{ itemIds: first.itemIds, vote: -1 }] });
+    expect(disliked.suggestions[0]!.itemIds).not.toEqual(first.itemIds);
+  });
+
   it('prefers the template with the most pieces for a partial result', () => {
     const dress = item('one_piece');
     expect(recommend({ items: [dress], context }).suggestions[0]!.missingSlots).toEqual(['footwear']);
@@ -267,6 +283,42 @@ describe('ranking, diversity and paging', () => {
     }
     expect(pages.flat()).toHaveLength(3 * 2 * 2);
     expect(new Set(pages.flat()).size).toBe(12);
+  });
+
+  function large() {
+    const colours = ['white', 'pink', 'green', 'navy', 'red', 'brown'] as const;
+    return [
+      ...colours.slice(0, 3).map(colour => item('top', { colours: [colour] })),
+      ...colours.slice(3).map(colour => item('bottom', { colours: [colour] })),
+      ...colours.map(colour => item('footwear', { colours: [colour] })),
+    ];
+  }
+
+  it('pages through every one of more than 40 combinations before reporting none', () => {
+    const items = large();
+    const shown = new Set<string>();
+    for (let page = 0; page < 30; page++) {
+      const result = recommend({ items, context, skip: shown });
+      if (result.status === 'none') break;
+      for (const s of result.suggestions) shown.add(s.coreKey);
+    }
+    expect(shown.size).toBe(3 * 3 * 6);
+  });
+
+  it('still finds ideas when more than 40 of the combinations are disliked', () => {
+    const items = large();
+    const ranked: string[] = [];
+    const shown = new Set<string>();
+    for (let page = 0; page < 30; page++) {
+      const result = recommend({ items, context, skip: shown });
+      if (result.status === 'none') break;
+      for (const s of result.suggestions) { shown.add(s.coreKey); ranked.push(s.key); }
+    }
+    const dislikedKeys = ranked.slice(0, 44);
+    const feedback = dislikedKeys.map(key => ({ itemIds: key.split('|'), vote: -1 as const }));
+    const result = recommend({ items, context, feedback });
+    expect(result.status).toBe('ideas');
+    for (const s of result.suggestions) expect(dislikedKeys).not.toContain(s.key);
   });
 
   it('gives reasons as language-neutral keys and parameters', () => {
