@@ -244,6 +244,29 @@ describe('I17 response validators', () => {
       .toContain('commit_image has unexpected A>B:tuple credit');
   });
 
+  it('rejects a complete tuple built from attacker data', () => {
+    const attacker = { changeItem: 'a0000000-0000-4000-8000-000000000001', changeIntent: { itemId: 'a0000000-0000-4000-8000-000000000001',
+      currentImageId: 'a0000000-0000-4000-8000-000000000002' } };
+    const victim = { changeItem: 'b0000000-0000-4000-8000-000000000001', changeIntent: { itemId: 'b0000000-0000-4000-8000-000000000001',
+      currentImageId: 'b0000000-0000-4000-8000-000000000002' } };
+    const good = { p_intent: structuredClone(victim.changeIntent) };
+    expect(catalog.tupleConstructionProblems('image_change_preflight', good, attacker, victim, 'changeIntent')).toEqual([]);
+    const cloned = { p_intent: { ...victim.changeIntent, currentImageId: attacker.changeIntent.currentImageId } };
+    expect(catalog.tupleConstructionProblems('image_change_preflight', cloned, attacker, victim, 'changeIntent')).toEqual([
+      'image_change_preflight tuple carries 1 attacker-only value(s)',
+      "image_change_preflight tuple intent differs from the victim's accepted changeIntent",
+    ]);
+    expect(catalog.tupleConstructionProblems('image_change_status',
+      { p_item_id: victim.changeItem, p_request_id: attacker.changeItem }, attacker, victim))
+      .toEqual(['image_change_status tuple carries 1 attacker-only value(s)']);
+  });
+
+  it('builds intent tuples from the victim intent', async () => {
+    const source = await readFile(path.resolve('tests/security/isolation-audit.sessions.mjs'), 'utf8');
+    expect(source).not.toMatch(/structuredClone\(a\./);
+    for (const key of ['freeIntent', 'recIntent', 'changeIntent']) expect(source).toContain(`tupleIntent: '${key}'`);
+  });
+
   it('forces every multi-reference requirement to declare tuple or alternatives', () => {
     for (const [name, r] of Object.entries(requirements)) {
       expect(r.refs.length > 1 ? Boolean(r.tuple) !== Boolean(r.alternatives) : !r.tuple && !r.alternatives).toBe(true);

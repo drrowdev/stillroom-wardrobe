@@ -70,6 +70,9 @@ owner-only case. In both directions (A→B and B→A):
 - for composite references (an item with its request, image or hash) the
   complete valid peer tuple is also probed against an all-random tuple,
   because a mixed pair names no existing row and cannot test the owner check;
+  the tuple is the victim's own payload (intent RPCs send the exact intent
+  the victim's control accepted) and a construction check fails the probe if
+  it carries any attacker-only identifier or a different intent;
   each multi-reference RPC is declared either composite or alternative;
 - lookups must return the family's exact response for the peer ID **and** the
   same response for the nonexistent ID (masked for the substituted IDs):
@@ -113,7 +116,8 @@ Validator unit tests (`tests/unit/isolation-catalog.test.ts`) prove rejection of
 unexpected functions/relations/policies, grant and column-grant changes,
 helper-body changes, public buckets, cross-owner foreign keys, leaked rows,
 missing coverage, a missing owned control, a missing single substitution, a
-missing complete peer tuple or an undeclared composite requirement,
+missing complete peer tuple, a tuple built from attacker data or an
+undeclared composite requirement,
 credit for an unreachable state, wrong error classes, HTTP-200 application
 errors, oracles outside the allowlist, restore-before-cleanup ordering and
 every guard refusal before SQL.

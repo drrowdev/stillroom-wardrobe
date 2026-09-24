@@ -8,7 +8,7 @@ import {
 import {
   EXPOSED_RPCS, SERVICE_ONLY_RPCS, PUBLIC_TABLES, RELATIONSHIP_NAMES, ACCEPTED_ORACLES, worstOracle, COVERAGE_REQUIREMENTS,
   matchOutcome, outcomeOf, sameOutcome, scanLeaks, validateCoverage, applicationCode, isInconclusive, classifyOracle,
-  restoreThenCleanup,
+  restoreThenCleanup, tupleConstructionProblems,
 } from '../../scripts/isolation-catalog.mjs';
 import { normalClient } from '../integration/preservation.sessions.mjs';
 import { intent, saveHarness } from '../integration/item-save.sessions.mjs';
@@ -449,11 +449,13 @@ function foreignCases(a) {
     p_item_ids: k === 'item' ? [x.item] : [a.item], p_expected_version: k === 'event' ? 1 : null });
   const wearMixed = (x) => ({ ...wear(a, 'item'), p_item_ids: [a.item, x.item] });
   const ownedOne = (id) => ({ status: 200, check: (d) => Array.isArray(d) && d.length === 1 && (d[0].id ?? d[0].itemId) === id });
-  const changeIntent = (x) => { const v = structuredClone(a.changeIntent); v.requestId = x.changeRequest; v.itemId = x.changeItem;
+  // Intents start from x's own complete intent: the attacker's for single substitutions, the victim's for the
+  // tuple (its `tupleBundle` carries the victim intent), so every fingerprint-bound field belongs to one owner.
+  const changeIntent = (x) => { const v = structuredClone(x.changeIntent); v.requestId = x.changeRequest; v.itemId = x.changeItem;
     v.imageId = x.changeImage; v.image.id = x.changeImage; return v; };
-  const recoveryIntent = (x) => { const v = structuredClone(a.recIntent); v.itemId = x.recItem; v.currentImageId = x.recCurrent;
+  const recoveryIntent = (x) => { const v = structuredClone(x.recIntent); v.itemId = x.recItem; v.currentImageId = x.recCurrent;
     v.sourceImageId = x.recSource; return v; };
-  const freeIntent = (x) => { const v = structuredClone(a.freeIntent); v.itemId = x.freeItem; v.expectedVersion = x.freeVersion;
+  const freeIntent = (x) => { const v = structuredClone(x.freeIntent); v.itemId = x.freeItem; v.expectedVersion = x.freeVersion;
     v.currentImageId = x.freeCurrent; return v; };
   const deletion = (x) => ({ p_item_id: x.trashItem, p_request_id: n1, p_expected_version: x.trashVersion, p_image_manifest_sha256: x.trashManifest });
   const trashBundle = { trashItem: ['trashVersion', 'trashManifest'] };
@@ -486,11 +488,13 @@ function foreignCases(a) {
     one('finish_item_deletion', ['removeItem', 'removeRequest'], pair(['removeItem', 'removeRequest']),
       (k) => (k === 'removeItem' ? { status: 200, data: [{ state: 'absent' }] } : CONFLICT)),
     one('reserve_image_change', ['freeItem', 'freeCurrent'], (x) => ({ p_intent: freeIntent(x) }), CONFLICT,
-      { bundle: { freeItem: ['freeVersion'] } }),
+      { bundle: { freeItem: ['freeVersion'] }, tupleBundle: ['freeIntent'], tupleIntent: 'freeIntent' }),
     one('image_change_status', ['changeItem', 'changeRequest'], pair(['changeItem', 'changeRequest']), NULL),
     one('image_change_requests', ['changeItem'], (x) => ({ p_item_id: x.changeItem }), EMPTY),
-    one('image_recovery_preflight', ['recItem', 'recCurrent', 'recSource'], (x) => ({ p_intent: recoveryIntent(x) }), CONFLICT),
-    one('image_change_preflight', ['changeRequest', 'changeItem', 'changeImage'], (x) => ({ p_intent: changeIntent(x) }), CONFLICT),
+    one('image_recovery_preflight', ['recItem', 'recCurrent', 'recSource'], (x) => ({ p_intent: recoveryIntent(x) }), CONFLICT,
+      { tupleBundle: ['recIntent'], tupleIntent: 'recIntent' }),
+    one('image_change_preflight', ['changeRequest', 'changeItem', 'changeImage'], (x) => ({ p_intent: changeIntent(x) }), CONFLICT,
+      { tupleBundle: ['changeIntent'], tupleIntent: 'changeIntent' }),
     one('cancel_image_change', ['changeItem', 'changeRequest'], pair(['changeItem', 'changeRequest']), NULL),
     one('item_deletion_operation_status', ['prepItem', 'prepRequest'], pair(['prepItem', 'prepRequest']), NULL),
     one('item_deletion_operations', ['prepItem'], (x) => ({ p_item_ids: [x.prepItem] }), EMPTY,
@@ -544,7 +548,11 @@ async function foreignMatrix(attacker, victim) {
       const expected = test.tupleExpected ?? (typeof test.expected === 'function' ? test.expected(test.refs[0]) : test.expected);
       let ok = true;
       for (const build of [test.build, ...(test.also ? [test.also] : [])]) {
-        const foreign = await probeRpc(attacker, victim, test.name, build(foreignX, test.refs[0]));
+        const payload = build(foreignX, test.refs[0]);
+        const construction = tupleConstructionProblems(test.name, payload, a, v, test.tupleIntent);
+        ok = need(construction.length === 0, `${stage}: ${construction.join('; ')}`) && ok;
+        if (construction.length) continue;
+        const foreign = await probeRpc(attacker, victim, test.name, payload);
         const missing = await probeRpc(attacker, victim, test.name, build(missingX, test.refs[0]));
         ok = expectMatch(`${stage} foreign`, expected, foreign) && ok;
         ok = expectMatch(`${stage} nonexistent`, expected, missing) && ok;

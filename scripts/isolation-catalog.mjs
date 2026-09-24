@@ -436,6 +436,28 @@ export function validateCoverage(covered, requirements = COVERAGE_REQUIREMENTS) 
   return problems;
 }
 
+const identifierLeaves = (value, out = new Set()) => {
+  if (typeof value === 'string') { if (/^[0-9a-f]{64}$/.test(value) || /^[0-9a-f-]{36}$/i.test(value)) out.add(value); }
+  else if (value && typeof value === 'object') for (const entry of Object.values(value)) identifierLeaves(entry, out);
+  return out;
+};
+
+/**
+ * A complete-tuple probe must be the victim's own valid payload: no identifier or hash that only the attacker's
+ * fixture holds, and (for intent RPCs) exactly the intent the victim's control accepted. Otherwise a rejection
+ * could come from a fingerprint mismatch rather than the owner predicate.
+ */
+export function tupleConstructionProblems(name, payload, attacker, victim, intentKey) {
+  const problems = [], victimIds = identifierLeaves(victim);
+  const attackerOnly = [...identifierLeaves(attacker)].filter((id) => !victimIds.has(id));
+  const leaked = [...identifierLeaves(payload)].filter((id) => attackerOnly.includes(id));
+  if (leaked.length) problems.push(`${name} tuple carries ${leaked.length} attacker-only value(s)`);
+  if (intentKey && !isDeepStrictEqual(payload?.p_intent, victim?.[intentKey])) {
+    problems.push(`${name} tuple intent differs from the victim's accepted ${intentKey}`);
+  }
+  return problems;
+}
+
 /**
  * Existence oracles that are known, reported on PR #47 and accepted pending a separate fix packet. Each pins the
  * exact response pair (peer-owned reference vs. nonexistent/new reference); they reveal existence, never content.
