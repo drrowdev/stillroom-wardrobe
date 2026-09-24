@@ -4,6 +4,7 @@ import {
   ROOT, assertNoServiceSecrets, readCredentialCache, normalSessionEnvironment,
   validateSessionEnvironment, fail, reportError,
 } from './backend/local.mjs';
+import { privilegedEnvironment, trackPhase } from './isolation-catalog.mjs';
 
 async function main() {
   const [suite, ...args] = process.argv.slice(2);
@@ -108,6 +109,75 @@ async function main() {
     });
     if (recoveryCode !== 0) process.exitCode = recoveryCode;
   }
+  if (suite === 'security') {
+    const isolationCode = await isolationAudit(env);
+    if (isolationCode !== 0) process.exitCode = isolationCode;
+  }
+}
+
+// I17: the normal-session audit child holds all tokens; this controller runs only the closed privileged CLI.
+const ISOLATION_DEADLINE_MS = 12 * 60_000, RESTORE_RESERVE_MS = 2 * 60_000, PHASE_MS = 60_000;
+function runPrivileged(args, privileged, timeout) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [path.join(ROOT, 'scripts', 'isolation-catalog.mjs'), ...args], {
+      cwd: ROOT, env: privileged, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'],
+    });
+    const timer = setTimeout(() => child.kill(), Math.max(1_000, timeout));
+    child.on('error', () => { clearTimeout(timer); resolve(2); });
+    child.on('close', (value) => { clearTimeout(timer); resolve(value ?? 2); });
+  });
+}
+async function isolationAudit(normalEnv) {
+  const started = Date.now(), remaining = () => ISOLATION_DEADLINE_MS - (Date.now() - started);
+  const privileged = privilegedEnvironment(process.env);
+  const catalogCode = await runPrivileged(['catalog'], privileged, PHASE_MS);
+  const touched = new Set();
+  let queue = Promise.resolve();
+  const child = spawn(process.execPath, [path.join(ROOT, 'tests', 'security', 'isolation-audit.sessions.mjs')], {
+    cwd: ROOT, env: normalEnv, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+  });
+  child.on('message', (message) => {
+    queue = queue.then(async () => {
+      const valid = message && message.type === 'phase' && Number.isSafeInteger(message.id)
+        && (message.phase === 'barrier' ? message.owner === null
+          : ['freeze', 'restore'].includes(message.phase) && ['A', 'B'].includes(message.owner));
+      if (!valid) { if (child.connected) child.send({ type: 'ack', id: message?.id, ok: false }); return; }
+      let ok = false;
+      if (message.phase === 'barrier') {
+        // Cleanup waits for this: every owner whose freeze was requested, acknowledged or not, is restored first.
+        for (const owner of [...touched]) {
+          const code = await runPrivileged(['restore', owner], privileged, Math.min(PHASE_MS, Math.max(1_000, remaining())));
+          trackPhase(touched, 'restore', owner, 'after', code);
+        }
+        ok = touched.size === 0;
+      } else {
+        const budget = remaining() - (message.phase === 'freeze' ? RESTORE_RESERVE_MS : 0);
+        if (budget > 0) {
+          trackPhase(touched, message.phase, message.owner, 'before');
+          const code = await runPrivileged([message.phase, message.owner], privileged, Math.min(PHASE_MS, budget));
+          trackPhase(touched, message.phase, message.owner, 'after', code);
+          ok = code === 0;
+        }
+      }
+      if (child.connected) child.send({ type: 'ack', id: message.id, ok });
+    });
+  });
+  const deadline = setTimeout(() => child.kill(), Math.max(1_000, remaining() - RESTORE_RESERVE_MS));
+  const auditCode = await new Promise((resolve) => {
+    child.on('error', () => resolve(2));
+    child.on('close', (value) => resolve(value ?? 2));
+  });
+  clearTimeout(deadline);
+  await queue;
+  let restoreCode = 0;
+  for (const owner of touched) {
+    // Restore runs even after an audit failure; both the primary and any restore failure are reported.
+    const code = await runPrivileged(['restore', owner], privileged, PHASE_MS);
+    if (code !== 0) { console.error(`FAIL: I17 approval restore for fictional owner ${owner} did not complete`); restoreCode = code; }
+  }
+  if (catalogCode !== 0) console.error('FAIL: I17 catalogue check failed');
+  if (auditCode !== 0) console.error('FAIL: I17 normal-session isolation audit failed');
+  return [catalogCode, auditCode, restoreCode].find((code) => code !== 0) ?? 0;
 }
 
 main().catch(reportError);
