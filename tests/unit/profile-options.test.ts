@@ -3,8 +3,8 @@ import { currencyOptions, timeZoneOptions } from '../../src/features/profile/pro
 import { validTimezone } from '../../src/domain/preferences';
 import type { Language } from '../../src/i18n';
 
-const zoneName = (locale: string, zone: string) => new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: 'longGeneric' })
-  .formatToParts(0).find((part) => part.type === 'timeZoneName')!.value;
+const zoneName = (locale: string, zone: string) => new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: 'shortOffset' })
+  .formatToParts(new Date()).find((part) => part.type === 'timeZoneName')!.value;
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
