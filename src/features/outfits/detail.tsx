@@ -20,7 +20,7 @@ type Shared = {
 
 const noComponents = new Map<string, OutfitComponent>();
 
-export function NewOutfit(props: Shared) {
+export function NewOutfit(props: Shared & { initial?: { itemIds: string[]; occasion: string } }) {
   const picker = usePickerItems(props.client, props.scope, props.online, props.invalidation);
   const { t } = props;
   return <section className="detail-page outfit-page" aria-labelledby="outfit-editor-title">
