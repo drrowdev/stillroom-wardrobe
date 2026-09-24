@@ -212,7 +212,7 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .photo-prompt-icon .icon { width: 27px; height: 27px; }
 .photo-prompt > .spinner { display: inline-block; margin-bottom: 16px; }
 .photo-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-.photo-actions .button { font-size: .875rem; padding-inline: 14px; }
+.photo-actions .button { font-size: .875rem; padding-inline: 12px; gap: 6px; }
 .photo-panel > .privacy-note { justify-content: center; margin-top: 18px; }
 .details-panel { padding-top: 5px; }
 .details-heading { display: flex; align-items: center; gap: 11px; margin-bottom: 16px; }
