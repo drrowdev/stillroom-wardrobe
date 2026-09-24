@@ -42,7 +42,7 @@
   "recovery.verifying": { "en": "Checking the link…", "fi": "Tarkistetaan linkkiä…", "sv": "Kontrollerar länken…" },
   "recovery.newPassword": { "en": "New password", "fi": "Uusi salasana", "sv": "Nytt lösenord" },
   "recovery.repeatPassword": { "en": "Repeat new password", "fi": "Toista uusi salasana", "sv": "Upprepa det nya lösenordet" },
-  "recovery.passwordHint": { "en": "At least {minimum} characters, and at most {maximum} bytes (letters like ä and emoji count as more than one).", "fi": "Vähintään {minimum} merkkiä ja enintään {maximum} tavua (esimerkiksi ä ja emojit vievät useamman tavun).", "sv": "Minst {minimum} tecken och högst {maximum} byte (till exempel å och emojier räknas som flera)." },
+  "recovery.passwordHint": { "en": "Use at least {minimum} characters.", "fi": "Käytä vähintään {minimum} merkkiä.", "sv": "Använd minst {minimum} tecken." },
   "recovery.short": { "en": "The password is too short.", "fi": "Salasana on liian lyhyt.", "sv": "Lösenordet är för kort." },
   "recovery.long": { "en": "The password is too long. Remove a few characters.", "fi": "Salasana on liian pitkä. Poista muutama merkki.", "sv": "Lösenordet är för långt. Ta bort några tecken." },
   "recovery.mismatch": { "en": "The passwords do not match.", "fi": "Salasanat eivät täsmää.", "sv": "Lösenorden stämmer inte överens." },

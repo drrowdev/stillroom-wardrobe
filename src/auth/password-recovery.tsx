@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } fro
 import type { PublicConfig } from '../data/config';
 import { locales, type Language, type MessageKey, type Translate } from '../i18n';
 import {
-  passwordProblem, recoveryAttempt, recoveryError, recoveryPasswordMaximumBytes,
+  passwordProblem, recoveryAttempt, recoveryError,
   recoveryPasswordMinimum, recoveryRequestWait, requestRecovery,
 } from './recovery';
 import type { RecoveryLink } from './recovery-callback';
@@ -109,7 +109,7 @@ export function PasswordRecovery({ config, link, online, t, onReturn }: {
       <button type="button" className="button button-quiet" onClick={() => onReturn()}>{t('recovery.notMine')}</button>
     </div>}
     {(state.phase === 'password' || state.phase === 'updating') && <form className="stack login-form" onSubmit={event => { void submit(event); }}>
-      <p className="fine muted" id="recovery-password-hint">{t('recovery.passwordHint', { minimum: recoveryPasswordMinimum, maximum: recoveryPasswordMaximumBytes })}</p>
+      <p className="fine muted" id="recovery-password-hint">{t('recovery.passwordHint', { minimum: recoveryPasswordMinimum })}</p>
       <div className="field">
         <label htmlFor="recovery-password">{t('recovery.newPassword')}</label>
         <div className="password-input">

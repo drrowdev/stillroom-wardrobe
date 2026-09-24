@@ -14,7 +14,7 @@ async function settings(page: Page, language: Language = 'en') {
 }
 const preferenceRequests = (api: { requests: { path: string }[] }) => api.requests.filter((request) => request.path.startsWith('/rest/v1/style_preferences'));
 const timeZoneLabel = (page: Page, locale: string, zone: string) => page.evaluate(({ locale, zone }) => {
-  const name = new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: 'longGeneric' }).formatToParts(0).find((part) => part.type === 'timeZoneName')!.value;
+  const name = new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: 'shortOffset' }).formatToParts(new Date()).find((part) => part.type === 'timeZoneName')!.value;
   return `${zone.split('/').pop()!.replaceAll('_', ' ')} (${name})`;
 }, { locale, zone });
 const currencyLabel = (page: Page, locale: string, code: string) => page.evaluate(({ locale, code }) =>
@@ -544,6 +544,13 @@ test('settings accessibility: 320px, keyboard, long text and 200% text', async (
   await expect(page.locator('#profile-currency')).toBeFocused();
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);
+  expect(await page.locator('#profile-timezone').evaluate((select: HTMLSelectElement) => {
+    const style = getComputedStyle(select);
+    const context = document.createElement('canvas').getContext('2d')!;
+    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const available = select.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    return context.measureText(select.selectedOptions[0]!.text).width <= available;
+  }), 'Selected time zone label fits the closed select at 320px').toBe(true);
   await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 2rem; }' });
   expect(await page.evaluate(() => ({
     viewport: innerWidth, width: document.documentElement.scrollWidth,
