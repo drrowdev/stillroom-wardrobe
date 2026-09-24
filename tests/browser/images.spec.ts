@@ -215,6 +215,20 @@ test('I07 default JPEG is byte-identical and transparency uses the warm neutral 
   }
 });
 
+async function openExact(page: Page) {
+  const details = page.locator('details.crop-exact');
+  if (!await details.evaluate((element: HTMLDetailsElement) => element.open)) await details.locator('summary').click();
+  await expect(page.locator('#crop-width')).toBeVisible();
+}
+
+async function dragHandle(page: Page, corner: 'nw' | 'ne' | 'sw' | 'se', x: number, y: number) {
+  const box = (await page.locator(`.crop-handle[data-corner="${corner}"]`).boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(x, y, { steps: 5 });
+  await page.mouse.up();
+}
+
 async function setup(page: Page, language: Language = 'en', failCommitOnce = false, size = { width: 120, height: 80 }) {
   const api = await mockBackend(page, { initialLanguage: language, failCommitOnce });
   await page.goto('/');
@@ -229,7 +243,7 @@ async function setup(page: Page, language: Language = 'en', failCommitOnce = fal
 }
 
 for (const size of [{ width: 3200, height: 1214 }, { width: 1600, height: 530 }]) {
-  test(`I07 Original ratio and edge nudges apply ordinary decimals for ${size.width}x${size.height}`, async ({ page }) => {
+  test(`I07 exact values, handle resize and edge nudges apply ordinary decimals for ${size.width}x${size.height}`, async ({ page }) => {
     await setup(page, 'en', false, size);
     await page.locator('#item-title').fill('Synthetic ratio garment');
     await page.locator('#item-category').selectOption('top');
@@ -237,14 +251,17 @@ for (const size of [{ width: 3200, height: 1214 }, { width: 1600, height: 530 }]
       ({ width: image.naturalWidth, height: image.naturalHeight }));
     expect(previewSize).toEqual({ width: 1600, height: size.height === 1214 ? 607 : 530 });
     await page.locator('#edit-photo').click();
-    await page.locator('#crop-aspect').selectOption('original');
+    await page.locator('#crop-reset').click();
+    await openExact(page);
     await expect(page.locator('#crop-x')).toHaveValue('0');
     await expect(page.locator('#crop-y')).toHaveValue('0');
     await expect(page.locator('#apply-crop')).toBeEnabled();
     await page.locator('#apply-crop').click();
     await expect(page.locator('#edit-photo')).toBeFocused();
+    await expect(page.locator('button[type="submit"]')).toBeEnabled();
     for (const field of ['width', 'height']) {
       await page.locator('#edit-photo').click();
+      await openExact(page);
       await page.locator(`#crop-${field}`).fill('99.99999999999999');
       await page.locator('#crop-rectangle').focus();
       for (const key of ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Shift+ArrowRight', 'Shift+ArrowDown']) {
@@ -258,12 +275,16 @@ for (const size of [{ width: 3200, height: 1214 }, { width: 1600, height: 530 }]
       await expect(page.locator('button[type="submit"]')).toBeEnabled();
     }
     await page.locator('#edit-photo').click();
-    await page.getByRole('button', { name: messages['photo.rotateRight'].en, exact: true }).click();
-    await page.locator('#crop-aspect').selectOption('original');
-    const crop = await page.locator('.crop-fields input').evaluateAll((inputs) =>
-      inputs.map((input) => Number((input as HTMLInputElement).value) / 100));
-    expect(crop[2]! * previewSize.height / (crop[3]! * previewSize.width)).toBeCloseTo(previewSize.width / previewSize.height, 9);
-    expect(crop[2]! < 1 || crop[3]! < 1).toBe(true);
+    await page.getByRole('button', { name: messages['photo.rotate'].en, exact: true }).click();
+    await page.locator('.crop-stage').scrollIntoViewIfNeeded();
+    const stage = (await page.locator('.crop-stage').boundingBox())!;
+    await dragHandle(page, 'se', stage.x + stage.width * 0.6137, stage.y + stage.height * 0.7291);
+    await openExact(page);
+    const values = await page.locator('.crop-fields input').evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value));
+    expect(values.every((value) => /^\d+(?:\.\d+)?$/.test(value))).toBe(true);
+    const crop = values.map((value) => Number(value) / 100);
+    expect([crop[0], crop[1]]).toEqual([0, 0]);
+    expect(crop[2]! < 1 && crop[3]! < 1).toBe(true);
     await expect(page.locator('#apply-crop')).toBeEnabled();
     await page.locator('#apply-crop').click();
     await expect(page.locator('#edit-photo')).toBeFocused();
@@ -271,11 +292,70 @@ for (const size of [{ width: 3200, height: 1214 }, { width: 1600, height: 530 }]
   });
 }
 
+test('I07 rotate, pointer crop and Done keep the expected asymmetric pixels', async ({ page }) => {
+  await setup(page, 'en', false, { width: 240, height: 160 });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.locator('#edit-photo').click();
+  await page.locator('#crop-rotate').click();
+  await expect(page.locator('.crop-stage')).toHaveCSS('aspect-ratio', '160 / 240');
+  await page.locator('.crop-stage').scrollIntoViewIfNeeded();
+  const stage = (await page.locator('.crop-stage').boundingBox())!;
+  const handle = (await page.locator('.crop-handle[data-corner="nw"]').boundingBox())!;
+  // The grab point is wherever the handle is actually pressed; the destination adds exactly half the stage width.
+  const grab = { x: Math.round(handle.x + handle.width / 2), y: Math.round(handle.y + handle.height / 2) };
+  await page.mouse.move(grab.x, grab.y);
+  await page.mouse.down();
+  await page.mouse.move(grab.x + stage.width / 2, grab.y, { steps: 6 });
+  await page.mouse.up();
+  await openExact(page);
+  expect(await page.locator('.crop-fields input').evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value)))
+    .toEqual(['50', '0', '50', '100']);
+  await page.locator('#apply-crop').click();
+  await expect(page.locator('#edit-photo')).toBeFocused();
+  const result = await page.locator('.capture-photo img').evaluate(async (element: HTMLImageElement, colours) => {
+    const helperPath = '/tests/fixtures/jpeg-helpers.ts';
+    const { summarizeJpeg } = await import(helperPath) as typeof import('../fixtures/jpeg-helpers');
+    const blob = await (await fetch(element.src)).blob();
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement('canvas');
+    try {
+      canvas.width = bitmap.width; canvas.height = bitmap.height;
+      const context = canvas.getContext('2d', { colorSpace: 'srgb' })!;
+      context.drawImage(bitmap, 0, 0);
+      const pixel = (x: number, y: number) => Array.from(context.getImageData(x, y, 1, 1).data).slice(0, 3);
+      const near = (actual: number[], colour: readonly number[]) => actual.every((channel, index) => Math.abs(channel - colour[index]!) < 35);
+      const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let stray = 0;
+      for (let y = 4; y < canvas.height - 4; y++) {
+        for (let x = 4; x < canvas.width - 4; x++) {
+          const offset = (y * canvas.width + x) * 4, value = [data[offset]!, data[offset + 1]!, data[offset + 2]!];
+          if (near(value, colours[2]!) || near(value, colours[3]!)) stray++;
+        }
+      }
+      const summary = await summarizeJpeg(blob);
+      return {
+        width: canvas.width, height: canvas.height, stray,
+        top: near(pixel(Math.floor(canvas.width / 2), Math.floor(canvas.height / 4)), colours[0]!),
+        bottom: near(pixel(Math.floor(canvas.width / 2), Math.floor(canvas.height * 3 / 4)), colours[1]!),
+        type: summary.type, size: summary.size, markers: summary.markers,
+      };
+    } finally { bitmap.close(); canvas.width = 1; canvas.height = 1; }
+  }, CORNER_COLOURS);
+  expect(Math.abs(result.width - 80)).toBeLessThanOrEqual(1);
+  expect(Math.abs(result.height - 240)).toBeLessThanOrEqual(1);
+  expect(result.top && result.bottom).toBe(true);
+  expect(result.stray).toBe(0);
+  expect(result.type).toBe('image/jpeg');
+  expect(result.size).toBeLessThanOrEqual(512000);
+  expect(result.markers.some((marker) => [0xe1, 0xe2, 0xed, 0xfe].includes(marker))).toBe(false);
+});
+
 test('I07 accepted crop alone enters immutable Save and retry', async ({ page }) => {
   const api = await setup(page, 'en', true);
   await page.locator('#item-title').fill('Synthetic cropped garment');
   await page.locator('#item-category').selectOption('top');
   await page.locator('#edit-photo').click();
+  await openExact(page);
   await page.locator('#crop-width').fill('50');
   await page.locator('#crop-rectangle').focus();
   await page.keyboard.press('ArrowRight');
@@ -305,26 +385,30 @@ test('I07 accepted crop alone enters immutable Save and retry', async ({ page })
   expect([...api.files].map(([name, bytes]) => [name, createHash('sha256').update(bytes).digest('hex')])).toEqual(hashes);
 });
 
-test('I07 cancel, reset, fit, language and owner cleanup retain only accepted drafts', async ({ page }) => {
+test('I07 cancel, reset, language and owner cleanup retain only accepted drafts', async ({ page }) => {
   const api = await setup(page);
   const initial = await page.locator('.capture-photo img').getAttribute('src');
   await page.locator('#item-title').fill('Oma synthetic text');
   await page.locator('#edit-photo').click();
   await expect(page.locator('.photo-panel img')).toHaveCount(1);
   await expect(page.locator('.capture-photo, #edit-photo')).toHaveCount(0);
+  await openExact(page);
   await page.locator('#crop-width').fill('');
   await expect(page.locator('#apply-crop')).toBeDisabled();
   await page.locator('form').evaluate((form: HTMLFormElement) => form.requestSubmit());
   await expect(page.locator('#crop-editor-title')).toBeFocused();
-  await page.getByRole('button', { name: messages['photo.cancelCrop'].en }).click();
+  await page.locator('#crop-cancel').click();
   await expect(page.locator('.capture-photo img')).toHaveAttribute('src', initial!);
   await expect(page.locator('#edit-photo')).toBeFocused();
   await page.locator('#edit-photo').click();
-  await page.getByRole('button', { name: messages['photo.rotateRight'].en }).click();
-  await page.locator('#crop-aspect').selectOption('1');
-  await page.getByRole('button', { name: messages['photo.fit'].en }).click();
+  await openExact(page);
+  await page.locator('#crop-width').fill('50');
+  await page.locator('#crop-rotate').click();
+  await expect(page.locator('.crop-stage')).toHaveCSS('aspect-ratio', '80 / 120');
   await expect(page.locator('#crop-width')).toHaveValue('100');
   await page.getByRole('button', { name: messages['photo.reset'].en }).click();
+  await expect(page.locator('.crop-stage')).toHaveCSS('aspect-ratio', '120 / 80');
+  await expect(page.locator('#crop-width')).toHaveValue('100');
   await page.locator('#crop-width').fill('50');
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
   await page.getByRole('button', { name: 'Suomi', exact: true }).click();
@@ -345,6 +429,7 @@ test('I07 cancel, reset, fit, language and owner cleanup retain only accepted dr
 test('I07 crop accessibility supports three languages, keyboard, narrow and enlarged text', async ({ page }) => {
   await setup(page);
   await page.locator('#edit-photo').click();
+  await openExact(page);
   for (const language of ['en', 'fi', 'sv'] as const) {
     if (language !== 'en') {
       await page.getByRole('button', { name: messages['account.menu'][language === 'fi' ? 'en' : 'fi'] }).click();
@@ -360,8 +445,8 @@ test('I07 crop accessibility supports three languages, keyboard, narrow and enla
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('ArrowDown');
     await expect(page.locator('#crop-x')).toHaveValue(String((['en', 'fi', 'sv'].indexOf(language) + 1)));
-    await expect(page.getByRole('button', { name: messages['photo.rotateRight'][language], exact: true }))
-      .toHaveText(messages['photo.rotateRight'][language]);
+    await expect(page.getByRole('button', { name: messages['photo.rotate'][language], exact: true }))
+      .toHaveText(messages['photo.rotate'][language]);
     expect(await page.locator('.crop-fields .field').evaluateAll((fields) => {
       const boxes = fields.map((field) => field.getBoundingClientRect());
       return boxes.every((box, index) => box.left === boxes[0]!.left && (!index || box.top > boxes[index - 1]!.bottom));
@@ -374,7 +459,7 @@ test('I07 crop accessibility supports three languages, keyboard, narrow and enla
       }).filter((rect) => rect.left >= 0 && rect.right > innerWidth + 1 && rect.width > 0);
     }), 'Narrow enlarged-text layout').toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    expect(await page.locator('.crop-editor button, .crop-editor input, .crop-editor select').evaluateAll((elements) =>
+    expect(await page.locator('.crop-editor button, .crop-editor input, .crop-editor summary').evaluateAll((elements) =>
       elements.every((element) => element.getBoundingClientRect().height >= 44))).toBe(true);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   }
@@ -494,6 +579,7 @@ test('I07 synthetic crop visual evidence retains functional assertions in every 
   await page.locator('#item-title').fill('Synthetic green garment');
   await page.locator('#item-category').selectOption('top');
   await page.locator('#edit-photo').click();
+  await openExact(page);
   await page.locator('#crop-width').fill('80');
   const origin = new URL(testInfo.project.use.baseURL!).origin;
   const directory = path.resolve('test-results/i07-visual');

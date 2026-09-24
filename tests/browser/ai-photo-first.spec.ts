@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Response as PlaywrightResponse, type TestInfo } from '@playwright/test';
+import { expect, test, type Page, type Request as PlaywrightRequest, type Response as PlaywrightResponse, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open, lstat } from 'node:fs/promises';
 import path from 'node:path';
@@ -21,6 +21,94 @@ const posts = (api: AiFixture) => api.calls.filter((call) => call.route.endsWith
 // A schema-valid "still working" status reply, so the client really parses it as dispatched.
 const dispatched = { code: 'OK', status: 'dispatched', result: null, accounting: { basis: 'held', amountMicro: '1034', currency: 'USD' } };
 const statusChecks = (api: AiFixture) => api.calls.filter((call) => call.route.endsWith('/ai_analysis_status'));
+const discards = (api: AiFixture) => api.calls.filter((call) => call.route.endsWith('/ai_request_control'));
+const admissions = (api: AiFixture) => api.calls.filter((call) => call.route.endsWith('/ai_status'));
+const libraryWrites = (api: AiFixture) => api.items.length + api.images.length + api.files.size + api.uploadWire.posts
+  + api.requests.filter((call) => /(?:reserve_(?:analyzed_)?item_save|reserve_image_change|\/finalize-[\w-]+)$/.test(call.path)).length;
+const requestIdOf = (api: AiFixture, index: number) => (posts(api)[index]!.body as { requestId: string }).requestId;
+async function openExact(page: Page) {
+  const details = page.locator('details.crop-exact');
+  if (!await details.evaluate((element: HTMLDetailsElement) => element.open)) await details.locator('summary').click();
+  await expect(page.locator('#crop-width')).toBeVisible();
+}
+async function mouseDrag(page: Page, selector: string, dx: number, dy: number) {
+  const box = (await page.locator(selector).boundingBox())!;
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y + dy, { steps: 5 });
+  await page.mouse.up();
+}
+// Every editing control short of Done: handle and body drags, arrows, rotation, reset and exact values.
+async function exerciseEditor(page: Page) {
+  await page.locator('.crop-stage').scrollIntoViewIfNeeded();
+  const stage = (await page.locator('.crop-stage').boundingBox())!;
+  const before = await page.locator('#crop-rectangle').boundingBox();
+  await mouseDrag(page, '.crop-handle[data-corner="se"]', -stage.width * 0.3, -stage.height * 0.3);
+  await mouseDrag(page, '#crop-rectangle', stage.width * 0.1, stage.height * 0.1);
+  expect(await page.locator('#crop-rectangle').boundingBox()).not.toEqual(before);
+  await page.locator('#crop-rectangle').focus();
+  for (const key of ['ArrowLeft', 'ArrowUp', 'Shift+ArrowRight', 'Shift+ArrowDown']) await page.keyboard.press(key);
+  await page.locator('#crop-rotate').click();
+  await page.locator('#crop-rotate').click();
+  await page.locator('#crop-reset').click();
+  await openExact(page);
+  await page.locator('#crop-width').fill('80');
+}
+// Status checks answer "still working" unless a request is marked ready; one armed request is held with a ready reply.
+async function holdStatus(page: Page, api: AiFixture) {
+  const ready = new Set<string>();
+  let held: string | null = null, reached = false, release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/rest/v1/rpc/ai_analysis_status', async (route) => {
+    if (route.request().method() === 'OPTIONS') { await route.fallback(); return; }
+    const body = route.request().postDataJSON() as { p_request_id: string };
+    api.calls.push({ route: '/rest/v1/rpc/ai_analysis_status', body });
+    const answer = () => ({ code: 'OK', status: 'ready', result: api.results.get(body.p_request_id),
+      accounting: { basis: 'estimated', amountMicro: '1034', currency: 'USD' } });
+    if (held === body.p_request_id && !reached) {
+      const late = answer();
+      expect(late.result?.facts.outcome).toBe('ready');
+      reached = true;
+      await gate;
+      await route.fulfill({ json: late }).catch(() => undefined);
+      return;
+    }
+    await route.fulfill({ json: ready.has(body.p_request_id) ? answer() : dispatched }).catch(() => undefined);
+  });
+  return { ready, arm: (id: string) => { held = id; }, reached: () => reached, release: () => release() };
+}
+// The clock stands still during editing and only moves at the designated polling steps. It pauses once the first
+// same-request check shows that the dispatched reply was received and polling has started.
+async function pauseClock(page: Page, api: AiFixture) {
+  await expect.poll(() => statusChecks(api).length).toBeGreaterThan(0);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 500));
+}
+// Advances the paused clock in small steps only until the next same-request check is recorded, so the check's own
+// five-second budget never elapses on the fake clock before the reply arrives.
+async function pollStep(page: Page, api: AiFixture, requestId: string, limit = 16000) {
+  const before = statusChecks(api).length;
+  let issued = false;
+  const seen = (request: PlaywrightRequest) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/ai_analysis_status')) issued = true;
+  };
+  page.on('request', seen);
+  try {
+    for (let elapsed = 0; !issued; elapsed += 250) {
+      if (elapsed >= limit) throw new Error('No status check within the polling step');
+      await page.clock.runFor(250);
+      await expect.poll(() => issued, { timeout: 250 }).toBe(true).catch(() => undefined);
+    }
+  } finally { page.off('request', seen); }
+  await expect.poll(() => statusChecks(api).length).toBeGreaterThan(before);
+  expect(statusChecks(api).at(-1)!.body).toEqual({ p_request_id: requestId });
+}
+async function previewSha256(page: Page) {
+  return page.locator('.capture-photo img').evaluate(async (element: HTMLImageElement) => {
+    const hash = await crypto.subtle.digest('SHA-256', await (await fetch(element.src)).arrayBuffer());
+    return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  });
+}
 type RawAnalysisClient = { status: number | null; outcome: 'response' | 'network-rejection'; constructedBytes?: number };
 type RawAnalysisEvidence = {
   case: 'oversized' | 'response-sequence' | 'boundaries'; project: 'chromium' | 'mobile' | 'webkit-photo' | null;
@@ -696,16 +784,149 @@ test('crop movement and cancellation do not analyze; an applied crop creates exa
   await addAiPhoto(page, api);
   await filled(page);
   await page.locator('#item-title').fill('Retained manual title');
-  await page.locator('#edit-photo').click(); await page.locator('#crop-width').fill('80');
+  await page.locator('#edit-photo').click(); await openExact(page); await page.locator('#crop-width').fill('80');
   expect(api.calls.filter((call) => call.route.endsWith('/analyze-clothing'))).toHaveLength(1);
   await page.getByRole('button', { name: messages['photo.cancelCrop'].en, exact: true }).click();
   await expect(page.locator('#edit-photo')).toBeVisible();
   expect(api.calls.filter((call) => call.route.endsWith('/analyze-clothing'))).toHaveLength(1);
-  await page.locator('#edit-photo').click(); await page.locator('#crop-width').fill('80'); await page.locator('#apply-crop').click();
+  await page.locator('#edit-photo').click(); await openExact(page); await page.locator('#crop-width').fill('80');
+  await page.locator('#apply-crop').click();
   await expect.poll(() => api.calls.filter((call) => call.route.endsWith('/analyze-clothing')).length).toBe(2);
   await filled(page);
   await expect(page.locator('#item-title')).toHaveValue('Retained manual title');
   expect([...api.results.values()][0]!.generation).toBe(2);
+});
+async function shrinkFrame(page: Page) {
+  await page.locator('.crop-stage').scrollIntoViewIfNeeded();
+  const stage = (await page.locator('.crop-stage').boundingBox())!;
+  await mouseDrag(page, '.crop-handle[data-corner="se"]', -stage.width * 0.25, -stage.height * 0.25);
+}
+test('UX L1b editing, Cancel editing and an unchanged Done keep the current analysis request', async ({ page }) => {
+  await page.clock.install();
+  const api = await aiFixture(page); api.mode('pending');
+  await holdStatus(page, api);
+  await addAiPhoto(page, api);
+  await expect.poll(() => posts(api).length).toBe(1);
+  await pauseClock(page, api);
+  const r1 = requestIdOf(api, 0);
+  const counts = () => ({ posts: posts(api).length, discards: discards(api).length, admissions: admissions(api).length, library: libraryWrites(api) });
+  await expect(page.locator('#edit-photo')).toBeEnabled();
+  const baseline = counts();
+  expect(baseline).toMatchObject({ posts: 1, discards: 0, library: 0 });
+  const src = await page.locator('.capture-photo img').getAttribute('src');
+  await page.locator('#edit-photo').click();
+  await exerciseEditor(page);
+  await page.locator('#crop-cancel').click();
+  await expect(page.locator('#edit-photo')).toBeFocused();
+  expect(counts()).toEqual(baseline);
+  await page.locator('#edit-photo').click();
+  await page.locator('#apply-crop').click();
+  await expect(page.locator('#edit-photo')).toBeFocused();
+  await expect(page.locator('.capture-photo img')).toHaveAttribute('src', src!);
+  expect(counts()).toEqual(baseline);
+  for (const check of statusChecks(api)) expect(check.body).toEqual({ p_request_id: r1 });
+  await pollStep(page, api, r1);
+  expect(counts()).toEqual(baseline);
+});
+test('UX L1b a changed Done starts one new generation and ignores the old request', async ({ page }) => {
+  await page.clock.install();
+  const api = await aiFixture(page); api.mode('pending');
+  const status = await holdStatus(page, api);
+  await addAiPhoto(page, api);
+  await expect.poll(() => posts(api).length).toBe(1);
+  await pauseClock(page, api);
+  const r1 = requestIdOf(api, 0);
+  await page.locator('#item-title').fill('Retained manual title');
+  status.arm(r1);
+  await pollStep(page, api, r1);
+  await expect.poll(() => status.reached()).toBe(true);
+  const before = { discards: discards(api).length, admissions: admissions(api).length };
+  await page.locator('#edit-photo').click();
+  await shrinkFrame(page);
+  await page.locator('#apply-crop').click();
+  await expect.poll(() => posts(api).length).toBe(2);
+  await expect(page.locator('#edit-photo')).toBeFocused();
+  expect(discards(api)).toHaveLength(before.discards + 1);
+  expect(discards(api).at(-1)!.body).toMatchObject({ p_request_id: r1 });
+  // One admission check in commitPhoto and the analysis client's own pre-send check.
+  expect(admissions(api)).toHaveLength(before.admissions + 2);
+  const r2 = requestIdOf(api, 1);
+  expect(api.results.get(r2)!.generation).toBe(2);
+  status.release();
+  await pollStep(page, api, r2);
+  await expect(page.locator('#item-category')).toHaveValue('');
+  await expect(page.locator('#item-title')).toHaveValue('Retained manual title');
+  status.ready.add(r2);
+  await pollStep(page, api, r2);
+  await filled(page);
+  await expect(page.locator('#item-title')).toHaveValue('Retained manual title');
+  expect(posts(api)).toHaveLength(2);
+  expect(api.inputs.at(-1)).toMatchObject({ requestId: r2, sha256: await previewSha256(page) });
+  expect(libraryWrites(api)).toBe(0);
+});
+test('UX L1b Save while editing cannot continue manually or write the library', async ({ page }) => {
+  await page.clock.install();
+  const api = await aiFixture(page); api.mode('pending');
+  await holdStatus(page, api);
+  await addAiPhoto(page, api);
+  await expect.poll(() => posts(api).length).toBe(1);
+  await pauseClock(page, api);
+  await page.clock.runFor(31000);
+  const stillWorking = statusRegion(page).getByText(messages['aiC.stillWorking'].en, { exact: true });
+  const check = statusRegion(page).getByRole('button', { name: messages['common.retry'].en, exact: true });
+  const save = page.getByRole('button', { name: messages['capture.save'].en, exact: true });
+  await expect(stillWorking).toBeVisible();
+  await page.locator('#item-title').fill('Typed while editing');
+  await page.locator('#item-category').selectOption('bottom');
+  await page.locator('#edit-photo').click();
+  await expect(save).toBeDisabled();
+  await page.locator('form.capture-layout').evaluate((form: HTMLFormElement) => form.requestSubmit());
+  await expect(page.locator('#crop-editor-title')).toBeFocused();
+  expect(discards(api)).toHaveLength(0);
+  expect(posts(api)).toHaveLength(1);
+  expect(libraryWrites(api)).toBe(0);
+  await expect(stillWorking).toBeVisible();
+  await expect(check).toBeDisabled();
+  await page.locator('#crop-cancel').click();
+  await expect(check).toBeEnabled();
+  await expect(save).toBeEnabled();
+  expect(discards(api)).toHaveLength(0);
+  expect(libraryWrites(api)).toBe(0);
+});
+test('UX L1b an implicit Save after a changed Done keeps typed facts and rejects the late result', async ({ page }) => {
+  await page.clock.install();
+  const api = await aiFixture(page); api.mode('pending');
+  const status = await holdStatus(page, api);
+  await addAiPhoto(page, api);
+  await expect.poll(() => posts(api).length).toBe(1);
+  await pauseClock(page, api);
+  await page.locator('#edit-photo').click();
+  await shrinkFrame(page);
+  await page.locator('#apply-crop').click();
+  await expect.poll(() => posts(api).length).toBe(2);
+  await expect(page.locator('#edit-photo')).toBeFocused();
+  const r2 = requestIdOf(api, 1);
+  await page.clock.runFor(31000);
+  await expect(statusRegion(page).getByText(messages['aiC.stillWorking'].en, { exact: true })).toBeVisible();
+  status.arm(r2);
+  await statusRegion(page).getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
+  await expect.poll(() => status.reached()).toBe(true);
+  await page.locator('#item-title').fill('Manual after crop');
+  await page.locator('#item-category').selectOption('bottom');
+  const before = statusChecks(api).length;
+  await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
+  status.release();
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  await page.clock.runFor(35000);
+  expect(posts(api)).toHaveLength(2);
+  expect(statusChecks(api).length).toBeLessThanOrEqual(before + 1);
+  for (const call of statusChecks(api).slice(before - 1)) expect(call.body).toEqual({ p_request_id: r2 });
+  expect(api.items).toHaveLength(1);
+  expect(api.items[0]).toMatchObject({ title: 'Manual after crop', category: 'bottom', colours: [], material: null });
+  expect(api.items[0]!.field_provenance).toEqual({ title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 } });
+  expect(api.inputs.at(-1)!.requestId).toBe(r2);
+  expect(api.images[0]!.main_sha256).toBe(api.inputs.at(-1)!.sha256);
+  expect(api.requests.some((call) => call.path.endsWith('/reserve_analyzed_item_save'))).toBe(false);
 });
 test('late result after an implicit manual Save cannot overwrite edits or add AI facts', async ({ page }) => {
   await page.clock.install();

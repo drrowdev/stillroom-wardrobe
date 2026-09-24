@@ -152,6 +152,203 @@ test('I10b consecutive replacements reload the current saved caption before anot
   expect(api.imageChanges[1]!.intent.currentImageId).toBe(api.imageChanges[0]!.receipt.imageId);
 });
 
+type ReplaceFixture = Awaited<ReturnType<typeof aiFixture>>;
+const replacePosts = (api: ReplaceFixture) => api.calls.filter(call => call.route.endsWith('/analyze-clothing'));
+const replaceChecks = (api: ReplaceFixture) => api.calls.filter(call => call.route.endsWith('/ai_analysis_status'));
+const replaceDiscards = (api: ReplaceFixture) => api.calls.filter(call => call.route.endsWith('/ai_request_control'));
+const replaceAdmissions = (api: ReplaceFixture) => api.calls.filter(call => call.route.endsWith('/ai_status'));
+const imageWrites = (api: ReplaceFixture) => api.uploadWire.posts
+  + api.requests.filter(call => /(?:reserve_image_change|\/finalize-[\w-]+)$/.test(call.path)).length;
+const replaceRequestId = (api: ReplaceFixture, index: number) => (replacePosts(api)[index]!.body as { requestId: string }).requestId;
+const stillDispatched = { code: 'OK', status: 'dispatched', result: null, accounting: { basis: 'held', amountMicro: '1034', currency: 'USD' } };
+// Status checks answer "still working" unless a request is marked ready; one armed request is held with a ready reply.
+async function holdReplaceStatus(page: Page, api: ReplaceFixture) {
+  const ready = new Set<string>();
+  let held: string | null = null, reached = false, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/rest/v1/rpc/ai_analysis_status', async route => {
+    if (route.request().method() === 'OPTIONS') { await route.fallback(); return; }
+    const body = route.request().postDataJSON() as { p_request_id: string };
+    api.calls.push({ route: '/rest/v1/rpc/ai_analysis_status', body });
+    const answer = () => ({ code: 'OK', status: 'ready', result: api.results.get(body.p_request_id),
+      accounting: { basis: 'estimated', amountMicro: '1034', currency: 'USD' } });
+    if (held === body.p_request_id && !reached) {
+      const late = answer();
+      expect(late.result?.facts.outcome).toBe('ready');
+      reached = true;
+      await gate;
+      await route.fulfill({ json: late }).catch(() => undefined);
+      return;
+    }
+    await route.fulfill({ json: ready.has(body.p_request_id) ? answer() : stillDispatched }).catch(() => undefined);
+  });
+  return { ready, arm: (id: string) => { held = id; }, reached: () => reached, release: () => release() };
+}
+// A pending replacement analysis: the clock pauses once polling has started and moves only at designated steps.
+async function pendingReplacement(page: Page) {
+  await page.clock.install();
+  const setup = await imageChangeSetup(page);
+  const { api } = setup;
+  api.mode('pending');
+  const status = await holdReplaceStatus(page, api);
+  await page.getByRole('button', { name: messages['imageChange.replace'].en, exact: true }).click();
+  await expect(page.locator('.image-change input[type=file]').first()).toBeEnabled();
+  await page.locator('.image-change input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
+  await expect.poll(() => replacePosts(api).length).toBe(1);
+  await expect.poll(() => replaceChecks(api).length).toBeGreaterThan(0);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 500));
+  await expect(page.locator('#image-change-edit')).toBeEnabled();
+  return { ...setup, status, r1: replaceRequestId(api, 0) };
+}
+async function replacePollStep(page: Page, api: ReplaceFixture, requestId: string, limit = 16000) {
+  const before = replaceChecks(api).length;
+  let issued = false;
+  const seen = (request: { method(): string; url(): string }) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/ai_analysis_status')) issued = true;
+  };
+  page.on('request', seen);
+  try {
+    for (let elapsed = 0; !issued; elapsed += 250) {
+      if (elapsed >= limit) throw new Error('No status check within the polling step');
+      await page.clock.runFor(250);
+      await expect.poll(() => issued, { timeout: 250 }).toBe(true).catch(() => undefined);
+    }
+  } finally { page.off('request', seen); }
+  await expect.poll(() => replaceChecks(api).length).toBeGreaterThan(before);
+  expect(replaceChecks(api).at(-1)!.body).toEqual({ p_request_id: requestId });
+}
+// Focus returns after React commits; a short clock step lets any work scheduled on the paused clock run first.
+async function focusedAfterFrame(page: Page, selector: string) {
+  await page.clock.runFor(40);
+  await expect(page.locator(selector)).toBeFocused();
+}
+async function replaceDrag(page: Page, selector: string, dx: number, dy: number) {
+  const box = (await page.locator(selector).boundingBox())!;
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y + dy, { steps: 5 });
+  await page.mouse.up();
+}
+async function shrinkReplacement(page: Page) {
+  await page.locator('.crop-stage').scrollIntoViewIfNeeded();
+  const stage = (await page.locator('.crop-stage').boundingBox())!;
+  await replaceDrag(page, '.crop-handle[data-corner="se"]', -stage.width * 0.25, -stage.height * 0.25);
+}
+const replacementSha256 = (page: Page) => page.locator('.image-change .capture-photo img').evaluate(async (element: HTMLImageElement) => {
+  const hash = await crypto.subtle.digest('SHA-256', await (await fetch(element.src)).arrayBuffer());
+  return [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+});
+test('UX L1b replacement editing, Cancel editing and an unchanged Done keep the current analysis request', async ({ page }) => {
+  const { api, item, image, r1 } = await pendingReplacement(page);
+  const before = structuredClone(item), oldImage = structuredClone(image);
+  const counts = () => ({ posts: replacePosts(api).length, discards: replaceDiscards(api).length,
+    admissions: replaceAdmissions(api).length, writes: imageWrites(api) });
+  const baseline = counts();
+  expect(baseline).toMatchObject({ posts: 1, discards: 0, writes: 0 });
+  const src = await page.locator('.image-change .capture-photo img').getAttribute('src');
+  await page.locator('#image-change-edit').click();
+  await page.locator('.crop-stage').scrollIntoViewIfNeeded();
+  const stage = (await page.locator('.crop-stage').boundingBox())!;
+  await replaceDrag(page, '.crop-handle[data-corner="se"]', -stage.width * 0.3, -stage.height * 0.3);
+  await replaceDrag(page, '#crop-rectangle', stage.width * 0.1, stage.height * 0.1);
+  await page.locator('#crop-rectangle').focus();
+  for (const key of ['ArrowLeft', 'ArrowUp', 'Shift+ArrowRight', 'Shift+ArrowDown']) await page.keyboard.press(key);
+  await page.locator('#crop-rotate').click();
+  await page.locator('#crop-rotate').click();
+  await page.locator('#crop-reset').click();
+  await page.locator('details.crop-exact > summary').click();
+  await page.locator('#crop-width').fill('80');
+  await page.locator('#crop-cancel').click();
+  await focusedAfterFrame(page, '#image-change-edit');
+  expect(counts()).toEqual(baseline);
+  await page.locator('#image-change-edit').click();
+  await page.locator('#apply-crop').click();
+  await focusedAfterFrame(page, '#image-change-edit');
+  await expect(page.locator('.image-change .capture-photo img')).toHaveAttribute('src', src!);
+  expect(counts()).toEqual(baseline);
+  for (const check of replaceChecks(api)) expect(check.body).toEqual({ p_request_id: r1 });
+  await replacePollStep(page, api, r1);
+  expect(counts()).toEqual(baseline);
+  expect(item).toEqual(before); expect(image).toEqual(oldImage);
+  expect(api.requests.some(call => call.path.endsWith('/reserve_image_change'))).toBe(false);
+});
+test('UX L1b a changed replacement Done starts one new generation and ignores the old request', async ({ page }) => {
+  const { api, item, image, status, r1 } = await pendingReplacement(page);
+  const before = structuredClone(item), oldImage = structuredClone(image);
+  const suggested = page.locator('.field-marker', { hasText: messages['aiC.markSuggested'].en });
+  status.arm(r1);
+  await replacePollStep(page, api, r1);
+  await expect.poll(() => status.reached()).toBe(true);
+  const counts = { discards: replaceDiscards(api).length, admissions: replaceAdmissions(api).length };
+  await page.locator('#image-change-edit').click();
+  await shrinkReplacement(page);
+  await page.locator('#apply-crop').click();
+  await expect.poll(() => replacePosts(api).length).toBe(2);
+  await focusedAfterFrame(page, '#image-change-edit');
+  expect(replaceDiscards(api)).toHaveLength(counts.discards + 1);
+  expect(replaceDiscards(api).at(-1)!.body).toMatchObject({ p_request_id: r1 });
+  expect(replaceAdmissions(api)).toHaveLength(counts.admissions + 2);
+  const r2 = replaceRequestId(api, 1);
+  expect(api.results.get(r2)!.generation).toBe(2);
+  status.release();
+  await replacePollStep(page, api, r2);
+  await expect(page.locator('#item-title')).toHaveValue(before.title);
+  await expect(page.locator('#item-category')).toHaveValue(before.category);
+  await expect(suggested).toHaveCount(0);
+  status.ready.add(r2);
+  await replacePollStep(page, api, r2);
+  await expect(suggested.first()).toBeVisible();
+  await expect(page.locator('#item-title')).toHaveValue(before.title);
+  expect(replacePosts(api)).toHaveLength(2);
+  expect(api.inputs.at(-1)).toMatchObject({ requestId: r2, sha256: await replacementSha256(page) });
+  expect(imageWrites(api)).toBe(0);
+  expect(item).toEqual(before); expect(image).toEqual(oldImage);
+});
+test('UX L1b replacement Save is refused while editing; a later implicit Save keeps typed fields and the cropped photo', async ({ page }) => {
+  const { api, item, status } = await pendingReplacement(page);
+  const before = structuredClone(item);
+  const provenance = before.field_provenance as Record<string, unknown>;
+  const save = page.getByRole('button', { name: messages['imageChange.save'].en, exact: true });
+  const stillWorking = page.locator('#analysis-status').getByText(messages['aiC.stillWorking'].en, { exact: true });
+  await page.clock.runFor(31000);
+  await expect(stillWorking).toBeVisible();
+  await page.locator('#image-change-edit').click();
+  await expect(save).toBeDisabled();
+  await page.locator('.image-change form.capture-layout').evaluate((form: HTMLFormElement) => form.requestSubmit());
+  expect(replaceDiscards(api)).toHaveLength(0);
+  expect(replacePosts(api)).toHaveLength(1);
+  expect(imageWrites(api)).toBe(0);
+  await shrinkReplacement(page);
+  await page.locator('#apply-crop').click();
+  await expect.poll(() => replacePosts(api).length).toBe(2);
+  await focusedAfterFrame(page, '#image-change-edit');
+  const r2 = replaceRequestId(api, 1);
+  await page.clock.runFor(31000);
+  await expect(stillWorking).toBeVisible();
+  status.arm(r2);
+  await page.locator('#analysis-status').getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
+  await expect.poll(() => status.reached()).toBe(true);
+  await page.locator('#item-title').fill('Typed replacement title');
+  const checks = replaceChecks(api).length;
+  await save.click();
+  status.release();
+  await expect(page.locator('#detail-title')).toBeVisible();
+  await page.clock.runFor(35000);
+  expect(replacePosts(api)).toHaveLength(2);
+  expect(replaceChecks(api).length).toBeLessThanOrEqual(checks + 1);
+  for (const call of replaceChecks(api).slice(checks - 1)) expect(call.body).toEqual({ p_request_id: r2 });
+  expect(api.requests.filter(call => call.path.endsWith('/reserve_image_change'))).toHaveLength(1);
+  expect(api.requests.filter(call => call.path.endsWith('/finalize-image-change'))).toHaveLength(1);
+  expect(item.title).toBe('Typed replacement title');
+  expect(item.material).toBe(before.material); expect(item.brand).toBe('Legacy brand');
+  expect(item.field_provenance).toMatchObject({ title: { kind: 'user' }, material: provenance.material,
+    subcategory: provenance.subcategory, sleeve_length: provenance.sleeve_length });
+  const ready = api.images.find(row => row.item_id === item.id && row.state === 'ready')!;
+  expect(api.inputs.at(-1)!.requestId).toBe(r2);
+  expect(ready.main_sha256).toBe(api.inputs.at(-1)!.sha256);
+});
+
 const itemUrl = 'http://127.0.0.1:54321/rest/v1/items*';
 const descriptionUrl = 'http://127.0.0.1:54321/rest/v1/rpc/update_image_description';
 const save = (page: Page, language: Language = 'en') => page.getByRole('button', { name: messages['detail.saveChanges'][language], exact: true });

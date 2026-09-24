@@ -82,6 +82,58 @@ export function cropGeometry(width: number, height: number, orientation = 1, edi
   };
 }
 
+export type Corner = 'nw' | 'ne' | 'sw' | 'se';
+export const MIN_DRAG = 0.05;
+export const HANDLE_PX = 44;
+export const FRAME_BORDER_PX = 3;
+// Two handles fit inside the frame's inner box, so the outer frame needs both handles plus both borders.
+export const HANDLE_FRAME_PX = 2 * HANDLE_PX + 2 * FRAME_BORDER_PX;
+const HANDLE_MARGIN_PX = 2;
+
+// Tolerance-admitted crops (validCrop allows 1e-10 overrun) are brought fully inside before any drag maths.
+export function normalizeCrop(crop: Crop): Crop {
+  const width = Math.min(1, crop.width), height = Math.min(1, crop.height);
+  return { x: Math.max(0, Math.min(1 - width, crop.x)), y: Math.max(0, Math.min(1 - height, crop.y)), width, height };
+}
+
+export function moveCrop(crop: Crop, dx: number, dy: number): Crop {
+  const start = normalizeCrop(crop);
+  return {
+    ...start,
+    x: Math.max(0, Math.min(1 - start.width, start.x + dx)),
+    y: Math.max(0, Math.min(1 - start.height, start.y + dy)),
+  };
+}
+
+export function resizeCrop(crop: Crop, corner: Corner, dx: number, dy: number, minWidth: number, minHeight: number): Crop {
+  const start = normalizeCrop(crop);
+  const axis = (near: number, size: number, delta: number, minimum: number, west: boolean): [number, number] => {
+    const least = Math.min(size, Math.max(minimum, Number.MIN_VALUE));
+    const far = Math.min(1, near + size);
+    if (west) {
+      const edge = Math.max(0, Math.min(far - least, near + delta));
+      return [edge, far - edge];
+    }
+    const edge = Math.max(near + least, Math.min(1, far + delta));
+    return [near, edge - near];
+  };
+  const [x, width] = axis(start.x, start.width, dx, minWidth, corner === 'nw' || corner === 'sw');
+  const [y, height] = axis(start.y, start.height, dy, minHeight, corner === 'nw' || corner === 'ne');
+  return { x, y, width, height };
+}
+
+export function handleMinimum(stagePx: number): number {
+  if (!(stagePx > 0)) return 1;
+  return Math.min(1, Math.max(MIN_DRAG, Math.ceil((HANDLE_FRAME_PX + HANDLE_MARGIN_PX) / stagePx * 1e10) / 1e10));
+}
+
+export function sameEdit(a: PhotoEdit, b: PhotoEdit): boolean {
+  const turns = (value: number) => ((value % 4) + 4) % 4;
+  if (!validCrop(a.crop) || !validCrop(b.crop) || turns(a.turns) !== turns(b.turns)) return false;
+  const left = cropValues(a.crop), right = cropValues(b.crop);
+  return left.x === right.x && left.y === right.y && left.width === right.width && left.height === right.height;
+}
+
 export function aspectCrop(width: number, height: number, ratio: number): Crop {
   if (!Number.isFinite(ratio) || ratio <= 0) throw new ImagePreparationError('invalid');
   const w = Math.min(1, ratio * height / width);

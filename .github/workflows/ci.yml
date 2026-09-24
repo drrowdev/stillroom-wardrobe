@@ -106,6 +106,20 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Preserve bounded synthetic UX L1b visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ux-l1b-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/ux-l1b-visual/crop-en-desktop.png
+            test-results/ux-l1b-visual/crop-fi-mobile.png
+            test-results/ux-l1b-visual/crop-exact-en-desktop.png
+            test-results/ux-l1b-visual/crop-exact-fi-mobile.png
+            test-results/ux-l1b-visual/photo-actions-en-desktop.png
+            test-results/ux-l1b-visual/photo-actions-fi-mobile.png
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Preserve bounded synthetic UX-copy visual evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

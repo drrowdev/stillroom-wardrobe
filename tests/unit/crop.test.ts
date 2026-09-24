@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { aspectCrop, cropGeometry, cropValues, FULL_CROP, inverse, mapPoint, orientationTransform, parseCropValues, validCrop } from '../../src/images/crop';
+import {
+  aspectCrop, cropGeometry, cropValues, FULL_CROP, handleMinimum, inverse, mapPoint, moveCrop, normalizeCrop, orientationTransform,
+  parseCropValues, resizeCrop, sameEdit, validCrop, type Corner, type Crop,
+} from '../../src/images/crop';
 import { imageEnhancementProvider } from '../../src/providers/enhancement';
 
 describe('I07 geometry', () => {
@@ -81,5 +84,106 @@ describe('I07 geometry', () => {
       expect(await imageEnhancementProvider.enhance()).toEqual({ status: 'unavailable' });
       expect(fetch).not.toHaveBeenCalled();
     } finally { fetch.mockRestore(); }
+  });
+});
+
+// The pre-L1b editor's keyboard nudge, kept verbatim so the new helper is proven equivalent.
+const oldNudge = (crop: Crop, dx: number, dy: number): Crop => ({
+  ...crop,
+  x: Math.max(0, Math.min(1 - crop.width, crop.x + dx)),
+  y: Math.max(0, Math.min(1 - crop.height, crop.y + dy)),
+});
+const tolerated: Crop[] = [
+  { x: 0, y: 0, width: 1.00000000005, height: 0.5 },
+  { x: 5e-11, y: 0.25, width: 1, height: 0.5 },
+  { x: 0.25, y: 0, width: 0.5, height: 1.00000000005 },
+  { x: 0.25, y: 5e-11, width: 0.5, height: 1 },
+  { x: 5e-11, y: 5e-11, width: 1.00000000005, height: 1.00000000005 },
+];
+function seeded(seed: number) {
+  return () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+}
+function randomCrops(count: number): Crop[] {
+  const random = seeded(20260923), crops: Crop[] = [];
+  while (crops.length < count) {
+    const width = Math.max(1e-6, random()), height = Math.max(1e-6, random());
+    crops.push({ x: random() * (1 - width), y: random() * (1 - height), width, height });
+  }
+  return crops;
+}
+const inside = (crop: Crop) => crop.x >= 0 && crop.y >= 0 && crop.width > 0 && crop.height > 0
+  && crop.width <= 1 && crop.height <= 1 && crop.x + crop.width <= 1 + 1e-15 && crop.y + crop.height <= 1 + 1e-15;
+
+describe('UX L1b crop frame helpers', () => {
+  it('normalizes tolerance-admitted crops inside the photo without changing their values', () => {
+    const plain = { x: 0.1, y: 0.2, width: 0.3, height: 0.4 };
+    expect(normalizeCrop(plain)).toEqual(plain);
+    for (const crop of tolerated) {
+      expect(validCrop(crop)).toBe(true);
+      const normal = normalizeCrop(crop);
+      expect(inside(normal)).toBe(true);
+      expect(cropValues(normal)).toEqual(cropValues(crop));
+    }
+  });
+  it('moves exactly like the previous keyboard nudge and never leaves the photo', () => {
+    for (const crop of [...randomCrops(200), ...tolerated]) {
+      for (const [dx, dy] of [[0.01, 0], [-0.01, 0], [0.1, 0], [-0.1, 0], [0, 0.01], [0, -0.01], [0, 0.1], [0, -0.1]] as const) {
+        const moved = moveCrop(crop, dx, dy);
+        expect(cropValues(moved)).toEqual(cropValues(oldNudge(crop, dx, dy)));
+        expect(moved.x).toBeGreaterThanOrEqual(0);
+        expect(moved.y).toBeGreaterThanOrEqual(0);
+        expect(moved.width).toBe(Math.min(1, crop.width));
+        expect(moved.height).toBe(Math.min(1, crop.height));
+        expect(inside(moved)).toBe(true);
+      }
+    }
+    expect(moveCrop({ x: 0.4, y: 0.4, width: 0.5, height: 0.5 }, 9, -9)).toEqual({ x: 0.5, y: 0, width: 0.5, height: 0.5 });
+  });
+  it('resizes from each corner around a fixed opposite corner within the minimum and the photo', () => {
+    const corners: Corner[] = ['nw', 'ne', 'sw', 'se'];
+    const start = { x: 0.2, y: 0.3, width: 0.5, height: 0.4 };
+    const anchor = (crop: Crop, corner: Corner) => [
+      corner.endsWith('w') ? crop.x + crop.width : crop.x,
+      corner.startsWith('n') ? crop.y + crop.height : crop.y,
+    ];
+    for (const corner of corners) {
+      expect(cropValues(resizeCrop(start, corner, 0, 0, 0.1, 0.1))).toEqual(cropValues(start));
+      for (const [dx, dy] of [[0.05, -0.07], [-0.3, 0.2], [50, 50], [-50, -50], [50, -50], [-50, 50]] as const) {
+        const next = resizeCrop(start, corner, dx, dy, 0.1, 0.12);
+        const [ax, ay] = anchor(start, corner), [bx, by] = anchor(next, corner);
+        expect(Math.abs(ax! - bx!)).toBeLessThanOrEqual(1e-12);
+        expect(Math.abs(ay! - by!)).toBeLessThanOrEqual(1e-12);
+        expect(next.width).toBeGreaterThanOrEqual(0.1 - 1e-12);
+        expect(next.height).toBeGreaterThanOrEqual(0.12 - 1e-12);
+        expect(inside(next)).toBe(true);
+        expect(validCrop(next)).toBe(true);
+      }
+      const small = { x: 0.5, y: 0.5, width: 0.02, height: 0.03 };
+      expect(cropValues(resizeCrop(small, corner, 0, 0, 0.1, 0.1))).toEqual(cropValues(small));
+      const shrunk = resizeCrop(small, corner, corner.endsWith('w') ? 1 : -1, corner.startsWith('n') ? 1 : -1, 0.1, 0.1);
+      expect([shrunk.width, shrunk.height].map((size) => cropValues({ ...FULL_CROP, width: size }).width)).toEqual(['2', '3']);
+      for (const crop of tolerated) {
+        const next = resizeCrop(crop, corner, -0.3, 0.3, 0.05, 0.05);
+        expect(inside(next)).toBe(true);
+        expect(validCrop(next)).toBe(true);
+      }
+    }
+  });
+  it('sizes the handle minimum from the stage pixels', () => {
+    expect(handleMinimum(1000)).toBe(0.096);
+    expect(handleMinimum(3000)).toBe(0.05);
+    expect(handleMinimum(50)).toBe(1);
+    expect(handleMinimum(0)).toBe(1);
+    expect(handleMinimum(Number.NaN)).toBe(1);
+    for (const px of [120, 213, 320, 777, 1234]) expect(handleMinimum(px) * px).toBeGreaterThanOrEqual(96);
+  });
+  it('compares edits after quantisation and quarter-turn normalisation', () => {
+    const crop = { x: 0.1, y: 0.2, width: 0.3, height: 0.4 };
+    expect(sameEdit({ turns: 0, crop: FULL_CROP }, { turns: 4, crop: FULL_CROP })).toBe(true);
+    expect(sameEdit({ turns: 1, crop: FULL_CROP }, { turns: 0, crop: FULL_CROP })).toBe(false);
+    expect(sameEdit({ turns: 3, crop }, { turns: -1, crop: { ...crop, x: 0.1 + 1e-14 } })).toBe(true);
+    expect(sameEdit({ turns: 0, crop }, { turns: 0, crop: { ...crop, x: 0.1 + 1e-12 } })).toBe(false);
+    expect(sameEdit({ turns: 0, crop: { ...crop, width: 0 } }, { turns: 0, crop })).toBe(false);
+    expect(sameEdit({ turns: 0, crop }, { turns: 0, crop: { ...crop, height: Number.NaN } })).toBe(false);
   });
 });

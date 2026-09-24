@@ -74,7 +74,7 @@ content unchanged. Historical starter catalogs are not active UI copy authority.
 Keep consequential privacy, consent, provider/location/retention, cost, recovery,
 ownership and unknown-outcome guidance visible. Separate short, complete notice
 sentences from the consent checkbox label; do not collapse the AI policy facts.
-Only secondary setup instructions and camera workarounds use disclosure controls.
+Only secondary setup instructions, camera workarounds and the crop editor's exact values use disclosure controls.
 Removing helper text also removes its accessible-description reference, never
 the field's label, validation or genuine constraint.
 
