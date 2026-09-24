@@ -3,7 +3,7 @@ import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import { errorKey, isAborted } from '../../data/errors';
 import { loadWardrobe } from '../../data/items';
-import { clearVote, loadSuggestionInputs, setVote, type Vote } from '../../data/suggestions';
+import { loadSuggestionInputs, readVote, writeVote, type Vote } from '../../data/suggestions';
 import type { Occasion } from '../../domain/outfits';
 import {
   combinationKey, recommend, seasonForDate, type EngineFeedback, type EngineItem, type Season, type SuggestionResult,
@@ -42,6 +42,17 @@ const votesFrom = (feedback: readonly EngineFeedback[]) => new Map(feedback.map(
 const feedbackFrom = (votes: ReadonlyMap<string, Vote>): EngineFeedback[] =>
   [...votes].map(([key, vote]) => ({ itemIds: key.split('|'), vote }));
 
+export type Confirmed = ReadonlyMap<string, { vote: Vote | null; seq: number }>;
+// A read that started before a confirmed choice cannot know about it, so that choice wins over the snapshot.
+export function mergeVotes(snapshot: ReadonlyMap<string, Vote>, confirmed: Confirmed, startSeq: number): Map<string, Vote> {
+  const merged = new Map(snapshot);
+  for (const [key, entry] of confirmed) {
+    if (entry.seq <= startSeq) continue;
+    if (entry.vote === null) merged.delete(key); else merged.set(key, entry.vote);
+  }
+  return merged;
+}
+
 export function useSuggestions(client: AppClient, scope: OwnerScope, online: boolean, invalidation: number, occasion: Occasion, season: Season) {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
@@ -53,6 +64,8 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   const wasOnline = useRef(online);
   const votesRef = useRef(votes);
   const writes = useRef<AbortController | null>(null);
+  const seq = useRef(0);
+  const confirmed = useRef(new Map<string, { vote: Vote | null; seq: number }>());
   const reload = useCallback(() => setTick(value => value + 1), []);
   useEffect(() => { votesRef.current = votes; }, [votes]);
   useEffect(() => {
@@ -61,12 +74,15 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   }, [online, reload]);
   useEffect(() => {
     const controller = new AbortController();
+    const startSeq = seq.current;
     setError(null);
     Promise.all([loadWardrobe(client, scope, controller.signal), loadSuggestionInputs(client, scope, controller.signal)]).then(([items, inputs]) => {
       if (controller.signal.aborted || scope.signal.aborted) return;
+      const merged = mergeVotes(votesFrom(inputs.feedback), confirmed.current, startSeq);
+      for (const [key, entry] of confirmed.current) if (entry.seq <= startSeq) confirmed.current.delete(key);
       setData({ items, excludedPairs: inputs.excludedPairs });
-      setVotes(votesFrom(inputs.feedback));
-      setRun(current => ({ ...current, feedback: inputs.feedback }));
+      setVotes(merged);
+      setRun(current => ({ ...current, feedback: feedbackFrom(merged) }));
     }, (problem: unknown) => {
       if (!controller.signal.aborted && !isAborted(problem)) setError(errorKey(problem));
     });
@@ -104,16 +120,25 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
     const signal = writes.current?.signal;
     if (!signal || pending || !online) return;
     setPending({ key, kind }); setFailed(null);
-    try {
-      const ids = key.split('|');
-      if (next === null) await clearVote(client, scope, ids, signal);
-      else await setVote(client, scope, ids, next, signal);
-      if (signal.aborted || scope.signal.aborted) return;
+    const attempt = { ownerId: scope.ownerId, epoch: scope.epoch, key, choice: next };
+    const settle = (stored: Vote | null) => {
+      seq.current += 1;
+      confirmed.current.set(key, { vote: stored, seq: seq.current });
       setVotes(current => {
         const updated = new Map(current);
-        if (next === null) updated.delete(key); else updated.set(key, next);
+        if (stored === null) updated.delete(key); else updated.set(key, stored);
         return updated;
       });
+    };
+    try {
+      const outcome = await writeVote(client, scope, attempt, signal);
+      if (outcome === 'done') { settle(next); return; }
+      if (outcome === 'unknown') {
+        const stored = await readVote(client, scope, attempt, signal);
+        settle(stored);
+        if (stored === next) return;
+      }
+      setFailed(key);
     } catch (problem) {
       if (!signal.aborted && !isAborted(problem)) setFailed(key);
     } finally {

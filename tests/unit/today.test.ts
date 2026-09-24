@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { parseFeedbackRows, parseRuleRows } from '../../src/data/suggestions';
+import { classifyVoteError, parseFeedbackRows, parseRuleRows, parseStoredVote } from '../../src/data/suggestions';
 import { navFamilyFor } from '../../src/domain/outfits';
 import type { WardrobeItem } from '../../src/domain/wardrobe';
-import { defaultSeason, localDate, suggestionPool } from '../../src/features/today/use-suggestions';
+import { defaultSeason, localDate, mergeVotes, suggestionPool } from '../../src/features/today/use-suggestions';
 
 const owner = '00000000-0000-4000-8000-00000000000a';
 const other = '00000000-0000-4000-8000-00000000000b';
@@ -60,5 +60,36 @@ describe('I15 suggestion data', () => {
 
   it('highlights Today in the navigation', () => {
     expect(navFamilyFor('today')).toBe('today');
+  });
+});
+
+describe('vote write outcomes', () => {
+  it('treats lost replies, transport failures and server errors as unknown', () => {
+    for (const [error, status] of [[{ code: '' }, 0], [{ message: 'x' }, 500], [{ code: 'PGRST000' }, 503], [null, 400], [{ code: '42501' }, 502]] as const) {
+      expect(classifyVoteError(error, status)).toBe('unknown');
+    }
+    expect(classifyVoteError({ code: 'XX999' }, 400)).toBe('unknown');
+  });
+  it('treats definite refusals as rejected', () => {
+    for (const code of ['42501', '23514', '23503', 'P0001', 'PGRST301']) expect(classifyVoteError({ code }, 400)).toBe('rejected');
+  });
+  it('reads back the stored choice for exactly the attempted outfit', () => {
+    const key = [id(1), id(2)].join('|');
+    const row = { id: id(50), owner_id: owner, item_ids: [id(2), id(1)], signature, vote: -1 };
+    expect(parseStoredVote([row], owner, key)).toBe(-1);
+    expect(parseStoredVote([], owner, key)).toBeNull();
+    expect(() => parseStoredVote([{ ...row, item_ids: [id(1), id(3)] }], owner, key)).toThrow();
+    expect(() => parseStoredVote([row, { ...row, id: id(51), item_ids: [id(4)] }], owner, key)).toThrow();
+    expect(() => parseStoredVote([{ ...row, owner_id: other }], owner, key)).toThrow();
+  });
+});
+
+describe('mergeVotes', () => {
+  it('lays choices confirmed after a read started over its older snapshot', () => {
+    const snapshot = new Map<string, 1 | -1>([['a', 1], ['b', -1], ['c', 1]]);
+    const confirmed = new Map([['a', { vote: null, seq: 3 }], ['b', { vote: 1 as const, seq: 2 }], ['d', { vote: -1 as const, seq: 4 }], ['c', { vote: null, seq: 1 }]]);
+    expect([...mergeVotes(snapshot, confirmed, 1)].sort()).toEqual([['b', 1], ['c', 1], ['d', -1]]);
+    expect([...mergeVotes(snapshot, confirmed, 4)]).toEqual([...snapshot]);
+    expect(snapshot.get('a')).toBe(1);
   });
 });

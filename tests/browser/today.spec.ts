@@ -116,6 +116,90 @@ test('I15 Like persists, Not for me hides the outfit for good and Undo brings it
   expect(everything).toHaveLength(11);
 });
 
+test('I15 a choice whose reply is lost is checked against what was stored', async ({ page }) => {
+  const { api } = await start(page);
+  const checks: string[] = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname === '/rest/v1/suggestion_feedback' && url.searchParams.has('signature') && request.method() === 'GET') checks.push(url.search);
+  });
+  const hidden = cards(page).nth(1);
+  api.feedbackControl.faults.push({ method: 'POST', commit: true, fail: 503 });
+  await hidden.getByRole('button', { name: text('today.notForMe'), exact: true }).click();
+  await expect(hidden).toContainText(text('today.hidden'));
+  await expect(page.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
+  expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
+  expect(checks).toHaveLength(1);
+
+  api.feedbackControl.faults.push({ method: 'DELETE', commit: true, fail: 'abort' });
+  await hidden.getByRole('button', { name: text('common.undo'), exact: true }).click();
+  await expect(hidden.getByRole('button', { name: text('today.notForMe'), exact: true })).toBeVisible();
+  await expect(page.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
+  expect(api.suggestionFeedback).toHaveLength(0);
+  expect(checks).toHaveLength(2);
+
+  const like = cards(page).nth(0).getByRole('button', { name: text('today.like'), exact: true });
+  api.feedbackControl.faults.push({ method: 'POST', commit: false, fail: 503 });
+  await like.click();
+  await expect(page.getByText(text('today.voteFailed'), { exact: true })).toBeVisible();
+  await expect(like).toHaveAttribute('aria-pressed', 'false');
+  expect(api.suggestionFeedback).toHaveLength(0);
+  await like.click();
+  await expect(like).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
+  expect(api.suggestionFeedback.map(row => row.vote)).toEqual([1]);
+
+  api.feedbackControl.faults.push({ method: 'DELETE', commit: false, fail: 'abort' }, { method: 'READ', commit: false, fail: 500 });
+  await like.click();
+  await expect(page.getByText(text('today.voteFailed'), { exact: true })).toBeVisible();
+  await expect(like).toHaveAttribute('aria-pressed', 'true');
+  expect(api.suggestionFeedback).toHaveLength(1);
+  await like.click();
+  await expect(like).toHaveAttribute('aria-pressed', 'false');
+  expect(api.suggestionFeedback).toHaveLength(0);
+});
+
+test('I15 an older refresh never brings back a card hidden while it was loading', async ({ page }) => {
+  const { api } = await start(page);
+  const hiddenNames = await names(cards(page).nth(1));
+  const gate = api.holdFeedbackReads();
+  await page.context().setOffline(true);
+  await expect(page.locator('.notice-offline')).toBeVisible();
+  await page.context().setOffline(false);
+  await expect.poll(() => gate.held()).toBeGreaterThan(0);
+  await cards(page).nth(1).getByRole('button', { name: text('today.notForMe'), exact: true }).click();
+  await expect(cards(page).nth(1)).toContainText(text('today.hidden'));
+  gate.release();
+  await page.waitForTimeout(500);
+  const offered = await cards(page).filter({ has: page.getByRole('button', { name: text('today.notForMe'), exact: true }) })
+    .evaluateAll(list => list.map(card => [...card.querySelectorAll('.outfit-component-name')].map(node => node.textContent ?? '').join(' + ')));
+  expect(offered.length).toBeGreaterThan(0);
+  expect(offered).not.toContain(hiddenNames.join(' + '));
+  await navLink(page, 'nav.wardrobe').click();
+  await navLink(page, 'nav.today').click();
+  await expect(cards(page)).toHaveCount(3);
+  expect(await pageThrough(page)).not.toContain(hiddenNames.join(' + '));
+  expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
+});
+
+test('I15 a held read for one account never shows after signing in as another', async ({ page }) => {
+  let gate!: { held: () => number; release: () => void };
+  const { api } = await start(page, 'en', api => { gate = api.holdFeedbackReads(); });
+  await expect.poll(() => gate.held()).toBeGreaterThan(0);
+  await button(page, 'account.menu').click(); await button(page, 'auth.signOut').click();
+  const from = api.requests.length;
+  await signIn(page, 'b');
+  await expect(page.locator('.workspace-identity')).toBeVisible();
+  gate.release();
+  await expect(cards(page).locator('.outfit-component-name')).toHaveText(['Robin private']);
+  await page.waitForTimeout(500);
+  await expect(page.getByText(/White shirt|Pink tee|Green polo|Navy trousers|Red skirt|Black boots|Brown loafers/)).toHaveCount(0);
+  const later = api.requests.slice(from).filter(entry => entry.path.startsWith('/rest/v1/'));
+  expect(later.length).toBeGreaterThan(0);
+  expect(later.every(entry => entry.owner === owners.b)).toBe(true);
+  expect(api.suggestionFeedback).toHaveLength(0);
+});
+
 test('I15 never suggests laundry, archived, excluded, photo-pending or another account\'s clothes, or an excluded pair', async ({ page }) => {
   const { api } = await start(page, 'en', (api, clothes) => {
     add(api, 'Laundry top', { colours: ['white'], availability: 'laundry' });
@@ -153,6 +237,7 @@ test('I15 with no clothes shows a short empty state with Add item', async ({ pag
   await expect(page.getByText(text('today.empty'), { exact: true })).toBeVisible();
   await expect(cards(page)).toHaveCount(0);
   await expect(button(page, 'wardrobe.add')).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
 test('I15 Save as outfit opens a filled-in editor and saves once through save_outfit', async ({ page }) => {

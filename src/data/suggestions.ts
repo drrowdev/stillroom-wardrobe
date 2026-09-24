@@ -62,22 +62,58 @@ export async function loadSuggestionInputs(client: AppClient, scope: OwnerScope,
   return { excludedPairs: parseRuleRows(rules, scope.ownerId), feedback: parseFeedbackRows(feedback, scope.ownerId) };
 }
 
-// The server trigger checks ownership, sorts the IDs and derives the signature that the conflict target uses.
-export async function setVote(client: AppClient, scope: OwnerScope, itemIds: readonly string[], vote: Vote, signal: AbortSignal): Promise<void> {
-  const lifetime = AbortSignal.any([scope.signal, signal]);
-  throwIfAborted(lifetime);
-  const { error } = await client.from('suggestion_feedback')
-    .upsert({ owner_id: scope.ownerId, item_ids: combinationKey(itemIds).split('|'), vote }, { onConflict: 'owner_id,signature' })
-    .abortSignal(lifetime);
-  throwIfAborted(lifetime);
-  requireSuccess(error);
+export type VoteAttempt = { ownerId: string; epoch: number; key: string; choice: Vote | null };
+export type WriteOutcome = 'done' | 'rejected' | 'unknown';
+
+// Only a definite database refusal proves nothing was stored. A lost or failed response may have committed.
+export function classifyVoteError(error: unknown, status?: number): Exclude<WriteOutcome, 'done'> {
+  if (typeof status === 'number' && (status === 0 || status >= 500)) return 'unknown';
+  if (!isRecord(error)) return 'unknown';
+  const code = String(error.code ?? '');
+  return ['42501', '23514', '23502', '23503', 'P0001', 'PGRST301', 'PGRST302'].includes(code) ? 'rejected' : 'unknown';
 }
-export async function clearVote(client: AppClient, scope: OwnerScope, itemIds: readonly string[], signal: AbortSignal): Promise<void> {
+
+function owned(scope: OwnerScope, signal: AbortSignal, attempt: VoteAttempt) {
+  throwIfAborted(signal);
+  if (scope.ownerId !== attempt.ownerId || scope.epoch !== attempt.epoch) throw new DOMException('Cancelled', 'AbortError');
+}
+
+// The server trigger checks ownership, sorts the IDs and derives the signature that the conflict target uses.
+export async function writeVote(client: AppClient, scope: OwnerScope, attempt: VoteAttempt, signal: AbortSignal): Promise<WriteOutcome> {
   const lifetime = AbortSignal.any([scope.signal, signal]);
-  const signature = await combinationSignature(itemIds);
-  throwIfAborted(lifetime);
-  const { error } = await client.from('suggestion_feedback').delete()
-    .eq('owner_id', scope.ownerId).eq('signature', signature).abortSignal(lifetime);
-  throwIfAborted(lifetime);
+  owned(scope, lifetime, attempt);
+  const ids = attempt.key.split('|');
+  const signature = attempt.choice === null ? await combinationSignature(ids) : '';
+  owned(scope, lifetime, attempt);
+  let result;
+  try {
+    result = attempt.choice === null
+      ? await client.from('suggestion_feedback').delete().eq('owner_id', attempt.ownerId).eq('signature', signature).abortSignal(lifetime)
+      : await client.from('suggestion_feedback')
+        .upsert({ owner_id: attempt.ownerId, item_ids: combinationKey(ids).split('|'), vote: attempt.choice }, { onConflict: 'owner_id,signature' })
+        .abortSignal(lifetime);
+  } catch {
+    owned(scope, lifetime, attempt);
+    return 'unknown';
+  }
+  owned(scope, lifetime, attempt);
+  return result.error ? classifyVoteError(result.error, result.status) : 'done';
+}
+
+export function parseStoredVote(rows: unknown, ownerId: string, key: string): Vote | null {
+  const [row, extra] = parseFeedbackRows(rows, ownerId);
+  if (extra || row && combinationKey(row.itemIds) !== key) throw new AppError('error.unavailable');
+  return row?.vote ?? null;
+}
+
+export async function readVote(client: AppClient, scope: OwnerScope, attempt: VoteAttempt, signal: AbortSignal): Promise<Vote | null> {
+  const lifetime = AbortSignal.any([scope.signal, signal]);
+  owned(scope, lifetime, attempt);
+  const signature = await combinationSignature(attempt.key.split('|'));
+  owned(scope, lifetime, attempt);
+  const { data, error } = await client.from('suggestion_feedback').select('id,owner_id,item_ids,signature,vote')
+    .eq('owner_id', attempt.ownerId).eq('signature', signature).limit(2).abortSignal(lifetime);
+  owned(scope, lifetime, attempt);
   requireSuccess(error);
+  return parseStoredVote(data, attempt.ownerId, attempt.key);
 }
