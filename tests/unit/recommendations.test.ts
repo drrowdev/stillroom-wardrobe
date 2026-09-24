@@ -172,6 +172,24 @@ describe('templates, partial and empty results', () => {
     expect(disliked.suggestions[0]!.itemIds).not.toEqual(first.itemIds);
   });
 
+  it('retries a partial start past the first eight pieces before reporting none', () => {
+    const tops = Array.from({ length: 9 }, () => item('top'));
+    const skip = new Set<string>();
+    for (let round = 0; round < 8; round++) {
+      const result = recommend({ items: tops, context, skip });
+      expect(result.status).toBe('partial');
+      skip.add(result.suggestions[0]!.coreKey);
+    }
+    const ninth = recommend({ items: tops, context, skip });
+    expect(ninth.status).toBe('partial');
+    expect(ninth.passes).toBe(2);
+    expect(skip.has(ninth.suggestions[0]!.coreKey)).toBe(false);
+    const feedback = [...skip].map(key => ({ itemIds: [key], vote: -1 as const }));
+    expect(recommend({ items: tops, context, feedback }).suggestions[0]!.coreKey).toBe(ninth.suggestions[0]!.coreKey);
+    skip.add(ninth.suggestions[0]!.coreKey);
+    expect(recommend({ items: tops, context, skip }).status).toBe('none');
+  });
+
   it('prefers the template with the most pieces for a partial result', () => {
     const dress = item('one_piece');
     expect(recommend({ items: [dress], context }).suggestions[0]!.missingSlots).toEqual(['footwear']);
@@ -305,18 +323,20 @@ describe('ranking, diversity and paging', () => {
     expect(shown.size).toBe(3 * 3 * 6);
   });
 
-  it('still finds ideas when more than 40 of the combinations are disliked', () => {
+  it.each(['summer', 'autumn', 'winter'] as const)('still finds ideas in %s when more than 40 of the combinations are disliked', season => {
+    const seasonal: EngineContext = { ...context, season };
     const items = large();
     const ranked: string[] = [];
     const shown = new Set<string>();
     for (let page = 0; page < 30; page++) {
-      const result = recommend({ items, context, skip: shown });
+      const result = recommend({ items, context: seasonal, skip: shown });
       if (result.status === 'none') break;
       for (const s of result.suggestions) { shown.add(s.coreKey); ranked.push(s.key); }
     }
+    expect(ranked).toHaveLength(54);
     const dislikedKeys = ranked.slice(0, 44);
     const feedback = dislikedKeys.map(key => ({ itemIds: key.split('|'), vote: -1 as const }));
-    const result = recommend({ items, context, feedback });
+    const result = recommend({ items, context: seasonal, feedback });
     expect(result.status).toBe('ideas');
     for (const s of result.suggestions) expect(dislikedKeys).not.toContain(s.key);
   });

@@ -169,6 +169,8 @@ type Filters = { core: (state: State) => boolean; final: (state: State) => boole
 function search(template: readonly Category[], extra: readonly Step[], buckets: ReadonlyMap<Category, EngineItem[]>, cap: number,
   score: (pieces: EngineItem[]) => number, excluded: ReadonlySet<string>, budget: { left: number }, filters: Filters): State[] {
   const steps: Step[] = [...template.map(category => ({ categories: [category], optional: false })), ...extra];
+  // A disliked core can only become valid through an added piece; without any candidates it would just take a beam slot.
+  const extendable = extra.some(step => step.categories.some(category => buckets.get(category)?.length));
   let beam: State[] = [{ pieces: [], score: 0, key: '' }];
   for (const [index, step] of steps.entries()) {
     let next: State[] = [];
@@ -188,7 +190,7 @@ function search(template: readonly Category[], extra: readonly Step[], buckets: 
         }
       }
     }
-    if (index === template.length - 1) next = next.filter(filters.core);
+    if (index === template.length - 1) next = next.filter(state => filters.core(state) && (extendable || filters.final(state)));
     if (index === steps.length - 1) next = next.filter(filters.final);
     beam = next.sort(byRank).slice(0, limits.beam);
     if (!beam.length) return [];
@@ -252,12 +254,19 @@ export function recommend(input: EngineInput): SuggestionResult {
     const best = [...templates].sort((a, b) => b.filter(c => all.get(c)?.length).length - a.filter(c => all.get(c)?.length).length)[0]!;
     const present = best.filter(category => all.get(category)?.length);
     if (!present.length) return { status: 'empty', suggestions: [], missingDetails: [], ...base };
-    const budget = { left: limits.passBudget };
-    const [state] = search(present, [], all, limits.perCategory, score, excluded, budget, { core: unshown, final: notDisliked });
-    const counters = { expansions: limits.passBudget - budget.left, passes: 1 };
-    if (!state) return { status: 'none', suggestions: [], missingDetails: [], ...counters };
+    let found: State | undefined;
+    let expansions = 0, passes = 0;
+    for (const cap of [limits.perCategory, limits.perCategory * 2]) {
+      if (passes && !present.some(category => (all.get(category)?.length ?? 0) > limits.perCategory)) break;
+      passes++;
+      const budget = { left: limits.passBudget };
+      [found] = search(present, [], all, cap, score, excluded, budget, { core: unshown, final: notDisliked });
+      expansions += limits.passBudget - budget.left;
+      if (found) break;
+    }
+    if (!found) return { status: 'none', suggestions: [], missingDetails: [], expansions, passes };
     const missingSlots = best.filter(category => !present.includes(category));
-    return { status: 'partial', suggestions: [make(state.pieces, { completeness: 'partial', missingSlots, missingDetails: [] })], missingDetails: [], ...counters };
+    return { status: 'partial', suggestions: [make(found.pieces, { completeness: 'partial', missingSlots, missingDetails: [] })], missingDetails: [], expansions, passes };
   }
 
   const target = formalityTargets[context.occasion];
