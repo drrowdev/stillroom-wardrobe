@@ -839,6 +839,12 @@ test('I11 outfits accessibility: keyboard, 320px and 200% text, with the header 
     for (const [hash, title] of screens) {
       await page.evaluate((value) => { location.hash = value; }, hash);
       await expect(page.locator(`#${title}`)).toBeVisible();
+      // Font-independent: the nav row stays inside the header's content box, so wider fonts cannot push it past 320px.
+      expect(await page.evaluate(() => {
+        const nav = document.querySelector('.workspace-header nav')!, header = nav.parentElement!;
+        return nav.scrollWidth <= nav.clientWidth
+          && nav.getBoundingClientRect().right <= header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight) + 0.5;
+      })).toBe(true);
       for (const key of ['nav.wardrobe', 'nav.outfits'] as const) {
         const link = navLink(page, key);
         await link.focus();

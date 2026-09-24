@@ -95,8 +95,8 @@ async function ownerCases(client, owner, h) {
 
   const archived = await h.item({ lifecycle: 'archived' });
   const trashed = await h.item();
-  const trash = await client.request(owner.token, '/rest/v1/rpc/set_item_trashed', { method: 'POST',
-    body: { p_item_id: trashed.id, p_expected_version: trashed.version, p_trashed: true } });
+  // set_item_trashed needs a ready photo; photo-less fixtures use the version-checked owner PATCH.
+  const trash = await client.patch(owner, 'items', trashed, { deleted_at: new Date().toISOString() });
   requireEvidence(trash.ok && Array.isArray(trash.data) && trash.data.length === 1 && trash.data[0].deleted_at !== null);
   const kept = await h.create([archived.id, trashed.id]);
   eq(h.positions(await h.read(kept.p_id)), [[archived.id, 0], [trashed.id, 1]]);

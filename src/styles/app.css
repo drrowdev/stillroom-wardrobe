@@ -272,7 +272,8 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
   .password-input input { grid-area: auto; padding-right: 13px; }
   .password-input button { grid-area: auto; justify-self: end; max-width: 100%; }
   .workspace-header { padding: 14px 16px; gap: 20px; flex-wrap: wrap; }
-  .workspace-header nav { order: 3; flex-basis: 100%; gap: 24px; }
+  .workspace-header nav { order: 3; flex-basis: 100%; flex-wrap: wrap; column-gap: 24px; row-gap: 0; min-width: 0; }
+  .nav-link { min-width: 0; overflow-wrap: anywhere; }
   .workspace-header .brand { font-size: 1.125rem; }
   .workspace-identity, .workspace-main { width: calc(100% - 32px); }
   .workspace-identity { margin-top: 18px; }
