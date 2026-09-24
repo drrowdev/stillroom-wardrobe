@@ -58,41 +58,60 @@ GraphQL `Connection`/`Edge` pagination types are not treated as relationships.
 
 ## Foreign-ID matrix (A2)
 
-For each exposed RPC signature and operation, in both directions (A→B and B→A),
-one substituted reference at a time:
+`COVERAGE_REQUIREMENTS` in the catalogue module lists, for every exposed RPC,
+the fixture references to substitute and any mixed-array, collision or
+owner-only case. In both directions (A→B and B→A):
 
-- an owned control must succeed first;
+- the attacker's own call on its own fixture, in the state where it would act,
+  must succeed first (the owned control); without it the RPC fails coverage;
+- each reference is substituted on its own with the peer's value (plus only the
+  peer values that state needs, such as a version), the rest stay the
+  attacker's, and the nonexistent counterpart randomizes only that reference;
 - lookups must return the family's exact response for the peer ID **and** the
-  same response for a random nonexistent ID (masked for the substituted IDs):
+  same response for the nonexistent ID (masked for the substituted IDs):
   description edit `42501 Not available`; lifecycle `22023 Request conflict`;
   AI status/discard `200 {code:'UNAVAILABLE'}`; image/deletion operation status
   `null`; deletion arrays `[]`; finish deletion `[{state:'absent'}]`;
-- mixed arrays and mismatched item/image/request combinations are rejected;
+- mixed own+peer arrays must return only the owner's entry or the exact
+  refusal;
+- `ai_set_consent` is called with `p_notice_revision: null` and a stale
+  version and must return exactly `200 {code:'CONFLICT'}`; application codes
+  inside HTTP 200 are validated, never inferred from HTTP success;
 - every response is scanned for the peer's IDs, paths and canary text;
   reflected inputs (the caller's own `export_manifest` ID, owner-local nonces)
   are exempt;
-- after the matrix the victim's rows, attribution and object bytes must be
-  unchanged.
+- each victim is snapshotted before its attacker's probes and compared after,
+  including AI status and request state.
 
-Create-ID collisions are probed separately and reported as findings.
+Where a state cannot be reached with normal sessions, the case is asserted but
+recorded **UNVERIFIED**, never as coverage: analyzed Save
+(`reserve_analyzed_item_save`, its preflight and cancel) needs a
+provider-completed claim; `ai_analysis_status` needs provider evidence; the AI
+request surfaces become UNVERIFIED if the owner's own reservation returns
+`ALLOWANCE`, `RATE_LIMIT`, `UNCONFIGURED` or similar.
 
+Create-ID collisions are probed separately (see Findings).
 ## Fixtures and positive controls (A3)
 
-Each owner gets fictional data covering items, a retired recovery image, a
-second committed image, an outfit, a wear event and its item rows, a
-combination rule, suggestion feedback, a reserved image change, a trashed item
-with a prepared deletion, a pending save reservation and the seeded AI ready
-request with attribution. Each surface is read back by its owner before any
-denial counts. `ALLOWANCE`, `RATE_LIMIT`, `UNCONFIGURED` and missing evidence
-never count as ownership proof; they are reported as unverified.
-
+Each owner gets fictional data: items with pending, committed and retired
+images and an edited description; an outfit, a wear event and its item rows, a
+combination rule and suggestion feedback; a reserved image change and an item
+free for a new change; a retired recovery source; deletion operations in the
+trashed, preparing, prepared (inventoried) and removing-registered states,
+plus legacy begin/finish and cancelled preparations as owned controls; a
+reserved, uploaded save; and an owned AI reservation. Owner state includes
+attribution history. `ALLOWANCE`, `RATE_LIMIT`, `UNCONFIGURED` and missing
+evidence never count as ownership proof; they are reported as unverified.
 The export must contain exactly the ten v2 table keys and include the owner's
 fixtures, with no peer value. REST reads exhaust pagination.
 
 Validator unit tests (`tests/unit/isolation-catalog.test.ts`) prove rejection of
 unexpected functions/relations/policies, grant and column-grant changes,
 helper-body changes, public buckets, cross-owner foreign keys, leaked rows,
-missing coverage, wrong error classes and every guard refusal before SQL.
+missing coverage, a missing owned control, a missing single substitution,
+credit for an unreachable state, wrong error classes, HTTP-200 application
+errors, oracles outside the allowlist, restore-before-cleanup ordering and
+every guard refusal before SQL.
 
 ## Freeze (A4)
 
@@ -100,8 +119,10 @@ For A then B: the same already-issued token is tested before, during and after
 approval is disabled, as is a fresh login. While frozen, private reads return
 empty or denial, and `export_manifest` returns `null`. The unaffected owner is
 snapshotted immediately before the freeze and compared afterwards for stable
-data and bytes, and a scratch write must still succeed. Approval is restored
-before cleanup.
+data and bytes, and a scratch write must still succeed. Cleanup runs only after
+a confirmed restore barrier from the runner, on every path including a lost or
+failed freeze/restore acknowledgement; otherwise cleanup is withheld and the
+job fails.
 
 ## Completed-feature ledger (A6)
 
@@ -121,17 +142,26 @@ and real-device account-switch and cache checks.
 
 ## Findings
 
-These are reported, not patched; any fix needs its own reviewed packet.
+These are reported, not patched; any fix needs its own reviewed packet. Any
+existence oracle **fails the audit** unless it is named in `ACCEPTED_ORACLES`.
+An accepted entry that stops reproducing is reported for removal.
 
-- **Existence oracles for create IDs.** A caller choosing a peer's primary key
-  gets `409 23505` instead of success, so the peer ID's existence is disclosed:
-  `save_outfit` and `save_wear_event` with a foreign `p_id` and null version,
-  and a REST `items` insert with a foreign `id`. No peer data is returned.
-- **`restore_history_entry` with a foreign `p_id`** returns `400 Request
-  conflict`, while a random ID inserts.
-- Other oracles, Storage-path collisions and any response mismatch are listed
-  from the CI run in the PR description.
+Accepted pending a fix packet (known and reported on PR #47): a caller choosing
+a peer's primary key gets `409 23505` instead of success, disclosing that the
+ID exists. No peer data is returned.
 
+- `save_outfit p_id`: a foreign `p_id` with null version;
+- `save_wear_event p_id`: the same;
+- `REST items id`: a REST `items` insert with a foreign `id`.
+
+Not allowlisted, so they fail CI until a decision is made:
+
+- `restore_history_entry p_id`: a foreign wear-event-item ID returns
+  `400 P0001`, while a new ID inserts (`204`);
+- `reserve_item_save p_item.id`: a foreign item ID returns `400 22023`, while a
+  new ID reserves (`200`);
+- `Storage DELETE object`: deleting a peer's object returns a different Storage
+  error than deleting a nonexistent path.
 ## Pending
 
 - CI `database` job evidence for this head (catalogue, matrix, freeze).

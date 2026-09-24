@@ -178,17 +178,139 @@ describe('I17 response validators', () => {
     expect(catalog.scanLeaks('short', ['abc'])).toEqual([]);
   });
 
-  it('fails on missing coverage and unknown entries', () => {
-    const complete = new Map<string, Set<string>>();
-    for (const f of catalog.EXPOSED_RPCS) complete.set(f.name, new Set(['A>B', 'B>A', 'anon']));
-    for (const f of catalog.SERVICE_ONLY_RPCS) complete.set(f.name, new Set(['normal-A', 'normal-B', 'anon']));
-    expect(catalog.validateCoverage(complete)).toEqual([]);
-    const partial = new Map(complete);
-    partial.set('commit_image', new Set(['A>B', 'anon']));
+  type Requirement = { refs: string[]; mixed?: boolean; collision?: boolean; ownerOnly?: boolean; runtime?: boolean; unverified?: string };
+  const requirements = catalog.COVERAGE_REQUIREMENTS as Record<string, Requirement>;
+  const fullCoverage = () => {
+    const map = new Map<string, Set<string>>();
+    for (const f of catalog.EXPOSED_RPCS as { name: string }[]) {
+      const r = requirements[f.name]!, tags = new Set(['anon']);
+      if (!r.unverified) {
+        for (const [a, v] of [['A', 'B'], ['B', 'A']]) {
+          const d = `${a}>${v}`;
+          tags.add(`${a}:control`);
+          for (const ref of r.refs) tags.add(`${d}:ref:${ref}`);
+          if (r.mixed) tags.add(`${d}:mixed`);
+          if (r.collision) tags.add(`${d}:collision`);
+          if (r.ownerOnly) tags.add(`${d}:owner-only`);
+        }
+      }
+      map.set(f.name, tags);
+    }
+    for (const f of catalog.SERVICE_ONLY_RPCS as { name: string }[]) map.set(f.name, new Set(['normal-A', 'normal-B', 'anon']));
+    return map;
+  };
+  const without = (map: Map<string, Set<string>>, name: string, tag: string) => {
+    const next = new Map(map);
+    next.set(name, new Set([...(map.get(name) ?? [])].filter((t) => t !== tag)));
+    return next;
+  };
+  const withTag = (map: Map<string, Set<string>>, name: string, ...tags: string[]) => {
+    const next = new Map(map);
+    next.set(name, new Set([...(map.get(name) ?? []), ...tags]));
+    return next;
+  };
+
+  it('keeps one coverage requirement per exposed RPC', () => {
+    expect(Object.keys(requirements).sort()).toEqual((catalog.EXPOSED_RPCS as { name: string }[]).map((f) => f.name).sort());
+    expect(catalog.validateCoverage(fullCoverage())).toEqual([]);
+    const fewer = { ...requirements };
+    delete fewer.commit_image;
+    expect(catalog.validateCoverage(fullCoverage(), fewer)).toContain('coverage requirements differ from the exposed RPCs');
+  });
+
+  it('rejects a missing successful owned control', () => {
+    expect(catalog.validateCoverage(without(fullCoverage(), 'commit_image', 'A:control')))
+      .toContain('commit_image A>B lacks a successful owned control');
+  });
+
+  it('requires each reference substituted on its own and mixed arrays', () => {
+    expect(catalog.validateCoverage(without(fullCoverage(), 'image_recovery_preflight', 'B>A:ref:recSource')))
+      .toContain('image_recovery_preflight lacks B>A:ref:recSource coverage');
+    expect(catalog.validateCoverage(without(fullCoverage(), 'item_deletion_status', 'A>B:mixed')))
+      .toContain('item_deletion_status lacks A>B:mixed coverage');
+    expect(catalog.validateCoverage(without(fullCoverage(), 'save_outfit', 'A>B:collision')))
+      .toContain('save_outfit lacks A>B:collision coverage');
+    expect(catalog.validateCoverage(withTag(fullCoverage(), 'commit_image', 'A>B:ref:everything')))
+      .toContain('commit_image has unexpected A>B:ref:everything credit');
+  });
+
+  it('never credits unreachable states and keeps runtime UNVERIFIED separate from credit', () => {
+    expect(catalog.validateCoverage(withTag(fullCoverage(), 'reserve_analyzed_item_save', 'A>B:ref:aiRequest')))
+      .toContain('reserve_analyzed_item_save A>B claims coverage for an unreachable state');
+    const blocked = new Map(fullCoverage());
+    blocked.set('ai_request_control', new Set(['anon', 'A>B:unverified', 'B>A:unverified']));
+    expect(catalog.validateCoverage(blocked)).toEqual([]);
+    expect(catalog.validateCoverage(withTag(blocked, 'ai_request_control', 'A>B:ref:aiRequest')))
+      .toContain('ai_request_control A>B mixes UNVERIFIED with coverage credit');
+    expect(catalog.validateCoverage(withTag(fullCoverage(), 'commit_image', 'A>B:unverified')))
+      .toContain('commit_image A>B is UNVERIFIED but has no runtime allowance');
+  });
+
+  it('fails on missing anonymous or service denials and unknown entries', () => {
+    const partial = without(fullCoverage(), 'commit_image', 'anon');
     partial.delete('deletion_control');
-    partial.set('share_wardrobe', new Set(['A>B']));
+    partial.set('share_wardrobe', new Set(['A>B:owner-only']));
+    partial.set('forget_image', new Set([...(partial.get('forget_image') ?? []), 'A>B']));
     expect(catalog.validateCoverage(partial)).toEqual(expect.arrayContaining([
-      'commit_image lacks B>A coverage', 'deletion_control lacks normal-A denial', 'coverage for unknown RPC share_wardrobe']));
+      'commit_image lacks anon coverage', 'deletion_control lacks normal-A denial', 'coverage for unknown RPC share_wardrobe',
+      'forget_image has malformed tag A>B']));
+  });
+
+  it('reads application errors from HTTP-200 envelopes, not transport errors', () => {
+    const conflict = success(200, { code: 'CONFLICT' });
+    expect(catalog.applicationCode(conflict)).toBe('CONFLICT');
+    expect(catalog.matchOutcome({ status: 200, data: { code: 'CONFLICT' } }, conflict)).toBe(true);
+    expect(catalog.matchOutcome({ status: 200, data: { code: 'CONFLICT' } }, success(200, { code: 'INVALID_INPUT' }))).toBe(false);
+    expect(catalog.matchOutcome({ status: 200, data: { code: 'CONFLICT' } }, error(400, '22023', 'Request conflict'))).toBe(false);
+    expect(catalog.applicationCode(error(400, 'CONFLICT', 'x'))).toBeNull();
+    expect(catalog.applicationCode(success(200, [{ code: 'OK' }]))).toBeNull();
+    expect(catalog.applicationCode(success(200, null))).toBeNull();
+  });
+
+  it('never treats owner-local refusals as ownership evidence', () => {
+    for (const code of ['ALLOWANCE', 'RATE_LIMIT', 'UNCONFIGURED', 'UNAVAILABLE']) {
+      expect(catalog.isInconclusive(success(200, { code }))).toBe(true);
+    }
+    expect(catalog.isInconclusive(success(200, { code: 'OK', status: 'reserved', replayed: false }))).toBe(false);
+    expect(catalog.isInconclusive(error(400, '22023', 'Request conflict'))).toBe(false);
+  });
+});
+
+describe('I17 existence oracles and restore ordering', () => {
+  it('fails every differing surface outside the named allowlist', () => {
+    expect(Object.keys(catalog.ACCEPTED_ORACLES).sort()).toEqual(['REST items id', 'save_outfit p_id', 'save_wear_event p_id']);
+    expect(catalog.classifyOracle('save_outfit p_id', true)).toBe('accepted');
+    expect(catalog.classifyOracle('save_outfit p_id', false)).toBe('accepted-not-reproduced');
+    expect(catalog.classifyOracle('restore_history_entry p_id', true)).toBe('fail');
+    expect(catalog.classifyOracle('Storage DELETE object', true)).toBe('fail');
+    expect(catalog.classifyOracle('reserve_item_save p_item.id', false)).toBe('equivalent');
+  });
+
+  it('keeps an owner marked until its restore succeeds', () => {
+    const touched = new Set<string>();
+    catalog.trackPhase(touched, 'freeze', 'A', 'before');
+    expect([...touched]).toEqual(['A']);
+    catalog.trackPhase(touched, 'restore', 'A', 'after', 1);
+    expect([...touched]).toEqual(['A']);
+    catalog.trackPhase(touched, 'restore', 'A', 'after', 0);
+    expect([...touched]).toEqual([]);
+  });
+
+  it('runs cleanup only after a confirmed restore barrier', async () => {
+    const order: string[] = [];
+    const cleanup = vi.fn(async () => { order.push('cleanup'); });
+    expect(await catalog.restoreThenCleanup(true, async () => false, cleanup))
+      .toEqual({ cleaned: false, errors: ['restore-barrier-unconfirmed'] });
+    expect(await catalog.restoreThenCleanup(true, async () => { throw new Error('timeout'); }, cleanup))
+      .toEqual({ cleaned: false, errors: ['restore-barrier-unconfirmed'] });
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(await catalog.restoreThenCleanup(true, async () => { order.push('barrier'); return true; }, cleanup))
+      .toEqual({ cleaned: true, errors: [] });
+    expect(order).toEqual(['barrier', 'cleanup']);
+    const barrier = vi.fn(async () => true);
+    expect(await catalog.restoreThenCleanup(false, barrier, async () => { throw new Error('x'); }))
+      .toEqual({ cleaned: true, errors: ['cleanup'] });
+    expect(barrier).not.toHaveBeenCalled();
   });
 });
 

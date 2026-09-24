@@ -325,20 +325,144 @@ export function scanLeaks(body, forbidden, reflected = []) {
     return needle.length >= 8 && !exempt.has(needle) && text.includes(needle);
   });
 }
-/** Each exposed RPC needs both directions plus anonymous denial; service-only RPCs need normal and anonymous denial. */
-export function validateCoverage(covered) {
+/** Application errors arrive as HTTP 200 JSON envelopes; returns their `code`, or null for other responses. */
+export function applicationCode(result) {
+  const data = result?.data;
+  return result?.status === 200 && data !== null && typeof data === 'object' && !Array.isArray(data)
+    && typeof data.code === 'string' ? data.code : null;
+}
+// Owner-local refusals decided before any lookup of the supplied reference; never ownership evidence.
+export const INCONCLUSIVE_CODES = Object.freeze(['ALLOWANCE', 'RATE_LIMIT', 'UNCONFIGURED', 'INACTIVE', 'CONSENT_REQUIRED',
+  'ACTIVE_DRAFT', 'INVALID_INPUT', 'UNAVAILABLE']);
+export const isInconclusive = (result) => INCONCLUSIVE_CODES.includes(applicationCode(result));
+
+const UNREACHABLE_ANALYZED = 'an analyzed Save needs a completed provider analysis claim, which normal sessions cannot create in this job';
+const req = (refs, extra = {}) => Object.freeze({ refs: Object.freeze(refs), ...extra });
+/**
+ * Per-signature requirements. `refs` are fixture references that must each be substituted on their own (the
+ * rest stay the attacker's), `mixed` needs an own+peer array, `collision` a create-ID probe, `ownerOnly` an own
+ * call with no reference, `runtime` allows an explicit UNVERIFIED tag when owner-local state blocks the probe,
+ * and `unverified` names a state normal sessions cannot reach. Every verified entry needs a successful owned control.
+ */
+export const COVERAGE_REQUIREMENTS = Object.freeze({
+  commit_image: req(['pendingImage', 'image']),
+  retire_image: req(['pendingImage', 'image']),
+  forget_image: req(['retired']),
+  save_outfit: req(['item', 'outfit'], { mixed: true, collision: true }),
+  save_wear_event: req(['item', 'event', 'outfit'], { mixed: true, collision: true }),
+  export_manifest: req([], { ownerOnly: true }),
+  restore_history_entry: req(['event', 'item'], { collision: true }),
+  update_image_description: req(['image']),
+  ai_status: req([], { ownerOnly: true }),
+  ai_set_consent: req([], { ownerOnly: true }),
+  ai_begin_request: req([], { collision: true, runtime: true }),
+  ai_request_control: req(['aiRequest'], { runtime: true }),
+  ai_analysis_status: req(['aiRequest'], { runtime: true }),
+  reserve_item_save: req([], { collision: true }),
+  finalize_item_save: req(['saveItem', 'saveImage', 'saveFingerprint']),
+  reserve_analyzed_item_save: req([], { unverified: UNREACHABLE_ANALYZED }),
+  analyzed_item_save_preflight: req([], { unverified: UNREACHABLE_ANALYZED }),
+  cancel_analyzed_item_save: req([], { unverified: UNREACHABLE_ANALYZED }),
+  item_attribution_history: req(['item', 'changeItem']),
+  set_item_trashed: req(['item']),
+  item_deletion_status: req(['item'], { mixed: true }),
+  begin_item_deletion: req(['trashItem']),
+  finish_item_deletion: req(['removeItem', 'removeRequest']),
+  reserve_image_change: req(['freeItem', 'freeCurrent']),
+  image_change_status: req(['changeItem', 'changeRequest']),
+  image_change_requests: req(['changeItem']),
+  image_recovery_versions: req(['recItem']),
+  image_recovery_preflight: req(['recItem', 'recCurrent', 'recSource']),
+  image_change_preflight: req(['changeRequest', 'changeItem', 'changeImage']),
+  cancel_image_change: req(['changeItem', 'changeRequest']),
+  item_deletion_operation_status: req(['prepItem', 'prepRequest']),
+  item_deletion_operations: req(['prepItem'], { mixed: true }),
+  prepare_item_deletion: req(['trashItem']),
+  inventory_item_deletion: req(['prepItem', 'prepRequest']),
+  cancel_item_deletion_preparation: req(['prepItem', 'prepRequest']),
+  authorize_item_deletion: req(['readyItem', 'readyRequest', 'readyHash']),
+  item_deletion_next_target: req(['removeItem', 'removeRequest']),
+  reconcile_item_deletion_target: req(['removeItem', 'removeRequest']),
+  begin_prepared_item_deletion: req(['removeItem', 'removeRequest']),
+});
+const DIRECTIONS = [['A', 'B'], ['B', 'A']];
+const TAG = /^(?:anon|normal-[AB]|[AB]:control|[AB]>[AB]:(?:owner-only|mixed|collision|unverified|ref:[A-Za-z]+))$/;
+/**
+ * Coverage credit per direction: the attacker's owned control, every single-reference substitution, mixed arrays,
+ * collision probes and anonymous denial. Unreachable states must carry no credit; runtime blocks carry an explicit
+ * UNVERIFIED tag instead of credit. Service-only RPCs need normal-A, normal-B and anonymous denial.
+ */
+export function validateCoverage(covered, requirements = COVERAGE_REQUIREMENTS) {
   const problems = [];
-  for (const f of EXPOSED_RPCS) {
-    const tags = covered.get(f.name) ?? new Set();
-    for (const tag of ['A>B', 'B>A', 'anon']) if (!tags.has(tag)) problems.push(`${f.name} lacks ${tag} coverage`);
+  const names = EXPOSED_RPCS.map((f) => f.name);
+  if (!isDeepStrictEqual(Object.keys(requirements).sort(), [...names].sort())) problems.push('coverage requirements differ from the exposed RPCs');
+  for (const name of names) {
+    const r = requirements[name], tags = covered.get(name) ?? new Set();
+    if (!r) continue;
+    if (!tags.has('anon')) problems.push(`${name} lacks anon coverage`);
+    for (const [attacker, victim] of DIRECTIONS) {
+      const d = `${attacker}>${victim}`;
+      const credit = [...tags].filter((t) => t.startsWith(`${d}:`) && t !== `${d}:unverified`);
+      if (r.unverified) {
+        if (credit.length || tags.has(`${d}:unverified`)) problems.push(`${name} ${d} claims coverage for an unreachable state`);
+        continue;
+      }
+      if (tags.has(`${d}:unverified`)) {
+        if (!r.runtime) problems.push(`${name} ${d} is UNVERIFIED but has no runtime allowance`);
+        else if (credit.length) problems.push(`${name} ${d} mixes UNVERIFIED with coverage credit`);
+        continue;
+      }
+      if (!tags.has(`${attacker}:control`)) problems.push(`${name} ${d} lacks a successful owned control`);
+      const needed = [...r.refs.map((ref) => `${d}:ref:${ref}`), ...(r.mixed ? [`${d}:mixed`] : []),
+        ...(r.collision ? [`${d}:collision`] : []), ...(r.ownerOnly ? [`${d}:owner-only`] : [])];
+      for (const tag of needed) if (!tags.has(tag)) problems.push(`${name} lacks ${tag} coverage`);
+      for (const tag of credit) if (!needed.includes(tag)) problems.push(`${name} has unexpected ${tag} credit`);
+    }
   }
   for (const f of SERVICE_ONLY_RPCS) {
     const tags = covered.get(f.name) ?? new Set();
     for (const tag of ['normal-A', 'normal-B', 'anon']) if (!tags.has(tag)) problems.push(`${f.name} lacks ${tag} denial`);
   }
-  const known = new Set([...EXPOSED_RPCS, ...SERVICE_ONLY_RPCS].map((f) => f.name));
-  for (const name of covered.keys()) if (!known.has(name)) problems.push(`coverage for unknown RPC ${name}`);
+  const known = new Set([...names, ...SERVICE_ONLY_RPCS.map((f) => f.name)]);
+  for (const [name, tags] of covered) {
+    if (!known.has(name)) problems.push(`coverage for unknown RPC ${name}`);
+    for (const tag of tags) if (!TAG.test(tag)) problems.push(`${name} has malformed tag ${tag}`);
+  }
   return problems;
+}
+
+/**
+ * Create-ID existence oracles that are known, reported on PR #47 and accepted pending a separate fix packet.
+ * Any other differing surface fails the audit; an accepted entry that stops reproducing is reported for removal.
+ */
+export const ACCEPTED_ORACLES = Object.freeze({
+  'save_outfit p_id': 'peer-owned outfit ID returns 409/23505 outfits_pkey; a new ID saves (known, reported on PR #47, accepted pending a fix packet)',
+  'save_wear_event p_id': 'peer-owned wear-event ID returns 409/23505 wear_events_pkey; a new ID saves (known, reported on PR #47, accepted pending a fix packet)',
+  'REST items id': 'peer-owned item ID returns 409/23505 items_pkey on REST insert; a new ID inserts (known, reported on PR #47, accepted pending a fix packet)',
+});
+export function classifyOracle(surface, differs) {
+  if (!differs) return Object.hasOwn(ACCEPTED_ORACLES, surface) ? 'accepted-not-reproduced' : 'equivalent';
+  return Object.hasOwn(ACCEPTED_ORACLES, surface) ? 'accepted' : 'fail';
+}
+
+/** Controller bookkeeping: a freeze request marks the owner before any SQL; only a successful restore clears it. */
+export function trackPhase(touched, phase, owner, stage, code = null) {
+  if (phase === 'freeze' && stage === 'before') touched.add(owner);
+  if (phase === 'restore' && stage === 'after' && code === 0) touched.delete(owner);
+  return touched;
+}
+/**
+ * Cleanup runs only after a confirmed restore barrier whenever any freeze was requested, including a freeze whose
+ * acknowledgement failed or timed out. An unconfirmed barrier withholds cleanup and reports both failures.
+ */
+export async function restoreThenCleanup(freezeRequested, barrier, cleanup) {
+  const errors = [];
+  if (freezeRequested) {
+    const confirmed = await Promise.resolve().then(barrier).then((value) => value === true, () => false);
+    if (!confirmed) { errors.push('restore-barrier-unconfirmed'); return { cleaned: false, errors }; }
+  }
+  try { await cleanup(); } catch { errors.push('cleanup'); }
+  return { cleaned: true, errors };
 }
 
 // --- Closed privileged access (CI database job only) -------------------------------------------

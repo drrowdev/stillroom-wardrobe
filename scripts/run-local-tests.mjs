@@ -4,7 +4,7 @@ import {
   ROOT, assertNoServiceSecrets, readCredentialCache, normalSessionEnvironment,
   validateSessionEnvironment, fail, reportError,
 } from './backend/local.mjs';
-import { privilegedEnvironment } from './isolation-catalog.mjs';
+import { privilegedEnvironment, trackPhase } from './isolation-catalog.mjs';
 
 async function main() {
   const [suite, ...args] = process.argv.slice(2);
@@ -131,16 +131,27 @@ async function isolationAudit(normalEnv) {
   child.on('message', (message) => {
     queue = queue.then(async () => {
       const valid = message && message.type === 'phase' && Number.isSafeInteger(message.id)
-        && ['freeze', 'restore'].includes(message.phase) && ['A', 'B'].includes(message.owner);
+        && (message.phase === 'barrier' ? message.owner === null
+          : ['freeze', 'restore'].includes(message.phase) && ['A', 'B'].includes(message.owner));
       if (!valid) { if (child.connected) child.send({ type: 'ack', id: message?.id, ok: false }); return; }
-      const budget = remaining() - (message.phase === 'freeze' ? RESTORE_RESERVE_MS : 0);
-      let code = 2;
-      if (budget > 0) {
-        if (message.phase === 'freeze') touched.add(message.owner);
-        code = await runPrivileged([message.phase, message.owner], privileged, Math.min(PHASE_MS, budget));
-        if (message.phase === 'restore' && code === 0) touched.delete(message.owner);
+      let ok = false;
+      if (message.phase === 'barrier') {
+        // Cleanup waits for this: every owner whose freeze was requested, acknowledged or not, is restored first.
+        for (const owner of [...touched]) {
+          const code = await runPrivileged(['restore', owner], privileged, Math.min(PHASE_MS, Math.max(1_000, remaining())));
+          trackPhase(touched, 'restore', owner, 'after', code);
+        }
+        ok = touched.size === 0;
+      } else {
+        const budget = remaining() - (message.phase === 'freeze' ? RESTORE_RESERVE_MS : 0);
+        if (budget > 0) {
+          trackPhase(touched, message.phase, message.owner, 'before');
+          const code = await runPrivileged([message.phase, message.owner], privileged, Math.min(PHASE_MS, budget));
+          trackPhase(touched, message.phase, message.owner, 'after', code);
+          ok = code === 0;
+        }
       }
-      if (child.connected) child.send({ type: 'ack', id: message.id, ok: code === 0 });
+      if (child.connected) child.send({ type: 'ack', id: message.id, ok });
     });
   });
   const deadline = setTimeout(() => child.kill(), Math.max(1_000, remaining() - RESTORE_RESERVE_MS));
