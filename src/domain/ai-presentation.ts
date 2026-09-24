@@ -16,11 +16,12 @@ export function presentAiFacts(facts: AiFacts, language: Language): { title: str
   });
   return { title, description: defaultDescription(title, facts.fields.colours ?? [], language), tags };
 }
-// Never convert money to a floating-point number or the garment's currency.
-export function microUsd(value: string, language: Language): string {
+// Never convert money to the garment's currency. Use rounds up to the next cent and the allowance rounds down.
+export function usdCents(value: string, language: Language, mode: 'used' | 'limit'): string {
   if (!isMicro(value)) throw new AppError('aiC.unavailable');
-  const amount = BigInt(value), whole = amount / 1000000n, fraction = String(amount % 1000000n).padStart(6, '0');
-  const decimal = new Intl.NumberFormat(locales[language]).formatToParts(1.1).find((part) => part.type === 'decimal')?.value;
-  if (!decimal) throw new AppError('aiC.unavailable');
-  return `${new Intl.NumberFormat(locales[language]).format(whole)}${decimal}${fraction} USD`;
+  const amount = BigInt(value), cents = mode === 'used' ? (amount + 9999n) / 10000n : amount / 10000n;
+  if (cents > BigInt(Number.MAX_SAFE_INTEGER)) throw new AppError('aiC.unavailable');
+  const whole = mode === 'limit' && cents % 100n === 0n;
+  return new Intl.NumberFormat(locales[language], { style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol',
+    minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(`${cents / 100n}.${String(cents % 100n).padStart(2, '0')}` as `${number}`);
 }

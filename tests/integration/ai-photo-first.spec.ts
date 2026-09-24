@@ -141,10 +141,9 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         await page.getByRole('button', { name: messages['account.menu'][language] }).click();
         await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
         await page.getByRole('button', { name: messages['aiC.disable'][language], exact: true }).click();
-        await page.getByText(messages['aiC.disabled'][language], { exact: true }).waitFor();
-        await page.getByRole('checkbox', { name: messages['aiC.azureAgree'][language] }).check();
+        await page.getByRole('heading', { name: messages['aiC.disabled'][language], exact: true }).waitFor();
         await page.getByRole('button', { name: messages['aiC.enable'][language], exact: true }).click();
-        await page.getByText(messages['aiC.enabled'][language], { exact: true }).waitFor();
+        await page.getByRole('heading', { name: messages['aiC.enabled'][language], exact: true }).waitFor();
         const afterConsent = await client.from('profiles').select('owner_id,display_name,ui_language,timezone,currency,version').eq('owner_id', ownerId).single();
         check(!afterConsent.error);
         check(JSON.stringify(parseProfile(afterConsent.data, ownerId)) === JSON.stringify({ ...profile, version: profile.version + 2 }));

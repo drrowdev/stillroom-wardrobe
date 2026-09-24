@@ -162,7 +162,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   }
   return (
     <>
-      <aside className="workspace-identity" aria-label={t('account.identity')}><span className="identity-dot" />{profile.display_name}<span className="identity-separator" />{t('common.private')}</aside>
+      <aside className="workspace-identity" aria-label={t('account.identity')}><span className="identity-dot" />{profile.display_name}</aside>
       <main id="main" className="workspace-main" tabIndex={-1}>
         {!online && <div className="notice notice-offline" role="status">{t('common.offline')} {t('common.stale')}</div>}
         {undo && <UndoNotice key={`${undo.item.id}:${undo.item.version}`} undo={undo} visible={route === 'wardrobe'} routeSignal={routeSignal} lifecycle={lifecycle} scope={scope} online={online} t={t} images={images}

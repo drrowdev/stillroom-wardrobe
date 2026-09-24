@@ -7,7 +7,7 @@ import {
   confirmsDescription, confirmsItem, prepareDescriptionAttempt, prepareGarmentAttempt, validDescription,
   type DescriptionAttempt, type ImageBaseline, type ItemAttempt, type ItemBaseline, type ItemDetail as Detail,
 } from '../../domain/item-details';
-import { editGarmentField, enumFields, garmentDraftDirty, newGarmentDraft, sameValue } from '../../domain/garment-fields';
+import { editGarmentField, garmentDraftDirty, newGarmentDraft, sameValue } from '../../domain/garment-fields';
 import { ItemForm } from './item-form';
 import type { Language, MessageKey, Translate } from '../../i18n';
 import type { PrivateImages } from '../../images/private-images';
@@ -111,9 +111,6 @@ const dirtyFields = (base: ItemBaseline, draft: ReturnType<typeof itemDraft>) =>
 const readItem = (detail: Detail) => detail.item;
 const readImage = (detail: Detail) => detail.image;
 const lifecycleLabels: Record<string, MessageKey> = { donated: 'lifecycle.donated', sold: 'lifecycle.sold' };
-const availabilityLabels: Record<typeof enumFields.availability[number], MessageKey> = {
-  ready: 'availability.ready', laundry: 'availability.laundry', repair: 'availability.repair', lent: 'availability.lent',
-};
 function focusFirstInvalid(form: HTMLFormElement | null) {
   const input = form?.querySelector<HTMLElement>('[aria-invalid="true"]');
   for (let ancestor = input?.parentElement; ancestor; ancestor = ancestor.parentElement) {
@@ -187,7 +184,7 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
       setOutcome('saved');
     } finally { saveLatch.current = false; setSaving(false); }
   }
-  async function quick(field: 'availability' | 'lifecycle', value: string) {
+  async function quick(field: 'lifecycle', value: string) {
     if (!quickReady || saveLatch.current) return;
     saveLatch.current = true; setOutcome(null);
     try { if (await item.run('save', editGarmentField(item.draft, field, value, props.language)) === 'confirmed') setOutcome('saved'); }
@@ -204,13 +201,6 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
         <button className="text-button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('recovery'); }}>{t('imageChange.recover')}</button>
       </div>
       <fieldset className="lifecycle-edit-lock" disabled={lifecycleState.busy || lifecycleState.pending}>
-        <fieldset className="detail-availability" disabled={!quickReady}>
-          <legend>{t('detail.availability')}</legend>
-          {enumFields.availability.map((value) => <label key={value} className="choice">
-            <input type="radio" name="detail-availability" value={value} checked={item.draft.raw.availability === value}
-              onChange={() => { void quick('availability', value); }} />{t(availabilityLabels[value])}
-          </label>)}
-        </fieldset>
         <section className="settings-card detail-name" aria-label={t('capture.detailsTitle')}>
           <form ref={form} className="stack" onSubmit={(event) => { event.preventDefault(); void saveAll(); }}>
             <ItemForm draft={item.draft} onChange={(next) => { item.setDraft(next); setOutcome(null); }} baseline={item.base.values} provenance={item.base.provenance}

@@ -589,6 +589,7 @@ test('UX L1b T12 Replace shows the editor in place of the photo actions and retu
   await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
   const before = structuredClone(item), oldImage = structuredClone(image);
   await page.getByRole('button', { name: text('imageChange.replace'), exact: true }).click();
+  await expect(page.locator('.image-change .photo-actions').getByRole('button', { name: text('capture.library'), exact: true })).toBeEnabled();
   await page.locator('.image-change input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
   await expect.poll(() => api.inputs.length).toBe(1);
   await expect(page.locator('#image-change-edit')).toBeEnabled();

@@ -7,7 +7,7 @@ import { resolveLanguage, type Language, type MessageKey } from '../i18n';
 import { AppError, isAborted } from '../data/errors';
 import { holdsStoredSession } from './stored-session';
 import { AiError, type AiClient } from '../data/ai';
-import { supportedAiPolicy, type AiStatus } from '../domain/ai-controls';
+import { aiPolicyBinding, supportedAiPolicy, type AiStatus } from '../domain/ai-controls';
 import { sameProfileFields } from '../domain/preferences';
 
 export type OwnerScope = { ownerId: string; epoch: number; signal: AbortSignal };
@@ -170,10 +170,12 @@ export class SessionController {
     this.publishProfile(scope, profile, 'refresh');
     return this.state.scope?.epoch === scope.epoch && this.state.profile ? this.state.profile : profile;
   }
-  async saveAiConsent(scope: OwnerScope, baseline: ProfileRow, ai: AiClient, enabled: boolean, noticeRevision: number | null): Promise<AiStatus> {
+  async saveAiConsent(scope: OwnerScope, baseline: ProfileRow, ai: AiClient, enabled: boolean, noticeRevision: number | null,
+    expectedBinding: string | null): Promise<AiStatus> {
     this.checkAiScope(scope, ai);
     if (this.state.profileSaving || this.state.aiConsentUnresolved) throw new AppError('aiC.reconcile');
     if (baseline.owner_id !== scope.ownerId || !Number.isSafeInteger(baseline.version) || baseline.version < 1) throw new AiError('CONFLICT');
+    if (!enabled && expectedBinding !== null) throw new AiError('CONFIG_CHANGED');
     this.publish({ ...this.state, profileSaving: true });
     const signal = AbortSignal.any([scope.signal, AbortSignal.timeout(20000)]);
     let sent = false;
@@ -181,7 +183,8 @@ export class SessionController {
       const current = await ai.status(signal);
       this.checkAiScope(scope, ai);
       if (current.consent.profileVersion !== String(baseline.version)) throw new AppError('error.conflict');
-      if (enabled && (!supportedAiPolicy(current) || noticeRevision !== current.policy?.noticeRevision)
+      if (enabled && (!supportedAiPolicy(current) || noticeRevision !== current.policy?.noticeRevision
+        || expectedBinding === null || expectedBinding !== aiPolicyBinding(scope, current))
         || !enabled && noticeRevision !== null) throw new AiError('CONFIG_CHANGED');
       sent = true;
       const version = await ai.consent({ enabled, noticeRevision, expectedVersion: baseline.version }, signal);

@@ -187,6 +187,24 @@ The add and replacement screens show one short status line (`#analysis-status`) 
 - The suggested name comes from per-language templates over the category and the **first** colour only (`defaultItemName`: "Green top", "Vihreä yläosa", "Grön överdel"). The draft description follows the name, adding the first colour when the name does not already mention it (`defaultDescription`: "Linen shirt in blue"). Both stop following after any user edit or clear, and the description stays editable under More details.
 - Tags additions (manual entry and suggestions from style words) share one budget across `tags` and `style_tags` (12 entries, 512 bytes joined). Saved lists already over that budget are kept unchanged; only additions that would exceed it are refused.
 
+### UX L2a photo analysis card - 24 September 2026
+
+Owner feedback of 24 September 2026 (ADR19). The settings card shows one clear state, derived by the pure `aiCardState` in `src/domain/ai-controls.ts` (the first matching rule wins):
+
+| State | Condition | Shows | Actions |
+|---|---|---|---|
+| unconfirmed | a consent change was sent but not confirmed | "Couldn't confirm the change." | Try again (read-only reconcile) |
+| loading | no status yet | the heading | none |
+| loadFailed | the status read failed | "Couldn't load photo analysis." | Try again (read-only) |
+| unavailable | unsupported, expired or missing policy, or code `UNAVAILABLE`/`UNCONFIGURED`/`INACTIVE` | one line | Turn off only while consent is stored |
+| on | `canAnalyze` | "Photo analysis: On", "This month: {used} of {limit}", the limit warning | Turn off |
+| renew | stored consent to an older notice and the current policy is supported | "Photo analysis: Off", "details have changed" | Turn on, Turn off |
+| off | otherwise | "Photo analysis: Off" and one short paragraph | Turn on |
+
+- **Turn on is the consent.** There is no checkbox and no separate check button, and Turn on is not rendered while analysis is on. The shown amounts come from the configured policy and usage; use is rounded up to the next cent and the allowance down (`usdCents`).
+- **Binding.** Turn on captures `aiPolicyBinding` (owner, epoch, model, prompt version, notice revision, manifest, per-request maximum, monthly allowance) from the rendered status. `saveAiConsent` re-reads status and throws `CONFIG_CHANGED` before `ai_set_consent` if the binding differs; the card then says the details changed and reloads. Turn off carries no binding. The mutex, deadlines, ACK floor, exact own +1 rebase and unconfirmed latch are unchanged.
+- **Documented limits.** `ai_set_consent` still checks only the profile version and the notice revision; the wider binding is a client-side check immediately before the call, so a change between that read and the call is caught by the server only if the revision changes. An allowance change while on needs no new consent; a notice revision change does. Status reads on load, focus, visibility and reconnect are single-flight, never call `ai_set_consent`, the profile or analysis endpoints, and never move focus; `ai_status` itself may perform internal server maintenance.
+- **Notice pin.** `aiC.azureNotice` and `aiC.azureTrainingNotice` and notice revision 2 are unchanged (991 bytes, SHA-256 `606487b1c973f49c739dfac8ca8c15bcad33d190fdbcc83147cdd60112c51d24`, `tests/unit/azure-openai.test.ts`). They are shown verbatim under Full details, reachable before Turn on; the short paragraph is display text. The recorded sentence "not necessarily in Sweden" stays in the recorded notice; removing it needs a new notice revision, hosted policy data and renewed consent, which is not planned without separate approval.
 ## Privacy and cost controls
 
 Send the sanitized photo, fixed instructions and taxonomy only, before library Save. No history, account email, location, notes, other photos or peer data. EXIF removal does not hide identifying pixels. Use inline bytes, not a public bucket, persistent vendor file or reusable signed link. Temporary validated results are owner-only and excluded from wardrobe queries/exports.

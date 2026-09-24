@@ -17,13 +17,16 @@ async function setup(page: Page, language: Language = 'en') {
   await page.goto('/'); await signIn(page); await settings(page, language);
   return api;
 }
+const consentCard = (page: Page) => page.locator('section[aria-labelledby="ai-consent-title"]');
+// The removed aiC.reviewNotice copy, kept here only to prove it no longer appears.
+const removedReviewNotice: Record<Language, string> = { en: 'Review every suggested detail before saving.',
+  fi: 'Tarkista kaikki ehdotetut tiedot ennen tallennusta.', sv: 'Granska alla föreslagna uppgifter innan du sparar.' };
 const profileUrl = 'http://127.0.0.1:54321/rest/v1/profiles*';
 const preferenceUrl = 'http://127.0.0.1:54321/rest/v1/style_preferences*';
 test('AI consent shares profile/language mutex and rebases only its own exact plus-one ACK', async ({ page }) => {
   const api = await aiFixture(page, 'en', false);
   await settings(page);
   await page.locator('#profile-display_name').fill('Preserved unsaved name');
-  await page.getByRole('checkbox', { name: messages['aiC.azureAgree'].en, exact: true }).check();
   let held: Route | undefined;
   await page.route('**/rest/v1/rpc/ai_set_consent', (route) => { held = route; });
   await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
@@ -31,7 +34,7 @@ test('AI consent shares profile/language mutex and rebases only its own exact pl
   await expect(page.getByRole('button', { name: 'Suomi', exact: true })).toBeDisabled();
   await expect(page.locator('#profile-display_name')).toBeDisabled();
   await held!.fallback();
-  await expect(page.getByText(messages['aiC.enabled'].en, { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: messages['aiC.enabled'].en, exact: true })).toBeVisible();
   await expect(page.locator('#profile-display_name')).toHaveValue('Preserved unsaved name');
   await page.getByRole('button', { name: messages['settings.saveProfile'].en, exact: true }).click();
   await expect(page.getByText(messages['settings.profileSaved'].en, { exact: true })).toBeVisible();
@@ -55,15 +58,15 @@ for (const failure of ['lost-ack', 'stale-profile'] as const) {
         else await route.fallback();
       });
     }
-    await page.getByRole('checkbox', { name: messages['aiC.azureAgree'].en, exact: true }).check();
     await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
     await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: messages['aiC.enable'].en, exact: true })).toBeDisabled();
+    await expect(consentCard(page).getByRole('button', { name: messages['aiC.enable'].en, exact: true })).toHaveCount(0);
+    await expect(consentCard(page).getByRole('button', { name: messages['aiC.disable'].en, exact: true })).toHaveCount(0);
     if (failure === 'stale-profile') await page.unroute(profileUrl);
     let writes = 0;
     page.on('request', (request) => { if (request.url().endsWith('/ai_set_consent')) writes++; });
-    await page.getByRole('button', { name: messages['aiC.checkConsent'].en, exact: true }).click();
-    await expect(page.getByText(messages['aiC.enabled'].en, { exact: true })).toBeVisible();
+    await consentCard(page).getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
+    await expect(page.getByRole('heading', { name: messages['aiC.enabled'].en, exact: true })).toBeVisible();
     expect(writes).toBe(0);
     await expect(page.locator('#profile-display_name')).toHaveValue('My unsaved name');
     await page.getByRole('button', { name: messages['settings.saveProfile'].en, exact: true }).click();
@@ -84,10 +87,9 @@ for (const action of ['save', 'reconcile'] as const) {
         api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
         await route.abort('failed');
       });
-      await page.getByRole('checkbox', { name: messages['aiC.azureAgree'].en, exact: true }).check();
       await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
       await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
-    } else await page.getByRole('checkbox', { name: messages['aiC.azureAgree'].en, exact: true }).check();
+    }
     const timings = new Map<PlaywrightRequest, { path: string; start: number; elapsed?: number; status?: number }>();
     const recordResponse = (response: PlaywrightResponse) => {
       const timing = timings.get(response.request());
@@ -112,8 +114,8 @@ for (const action of ['save', 'reconcile'] as const) {
     page.on('request', countWrite);
     try {
       const writesBefore = writes, started = performance.now();
-      await page.getByRole('button', { name: messages[action === 'save' ? 'aiC.enable' : 'aiC.checkConsent'].en, exact: true }).click();
-      await expect(page.getByText(messages['aiC.enabled'].en, { exact: true })).toBeVisible({ timeout: 12000 });
+      await consentCard(page).getByRole('button', { name: messages[action === 'save' ? 'aiC.enable' : 'common.retry'].en, exact: true }).click();
+      await expect(page.getByRole('heading', { name: messages['aiC.enabled'].en, exact: true })).toBeVisible({ timeout: 12000 });
       expect(performance.now() - started).toBeGreaterThan(5000);
       expect(performance.now() - started).toBeLessThan(20000);
       expect(timings.size).toBe(action === 'save' ? 4 : 2);
@@ -160,10 +162,9 @@ for (const action of ['save', 'reconcile'] as const) {
         api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
         await route.abort('failed');
       });
-      await page.getByRole('checkbox', { name: messages['aiC.azureAgree'].en, exact: true }).check();
       await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
       await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
-    } else await page.getByRole('checkbox', { name: messages['aiC.azureAgree'].en, exact: true }).check();
+    }
     await page.route(profileUrl, async (route) => {
       expect(route.request().method()).toBe('GET');
       await route.fulfill({ json: { ...api.profiles[owners.a], display_name: 'Late unconfirmed profile' } });
@@ -191,10 +192,10 @@ for (const action of ['save', 'reconcile'] as const) {
       };
     });
     const writesBefore = writes;
-    await page.getByRole('button', { name: messages[action === 'save' ? 'aiC.enable' : 'aiC.checkConsent'].en, exact: true }).click();
+    await consentCard(page).getByRole('button', { name: messages[action === 'save' ? 'aiC.enable' : 'common.retry'].en, exact: true }).click();
     await expect.poll(() => page.evaluate(() => Boolean((window as AiProfileWindow).aiProfileWait))).toBe(true);
     await expect(page.locator('#profile-display_name')).toBeDisabled();
-    await expect(page.getByRole('button', { name: messages['aiC.checkConsent'].en, exact: true })).toBeEnabled({ timeout: 6500 });
+    await expect(consentCard(page).getByRole('button', { name: messages['common.retry'].en, exact: true })).toBeEnabled({ timeout: 6500 });
     const deadline = await page.evaluate(() => {
       const state = (window as AiProfileWindow).aiProfileWait!;
       return { elapsed: state.aborted === null ? null : state.aborted - state.started, released: state.released };
@@ -210,7 +211,8 @@ for (const action of ['save', 'reconcile'] as const) {
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
     await expect(page.getByText(messages['aiC.enabled'].en, { exact: true })).toHaveCount(0);
     await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: messages['aiC.enable'].en, exact: true })).toBeDisabled();
+    await expect(consentCard(page).getByRole('button', { name: messages['aiC.enable'].en, exact: true })).toHaveCount(0);
+    await expect(consentCard(page).getByRole('button', { name: messages['aiC.disable'].en, exact: true })).toHaveCount(0);
     expect(writes - writesBefore).toBe(action === 'save' ? 1 : 0);
     expect(api.profiles[owners.a]).toMatchObject({ version: 2, display_name: 'Alex', ui_language: 'en' });
   });
@@ -220,32 +222,33 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     const api = await setup(page, language);
     const consent = page.locator('section[aria-labelledby="ai-consent-title"]');
     await expect(consent.getByText(messages['aiC.inactive'][language], { exact: true })).toBeVisible();
-    for (const key of ['aiC.notice', 'aiC.azureNotice', 'aiC.trainingNotice', 'aiC.azureTrainingNotice'] as const)
+    for (const key of ['aiC.notice', 'aiC.azureNotice', 'aiC.trainingNotice', 'aiC.azureTrainingNotice', 'aiC.offSummary'] as const)
       await expect(consent.getByText(messages[key][language], { exact: true })).toHaveCount(0);
-    for (const key of ['aiC.agree', 'aiC.azureAgree'] as const)
-      await expect(consent.getByRole('checkbox', { name: messages[key][language], exact: true })).toHaveCount(0);
-    await expect(consent.getByText(messages['aiC.reviewNotice'][language], { exact: true })).toBeVisible();
-    const enable = consent.getByRole('button', { name: messages['aiC.enable'][language], exact: true });
-    await expect(enable).toBeVisible();
-    await expect(enable).toBeDisabled();
-    expect(await consent.evaluate((element) => !element.querySelector('details')
-      && [...element.querySelectorAll('.fine')].every((copy) => parseFloat(getComputedStyle(copy).fontSize) >= 14))).toBe(true);
+    await expect(consent.getByRole('checkbox')).toHaveCount(0);
+    await expect(consent.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toHaveCount(0);
+    await expect(consent.getByRole('button', { name: messages['aiC.disable'][language], exact: true })).toHaveCount(0);
+    expect(await consent.evaluate((element) => !element.querySelector('details'))).toBe(true);
     expect(api.requests.filter((request) => request.path.endsWith('/ai_set_consent'))).toHaveLength(0);
   });
   test(`settings ${language}: private fields, preferences, clearing and persistence`, async ({ page }) => {
     const api = await aiFixture(page, language);
     await settings(page, language);
     const consent = page.locator('section[aria-labelledby="ai-consent-title"]');
-    for (const key of ['aiC.azureNotice', 'aiC.azureTrainingNotice', 'aiC.retentionNotice', 'aiC.allowanceNotice', 'aiC.optOutNotice', 'aiC.reviewNotice'] as const) {
+    // The fixture starts with analysis on: one Turn off, no Turn on, and the notice only inside a closed disclosure.
+    await expect(consent.getByRole('heading', { name: messages['aiC.enabled'][language], exact: true })).toBeVisible();
+    await expect(consent.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toHaveCount(0);
+    await expect(consent.getByRole('button', { name: messages['aiC.disable'][language], exact: true })).toHaveCount(1);
+    await expect(consent.getByRole('checkbox')).toHaveCount(0);
+    await expect(consent.locator('details')).toHaveCount(1);
+    expect(await consent.locator('details').evaluate((element) => (element as HTMLDetailsElement).open)).toBe(false);
+    await expect(consent.getByText(removedReviewNotice[language], { exact: true })).toHaveCount(0);
+    await consent.locator('summary').click();
+    for (const key of ['aiC.azureNotice', 'aiC.azureTrainingNotice', 'aiC.retentionNotice', 'aiC.allowanceNotice', 'aiC.usageNotice', 'aiC.optOutNotice'] as const) {
       await expect(consent.getByText(messages[key][language], { exact: true })).toBeVisible();
     }
-    await expect(consent.getByRole('checkbox', { name: messages['aiC.azureAgree'][language], exact: true })).toHaveCount(1);
-    await expect(consent.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toBeVisible();
-    await expect(consent.getByRole('button', { name: messages['aiC.disable'][language], exact: true })).toBeVisible();
     expect(await consent.evaluate((element) =>
-      !element.querySelector('details')
-      && [...element.querySelectorAll('.fine')].every((copy) => parseFloat(getComputedStyle(copy).fontSize) >= 14)
-      && element.querySelector('.consent-confirm')!.getBoundingClientRect().height >= 44)).toBe(true);
+      [...element.querySelectorAll('.fine')].every((copy) => parseFloat(getComputedStyle(copy).fontSize) >= 14)
+      && element.querySelector('summary')!.getBoundingClientRect().height >= 44)).toBe(true);
     const beforeB = structuredClone(api.profiles[owners.b]);
     const patches: Record<string, unknown>[] = [];
     page.on('request', (request) => { if (request.method() === 'PATCH') patches.push(request.postDataJSON() as Record<string, unknown>); });
