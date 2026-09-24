@@ -13,9 +13,16 @@ const button = (page: Page, key: MessageKey, language: Language = 'en') => page.
 const navLink = (page: Page, key: 'nav.today' | 'nav.wardrobe' | 'nav.outfits', language: Language = 'en') =>
   page.locator('.workspace-header nav').getByRole('link', { name: text(key, language), exact: true });
 const cards = (page: Page) => page.locator('.today-card');
-const names = (card: Locator) => card.locator('.outfit-component-name').allTextContents();
-const allNames = (page: Page) => page.locator('.today-card').evaluateAll(list => list.map(card =>
-  [...card.querySelectorAll('.outfit-component-name')].map(node => node.textContent ?? '').join(' + ')));
+// Read names only once the card's pieces have rendered, so a capture is never an empty list.
+async function names(card: Locator) {
+  await expect(card.locator('.outfit-component-name')).not.toHaveCount(0);
+  return card.locator('.outfit-component-name').allTextContents();
+}
+async function allNames(page: Page) {
+  await expect(page.locator('.today-card .outfit-component-name')).not.toHaveCount(0);
+  return page.locator('.today-card').evaluateAll(list => list.map(card =>
+    [...card.querySelectorAll('.outfit-component-name')].map(node => node.textContent ?? '').join(' + ')));
+}
 const missing = (language: Language, categories: MessageKey[]) =>
   text('today.missing', language, { categories: new Intl.ListFormat(locales[language], { type: 'conjunction' }).format(categories.map(key => text(key, language))) });
 
