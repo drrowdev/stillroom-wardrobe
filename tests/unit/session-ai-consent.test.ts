@@ -5,11 +5,12 @@ import type { AppClient } from '../../src/data/client';
 import type { ProfileRow } from '../../src/data/rows';
 import { aiCardState, aiPolicyBinding, azureAiManifest, azureAiModel, type AiStatus } from '../../src/domain/ai-controls';
 
+const noWeather = { weather_enabled: false, weather_city: null, latitude: null, longitude: null };
 const ownerId = '00000000-0000-4000-8000-000000000001';
 const now = Date.parse('2026-09-24T12:00:00Z');
 const policy = { activated: true, noticeRevision: 2, modelId: azureAiModel, promptVersion: 2, maxRequestMicro: '4097351',
   monthlyAllowanceMicro: '20000000', maxRequestsPerHour: 30, resultTtlSeconds: 3600, executionManifestId: azureAiManifest };
-const profile: ProfileRow = { owner_id: ownerId, display_name: 'Alex', ui_language: 'en', timezone: 'Europe/Helsinki', currency: 'EUR', version: 3 };
+const profile: ProfileRow = { owner_id: ownerId, display_name: 'Alex', ui_language: 'en', timezone: 'Europe/Helsinki', currency: 'EUR', version: 3, ...noWeather };
 function status(allowance = '20000000', enabled = false): AiStatus {
   return { code: enabled ? 'OK' : 'CONSENT_REQUIRED', period: '2026-09', serverTimeMs: now,
     consent: { enabled, noticeRevision: enabled ? 2 : null, consentedAt: enabled ? '2026-09-01T00:00:00Z' : null, profileVersion: '3' },

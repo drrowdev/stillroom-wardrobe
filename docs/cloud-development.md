@@ -534,6 +534,14 @@ Owner review was pending in both receipts.
   ([PR #36 `5813432944`](https://github.com/drrowdev/stillroom-wardrobe/pull/36#issuecomment-5813432944)).
   This is the latest cited Pages deployment.
 
+**I16 weather CSP (source only, not deployed).** The I16
+draft PR adds `https://geocoding-api.open-meteo.com` and
+`https://api.open-meteo.com` to the generated CSP `connect-src` in
+`vite.config.ts`. The historical CSP observations above stay as recorded.
+Weather only works on the hosted site after the owner runs a Pages deploy of a
+main that includes I16. No hosted schema, function or Auth change is needed:
+the profile weather columns are in the installed base schema.
+
 **AI activation, owner account only** (from
 [`5815445262`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815445262)).
 

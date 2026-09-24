@@ -9,7 +9,7 @@ try { validateSessionEnvironment(process.env); } catch (error) { reportError(err
 const base=assertLocalApi(process.env.SUPABASE_URL);
 const key=process.env.SUPABASE_PUBLISHABLE_KEY;
 function claims(token){try{return JSON.parse(Buffer.from(token.split('.')[1],'base64url').toString());}catch{return {};}}
-const passed=[];let stage='configuration';const cleanups=[],profileCleanups=[];
+const passed=[];let stage='configuration';const cleanups=[],profileCleanups=[],weatherCleanups=[];
 async function call(token,path,{method='GET',body,bytes=false,returnRepresentation=false}={}) {
   const r=await fetch(base+path,{method,headers:{apikey:key,...(token?{Authorization:`Bearer ${token}`}:{ }),...(body!==undefined?{'Content-Type':bytes?'image/jpeg':'application/json'}:{}),...(returnRepresentation?{Prefer:'return=representation'}:{})},
     ...(body!==undefined?{body:bytes?body:JSON.stringify(body)}:{}),cache:'no-store',redirect:'error',signal:AbortSignal.timeout(15000)})
@@ -54,6 +54,10 @@ async function login(email,password){
 async function rpc(c,name,body){const r=await call(c.token,`/rest/v1/rpc/${name}`,{method:'POST',body});assert.ok(r.ok);return r.data;}
 async function profile(c){
   const r=await call(c.token,`/rest/v1/profiles?owner_id=eq.${c.uid}&select=ui_language,timezone,currency,version`);
+  assert.ok(r.ok);assert.equal(r.data.length,1);return r.data[0];
+}
+async function weather(c){
+  const r=await call(c.token,`/rest/v1/profiles?owner_id=eq.${c.uid}&select=weather_enabled,weather_city,latitude,longitude,version`);
   assert.ok(r.ok);assert.equal(r.data.length,1);return r.data[0];
 }
 const jpg=await fs.readFile(new URL('./fixture.jpg',import.meta.url));
@@ -339,11 +343,28 @@ try {
     assert.ok(!invalid.ok);assert.deepEqual(await profile(c),after);
   }
   passed.push(stage);
+  stage='independent weather cities';
+  for(const [c,city,latitude,longitude] of [[a,'Oulu, Finland',65,25.5],[b,'Malmö, Sweden',55.6,13]]){
+    const before=await weather(c);
+    const saved=await call(c.token,`/rest/v1/profiles?owner_id=eq.${c.uid}&version=eq.${before.version}`,{method:'PATCH',body:{weather_enabled:true,weather_city:city,latitude,longitude},returnRepresentation:true});
+    assert.ok(saved.ok);assert.equal(saved.data.length,1);
+    weatherCleanups.push({c,previous:before});c.city=city;
+    const after=await weather(c);
+    assert.deepEqual({...after,version:undefined},{weather_enabled:true,weather_city:city,latitude,longitude,version:undefined});
+    for(const body of [{latitude:null},{weather_city:'x'.repeat(101)},{latitude:95,longitude:10}]){
+      const invalid=await call(c.token,`/rest/v1/profiles?owner_id=eq.${c.uid}&version=eq.${after.version}`,{method:'PATCH',body});
+      assert.ok(!invalid.ok);assert.deepEqual(await weather(c),after);
+    }
+  }
+  passed.push(stage);
   for(const [c,own,other,f] of [[a,af,b,bf],[b,bf,a,af]]){
     stage='foreign language mutation isolation';
     const languageBefore=await profile(other);
     await call(c.token,`/rest/v1/profiles?owner_id=eq.${other.uid}`,{method:'PATCH',body:{ui_language:'en'}});
     assert.deepEqual(await profile(other),languageBefore);
+    const weatherBefore=await weather(other);
+    await call(c.token,`/rest/v1/profiles?owner_id=eq.${other.uid}`,{method:'PATCH',body:{weather_enabled:false,weather_city:null,latitude:null,longitude:null}});
+    assert.deepEqual(await weather(other),weatherBefore);
     stage='private table read/mutation isolation';
     for(const t of tables){
       const before=await call(other.token,`/rest/v1/${t}?owner_id=eq.${other.uid}&select=*`);assert.ok(before.ok&&before.data.length>0);
@@ -379,8 +400,10 @@ try {
     stage='owner-only manifest';const manifest=await rpc(c,'export_manifest',{p_export_id:randomUUID()});assert.equal(manifest.owner_id,c.uid);
     for(const rows of Object.values(manifest.tables))assert.ok(rows.every(row=>row.owner_id===c.uid));
     assert.equal(manifest.tables.profiles.length,1);assert.equal(manifest.tables.profiles[0].ui_language,c.language);
+    assert.equal(manifest.tables.profiles[0].weather_enabled,true);assert.equal(manifest.tables.profiles[0].weather_city,c.city);
+    assert.equal(typeof manifest.tables.profiles[0].latitude,'number');assert.equal(typeof manifest.tables.profiles[0].longitude,'number');
   }
-  passed.push('Both directions: foreign language changes have no effect; each export retains its own preference','Both directions: private reads/mutations/FKs/privileged RPC denied; owner data unchanged','Both directions: foreign Storage download/sign/list/upload/delete denied; owner image bytes unchanged','Both owner exports contain only their own rows');
+  passed.push('Both directions: foreign language and weather changes have no effect; each export retains its own preference and weather city','Both directions: private reads/mutations/FKs/privileged RPC denied; owner data unchanged','Both directions: foreign Storage download/sign/list/upload/delete denied; owner image bytes unchanged','Both owner exports contain only their own rows');
   stage='anonymous access';for(const t of tables){const r=await call(null,`/rest/v1/${t}?select=owner_id`);assert.ok(!r.ok || Array.isArray(r.data)&&r.data.length===0);}
   let r=await call(null,'/rest/v1/rpc/export_manifest',{method:'POST',body:{p_export_id:randomUUID()}});assert.ok(!r.ok);
   r=await call(null,'/auth/v1/signup',{method:'POST',body:{email:`unapproved-${randomUUID()}@example.test`,password:randomUUID()+randomUUID()}});assert.ok(!r.ok);
@@ -419,6 +442,14 @@ try {
         const d=await call(c.token,`/rest/v1/${table}?id=eq.${id}`,{method:'DELETE'});assert.ok(d.ok);
       }
     }catch(error){console.error('Fixture cleanup incomplete; rerun owner-scoped cleanup in the disposable test project.');process.exitCode=securityFailureExitCode(process.exitCode,error);}
+  }
+  for(const {c,previous} of weatherCleanups){
+    try{
+      const current=await weather(c);
+      const {weather_enabled,weather_city,latitude,longitude}=previous;
+      const restored=await call(c.token,`/rest/v1/profiles?owner_id=eq.${c.uid}&version=eq.${current.version}`,{method:'PATCH',body:{weather_enabled,weather_city,latitude,longitude},returnRepresentation:true});
+      assert.ok(restored.ok);assert.equal(restored.data.length,1);
+    }catch(error){console.error('Test weather cleanup incomplete; review the disposable owner profile.');process.exitCode=securityFailureExitCode(process.exitCode,error);}
   }
   for(const {c,previous,assigned} of profileCleanups){
     try{

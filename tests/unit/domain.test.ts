@@ -15,7 +15,7 @@ const itemId = '20000000-0000-4000-8000-000000000001';
 const imageId = '30000000-0000-4000-8000-000000000001';
 const row = { id: itemId, owner_id: owner, title: 'Olive shirt', category: 'top', created_at: '2026-09-06T08:00:00Z', deleted_at: null,
   favourite: false, availability: 'ready', lifecycle: 'active', exclude_suggestions: false,
-  brand: null, tags: [], colours: [], seasons: [], formality: null, purchase_price: null, currency: 'EUR' };
+  brand: null, tags: [], colours: [], seasons: [], formality: null, purchase_price: null, currency: 'EUR', warmth: null, lower_coverage: null, min_temp: null, max_temp: null, rain_rating: null, windproof: null, field_provenance: {} };
 const image = {
   id: imageId, item_id: itemId, owner_id: owner, state: 'ready', alt_text: 'Olive shirt',
   main_path: `${owner}/${itemId}/${imageId}/main.jpg`, thumb_path: `${owner}/${itemId}/${imageId}/thumb.jpg`,

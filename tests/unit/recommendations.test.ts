@@ -56,8 +56,9 @@ describe('score arithmetic (blueprint 09 fixtures)', () => {
     const top = item('top', { seasons: ['summer'], warmth: 1 }), bottom = item('bottom', { seasons: ['winter'], warmth: 1 }), shoes = item('footwear');
     expect(componentsFor([top, bottom, shoes], context, new Set()).W).toBe(0.5);
     // Warmth 2 against a target of 3 at 20 °C: (1 − 1/6) × 0.9 + 0.5 × 0.1.
-    expect(componentsFor([top, bottom, shoes], { ...context, temperatureC: 20 }, new Set()).W).toBeCloseTo((5 / 6) * 0.9 + 0.05, 10);
-    expect(componentsFor([top, { ...bottom, warmth: null }, shoes], { ...context, temperatureC: 20 }, new Set()).W).toBe(0.5);
+    expect(componentsFor([top, bottom, shoes], { ...context, temperatureC: 20 }, new Set()).W).toBe(0.5);
+    expect(componentsFor([top, bottom, shoes], { ...context, setting: 'outdoors', temperatureC: 20 }, new Set()).W).toBeCloseTo((5 / 6) * 0.9 + 0.05, 10);
+    expect(componentsFor([top, { ...bottom, warmth: null }, shoes], { ...context, setting: 'outdoors', temperatureC: 20 }, new Set()).W).toBe(0.5);
     expect([30, 20, 12, 5, 0].map(warmthTarget)).toEqual([1, 3, 6, 10, 14]);
   });
 });
@@ -201,7 +202,7 @@ describe('templates, partial and empty results', () => {
     const { top, bottom, shoes } = basic();
     const result = recommend({ items: [top, bottom, shoes], context });
     expect(result.suggestions).toHaveLength(1);
-    expect(result.suggestions[0]).toMatchObject({ completeness: 'complete', missingSlots: [], rulesVersion: 'rules-v1' });
+    expect(result.suggestions[0]).toMatchObject({ completeness: 'complete', missingSlots: [], rulesVersion: 'rules-v2' });
   });
 
   it('fills a one-piece template without a separate top or bottom', () => {
@@ -268,6 +269,47 @@ describe('weather rules stay inactive without weather and apply when it is suppl
     expect(recommend({ items: [warmTop, bottom, shoes], context: hot }).status).toBe('partial');
     expect(recommend({ items: [warmTop, bottom, shoes], context: { ...hot, setting: 'indoors' } }).status).toBe('ideas');
     expect(recommend({ items: [top, bottom, shoes], context: hot }).status).toBe('ideas');
+  });
+
+  it('reports each weather need per idea: met, unknown, lacking, apart or none', () => {
+    const { top, bottom, shoes } = basic();
+    const rainy: EngineContext = { ...context, setting: 'outdoors', rainProbability: 80 };
+    const needs = (items: EngineItem[], ctx: EngineContext) => recommend({ items, context: ctx }).suggestions[0]!.weatherNeeds;
+    expect(needs([top, bottom, shoes, item('layer', { rainRating: 2 })], rainy)).toEqual([{ need: 'rain', status: 'met' }]);
+    expect(needs([top, bottom, shoes, item('layer', { rainRating: null })], rainy)).toEqual([{ need: 'rain', status: 'unknown' }]);
+    expect(needs([top, bottom, shoes, item('layer', { rainRating: 0 })], rainy)).toEqual([{ need: 'rain', status: 'lacking' }]);
+    expect(needs([top, bottom, shoes], rainy)).toEqual([{ need: 'rain', status: 'none' }]);
+    const stormy: EngineContext = { ...rainy, windMetresPerSecond: 12 };
+    const apart = needs([top, bottom, shoes, item('layer', { rainRating: 1, windproof: false }), item('outerwear', { rainRating: 0, windproof: true })], stormy);
+    expect(apart).toEqual([{ need: 'rain', status: 'apart' }, { need: 'wind', status: 'apart' }]);
+    const cold: EngineContext = { ...context, season: 'winter', setting: 'outdoors', temperatureC: 0 };
+    expect(needs([top, { ...bottom, lowerCoverage: 2 }, shoes], cold)).toEqual([{ need: 'cold', status: 'none' }]);
+  });
+
+  it('claims warmth, rain or wind only for a complete idea that is known to meet it', () => {
+    const { top, bottom, shoes } = basic();
+    const shell = item('layer', { rainRating: 1, windproof: true });
+    const stormy: EngineContext = { ...context, setting: 'outdoors', rainProbability: 70, windMetresPerSecond: 11 };
+    const [idea] = recommend({ items: [top, bottom, shoes, shell], context: stormy }).suggestions;
+    expect(idea!.reasons.map(reason => reason.key)).toEqual(['rainReady', 'windReady']);
+    const unknown = recommend({ items: [top, bottom, shoes, { ...shell, windproof: null }], context: stormy }).suggestions[0]!;
+    expect(unknown.reasons.map(reason => reason.key)).not.toContain('windReady');
+    expect(unknown.reasons.map(reason => reason.key)).not.toContain('rainReady');
+    const mild: EngineContext = { ...context, setting: 'outdoors', temperatureC: 20 };
+    const warm = recommend({ items: [{ ...top, warmth: 1 }, { ...bottom, warmth: 2 }, shoes], context: mild }).suggestions[0]!;
+    expect(warm.reasons[0]!.key).toBe('warmth');
+    const unknownWarmth = recommend({ items: [{ ...top, warmth: null }, { ...bottom, warmth: 2 }, shoes], context: mild }).suggestions[0]!;
+    expect(unknownWarmth.reasons.map(reason => reason.key)).not.toContain('warmth');
+    expect(recommend({ items: [{ ...top, warmth: 1 }, { ...bottom, warmth: 2 }, shoes], context: { ...mild, setting: 'indoors' } })
+      .suggestions[0]!.reasons.map(reason => reason.key)).not.toContain('warmth');
+  });
+
+  it('is unchanged by weather it cannot use: none, or staying in', () => {
+    const items = [...Object.values(basic()), item('layer', { warmth: 2 }), item('outerwear', { warmth: 4 })];
+    const plain = recommend({ items, context });
+    const indoors = recommend({ items, context: { ...context, setting: 'indoors' } });
+    expect(indoors.suggestions.map(s => [s.key, s.score, s.reasons])).toEqual(plain.suggestions.map(s => [s.key, s.score, s.reasons]));
+    expect(plain.suggestions.every(s => s.weatherNeeds === undefined)).toBe(true);
   });
 });
 

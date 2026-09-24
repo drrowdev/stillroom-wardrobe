@@ -11,7 +11,7 @@ const scope = () => ({ ownerId: owner, epoch: 4, signal: new AbortController().s
 const items = parseWardrobeRows([{
   id: id(1), owner_id: owner, title: 'Fixture', category: 'top', created_at: '2026-09-01T00:00:00Z', deleted_at: null,
   favourite: false, availability: 'ready', lifecycle: 'active', exclude_suggestions: false,
-  brand: null, tags: [], colours: [], seasons: [], formality: null, purchase_price: null, currency: 'EUR',
+  brand: null, tags: [], colours: [], seasons: [], formality: null, purchase_price: null, currency: 'EUR', warmth: null, lower_coverage: null, min_temp: null, max_temp: null, rain_rating: null, windproof: null, field_provenance: {},
 }], [{ id: id(2), owner_id: owner, item_id: id(1), state: 'ready', main_path: `${owner}/${id(1)}/${id(2)}/main.jpg`, thumb_path: `${owner}/${id(1)}/${id(2)}/thumb.jpg`, alt_text: '' }], owner);
 function link(n: number) {
   return { id: id(100 + n), owner_id: owner, item_id: id(1) as string | null, event_id: id(1000 + n),

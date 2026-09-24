@@ -27,6 +27,8 @@ import { OutfitsScreen } from '../features/outfits/outfits-screen';
 import { OutfitLeaveDialog } from '../features/outfits/editor';
 import { NewOutfit, OutfitDetail } from '../features/outfits/detail';
 import { TodayScreen } from '../features/today/today-screen';
+import { WeatherStore, weatherKey } from '../features/today/use-weather';
+import { weatherConfig } from '../domain/weather';
 import {
   clearRecoveryNotice, leaveRecovery, markNormalAuthStarted, normalAuthStarted,
   recoverySnapshot, subscribeRecovery, type RecoveryCallback,
@@ -100,6 +102,10 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   const images = useMemo(() => new PrivateImages(client, scope), [client, scope]);
   const ai = useMemo(() => new AiClient(client, config, scope), [client, config, scope]);
   const lifecycle = useMemo(() => new ItemLifecycleClient(client, config, scope), [client, config, scope]);
+  const [weatherStore] = useState(() => new WeatherStore());
+  const weather = weatherConfig(profile);
+  const weatherId = weatherKey(weather);
+  useEffect(() => { weatherStore.keep(weatherId); }, [weatherStore, weatherId]);
   const routeLifetime = useRef(new AbortController());
   const routeSignal = useCallback(() => routeLifetime.current.signal, []);
   useEffect(() => {
@@ -217,7 +223,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           : route === 'outfit-new' ? <NewOutfit key={outfitSeed ? outfitSeed.itemIds.join('|') : 'blank'} {...outfitProps} initial={outfitSeed ?? undefined} />
           : route.startsWith('outfit:') ? <OutfitDetail key={route} {...outfitProps} id={outfitRouteId(route.slice(7))} />
           : route === 'today' ? <TodayScreen client={client} scope={scope} images={images} online={online} language={language} t={t}
-            timeZone={profile.timezone} invalidation={outfitsInvalidation} onAddItem={() => changeRoute('add')}
+            timeZone={profile.timezone} invalidation={outfitsInvalidation} weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')}
             onSave={(itemIds, occasion) => { setOutfitSeed({ itemIds, occasion }); changeRoute('outfit-new'); }} />
           : <WardrobeScreen browse={browse} images={images} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={refresh} />}
       </main>

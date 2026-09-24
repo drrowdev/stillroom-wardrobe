@@ -27,7 +27,7 @@ export default defineConfig(({ mode }) => {
             fileName: '_headers',
             source: [
               '/*',
-              `  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' ${backend}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
+              `  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' ${backend} https://geocoding-api.open-meteo.com https://api.open-meteo.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
               '  Referrer-Policy: no-referrer',
               '  X-Content-Type-Options: nosniff',
               '  Permissions-Policy: geolocation=(), microphone=()',

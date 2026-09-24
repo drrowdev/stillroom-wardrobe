@@ -169,7 +169,7 @@ describe('actual SDK Auth and profile transport guard', () => {
         expect(call.bearer).toBe('Bearer ' + link.accessToken);
         expect(call).toMatchObject({ credentials: 'omit', redirect: 'error', cache: 'no-store' });
       }
-      expect(calls[1]!.url.searchParams.get('select')).toBe('owner_id,display_name,ui_language,timezone,currency,version');
+      expect(calls[1]!.url.searchParams.get('select')).toBe('owner_id,display_name,ui_language,timezone,currency,weather_enabled,weather_city,latitude,longitude,version');
       expect(calls[1]!.url.searchParams.get('owner_id')).toBe(`eq.${owner}`);
     } finally { transport.dispose(); }
   });

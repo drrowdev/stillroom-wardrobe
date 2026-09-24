@@ -435,6 +435,21 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .today-hint { margin: 0 0 16px; }
 .today-more { margin-top: 24px; }
 .today-empty { padding: 32px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
+.weather-bar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 24px; margin: -8px 0 24px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.weather-line { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.weather-line p { margin: 0; }
+.weather-line[role="status"] { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+.weather-heading { font-weight: 600; }
+.weather-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.weather-manual-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.weather-manual-form .field { max-width: 160px; }
+.weather-manual-form .field-error { flex-basis: 100%; margin: 0; }
+.weather-search { display: flex; flex-wrap: wrap; gap: 8px; }
+.weather-search input { flex: 1 1 180px; min-width: 0; }
+.weather-results { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.weather-results legend { font-weight: 600; margin-bottom: 8px; }
+.weather-results .choice { display: flex; gap: 8px; align-items: flex-start; overflow-wrap: anywhere; }
+.weather-credit a { color: inherit; }
 @media (max-width: 650px) {
   .today-ideas { grid-template-columns: minmax(0, 1fr); }
   .today-context .field { max-width: none; }

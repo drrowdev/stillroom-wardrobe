@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from './database.types';
 import type { PublicConfig } from './config';
 import type { RecoveryLink } from '../auth/recovery-callback';
+import { profileColumns } from './rows';
 
 export type AppClient = SupabaseClient<Database>;
 export const authStorageKey = 'stillroom.auth';
@@ -50,7 +51,7 @@ export function makeRecoveryClient(config: PublicConfig, link: RecoveryLink | nu
   let retrySeconds = 60;
   let errorDetails: { status: number; code?: string; minimum?: number } | undefined;
   const refuse = () => { throw new Error('Recovery request refused.'); };
-  const projection = 'owner_id,display_name,ui_language,timezone,currency,version';
+  const projection = profileColumns;
   const guardedFetch: typeof fetch = async (input, init) => {
     const address = input instanceof Request ? input.url : String(input);
     let url: URL;

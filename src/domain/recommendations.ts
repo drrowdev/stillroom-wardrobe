@@ -3,7 +3,7 @@ import type { Occasion } from './outfits';
 import { pairScore } from './colour-pairs';
 
 // Deterministic outfit rules (blueprint 09, ADR21). Pure: no clock, randomness, network, language or AI input.
-export const rulesVersion = 'rules-v1';
+export const rulesVersion = 'rules-v2';
 export const seasonCodes = ['spring', 'summer', 'autumn', 'winter'] as const;
 export type Season = (typeof seasonCodes)[number];
 export const formalityTargets: Readonly<Record<Occasion, number>> = { home: 0, everyday: 1, smart: 2, business: 3, formal: 4 };
@@ -16,7 +16,7 @@ export type EngineItem = {
   favourite: boolean; availability: string; lifecycle: string; excludeSuggestions: boolean; deleted: boolean;
 };
 export type EngineFeedback = { itemIds: readonly string[]; vote: 1 | -1 };
-// Weather fields are for Phase 5; without them every weather rule is inactive.
+// Without weather input every weather rule is inactive and the result matches rules-v1. Indoors turns them all off.
 export type EngineContext = {
   ownerId: string; occasion: Occasion; season: Season;
   setting?: 'indoors' | 'outdoors'; temperatureC?: number; rainProbability?: number; windMetresPerSecond?: number;
@@ -31,12 +31,19 @@ export type EngineInput = {
 export type ComponentId = 'W' | 'O' | 'C' | 'S' | 'N' | 'U' | 'F' | 'P';
 export const weights: Readonly<Record<ComponentId, number>> = { W: 25, O: 20, C: 15, S: 10, N: 10, U: 10, F: 5, P: 5 };
 export type Components = Partial<Record<ComponentId, number>>;
-export type ReasonKey = 'season' | 'occasion' | 'colours' | 'favourite' | 'liked';
+export type ReasonKey = 'warmth' | 'rainReady' | 'windReady' | 'season' | 'occasion' | 'colours' | 'favourite' | 'liked';
 export type Reason = { key: ReasonKey; parameters: Readonly<Record<string, string>> };
 export type MissingDetail = 'formality' | 'coverage' | 'rain' | 'wind';
+export type WeatherNeed = 'cold' | 'rain' | 'wind';
+// met: the outfit covers it; unknown: protection isn't recorded; lacking: no owned coat or layer is marked as protective;
+// apart: one is, but not one that also covers the other needs; none: the owner has no coat (or layer, where one is enough).
+export type WeatherNeedStatus = { need: WeatherNeed; status: 'met' | 'unknown' | 'lacking' | 'apart' | 'none' };
+type WeatherClaims = { warmth: boolean; rain: boolean; wind: boolean };
 export type Suggestion = {
   itemIds: string[]; key: string; coreKey: string; score: number; components: Components; reasons: Reason[];
   completeness: 'complete' | 'partial'; missingSlots: Category[]; missingDetails: MissingDetail[];
+  // Present only while a cold, rain or wind rule applies.
+  weatherNeeds?: WeatherNeedStatus[];
   rulesVersion: typeof rulesVersion; contextFingerprint: string;
 };
 export type SuggestionResult = {
@@ -91,7 +98,7 @@ export function eligible(item: EngineItem, context: EngineContext): boolean {
 
 function warmthFit(pieces: readonly EngineItem[], context: EngineContext): number | undefined {
   const clothing = pieces.filter(isClothing);
-  if (context.temperatureC === undefined || !clothing.length || clothing.some(item => item.warmth === null)) return undefined;
+  if (context.setting !== 'outdoors' || context.temperatureC === undefined || !clothing.length || clothing.some(item => item.warmth === null)) return undefined;
   const sum = clothing.reduce((total, item) => total + item.warmth! * (item.category === 'one_piece' || item.category === 'outerwear' ? 2 : 1), 0);
   return Math.max(0, 1 - Math.abs(sum - warmthTarget(context.temperatureC)) / 6);
 }
@@ -120,8 +127,12 @@ export function componentsFor(pieces: readonly EngineItem[], context: EngineCont
   return result;
 }
 
-function reasonsFor(components: Components, pieces: readonly EngineItem[], context: EngineContext, liked: boolean): Reason[] {
+function reasonsFor(components: Components, pieces: readonly EngineItem[], context: EngineContext, liked: boolean, weather: WeatherClaims): Reason[] {
   const candidates: { weight: number; reason: Reason }[] = [];
+  // Weather reasons come first, and only for a requirement the outfit is known to meet.
+  if (weather.warmth) candidates.push({ weight: 100, reason: { key: 'warmth', parameters: {} } });
+  if (weather.rain) candidates.push({ weight: 100, reason: { key: 'rainReady', parameters: {} } });
+  if (weather.wind) candidates.push({ weight: 100, reason: { key: 'windReady', parameters: {} } });
   const add = (id: ComponentId, ok: boolean, reason: Reason) => {
     if (ok && components[id] !== undefined) candidates.push({ weight: weights[id] * components[id]!, reason });
   };
@@ -146,20 +157,29 @@ function itemRank(context: EngineContext) {
 }
 
 type Cover = { categories: Category[]; accepts: (item: EngineItem) => boolean };
-function coverRequirement(context: EngineContext, buckets: ReadonlyMap<Category, EngineItem[]>): { cover: Cover | null; unmet: MissingDetail[]; cold: boolean; required: boolean } {
-  if (context.setting !== 'outdoors') return { cover: null, unmet: [], cold: false, required: false };
+type CoverRequirement = { cover: Cover | null; unmet: MissingDetail[]; cold: boolean; required: boolean; needs: WeatherNeedStatus[] };
+function coverRequirement(context: EngineContext, buckets: ReadonlyMap<Category, EngineItem[]>): CoverRequirement {
+  if (context.setting !== 'outdoors') return { cover: null, unmet: [], cold: false, required: false, needs: [] };
   const cold = context.temperatureC !== undefined && context.temperatureC <= 5;
   const rain = context.rainProbability !== undefined && context.rainProbability >= 60;
   const wind = context.windMetresPerSecond !== undefined && context.windMetresPerSecond >= 10;
-  if (!cold && !rain && !wind) return { cover: null, unmet: [], cold, required: false };
+  if (!cold && !rain && !wind) return { cover: null, unmet: [], cold, required: false, needs: [] };
+  const active = ([['cold', cold], ['rain', rain], ['wind', wind]] as const).filter(([, on]) => on).map(([need]) => need);
   const categories: Category[] = cold ? ['outerwear'] : ['layer', 'outerwear'];
   const accepts = (item: EngineItem) => (!rain || (item.rainRating ?? 0) >= 1) && (!wind || item.windproof === true);
   const pool = categories.flatMap(category => buckets.get(category) ?? []);
-  if (pool.some(accepts)) return { cover: { categories, accepts }, unmet: [], cold, required: true };
+  if (pool.some(accepts)) return { cover: { categories, accepts }, unmet: [], cold, required: true, needs: active.map(need => ({ need, status: 'met' })) };
   const unmet: MissingDetail[] = [];
   if (rain && pool.some(item => item.rainRating === null)) unmet.push('rain');
   if (wind && pool.some(item => item.windproof === null)) unmet.push('wind');
-  return { cover: null, unmet, cold, required: true };
+  // Without a suitable cover the outfit meets none of these; each status says why, without guessing at unknown protection.
+  const status = (need: WeatherNeed): WeatherNeedStatus['status'] => {
+    if (!pool.length) return 'none';
+    if (need === 'cold') return 'lacking';
+    if (unmet.includes(need)) return 'unknown';
+    return pool.some(item => need === 'rain' ? (item.rainRating ?? 0) >= 1 : item.windproof === true) ? 'apart' : 'lacking';
+  };
+  return { cover: null, unmet, cold, required: true, needs: active.map(need => ({ need, status: status(need) })) };
 }
 
 type Step = { categories: Category[]; optional: boolean; accepts?: (item: EngineItem) => boolean };
@@ -238,13 +258,16 @@ export function recommend(input: EngineInput): SuggestionResult {
   const base = { expansions: 0, passes: 0 };
   if (!pool.length) return { status: 'empty', suggestions: [], missingDetails: [], ...base };
 
-  const make = (pieces: EngineItem[], extra: Pick<Suggestion, 'completeness' | 'missingSlots' | 'missingDetails'>): Suggestion => {
+  const make = (pieces: EngineItem[], extra: Pick<Suggestion, 'completeness' | 'missingSlots' | 'missingDetails' | 'weatherNeeds'>): Suggestion => {
     const ordered = [...pieces].sort((a, b) => displayOrder.indexOf(a.category) - displayOrder.indexOf(b.category));
     const key = combinationKey(ordered.map(item => item.id));
     const components = componentsFor(ordered, context, liked);
+    const complete = extra.completeness === 'complete';
+    const met = (need: WeatherNeed) => complete && Boolean(extra.weatherNeeds?.some(entry => entry.need === need && entry.status === 'met'));
+    const claims = { warmth: complete && (warmthFit(ordered, context) ?? 0) >= 0.8, rain: met('rain'), wind: met('wind') };
     return {
       itemIds: ordered.map(item => item.id), key, coreKey: combinationKey(coreIds(ordered)), score: combineScore(components), components,
-      reasons: reasonsFor(components, ordered, context, liked.has(key)), rulesVersion, contextFingerprint: fingerprint, ...extra,
+      reasons: reasonsFor(components, ordered, context, liked.has(key), claims), rulesVersion, contextFingerprint: fingerprint, ...extra,
     };
   };
 
@@ -278,11 +301,11 @@ export function recommend(input: EngineInput): SuggestionResult {
   const missingDetails: MissingDetail[] = [];
   if (strict && pool.some(item => isCore(item) && item.formality === null)) missingDetails.push('formality');
   const buckets = strict ? bucketsFor(pool.filter(item => !isCore(item) || item.formality !== null && item.formality >= target - 1)) : all;
-  const { cover, unmet, cold, required } = coverRequirement(context, buckets);
+  const { cover, unmet, cold, required, needs } = coverRequirement(context, buckets);
   for (const detail of unmet) if (!missingDetails.includes(detail)) missingDetails.push(detail);
   const extra: Step[] = cover ? [{ categories: cover.categories, optional: false, accepts: cover.accepts }] : [];
   if (cover && cold) extra.push({ categories: ['layer'], optional: true });
-  if (!cover && (context.season === 'autumn' || context.season === 'winter' || context.temperatureC !== undefined)) {
+  if (!cover && (context.season === 'autumn' || context.season === 'winter' || context.setting === 'outdoors' && context.temperatureC !== undefined)) {
     extra.push({ categories: ['layer'], optional: true }, { categories: ['outerwear'], optional: true });
   }
   let valid: Suggestion[] = [];
@@ -307,7 +330,8 @@ export function recommend(input: EngineInput): SuggestionResult {
         else details.push('coverage');
       }
       const missingSlots: Category[] = required && !cover ? ['outerwear'] : [];
-      const suggestion = make(state.pieces, { completeness: details.length || missingSlots.length ? 'partial' : 'complete', missingSlots, missingDetails: [...unmet, ...details] });
+      const suggestion = make(state.pieces, { completeness: details.length || missingSlots.length ? 'partial' : 'complete', missingSlots,
+        missingDetails: [...unmet, ...details], ...needs.length && { weatherNeeds: needs } });
       if (skip.has(suggestion.coreKey)) continue;
       valid.push(suggestion);
     }

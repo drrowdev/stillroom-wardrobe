@@ -13,7 +13,8 @@ function item(n: number, fields: Partial<WardrobeItem> = {}): WardrobeItem {
   return {
     id: id(n), ownerId: owner, title: `Item ${n}`, category: 'top', createdAt: '2026-09-01T00:00:00Z', imageId: id(100 + n),
     mainPath: 'm', thumbPath: 't', altText: '', favourite: false, availability: 'available', lifecycle: 'active',
-    excludeSuggestions: false, colours: [], seasons: [], formality: null, ...fields,
+    excludeSuggestions: false, colours: [], seasons: [], formality: null,
+    weather: { warmth: null, lowerCoverage: null, minTemp: null, maxTemp: null, rainRating: null, windproof: null }, ...fields,
   } as WardrobeItem;
 }
 
@@ -43,10 +44,12 @@ describe('I15 suggestion data', () => {
   });
 
   it('offers only active clothes that have a photo', () => {
-    const pool = suggestionPool([item(1), item(2, { lifecycle: 'archived' }), item(3, { imageId: '' }), item(4, { availability: 'laundry' })]);
+    const pool = suggestionPool([item(1), item(2, { lifecycle: 'archived' }), item(3, { imageId: '' }), item(4, { availability: 'laundry', weather: { warmth: 3, lowerCoverage: 2, minTemp: null, maxTemp: null, rainRating: 1, windproof: true } })]);
     expect(pool.map(entry => entry.id)).toEqual([id(1), id(4)]);
     expect(pool[1]!.availability).toBe('laundry');
-    expect(pool.every(entry => entry.warmth === null && entry.minTemp === null && !entry.deleted)).toBe(true);
+    expect(pool[0]!.warmth).toBeNull();
+    expect(pool[1]).toMatchObject({ warmth: 3, lowerCoverage: 2, rainRating: 1, windproof: true, minTemp: null });
+    expect(pool.every(entry => !entry.deleted)).toBe(true);
   });
 
   it('uses the profile time zone for today and falls back when it is invalid', () => {

@@ -2,11 +2,17 @@ import { isCategory, isRecord, isUuid, type WardrobeItem } from '../domain/wardr
 import type { AppClient } from './client';
 import type { OwnerScope } from '../auth/session';
 import { AppError, requireSuccess, throwIfAborted } from './errors';
-import { availability, lifecycle, seasons, textLimits, collectionLimits } from '../domain/garment-fields';
+import { availability, lifecycle, seasons, textLimits, collectionLimits, integerRanges } from '../domain/garment-fields';
+import { parseFieldProvenance, type FieldProvenance } from '../domain/attribute-provenance';
+import { confirmedWeather } from '../domain/weather';
 import { canonicalPrice, validDateOnly } from '../i18n/format';
 
 function text(value: unknown, maximum: number): value is string {
   return typeof value === 'string' && !value.includes('\0') && [...value].length <= maximum;
+}
+function whole(value: unknown, field: keyof typeof integerRanges): value is number | null {
+  const [low, high] = integerRanges[field];
+  return value === null || typeof value === 'number' && Number.isInteger(value) && value >= low && value <= high;
 }
 function collection(value: unknown, maximum: number): value is string[] {
   return Array.isArray(value) && value.length <= maximum
@@ -54,6 +60,11 @@ export function parseWardrobeRows(items: unknown, images: unknown, ownerId: stri
       || !item.seasons.every(code => seasons.some(season => season === code))
       || !(item.formality === null || typeof item.formality === 'number' && Number.isInteger(item.formality) && item.formality >= 0 && item.formality <= 4)
       || typeof item.currency !== 'string' || !/^[A-Z]{3}$/.test(item.currency)) throw new AppError('error.unavailable');
+    if (!whole(item.warmth, 'warmth') || !whole(item.lower_coverage, 'lower_coverage') || !whole(item.min_temp, 'min_temp')
+      || !whole(item.max_temp, 'max_temp') || !whole(item.rain_rating, 'rain_rating')
+      || !(item.windproof === null || typeof item.windproof === 'boolean')) throw new AppError('error.unavailable');
+    let provenance: FieldProvenance;
+    try { provenance = parseFieldProvenance(item.field_provenance); } catch { throw new AppError('error.unavailable'); }
     let price: string | null;
     try { price = item.purchase_price === null ? null : canonicalPrice(item.purchase_price); }
     catch { throw new AppError('error.unavailable'); }
@@ -65,6 +76,8 @@ export function parseWardrobeRows(items: unknown, images: unknown, ownerId: stri
       favourite: item.favourite, availability: available, lifecycle: state, excludeSuggestions: item.exclude_suggestions,
       brand: item.brand, tags: [...item.tags], colours: [...item.colours], seasons: [...item.seasons],
       formality: item.formality, purchasePrice: price, currency: item.currency,
+      weather: confirmedWeather({ warmth: item.warmth, lower_coverage: item.lower_coverage, min_temp: item.min_temp, max_temp: item.max_temp,
+        rain_rating: item.rain_rating, windproof: item.windproof }, provenance),
     }];
   });
 }
@@ -76,7 +89,7 @@ export async function loadWardrobe(client: AppClient, scope: OwnerScope, signal:
   let itemCursor: { createdAt: string; id: string } | null = null;
   for (;;) {
     throwIfAborted(lifetime);
-    let query = client.from('items').select('id,owner_id,title,category,created_at,deleted_at,favourite,availability,lifecycle,exclude_suggestions,brand,tags,colours,seasons,formality,purchase_price,currency')
+    let query = client.from('items').select('id,owner_id,title,category,created_at,deleted_at,favourite,availability,lifecycle,exclude_suggestions,brand,tags,colours,seasons,formality,purchase_price,currency,warmth,lower_coverage,min_temp,max_temp,rain_rating,windproof,field_provenance')
       .eq('owner_id', scope.ownerId).is('deleted_at', null)
       .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(500);
     if (itemCursor) query = query.or(`created_at.lt.${itemCursor.createdAt},and(created_at.eq.${itemCursor.createdAt},id.lt.${itemCursor.id})`);

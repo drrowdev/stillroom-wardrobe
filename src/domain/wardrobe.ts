@@ -1,5 +1,6 @@
 import type { MessageKey } from '../i18n';
 import type { GarmentValues } from './garment-fields';
+import type { ItemWeather } from './weather';
 
 export const categories = ['top', 'bottom', 'one_piece', 'footwear', 'layer', 'outerwear', 'accessory'] as const;
 export type Category = (typeof categories)[number];
@@ -38,6 +39,8 @@ export type WardrobeItem = {
   formality: number | null;
   purchasePrice: string | null;
   currency: string;
+  // Only facts the owner confirmed (and visible coverage observed in a photo); anything else is null.
+  weather: ItemWeather;
 };
 
 export function eligibleForSuggestions(item: WardrobeItem): boolean {

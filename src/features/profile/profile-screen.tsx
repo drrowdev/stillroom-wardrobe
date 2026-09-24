@@ -7,6 +7,7 @@ import { errorKey, isAborted } from '../../data/errors';
 import type { Language, MessageKey, Translate } from '../../i18n';
 import { LanguageSettings } from '../settings/language-settings';
 import { AiSettings } from '../settings/ai-settings';
+import { WeatherSettings } from '../settings/weather-settings';
 import type { AiClient } from '../../data/ai';
 import { currencyOptions, timeZoneOptions } from './profile-options';
 
@@ -31,7 +32,7 @@ export function ProfileScreen({ ai, unresolved, controller, scope, profile, chan
   if (seen !== profile) {
     setSeen(profile);
     if (!dirty) { setBase(profile); setFields(profileFields(profile)); }
-    else if (change?.kind === 'language' && change.previous.version === base.version
+    else if ((change?.kind === 'language' || change?.kind === 'weather') && change.previous.version === base.version
       && sameProfileFields(change.previous, base) && sameProfileFields(profile, base)) setBase(profile);
     else if (change?.kind === 'ai' && change.previous.version === base.version && profile.version === base.version + 1
       && sameProfileFields(change.previous, base) && sameProfileFields(profile, base)
@@ -93,6 +94,7 @@ export function ProfileScreen({ ai, unresolved, controller, scope, profile, chan
         <LanguageSettings controller={controller} scope={scope} profile={profile} language={language} busy={busy || reading} online={online} t={t} />
         <p className="privacy-note">{t('profile.privacy')}</p>
       </section>
+      <WeatherSettings controller={controller} scope={scope} profile={profile} busy={busy || reading} language={language} online={online} t={t} />
       <AiSettings ai={ai} controller={controller} scope={scope} profile={profile} busy={busy || reading}
         unresolved={unresolved} language={language} online={online} t={t} />
     </div>

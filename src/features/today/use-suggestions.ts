@@ -6,7 +6,7 @@ import { loadWardrobe } from '../../data/items';
 import { loadSuggestionInputs, readVote, writeVote, type Vote, type WriteOutcome } from '../../data/suggestions';
 import type { Occasion } from '../../domain/outfits';
 import {
-  combinationKey, recommend, seasonForDate, type EngineFeedback, type EngineItem, type Season, type SuggestionResult,
+  combinationKey, recommend, seasonForDate, type EngineContext, type EngineFeedback, type EngineItem, type Season, type SuggestionResult,
 } from '../../domain/recommendations';
 import type { WardrobeItem } from '../../domain/wardrobe';
 import type { MessageKey } from '../../i18n';
@@ -14,7 +14,7 @@ import type { MessageKey } from '../../i18n';
 export function engineItem(item: WardrobeItem): EngineItem {
   return {
     id: item.id, ownerId: item.ownerId, category: item.category, colours: item.colours, seasons: item.seasons,
-    formality: item.formality, warmth: null, lowerCoverage: null, minTemp: null, maxTemp: null, rainRating: null, windproof: null,
+    formality: item.formality, ...item.weather,
     favourite: item.favourite, availability: item.availability, lifecycle: item.lifecycle,
     excludeSuggestions: item.excludeSuggestions, deleted: false,
   };
@@ -63,7 +63,10 @@ export function rankingVotes(fresh: ReadonlyMap<string, Vote>, ranked: ReadonlyM
   return result;
 }
 
-export function useSuggestions(client: AppClient, scope: OwnerScope, online: boolean, invalidation: number, occasion: Occasion, season: Season) {
+export type WeatherContext = Pick<EngineContext, 'setting' | 'temperatureC' | 'rainProbability' | 'windMetresPerSecond'>;
+
+export function useSuggestions(client: AppClient, scope: OwnerScope, online: boolean, invalidation: number, occasion: Occasion, season: Season,
+  weather: WeatherContext = {}) {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
   const [tick, setTick] = useState(0);
@@ -72,6 +75,12 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   const [pending, setPending] = useState<Pending | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [unresolved, setUnresolved] = useState<Unresolved | null>(null);
+  // While a choice is being written or is unsettled the page keeps its ideas in place.
+  const settling = pending !== null || unresolved !== null;
+  // New weather (a forecast arriving, a manual temperature, staying in) redraws the ideas, but not while a choice is unsettled.
+  const weatherId = JSON.stringify([weather.setting ?? null, weather.temperatureC ?? null, weather.rainProbability ?? null, weather.windMetresPerSecond ?? null]);
+  const [applied, setApplied] = useState({ id: weatherId, weather });
+  if (!settling && applied.id !== weatherId) setApplied({ id: weatherId, weather });
   const wasOnline = useRef(online);
   const votesRef = useRef(votes);
   const writes = useRef<AbortController | null>(null);
@@ -106,21 +115,19 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
     writes.current = controller;
     return () => controller.abort();
   }, []);
-  // A new occasion or season starts again from the first ideas.
+  // A new occasion, season or weather starts again from the first ideas.
   useEffect(() => {
     changedOnPage.current = new Set();
     setRun({ feedback: feedbackFrom(votesRef.current), skip: new Set(), paged: false });
     setFailed(null); setUnresolved(null);
-  }, [occasion, season]);
+  }, [occasion, season, applied.id]);
 
   const engineItems = useMemo(() => suggestionPool(data?.items ?? []), [data]);
   const result: SuggestionResult | null = useMemo(() => data ? recommend({
-    items: engineItems, context: { ownerId: scope.ownerId, occasion, season },
+    items: engineItems, context: { ownerId: scope.ownerId, occasion, season, ...applied.weather },
     feedback: run.feedback, excludedPairs: data.excludedPairs, skip: run.skip,
-  }) : null, [data, engineItems, scope.ownerId, occasion, season, run]);
+  }) : null, [data, engineItems, scope.ownerId, occasion, season, applied, run]);
 
-  // While a choice is being written or is unsettled the page keeps its ideas in place.
-  const settling = pending !== null || unresolved !== null;
   const more = useCallback(() => {
     if (!result || settling) return;
     const shown = result.suggestions.map(suggestion => suggestion.coreKey);
