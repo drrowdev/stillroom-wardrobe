@@ -169,7 +169,10 @@ test('I15 a stored Not for me whose reply and check both fail is settled by Try 
   await card.getByRole('button', { name: text('today.notForMe'), exact: true }).click();
   await expect(card.getByText(text('today.voteFailed'), { exact: true })).toBeVisible();
   expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
-  for (const key of ['today.like', 'today.notForMe'] as const) await expect(card.getByRole('button', { name: text(key), exact: true })).toBeDisabled();
+  for (const other of [cards(page).nth(0), cards(page).nth(2), card]) {
+    for (const key of ['today.like', 'today.notForMe'] as const) await expect(other.getByRole('button', { name: text(key), exact: true })).toBeDisabled();
+  }
+  await expect(page.getByRole('button', { name: text('common.retry'), exact: true })).toHaveCount(1);
   await card.getByRole('button', { name: text('common.retry'), exact: true }).click();
   await expect(card).toContainText(text('today.hidden'));
   await expect(card.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
@@ -177,6 +180,29 @@ test('I15 a stored Not for me whose reply and check both fail is settled by Try 
   await card.getByRole('button', { name: text('common.undo'), exact: true }).click();
   await expect(card.locator('.outfit-component-name')).toHaveText(hiddenNames);
   expect(api.suggestionFeedback).toHaveLength(0);
+});
+
+test('I15 an unsettled choice keeps its card and Try again through a reconnect refresh', async ({ page }) => {
+  const { api } = await start(page);
+  const card = cards(page).nth(1);
+  api.feedbackControl.faults.push({ method: 'POST', commit: true, fail: 503 }, { method: 'READ', commit: false, fail: 500 });
+  await card.getByRole('button', { name: text('today.notForMe'), exact: true }).click();
+  await expect(card.getByRole('button', { name: text('common.retry'), exact: true })).toBeVisible();
+  const reads = () => api.requests.filter(entry => entry.path === '/rest/v1/suggestion_feedback' && entry.method === 'GET').length;
+  const before = reads();
+  await page.context().setOffline(true);
+  await expect(page.locator('.notice-offline')).toBeVisible();
+  await page.context().setOffline(false);
+  await expect.poll(reads).toBeGreaterThan(before);
+  await page.waitForTimeout(500);
+  await expect(cards(page)).toHaveCount(3);
+  const retry = card.getByRole('button', { name: text('common.retry'), exact: true });
+  await expect(retry).toBeEnabled();
+  await retry.click();
+  await expect(card).toContainText(text('today.hidden'));
+  await expect(card.getByRole('button', { name: text('common.undo'), exact: true })).toBeEnabled();
+  await expect(page.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
+  expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
 });
 
 test('I15 an older refresh never brings back a card hidden while it was loading', async ({ page }) => {
@@ -290,6 +316,7 @@ test('I15 Save as outfit opens a filled-in editor and saves once through save_ou
 test('I15 offline keeps ideas visible but disables saving and choices; a language change keeps the same ideas', async ({ page }) => {
   const paths = traffic(page);
   await start(page);
+  await expect(cards(page)).toHaveCount(3);
   const before = await allNames(page);
   await page.context().setOffline(true);
   await expect(page.locator('.notice-offline')).toBeVisible();

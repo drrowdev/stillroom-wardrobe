@@ -134,14 +134,16 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
 
   const write = useCallback(async (key: string, kind: Pending['kind'], next: Vote | null) => {
     const signal = writes.current?.signal;
-    if (!signal || pending || !online) return;
+    // One uncertain choice at a time: until it is settled only its own Try again may write.
+    if (!signal || pending || !online || unresolved && unresolved.key !== key) return;
     setPending({ key, kind }); setFailed(null);
     setUnresolved(current => current?.key === key ? null : current);
+    // A pending or unsettled card keeps its place through a refresh.
+    changedOnPage.current.add(key);
     const attempt = { ownerId: scope.ownerId, epoch: scope.epoch, key, choice: next };
     const settle = (stored: Vote | null) => {
       seq.current += 1;
       confirmed.current.set(key, { vote: stored, seq: seq.current });
-      changedOnPage.current.add(key);
       setVotes(current => {
         const updated = new Map(current);
         if (stored === null) updated.delete(key); else updated.set(key, stored);
@@ -165,7 +167,7 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
     } finally {
       if (!signal.aborted) setPending(null);
     }
-  }, [client, scope, online, pending]);
+  }, [client, scope, online, pending, unresolved]);
 
   return {
     data, error, result, votes, pending, failed, unresolved: unresolved?.key ?? null, paged: run.paged, reload, more, startOver,

@@ -69,7 +69,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
         {result.missingDetails.includes('formality') && <p className="muted today-hint">{t('today.missingFormality')}</p>}
         <div className="today-ideas">
           {result.suggestions.map((suggestion, index) => <Idea key={suggestion.key} suggestion={suggestion} number={index + 1} byId={byId} images={images} t={t}
-            online={online} vote={ideas.votes.get(suggestion.key) ?? null} pending={ideas.pending} failed={ideas.failed === suggestion.key} unresolved={ideas.unresolved === suggestion.key} onRetry={ideas.retry}
+            online={online} vote={ideas.votes.get(suggestion.key) ?? null} pending={ideas.pending} failed={ideas.failed === suggestion.key} unresolved={ideas.unresolved === suggestion.key} locked={ideas.unresolved !== null} onRetry={ideas.retry}
             onSave={() => onSave(suggestion.itemIds, occasion)} onLike={() => ideas.like(suggestion.key)}
             onHide={() => ideas.hide(suggestion.key)} onUndo={() => ideas.undo(suggestion.key)} />)}
         </div>
@@ -91,13 +91,13 @@ function Pieces({ suggestion, byId, images, t }: { suggestion: Suggestion; byId:
 
 type IdeaProps = {
   suggestion: Suggestion; number: number; byId: ReadonlyMap<string, WardrobeItem>; images: PrivateImages; t: Translate; online: boolean;
-  vote: 1 | -1 | null; pending: Pending | null; failed: boolean; unresolved: boolean;
+  vote: 1 | -1 | null; pending: Pending | null; failed: boolean; unresolved: boolean; locked: boolean;
   onSave: () => void; onLike: () => void; onHide: () => void; onUndo: () => void; onRetry: () => void;
 };
-function Idea({ suggestion, number, byId, images, t, online, vote, pending, failed, unresolved, onSave, onLike, onHide, onUndo, onRetry }: IdeaProps) {
+function Idea({ suggestion, number, byId, images, t, online, vote, pending, failed, unresolved, locked, onSave, onLike, onHide, onUndo, onRetry }: IdeaProps) {
   const title = `idea-${number}-title`;
-  // Until an uncertain choice is settled, only Try again is offered on this card.
-  const busy = pending !== null || unresolved;
+  // Until an uncertain choice is settled, only its Try again is offered on the page.
+  const busy = pending !== null || locked;
   const problem = unresolved
     ? <div className="notice notice-error" role="alert"><span>{t('today.voteFailed')}</span><button type="button" className="text-button" disabled={!online || pending !== null} onClick={onRetry}>{t('common.retry')}</button></div>
     : failed && <p className="notice notice-error" role="alert">{t('today.voteFailed')}</p>;
