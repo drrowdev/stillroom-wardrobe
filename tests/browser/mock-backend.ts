@@ -17,6 +17,7 @@ export const owners = {
   b: '10000000-0000-4000-8000-000000000002',
 };
 type JsonRow = Record<string, unknown>;
+export type FeedbackFault = { method: 'POST' | 'DELETE' | 'READ'; commit: boolean; fail: number | 'abort' };
 const itemDefaults = () => ({
   subcategory: null, colours: [], pattern: null, sleeve_length: null, garment_length: null,
   brand: null, size_label: null, material: null, seasons: [],
@@ -507,6 +508,23 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   const wearLinks: JsonRow[] = [];
   const outfits: JsonRow[] = [];
   const outfitItems: JsonRow[] = [];
+  const combinationRules: JsonRow[] = [];
+  const suggestionFeedback: JsonRow[] = [];
+  // Scripts feedback faults in order (a committed write can still lose its reply) and can hold list reads after taking their snapshot.
+  const feedbackControl: { faults: FeedbackFault[]; hold: (() => void) | null } = { faults: [], hold: null };
+  let feedbackReadGate: Promise<void> | null = null;
+  let feedbackReadsHeld = 0;
+  const takeFeedbackFault = (method: string) => {
+    const index = feedbackControl.faults.findIndex(fault => fault.method === method);
+    return index < 0 ? null : feedbackControl.faults.splice(index, 1)[0]!;
+  };
+  const holdFeedbackReads = () => {
+    feedbackReadGate = new Promise<void>(resolve => { feedbackControl.hold = resolve; });
+    return {
+      held: () => feedbackReadsHeld,
+      release: () => { feedbackReadGate = null; feedbackControl.hold?.(); feedbackControl.hold = null; },
+    };
+  };
   // Scripts the next outfit save or outfit reads: lost replies, commits whose reply is lost, and failed rereads.
   const outfitControl: { nextSave: null | { mode: 'lost' | 'committedLost' | 'transport' } | { mode: 'error'; status: number; body: unknown };
     readFailures: number; readFailureStatus: number; saves: number } = { nextSave: null, readFailures: 0, readFailureStatus: 500, saves: 0 };
@@ -642,6 +660,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       }
       return route.fulfill({ status, json: body, headers: { 'x-supabase-api-version': '2024-01-01' } });
     };
+    const failFeedback = (fault: FeedbackFault) => fault.fail === 'abort'
+      ? route.abort('failed') : json({ message: 'Service unavailable' }, fault.fail);
     if (method === 'OPTIONS') {
       if (url.pathname.startsWith(storagePrefix)) {
         const allowed = !url.search && receiver.reservedOwner(url.pathname) && receiver.preflightAllowed(request.headers());
@@ -1162,6 +1182,56 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (script?.mode === 'committedLost') { await json({ message: 'Service unavailable' }, 503); return; }
       await json(version); return;
     }
+    if (url.pathname === '/rest/v1/combination_rules' || url.pathname === '/rest/v1/suggestion_feedback') {
+      const store = url.pathname === '/rest/v1/combination_rules' ? combinationRules : suggestionFeedback;
+      if (!owner || method !== 'POST' && url.searchParams.get('owner_id') !== `eq.${owner}`) { await json({ code: '42501' }, 403); return; }
+      const signatureOf = (ids: string[]) => createHash('sha256').update(ids.join('|')).digest('hex');
+      if (method === 'GET') {
+        const expected = store === combinationRules ? 'id,owner_id,item_low,item_high' : 'id,owner_id,item_ids,signature,vote';
+        const exact = url.searchParams.get('signature');
+        if (store === suggestionFeedback && exact !== null) {
+          if (url.searchParams.get('select') !== expected || url.searchParams.get('limit') !== '2' || !/^eq\.[0-9a-f]{64}$/.test(exact)) { await json({ code: '22023' }, 400); return; }
+          const fault = takeFeedbackFault('READ');
+          if (fault) { await failFeedback(fault); return; }
+          await json(suggestionFeedback.filter(row => row.owner_id === owner && row.signature === exact.slice(3)).map(row => ({ ...row }))); return;
+        }
+        const cursor = url.searchParams.get('id');
+        if (url.searchParams.get('select') !== expected || url.searchParams.get('order') !== 'id.asc' || url.searchParams.get('limit') !== '500'
+          || cursor && (!cursor.startsWith('gt.') || !isUuid(cursor.slice(3)))) { await json({ code: '22023' }, 400); return; }
+        const snapshot = store.filter(row => row.owner_id === owner && (!cursor || String(row.id) > cursor.slice(3)))
+          .sort((a, b) => String(a.id) < String(b.id) ? -1 : 1).slice(0, 500).map(row => ({ ...row }));
+        if (store === suggestionFeedback && feedbackReadGate) { feedbackReadsHeld++; await feedbackReadGate; }
+        await json(snapshot).catch(() => undefined); return;
+      }
+      if (store !== suggestionFeedback) { await json({ code: '42501' }, 403); return; }
+      const fault = takeFeedbackFault(method);
+      if (fault && !fault.commit) { await failFeedback(fault); return; }
+      if (method === 'POST') {
+        const raw = request.postDataJSON() as JsonRow | JsonRow[];
+        const body = Array.isArray(raw) ? raw[0]! : raw;
+        const ids = body.item_ids;
+        if (url.searchParams.get('on_conflict') !== 'owner_id,signature' || body.owner_id !== owner || (body.vote !== 1 && body.vote !== -1)
+          || !Array.isArray(ids) || !ids.length || ids.length > 12 || new Set(ids).size !== ids.length
+          || ids.some(value => !items.some(item => item.id === value && item.owner_id === owner))) { await json({ code: 'P0001', message: 'Invalid selection' }, 400); return; }
+        const sorted = [...ids].map(String).sort();
+        const signature = signatureOf(sorted);
+        const existing = suggestionFeedback.find(row => row.owner_id === owner && row.signature === signature);
+        if (existing) existing.vote = body.vote;
+        else suggestionFeedback.push({ id: randomUUID(), owner_id: owner, item_ids: sorted, signature, vote: body.vote, created_at: new Date().toISOString() });
+        if (fault) { await failFeedback(fault); return; }
+        await route.fulfill({ status: 201, body: '' }); return;
+      }
+      if (method === 'DELETE') {
+        const signature = url.searchParams.get('signature');
+        if (!signature?.startsWith('eq.')) { await json({ code: '22023' }, 400); return; }
+        for (let i = suggestionFeedback.length - 1; i >= 0; i--) {
+          if (suggestionFeedback[i]!.owner_id === owner && suggestionFeedback[i]!.signature === signature.slice(3)) suggestionFeedback.splice(i, 1);
+        }
+        if (fault) { await failFeedback(fault); return; }
+        await route.fulfill({ status: 204 }); return;
+      }
+      await json({ code: '42501' }, 403); return;
+    }
     const table = url.pathname === '/rest/v1/items' ? items : url.pathname === '/rest/v1/item_images' ? images : null;
     if (table) {
       if (method === 'POST') {
@@ -1307,7 +1377,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, outfitControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, feedbackControl, holdFeedbackReads, outfitControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

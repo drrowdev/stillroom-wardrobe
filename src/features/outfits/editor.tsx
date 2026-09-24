@@ -50,6 +50,7 @@ function focusFirstInvalid(form: HTMLFormElement | null) {
 export type EditorProps = {
   client: AppClient; scope: OwnerScope; images: PrivateImages; online: boolean; t: Translate;
   record: OutfitRecord | null; components: ReadonlyMap<string, OutfitComponent>;
+  initial?: Pick<OutfitDraft, 'itemIds' | 'occasion'>;
   picker: { data: WardrobeItem[] | null; error: MessageKey | null; reload: () => void };
   invalidation: number;
   removed: boolean;
@@ -67,7 +68,9 @@ export function OutfitEditor(props: EditorProps) {
   const [createId] = useState(() => crypto.randomUUID());
   const [form, setForm] = useState(() => {
     const baseline = record ? draftFromRecord(record) : emptyDraft();
-    return { baseline, version: record?.version ?? null, draft: baseline };
+    // A suggestion opens as an unsaved draft, so leaving it asks first.
+    const draft = !record && props.initial ? { ...baseline, itemIds: [...props.initial.itemIds], occasion: props.initial.occasion } : baseline;
+    return { baseline, version: record?.version ?? null, draft };
   });
   const [phase, setPhase] = useState<Phase>('idle');
   const [submitted, setSubmitted] = useState(false);

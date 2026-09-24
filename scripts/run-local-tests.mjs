@@ -90,6 +90,14 @@ async function main() {
   });
   if (outfitCode !== 0) { process.exitCode = outfitCode; return; }
   if (suite === 'integration') {
+    const feedbackCode = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [path.join(ROOT, 'tests', suite, 'feedback.sessions.mjs')], {
+        cwd: ROOT, env, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'],
+      });
+      child.on('error', () => resolve(2));
+      child.on('close', (value) => resolve(value ?? 2));
+    });
+    if (feedbackCode !== 0) { process.exitCode = feedbackCode; return; }
     const recoveryCode = await new Promise((resolve) => {
       const child = spawn(process.execPath, [
         path.join(ROOT, 'node_modules', '@playwright', 'test', 'cli.js'),

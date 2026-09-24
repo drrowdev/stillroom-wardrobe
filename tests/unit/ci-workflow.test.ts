@@ -47,6 +47,8 @@ const browserArtifacts: Record<string, string[]> = {
     'i10b-visual/deletion-resume-sv-mobile.png'],
   'i11-outfits-ui': ['list-en-desktop', 'editor-en-desktop', 'detail-en-desktop', 'list-fi-mobile', 'editor-fi-mobile', 'detail-fi-mobile']
     .map((name) => `i11-visual/${name}.png`),
+  'i15-today-ui': ['ideas-en-desktop', 'missing-en-desktop', 'ideas-fi-mobile', 'missing-fi-mobile']
+    .map((name) => `i15-visual/${name}.png`),
 };
 
 describe('CI workflow browser split', () => {
@@ -66,7 +68,7 @@ describe('CI workflow browser split', () => {
     expect(projects).toEqual(['chromium', 'mobile', 'webkit-photo']);
     expect(config).toContain("testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', "
       + "'item-details.spec.ts', 'garment-fields.spec.ts', 'ai-photo-first.spec.ts', 'items.spec.ts', 'ux-l1a.spec.ts', "
-      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts'],");
+      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts'],");
     expect(config).toContain('  failOnFlakyTests: Boolean(process.env.CI),\n');
     expect(config).toContain('  forbidOnly: Boolean(process.env.CI),\n');
     const app = job('app'), webkit = job('webkit-photo');
@@ -90,10 +92,10 @@ describe('CI workflow browser split', () => {
     for (const forbidden of ['upload-artifact', 'secrets.', 'env:', 'CI:', 'if:']) expect(webkit).not.toContain(forbidden);
   });
 
-  it('uploads each of the 13 browser artifacts exactly once, from the App job, success-only and exact-head named', () => {
+  it('uploads each of the 14 browser artifacts exactly once, from the App job, success-only and exact-head named', () => {
     const app = job('app');
     const uploads = steps(app).filter((step) => step.includes(upload));
-    expect(uploads).toHaveLength(13);
+    expect(uploads).toHaveLength(14);
     const seen = uploads.map((step) => {
       const name = /\n {10}name: ([a-z0-9-]+)-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}\n/.exec(step)?.[1];
       expect(name, step).toBeDefined();
@@ -106,7 +108,7 @@ describe('CI workflow browser split', () => {
     });
     expect(seen).toEqual(Object.keys(browserArtifacts));
     for (const name of seen) expect(count(workflow, `name: ${name}${headSuffix}\n`)).toBe(1);
-    expect(count(workflow, upload)).toBe(14);
+    expect(count(workflow, upload)).toBe(15);
     expect(count(job('database'), upload)).toBe(1);
     expect(job('database')).toContain('          name: database-types\n          path: src/data/database.types.ts\n'
       + '          if-no-files-found: error\n          retention-days: 1\n');
