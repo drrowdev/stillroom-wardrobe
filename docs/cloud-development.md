@@ -1,11 +1,67 @@
 # GitHub Copilot cloud development
 
-Development now uses **one persistent isolated LOCAL implementation writer
-overall** against `drrowdev/stillroom-wardrobe`. No new cloud/native coding
+Development now uses persistent isolated LOCAL implementation writers (at most
+two builders, one writer per branch; updated 24 September 2026) against
+`drrowdev/stillroom-wardrobe`. No new cloud/native coding
 allocation, wrapper, retry or automatic fallback is authorized. GitHub Actions
 remains CI, not a coding agent. This historical title/path and all existing
 headings/anchors remain for evidence-link compatibility. Source is public;
 account credentials, photos, backups and local service state must never be published.
+
+## Leaner process - 24 September 2026
+
+Updated 24 Sep 2026 (owner decision): leaner process. The owner approved it in
+the coordinator session on 24 September 2026 at about 18:10Z. Where older text
+in this guide or the root instructions conflicts, this section wins. Historical
+PR, comment and receipt references stay as evidence.
+
+**Planning by risk tier.**
+
+* **Tier A**: database schema or hosted database changes, AI/provider/cost/consent,
+  auth/security/privacy, deletion/data integrity, and CI infrastructure. Write a
+  plan and get ONE read-only GPT-6 Astra plan critique. The coordinator applies
+  its findings as binding amendments and approves. There is no second review
+  round unless scope, authority or behaviour changes materially.
+* **Tier B**: UI, copy, docs, tests and small features without schema changes.
+  The builder writes a short plan; the coordinator approves it directly. No plan
+  critique.
+
+**Code review.** Every change gets ONE read-only GPT-6 Astra code review before
+merge. A repair of its findings gets a quick delta check only when the fix is
+non-trivial. The coordinator reviews routine CI fixes inside an approved packet.
+
+**Evidence.** Keep the PR description (scope, validation, what is pending), the
+review verdict, green exact-head CI for all required jobs, coordinator visual
+review of UI captures and a short coordinator merge note. Release files with
+checksums, per-file SHA256 receipts, publicly posted model attestations and
+"stage exactly N files" instructions are no longer required. The coordinator
+still verifies the builder's actual model from session logs and notes it in the
+merge note.
+
+**Local validation.** Builders run `npm run lint`, `npm run typecheck`,
+`npm run check:translations`, `npm run test:unit` and the browser specs their
+change affects. The full browser, integration and security suites run in CI.
+Builders report honestly what they did not run.
+
+**Tests.** Prefer behaviour checks over pinned counts, file lists or hashes.
+Keep pins that protect security or consent: the consent notice hash,
+migration-body reproductions and secret scanning.
+
+**Builders don't stall.** Builders use plan mode only for the planning step.
+After approval they run in autopilot.
+
+**Deploy more often.** After each merged user-visible change the coordinator
+recommends a Pages deploy, which the owner runs. Hosted database changes, paid
+AI and provider changes still need their own owner approval.
+
+**Unchanged.** Owner isolation and privacy rules; no secrets in the app, bundle
+or logs; hosted mutations only with owner approval; merge guards
+(`--match-head-commit`, no `--auto` or `--admin`, no self-approval); one writer
+per branch; at most two implementation builders; model policy: Claude Opus 5.5
+builds, GPT-6 Astra critiques and reviews
+([PR #32 comment 5795033115](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5795033115)).
+Text-only builders, local tooling rules and no cloud coding allocation also
+stay as below.
 
 ## Local development policy - 11 September 2026
 
@@ -30,15 +86,15 @@ owner reconfirmed GPT-6 Astra for critique and rubber-duck work in the
 coordinator session on 23 September 2026 at about 12:49Z; public copy in
 [`5815445262`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815445262).
 Start each local implementation
-session read-only until the coordinator independently retrieves the writer's OWN
-documented machine-readable actual-model usage outside the writer's turn output.
-Cross-match active app/CLI identity, repository, workspace, branch, exact
-base/start head, observation time and approved scope. Publish a
-**coordinator-observed local model attestation** and explicit edit permission;
-the writer reads both after context and before edits, with fresh source/scope
-checks. Link the eventual PR when it exists; never invent a native task or PR ID.
-Requested model names, another session's evidence, stale/mismatched identity
-or unavailable proof mean STOP, not Auto/fallback. Maintain same
+session read-only (plan mode) for the planning step; the coordinator's plan
+approval is the edit permission, after which the builder runs in autopilot.
+The coordinator independently checks the writer's OWN documented
+machine-readable actual-model usage outside the writer's turn output against
+the app/CLI identity, repository, workspace, branch, base head and scope, and
+notes the result in the merge note (updated 24 September 2026; a publicly
+posted attestation before edits is no longer required). Never invent a native
+task or PR ID. Requested model names, another session's evidence or a
+mismatched model mean STOP, not Auto/fallback. Maintain same
 session/model/source continuity through routine scoped corrections.
 
 Local usage telemetry is locally recorded, not tamper-proof or equivalent to
@@ -55,7 +111,7 @@ image limitation is assumed. No image/binary/archive viewing, image-returning
 tools, image attachments, encoded image bytes or image embeds into the model. Existing
 packet-approved tests may internally process bounded synthetic fixtures/capture
 buffers and return text-only outcomes. Only the designated coordinator actually
-reviews approved exact-head artifacts and records run/head/hashes/verdict.
+reviews approved exact-head artifacts and records run/head/verdict.
 Artifact existence, DOM checks or worker judgment cannot replace that review.
 Historical capture bounds remain intact; missing/unread evidence stays pending.
 
@@ -84,9 +140,10 @@ They prove only that fixture scope. Real recovery through integration and
 `playwright.local.config.ts`, or other real-backend browser selections, need the
 owned working stack. Inspect intended daemon/project/port ownership before setup.
 
-Genuine different-provider material-plan critique and final review, all required
-exact-head automated/live/type/App/browser/native-Apple/coordinator-visual gates
-and normal merge protections remain mandatory. Unavailable review is not a pass.
+The tiered plan critique and the one GPT-6 Astra code review (leaner process
+above), all required exact-head CI jobs, coordinator visual review of UI
+captures and normal merge protections remain mandatory. Builders run the local
+subset listed above; the full suites run in CI. Unavailable review is not a pass.
 Phase 0 remains **engineering complete; acceptance open**; only the second
 hosted-account journey was deferred, not other operator/device/human checks.
 Paid activation, private-input processing, hosted mutations and deployment retain
@@ -140,11 +197,11 @@ compatibility contract authorizes no new allocation under the local-only policy.
 ## Task scope and historical evidence
 
 Historical packet restrictions below do not veto a separately approved next packet.
-For each local packet, the controlling scope is the specific coordinator-approved,
-actually reviewed packet and public plan URL supplied in its authorized kickoff,
-followed after context by that writer's own matching coordinator-observed local
-model attestation and explicit edit permission before edits. Native receipts and
-cloud setup/intake requirements below are dated evidence, not local entry proof.
+For each local packet, the controlling scope is the specific coordinator-approved
+packet and plan supplied in its authorized kickoff (tiered as in the leaner
+process above); the coordinator's approval is the edit permission. Native
+receipts and cloud setup/intake requirements below are dated evidence, not
+local entry proof.
 Dated in-tree packet names and receipts are historical evidence, not permanent
 task pins or approval for another assignment. A later separately approved packet
 can supersede that dated assignment without editing these instructions again.
@@ -211,7 +268,7 @@ session `c40a8a6b-551d-4831-8703-691b138c980a`, observed
 `2026-09-08T05:47:29.6473139Z`, against this exact PR/base/saved head.
 This is the coordinator's runtime evidence, not a worker self-attestation or a
 receipt reusable by another task. Historical native tasks/retries needed their
-own matching receipt; current local entry uses the attestation contract above.
+own matching receipt; current local entry uses the model-check contract above.
 
 ### Text-only worker and retained visual gate
 
@@ -772,8 +829,8 @@ I10a-D maintenance is deferred, not passed; I22 owner-prefix deletion is still
 required in Phase 6. Deletion promises logical native removal/reconciliation and
 durable publication fencing, not physical erasure or provider-remnant deadlines.
 
-Delivery uses the persistent isolated local writer and own-model attestation
-contract above, not cloud/native allocation or historical setup/intake authority.
+Delivery uses the persistent isolated local writers and the model-check contract
+above, not cloud/native allocation or historical setup/intake authority.
 The dated PR #2 handoff, PR #3 recovery and completed I06/PR #7 restrictions
 remain historical evidence. Current ordered development follows the specific
 authorized packet under the task scope rule above, not an old packet pin.
@@ -784,9 +841,11 @@ Under [H1 clarification 5580579847](https://github.com/drrowdev/stillroom-wardro
 the **coordinator may execute a recommended ordinary merge without another user
 question**, only after genuine independent review, all required exact-head gates,
 no blockers or overlapping writers, and normal repository protections. Record the
-recommendation/evidence and guard the exact head. No `--auto`, `--admin`,
+recommendation/evidence in a short merge note and guard the exact head with
+`--match-head-commit`. No `--auto`, `--admin`,
 self-approval or protection bypass. Workers never merge, deploy, approve/authorize/
-rerun Actions or start another agent or packet.
+rerun Actions or start another agent or packet. After each merged user-visible
+change the coordinator recommends a Pages deploy, which the owner runs.
 
 Deployments, paid AI/provider/dependency/codec changes, hosted schema/account/data mutations
 and private input capture retain separate approvals. The source worker receives no
@@ -803,32 +862,33 @@ Before every implementation packet:
    relevant blueprint requirements/work packets, actual schema/source/tests,
    PR body/discussion/diff/reviews and CI job logs. Record exact base/head,
    files actually consulted and unresolved gates.
-2. Write a focused plan before edits. Obtain an actual different-provider,
-   read-only critique; record provider/model, findings and amendments. For
-   Anthropic builders that reviewer is OpenAI GPT-6 Astra (`gpt-6-astra`). The
+2. Write a plan before edits, tiered as in the leaner process above (updated
+   24 September 2026). Tier A gets ONE read-only OpenAI GPT-6 Astra
+   (`gpt-6-astra`) plan critique; record provider/model and findings, which the
+   coordinator applies as binding amendments before approving. Tier B gets a
+   short plan approved directly by the coordinator. The
    historical I06 plan/amendment and actual **Anthropic Claude Opus 5** critiques
    are linked above, not approval for this task. PR #2 `5559949209` and
    `5560449572`/`5560847183` also remain
    historical evidence, not current-packet approval. Automated validation/self-review is
    supplemental, not that prereview; do not invent a native review tool.
 3. Explicitly select **Anthropic Claude Opus 5.5 (`claude-opus-5.5`)** and enter
-   each new local implementation session read-only (owner decision
-   `5795033115`). After context and before edits, read the
-   matching coordinator-observed local model attestation and explicit permission,
-   independently bound to OWN actual usage, active app/CLI/repo/workspace/branch,
-   base/start head, time and scope. Fresh source and session/model continuity
-   remain mandatory. Local telemetry has the weaker provenance described above,
-   not native-receipt equivalence. Missing/mismatched proof means STOP;
-   no Auto, silent fallback or unverified implementation.
-   Every new implementation plan/material amendment requires actual read-only
-   different-provider critique (reviewer/provider/model, findings and amendments),
-   then coordinator approval before edits. Material means changes to scope, allowed
-   files, authority, behaviour, gates or evidence claims, not typo/formatting edits.
-   Stop if the required model or reviewer is unavailable.
-4. Keep **one persistent isolated LOCAL implementation writer overall**, one
-   writer per workspace/branch/PR and one focused approved packet at a time,
-   with genuine on-demand read-only review. The former two-cloud-builder
-   allowance is superseded historical policy. Routine scoped failures stay in
+   each new local implementation session read-only (plan mode) for planning
+   only (owner decision `5795033115`). The coordinator's plan approval is the
+   edit permission; the builder then runs in autopilot. The coordinator checks
+   the builder's OWN actual model usage in session logs against the
+   app/CLI/repo/workspace/branch, base head and scope and notes it in the merge
+   note. Fresh source and session/model continuity remain mandatory. Local
+   telemetry has the weaker provenance described above, not native-receipt
+   equivalence. A mismatched model means STOP; no Auto, silent fallback or
+   unverified implementation. A material amendment to a Tier A plan (scope,
+   allowed files, authority or behaviour) gets another critique; routine
+   corrections do not. Stop if the required model or reviewer is unavailable.
+4. Keep persistent isolated LOCAL implementation writers: at most two
+   implementation builders, one writer per workspace/branch/PR and one focused
+   approved packet per writer, with genuine on-demand read-only review. The
+   former two-cloud-builder allowance is superseded historical policy. Routine
+   scoped failures stay in
    the same session; no main/coordinator-checkout implementation. Before
    assignment, the coordinator names the packet/branch, owned files, dependencies
    and shared mutable-resource owners. Never concurrently mutate the same branch
@@ -840,7 +900,10 @@ Before every implementation packet:
    credential restrictions still apply. Concurrency itself authorizes no new
    packet/PR, phase, dependency, provider or hosted operation. The coordinator
    handles routine scoped fixes/reviews/CI; consequential decisions go to the user.
-5. Report exact validation commands/results and fresh-head CI status.
+5. Report exact validation commands/results, what was not run, and fresh-head
+   CI status. Builders run lint, typecheck, check:translations, unit tests and
+   affected browser specs; CI runs the full suites. Every change gets one
+   read-only GPT-6 Astra code review before merge.
    Coordinator authorization governs CI reruns/approval; do not bypass it.
    Physical-phone/Safari, camera/library, VoiceOver and TalkBack acceptance
    remains a human gate, not something Chromium emulation or axe proves.
