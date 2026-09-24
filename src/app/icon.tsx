@@ -1,4 +1,4 @@
-type Name = 'wardrobe' | 'plus' | 'lock' | 'arrow' | 'camera' | 'photo' | 'crop' | 'refresh' | 'chevron' | 'close' | 'check' | 'user';
+type Name = 'wardrobe' | 'plus' | 'lock' | 'arrow' | 'camera' | 'photo' | 'crop' | 'refresh' | 'chevron' | 'close' | 'check' | 'user' | 'outfits';
 const paths: Record<Name, string> = {
   wardrobe: 'M5 21V4h14v17M12 4v17M3 21h18M9 11v3m6-3v3',
   plus: 'M12 5v14M5 12h14',
@@ -12,6 +12,7 @@ const paths: Record<Name, string> = {
   close: 'm6 6 12 12M6 18 18 6',
   check: 'm5 12 4 4L19 6',
   user: 'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M4 21v-2a8 8 0 0 1 16 0v2',
+  outfits: 'M10 6a2 2 0 1 1 3 1.7c-.6.4-1 .9-1 1.6V10m0 0-8.5 6.3A1 1 0 0 0 4 18h16a1 1 0 0 0 .5-1.7Z',
 };
 export function Icon({ name, className = '' }: { name: Name; className?: string }) {
   return <svg className={`icon ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;

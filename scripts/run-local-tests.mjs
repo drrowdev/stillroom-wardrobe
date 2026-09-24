@@ -81,6 +81,14 @@ async function main() {
     child.on('close', (value) => resolve(value ?? 2));
   });
   if (imageChangeCode !== 0) { process.exitCode = imageChangeCode; return; }
+  const outfitCode = await new Promise((resolve) => {
+    const child = spawn(process.execPath, [path.join(ROOT, 'tests', suite, 'outfit-rpc.sessions.mjs')], {
+      cwd: ROOT, env, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'],
+    });
+    child.on('error', () => resolve(2));
+    child.on('close', (value) => resolve(value ?? 2));
+  });
+  if (outfitCode !== 0) { process.exitCode = outfitCode; return; }
   if (suite === 'integration') {
     const recoveryCode = await new Promise((resolve) => {
       const child = spawn(process.execPath, [

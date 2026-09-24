@@ -22,6 +22,10 @@ import { ItemLifecycleClient } from '../data/item-lifecycle';
 import { newUndo, type LifecycleSnapshot, type UndoItem } from '../domain/item-lifecycle';
 import type { ProfileRow } from '../data/rows';
 import { PasswordRecovery, RecoveryRequest } from '../auth/password-recovery';
+import { leaveDialogFor, navFamilyFor, outfitRouteId, type NavFamily } from '../domain/outfits';
+import { OutfitsScreen } from '../features/outfits/outfits-screen';
+import { OutfitLeaveDialog } from '../features/outfits/editor';
+import { NewOutfit, OutfitDetail } from '../features/outfits/detail';
 import {
   clearRecoveryNotice, leaveRecovery, markNormalAuthStarted, normalAuthStarted,
   recoverySnapshot, subscribeRecovery, type RecoveryCallback,
@@ -60,15 +64,28 @@ function Unconfigured({ status }: { status: Configuration['status'] }) {
   useEffect(() => { document.documentElement.lang = language; }, [language]);
   return <EntryLayout language={language} onLanguage={setLanguage} t={t}><section className="entry-card setup-card"><div className="small-mark"><Icon name="wardrobe" /></div><h1>{t('setup.title')}</h1><p className="muted">{t(status === 'invalid' ? 'setup.invalid' : 'setup.body')}</p><details className="copy-details"><summary>{t('setup.instructions')}</summary><ol className="setup-steps"><li>{t('setup.step1')}<code>npm run db:start</code></li><li>{t('setup.step2')}<code>.env.local</code></li><li>{t('setup.step3')}</li></ol></details><p className="privacy-note"><Icon name="lock" />{t('setup.note')}</p></section></EntryLayout>;
 }
-type WorkspaceRoute = 'wardrobe' | 'add' | 'settings' | 'trash' | `detail:${string}`;
-const routeHash = { wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings', trash: '#/trash' };
+type WorkspaceRoute = 'wardrobe' | 'add' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | `detail:${string}` | `outfit:${string}`;
+const routeHash = { wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new' };
 function currentRoute(hash = location.hash): WorkspaceRoute {
   return hash === '#/items/new' ? 'add' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
-    : hash.startsWith('#/items/') ? `detail:${hash}` : 'wardrobe';
+    : hash === '#/outfits' ? 'outfits' : hash === '#/outfits/new' ? 'outfit-new'
+      : hash.startsWith('#/outfits/') ? `outfit:${hash.slice(10)}`
+        : hash.startsWith('#/items/') ? `detail:${hash}` : 'wardrobe';
 }
-function hashForRoute(route: WorkspaceRoute) { return route.startsWith('detail:') ? route.slice(7) : routeHash[route as keyof typeof routeHash]; }
-function OwnedWardrobe({ client, config, controller, scope, profile, change, busy, unresolved, t, language, online }: { client: AppClient; config: PublicConfig; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; unresolved: boolean; t: Translate; language: Language; online: boolean }) {
+function hashForRoute(route: WorkspaceRoute) {
+  return route.startsWith('detail:') ? route.slice(7) : route.startsWith('outfit:') ? `#/outfits/${route.slice(7)}` : routeHash[route as keyof typeof routeHash];
+}
+const routeFocus: Partial<Record<WorkspaceRoute, string>> = { add: 'capture-title', settings: 'settings-title', trash: 'trash-title', outfits: 'outfits-title', 'outfit-new': 'outfit-editor-title' };
+function OwnedWardrobe({ client, config, controller, scope, profile, change, busy, unresolved, t, language, online, onRouteCommitted }: { client: AppClient; config: PublicConfig; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; unresolved: boolean; t: Translate; language: Language; online: boolean; onRouteCommitted: (family: NavFamily) => void }) {
   const [route, setRoute] = useState<WorkspaceRoute>(() => currentRoute());
+  const [outfitUnresolved, setOutfitUnresolved] = useState(false);
+  const [outfitsInvalidation, setOutfitsInvalidation] = useState(0);
+  const [outfitNotice, setOutfitNotice] = useState<string | null>(null);
+  const invalidateOutfits = useCallback(() => setOutfitsInvalidation(value => value + 1), []);
+  useEffect(() => {
+    onRouteCommitted(navFamilyFor(route));
+    setOutfitNotice(current => current !== null && route !== `outfit:${current}` ? null : current);
+  }, [route, onRouteCommitted]);
   const browse = useWardrobeBrowse(client, scope, language, online);
   const refresh = browse.refresh;
   const [notice, setNotice] = useState(false);
@@ -133,8 +150,8 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       const anchor = event.target instanceof Element ? event.target.closest('a') : null;
       const href = anchor?.getAttribute('href');
-      const next = href && (Object.values(routeHash).includes(href) || href.startsWith('#/items/')) ? currentRoute(href) : null;
-      if (next) { event.preventDefault(); if (navigation.current.route.startsWith('detail:')) anchor?.focus(); changeRoute(next); }
+      const next = href && (Object.values(routeHash).includes(href) || href.startsWith('#/items/') || href.startsWith('#/outfits/')) ? currentRoute(href) : null;
+      if (next) { event.preventDefault(); if (navigation.current.route.startsWith('detail:') || navigation.current.route.startsWith('outfit')) anchor?.focus(); changeRoute(next); }
     };
     const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty.current.dirty) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('hashchange', onHash);
@@ -147,39 +164,65 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       dirty.current = { dirty: false, incomplete: false, busy: false };
     };
   }, [changeRoute]);
-  useEffect(() => { document.getElementById(route === 'add' ? 'capture-title' : route === 'settings' ? 'settings-title' : route === 'trash' ? 'trash-title' : route.startsWith('detail:') ? 'item-detail-title' : 'wardrobe-title')?.focus(); }, [route]);
+  useEffect(() => { document.getElementById(routeFocus[route] ?? (route.startsWith('detail:') ? 'item-detail-title' : route.startsWith('outfit:') ? 'outfit-detail-title' : 'wardrobe-title'))?.focus(); }, [route]);
   function trashed(item: LifecycleSnapshot) {
     dirty.current = { dirty: false, incomplete: false, busy: false };
     browse.remove(item.id);
     setUndo(newUndo(item)); setNotice(false);
-    changeRoute('wardrobe'); void refresh();
+    changeRoute('wardrobe'); void refresh(); invalidateOutfits();
   }
   function saved() {
     dirty.current = { dirty: false, incomplete: false, busy: false };
     setNotice(true);
     changeRoute('wardrobe');
-    void refresh();
+    void refresh(); invalidateOutfits();
   }
+  const settle = useCallback(() => {
+    dirty.current = { dirty: false, incomplete: false, busy: false };
+    setOutfitUnresolved(false); setDiscard(null);
+  }, []);
+  const outfitSaved = useCallback((id: string) => {
+    settle(); setOutfitNotice(id); invalidateOutfits();
+    changeRoute(`outfit:${id}`);
+  }, [settle, invalidateOutfits, changeRoute]);
+  const openOutfit = useCallback((id: string) => { settle(); changeRoute(`outfit:${id}`); }, [settle, changeRoute]);
+  const outfitsBack = useCallback(() => changeRoute('outfits'), [changeRoute]);
+  const outfitProps = {
+    client, scope, images, online, t, invalidation: outfitsInvalidation, paused: discard !== null, onDirty,
+    onOutfitUnresolved: setOutfitUnresolved, onSaved: outfitSaved, onOpen: openOutfit, onBack: outfitsBack,
+  };
   return (
     <>
       <aside className="workspace-identity" aria-label={t('account.identity')}><span className="identity-dot" />{profile.display_name}</aside>
       <main id="main" className="workspace-main" tabIndex={-1}>
         {!online && <div className="notice notice-offline" role="status">{t('common.offline')} {t('common.stale')}</div>}
         {undo && <UndoNotice key={`${undo.item.id}:${undo.item.version}`} undo={undo} visible={route === 'wardrobe'} routeSignal={routeSignal} lifecycle={lifecycle} scope={scope} online={online} t={t} images={images}
-          onRestored={() => { setUndo(null); void refresh(); }} />}
+          onRestored={() => { setUndo(null); void refresh(); invalidateOutfits(); }} />}
         {notice && route === 'wardrobe' && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('item.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setNotice(false)}><Icon name="close" /></button></div>}
+        {outfitNotice && route === `outfit:${outfitNotice}` && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('outfits.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setOutfitNotice(null)}><Icon name="close" /></button></div>}
         {route === 'add'
           ? <AddItem client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} />
           : route === 'settings' ? <ProfileScreen client={client} ai={ai} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} />
           : route === 'trash' ? <Trash lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
             onDeleting={itemId => setUndo(current => current?.item.id === itemId ? null : current)}
-            onBack={() => changeRoute('wardrobe')} onChanged={() => { setUndo(null); void refresh(); }} />
+            onBack={() => changeRoute('wardrobe')} onChanged={() => { setUndo(null); void refresh(); invalidateOutfits(); }} />
           : route.startsWith('detail:') ? <ItemDetail key={route} client={client} scope={scope} itemId={detailRouteId(route.slice(7))} images={images}
             lifecycle={lifecycle} onTrashed={trashed} ai={ai} onBeforeDiscard={onBeforeDiscard}
-            t={t} language={language} currency={profile.currency} online={online} onDirty={onDirty} onSaved={() => { void refresh(); }} onBack={() => changeRoute('wardrobe')} />
+            t={t} language={language} currency={profile.currency} online={online} onDirty={onDirty} onSaved={() => { void refresh(); invalidateOutfits(); }} onBack={() => changeRoute('wardrobe')} />
+          : route === 'outfits' ? <OutfitsScreen client={client} scope={scope} invalidation={outfitsInvalidation} images={images} online={online} language={language} t={t}
+            onCreate={() => changeRoute('outfit-new')} onAddItem={() => changeRoute('add')} />
+          : route === 'outfit-new' ? <NewOutfit {...outfitProps} />
+          : route.startsWith('outfit:') ? <OutfitDetail key={route} {...outfitProps} id={outfitRouteId(route.slice(7))} />
           : <WardrobeScreen browse={browse} images={images} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={refresh} />}
       </main>
-      {discard && <DiscardDialog beforeConfirm={route === 'add' || route.startsWith('detail:')
+      {discard && leaveDialogFor(route) === 'outfit' && <OutfitLeaveDialog unresolved={outfitUnresolved} t={t}
+        onStay={() => { setDiscard(null); requestAnimationFrame(() => { if (discardFocus.current?.isConnected) discardFocus.current.focus(); }); }}
+        onLeave={() => {
+          dirty.current = { dirty: false, incomplete: false, busy: false }; setDiscard(null); setOutfitUnresolved(false);
+          if (discard.position !== undefined) history.go(discard.position - navigation.current.position);
+          else changeRoute(discard.next);
+        }} />}
+      {discard && leaveDialogFor(route) === 'discard' && <DiscardDialog beforeConfirm={route === 'add' || route.startsWith('detail:')
         ? async () => beforeDiscard.current ? beforeDiscard.current() : route === 'add' ? 'unresolved' : 'cancelled' : undefined}
         title={t(route === 'settings' || route.startsWith('detail:') ? 'common.unsaved' : 'capture.discard')} t={t} onCancel={() => {
         setDiscard(null);
@@ -199,6 +242,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   const [menu, setMenu] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
   const [requestPassword, setRequestPassword] = useState(false);
+  const [navFamily, setNavFamily] = useState<NavFamily>('wardrobe');
   const refusal = callback.kind === 'none' ? null
     : callback.kind === 'link' ? { kind: 'conflict' as const, notice: undefined }
       : { kind: callback.kind, notice: callback.notice };
@@ -238,9 +282,12 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
     <div className="workspace">
       {refusal && <aside className="notice" role="alert"><p>{t(refusal.notice ?? (refusal.kind === 'conflict' ? 'recovery.conflict' : 'recovery.invalid'))}</p><button type="button" className="text-button" onClick={() => leaveRecovery()}>{t('common.close')}</button></aside>}
       <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); document.getElementById('main')?.focus(); }}>{t('common.skipContent')}</a>
-      <header className="workspace-header"><Brand /><nav aria-label={t('nav.wardrobe')}><a className="active-nav" href="#/wardrobe"><Icon name="wardrobe" />{t('nav.wardrobe')}</a></nav><div className="account-controls"><button type="button" className="account-button" aria-expanded={menu} aria-label={t('account.menu')} onClick={() => setMenu(!menu)}><span className="avatar">{state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)}</span><span>{state.profile.display_name}</span><Icon name="chevron" /></button>{menu && <div className="account-popover"><a className="text-button" href="#/settings" onClick={() => setMenu(false)}>{t('nav.settings')}</a><a className="text-button" href="#/trash" onClick={() => setMenu(false)}>{t('nav.trash')}</a><LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} /><button className="text-button" type="button" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div>}</div></header>
+      <header className="workspace-header"><Brand /><nav aria-label={t('nav.wardrobe')}>
+        <a className={`nav-link${navFamily === 'wardrobe' ? ' active-nav' : ''}`} aria-current={navFamily === 'wardrobe' ? 'page' : undefined} href="#/wardrobe"><Icon name="wardrobe" />{t('nav.wardrobe')}</a>
+        <a className={`nav-link${navFamily === 'outfits' ? ' active-nav' : ''}`} aria-current={navFamily === 'outfits' ? 'page' : undefined} href="#/outfits"><Icon name="outfits" />{t('nav.outfits')}</a>
+      </nav><div className="account-controls"><button type="button" className="account-button" aria-expanded={menu} aria-label={t('account.menu')} onClick={() => setMenu(!menu)}><span className="avatar">{state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)}</span><span>{state.profile.display_name}</span><Icon name="chevron" /></button>{menu && <div className="account-popover"><a className="text-button" href="#/settings" onClick={() => setMenu(false)}>{t('nav.settings')}</a><a className="text-button" href="#/trash" onClick={() => setMenu(false)}>{t('nav.trash')}</a><LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} /><button className="text-button" type="button" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div>}</div></header>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online || state.profileSaving} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}
-      <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={state.language} online={online} t={t} />
+      <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={state.language} online={online} t={t} onRouteCommitted={setNavFamily} />
       <footer className="site-footer"><span>Stillroom Wardrobe</span></footer>
     </div>
   );
