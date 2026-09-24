@@ -452,6 +452,9 @@ export function lifecycleFailureDetail(error) {
   catch { return ''; }
 }
 
+const STORAGE_REPOSITORIES = '(public\\.ecr\\.aws\\/supabase\\/storage-api|ghcr\\.io\\/supabase\\/storage-api|supabase\\/storage-api)';
+const STORAGE_IMAGE_TAG = new RegExp(`^${STORAGE_REPOSITORIES}:v1\\.70\\.3$`);
+const STORAGE_IMAGE_DIGEST = new RegExp(`^${STORAGE_REPOSITORIES}@sha256:[0-9a-f]{64}$`);
 export async function lifecycleStorageRuntime(run = runCommand) {
   assertRehearsalEnvironment(process.env, []);
   lifecyclePhase('docker');
@@ -475,7 +478,10 @@ export async function lifecycleStorageRuntime(run = runCommand) {
   lifecycleGuard('running');
   requireEvidence(value.running === true);
   lifecycleGuard('image-tag');
-  requireEvidence(/^(?:public\.ecr\.aws\/supabase|supabase)\/storage-api:v1\.70\.3$/.test(value.image));
+  // Exact version tag from one of the three reviewed registries; a digest-only reference would bypass the version.
+  const reference = value.image;
+  const tagged = STORAGE_IMAGE_TAG.exec(typeof reference === 'string' ? reference : '');
+  requireEvidence(tagged !== null);
   lifecycleGuard('image-id');
   requireEvidence(/^sha256:[0-9a-f]{64}$/.test(value.id));
   lifecycleGuard('mount-array');
@@ -512,8 +518,8 @@ export async function lifecycleStorageRuntime(run = runCommand) {
   lifecyclePhase('image-shape');
   const pinned = JSON.parse(image.stdout);
   requireEvidence(pinned.id === value.id && Array.isArray(pinned.digests) && pinned.digests.length >= 1
-    && pinned.digests.length <= 4 && pinned.digests.every((entry) =>
-      typeof entry === 'string' && /^(?:public\.ecr\.aws\/supabase|supabase)\/storage-api@sha256:[0-9a-f]{64}$/.test(entry)));
+    && pinned.digests.length <= 4 && pinned.digests.every((entry) => typeof entry === 'string' && STORAGE_IMAGE_DIGEST.test(entry))
+    && pinned.digests.some((entry) => entry.startsWith(tagged[1] + '@')));
   console.log(JSON.stringify({ i08: 'runtime-review-required', image: value.image, id: value.id, digests: pinned.digests }));
   return container;
 }

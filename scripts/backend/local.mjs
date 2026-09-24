@@ -733,32 +733,52 @@ function validateRuntime(value) {
   return value;
 }
 
+const RUNTIME_LIST = ['ps', '-a', '--no-trunc', '--filter', 'name=^/supabase_edge_runtime_stillroom-wardrobe$', '--format', '{{.ID}} {{.State}}'];
+const RUNTIME_LINE = /^([0-9a-f]{64}) (created|running|paused|restarting|removing|exited|dead)\r?\n?$/;
+
 export async function readAnalysisRuntime(deadline, run = runCommand) {
   const observation = { schemaVersion: 1, step: 'ps-call', commandCode: null, listedState: null };
-  let currentResult = null;
-  const call = async (args) => {
+  let currentResult = null, original = null;
+  const call = async (args, { allowGone = false } = {}) => {
     currentResult = null; observation.commandCode = null;
     const result = await run('docker', args, { timeout: Math.min(startupRemaining(deadline), 5000), maxOutputBytes: 4096 });
     startupRemaining(deadline);
     currentResult = result;
     observation.step = observation.step === 'ps-call' ? 'ps-result' : 'inspect-result';
-    if (result.code !== 0 || typeof result.stdout !== 'string' || typeof result.stderr !== 'string'
+    const code = result.code;
+    // Only a bounded, well-formed exit 1 of the just-listed ID may mean the container disappeared meanwhile.
+    const gone = allowGone && code === 1;
+    if (!gone && code !== 0 || typeof result.stdout !== 'string' || typeof result.stderr !== 'string'
       || Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) > 4096) {
       throw new AnalysisStartupError('reader-failed');
     }
-    return result.stdout;
+    return gone ? null : result.stdout;
+  };
+  // Re-list with the same exact-name filter, parser, limits and original deadline. Absence is confirmed only when
+  // the container is gone, or the same ID is removing/dead; anything else stays reader-failed.
+  const confirmGone = async (id) => {
+    original = { ...observation, commandCode: 1 };
+    let relisted;
+    try {
+      observation.step = 'ps-call';
+      relisted = await call(RUNTIME_LIST);
+    } catch { throw new AnalysisStartupError('reader-failed'); }
+    if (relisted === '') return null;
+    const again = RUNTIME_LINE.exec(relisted);
+    if (again && again[1] === id && (again[2] === 'removing' || again[2] === 'dead')) return null;
+    throw new AnalysisStartupError('reader-failed');
   };
   try {
-    const listed = await call(['ps', '-a', '--no-trunc', '--filter',
-      'name=^/supabase_edge_runtime_stillroom-wardrobe$', '--format', '{{.ID}} {{.State}}']);
+    const listed = await call(RUNTIME_LIST);
     observation.step = 'ps-shape';
     if (listed === '') return null;
     if (listed.trim().split('\n').length > 1) throw new AnalysisStartupError('reader-ambiguous');
-    const match = /^([0-9a-f]{64}) (created|running|paused|restarting|removing|exited|dead)\r?\n?$/.exec(listed);
+    const match = RUNTIME_LINE.exec(listed);
     if (!match) throw new AnalysisStartupError('reader-failed');
     observation.listedState = match[2];
     observation.step = 'inspect-call';
-    const inspected = await call(['inspect', '--format', '{{.Id}}|{{.State.Running}}|{{.State.StartedAt}}', match[1]]);
+    const inspected = await call(['inspect', '--format', '{{.Id}}|{{.State.Running}}|{{.State.StartedAt}}', match[1]], { allowGone: true });
+    if (inspected === null) return await confirmGone(match[1]);
     observation.step = 'inspect-shape';
     const fields = /^([0-9a-f]{64})\|(true|false)\|([^\r\n]+)\r?\n?$/.exec(inspected);
     if (!fields || fields[1] !== match[1]) throw new AnalysisStartupError('reader-failed');
@@ -768,12 +788,15 @@ export async function readAnalysisRuntime(deadline, run = runCommand) {
     return validateRuntime({ id: fields[1], running: fields[2] === 'true', startedAt });
   } catch (error) {
     try {
-      // Classify only after the original failure, without invoking result accessors.
-      const descriptor = currentResult !== null && typeof currentResult === 'object'
-        ? Object.getOwnPropertyDescriptor(currentResult, 'code') : undefined;
-      if (descriptor && Object.hasOwn(descriptor, 'value') && Number.isInteger(descriptor.value)
-        && descriptor.value >= 0 && descriptor.value <= 255) observation.commandCode = descriptor.value;
-      const line = 'B1-RUNTIME-READ ' + JSON.stringify(observation);
+      // Classify only after the original failure, without invoking result accessors. A failed re-list reports the
+      // original inspect observation.
+      if (original === null) {
+        const descriptor = currentResult !== null && typeof currentResult === 'object'
+          ? Object.getOwnPropertyDescriptor(currentResult, 'code') : undefined;
+        if (descriptor && Object.hasOwn(descriptor, 'value') && Number.isInteger(descriptor.value)
+          && descriptor.value >= 0 && descriptor.value <= 255) observation.commandCode = descriptor.value;
+      }
+      const line = 'B1-RUNTIME-READ ' + JSON.stringify(original ?? observation);
       if (Buffer.byteLength(line + '\n', 'utf8') <= 512 && !/[\r\n]/.test(line)) console.log(line);
     } catch { /* Diagnostic failure cannot replace the original thrown value. */ }
     throw error;
@@ -826,8 +849,8 @@ export async function waitForAnalysisHandler(owned, { deadline, spawnedAt, previ
         : current.startedAt === null ? 'replacement-not-started' : 'replacement-not-serving';
       evidence.running = current?.running === true;
       evidence.fresh = current !== null && current.startedAt !== null && (previous === null || previous.startedAt === null
-        ? runtimeTime(current.startedAt) >= BigInt(spawnedAt) * 1_000_000n
-        : runtimeTime(current.startedAt) > runtimeTime(previous.startedAt));
+        ? true : runtimeTime(current.startedAt) > runtimeTime(previous.startedAt))
+        && runtimeTime(current.startedAt) >= BigInt(spawnedAt) * 1_000_000n;
       if (evidence.replacement) {
         if (current.startedAt !== null && !evidence.fresh) throw new AnalysisStartupError('reader-failed');
         candidate = { id: current.id, startedAt: current.startedAt };

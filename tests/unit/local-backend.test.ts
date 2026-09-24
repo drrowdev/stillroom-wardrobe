@@ -607,12 +607,30 @@ describe('B1 replacement identity readiness', () => {
       await expect(waitForAnalysisHandler(process(), { ...options(), readRuntime: async () => ({ ...current, startedAt }) },
         transport())).rejects.toThrow('reader-failed');
     });
-  it('compares nanosecond freshness, not rounded milliseconds', async () => {
+  it('compares nanosecond freshness, not rounded milliseconds, above the spawn floor', async () => {
     const owned = process();
-    await waitForAnalysisHandler(owned, { ...options(),
+    await waitForAnalysisHandler(owned, { ...options(), deadline: now + 59_000, spawnedAt: now - 1000,
       previous: { ...previous, startedAt: '2026-09-11T11:59:59.999999998Z' },
       readRuntime: async () => ({ ...current, startedAt: previous.startedAt }) }, transport());
     expect(owned.ready).toHaveBeenCalledOnce();
+  });
+  it.each([
+    ['a started baseline', { ...previous, startedAt: '2026-09-11T11:59:59.999999998Z' }],
+    ['a not-started baseline', { ...previous, running: false, startedAt: null }],
+    ['no baseline', null],
+  ] as const)('rejects a replacement newer than %s but started before the spawn', async (_label, baseline) => {
+    const owned = process(), fetcher = transport();
+    await expect(waitForAnalysisHandler(owned, { ...options(), previous: baseline,
+      readRuntime: async () => ({ ...current, startedAt: '2026-09-11T11:59:59.999999999Z' }) }, fetcher)).rejects.toThrow('reader-failed');
+    expect(fetcher).not.toHaveBeenCalled(); expect(owned.ready).not.toHaveBeenCalled();
+  });
+  it('fails a replacement that disappears during confirmation; absence is never readiness', async () => {
+    let reads = 0;
+    const owned = process(), fetcher = transport();
+    const config = { ...options(), readRuntime: vi.fn(async () => (reads++ === 0 ? current : null)) };
+    await expect(waitForAnalysisHandler(owned, config, fetcher)).rejects.toThrow('identity-unstable');
+    expect(config.readRuntime).toHaveBeenCalledTimes(2);
+    expect(owned.ready).not.toHaveBeenCalled();
   });
   it.each([1, 2])('fails identity instability after probe %s without restarting confirmation', async (position) => {
     const owned = process(), config = options(), fetcher = transport();
@@ -860,6 +878,75 @@ describe('B1 bounded Docker runtime metadata', () => {
     expect(await readerFailure(() => readAnalysisRuntime(Date.now() + 6000, run))).toBe(sentinel);
     expect(order).toEqual(['code', 'stdout', 'descriptor:code']);
     expectReaderLine(log, 'ps-result', 0, null); expect(log).toHaveBeenCalledOnce();
+  });
+  const goneRun = (relist: Awaited<ReturnType<typeof runCommand>> | Error, listed = 'running') => {
+    const run = vi.fn<typeof runCommand>()
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} ${listed}\n`, stderr: '' })
+      .mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'Error: No such object: private' });
+    if (relist instanceof Error) run.mockRejectedValueOnce(relist); else run.mockResolvedValueOnce(relist);
+    return run;
+  };
+  it.each(['', `${id} removing\n`, `${id} dead\n`])(
+    'reports absence when a container vanishes between ps and inspect and the re-list confirms it %#', async (stdout) => {
+      const log = readerLog(), deadline = Date.now() + 6000, run = goneRun({ code: 0, stdout, stderr: '' });
+      await expect(readAnalysisRuntime(deadline, run)).resolves.toBeNull();
+      expect(run).toHaveBeenCalledTimes(3);
+      expect(run.mock.calls[2]?.[1]).toEqual(run.mock.calls[0]?.[1]);
+      expect(run.mock.calls[2]?.[2]).toEqual({ timeout: 5000, maxOutputBytes: 4096 });
+      expect(log).not.toHaveBeenCalled();
+    });
+  it.each([
+    ['still running', { code: 0, stdout: `${id} running\n`, stderr: '' }],
+    ['exited', { code: 0, stdout: `${id} exited\n`, stderr: '' }],
+    ['a new ID', { code: 0, stdout: `${'b'.repeat(64)} removing\n`, stderr: '' }],
+    ['an ambiguous re-list', { code: 0, stdout: `${id} dead\n${'b'.repeat(64)} running\n`, stderr: '' }],
+    ['a malformed re-list', { code: 0, stdout: 'private malformed', stderr: '' }],
+    ['a failed re-list', { code: 1, stdout: '', stderr: 'private' }],
+    ['an oversized re-list', { code: 0, stdout: 'x'.repeat(4097), stderr: '' }],
+    ['a thrown re-list', new Error('private re-list')],
+  ] as const)('keeps reader-failed with the original inspect diagnostics after %s', async (_label, relist) => {
+    const log = readerLog(), run = goneRun(relist, 'restarting');
+    await expect(readAnalysisRuntime(Date.now() + 6000, run)).rejects.toThrow('reader-failed');
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(log).toHaveBeenCalledOnce();
+    expectReaderLine(log, 'inspect-result', 1, 'restarting');
+  });
+  it.each([
+    ['a malformed stdout', { code: 1, stdout: null, stderr: '' }],
+    ['a malformed stderr', { code: 1, stdout: '', stderr: undefined }],
+    ['an oversized result', { code: 1, stdout: '', stderr: 'x'.repeat(4097) }],
+  ])('does not re-list after an inspect exit 1 with %s', async (_label, result) => {
+    const log = readerLog(), run = vi.fn()
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+      .mockResolvedValueOnce(result);
+    await expect(Reflect.apply(readAnalysisRuntime, undefined, [Date.now() + 6000, run])).rejects.toThrow('reader-failed');
+    expect(run).toHaveBeenCalledTimes(2);
+    expectReaderLine(log, 'inspect-result', 1, 'running'); expect(log).toHaveBeenCalledOnce();
+  });
+  it('does not re-list when the original deadline expires during an exit-1 inspect', async () => {
+    const log = readerLog(), deadline = Date.now() + 1000;
+    const run = vi.fn<typeof runCommand>()
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+      .mockImplementationOnce(async () => { vi.setSystemTime(deadline); return { code: 1, stdout: '', stderr: '' }; });
+    await expect(readAnalysisRuntime(deadline, run)).rejects.toThrow('deadline');
+    expect(run).toHaveBeenCalledTimes(2);
+    expectReaderLine(log, 'inspect-call', null, 'running'); expect(log).toHaveBeenCalledOnce();
+  });
+  it('keeps the original deadline for the re-list and fails when it is exhausted', async () => {
+    const log = readerLog(), deadline = Date.now() + 1000;
+    const run = vi.fn<typeof runCommand>()
+      .mockResolvedValueOnce({ code: 0, stdout: `${id} running\n`, stderr: '' })
+      .mockImplementationOnce(async () => { vi.setSystemTime(deadline - 400); return { code: 1, stdout: '', stderr: '' }; })
+      .mockImplementationOnce(async () => { vi.setSystemTime(deadline); return { code: 0, stdout: '', stderr: '' }; });
+    await expect(readAnalysisRuntime(deadline, run)).rejects.toThrow('reader-failed');
+    expect(run.mock.calls[2]?.[2]).toEqual({ timeout: 400, maxOutputBytes: 4096 });
+    expectReaderLine(log, 'inspect-result', 1, 'running'); expect(log).toHaveBeenCalledOnce();
+  });
+  it('never re-lists after a ps exit 1', async () => {
+    const log = readerLog(), run = vi.fn<typeof runCommand>().mockResolvedValue({ code: 1, stdout: '', stderr: '' });
+    await expect(readAnalysisRuntime(Date.now() + 6000, run)).rejects.toThrow('reader-failed');
+    expect(run).toHaveBeenCalledOnce();
+    expectReaderLine(log, 'ps-result', 1, null);
   });
   it('does not invoke result accessors again or serialize private canaries', async () => {
     const log = readerLog(), sentinel = new Error('private getter failure');

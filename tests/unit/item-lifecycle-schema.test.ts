@@ -206,6 +206,26 @@ describe('late-upload child orchestration (mock-only, not byte-phase acceptance)
     await expect(lifecycleStorageRuntime()).rejects.toThrow('EVIDENCE_REQUIRED');
     expect(fixtureMocks.spawn).not.toHaveBeenCalled();
   });
+  it.each([
+    ['a wrong tag', 'supabase/storage-api:v1.70.4', ['supabase/storage-api@' + imageId]],
+    ['a wrong repository', 'example.com/supabase/storage-api:v1.70.3', ['supabase/storage-api@' + imageId]],
+    ['a digest-only reference', 'supabase/storage-api@' + imageId, ['supabase/storage-api@' + imageId]],
+    ['a RepoDigest from another repository', 'ghcr.io/supabase/storage-api:v1.70.3', ['supabase/storage-api@' + imageId]],
+    ['an unlisted RepoDigest repository', 'supabase/storage-api:v1.70.3', ['supabase/storage-api@' + imageId, 'example.com/storage-api@' + imageId]],
+  ])('refuses the storage image with %s', async (_label, image, digests) => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: JSON.stringify({ ...runtime, image }) })
+      .mockResolvedValueOnce({ code: 0, stdout: JSON.stringify({ id: imageId, digests }) });
+    await expect(lifecycleStorageRuntime()).rejects.toThrow('EVIDENCE_REQUIRED');
+    expect(fixtureMocks.spawn).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['ghcr.io/supabase/storage-api:v1.70.3', ['ghcr.io/supabase/storage-api@' + imageId]],
+    ['public.ecr.aws/supabase/storage-api:v1.70.3', ['public.ecr.aws/supabase/storage-api@' + imageId, 'supabase/storage-api@' + imageId]],
+  ])('accepts the exact tag %s with a RepoDigest from the same repository', async (image, digests) => {
+    fixtureMocks.runCommand.mockReset().mockResolvedValueOnce({ code: 0, stdout: JSON.stringify({ ...runtime, image }) })
+      .mockResolvedValueOnce({ code: 0, stdout: JSON.stringify({ id: imageId, digests }) });
+    await expect(lifecycleStorageRuntime()).resolves.toBe(container);
+  });
   it('does not bless absent, excessive or incompatible catalog observations', () => {
     for (const input of [null, {}, { deleteProtected: true }, { triggers: new Array(17).fill({}) }]) {
       expect(() => requireStorageCatalogInventory(input)).toThrow('EVIDENCE_REQUIRED');
