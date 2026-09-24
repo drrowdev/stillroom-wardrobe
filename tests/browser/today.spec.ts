@@ -205,6 +205,35 @@ test('I15 an unsettled choice keeps its card and Try again through a reconnect r
   expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
 });
 
+test('I15 paging and context stay put while a choice is written, so its Try again is kept', async ({ page }) => {
+  const { api } = await start(page);
+  const card = cards(page).nth(1);
+  const shown = await names(card);
+  let release = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/rest/v1/suggestion_feedback*', async route => {
+    if (route.request().method() === 'POST') await gate;
+    await route.fallback();
+  });
+  api.feedbackControl.faults.push({ method: 'POST', commit: true, fail: 503 }, { method: 'READ', commit: false, fail: 500 });
+  await card.getByRole('button', { name: text('today.notForMe'), exact: true }).click();
+  const more = page.getByRole('button', { name: text('today.more'), exact: true });
+  await expect(more).toBeDisabled();
+  const pickers = page.locator('.today-context select');
+  await expect(pickers).toHaveCount(2);
+  for (const picker of await pickers.all()) await expect(picker).toBeDisabled();
+  release();
+  const retry = card.getByRole('button', { name: text('common.retry'), exact: true });
+  await expect(retry).toBeVisible();
+  await expect(more).toBeDisabled();
+  await expect(card.locator('.outfit-component-name')).toHaveText(shown);
+  await retry.click();
+  await expect(card).toContainText(text('today.hidden'));
+  await expect(more).toBeEnabled();
+  for (const picker of await pickers.all()) await expect(picker).toBeEnabled();
+  expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
+});
+
 test('I15 an older refresh never brings back a card hidden while it was loading', async ({ page }) => {
   const { api } = await start(page);
   const hiddenNames = await names(cards(page).nth(1));

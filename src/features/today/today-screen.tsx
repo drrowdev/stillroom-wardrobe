@@ -37,11 +37,11 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
     <div className="page-heading"><div><h1 id="today-title" tabIndex={-1}>{t('today.title')}</h1></div></div>
     <div className="today-context">
       <label className="field"><span>{t('outfits.occasion')}</span>
-        <select value={occasion} onChange={event => { if (isOccasion(event.target.value)) setOccasion(event.target.value); }}>
+        <select value={occasion} disabled={ideas.settling} onChange={event => { if (!ideas.settling && isOccasion(event.target.value)) setOccasion(event.target.value); }}>
           {occasions.map(code => <option key={code} value={code}>{t(occasionKeys[code])}</option>)}
         </select></label>
       <label className="field"><span>{t('item.season')}</span>
-        <select value={season} onChange={event => { if (isSeason(event.target.value)) setSeason(event.target.value); }}>
+        <select value={season} disabled={ideas.settling} onChange={event => { if (!ideas.settling && isSeason(event.target.value)) setSeason(event.target.value); }}>
           {seasonCodes.map(code => <option key={code} value={code}>{t(seasonKeys[code])}</option>)}
         </select></label>
     </div>
@@ -63,7 +63,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
       : result.status === 'none' ? <div className="today-empty">
         <p>{t(ideas.paged ? 'today.noMore' : 'today.none')}</p>
         {result.missingDetails.includes('formality') && <p className="muted">{t('today.missingFormality')}</p>}
-        {ideas.paged && <button type="button" className="button button-secondary" onClick={ideas.startOver}>{t('today.startOver')}</button>}
+        {ideas.paged && <button type="button" className="button button-secondary" disabled={ideas.settling} onClick={ideas.startOver}>{t('today.startOver')}</button>}
       </div>
       : <>
         {result.missingDetails.includes('formality') && <p className="muted today-hint">{t('today.missingFormality')}</p>}
@@ -73,7 +73,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
             onSave={() => onSave(suggestion.itemIds, occasion)} onLike={() => ideas.like(suggestion.key)}
             onHide={() => ideas.hide(suggestion.key)} onUndo={() => ideas.undo(suggestion.key)} />)}
         </div>
-        <div className="today-more"><button type="button" className="button button-secondary" onClick={ideas.more}><Icon name="refresh" />{t('today.more')}</button></div>
+        <div className="today-more"><button type="button" className="button button-secondary" disabled={ideas.settling} onClick={ideas.more}><Icon name="refresh" />{t('today.more')}</button></div>
       </>}
   </section>;
 }

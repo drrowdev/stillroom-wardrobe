@@ -119,18 +119,21 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
     feedback: run.feedback, excludedPairs: data.excludedPairs, skip: run.skip,
   }) : null, [data, engineItems, scope.ownerId, occasion, season, run]);
 
+  // While a choice is being written or is unsettled the page keeps its ideas in place.
+  const settling = pending !== null || unresolved !== null;
   const more = useCallback(() => {
-    if (!result) return;
+    if (!result || settling) return;
     const shown = result.suggestions.map(suggestion => suggestion.coreKey);
     changedOnPage.current = new Set();
     setRun(current => ({ feedback: feedbackFrom(votesRef.current), skip: new Set([...current.skip, ...shown]), paged: true }));
     setFailed(null); setUnresolved(null);
-  }, [result]);
+  }, [result, settling]);
   const startOver = useCallback(() => {
+    if (settling) return;
     changedOnPage.current = new Set();
     setRun({ feedback: feedbackFrom(votesRef.current), skip: new Set(), paged: false });
     setFailed(null); setUnresolved(null);
-  }, []);
+  }, [settling]);
 
   const write = useCallback(async (key: string, kind: Pending['kind'], next: Vote | null) => {
     const signal = writes.current?.signal;
@@ -170,7 +173,7 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   }, [client, scope, online, pending, unresolved]);
 
   return {
-    data, error, result, votes, pending, failed, unresolved: unresolved?.key ?? null, paged: run.paged, reload, more, startOver,
+    data, error, result, votes, pending, failed, unresolved: unresolved?.key ?? null, settling, paged: run.paged, reload, more, startOver,
     retry: () => { if (unresolved) void write(unresolved.key, unresolved.kind, unresolved.choice); },
     hasClothes: Boolean(data?.items.some(item => item.lifecycle === 'active')),
     like: (key: string) => { void write(key, 'like', votes.get(key) === 1 ? null : 1); },
