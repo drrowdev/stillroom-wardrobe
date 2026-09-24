@@ -6,6 +6,7 @@ import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { provenanceFields } from '../../src/domain/attribute-provenance';
 import { moreFields, visibleFields } from '../../src/domain/item-details';
+import { colours } from '../../src/domain/preferences';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { manualEntry } from './ai-photo-first-support';
 
@@ -45,6 +46,27 @@ async function fillFields(page: Page, language: Language) {
   await page.locator('#item-alt').fill('  Fictional prepared overshirt  ');
 }
 for (const language of ['en', 'fi', 'sv'] as const) {
+  test(`colour picker ${language}: all 21 colours in order, added codes saved, three-colour limit`, async ({ page }) => {
+    const api = await setup(page, language);
+    await photo(page, api);
+    await expand(page, 'item');
+    const add = page.locator('#item-colours-add');
+    const options = async () => (await add.locator('option').evaluateAll((elements) =>
+      elements.map((element) => [(element as HTMLOptionElement).value, element.textContent ?? '']))).slice(1);
+    expect(await options()).toEqual(colours.map((code) => [code, messages[`colour.${code}`][language]]));
+    for (const code of ['burgundy', 'light_blue', 'silver'] as const) {
+      await add.selectOption(code);
+      await expect(page.getByRole('button', { name: messages['item.removeColour'][language].replace('{colour}', messages[`colour.${code}`][language]), exact: true })).toBeVisible();
+    }
+    await expect(add).toBeDisabled();
+    await expect(page.getByText(messages['item.colourLimit'][language], { exact: true })).toBeVisible();
+    expect((await options()).map(([code]) => code)).toEqual(colours.filter((code) => !['burgundy', 'light_blue', 'silver'].includes(code)));
+    await page.locator('#item-title').fill('Fictional coat');
+    await page.locator('#item-category').selectOption('outerwear');
+    await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    expect(api.items[0]).toMatchObject({ title: 'Fictional coat', colours: ['burgundy', 'light_blue', 'silver'] });
+  });
   test(`blank photo description ${language}: truthful help, empty stored alt and named library link`, async ({ page }) => {
     const api = await setup(page, language);
     await photo(page, api);

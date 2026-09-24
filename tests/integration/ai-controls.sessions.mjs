@@ -28,10 +28,13 @@ export const AI_FACT_VECTORS = Object.freeze([
     pattern: 'solid', sleeve_length: 'long', garment_length: 'regular', brand: '🌿'.repeat(100),
     size_label: '🌿'.repeat(50), upper_coverage: 0, lower_coverage: 2, material: '🌿'.repeat(200),
     seasons: ['spring', 'summer', 'autumn', 'winter'], formality: 4, style_tags: ['🌿'.repeat(40)] } }, true],
+  ...[['burgundy', 'cream', 'khaki'], ['light_blue', 'teal', 'gold'], ['silver'], ['burgundy', 'navy', 'purple']]
+    .map((colours) => [{ outcome: 'ready', fields: { category: 'outerwear', colours } }, true]),
   ...['title', 'warmth', 'rain_rating', 'windproof', 'owner_id', 'modelId', 'confidence', '__proto__']
     .map((key) => [{ outcome: 'ready', fields: { [key]: null } }, false]),
   ...[
     { category: 'invalid' }, { colours: ['unknown'] }, { colours: null }, { colours: ['black', 'black'] },
+    { colours: ['wine'] }, { colours: ['Burgundy'] }, { colours: ['light-blue'] }, { colours: ['lightblue'] },
     { colours: ['black', 'white', 'green', 'red'] }, { seasons: ['monsoon'] }, { seasons: ['spring', 'spring'] },
     { style_tags: ['same', 'same'] }, { style_tags: ['🌿'.repeat(41)] }, { style_tags: [' \t\n\u00a0\ufeff'] },
     { formality: 0.5 }, { formality: 5 }, { upper_coverage: -1 }, { lower_coverage: '0' },

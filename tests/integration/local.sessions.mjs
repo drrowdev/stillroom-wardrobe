@@ -229,6 +229,11 @@ async function itemProvenance(owner) {
         assert.equal(empty.purchase_price, null); assert.equal(empty.warmth, null); assert.equal(empty.windproof, null);
         assert.equal(empty.currency, value.currency); assert.deepEqual(empty.colours, []); assert.deepEqual(empty.seasons, []);
       }
+      stage = 'COL1 item edits keep added colour codes';
+      const coloured = await insert({ colours: ['burgundy', 'light_blue'], field_provenance: { colours: { kind: 'user', revision: 1 } } });
+      assert.deepEqual(coloured.colours, ['burgundy', 'light_blue']);
+      const recoloured = await save(coloured, { colours: ['silver', 'navy'], field_provenance: { ...coloured.field_provenance, colours: { kind: 'user', revision: 2 } } });
+      assert.deepEqual(recoloured.colours, ['silver', 'navy']);
       assert.ok(!manifest.tables.item_images.some((image) => ids.includes(image.item_id)));
     } finally {
       for (const id of ids) {
@@ -440,6 +445,12 @@ async function personalSettings(owner, other, itemId) {
     assert.ok(stalePreferences.ok); assert.deepEqual(stalePreferences.data, []);
     const invalid = await patch('style_preferences', preferences.data[0].version, { repeat_gap_days: 15 });
     assert.ok(!invalid.ok);
+    const added = ['burgundy', 'cream', 'khaki', 'light_blue', 'teal', 'gold', 'silver', 'navy'];
+    const addedColours = await patch('style_preferences', preferences.data[0].version, { preferred_colours: added });
+    assert.ok(addedColours.ok); assert.equal(addedColours.data.length, 1);
+    assert.deepEqual(addedColours.data[0].preferred_colours, added);
+    assert.equal(addedColours.data[0].version, preferences.data[0].version + 1);
+    preferences.data[0] = addedColours.data[0];
     const cleared = await patch('style_preferences', preferences.data[0].version, { preferred_colours: [], style_tags: [], excluded_categories: [], minimum_upper_coverage: 0, minimum_lower_coverage: 0, cold_sensitivity: 2, repeat_gap_days: 0 });
     assert.ok(cleared.ok); assert.equal(cleared.data.length, 1);
     for (const field of ['preferred_colours', 'style_tags', 'excluded_categories']) assert.deepEqual(cleared.data[0][field], []);

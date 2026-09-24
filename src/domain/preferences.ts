@@ -2,7 +2,8 @@ import { categories, isRecord } from './wardrobe';
 import { AppError } from '../data/errors';
 import type { PreferencesRow, ProfileRow } from '../data/rows';
 
-export const colours = ['black', 'white', 'grey', 'navy', 'blue', 'green', 'olive', 'beige', 'brown', 'red', 'yellow', 'orange', 'pink', 'purple'] as const;
+export const colours = ['black', 'white', 'cream', 'grey', 'navy', 'blue', 'light_blue', 'teal', 'green', 'olive', 'khaki',
+  'beige', 'brown', 'burgundy', 'red', 'yellow', 'orange', 'pink', 'purple', 'gold', 'silver'] as const;
 export const styleTagLimit = 40;
 export type ProfileFields = Pick<ProfileRow, 'display_name' | 'timezone' | 'currency'>;
 export type PreferenceFields = Omit<PreferencesRow, 'owner_id' | 'version'>;

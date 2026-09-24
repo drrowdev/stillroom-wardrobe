@@ -546,6 +546,28 @@ privacy/retention and human/device acceptance remain live-activation gates.
 No private capture, paid call, hosted mutation, production deployment or owner
 activation is implied by this source packet.
 
+### COL1 garment colours and Azure v2 manifest - 24 September 2026
+
+COL1 adds `burgundy`, `cream`, `khaki`, `light_blue`, `teal`, `gold` and
+`silver` to the 14 colour codes. Existing values stay valid and no rows change.
+Two additive migrations follow the eleven installed ones:
+`20260924100000_garment_colours.sql` widens only the three colour checks
+(`private.ai_valid_facts`, `private.reserve_item_save`,
+`private.image_change_intent`), and `20260924100100_azure_colour_manifest.sql`
+inserts immutable `azure-eu-terra-devtest-v2` (new schema/prompt hashes,
+`prompt_version` 2, same model, tariff, limits and expiry) and lets the four
+v1-literal functions accept v1 or v2. Each body is its predecessor with exactly
+one substitution; a unit test rebuilds both files from the earlier migrations.
+
+The deployed handler dispatches only the v2/prompt 2 pair. Receipts, finishes
+and Saves for v1 remain accepted, and the browser accepts either matching pair;
+mixed pairs are refused. The consent notice and its hash are unchanged, so the
+v2 switch needs no new consent. Preservation stages now include `colours`
+(twelve) and final `target` (thirteen); the storage guard accepts exact prefixes
+of nine to thirteen. Hosted order is M1, M2, Pages, the three Edge Functions
+together (they share `protocol.ts`), then the owner's controls switch to v2;
+each step is separately approved.
+
 ## Delivery rules
 
 ### I10b staged local source authority - 22 September 2026

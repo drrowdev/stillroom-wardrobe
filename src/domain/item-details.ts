@@ -2,7 +2,7 @@ import { maximumFieldRevision, parseFieldProvenance, sameFieldProvenance, type F
 import { isCategory, isRecord, isUuid, type Category } from './wardrobe';
 import { AppError } from '../data/errors';
 import { locales, translate, type Language, type MessageKey } from '../i18n';
-import { styleTagLimit } from './preferences';
+import { colours, styleTagLimit } from './preferences';
 import {
   buildGarmentWrite, collectionLimits, editGarmentField, freezeValues, newGarmentDraft, parseGarmentValues, sameValue,
   type GarmentDraft, type GarmentPatch, type GarmentValues,
@@ -47,11 +47,8 @@ export function validDescription(text: string): string | null {
   const value = text.trim();
   return [...value].length <= 240 && !value.includes('\0') ? value : null;
 }
-const colourCodes = [
-  'black', 'white', 'grey', 'navy', 'blue', 'green', 'olive', 'beige', 'brown', 'red', 'yellow', 'orange', 'pink', 'purple',
-] as const;
-type ColourCode = typeof colourCodes[number];
-const isColourCode = (value: string): value is ColourCode => colourCodes.some((code) => code === value);
+type ColourCode = typeof colours[number];
+const isColourCode = (value: string): value is ColourCode => colours.some((code) => code === value);
 // Which colour form each name template needs (Swedish neuter nouns, Finnish and Swedish plural shoes). English repeats one form.
 const nameForms: Record<Category, 'base' | 'neuter' | 'plural'> = {
   top: 'base', bottom: 'base', accessory: 'base', one_piece: 'neuter', layer: 'neuter', outerwear: 'neuter', footwear: 'plural',

@@ -182,6 +182,13 @@ describe('closed complete manual fields', () => {
     ['style_tags', Array.from({ length: 9 }, (_, i) => String(i))], ['tags', Array.from({ length: 12 }, (_, i) => `${i}${'🌿'.repeat(39)}`)] ] satisfies Array<[GarmentField, string[]]>)('rejects invalid collection %s', (field, value) => {
     expect(validateGarmentDraft(editGarmentField(draft(), field, value, 'en')).errors[field]).toBe(true);
   });
+  it('accepts the added colour codes and still rejects variants of them', () => {
+    const added = editGarmentField(draft(), 'colours', ['burgundy', 'light_blue', 'silver'], 'en');
+    expect(validateGarmentDraft(added).values?.colours).toEqual(['burgundy', 'light_blue', 'silver']);
+    for (const value of ['wine', 'Burgundy', 'light-blue']) {
+      expect(validateGarmentDraft(editGarmentField(draft(), 'colours', [value], 'en')).errors.colours).toBe(true);
+    }
+  });
   it('counts Unicode code points, preserves zero/false and rejects contradictory temperatures', () => {
     expect(validateGarmentDraft(editGarmentField(draft(), 'title', '🌿'.repeat(100), 'en')).values?.title).toHaveLength(200);
     const zero = editGarmentField(editGarmentField(draft(), 'warmth', '0', 'en'), 'windproof', 'false', 'en');

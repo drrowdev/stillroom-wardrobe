@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { aiCardState, aiPolicyBinding, azureAiManifest, azureAiModel, azureAiReviewExpires, type AiStatus } from '../../src/domain/ai-controls';
 
 const now = Date.parse('2026-09-24T12:00:00Z');
-const policy = { activated: true, noticeRevision: 2, modelId: azureAiModel, promptVersion: 1, maxRequestMicro: '4097351',
+const policy = { activated: true, noticeRevision: 2, modelId: azureAiModel, promptVersion: 2, maxRequestMicro: '4097351',
   monthlyAllowanceMicro: '20000000', maxRequestsPerHour: 30, resultTtlSeconds: 3600, executionManifestId: azureAiManifest };
 function status(overrides: { code?: AiStatus['code']; enabled?: boolean; revision?: number | null; policy?: Partial<typeof policy> | null;
   serverTimeMs?: number } = {}): AiStatus {
@@ -73,7 +73,7 @@ describe('policy binding', () => {
   it.each([
     ['monthly allowance', { monthlyAllowanceMicro: '30000000' }], ['maximum request', { maxRequestMicro: '4097352' }],
     ['revision', { noticeRevision: 3 }], ['model', { modelId: 'other-model' }], ['manifest', { executionManifestId: 'other-manifest' }],
-    ['prompt version', { promptVersion: 2 }],
+    ['prompt version', { promptVersion: 1 }],
   ] as const)('changes with the %s', (_, change) => {
     expect(aiPolicyBinding(scope, status({ policy: change }))).not.toBe(base);
   });

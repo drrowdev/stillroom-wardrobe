@@ -106,6 +106,8 @@ export async function imageReplacementBaseline(env) {
       (v) => { v.currentImageId = randomUUID(); }, (v) => { v.item.title = null; },
       (v) => { v.item.field_provenance.material = { kind: 'ai_estimated', revision: 1 }; v.item.material = 'Invented'; },
       (v) => { v.image.main_bytes = 1.5; }, (v) => { v.item.tags = Array(13).fill('duplicate'); },
+      ...['wine', 'Burgundy', 'light-blue', 'lightblue'].map((colour) => (v) => {
+        v.item.colours = [colour]; v.item.field_provenance.colours = { kind: 'user', revision: 1 }; }),
     ]) {
       const invalid = structuredClone(value); change(invalid);
       const result = await h.call('reserve_image_change', { p_intent: invalid });
@@ -113,6 +115,9 @@ export async function imageReplacementBaseline(env) {
       eq(await h.read('items', base.item.id), [base.item]);
       eq(await h.read('item_images', value.imageId), []);
     }
+    // The frozen change also carries added colour codes; the item row stays unchanged until completion.
+    value.item.colours = ['burgundy', 'light_blue', 'gold'];
+    value.item.field_provenance = { ...value.item.field_provenance, colours: { kind: 'user', revision: 1 } };
     const receipt = await h.reserve(value); eq(await h.reserve(value), receipt);
     const drift = structuredClone(value); drift.image.alt_text = 'Changed frozen request';
     denied(await h.call('reserve_image_change', { p_intent: drift }));

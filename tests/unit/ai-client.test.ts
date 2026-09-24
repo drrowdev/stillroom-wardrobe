@@ -260,4 +260,13 @@ describe('status validation and current policy', () => {
       { ...good.policy!, executionManifestId: 'other' }, { ...good.policy!, activated: false }])
       expect(supportedAiPolicy({ ...good, policy })).toBe(false);
   });
+  it('supports each Azure manifest only with its own prompt version', () => {
+    const good = parseAiStatus(status())!;
+    const at = Date.parse('2026-09-24T00:00:00Z');
+    const v2 = { ...good.policy!, executionManifestId: 'azure-eu-terra-devtest-v2', promptVersion: 2 };
+    expect(supportedAiPolicy({ ...good, policy: v2 }, at)).toBe(true);
+    for (const policy of [{ ...v2, promptVersion: 1 }, { ...good.policy!, promptVersion: 2 },
+      { ...v2, promptVersion: 3 }, { ...v2, executionManifestId: 'azure-eu-terra-devtest-v3' }])
+      expect(supportedAiPolicy({ ...good, policy }, at)).toBe(false);
+  });
 });

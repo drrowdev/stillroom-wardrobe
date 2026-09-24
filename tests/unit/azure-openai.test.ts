@@ -7,6 +7,7 @@ import {
 } from '../../supabase/functions/analyze-clothing/azure-openai';
 import { aiNoticeProfile, parseAnalysisReply, parseAiStatus, supportedAiPolicy } from '../../src/domain/ai-controls';
 import messages from '../../src/i18n/messages.json';
+import { colours } from '../../src/domain/preferences';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers';
 
 const fields = Object.fromEntries(AZURE_SCHEMA.properties.fields.required.map((key) =>
@@ -19,14 +20,28 @@ const response = () => ({ model: AZURE_MODEL, usage: structuredClone(usage),
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 describe('fixed inactive Azure profile', () => {
   it('pins exact NFC literals and independent Google identity without rewriting historical manifests', async () => {
-    const sql = await readFile(new URL('../../supabase/migrations/20260921193000_azure_terra_analysis.sql', import.meta.url), 'utf8');
-    const entries = [[AZURE_PROMPT, 1421, 'fd0218f1e71b7902af437cb58f17c724883c78f3d76d085ca8bbb1cea0eb25ff'],
-      [JSON.stringify(AZURE_SCHEMA), 1543, '84d87dca033cc587c6cae54cc8a0a2936f3dabefa0ab18fb4c3ee03467cc8ff1'],
-      [JSON.stringify(AZURE_SETTINGS), 1780, '8a4eef8a47549d57d2466148efee37ebaeed57beb6a046c5a464e977da15eb88']] as const;
+    const read = (name: string) => readFile(new URL(`../../supabase/migrations/${name}`, import.meta.url), 'utf8');
+    const v1 = await read('20260921193000_azure_terra_analysis.sql');
+    const v2 = await read('20260924100100_azure_colour_manifest.sql');
+    for (const hash of ['fd0218f1e71b7902af437cb58f17c724883c78f3d76d085ca8bbb1cea0eb25ff',
+      '84d87dca033cc587c6cae54cc8a0a2936f3dabefa0ab18fb4c3ee03467cc8ff1',
+      '8a4eef8a47549d57d2466148efee37ebaeed57beb6a046c5a464e977da15eb88']) {
+      expect(v1).toContain(hash); expect(v2).not.toContain(hash);
+    }
+    const entries = [[AZURE_PROMPT, 1642, 'f936938355042f9620fad74b3da848e1045bb76461a4a6e98a1f2ed8080cec46'],
+      [JSON.stringify(AZURE_SCHEMA), 1606, '36ab5116df2cfce8443c5db0a9a0747e15f8d018e7463b8c2296d98568503d6e'],
+      [JSON.stringify(AZURE_SETTINGS), 1780, '6713706fb27792e2771f1fd2d0e4586a5ce1d61fb8ecbfa8dfd88f89db504827']] as const;
     for (const [value, length, hash] of entries) {
       expect(Buffer.byteLength(value)).toBe(length); expect(digest(value)).toBe(hash);
-      expect(value.normalize('NFC')).toBe(value); expect(sql).toContain(hash);
+      expect(value.normalize('NFC')).toBe(value); expect(v2).toContain(hash); expect(v1).not.toContain(hash);
     }
+    expect(AZURE_MANIFEST).toBe('azure-eu-terra-devtest-v2');
+    expect(AZURE_SETTINGS).toMatchObject({ profileId: AZURE_MANIFEST, promptVersion: 2, schemaVersion: 1, noticeRevision: 2 });
+    expect(v2).toContain(`'${AZURE_MANIFEST}','${AZURE_MODEL}',2,`);
+    expect(AZURE_SCHEMA.properties.fields.properties.colours.items.enum).toEqual([...colours]);
+    expect(AZURE_PROMPT).toContain('Colour guidance: burgundy for wine, maroon or oxblood; cream for ivory, ecru or off-white; '
+      + 'khaki for khaki or tan; light_blue for pale or sky blue; teal for blue-green or petrol; gold and silver only for metallic colour.');
+    expect(/^[\x20-\x7e]*$/.test(AZURE_PROMPT)).toBe(true);
     const notice = JSON.stringify({ noticeRevision: 2, 'aiC.notice': messages['aiC.azureNotice'],
       'aiC.trainingNotice': messages['aiC.azureTrainingNotice'] });
     expect(Buffer.byteLength(notice)).toBe(991);
@@ -118,24 +133,36 @@ describe('fixed inactive Azure profile', () => {
 });
 describe('historical receipt reading versus Azure-only new dispatch', () => {
   it('reads Google and Azure ready receipts after Azure review expiry without admitting new analysis', () => {
-    for (const modelId of ['gemini-3.8-flash', AZURE_MODEL]) {
-      expect(parseAnalysisReply({ code: 'OK', status: 'ready', accounting: { basis: 'estimated', amountMicro: '1034', currency: 'USD' },
-        result: { schemaVersion: 1, requestId: '10000000-0000-4000-8000-000000000001',
-          draftId: '20000000-0000-4000-8000-000000000001', generation: 1, imageSha256: 'a'.repeat(64),
-          modelId, promptVersion: 1, createdAtMs: Date.parse('2026-11-01'), expiresAtMs: Date.parse('2026-11-01') + 60000,
-          facts: { outcome: 'ready', fields: modelId === AZURE_MODEL ? facts.fields : { category: 'top' } } } })?.code).toBe('OK');
-    }
+    const reply = (modelId: string, promptVersion: number, colours: string[] = ['green']) => parseAnalysisReply({ code: 'OK',
+      status: 'ready', accounting: { basis: 'estimated', amountMicro: '1034', currency: 'USD' },
+      result: { schemaVersion: 1, requestId: '10000000-0000-4000-8000-000000000001',
+        draftId: '20000000-0000-4000-8000-000000000001', generation: 1, imageSha256: 'a'.repeat(64),
+        modelId, promptVersion, createdAtMs: Date.parse('2026-11-01'), expiresAtMs: Date.parse('2026-11-01') + 60000,
+        facts: { outcome: 'ready', fields: modelId === AZURE_MODEL ? { ...facts.fields, colours } : { category: 'top' } } } });
+    expect(reply('gemini-3.8-flash', 1)?.code).toBe('OK');
+    expect(reply('gemini-3.8-flash', 2)).toBeNull();
+    for (const promptVersion of [1, 2]) expect(reply(AZURE_MODEL, promptVersion, ['burgundy', 'light_blue'])?.code).toBe('OK');
+    expect(reply(AZURE_MODEL, 3)).toBeNull();
+    expect(reply(AZURE_MODEL, 2, ['wine'])).toBeNull();
     const status = parseAiStatus({ code: 'OK', period: '2026-09', serverTimeMs: Date.parse('2026-09-21'),
       consent: { enabled: true, noticeRevision: 2, consentedAt: '2026-09-21T00:00:00Z', profileVersion: '1' },
-      policy: { activated: true, modelId: AZURE_MODEL, promptVersion: 1, noticeRevision: 2,
+      policy: { activated: true, modelId: AZURE_MODEL, promptVersion: 2, noticeRevision: 2,
         executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351', monthlyAllowanceMicro: '50000000',
         maxRequestsPerHour: 100, resultTtlSeconds: 3600 },
       usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } })!;
     expect(supportedAiPolicy(status, Date.parse('2026-09-21'))).toBe(true);
     expect(supportedAiPolicy(status, Date.parse('2026-10-21'))).toBe(false);
     expect(aiNoticeProfile(status.policy)).toBe('azure');
-    const legacy = { ...status, policy: { ...status.policy!, modelId: 'gemini-3.8-flash', noticeRevision: 1,
+    const withPolicy = (change: object) => ({ ...status, policy: { ...status.policy!, ...change } });
+    const v1 = withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v1', promptVersion: 1 });
+    expect(supportedAiPolicy(v1, Date.parse('2026-09-21'))).toBe(true); expect(aiNoticeProfile(v1.policy)).toBe('azure');
+    for (const mixed of [withPolicy({ promptVersion: 1 }), withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v1' }),
+      withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v3' })]) {
+      expect(supportedAiPolicy(mixed, Date.parse('2026-09-21'))).toBe(false); expect(aiNoticeProfile(mixed.policy)).toBeNull();
+    }
+    const legacy = { ...status, policy: { ...status.policy!, modelId: 'gemini-3.8-flash', noticeRevision: 1, promptVersion: 1,
       executionManifestId: 'google-eu-3.8-v1' } };
     expect(aiNoticeProfile(legacy.policy)).toBe('google'); expect(supportedAiPolicy(legacy)).toBe(false);
+    expect(aiNoticeProfile({ ...legacy.policy, promptVersion: 2 })).toBeNull();
   });
 });

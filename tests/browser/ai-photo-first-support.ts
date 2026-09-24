@@ -20,8 +20,8 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
   const failed = new Set<string>();
   let analysisMode: 'ready' | 'pending' | 'timeout' | 'unclear' | 'failed' = 'ready';
   let ttl = 3600000;
-  let policy = { activated: true, noticeRevision: 2, modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 1,
-    executionManifestId: 'azure-eu-terra-devtest-v1',
+  let policy = { activated: true, noticeRevision: 2, modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 2,
+    executionManifestId: 'azure-eu-terra-devtest-v2',
     maxRequestMicro: '4097351', monthlyAllowanceMicro: '100000000', maxRequestsPerHour: 200, resultTtlSeconds: 3600 };
   const accounting = { basis: 'estimated', amountMicro: '1034', currency: 'USD' };
   const unknown = { category: null, subcategory: null, colours: [], pattern: null, sleeve_length: null,
@@ -39,7 +39,7 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
         return { body: { code: 'ANALYSIS_FAILED' }, status: 502 };
       }
       const result: AiResult = { schemaVersion: 1, requestId, draftId, generation, imageSha256,
-        modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 1, createdAtMs: Date.now() - 1, expiresAtMs: Date.now() + ttl,
+        modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 2, createdAtMs: Date.now() - 1, expiresAtMs: Date.now() + ttl,
         facts: analysisMode === 'unclear' ? { outcome: 'unclear', fields: unknown }
           : { outcome: 'ready', fields: { ...unknown, category: 'top', colours: ['green'], formality: 0, material: 'Cotton', sleeve_length: 'long', style_tags: ['relaxed'] } } };
       results.set(requestId, result);

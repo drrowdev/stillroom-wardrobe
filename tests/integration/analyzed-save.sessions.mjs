@@ -144,7 +144,7 @@ async function full(env, phase) {
       const history = await client.rpc(owner, 'item_attribution_history', { p_item_id: value.p_item.id });
       requireEvidence(history.length === 1 && history[0].source_image_id === value.p_image.id
         && history[0].image_sha256 === analysisHash && history[0].model_id === 'gpt-5.6-terra-2026-07-09'
-        && history[0].prompt_version === 1);
+        && history[0].prompt_version === 2);
       eq(Object.keys(history[0].fields).sort(), ['category', 'colours', 'formality']);
       eq(Object.keys(history[0]).sort(), ['fields', 'image_sha256', 'model_id', 'prompt_version', 'source_image_id']);
       for (const field of ['category', 'colours', 'formality'])

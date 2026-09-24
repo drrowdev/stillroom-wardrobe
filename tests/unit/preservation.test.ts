@@ -113,6 +113,8 @@ const baseTable = [
   '   `20260913120000` | ` `              | `2026-09-13 12:00:00` ',
   '   `20260921193000` | ` `              | `2026-09-21 19:30:00` ',
   '   `20260922020000` | ` `              | `2026-09-22 02:00:00` ',
+  '   `20260924100000` | ` `              | `2026-09-24 10:00:00` ',
+  '   `20260924100100` | ` `              | `2026-09-24 10:01:00` ',
   '',
   '',
 ].join('\n');
@@ -132,10 +134,16 @@ const targetTable = [
   '   `20260913120000` | `20260913120000` | `2026-09-13 12:00:00` ',
   '   `20260921193000` | `20260921193000` | `2026-09-21 19:30:00` ',
   '   `20260922020000` | `20260922020000` | `2026-09-22 02:00:00` ',
+  '   `20260924100000` | `20260924100000` | `2026-09-24 10:00:00` ',
+  '   `20260924100100` | `20260924100100` | `2026-09-24 10:01:00` ',
   '',
   '',
 ].join('\n');
-const azureTable = targetTable.replace('`20260922020000` | `20260922020000`', '`20260922020000` | ` `             ');
+const pendingRow = (table: string, version: string) => table.replace(`\`${version}\` | \`${version}\``, `\`${version}\` | \` \`             `);
+// COL1: eleven applied (image-change) and twelve applied (colours), then the full thirteen as target.
+const coloursTable = pendingRow(targetTable, '20260924100100');
+const imageChangeTable = pendingRow(coloursTable, '20260924100000');
+const azureTable = pendingRow(imageChangeTable, '20260922020000');
 const priorMainTable = azureTable.replace('`20260921193000` | `20260921193000`', '`20260921193000` | ` `             ');
 const validEnv = { ALLOW_PRESERVATION_REHEARSAL: '1', CI: 'true', GITHUB_ACTIONS: 'true' };
 const inventory = () => (MIGRATIONS as { name: string; version: string; bytes: number; sha256: string }[])
@@ -329,11 +337,11 @@ describe('HC1 populated six-to-eleven preservation (synthetic, no backend proof)
     let offset = 0;
     for (const step of ["'--version', HOSTED_SOURCE_VERSION", "await history('hosted-source')",
       'await captureSixPreservation(', "await history('hosted-source')", 'await sameDatabaseIdentity()',
-      "await cli(['migration', 'up', '--local'], 120_000)", "await history('target')", 'await verifyCiStorageGuard()',
+      "await migrateToStage(run, 'hosted-source', 'image-change')", "await history('image-change')", 'await verifyCiStorageGuard()',
       'await readSixPreservation(', 'compareSixPrivate(', 'await probeSixPreservation(', 'await lifecyclePublicationCases(']) {
       const next = six.indexOf(step, offset); expect(next).toBeGreaterThanOrEqual(offset); offset = next + step.length;
     }
-    expect(six.match(/await cli\(\['migration', 'up'/g)).toHaveLength(1);
+    expect(six).not.toMatch(/await cli\(\['migration', 'up'/);
     expect(six.slice(0, six.indexOf("stage = 'HC1-six-to-eleven'"))).not.toContain('verifyCiStorageGuard');
     expect(six.match(/performance\.now\(\) \+ 120_000/g)).toHaveLength(3);
     expect(six).toContain('requireLifecyclePrefixEmpty, requireLifecycleClaimFence');
@@ -364,11 +372,11 @@ describe('CI-only preservation guards', () => {
       expect(() => assertRehearsalEnvironment({ ...validEnv, [key]: 'fictional-refused' }, [])).toThrow();
     }
   });
-  it('pins exactly eleven regular migrations, preserving all ten earlier lengths and hashes', async () => {
-    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000']);
+  it('pins exactly thirteen regular migrations, preserving all eleven earlier lengths and hashes', async () => {
+    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000', '20260924100000', '20260924100100']);
     expect(() => validateInventory(inventory())).not.toThrow();
     await expect(assertMigrationInventory()).resolves.toBeUndefined();
-    for (const index of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) for (const [key, value] of [
+    for (const index of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) for (const [key, value] of [
       ['name', 'unexpected.sql'], ['bytes', 0], ['bytes', present(inventory()[index]).bytes + 1],
       ['sha256', 'b'.repeat(64)], ['regular', false], ['symlink', true],
     ]) {
@@ -406,12 +414,21 @@ describe('CI-only preservation guards', () => {
     expect(() => assertCapabilities([{ code: 0, stdout: '  --local\n' }, ...help.slice(1)])).toThrow();
   });
   it('parses source-derived applied/pending tables without claiming execution', () => {
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000'] });
-    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000'], pending: [] });
-    expect(assertHistory(priorMainTable, 'prior-main')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'], pending: ['20260921193000', '20260922020000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000', '20260924100000', '20260924100100'] });
+    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000', '20260924100000', '20260924100100'], pending: [] });
+    expect(assertHistory(priorMainTable, 'prior-main')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'], pending: ['20260921193000', '20260922020000', '20260924100000', '20260924100100'] });
     expect(assertHistory(azureTable, 'azure-target')).toEqual({
-      applied: inventory().slice(0, 10).map((entry) => entry.version), pending: ['20260922020000'],
+      applied: inventory().slice(0, 10).map((entry) => entry.version), pending: ['20260922020000', '20260924100000', '20260924100100'],
     });
+    expect(assertHistory(imageChangeTable, 'image-change')).toEqual({
+      applied: inventory().slice(0, 11).map((entry) => entry.version), pending: ['20260924100000', '20260924100100'],
+    });
+    expect(assertHistory(coloursTable, 'colours')).toEqual({
+      applied: inventory().slice(0, 12).map((entry) => entry.version), pending: ['20260924100100'],
+    });
+    for (const [table, stage] of [[imageChangeTable, 'target'], [imageChangeTable, 'colours'], [coloursTable, 'target'],
+      [coloursTable, 'image-change'], [targetTable, 'colours'], [azureTable, 'image-change']] as const)
+      expect(() => assertHistory(table, stage)).toThrow();
     expect(() => assertHistory(azureTable, 'target')).toThrow();
     expect(() => assertHistory(targetTable, 'azure-target')).toThrow();
     for (const [table, stage] of [[baseTable, 'prior-main'], [targetTable, 'prior-main'],
@@ -427,9 +444,9 @@ describe('CI-only preservation guards', () => {
     expect(assertHistoryResult({ code: 0, stdout: baseTable }, 'base')).toEqual(parseMigrationHistory(baseTable));
   });
   it('retains SOURCE-DERIVED renderer padding, widths and decorative blank lines', () => {
-    for (const table of [baseTable, priorMainTable, azureTable, targetTable]) {
+    for (const table of [baseTable, priorMainTable, azureTable, imageChangeTable, coloursTable, targetTable]) {
       const lines = table.split('\n');
-      expect(lines).toHaveLength(17);
+      expect(lines).toHaveLength(19);
       expect(lines.slice(0, 2)).toEqual(['', '  ']);
       expect(lines.slice(-2)).toEqual(['', '']);
       for (const line of lines.slice(2, -2)) {
@@ -501,7 +518,7 @@ describe('CI-only preservation guards', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe('EVIDENCE_REQUIRED');
     expect(historyFailureDetail(failure)).toBe(`; reason=${reason}`);
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000', '20260924100000', '20260924100100'] });
   });
   it('distinguishes history command failure without forwarding command output or arbitrary errors', () => {
     const privateText = 'arbitrary upstream text /private/fixture-path';
@@ -1626,7 +1643,7 @@ describe('import safety and frozen integration boundary', () => {
     expect(main.indexOf('await verifyCiStorageGuard();')).toBeGreaterThan(main.indexOf("await migrateToAzureTarget(run, 'base')"));
     expect(main.indexOf("await history('azure-target');")).toBeGreaterThan(main.indexOf('await verifyCiStorageGuard();'));
     expect(main.indexOf('ITEM_LIFECYCLE_CATALOG_SQL')).toBeGreaterThan(main.indexOf("await history('azure-target');"));
-    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(5);
+    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(8);
     const prior = main.slice(main.indexOf("stage = 'AZ1-prior-main-reset'"));
     expect(source).toContain("const PRIOR_MAIN_VERSION = '20260913120000';");
     expect(source).toContain('MIGRATIONS.findIndex((entry) => entry.version === PRIOR_MAIN_VERSION)');
@@ -1635,13 +1652,14 @@ describe('import safety and frozen integration boundary', () => {
     expect(source).not.toContain('MIGRATIONS.slice(0, 9)');
     expect(source).not.toContain('MIGRATIONS[9]');
     expect(prior.indexOf("await history('prior-main');")).toBeLessThan(prior.indexOf('await captureAzurePreservation('));
-    expect(prior.indexOf('await captureAzurePreservation(')).toBeLessThan(prior.indexOf("await cli(['migration', 'up', '--local'])"));
+    expect(prior.indexOf('await captureAzurePreservation(')).toBeLessThan(prior.indexOf("await migrateToStage(run, 'azure-target', 'image-change')"));
     expect(prior.indexOf("await history('azure-target');")).toBeLessThan(prior.indexOf('await verifyAzurePreservation('));
     const nineToTen = prior.slice(prior.indexOf("await migrateToAzureTarget(run, 'prior-main')"), prior.indexOf('await verifyAzurePreservation('));
     expect(nineToTen).toContain("await history('azure-target');\n      await verifyCiStorageGuard();");
     expect(prior.indexOf('await verifyAzurePreservation(')).toBeLessThan(prior.indexOf('await captureImageChangePreservation('));
-    expect(prior.indexOf('await captureImageChangePreservation(')).toBeLessThan(prior.indexOf("await cli(['migration', 'up', '--local'])"));
-    expect(prior.indexOf("await history('target');")).toBeLessThan(prior.indexOf('await verifyImageChangePreservation('));
+    expect(prior.indexOf('await captureImageChangePreservation(')).toBeLessThan(prior.indexOf("await migrateToStage(run, 'azure-target', 'image-change')"));
+    expect(prior.indexOf("await history('image-change');")).toBeLessThan(prior.indexOf('await verifyImageChangePreservation('));
+    expect(main).not.toMatch(/await cli\(\['migration', 'up'/);
   });
   it('keeps the normal child free of privileged calls and compares before probes', async () => {
     const source = await readFile(path.join(root, 'tests/integration/preservation.sessions.mjs'), 'utf8');
@@ -1652,8 +1670,8 @@ describe('import safety and frozen integration boundary', () => {
     const orchestrator = await readFile(path.join(root, 'scripts/preservation-rehearsal.mjs'), 'utf8');
     expect(orchestrator).toContain('normalSessionEnvironment(process.env, await readCredentialCache())');
     expect(orchestrator).toContain('validateSessionEnvironment(env)');
-    expect(orchestrator.match(/provision-test-users\.mjs/g)).toHaveLength(3);
-    expect(orchestrator.match(/\['db', 'reset'/g)).toHaveLength(4); // Help, fixed base, prior-main and schema six.
+    expect(orchestrator.match(/provision-test-users\.mjs/g)).toHaveLength(4);
+    expect(orchestrator.match(/\['db', 'reset'/g)).toHaveLength(5); // Help, fixed base, prior-main, schema six and COL1 twelve.
     for (const [stage, target] of [['S1-base-history', 'base'], ['S3-base-history', 'base'], ['S3-target-history', 'azure-target']]) {
       expect(orchestrator.replaceAll('\r\n', '\n')).toContain(`stage = '${stage}';\n    await history('${target}');`);
     }
@@ -1661,5 +1679,29 @@ describe('import safety and frozen integration boundary', () => {
     const fixtureBytes = await readFile(path.join(root, 'tests/security/fixture.jpg'));
     expect(fixtureBytes.length).toBe(632);
     expect(createHash('sha256').update(fixtureBytes).digest('hex')).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
+
+describe('COL1 strict preservation pass and twelve-only probes (source order, not executed backend proof)', () => {
+  it('captures eleven, compares twelve and thirteen read-only, and probes only afterwards', async () => {
+    const source = (await readFile(path.join(root, 'scripts/preservation-rehearsal.mjs'), 'utf8')).replaceAll('\r\n', '\n');
+    const col1 = source.slice(source.indexOf("stage = 'COL1-A-finalizer'"), source.indexOf('} catch (error) {', source.indexOf("stage = 'COL1-A-finalizer'")));
+    let offset = 0;
+    for (const step of ["await history('image-change')", 'await captureColourPreservation(', "await history('image-change')",
+      "await migrateToStage(run, 'image-change', 'colours')", "await history('colours'); await verifyCiStorageGuard();",
+      "await verifyColourStage(colourSnapshot, privilegedLocalSql, 'colours')", "await migrateToStage(run, 'colours', 'target')",
+      "await history('target'); await verifyCiStorageGuard();", "await verifyColourStage(colourSnapshot, privilegedLocalSql, 'target')",
+      "await colourProbes(sixEnv, privilegedLocalSql, 'target')", 'await colourFinalizer.stop()',
+      "'--version', COLOUR_VERSION", "await history('colours'); await verifyCiStorageGuard();", 'provision-test-users.mjs',
+      "await colourProbes(twelveEnv, privilegedLocalSql, 'colours')", 'await twelveFinalizer.stop()']) {
+      const next = col1.indexOf(step, offset); expect(next, step).toBeGreaterThanOrEqual(offset); offset = next + step.length;
+    }
+    expect(col1.match(/colourProbes\(/g)).toHaveLength(2);
+    expect(col1).not.toMatch(/await cli\(\['migration', 'up'/);
+    expect(source).toContain("const COLOUR_VERSION = '20260924100000';");
+    const normal = await readFile(path.join(root, 'tests/integration/azure-preservation.sessions.mjs'), 'utf8');
+    const verify = normal.slice(normal.indexOf('export async function verifyColourStage'), normal.indexOf('export async function colourProbes'));
+    expect(verify).not.toMatch(/insert|update|delete|\.rpc\(|colourControls|colourConsent/);
+    expect(verify).toContain('equal(after.rows, before.rows);');
   });
 });

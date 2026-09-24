@@ -150,3 +150,21 @@ hidden thoughts. Account/terms eligibility, regional configuration, consent,
 finite allowances, authorized photo evaluation, retention/purge and deployment
 approvals remain required. Synthetic usage tests prove arithmetic and lifecycle,
 not Google's billing behavior or those external gates.
+
+## COL1 Azure colour manifest — 24 September 2026
+
+Immutable `azure-eu-terra-devtest-v2` is a copy of `azure-eu-terra-devtest-v1`
+with only the colour vocabulary and prompt changed, following the owner's
+24 September decision after a wine-red coat was returned as `brown`. The Azure
+response schema enum adds `burgundy`, `cream`, `khaki`, `light_blue`, `teal`,
+`gold` and `silver` to the earlier 14 codes, and the prompt adds one guidance
+sentence for them. `prompt_version` is 2; model, deployment, endpoint, region,
+tariff rates, reservation, limits and the 21 October 2026 review expiry are
+unchanged. Pinned SHA-256: prompt `f936938355042f9620fad74b3da848e1045bb76461a4a6e98a1f2ed8080cec46`,
+schema `36ab5116df2cfce8443c5db0a9a0747e15f8d018e7463b8c2296d98568503d6e`,
+settings `6713706fb27792e2771f1fd2d0e4586a5ce1d61fb8ecbfa8dfd88f89db504827`.
+
+The tariff was not re-retrieved and no new photo evaluation was run; v2 carries
+v1's evidence and cautions. v1 is not modified or deleted. The Google legacy
+schema and its hash stay at the original 14 colours. Switching an owner's
+controls to v2 is a separate reviewed hosted data step, not part of the source.

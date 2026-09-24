@@ -16,11 +16,20 @@ import {
   captureSixPreservation, readSixPreservation, probeSixPreservation,
 } from '../tests/integration/preservation.sessions.mjs';
 import { captureAzurePreservation, verifyAzurePreservation,
-  captureImageChangePreservation, verifyImageChangePreservation } from '../tests/integration/azure-preservation.sessions.mjs';
+  captureImageChangePreservation, verifyImageChangePreservation,
+  captureColourPreservation, verifyColourStage, colourProbes } from '../tests/integration/azure-preservation.sessions.mjs';
 
 const PRIOR_MAIN_VERSION = '20260913120000';
 const AZURE_TARGET_VERSION = '20260921193000';
 const HOSTED_SOURCE_VERSION = '20260910070000';
+const IMAGE_CHANGE_VERSION = '20260922020000';
+const COLOUR_VERSION = '20260924100000';
+// Exact applied prefix per labelled stage; 'target' is the full source inventory.
+const STAGE_VERSIONS = Object.freeze({ base: '20260905000000', 'hosted-source': HOSTED_SOURCE_VERSION,
+  'prior-main': PRIOR_MAIN_VERSION, 'azure-target': AZURE_TARGET_VERSION, 'image-change': IMAGE_CHANGE_VERSION,
+  colours: COLOUR_VERSION, target: null });
+const STAGE_UPGRADES = Object.freeze({ 'azure-target': ['base', 'prior-main'], 'image-change': ['azure-target', 'hosted-source'],
+  colours: ['image-change'], target: ['colours'] });
 
 export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
@@ -34,6 +43,8 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260913120000_item_lifecycle.sql', version: '20260913120000', time: '2026-09-13 12:00:00', bytes: 20822, sha256: SOURCE_HASHES.lifecycle },
   { name: '20260921193000_azure_terra_analysis.sql', version: '20260921193000', time: '2026-09-21 19:30:00', bytes: 29274, sha256: SOURCE_HASHES.azure },
   { name: '20260922020000_checked_image_changes.sql', version: '20260922020000', time: '2026-09-22 02:00:00', bytes: 82482, sha256: SOURCE_HASHES.imageChanges },
+  { name: '20260924100000_garment_colours.sql', version: '20260924100000', time: '2026-09-24 10:00:00', bytes: 20945, sha256: SOURCE_HASHES.colours },
+  { name: '20260924100100_azure_colour_manifest.sql', version: '20260924100100', time: '2026-09-24 10:01:00', bytes: 16215, sha256: SOURCE_HASHES.colourManifest },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -854,27 +865,25 @@ export function parseMigrationHistory(output) {
 }
 
 export function assertHistory(output, stage) {
-  requireHistory(['base', 'hosted-source', 'prior-main', 'azure-target', 'target'].includes(stage), 'inventory-mismatch');
+  requireHistory(Object.hasOwn(STAGE_VERSIONS, stage), 'inventory-mismatch');
   const priorMainIndex = MIGRATIONS.findIndex((entry) => entry.version === PRIOR_MAIN_VERSION);
   const azureIndex = MIGRATIONS.findIndex((entry) => entry.version === AZURE_TARGET_VERSION);
   const hostedIndex = MIGRATIONS.findIndex((entry) => entry.version === HOSTED_SOURCE_VERSION);
   requireHistory(priorMainIndex >= 0 && azureIndex === priorMainIndex + 1, 'inventory-mismatch');
   requireHistory(hostedIndex === 5, 'inventory-mismatch');
   const inventory = parseMigrationHistory(output);
-  const expected = stage === 'base'
-    ? { applied: [MIGRATIONS[0].version], pending: MIGRATIONS.slice(1).map((entry) => entry.version) }
-    : stage === 'hosted-source'
-      ? { applied: MIGRATIONS.slice(0, hostedIndex + 1).map((entry) => entry.version),
-        pending: MIGRATIONS.slice(hostedIndex + 1).map((entry) => entry.version) }
-      : stage === 'prior-main'
-      ? { applied: MIGRATIONS.slice(0, priorMainIndex + 1).map((entry) => entry.version),
-        pending: MIGRATIONS.slice(priorMainIndex + 1).map((entry) => entry.version) }
-      : stage === 'azure-target'
-        ? { applied: MIGRATIONS.slice(0, azureIndex + 1).map((entry) => entry.version),
-          pending: MIGRATIONS.slice(azureIndex + 1).map((entry) => entry.version) }
-        : { applied: MIGRATIONS.map((entry) => entry.version), pending: [] };
+  const last = stageIndex(stage);
+  requireHistory(last >= 0, 'inventory-mismatch');
+  const expected = { applied: MIGRATIONS.slice(0, last + 1).map((entry) => entry.version),
+    pending: MIGRATIONS.slice(last + 1).map((entry) => entry.version) };
   requireHistory(JSON.stringify(inventory) === JSON.stringify(expected), 'inventory-mismatch');
   return inventory;
+}
+
+function stageIndex(stage) {
+  if (!Object.hasOwn(STAGE_VERSIONS, stage)) return -1;
+  return STAGE_VERSIONS[stage] === null ? MIGRATIONS.length - 1
+    : MIGRATIONS.findIndex((entry) => entry.version === STAGE_VERSIONS[stage]);
 }
 
 export function assertHistoryResult(result, stage) {
@@ -915,11 +924,15 @@ async function sameDatabaseIdentity() {
   return result.stdout.trim();
 }
 
-// Copy-only ten-migration workdir: the existing CLI helper remains ROOT-bound.
+// Copy-only exact-prefix workdir: the existing CLI helper remains ROOT-bound.
 export async function migrateToAzureTarget(run, from) {
+  return migrateToStage(run, from, 'azure-target');
+}
+
+export async function migrateToStage(run, from, to) {
   assertRehearsalEnvironment(process.env, []);
   assertCiDatabaseMutationAllowed();
-  requireEvidence(['base', 'prior-main'].includes(from));
+  requireEvidence(Object.hasOwn(STAGE_UPGRADES, to) && STAGE_UPGRADES[to].includes(from));
   const directory = preservationStagePath(run), cache = path.dirname(directory);
   const cacheInfo = await lstat(cache);
   requireEvidence(cacheInfo.isDirectory() && !cacheInfo.isSymbolicLink());
@@ -928,8 +941,8 @@ export async function migrateToAzureTarget(run, from) {
   const configPath = path.join(ROOT, 'supabase', 'config.toml'), configInfo = await lstat(configPath);
   requireEvidence(configInfo.isFile() && !configInfo.isSymbolicLink() && configInfo.size <= 32768);
   const config = await readFile(configPath);
-  const last = MIGRATIONS.findIndex((entry) => entry.version === AZURE_TARGET_VERSION);
-  requireEvidence(last === 9);
+  const last = stageIndex(to);
+  requireEvidence(last > stageIndex(from) && last < MIGRATIONS.length);
   const prefix = MIGRATIONS.slice(0, last + 1);
   const files = await Promise.all(prefix.map(async (entry) => {
     const bytes = await readFile(path.join(ROOT, 'supabase', 'migrations', entry.name));
@@ -963,7 +976,7 @@ export async function migrateToAzureTarget(run, from) {
       timeout: 120_000,
     });
     requireEvidence(result.code === 0);
-    await history('azure-target'); requireEvidence(await sameDatabaseIdentity() === container);
+    await history(to); requireEvidence(await sameDatabaseIdentity() === container);
     await assertMigrationInventory();
   } catch (error) { failed = true; primary = error; }
   try {
@@ -1178,9 +1191,9 @@ async function main() {
       await assertMigrationInventory(); await history('azure-target');
       const container = await sameDatabaseIdentity();
       stage = 'I10b-ten-to-eleven';
-      requireEvidence((await cli(['migration', 'up', '--local'])).code === 0);
+      await migrateToStage(run, 'azure-target', 'image-change');
       requireEvidence(await sameDatabaseIdentity() === container);
-      await history('target');
+      await history('image-change');
       await verifyCiStorageGuard();
       stage = 'I10b-preservation';
       await verifyImageChangePreservation(ten, privilegedLocalSql, (label) => { stage = `I10b-preservation-${label}`; });
@@ -1218,9 +1231,9 @@ async function main() {
     await assertMigrationInventory(); await history('hosted-source');
     const sixContainer = await sameDatabaseIdentity();
     stage = 'HC1-six-to-eleven';
-    requireEvidence((await cli(['migration', 'up', '--local'], 120_000)).code === 0);
+    await migrateToStage(run, 'hosted-source', 'image-change');
     requireEvidence(await sameDatabaseIdentity() === sixContainer);
-    await assertMigrationInventory(); await history('target'); await verifyCiStorageGuard();
+    await assertMigrationInventory(); await history('image-change'); await verifyCiStorageGuard();
     stage = 'HC1-eleven-compare';
     deadline = performance.now() + 120_000;
     const sixAfter = await readSixPreservation(six, sixEnv, deadline);
@@ -1235,6 +1248,47 @@ async function main() {
     await lifecyclePublicationCases(sixEnv, { withLifecycleCatalogMarker, withLifecycleLateUpload,
       requireLifecyclePrefixEmpty, requireLifecycleClaimFence });
     console.log('PASS: populated6/target11; owners=2 publicRows=38 objects=16 attempts=4 usedIds=6 registry=10; exact preservation before replay and original late-publication/catalog-zero cases; no provider calls');
+    stage = 'COL1-A-finalizer';
+    const colourFinalizer = await startAnalysisServer();
+    try {
+      colourFinalizer.assertRunning();
+      stage = 'COL1-A1-eleven-capture';
+      await history('image-change');
+      const colourSnapshot = await captureColourPreservation(sixEnv, privilegedLocalSql);
+      await assertMigrationInventory(); await history('image-change');
+      const colourContainer = await sameDatabaseIdentity();
+      stage = 'COL1-A2-eleven-to-twelve';
+      await migrateToStage(run, 'image-change', 'colours');
+      requireEvidence(await sameDatabaseIdentity() === colourContainer);
+      await history('colours'); await verifyCiStorageGuard();
+      stage = 'COL1-A3-twelve-compare';
+      await verifyColourStage(colourSnapshot, privilegedLocalSql, 'colours');
+      stage = 'COL1-A4-twelve-to-thirteen';
+      await migrateToStage(run, 'colours', 'target');
+      requireEvidence(await sameDatabaseIdentity() === colourContainer);
+      await history('target'); await verifyCiStorageGuard();
+      stage = 'COL1-A5-thirteen-compare';
+      await verifyColourStage(colourSnapshot, privilegedLocalSql, 'target');
+      stage = 'COL1-A6-thirteen-probes';
+      await colourProbes(sixEnv, privilegedLocalSql, 'target');
+      colourFinalizer.assertRunning();
+    } finally { await colourFinalizer.stop(); }
+    console.log('PASS: COL1 populated11/twelve/thirteen; rows, v1 manifest and unchanged bodies preserved at each compare; probes only after thirteen; no provider calls');
+    stage = 'COL1-B-twelve-reset';
+    requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', COLOUR_VERSION], 10 * 60_000)).code === 0);
+    await assertMigrationInventory(); await history('colours'); await verifyCiStorageGuard();
+    requireEvidence((await runCommand(process.execPath, [path.join(ROOT, 'scripts', 'provision-test-users.mjs')])).code === 0);
+    const twelveEnv = normalSessionEnvironment(process.env, await readCredentialCache());
+    validateSessionEnvironment(twelveEnv);
+    stage = 'COL1-B-twelve-probes';
+    const twelveFinalizer = await startAnalysisServer();
+    try {
+      twelveFinalizer.assertRunning();
+      await colourProbes(twelveEnv, privilegedLocalSql, 'colours');
+      await history('colours');
+      twelveFinalizer.assertRunning();
+    } finally { await twelveFinalizer.stop(); }
+    console.log('PASS: COL1 twelve-only probes; new colours accepted, invalid refused, v1 analysis Save works, v2 claim UNCONFIGURED');
   } catch (error) {
     console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}${lifecycleFailureDetail(error)}; subsequent stages NOT RUN`);
     process.exitCode = 1;

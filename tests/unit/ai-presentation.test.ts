@@ -25,6 +25,9 @@ describe('local presentation, not a second inference', () => {
     expect(JSON.stringify(presentAiFacts({ outcome: 'ready', fields }, 'en'))).not.toMatch(/·|navy/iu);
     expect(presentAiFacts({ outcome: 'ready', fields: { category: 'footwear' } }, 'en').title).toBe('Footwear');
     expect(presentAiFacts({ outcome: 'ready', fields: { colours: ['navy'] } }, 'sv').title).toBe('Marinblå');
+    expect(presentAiFacts({ outcome: 'ready', fields: { category: 'outerwear', colours: ['burgundy', 'gold'] } }, 'en').title).toBe('Burgundy outerwear');
+    expect(presentAiFacts({ outcome: 'ready', fields: { category: 'outerwear', colours: ['burgundy'] } }, 'fi').title).toBe('Viininpunainen ulkovaate');
+    expect(presentAiFacts({ outcome: 'ready', fields: { category: 'footwear', colours: ['silver'] } }, 'sv').title).toBe('Silverfärgade skor');
     expect(presentAiFacts({ outcome: 'ready', fields: { category: 'top', colours: ['green'] } }, 'en').tags).toEqual([]);
   });
   it('rounds usage up and the limit down to whole cents', () => {

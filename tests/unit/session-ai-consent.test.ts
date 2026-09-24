@@ -7,7 +7,7 @@ import { aiCardState, aiPolicyBinding, azureAiManifest, azureAiModel, type AiSta
 
 const ownerId = '00000000-0000-4000-8000-000000000001';
 const now = Date.parse('2026-09-24T12:00:00Z');
-const policy = { activated: true, noticeRevision: 2, modelId: azureAiModel, promptVersion: 1, maxRequestMicro: '4097351',
+const policy = { activated: true, noticeRevision: 2, modelId: azureAiModel, promptVersion: 2, maxRequestMicro: '4097351',
   monthlyAllowanceMicro: '20000000', maxRequestsPerHour: 30, resultTtlSeconds: 3600, executionManifestId: azureAiManifest };
 const profile: ProfileRow = { owner_id: ownerId, display_name: 'Alex', ui_language: 'en', timezone: 'Europe/Helsinki', currency: 'EUR', version: 3 };
 function status(allowance = '20000000', enabled = false): AiStatus {

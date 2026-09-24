@@ -7,13 +7,14 @@ export const PUBLICATION_BODY_MD5 = 'a1e6faa7a53dd540403d8b6e831820b4';
 export const IMAGE_CHANGE_PUBLICATION_BODY_MD5 = '636fb77a3c954f4a23d78c7339ffef95';
 
 const HISTORY = ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000',
-  '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000'];
+  '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000',
+  '20260924100000', '20260924100100'];
 async function historyMode() {
   const output = await readOnlySql(HISTORY_SQL, 1024);
   const versions = JSON.parse(output);
-  if (!Array.isArray(versions) || ![9, 10, 11].includes(versions.length)
+  if (!Array.isArray(versions) || ![9, 10, 11, 12, 13].includes(versions.length)
     || JSON.stringify(versions) !== JSON.stringify(HISTORY.slice(0, versions.length))) fail(VERIFY_FAILED, 1);
-  return versions.length === 11 ? 'image-change' : 'legacy';
+  return versions.length >= 11 ? 'image-change' : 'legacy';
 }
 
 const NOT_RUN = 'NOT RUN: database mutation requires the explicitly approved disposable CI database job.';
