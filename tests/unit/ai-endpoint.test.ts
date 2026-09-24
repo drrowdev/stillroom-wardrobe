@@ -100,7 +100,7 @@ describe('B1 source runtime and fixed protocol', () => {
     const fetcher = vi.fn(async (url: string) => Response.json(url.endsWith('/user')
       ? { id, role: 'authenticated', is_anonymous: false }
       : { code: 'OK', consent: { enabled: true, noticeRevision: 2 },
-        policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 1,
+        policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 2,
           executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' } }));
     vi.stubGlobal('fetch', fetcher);
     const google = vi.fn();
@@ -145,7 +145,7 @@ describe('B1 source runtime and fixed protocol', () => {
         calls.push(url.split('/').at(-1)!);
         if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
         if (url.endsWith('/ai_status')) return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 2 },
-          policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 1,
+          policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 2,
             executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' } });
         expect(url.endsWith('/ai_claim_analysis')).toBe(true);
         if (failure === 'lost-ack') throw new Error('private transport failure');
@@ -164,6 +164,42 @@ describe('B1 source runtime and fixed protocol', () => {
       expect(provider).toHaveBeenCalledTimes(failure === 'provider-timeout' ? 1 : 0);
     },
   );
+  it.each([['azure-eu-terra-devtest-v1', 1], ['azure-eu-terra-devtest-v2', 1], ['azure-eu-terra-devtest-v1', 2]])(
+    'dispatches only the v2 pair, refusing %s with prompt %s before any claim or provider call', async (manifest, promptVersion) => {
+      const calls: string[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        calls.push(url.split('/').at(-1)!);
+        if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
+        return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 2 },
+          policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion,
+            executionManifestId: manifest, maxRequestMicro: '4097351' } });
+      }));
+      const provider = vi.fn();
+      const response = await createHandler({ ...config, azure: { apiKey: 'fictional-local-only' } }, provider)(request());
+      expect(AZURE_MANIFEST).toBe('azure-eu-terra-devtest-v2');
+      expect(await response.json()).toEqual({ code: 'UNCONFIGURED' });
+      expect(calls).toEqual(['user', 'ai_status']);
+      expect(calls).not.toContain('ai_claim_analysis');
+      expect(provider).not.toHaveBeenCalled();
+    },
+  );
+  it('refuses a v1 claim acknowledgement under v2 controls without a provider call', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url.split('/').at(-1)!);
+      if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
+      if (url.endsWith('/ai_status')) return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 2 },
+        policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 2,
+          executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' } });
+      return Response.json({ code: 'OK', claimed: true, manifestId: 'azure-eu-terra-devtest-v1',
+        resultExpiresAtMs: Date.now() + 10000, dispatchBeforeMs: Date.now() + 1000 });
+    }));
+    const provider = vi.fn();
+    const response = await createHandler({ ...config, azure: { apiKey: 'fictional-local-only' } }, provider)(request());
+    expect(await response.json()).toEqual({ code: 'TIMEOUT' });
+    expect(calls).toEqual(['user', 'ai_status', 'ai_claim_analysis']);
+    expect(provider).not.toHaveBeenCalled();
+  });
 });
 describe('Google usage estimates are not confirmed billing', () => {
   const full = { promptTokenCount: 100, totalTokenCount: 125, candidatesTokenCount: 10, thoughtsTokenCount: 15, trafficType: 'ON_DEMAND' };

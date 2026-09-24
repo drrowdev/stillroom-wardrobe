@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { normalClient, requireEvidence } from './preservation.sessions.mjs';
 import { equal, analysisId, analysisHash, analysisFacts, analysisUsage } from './ai-analysis.sessions.mjs';
 import { analyzedHarness, analyzedIntent } from './analyzed-save.sessions.mjs';
+import { saveHarness, denied } from './item-save.sessions.mjs';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
 import { imageChangeHarness } from './image-replacement.sessions.mjs';
 
@@ -411,4 +413,180 @@ async function imageChangeContextProbe(owner, itemId, sql) {
     end $probe$; rollback; select 'I10B_CONTEXT_OK';`);
   requireEvidence(result === 'I10B_CONTEXT_OK');
   requireEvidence(await sql("select case when not exists(select 1 from private.image_change_context) then 'I10B_POOL_CLEAN' end;") === 'I10B_POOL_CLEAN');
+}
+
+// COL1: ordered-row digests, manifest rows and the seven replaced bodies. Read-only; CI-only preservation owner.
+export const COLOUR_FUNCTIONS = Object.freeze({
+  colours: Object.freeze(['private.ai_valid_facts', 'private.reserve_item_save', 'private.image_change_intent']),
+  manifest: Object.freeze(['public.ai_claim_analysis', 'private.ai_analysis_permitted', 'public.ai_finish_analysis',
+    'public.complete_analyzed_item_save']),
+});
+const COLOUR_MANIFEST = Object.freeze({ v1: 'azure-eu-terra-devtest-v1', v2: 'azure-eu-terra-devtest-v2' });
+const digest = (relation, order) => `(select jsonb_build_object('n',count(*),'md5',
+  md5(coalesce(string_agg(to_jsonb(t)::text,E'\n' order by ${order}),''))) from ${relation} t)`;
+const colourDigestSql = `select jsonb_build_object('rows',jsonb_build_object(
+  'profiles',${digest('public.profiles', 't.owner_id')},
+  'style_preferences',${digest('public.style_preferences', 't.owner_id')},
+  'items',${digest('public.items', 't.owner_id,t.id')},
+  'item_images',${digest('public.item_images', 't.owner_id,t.id')},
+  'item_attribution_history',${digest('private.item_attribution_history', 't.owner_id,t.item_id,to_jsonb(t)::text')},
+  'ai_controls',${digest('private.ai_controls', 't.owner_id')},
+  'ai_usage',${digest('private.ai_usage', 't.owner_id,t.request_id')},
+  'ai_requests',${digest('private.ai_requests', 't.owner_id,t.request_id')},
+  'ai_usage_evidence',${digest('private.ai_usage_evidence', 't.owner_id,t.request_id')}),
+  'manifests',(select jsonb_object_agg(m.id,md5(to_jsonb(m)::text)) from private.ai_execution_manifests m),
+  'functions',(select jsonb_object_agg(n.nspname||'.'||p.proname,md5(p.prosrc)) from pg_proc p
+    join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname||'.'||p.proname in (${[...COLOUR_FUNCTIONS.colours, ...COLOUR_FUNCTIONS.manifest].map(literal).join(',')})));`;
+
+// PostgreSQL stores the exact dollar-quoted text, including the newlines after "as $$" and before "$$;".
+export function sourceBodyMd5(sql, name) {
+  requireEvidence(typeof sql === 'string' && !sql.includes('\r'));
+  const header = `create or replace function ${name}(`, start = sql.indexOf(header);
+  requireEvidence(start >= 0 && sql.indexOf(header, start + header.length) === -1);
+  const open = sql.indexOf(' as $$\n', start), close = sql.indexOf('\n$$;', open);
+  requireEvidence(open > start && close > open);
+  const body = sql.slice(open + ' as $$'.length, close + 1);
+  requireEvidence(!body.includes('$$'));
+  return createHash('md5').update(body).digest('hex');
+}
+
+async function colourSourceBodies() {
+  const read = (name) => readFile(new URL(`../../supabase/migrations/${name}`, import.meta.url), 'utf8');
+  const [colours, manifest] = await Promise.all([read('20260924100000_garment_colours.sql'),
+    read('20260924100100_azure_colour_manifest.sql')]);
+  return {
+    colours: Object.fromEntries(COLOUR_FUNCTIONS.colours.map((name) => [name, sourceBodyMd5(colours, name)])),
+    manifest: Object.fromEntries(COLOUR_FUNCTIONS.manifest.map((name) => [name, sourceBodyMd5(manifest, name)])),
+  };
+}
+
+async function colourDigests(sql) {
+  const state = JSON.parse(await sql(colourDigestSql));
+  requireEvidence(Object.keys(state.functions ?? {}).length === 7 && Object.keys(state.rows ?? {}).length === 9);
+  return state;
+}
+
+async function colourControls(sql, owner, manifest, prompt) {
+  await sql(`insert into private.ai_controls(owner_id,activated,notice_revision,model_id,prompt_version,max_request_micro,
+    monthly_allowance_micro,max_requests_per_hour,result_ttl_seconds,execution_manifest_id)
+    values(${literal(owner.uid)},true,2,'gpt-5.6-terra-2026-07-09',${prompt},4097351,100000000,200,3600,${literal(manifest)})
+    on conflict (owner_id) do update set activated=true,notice_revision=2,model_id=excluded.model_id,
+      prompt_version=excluded.prompt_version,max_request_micro=excluded.max_request_micro,
+      monthly_allowance_micro=excluded.monthly_allowance_micro,max_requests_per_hour=excluded.max_requests_per_hour,
+      result_ttl_seconds=excluded.result_ttl_seconds,execution_manifest_id=excluded.execution_manifest_id;`);
+}
+
+async function colourConsent(client, owner) {
+  const profile = (await client.rows(owner, 'profiles'))[0];
+  const result = await client.rpc(owner, 'ai_set_consent', { p_enabled: true, p_notice_revision: 2, p_expected_version: profile.version });
+  requireEvidence(result?.code === 'OK');
+}
+
+const colourClaim = async (sql, owner, n, manifest) => JSON.parse(await sql(`select public.ai_claim_analysis(${literal(owner.uid)},
+  ${literal(analysisId(owner.label, n))},${literal(analysisId(owner.label, n))},1,${literal(analysisHash)},${jpegHeaderFixture().length},
+  120,80,${literal(manifest)});`));
+
+// One Azure analysis plus analyzed Save; the item carries the stated colours from the stored result.
+async function colourAnalyzedSave(client, owner, env, sql, n, manifest, colours) {
+  const claim = await colourClaim(sql, owner, n, manifest);
+  requireEvidence(claim.claimed === true && claim.manifestId === manifest);
+  const facts = { ...analysisFacts, fields: { ...analysisFacts.fields, colours } };
+  const finish = JSON.parse(await sql(`select public.ai_finish_analysis(${literal(owner.uid)},${literal(analysisId(owner.label, n))},
+    ${literal(manifest)},${json(facts)},${json(analysisUsage)},'SUCCESS');`));
+  requireEvidence(finish.stored === true);
+  const h = analyzedHarness(client, owner, env), value = analyzedIntent(owner, n);
+  value.p_item.colours = colours;
+  value.p_claim.fields.colours = { kind: 'ai_observed', value: colours };
+  const row = await h.reserve(value);
+  await h.upload(value); await h.finalize(value, row);
+  const history = await client.rpc(owner, 'item_attribution_history', { p_item_id: value.p_item.id });
+  requireEvidence(history.length === 1);
+  equal(history[0].fields.colours, { kind: 'ai_observed', revision: 1 });
+  return { history: history[0], value };
+}
+
+async function colourManualSave(client, owner, colours) {
+  const h = saveHarness(client, owner), value = h.track();
+  value.p_item.colours = colours;
+  if (colours.length) value.p_item.field_provenance.colours = { kind: 'user', revision: 1 };
+  const row = await h.reserve(value);
+  await h.upload(value); await h.finalize(value, row);
+  equal((await h.read('items', value.p_item.id))[0].colours, colours);
+  return value;
+}
+
+async function colourInvalidManualSaves(client, owner) {
+  const h = saveHarness(client, owner);
+  for (const colours of [['wine'], ['Burgundy'], ['light-blue'], ['lightblue'], ['burgundy', 'cream', 'khaki', 'teal']]) {
+    const value = h.track();
+    value.p_item.colours = colours; value.p_item.field_provenance.colours = { kind: 'user', revision: 1 };
+    denied(await h.call('reserve_item_save', value), 'Invalid input');
+    equal(await h.read('items', value.p_item.id), []);
+  }
+}
+
+// A1: hosted-like eleven-applied state with v1 controls, legacy colours and v1 attribution, then capture.
+export async function captureColourPreservation(env, sql) {
+  const client = normalClient(env), owners = [await client.signIn('A'), await client.signIn('B')];
+  requireEvidence(owners[0].uid !== owners[1].uid);
+  requireEvidence(!Object.hasOwn(JSON.parse(await sql(colourDigestSql)).manifests, COLOUR_MANIFEST.v2));
+  for (const owner of owners) {
+    await colourControls(sql, owner, COLOUR_MANIFEST.v1, 1);
+    await colourConsent(client, owner);
+    await colourAnalyzedSave(client, owner, env, sql, 26, COLOUR_MANIFEST.v1, ['green']);
+    for (const colours of [['navy', 'purple'], ['unknown'], []]) await colourManualSave(client, owner, colours);
+    const preferences = (await client.rows(owner, 'style_preferences'))[0];
+    await client.save(owner, 'style_preferences', preferences, { preferred_colours: ['navy', 'brown'] });
+  }
+  const before = await colourDigests(sql), expected = await colourSourceBodies();
+  requireEvidence(before.rows.items.n >= 8 && before.rows.item_attribution_history.n >= 2 && before.rows.ai_controls.n >= 2);
+  for (const name of COLOUR_FUNCTIONS.colours) requireEvidence(before.functions[name] !== expected.colours[name]);
+  for (const name of COLOUR_FUNCTIONS.manifest) requireEvidence(before.functions[name] !== expected.manifest[name]);
+  return { before, expected, client, owners, env };
+}
+
+// A3/A5: read-only comparison after M1 ('colours') or M2 ('target').
+export async function verifyColourStage(snapshot, sql, stage) {
+  requireEvidence(['colours', 'target'].includes(stage));
+  const { before, expected } = snapshot, after = await colourDigests(sql);
+  equal(after.rows, before.rows);
+  for (const name of COLOUR_FUNCTIONS.colours) equal(after.functions[name], expected.colours[name]);
+  for (const name of COLOUR_FUNCTIONS.manifest) {
+    equal(after.functions[name], stage === 'colours' ? before.functions[name] : expected.manifest[name]);
+  }
+  const added = Object.keys(after.manifests).filter((id) => !Object.hasOwn(before.manifests, id));
+  equal(added, stage === 'colours' ? [] : [COLOUR_MANIFEST.v2]);
+  for (const [id, md5] of Object.entries(before.manifests)) equal(after.manifests[id], md5);
+  return after;
+}
+
+// A6 (thirteen applied) and Pass B (twelve applied). Only called after the read-only comparisons.
+export async function colourProbes(env, sql, stage) {
+  requireEvidence(['colours', 'target'].includes(stage));
+  const client = normalClient(env), owners = [await client.signIn('A'), await client.signIn('B')];
+  requireEvidence(owners[0].uid !== owners[1].uid);
+  for (const owner of owners) {
+    await colourManualSave(client, owner, ['burgundy', 'light_blue', 'silver']);
+    await colourManualSave(client, owner, ['navy']);
+    await colourInvalidManualSaves(client, owner);
+    await colourControls(sql, owner, COLOUR_MANIFEST.v1, 1);
+    await colourConsent(client, owner);
+    const legacy = await colourAnalyzedSave(client, owner, env, sql, stage === 'target' ? 27 : 29, COLOUR_MANIFEST.v1, ['green']);
+    equal(legacy.history.prompt_version, 1);
+    const v2 = await colourClaim(sql, owner, stage === 'target' ? 28 : 30, COLOUR_MANIFEST.v2);
+    equal(v2, { code: stage === 'target' ? 'CONFIG_CHANGED' : 'UNCONFIGURED', claimed: false });
+    if (stage === 'target') {
+      await colourControls(sql, owner, COLOUR_MANIFEST.v2, 2);
+      equal(await colourClaim(sql, owner, 31, COLOUR_MANIFEST.v1), { code: 'CONFIG_CHANGED', claimed: false });
+      await sql(`update private.ai_controls set prompt_version=1 where owner_id=${literal(owner.uid)};`);
+      equal(await colourClaim(sql, owner, 31, COLOUR_MANIFEST.v2), { code: 'CONFIG_CHANGED', claimed: false });
+      await sql(`update private.ai_controls set prompt_version=2 where owner_id=${literal(owner.uid)};`);
+      const current = await colourAnalyzedSave(client, owner, env, sql, 31, COLOUR_MANIFEST.v2, ['burgundy', 'gold']);
+      equal(current.history.prompt_version, 2);
+      const manifest = JSON.parse(await sql(`select jsonb_build_object('manifest',(select manifest_id from private.item_attribution_history
+        where owner_id=${literal(owner.uid)} and item_id=${literal(current.value.p_item.id)}));`));
+      equal(manifest, { manifest: COLOUR_MANIFEST.v2 });
+    }
+  }
 }

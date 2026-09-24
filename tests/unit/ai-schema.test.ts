@@ -35,6 +35,10 @@ describe('AZ1 effective additive definitions (source checks, not live SQL proof)
   it('admits only Azure new claims while preserving a private frozen-manifest Google finish', async () => {
     const sql = await source(), claim = definition(sql, 'public.ai_claim_analysis');
     expect(claim).toContain("id='azure-eu-terra-devtest-v1'");
+    const current = definition(await readFile(new URL('../../supabase/migrations/20260924100100_azure_colour_manifest.sql',
+      import.meta.url), 'utf8'), 'public.ai_claim_analysis');
+    expect(current).toContain("id in ('azure-eu-terra-devtest-v1','azure-eu-terra-devtest-v2')");
+    expect(current).toContain('c.execution_manifest_id<>m.id or c.model_id<>m.model_id or c.prompt_version<>m.prompt_version');
     expect(claim).toContain('c.notice_revision<>2');
     expect(claim).toContain("'not_observed',jsonb_build_object('draftId'");
     expect(sql).toContain('alter function public.ai_finish_analysis(uuid,uuid,text,jsonb,jsonb,text) set schema private');
@@ -340,9 +344,13 @@ describe('I29e SQL/shared contract parity', () => {
     expect(sql).toContain(`observed constant text[] := ${list(observedAiFields)}`);
     expect(sql).toContain(`estimated constant text[] := ${list(estimatedAiFields)}`);
     for (const [field, codes] of Object.entries({
-      category: enumFields.category, pattern: enumFields.pattern, sleeve_length: enumFields.sleeve_length,
-      colours, seasons,
+      category: enumFields.category, pattern: enumFields.pattern, sleeve_length: enumFields.sleeve_length, seasons,
     })) expect(sql).toContain(`when '${field}' then ${list(codes)}`);
+    // COL1 replaced ai_valid_facts; the original migration keeps its historical 14 codes.
+    const latest = await readFile(path.join(root, 'supabase/migrations/20260924100000_garment_colours.sql'), 'utf8');
+    expect(latest).toContain(`when 'colours' then ${list(colours)}`);
+    expect(sql).toContain(`when 'colours' then ${list(colours.filter((code) =>
+      !['cream', 'light_blue', 'teal', 'khaki', 'burgundy', 'gold', 'silver'].includes(code)))}`);
     expect(sql).toContain(`else ${list(enumFields.garment_length)} end`);
     expect(sql).toContain(`when 'colours' then ${collectionLimits.colours} when 'seasons' then ${collectionLimits.seasons} else ${collectionLimits.style_tags}`);
     expect(sql).toContain(`char_length(e#>>'{}')>${styleTagLimit}`);

@@ -19,6 +19,8 @@ export const SOURCE_HASHES = Object.freeze({
   lifecycle: '8cc0fc1207737d63b7e1d000fc7471a9941a4833aaebebc75979c498a4d6c476',
   azure: 'ce66f9585f21badd978597d3ccbf94d7b9ff227687aa787faa860b05f86d02b5',
   imageChanges: '28f0c87f9db6c643bc68d86843dffc905449280bd26483721503389281d7ec93',
+  colours: '21c63831d49416e7322e21de63902554e9382fe3c51489776d3d1a2d9ccb2195',
+  colourManifest: 'b90043a542e65c683c04e075021c08d31019804f157bfbd1dde1dea3488155c5',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const voidRpcs = new Set(['commit_image', 'retire_image', 'forget_image']);

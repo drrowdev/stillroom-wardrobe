@@ -1,5 +1,5 @@
 import { assertSanitizedJpeg, readJpegHeader } from '../../../src/images/jpeg.ts';
-import { analyzeAzure, azureConfigured, validAzureFacts, AZURE_MANIFEST, AZURE_MODEL, AZURE_RESERVATION, AZURE_REVIEW_EXPIRES,
+import { analyzeAzure, azureConfigured, validAzureFacts, AZURE_MANIFEST, AZURE_MODEL, AZURE_RESERVATION, AZURE_REVIEW_EXPIRES, AZURE_SETTINGS,
   type AzureConfig, type AzureTransport } from './azure-openai.ts';
 import {
   MAX_IMAGE_BYTES, MODEL_ID, ProtocolError, REQUEST_MS,
@@ -88,7 +88,7 @@ export function createHandler(config: HandlerConfig, azureTransport: AzureTransp
         if (!exact(result, ['code', 'status', 'result', 'accounting']) || !validAccounting(result.accounting)
           || !['dispatched', 'ready'].includes(String(result.status))) throw new ProtocolError('ANALYSIS_FAILED');
         if (result.status === 'ready') {
-          if (!(validResult(result.result, AZURE_MODEL) && validAzureFacts(result.result.facts) || validResult(result.result, MODEL_ID))
+          if (!(validResult(result.result, AZURE_MODEL, [1, 2]) && validAzureFacts(result.result.facts) || validResult(result.result, MODEL_ID))
             || result.result.requestId !== requestId || result.result.draftId !== draftId
             || result.result.generation !== Number(generation) || result.result.imageSha256 !== imageHash) throw new ProtocolError('ANALYSIS_FAILED');
         } else if (result.result !== null) throw new ProtocolError('ANALYSIS_FAILED');
@@ -108,7 +108,7 @@ export function createHandler(config: HandlerConfig, azureTransport: AzureTransp
       if (!object(preflight.consent) || preflight.consent.enabled !== true
         || !Number.isInteger(preflight.policy.noticeRevision) || Number(preflight.policy.noticeRevision) < 1
         || preflight.consent.noticeRevision !== preflight.policy.noticeRevision) return error('CONSENT_REQUIRED');
-      if (!object(preflight.policy) || preflight.policy.modelId !== AZURE_MODEL || preflight.policy.promptVersion !== 1
+      if (!object(preflight.policy) || preflight.policy.modelId !== AZURE_MODEL || preflight.policy.promptVersion !== AZURE_SETTINGS.promptVersion
         || preflight.policy.noticeRevision !== 2 || preflight.policy.executionManifestId !== AZURE_MANIFEST
         || typeof preflight.policy.maxRequestMicro !== 'string' || !/^[1-9][0-9]{0,18}$/.test(preflight.policy.maxRequestMicro)
         || BigInt(preflight.policy.maxRequestMicro) < BigInt(AZURE_RESERVATION)

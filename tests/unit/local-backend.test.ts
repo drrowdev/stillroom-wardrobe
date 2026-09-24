@@ -1911,6 +1911,7 @@ describe('safe startup/reset failure description', () => {
     '20260911040000_ai_analysis_backend.sql',
     '20260911200000_checked_ai_item_save.sql', '20260913120000_item_lifecycle.sql',
     '20260921193000_azure_terra_analysis.sql', '20260922020000_checked_image_changes.sql',
+    '20260924100000_garment_colours.sql', '20260924100100_azure_colour_manifest.sql',
   ]);
 
   function report(result: unknown, ...elapsed: [] | [unknown]) {
@@ -1926,10 +1927,10 @@ describe('safe startup/reset failure description', () => {
     }
     if (value.exitCode !== null) expect(value.exitCode).toBeLessThanOrEqual(255);
     expect(value.announcedKnownMigrationCount).not.toBeNull();
-    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(11);
+    expect(value.announcedKnownMigrationCount).toBeLessThanOrEqual(migrations.length);
     if (value.lastAnnouncedKnownMigrationIndex !== null) {
       expect(value.lastAnnouncedKnownMigrationIndex).toBeGreaterThanOrEqual(1);
-      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(11);
+      expect(value.lastAnnouncedKnownMigrationIndex).toBeLessThanOrEqual(migrations.length);
     }
     expect(['none', 'multiple', ...operations.map(([, operation]) => operation)]).toContain(value.stderrDockerOperation);
     expect(['unclassified', 'exit-125', 'exit-126-or-127', 'other-nonzero']).toContain(value.stderrContainerExitBucket);
@@ -2037,7 +2038,7 @@ describe('safe startup/reset failure description', () => {
   it('counts distinct announcements and uses stderr order rather than version order', () => {
     const lines = [...migrations, migrations[1], migrations[0]];
     expect(failure(lines.map((name) => `Applying migration ${name}...\n`).join('')))
-      .toMatchObject({ announcedKnownMigrationCount: 11, lastAnnouncedKnownMigrationIndex: 1 });
+      .toMatchObject({ announcedKnownMigrationCount: 13, lastAnnouncedKnownMigrationIndex: 1 });
   });
 
   it('keeps eighth/ninth announcements distinct from the observed statement ordinal', () => {
@@ -2048,7 +2049,7 @@ describe('safe startup/reset failure description', () => {
       .toMatchObject({ announcedKnownMigrationCount: 9, lastAnnouncedKnownMigrationIndex: 9, stderrStatementIndex: 9999 });
   });
 
-  it.each([10, 11])('keeps exact tenth/eleventh migration %s distinct from syntax statement 36', (count) => {
+  it.each([10, 11, 12, 13])('keeps exact tenth to thirteenth migration %s distinct from syntax statement 36', (count) => {
     const announcements = migrations.slice(0, count).map((name) => `Applying migration ${name}...\n`).join('');
     const repeated = `Applying migration ${migrations[count - 1]}...\n`;
     expect(failure(announcements + repeated + 'ERROR: synthetic syntax failure (SQLSTATE 42601)\nAt statement: 36\n'))
@@ -2172,7 +2173,7 @@ describe('safe startup/reset failure description', () => {
     const maximum = { ...defaults, tag: 'nonzero-with-stderr', exitCode: 255, elapsedMs: Number.MAX_SAFE_INTEGER,
       stdoutBytes: 16777216, stderrBytes: 16777216, stderrDockerOperation: 'inspect-container',
       stderrContainerExitBucket: 'other-nonzero', stderrSqlState: 'unclassified',
-      announcedKnownMigrationCount: 11, lastAnnouncedKnownMigrationIndex: 11, stderrPortAllocationMarker: false,
+      announcedKnownMigrationCount: 13, lastAnnouncedKnownMigrationIndex: 13, stderrPortAllocationMarker: false,
       stderrStatementIndex: 9999, stderrPermissionMarker: 'rls-policy-violation' };
     expect(Reflect.ownKeys(maximum)).toEqual(keys);
     expect(Buffer.byteLength(JSON.stringify(maximum), 'utf8')).toBeLessThan(512);

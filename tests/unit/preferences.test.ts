@@ -46,6 +46,11 @@ describe('private preference validation', () => {
       expect(() => validatePreferences({ ...preferences, [key]: ['green', 'green'] })).toThrow();
     }
     expect(() => validatePreferences({ ...preferences, preferred_colours: ['unknown-id'] })).toThrow();
+    expect(validatePreferences({ ...preferences, preferred_colours: ['burgundy', 'cream', 'khaki', 'light_blue', 'teal', 'gold', 'silver', 'navy'] }).preferred_colours)
+      .toEqual(['burgundy', 'cream', 'khaki', 'light_blue', 'teal', 'gold', 'silver', 'navy']);
+    for (const value of ['wine', 'Burgundy', 'light-blue', 'unknown']) {
+      expect(() => validatePreferences({ ...preferences, preferred_colours: [value] })).toThrow();
+    }
     expect(() => validatePreferences({ ...preferences, excluded_categories: ['unknown-id'] })).toThrow();
   });
   it('preserves persisted unknown, duplicate and longer private values without truncation', () => {

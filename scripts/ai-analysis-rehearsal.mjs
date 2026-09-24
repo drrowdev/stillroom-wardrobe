@@ -6,7 +6,7 @@ import { ROOT, LOCAL_API, assertNoServiceSecrets, readCredentialCache, normalSes
   localStatus, privilegedLocalSql, runCommand, startAnalysisServer, parseServedDiagnostics, withAnalyzedSaveFixtureLock } from './backend/local.mjs';
 import { isMain } from './quality/files.mjs';
 import { createHandler } from '../supabase/functions/analyze-clothing/handler.ts';
-import { AZURE_MODEL, AZURE_ENDPOINT, azureRequest } from '../supabase/functions/analyze-clothing/azure-openai.ts';
+import { AZURE_MODEL, AZURE_ENDPOINT, AZURE_MANIFEST, azureRequest } from '../supabase/functions/analyze-clothing/azure-openai.ts';
 import { readJson } from '../supabase/functions/analyze-clothing/protocol.ts';
 import { aiClients, requireReady, AI_FACT_VECTORS } from '../tests/integration/ai-controls.sessions.mjs';
 import { baseline, analysisId, analysisFacts, analysisUsage, analysisHash, equal } from '../tests/integration/ai-analysis.sessions.mjs';
@@ -19,7 +19,8 @@ const cAnalysisFacts = { ...analysisFacts, fields: { ...analysisFacts.fields, sl
 const literal = (value) => "'" + String(value).replaceAll("'", "''") + "'";
 const json = (value) => `${literal(JSON.stringify(value))}::jsonb`;
 const db = async (sql) => JSON.parse(await privilegedLocalSql(sql));
-const manifest = 'azure-eu-terra-devtest-v1';
+const manifest = AZURE_MANIFEST;
+requireEvidence(manifest === 'azure-eu-terra-devtest-v2');
 const privateTables = ['ai_controls', 'ai_usage', 'ai_requests', 'ai_usage_evidence', 'ai_analysis_attestations'];
 const rowsSql = (table, where = 'true') =>
   `coalesce((select jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text) from ${table} t where ${where}),'[]'::jsonb)`;
@@ -316,7 +317,7 @@ async function main() {
     const origin = `http://127.0.0.1:${server.address().port}`;
     stage = 'temporary-policy';
     await privilegedLocalSql(`update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.6-terra-2026-07-09',
-      prompt_version=1,max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,
+      prompt_version=2,max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,
       result_ttl_seconds=3600,execution_manifest_id=${literal(manifest)} where ${ownerWhere};`);
     await consentRevision(2);
     const run = async (phase, expectedGenerations = 0) => {
@@ -501,7 +502,7 @@ async function main() {
       console.log(`PASS: B2 ${suite}/${phase} normal-session child`);
     };
     await privilegedLocalSql(`update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.6-terra-2026-07-09',
-      prompt_version=1,max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,
+      prompt_version=2,max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,
       result_ttl_seconds=3600,execution_manifest_id=${literal(manifest)} where ${ownerWhere};`);
     await consentRevision(2);
     mode = 'ready';
@@ -554,7 +555,7 @@ async function main() {
       const history = await db(`select coalesce(jsonb_agg(to_jsonb(h)),'[]'::jsonb)
         from private.item_attribution_history h where owner_id=${literal(owner.uid)}
           and item_id=${literal(completed.p_item.id)} and source_image_id=${literal(completed.p_image.id)};`);
-      requireEvidence(history.length === 1 && history[0].manifest_id === 'azure-eu-terra-devtest-v1');
+      requireEvidence(history.length === 1 && history[0].manifest_id === manifest && history[0].prompt_version === 2);
       const publicHistory = await client.rpc(owner, 'item_attribution_history', { p_item_id: completed.p_item.id });
       requireEvidence(publicHistory.length === 1);
       equal(Object.keys(publicHistory[0]).sort(), ['fields', 'image_sha256', 'model_id', 'prompt_version', 'source_image_id']);
@@ -625,7 +626,7 @@ async function main() {
       requireEvidence(await db(`select to_jsonb(not exists(select 1 from ${table} where ${field}::text like 'c329a000-%' or ${field}::text like 'c329b000-%'));`));
     }
     await privilegedLocalSql(`update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.6-terra-2026-07-09',
-      prompt_version=1,max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,
+      prompt_version=2,max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,
       result_ttl_seconds=3600,execution_manifest_id=${literal(manifest)} where ${ownerWhere};`);
     await consentRevision(2);
     mode = 'ready';

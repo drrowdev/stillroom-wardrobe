@@ -8,6 +8,7 @@ import {
   validItemFields, visibleFields, warmthOptions,
 } from '../../src/domain/item-details';
 import { editGarmentField, garmentFields, newGarmentDraft } from '../../src/domain/garment-fields';
+import { colours } from '../../src/domain/preferences';
 import { loadItemDetail, saveImageDescription, saveItemFields } from '../../src/data/item-details';
 import { maximumFieldRevision } from '../../src/domain/attribute-provenance';
 
@@ -149,9 +150,16 @@ describe('default photo description', () => {
     expect(defaultItemName('top', [], 'sv')).toBe('Överdel');
     expect(defaultItemName(null, ['olive'], 'fi')).toBe('Oliivinvihreä');
     expect(defaultItemName(null, [], 'en')).toBe('');
+    expect(defaultItemName('outerwear', ['burgundy'], 'en')).toBe('Burgundy outerwear');
+    expect(defaultItemName('outerwear', ['burgundy'], 'fi')).toBe('Viininpunainen ulkovaate');
+    expect(defaultItemName('outerwear', ['burgundy'], 'sv')).toBe('Vinrött ytterplagg');
+    expect(defaultItemName('footwear', ['gold'], 'sv')).toBe('Guldfärgade skor');
+    expect(defaultItemName('top', ['light_blue'], 'en')).toBe('Light blue top');
+    expect(defaultItemName(null, ['teal'], 'fi')).toBe('Petroolinsininen');
+    expect(colours).toHaveLength(21);
     for (const language of ['en', 'fi', 'sv'] as const) {
       for (const category of ['top', 'bottom', 'one_piece', 'footwear', 'layer', 'outerwear', 'accessory']) {
-        for (const colour of ['black', 'white', 'grey', 'navy', 'blue', 'green', 'olive', 'beige', 'brown', 'red', 'yellow', 'orange', 'pink', 'purple']) {
+        for (const colour of colours) {
           const name = defaultItemName(category, [colour], language);
           expect(name).toMatch(/^\p{Lu}\S* \p{Ll}/u);
           expect(name).not.toMatch(/·|\{|\}/u);

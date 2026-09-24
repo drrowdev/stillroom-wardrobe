@@ -10,12 +10,12 @@ async function main() {
     const ready = await requireReady(client, owners);
     for (const owner of owners) {
       const id = analysisId(owner.label, 32);
-      const calls = [
+      const calls = ['azure-eu-terra-devtest-v1', 'azure-eu-terra-devtest-v2'].flatMap((manifest) => [
         ['ai_claim_analysis', { p_owner_id: owner.uid, p_request_id: id, p_draft_id: id, p_generation: 1,
-          p_image_sha256: 'a'.repeat(64), p_byte_count: 1, p_width: 1, p_height: 1, p_manifest_id: 'azure-eu-terra-devtest-v1' }],
-        ['ai_finish_analysis', { p_owner_id: owner.uid, p_request_id: id, p_manifest_id: 'azure-eu-terra-devtest-v1',
+          p_image_sha256: 'a'.repeat(64), p_byte_count: 1, p_width: 1, p_height: 1, p_manifest_id: manifest }],
+        ['ai_finish_analysis', { p_owner_id: owner.uid, p_request_id: id, p_manifest_id: manifest,
           p_facts: analysisFacts, p_usage: analysisUsage, p_code: 'SUCCESS' }],
-      ];
+      ]);
       for (const token of [owner.token, null]) {
         for (const [name, body] of calls) {
           const denied = await client.request(token, `/rest/v1/rpc/${name}`, { method: 'POST', body });

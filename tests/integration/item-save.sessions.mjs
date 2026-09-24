@@ -241,6 +241,19 @@ async function ownerCases(client, owner) {
       await h.reserve(valid);
     }
 
+    phase = 'garment-colours';
+    for (const colours of [['burgundy', 'light_blue', 'silver'], ['cream', 'khaki', 'teal'], ['gold'], ['navy'], ['unknown'], []]) {
+      const value = h.track();
+      Object.assign(value.p_item, { colours, field_provenance: { ...value.p_item.field_provenance, colours: { kind: 'user', revision: 1 } } });
+      eq((await h.reserve(value)).item.colours, colours);
+    }
+    for (const colours of [['wine'], ['Burgundy'], ['light-blue'], ['lightblue'], ['burgundy', 'cream', 'khaki', 'teal']]) {
+      const value = h.track();
+      Object.assign(value.p_item, { colours, field_provenance: { ...value.p_item.field_provenance, colours: { kind: 'user', revision: 1 } } });
+      denied(await h.call('reserve_item_save', value), 'Invalid input');
+      eq(await h.read('items', value.p_item.id), []);
+    }
+
     // Permanent deletion removes live content, not the owner-local used identities.
     phase = 'deletion';
     const pending = h.track(); await h.reserve(pending); await h.deleteItem(pending);

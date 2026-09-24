@@ -3,7 +3,12 @@ import { freezeValues } from './garment-fields';
 
 export const aiModel = 'gemini-3.8-flash';
 export const azureAiModel = 'gpt-5.6-terra-2026-07-09';
-export const azureAiManifest = 'azure-eu-terra-devtest-v1';
+export const azureAiManifest = 'azure-eu-terra-devtest-v2';
+// Each Azure manifest is valid only with its own prompt version; mixed pairs are unsupported.
+export const azureAiProfiles = [
+  { executionManifestId: 'azure-eu-terra-devtest-v1', promptVersion: 1 },
+  { executionManifestId: azureAiManifest, promptVersion: 2 },
+] as const;
 export const azureAiReviewExpires = Date.parse('2026-10-21T00:00:00Z');
 export const aiCodes = ['OK', 'UNAVAILABLE', 'UNAUTHENTICATED', 'INVALID_INPUT', 'CONSENT_REQUIRED',
   'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'CONFLICT', 'ACTIVE_DRAFT', 'RATE_LIMIT',
@@ -63,16 +68,20 @@ export function parseAiStatus(value: unknown): AiStatus | null {
     consent: { enabled: c.enabled, noticeRevision: c.noticeRevision, consentedAt: c.consentedAt, profileVersion: c.profileVersion },
     policy, usage: { accountedMicro: u.accountedMicro, requestsLastHour: u.requestsLastHour, warning: u.warning } });
 }
+function azureProfile(policy: AiPolicy): boolean {
+  return azureAiProfiles.some((profile) => profile.executionManifestId === policy.executionManifestId
+    && profile.promptVersion === policy.promptVersion);
+}
 export function supportedAiPolicy(status: AiStatus, now = Date.now()): boolean {
   const p = status.policy;
-  return !!p && p.activated && p.modelId === azureAiModel && p.promptVersion === 1 && p.noticeRevision === 2
-    && p.executionManifestId === azureAiManifest && BigInt(p.maxRequestMicro) >= 4097351n
+  return !!p && p.activated && p.modelId === azureAiModel && p.noticeRevision === 2
+    && azureProfile(p) && BigInt(p.maxRequestMicro) >= 4097351n
     && BigInt(p.monthlyAllowanceMicro) > 0n && now < azureAiReviewExpires && status.serverTimeMs < azureAiReviewExpires;
 }
 export function aiNoticeProfile(policy: AiPolicy | null): 'google' | 'azure' | null {
-  if (!policy || policy.promptVersion !== 1) return null;
-  if (policy.modelId === azureAiModel && policy.noticeRevision === 2 && policy.executionManifestId === azureAiManifest) return 'azure';
-  if (policy.modelId === aiModel && policy.noticeRevision === 1
+  if (!policy) return null;
+  if (policy.modelId === azureAiModel && policy.noticeRevision === 2 && azureProfile(policy)) return 'azure';
+  if (policy.modelId === aiModel && policy.promptVersion === 1 && policy.noticeRevision === 1
     && (policy.executionManifestId === undefined || policy.executionManifestId === 'google-eu-3.8-v1')) return 'google';
   return null;
 }
@@ -117,7 +126,8 @@ export function parseAnalysisReply(value: unknown): AiAnalysisReply | null {
     || !isMicro(a.amountMicro) || a.currency !== 'USD') return null;
   const parsed = value.result === null ? null : parseAiResult(value.result);
   if (value.status === 'ready' ? !parsed?.ok : value.result !== null) return null;
-  if (parsed?.ok && (![aiModel, azureAiModel].includes(parsed.value.modelId) || parsed.value.promptVersion !== 1)) return null;
+  if (parsed?.ok && !(parsed.value.modelId === aiModel && parsed.value.promptVersion === 1
+    || parsed.value.modelId === azureAiModel && [1, 2].includes(parsed.value.promptVersion))) return null;
   if (parsed?.ok && parsed.value.modelId === azureAiModel && !hasOnlyDataKeys(parsed.value.facts.fields, aiFields)) return null;
   return freezeValues({ code: 'OK', status: value.status, result: parsed?.ok ? parsed.value : null,
     accounting: { basis: a.basis, amountMicro: a.amountMicro, currency: 'USD' } });

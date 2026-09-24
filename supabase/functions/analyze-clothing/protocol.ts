@@ -15,7 +15,9 @@ const enums = {
   sleeve_length: ['sleeveless', 'short', 'elbow', 'three_quarter', 'long'],
   garment_length: ['cropped', 'short', 'regular', 'long'],
 };
-const colours = ['black', 'white', 'grey', 'navy', 'blue', 'green', 'olive', 'beige', 'brown', 'red', 'yellow', 'orange', 'pink', 'purple'];
+// The Google schema stays frozen at its pinned 14 codes; validation accepts the current 21.
+const googleColours = ['black', 'white', 'grey', 'navy', 'blue', 'green', 'olive', 'beige', 'brown', 'red', 'yellow', 'orange', 'pink', 'purple'];
+const colours = ['black', 'white', 'cream', 'grey', 'navy', 'blue', 'light_blue', 'teal', 'green', 'olive', 'khaki', 'beige', 'brown', 'burgundy', 'red', 'yellow', 'orange', 'pink', 'purple', 'gold', 'silver'];
 const seasons = ['spring', 'summer', 'autumn', 'winter'];
 const texts: Record<string, number> = { subcategory: 60, brand: 100, size_label: 50, material: 200 };
 const integers: Record<string, number> = { formality: 4, upper_coverage: 2, lower_coverage: 2 };
@@ -26,7 +28,7 @@ export const RESPONSE_SCHEMA = {
     fields: { type: 'OBJECT', properties: {
       category: { type: 'STRING', nullable: true, enum: enums.category },
       subcategory: { type: 'STRING', nullable: true, maxLength: 60 },
-      colours: { type: 'ARRAY', maxItems: 3, items: { type: 'STRING', enum: colours } },
+      colours: { type: 'ARRAY', maxItems: 3, items: { type: 'STRING', enum: googleColours } },
       pattern: { type: 'STRING', nullable: true, enum: enums.pattern },
       sleeve_length: { type: 'STRING', nullable: true, enum: enums.sleeve_length },
       garment_length: { type: 'STRING', nullable: true, enum: enums.garment_length },
@@ -84,14 +86,14 @@ export function validFacts(value: unknown): value is JsonObject {
   }
   return true;
 }
-export function validResult(value: unknown, modelId = MODEL_ID): value is JsonObject {
+export function validResult(value: unknown, modelId = MODEL_ID, promptVersions: readonly number[] = [1]): value is JsonObject {
   if (!exact(value, ['schemaVersion', 'requestId', 'draftId', 'generation', 'imageSha256', 'modelId',
     'promptVersion', 'createdAtMs', 'expiresAtMs', 'facts'])) return false;
   return value.schemaVersion === 1 && typeof value.requestId === 'string' && UUID.test(value.requestId)
     && typeof value.draftId === 'string' && UUID.test(value.draftId)
     && typeof value.generation === 'number' && Number.isInteger(value.generation) && value.generation >= 1 && value.generation <= 2147483647
     && typeof value.imageSha256 === 'string' && /^[0-9a-f]{64}$/.test(value.imageSha256)
-    && value.modelId === modelId && value.promptVersion === 1
+    && value.modelId === modelId && promptVersions.includes(value.promptVersion as number)
     && typeof value.createdAtMs === 'number' && Number.isSafeInteger(value.createdAtMs) && value.createdAtMs >= 0
     && typeof value.expiresAtMs === 'number' && Number.isSafeInteger(value.expiresAtMs)
     && value.expiresAtMs > value.createdAtMs && value.expiresAtMs - value.createdAtMs <= 86400000

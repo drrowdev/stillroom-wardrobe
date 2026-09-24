@@ -43,6 +43,17 @@ describe('owned wardrobe search and facets', () => {
     }
     expect(filterItems([item], '', { ...facets, favourite: 'no' }, 'en')).toEqual([]);
   });
+  it('finds the added colours by their localized names and facet code', () => {
+    const coat = fixture(5, { title: 'Coat', category: 'outerwear', colours: ['burgundy', 'light_blue'] });
+    expect(filterItems([coat], 'burgundy', emptyFacets(), 'en')).toEqual([coat]);
+    expect(filterItems([coat], 'light blue', emptyFacets(), 'en')).toEqual([coat]);
+    expect(filterItems([coat], 'viininpunainen', emptyFacets(), 'fi')).toEqual([coat]);
+    expect(filterItems([coat], 'vinröd', emptyFacets(), 'sv')).toEqual([coat]);
+    expect(filterItems([coat], 'ljusblå', emptyFacets(), 'sv')).toEqual([coat]);
+    expect(filterItems([coat], 'light_blue', emptyFacets(), 'en')).toEqual([]);
+    expect(filterItems([coat], '', { ...emptyFacets(), colour: ['burgundy'] }, 'en')).toEqual([coat]);
+    expect(filterItems([coat], '', { ...emptyFacets(), colour: ['brown'] }, 'en')).toEqual([]);
+  });
   it('keeps legacy colour text, duplicates and missing facts separate', () => {
     const unknown = fixture(2), mixed = fixture(3, { colours: ['unknown', 'red'] });
     const legacy = fixture(4, { colours: ['長'.repeat(70)], tags: ['retained', 'retained'] });
