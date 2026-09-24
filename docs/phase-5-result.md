@@ -142,26 +142,22 @@ and real-device account-switch and cache checks.
 
 ## Findings
 
-These are reported, not patched; any fix needs its own reviewed packet. Any
-existence oracle **fails the audit** unless it is named in `ACCEPTED_ORACLES`.
-An accepted entry that stops reproducing is reported for removal.
+These are reported, not patched; a separate fix packet is queued. Each is an
+existence oracle only: a peer's reference and a nonexistent or new one get
+different responses, but no peer content is returned. All six are named in
+`ACCEPTED_ORACLES` with their exact response pair (status, code and message),
+and each run still prints them as `FINDING` lines. Any other differing surface,
+or a changed pair on an accepted surface, fails the audit. An accepted entry
+that stops reproducing is reported for removal.
 
-Accepted pending a fix packet (known and reported on PR #47): a caller choosing
-a peer's primary key gets `409 23505` instead of success, disclosing that the
-ID exists. No peer data is returned.
-
-- `save_outfit p_id`: a foreign `p_id` with null version;
-- `save_wear_event p_id`: the same;
-- `REST items id`: a REST `items` insert with a foreign `id`.
-
-Not allowlisted, so they fail CI until a decision is made:
-
-- `restore_history_entry p_id`: a foreign wear-event-item ID returns
-  `400 P0001`, while a new ID inserts (`204`);
-- `reserve_item_save p_item.id`: a foreign item ID returns `400 22023`, while a
-  new ID reserves (`200`);
-- `Storage DELETE object`: deleting a peer's object returns a different Storage
-  error than deleting a nonexistent path.
+| Surface | Peer-owned reference | Nonexistent or new reference |
+| --- | --- | --- |
+| `save_outfit p_id` (null version) | `409 23505` `outfits_pkey` | `200` |
+| `save_wear_event p_id` (null version) | `409 23505` `wear_events_pkey` | `200` |
+| `REST items id` (insert) | `409 23505` `items_pkey` | `201` |
+| `restore_history_entry p_id` | `400 P0001` Request conflict | `204` |
+| `reserve_item_save p_item.id` | `400 22023` Request conflict | `200` |
+| `Storage DELETE object` | `400 AccessDenied` | `400 NoSuchKey` |
 ## Pending
 
 - CI `database` job evidence for this head (catalogue, matrix, freeze).

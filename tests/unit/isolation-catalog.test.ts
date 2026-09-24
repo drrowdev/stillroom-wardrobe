@@ -277,13 +277,45 @@ describe('I17 response validators', () => {
 });
 
 describe('I17 existence oracles and restore ordering', () => {
-  it('fails every differing surface outside the named allowlist', () => {
-    expect(Object.keys(catalog.ACCEPTED_ORACLES).sort()).toEqual(['REST items id', 'save_outfit p_id', 'save_wear_event p_id']);
-    expect(catalog.classifyOracle('save_outfit p_id', true)).toBe('accepted');
-    expect(catalog.classifyOracle('save_outfit p_id', false)).toBe('accepted-not-reproduced');
-    expect(catalog.classifyOracle('restore_history_entry p_id', true)).toBe('fail');
-    expect(catalog.classifyOracle('Storage DELETE object', true)).toBe('fail');
-    expect(catalog.classifyOracle('reserve_item_save p_item.id', false)).toBe('equivalent');
+  const err = (status: number, code: string, message: string) => ({ status, code, message });
+  const ok = (status: number, data: unknown = null) => ({ status, data });
+  const dup = (constraint: string) => err(409, '23505', `duplicate key value violates unique constraint "${constraint}"`);
+
+  it('accepts only the six named oracles with their exact pinned response pairs', () => {
+    expect(Object.keys(catalog.ACCEPTED_ORACLES).sort()).toEqual(['REST items id', 'Storage DELETE object',
+      'reserve_item_save p_item.id', 'restore_history_entry p_id', 'save_outfit p_id', 'save_wear_event p_id']);
+    const cases: [string, object, object][] = [
+      ['save_outfit p_id', dup('outfits_pkey'), ok(200, { id: 'x' })],
+      ['save_wear_event p_id', dup('wear_events_pkey'), ok(200, { id: 'x' })],
+      ['REST items id', dup('items_pkey'), ok(201, [])],
+      ['restore_history_entry p_id', err(400, 'P0001', 'Request conflict'), ok(204)],
+      ['reserve_item_save p_item.id', err(400, '22023', 'Request conflict'), ok(200, {})],
+      ['Storage DELETE object', err(400, 'AccessDenied', 'Access denied'), err(400, 'NoSuchKey', 'Object not found')],
+    ];
+    for (const [surface, foreign, missing] of cases) {
+      expect(catalog.classifyOracle(surface, true, foreign, missing)).toBe('accepted');
+      expect(catalog.classifyOracle(surface, false, foreign, foreign)).toBe('accepted-not-reproduced');
+    }
+  });
+
+  it('fails a changed pair on an accepted surface and any surface outside the allowlist', () => {
+    expect(catalog.classifyOracle('save_outfit p_id', true, dup('items_pkey'), ok(200))).toBe('changed');
+    expect(catalog.classifyOracle('save_outfit p_id', true, dup('outfits_pkey'), ok(201))).toBe('changed');
+    expect(catalog.classifyOracle('restore_history_entry p_id', true, err(400, 'P0001', 'Not available'), ok(204))).toBe('changed');
+    expect(catalog.classifyOracle('Storage DELETE object', true, err(403, 'AccessDenied', 'Access denied'),
+      err(400, 'NoSuchKey', 'Object not found'))).toBe('changed');
+    expect(catalog.classifyOracle('Storage DELETE object', true, err(400, 'AccessDenied', 'Access denied'), ok(200))).toBe('changed');
+    expect(catalog.classifyOracle('reserve_item_save p_item.id', true, err(400, '22023', 'Request conflict'),
+      err(400, '22023', 'Request conflict'))).toBe('changed');
+    expect(catalog.classifyOracle('ai_begin_request p_request_id', true, ok(200, {}), ok(200, { code: 'OK' }))).toBe('fail');
+    expect(catalog.classifyOracle('ai_begin_request p_request_id', false, ok(200), ok(200))).toBe('equivalent');
+  });
+
+  it('lets the worst verdict decide a surface probed several times', () => {
+    expect(catalog.worstOracle(['equivalent', 'accepted', 'accepted-not-reproduced'])).toBe('accepted');
+    expect(catalog.worstOracle(['accepted', 'changed', 'accepted'])).toBe('changed');
+    expect(catalog.worstOracle(['changed', 'fail'])).toBe('fail');
+    expect(catalog.worstOracle([])).toBe('equivalent');
   });
 
   it('keeps an owner marked until its restore succeeds', () => {

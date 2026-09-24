@@ -432,19 +432,43 @@ export function validateCoverage(covered, requirements = COVERAGE_REQUIREMENTS) 
 }
 
 /**
- * Create-ID existence oracles that are known, reported on PR #47 and accepted pending a separate fix packet.
- * Any other differing surface fails the audit; an accepted entry that stops reproducing is reported for removal.
+ * Existence oracles that are known, reported on PR #47 and accepted pending a separate fix packet. Each pins the
+ * exact response pair (peer-owned reference vs. nonexistent/new reference); they reveal existence, never content.
+ * Any other differing surface, or an accepted surface whose pair changes, fails the audit. An accepted entry that
+ * stops reproducing is reported for removal.
  */
+const pinned = (foreign, missing, summary) => Object.freeze({ foreign: Object.freeze(foreign), missing: Object.freeze(missing),
+  summary: `${summary} (known, reported on PR #47, accepted pending a fix packet)` });
+const duplicate = (constraint) => ({ status: 409, code: '23505', message: `duplicate key value violates unique constraint "${constraint}"` });
 export const ACCEPTED_ORACLES = Object.freeze({
-  'save_outfit p_id': 'peer-owned outfit ID returns 409/23505 outfits_pkey; a new ID saves (known, reported on PR #47, accepted pending a fix packet)',
-  'save_wear_event p_id': 'peer-owned wear-event ID returns 409/23505 wear_events_pkey; a new ID saves (known, reported on PR #47, accepted pending a fix packet)',
-  'REST items id': 'peer-owned item ID returns 409/23505 items_pkey on REST insert; a new ID inserts (known, reported on PR #47, accepted pending a fix packet)',
+  'save_outfit p_id': pinned(duplicate('outfits_pkey'), { status: 200 }, 'peer-owned outfit ID returns 409/23505; a new ID saves (200)'),
+  'save_wear_event p_id': pinned(duplicate('wear_events_pkey'), { status: 200 }, 'peer-owned wear-event ID returns 409/23505; a new ID saves (200)'),
+  'REST items id': pinned(duplicate('items_pkey'), { status: 201 }, 'peer-owned item ID returns 409/23505 on REST insert; a new ID inserts (201)'),
+  'restore_history_entry p_id': pinned({ status: 400, code: 'P0001', message: 'Request conflict' }, { status: 204 },
+    'peer-owned wear-event-item ID returns 400/P0001; a new ID restores (204)'),
+  'reserve_item_save p_item.id': pinned({ status: 400, code: '22023', message: 'Request conflict' }, { status: 200 },
+    'peer-owned item ID returns 400/22023; a new ID reserves (200)'),
+  'Storage DELETE object': pinned({ status: 400, code: 'AccessDenied', message: 'Access denied' },
+    { status: 400, code: 'NoSuchKey', message: 'Object not found' },
+    'peer-owned object path returns 400/AccessDenied; a nonexistent path returns 400/NoSuchKey'),
 });
-export function classifyOracle(surface, differs) {
-  if (!differs) return Object.hasOwn(ACCEPTED_ORACLES, surface) ? 'accepted-not-reproduced' : 'equivalent';
-  return Object.hasOwn(ACCEPTED_ORACLES, surface) ? 'accepted' : 'fail';
+const matchesPin = (pin, outcome) => outcome.status === pin.status
+  && (pin.code === undefined ? Object.hasOwn(outcome, 'data') : outcome.code === pin.code && outcome.message === pin.message);
+/**
+ * Verdict for one probe pair (`outcomeOf` shapes): 'equivalent', 'accepted', 'accepted-not-reproduced', 'changed'
+ * (an accepted surface with a different pair: fails) or 'fail' (not allowlisted).
+ */
+export function classifyOracle(surface, differs, foreign, missing) {
+  const pin = Object.hasOwn(ACCEPTED_ORACLES, surface) ? ACCEPTED_ORACLES[surface] : null;
+  if (!differs) return pin ? 'accepted-not-reproduced' : 'equivalent';
+  if (!pin) return 'fail';
+  return foreign && missing && matchesPin(pin.foreign, foreign) && matchesPin(pin.missing, missing) ? 'accepted' : 'changed';
 }
-
+const SEVERITY = ['equivalent', 'accepted-not-reproduced', 'accepted', 'changed', 'fail'];
+/** Worst verdict over several probe pairs for one surface (e.g. every object path). */
+export function worstOracle(verdicts) {
+  return verdicts.reduce((worst, v) => (SEVERITY.indexOf(v) > SEVERITY.indexOf(worst) ? v : worst), 'equivalent');
+}
 /** Controller bookkeeping: a freeze request marks the owner before any SQL; only a successful restore clears it. */
 export function trackPhase(touched, phase, owner, stage, code = null) {
   if (phase === 'freeze' && stage === 'before') touched.add(owner);

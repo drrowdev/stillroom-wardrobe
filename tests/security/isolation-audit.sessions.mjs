@@ -6,7 +6,7 @@ import {
   assertLocalApi, validateSessionEnvironment, reportError, LocalBackendError,
 } from '../../scripts/backend/local.mjs';
 import {
-  EXPOSED_RPCS, SERVICE_ONLY_RPCS, PUBLIC_TABLES, RELATIONSHIP_NAMES, ACCEPTED_ORACLES,
+  EXPOSED_RPCS, SERVICE_ONLY_RPCS, PUBLIC_TABLES, RELATIONSHIP_NAMES, ACCEPTED_ORACLES, worstOracle,
   matchOutcome, outcomeOf, sameOutcome, scanLeaks, validateCoverage, applicationCode, isInconclusive, classifyOracle,
   restoreThenCleanup,
 } from '../../scripts/isolation-catalog.mjs';
@@ -596,10 +596,14 @@ function exportShape(owner, result) {
 }
 
 // --- Existence oracles on create-ID collisions --------------------------------------------------------
-function reportOracle(surface, d, differs, detail) {
-  const verdict = classifyOracle(surface, differs);
-  if (verdict === 'fail') oracleFailures.push(`${surface} ${d}: ${detail}`);
-  else if (verdict === 'accepted') findings.push(`(accepted pending fix) ${surface} ${d}: ${detail} [${ACCEPTED_ORACLES[surface]}]`);
+const pairOf = (foreign, missing, foreignIds = [], missingIds = []) => ({
+  differs: !sameOutcome(foreign, missing, foreignIds, missingIds), foreign: outcomeOf(foreign), missing: outcomeOf(missing) });
+/** `pairs`: one `{ differs, foreign, missing }` per probe (outcome shapes); the worst verdict decides the surface. */
+function reportOracle(surface, d, pairs, detail) {
+  const verdict = worstOracle(pairs.map((p) => classifyOracle(surface, p.differs, p.foreign, p.missing)));
+  if (verdict === 'fail') oracleFailures.push(`${surface} ${d}: ${detail} (not allowlisted)`);
+  else if (verdict === 'changed') oracleFailures.push(`${surface} ${d}: ${detail} (allowlisted pair changed; pinned ${JSON.stringify(ACCEPTED_ORACLES[surface].foreign)} vs ${JSON.stringify(ACCEPTED_ORACLES[surface].missing)})`);
+  else if (verdict === 'accepted') findings.push(`(accepted pending fix) ${surface} ${d}: ${detail} [${ACCEPTED_ORACLES[surface].summary}]`);
   else if (verdict === 'accepted-not-reproduced') note(`accepted oracle ${surface} ${d} no longer reproduces; remove its allowlist entry`);
 }
 async function oracles(attacker, victim) {
@@ -612,7 +616,7 @@ async function oracles(attacker, victim) {
     if (need(missing.ok, `${stage}: new-ID control ${describe(missing)}`)) { await cleanup(); control(attacker, name, true); }
     if (expected && missing.ok) {
       tag(name, `${d}:collision`);
-      reportOracle(surface, d, !sameOutcome(foreign, missing, [], []), `a peer-owned ID returns ${describe(foreign)}, a new ID ${describe(missing)}`);
+      reportOracle(surface, d, [pairOf(foreign, missing)], `a peer-owned ID returns ${describe(foreign)}, a new ID ${describe(missing)}`);
     }
   };
   const outfit = (id) => ({ p_id: id, p_title: 'Isolation oracle', p_occasion: 'everyday', p_notes: '', p_favourite: false,
@@ -633,7 +637,7 @@ async function oracles(attacker, victim) {
   const restMissing = await raw(attacker.token, '/rest/v1/items', item(id));
   expectMatch(`${stage} foreign`, { status: 409, code: '23505' }, restForeign);
   if (need(restMissing.ok, `${stage}: new-ID control ${describe(restMissing)}`)) await del('items', id)();
-  if (restMissing.ok) reportOracle('REST items id', d, !sameOutcome(restForeign, restMissing, [], []),
+  if (restMissing.ok) reportOracle('REST items id', d, [pairOf(restForeign, restMissing)],
     `a peer-owned ID returns ${describe(restForeign)}, a new ID ${describe(restMissing)}`);
   const history = (x) => ({ p_id: x, p_event_id: a.event, p_item_id: null, p_title: 'Isolation oracle', p_category: 'top', p_import_id: randomUUID() });
   id = randomUUID();
@@ -671,7 +675,8 @@ async function aiCollision(attacker, victim) {
   }
   if (need(matchOutcome(expected, a.aiBegin) && foreign.status === 200, `${stage}: peer ID ${describe(foreign)} ${JSON.stringify(foreign.data)}`)) {
     tag('ai_begin_request', `${d}:collision`);
-    reportOracle('ai_begin_request p_request_id', d, !isDeepStrictEqual(outcomeOf(foreign), a.aiBegin),
+    reportOracle('ai_begin_request p_request_id', d,
+      [{ differs: !isDeepStrictEqual(outcomeOf(foreign), a.aiBegin), foreign: outcomeOf(foreign), missing: a.aiBegin }],
       `a peer-owned request ID returns ${JSON.stringify(foreign.data)}, the owner's new ID ${JSON.stringify(a.aiBegin.data)}`);
   }
 }
@@ -721,7 +726,8 @@ async function restIsolation(attacker, victim) {
 async function storageIsolation(attacker, victim) {
   const v = fixtures[victim.label], direction = `${attacker.label}>${victim.label}`;
   const missingPath = `${v.uid}/${v.item}/${randomUUID()}/main.jpg`;
-  let deleteDiffers = false, deleteDetail = '';
+  const deletePairs = [];
+  let deleteDetail = '';
   for (const path of v.paths) {
     stage = `storage-${direction}`;
     const masked = [path.split('/')[2]], random = [missingPath.split('/')[2]];
@@ -738,10 +744,10 @@ async function storageIsolation(attacker, victim) {
     const remove = await probe(attacker, victim, `/storage/v1/object/wardrobe/${path}`, { method: 'DELETE' });
     const removeAbsent = await probe(attacker, victim, `/storage/v1/object/wardrobe/${missingPath}`, { method: 'DELETE' });
     need(!remove.ok && !removeAbsent.ok, `${stage}: peer delete ${describe(remove)} / ${describe(removeAbsent)}`);
-    deleteDiffers = deleteDiffers || !sameOutcome(remove, removeAbsent, masked, random);
+    deletePairs.push(pairOf(remove, removeAbsent, masked, random));
     deleteDetail = `a peer-owned object returns ${describe(remove)}, a nonexistent one ${describe(removeAbsent)}`;
   }
-  reportOracle('Storage DELETE object', direction, deleteDiffers, deleteDetail);
+  reportOracle('Storage DELETE object', direction, deletePairs, deleteDetail);
   const listed = await probe(attacker, victim, '/storage/v1/object/list/wardrobe', { method: 'POST',
     body: { prefix: `${v.uid}/`, limit: 100, offset: 0 } });
   need(listed.ok && isDeepStrictEqual(listed.data, []), `${stage}: peer prefix listing ${describe(listed)}`);
@@ -956,7 +962,7 @@ try {
 }
 for (const text of findings.slice(0, 40)) console.log(`FINDING: ${text}`);
 for (const text of unverified.slice(0, 40)) console.log(`UNVERIFIED: ${text}`);
-for (const text of oracleFailures) console.error(`FAIL: existence oracle ${text.replace(uuidPattern, '<id>')} (not allowlisted)`);
+for (const text of oracleFailures) console.error(`FAIL: existence oracle ${text.replace(uuidPattern, '<id>')}`);
 if (oracleFailures.length) exitCode = 1;
 if (problems.length) {
   for (const problem of problems.slice(0, 120)) console.error(`MISMATCH: ${problem.replace(uuidPattern, '<id>')}`);
