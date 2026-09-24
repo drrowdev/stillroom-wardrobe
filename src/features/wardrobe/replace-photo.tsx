@@ -17,6 +17,7 @@ import { CropEditor } from '../../images/crop-editor';
 import { ORIGINAL_EDIT, type PhotoEdit } from '../../images/crop';
 import type { SaveStage } from '../../images/upload';
 import { useAiDraft } from './use-ai-draft';
+import { AnalysisStatus } from './analysis-status';
 import { ItemForm } from './item-form';
 
 type Props = {
@@ -215,6 +216,7 @@ function Replacement(props: Props) {
       event.preventDefault();
       if (!photo || preparing || editing || !change.attempt && !analysis.canSave) return;
       void change.save(() => {
+        if (analysis.implicitManual) analysis.continueManual();
         const view = analysis.snapshot();
         if (!view.manual && !view.state) throw new AppError('error.conflict');
         return newImageChangeAttempt(props.item, props.image, view.draft, view.description, photo, props.scope,
@@ -238,18 +240,13 @@ function Replacement(props: Props) {
         </div>
         {preparing && <p role="status">{t('capture.preparing')}</p>}
         {error && <p role="alert" className="notice notice-error">{t(error)}</p>}
-        <p className="privacy-note">{t('aiC.photoNotice')}</p>
       </div>
       <div className="details-panel">
-        {analysis.notice && <p role="status" className="notice">{t(analysis.notice)}</p>}
-        {photo && !change.attempt && <div className="settings-actions">
-          <button type="button" className="text-button" disabled={!props.online || change.frozen || analysis.working || analysis.manual}
-            onClick={() => { void analysis.checkStatus(); }}>{t('aiC.checkStatus')}</button>
-          <button type="button" className="button button-secondary" disabled={change.frozen || analysis.manual}
-            onClick={() => { void analysis.continueManual(); }}>{t('aiC.continueManual')}</button>
-          <button type="button" className="text-button" disabled={!props.online || change.frozen || analysis.working || preparing || editing}
-            onClick={() => { void analysis.commitPhoto(photo); }}>{t('aiC.newAnalysis')}</button>
-        </div>}
+        {photo && !change.attempt && <AnalysisStatus phase={analysis.phase} checking={analysis.checking} t={t}
+          disabled={!props.online || change.frozen || preparing || editing}
+          onRetry={() => { void analysis.commitPhoto(photo); }}
+          onCheck={() => { void analysis.checkStatus(); }}
+          onKeep={analysis.continueManual} />}
         <ItemForm draft={analysis.draft} baseline={formBaseline} provenance={props.item.provenance} onChange={analysis.edit}
           language={props.language} t={t} prefix="item" locked={change.frozen} currency={props.item.values.currency}
           aiDerived={analysis.state?.derivation ?? {}}>

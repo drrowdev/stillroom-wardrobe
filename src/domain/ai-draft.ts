@@ -2,14 +2,37 @@ import { isUuid } from './wardrobe';
 import { presentAiFacts } from './ai-presentation';
 import { fieldAssertion, provenanceFields, type FieldProvenance } from './attribute-provenance';
 import {
-  editGarmentField, freezeValues, garmentFields, initialRawFields, sameValue, validateGarmentDraft,
+  collectionLimits, editGarmentField, freezeValues, garmentFields, initialRawFields, sameValue, validateGarmentDraft,
   type GarmentDraft, type GarmentField, type GarmentValues, type RawFields,
 } from './garment-fields';
 import {
   aiFields, aiKind, hasOnlyDataKeys, isAiCounter, isAiTimestamp, isAssertedAiValue, isImageSha256, parseAiResult,
   type AiField, type AiKind, type AiResult, type DeepReadonly,
 } from './ai-analysis';
+import { styleTagLimit } from './preferences';
 
+// Owner decision (UX L1a): suggestions are applied only to fields the form shows. Hidden facts are never applied or claimed.
+export const hiddenAiFields = ['sleeve_length', 'garment_length', 'upper_coverage', 'lower_coverage', 'style_tags'] as const;
+export const formAiFields = aiFields.filter((field): field is Exclude<AiField, typeof hiddenAiFields[number]> =>
+  !hiddenAiFields.some((hidden) => hidden === field));
+// The same combined tags + style words budget as manual additions (`addTag` in item-details); the unit tests pin both
+// to identical boundaries. Kept here because this reviewed core imports only its approved domain modules.
+function fitsTagBudget(entries: readonly string[]): boolean {
+  return entries.length <= collectionLimits.tags && new TextEncoder().encode(entries.join(',')).byteLength <= 512;
+}
+// Local suggestion text for the Tags area: never a claim, deduplicated against both saved tag lists and bounded by
+// the combined tags + style words budget the Tags area uses for manual additions.
+export function prefillTags(suggested: readonly string[], tags: readonly string[], styleTags: readonly string[]): string[] {
+  const seen = new Set([...tags, ...styleTags].map((entry) => entry.toLocaleLowerCase()));
+  const added: string[] = [];
+  for (const entry of suggested) {
+    const key = entry.toLocaleLowerCase();
+    if (!entry.trim() || [...entry].length > styleTagLimit || entry.includes('\0') || seen.has(key)) continue;
+    if (!fitsTagBudget([...tags, ...styleTags, ...added, entry])) break;
+    added.push(entry); seen.add(key);
+  }
+  return added;
+}
 export type AiContext = Readonly<{
   ownerId: string; epoch: number; draftId: string; generation: number; requestId: string; imageSha256: string;
 }>;
@@ -118,7 +141,7 @@ export function receiveAiResult(state: AiDraftState, current: unknown, input: un
   const draft = copyDraft(state.draft);
   const defaults = initialRawFields(draft.raw.currency);
   const derivation: AiDerivation = {};
-  for (const field of aiFields) {
+  for (const field of formAiFields) {
     const value = result.facts.fields[field];
     if (!isAssertedAiValue(value) || draft.intent[field] || state.eligibility && !state.eligibility[field]
       || !sameValue(draft.raw[field], defaults[field])) continue;
@@ -145,8 +168,11 @@ export function presentAiDraft(state: AiDraftState, current: AiContext, language
   const presentation = presentAiFacts(state.result.facts, language);
   const draft = copyDraft(state.draft);
   if (!draft.intent.title && draft.raw.title === '' && (!state.eligibility || state.eligibility.title)) draft.raw.title = presentation.title;
-  if (!draft.intent.tags && draft.raw.tags.length === 0 && (!state.eligibility || state.eligibility.tags)) draft.raw.tags = [...presentation.tags];
-  return updated({ ...state, draft, presentation: { title: presentation.title, tags: presentation.tags } });
+  // G1: prefill only untouched, eligible, empty tags; saved or deliberately cleared tags stay as they are.
+  const tags = !draft.intent.tags && draft.raw.tags.length === 0 && (!state.eligibility || state.eligibility.tags)
+    ? prefillTags(presentation.tags, draft.raw.tags, draft.raw.style_tags) : [];
+  if (tags.length) draft.raw.tags = [...tags];
+  return updated({ ...state, draft, presentation: { title: presentation.title, tags } });
 }
 // An explicit new generation is also required for retry; no request is allocated here.
 export function prepareAiGeneration(state: AiDraftState, current: unknown, next: unknown): AiTransition {

@@ -10,6 +10,17 @@ import { aiFixture, addAiPhoto } from './ai-photo-first-support';
 import { analysisPath, mockBackend, owners, signIn, type RawAnalysisObservation } from './mock-backend';
 
 type AiFixture = Awaited<ReturnType<typeof aiFixture>>;
+// A ready draft shows no status line: the filled fields and their "Suggested" markers are the signal.
+async function filled(page: Page, language: Language = 'en') {
+  await expect(page.locator('#item-category')).not.toHaveValue('');
+  await expect(page.locator('.field-marker', { hasText: messages['aiC.markSuggested'][language] }).first()).toBeVisible();
+  await expect(page.locator('#analysis-status')).toHaveCount(0);
+}
+const statusRegion = (page: Page) => page.locator('#analysis-status');
+const posts = (api: AiFixture) => api.calls.filter((call) => call.route.endsWith('/analyze-clothing'));
+// A schema-valid "still working" status reply, so the client really parses it as dispatched.
+const dispatched = { code: 'OK', status: 'dispatched', result: null, accounting: { basis: 'held', amountMicro: '1034', currency: 'USD' } };
+const statusChecks = (api: AiFixture) => api.calls.filter((call) => call.route.endsWith('/ai_analysis_status'));
 type RawAnalysisClient = { status: number | null; outcome: 'response' | 'network-rejection'; constructedBytes?: number };
 type RawAnalysisEvidence = {
   case: 'oversized' | 'response-sequence' | 'boundaries'; project: 'chromium' | 'mobile' | 'webkit-photo' | null;
@@ -145,9 +156,9 @@ async function sendBrowserAnalysis(page: Page, api: AiFixture, kind: BrowserAnal
         ? ids.requestId.replace('c329a000', 'c329b000') : ids.requestId,
       'x-stillroom-draft-id': kind === 'draft-id' ? 'invalid' : ids.draftId,
       'x-stillroom-generation': kind === 'generation' ? '0' : ids.generation };
-    const body = new Blob([kind === 'empty' ? new Uint8Array() : kind === 'oversized'
-      ? new Uint8Array(512001) : new Uint8Array(bytes)], { type: headers['content-type'] });
-    const constructedBytes = body.size;
+    // A typed array, not a Blob: WebKit route interception may forward a Blob body as Content-Length 0.
+    const body = kind === 'empty' ? new Uint8Array() : kind === 'oversized' ? new Uint8Array(512001) : new Uint8Array(bytes);
+    const constructedBytes = body.byteLength;
     try {
       const response = await fetch('http://127.0.0.1:54321' + route
         + (kind === 'path' ? '-unapproved' : kind === 'query' ? '?unexpected=1' : ''), {
@@ -501,8 +512,12 @@ for (const mode of ['parser-error', 'truncated', 'stalled'] as const) {
 for (const language of ['en', 'fi', 'sv'] as const) {
   test(`photo-first ${language}: one call, editable facts, unknown local text and explicit trusted Save`, async ({ page }) => {
     const api = await aiFixture(page, language);
+    const claims: unknown[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().endsWith('/reserve_analyzed_item_save')) claims.push((request.postDataJSON() as { p_claim: unknown }).p_claim);
+    });
     await addAiPhoto(page, api, language);
-    await expect(page.getByText(messages['aiC.ready'][language], { exact: true })).toBeVisible();
+    await filled(page, language);
     await expect(page.locator('#item-title')).not.toHaveValue('');
     expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
     await page.locator('#item-title').fill('My corrected title');
@@ -515,6 +530,13 @@ for (const language of ['en', 'fi', 'sv'] as const) {
       title: { kind: 'user', revision: 1 }, category: { kind: 'ai_observed', revision: 1 },
       formality: { kind: 'ai_estimated', revision: 1 }, tags: { kind: 'unknown', revision: 1 },
     });
+    expect(api.items[0]).toMatchObject({ tags: ['relaxed'], style_tags: [], sleeve_length: null, garment_length: null,
+      upper_coverage: null, lower_coverage: null });
+    expect(claims).toHaveLength(1);
+    expect(Object.keys((claims[0] as { fields: object }).fields).sort()).toEqual(['category', 'colours', 'formality', 'material']);
+    for (const hidden of ['sleeve_length', 'garment_length', 'upper_coverage', 'lower_coverage', 'style_tags']) {
+      expect(Object.hasOwn(api.items[0]!.field_provenance as object, hidden)).toBe(false);
+    }
     expect(api.images[0]!.alt_text).toBe('');
     expect(api.calls.filter((call) => call.route.endsWith('/analyze-clothing'))).toHaveLength(1);
     expect(api.requests.filter((call) => call.path.endsWith('/reserve_analyzed_item_save'))).toHaveLength(1);
@@ -524,7 +546,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
 test('language change never regenerates draft title, description, tags or analysis', async ({ page }) => {
   const api = await aiFixture(page);
   await addAiPhoto(page, api);
-  await expect(page.getByText(messages['aiC.ready'].en, { exact: true })).toBeVisible();
+  await filled(page);
   await page.locator('details.optional-details summary').click();
   const title = await page.locator('#item-title').inputValue(), description = await page.locator('#item-alt').inputValue();
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
@@ -535,63 +557,93 @@ test('language change never regenerates draft title, description, tags or analys
   expect(api.calls.filter((call) => call.route.endsWith('/analyze-clothing'))).toHaveLength(1);
 });
 for (const mode of ['pending', 'timeout'] as const) {
-  test(`${mode}: explicit same-request status resolution without another POST`, async ({ page }) => {
+  test(`${mode}: automatic same-request status checks resolve without another POST`, async ({ page }) => {
     const api = await aiFixture(page); api.mode(mode);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    await page.route('**/rest/v1/rpc/ai_analysis_status', async (route) => { await held; await route.fallback(); });
     await addAiPhoto(page, api);
-    await expect(page.getByText(messages[mode === 'pending' ? 'aiC.pending' : 'aiC.uncertain'].en, { exact: true })).toBeVisible();
+    await expect(statusRegion(page).getByText(messages['aiC.filling'].en, { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: messages['capture.save'].en, exact: true })).toBeDisabled();
     await page.locator('#item-title').fill('Retain my pending edit');
-    await page.getByRole('button', { name: messages['aiC.checkStatus'].en, exact: true }).click();
-    await expect(page.getByText(messages['aiC.ready'].en, { exact: true })).toBeVisible();
+    release();
+    await filled(page);
     await expect(page.locator('#item-title')).toHaveValue('Retain my pending edit');
-    expect(api.calls.filter((call) => call.route.endsWith('/analyze-clothing'))).toHaveLength(1);
+    expect(posts(api)).toHaveLength(1);
+    const checks = statusChecks(api);
+    expect(checks.length).toBeGreaterThanOrEqual(1); expect(checks.length).toBeLessThanOrEqual(5);
+    for (const check of checks) expect(check.body).toEqual({ p_request_id: (posts(api)[0]!.body as { requestId: string }).requestId });
     expect(api.items).toHaveLength(0);
   });
 }
+test('status checks stop after the deadline; Try again makes one more check and never a new analysis', async ({ page }) => {
+  await page.clock.install();
+  const api = await aiFixture(page); api.mode('pending');
+  await page.route('**/rest/v1/rpc/ai_analysis_status', async (route) => {
+    const body = route.request().postDataJSON() as { p_request_id: string };
+    api.calls.push({ route: '/rest/v1/rpc/ai_analysis_status', body });
+    await route.fulfill({ json: dispatched });
+  });
+  await addAiPhoto(page, api);
+  await expect.poll(() => posts(api).length).toBe(1);
+  await page.clock.runFor(31000);
+  await expect(statusRegion(page).getByText(messages['aiC.stillWorking'].en, { exact: true })).toBeVisible();
+  const after = statusChecks(api).length;
+  expect(after).toBeGreaterThanOrEqual(1); expect(after).toBeLessThanOrEqual(5);
+  await page.clock.runFor(35000);
+  expect(statusChecks(api)).toHaveLength(after);
+  await statusRegion(page).getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
+  await expect.poll(() => statusChecks(api).length).toBe(after + 1);
+  await expect(statusRegion(page).getByText(messages['aiC.stillWorking'].en, { exact: true })).toBeVisible();
+  expect(posts(api)).toHaveLength(1);
+  expect(new Set(statusChecks(api).map((call) => JSON.stringify(call.body))).size).toBe(1);
+  expect(api.items).toHaveLength(0);
+});
 for (const action of ['new-analysis', 'manual'] as const) {
   test(`closed failed analysis: first explicit ${action} succeeds without a false cancellation warning`, async ({ page }) => {
+    await page.clock.install();
     const api = await aiFixture(page); api.mode('failed');
     await addAiPhoto(page, api);
-    await expect(page.getByText(messages['aiC.unavailable'].en, { exact: true })).toBeVisible();
+    await expect(statusRegion(page).getByText(messages['aiC.fillFailed'].en, { exact: true })).toBeVisible();
+    await page.clock.runFor(35000);
     const first = api.calls.filter((call) => call.route.endsWith('/analyze-clothing'));
     expect(first).toHaveLength(1);
     expect(api.results.size).toBe(0);
     await page.locator('#item-title').fill('My retained manual title');
     if (action === 'new-analysis') {
       api.mode('ready');
-      await page.getByRole('button', { name: messages['aiC.newAnalysis'].en, exact: true }).click();
-      await expect(page.getByText(messages['aiC.ready'].en, { exact: true })).toBeVisible();
-      const posts = api.calls.filter((call) => call.route.endsWith('/analyze-clothing'));
-      expect(posts).toHaveLength(2);
-      expect(posts[1]!.body).not.toEqual(posts[0]!.body);
+      await statusRegion(page).getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
+      await filled(page);
+      const sent = posts(api);
+      expect(sent).toHaveLength(2);
+      expect(sent[1]!.body).not.toEqual(sent[0]!.body);
       expect(api.results.size).toBe(1);
       expect([...api.results.values()][0]!.generation).toBe(2);
     } else {
-      const checked = page.waitForResponse((response) => response.url().endsWith('/ai_analysis_status'));
-      await page.getByRole('button', { name: messages['aiC.checkStatus'].en, exact: true }).click();
-      expect(await (await checked).json()).toEqual({ code: 'TERMINAL', reason: 'FAILED' });
-      await expect(page.getByText(messages['aiC.expired'].en, { exact: true })).toBeVisible();
-      const discarded = page.waitForResponse((response) => response.url().endsWith('/ai_request_control'));
-      await page.getByRole('button', { name: messages['aiC.continueManual'].en, exact: true }).click();
-      expect(await (await discarded).json()).toEqual({ code: 'TERMINAL', reason: 'FAILED' });
-      await expect(page.getByText(messages['aiC.manual'].en, { exact: true })).toBeVisible();
+      expect(statusChecks(api)).toHaveLength(0);
       await page.locator('#item-category').selectOption('top');
-      await expect(page.getByRole('button', { name: messages['capture.save'].en, exact: true })).toBeEnabled();
-      expect(api.calls.filter((call) => call.route.endsWith('/analyze-clothing'))).toHaveLength(1);
+      const discarded = page.waitForResponse((response) => response.url().endsWith('/ai_request_control'));
+      await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
+      expect(await (await discarded).json()).toEqual({ code: 'TERMINAL', reason: 'FAILED' });
+      await expect(page.locator('#wardrobe-title')).toBeVisible();
+      expect(posts(api)).toHaveLength(1);
       expect(api.results.size).toBe(0);
+      expect(api.items[0]!.field_provenance).toEqual({ title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 } });
     }
-    await expect(page.locator('#item-title')).toHaveValue('My retained manual title');
+    if (action === 'new-analysis') {
+      await expect(page.locator('#item-title')).toHaveValue('My retained manual title');
+      expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
+    } else expect(api.items[0]!.title).toBe('My retained manual title');
     await expect(page.getByText(messages['aiC.discardUnconfirmed'].en, { exact: true })).toHaveCount(0);
     expect(api.calls.filter((call) => call.route.endsWith('/ai_request_control'))).toHaveLength(1);
-    expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
   });
 }
 test('unclear result and manual continuation never imply verified or automatically saved facts', async ({ page }) => {
   const api = await aiFixture(page); api.mode('unclear');
   await addAiPhoto(page, api);
-  await expect(page.getByText(messages['aiC.unclear'].en, { exact: true })).toBeVisible();
+  await expect(statusRegion(page).getByText(messages['aiC.fillFailed'].en, { exact: true })).toBeVisible();
+  await expect(statusRegion(page).getByRole('button', { name: messages['common.retry'].en, exact: true })).toBeVisible();
   await expect(page.locator('#item-title')).toHaveValue('');
-  await page.getByRole('button', { name: messages['aiC.continueManual'].en, exact: true }).click();
   await page.locator('#item-title').fill('Manual garment');
   await page.locator('#item-category').selectOption('top');
   await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
@@ -602,13 +654,14 @@ test('expiry retains fields but requires explicit unknown continuation, without 
   await page.clock.install();
   const api = await aiFixture(page); api.ttl(2000);
   await addAiPhoto(page, api);
-  await expect(page.getByText(messages['aiC.ready'].en, { exact: true })).toBeVisible();
+  await filled(page);
   const title = await page.locator('#item-title').inputValue();
   await page.clock.fastForward(2001);
-  await expect(page.getByText(messages['aiC.expired'].en, { exact: true })).toBeVisible();
+  await expect(statusRegion(page).getByText(messages['aiC.needsCheck'].en, { exact: true })).toBeVisible();
   await expect(page.locator('#item-title')).toHaveValue(title);
   await expect(page.getByRole('button', { name: messages['capture.save'].en, exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: messages['aiC.continueManual'].en, exact: true }).click();
+  expect(api.items).toHaveLength(0);
+  await statusRegion(page).getByRole('button', { name: messages['aiC.keep'].en, exact: true }).click();
   await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   expect(api.items[0]!.field_provenance).toMatchObject({ title: { kind: 'unknown', revision: 1 }, category: { kind: 'unknown', revision: 1 } });
@@ -641,7 +694,7 @@ test('owner change clears an in-flight draft and ignores its late completion', a
 test('crop movement and cancellation do not analyze; an applied crop creates exactly one new generation', async ({ page }) => {
   const api = await aiFixture(page);
   await addAiPhoto(page, api);
-  await expect(page.getByText(messages['aiC.ready'].en, { exact: true })).toBeVisible();
+  await filled(page);
   await page.locator('#item-title').fill('Retained manual title');
   await page.locator('#edit-photo').click(); await page.locator('#crop-width').fill('80');
   expect(api.calls.filter((call) => call.route.endsWith('/analyze-clothing'))).toHaveLength(1);
@@ -650,27 +703,81 @@ test('crop movement and cancellation do not analyze; an applied crop creates exa
   expect(api.calls.filter((call) => call.route.endsWith('/analyze-clothing'))).toHaveLength(1);
   await page.locator('#edit-photo').click(); await page.locator('#crop-width').fill('80'); await page.locator('#apply-crop').click();
   await expect.poll(() => api.calls.filter((call) => call.route.endsWith('/analyze-clothing')).length).toBe(2);
-  await expect(page.getByText(messages['aiC.ready'].en, { exact: true })).toBeVisible();
+  await filled(page);
   await expect(page.locator('#item-title')).toHaveValue('Retained manual title');
   expect([...api.results.values()][0]!.generation).toBe(2);
 });
-test('late result after explicit manual continuation cannot overwrite edits or create rows', async ({ page }) => {
-  const api = await aiFixture(page);
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => { release = resolve; });
-  let reached = false;
-  await page.route('**/functions/v1/analyze-clothing', async (route) => {
-    reached = true; await held;
-    try { await route.fallback(); } catch { /* The deliberate local abort may already have closed this fixture request. */ }
+test('late result after an implicit manual Save cannot overwrite edits or add AI facts', async ({ page }) => {
+  await page.clock.install();
+  const api = await aiFixture(page); api.mode('pending');
+  let armed = false, reached = false, release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/rest/v1/rpc/ai_analysis_status', async (route) => {
+    if (!armed) {
+      api.calls.push({ route: '/rest/v1/rpc/ai_analysis_status', body: route.request().postDataJSON() });
+      await route.fulfill({ json: dispatched }); return;
+    }
+    const body = route.request().postDataJSON() as { p_request_id: string };
+    api.calls.push({ route: '/rest/v1/rpc/ai_analysis_status', body });
+    // Snapshot the valid ready reply now: the manual Save discards the request before this late reply is released.
+    const late = { code: 'OK', status: 'ready', result: api.results.get(body.p_request_id),
+      accounting: { basis: 'estimated', amountMicro: '1034', currency: 'USD' } };
+    expect(late.result?.facts.outcome).toBe('ready');
+    reached = true;
+    await gate;
+    await route.fulfill({ json: late }).catch(() => undefined);
   });
   await addAiPhoto(page, api);
+  await expect.poll(() => posts(api).length).toBe(1);
+  const requestId = (posts(api)[0]!.body as { requestId: string }).requestId;
+  await page.clock.runFor(31000);
+  await expect(statusRegion(page).getByText(messages['aiC.stillWorking'].en, { exact: true })).toBeVisible();
+  const before = statusChecks(api).length;
+  armed = true;
+  await statusRegion(page).getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
   await expect.poll(() => reached).toBe(true);
-  await page.getByRole('button', { name: messages['aiC.continueManual'].en, exact: true }).click();
   await page.locator('#item-title').fill('Manual after abort');
+  await page.locator('#item-category').selectOption('bottom');
+  await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
   release();
-  await expect(page.locator('#item-title')).toHaveValue('Manual after abort');
-  await expect(page.locator('#item-category')).toHaveValue('');
-  expect(api.items).toHaveLength(0); expect(api.files.size).toBe(0);
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  await page.clock.runFor(35000);
+  expect(posts(api)).toHaveLength(1);
+  expect(statusChecks(api).length).toBeLessThanOrEqual(before + 1);
+  for (const check of statusChecks(api)) expect(check.body).toEqual({ p_request_id: requestId });
+  expect(api.items).toHaveLength(1);
+  expect(api.items[0]).toMatchObject({ title: 'Manual after abort', category: 'bottom', colours: [], material: null });
+  expect(api.items[0]!.field_provenance).toEqual({ title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 } });
+  expect(api.requests.some((call) => call.path.endsWith('/reserve_analyzed_item_save'))).toBe(false);
+});
+test('an accepted analysis whose response is lost keeps checking the same request and never resends', async ({ page }) => {
+  const api = await aiFixture(page);
+  // The request reaches the receiver unchanged (WebKit keeps the native upload body), which accepts and answers it;
+  // the browser then loses that reply as a network error, with no timeout involved.
+  await page.evaluate((path) => {
+    const native = window.fetch.bind(window);
+    const counter = window as unknown as { lostAnalysisReplies: number };
+    counter.lostAnalysisReplies = 0;
+    window.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+      if (method !== 'POST' || new URL(url).pathname !== path) return native(input, init);
+      const reply = await native(input, init);
+      await reply.arrayBuffer().catch(() => undefined);
+      counter.lostAnalysisReplies += 1;
+      throw new TypeError('Failed to fetch');
+    };
+  }, analysisPath);
+  await addAiPhoto(page, api);
+  await filled(page);
+  expect(await page.evaluate(() => (window as unknown as { lostAnalysisReplies: number }).lostAnalysisReplies)).toBe(1);
+  expect(posts(api)).toHaveLength(1);
+  const requestId = (posts(api)[0]!.body as { requestId: string }).requestId;
+  expect(statusChecks(api).length).toBeGreaterThanOrEqual(1);
+  expect(statusChecks(api).length).toBeLessThanOrEqual(5);
+  for (const check of statusChecks(api)) expect(check.body).toEqual({ p_request_id: requestId });
+  await expect(page.getByText(messages['aiC.fillFailed'].en, { exact: true })).toHaveCount(0);
+  expect(api.items).toHaveLength(0);
 });
 for (const language of ['en', 'fi', 'sv'] as const) {
   test(`provider-correct notices and accessibility ${language}: agreement is reset by changed policy`, async ({ page }) => {
@@ -702,18 +809,18 @@ for (const language of ['en', 'fi', 'sv'] as const) {
   });
   test(`committed first refusal and accessibility ${language}: preserve edits and require explicit unknown Save`, async ({ page }) => {
     const api = await aiFixture(page, language); await addAiPhoto(page, api, language);
-    await expect(page.getByText(messages['aiC.ready'][language], { exact: true })).toBeVisible();
+    await filled(page, language);
     await page.locator('#item-title').fill('My retained title');
     const category = await page.locator('#item-category').inputValue();
     for (const [id, result] of api.results) api.results.set(id, { ...result, expiresAtMs: Date.now() - 1 });
     await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
-    await expect(page.getByText(messages['aiC.saveRefused'][language], { exact: true })).toBeVisible();
+    await expect(statusRegion(page).getByText(messages['aiC.needsCheck'][language], { exact: true })).toBeVisible();
     await expect(page.locator('#item-title')).toHaveValue('My retained title');
     await expect(page.locator('#item-category')).toHaveValue(category);
     await expect(page.getByRole('button', { name: messages['capture.save'][language], exact: true })).toBeDisabled();
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
-    await page.getByRole('button', { name: messages['aiC.continueManual'][language], exact: true }).click();
+    await statusRegion(page).getByRole('button', { name: messages['aiC.keep'][language], exact: true }).click();
     await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
     await expect(page.locator('#wardrobe-title')).toBeVisible();
     expect(api.items).toHaveLength(1);
@@ -727,7 +834,8 @@ for (const entry of ['refused analysis', 'inactive analysis'] as const) test(
   `${entry} then manual Save retries a lost finalizer ACK without writing ready objects`, async ({ page }) => {
   const enabled = entry === 'refused analysis';
   const api = await aiFixture(page, 'en', enabled, 'finalizer'); await addAiPhoto(page, api);
-  await expect(page.getByText(messages[enabled ? 'aiC.ready' : 'aiC.manualRequired'].en, { exact: true })).toBeVisible();
+  if (enabled) await filled(page);
+  else await expect(statusRegion(page).getByText(messages['aiC.off'].en, { exact: true })).toBeVisible();
   if (enabled) {
     await page.locator('#item-title').fill('Retained manual title');
     for (const [id, result] of api.results) api.results.set(id, { ...result, expiresAtMs: Date.now() - 1 });
@@ -741,17 +849,17 @@ for (const entry of ['refused analysis', 'inactive analysis'] as const) test(
   });
   if (enabled) {
     await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
-    await expect(page.getByText(messages['aiC.saveRefused'].en, { exact: true })).toBeVisible();
+    await expect(statusRegion(page).getByText(messages['aiC.needsCheck'].en, { exact: true })).toBeVisible();
   }
   expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
-  await page.getByRole('button', { name: messages['aiC.continueManual'].en, exact: true }).click();
+  if (enabled) await statusRegion(page).getByRole('button', { name: messages['aiC.keep'].en, exact: true }).click();
   if (!enabled) {
     await page.locator('#item-title').fill('Retained manual title');
     await page.locator('#item-category').selectOption('top');
   }
   await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
   await expect(page.getByRole('button', { name: messages['common.retry'].en, exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: messages['aiC.continueManual'].en, exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: messages['aiC.keep'].en, exact: true })).toHaveCount(0);
   const items = structuredClone(api.items), images = structuredClone(api.images);
   const requestsBefore = api.requests.length;
   expect(images).toHaveLength(1); expect(images[0]!.state).toBe('ready');
@@ -769,10 +877,10 @@ for (const entry of ['refused analysis', 'inactive analysis'] as const) test(
 for (const lost of ['reservation', 'finalizer'] as const) {
   test(`lost ${lost} ACK: Cancel never reserves; retry preserves the frozen Save`, async ({ page }) => {
     const api = await aiFixture(page, 'en', true, lost); await addAiPhoto(page, api);
-    await expect(page.getByText(messages['aiC.ready'].en, { exact: true })).toBeVisible();
+    await filled(page);
     await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
     await expect(page.getByRole('button', { name: messages['common.retry'].en, exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: messages['aiC.continueManual'].en, exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: messages['aiC.keep'].en, exact: true })).toHaveCount(0);
     const frozen = structuredClone(api.items);
     await page.getByRole('button', { name: messages['common.cancel'].en, exact: true }).click();
     const before = api.requests.length;
@@ -791,7 +899,7 @@ for (const lost of ['reservation', 'finalizer'] as const) {
 }
 test('a reserved incomplete Save can be cancelled, without a second reservation or a deletion claim', async ({ page }) => {
   const api = await aiFixture(page); await addAiPhoto(page, api);
-  await expect(page.getByText(messages['aiC.ready'].en, { exact: true })).toBeVisible();
+  await filled(page);
   await page.route('**/functions/v1/finalize-analyzed-item', (route) => route.abort('failed'));
   await page.getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
   await expect(page.getByRole('button', { name: messages['common.retry'].en, exact: true })).toBeVisible();
@@ -804,7 +912,7 @@ test('a reserved incomplete Save can be cancelled, without a second reservation 
 });
 test('Save excludes Cancel until its finalizer has settled', async ({ page }) => {
   const api = await aiFixture(page); await addAiPhoto(page, api);
-  await expect(page.getByText(messages['aiC.ready'].en, { exact: true })).toBeVisible();
+  await filled(page);
   let release!: () => void, reached = false;
   const held = new Promise<void>((resolve) => { release = resolve; });
   await page.route('**/functions/v1/finalize-analyzed-item', async (route) => { reached = true; await held; await route.fallback(); });
@@ -851,7 +959,7 @@ test.describe('bounded C visual evidence', () => {
       await capture('consent');
       await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
       await addAiPhoto(page, api, language);
-      await expect(page.getByText(messages['aiC.ready'][language], { exact: true })).toBeVisible();
+      await filled(page, language);
       await page.locator('details.optional-details summary').click();
       await capture('analyzed-draft');
       expect(api.calls.filter((call) => call.route.endsWith('/analyze-clothing'))).toHaveLength(1);

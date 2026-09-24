@@ -640,7 +640,7 @@ test('late selection cannot overwrite a replacement or manual edits and clears n
   await input.setInputFiles(replacement);
   await expect(page.locator('.capture-photo img')).toBeVisible();
   expect((await firstStatus).status()).toBe(200);
-  await expect(page.getByText(messages['aiC.checking'].en, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(messages['aiC.filling'].en, { exact: true })).toHaveCount(0);
   const preview = await page.locator('.capture-photo img').getAttribute('src');
   await page.evaluate(() => (window as PhotoReadProbe).releasePhotoRead?.());
   await expect(page.locator('.capture-photo img')).toHaveAttribute('src', preview!);
@@ -653,7 +653,7 @@ test('late selection cannot overwrite a replacement or manual edits and clears n
   await expect(page.locator('.capture-photo img')).toBeVisible();
   await expect(page.locator('.capture-photo img')).not.toHaveAttribute('src', preview!);
   expect((await secondStatus).status()).toBe(200);
-  await expect(page.getByText(messages['aiC.checking'].en, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(messages['aiC.filling'].en, { exact: true })).toHaveCount(0);
   expect(backend.requests.slice(before)).toEqual([
     { method: 'POST', path: '/rest/v1/rpc/ai_status', owner: owners.a, ownerFilter: null },
     { method: 'POST', path: '/rest/v1/rpc/ai_status', owner: owners.a, ownerFilter: null },
@@ -714,7 +714,7 @@ test('discarding a prepared draft creates no library records', async ({ page }) 
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
   await expect(page.locator('.capture-photo img')).toBeVisible();
   expect((await status).status()).toBe(200);
-  await expect(page.getByText(messages['aiC.checking'].en, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(messages['aiC.filling'].en, { exact: true })).toHaveCount(0);
   await page.locator('#item-title').fill('Unsaved');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();

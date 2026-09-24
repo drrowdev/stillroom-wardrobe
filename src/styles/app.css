@@ -153,6 +153,16 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .recovery-preview { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; max-width: 520px; }
 .recovery-preview img { display: block; width: 100%; max-height: 360px; object-fit: contain; background: var(--surface); border-radius: 12px; }
 .lifecycle-edit-lock { display: grid; gap: 24px; padding: 0; margin: 0; border: 0; min-width: 0; }
+.detail-availability { display: flex; flex-wrap: wrap; gap: 4px 20px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.detail-availability legend { width: 100%; padding: 0 0 8px; font-size: .875rem; font-weight: 550; }
+.detail-availability .choice { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-weight: 400; overflow-wrap: anywhere; }
+.detail-availability .choice input { width: 20px; height: 20px; margin: 0; }
+.detail-archive { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.detail-archive p { margin: 0; color: var(--secondary); }
+.analysis-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-width: 0; overflow-wrap: anywhere; }
+.analysis-status p { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+.analysis-status .spinner { width: 16px; height: 16px; }
+.analysis-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .trash-list { list-style: none; padding: 0; display: grid; gap: 16px; }
 .trash-page, .lifecycle-dialog, .lifecycle-undo, .lifecycle-actions { min-width: 0; overflow-wrap: anywhere; }
 .trash-page button, .lifecycle-dialog button, .lifecycle-undo button, .lifecycle-undo a { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
@@ -317,18 +327,27 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .capture-page:has(#edit-photo, .crop-editor) .capture-layout > * { min-width: 0; overflow-wrap: anywhere; }
 .capture-page:has(#edit-photo, .crop-editor) .button { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .capture-page:has(#edit-photo, .crop-editor) select { min-width: 0; max-width: 100%; }
-.garment-group { min-width: 0; border-top: 1px solid var(--border); padding-block: 10px; }
-.garment-toggle { min-height: 44px; font-weight: 600; max-width: 100%; text-align: start; white-space: normal; }
-.garment-toggle::before { content: '▸'; margin-inline-end: 8px; }
-.garment-toggle[aria-expanded="true"]::before { content: '▾'; }
-.garment-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding-top: 16px; }
-.garment-grid[hidden] { display: none; }
-.garment-field, .garment-collection { min-width: 0; overflow-wrap: anywhere; }
-.garment-label { font-weight: 600; }
+.garment-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding-block: 4px 20px; }
+.garment-field, .chip-list { min-width: 0; overflow-wrap: anywhere; }
+.garment-label { font-size: .875rem; font-weight: 550; }
 .garment-field input, .garment-field select, .garment-field textarea { min-width: 0; max-width: 100%; min-height: 44px; }
-.garment-field button { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: start; }
-.garment-field .fine { margin-block: 4px; }
-.garment-chip { display: flex; align-items: center; gap: 8px; margin-block: 4px; }
-.garment-chip > :first-child { flex: 1; min-width: 0; }
+.garment-field select { contain: paint; }
+.garment-field button { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.garment-field .fine { margin-block: 0; }
+.field-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.field-marker { color: var(--secondary); font-size: .75rem; font-weight: 400; }
+.chip-list { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.chip-list select { width: auto; flex: 1 1 10rem; min-width: 0; max-width: 100%; }
+.chip { display: inline-flex; align-items: center; gap: 2px; min-height: 36px; padding-inline: 12px 2px; border: 1px solid var(--input-border); border-radius: 18px; background: var(--surface); max-width: 100%; overflow-wrap: anywhere; }
+.garment-field .chip-remove { min-width: 44px; min-height: 44px; margin-block: -4px; border: 0; background: none; color: var(--secondary); font-size: 1.125rem; text-align: center; cursor: pointer; }
+.season-set { border: 0; margin: 0; padding: 0; }
+.season-set legend { display: flex; gap: 8px; align-items: baseline; padding: 0 0 8px; font-size: .875rem; font-weight: 550; }
+.check-row { display: flex; flex-wrap: wrap; gap: 4px 20px; }
+.check { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-weight: 400; }
+.garment-field .check input { width: 20px; height: 20px; min-height: 0; margin: 0; }
+.tag-entry, .price-entry { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tag-entry input, .price-entry input { flex: 1 1 8rem; min-width: 0; }
+.garment-field .tag-entry button { flex: 0 1 auto; }
+.price-currency { color: var(--secondary); font-size: .875rem; }
 .capture-layout > *, .detail-layout > * { min-width: 0; }
 @media (min-width: 1000px) { .garment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

@@ -8013,3 +8013,27 @@ step and diagnostics are unexercised in CI. A later green run proves nothing
 about the cause or its elimination; the next failing run's `dockerDiag` is
 evidence to interpret, not a diagnosis. No stage, commit, push, PR, hosted
 action, deployment or other agent occurred; publication remains separately gated.
+
+## UX L1a simplified item form and AI status - local source candidate (23 September 2026)
+
+Owner-approved simplification (plan rev2 with binding amendments G1–G5). Local writer session `3df3928e-69d9-4a64-a2db-e9dd95a89f71`, model `claude-opus-5.5`, from base `9f6cee1f`. Source candidate only: not committed, not CI-run, not visually reviewed, not accepted.
+
+- Add, replacement and saved-item screens show Photo, Name, Category, Colours and Seasons, with the other approved fields in a collapsed More details. There is no schema change; hidden columns keep their stored values and provenance.
+- The saved item has one Save changes (item PATCH first, then the description RPC, each at most once), a quick Availability choice and Archive/Unarchive, all version-checked and disabled while other edits are unsaved.
+- AI status mapping, polling bounds and precedence are recorded in `blueprint/20` ("UX L1a simplified status").
+
+Deviations and known limits:
+- The fifth poll delay is 7 s (2+4+8+8+7 s) so five checks fit the 30 s deadline.
+- Save stays enabled when a field is invalid; clicking it sends nothing and focuses the first invalid field. `detail.invalidFields` is kept for the error summary title.
+- After a confirmed read-only Check, the saved page shows "Saved" (`onChecked`).
+- A refused checked Save for the current analysis shows the needs-check line instead of the separate `aiC.saveRefused` alert (the key stays in use in `errors.ts`).
+- The browser test "description save finishes while the item attempt is pending" was removed: the combined Save never sends the description before the item is confirmed. It is replaced by two tests: an unconfirmed item leaves the description unsent, and a confirmed item with a failed description reports the partial save without resending.
+- Known mock limitation: `tests/browser/mock-backend.ts` does not reproduce every server-side AI provenance transition on PATCH. The file is intentionally unchanged (coordinator decision), so hosted/integration evidence remains authoritative for that path.
+- Bounded synthetic captures (8 PNGs in `test-results/ux-l1a-visual/`, CI artifact `ux-l1a-ui-<head>`) have not been opened by the writer. Visual acceptance is pending coordinator review.
+
+Review round 1 (independent GPT-6 Astra review R1–R4, coordinator visual V1), same allowlist:
+- R1: `TIMEOUT` and `UNAVAILABLE` after the analysis request has started keep the request pending with bounded same-request checks. Regression test: the receiver accepts the analysis and the browser loses the reply as a network error; checks reuse the original request id and one analysis POST is sent.
+- R2: the saved page announces the combined success only when both sections are clean and no attempt is outstanding. If Check confirms only the item, the unsaved description stays marked and the next explicit Save sends only the description. This supersedes the "Saved after a confirmed Check" note above for the partial case.
+- R3: the late-result test holds a same-request status check started by Try again after the deadline, performs a manual Save, then releases a schema-valid ready reply; fields and provenance stay manual, with no analyzed reservation and no extra analysis POST.
+- R4: one Tags count/byte budget across `tags` and `style_tags` for manual additions, suggestions and the full state; legacy over-limit lists stay unchanged.
+- V1: natural per-language default names and descriptions from the first colour (`itemName.*`, `item.photoDescription`, `colourNeuter.*`, `colourPlural.*`); the old `item.aiTitle` and `aiC.description` keys were removed.
