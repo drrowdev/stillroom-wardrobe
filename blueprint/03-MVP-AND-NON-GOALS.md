@@ -4,7 +4,7 @@ The first release is **Phases 0–7**. Phase 0 is a secure vertical slice; it is
 
 ## Included
 
-Two invited logins; independent profiles/preferences; camera/library image capture; crop/orient/resize/compress and remove metadata; automatic editable AI clothing details after upload, with manual metadata and lifecycle controls; filtering/search; manual outfits; plans and wear history; wear statistics; deterministic suggestions and feedback; optional city weather; no account relationship or sharing; personal exports, restore and deletion; encrypted backup tooling; installable responsive PWA and accessible states.
+Two invited logins; independent profiles/preferences; camera/library image capture; crop/orient/resize/compress and remove metadata; automatic editable AI clothing details after upload, with manual metadata and lifecycle controls; filtering/search; manual outfits; plans and wear history; wear statistics; deterministic suggestions and feedback; optional city weather; no account relationship or sharing; personal exports, restore and deletion; encrypted backup tooling; installable responsive PWA and accessible states. 24 Sep 2026: I12/I13 calendar, wear records and wear counts/cost-per-wear moved to backlog by owner decision; PR #37 comment 5815445262.
 
 **Approved revision 1.3:** paid AI automatically fills an editable form from a photo, including title/category. The user can edit every garment field before explicit Save to library; analysis never automatically saves an item. One-time provider consent replaces a separate "Suggest" action, not the final Save. This supersedes revision 1.2's post-save enrichment. Outfits stay deterministic. `20` defines the revised I29 contract.
 
@@ -56,7 +56,7 @@ implicit waiver of deletion, backup, recovery or security.
 |---|---|
 | Phase 0 | Auth + RLS + private upload + one wardrobe screen + CI in English/Finnish/Swedish; revision 1.1 base schema only, no AI calls |
 | Phases 1–2 | Personal setup, reliable image capture, I29 AI-filled draft/review/Save and metadata migration, full wardrobe and filters |
-| Phase 3 | Outfits, calendar, wear records and statistics |
+| Phase 3 | Outfits, calendar, wear records and statistics (24 Sep 2026: calendar/wear records, I12/I13, in backlog by owner decision, PR #37 comment 5815445262) |
 | Phase 4 | Rule engine and feedback |
 | Phase 5 | Optional weather and full account-isolation verification |
 | Phase 6 | Export, restore, account deletion and backup scripts |

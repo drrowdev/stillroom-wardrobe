@@ -20,7 +20,9 @@ password-recovery Auth unblocker, not Phase 1 or hosted acceptance.
 See the [dated shell/dashboard evidence and remaining gates](docs/cloud-development.md#hosted-state-and-responsible-actors).
 Ordinary password login, own Save/reload, negative RLS/Storage, prepared fixtures,
 live hosted smoke and physical-device acceptance remain open. No later phase or
-automatic merge is authorized.
+automatic merge is authorized. Since 23 September 2026 one owner's sign-in, Save,
+reload and photo replacement work on the hosted app. Second-account isolation,
+the private hosted smoke and physical-device acceptance remain open.
 
 ## Current implementation
 
@@ -37,9 +39,11 @@ the app requests global sign-out for the recovered owner and returns to ordinary
 Login; existing access JWTs may remain valid until expiry. Cancellation cannot
 undo an already-transmitted update. See the [local-only proof and limits](docs/local-backend.md#real-local-password-recovery).
 
-The first slice uses manual names/categories. Automatic AI form filling belongs
-to Phase 2 and is not simulated here. Outfits, calendar, statistics, full backup restoration
-and account deletion are later phases; no unfinished screen is presented as working.
+The first slice uses manual names/categories. Automatic AI form filling (Phase 2)
+is active for the owner's account only; other accounts use manual names and
+categories. Outfits, outfit suggestions and weather are not built yet.
+Statistics, full backup restoration and account deletion are later phases, and
+the calendar is in the backlog. No unfinished screen is presented as working.
 The app has an initial manifest, but complete installation/offline acceptance remains
 a later release gate.
 
@@ -102,12 +106,14 @@ application relies on.
 
 The coordinator installed the exact base schema once in the approved **AI
 Wardrobe** Supabase project, `xwrdrugastphdiihzuia`, **Stockholm (`eu-north-1`)**.
+Later migrations are installed; see the
+[mapping](docs/cloud-development.md#hosted-state-and-responsible-actors).
 This is structural evidence, not working hosted login or ordinary-user RLS proof.
 The source-to-remote migration versions differ: see the
 [mapping and actor/gate handoff](docs/cloud-development.md#hosted-state-and-responsible-actors).
 Do not run hosted `db push`, replay/reset, history repair or local fictional
 provisioning. Edge Functions and AI processing have separate location controls;
-no AI service is activated.
+AI photo analysis is active for the owner's account only.
 
 The coordinator created git-backed Cloudflare Pages project `stillroom-wardrobe`
 with automatic production and preview deployments disabled. Coordinator review
@@ -115,8 +121,10 @@ with automatic production and preview deployments disabled. Coordinator review
 reachable on 6 September 2026, 15:09 UTC; see the
 [deployment-specific evidence](docs/cloud-development.md#hosted-state-and-responsible-actors).
 This supersedes queued as current status, not the historical worker observation.
+The latest recorded deployment (24 September 2026) is `27a1c642` of main
+`3ed08147`.
 Any replacement needs fresh evidence. No PR #2 deployment, deployment workflow,
-Functions or paid hosting.
+Cloudflare Pages Functions or paid hosting.
 Production uses only the three public VITE settings and build-only Node version.
 A reachable shell does not complete hosted login, Save, Storage/RLS or phone gates.
 

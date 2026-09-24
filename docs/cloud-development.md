@@ -19,7 +19,17 @@ main checkout or the coordinator's old read-only checkout. The coordinator
 records owned files, dependencies and shared-resource owners before assignment;
 do not stop, reset or mutate unrelated services.
 
-Explicitly select **GPT-6 Astra (`gpt-6-astra`)**. Start each local implementation
+Explicitly select **Anthropic Claude Opus 5.5 (`claude-opus-5.5`)** for each new
+local implementation builder, per the
+[owner decision of 23 September 2026](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5795033115).
+Required different-provider critique, rubber-duck and review work uses **OpenAI
+GPT-6 Astra (`gpt-6-astra`)**, read-only. Sessions held before that decision keep
+their recorded models and results; for example, PR #32's GPT-6 Astra writer keeps
+its Anthropic Claude Opus 5 review. A model name in a prompt is not proof. The
+owner reconfirmed GPT-6 Astra for critique and rubber-duck work in the
+coordinator session on 23 September 2026 at about 12:49Z; public copy in
+[`5815445262`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815445262).
+Start each local implementation
 session read-only until the coordinator independently retrieves the writer's OWN
 documented machine-readable actual-model usage outside the writer's turn output.
 Cross-match active app/CLI identity, repository, workspace, branch, exact
@@ -82,7 +92,8 @@ hosted-account journey was deferred, not other operator/device/human checks.
 Paid activation, private-input processing, hosted mutations and deployment retain
 separate approval. Source writers receive no hosted credentials;
 `ALLOW_HOSTED_SMOKE` remains unset in implementation sessions. The dated hosted
-actor evidence below is preserved, not a fresh hosted-state observation.
+actor evidence below is preserved. The rollout subsection dated 23–24 September
+2026 is coordinator-recorded evidence, not a fresh observation by any writer.
 
 ## Prepared environment
 
@@ -374,20 +385,174 @@ This is a dated snapshot, not live counters or API verification of every Auth
 setting. Administrative confirmation is not email-delivery evidence; counts
 prove neither ordinary login nor RLS/Storage isolation.
 
+#### Hosted rollouts since 23 September 2026
+
+Coordinator-recorded evidence. Each item cites its source comment; nothing here
+is a fresh observation by a writer.
+
+**First hosted rollout, 23 September 2026.** Owner approvals:
+[PR #32 `5794990408`](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5794990408)
+accepted possible loss of hosted test garments, photos and Save attempts, and a
+short no-use window. That replaced the full database and Storage backup gate for
+this rollout only; accounts and settings had to be preserved.
+[PR #33 `5796499459`](https://github.com/drrowdev/stillroom-wardrobe/pull/33#issuecomment-5796499459)
+approved annex R2 (M1–M10, critiqued read-only by OpenAI GPT-6 Astra) and the
+Pages route, and accepted Edge Functions running outside the EU for this test
+rollout only, with only the owner's test photos. The database and Storage stay in
+Stockholm; that is not a general residency waiver. The
+[execution receipt `5800183953`](https://github.com/drrowdev/stillroom-wardrobe/pull/33#issuecomment-5800183953)
+records:
+
+- Source: accepted main `9f6cee1f2f6ba4d7f9828d7b46cde63170ebc05e` (tree
+  `dece8adf`), post-merge CI 35869516551 green.
+- Window: the owner confirmed no app use. The baseline was taken at 14:33:13Z
+  (database time), and a detection receipt at 15:30:37Z matched it. This is
+  limited activity detection only.
+- Database: role postgres, not superuser; the M3 capability preflight passed.
+  Five migrations were added, giving an 11-row hosted ledger that day. Each body
+  was MD5-checked before execution, each ledger row equals its Git blob MD5, and
+  objects were read back after each migration. M1: the final
+  `item_object_publication_guard` is AFTER I/U/D, tgtype 29, enabled `O` (after
+  the intermediate `O`/21); `item_image_identity_guard` is `A`. The `wardrobe`
+  bucket is still private, JPEG only, 512000 bytes, with three owner policies and
+  no UPDATE policy. M2: no anon or PUBLIC EXECUTE on public functions, and
+  service-role-only RPCs are not callable by authenticated users.
+- Edge Functions: `analyze-clothing`, `finalize-analyzed-item` and
+  `finalize-image-change`, v1 ACTIVE, `verify_jwt=true`, readback byte-identical
+  to the Git blobs; `google-cloud.ts` was not uploaded. CORS preflight from the
+  exact origin returns 204, a disallowed origin gets 403 with no ACAO, and an
+  unauthenticated POST gets a gateway 401. At that point no provider secret
+  existed and AI controls were 0.
+- Pages: the owner ran one API production create-deployment, `6e01b747`, of
+  commit `9f6cee1f`. Automatic production stayed OFF and previews NONE. The
+  served JavaScript contains `9f6cee1f`, this project's URL and default
+  publishable key; repository `scanText` found nothing in the 5 served assets.
+  CSP `connect-src` allows only this project, and no-referrer and nosniff are
+  set. Missing asset paths return the platform HTML fallback.
+- Owner smoke test, 18:01Z, own account, normal session: sign in, add a photo
+  and crop, AI unavailable → Continue manually, edit, Save, reload with thumbnail
+  and full image, edit and save, replace photo, sign out and back in. All steps
+  passed. Coordinator aggregate deltas are consistent: items 4→5, completed Save
+  attempts 3→4, one completed replacement, objects 8→12, no orphans; accounts,
+  approvals and preferences unchanged; AI requests 0.
+
+At that point only the manual add/edit/Save/photo-replace journey was live. It
+was not full product or Phase 0 acceptance, and it did not use the private
+read-only smoke runner.
+
+Source→hosted versions from the coordinator's 23 September 2026 ledger readback,
+where every stored statement hash-matched its source blob (receipt `5800183953`):
+
+| Source migration | Hosted version | Method |
+|---|---|---|
+| `20260905000000_initial.sql` | `20260906144202_initial_wardrobe` | applied once, 6 Sep (`5559976584`) |
+| `20260906000000_item_field_provenance.sql` | `20260909062611_item_field_provenance` | installed before 20 Sep (six-row ledger) |
+| `20260909070000_item_description_edit.sql` | `20260910060829_item_description_edit` | installed before 20 Sep (six-row ledger) |
+| `20260909110000_item_optional_collections.sql` | `20260910060849_item_optional_collections` | installed before 20 Sep (six-row ledger) |
+| `20260909180000_ai_request_controls.sql` | `20260910172705_ai_request_controls` | `apply_migration`, 10 Sep ([`5622788324`](https://github.com/drrowdev/stillroom-wardrobe/pull/17#issuecomment-5622788324)) |
+| `20260910070000_checked_item_save.sql` | `20260910172928_checked_item_save` | `apply_migration`, 10 Sep (`5622788324`) |
+| `20260911040000_ai_analysis_backend.sql` | `20260923143642_ai_analysis_backend` | `apply_migration`, 23 Sep; 24856 B, MD5 `70284cb6…` |
+| `20260911200000_checked_ai_item_save.sql` | `20260923144008_checked_ai_item_save` | `apply_migration`, 23 Sep; 29668 B, MD5 `3eee343a…` |
+| `20260913120000_item_lifecycle.sql` | `20260923144230_item_lifecycle` | `apply_migration`, 23 Sep; 20822 B, MD5 `878902fe…` |
+| `20260921193000_azure_terra_analysis.sql` | `20260923144606_azure_terra_analysis` | `apply_migration`, 23 Sep; 29274 B, MD5 `49121b22…` |
+| `20260922020000_checked_image_changes.sql` | `20260923150145_checked_image_changes` | **manual atomic ledger write, method M11**, 23 Sep; 82482 B, MD5 `2dee8119…` |
+
+M11 was reviewed read-only by OpenAI GPT-6 Astra (AMEND C1–C5). The 82 KB body
+went in 6 hash-verified chunks into a private scratch table. One atomic DO block
+ran the exact body and inserted the ledger row with `created_by` null; this was
+not an `apply_migration` call. The prior ten ledger rows were unchanged, and the
+scratch table was dropped. Source and hosted versions differ for every row.
+**Still do not run hosted `db push`, replay, reset or automatic history repair.**
+
+**Pages deployments since then.** Each was one owner-run create-deployment of
+production main HEAD, with automatic production OFF and previews NONE. Each
+receipt records that the served JavaScript contains the commit, the project URL
+and the publishable key, that `scanText` is clean on 5 assets, that CSP,
+no-referrer and nosniff are unchanged, and no database or function change.
+Owner review was pending in both receipts.
+
+- `f0016398` of main `c3ce908a` (UX L1a), 24 September
+  ([PR #34 `5808561122`](https://github.com/drrowdev/stillroom-wardrobe/pull/34#issuecomment-5808561122)).
+- `27a1c642` of main `3ed08147` (UX L1b and L2a), 24 September
+  ([PR #36 `5813432944`](https://github.com/drrowdev/stillroom-wardrobe/pull/36#issuecomment-5813432944)).
+  This is the latest cited Pages deployment.
+
+**AI activation, owner account only** (from
+[`5815445262`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815445262)).
+
+- **Activation.** At about 19:20Z on 23 September 2026 the coordinator inserted
+  one `private.ai_controls` row for the owner's account only, under reviewed
+  annex A2 (OpenAI GPT-6 Astra, AMEND F1–F5) with owner answers.
+  - Row values: `azure-eu-terra-devtest-v1`, prompt 1, notice revision 2,
+    monthly allowance USD 20 (`20000000` micro-USD), 20 requests per hour,
+    result TTL 3600 s.
+  - The owner accepted that USD 20 per month is an application allowance, not an
+    Azure invoice ceiling.
+  - The owner confirmed in the Azure portal: deployment `eval-terra-20260709`,
+    `gpt-5.6-terra` 2026-07-09, Data Zone Standard EU (not Global), and no extra
+    logging or data sharing.
+  - The owner added `AI_AZURE_OPENAI_API_KEY` personally. The coordinator never
+    saw the value.
+  - The other account has no controls.
+  - The profile review expires on 21 October 2026, per the AZ1 source contract
+    in this guide.
+- **Supervised probe.** At about 07:31Z on 24 September the owner turned photo
+  analysis on and analysed one photo.
+  - Aggregate readback: 1 usage row, `estimated`, 9018 micro-USD; model
+    observation `expected_snapshot` (an observation, not proof of the exact
+    snapshot); control `ordinary`; cache read/write 0/0; 8 counters; no anomaly.
+  - A wine-red coat was returned as `brown`, which led to COL1.
+- **Open gate.** Scheduled purge of expired results is still open. Results are
+  cleared by hand after supervised use for now.
+
+**COL1.** #37 merged as `a6a027eb`.
+
+- The owner approved its hosted rollout (annex R0–R5 in the Phase 2 result) at
+  about 13:05Z on 24 September 2026. The R0 read-only baseline was recorded at
+  13:33:04Z (`5815445262`).
+- COL1 was last recorded at R1 on 24 September
+  ([`5815899879`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815899879)):
+  - M1 `garment_colours` was applied as hosted version `20260924135607`, with
+    readback at 14:00:06Z.
+  - M2 `azure_colour_manifest` was applied as hosted version `20260924140200`,
+    with readback at 14:02:12Z.
+  - R2 (Pages deploy of `a6a027eb` and smoke test), R3 (functions), R4
+    (controls switch) and R5 (owner coat retest) were recorded as not yet done.
+- Later steps are not evidenced by the cited comments. COL1 is not recorded as
+  complete.
+- The latest cited Pages receipt records deployment `27a1c642` of main
+  `3ed08147` (PR #36 `5813432944`).
+- The 23 September function versions (v1) and the activation controls
+  (`azure-eu-terra-devtest-v1`, prompt 1) are the recorded state as of those
+  dates, not a claim about the current state.
+
+**Scope.** Recorded as live by these comments: add/edit/Save/photo replacement,
+AI-filled details for the owner's account only, and the simplified UI (L1a, L1b,
+L2a). Not built: outfits, suggestions and weather (Phases 3–5). The owner moved
+the calendar (I12/I13: date planning, marking worn, wear counts and
+cost-per-wear) to the backlog at about 12:12Z on 24 September 2026
+(`5815445262`); Phase 3 continues with I11 outfits only, and Phase 4 suggestions
+must not depend on wear history for now. This is not the owner's full core
+workflow and not Phase 0 or product acceptance.
+
 | Gate | Current evidence / next step | Responsible actor |
 |---|---|---|
-| Backend installation | Exact base SQL installed once; mapping above preserved. No I29 extension or AI activation. | Coordinator/operator; cloud source worker must not access it |
-| Hosted Auth | User-confirmed dashboard settings in the dated snapshot above; ordinary password login and email delivery remain unproved. No arbitrary preview/wildcard redirect or inference from local TOML/SQL. | User dashboard confirmation; coordinator/operator tracks remaining gates |
-| Intended owners | Privately reserved/created by the user; aggregate administrative evidence above. Ordinary password access, own Save/reload and negative RLS/Storage checks remain OPEN. Credentials stay private; never use local reserve/provision scripts on hosted. Password/account/recovery setup is outside the smoke runner. | User handles private credentials; approved private operator verifies ordinary-session access |
-| Website | Git-backed Pages project `stillroom-wardrobe` created; selected GitHub repo access verified. Automatic production deployments OFF, preview deployments NONE, no production backend in preview environment. | Coordinator through official Cloudflare connection only |
-| Live deployment | Reviewed-main shell verified in the dated observation above; no PR #2 deployment. Replacement requires separate authorization and fresh evidence; shell reachability is not hosted acceptance. | Coordinator |
-| Hosted smoke | BLOCKED until both intended ordinary sessions and prepared non-personal item/main/thumb fixtures exist. Run the separate read-only command below privately and report only coarse result plus reviewed code head. | Approved private operator, not cloud agent or public CI |
+| Backend installation | The eleven Phase 0–2 source migrations are installed (23 September mapping above, including the manual M11 row). The two COL1 migrations were recorded as applied at R1 on 24 September (`5815899879`); see COL1. Future hosted DDL needs separate approval. | Coordinator/operator; cloud source worker must not access it |
+| Hosted Auth | User-confirmed dashboard settings in the dated snapshot above; one owner's ordinary sign-in passed in the 23 September smoke test. Email delivery remains unproved. No arbitrary preview/wildcard redirect or inference from local TOML/SQL. | User dashboard confirmation; coordinator/operator tracks remaining gates |
+| Intended owners | Privately reserved/created by the user; aggregate administrative evidence above. One owner's ordinary sign-in, own Save/reload, edit, photo replacement and sign-out/in passed on 23 September. Second-account use and negative cross-account RLS/Storage checks remain OPEN (second-account test user-deferred). Credentials stay private; never use local reserve/provision scripts on hosted. Password/account/recovery setup is outside the smoke runner. | User handles private credentials; approved private operator verifies ordinary-session access |
+| Website | Git-backed Pages project `stillroom-wardrobe` created; selected GitHub repo access verified. Automatic production deployments OFF, preview deployments NONE, no production backend in preview environment. Deployments since 23 September are owner-run create-deployments of production main HEAD. | Coordinator through official Cloudflare connection only |
+| Live deployment | Latest cited deployment: `27a1c642` of `3ed08147` (PR #36 comment `5813432944`, 24 September). Earlier: `f0016398` and `6e01b747`; the 6 September shell `91462a90` is history. Each replacement needs separate approval and fresh evidence. A deployment is not acceptance. | Coordinator; owner runs the create-deployment |
+| Edge Functions | Three functions v1 ACTIVE, `verify_jwt=true`, source-identical as recorded on 23 September (`5800183953`). COL1 R3 (functions) was recorded as not yet done at R1 on 24 September (`5815899879`). The out-of-EU Edge location is accepted for the 23 September test rollout only, with owner test photos; general residency remains OPEN. Redeployment needs separate approval. | Coordinator/operator with owner approval; source writers have no access |
+| Photo analysis (AI) | Activated for the owner's account only on 23 September (`5815445262`): `azure-eu-terra-devtest-v1`, prompt 1, notice 2, a USD 20/month application allowance (not an invoice ceiling), 20 requests per hour, 3600 s result TTL, review expiry 21 October 2026. The 24 September single-photo probe had no anomaly. Still open: scheduled purge (manual clearing for now), other accounts, quality (see COL1), privacy/retention and device acceptance, and renewal before expiry. | Owner decides; coordinator/operator executes each change |
+| Not built / backlog | Outfits, suggestions and weather (Phases 3–5) are not built. The calendar (I12/I13) is in the backlog (`5815445262`). Hosted deletion and recovery flows are not exercised. | Owner prioritises; separate approved packets |
+| Hosted smoke | BLOCKED until both intended ordinary sessions and prepared non-personal item/main/thumb fixtures exist. Run the separate read-only command below privately and report only coarse result plus reviewed code head. The 23 September owner journey was a manual single-account check, not this two-owner runner. | Approved private operator, not cloud agent or public CI |
 | Phone/accessibility | Actual iPhone/Safari and Android camera/library, rotation/compatible-photo fallback, explicit Save/Discard, own login/logout, EN/FI/SV, VoiceOver/TalkBack and narrow/zoomed layout checks remain open. Emulation/axe is insufficient. | Human owners/testers |
 | Code/merge | All required exact-head gates, including App/browser, WebKit photo contracts, Real local Supabase/type parity, native Apple and I06 artifact visual review, plus genuine independent review, no blockers/overlapping writers and normal protections. Under [H1 clarification 5580579847](https://github.com/drrowdev/stillroom-wardrobe/pull/7#issuecomment-5580579847), the coordinator may execute a recommended ordinary merge without another user question; record recommendation/evidence and guard the exact head. No `--auto`, `--admin`, self-approval or protection bypass. | Cloud worker reports checks, never merges; coordinator reviews, records recommendation/evidence and executes the exact-head ordinary merge |
 
 Pages production configuration contains only public `VITE_SUPABASE_URL`,
 `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_APP_VERSION` and build-only
-`NODE_VERSION=24.19.0`. No administrator secret, Functions/bindings, paid hosting
+`NODE_VERSION=24.19.0`. No administrator secret, Cloudflare Pages
+Functions/bindings, paid hosting
 or automatic deployment workflow. Other sites, DNS and billing are untouched.
 A reachable shell does not prove login, owner setup, Storage/RLS or full Phase 0.
 
@@ -639,14 +804,16 @@ Before every implementation packet:
    PR body/discussion/diff/reviews and CI job logs. Record exact base/head,
    files actually consulted and unresolved gates.
 2. Write a focused plan before edits. Obtain an actual different-provider,
-   read-only critique; record provider/model, findings and amendments. The
+   read-only critique; record provider/model, findings and amendments. For
+   Anthropic builders that reviewer is OpenAI GPT-6 Astra (`gpt-6-astra`). The
    historical I06 plan/amendment and actual **Anthropic Claude Opus 5** critiques
    are linked above, not approval for this task. PR #2 `5559949209` and
    `5560449572`/`5560847183` also remain
    historical evidence, not current-packet approval. Automated validation/self-review is
    supplemental, not that prereview; do not invent a native review tool.
-3. Explicitly select **GPT-6 Astra (`gpt-6-astra`)** and enter each local
-   implementation session read-only. After context and before edits, read the
+3. Explicitly select **Anthropic Claude Opus 5.5 (`claude-opus-5.5`)** and enter
+   each new local implementation session read-only (owner decision
+   `5795033115`). After context and before edits, read the
    matching coordinator-observed local model attestation and explicit permission,
    independently bound to OWN actual usage, active app/CLI/repo/workspace/branch,
    base/start head, time and scope. Fresh source and session/model continuity

@@ -57,6 +57,9 @@ review `5125863611` records the reviewed-main shell reachable on 6 September
 [dated cloud-guide evidence](../docs/cloud-development.md#hosted-state-and-responsible-actors).
 That supersedes queued as current status, not the historical worker observation,
 and proves neither working Auth/Save/RLS nor full Phase 0. No PR #2 deployment.
+Since 23 September 2026 the later migrations and the 3 Edge Functions are
+installed as well, Pages serves reviewed main builds, and AI tagging is active
+for the owner's account only. See the guide for the mapping and the open gates.
 Preserve comment `5560093343`; do not replay the installed base migration or repair history.
 
 Follow the root context/planning gate: read current instructions, phase/backend
@@ -79,8 +82,12 @@ Each new packet uses its own reviewed plan; routine corrections within that
 approved scope do not require a new planning round. PR #1 comments
 `5558504250` and `5558542193` remain historical evidence, not the active target.
 
-Explicitly select GPT-6 Astra (`gpt-6-astra`) and start each local implementation
-session read-only. The coordinator independently retrieves the writer's OWN
+Explicitly select Anthropic Claude Opus 5.5 (`claude-opus-5.5`) for each new
+local implementation builder and start it read-only. Required different-provider
+critique, rubber-duck and review work uses OpenAI GPT-6 Astra (`gpt-6-astra`),
+read-only, per the
+[owner decision of 23 September 2026](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5795033115).
+Held sessions keep their recorded models and reviews. The coordinator independently retrieves the writer's OWN
 documented machine-readable actual-model usage outside its narrative, matching
 active app/CLI identity, repo/workspace/branch, exact base/start head, time and
 approved scope. Publish a **coordinator-observed local model attestation** and

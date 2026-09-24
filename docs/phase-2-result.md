@@ -8091,3 +8091,78 @@ Hosted rollout annex (owner approval per step; coordinator executes; follows the
 - R3 the three Edge Functions together from the merged commit, `verify_jwt=true`, bundle files byte-identical to Git. AI answers UNCONFIGURED until R4. STOP/rollback: redeploy the 23 September versions.
 - R4 one guarded transaction: lock profile then controls; require the exact R0/R2 controls row, no open request and no reserved or held usage; update manifest to v2 and prompt to 2 for exactly one row. Readback: only manifest, prompt and `updated_at` changed; `ai_status` shows v2/prompt 2/notice 2 with consent kept. Rollback is the same shape in reverse, before any R3 rollback, and never re-activates or narrows validators.
 - R5 owner smoke with the coat photo: record the colours returned, Save, history shows prompt 2, usage within the reservation, controls still active. STOP and roll back R4 on anomaly deactivation, CONFIG_CHANGED, invalid facts or an accounting mismatch.
+
+## Hosted state of Phase 2 code — 23–24 September 2026
+
+Coordinator-recorded evidence; the sections above are not edited.
+
+- **23 September rollout.** Approvals PR #32
+  [`5794990408`](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5794990408)
+  and PR #33 [`5796499459`](https://github.com/drrowdev/stillroom-wardrobe/pull/33#issuecomment-5796499459);
+  receipt [`5800183953`](https://github.com/drrowdev/stillroom-wardrobe/pull/33#issuecomment-5800183953).
+  Main `9f6cee1f` (tree `dece8adf`, post-merge CI 35869516551 green) was
+  installed and deployed. The five Phase 2 migrations are installed as hosted
+  `20260923143642_ai_analysis_backend`, `20260923144008_checked_ai_item_save`,
+  `20260923144230_item_lifecycle`, `20260923144606_azure_terra_analysis` and
+  `20260923150145_checked_image_changes`. The last was a manual atomic ledger
+  write under reviewed method M11, not `apply_migration`. `analyze-clothing`,
+  `finalize-analyzed-item` and `finalize-image-change` were deployed v1 ACTIVE
+  with JWT verification, and Pages `6e01b747` served the build. The final
+  publication guard is `O`/tgtype 29 after the intermediate `O`/21, and identity
+  is `A`: the first hosted instance of HC1's O/origin contract. The owner's
+  manual journey passed Save, reload, manual continuation with AI unavailable,
+  and photo replacement. AI requests were 0 that day.
+- **Merges and deployments of sections above** (not edited here). UX L1a merged
+  as `c3ce908a` (PR #34) and was deployed as `f0016398`
+  ([`5808561122`](https://github.com/drrowdev/stillroom-wardrobe/pull/34#issuecomment-5808561122)).
+  UX L1b merged as `232b232c` (PR #35) and L2a as `3ed08147` (PR #36); both
+  were deployed together as `27a1c642`
+  ([`5813432944`](https://github.com/drrowdev/stillroom-wardrobe/pull/36#issuecomment-5813432944)),
+  the latest cited Pages deployment. Owner review and coordinator visual
+  acceptance are as recorded in those PRs and are not claimed here.
+- **AI activation, owner account only**
+  ([`5815445262`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815445262)).
+  At about 19:20Z on 23 September one `private.ai_controls` row was inserted for
+  the owner's account under reviewed annex A2 (OpenAI GPT-6 Astra, AMEND F1–F5):
+  `azure-eu-terra-devtest-v1`, prompt 1, notice revision 2, `20000000`
+  micro-USD monthly allowance (an application allowance, not an Azure invoice
+  ceiling), 20 requests per hour, result TTL 3600 s. The owner confirmed
+  deployment `eval-terra-20260709`, `gpt-5.6-terra` 2026-07-09, Data Zone
+  Standard EU. The owner added `AI_AZURE_OPENAI_API_KEY` personally. The
+  coordinator never saw the value. The other account has no controls. On
+  24 September at about 07:31Z the owner's supervised single-photo probe
+  recorded 1 usage row, `estimated`, 9018 micro-USD; model observation
+  `expected_snapshot` (an observation, not proof of the exact snapshot); cache
+  0/0; no anomaly. A wine-red coat was returned as `brown`, which led to COL1.
+  Scheduled purge of expired results is an **open gate**; results are cleared
+  manually after supervised use.
+- **COL1.** #37 merged as `a6a027eb`. The owner approved the hosted rollout
+  (annex above) at about 13:05Z on 24 September; R0 was recorded at 13:33:04Z
+  (`5815445262`). COL1 was last recorded at R1 on 24 September
+  ([`5815899879`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815899879)):
+  M1 applied as hosted `20260924135607` (readback 14:00:06Z) and M2 as
+  `20260924140200` (readback 14:02:12Z); R2–R5 were recorded as not yet done.
+  Later steps are not evidenced by the cited comments, and COL1 is not recorded
+  as complete. The latest cited Pages receipt records `27a1c642` of main
+  `3ed08147`. The 23 September function versions and the v1/prompt 1 controls
+  are the recorded state as of those dates, not a claim about the current state.
+- **CI.** Post-merge main CI 36002588126 on `a6a027eb` passed on attempt 2
+  ([`5815450476`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815450476)).
+  Attempt 1 hit two infrastructure limits: the database pre-pull got ECR
+  `toomanyrequests`, and the App job was cancelled at its 20-minute limit. Only
+  the failed jobs were rerun, and the App job took 19m17s. CI2 (#38) merged as
+  `386656b6`
+  ([`5815937320`](https://github.com/drrowdev/stillroom-wardrobe/pull/38#issuecomment-5815937320)).
+  That record shows the jobs split into App and browser contracts (9m30s),
+  WebKit photo contracts (7m14s) and Real local Supabase (8m26s) in exact-head
+  run 36010871476, and that the live ECR path pulled and verified the pg-meta
+  image; the GHCR fallback has so far been exercised only by stand-in tests, not
+  live. Post-merge main CI run 36012133313 on `386656b6` passed
+  ([`5816248556`](https://github.com/drrowdev/stillroom-wardrobe/pull/38#issuecomment-5816248556)).
+- **Scope and open items.** Recorded as live: add/edit/Save/photo replacement,
+  AI-filled details for the owner's account only, and the simplified UI. This is
+  not the owner's full core workflow: outfits, suggestions and weather are not
+  built, and the calendar (I12/I13) is in the backlog (`5815445262`). Not
+  evidence for other accounts, AI quality, privacy/retention, I22/I10a-D
+  deletion or recovery, second-account isolation, device/accessibility/language
+  acceptance, or Edge residency beyond the 23 September test.
