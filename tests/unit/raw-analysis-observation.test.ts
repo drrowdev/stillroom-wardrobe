@@ -117,15 +117,17 @@ describe('durable raw analysis boundary observation (extracted source only)', ()
   it('executes the actual sender with no network, preserving default shape and opt-in zero on rejection', async () => {
     for (const fail of [false, true]) for (const size of [0, 1, 512000]) for (const optIn of [false, true]) {
       const calls: Array<{ size: number; method: unknown; credentials: unknown }> = [];
+      const bodies: Array<{ typed: boolean; byteLength: number }> = [];
       const result = record(await execute(`${sender}
         sendBrowserAnalysis({evaluate:(callback,args)=>callback(args)},
           {issuedWireAuthorization:()=> 'synthetic'},'valid',Buffer.alloc(size),optIn);`, {
         size, optIn, analysisIds: () => ({ requestId: 'synthetic', draftId: 'synthetic', generation: '1' }),
-        analysisPath: '/synthetic', fixtureKey: 'synthetic',
+        analysisPath: '/synthetic', fixtureKey: 'synthetic', Uint8Array,
         fetch: async (_url: unknown, input: unknown) => {
           const options = record(input);
-          if (!(options.body instanceof Blob)) throw new Error('Expected constructed Blob');
-          calls.push({ size: options.body.size, method: options.method, credentials: options.credentials });
+          if (!(options.body instanceof Uint8Array)) throw new Error('Expected constructed Uint8Array');
+          bodies.push({ typed: options.body instanceof Uint8Array, byteLength: options.body.byteLength });
+          calls.push({ size: options.body.byteLength, method: options.method, credentials: options.credentials });
           if (fail) throw new Error(canary);
           return { status: 200 };
         },
@@ -133,6 +135,7 @@ describe('durable raw analysis boundary observation (extracted source only)', ()
       expect(result).toEqual({ status: fail ? null : 200, outcome: fail ? 'network-rejection' : 'response',
         ...(optIn ? { constructedBytes: size } : {}) });
       expect(calls).toEqual([{ size, method: 'POST', credentials: 'omit' }]);
+      expect(bodies).toEqual([{ typed: true, byteLength: size }]);
       expect(JSON.stringify(result)).not.toContain(canary);
     }
   });
