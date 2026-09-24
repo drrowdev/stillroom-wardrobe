@@ -67,6 +67,10 @@ owner-only case. In both directions (A→B and B→A):
 - each reference is substituted on its own with the peer's value (plus only the
   peer values that state needs, such as a version), the rest stay the
   attacker's, and the nonexistent counterpart randomizes only that reference;
+- for composite references (an item with its request, image or hash) the
+  complete valid peer tuple is also probed against an all-random tuple,
+  because a mixed pair names no existing row and cannot test the owner check;
+  each multi-reference RPC is declared either composite or alternative;
 - lookups must return the family's exact response for the peer ID **and** the
   same response for the nonexistent ID (masked for the substituted IDs):
   description edit `42501 Not available`; lifecycle `22023 Request conflict`;
@@ -108,7 +112,8 @@ fixtures, with no peer value. REST reads exhaust pagination.
 Validator unit tests (`tests/unit/isolation-catalog.test.ts`) prove rejection of
 unexpected functions/relations/policies, grant and column-grant changes,
 helper-body changes, public buckets, cross-owner foreign keys, leaked rows,
-missing coverage, a missing owned control, a missing single substitution,
+missing coverage, a missing owned control, a missing single substitution, a
+missing complete peer tuple or an undeclared composite requirement,
 credit for an unreachable state, wrong error classes, HTTP-200 application
 errors, oracles outside the allowlist, restore-before-cleanup ordering and
 every guard refusal before SQL.

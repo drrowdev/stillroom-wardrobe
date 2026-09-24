@@ -178,7 +178,7 @@ describe('I17 response validators', () => {
     expect(catalog.scanLeaks('short', ['abc'])).toEqual([]);
   });
 
-  type Requirement = { refs: string[]; mixed?: boolean; collision?: boolean; ownerOnly?: boolean; runtime?: boolean; unverified?: string };
+  type Requirement = { refs: string[]; tuple?: boolean; alternatives?: boolean; mixed?: boolean; collision?: boolean; ownerOnly?: boolean; runtime?: boolean; unverified?: string };
   const requirements = catalog.COVERAGE_REQUIREMENTS as Record<string, Requirement>;
   const fullCoverage = () => {
     const map = new Map<string, Set<string>>();
@@ -189,6 +189,7 @@ describe('I17 response validators', () => {
           const d = `${a}>${v}`;
           tags.add(`${a}:control`);
           for (const ref of r.refs) tags.add(`${d}:ref:${ref}`);
+          if (r.tuple) tags.add(`${d}:tuple`);
           if (r.mixed) tags.add(`${d}:mixed`);
           if (r.collision) tags.add(`${d}:collision`);
           if (r.ownerOnly) tags.add(`${d}:owner-only`);
@@ -232,6 +233,28 @@ describe('I17 response validators', () => {
       .toContain('save_outfit lacks A>B:collision coverage');
     expect(catalog.validateCoverage(withTag(fullCoverage(), 'commit_image', 'A>B:ref:everything')))
       .toContain('commit_image has unexpected A>B:ref:everything credit');
+  });
+
+  it('requires the complete valid peer tuple for composite references', () => {
+    expect(catalog.validateCoverage(without(fullCoverage(), 'image_change_status', 'A>B:tuple')))
+      .toContain('image_change_status lacks A>B:tuple coverage');
+    expect(catalog.validateCoverage(without(fullCoverage(), 'reconcile_item_deletion_target', 'B>A:tuple')))
+      .toContain('reconcile_item_deletion_target lacks B>A:tuple coverage');
+    expect(catalog.validateCoverage(withTag(fullCoverage(), 'commit_image', 'A>B:tuple')))
+      .toContain('commit_image has unexpected A>B:tuple credit');
+  });
+
+  it('forces every multi-reference requirement to declare tuple or alternatives', () => {
+    for (const [name, r] of Object.entries(requirements)) {
+      expect(r.refs.length > 1 ? Boolean(r.tuple) !== Boolean(r.alternatives) : !r.tuple && !r.alternatives).toBe(true);
+      if (r.tuple) expect(name).not.toBe('commit_image');
+    }
+    const undeclared = { ...requirements.image_change_status! };
+    delete undeclared.tuple;
+    expect(catalog.validateCoverage(fullCoverage(), { ...requirements, image_change_status: undeclared }))
+      .toContain('image_change_status must declare its references as exactly one of tuple or alternatives');
+    expect(catalog.validateCoverage(fullCoverage(), { ...requirements, forget_image: { ...requirements.forget_image!, tuple: true } }))
+      .toContain('forget_image must declare its references as exactly one of tuple or alternatives');
   });
 
   it('never credits unreachable states and keeps runtime UNVERIFIED separate from credit', () => {

@@ -6,7 +6,7 @@ import {
   assertLocalApi, validateSessionEnvironment, reportError, LocalBackendError,
 } from '../../scripts/backend/local.mjs';
 import {
-  EXPOSED_RPCS, SERVICE_ONLY_RPCS, PUBLIC_TABLES, RELATIONSHIP_NAMES, ACCEPTED_ORACLES, worstOracle,
+  EXPOSED_RPCS, SERVICE_ONLY_RPCS, PUBLIC_TABLES, RELATIONSHIP_NAMES, ACCEPTED_ORACLES, worstOracle, COVERAGE_REQUIREMENTS,
   matchOutcome, outcomeOf, sameOutcome, scanLeaks, validateCoverage, applicationCode, isInconclusive, classifyOracle,
   restoreThenCleanup,
 } from '../../scripts/isolation-catalog.mjs';
@@ -433,7 +433,9 @@ const randomLike = (value) => (hex64.test(String(value)) ? randomBytes(32).toStr
 /**
  * Per-signature foreign-reference cases. Each `refs` key is substituted on its own with the victim's value (plus
  * any `bundle` values the victim's real state needs), everything else stays the attacker's; the nonexistent
- * counterpart randomizes only that key. `mixed` builds an own+peer array. Cases match COVERAGE_REQUIREMENTS.
+ * counterpart randomizes only that key. For `tuple` requirements the complete valid peer tuple (all refs, their
+ * bundles and `tupleBundle`) is also probed against an all-random tuple. `mixed` builds an own+peer array.
+ * Cases match COVERAGE_REQUIREMENTS.
  */
 function foreignCases(a) {
   const n1 = randomUUID(), n2 = randomUUID();
@@ -499,7 +501,8 @@ function foreignCases(a) {
       (x) => ({ p_item_id: x.readyItem, p_request_id: x.readyRequest, p_inventory_hash: x.readyHash }), CONFLICT),
     one('item_deletion_next_target', ['removeItem', 'removeRequest'], pair(['removeItem', 'removeRequest']), CONFLICT),
     one('reconcile_item_deletion_target', ['removeItem', 'removeRequest'],
-      (x) => ({ p_item_id: x.removeItem, p_request_id: x.removeRequest, p_ordinal: a.removeOrdinal }), CONFLICT),
+      (x) => ({ p_item_id: x.removeItem, p_request_id: x.removeRequest, p_ordinal: x.removeOrdinal }), CONFLICT,
+      { tupleBundle: ['removeOrdinal'] }),
     one('begin_prepared_item_deletion', ['removeItem', 'removeRequest'], pair(['removeItem', 'removeRequest']), CONFLICT),
   ];
 }
@@ -531,6 +534,24 @@ async function foreignMatrix(attacker, victim) {
           `${stage}: foreign ${describe(foreign)} differs from nonexistent ${describe(missing)}`) && ok;
       }
       if (ok && !(test.runtime && !controlled)) tag(test.name, `${d}:ref:${k}`);
+    }
+    if (COVERAGE_REQUIREMENTS[test.name]?.tuple) {
+      // The complete valid peer tuple names a real peer row; mixed pairs alone cannot prove the owner predicate.
+      stage = `matrix-${d}-${test.name}-tuple`;
+      const keys = [...test.refs, ...test.refs.flatMap((k) => test.bundle?.[k] ?? []), ...(test.tupleBundle ?? [])];
+      const foreignX = { ...a, ...Object.fromEntries(keys.map((key) => [key, v[key]])) };
+      const missingX = { ...foreignX, ...Object.fromEntries(test.refs.map((k) => [k, randomLike(v[k])])) };
+      const expected = test.tupleExpected ?? (typeof test.expected === 'function' ? test.expected(test.refs[0]) : test.expected);
+      let ok = true;
+      for (const build of [test.build, ...(test.also ? [test.also] : [])]) {
+        const foreign = await probeRpc(attacker, victim, test.name, build(foreignX, test.refs[0]));
+        const missing = await probeRpc(attacker, victim, test.name, build(missingX, test.refs[0]));
+        ok = expectMatch(`${stage} foreign`, expected, foreign) && ok;
+        ok = expectMatch(`${stage} nonexistent`, expected, missing) && ok;
+        ok = need(sameOutcome(foreign, missing, test.refs.map((k) => v[k]), test.refs.map((k) => missingX[k])),
+          `${stage}: foreign ${describe(foreign)} differs from nonexistent ${describe(missing)}`) && ok;
+      }
+      if (ok && !(test.runtime && !controlled)) tag(test.name, `${d}:tuple`);
     }
     if (test.mixed) {
       stage = `matrix-${d}-${test.name}-mixed`;

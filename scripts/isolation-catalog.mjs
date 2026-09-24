@@ -343,15 +343,17 @@ const req = (refs, extra = {}) => Object.freeze({ refs: Object.freeze(refs), ...
  * rest stay the attacker's), `mixed` needs an own+peer array, `collision` a create-ID probe, `ownerOnly` an own
  * call with no reference, `runtime` allows an explicit UNVERIFIED tag when owner-local state blocks the probe,
  * and `unverified` names a state normal sessions cannot reach. Every verified entry needs a successful owned control.
+ * With several refs, `tuple` marks references used together (the complete valid peer tuple must also be probed,
+ * because a mixed pair names no existing row); `alternatives` marks references that are each a separate argument.
  */
 export const COVERAGE_REQUIREMENTS = Object.freeze({
-  commit_image: req(['pendingImage', 'image']),
-  retire_image: req(['pendingImage', 'image']),
+  commit_image: req(['pendingImage', 'image'], { alternatives: true }),
+  retire_image: req(['pendingImage', 'image'], { alternatives: true }),
   forget_image: req(['retired']),
-  save_outfit: req(['item', 'outfit'], { mixed: true, collision: true }),
-  save_wear_event: req(['item', 'event', 'outfit'], { mixed: true, collision: true }),
+  save_outfit: req(['item', 'outfit'], { alternatives: true, mixed: true, collision: true }),
+  save_wear_event: req(['item', 'event', 'outfit'], { alternatives: true, mixed: true, collision: true }),
   export_manifest: req([], { ownerOnly: true }),
-  restore_history_entry: req(['event', 'item'], { collision: true }),
+  restore_history_entry: req(['event', 'item'], { alternatives: true, collision: true }),
   update_image_description: req(['image']),
   ai_status: req([], { ownerOnly: true }),
   ai_set_consent: req([], { ownerOnly: true }),
@@ -359,34 +361,34 @@ export const COVERAGE_REQUIREMENTS = Object.freeze({
   ai_request_control: req(['aiRequest'], { runtime: true }),
   ai_analysis_status: req(['aiRequest'], { runtime: true }),
   reserve_item_save: req([], { collision: true }),
-  finalize_item_save: req(['saveItem', 'saveImage', 'saveFingerprint']),
+  finalize_item_save: req(['saveItem', 'saveImage', 'saveFingerprint'], { tuple: true }),
   reserve_analyzed_item_save: req([], { unverified: UNREACHABLE_ANALYZED }),
   analyzed_item_save_preflight: req([], { unverified: UNREACHABLE_ANALYZED }),
   cancel_analyzed_item_save: req([], { unverified: UNREACHABLE_ANALYZED }),
-  item_attribution_history: req(['item', 'changeItem']),
+  item_attribution_history: req(['item', 'changeItem'], { alternatives: true }),
   set_item_trashed: req(['item']),
   item_deletion_status: req(['item'], { mixed: true }),
   begin_item_deletion: req(['trashItem']),
-  finish_item_deletion: req(['removeItem', 'removeRequest']),
-  reserve_image_change: req(['freeItem', 'freeCurrent']),
-  image_change_status: req(['changeItem', 'changeRequest']),
+  finish_item_deletion: req(['removeItem', 'removeRequest'], { tuple: true }),
+  reserve_image_change: req(['freeItem', 'freeCurrent'], { tuple: true }),
+  image_change_status: req(['changeItem', 'changeRequest'], { tuple: true }),
   image_change_requests: req(['changeItem']),
   image_recovery_versions: req(['recItem']),
-  image_recovery_preflight: req(['recItem', 'recCurrent', 'recSource']),
-  image_change_preflight: req(['changeRequest', 'changeItem', 'changeImage']),
-  cancel_image_change: req(['changeItem', 'changeRequest']),
-  item_deletion_operation_status: req(['prepItem', 'prepRequest']),
+  image_recovery_preflight: req(['recItem', 'recCurrent', 'recSource'], { tuple: true }),
+  image_change_preflight: req(['changeRequest', 'changeItem', 'changeImage'], { tuple: true }),
+  cancel_image_change: req(['changeItem', 'changeRequest'], { tuple: true }),
+  item_deletion_operation_status: req(['prepItem', 'prepRequest'], { tuple: true }),
   item_deletion_operations: req(['prepItem'], { mixed: true }),
   prepare_item_deletion: req(['trashItem']),
-  inventory_item_deletion: req(['prepItem', 'prepRequest']),
-  cancel_item_deletion_preparation: req(['prepItem', 'prepRequest']),
-  authorize_item_deletion: req(['readyItem', 'readyRequest', 'readyHash']),
-  item_deletion_next_target: req(['removeItem', 'removeRequest']),
-  reconcile_item_deletion_target: req(['removeItem', 'removeRequest']),
-  begin_prepared_item_deletion: req(['removeItem', 'removeRequest']),
+  inventory_item_deletion: req(['prepItem', 'prepRequest'], { tuple: true }),
+  cancel_item_deletion_preparation: req(['prepItem', 'prepRequest'], { tuple: true }),
+  authorize_item_deletion: req(['readyItem', 'readyRequest', 'readyHash'], { tuple: true }),
+  item_deletion_next_target: req(['removeItem', 'removeRequest'], { tuple: true }),
+  reconcile_item_deletion_target: req(['removeItem', 'removeRequest'], { tuple: true }),
+  begin_prepared_item_deletion: req(['removeItem', 'removeRequest'], { tuple: true }),
 });
 const DIRECTIONS = [['A', 'B'], ['B', 'A']];
-const TAG = /^(?:anon|normal-[AB]|[AB]:control|[AB]>[AB]:(?:owner-only|mixed|collision|unverified|ref:[A-Za-z]+))$/;
+const TAG = /^(?:anon|normal-[AB]|[AB]:control|[AB]>[AB]:(?:owner-only|mixed|collision|unverified|tuple|ref:[A-Za-z]+))$/;
 /**
  * Coverage credit per direction: the attacker's owned control, every single-reference substitution, mixed arrays,
  * collision probes and anonymous denial. Unreachable states must carry no credit; runtime blocks carry an explicit
@@ -399,6 +401,9 @@ export function validateCoverage(covered, requirements = COVERAGE_REQUIREMENTS) 
   for (const name of names) {
     const r = requirements[name], tags = covered.get(name) ?? new Set();
     if (!r) continue;
+    if (r.refs.length > 1 ? r.tuple === r.alternatives : r.tuple || r.alternatives) {
+      problems.push(`${name} must declare its references as exactly one of tuple or alternatives`);
+    }
     if (!tags.has('anon')) problems.push(`${name} lacks anon coverage`);
     for (const [attacker, victim] of DIRECTIONS) {
       const d = `${attacker}>${victim}`;
@@ -413,7 +418,7 @@ export function validateCoverage(covered, requirements = COVERAGE_REQUIREMENTS) 
         continue;
       }
       if (!tags.has(`${attacker}:control`)) problems.push(`${name} ${d} lacks a successful owned control`);
-      const needed = [...r.refs.map((ref) => `${d}:ref:${ref}`), ...(r.mixed ? [`${d}:mixed`] : []),
+      const needed = [...r.refs.map((ref) => `${d}:ref:${ref}`), ...(r.tuple ? [`${d}:tuple`] : []), ...(r.mixed ? [`${d}:mixed`] : []),
         ...(r.collision ? [`${d}:collision`] : []), ...(r.ownerOnly ? [`${d}:owner-only`] : [])];
       for (const tag of needed) if (!tags.has(tag)) problems.push(`${name} lacks ${tag} coverage`);
       for (const tag of credit) if (!needed.includes(tag)) problems.push(`${name} has unexpected ${tag} credit`);
