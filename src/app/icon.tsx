@@ -1,4 +1,4 @@
-type Name = 'wardrobe' | 'plus' | 'lock' | 'arrow' | 'camera' | 'photo' | 'refresh' | 'chevron' | 'close' | 'check' | 'user';
+type Name = 'wardrobe' | 'plus' | 'lock' | 'arrow' | 'camera' | 'photo' | 'crop' | 'refresh' | 'chevron' | 'close' | 'check' | 'user';
 const paths: Record<Name, string> = {
   wardrobe: 'M5 21V4h14v17M12 4v17M3 21h18M9 11v3m6-3v3',
   plus: 'M12 5v14M5 12h14',
@@ -6,6 +6,7 @@ const paths: Record<Name, string> = {
   arrow: 'M19 12H5m6-6-6 6 6 6',
   camera: 'M4 7h4l2-3h4l2 3h4v13H4zM16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
   photo: 'M4 4h16v16H4zM4 16l5-5 4 4 3-3 4 4M14 8h.01',
+  crop: 'M6 3v13a2 2 0 0 0 2 2h13M3 6h13a2 2 0 0 1 2 2v13',
   refresh: 'M20 8a8 8 0 1 0 0 8M20 3v5h-5',
   chevron: 'm6 9 6 6 6-6',
   close: 'm6 6 12 12M6 18 18 6',

@@ -8037,3 +8037,19 @@ Review round 1 (independent GPT-6 Astra review R1–R4, coordinator visual V1), 
 - R3: the late-result test holds a same-request status check started by Try again after the deadline, performs a manual Save, then releases a schema-valid ready reply; fields and provenance stay manual, with no analyzed reservation and no extra analysis POST.
 - R4: one Tags count/byte budget across `tags` and `style_tags` for manual additions, suggestions and the full state; legacy over-limit lists stay unchanged.
 - V1: natural per-language default names and descriptions from the first colour (`itemName.*`, `item.photoDescription`, `colourNeuter.*`, `colourPlural.*`); the old `item.aiTitle` and `aiC.description` keys were removed.
+
+## UX L1b crop editor and photo actions - local source candidate (23 September 2026)
+
+Owner-approved simplification (plan rev2 with binding amendments H1–H5). Local writer session `98dd91e4-5f0b-40ca-a10a-b5e1396e5825`, model `claude-opus-5.5`, from base `c3ce908a`. Source candidate only: not committed, not CI-run, not visually reviewed, not accepted.
+
+- The crop editor shows the photo with a draggable frame (pointer and touch) and inset corner handles, plus Rotate, Reset (full frame and original orientation), Done and Cancel editing. Arrow keys move the frame; Shift+Arrow moves it further. Exact Left/Top/Width/Height values sit under a collapsed "Enter exact values", which is also the keyboard resize route. The aspect-ratio select and the rotate-left/right pair are removed; the help is one line in en/fi/sv, and unused keys are deleted.
+- Moving, rotating, resetting and cancelling send no analysis request. An unchanged Done sends nothing; a changed Done prepares one new photo and at most one analysis request. Local JPEG preparation, EXIF stripping and size limits are unchanged.
+- On Add and Replace, the photo actions form one group that is hidden while the editor is open.
+
+Deviations and known limits:
+- Analysis admissions in the mock count two `ai_status` checks per generation; the zero/one-request contract counts analysis POSTs.
+- The AI-off test uses a crop instead of Rotate because the standard fixture is rotation-invariant.
+- Replace returns focus to Edit photo through an effect (as Add does) instead of `requestAnimationFrame`, which raced React's commit in WebKit. This goes beyond the "hide while editing" change planned for `replace-photo.tsx` and awaits a coordinator ruling.
+- `aspectCrop` stays exported.
+- H4 (existing behaviour, unchanged): cancelling while a changed Done is being prepared stops automatic polling; the same-request manual check stays available. "One new generation" applies only when preparation succeeds and commits.
+- Bounded synthetic captures (6 PNGs in `test-results/ux-l1b-visual/`, CI artifact `ux-l1b-ui-<head>`) have not been opened by the writer. Visual and real-device touch acceptance remain pending.

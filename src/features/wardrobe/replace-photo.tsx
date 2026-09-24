@@ -160,9 +160,17 @@ function Replacement(props: Props) {
   const original = useRef<Blob | null>(null);
   const work = useRef<AbortController | null>(null);
   const preparation = useRef<Promise<void>>(Promise.resolve());
+  const focusEdit = useRef(false);
   const library = useRef<HTMLInputElement>(null), camera = useRef<HTMLInputElement>(null);
   const preview = usePreview(photo), fullPreview = usePreview(full);
   const { onDirty } = props;
+  // Focus returns after the editor has closed and preparation has settled, once the button is rendered and enabled.
+  useEffect(() => {
+    if (focusEdit.current && !editing && !preparing) {
+      focusEdit.current = false;
+      document.getElementById('image-change-edit')?.focus();
+    }
+  }, [editing, preparing]);
   useEffect(() => {
     onDirty(photo !== null || preparing || !!Object.keys(analysis.draft.intent).length || analysis.descriptionEdited,
       change.attempt !== null, change.busy || preparing);
@@ -186,10 +194,10 @@ function Replacement(props: Props) {
       try {
         const value = await prepareImage(source, signal, next);
         if (signal.aborted) return;
+        if (!replacing) focusEdit.current = true;
         setPhoto(value); setEdit(next); setEditing(false);
         if (replacing) setFull(value);
         void analysis.commitPhoto(value);
-        if (!replacing) requestAnimationFrame(() => document.getElementById('image-change-edit')?.focus());
       } catch (error) {
         if (!signal.aborted) setError(error instanceof ImagePreparationError
           ? error.code === 'tooLarge' ? 'photo.prepareTooLarge' : error.code === 'unsupported' ? 'photo.prepareUnsupported'
@@ -226,18 +234,18 @@ function Replacement(props: Props) {
       <div className="photo-panel">
         {editing && full && fullPreview ? <CropEditor preview={fullPreview} width={full.width} height={full.height}
           accepted={edit} preparing={preparing} t={t} onApply={next => { if (original.current) void prepare(original.current, next, false); }}
-          onCancel={() => { work.current?.abort(); setPreparing(false); setEditing(false); requestAnimationFrame(() => document.getElementById('image-change-edit')?.focus()); }} />
+          onCancel={() => { work.current?.abort(); setPreparing(false); setEditing(false); focusEdit.current = true; }} />
           : <div className="capture-photo">{preview ? <img src={preview} alt={analysis.description || props.item.title} /> : <p>{t('capture.photo')}</p>}</div>}
         <input ref={library} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1}
           aria-label={t('capture.library')} disabled={change.frozen || preparing} onChange={event => { choose(event.target.files?.[0]); event.target.value = ''; }} />
         <input ref={camera} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" tabIndex={-1}
           aria-label={t('capture.camera')} disabled={change.frozen || preparing} onChange={event => { choose(event.target.files?.[0]); event.target.value = ''; }} />
-        <div className="photo-actions">
+        {!editing && <div className="photo-actions">
           <button className="button button-secondary" type="button" disabled={change.frozen || preparing} onClick={() => library.current?.click()}>{t('capture.library')}</button>
           <button className="button button-quiet" type="button" disabled={change.frozen || preparing} onClick={() => camera.current?.click()}>{t('capture.camera')}</button>
-          {photo && !editing && <button id="image-change-edit" className="button button-secondary" type="button"
+          {photo && <button id="image-change-edit" className="button button-secondary" type="button"
             disabled={change.frozen || preparing} onClick={() => setEditing(true)}>{t('photo.edit')}</button>}
-        </div>
+        </div>}
         {preparing && <p role="status">{t('capture.preparing')}</p>}
         {error && <p role="alert" className="notice notice-error">{t(error)}</p>}
       </div>
