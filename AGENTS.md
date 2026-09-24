@@ -49,8 +49,13 @@ Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `
    a different model provider; record reviewer/provider/model, findings and
    amendments in the PR. Self-review and automated code checks do not replace
    this prerequisite. If the required reviewer is unavailable, stop.
-3. Explicitly select **GPT-6 Astra (`gpt-6-astra`)** and start each local
-   implementation session read-only. Before edits, the coordinator independently
+3. Explicitly select **Anthropic Claude Opus 5.5 (`claude-opus-5.5`)** for each
+   new local implementation builder and start it read-only. Required
+   different-provider critique, rubber-duck and review work uses **OpenAI GPT-6
+   Astra (`gpt-6-astra`)**, read-only. This follows the
+   [owner decision of 23 September 2026](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5795033115),
+   which replaces the earlier GPT-6 Astra builder selection. Held sessions keep
+   their recorded models and reviews. Before edits, the coordinator independently
    retrieves that writer's OWN documented machine-readable actual-model usage,
    outside the writer's narrative, and cross-matches active app/CLI identity,
    repository, workspace, branch, exact base/start head, time and approved scope.
@@ -152,7 +157,11 @@ server-verified ordinary sessions with prepared non-personal fixtures. Missing
 evidence is BLOCKED/nonzero, not a pass. Local reset/provision/test guards stay
 local-only. The initial SQL is already installed: source version `20260905000000`
 maps by exact hash to remote `20260906144202_initial_wardrobe`; no hosted
-`db push`, replay or history repair is authorized. See the actor/gate table in
+`db push`, replay or history repair is authorized. Since 23 September 2026 the
+later source migrations and the three Edge Functions are installed as well, and
+Pages serves reviewed main builds. AI tagging is active for the owner's account
+only. The guide records the source-to-hosted mapping, the latest cited
+deployment and the open gates. See the actor/gate table in
 `docs/cloud-development.md` and preserved evidence in `docs/phase-0-result.md`.
 Comment `5560093343` preserves reviewed instruction repair and coordinator-only
 Cloudflare setup. Coordinator review `5125863611` records the reviewed-main shell
@@ -160,7 +169,8 @@ reachable on 6 September 2026, 15:09 UTC; see the
 [dated cloud-guide evidence](docs/cloud-development.md#hosted-state-and-responsible-actors).
 That supersedes queued as current status, not the worker's historical observation,
 and proves neither working Auth/Save/RLS nor full Phase 0. No PR #2 deployment;
-automatic production/previews remain off.
+automatic production/previews remain off. Later deployments supersede the
+6 September shell. They do not complete Phase 0 acceptance.
 
 * Latest user instruction: accounts are completely independent. No household, partner relation, sharing, recipient columns, user directory, cross-account references or mixed recommendations. Do not implement these as deferred work.
 * One TypeScript/React/Vite PWA, Supabase Auth/Postgres/private Storage and static hosting. Automatic paid photo tagging is first-release I29 scope; outfits remain deterministic. No native app, AI stylist, SSR or unrelated service/package.

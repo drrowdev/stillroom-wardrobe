@@ -1682,3 +1682,30 @@ No `--auto`, `--admin`, self-approval or protection bypass. Workers never merge,
 deploy, approve/authorize/rerun Actions, create another agent, start another packet
 or access hosted credentials. Deployments, paid AI/provider/dependency/codec changes,
 hosted schema/account/data mutations and private-input capture keep separate approvals.
+
+## First hosted rollout and later updates — 23–24 September 2026
+
+Coordinator-recorded, owner-approved rollout (PR #32
+[`5794990408`](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5794990408),
+PR #33 [`5796499459`](https://github.com/drrowdev/stillroom-wardrobe/pull/33#issuecomment-5796499459),
+receipt [`5800183953`](https://github.com/drrowdev/stillroom-wardrobe/pull/33#issuecomment-5800183953)).
+On 23 September 2026 accepted main `9f6cee1f` was installed (the five remaining
+Phase 2 migrations, giving 11 ledger rows that day) and deployed, with the
+3 Edge Functions and Pages `6e01b747`. The owner's single-account smoke test
+passed at 18:01Z: sign-in, photo, crop, manual continue, Save, reload, edit,
+replace, sign-out/in. At that point only the manual add/edit/Save/photo-replace
+journey was live. The mapping and the M11 manual ledger row are in the
+[cloud guide](cloud-development.md#hosted-state-and-responsible-actors).
+
+Since then the latest cited Pages deployment is `27a1c642` of main `3ed08147`
+(PR #36 `5813432944`), and AI tagging is active for the owner's account only
+([`5815445262`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815445262)).
+Recorded as live: add/edit/Save/photo replacement, AI-filled details for the
+owner, and the simplified UI. Not built: outfits, suggestions and weather.
+
+Phase 0 stays **engineering complete; acceptance open**. Still open:
+second-account use and negative RLS/Storage isolation (user-deferred), email
+delivery, private read-only hosted smoke, deletion/recovery, the AI purge gate,
+and phone, Safari, camera/library, VoiceOver/TalkBack, EN/FI/SV and
+narrow/zoomed checks. Edge residency beyond the 23 September test also stays
+open. Earlier sections are preserved unchanged.
