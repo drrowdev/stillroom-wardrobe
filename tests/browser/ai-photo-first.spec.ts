@@ -1001,31 +1001,39 @@ test('an accepted analysis whose response is lost keeps checking the same reques
   expect(api.items).toHaveLength(0);
 });
 for (const language of ['en', 'fi', 'sv'] as const) {
-  test(`provider-correct notices and accessibility ${language}: agreement is reset by changed policy`, async ({ page }) => {
+  test(`provider-correct notices and accessibility ${language}: a changed policy needs Turn on again`, async ({ page }) => {
     const api = await aiFixture(page, language, false);
     await page.getByRole('button', { name: messages['account.menu'][language] }).click();
     await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
-    await expect(page.getByText(messages['aiC.azureNotice'][language], { exact: true })).toBeVisible();
-    await expect(page.getByText(messages['aiC.azureTrainingNotice'][language], { exact: true })).toBeVisible();
-    await expect(page.getByText(messages['aiC.notice'][language], { exact: true })).toHaveCount(0);
+    const consent = page.locator('section[aria-labelledby="ai-consent-title"]');
+    await expect(consent.getByRole('heading', { name: messages['aiC.disabled'][language], exact: true })).toBeVisible();
+    await expect(consent.getByText(messages['aiC.azureNotice'][language], { exact: true })).toBeHidden();
+    await consent.locator('summary').click();
+    await expect(consent.getByText(messages['aiC.azureNotice'][language], { exact: true })).toBeVisible();
+    await expect(consent.getByText(messages['aiC.azureTrainingNotice'][language], { exact: true })).toBeVisible();
+    await expect(consent.getByText(messages['aiC.notice'][language], { exact: true })).toHaveCount(0);
+    await expect(consent.getByRole('checkbox')).toHaveCount(0);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-    const agreement = page.getByRole('checkbox', { name: messages['aiC.azureAgree'][language] });
-    await agreement.check();
-    await expect(page.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toBeEnabled();
     api.policy({ maxRequestMicro: '4097352' });
-    await page.getByRole('button', { name: messages['aiC.checkConsent'][language], exact: true }).click();
-    await expect(agreement).not.toBeChecked();
-    await expect(page.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toBeDisabled();
+    await consent.getByRole('button', { name: messages['aiC.enable'][language], exact: true }).click();
+    await expect(consent.getByRole('alert')).toHaveText(messages['aiC.changed'][language]);
+    await expect(consent.getByRole('heading', { name: messages['aiC.disabled'][language], exact: true })).toBeVisible();
     api.policy({ noticeRevision: 1, modelId: 'gemini-3.8-flash', executionManifestId: 'google-eu-3.8-v1' });
-    await page.getByRole('button', { name: messages['aiC.checkConsent'][language], exact: true }).click();
-    await expect(page.getByText(messages['aiC.notice'][language], { exact: true })).toBeVisible();
-    await expect(page.getByText(messages['aiC.azureNotice'][language], { exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toBeDisabled();
+    await expect(async () => {
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await expect(consent.getByText(messages['aiC.inactive'][language], { exact: true })).toBeVisible({ timeout: 1000 });
+    }).toPass();
+    for (const key of ['aiC.notice', 'aiC.azureNotice', 'aiC.offSummary'] as const)
+      await expect(consent.getByText(messages[key][language], { exact: true })).toHaveCount(0);
+    await expect(consent.locator('details')).toHaveCount(0);
+    await expect(consent.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toHaveCount(0);
     api.policy({ modelId: 'unrecognized-model' });
-    await page.getByRole('button', { name: messages['aiC.checkConsent'][language], exact: true }).click();
-    await expect(page.getByText(messages['aiC.notice'][language], { exact: true })).toHaveCount(0);
-    await expect(page.getByText(messages['aiC.azureNotice'][language], { exact: true })).toHaveCount(0);
-    await expect(page.getByRole('checkbox', { name: messages['aiC.agree'][language] })).toHaveCount(0);
+    await expect(async () => {
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await expect(consent.getByText(messages['aiC.inactive'][language], { exact: true })).toBeVisible({ timeout: 1000 });
+    }).toPass();
+    await expect(consent.getByText(messages['aiC.notice'][language], { exact: true })).toHaveCount(0);
+    await expect(consent.getByRole('checkbox')).toHaveCount(0);
     expect(api.calls.filter((call) => call.route.endsWith('/ai_set_consent'))).toHaveLength(0);
   });
   test(`committed first refusal and accessibility ${language}: preserve edits and require explicit unknown Save`, async ({ page }) => {
@@ -1176,7 +1184,7 @@ test.describe('bounded C visual evidence', () => {
       };
       await page.getByRole('button', { name: messages['account.menu'][language] }).click();
       await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
-      await expect(page.getByText(messages['aiC.enabled'][language], { exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: messages['aiC.enabled'][language], exact: true })).toBeVisible();
       await capture('consent');
       await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
       await addAiPhoto(page, api, language);

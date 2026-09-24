@@ -120,40 +120,45 @@ test('L1a warmth keeps a stored 4, sends no warmth key when untouched and 2 for 
   await auditCopy(page);
 });
 
-test('L1a availability and Archive are quick, sparse, version-checked saves disabled while editing', async ({ page }) => {
+test('L1a saved item has no availability control; stored availability survives edits, Archive and Unarchive', async ({ page }) => {
   const api = await aiFixture(page);
   const patches = recordPatches(page);
-  const { item } = await openSaved(page, api);
+  const saved = api.seedSavedItem();
+  (saved.item as Record<string, unknown>).availability = 'laundry';
+  await page.reload();
+  await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+  await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
+  const { item } = saved;
   await auditCopy(page);
-  const radios = page.locator('.detail-availability input');
-  await expect(radios).toHaveCount(4);
+  await expect(page.locator('.detail-availability, input[name="detail-availability"]')).toHaveCount(0);
+  for (const value of ['ready', 'laundry', 'repair', 'lent'] as const) {
+    await expect(page.getByRole('radio', { name: text(`availability.${value}`), exact: true })).toHaveCount(0);
+  }
   await page.locator('#detail-title').fill('Edited title');
-  for (const radio of await radios.all()) await expect(radio).toBeDisabled();
   await expect(button(page, 'detail.archive')).toBeDisabled();
   await button(page, 'detail.saveChanges').click();
   await expect(page.getByText(text('detail.saved'), { exact: true })).toBeVisible();
-  await expect(radios.first()).toBeEnabled();
   expect(patches).toHaveLength(1);
-  await page.locator('.detail-availability input[value="laundry"]').check();
-  await expect.poll(() => patches.length).toBe(2);
-  const availability = () => patches[1]!, archive = () => patches[2]!, unarchive = () => patches[3]!;
-  expect(sent(availability().body)).toEqual(['availability']);
-  expect(availability().body.availability).toBe('laundry');
-  expect(availability().url.searchParams.get('version')).toBe('eq.2');
-  await expect.poll(() => item.availability).toBe('laundry');
+  expect(sent(patches[0]!.body)).toEqual(['title']);
   await expect(button(page, 'detail.archive')).toBeEnabled();
   await button(page, 'detail.archive').click();
   await expect(button(page, 'detail.unarchive')).toBeVisible();
+  const archive = () => patches[1]!, unarchive = () => patches[2]!;
   expect(sent(archive().body)).toEqual(['lifecycle']);
   expect(archive().body.lifecycle).toBe('archived');
-  expect(archive().url.searchParams.get('version')).toBe('eq.3');
+  expect(archive().url.searchParams.get('version')).toBe('eq.2');
   await button(page, 'detail.unarchive').click();
   await expect(button(page, 'detail.archive')).toBeVisible();
-  expect(patches).toHaveLength(4);
+  expect(patches).toHaveLength(3);
   expect(sent(unarchive().body)).toEqual(['lifecycle']);
   expect(unarchive().body.lifecycle).toBe('active');
-  expect(unarchive().url.searchParams.get('version')).toBe('eq.4');
+  expect(unarchive().url.searchParams.get('version')).toBe('eq.3');
+  for (const patch of patches) {
+    expect(Object.hasOwn(patch.body, 'availability')).toBe(false);
+    expect(Object.keys((patch.body.field_provenance ?? {}) as Record<string, unknown>)).not.toContain('availability');
+  }
   expect(item.lifecycle).toBe('active');
+  expect(item.availability).toBe('laundry');
   await expect(button(page, 'item.trash')).toBeEnabled();
   expect(api.requests.some((call) => call.method === 'DELETE')).toBe(false);
 });

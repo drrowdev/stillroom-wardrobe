@@ -72,9 +72,13 @@ Write naturally in each language; keep named parameters and personal/generated
 content unchanged. Historical starter catalogs are not active UI copy authority.
 
 Keep consequential privacy, consent, provider/location/retention, cost, recovery,
-ownership and unknown-outcome guidance visible. Separate short, complete notice
-sentences from the consent checkbox label; do not collapse the AI policy facts.
-Only secondary setup instructions, camera workarounds and the crop editor's exact values use disclosure controls.
+ownership and unknown-outcome guidance visible. AI policy facts are shown in a Full details disclosure on the photo analysis card
+(owner decision F6(a), 24 September 2026). The recorded notice texts stay verbatim
+there and are reachable before Turn on. The visible summary states the automatic
+sending to Microsoft's Azure OpenAI in the EU, no training, that analysis costs
+money, and that the monthly allowance is not a bill cap. The disclosure is never
+forced open and the app doesn't claim it was read.
+Only secondary setup instructions, camera workarounds, the crop editor's exact values and the photo analysis Full details use disclosure controls.
 Removing helper text also removes its accessible-description reference, never
 the field's label, validation or genuine constraint.
 

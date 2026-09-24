@@ -80,6 +80,27 @@ export function canAnalyze(status: AiStatus, now = Date.now()): boolean {
   return supportedAiPolicy(status, now) && status.code === 'OK' && status.consent.enabled
     && status.consent.noticeRevision === status.policy?.noticeRevision;
 }
+// The exact policy details shown when the owner presses Turn on; any difference before the write means asking again.
+export function aiPolicyBinding(scope: Readonly<{ ownerId: string; epoch: number }>, status: AiStatus): string | null {
+  const p = status.policy;
+  return p ? JSON.stringify([scope.ownerId, scope.epoch, p.modelId, p.promptVersion, p.noticeRevision,
+    p.executionManifestId ?? null, p.maxRequestMicro, p.monthlyAllowanceMicro]) : null;
+}
+export type AiCardState = 'unconfirmed' | 'loading' | 'loadFailed' | 'unavailable' | 'on' | 'renew' | 'off';
+export type AiCardView = Readonly<{ state: AiCardState; turnOn: boolean; turnOff: boolean; retry: boolean; details: boolean }>;
+export function aiCardState(input: Readonly<{ status: AiStatus | null; loadFailed: boolean; unresolved: boolean; now?: number }>): AiCardView {
+  const { status, loadFailed, unresolved, now = Date.now() } = input;
+  const view = (state: AiCardState, turnOn: boolean, turnOff: boolean, retry: boolean, details: boolean): AiCardView =>
+    ({ state, turnOn, turnOff, retry, details });
+  if (unresolved) return view('unconfirmed', false, false, true, false);
+  if (!status) return loadFailed ? view('loadFailed', false, false, true, false) : view('loading', false, false, false, false);
+  if (!supportedAiPolicy(status, now) || status.code === 'UNAVAILABLE' || status.code === 'UNCONFIGURED' || status.code === 'INACTIVE') {
+    return view('unavailable', false, status.consent.enabled, false, false);
+  }
+  if (canAnalyze(status, now)) return view('on', false, true, false, true);
+  if (status.consent.enabled && status.consent.noticeRevision !== status.policy?.noticeRevision) return view('renew', true, true, false, true);
+  return view('off', true, false, false, true);
+}
 export function parseAnalysisReply(value: unknown): AiAnalysisReply | null {
   if (!hasOnlyDataKeys(value, ['code', 'status', 'result', 'accounting'], ['code']) || !isAiCode(value.code)) {
     if (hasOnlyDataKeys(value, ['code', 'reason']) && value.code === 'TERMINAL'

@@ -8053,3 +8053,18 @@ Deviations and known limits:
 - `aspectCrop` stays exported.
 - H4 (existing behaviour, unchanged): cancelling while a changed Done is being prepared stops automatic polling; the same-request manual check stays available. "One new generation" applies only when preparation succeeds and commits.
 - Bounded synthetic captures (6 PNGs in `test-results/ux-l1b-visual/`, CI artifact `ux-l1b-ui-<head>`) have not been opened by the writer. Visual and real-device touch acceptance remain pending.
+
+## UX L2a photo analysis card, Availability and header - local source candidate (24 September 2026)
+
+Owner feedback of 24 September 2026 (plan rev2 with binding amendment E3a). Local writer session `6f56ec8d-812b-425f-80b6-08eb8845fa8a`, model `claude-opus-5.5`, from base `232b232c`. Source candidate only: not committed, not CI-run, not visually reviewed, not accepted.
+
+- The photo analysis card is a state card: On with this month's use and one Turn off; Off with one short paragraph and one Turn on that is the consent; unavailable as one line. The recorded notice and the retention, charge and opt-out facts are under Full details. State table, binding, limits and the unchanged notice pin are in `blueprint/20` ("UX L2a photo analysis card").
+- The saved-item Availability control is removed; the stored value is never sent or overwritten. The header shows the display name without the Private badge.
+- Removed catalog keys: `aiC.agree`, `aiC.azureAgree`, `aiC.checkConsent`, `aiC.controlPending`, `aiC.reviewNotice`, `aiC.model`, `aiC.allowance`, `aiC.accounted`, `common.private`, `detail.availability`.
+
+Deviations and known limits:
+- Amounts use the narrow dollar sign in every language ("$0.01 of $20", "0,01 $ / 20 $", "0,01 $ av 20 $"), matching the owner's wording; the default en-GB display would show "US$".
+- Focus after a pressed button is replaced moves to the card heading through an effect after the commit, not `requestAnimationFrame` (same reason as L1b).
+- Stale-profile reconciliation and the Try again recovery path stay covered by `profile.spec.ts`; `ux-l2a.spec.ts` adds the focus, visibility and reconnect triggers.
+- The recorded Azure notice still says "not necessarily in Sweden"; changing it needs a new notice revision and separate approval.
+- Bounded synthetic captures (8 PNGs in `test-results/ux-l2a-visual/`, CI artifact `ux-l2a-ui-<head>`) have not been opened by the writer. Visual acceptance is pending coordinator review.

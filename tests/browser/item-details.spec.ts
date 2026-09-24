@@ -530,7 +530,7 @@ test('language and offline changes preserve both drafts and disable offline writ
   await expect(page.locator('#detail-description')).toHaveValue('Egen beskrivning');
   await context.setOffline(true);
   await expect(save(page, 'fi')).toBeDisabled();
-  await expect(page.locator('.detail-availability input').first()).toBeDisabled();
+  await expect(page.getByRole('button', { name: messages['detail.archive'].fi, exact: true })).toBeDisabled();
   await context.setOffline(false);
   await expect(save(page, 'fi')).toBeEnabled();
 });
@@ -593,7 +593,7 @@ for (const section of ['name', 'description'] as const) {
     const siblingValue = section === 'name' ? 'Sibling draft' : item.title;
     await expect(page.locator(sibling)).toHaveValue(siblingValue);
     await expect(save(page)).toBeDisabled();
-    await expect(page.locator('.detail-availability input').first()).toBeDisabled();
+    await expect(page.getByRole('button', { name: messages['detail.archive'].en, exact: true })).toBeDisabled();
     await expect(page.getByText('Private upstream error')).toHaveCount(0);
     expect(calls).toHaveLength(1);
     await page.getByRole('button', { name: messages['detail.check'].en }).click();
