@@ -382,8 +382,13 @@ test('invalid saved input, manual confirmations and explicit empty clears remain
       stage = `${field}-continue`;
       await page.getByRole('dialog').getByRole('button', { name: messages['common.continueEditing'].en, exact: true }).click();
       await expect(page.locator(`#detail-${field}`)).toHaveValue(raw);
+      // Closing the dialog returns focus on the next frame; editing before then would type into the returned focus target.
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
       stage = `${field}-restore`;
       await page.locator(`#detail-${field}`).fill(original);
+      await expect(page.locator(`#detail-${field}`)).toHaveValue(original);
+      await expect(page.locator(`#detail-${field}`)).toHaveAttribute('aria-invalid', 'false');
     }
     stage = 'title-fill';
     await page.locator('#detail-title').fill(` ${item.title} `);
