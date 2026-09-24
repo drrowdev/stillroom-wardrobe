@@ -156,9 +156,9 @@ async function sendBrowserAnalysis(page: Page, api: AiFixture, kind: BrowserAnal
         ? ids.requestId.replace('c329a000', 'c329b000') : ids.requestId,
       'x-stillroom-draft-id': kind === 'draft-id' ? 'invalid' : ids.draftId,
       'x-stillroom-generation': kind === 'generation' ? '0' : ids.generation };
-    const body = new Blob([kind === 'empty' ? new Uint8Array() : kind === 'oversized'
-      ? new Uint8Array(512001) : new Uint8Array(bytes)], { type: headers['content-type'] });
-    const constructedBytes = body.size;
+    // A typed array, not a Blob: WebKit route interception may forward a Blob body as Content-Length 0.
+    const body = kind === 'empty' ? new Uint8Array() : kind === 'oversized' ? new Uint8Array(512001) : new Uint8Array(bytes);
+    const constructedBytes = body.byteLength;
     try {
       const response = await fetch('http://127.0.0.1:54321' + route
         + (kind === 'path' ? '-unapproved' : kind === 'query' ? '?unexpected=1' : ''), {
