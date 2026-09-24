@@ -8166,3 +8166,48 @@ Coordinator-recorded evidence; the sections above are not edited.
   evidence for other accounts, AI quality, privacy/retention, I22/I10a-D
   deletion or recovery, second-account isolation, device/accessibility/language
   acceptance, or Edge residency beyond the 23 September test.
+
+## UX L2b — settings pickers, hidden style preferences and shorter copy
+
+Source packet on main `bda858d3` (implementation started from `386656b6`;
+the PR #39 docs merge touched none of the L2b source or test lines). Plan rev1
+and rev2 with binding amendments B1–B3, GPT-6 Astra critique and coordinator
+approval: PR #38 comment
+[`5816713800`](https://github.com/drrowdev/stillroom-wardrobe/pull/38#issuecomment-5816713800).
+Decision record: ADR20 in `blueprint/18`; S02 in `blueprint/04`.
+
+- **Pickers.** Time zone and currency are native selects from
+  `Intl.supportedValuesOf` (`src/features/profile/profile-options.ts`), with
+  localized labels and the saved and edited values always listed. Without the
+  list the previous text field is shown, and its error asks for a value
+  instead of implying a list choice. Validation, owner-only saves, per-section
+  Save and serialized profile writes are unchanged. In WebKit a closed select
+  sized its intrinsic width to the longest option and widened the page at
+  320px; the select has `contain: paint`, as the garment form selects already
+  do.
+- **Style preferences** are not rendered and send no `style_preferences`
+  request. Stored rows are kept; `preferences.tsx` and the schema are unchanged.
+- **Copy.** Shorter EN/FI/SV for sign-in failure, recovery (conflict message
+  per B1, with no stated cause), trash retention and deletion, and photo
+  preparation. The preparation-details disclosure and the deletion inventory
+  paragraph are removed (14 `phase-zero.json` keys). 48 values changed, 4 keys
+  added, 14 removed; every `aiC.*` value is byte-identical. No key collides
+  with the I11 plan (B2).
+- **Tests.** `profile.spec.ts` covers picker saves, kept values missing from
+  the list, relabelling on language change, the Intl fallback, a server time
+  zone rejection, no preference requests and the 320px/200% layout. The retired
+  preference-UI tests ("unknown persisted selections", "preferences conflict")
+  are not replaced, because the UI no longer exists. `slice.spec.ts` asserts
+  that the invalid-photo alert has no details disclosure. New unit test
+  `tests/unit/profile-options.test.ts`.
+- **Local validation** (pinned Node 24.19.0): `npm run lint`, `typecheck`,
+  `check:translations` (576 keys), `test:unit` (38 files), `build` and
+  `scan:secrets` pass. `npx playwright test` for `profile`, `slice`, `recovery`
+  and `items` on `chromium`, `mobile` and `webkit-photo` passes: 325 tests.
+  `npm run test:a11y` passes: 81 tests. `git diff --check` is clean. CI has not
+  run on this head.
+- **Pending, not passed:** coordinator visual review of closed-select
+  readability at 200% text (B3), Apple-device behaviour (WebKit here is
+  Playwright's build), and owner acceptance. Observation for I11: a 13th
+  capture upload would conflict with the pin of 12 in
+  `tests/unit/ci-workflow.test.ts`.

@@ -102,8 +102,8 @@ export function UndoNotice({ undo, visible, routeSignal, ...props }: Shared & { 
   </div>;
 }
 
-function DeleteDialog({ preview, operation, busy, t, language, returnFocus, onCancel, onConfirm }: {
-  preview: DeletionStatus; operation: DeletionOperation; busy: boolean; t: Translate; language: Language; returnFocus: HTMLButtonElement | null; onCancel: () => void; onConfirm: () => void;
+function DeleteDialog({ preview, busy, t, language, returnFocus, onCancel, onConfirm }: {
+  preview: DeletionStatus; busy: boolean; t: Translate; language: Language; returnFocus: HTMLButtonElement | null; onCancel: () => void; onConfirm: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -119,11 +119,8 @@ function DeleteDialog({ preview, operation, busy, t, language, returnFocus, onCa
   return <dialog ref={dialog} className="dialog lifecycle-dialog" aria-labelledby="delete-item-heading" aria-describedby="delete-item-body"
     onCancel={event => { event.preventDefault(); if (!busy) onCancel(); }}>
     <h2 id="delete-item-heading">{t('lifecycle.deleteTitle', { name: preview.title })}</h2>
-    <div id="delete-item-body"><p>{t(plural === 'one' ? 'lifecycle.photos_one' : 'lifecycle.photos_other', { count: new Intl.NumberFormat(locales[language]).format(preview.photo_count) })}</p>
-      <p>{t('deletion.inventory', { count: new Intl.NumberFormat(locales[language]).format(operation.targetCount),
-        pending: new Intl.NumberFormat(locales[language]).format(operation.pendingTargets),
-        other: new Intl.NumberFormat(locales[language]).format(operation.unmanifestedTargets) })}</p>
-      <p>{t('lifecycle.history')}</p><p>{t('deletion.garmentWarning')}</p></div>
+    <div id="delete-item-body"><p>{t(plural === 'one' ? 'lifecycle.photos_one' : 'lifecycle.photos_other', { count: new Intl.NumberFormat(locales[language]).    format(preview.photo_count) })}</p>
+          <p>{t('lifecycle.history')}</p><p>{t('deletion.garmentWarning')}</p></div>
     <div className="settings-actions"><button type="button" autoFocus className="button button-secondary" disabled={busy} onClick={onCancel}>{t('common.cancel')}</button>
       <button type="button" className="button button-danger" disabled={busy} onClick={onConfirm}>{t('lifecycle.delete')}</button></div>
   </dialog>;
@@ -259,7 +256,7 @@ export function Trash(props: Shared & { language: Language; onBack: () => void; 
       </div>}
     </li>)}</ul>
     {next && <button className="button button-secondary" disabled={locked || !online} onClick={() => { void action.run(signal => load(signal, next)); }}>{t('wardrobe.more')}</button>}
-    {dialog && intent && operation?.phase === 'prepared' && !uncertain && <DeleteDialog preview={intent.preview} operation={operation}
+    {dialog && intent && operation?.phase === 'prepared' && !uncertain && <DeleteDialog preview={intent.preview}
       busy={action.busy} t={t} language={language} returnFocus={deleteTrigger.current} onCancel={cancel} onConfirm={() => {
       void action.run(async signal => {
         setDialog(false);

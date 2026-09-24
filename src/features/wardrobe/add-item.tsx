@@ -10,7 +10,6 @@ import { ImagePreparationError, type PreparedPhoto } from '../../images/process-
 import { prepareImage } from '../../images/process-image';
 import { CropEditor } from '../../images/crop-editor';
 import { ORIGINAL_EDIT, type PhotoEdit } from '../../images/crop';
-import type { ImagePreparationDetails, ImagePreparationStage } from '../../images/jpeg';
 import { newSaveAttempt, saveItem, saveAnalyzedItem, type SaveStage } from '../../images/upload';
 import { AnalyzedSaveRefusedError, errorKey, isAborted } from '../../data/errors';
 import { newAnalyzedSaveAttempt, newUnverifiedSaveAttempt, type AnalyzedSaveAttempt } from '../../domain/analyzed-save';
@@ -24,14 +23,6 @@ const preparationErrors: Record<ImagePreparationError['code'], MessageKey> = {
   tooLarge: 'photo.prepareTooLarge',
   invalid: 'photo.invalid',
   unavailable: 'photo.prepareUnavailable',
-};
-const preparationStages: Record<ImagePreparationStage, MessageKey> = {
-  source: 'photo.stageSource', decode: 'photo.stageDecode', mainEncode: 'photo.stageMainEncode',
-  thumbEncode: 'photo.stageThumbEncode', outputCheck: 'photo.stageOutputCheck', hash: 'photo.stageHash',
-};
-const preparationReasons: Record<ImagePreparationDetails['reason'], MessageKey> = {
-  unsupported: 'photo.reasonUnsupported', tooLarge: 'photo.reasonTooLarge',
-  invalid: 'photo.reasonInvalid', unavailable: 'photo.reasonUnavailable',
 };
 function focusGarmentField(id: string): void {
   const input = document.getElementById(id);
@@ -61,8 +52,6 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   const [preparing, setPreparing] = useState(false);
   const [stage, setStage] = useState<SaveStage | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
-  const [preparationDetails, setPreparationDetails] = useState<ImagePreparationDetails | null>(null);
-  const [showPreparationDetails, setShowPreparationDetails] = useState(false);
   const [invalid, setInvalid] = useState(false);
   const [attempt, setAttempt] = useState<AnalyzedSaveAttempt | null>(null);
   const receipt = useRef<{ attempt: AnalyzedSaveAttempt; fingerprint: string } | null>(null);
@@ -147,8 +136,6 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     const signal = AbortSignal.any([controller.signal, scope.signal]);
     setPreparing(true);
     setError(null);
-    setPreparationDetails(null);
-    setShowPreparationDetails(false);
     const previous = preparationWork.current;
     const work = (async () => {
       await previous;
@@ -167,9 +154,6 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
         if (!signal.aborted && !isAborted(problem)) {
           if (replacing) original.current = null;
           setError(problem instanceof ImagePreparationError ? preparationErrors[problem.code] : 'photo.invalid');
-          if (problem instanceof ImagePreparationError && problem.stage) {
-            setPreparationDetails({ stage: problem.stage, reason: problem.code });
-          }
         }
       } finally { if (!signal.aborted) setPreparing(false); }
     })();
@@ -255,13 +239,6 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           {(editing || preparing) && <p id="photo-pending" tabIndex={-1} role="status" className="notice">{t(preparing ? 'photo.pendingPreparation' : 'photo.pendingCrop')}</p>}
           {invalid && !photo && <p className="field-error">{t('common.required')}</p>}
           <details className="copy-details"><summary>{t('photo.cameraHelp')}</summary><p>{t('photo.cameraFallback')}</p></details>
-          {preparationDetails && <>
-            <button className="text-button" type="button" aria-expanded={showPreparationDetails} aria-controls="preparation-details" onClick={() => setShowPreparationDetails(!showPreparationDetails)}>{t(showPreparationDetails ? 'photo.hideDetails' : 'photo.showDetails')}</button>
-            <section id="preparation-details" aria-label={t('photo.details')} hidden={!showPreparationDetails}>
-              <p>{t(preparationStages[preparationDetails.stage])}</p>
-              <p>{t(preparationReasons[preparationDetails.reason])}</p>
-            </section>
-          </>}
         </div>
         <div className="details-panel">
           <div className="details-heading"><h2>{t('capture.detailsTitle')}</h2></div>
