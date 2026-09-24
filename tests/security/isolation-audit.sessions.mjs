@@ -223,11 +223,13 @@ async function buildFixture(owner) {
   });
   await ich.reserve(change);
   control(owner, 'reserve_image_change', true);
+  // Uploaded replacement objects: the state in which the owner's preflight (and finalize) would act.
+  await ich.upload(change);
   const preflight = await call(owner, 'image_change_preflight', { p_intent: change });
   control(owner, 'image_change_preflight', preflight.ok && preflight.data?.state === 'reserved', describe(preflight));
   f.changeItem = change.itemId; f.changeRequest = change.requestId; f.changeImage = change.imageId;
   f.changeCurrent = changeBase.image.id; f.changeIntent = change;
-  f.paths.push(...ich.paths({ itemId: changeBase.item.id, imageId: changeBase.image.id }));
+  f.paths.push(...ich.paths({ itemId: changeBase.item.id, imageId: changeBase.image.id }), ...ich.paths(change));
   const cancelBase = await ich.create(), cancelled = ich.make(cancelBase.item, cancelBase.image);
   cleanups.push(async () => {
     await ich.remove({ itemId: cancelBase.item.id, imageId: cancelBase.image.id });
