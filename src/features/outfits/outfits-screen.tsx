@@ -52,11 +52,11 @@ export function OutfitsScreen({ client, scope, invalidation, images, online, lan
       : data.outfits.length ? <ul className="outfit-grid">
         {data.outfits.map(outfit => {
           const occasion = occasionLabel(outfit);
-          const shown = outfit.links.slice(0, 4);
+          const shown = outfit.links.flatMap(link => { const component = data.components.get(link.itemId); return component ? [{ id: link.itemId, component }] : []; }).slice(0, 4);
           return <li key={outfit.id} className="outfit-card"><a className="outfit-card-link" href={`#/outfits/${outfit.id}`}>
-            <div className="outfit-card-thumbs" aria-hidden="true">
-              {shown.map(link => { const component = data.components.get(link.itemId);
-                return component ? <OutfitThumb key={link.itemId} component={component} images={images} t={t} decorative /> : null; })}
+            <div className={`outfit-card-thumbs outfit-card-thumbs-${Math.max(shown.length, 1)}`} aria-hidden="true">
+              {shown.map(({ id, component }) => <OutfitThumb key={id} component={component} images={images} t={t} decorative />)}
+              {shown.length === 3 && <div className="outfit-thumb-fill" />}
             </div>
             <div className="item-caption"><h2>{outfit.title}</h2>
               <span>{outfit.links.length ? itemCount(language, outfit.links.length) : t('outfits.noItems')}</span>

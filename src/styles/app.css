@@ -356,6 +356,8 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .check-row { display: flex; flex-wrap: wrap; gap: 4px 20px; }
 .check { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-weight: 400; }
 .garment-field .check input { width: 20px; height: 20px; min-height: 0; margin: 0; }
+.outfit-editor .field .check { align-self: flex-start; }
+.outfit-editor .field .check input { flex: none; width: 20px; height: 20px; min-height: 0; margin: 0; padding: 0; }
 .tag-entry, .price-entry { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .tag-entry input, .price-entry input { flex: 1 1 8rem; min-width: 0; }
 .garment-field .tag-entry button { flex: 0 1 auto; }
@@ -366,7 +368,11 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .outfit-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 24px 20px; }
 .outfit-card-link { display: block; color: inherit; text-decoration: none; }
 .outfit-card-link:hover h2 { text-decoration: underline; }
-.outfit-card-thumbs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; aspect-ratio: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.outfit-card-thumbs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 4px; aspect-ratio: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.outfit-card-thumbs-1 { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.outfit-card-thumbs-2 { grid-template-rows: minmax(0, 1fr); }
+.outfit-card-thumbs > .outfit-thumb, .outfit-thumb-fill { aspect-ratio: auto; width: 100%; height: 100%; min-height: 0; }
+.outfit-thumb-fill { background: var(--canvas); }
 .outfit-card-occasion { display: block; color: var(--secondary); font-size: .8125rem; }
 .outfit-thumb { position: relative; aspect-ratio: 4 / 5; background: var(--canvas); overflow: hidden; display: grid; place-items: center; }
 .outfit-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }

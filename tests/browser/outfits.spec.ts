@@ -867,6 +867,67 @@ test('I11 outfits accessibility: keyboard, 320px and 200% text, with the header 
   }
 });
 
+test('I11 list collages fill the card for one to four items, and the editor favourite is a small inline checkbox', async ({ page }) => {
+  await start(page, 'en', (api, clothes) => {
+    const scarf = api.seedSavedItem('a', 'Grey scarf').item as Row;
+    const all = [clothes.top.id, clothes.trousers.id, clothes.shoes.id, String(scarf.id)];
+    for (const count of [1, 2, 3, 4]) seedOutfit(api, all.slice(0, count), { title: `Look ${count}`, created_at: new Date(Date.now() - count * 60000).toISOString() });
+  });
+  await openOutfits(page);
+  for (const width of [1280, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.locator('.outfit-card')).toHaveCount(4);
+    await expect(page.locator('.outfit-card img')).toHaveCount(10);
+    const layouts = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.outfit-card-thumbs')].map(box => {
+      const outer = box.getBoundingClientRect(), style = getComputedStyle(box);
+      const inner = { left: outer.left + parseFloat(style.borderLeftWidth), top: outer.top + parseFloat(style.borderTopWidth),
+        width: box.clientWidth, height: box.clientHeight };
+      const cells = [...box.children].map(cell => { const rect = cell.getBoundingClientRect();
+        return { fill: cell.classList.contains('outfit-thumb-fill'), background: getComputedStyle(cell).backgroundColor,
+          x: (rect.left - inner.left) / inner.width, y: (rect.top - inner.top) / inner.height, w: rect.width / inner.width, h: rect.height / inner.height }; });
+      return { title: box.closest('.outfit-card')!.querySelector('h2')!.textContent, background: style.backgroundColor, cells };
+    }));
+    const near = (value: number, expected: number) => Math.abs(value - expected) < 0.04;
+    for (const layout of layouts) {
+      const count = Number(layout.title!.split(' ')[1]);
+      const cells = layout.cells;
+      expect(cells.length).toBe(count === 3 ? 4 : count);
+      for (const cell of cells) expect(near(cell.h, count <= 2 ? 1 : 0.5) && near(cell.w, count === 1 ? 1 : 0.5)).toBe(true);
+      if (count === 2) expect(near(cells[0]!.x, 0) && near(cells[1]!.x, 0.5) && cells.every(cell => near(cell.y, 0))).toBe(true);
+      if (count >= 3) expect(cells.map(cell => [Math.round(cell.x * 2), Math.round(cell.y * 2)])).toEqual([[0, 0], [1, 0], [0, 1], [1, 1]]);
+      const fill = cells.filter(cell => cell.fill);
+      expect(fill.length).toBe(count === 3 ? 1 : 0);
+      for (const cell of fill) expect(cell.background !== layout.background && cell.background !== 'rgba(0, 0, 0, 0)').toBe(true);
+    }
+  }
+  for (const [language, width] of [['en', 1280], ['en', 320], ['fi', 320]] as const) {
+    if (language === 'fi') {
+      await page.getByRole('button', { name: text('account.menu', 'en') }).click();
+      await page.getByRole('button', { name: 'Suomi', exact: true }).click();
+      await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
+    }
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(() => { location.hash = '#/outfits/new'; });
+    await expect(page.locator('#outfit-editor-title')).toBeVisible();
+    const favourite = page.locator('#outfit-favourite');
+    if (!(await favourite.isVisible())) await page.getByText(text('item.moreDetails', language), { exact: true }).click();
+    await expect(favourite).toBeVisible();
+    const shape = await favourite.evaluate((input) => {
+      const label = input.closest('label')!, words = [...label.childNodes].find(node => node.nodeType === Node.TEXT_NODE)!;
+      const range = document.createRange(); range.selectNodeContents(words);
+      const lines = new Set([...range.getClientRects()].map(rect => Math.round(rect.top)));
+      const box = input.getBoundingClientRect(), textBox = range.getBoundingClientRect();
+      return { width: box.width, height: box.height, lines: lines.size, after: textBox.left >= box.right, gap: textBox.left - box.right,
+        labelWidth: label.getBoundingClientRect().width, text: words.textContent };
+    });
+    expect(shape.text).toBe(text('item.favourite', language));
+    expect(shape.width <= 24 && shape.height <= 24 && shape.lines === 1 && shape.after && shape.gap < 16 && shape.labelWidth < 200).toBe(true);
+    if (language !== 'fi') continue;
+    await page.locator('label.check').filter({ has: favourite }).click();
+    await expect(favourite).toBeChecked();
+  }
+});
+
 test.describe('bounded I11 visual evidence', () => {
   test.describe.configure({ retries: 0 });
   for (const selected of [{ project: 'chromium', language: 'en', width: 1280, suffix: 'en-desktop' },
@@ -881,7 +942,7 @@ test.describe('bounded I11 visual evidence', () => {
         weekend = seedOutfit(api, [clothes.top.id, clothes.trousers.id, clothes.shoes.id, String(scarf.id)], { title: 'Weekend', notes: 'Dinner', occasion: 'smart' });
         errands = seedOutfit(api, [clothes.trousers.id, clothes.shoes.id], { title: 'Errands', created_at: new Date(Date.now() - 120000).toISOString() });
         api.outfitItems.find(link => link.outfit_id === errands && link.item_id === clothes.shoes.id)!.position = 2;
-        seedOutfit(api, [String(scarf.id), clothes.trousers.id], { title: 'Office', occasion: 'business', created_at: new Date(Date.now() - 180000).toISOString() });
+        seedOutfit(api, [String(scarf.id), clothes.trousers.id, clothes.shoes.id], { title: 'Office', occasion: 'business', created_at: new Date(Date.now() - 180000).toISOString() });
       });
       const write = testInfo.project.name === selected.project;
       await page.setViewportSize({ width: selected.width, height: 900 });
@@ -911,6 +972,9 @@ test.describe('bounded I11 visual evidence', () => {
       };
       await openOutfits(page, language);
       await expect(page.locator('.outfit-card')).toHaveCount(3);
+      await expect(page.locator('.outfit-card-thumbs-4')).toHaveCount(1);
+      await expect(page.locator('.outfit-card-thumbs-2')).toHaveCount(1);
+      await expect(page.locator('.outfit-card-thumbs-3 .outfit-thumb-fill')).toHaveCount(1);
       await expect(page.locator('.outfit-card img').first()).toBeVisible();
       await capture('list');
       await page.locator(`a[href="#/outfits/${errands}"]`).click();
