@@ -4,6 +4,7 @@ import { mkdir, open, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { languages, messages, type Language, type MessageKey } from '../../src/i18n';
 import { aiFixture, addAiPhoto } from './ai-photo-first-support';
+import { mockBackend, signIn, type MockOptions } from './mock-backend';
 
 type Api = Awaited<ReturnType<typeof aiFixture>>;
 const text = (key: MessageKey, language: Language = 'en') => messages[key][language];
@@ -245,4 +246,286 @@ test.describe('bounded L1a visual evidence', () => {
       await capture('saved-item');
     });
   }
+});
+
+test.describe('UX L1c saved item layout', () => {
+  async function openDetail(page: Page, language: Language = 'en', options: MockOptions = {}) {
+    const api = await mockBackend(page, { ...options, initialLanguage: language });
+    const saved = api.seedSavedItem();
+    await page.goto('/'); await signIn(page);
+    await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+    await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
+    await expect(page.locator('.detail-photo img')).toBeVisible();
+    return { api, ...saved };
+  }
+  const axe = async (page: Page) => expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  const setMore = (page: Page, open: boolean) => page.locator('details.optional-details')
+    .evaluate((details, value) => { (details as HTMLDetailsElement).open = value; }, open);
+  // The trash section keeps its card class from TrashAction; on this page it must render without a box.
+  const flatTrash = (page: Page) => page.locator('.detail-item-actions > section.lifecycle-actions').evaluate((section) => {
+    const style = getComputedStyle(section);
+    return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft,
+      style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth].every((value) => parseFloat(value) === 0)
+      && ['rgba(0, 0, 0, 0)', 'transparent'].includes(style.backgroundColor) && style.backgroundImage === 'none';
+  });
+  // The alert takes its own line inside the trash section and never covers its buttons.
+  const alertOwnLine = (page: Page) => page.locator('.detail-item-actions > section.lifecycle-actions').evaluate((section) => {
+    const alert = section.querySelector('[role="alert"]')?.getBoundingClientRect();
+    const buttons = [...section.querySelectorAll('button')].map((button) => button.getBoundingClientRect());
+    return Boolean(alert) && buttons.length > 0 && buttons.every((box) => alert!.bottom <= box.top + 0.5);
+  });
+  const boxedContainers = (page: Page) => page.evaluate(() => [...document.querySelectorAll('.detail-page section, .detail-page div, .detail-page fieldset')]
+    .filter((element) => element.getClientRects().length > 0 && !element.closest('[role="alert"], dialog'))
+    .filter((element) => {
+      const style = getComputedStyle(element);
+      return (['Top', 'Right', 'Bottom', 'Left'] as const).every((side) => parseFloat(style[`border${side}Width`]) > 0 && style[`border${side}Style`] !== 'none');
+    }).map((element) => element.className));
+  function hold(page: Page, pattern: RegExp, method?: string) {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    return page.route(pattern, async (route) => {
+      if (!method || route.request().method() === method) await gate;
+      await route.fallback();
+    }).then(() => release);
+  }
+
+  test('L1c accessibility at 1280: photo actions under the photo, one form card and one quiet action row', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openDetail(page);
+    const shape = await page.evaluate(() => {
+      const names = (selector: string) => [...document.querySelector(selector)!.children].map((child) => child.className);
+      const box = (element: Element | null) => element!.getBoundingClientRect();
+      const row = document.querySelector('.detail-item-actions')!;
+      const archive = box(row.querySelector('.detail-archive button')), trash = box(row.querySelector('.lifecycle-actions button'));
+      const photo = box(document.querySelector('.detail-photo')), group = box(document.querySelector('.detail-media .photo-actions'));
+      const media = box(document.querySelector('.detail-media')), card = box(document.querySelector('.detail-name'));
+      return {
+        layout: names('.detail-layout'), media: names('.detail-media'), sections: names('.detail-sections'), row: names('.detail-item-actions'),
+        actions: [...document.querySelectorAll('.detail-page .photo-actions')].map((element) => [...element.querySelectorAll('button')].map((button) => button.textContent)),
+        underPhoto: group.top - photo.bottom >= 0 && group.top - photo.bottom <= 24,
+        inColumn: group.left >= media.left - 0.5 && group.right <= media.right + 0.5,
+        oneRow: Math.abs(archive.top - trash.top) <= 1, afterCard: box(row).top >= card.bottom,
+      };
+    });
+    expect(shape).toEqual({
+      layout: ['detail-media', 'detail-sections'], media: ['detail-photo', 'photo-actions'],
+      sections: ['lifecycle-edit-lock', 'detail-item-actions'], row: ['detail-archive', 'settings-card lifecycle-actions'],
+      actions: [[text('imageChange.replace'), text('imageChange.recover')]],
+      underPhoto: true, inColumn: true, oneRow: true, afterCard: true,
+    });
+    expect(await boxedContainers(page)).toEqual(['settings-card detail-name']);
+    expect(await page.locator('.detail-name form').count()).toBe(1);
+    expect(await flatTrash(page)).toBe(true);
+    await axe(page);
+    await setMore(page, true);
+    expect(await boxedContainers(page)).toEqual(['settings-card detail-name']);
+    await axe(page);
+  });
+
+  test('L1c form: Save ends the form, even spacing and the status right under Save', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openDetail(page);
+    const form = page.locator('.detail-name form');
+    expect(await form.evaluate((element) => {
+      const last = [...element.querySelectorAll('button')].at(-1);
+      const seasons = element.querySelector('#detail-seasons')!.getBoundingClientRect();
+      const more = element.querySelector('details.optional-details')!.getBoundingClientRect();
+      const save = element.querySelector(':scope > button.button-primary')!.getBoundingClientRect();
+      return { last: last?.parentElement === element && last.classList.contains('button-primary'), gaps: [more.top - seasons.bottom, save.top - more.bottom] };
+    })).toEqual({ last: true, gaps: [20, 20] });
+    await page.locator('#detail-title').fill('Edited overshirt');
+    await button(page, 'detail.saveChanges').click();
+    const status = page.getByText(text('detail.saved'), { exact: true });
+    await expect(status).toBeVisible();
+    const distance = await status.evaluate((element) => {
+      const save = element.previousElementSibling;
+      return save instanceof HTMLButtonElement && save.classList.contains('button-primary')
+        ? element.getBoundingClientRect().top - save.getBoundingClientRect().bottom : null;
+    });
+    expect(distance).not.toBeNull();
+    expect(distance!).toBeGreaterThanOrEqual(0);
+    expect(distance!).toBeLessThanOrEqual(16);
+  });
+
+  test('L1c the photo holds only the image, with no generated content or overlay', async ({ page }) => {
+    await openDetail(page);
+    expect(await page.locator('.detail-photo').evaluate((photo) => {
+      const image = photo.firstElementChild;
+      const empty = (element: Element, pseudo: string) => ['none', 'normal'].includes(getComputedStyle(element, pseudo).content);
+      photo.scrollIntoView({ block: 'center' });
+      const box = photo.getBoundingClientRect();
+      return photo.children.length === 1 && image instanceof HTMLImageElement
+        && document.elementFromPoint(box.right - 8, box.top + 8) === image
+        && [photo, image].every((element) => empty(element, '::before') && empty(element, '::after'));
+    })).toBe(true);
+  });
+
+  for (const language of languages) {
+    test(`L1c accessibility ${language}: single column at 320 and 430 px and text-resize coverage`, async ({ page }) => {
+      test.slow();
+      await openDetail(page, language);
+      const check = async (width: number) => {
+        await page.setViewportSize({ width, height: 900 });
+        expect(await page.evaluate(() => {
+          const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+          const media = box('.detail-media'), sections = box('.detail-sections'), photo = box('.detail-photo');
+          const group = box('.detail-media .photo-actions'), card = box('.detail-name'), row = box('.detail-item-actions');
+          const overlaps = (selector: string) => {
+            const boxes = [...document.querySelectorAll(selector)].filter((element) => element.getClientRects().length).map((element) => element.getBoundingClientRect());
+            return boxes.some((a, index) => boxes.slice(index + 1).some((b) => a.right > b.left + 0.5 && b.right > a.left + 0.5 && a.bottom > b.top + 0.5 && b.bottom > a.top + 0.5));
+          };
+          // Checkboxes are 20 px inside a clickable label; measure the label for them and the control for everything else.
+          const small = [...document.querySelectorAll<HTMLElement>('.detail-page button, .detail-page select, .detail-page input, .detail-page textarea, .detail-page summary')]
+            .filter((element) => element.getClientRects().length > 0)
+            .map((element) => element instanceof HTMLInputElement && element.type === 'checkbox' ? element.closest('label') ?? element : element)
+            .filter((element) => element.getBoundingClientRect().height < 43.5)
+            .map((element) => element.id || element.textContent || element.tagName);
+          return { column: Math.abs(media.left - sections.left) < 1,
+            order: photo.bottom <= group.top + 0.5 && group.bottom <= card.top + 0.5 && card.bottom <= row.top + 0.5,
+            fits: document.documentElement.scrollWidth <= innerWidth,
+            overlap: overlaps('.detail-media .photo-actions button') || overlaps('.detail-item-actions button'), small };
+        })).toEqual({ column: true, order: true, fits: true, overlap: false, small: [] });
+      };
+      const reachable = async () => {
+        const save = button(page, 'detail.saveChanges', language), archive = button(page, 'detail.archive', language), trash = button(page, 'item.trash', language);
+        for (const control of [save, archive, trash]) { await control.scrollIntoViewIfNeeded(); await expect(control).toBeInViewport(); }
+        await expect(save).toBeDisabled();
+        await expect(archive).toBeEnabled();
+        await expect(trash).toBeEnabled();
+      };
+      for (const open of [false, true]) {
+        await setMore(page, open);
+        for (const width of [320, 430]) await check(width);
+        await axe(page);
+      }
+      // Text-resize coverage, not browser zoom: doubles root-relative sizes and the inherited body/control text.
+      const resize = await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' });
+      expect(await page.evaluate(() => {
+        const size = (element: Element) => parseFloat(getComputedStyle(element).fontSize);
+        const one = (selector: string) => size(document.querySelector(selector)!);
+        return { body: one('body'), title: one('#detail-title') >= 32, category: one('#detail-category') >= 32, colour: one('#detail-colours-add') >= 32,
+          save: one('.detail-name form > button.button-primary') >= 28,
+          row: [...document.querySelectorAll('.detail-item-actions button')].every((element) => size(element) >= 28) };
+      })).toEqual({ body: 32, title: true, category: true, colour: true, save: true, row: true });
+      for (const open of [false, true]) {
+        await setMore(page, open);
+        await check(320);
+        await reachable();
+        await axe(page);
+      }
+      await resize.evaluate((element) => (element as Element).remove());
+    });
+  }
+
+  test('L1c clean and dirty states: disabled controls and keyboard order', async ({ page }) => {
+    await openDetail(page);
+    const save = button(page, 'detail.saveChanges'), archive = button(page, 'detail.archive'), trash = button(page, 'item.trash');
+    const others = [button(page, 'imageChange.replace'), button(page, 'imageChange.recover'), archive, trash];
+    const summary = page.locator('details.optional-details > summary');
+    await expect(save).toBeDisabled();
+    for (const control of others) await expect(control).toBeEnabled();
+    await summary.focus();
+    await page.keyboard.press('Tab'); await expect(archive).toBeFocused();
+    await page.keyboard.press('Tab'); await expect(trash).toBeFocused();
+    await page.locator('#detail-title').fill('Edited overshirt');
+    await expect(save).toBeEnabled();
+    for (const control of others) await expect(control).toBeDisabled();
+    await summary.focus();
+    await page.keyboard.press('Tab'); await expect(save).toBeFocused();
+  });
+
+  test('L1c Enter in Name saves once and shows the status under Save', async ({ page }) => {
+    await openDetail(page);
+    const patches = recordPatches(page);
+    await page.locator('#detail-title').fill('Keyboard overshirt');
+    await page.locator('#detail-title').press('Enter');
+    const status = page.getByText(text('detail.saved'), { exact: true });
+    await expect(status).toBeVisible();
+    expect(patches).toHaveLength(1);
+    expect(sent(patches[0]!.body)).toEqual(['title']);
+    expect(await status.evaluate((element) => element.previousElementSibling?.matches('button.button-primary') === true
+      && !document.activeElement?.closest('.detail-item-actions, .photo-actions'))).toBe(true);
+  });
+
+  test('L1c a held save disables the photo and item actions and sends nothing twice', async ({ page }) => {
+    await openDetail(page);
+    const patches = recordPatches(page);
+    const release = await hold(page, /\/rest\/v1\/items(?:\?|$)/, 'PATCH');
+    const others = [button(page, 'imageChange.replace'), button(page, 'imageChange.recover'), button(page, 'detail.archive'), button(page, 'item.trash')];
+    await page.locator('#detail-title').fill('Held overshirt');
+    await button(page, 'detail.saveChanges').click();
+    await expect(button(page, 'common.saving')).toBeDisabled();
+    for (const control of others) await expect(control).toBeDisabled();
+    await page.locator('.detail-name form > button.button-primary').evaluate((element) => { (element as HTMLButtonElement).click(); });
+    expect(patches).toHaveLength(1);
+    release();
+    await expect(page.getByText(text('detail.saved'), { exact: true })).toBeVisible();
+    for (const control of others) await expect(control).toBeEnabled();
+    expect(patches).toHaveLength(1);
+  });
+
+  test('L1c a held trash request keeps Archive disabled without a write', async ({ page }) => {
+    await openDetail(page);
+    const patches = recordPatches(page);
+    const release = await hold(page, /\/rest\/v1\/rpc\/set_item_trashed$/);
+    const archive = button(page, 'detail.archive');
+    await button(page, 'item.trash').click();
+    await expect(archive).toBeDisabled();
+    await archive.evaluate((element) => { (element as HTMLButtonElement).click(); });
+    expect(patches).toHaveLength(0);
+    release();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    expect(patches).toHaveLength(0);
+  });
+
+  test('L1c an unconfirmed trash result keeps Check in the quiet row and the rest locked', async ({ page }) => {
+    const { api } = await openDetail(page, 'en', { lifecycleLoss: 'change' });
+    const patches = recordPatches(page);
+    const trashCalls = () => api.requests.filter((request) => request.path.endsWith('/set_item_trashed')).length;
+    await button(page, 'item.trash').click();
+    const section = page.locator('.detail-item-actions > section.lifecycle-actions');
+    await expect(section.getByRole('alert')).toHaveText(text('lifecycle.unconfirmed'));
+    const check = section.getByRole('button', { name: text('lifecycle.check'), exact: true });
+    await expect(check).toBeEnabled();
+    await expect(button(page, 'detail.archive')).toBeDisabled();
+    await expect(page.locator('#detail-title')).toBeDisabled();
+    expect(await flatTrash(page)).toBe(true);
+    expect(await alertOwnLine(page)).toBe(true);
+    expect(patches).toHaveLength(0);
+    expect(api.requests.some((request) => request.method === 'DELETE')).toBe(false);
+    expect(trashCalls()).toBe(1);
+    await check.click();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    expect(trashCalls()).toBe(1);
+  });
+
+  test('L1c a rejected trash request shows its alert on its own line in the flat section', async ({ page }) => {
+    const { item } = await openDetail(page);
+    (item as Record<string, unknown>).version = Number(item.version) + 1;
+    await button(page, 'item.trash').click();
+    const section = page.locator('.detail-item-actions > section.lifecycle-actions');
+    await expect(section.getByRole('alert')).toBeVisible();
+    await expect(section.getByRole('alert')).not.toHaveText(text('lifecycle.unconfirmed'));
+    await expect(button(page, 'item.trash')).toBeEnabled();
+    expect(await flatTrash(page)).toBe(true);
+    expect(await alertOwnLine(page)).toBe(true);
+    await page.setViewportSize({ width: 320, height: 800 });
+    expect(await alertOwnLine(page)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+
+  test('L1c accessibility: Archive and Unarchive stay in the quiet row', async ({ page }) => {
+    await openDetail(page);
+    const patches = recordPatches(page);
+    const row = page.locator('.detail-item-actions');
+    await button(page, 'detail.archive').click();
+    await expect(row.locator('.detail-archive')).toContainText(text('detail.archived'));
+    await expect(row.getByRole('button', { name: text('detail.unarchive'), exact: true })).toBeEnabled();
+    await expect(row.locator('section.lifecycle-actions')).toHaveCount(1);
+    expect(await boxedContainers(page)).toEqual(['settings-card detail-name']);
+    await axe(page);
+    await row.getByRole('button', { name: text('detail.unarchive'), exact: true }).click();
+    await expect(row.getByRole('button', { name: text('detail.archive'), exact: true })).toBeEnabled();
+    expect(patches.map((patch) => patch.body.lifecycle)).toEqual(['archived', 'active']);
+  });
 });

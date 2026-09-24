@@ -8211,3 +8211,31 @@ Decision record: ADR20 in `blueprint/18`; S02 in `blueprint/04`.
   Playwright's build), and owner acceptance. Observation for I11: a 13th
   capture upload would conflict with the pin of 12 in
   `tests/unit/ci-workflow.test.ts`.
+
+## UX L1c garment page layout - local source candidate (24 September 2026)
+
+This follows owner feedback from 24 September 2026 (plan rev2 SHA256 `29C49947427009B19B521FE1A93CEEE50FE9055CF086596154E0B13DCCFB92D9`, with binding test contracts G1 and G2). The work ran in local writer session `d9946a83-7aec-4327-95b9-fbb98222f8a4`, model `claude-opus-5.5`, from base `ff5ebfe7`. It is a source candidate only: it has not been visually reviewed or accepted.
+
+- The saved-item page now has two parts:
+  - The photo, with Replace photo and Previous photos directly beneath it.
+  - The details form, still one card, with Save changes at the end and "Changes saved." directly under it.
+- Archive or Unarchive and Move to trash (or Check status) now form one quiet row of plain text buttons below the form. This replaces the separate outlined button and the second card. The trash error alert takes its own line in that row.
+- The gaps around More details are even. Below 700px the page is one column: photo, photo actions, form, item actions.
+- Handlers, disabled and lock logic, the version-checked save, leave guards, image-change flows, archive and trash semantics, and confirmation dialogs are unchanged. Archive moved out of the `lifecycle-edit-lock` fieldset. It is still disabled through `quickReady` during a trash request or an unconfirmed trash result. No catalog, schema, dependency or service-worker changes.
+- The small circle in the owner's screenshot was a transient browser hover overlay, not app UI. There is no fix; one regression check confirms the photo holds a single image and no generated content.
+
+Tests: a `UX L1c saved item layout` block in `tests/browser/ux-l1a.spec.ts` checks:
+- element order and grouping, including exactly one boxed container;
+- the flat trash section in its normal, Check and error states;
+- the spacing around the form;
+- one column at 320 and 430 px in en/fi/sv, with text resized to 200% (`html` and `body` font sizes);
+- the size of targets, measured on the enclosing label for checkboxes (G1);
+- keyboard order in the clean and dirty states;
+- held save and held trash requests;
+- unconfirmed and rejected trash;
+- Archive and Unarchive;
+- axe with More details closed and open.
+
+Deviations and known limits:
+- The 200% text coverage is emulated through CSS font sizes. Real 200% browser zoom still needs a manual check.
+- Captures reuse the existing slots in `ux-l1a` (`saved-item-*`) and `item-details`, with no new artifact. The writer has not opened them. Visual acceptance awaits coordinator review.
