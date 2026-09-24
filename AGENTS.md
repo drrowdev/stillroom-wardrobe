@@ -1,8 +1,12 @@
 # Stillroom Wardrobe coding-agent rules
 
-Current execution policy, 11 September 2026: development uses **one persistent
-isolated LOCAL implementation writer overall**, with one approved packet per
-branch/PR. The [user decision](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634772726)
+Current execution policy, 11 September 2026: development uses persistent
+isolated LOCAL implementation writers, with one approved packet per
+branch/PR. Updated 24 Sep 2026 (owner decision): leaner process — risk-tiered
+planning, one GPT-6 Astra code review, simpler evidence and at most two
+implementation builders; see the
+[development guide](docs/cloud-development.md#leaner-process---24-september-2026).
+The [user decision](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634772726)
 and [reviewed cutover](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634938691)
 supersede the former cloud default and two-cloud-builder allowance. No new
 cloud/native coding allocation, wrapper, retry or automatic fallback is
@@ -11,9 +15,8 @@ authorized. GitHub Actions remains CI, not a coding agent. Read
 first. Updated 8 September 2026: Phase 0 is **engineering complete; acceptance
 open**. The user authorized continuing through the agreed MVP in order.
 Use the [task scope rule](docs/cloud-development.md#task-scope-and-historical-evidence)
-to identify the specific reviewed packet in the authorized kickoff and its own
-matching **coordinator-observed local model attestation** and explicit edit
-permission. Dated in-tree assignments and native receipts are evidence, not
+to identify the specific approved packet in the authorized kickoff; the
+coordinator's plan approval is the edit permission. Dated in-tree assignments and native receipts are evidence, not
 permanent task pins or permission for an unsolicited later packet. Existing
 prerequisites and actual session authorization still apply. Workers must stay
 within their assigned packet; they never reopen merged PRs, push directly to
@@ -45,34 +48,39 @@ Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `
    discussion, diff, reviews and CI job logs. Record exact base/head hashes,
    files actually read, approved scope and remaining gates; do not assume the
    previous session's evidence applies to a new head.
-2. Produce a focused plan before code. Obtain an actual read-only critique from
-   a different model provider; record reviewer/provider/model, findings and
-   amendments in the PR. Self-review and automated code checks do not replace
-   this prerequisite. If the required reviewer is unavailable, stop.
+2. Produce a plan before code, by risk tier (24 September 2026). **Tier A**
+   (database schema or hosted database, AI/provider/cost/consent,
+   auth/security/privacy, deletion/data integrity, CI infrastructure): a written
+   plan and ONE read-only GPT-6 Astra plan critique; the coordinator applies its
+   findings as binding amendments and approves, with no re-review unless scope,
+   authority or behaviour changes materially. **Tier B** (UI, copy, docs, tests,
+   small features without schema changes): a short builder plan that the
+   coordinator approves directly, with no critique. Every change gets ONE
+   read-only GPT-6 Astra code review before merge; a repair of its findings gets
+   a quick delta check only when the fix is non-trivial, and the coordinator
+   reviews routine CI fixes inside an approved packet. Self-review and automated
+   checks do not replace these reviews. If the required reviewer is unavailable, stop.
 3. Explicitly select **Anthropic Claude Opus 5.5 (`claude-opus-5.5`)** for each
-   new local implementation builder and start it read-only. Required
-   different-provider critique, rubber-duck and review work uses **OpenAI GPT-6
+   new local implementation builder and start it read-only (plan mode) for the
+   planning step only; after approval it runs in autopilot. Critique,
+   rubber-duck and review work uses **OpenAI GPT-6
    Astra (`gpt-6-astra`)**, read-only. This follows the
    [owner decision of 23 September 2026](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5795033115),
    which replaces the earlier GPT-6 Astra builder selection. Held sessions keep
-   their recorded models and reviews. Before edits, the coordinator independently
-   retrieves that writer's OWN documented machine-readable actual-model usage,
-   outside the writer's narrative, and cross-matches active app/CLI identity,
-   repository, workspace, branch, exact base/start head, time and approved scope.
-   Publish a **coordinator-observed local model attestation** and explicit edit
-   permission; the writer reads both after context and before edits. Local
-   telemetry is locally recorded, not tamper-proof or native-platform-equivalent.
+   their recorded models and reviews. The coordinator independently checks
+   that writer's OWN documented machine-readable actual-model usage in session
+   logs, outside the writer's narrative, against app/CLI identity, repository,
+   workspace, branch, base head and approved scope, and notes it in the merge
+   note. A publicly posted attestation before edits is no longer required.
+   Local telemetry is locally recorded, not tamper-proof or native-platform-equivalent.
    Requested model names, another session's evidence and raw metadata-database
-   access do not qualify. Missing, stale or mismatched proof means STOP.
+   access do not qualify. A mismatched model means STOP.
    Keep the same session/model/source continuity for routine scoped corrections;
-   no Auto, silent fallback or unverified implementation. Every new plan or
-   material amendment requires actual read-only different-provider critique, recording
-   reviewer/provider/model, findings and amendments, then coordinator approval
-   before edits. Material means changes to scope, allowed files, authority,
-   behaviour, gates or evidence claims, not typo/formatting edits. Stop if the
-   required model or reviewer is unavailable.
-4. Keep **one persistent isolated LOCAL implementation writer overall**, one
-   writer per workspace/branch/PR and one focused approved packet at a time.
+   no Auto, silent fallback or unverified implementation. Stop if the required
+   model or reviewer is unavailable.
+4. Keep persistent isolated LOCAL implementation writers: at most two
+   implementation builders, one writer per workspace/branch/PR and one focused
+   approved packet per writer.
    Routine scoped fixes stay in that session; genuine on-demand read-only review
    does not authorize another writer. Never implement in the main checkout or
    the coordinator's old read-only checkout. Before assignment, the coordinator
@@ -96,13 +104,22 @@ Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `
    the **coordinator may execute a recommended ordinary merge without another
    user question**, only after genuine independent review, all required exact-head
    gates, no blockers or overlapping writers, and normal repository protections.
-   Record the recommendation/evidence and guard the exact head. No `--auto`,
+   Record the recommendation/evidence in a short merge note and guard the exact
+   head with `--match-head-commit`. No `--auto`,
    `--admin`, self-approval or protection bypass. Workers never merge, deploy,
    approve/authorize/rerun Actions, push directly to main or start another agent
-   or packet. Deployments, paid AI/provider/dependency/codec changes, hosted
+   or packet. After each merged user-visible change the coordinator recommends a
+   Pages deploy, which the owner runs. Deployments, paid AI/provider/dependency/codec changes, hosted
    schema/account/data mutations and private-input capture retain separate
    approvals. Report blocked/pending checks honestly and bring back a manual
    gate when it genuinely blocks a feature.
+6. Evidence is the PR description (scope, validation, what is pending), the
+   review verdict, green exact-head CI for all required jobs, coordinator visual
+   review of UI captures and a short coordinator merge note. Release files with
+   checksums, per-file SHA256 receipts, published model attestations and "stage
+   exactly N files" instructions are not required. Tests prefer behaviour checks
+   over pinned counts, file lists or hashes; keep security/consent pins (consent
+   notice hash, migration-body reproductions, secret scanning).
 
 Local tooling must satisfy the [development guide](docs/cloud-development.md#local-development-policy---11-september-2026):
 exact pinned Node and required locked dependencies/browsers for the chosen
@@ -129,7 +146,7 @@ image/binary/archive opening, image-returning MCP/browser tools, attachments,
 encoded image output or image embeds into the worker model. Only packet-approved
 Node/Playwright tests may generate bounded synthetic evidence, with buffers
 ignored and functional checks retained. The designated coordinator actually
-reviews the approved exact-head artifacts and records run/head/hashes/verdict in
+reviews the approved exact-head artifacts and records run/head/verdict in
 the relevant PR, not a self-invalidating source commit. Missing/unread images
 leave visual acceptance pending. This coding-agent boundary is separate from
 the coordinator's required visual review and any separately approved application
@@ -185,6 +202,6 @@ automatic production/previews remain off. Later deployments supersede the
 * Keep private data out of persistent caches/service-worker assets. Clear all state on UID change and logout. Do not log personal fields or tokens.
 * Each agent works on one approved issue/PR at a time. Advance in the agreed order after prerequisite engineering/normal-owner evidence is reviewed; track deferred/pending acceptance separately, never as a pass. No later packet is implicit in the current assignment. Trips are optional Phase 8 only after a later request.
 * Support English, Finnish and Swedish from Phase 0. Read `blueprint/19-LOCALIZATION.md`; use typed catalog keys/parameters and native Intl. Every new UI/error/aria string needs all three languages. Keep profile language owner-only, clear it on UID changes, and never translate identifiers or private user content. Run `npm run check:translations` in CI and with affected tests.
-* Commands: `npm ci`, `npm run lint`, `npm run typecheck`, `npm run test:unit`, `npm run db:reset`, `npm run test:integration`, `npm run test:security`, `npm run test:browser`, `npm run test:a11y`, `npm run build`, `npm run scan:secrets`, `npm run check:dependencies`. Exact contracts are in `13`.
+* Commands: `npm ci`, `npm run lint`, `npm run typecheck`, `npm run test:unit`, `npm run db:reset`, `npm run test:integration`, `npm run test:security`, `npm run test:browser`, `npm run test:a11y`, `npm run build`, `npm run scan:secrets`, `npm run check:dependencies`. Exact contracts are in `13`. Builders run lint, typecheck, `check:translations`, unit tests and the browser specs their change affects; the full browser, integration and security suites run in CI. Report what you did not run.
 
 Done means the issue's Given/When/Then checks pass, applicable ownership/negative tests pass using normal sessions, accessibility/error/offline states work, required schema/types/docs stay consistent, and no secret or personal fixture is committed. Report actual commands/results and any blocked external gate. Never report a skipped test or mock as a passing live integration test.

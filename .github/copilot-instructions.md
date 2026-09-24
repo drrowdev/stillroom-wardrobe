@@ -4,8 +4,10 @@ instructions and the root file must not be replaced by historical templates.
 Current execution policy, 11 September 2026: follow the
 [user decision](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634772726)
 and [reviewed local cutover](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634938691).
-Use ONE persistent isolated LOCAL implementation writer overall, with one
-approved packet/branch/PR. No new cloud/native coding allocation, wrapper, retry
+Use persistent isolated LOCAL implementation writers (at most two builders), with one
+approved packet/branch/PR each. Updated 24 Sep 2026 (owner decision): leaner
+process; see the [development guide](../docs/cloud-development.md#leaner-process---24-september-2026).
+No new cloud/native coding allocation, wrapper, retry
 or automatic fallback. GitHub Actions remains CI, not a coding agent.
 The root instructions and development guide contain the active local policy
 and dated cloud evidence; do not overwrite them with older templates.
@@ -14,9 +16,8 @@ Updated 8 September 2026: the user authorized continuing through the agreed MVP
 in order. Phase 0 is **engineering complete; acceptance open**. Only the second
 hosted-account test was user-deferred; other manual/operator/device checks remain
 pending. Use the [task scope rule](../docs/cloud-development.md#task-scope-and-historical-evidence)
-to identify the specific reviewed packet in the authorized kickoff and its own
-matching coordinator-observed local model attestation and explicit edit
-permission. Historical packet names and native receipts do not pin a new task
+to identify the specific approved packet in the authorized kickoff; the
+coordinator's plan approval is the edit permission. Historical packet names and native receipts do not pin a new task
 or authorize an unsolicited one. Actual session authorization and all existing
 prerequisites remain mandatory. Workers stay within their assigned packet and
 never reopen merged PRs, create additional branches/PRs/agents, push to main,
@@ -40,7 +41,7 @@ screenshot buffers; retain
 functional checks and the approved capture bounds. The I06 amendment's two
 synthetic settings PNGs remain historical evidence for that packet. The designated
 coordinator owns actual approved exact-head artifact review and records
-run/head/hashes/verdict on the relevant PR. Missing images or absent visual review
+run/head/verdict on the relevant PR. Missing images or absent visual review
 remain pending, not a waiver. This deliberate local policy does not prohibit
 that coordinator review or separately approved application AI processing.
 It is not an assumed local-platform limitation. Preserve historical native
@@ -65,10 +66,14 @@ Preserve comment `5560093343`; do not replay the installed base migration or rep
 Follow the root context/planning gate: read current instructions, phase/backend
 evidence, relevant blueprint/work packets, actual schema/source/tests and PR
 discussion/diff/reviews/CI logs; record exact base/head, files read and gates.
-Plan before edits. Obtain actual different-provider critique and record its
-reviewer/provider/model, findings and amendments; coordinator approval precedes
-implementation. Material amendments repeat that gate: changes to scope, allowed
-files, authority, behaviour, gates or evidence claims, not typo/formatting edits.
+Plan before edits, by risk tier (24 September 2026). Tier A (schema/hosted
+database, AI/provider/cost/consent, auth/security/privacy, deletion/data
+integrity, CI infrastructure) gets ONE read-only GPT-6 Astra plan critique; the
+coordinator applies its findings as binding amendments and approves, with no
+re-review unless scope, authority or behaviour changes materially. Tier B (UI,
+copy, docs, tests, small features without schema changes) gets a short plan the
+coordinator approves directly. Every change gets ONE read-only GPT-6 Astra code
+review before merge; a non-trivial repair gets a quick delta check.
 PR #2 comment `5559949209` approved the completed source packet after actual
 Anthropic Claude Opus 5 critique; `5559976584` records hosted structural results.
 The 6 September documentation amendment follows
@@ -83,29 +88,37 @@ approved scope do not require a new planning round. PR #1 comments
 `5558504250` and `5558542193` remain historical evidence, not the active target.
 
 Explicitly select Anthropic Claude Opus 5.5 (`claude-opus-5.5`) for each new
-local implementation builder and start it read-only. Required different-provider
-critique, rubber-duck and review work uses OpenAI GPT-6 Astra (`gpt-6-astra`),
+local implementation builder and start it read-only (plan mode) for planning;
+after approval it runs in autopilot. Critique,
+rubber-duck and review work uses OpenAI GPT-6 Astra (`gpt-6-astra`),
 read-only, per the
 [owner decision of 23 September 2026](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5795033115).
-Held sessions keep their recorded models and reviews. The coordinator independently retrieves the writer's OWN
-documented machine-readable actual-model usage outside its narrative, matching
-active app/CLI identity, repo/workspace/branch, exact base/start head, time and
-approved scope. Publish a **coordinator-observed local model attestation** and
-explicit edit permission; read both after context and before edits. Local
+Held sessions keep their recorded models and reviews. The coordinator independently checks the writer's OWN
+documented machine-readable actual-model usage in session logs, outside its
+narrative, against app/CLI identity, repo/workspace/branch, base head and
+approved scope, and notes it in the merge note; no published attestation is
+required before edits. Local
 telemetry is locally recorded, not tamper-proof or native-platform-equivalent.
 Requested names, another session's usage or raw metadata-database access do not
 qualify. Old native public receipts were coordinator-authored, backed by
 authenticated native-platform GET, not platform-posted or local entry evidence.
 No invented native task ID or transplanted numbered-comment-page intake.
-Missing/stale/mismatched proof means STOP; maintain same session/model/source
+A mismatched model means STOP; maintain same session/model/source
 continuity for routine scoped fixes. No Auto, fallback, unverified implementation
-or invented review tool. Every new implementation plan/material amendment needs
-actual different-provider read-only critique (reviewer/provider/model, findings and
-amendments) and coordinator approval before edits; stop if model/reviewer is unavailable.
+or invented review tool; stop if the model/reviewer is unavailable.
+Evidence is the PR description (scope, validation, pending), the review verdict,
+green exact-head CI for all required jobs, coordinator visual review of UI
+captures and a short merge note; no release checksum files, per-file SHA256
+receipts or "stage exactly N files" instructions. Builders run lint, typecheck,
+`check:translations`, unit tests and affected browser specs; the full browser,
+integration and security suites run in CI. Prefer behaviour tests over pinned
+counts/lists/hashes; keep the consent notice hash, migration-body reproductions
+and secret scanning.
 
 The former two-cloud-builder allowance is superseded historical policy.
-Keep **ONE persistent isolated LOCAL implementation writer overall**, one writer
-per workspace/branch/PR and one focused approved packet at a time, with genuine
+Keep persistent isolated LOCAL implementation writers: at most two
+implementation builders, one writer
+per workspace/branch/PR and one focused approved packet per writer, with genuine
 on-demand read-only review. Never implement in main or the coordinator's old
 read-only checkout. Before assignment the coordinator names the packet/branch,
 owned files, dependencies and shared-resource owners. No concurrent same-branch
@@ -123,9 +136,12 @@ phase-start/continue question. Under
 the **coordinator may execute a recommended ordinary merge without another user
 question**, only after genuine independent review, all required exact-head gates,
 no blockers or overlapping writers, and normal repository protections. Record the
-recommendation/evidence and guard the exact head. No `--auto`, `--admin`,
+recommendation/evidence in a short merge note and guard the exact head with
+`--match-head-commit`. No `--auto`, `--admin`,
 self-approval or protection bypass. Workers never merge, deploy, approve/authorize/
-rerun Actions or start another agent or packet. Deployments, paid AI/provider/
+rerun Actions or start another agent or packet. After each merged user-visible
+change the coordinator recommends a Pages deploy, which the owner runs.
+Deployments, paid AI/provider/
 dependency/codec changes, hosted schema/account/data mutations and private-input
 capture retain separate approval.
 
