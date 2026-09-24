@@ -539,7 +539,7 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
 }
 
 for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
-  test(`accessibility of private preparation details, cancel and same-file reselection in ${language}`, async ({ page }) => {
+  test(`accessibility of the invalid-photo alert, cancel and same-file reselection in ${language}`, async ({ page }) => {
     const backend = await mockBackend(page, { initialLanguage: language });
     await page.setViewportSize({ width: 320, height: 800 });
     await page.goto('/');
@@ -551,35 +551,29 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
     await page.locator('#item-alt').fill('Manual synthetic description');
     await page.locator('#item-alt').fill('');
     const input = page.locator('input[type="file"]').first();
-    const show = page.getByRole('button', { name: messages['photo.showDetails'][language] });
-    await expect(show).toHaveCount(0);
+    const noDetails = async () => {
+      await expect(page.locator('#preparation-details')).toHaveCount(0);
+      await expect(page.locator('[aria-controls="preparation-details"]')).toHaveCount(0);
+    };
+    await noDetails();
     const before = backend.requests.length;
     const invalid = { name: 'PRIVATE_FILENAME_FIXTURE.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) };
     await input.setInputFiles(invalid);
     await expect(page.getByRole('alert')).toHaveText(messages['photo.invalid'][language]);
-    await expect(show).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.locator('#preparation-details')).toBeHidden();
-    await show.focus();
-    await page.keyboard.press('Enter');
-    const details = page.getByRole('region', { name: messages['photo.details'][language] });
-    await expect(details).toBeVisible();
-    await expect(details).toHaveText(messages['photo.stageSource'][language] + messages['photo.reasonInvalid'][language]);
-    await expect(details).not.toHaveAttribute('aria-live');
     await expect(page.getByRole('alert')).toHaveCount(1);
-    await expect(page.getByRole('button', { name: messages['photo.hideDetails'][language] })).toBeFocused();
+    await noDetails();
     await expect(page.locator('body')).not.toContainText('PRIVATE_FILENAME_FIXTURE');
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await input.setInputFiles([]);
-    await expect(details).toBeVisible();
     await expect(page.getByRole('alert')).toHaveText(messages['photo.invalid'][language]);
     await input.setInputFiles(invalid);
-    await expect(show).toHaveAttribute('aria-expanded', 'false');
-    await expect(details).toBeHidden();
+    await expect(page.getByRole('alert')).toHaveText(messages['photo.invalid'][language]);
+    await noDetails();
     // A mislabeled synthetic JPEG proves byte admission, not native HEIC picker conversion.
     await input.setInputFiles({ name: 'synthetic.heic', mimeType: 'application/octet-stream', buffer: backend.fixture });
     await expect(page.locator('.capture-photo img')).toBeVisible();
-    await expect(show).toHaveCount(0);
+    await noDetails();
     await expect(page.getByRole('alert')).toHaveCount(0);
     const preview = await page.locator('.capture-photo img').getAttribute('src');
     await input.setInputFiles([]);
@@ -595,7 +589,7 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
     await page.getByRole('button', { name: messages['common.cancel'][language], exact: true }).click();
     await page.getByRole('button', { name: messages['common.discard'][language], exact: true }).click();
     await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'][language], exact: true }).click();
-    await expect(show).toHaveCount(0);
+    await expect(page.getByRole('alert')).toHaveCount(0);
     await expect(page.locator('#item-title')).toHaveValue('');
     await expect(page.locator('.capture-photo img')).toHaveCount(0);
   });
@@ -665,29 +659,29 @@ test('late selection cannot overwrite a replacement or manual edits and clears n
   expect(backend.items).toHaveLength(0); expect(backend.images).toHaveLength(0); expect(backend.files.size).toBe(0);
 });
 
-test('discard and owner logout clear preparation details and ignore late photo reads', async ({ page }) => {
+test('discard and owner logout clear the invalid-photo alert and ignore late photo reads', async ({ page }) => {
   const backend = await mockBackend(page, { initialLanguage: 'en' });
   await page.goto('/');
   await signIn(page);
   await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
   const input = page.locator('input[type="file"]').first();
   await input.setInputFiles({ name: 'invalid.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
-  await page.getByRole('button', { name: 'Show preparation details' }).click();
+  await expect(page.getByRole('alert')).toHaveText(messages['photo.invalid'].en);
   await page.locator('#item-title').fill('Unsaved synthetic');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.getByRole('button', { name: 'Discard changes' }).click();
   await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
-  await expect(page.locator('#preparation-details')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
   await input.setInputFiles({ name: 'invalid.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
-  await page.getByRole('button', { name: 'Show preparation details' }).click();
+  await expect(page.getByRole('alert')).toHaveText(messages['photo.invalid'].en);
   await page.getByRole('button', { name: 'Account menu' }).click();
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
-  await expect(page.locator('#preparation-details')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
   await signIn(page, 'b');
   await expect(page.locator('#capture-title')).toHaveText(messages['capture.title'].sv);
   await expect(page.locator('#item-title')).toHaveValue('');
-  await expect(page.locator('#preparation-details')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
   await holdNextPhotoRead(page);
   await input.setInputFiles({ name: 'late.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
   await expect.poll(() => page.evaluate(() => (window as PhotoReadProbe).photoReadStarted)).toBe(true);
@@ -696,7 +690,6 @@ test('discard and owner logout clear preparation details and ignore late photo r
   await expect(page.locator('#email')).toBeVisible();
   await page.evaluate(() => (window as PhotoReadProbe).releasePhotoRead?.());
   await expect(page.locator('.capture-photo img')).toHaveCount(0);
-  await expect(page.locator('#preparation-details')).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect(backend.items).toHaveLength(0);
   expect(backend.files.size).toBe(0);
