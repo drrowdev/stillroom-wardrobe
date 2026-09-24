@@ -69,7 +69,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
         {result.missingDetails.includes('formality') && <p className="muted today-hint">{t('today.missingFormality')}</p>}
         <div className="today-ideas">
           {result.suggestions.map((suggestion, index) => <Idea key={suggestion.key} suggestion={suggestion} number={index + 1} byId={byId} images={images} t={t}
-            online={online} vote={ideas.votes.get(suggestion.key) ?? null} pending={ideas.pending} failed={ideas.failed === suggestion.key}
+            online={online} vote={ideas.votes.get(suggestion.key) ?? null} pending={ideas.pending} failed={ideas.failed === suggestion.key} unresolved={ideas.unresolved === suggestion.key} onRetry={ideas.retry}
             onSave={() => onSave(suggestion.itemIds, occasion)} onLike={() => ideas.like(suggestion.key)}
             onHide={() => ideas.hide(suggestion.key)} onUndo={() => ideas.undo(suggestion.key)} />)}
         </div>
@@ -91,24 +91,28 @@ function Pieces({ suggestion, byId, images, t }: { suggestion: Suggestion; byId:
 
 type IdeaProps = {
   suggestion: Suggestion; number: number; byId: ReadonlyMap<string, WardrobeItem>; images: PrivateImages; t: Translate; online: boolean;
-  vote: 1 | -1 | null; pending: Pending | null; failed: boolean;
-  onSave: () => void; onLike: () => void; onHide: () => void; onUndo: () => void;
+  vote: 1 | -1 | null; pending: Pending | null; failed: boolean; unresolved: boolean;
+  onSave: () => void; onLike: () => void; onHide: () => void; onUndo: () => void; onRetry: () => void;
 };
-function Idea({ suggestion, number, byId, images, t, online, vote, pending, failed, onSave, onLike, onHide, onUndo }: IdeaProps) {
+function Idea({ suggestion, number, byId, images, t, online, vote, pending, failed, unresolved, onSave, onLike, onHide, onUndo, onRetry }: IdeaProps) {
   const title = `idea-${number}-title`;
-  const busy = pending !== null;
+  // Until an uncertain choice is settled, only Try again is offered on this card.
+  const busy = pending !== null || unresolved;
+  const problem = unresolved
+    ? <div className="notice notice-error" role="alert"><span>{t('today.voteFailed')}</span><button type="button" className="text-button" disabled={!online || pending !== null} onClick={onRetry}>{t('common.retry')}</button></div>
+    : failed && <p className="notice notice-error" role="alert">{t('today.voteFailed')}</p>;
   const mine = pending?.key === suggestion.key;
   if (vote === -1) return <article className="today-card today-card-hidden" aria-labelledby={title}>
     <h2 id={title} className="sr-only">{t('today.idea', { number })}</h2>
     <p role="status">{t('today.hidden')}</p>
-    {failed && <p className="notice notice-error" role="alert">{t('today.voteFailed')}</p>}
+    {problem}
     <button type="button" className="text-button" disabled={!online || busy} aria-busy={mine || undefined} onClick={onUndo}>{t('common.undo')}</button>
   </article>;
   return <article className="today-card" aria-labelledby={title}>
     <h2 id={title} className="sr-only">{t('today.idea', { number })}</h2>
     <Pieces suggestion={suggestion} byId={byId} images={images} t={t} />
     {suggestion.reasons.length > 0 && <ul className="today-reasons">{suggestion.reasons.map(reason => <li key={reason.key}><Icon name="check" />{t(reasonKeys[reason.key])}</li>)}</ul>}
-    {failed && <p className="notice notice-error" role="alert">{t('today.voteFailed')}</p>}
+    {problem}
     <div className="today-actions">
       <button type="button" className="button button-primary" disabled={!online} onClick={onSave}>{t('today.save')}</button>
       <button type="button" className="button button-secondary" aria-pressed={vote === 1} disabled={!online || busy} aria-busy={mine && pending.kind === 'like' || undefined} onClick={onLike}>{t('today.like')}</button>

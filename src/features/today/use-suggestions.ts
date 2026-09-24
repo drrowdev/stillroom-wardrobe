@@ -3,7 +3,7 @@ import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import { errorKey, isAborted } from '../../data/errors';
 import { loadWardrobe } from '../../data/items';
-import { loadSuggestionInputs, readVote, writeVote, type Vote } from '../../data/suggestions';
+import { loadSuggestionInputs, readVote, writeVote, type Vote, type WriteOutcome } from '../../data/suggestions';
 import type { Occasion } from '../../domain/outfits';
 import {
   combinationKey, recommend, seasonForDate, type EngineFeedback, type EngineItem, type Season, type SuggestionResult,
@@ -37,6 +37,7 @@ type Data = { items: WardrobeItem[]; excludedPairs: [string, string][] };
 // Ideas are ranked with the votes known when the page was drawn, so a Like never moves a card.
 type Run = { feedback: EngineFeedback[]; skip: ReadonlySet<string>; paged: boolean };
 export type Pending = { key: string; kind: 'like' | 'hide' | 'undo' };
+type Unresolved = Pending & { choice: Vote | null };
 
 const votesFrom = (feedback: readonly EngineFeedback[]) => new Map(feedback.map(entry => [combinationKey(entry.itemIds), entry.vote]));
 const feedbackFrom = (votes: ReadonlyMap<string, Vote>): EngineFeedback[] =>
@@ -52,6 +53,15 @@ export function mergeVotes(snapshot: ReadonlyMap<string, Vote>, confirmed: Confi
   }
   return merged;
 }
+// Ranking for a refreshed page: the fresh votes, except choices made on this page keep the value the page was ranked with.
+export function rankingVotes(fresh: ReadonlyMap<string, Vote>, ranked: ReadonlyMap<string, Vote>, changed: ReadonlySet<string>): Map<string, Vote> {
+  const result = new Map(fresh);
+  for (const key of changed) {
+    const vote = ranked.get(key);
+    if (vote === undefined) result.delete(key); else result.set(key, vote);
+  }
+  return result;
+}
 
 export function useSuggestions(client: AppClient, scope: OwnerScope, online: boolean, invalidation: number, occasion: Occasion, season: Season) {
   const [data, setData] = useState<Data | null>(null);
@@ -61,11 +71,14 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   const [run, setRun] = useState<Run>({ feedback: [], skip: new Set(), paged: false });
   const [pending, setPending] = useState<Pending | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [unresolved, setUnresolved] = useState<Unresolved | null>(null);
   const wasOnline = useRef(online);
   const votesRef = useRef(votes);
   const writes = useRef<AbortController | null>(null);
   const seq = useRef(0);
   const confirmed = useRef(new Map<string, { vote: Vote | null; seq: number }>());
+  // Choices made on the page being shown keep their earlier ranking, so a hidden card stays in place with its Undo.
+  const changedOnPage = useRef(new Set<string>());
   const reload = useCallback(() => setTick(value => value + 1), []);
   useEffect(() => { votesRef.current = votes; }, [votes]);
   useEffect(() => {
@@ -82,7 +95,7 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
       for (const [key, entry] of confirmed.current) if (entry.seq <= startSeq) confirmed.current.delete(key);
       setData({ items, excludedPairs: inputs.excludedPairs });
       setVotes(merged);
-      setRun(current => ({ ...current, feedback: feedbackFrom(merged) }));
+      setRun(current => ({ ...current, feedback: feedbackFrom(rankingVotes(merged, votesFrom(current.feedback), changedOnPage.current)) }));
     }, (problem: unknown) => {
       if (!controller.signal.aborted && !isAborted(problem)) setError(errorKey(problem));
     });
@@ -95,8 +108,9 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   }, []);
   // A new occasion or season starts again from the first ideas.
   useEffect(() => {
+    changedOnPage.current = new Set();
     setRun({ feedback: feedbackFrom(votesRef.current), skip: new Set(), paged: false });
-    setFailed(null);
+    setFailed(null); setUnresolved(null);
   }, [occasion, season]);
 
   const engineItems = useMemo(() => suggestionPool(data?.items ?? []), [data]);
@@ -108,30 +122,35 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   const more = useCallback(() => {
     if (!result) return;
     const shown = result.suggestions.map(suggestion => suggestion.coreKey);
+    changedOnPage.current = new Set();
     setRun(current => ({ feedback: feedbackFrom(votesRef.current), skip: new Set([...current.skip, ...shown]), paged: true }));
-    setFailed(null);
+    setFailed(null); setUnresolved(null);
   }, [result]);
   const startOver = useCallback(() => {
+    changedOnPage.current = new Set();
     setRun({ feedback: feedbackFrom(votesRef.current), skip: new Set(), paged: false });
-    setFailed(null);
+    setFailed(null); setUnresolved(null);
   }, []);
 
   const write = useCallback(async (key: string, kind: Pending['kind'], next: Vote | null) => {
     const signal = writes.current?.signal;
     if (!signal || pending || !online) return;
     setPending({ key, kind }); setFailed(null);
+    setUnresolved(current => current?.key === key ? null : current);
     const attempt = { ownerId: scope.ownerId, epoch: scope.epoch, key, choice: next };
     const settle = (stored: Vote | null) => {
       seq.current += 1;
       confirmed.current.set(key, { vote: stored, seq: seq.current });
+      changedOnPage.current.add(key);
       setVotes(current => {
         const updated = new Map(current);
         if (stored === null) updated.delete(key); else updated.set(key, stored);
         return updated;
       });
     };
+    let outcome: WriteOutcome | null = null;
     try {
-      const outcome = await writeVote(client, scope, attempt, signal);
+      outcome = await writeVote(client, scope, attempt, signal);
       if (outcome === 'done') { settle(next); return; }
       if (outcome === 'unknown') {
         const stored = await readVote(client, scope, attempt, signal);
@@ -140,14 +159,17 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
       }
       setFailed(key);
     } catch (problem) {
-      if (!signal.aborted && !isAborted(problem)) setFailed(key);
+      if (signal.aborted || isAborted(problem)) return;
+      // The choice may have been stored; keep it so Try again can settle it.
+      if (outcome === 'unknown') setUnresolved({ key, kind, choice: next }); else setFailed(key);
     } finally {
       if (!signal.aborted) setPending(null);
     }
   }, [client, scope, online, pending]);
 
   return {
-    data, error, result, votes, pending, failed, paged: run.paged, reload, more, startOver,
+    data, error, result, votes, pending, failed, unresolved: unresolved?.key ?? null, paged: run.paged, reload, more, startOver,
+    retry: () => { if (unresolved) void write(unresolved.key, unresolved.kind, unresolved.choice); },
     hasClothes: Boolean(data?.items.some(item => item.lifecycle === 'active')),
     like: (key: string) => { void write(key, 'like', votes.get(key) === 1 ? null : 1); },
     hide: (key: string) => { void write(key, 'hide', -1); },

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { classifyVoteError, parseFeedbackRows, parseRuleRows, parseStoredVote } from '../../src/data/suggestions';
 import { navFamilyFor } from '../../src/domain/outfits';
 import type { WardrobeItem } from '../../src/domain/wardrobe';
-import { defaultSeason, localDate, mergeVotes, suggestionPool } from '../../src/features/today/use-suggestions';
+import { defaultSeason, localDate, mergeVotes, rankingVotes, suggestionPool } from '../../src/features/today/use-suggestions';
 
 const owner = '00000000-0000-4000-8000-00000000000a';
 const other = '00000000-0000-4000-8000-00000000000b';
@@ -91,5 +91,14 @@ describe('mergeVotes', () => {
     expect([...mergeVotes(snapshot, confirmed, 1)].sort()).toEqual([['b', 1], ['c', 1], ['d', -1]]);
     expect([...mergeVotes(snapshot, confirmed, 4)]).toEqual([...snapshot]);
     expect(snapshot.get('a')).toBe(1);
+  });
+});
+
+describe('rankingVotes', () => {
+  it('keeps the ranking value of choices made on the shown page and takes fresh votes for the rest', () => {
+    const fresh = new Map<string, 1 | -1>([['a', -1], ['b', 1], ['c', -1]]);
+    const ranked = new Map<string, 1 | -1>([['b', -1], ['d', 1]]);
+    expect([...rankingVotes(fresh, ranked, new Set(['a', 'b', 'd']))].sort()).toEqual([['b', -1], ['c', -1], ['d', 1]]);
+    expect([...rankingVotes(fresh, ranked, new Set())]).toEqual([...fresh]);
   });
 });

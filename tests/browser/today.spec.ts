@@ -153,9 +153,29 @@ test('I15 a choice whose reply is lost is checked against what was stored', asyn
   await like.click();
   await expect(page.getByText(text('today.voteFailed'), { exact: true })).toBeVisible();
   await expect(like).toHaveAttribute('aria-pressed', 'true');
+  await expect(like).toBeDisabled();
   expect(api.suggestionFeedback).toHaveLength(1);
-  await like.click();
+  await cards(page).nth(0).getByRole('button', { name: text('common.retry'), exact: true }).click();
   await expect(like).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
+  expect(api.suggestionFeedback).toHaveLength(0);
+});
+
+test('I15 a stored Not for me whose reply and check both fail is settled by Try again', async ({ page }) => {
+  const { api } = await start(page);
+  const card = cards(page).nth(1);
+  const hiddenNames = await names(card);
+  api.feedbackControl.faults.push({ method: 'POST', commit: true, fail: 503 }, { method: 'READ', commit: false, fail: 500 });
+  await card.getByRole('button', { name: text('today.notForMe'), exact: true }).click();
+  await expect(card.getByText(text('today.voteFailed'), { exact: true })).toBeVisible();
+  expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
+  for (const key of ['today.like', 'today.notForMe'] as const) await expect(card.getByRole('button', { name: text(key), exact: true })).toBeDisabled();
+  await card.getByRole('button', { name: text('common.retry'), exact: true }).click();
+  await expect(card).toContainText(text('today.hidden'));
+  await expect(card.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
+  expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
+  await card.getByRole('button', { name: text('common.undo'), exact: true }).click();
+  await expect(card.locator('.outfit-component-name')).toHaveText(hiddenNames);
   expect(api.suggestionFeedback).toHaveLength(0);
 });
 
@@ -170,11 +190,13 @@ test('I15 an older refresh never brings back a card hidden while it was loading'
   await cards(page).nth(1).getByRole('button', { name: text('today.notForMe'), exact: true }).click();
   await expect(cards(page).nth(1)).toContainText(text('today.hidden'));
   gate.release();
+  await expect.poll(() => api.requests.filter(entry => entry.path === '/rest/v1/suggestion_feedback' && entry.method === 'GET').length).toBeGreaterThan(1);
   await page.waitForTimeout(500);
-  const offered = await cards(page).filter({ has: page.getByRole('button', { name: text('today.notForMe'), exact: true }) })
-    .evaluateAll(list => list.map(card => [...card.querySelectorAll('.outfit-component-name')].map(node => node.textContent ?? '').join(' + ')));
-  expect(offered.length).toBeGreaterThan(0);
-  expect(offered).not.toContain(hiddenNames.join(' + '));
+  await expect(cards(page).nth(1)).toContainText(text('today.hidden'));
+  await cards(page).nth(1).getByRole('button', { name: text('common.undo'), exact: true }).click();
+  await expect(cards(page).nth(1).locator('.outfit-component-name')).toHaveText(hiddenNames);
+  await cards(page).nth(1).getByRole('button', { name: text('today.notForMe'), exact: true }).click();
+  await expect(cards(page).nth(1)).toContainText(text('today.hidden'));
   await navLink(page, 'nav.wardrobe').click();
   await navLink(page, 'nav.today').click();
   await expect(cards(page)).toHaveCount(3);
