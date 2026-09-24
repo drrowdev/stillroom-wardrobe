@@ -729,6 +729,17 @@ retried-pass flaky outcome. A separate `test:a11y` invocation uses this config,
 but CI does not currently invoke that command. Existing success-only visual
 uploads skip after a flaky failure; absent visual review stays pending.
 
+Since CI2 the browser run is split across two jobs with the same config:
+"App and browser contracts" runs `--project=chromium --project=mobile` (timeout
+30 minutes) and keeps all 12 visual uploads, because only those projects write
+captures; "WebKit photo contracts" runs `--project=webkit-photo` (timeout 20
+minutes) and uploads nothing. Each invocation applies `failOnFlakyTests`
+independently. A WebKit failure no longer skips the App job's uploads, but it
+still fails its own required gate. `tests/unit/ci-workflow.test.ts` fails if a
+Playwright project is not selected by exactly one job or an upload moves. The
+timeouts are estimates from the ~19.6-minute single job; measured durations
+must stay within 60 % of each timeout.
+
 Only the existing oversized analysis call adds its pre-fetch `constructedBytes`,
 expecting exactly413/response/512001. The other eleven authorization/envelope
 results retain two keys and their original statuses. The closed copier retains
@@ -812,19 +823,47 @@ The Database CI job runs one visible step before `db:start`: it asserts that
 `SUPABASE_ENV` is unset, that none of the eight project dotenv files the legacy
 CLI loads (`.env.development.local`, `.env.local`, `.env.development` and `.env`,
 in `supabase/` and the project root) exist, and that
-`supabase/.temp/pgmeta-version` is absent. It then runs a single
-`docker pull public.ecr.aws/supabase/postgres-meta:v0.98.0`. That reference is
+`supabase/.temp/pgmeta-version` is absent. It then acquires
+`public.ecr.aws/supabase/postgres-meta:v0.98.0`. That reference is
 the pinned CLI's Dockerfile pg-meta tag with its default public.ecr.aws registry.
 Ambient overrides are filtered; project dotenv overrides remain possible, but are
 absent in this checkout/current CI. No writer for `pgmeta-version` was found in
-the legacy TypeScript sources; that is a negative search result. A failing pull
-fails the job; there is no retry, suppression or fallback, and `db:types` itself
-is never retried. The pull can change the timing or path of the failure; a later
-green run proves nothing about the cause or its elimination.
-`tests/unit/local-backend.test.ts` pins the step text, its order and the
-`supabase` 2.116.0 pin. **Whenever the CLI pin changes, re-derive the image
-reference by hand from that version's source**; the test cannot do it. Any
+the legacy TypeScript sources; that is a negative search result.
+
+CI2 (24 September 2026) made acquisition bounded and verified after two
+`toomanyrequests: Rate exceeded` ECR failures (runs 35999112583 and 36002588126,
+attempt 1), under `shell: bash -eo pipefail {0}`:
+
+1. One `docker pull` of the ECR tag. On success, the image's RepoDigests must
+   contain `public.ecr.aws/supabase/postgres-meta@sha256:cef71ba901751dcc242cc685cf13786935ea8926820fb342f23bb0fbef77de5a`,
+   so upstream tag drift fails visibly.
+2. Only if that pull fails: a `::warning` annotation, one `docker pull` of
+   `ghcr.io/supabase/postgres-meta@<same digest>`, a `docker tag` to the exact
+   ECR tag, and a RepoDigests check for the GHCR digest reference.
+
+That is at most two `docker pull` invocations; neither has its own elapsed-time
+bound beyond the job timeout. A failed pull, tag, inspect or digest check fails
+the job; there is no loop, sleep, suppression or third source, and `db:types`
+itself is never retried. A GHCR recovery is an honest pass for image
+availability only, never evidence about ECR or the exit-125 cause. On 24 September
+2026, anonymous manifest requests with identical Accept headers returned the same
+OCI image index digest from both registries (linux/amd64 `sha256:4f23a37b…`,
+linux/arm64 `sha256:1fa69d28…` plus two attestation entries). The pull can
+change the timing or path of a failure; a later green run proves nothing about
+the cause or its elimination.
+`tests/unit/local-backend.test.ts` pins the step text, its order, the digest and
+the `supabase` 2.116.0 pin, and runs the step body under a docker stand-in for
+the pass, recovery and failure branches. **Whenever the CLI pin changes,
+re-derive the image reference by hand from that version's source and the digest
+from both registries (they must be identical)**; the test cannot do it. Any
 introduced override file or variable also requires stopping and re-deriving it.
+
+Separately, pinned CLI 2.116.0 already protects `supabase start` images: it
+first checks local candidates, then makes up to three pull attempts per
+candidate with 4 s/8 s backoff across ECR, `ghcr.io/supabase` and the Docker Hub
+source repository. A registry override disables that fallback, and inspection
+or spawn failures can end it early. `db:types` uses the single ECR reference,
+which is why only the pg-meta acquisition needed this step.
 
 ## Targeted local validation
 

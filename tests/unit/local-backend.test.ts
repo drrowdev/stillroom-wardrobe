@@ -2,6 +2,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { readFile } from 'node:fs/promises';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { AssertionError } from 'node:assert';
 import path from 'node:path';
@@ -16,6 +18,41 @@ import {
 } from '../../scripts/backend/local.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { analysisRequest, servedInvalidTokenRequest } from '../integration/ai-analysis.sessions.mjs';
+
+// Re-derive the tag by hand from the pinned CLI source, and the digest from both registries, whenever the pin changes.
+const pgMetaPullStep = (() => {
+  const image = 'public.ecr.aws/supabase/postgres-meta:v0.98.0';
+  const digest = 'sha256:cef71ba901751dcc242cc685cf13786935ea8926820fb342f23bb0fbef77de5a';
+  const mirror = `ghcr.io/supabase/postgres-meta@${digest}`;
+  const lines = [
+    'test -z "${SUPABASE_ENV:-}"',
+    ...['supabase/', ''].flatMap((dir) => ['.env.development.local', '.env.local', '.env.development', '.env']
+      .map((name) => `test ! -e ${dir}${name}`)),
+    'test ! -e supabase/.temp/pgmeta-version',
+    `image=${image}`,
+    `digest=${digest}`,
+    'mirror=ghcr.io/supabase/postgres-meta@$digest',
+    'if docker pull "$image"; then',
+    '  expected="public.ecr.aws/supabase/postgres-meta@$digest"',
+    'else',
+    '  echo "::warning title=pg-meta recovered from GHCR::ECR pull failed. Pulling the GHCR mirror once by pinned digest; a pass proves image availability only."',
+    '  docker pull "$mirror"',
+    '  docker tag "$mirror" "$image"',
+    '  expected="$mirror"',
+    'fi',
+    `digests="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image")"`,
+    'grep -Fqx "$expected" <<< "$digests"',
+    'echo "pg-meta verified: $expected"',
+  ];
+  const step = [
+    '      - name: Pull the pg-meta image used by type generation (ECR, then pinned GHCR mirror)',
+    '        shell: bash -eo pipefail {0}',
+    '        run: |',
+    ...lines.map((line) => `          ${line}`),
+    '',
+  ].join('\n');
+  return { image, digest, mirror, step, body: `${lines.join('\n')}\n` };
+})();
 
 describe('C parent receipt contract', () => {
   let cReceipts: (stdout: string, stderr: string, requests: unknown, owners: unknown, generations: number) => unknown;
@@ -1771,34 +1808,96 @@ describe('safe local type-generation description', () => {
     const manifest = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
     // Re-derive this reference by hand from the pinned CLI source whenever the pin changes.
     expect(manifest.devDependencies.supabase).toBe('2.116.0');
-    const image = 'public.ecr.aws/supabase/postgres-meta:v0.98.0';
-    const step = [
-      '      - name: Pull the pg-meta image used by type generation (single attempt)',
-      '        run: |',
-      '          test -z "${SUPABASE_ENV:-}"',
-      ...['supabase/', ''].flatMap((dir) => ['.env.development.local', '.env.local', '.env.development', '.env']
-        .map((name) => `          test ! -e ${dir}${name}`)),
-      '          test ! -e supabase/.temp/pgmeta-version',
-      `          docker pull ${image}`,
-      '',
-    ].join('\n');
+    const { image, digest, step } = pgMetaPullStep;
     const start = workflow.indexOf('\n  database:\n');
     expect(start).toBeGreaterThan(-1);
     const after = workflow.slice(start + 1);
     const next = after.slice(1).search(/\n {2}[A-Za-z0-9_-]+:\n/);
     const job = next === -1 ? after : after.slice(0, next + 1);
     expect(workflow.split(image).length - 1).toBe(1);
-    expect(workflow.split('docker pull').length - 1).toBe(1);
+    expect(workflow.split(digest).length - 1).toBe(1);
+    expect(workflow.split('ghcr.io/supabase/postgres-meta@$digest').length - 1).toBe(1);
+    expect(workflow.split('ghcr.io').length - 1).toBe(1);
+    expect(workflow.split('docker pull').length - 1).toBe(2);
+    expect(workflow.split('docker tag').length - 1).toBe(1);
     expect(job.split(step).length - 1).toBe(1);
     const stepIndex = job.indexOf(step);
     const startup = job.indexOf('      - run: npm run db:start\n');
     expect(startup).toBeGreaterThan(-1);
     expect(stepIndex).toBeLessThan(startup);
     expect(job.slice(stepIndex + step.length).startsWith('      - run: npm run db:start\n')).toBe(true);
-    for (const suppression of ['|| true', 'continue-on-error', 'set +e', '||', 'retry']) {
+    for (const suppression of ['|| true', 'continue-on-error', 'set +e', '||', 'retry', 'sleep', 'for ', 'while ', 'until ']) {
       expect(step.includes(suppression)).toBe(false);
     }
     expect(job.split('continue-on-error').length - 1).toBe(0);
+  });
+
+  describe('CI pg-meta pull step behaviour under a docker stand-in', () => {
+    const gitBash = 'C:\\Program Files\\Git\\bin\\bash.exe';
+    const bash = process.platform === 'win32' ? (existsSync(gitBash) ? gitBash : null) : 'bash';
+    const { image, digest, mirror, body } = pgMetaPullStep;
+    const ecrDigest = `public.ecr.aws/supabase/postgres-meta@${digest}`;
+    type Mode = { ecr?: number; ghcr?: number; tag?: number; inspect?: number; digests?: readonly string[]; dotenv?: boolean };
+    const run = (mode: Mode) => {
+      // Replace only the docker binary; the step body runs verbatim under the workflow's bash flags.
+      const prelude = [
+        'calls=()',
+        'docker() {',
+        '  calls+=("$*"); echo "docker $*" >&2',
+        '  case "$1 $2" in',
+        `    "pull ${image}") return ${mode.ecr ?? 0} ;;`,
+        `    "pull ${mirror}") return ${mode.ghcr ?? 0} ;;`,
+        `    "tag ${mirror}") return ${mode.tag ?? 0} ;;`,
+        `    "image inspect") printf '%s\\n' ${(mode.digests ?? []).map((value) => `'${value}'`).join(' ')}; return ${mode.inspect ?? 0} ;;`,
+        '  esac',
+        '  return 99',
+        '}',
+        mode.dotenv ? 'touch .env' : '',
+      ].join('\n');
+      const directory = mkdtempSync(path.join(os.tmpdir(), 'pg-meta-step-'));
+      try {
+        return spawnSync(bash!, ['-eo', 'pipefail', '-s'], {
+          cwd: directory, input: `${prelude}\n${body}`, encoding: 'utf8', timeout: 15_000,
+          env: { PATH: process.env.PATH ?? '', HOME: directory, SYSTEMROOT: process.env.SYSTEMROOT ?? '' },
+        });
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    };
+    const warning = '::warning title=pg-meta recovered from GHCR::';
+
+    it.skipIf(bash === null)('passes a verified ECR acquisition without the mirror', () => {
+      const result = run({ digests: [ecrDigest] });
+      expect(result.status).toBe(0);
+      expect(result.stdout).not.toContain(warning);
+      expect(result.stdout).toContain(`pg-meta verified: ${ecrDigest}\n`);
+      expect(result.stderr).not.toContain('docker pull ghcr.io');
+    });
+    it.skipIf(bash === null)('recovers once from the pinned GHCR digest with a visible warning', () => {
+      const result = run({ ecr: 1, digests: [mirror] });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(warning);
+      expect(result.stderr).toContain(`docker pull ${mirror}\ndocker tag ${mirror} ${image}\ndocker image inspect`);
+      expect(result.stdout).toContain(`pg-meta verified: ${mirror}\n`);
+    });
+    it.skipIf(bash === null).each([
+      ['both sources fail', { ecr: 1, ghcr: 1, digests: [mirror] }],
+      ['the retag fails', { ecr: 1, tag: 1, digests: [mirror] }],
+      ['inspect fails after ECR', { inspect: 1, digests: [ecrDigest] }],
+      ['inspect fails after GHCR', { ecr: 1, inspect: 1, digests: [mirror] }],
+      ['ECR serves another digest', { digests: [`public.ecr.aws/supabase/postgres-meta@sha256:${'0'.repeat(64)}`] }],
+      ['GHCR recovery lacks its digest', { ecr: 1, digests: [ecrDigest] }],
+      ['ECR success is judged by the mirror digest', { digests: [mirror] }],
+    ] as const)('fails when %s', (_name, mode: Mode) => {
+      const result = run(mode);
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).not.toContain('pg-meta verified:');
+    });
+    it.skipIf(bash === null)('refuses before any docker call when a project dotenv override exists', () => {
+      const result = run({ dotenv: true, digests: [ecrDigest] });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).not.toContain('docker ');
+    });
   });
 
   it.each([undefined, null, false, '0', 1n, NaN, Infinity, -Infinity, 0.5,
