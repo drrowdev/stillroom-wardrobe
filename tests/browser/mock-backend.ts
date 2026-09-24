@@ -505,6 +505,11 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   const items: JsonRow[] = [];
   const wearEvents: JsonRow[] = [];
   const wearLinks: JsonRow[] = [];
+  const outfits: JsonRow[] = [];
+  const outfitItems: JsonRow[] = [];
+  // Scripts the next outfit save or outfit reads: lost replies, commits whose reply is lost, and failed rereads.
+  const outfitControl: { nextSave: null | { mode: 'lost' | 'committedLost' | 'transport' } | { mode: 'error'; status: number; body: unknown };
+    readFailures: number; readFailureStatus: number; saves: number } = { nextSave: null, readFailures: 0, readFailureStatus: 500, saves: 0 };
   const preferences: Record<string, JsonRow> = Object.fromEntries(Object.values(owners).map((owner) => [owner, {
     owner_id: owner, version: 1, preferred_colours: [], style_tags: [], excluded_categories: [],
     minimum_upper_coverage: 0, minimum_lower_coverage: 0, cold_sensitivity: 0, repeat_gap_days: 2,
@@ -1032,6 +1037,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         if (op && (op.receipt.requestId !== body.p_request_id || op.receipt.phase !== 'removing_registered' || op.targets.some(target => !target.absent))) { await conflict(); return; }
         items.splice(items.indexOf(item), 1);
         for (let i = images.length - 1; i >= 0; i--) if (images[i]!.owner_id === owner && images[i]!.item_id === id) images.splice(i, 1);
+        for (let i = outfitItems.length - 1; i >= 0; i--) if (outfitItems[i]!.owner_id === owner && outfitItems[i]!.item_id === id) outfitItems.splice(i, 1);
         deletionClaims.delete(id);
         if (op) {
           op.targets = []; op.receipt = { ...op.receipt, phase: 'completed', expectedVersion: null, inventoryHash: null,
@@ -1083,6 +1089,79 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         }).sort((a, b) => String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0).slice(0, 500);
       await json(result); return;
     }
+    if (url.pathname === '/rest/v1/outfits' && method === 'GET') {
+      const expected = 'id,owner_id,title,occasion,notes,favourite,deleted_at,version,created_at,outfit_items!outfit_items_owner_id_outfit_id_fkey(owner_id,item_id,position)';
+      if (!owner || url.searchParams.get('select') !== expected || url.searchParams.get('owner_id') !== `eq.${owner}`) { await json({ code: '42501' }, 403); return; }
+      if (outfitControl.readFailures > 0) {
+        outfitControl.readFailures--;
+        await route.fulfill({ status: outfitControl.readFailureStatus, json: { message: 'Unavailable' }, headers: { 'x-supabase-api-version': '2024-01-01', 'retry-after': '0', 'access-control-expose-headers': 'retry-after' } }); return;
+      }
+      const id = url.searchParams.get('id');
+      let rows = outfits.filter(row => row.owner_id === owner);
+      if (id) {
+        if (!id.startsWith('eq.') || !isUuid(id.slice(3)) || url.searchParams.has('or') || url.searchParams.has('deleted_at')) { await json({ code: '22023' }, 400); return; }
+        rows = rows.filter(row => row.id === id.slice(3));
+      } else {
+        const keyset = url.searchParams.get('or');
+        const match = keyset ? /^\(created_at\.lt\.([^,]+),and\(created_at\.eq\.([^,]+),id\.lt\.([^)]+)\)\)$/.exec(keyset) : null;
+        if (url.searchParams.get('deleted_at') !== 'is.null' || url.searchParams.get('order') !== 'created_at.desc,id.desc'
+          || url.searchParams.get('limit') !== '500' || keyset && (!match || match[1] !== match[2] || !isUuid(match[3]))) { await json({ code: '22023' }, 400); return; }
+        rows = rows.filter(row => row.deleted_at === null && (!match || String(row.created_at) < match[1]! || row.created_at === match[1] && String(row.id) < match[3]!))
+          .sort((a, b) => String(a.created_at) < String(b.created_at) ? 1 : String(a.created_at) > String(b.created_at) ? -1 : String(a.id) < String(b.id) ? 1 : -1).slice(0, 500);
+      }
+      const shaped = rows.map(row => ({ id: row.id, owner_id: row.owner_id, title: row.title, occasion: row.occasion, notes: row.notes, favourite: row.favourite,
+        deleted_at: row.deleted_at, version: row.version, created_at: row.created_at,
+        outfit_items: outfitItems.filter(link => link.owner_id === owner && link.outfit_id === row.id).map(link => ({ owner_id: link.owner_id, item_id: link.item_id, position: link.position })) }));
+      await json(request.headers().accept?.includes('vnd.pgrst.object') ? shaped[0] ?? null : shaped); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/save_outfit') {
+      outfitControl.saves++;
+      const body = request.postDataJSON() as JsonRow;
+      const script = outfitControl.nextSave;
+      outfitControl.nextSave = null;
+      if (script?.mode === 'lost') { await json({ message: 'Service unavailable' }, 503); return; }
+      if (script?.mode === 'transport') { await route.abort('failed'); return; }
+      if (script?.mode === 'error') { await json(script.body, script.status); return; }
+      const keys = Object.keys(body).sort().join(',');
+      const create = 'p_favourite,p_id,p_item_ids,p_notes,p_occasion,p_title', edit = 'p_expected_version,p_favourite,p_id,p_item_ids,p_notes,p_occasion,p_title';
+      if (!owner || method !== 'POST' || keys !== create && keys !== edit) { await json({ code: '42501', message: 'Not available' }, 403); return; }
+      const ids = body.p_item_ids;
+      const invalid = () => json({ code: 'P0001', message: 'Invalid selection' }, 400);
+      const conflict = () => json({ code: 'P0001', message: 'Request conflict' }, 400);
+      if (!Array.isArray(ids) || !ids.length || ids.length > 12 || new Set(ids).size !== ids.length
+        || ids.some(value => !items.some(item => item.id === value && item.owner_id === owner))) { await invalid(); return; }
+      if (!isUuid(body.p_id) || typeof body.p_title !== 'string' || !body.p_title.trim() || typeof body.p_notes !== 'string'
+        || typeof body.p_occasion !== 'string' || typeof body.p_favourite !== 'boolean') { await json({ code: '23514', message: 'Invalid input' }, 400); return; }
+      const existing = outfits.find(row => row.id === body.p_id);
+      if (existing && existing.owner_id !== owner) { await json({ code: '23505', message: 'duplicate key' }, 409); return; }
+      const links = (outfitId: unknown) => outfitItems.filter(link => link.owner_id === owner && link.outfit_id === outfitId)
+        .sort((a, b) => Number(a.position) - Number(b.position)).map(link => link.item_id);
+      const write = (row: JsonRow) => {
+        for (let i = outfitItems.length - 1; i >= 0; i--) if (outfitItems[i]!.outfit_id === row.id) outfitItems.splice(i, 1);
+        ids.forEach((itemId, position) => outfitItems.push({ owner_id: owner, outfit_id: row.id, item_id: itemId, position }));
+      };
+      let version: number;
+      if (keys === create) {
+        if (existing) {
+          const same = existing.title === body.p_title && existing.occasion === body.p_occasion && existing.notes === body.p_notes
+            && existing.favourite === body.p_favourite && links(existing.id).join(',') === ids.join(',') && existing.deleted_at === null;
+          if (!same) { await conflict(); return; }
+          version = Number(existing.version);
+        } else {
+          const now = new Date().toISOString();
+          const row = { id: body.p_id, owner_id: owner, title: body.p_title, occasion: body.p_occasion, notes: body.p_notes, favourite: body.p_favourite,
+            deleted_at: null, version: 1, created_at: now, updated_at: now };
+          outfits.push(row); write(row); version = 1;
+        }
+      } else {
+        if (!existing || existing.deleted_at !== null || existing.version !== body.p_expected_version) { await conflict(); return; }
+        Object.assign(existing, { title: body.p_title, occasion: body.p_occasion, notes: body.p_notes, favourite: body.p_favourite,
+          version: Number(existing.version) + 1, updated_at: new Date().toISOString() });
+        write(existing); version = Number(existing.version);
+      }
+      if (script?.mode === 'committedLost') { await json({ message: 'Service unavailable' }, 503); return; }
+      await json(version); return;
+    }
     const table = url.pathname === '/rest/v1/items' ? items : url.pathname === '/rest/v1/item_images' ? images : null;
     if (table) {
       if (method === 'POST') {
@@ -1110,10 +1189,12 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (keyset && (!match || match[1] !== match[2] || !isUuid(match[3]) || !Number.isFinite(Date.parse(match[1]!)))) {
         await json({ code: '22023' }, 400); return;
       }
-      const rows = own.filter((row) => (!id || (id.startsWith('gt.') ? String(row.id) > id.slice(3) : `eq.${row.id}` === id)) && (!state || `eq.${row.state}` === state)
+      const inList = (value: string | null) => value?.startsWith('in.(') && value.endsWith(')') ? value.slice(4, -1).split(',') : null;
+      const idIn = inList(id), itemIn = inList(url.searchParams.get('item_id'));
+      const rows = own.filter((row) => (!id || (idIn ? idIn.includes(String(row.id)) : id.startsWith('gt.') ? String(row.id) > id.slice(3) : `eq.${row.id}` === id)) && (!state || `eq.${row.state}` === state)
         && (!match || String(row.created_at) < match[1]! || row.created_at === match[1] && String(row.id) < match[3]!)
         && (!url.searchParams.has('owner_id') || url.searchParams.get('owner_id') === `eq.${row.owner_id}`)
-        && (!url.searchParams.has('item_id') || url.searchParams.get('item_id') === `eq.${row.item_id}`)
+        && (!url.searchParams.has('item_id') || (itemIn ? itemIn.includes(String(row.item_id)) : url.searchParams.get('item_id') === `eq.${row.item_id}`))
         && (!url.searchParams.has('deleted_at') || (url.searchParams.get('deleted_at') === 'not.is.null' ? row.deleted_at !== null : row.deleted_at === null))
         && (!url.searchParams.has('retired_at') || row.retired_at === null));
       if (method === 'PATCH') {
@@ -1226,7 +1307,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { profiles, preferences, items, images, wearEvents, wearLinks, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, outfitControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

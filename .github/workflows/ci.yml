@@ -183,6 +183,20 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Preserve bounded synthetic I11 visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: i11-outfits-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/i11-visual/list-en-desktop.png
+            test-results/i11-visual/editor-en-desktop.png
+            test-results/i11-visual/detail-en-desktop.png
+            test-results/i11-visual/list-fi-mobile.png
+            test-results/i11-visual/editor-fi-mobile.png
+            test-results/i11-visual/detail-fi-mobile.png
+          if-no-files-found: error
+          retention-days: 1
+
   webkit-photo:
     name: WebKit photo contracts
     runs-on: ubuntu-latest
