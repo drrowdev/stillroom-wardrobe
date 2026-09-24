@@ -19,9 +19,9 @@ const places = {
   malmo: { id: 2, name: 'Malmö', admin1: 'Skåne', country: 'Sweden', latitude: 55.60587, longitude: 13.00073 },
 };
 
-// A reply for the city's current local date and the next, 00:00 to 23:00, with daytime values as given.
-function forecastReply(weather: { temperature: number; rain?: number; wind?: number }, offset = 10800) {
-  const first = new Date(Date.now() + offset * 1000).toISOString().slice(0, 10);
+// A reply for the city's local date at `now` and the next, 00:00 to 23:00, with daytime values as given.
+function forecastReply(weather: { temperature: number; rain?: number; wind?: number }, offset = 10800, now = Date.now()) {
+  const first = new Date(now + offset * 1000).toISOString().slice(0, 10);
   const time: string[] = [], temperature: number[] = [], rain: number[] = [], wind: number[] = [];
   for (let index = 0; index < 48; index++) {
     const day = new Date(Date.parse(`${first}T00:00:00Z`) + Math.floor(index / 24) * 86400000).toISOString().slice(0, 10);
@@ -40,7 +40,11 @@ const cors = { 'access-control-allow-origin': '*' };
 const reply = (route: Route, body: unknown, status = 200) =>
   route.fulfill({ status, headers: cors, contentType: 'application/json', body: JSON.stringify(body) }).catch(() => {});
 
-// Stands in for Open-Meteo. Registered after the mock backend, so it runs before the backend's default block.
+// Stands in for Open-Meteo. Registered after the mock backend, so it runs before the backend's default block. Any other
+// external host is refused and recorded, and every test checks that none was asked.
+let unexpected: string[] = [];
+test.beforeEach(() => { unexpected = []; });
+test.afterEach(() => { expect(unexpected).toEqual([]); });
 async function service(page: Page) {
   const state = {
     requests: [] as URL[],
@@ -49,7 +53,13 @@ async function service(page: Page) {
     status: { search: 200, forecast: 200 },
     hold: { search: false, forecast: new Set<string>() },
     held: [] as { kind: 'search' | 'forecast'; url: URL; route: Route }[],
+    // The instant the stand-in treats as now; tests with a fake page clock set it to match.
+    clock: { at: null as number | null },
   };
+  await page.route(url => /^https?:$/.test(url.protocol) && url.hostname !== '127.0.0.1' && !/^(geocoding-api|api)\.open-meteo\.com$/.test(url.hostname), async route => {
+    unexpected.push(new URL(route.request().url()).origin);
+    await route.abort('blockedbyclient').catch(() => {});
+  });
   page.on('request', request => {
     const url = new URL(request.url());
     if (url.hostname.endsWith('open-meteo.com')) state.requests.push(url);
@@ -63,7 +73,7 @@ async function service(page: Page) {
     const url = new URL(route.request().url());
     const latitude = url.searchParams.get('latitude') ?? '';
     if (state.hold.forecast.has(latitude)) { state.held.push({ kind: 'forecast', url, route }); return; }
-    await reply(route, state.status.forecast === 200 ? forecastReply(state.weather.get(latitude) ?? { temperature: 20 }) : { error: true }, state.status.forecast);
+    await reply(route, state.status.forecast === 200 ? forecastReply(state.weather.get(latitude) ?? { temperature: 20 }, 10800, state.clock.at ?? Date.now()) : { error: true }, state.status.forecast);
   });
   return {
     ...state,
@@ -235,6 +245,59 @@ test('I16 a failed forecast pauses before Try again, suggestions keep working, a
   await page.context().setOffline(true);
   await expect(bar(page)).toContainText(await lowLine(page, 0));
   await page.context().setOffline(false);
+});
+
+// Moving the page clock past an hour would expire the fixture sign-in; renew it as the same owner.
+async function keepSignedIn(page: Page) {
+  await page.route('http://127.0.0.1:54321/auth/v1/token**', async route => {
+    const request = route.request();
+    if (new URL(request.url()).searchParams.get('grant_type') !== 'refresh_token') { await route.fallback(); return; }
+    const token = (request.postDataJSON() as { refresh_token?: string }).refresh_token;
+    const email = token === `fixture-${owners.a}` ? 'user-a@example.test' : token === `fixture-${owners.b}` ? 'user-b@example.test' : 'unknown@example.test';
+    await route.fallback({ postData: JSON.stringify({ email, password: 'fictional-test-password' }) });
+  });
+}
+
+test('I16 a forecast stops counting after three hours; suggestions drop it and it is asked for again', async ({ page }) => {
+  const at = Date.parse(`${new Date().toISOString().slice(0, 10)}T07:00:00Z`);
+  await page.clock.install({ time: at });
+  const { weather } = await start(page, { weather: oulu, seed: (api, service) => { basics(api); service.clock.at = at; } });
+  await keepSignedIn(page);
+  await expect(bar(page)).toContainText(await lowLine(page, 0));
+  await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  weather.hold.forecast.add('65.0');
+  await page.clock.fastForward('02:59:00');
+  await expect(bar(page)).toContainText(await lowLine(page, 0));
+  expect(weather.forecasts()).toHaveLength(1);
+  await page.clock.fastForward('00:01:01');
+  await expect(bar(page)).toContainText(text('weather.loading'));
+  await expect(cards(page).first()).not.toContainText(text('today.addCoat'));
+  expect(weather.forecasts()).toHaveLength(2);
+  await weather.release('forecast', forecastReply({ temperature: 10 }, 10800, at + 3 * 3600_000));
+  await expect(bar(page)).toContainText(await lowLine(page, 10));
+});
+
+test('I16 a forecast stops counting at the city\'s midnight and the next day\'s is asked for', async ({ page }) => {
+  const at = Date.parse(`${new Date().toISOString().slice(0, 10)}T20:50:00Z`);
+  await page.clock.install({ time: at });
+  const { weather } = await start(page, { weather: oulu, seed: (api, service) => { basics(api); service.clock.at = at; } });
+  await expect(bar(page)).toContainText(await lowLine(page, 0));
+  weather.clock.at = at + 11 * 60_000;
+  weather.weather.set('65.0', { temperature: 4 });
+  await page.clock.fastForward('00:10:01');
+  await expect(bar(page)).toContainText(await lowLine(page, 4));
+  expect(weather.forecasts()).toHaveLength(2);
+});
+
+test('I16 an unfinished outfit still names what the weather needs, without claims', async ({ page }) => {
+  await start(page, { weather: oulu, seed: api => {
+    add(api, 'White shirt', { colours: ['white'] });
+    add(api, 'Navy trousers', { category: 'bottom', colours: ['navy'], lower_coverage: 2, warmth: 4, field_provenance: { lower_coverage: user, warmth: user } });
+  } });
+  const card = cards(page).first();
+  await expect(card).toContainText(text('today.missing', 'en', { categories: text('categoryOne.footwear') }));
+  await expect(card).toContainText(text('today.addCoat'));
+  await expect(card).not.toContainText(text('today.reasonWarmth'));
 });
 
 test('I16 a manual temperature needs no weather setting, is marked as yours and a late forecast never replaces it', async ({ page }) => {

@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Plugin } from 'vite';
 import viteConfig from '../../vite.config';
 import {
-  confirmedWeather, forecastCurrent, forecastLifetimeMs, localDate, summarizeForecast, validManualTemperature, weatherConfig,
+  confirmedWeather, forecastCurrent, forecastExpiresAt, forecastLifetimeMs, localDate, summarizeForecast, validManualTemperature, weatherConfig,
   weatherContext, weatherPlace, type Forecast,
 } from '../../src/domain/weather';
-import { fetchForecast, searchCities, WeatherError } from '../../src/providers/weather';
+import { fetchForecast, forecastLimitBytes, geocodingLimitBytes, searchCities, WeatherError } from '../../src/providers/weather';
 import { parseProfile, updateProfile } from '../../src/data/profile';
 import { WeatherStore } from '../../src/features/today/use-weather';
 import type { AppClient } from '../../src/data/client';
@@ -132,6 +132,11 @@ describe('forecast summary', () => {
     expect(forecastCurrent(forecast, fetched, fetched - 1)).toBe(false);
     const late = Date.parse('2026-09-25T20:30:00Z');
     expect(forecastCurrent(forecast, late, late + 60 * 60 * 1000)).toBe(false);
+    expect(forecastExpiresAt(forecast, fetched)).toBe(fetched + forecastLifetimeMs);
+    expect(forecastExpiresAt(forecast, late)).toBe(Date.parse('2026-09-25T21:00:00Z'));
+    expect(forecastCurrent(forecast, late, Date.parse('2026-09-25T21:00:00Z') - 1)).toBe(true);
+    const behind: Forecast = { ...forecast, date: '2026-09-24', timeZone: 'America/New_York', utcOffsetSeconds: -14400 };
+    expect(forecastExpiresAt(behind, Date.parse('2026-09-25T02:00:00Z'))).toBe(Date.parse('2026-09-25T04:00:00Z'));
   });
 });
 
@@ -201,6 +206,30 @@ describe('Open-Meteo requests', () => {
     stub({ reason: 'limit' }, 429);
     await expect(fetchForecast({ city: 'Oulu', latitude: 65, longitude: 25.5 }, new AbortController().signal, () => now)).rejects.toEqual(new WeatherError('busy'));
     stub({ reason: 'x' }, 500);
+    await expect(searchCities('Oulu', 'en', new AbortController().signal)).rejects.toEqual(new WeatherError('unavailable'));
+  });
+  it('rejects an oversized reply without reading or parsing all of it', async () => {
+    let pulled = 0, cancelled = false;
+    const endless = () => new ReadableStream<Uint8Array>({
+      pull(controller) { pulled++; controller.enqueue(new Uint8Array(16 * 1024).fill(32)); },
+      cancel() { cancelled = true; },
+    });
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(endless(), { status: 200 })));
+    await expect(searchCities('Oulu', 'en', new AbortController().signal)).rejects.toEqual(new WeatherError('unavailable'));
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThanOrEqual(6);
+    pulled = 0; cancelled = false;
+    const now = Date.parse('2026-09-25T09:00:00Z');
+    await expect(fetchForecast({ city: 'Oulu', latitude: 65, longitude: 25.5 }, new AbortController().signal, () => now)).rejects.toEqual(new WeatherError('unavailable'));
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThanOrEqual(18);
+    cancelled = false;
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(endless(), { status: 200, headers: { 'content-length': String(forecastLimitBytes + 1) } })));
+    await expect(fetchForecast({ city: 'Oulu', latitude: 65, longitude: 25.5 }, new AbortController().signal, () => now)).rejects.toEqual(new WeatherError('unavailable'));
+    expect(cancelled).toBe(true);
+    const padded = JSON.stringify(reply('2026-09-25', 0, () => 8)).padEnd(geocodingLimitBytes + 10, ' ');
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(padded, { status: 200 })));
+    expect((await fetchForecast({ city: 'Oulu', latitude: 65, longitude: 25.5 }, new AbortController().signal, () => now)).minTemperature).toBe(8);
     await expect(searchCities('Oulu', 'en', new AbortController().signal)).rejects.toEqual(new WeatherError('unavailable'));
   });
 });

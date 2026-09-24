@@ -148,6 +148,7 @@ function reasonsFor(components: Components, pieces: readonly EngineItem[], conte
 type State = { pieces: EngineItem[]; score: number; key: string };
 const byRank = (a: State, b: State) => b.score - a.score || compare(a.key, b.key);
 const coreIds = (pieces: readonly EngineItem[]) => pieces.filter(isCore).map(item => item.id);
+const lowerOnly = (item: EngineItem) => item.category === 'bottom' || item.category === 'one_piece';
 
 function itemRank(context: EngineContext) {
   const target = formalityTargets[context.occasion];
@@ -278,22 +279,31 @@ export function recommend(input: EngineInput): SuggestionResult {
 
   const fillable = templates.filter(template => template.every(category => all.get(category)?.length));
   if (!fillable.length) {
-    const best = [...templates].sort((a, b) => b.filter(c => all.get(c)?.length).length - a.filter(c => all.get(c)?.length).length)[0]!;
-    const present = best.filter(category => all.get(category)?.length);
+    // The weather rules apply to an unfinished outfit too: bottoms known to be short are left out in the cold, a suitable
+    // cover is added when there is one, and every unmet weather need is reported.
+    const partialCold = coverRequirement(context, all).cold;
+    const usable = partialCold ? bucketsFor(pool.filter(item => !lowerOnly(item) || item.lowerCoverage === null || item.lowerCoverage >= 2)) : all;
+    const { cover, unmet, needs } = coverRequirement(context, usable);
+    const best = [...templates].sort((a, b) => b.filter(c => usable.get(c)?.length).length - a.filter(c => usable.get(c)?.length).length)[0]!;
+    const present = best.filter(category => usable.get(category)?.length);
     if (!present.length) return { status: 'empty', suggestions: [], missingDetails: [], ...base };
+    const extra: Step[] = cover ? [{ categories: cover.categories, optional: false, accepts: cover.accepts }] : [];
     let found: State | undefined;
     let expansions = 0, passes = 0;
     for (const cap of [limits.perCategory, limits.perCategory * 2]) {
-      if (passes && !present.some(category => (all.get(category)?.length ?? 0) > limits.perCategory)) break;
+      if (passes && ![...present, ...cover?.categories ?? []].some(category => (usable.get(category)?.length ?? 0) > limits.perCategory)) break;
       passes++;
       const budget = { left: limits.passBudget };
-      [found] = search(present, [], all, cap, score, excluded, budget, { core: unshown, allowed: notDisliked });
+      [found] = search(present, extra, usable, cap, score, excluded, budget, { core: unshown, allowed: notDisliked });
       expansions += limits.passBudget - budget.left;
       if (found) break;
     }
-    if (!found) return { status: 'none', suggestions: [], missingDetails: [], expansions, passes };
+    if (!found) return { status: 'none', suggestions: [], missingDetails: [...unmet], expansions, passes };
     const missingSlots = best.filter(category => !present.includes(category));
-    return { status: 'partial', suggestions: [make(found.pieces, { completeness: 'partial', missingSlots, missingDetails: [] })], missingDetails: [], expansions, passes };
+    const lower = found.pieces.filter(lowerOnly).map(item => item.lowerCoverage);
+    const details: MissingDetail[] = [...unmet, ...partialCold && lower.length && !lower.includes(2) ? ['coverage' as const] : []];
+    const suggestion = make(found.pieces, { completeness: 'partial', missingSlots, missingDetails: details, ...needs.length && { weatherNeeds: needs } });
+    return { status: 'partial', suggestions: [suggestion], missingDetails: details, expansions, passes };
   }
 
   const target = formalityTargets[context.occasion];

@@ -63,6 +63,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
           <h2 id={`idea-${suggestion.key}`} className="sr-only">{t('today.idea', { number: 1 })}</h2>
           <Pieces suggestion={suggestion} byId={byId} images={images} t={t} />
           <p className="today-missing">{t('today.missing', { categories: list(suggestion.missingSlots) })}</p>
+          {notes(suggestion).map(key => <p key={key} className="today-missing">{t(key)}</p>)}
           <div className="today-actions"><button type="button" className="button button-primary" onClick={onAddItem}><Icon name="plus" />{t('wardrobe.add')}</button></div>
         </article>)}
       </div>

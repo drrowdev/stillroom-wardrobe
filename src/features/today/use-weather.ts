@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { failureCooldownMs, forecastCurrent, type Forecast, type WeatherConfig, type WeatherOverride } from '../../domain/weather';
+import { failureCooldownMs, forecastCurrent, forecastExpiresAt, type Forecast, type WeatherConfig, type WeatherOverride } from '../../domain/weather';
 import { fetchForecast } from '../../providers/weather';
 
 const placeKey = (latitude: number, longitude: number, city: string) => `${latitude}|${longitude}|${city}`;
@@ -87,6 +87,15 @@ export function useWeather(store: WeatherStore, config: WeatherConfig, online: b
   const canRetry = view.status === 'failed' && online && view.retryAt <= now();
   const retry = useCallback(() => { if (canRetry) setAttempt(value => value + 1); }, [canRetry]);
 
-  const forecast = view.status === 'ready' ? view.forecast : null;
-  return { view, forecast, override, setOverride, canRetry, retry };
+  // A shown forecast stops counting at the end of its lifetime or at the city's midnight; the screen then asks again.
+  const expiresAt = view.status === 'ready' ? forecastExpiresAt(view.forecast, view.fetchedAt) : null;
+  useEffect(() => {
+    if (expiresAt === null) return;
+    const timer = window.setTimeout(() => setAttempt(value => value + 1), Math.max(0, expiresAt - now()) + 50);
+    return () => window.clearTimeout(timer);
+  }, [expiresAt, now]);
+
+  const current = view.status !== 'ready' || forecastCurrent(view.forecast, view.fetchedAt, now());
+  const forecast = view.status === 'ready' && current ? view.forecast : null;
+  return { view: current ? view : { status: 'loading' } as WeatherView, forecast, override, setOverride, canRetry, retry };
 }

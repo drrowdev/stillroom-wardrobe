@@ -250,6 +250,20 @@ describe('weather rules stay inactive without weather and apply when it is suppl
     expect(noCoat.suggestions[0]).toMatchObject({ completeness: 'partial', missingSlots: ['outerwear'] });
   });
 
+  it('applies the weather rules to an unfinished outfit and makes no claims for it', () => {
+    const top = item('top'), jeans = item('bottom', { lowerCoverage: 2, warmth: 4 }), shorts = item('bottom', { lowerCoverage: 0 });
+    const noShoes = recommend({ items: [top, jeans, shorts], context: cold });
+    expect(noShoes.status).toBe('partial');
+    expect(noShoes.suggestions[0]).toMatchObject({ itemIds: [top.id, jeans.id], missingSlots: ['footwear'], weatherNeeds: [{ need: 'cold', status: 'none' }] });
+    expect(noShoes.suggestions[0]!.reasons.join()).not.toMatch(/warm/i);
+    const coat = item('outerwear');
+    const withCoat = recommend({ items: [top, shorts, { ...jeans, lowerCoverage: null }, coat], context: cold });
+    expect(withCoat.suggestions[0]).toMatchObject({ itemIds: [top.id, jeans.id, coat.id], missingDetails: ['coverage'], weatherNeeds: [{ need: 'cold', status: 'met' }] });
+    const rainy = recommend({ items: [top, jeans, item('outerwear', { rainRating: null })], context: { ...context, setting: 'outdoors', rainProbability: 80 } });
+    expect(rainy.suggestions[0]).toMatchObject({ missingDetails: ['rain'], weatherNeeds: [{ need: 'rain', status: 'unknown' }] });
+    expect(recommend({ items: [top, jeans], context }).suggestions[0]!.weatherNeeds).toBeUndefined();
+  });
+
   it('rain and wind need a protective layer or outerwear; unknown protection is named, never assumed', () => {
     const { top, bottom, shoes } = basic();
     const rainy: EngineContext = { ...context, setting: 'outdoors', rainProbability: 80 };

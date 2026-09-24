@@ -108,6 +108,12 @@ export function forecastCurrent(forecast: Forecast, fetchedAtMs: number, nowMs: 
   return nowMs >= fetchedAtMs && nowMs - fetchedAtMs < forecastLifetimeMs && localDate(nowMs, forecast.utcOffsetSeconds) === forecast.date;
 }
 
+// The instant a forecast stops being current: the end of its lifetime or the city's next midnight, whichever is first.
+export function forecastExpiresAt(forecast: Forecast, fetchedAtMs: number): number {
+  const [year, month, day] = forecast.date.split('-').map(Number) as [number, number, number];
+  return Math.min(fetchedAtMs + forecastLifetimeMs, Date.UTC(year, month - 1, day + 1) - forecast.utcOffsetSeconds * 1000);
+}
+
 export function validManualTemperature(value: number): boolean {
   return Number.isInteger(value) && value >= manualTemperatureRange.min && value <= manualTemperatureRange.max;
 }
