@@ -163,19 +163,20 @@ function coverRequirement(context: EngineContext, buckets: ReadonlyMap<Category,
 }
 
 type Step = { categories: Category[]; optional: boolean; accepts?: (item: EngineItem) => boolean };
-// Rejections applied before a beam is trimmed: `core` once every template slot is filled, `final` after the last step.
-type Filters = { core: (state: State) => boolean; final: (state: State) => boolean };
+// `core` rejects a finished core outright (already shown, dress code); `allowed` rejects an exact disliked combination.
+type Filters = { core: (state: State) => boolean; allowed: (state: State) => boolean };
 
+// Once the core is complete, acceptable states and disliked cores live in two separately capped beams. Disliked cores are
+// only seeds for added pieces, so they never take a slot from an acceptable state, and only acceptable states are returned.
 function search(template: readonly Category[], extra: readonly Step[], buckets: ReadonlyMap<Category, EngineItem[]>, cap: number,
   score: (pieces: EngineItem[]) => number, excluded: ReadonlySet<string>, budget: { left: number }, filters: Filters): State[] {
   const steps: Step[] = [...template.map(category => ({ categories: [category], optional: false })), ...extra];
-  // A disliked core can only become valid through an added piece; without any candidates it would just take a beam slot.
-  const extendable = extra.some(step => step.categories.some(category => buckets.get(category)?.length));
   let beam: State[] = [{ pieces: [], score: 0, key: '' }];
+  let seeds: State[] = [];
   for (const [index, step] of steps.entries()) {
-    let next: State[] = [];
-    for (const state of beam) {
-      if (step.optional) next.push(state);
+    const next: State[] = [], nextSeeds: State[] = [];
+    const expand = (state: State, own: State[]) => {
+      if (step.optional) own.push(state);
       for (const category of step.categories) {
         for (const item of (buckets.get(category) ?? []).slice(0, cap)) {
           if (budget.left <= 0) break;
@@ -186,14 +187,17 @@ function search(template: readonly Category[], extra: readonly Step[], buckets: 
           const value = score(pieces);
           // An optional piece stays only when it strictly improves the outfit.
           if (step.optional && value <= state.score) continue;
-          next.push({ pieces, score: value, key: combinationKey(pieces.map(piece => piece.id)) });
+          const extended = { pieces, score: value, key: combinationKey(pieces.map(piece => piece.id)) };
+          (index < template.length - 1 || filters.allowed(extended) ? next : nextSeeds).push(extended);
         }
       }
-    }
-    if (index === template.length - 1) next = next.filter(state => filters.core(state) && (extendable || filters.final(state)));
-    if (index === steps.length - 1) next = next.filter(filters.final);
-    beam = next.sort(byRank).slice(0, limits.beam);
-    if (!beam.length) return [];
+    };
+    for (const state of beam) expand(state, next);
+    for (const state of seeds) expand(state, nextSeeds);
+    const coreDone = index === template.length - 1;
+    beam = (coreDone ? next.filter(filters.core) : next).sort(byRank).slice(0, limits.beam);
+    seeds = (coreDone ? nextSeeds.filter(filters.core) : nextSeeds).sort(byRank).slice(0, limits.beam);
+    if (!beam.length && !seeds.length) return [];
   }
   return beam.filter(state => template.every(category => state.pieces.some(piece => piece.category === category)));
 }
@@ -260,7 +264,7 @@ export function recommend(input: EngineInput): SuggestionResult {
       if (passes && !present.some(category => (all.get(category)?.length ?? 0) > limits.perCategory)) break;
       passes++;
       const budget = { left: limits.passBudget };
-      [found] = search(present, [], all, cap, score, excluded, budget, { core: unshown, final: notDisliked });
+      [found] = search(present, [], all, cap, score, excluded, budget, { core: unshown, allowed: notDisliked });
       expansions += limits.passBudget - budget.left;
       if (found) break;
     }
@@ -283,7 +287,7 @@ export function recommend(input: EngineInput): SuggestionResult {
   }
   let valid: Suggestion[] = [];
   let expansions = 0, passes = 0;
-  const filters: Filters = { core: state => unshown(state) && (!strict || formalityGate(state.pieces, target)), final: notDisliked };
+  const filters: Filters = { core: state => unshown(state) && (!strict || formalityGate(state.pieces, target)), allowed: notDisliked };
   for (const cap of [limits.perCategory, limits.perCategory * 2]) {
     if (passes && ![...buckets.values()].some(list => list.length > limits.perCategory)) break;
     passes++;

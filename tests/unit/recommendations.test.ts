@@ -219,6 +219,12 @@ describe('templates, partial and empty results', () => {
     const summerItems = [{ ...top, seasons: ['summer'] }, { ...bottom, seasons: ['summer'] }, shoes];
     expect(recommend({ items: [...summerItems, cardigan], context: autumn }).suggestions[0]!.itemIds).toEqual([top.id, bottom.id, cardigan.id, shoes.id]);
     expect(recommend({ items: [top, bottom, shoes, cardigan], context: autumn }).suggestions[0]!.itemIds).not.toContain(cardigan.id);
+    // A disliked core stays a seed: adding an improving layer makes a different, allowed combination.
+    const seeded = recommend({ items: [...summerItems, cardigan], context: autumn, feedback: [{ itemIds: [top.id, bottom.id, shoes.id], vote: -1 }] });
+    expect(seeded.suggestions.map(s => s.itemIds)).toEqual([[top.id, bottom.id, cardigan.id, shoes.id]]);
+    const both = recommend({ items: [...summerItems, cardigan], context: autumn, feedback: [
+      { itemIds: [top.id, bottom.id, shoes.id], vote: -1 }, { itemIds: [top.id, bottom.id, cardigan.id, shoes.id], vote: -1 }] });
+    expect(both.status).toBe('none');
   });
 
   it('never forces a coat on a cold day indoors', () => {
@@ -321,6 +327,27 @@ describe('ranking, diversity and paging', () => {
       for (const s of result.suggestions) shown.add(s.coreKey);
     }
     expect(shown.size).toBe(3 * 3 * 6);
+  });
+
+  it('keeps disliked cores out of the result beam even when an added coat would not improve them', () => {
+    const autumn: EngineContext = { ...context, season: 'autumn' };
+    const items = [
+      ...Array.from({ length: 3 }, () => item('top')), ...Array.from({ length: 3 }, () => item('bottom')),
+      ...Array.from({ length: 6 }, () => item('footwear')), item('outerwear'),
+    ];
+    const ranked: string[] = [];
+    const shown = new Set<string>();
+    for (let page = 0; page < 30; page++) {
+      const result = recommend({ items, context: autumn, skip: shown });
+      if (result.status === 'none') break;
+      for (const s of result.suggestions) { shown.add(s.coreKey); ranked.push(s.key); }
+    }
+    expect(ranked).toHaveLength(54);
+    expect(ranked.every(key => key.split('|').length === 3)).toBe(true);
+    const dislikedKeys = ranked.slice(0, 44);
+    const result = recommend({ items, context: autumn, feedback: dislikedKeys.map(key => ({ itemIds: key.split('|'), vote: -1 as const })) });
+    expect(result.status).toBe('ideas');
+    for (const s of result.suggestions) expect(dislikedKeys).not.toContain(s.key);
   });
 
   it.each(['summer', 'autumn', 'winter'] as const)('still finds ideas in %s when more than 40 of the combinations are disliked', season => {
