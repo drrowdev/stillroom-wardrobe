@@ -14,6 +14,7 @@
     "test:unit": "vitest run",
     "test:browser": "playwright test",
     "test:a11y": "playwright test --grep accessibility",
+    "test:pwa": "playwright test --config playwright.pwa.config.ts",
     "db:start": "node scripts/db.mjs start",
     "db:reset": "node scripts/db.mjs reset",
     "db:rehearse": "node scripts/preservation-rehearsal.mjs",

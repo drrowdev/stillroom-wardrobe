@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const workflow = readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8').replaceAll('\r\n', '\n');
 const config = readFileSync(path.join(root, 'playwright.config.ts'), 'utf8').replaceAll('\r\n', '\n');
+const pwaConfig = readFileSync(path.join(root, 'playwright.pwa.config.ts'), 'utf8').replaceAll('\r\n', '\n');
 
 const jobsText = workflow.slice(workflow.indexOf('\njobs:\n') + '\njobs:\n'.length);
 const jobs = new Map(jobsText.split(/\n(?= {2}[A-Za-z0-9_-]+:\n)/).map((block) => {
@@ -54,7 +55,8 @@ const browserArtifacts: Record<string, string[]> = {
   'p6a-backup-ui': ['backup-en-desktop', 'backup-parts-fi-mobile'].map((name) => `p6a-visual/${name}.png`),
   'p6b-restore-ui': ['restore-preview-en-desktop', 'restore-progress-sv-mobile'].map((name) => `p6b-visual/${name}.png`),
   'p6c-delete-account-ui': ['delete-account-en-desktop', 'delete-account-fi-mobile', 'delete-recovery-sv-desktop', 'delete-recovery-en-mobile'].map((name) => `p6c-visual/${name}.png`),
-};
+    'i23-shell-ui': ['update-en-desktop', 'install-en-desktop', 'update-fi-mobile', 'install-sv-mobile', 'install-fi-iphone'].map((name) => `i23-visual/${name}.png`),
+  };
 
 describe('CI workflow browser split', () => {
   it('declares exactly the App, WebKit photo, database and deletion rehearsal jobs with fixed names and timeouts', () => {
@@ -81,12 +83,27 @@ describe('CI workflow browser split', () => {
     expect(count(workflow, 'npm run test:browser')).toBe(2);
     expect(count(workflow, 'npx playwright install')).toBe(3);
     expect(app).toContain('      - run: npx playwright install --with-deps chromium\n'
-      + '      - run: npm run test:browser -- --project=chromium --project=mobile\n');
+      + '      - run: npm run test:browser -- --project=chromium --project=mobile\n'
+      + '      - run: npm run test:pwa\n');
+    expect(count(workflow, 'npm run test:pwa')).toBe(1);
     // images.spec.ts launches Chromium to generate WebP fixtures when WebKit's canvas cannot encode them.
     expect(webkit).toContain('      - run: npx playwright install --with-deps chromium webkit\n'
       + '      - run: npm run test:browser -- --project=webkit-photo\n');
     const selected = [...workflow.matchAll(/--project=([a-z-]+)/g)].map((match) => match[1]).sort();
     expect(selected).toEqual([...projects].sort());
+  });
+
+  it('runs the production shell suite once, in the App job, as its own Playwright config that fails when nothing ran', () => {
+    const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
+    expect(pkg.scripts['test:pwa']).toBe('playwright test --config playwright.pwa.config.ts');
+    expect(pwaConfig).toContain("  testDir: './tests/pwa',\n");
+    expect(pwaConfig).toContain("  outputDir: './test-results/pwa-output',\n");
+    expect(pwaConfig).toContain("  reporter: [['list'], ['./tests/pwa/executed-reporter.ts']],\n");
+    expect(pwaConfig).toContain("  globalSetup: './tests/pwa/global-setup.ts',\n");
+    expect(pwaConfig).toContain('  failOnFlakyTests: Boolean(process.env.CI),\n');
+    expect(pwaConfig).toContain('  forbidOnly: Boolean(process.env.CI),\n');
+    expect([...pwaConfig.matchAll(/\{ name: '([^']+)'/g)].map((match) => match[1])).toEqual(['pwa-prod']);
+    expect(config).not.toContain('tests/pwa');
   });
 
   it('keeps the WebKit job minimal: pinned setup, no uploads, secrets, env or suppression', () => {
@@ -98,10 +115,10 @@ describe('CI workflow browser split', () => {
     for (const forbidden of ['upload-artifact', 'secrets.', 'env:', 'CI:', 'if:']) expect(webkit).not.toContain(forbidden);
   });
 
-  it('uploads each of the 18 browser artifacts exactly once, from the App job, success-only and exact-head named', () => {
+  it('uploads each of the 19 browser artifacts exactly once, from the App job, success-only and exact-head named', () => {
     const app = job('app');
     const uploads = steps(app).filter((step) => step.includes(upload));
-    expect(uploads).toHaveLength(18);
+    expect(uploads).toHaveLength(19);
     const seen = uploads.map((step) => {
       const name = /\n {10}name: ([a-z0-9-]+)-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}\n/.exec(step)?.[1];
       expect(name, step).toBeDefined();
@@ -114,7 +131,7 @@ describe('CI workflow browser split', () => {
     });
     expect(seen).toEqual(Object.keys(browserArtifacts));
     for (const name of seen) expect(count(workflow, `name: ${name}${headSuffix}\n`)).toBe(1);
-    expect(count(workflow, upload)).toBe(19);
+    expect(count(workflow, upload)).toBe(20);
     expect(count(job('database'), upload)).toBe(1);
     expect(job('database')).toContain('          name: database-types\n          path: src/data/database.types.ts\n'
       + '          if-no-files-found: error\n          retention-days: 1\n');

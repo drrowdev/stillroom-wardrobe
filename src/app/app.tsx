@@ -25,6 +25,7 @@ import { DeletionRecovery } from '../auth/deletion-recovery';
 import { leaveDialogFor, navFamilyFor, outfitRouteId, type NavFamily } from '../domain/outfits';
 import { OutfitLeaveDialog } from '../features/outfits/leave-dialog';
 import { LazyBoundary } from './lazy';
+import { UpdatePrompt } from '../pwa/update-prompt';
 import { lazyNamed, preloadChunks } from './lazy-load';
 import { WeatherStore, weatherKey } from '../features/today/use-weather';
 import { weatherConfig } from '../domain/weather';
@@ -58,6 +59,7 @@ function EntryLayout({ children, language, onLanguage, t }: { children: ReactNod
   return (
     <div className="entry-page">
       <header className="entry-header"><Brand /><LanguageSelector language={language} onChange={onLanguage} t={t} /></header>
+      <UpdatePrompt t={t} />
       <main id="main" className="entry-main">
         <div className="intro"><WardrobeIllustration /></div>
         {children}
@@ -334,6 +336,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
         <a className={`nav-link${navFamily === 'outfits' ? ' active-nav' : ''}`} aria-current={navFamily === 'outfits' ? 'page' : undefined} href="#/outfits"><Icon name="outfits" />{t('nav.outfits')}</a>
       </nav><div className="account-controls"><button type="button" className="account-button" aria-expanded={menu} aria-label={t('account.menu')} onClick={() => setMenu(!menu)}><span className="avatar">{state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)}</span><span>{state.profile.display_name}</span><Icon name="chevron" /></button>{menu && <div className="account-popover"><a className="text-button" href="#/settings" onClick={() => setMenu(false)}>{t('nav.settings')}</a><a className="text-button" href="#/trash" onClick={() => setMenu(false)}>{t('nav.trash')}</a><LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} /><button className="text-button" type="button" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div>}</div></header>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online || state.profileSaving} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}
+      <UpdatePrompt t={t} />
       <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={state.language} online={online} t={t} onRouteCommitted={setNavFamily} />
       <footer className="site-footer"><span>Stillroom Wardrobe</span></footer>
     </div>

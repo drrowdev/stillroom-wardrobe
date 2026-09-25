@@ -11,6 +11,7 @@ import { WeatherSettings } from '../settings/weather-settings';
 import { BackupSettings } from '../settings/backup-settings';
 import { RestoreSettings } from '../settings/restore-settings';
 import { DeleteAccountSettings } from '../settings/delete-account';
+import { InstallHint } from '../settings/install-hint';
 import type { AiClient } from '../../data/ai';
 import { currencyOptions, timeZoneOptions } from './profile-options';
 
@@ -100,6 +101,7 @@ export function ProfileScreen({ client, ai, unresolved, controller, scope, profi
       <WeatherSettings controller={controller} scope={scope} profile={profile} busy={busy || reading} language={language} online={online} t={t} />
       <AiSettings ai={ai} controller={controller} scope={scope} profile={profile} busy={busy || reading}
         unresolved={unresolved} language={language} online={online} t={t} />
+      <InstallHint t={t} />
       <BackupSettings client={client} scope={scope} language={language} online={online} t={t} />
       <RestoreSettings client={client} scope={scope} language={language} online={online} t={t} />
       <DeleteAccountSettings client={client} controller={controller} scope={scope} online={online} t={t} />

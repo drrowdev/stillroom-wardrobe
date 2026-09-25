@@ -38,6 +38,7 @@ jobs:
       - run: npm run check:dependencies
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser -- --project=chromium --project=mobile
+      - run: npm run test:pwa
       - name: Preserve bounded synthetic I06 visual evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -249,6 +250,18 @@ jobs:
             test-results/p6c-visual/delete-account-fi-mobile.png
             test-results/p6c-visual/delete-recovery-sv-desktop.png
             test-results/p6c-visual/delete-recovery-en-mobile.png
+          if-no-files-found: error
+          retention-days: 1
+      - name: Preserve bounded synthetic I23 visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: i23-shell-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/i23-visual/update-en-desktop.png
+            test-results/i23-visual/install-en-desktop.png
+            test-results/i23-visual/update-fi-mobile.png
+            test-results/i23-visual/install-sv-mobile.png
+            test-results/i23-visual/install-fi-iphone.png
           if-no-files-found: error
           retention-days: 1
 
