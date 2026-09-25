@@ -7,6 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const workflow = readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8').replaceAll('\r\n', '\n');
 const config = readFileSync(path.join(root, 'playwright.config.ts'), 'utf8').replaceAll('\r\n', '\n');
 const pwaConfig = readFileSync(path.join(root, 'playwright.pwa.config.ts'), 'utf8').replaceAll('\r\n', '\n');
+const performanceConfig = readFileSync(path.join(root, 'playwright.performance.config.ts'), 'utf8').replaceAll('\r\n', '\n');
 
 const jobsText = workflow.slice(workflow.indexOf('\njobs:\n') + '\njobs:\n'.length);
 const jobs = new Map(jobsText.split(/\n(?= {2}[A-Za-z0-9_-]+:\n)/).map((block) => {
@@ -61,16 +62,18 @@ const browserArtifacts: Record<string, string[]> = {
   };
 
 describe('CI workflow browser split', () => {
-  it('declares exactly the App, WebKit photo, database and deletion rehearsal jobs with fixed names and timeouts', () => {
-    expect([...jobs.keys()]).toEqual(['app', 'webkit-photo', 'database', 'deletion-rehearsal']);
+  it('declares exactly the App, WebKit photo, database, deletion rehearsal and performance jobs with fixed names and timeouts', () => {
+    expect([...jobs.keys()]).toEqual(['app', 'webkit-photo', 'database', 'deletion-rehearsal', 'performance']);
     const names = [...jobs.values()].map((text) => /\n {4}name: (.+)\n/.exec(text)?.[1]);
-    expect(names).toEqual(['App and browser contracts', 'WebKit photo contracts', 'Real local Supabase', 'Account deletion rehearsal']);
+    expect(names).toEqual(['App and browser contracts', 'WebKit photo contracts', 'Real local Supabase', 'Account deletion rehearsal',
+      'Performance budgets']);
     expect(new Set(names).size).toBe(names.length);
     expect(job('app')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n    steps:\n');
     expect(job('webkit-photo')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    steps:\n');
     expect(job('database')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n');
     expect(job('deletion-rehearsal')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 25\n');
-    expect(count(workflow, 'timeout-minutes:')).toBe(4);
+    expect(job('performance')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 15\n    steps:\n');
+    expect(count(workflow, 'timeout-minutes:')).toBe(5);
   });
 
   it('selects every Playwright project exactly once across the two browser jobs', () => {
@@ -83,7 +86,7 @@ describe('CI workflow browser split', () => {
     expect(config).toContain('  forbidOnly: Boolean(process.env.CI),\n');
     const app = job('app'), webkit = job('webkit-photo');
     expect(count(workflow, 'npm run test:browser')).toBe(2);
-    expect(count(workflow, 'npx playwright install')).toBe(3);
+    expect(count(workflow, 'npx playwright install')).toBe(4);
     expect(app).toContain('      - run: npx playwright install --with-deps chromium\n'
       + '      - run: npm run test:browser -- --project=chromium --project=mobile\n'
       + '      - run: npm run test:pwa\n');
@@ -106,6 +109,31 @@ describe('CI workflow browser split', () => {
     expect(pwaConfig).toContain('  forbidOnly: Boolean(process.env.CI),\n');
     expect([...pwaConfig.matchAll(/\{ name: '([^']+)'/g)].map((match) => match[1])).toEqual(['pwa-prod']);
     expect(config).not.toContain('tests/pwa');
+  });
+
+  it('measures performance budgets in their own single-worker job and checks the bundle budget after the App build', () => {
+    const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
+    expect(pkg.scripts['test:performance']).toBe('playwright test --config playwright.performance.config.ts');
+    expect(pkg.scripts['check:bundle']).toBe('node scripts/check-bundle-budget.mjs dist');
+    expect(job('app')).toContain('      - run: npm run build\n      - run: npm run check:bundle\n');
+    expect(count(workflow, 'npm run check:bundle')).toBe(1);
+    expect(steps(job('performance'))).toEqual([
+      checkout, setupNode, '      - run: npm ci --no-fund\n', '      - run: npx playwright install --with-deps chromium\n',
+      '      - run: npm run test:performance\n\n',
+    ]);
+    expect(count(workflow, 'npm run test:performance')).toBe(1);
+    for (const forbidden of ['upload-artifact', 'secrets.', 'env:', 'if:']) expect(job('performance')).not.toContain(forbidden);
+    expect(performanceConfig).toContain("  testDir: './tests/performance',\n");
+    expect(performanceConfig).toContain("  outputDir: './test-results/performance-output',\n");
+    expect(performanceConfig).toContain('  fullyParallel: false,\n');
+    expect(performanceConfig).toContain('  retries: 0,\n');
+    expect(performanceConfig).toContain('  workers: 1,\n');
+    expect(performanceConfig).toContain("  reporter: [['list'], ['./tests/pwa/executed-reporter.ts', { required: ['performance.spec.ts'] }]],\n");
+    expect(performanceConfig).toContain("  globalSetup: './tests/performance/global-setup.ts',\n");
+    expect(performanceConfig).toContain('  forbidOnly: Boolean(process.env.CI),\n');
+    expect([...performanceConfig.matchAll(/\{ name: '([^']+)'/g)].map((match) => match[1])).toEqual(['performance']);
+    expect(config).not.toContain('tests/performance');
+    expect(pwaConfig).not.toContain('tests/performance');
   });
 
   it('keeps the WebKit job minimal: pinned setup, no uploads, secrets, env or suppression', () => {
@@ -164,7 +192,7 @@ describe('CI workflow browser split', () => {
       'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020',
       upload,
     ]));
-    for (const id of ['app', 'webkit-photo', 'deletion-rehearsal']) {
+    for (const id of ['app', 'webkit-photo', 'deletion-rehearsal', 'performance']) {
       expect(job(id).split(checkout).length - 1).toBe(1);
       expect(job(id).split(setupNode).length - 1).toBe(1);
     }

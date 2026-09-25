@@ -25,9 +25,10 @@ export function artifactBytes(name: BuildName, url: string): Buffer {
   return readFileSync(path.join(builds[name], url === '/' ? 'index.html' : url.slice(1)));
 }
 
-function build(name: 'a' | 'b' | 'kill', version: string, extra: Record<string, string> = {}) {
-  rmSync(builds[name], { recursive: true, force: true });
-  const result = spawnSync(process.execPath, [path.join(repository, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--outDir', builds[name], '--emptyOutDir'], {
+// A production build with the fictional fixture backend and no inherited VITE_/STILLROOM_ settings.
+export function buildProduction(outDir: string, version: string, extra: Record<string, string> = {}) {
+  rmSync(outDir, { recursive: true, force: true });
+  const result = spawnSync(process.execPath, [path.join(repository, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--outDir', outDir, '--emptyOutDir'], {
     cwd: repository,
     stdio: ['ignore', 'ignore', 'inherit'],
     env: {
@@ -38,8 +39,9 @@ function build(name: 'a' | 'b' | 'kill', version: string, extra: Record<string, 
       ...extra,
     },
   });
-  if (result.status !== 0 || !existsSync(path.join(builds[name], 'service-worker.js'))) throw new Error(`Production fixture build ${name} failed.`);
+  if (result.status !== 0 || !existsSync(path.join(outDir, 'service-worker.js'))) throw new Error(`Production fixture build ${version} failed.`);
 }
+const build = (name: 'a' | 'b' | 'kill', version: string, extra: Record<string, string> = {}) => buildProduction(builds[name], version, extra);
 
 // Puts the build placeholders back into A's stamped worker, changes only the worker code and finalizes again.
 async function workerOnlyRelease() {
