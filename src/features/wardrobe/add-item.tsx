@@ -6,10 +6,10 @@ import { validDescription } from '../../domain/item-details';
 import { ItemForm } from './item-form';
 import { Icon } from '../../app/icon';
 import type { Language, MessageKey, Translate } from '../../i18n';
-import { ImagePreparationError, type PreparedPhoto } from '../../images/process-jpeg';
-import { prepareImage } from '../../images/process-image';
-import { CropEditor } from '../../images/crop-editor';
-import { ORIGINAL_EDIT, type PhotoEdit } from '../../images/crop';
+import type { ImagePreparationError, PreparedPhoto } from '../../images/process-jpeg';
+import { ORIGINAL_EDIT, type PhotoEdit } from '../../images/photo-edit';
+import { LazyBoundary } from '../../app/lazy';
+import { lazyNamed, preloadable } from '../../app/lazy-load';
 import { newSaveAttempt, saveItem, saveAnalyzedItem, type SaveStage } from '../../images/upload';
 import { AnalyzedSaveRefusedError, errorKey, isAborted } from '../../data/errors';
 import { newAnalyzedSaveAttempt, newUnverifiedSaveAttempt, type AnalyzedSaveAttempt } from '../../domain/analyzed-save';
@@ -18,6 +18,8 @@ import { useAiDraft } from './use-ai-draft';
 import { AnalysisStatus } from './analysis-status';
 import type { BeforeDiscard } from '../../app/dialog';
 
+const loadImaging = preloadable(() => import('../../images/imaging'));
+const CropEditor = lazyNamed(() => import('../../images/crop-editor'), 'CropEditor');
 const preparationErrors: Record<ImagePreparationError['code'], MessageKey> = {
   unsupported: 'photo.prepareUnsupported',
   tooLarge: 'photo.prepareTooLarge',
@@ -68,6 +70,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   const frozen = attempt !== null;
   const dirty = preparing || photo !== null || Object.keys(draft.intent).length > 0 || Boolean(altText);
   useEffect(() => { onDirty(dirty, frozen, busy); }, [dirty, frozen, busy, onDirty]);
+  useEffect(() => { loadImaging().catch(() => undefined); CropEditor.preload().catch(() => undefined); }, []);
   useEffect(() => {
     onBeforeDiscard(async () => {
       if (submitLatch.current || scope.signal.aborted) return 'unresolved';
@@ -140,8 +143,10 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     const work = (async () => {
       await previous;
       if (signal.aborted) return;
+      let imaging: Awaited<ReturnType<typeof loadImaging>> | null = null;
       try {
-        const prepared = await prepareImage(file, signal, edit);
+        imaging = await loadImaging();
+        const prepared = await imaging.prepareImage(file, signal, edit);
         if (!signal.aborted) {
           setPhoto(prepared);
           void analysis.commitPhoto(prepared);
@@ -153,7 +158,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
       } catch (problem) {
         if (!signal.aborted && !isAborted(problem)) {
           if (replacing) original.current = null;
-          setError(problem instanceof ImagePreparationError ? preparationErrors[problem.code] : 'photo.invalid');
+          setError(!imaging ? 'chunk.failed' : problem instanceof imaging.ImagePreparationError ? preparationErrors[problem.code] : 'photo.invalid');
         }
       } finally { if (!signal.aborted) setPreparing(false); }
     })();
@@ -212,22 +217,25 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
       }
     } finally { if (!scope.signal.aborted) { submitLatch.current = false; setStage(null); } }
   }
+  function cancelEdit() {
+    preparation.current?.abort();
+    setPreparing(false);
+    setEditing(false);
+    setError(null);
+    focusEditorButton.current = true;
+  }
   return (
     <section className="capture-page" aria-labelledby="capture-title">
       <button className="text-button back-button" type="button" onClick={onBack} disabled={busy}><Icon name="arrow" />{t('wardrobe.back')}</button>
       <div className="page-heading"><div><h1 id="capture-title" tabIndex={-1}>{t('capture.title')}</h1></div></div>
       <form className="capture-layout" onSubmit={(event) => { void submit(event); }} noValidate>
         <div className="photo-panel">
-          {editing && fullPhoto && fullPreview ? <CropEditor preview={fullPreview} width={fullPhoto.width} height={fullPhoto.height}
-            accepted={acceptedEdit} preparing={preparing} t={t}
-            onApply={(edit) => { if (original.current) void prepare(original.current, edit); }}
-            onCancel={() => {
-              preparation.current?.abort();
-              setPreparing(false);
-              setEditing(false);
-              setError(null);
-              focusEditorButton.current = true;
-            }} />
+          {editing && fullPhoto && fullPreview ? <LazyBoundary t={t}
+            action={<button id="crop-leave" className="button button-quiet" type="button" onClick={cancelEdit}>{t('photo.cancelCrop')}</button>}>
+            <CropEditor preview={fullPreview} width={fullPhoto.width} height={fullPhoto.height}
+              accepted={acceptedEdit} preparing={preparing} t={t}
+              onApply={(edit) => { if (original.current) void prepare(original.current, edit); }}
+              onCancel={cancelEdit} /></LazyBoundary>
           : !editing && <div className={`capture-photo ${preview ? 'has-photo' : ''}`} aria-busy={preparing}>
             {preview ? <img src={preview} alt={altText || title || t('capture.photo')} /> : preparing ? <div className="photo-prompt"><span className="spinner" /><p role="status">{t('capture.preparing')}</p></div> : <div className="photo-prompt"><span className="photo-prompt-icon"><Icon name="photo" /></span><h2>{t('capture.photo')}</h2><p>{t('capture.photoHint')}</p></div>}
           </div>}

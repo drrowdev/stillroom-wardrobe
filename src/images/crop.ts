@@ -1,10 +1,8 @@
 import { ImagePreparationError, JPEG_LIMITS } from './jpeg';
+import { FULL_CROP, ORIGINAL_EDIT, type Crop, type PhotoEdit } from './photo-edit';
 
-export type Crop = { x: number; y: number; width: number; height: number };
-export type PhotoEdit = { turns: number; crop: Crop };
+export { FULL_CROP, ORIGINAL_EDIT, type Crop, type PhotoEdit };
 export type Matrix = readonly [number, number, number, number, number, number];
-export const FULL_CROP: Crop = Object.freeze({ x: 0, y: 0, width: 1, height: 1 });
-export const ORIGINAL_EDIT: PhotoEdit = Object.freeze({ turns: 0, crop: FULL_CROP });
 
 export function validCrop(crop: Crop): boolean {
   return Object.values(crop).every(Number.isFinite) && crop.x >= 0 && crop.y >= 0

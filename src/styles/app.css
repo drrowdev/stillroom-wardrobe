@@ -111,6 +111,9 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .setup-steps code { display: block; color: var(--ink); background: var(--canvas); padding: 6px 9px; border-radius: 4px; margin-top: 7px; overflow-wrap: anywhere; font-size: .875rem; }
 .connecting { display: flex; align-items: center; gap: 15px; min-height: 170px; }
 .connecting p { margin-bottom: 0; }
+.chunk-loading { display: grid; justify-items: start; align-content: center; gap: 12px; min-height: 120px; }
+.chunk-status, .chunk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.chunk-error { display: grid; justify-items: start; gap: 12px; padding: 24px 0; }
 .workspace { min-height: 100svh; display: flex; flex-direction: column; }
 .workspace-header { background: var(--surface); padding: 19px max(32px, calc((100vw - 1120px) / 2)); display: flex; align-items: center; gap: 55px; border-bottom: 1px solid var(--border); }
 .workspace-header nav { align-self: stretch; display: flex; align-items: center; gap: 28px; }

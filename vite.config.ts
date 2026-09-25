@@ -43,7 +43,19 @@ export default defineConfig(({ mode }) => {
         },
       },
     ],
-    build: { sourcemap: false },
+    build: {
+      sourcemap: false,
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              { name: 'react', test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+              { name: 'supabase', test: /[\\/]node_modules[\\/]@supabase[\\/]/ },
+            ],
+          },
+        },
+      },
+    },
     test: {
       include: ['tests/unit/**/*.test.ts'],
       environment: 'node',

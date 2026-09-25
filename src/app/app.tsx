@@ -15,18 +15,16 @@ import { AiClient } from '../data/ai';
 import type { AppClient } from '../data/client';
 import { useWardrobeBrowse } from '../features/wardrobe/use-wardrobe-browse';
 import { PrivateImages } from '../images/private-images';
-import { ProfileScreen } from '../features/profile/profile-screen';
 import { LanguageSettings } from '../features/settings/language-settings';
-import { Trash, UndoNotice } from '../features/settings/trash';
+import { UndoNotice } from '../features/settings/trash';
 import { ItemLifecycleClient } from '../data/item-lifecycle';
 import { newUndo, type LifecycleSnapshot, type UndoItem } from '../domain/item-lifecycle';
 import type { ProfileRow } from '../data/rows';
 import { PasswordRecovery, RecoveryRequest } from '../auth/password-recovery';
 import { leaveDialogFor, navFamilyFor, outfitRouteId, type NavFamily } from '../domain/outfits';
-import { OutfitsScreen } from '../features/outfits/outfits-screen';
-import { OutfitLeaveDialog } from '../features/outfits/editor';
-import { NewOutfit, OutfitDetail } from '../features/outfits/detail';
-import { TodayScreen } from '../features/today/today-screen';
+import { OutfitLeaveDialog } from '../features/outfits/leave-dialog';
+import { LazyBoundary } from './lazy';
+import { lazyNamed, preloadChunks } from './lazy-load';
 import { WeatherStore, weatherKey } from '../features/today/use-weather';
 import { weatherConfig } from '../domain/weather';
 import {
@@ -34,6 +32,12 @@ import {
   recoverySnapshot, subscribeRecovery, type RecoveryCallback,
 } from '../auth/recovery-callback';
 
+const ProfileScreen = lazyNamed(() => import('../features/profile/profile-screen'), 'ProfileScreen');
+const Trash = lazyNamed(() => import('../features/settings/trash-screen'), 'Trash');
+const OutfitsScreen = lazyNamed(() => import('../features/outfits/outfits-screen'), 'OutfitsScreen');
+const NewOutfit = lazyNamed(() => import('../features/outfits/detail'), 'NewOutfit');
+const OutfitDetail = lazyNamed(() => import('../features/outfits/detail'), 'OutfitDetail');
+const TodayScreen = lazyNamed(() => import('../features/today/today-screen'), 'TodayScreen');
 const configuration = readConfiguration(import.meta.env);
 const browserLanguages = navigator.languages;
 function Brand() {
@@ -116,6 +120,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   const onBeforeDiscard = useCallback((handler: BeforeDiscard | null) => { beforeDiscard.current = handler; }, []);
   const onDirty = useCallback((isDirty: boolean, incomplete: boolean, busy: boolean) => { dirty.current = { dirty: isDirty, incomplete, busy }; }, []);
   useEffect(() => { images.activate(); return () => images.clear(); }, [images]);
+  useEffect(preloadChunks, []);
   const changeRoute = useCallback((next: WorkspaceRoute) => {
     if (next === navigation.current.route) return;
     if (dirty.current.dirty || dirty.current.busy) {
@@ -173,7 +178,8 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       dirty.current = { dirty: false, incomplete: false, busy: false };
     };
   }, [changeRoute]);
-  useEffect(() => { document.getElementById(routeFocus[route] ?? (route.startsWith('detail:') ? 'item-detail-title' : route.startsWith('outfit:') ? 'outfit-detail-title' : 'wardrobe-title'))?.focus(); }, [route]);
+  const focusRoute = useCallback(() => { document.getElementById(routeFocus[route] ?? (route.startsWith('detail:') ? 'item-detail-title' : route.startsWith('outfit:') ? 'outfit-detail-title' : 'wardrobe-title'))?.focus(); }, [route]);
+  useEffect(focusRoute, [focusRoute]);
   function trashed(item: LifecycleSnapshot) {
     dirty.current = { dirty: false, incomplete: false, busy: false };
     browse.remove(item.id);
@@ -209,7 +215,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           onRestored={() => { setUndo(null); void refresh(); invalidateOutfits(); }} />}
         {notice && route === 'wardrobe' && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('item.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setNotice(false)}><Icon name="close" /></button></div>}
         {outfitNotice && route === `outfit:${outfitNotice}` && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('outfits.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setOutfitNotice(null)}><Icon name="close" /></button></div>}
-        {route === 'add'
+        <LazyBoundary key={route} t={t} onReady={focusRoute}>{route === 'add'
           ? <AddItem client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} />
           : route === 'settings' ? <ProfileScreen client={client} ai={ai} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} />
           : route === 'trash' ? <Trash lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
@@ -225,7 +231,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           : route === 'today' ? <TodayScreen client={client} scope={scope} images={images} online={online} language={language} t={t}
             timeZone={profile.timezone} invalidation={outfitsInvalidation} weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')}
             onSave={(itemIds, occasion) => { setOutfitSeed({ itemIds, occasion }); changeRoute('outfit-new'); }} />
-          : <WardrobeScreen browse={browse} images={images} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={refresh} />}
+          : <WardrobeScreen browse={browse} images={images} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={refresh} />}</LazyBoundary>
       </main>
       {discard && leaveDialogFor(route) === 'outfit' && <OutfitLeaveDialog unresolved={outfitUnresolved} t={t}
         onStay={() => { setDiscard(null); requestAnimationFrame(() => { if (discardFocus.current?.isConnected) discardFocus.current.focus(); }); }}

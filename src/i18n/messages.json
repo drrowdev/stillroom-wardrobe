@@ -64,6 +64,8 @@
   "common.undo": {"en":"Undo","fi":"Kumoa","sv":"Ångra"},
   "common.skip": {"en":"Skip for now","fi":"Ohita toistaiseksi","sv":"Hoppa över tills vidare"},
   "common.loading": {"en":"Loading…","fi":"Ladataan…","sv":"Laddar…"},
+  "chunk.failed": {"en":"This page couldn't load. Reload to try again.","fi":"Sivua ei voitu ladata. Lataa sivu uudelleen.","sv":"Sidan kunde inte läsas in. Ladda om sidan och försök igen."},
+  "chunk.reload": {"en":"Reload","fi":"Lataa uudelleen","sv":"Ladda om"},
   "common.saving": {"en":"Saving…","fi":"Tallennetaan…","sv":"Sparar…"},
   "common.search": {"en":"Search","fi":"Hae","sv":"Sök"},
   "common.filters": {"en":"Filters","fi":"Suodattimet","sv":"Filter"},
