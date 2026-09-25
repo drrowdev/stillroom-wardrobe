@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { BACKUP_LIMITS, BackupFormatError, verifyBackup } from '../src/domain/export-format.ts';
 import { assertSanitizedJpeg, JPEG_LIMITS, readJpegHeader } from '../src/images/jpeg.ts';
+import { readPipedInput, readTerminalLine } from './backup-prompt.mjs';
 
 const partName = /^stillroom-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-(\d{1,3})\.json\.enc$/;
 
@@ -79,37 +80,12 @@ export function partSource(listing) {
   return { count: listing.count, exportId: listing.exportId, read: (index) => readBounded(listing.paths.get(index)) };
 }
 async function readPassphrase() {
-  const input = process.stdin;
-  if (!input.isTTY) {
-    const chunks = [];
-    let size = 0;
-    for await (const chunk of input) {
-      size += chunk.length;
-      if (size > 4096) usage('Passphrase input is too long.');
-      chunks.push(chunk);
-    }
-    return Buffer.concat(chunks).toString('utf8').replace(/\r?\n$/, '');
+  if (!process.stdin.isTTY) {
+    let buffer;
+    try { buffer = await readPipedInput(process.stdin, 4096); } catch { usage('Passphrase input is too long.'); }
+    return buffer.toString('utf8').replace(/\r?\n$/, '');
   }
-  process.stderr.write('Backup passphrase: ');
-  input.setRawMode(true);
-  input.resume();
-  input.setEncoding('utf8');
-  return new Promise((done, failed) => {
-    let value = '';
-    const finish = (error) => {
-      input.setRawMode(false); input.pause(); input.removeListener('data', onData); process.stderr.write('\n');
-      if (error) failed(error); else done(value);
-    };
-    const onData = (text) => {
-      for (const character of text) {
-        if (character === '\r' || character === '\n') return finish();
-        if (character === '\u0003') return finish(new Error('Cancelled.'));
-        if (character === '\u007f' || character === '\b') value = value.slice(0, -1);
-        else if (value.length < 4096) value += character;
-      }
-    };
-    input.on('data', onData);
-  });
+  return readTerminalLine({ input: process.stdin, output: process.stderr, prompt: 'Backup passphrase: ', hidden: true, limit: 4096, overflow: 'ignore' });
 }
 
 async function main() {

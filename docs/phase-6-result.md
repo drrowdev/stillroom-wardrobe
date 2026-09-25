@@ -78,8 +78,9 @@ Exit 1 means a failed check; exit 2 a usage error.
 ## Deferred and pending
 
 - **Scope deferral (not completion):** the `export-own` and `restore-own`
-  CLIs of I19/I21 are moved to the backlog by coordinator decision under the
-  owner's standing approval. I19 and I21 are not complete.
+  CLIs of I19/I21 were moved to the backlog by coordinator decision under the
+  owner's standing approval. `export-own` now follows in B1-1 below; I21 is
+  not complete.
 - Restore (P6b) and account deletion (P6c) follow in their own PRs, in that
   order.
 - Pending: GPT-6 Astra code review, green exact-head CI (including the
@@ -255,4 +256,118 @@ Docker or database stack.
   the stack starts; the script itself never changes Docker configuration and
   refuses any effective published address other than `127.0.0.1`. A failed
   rehearsal SQL step prints its step, SQLSTATE and a redacted first error line.
-- The deferred `export-own`/`restore-own` CLIs.
+- The deferred `restore-own` CLI (`export-own` follows in B1-1 below).
+
+# B1-1 weekly backup from the command line (I19 remainder; I26 runbook)
+
+- Requirements: R13, R20; blueprint `15` I19 (export CLI). This section is an
+  addition to the I26 backup runbook, not I27. No I26 restore drill is claimed.
+- `scripts/export-own.mjs` writes the same encrypted v2 parts as the Backup
+  card: the export steps are shared (`src/domain/export-run.ts`) and a
+  pre-refactor parity fixture pins the browser output byte for byte.
+
+## Running it weekly
+
+1. Once: set `SUPABASE_PUBLISHABLE_KEY` to the project's publishable key (the
+   same public value the app uses). Never set a secret or service key; the
+   command refuses to start if one is in the environment.
+2. Run `node scripts/export-own.mjs --output D:\StillroomBackups`. It asks for
+   your email, password and a backup passphrase (twice for a new backup). The
+   password and passphrase are never shown, and nothing is taken from
+   arguments, files or the environment.
+3. When it prints `Backup complete: … Folder: stillroom-<id>`, run
+   `node scripts/verify-backup.mjs --input D:\StillroomBackups\stillroom-<id>`
+   with the same passphrase. Only a backup that verifies counts.
+4. Keep the three most recent complete, verified backups on this computer, and
+   a separate copy of at least the newest one somewhere else (for example an
+   external drive kept elsewhere). The parts are already encrypted; copy the
+   whole folder. Unfinished (`.stillroom-export-<id>.partial`), failed or stale
+   runs never count towards the three.
+
+It only reads your own account, through your own normal sign-in and the same
+access rules as the app. It connects only to the Stillroom project; `--local
+http://127.0.0.1:PORT` is for the local development stack. Only you run it
+against the hosted project, by hand.
+
+**Piping from a password manager.** Instead of typing, you can pipe exactly
+three lines (email, password, passphrase; LF or CRLF; at most 4096 bytes) on
+standard input, for example from your password manager's command-line tool.
+Pipe directly from that tool into the command; don't put the values in a file,
+a script, an environment variable or your shell history. Spaces are kept: the
+password and passphrase are not trimmed. The passphrase needs at least 16
+characters.
+
+**The passphrase.** It is the only key to the backup. If you lose it, the backup
+can't be opened by anyone, including you, and there is no reset. Keep it in
+your password manager, separately from the backup copies.
+
+## Messages
+
+| Message | Meaning and next step |
+| --- | --- |
+| `Backup complete` | All parts were written and verified. Run verify-backup, then rotate old copies. |
+| `Backup refused (…)` (exit 2) | Nothing was read or written: wrong arguments, address, key, environment or input. Fix and run again. |
+| `Backup incomplete (auth)` | Sign-in failed or the session ended. Run the same command again. |
+| `Backup incomplete (unavailable)`, `(io)`, `(cancelled)`, `(invalid)` | Interrupted. Run the same command again within a day to continue the same backup. |
+| `Backup incomplete (changed)` | Items or photos changed while it ran. Delete the unfinished folder and run again. |
+| `Backup incomplete (stale)` / `(unresumable)` | The unfinished backup is over a day old, or has no saved snapshot. Delete it and run again. |
+| `Backup incomplete (passphrase)` | Use the passphrase you gave when this backup started. |
+| `Backup incomplete (conflict)` | Unexpected files or another owner's backup in the folder. Nothing was changed. |
+| `Backup incomplete (busy)` | Another run is using the folder, or one was killed. The message says when the lock was created. If no backup is running, delete `.stillroom-export.lock` (and `.stillroom-export.lock.reclaim`, if present) and run again. |
+
+A partial backup is never reported as complete. Messages never include your
+email, titles, tokens or the folder you gave; only the generated folder names.
+
+## Interruptions
+
+Parts are written to a temporary file, flushed, closed and renamed into
+`.stillroom-export-<id>.partial/parts/`, and a small `state.json` is kept for
+bookkeeping. Rerunning the same command within 24 hours continues the same
+backup: it signs in again, opens the saved metadata part with your passphrase,
+checks that it belongs to you and matches the file names and state, and then
+re-checks every part already written. It never reads the wardrobe metadata
+again, so the finished backup is the snapshot from when it started; later
+changes go into the next weekly backup.
+
+| Left behind | What the next run does |
+| --- | --- |
+| A temporary part (`part-N.tmp`) | Deletes it and writes that part again. |
+| A renamed part that the state doesn't list | Keeps it only after decrypting it and checking its identity and every photo. |
+| Missing or damaged `state.json` | Rebuilds it from the authenticated metadata part. |
+| No saved metadata part | Reports `unresumable`; the old snapshot is never replaced under the same ID. |
+| The finished folder next to the unfinished one | Verifies the finished backup and tidies up, even after 24 hours. |
+
+This protects against the process being stopped at any point. Surviving a power
+cut also depends on the disk honouring flushes. On Windows a folder can't be
+flushed, so after a power cut a just-renamed part may be missing; the next run
+then reports what is left, as above. Only one run can use an output folder at a
+time (`.stillroom-export.lock`). A normal finish, failure or Ctrl+C removes it.
+If the run was killed or the computer stopped, the lock stays and the next run
+reports `busy` with the time the lock was created. Nothing removes it
+automatically: check that no backup is running (on any computer or container
+using that folder), delete the lock, and run again to continue.
+
+## Validation (builder, local)
+
+- Unit: `tests/unit/export-run.test.ts` (parity with the pre-refactor fixture)
+  and `tests/unit/export-own.test.ts` (arguments, refusals, prompts, the
+  transport guard, refresh and failed refresh through the real SDK, redaction
+  of error bodies, thrown errors and refresh failures (in process and as a real
+  child process), photo retries after a mid-body disconnect and after a 503
+  whose body already failed,
+  resume with changed live data, a crash between every pair of file operations,
+  recovery after promotion, the lock (a second run at every point of the first
+  gets `busy`; a lock or reclaim file on its own keeps the folder busy),
+  and 500 photos in 3 parts), run on Windows.
+- Integration (CI only, local stack): `tests/integration/export-own.spec.ts`
+  kills the CLI while a photo download is held, checks that the next run reports
+  `busy` until the lock is deleted, resumes it, runs verify-backup
+  and compares the metadata with the browser export path for the same owner.
+  A second test times out a child waiting for input and one stuck at a hung
+  upstream, and checks that no process, proxy request or late write remains.
+
+## Pending
+
+- GPT-6 Astra code review and green exact-head CI, including the local-stack
+  integration run. No hosted run; the first hosted export is the owner's own.
+- `restore-own.mjs` (I21 remainder) follows separately.
