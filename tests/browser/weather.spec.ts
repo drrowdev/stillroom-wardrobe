@@ -272,7 +272,8 @@ test('I16 a forecast stops counting after three hours; suggestions drop it and i
   await page.clock.fastForward('00:01:01');
   await expect(bar(page)).toContainText(text('weather.loading'));
   await expect(cards(page).first()).not.toContainText(text('today.addCoat'));
-  expect(weather.forecasts()).toHaveLength(2);
+  // "Loading" renders before the mocked route logs the new request.
+  await expect.poll(() => weather.forecasts().length).toBe(2);
   await weather.release('forecast', forecastReply({ temperature: 10 }, 10800, at + 3 * 3600_000));
   await expect(bar(page)).toContainText(await lowLine(page, 10));
 });
@@ -420,6 +421,8 @@ test('I16 a held forecast or search is dropped after a city change, Turn off or 
   weather.results.splice(0, 1, places.oulu);
   await search(page, 'Oulu');
   await button(page, 'weather.useCity').click();
+  // Navigation is held back while a profile save is in progress, so wait for the save as above.
+  await expect(page.getByText(text('weather.savedOn', 'en', { city: 'Oulu, Finland' }), { exact: true })).toBeVisible();
   await goTo(page, 'today');
   await expect.poll(() => weather.held.length).toBe(1);
   await goTo(page, 'settings');
