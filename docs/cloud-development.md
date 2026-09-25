@@ -542,6 +542,14 @@ Weather only works on the hosted site after the owner runs a Pages deploy of a
 main that includes I16. No hosted schema, function or Auth change is needed:
 the profile weather columns are in the installed base schema.
 
+**P6a backup (source only, not deployed).** The P6a draft PR adds the Settings
+Backup card and `scripts/verify-backup.mjs`. It uses the installed
+`export_manifest` and `item_attribution_history` RPCs and authenticated Storage
+downloads only: no schema, migration, Edge Function, CSP or Auth change, and no
+hosted call from builders. The card appears on the hosted site only after the
+owner runs a Pages deploy of a main that includes P6a. See
+`docs/phase-6-result.md` for scope, deferrals and pending gates.
+
 **AI activation, owner account only** (from
 [`5815445262`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815445262)).
 

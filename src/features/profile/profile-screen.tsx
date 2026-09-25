@@ -8,6 +8,7 @@ import type { Language, MessageKey, Translate } from '../../i18n';
 import { LanguageSettings } from '../settings/language-settings';
 import { AiSettings } from '../settings/ai-settings';
 import { WeatherSettings } from '../settings/weather-settings';
+import { BackupSettings } from '../settings/backup-settings';
 import type { AiClient } from '../../data/ai';
 import { currencyOptions, timeZoneOptions } from './profile-options';
 
@@ -15,7 +16,7 @@ import { currencyOptions, timeZoneOptions } from './profile-options';
 type Props = { client: AppClient; ai: AiClient; unresolved: boolean; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; language: Language; online: boolean; t: Translate; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void; onBack: () => void };
 const fieldLabels = { display_name: 'profile.displayName', timezone: 'profile.timezone', currency: 'profile.currency' } as const;
 const fieldErrors = { display_name: 'settings.invalidName', timezone: 'settings.invalidTimezone', currency: 'settings.invalidCurrency' } as const;
-export function ProfileScreen({ ai, unresolved, controller, scope, profile, change, busy, language, online, t, onDirty, onBack }: Props) {
+export function ProfileScreen({ client, ai, unresolved, controller, scope, profile, change, busy, language, online, t, onDirty, onBack }: Props) {
   const [base, setBase] = useState(profile);
   const [seen, setSeen] = useState(profile);
   const [fields, setFields] = useState<ProfileFields>(() => profileFields(profile));
@@ -97,6 +98,7 @@ export function ProfileScreen({ ai, unresolved, controller, scope, profile, chan
       <WeatherSettings controller={controller} scope={scope} profile={profile} busy={busy || reading} language={language} online={online} t={t} />
       <AiSettings ai={ai} controller={controller} scope={scope} profile={profile} busy={busy || reading}
         unresolved={unresolved} language={language} online={online} t={t} />
+      <BackupSettings client={client} scope={scope} language={language} online={online} t={t} />
     </div>
   </div>;
 }
