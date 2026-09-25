@@ -14,23 +14,6 @@ import type { PrivateImages } from '../../images/private-images';
 import { ComponentText, OutfitThumb } from './outfits-screen';
 import { pickerComponent, useDraftComponents } from './use-outfits';
 
-export function OutfitLeaveDialog({ unresolved, onStay, onLeave, t }: { unresolved: boolean; onStay: () => void; onLeave: () => void; t: Translate }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const element = dialog.current;
-    element?.showModal();
-    return () => element?.close();
-  }, []);
-  return <dialog ref={dialog} className="dialog outfit-leave" aria-labelledby="outfit-leave-title" onCancel={(event) => { event.preventDefault(); onStay(); }}>
-    <h2 id="outfit-leave-title">{t('outfits.leaveTitle')}</h2>
-    <div className="muted"><p>{t(unresolved ? 'outfits.leaveUnresolved' : 'outfits.discardBody')}</p></div>
-    <div className="dialog-actions">
-      <button className="button button-primary" type="button" autoFocus onClick={onStay}>{t('common.continueEditing')}</button>
-      <button className="button button-danger" type="button" onClick={onLeave}>{t('outfits.leave')}</button>
-    </div>
-  </dialog>;
-}
-
 type Phase = 'idle' | 'saving' | 'waiting' | 'rereading' | 'stillSaving' | 'notSaved' | 'rejected' | 'changed' | 'gone' | 'invalidSelection';
 const locked: readonly Phase[] = ['saving', 'waiting', 'rereading', 'stillSaving', 'changed', 'gone'];
 const unresolvedPhases: readonly Phase[] = ['waiting', 'rereading', 'stillSaving'];

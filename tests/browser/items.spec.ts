@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { codePreloaded } from './lazy-support';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdir, lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -320,6 +321,7 @@ test('standalone list states and initially offline Trash preserve pages across r
     await expect(page.locator('.item-card').getByText(messages[key].en, { exact: true })).toBeVisible();
   }
   for (let n = 0; n < 41; n++) { const saved = api.seedSavedItem('a', `Fictional trash ${n}`); saved.item.deleted_at = new Date().toISOString(); }
+  await codePreloaded(page);
   await context.setOffline(true);
   await expect(page.locator('.notice-offline')).toBeVisible();
   await trashPage(page);

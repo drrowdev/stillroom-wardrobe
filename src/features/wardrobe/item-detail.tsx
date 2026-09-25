@@ -17,7 +17,10 @@ import type { ItemLifecycleClient } from '../../data/item-lifecycle';
 import type { LifecycleSnapshot } from '../../domain/item-lifecycle';
 import { TrashAction } from '../settings/trash';
 import type { AiClient } from '../../data/ai';
-import { ReplacePhoto } from './replace-photo';
+import { LazyBoundary } from '../../app/lazy';
+import { lazyNamed } from '../../app/lazy-load';
+
+const ReplacePhoto = lazyNamed(() => import('./replace-photo'), 'ReplacePhoto');
 
 type Outcome = 'confirmed' | 'rejected' | 'unknown' | 'skipped';
 type Shared = {
@@ -190,8 +193,8 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
     try { if (await item.run('save', editGarmentField(item.draft, field, value, props.language)) === 'confirmed') setOutcome('saved'); }
     finally { saveLatch.current = false; }
   }
-  if (mode) return <ReplacePhoto {...props} item={item.base} image={description.base} mode={mode} onDirty={onPhotoState}
-    onClose={() => { setMode(null); props.onReload(); }} />;
+  if (mode) return <LazyBoundary t={t}><ReplacePhoto {...props} item={item.base} image={description.base} mode={mode} onDirty={onPhotoState}
+    onClose={() => { setMode(null); props.onReload(); }} /></LazyBoundary>;
   const lifecycle = item.draft.raw.lifecycle;
   return <div className="detail-layout">
     <div className="detail-media">
