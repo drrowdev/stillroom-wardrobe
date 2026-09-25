@@ -572,6 +572,41 @@ the non-additive replacements and triggers, the Edge deploy, the schedule
 activation and a disposable hosted drill. Builders make no hosted call. See
 `docs/phase-6-result.md`.
 
+**I23 service worker (source only, not deployed).** The Phase 7 PR-1 draft
+adds `src/service-worker.ts`, the Update/Reload prompt and the Settings install
+hint. The worker precaches only the public shell listed in the generated
+`precache-manifest.json` (index as `/`, hashed assets, icons and the web
+manifest; never `_headers`, source maps or the worker itself). It checks the
+manifest against the SHA-256 embedded in the worker and each file against the
+manifest, so a deploy that lands mid-install leaves the working version in
+place. Each release has its own cache, named from the shell and the worker's
+own bytes; install fills a staging cache and commits it only after every file
+verifies, and older caches are removed only on activation. The worker answers
+only document navigations to `/` (from its own verified shell) and same-origin
+requests for exactly its listed files with the matching destination. If its
+own shell is missing it fails the navigation and unregisters itself rather than
+serving the network's HTML; the next load is an ordinary network load. A page
+with no controller loads from the network without the worker, so the planned
+4 s navigation bound had nothing to apply to and was dropped. Nothing else is
+cached: API, Auth, Storage, Edge, image traffic and `/_*` paths pass through. A
+new version waits until the user presses Reload; `skipWaiting` is used only by
+that button and by the emergency worker.
+
+- **Headers.** `_headers` adds `Cache-Control: no-cache` for
+  `/service-worker.js` and `/precache-manifest.json`. The CSP is unchanged.
+  Before the owner-run deploy, check the served worker's headers, MIME type and
+  scope on Pages; `scripts/serve-dist.mjs` only approximates Pages in tests.
+- **Kill switch.** `STILLROOM_SW_KILL_SWITCH=1 npm run build` builds an
+  emergency worker that activates at once, deletes only `stillroom-shell-*`
+  caches and unregisters itself; that build's page registers no worker. Code
+  already loaded in an open tab keeps running; other routes and the next visit
+  load from the network, so open tabs may need a reload.
+- **Rollback.** Deploying an earlier build is an ordinary update: open tabs see
+  the Update prompt. Old shells talk to the current backend and must reject
+  unsupported operations safely; cache eviction is not the safety mechanism.
+- Any Pages deploy of a main with the worker, and any kill-switch deploy, needs
+  the owner's approval. Device, install and visual acceptance stay pending.
+
 **AI activation, owner account only** (from
 [`5815445262`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815445262)).
 
