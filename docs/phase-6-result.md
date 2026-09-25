@@ -131,7 +131,8 @@ photos, outfits and history to the signed-in account.
   version). The item's values and provenance kinds must equal the restored
   ones and its version must equal the completed prefix; an edit made here, a
   missing or different stored file, or a mismatched request makes the item a
-  conflict, left as it is.
+  conflict, left as it is. A stored file that cannot be read for now (network
+  or server error) is not a conflict: the item is retried like any other failure.
 - An item that failed in a way that can be retried holds back every outfit,
   rule, feedback entry and history event that refers to it, so their
   deterministic IDs are only written once, complete. The run then reports

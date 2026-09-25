@@ -231,6 +231,56 @@ test('I21 restore: an item that could not be restored is reported, and running t
     .toEqual([['Fictional linen shirt', shirtId], ['Fictional old scarf', null]]);
 });
 
+test('I21 restore: a stored photo that cannot be read for now is retried, and nothing that refers to it is written', async ({ page }) => {
+  const { api, thumb } = await start(page);
+  const shirt = seed(api, thumb, 'Fictional linen shirt', 2);
+  const trousers = seed(api, thumb, 'Fictional wool trousers');
+  seedHistory(api, shirt.item, trousers.item);
+  await settings(page, 'a');
+  const parts = await backup(page);
+  await signOut(page);
+  await settings(page, 'b');
+  // First run: the shirt's replacement cannot be reserved, so the shirt stops after its first photo.
+  let blocked = 2;
+  await page.route('**/rest/v1/rpc/reserve_image_change', async route => {
+    if (blocked > 0) { blocked--; await route.abort('failed'); return; }
+    await route.fallback();
+  });
+  await check(page, parts);
+  await button(page, 'restore.start').click();
+  const card = restoreCard(page);
+  await expect(card.getByRole('alert')).toHaveText(text('restore.stopped'), slow);
+  const restoredShirt = own(api.items).find(row => row.title === 'Fictional linen shirt')!;
+  const first = own(api.images).find(image => image.item_id === restoredShirt.id && image.state === 'ready')!;
+  // Second run: reading the shirt's first photo back fails with 503 on both attempts. That is not a different photo.
+  let unavailable = 0;
+  await page.route(`**/storage/v1/object/wardrobe/${String(first.main_path)}`, async route => {
+    if (route.request().method() === 'GET' && unavailable < 2) { unavailable++; await route.fulfill({ status: 503, contentType: 'application/json', body: '{"message":"Unavailable"}' }); return; }
+    await route.fallback();
+  });
+  await button(page, 'restore.again').click();
+  await expect(card.getByRole('alert')).toHaveText(text('restore.stopped'), slow);
+  expect(unavailable).toBe(2);
+  await expect(card).toContainText(text('restore.notRestored', 'en', { n: '5' }));
+  await expect(card).not.toContainText(text('restore.done'));
+  for (const rows of [api.outfits, api.outfitItems, api.combinationRules, api.suggestionFeedback, api.wearEvents, api.wearLinks]) expect(own(rows)).toEqual([]);
+  // Third run: the photo reads back as it was stored, the shirt is finished and everything is linked to it.
+  await button(page, 'restore.again').click();
+  await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
+  await expect(card).not.toContainText(text('restore.conflicts', 'en', { n: '1' }));
+  const items = own(api.items);
+  expect(items).toHaveLength(2);
+  expect(own(api.images).map(image => image.state).sort()).toEqual(['ready', 'ready', 'retired']);
+  const outfits = own(api.outfits);
+  expect(outfits).toHaveLength(1);
+  expect(own(api.outfitItems).map(link => link.item_id).sort()).toEqual(items.map(row => row.id).sort());
+  expect(own(api.combinationRules)).toHaveLength(1);
+  expect(own(api.suggestionFeedback)).toHaveLength(1);
+  expect(own(api.wearEvents)).toEqual([expect.objectContaining({ outfit_id: outfits[0]!.id })]);
+  expect(own(api.wearLinks).map(link => [link.title_snapshot, link.item_id]).sort())
+    .toEqual([['Fictional linen shirt', restoredShirt.id], ['Fictional old scarf', null]]);
+});
+
 test('I20 restore: an item in Trash or changed here is skipped and left as it is', async ({ page }) => {
   const { api, thumb } = await start(page);
   seed(api, thumb, 'Fictional linen shirt');

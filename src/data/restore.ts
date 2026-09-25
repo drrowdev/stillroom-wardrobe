@@ -172,11 +172,18 @@ async function preparePhoto(backup: ReadBackup, sourceImageId: string, signal: A
   return prepareImage(new Blob([bytes], { type: 'image/jpeg' }), signal, ORIGINAL_EDIT);
 }
 
+// Storage reports a missing object as 404 (in the status or in the body's statusCode).
+const missingObject = (error: unknown) => isRecord(error)
+  && (String(error.statusCode) === '404' || error.status === 404 || error.code === 'NoSuchKey');
+// False only when the stored file is verified missing or different. A file that could not be read (network, 5xx, anything
+// else) throws, so the item is retried and nothing that refers to it is written yet.
 async function storedMatches(client: AppClient, image: StoredImage, signal: AbortSignal): Promise<boolean> {
   for (const [path, size, hash] of [[image.thumbPath, image.thumbBytes, image.thumbSha256], [image.mainPath, image.mainBytes, image.mainSha256]] as const) {
     const result = await client.storage.from('wardrobe').download(path, {}, { signal, cache: 'no-store' });
     throwIfAborted(signal);
-    if (result.error || !result.data || result.data.size !== size) return false;
+    if (result.error) { if (missingObject(result.error)) return false; throw new AppError('error.unavailable'); }
+    if (!result.data) throw new AppError('error.unavailable');
+    if (result.data.size !== size) return false;
     if (await sha256Hex(new Uint8Array(await result.data.arrayBuffer())) !== hash) return false;
   }
   return true;
