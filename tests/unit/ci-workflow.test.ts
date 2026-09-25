@@ -54,7 +54,7 @@ const browserArtifacts: Record<string, string[]> = {
   'i16-weather-ui': ['settings-en-desktop', 'settings-fi-mobile', 'today-forecast-en-desktop', 'today-unavailable-fi-mobile']
     .map((name) => `i16-visual/${name}.png`),
   'p6a-backup-ui': ['backup-en-desktop', 'backup-parts-fi-mobile'].map((name) => `p6a-visual/${name}.png`),
-  'p6b-restore-ui': ['restore-preview-en-desktop', 'restore-progress-sv-mobile'].map((name) => `p6b-visual/${name}.png`),
+  'p6b-restore-ui': ['restore-preview-en-desktop', 'restore-progress-sv-mobile', 'restore-reencoded-fi-mobile'].map((name) => `p6b-visual/${name}.png`),
   'p6c-delete-account-ui': ['delete-account-en-desktop', 'delete-account-fi-mobile', 'delete-recovery-sv-desktop', 'delete-recovery-en-mobile'].map((name) => `p6c-visual/${name}.png`),
     'i23-shell-ui': ['update-en-desktop', 'install-en-desktop', 'update-fi-mobile', 'install-sv-mobile', 'install-fi-iphone'].map((name) => `i23-visual/${name}.png`),
   'i24-a11y-ui': ['leave-dialog-fi-320-200', 'delete-card-fi-320-200', 'outfit-leave-sv-320-200', 'deletion-resume-sv-320-200', 'update-sv-320-200']

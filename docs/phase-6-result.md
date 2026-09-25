@@ -64,6 +64,16 @@ file IDs, strict base64, exact completeness against the manifest hash, and
 sanitized JPEGs (exact main dimensions, thumbnails ≤ 320 px, orientation 1).
 Exit 1 means a failed check; exit 2 a usage error.
 
+What the verifier checks, and what it does not (corrected under B1-2 A6): it
+is not a header-only check. Every file's size and SHA-256 are checked against
+the manifest, and each JPEG's structure goes through `assertSanitizedJpeg`
+(segments, frame, no private metadata). It does not decode pixels and does
+not apply restore's stricter Q6 profile (the entropy walk, the one-frame and
+one-scan limits, the decoded-size check and the thumbnail checks). **A
+verifier pass means the backup is complete and intact; it does not mean every
+photo is ready to restore.** Aligning the verifier with the restore check is
+deferred to the estore-own packet (B1-2 Q3).
+
 ## Validation (builder, local)
 
 - `npm run lint`, `npm run typecheck`, `npm run check:translations`: clean.
@@ -120,9 +130,10 @@ photos, outfits and history to the signed-in account.
   Restoring a backup into the account that made it adds copies with new IDs.
 - Items go through the checked Save chain (`reserve_restored_item_save` ->
   upload -> `finalize_item_save`) with the exported provenance kinds and
-  revisions reset to 1. Photos are decoded and re-encoded in the browser
-  (`prepareImage`), thumbnails are generated from the restored main photo, and
-  uploaded bytes match the newly recorded hashes. Retired photos are replayed as
+  revisions reset to 1. Main photos follow the Q6 rules below (kept byte for
+  byte, or re-encoded only for a metadata or encoding reason); thumbnails are
+  always generated from the final main photo, and uploaded bytes match the
+  recorded hashes. Retired photos are replayed as
   a replacement chain through the existing `finalize-image-change` function,
   with the latest photo current (R1 completed-prefix validation).
 - Before an item is skipped as already here, or resumed, every completed photo
@@ -157,6 +168,66 @@ photos, outfits and history to the signed-in account.
   account stops the restore and drops passphrase and photo bytes; running it
   again continues, and nothing is added twice.
 
+## Q6 photo bytes (B1-2, ADR22)
+
+Owner decision Q6 (PR #54 comment 5829003129): restore keeps a backup photo's
+bytes when they pass strict checks. B1-2 plan rev1 with binding amendments
+A1-A7.
+
+- **Before any decoder starts**, Check validates every main photo's structure
+  (src/images/restore-jpeg.ts): monotonic offsets, bounds checked before
+  every read, at most 512 segments and 32 scans, the main byte cap and the
+  1600 px side limit, SOF equal to the manifest size, one frame, nothing after
+  EOI. Malformed or truncated data, a second frame, DNL/DHP/EXP, a scan or
+  segment over budget, metadata or tables between scans, or a size that
+  differs from the manifest refuses the backup with nothing written. A
+  thumbnail's size or hash mismatch is refused the same way (the file hash
+  check covers both files).
+- **Kept byte for byte** only for the app's own encoder profile: baseline
+  SOF0, one scan, no restart markers, APP0 JFIF only (no JFXX or embedded
+  thumbnail), validated DQT/DHT/SOF0/SOS payloads, and a bounded baseline
+  Huffman walk (no IDCT) that consumes exactly the expected MCUs and blocks,
+  followed only by one-bits padding and then EOI straight away. Anything
+  between the scan and EOI (an unused table, fill bytes) is not kept.
+- **Re-encoded** when a photo parses safely and decodes but is outside that
+  profile: progressive, restart markers, other APPn (EXIF, XMP, ICC, MPF,
+  comments), legal 0xFF fill bytes (at most 1024 in a file) and four-component
+  (CMYK) frames. The output must have the manifest's exact size, be inside the
+  profile and pass `assertSanitizedJpeg`; if it can't meet the byte cap at
+  that size, the backup is refused. Each such photo is recorded in the result
+  as re-encoded with its reason. The preview shows "N photos will be
+  re-encoded", counting only photos that will be written.
+- **Dimensions (A2):** the raw SOF must equal the manifest and the decoded
+  size must equal the raw SOF, so a non-square photo whose EXIF orientation
+  swaps its decoded size is refused. Re-encoding is allowed only after that.
+- **Thumbnails** are always regenerated from the final main photo; the backup
+  thumbnail is checked for integrity only. No claim is made that the two
+  correspond, and none about origin or hidden content in pixels.
+- **Zero writes, narrowed (A3):** Check validates every photo, so any failure
+  there means nothing is written. While restoring, each photo is read and
+  planned again before it is reserved and must match Check (source hash,
+  verdict, and the hashes of both files it would write, main and thumbnail,
+  kept or re-encoded). The first difference or failure stops the whole run as
+  "check again": the preview is dropped, nothing more is written, and earlier
+  verified writes remain. The re-read reads the chosen file again every time
+  and checks the photo's hash against the manifest; a decrypted part is reused
+  only when the file's text is exactly what was decrypted before. A file that
+  can't be read any more also means "check again". A browser that can't
+  process photos for now stays an ordinary retry.
+- **Blocked (A4):** a pending reservation whose recorded files differ from
+  what this backup gives now is blocked: never overwritten and never given
+  another ID. Its dependents are held back and the restore is reported as
+  incomplete, without offering to run it again. This cutover ships with the
+  first Pages deploy of restore; the P6b UI has never been deployed, so there
+  are no older production reservations.
+- **Report (A5):** each photo's planned source, main and thumbnail hashes and
+  verdict are kept apart from its outcome (written, already present, skipped,
+  failed, blocked) and the stored hashes. The report stays in this tab's
+  memory after success and also after a run that stopped (retry or check
+  again), with photos not reached marked skipped; it holds backup IDs and
+  hashes only and is cleared at sign-out. Hashes of photos already present are
+  the stored rows' hashes, not new calculations.
+
 ## Validation (builder, local)
 
 See the P6b PR description for exact commands and results. The database,
@@ -170,6 +241,9 @@ integration (`tests/integration/restore-save.sessions.mjs`) and security
 - Hosted apply of the additive migration and an owner-run Pages deploy.
 - Q5 (attribution restore), P6c account deletion, and the deferred
   `export-own`/`restore-own` CLIs.
+- B1-2 (Q6): GPT-6 Astra code review, green exact-head CI, coordinator visual
+  review of `restore-reencoded-fi-mobile`; aligning `verify-backup.mjs` with the
+  restore check is deferred to `restore-own`.
 - No real-backend restore round trip: the browser restore specs run against
   the mock backend, and the integration suite checks the new functions
   (`reserve_restored_item_save`, `restore_image_change_status`,

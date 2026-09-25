@@ -14,19 +14,20 @@ import { garmentPayload, parseGarmentValues, type GarmentPayload, type GarmentVa
 import { itemDetailColumns } from '../domain/item-details';
 import { parseImageChangeReceipt, type ImageChangeAttempt, type ImageChangeIntent } from '../domain/image-replacement';
 import { isRecord } from '../domain/wardrobe';
-import { readJpegHeader, JPEG_LIMITS } from '../images/jpeg';
-import { prepareImage } from '../images/process-image';
-import { ORIGINAL_EDIT } from '../images/crop';
+import { readJpegHeader, JPEG_LIMITS, ImagePreparationError } from '../images/jpeg';
+import { inspectRestoreJpeg } from '../images/restore-jpeg';
+import { planRestorePhoto, restorePhotoDeps, type PhotoPlan, type RestorePhotoDeps } from '../images/restore-photo';
 import type { PreparedPhoto } from '../images/process-jpeg';
 import { ImageChangeClient } from '../images/replace';
 import { saveItem, type SaveAttempt } from '../images/upload';
 
-// Header-only check while reading: the photo is decoded and encoded again before anything is uploaded.
+// While reading, before any photo is decoded: the whole structure of every main photo (Q6), and the size of every thumbnail.
+// Thumbnails are never stored from a backup; a new one is always made from the main photo.
 const checkJpeg: JpegCheck = (bytes, variant, width, height) => {
   try {
+    if (variant === 'main') { inspectRestoreJpeg(bytes, width, height); return; }
     const header = readJpegHeader(bytes);
-    if (variant === 'main' ? header.width !== width || header.height !== height || bytes.length > JPEG_LIMITS.mainBytes
-      : header.width > JPEG_LIMITS.thumbSide || header.height > JPEG_LIMITS.thumbSide || bytes.length > JPEG_LIMITS.thumbBytes) throw new Error('size');
+    if (header.width > JPEG_LIMITS.thumbSide || header.height > JPEG_LIMITS.thumbSide || bytes.length > JPEG_LIMITS.thumbBytes) throw new Error('size');
   } catch { throw new BackupFormatError('invalid'); }
 };
 function readProblem(error: unknown): never {
@@ -41,12 +42,46 @@ export type ItemStatus = 'new' | 'resume' | 'same' | 'conflict' | 'trash';
 export type ItemPlan = { source: RestoreItem; id: string; imageIds: string[]; requestIds: string[]; status: ItemStatus };
 export type RestorePreview = {
   ownerId: string; epoch: number; backup: ReadBackup; items: ItemPlan[]; otherAccount: boolean;
-  counts: { add: number; same: number; conflicts: number; trash: number; outfits: number };
+  // Every main photo, checked in full by Check; `reencoded` counts only the photos this restore will write.
+  photos: ReadonlyMap<string, PhotoPlan>; deps: RestorePhotoDeps;
+  counts: { add: number; same: number; conflicts: number; trash: number; outfits: number; reencoded: number };
   ids: { outfits: string[]; events: string[]; entries: string[][] };
 };
-// `failed` can be retried; `deferred` counts outfits, rules, feedback and history held back until a failed item is restored.
-export type RestoreResult = { restored: number; same: number; conflicts: number; trash: number; failed: number; deferred: number;
-  outfits: number; outfitConflicts: number; history: number; historyConflicts: number };
+// Per photo: what Check planned (the backup file and the main and thumbnail files it would write), kept apart from what
+// happened here. `stored` holds the hashes of the files this run wrote, or those recorded for photos already here; it is
+// never a newly calculated hash presented as the one expected. Photos not reached are 'skipped'.
+export type PhotoOutcome = { sourceImageId: string; planned: Pick<PhotoPlan, 'main' | 'reason' | 'sourceSha256' | 'mainSha256' | 'thumbSha256'>;
+  outcome: 'written' | 'present' | 'skipped' | 'failed' | 'blocked'; stored: { mainSha256: string; thumbSha256: string } | null };
+// `failed` can be retried; `blocked` items were started by a different restore and can't be finished from this backup;
+// `deferred` counts outfits, rules, feedback and history held back until a failed or blocked item is restored.
+export type RestoreResult = { restored: number; same: number; conflicts: number; trash: number; failed: number; blocked: number; deferred: number;
+  outfits: number; outfitConflicts: number; history: number; historyConflicts: number; photos: PhotoOutcome[] };
+
+/** A backup photo changed or failed its checks after Check: the whole restore stops, and the backup must be checked again. */
+export class RestoreRecheckError extends Error {
+  constructor() { super('restore.recheck'); this.name = 'RestoreRecheckError'; }
+}
+
+// The last run's report, in this tab's memory only. It holds IDs from the backup and file hashes, no garment details, and
+// is cleared when the sign-in it ran in ends.
+let lastReport: { result: RestoreResult } | null = null;
+/** The report of the last restore in this sign-in, including one that stopped early. */
+export function restoreReport(): RestoreResult | null { return lastReport?.result ?? null; }
+
+// Check: each photo decoded and planned in part order. A photo this browser can't process now can be checked again later;
+// anything else refuses the backup.
+async function checkPhoto(backup: ReadBackup, sourceImageId: string, width: number, height: number, signal: AbortSignal,
+  deps: RestorePhotoDeps): Promise<PhotoPlan> {
+  let bytes: Uint8Array<ArrayBuffer>;
+  try { bytes = await backup.read(sourceImageId, 'main'); } catch (error) { if (isAborted(error)) throw error; return readProblem(error); }
+  throwIfAborted(signal);
+  try { return (await planRestorePhoto(sourceImageId, bytes, width, height, signal, deps)).plan; }
+  catch (error) {
+    throwIfAborted(signal);
+    if (isAborted(error)) throw error;
+    throw new AppError(error instanceof ImagePreparationError && error.code === 'unavailable' ? 'error.unavailable' : 'restore.invalid');
+  }
+}
 
 type StoredImage = ChainImage & { descriptionVersion: number; mainPath: string; thumbPath: string;
   mainBytes: number; thumbBytes: number; mainSha256: string; thumbSha256: string };
@@ -125,7 +160,7 @@ function classify(plan: Omit<ItemPlan, 'status'>, row: Record<string, unknown> |
 
 // Reads and checks the backup, then compares it with this account using owner-scoped reads only. Nothing is written.
 export async function checkBackup(client: AppClient, scope: OwnerScope, files: readonly File[], passphrase: string,
-  signal: AbortSignal): Promise<RestorePreview> {
+  signal: AbortSignal, deps: RestorePhotoDeps = restorePhotoDeps): Promise<RestorePreview> {
   const lifetime = AbortSignal.any([scope.signal, signal]);
   let backup: ReadBackup;
   try {
@@ -144,12 +179,26 @@ export async function checkBackup(client: AppClient, scope: OwnerScope, files: r
   } catch (error) { if (isAborted(error)) throw error; return readProblem(error); }
   throwIfAborted(lifetime);
   const { data } = backup, uid = scope.ownerId;
+  // Every photo's structure passed while reading; only now is any photo decoded.
+  const sizes = new Map(data.items.flatMap(item => item.photos.map(photo => [photo.sourceId, photo] as const)));
+  const photos = new Map<string, PhotoPlan>();
+  for (const id of backup.order) {
+    const photo = sizes.get(id);
+    if (photo) photos.set(id, await checkPhoto(backup, id, photo.width, photo.height, lifetime, deps));
+  }
+  if (photos.size !== sizes.size) return readProblem(new BackupFormatError('incomplete'));
   const map = (table: string, id: string) => restoreId(data.version, uid, data.exportId, table, id);
   const base = await Promise.all(data.items.map(async (source) => ({ source, id: await map('items', source.sourceId),
     imageIds: await Promise.all(source.photos.map(photo => map('item_images', photo.sourceId))),
     requestIds: await Promise.all(source.photos.map((_, index) => map('photo-request', `${source.sourceId}#${index}`))) })));
   const { rows, images } = await readTargets(client, scope, base.map(item => item.id), lifetime);
-  const items = base.map(plan => ({ ...plan, status: classify(plan, rows.get(plan.id), images.get(plan.id) ?? []).status }));
+  let reencoded = 0;
+  const items = base.map(plan => {
+    const { status, chain } = classify(plan, rows.get(plan.id), images.get(plan.id) ?? []);
+    const first = status === 'new' ? 0 : status === 'resume' && chain.kind === 'resume' ? chain.completed + 1 : plan.source.photos.length;
+    reencoded += plan.source.photos.slice(first).filter(photo => photos.get(photo.sourceId)?.main === 'reencoded').length;
+    return { ...plan, status };
+  });
   const available = new Set(items.filter(item => item.status !== 'conflict' && item.status !== 'trash').map(item => item.source.sourceId));
   const count = (status: ItemStatus) => items.filter(item => item.status === status).length;
   const ids = {
@@ -158,19 +207,41 @@ export async function checkBackup(client: AppClient, scope: OwnerScope, files: r
     entries: await Promise.all(data.events.map(event => Promise.all(event.entries.map(entry => map('wear_event_items', entry.sourceId))))),
   };
   throwIfAborted(lifetime);
-  return { ownerId: uid, epoch: scope.epoch, backup, items, otherAccount: data.sourceOwner !== uid, ids,
+  return { ownerId: uid, epoch: scope.epoch, backup, items, otherAccount: data.sourceOwner !== uid, ids, photos, deps,
     counts: { add: count('new') + count('resume'), same: count('same'), conflicts: count('conflict'), trash: count('trash'),
-      outfits: data.outfits.filter(outfit => outfit.itemIds.some(id => available.has(id))).length } };
+      outfits: data.outfits.filter(outfit => outfit.itemIds.some(id => available.has(id))).length, reencoded } };
 }
 
 const conflictError = (error: unknown) => isRecord(error) && error.message === 'Request conflict' && (error.code === 'P0001' || error.code === '22023');
 
-async function preparePhoto(backup: ReadBackup, sourceImageId: string, signal: AbortSignal): Promise<PreparedPhoto> {
-  const bytes = await backup.read(sourceImageId, 'main');
+type Photos = { backup: ReadBackup; plans: ReadonlyMap<string, PhotoPlan>; deps: RestorePhotoDeps };
+// Before each reservation the photo is read and planned again and must match Check exactly. Any difference or refusal stops
+// the whole restore; only a browser that can't process photos right now is an ordinary retry.
+async function preparePhoto(photos: Photos, sourceImageId: string, width: number, height: number, signal: AbortSignal): Promise<PreparedPhoto> {
+  const planned = photos.plans.get(sourceImageId);
+  if (!planned) throw new RestoreRecheckError();
+  let bytes: Uint8Array<ArrayBuffer>;
+  // Read from the chosen file again, not from what Check kept in memory.
+  try { bytes = await photos.backup.read(sourceImageId, 'main', true); }
+  catch (error) { if (isAborted(error) || signal.aborted) throw error; throw new RestoreRecheckError(); }
   throwIfAborted(signal);
-  // The original bytes were checked against the backup; they are decoded and encoded again, with a new thumbnail.
-  return prepareImage(new Blob([bytes], { type: 'image/jpeg' }), signal, ORIGINAL_EDIT);
+  try {
+    const { plan, photo } = await planRestorePhoto(sourceImageId, bytes, width, height, signal, photos.deps);
+    // Both files this photo would write, kept or re-encoded, must be the ones Check planned.
+    if (plan.sourceSha256 !== planned.sourceSha256 || plan.main !== planned.main || plan.reason !== planned.reason
+      || plan.mainSha256 !== planned.mainSha256 || plan.thumbSha256 !== planned.thumbSha256) throw new RestoreRecheckError();
+    return photo;
+  } catch (error) {
+    throwIfAborted(signal);
+    if (isAborted(error) || error instanceof RestoreRecheckError) throw error;
+    if (error instanceof ImagePreparationError && error.code === 'unavailable') throw new AppError('error.unavailable');
+    throw new RestoreRecheckError();
+  }
 }
+const sameReservation = (image: { mainBytes: number; thumbBytes: number; mainSha256: string; thumbSha256: string; width: number; height: number; altText: string },
+  photo: PreparedPhoto, altText: string) => image.mainBytes === photo.main.size && image.thumbBytes === photo.thumb.size
+  && image.mainSha256 === photo.mainSha256 && image.thumbSha256 === photo.thumbSha256 && image.width === photo.width
+  && image.height === photo.height && image.altText === altText;
 
 // Storage reports a missing object as 404 (in the status or in the body's statusCode).
 const missingObject = (error: unknown) => isRecord(error)
@@ -235,8 +306,12 @@ async function verifyPrefix(client: AppClient, plan: ItemPlan, images: readonly 
 }
 
 // One item: the checked Save for photo 0, then one replacement per later photo, resuming from the completed prefix.
-// 'failed' can be retried; 'conflict' and 'trash' are final for this item, and nothing here is changed.
-async function restoreItem(client: AppClient, scope: OwnerScope, backup: ReadBackup, plan: ItemPlan, signal: AbortSignal): Promise<ItemStatus | 'failed'> {
+// 'failed' can be retried; 'conflict' and 'trash' are final for this item, and nothing here is changed. 'blocked' is an
+// item whose next photo was reserved with other files than this backup gives now: it is never overwritten or renamed.
+type ItemOutcome = ItemStatus | 'failed' | 'blocked';
+type PhotoReport = (index: number, outcome: 'written' | 'present', stored: { mainSha256: string; thumbSha256: string }) => void;
+async function restoreItem(client: AppClient, scope: OwnerScope, photoSource: Photos, plan: ItemPlan, signal: AbortSignal,
+  report: PhotoReport): Promise<ItemOutcome> {
   const photos = plan.source.photos;
   const read = async () => {
     const { rows, images } = await readTargets(client, scope, [plan.id], signal);
@@ -248,14 +323,21 @@ async function restoreItem(client: AppClient, scope: OwnerScope, backup: ReadBac
   if (state.status === 'conflict' || state.status === 'trash') return state.status;
   let completed = state.chain.kind === 'resume' ? state.chain.completed : state.chain.kind === 'complete' ? photos.length - 1 : -1;
   if (completed >= 0 && !await verifyPrefix(client, plan, state.images, completed, signal)) return 'conflict';
+  for (let index = 0; index <= completed; index++) {
+    const image = state.images.find(entry => entry.id === plan.imageIds[index])!;
+    report(index, 'present', { mainSha256: image.mainSha256, thumbSha256: image.thumbSha256 });
+  }
   if (state.status === 'same') return 'same';
   const restored = restoredFields(plan.source);
   if (completed < 0) {
-    const photo = await preparePhoto(backup, photos[0]!.sourceId, signal);
+    const photo = await preparePhoto(photoSource, photos[0]!.sourceId, photos[0]!.width, photos[0]!.height, signal);
+    const reserved = state.images.find(image => image.id === plan.imageIds[0]);
+    if (reserved && (reserved.state !== 'pending' || !sameReservation(reserved, photo, photos[0]!.altText))) return 'blocked';
     const attempt: SaveAttempt = { itemId: plan.id, imageId: plan.imageIds[0]!, values: restored.values,
       payload: { ...restored.payload, field_provenance: restored.provenance }, altText: photos[0]!.altText, photo,
       ownerId: scope.ownerId, epoch: scope.epoch };
     await saveItem(client, { ...scope, signal }, attempt, () => undefined, 'reserve_restored_item_save');
+    report(0, 'written', { mainSha256: photo.mainSha256, thumbSha256: photo.thumbSha256 });
     completed = 0;
   }
   const changes = new ImageChangeClient(client, { ...scope, signal });
@@ -264,7 +346,7 @@ async function restoreItem(client: AppClient, scope: OwnerScope, backup: ReadBac
     state = await read();
     if (state.status === 'trash') return 'trash';
     if (state.status !== 'resume' || state.chain.kind !== 'resume' || state.chain.completed !== index - 1 || !state.row) return 'conflict';
-    const photo = await preparePhoto(backup, photos[index]!.sourceId, signal);
+    const photo = await preparePhoto(photoSource, photos[index]!.sourceId, photos[index]!.width, photos[index]!.height, signal);
     const requestId = plan.requestIds[index]!, imageId = plan.imageIds[index]!;
     const current = state.images.find(image => image.id === plan.imageIds[index - 1]);
     if (!current || current.state !== 'ready') return 'conflict';
@@ -273,9 +355,10 @@ async function restoreItem(client: AppClient, scope: OwnerScope, backup: ReadBac
     const descriptionVersion = known ? known.descriptionVersion : current.descriptionVersion;
     const image = { id: imageId, main_bytes: photo.main.size, thumb_bytes: photo.thumb.size, main_sha256: photo.mainSha256,
       thumb_sha256: photo.thumbSha256, width: photo.width, height: photo.height, alt_text: photos[index]!.altText };
-    // A reserved replacement is resumed only with the intent it was reserved with, down to the prepared bytes.
+    // A reserved replacement is resumed only with the intent it was reserved with, down to the prepared bytes; otherwise the
+    // item is blocked for this backup, not treated as an ordinary difference.
     if (known?.receipt.state === 'reserved' && (!known.image || known.image.state !== 'pending'
-      || (['main_bytes', 'thumb_bytes', 'main_sha256', 'thumb_sha256', 'width', 'height', 'alt_text'] as const).some(key => known.image![key] !== image[key]))) return 'conflict';
+      || (['main_bytes', 'thumb_bytes', 'main_sha256', 'thumb_sha256', 'width', 'height', 'alt_text'] as const).some(key => known.image![key] !== image[key]))) return 'blocked';
     const intent: ImageChangeIntent = { requestId, itemId: plan.id, imageId, expectedVersion: index, currentImageId: current.id, descriptionVersion,
       item: { ...restored.payload, field_provenance: parseFieldProvenance(state.row.field_provenance) as Json } as Record<string, Json>,
       image, claim: null, sourceImageId: null };
@@ -283,6 +366,7 @@ async function restoreItem(client: AppClient, scope: OwnerScope, backup: ReadBac
     const receipt = await changes.save(attempt, () => undefined, () => undefined, signal);
     if (receipt.state === 'cancelled') return 'conflict';
     if (receipt.state !== 'completed') return 'failed';
+    report(index, 'written', { mainSha256: photo.mainSha256, thumbSha256: photo.thumbSha256 });
   }
   return initial === 'new' ? 'new' : 'resume';
 }
@@ -293,23 +377,57 @@ export type RestoreProgress = { done: number; total: number };
 // Nothing that refers to an item still to be retried is written yet, so a later run writes it once, complete.
 export async function runRestore(client: AppClient, scope: OwnerScope, preview: RestorePreview, signal: AbortSignal,
   onProgress: (progress: RestoreProgress) => void): Promise<RestoreResult> {
-  const lifetime = AbortSignal.any([scope.signal, signal]);
   if (preview.ownerId !== scope.ownerId || preview.epoch !== scope.epoch) throw new AppError('error.conflict');
+  const result: RestoreResult = { restored: 0, same: 0, conflicts: 0, trash: 0, failed: 0, blocked: 0, deferred: 0,
+    outfits: 0, outfitConflicts: 0, history: 0, historyConflicts: 0, photos: [] };
+  throwIfAborted(scope.signal);
+  const entry = { result };
+  lastReport = entry;
+  scope.signal.addEventListener('abort', () => { if (lastReport === entry) lastReport = null; }, { once: true });
+  const reached = new Set<ItemPlan>();
+  try { return await restoreAll(client, scope, preview, signal, onProgress, result, reached); }
+  finally {
+    // A run that stopped early still reports every photo: those of items it never reached were not written.
+    for (const plan of preview.items) if (!reached.has(plan)) recordPhotos(result, preview, plan, new Map(), 'skipped');
+  }
+}
+
+function recordPhotos(result: RestoreResult, preview: RestorePreview, plan: ItemPlan,
+  done: ReadonlyMap<number, Pick<PhotoOutcome, 'outcome' | 'stored'>>, rest: 'failed' | 'blocked' | 'skipped') {
+  for (const [index, photo] of plan.source.photos.entries()) {
+    const planned = preview.photos.get(photo.sourceId)!;
+    result.photos.push({ sourceImageId: photo.sourceId, planned: { main: planned.main, reason: planned.reason, sourceSha256: planned.sourceSha256,
+      mainSha256: planned.mainSha256, thumbSha256: planned.thumbSha256 }, ...done.get(index) ?? { outcome: rest, stored: null } });
+  }
+}
+
+async function restoreAll(client: AppClient, scope: OwnerScope, preview: RestorePreview, signal: AbortSignal,
+  onProgress: (progress: RestoreProgress) => void, result: RestoreResult, reached: Set<ItemPlan>): Promise<RestoreResult> {
+  const lifetime = AbortSignal.any([scope.signal, signal]);
   const { backup } = preview, { data } = backup;
-  const result: RestoreResult = { restored: 0, same: 0, conflicts: 0, trash: 0, failed: 0, deferred: 0,
-    outfits: 0, outfitConflicts: 0, history: 0, historyConflicts: 0 };
+  const photoSource: Photos = { backup, plans: preview.photos, deps: preview.deps };
   const available = new Map<string, string>();
-  // Items that may still be restored by running again. Anything that refers to one waits, so its deterministic ID is only
-  // ever written with its final contents; excluded items (different here, in Trash) are left out for good.
+  // Items that may still be restored by running again, or are blocked. Anything that refers to one waits, so its deterministic
+  // ID is only ever written with its final contents; excluded items (different here, in Trash) are left out for good.
   const retry = new Set<string>();
   const total = preview.items.length;
   onProgress({ done: 0, total });
   for (const [position, plan] of preview.items.entries()) {
-    let outcome: ItemStatus | 'failed' = 'failed';
+    let outcome: ItemOutcome = 'failed';
+    const done = new Map<number, Pick<PhotoOutcome, 'outcome' | 'stored'>>();
+    const report: PhotoReport = (index, kind, stored) => {
+      // A photo written by the first attempt stays written when the second attempt finds it in place.
+      if (done.get(index)?.outcome !== 'written') done.set(index, { outcome: kind, stored });
+    };
+    reached.add(plan);
     for (let attempt = 0; attempt < 2; attempt++) {
-      try { outcome = await restoreItem(client, scope, backup, plan, lifetime); break; }
+      try { outcome = await restoreItem(client, scope, photoSource, plan, lifetime, report); break; }
       catch (error) {
-        if (lifetime.aborted || isAborted(error)) throw error;
+        // A photo that changed or failed its checks since Check stops everything: it is not an item to retry.
+        if (lifetime.aborted || isAborted(error) || error instanceof RestoreRecheckError) {
+          recordPhotos(result, preview, plan, done, 'failed');
+          throw error;
+        }
         outcome = 'failed';
       }
     }
@@ -317,7 +435,9 @@ export async function runRestore(client: AppClient, scope: OwnerScope, preview: 
     else if (outcome === 'same') result.same++;
     else if (outcome === 'conflict') result.conflicts++;
     else if (outcome === 'trash') result.trash++;
+    else if (outcome === 'blocked') { result.blocked++; retry.add(plan.source.sourceId); }
     else { result.failed++; retry.add(plan.source.sourceId); }
+    recordPhotos(result, preview, plan, done, outcome === 'failed' ? 'failed' : outcome === 'blocked' ? 'blocked' : 'skipped');
     if (outcome === 'new' || outcome === 'resume' || outcome === 'same') available.set(plan.source.sourceId, plan.id);
     onProgress({ done: position + 1, total });
   }

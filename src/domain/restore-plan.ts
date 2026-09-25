@@ -114,21 +114,29 @@ export function describeSaved(metadata: SavedMetadata, version: 1 | 2): RestoreD
 }
 
 // ---- Reading a backup. ----
-export type PhotoReader = (imageId: string, variant: 'main' | 'thumb') => Promise<Uint8Array<ArrayBuffer>>;
-export type ReadBackup = { data: RestoreData; parts: number; photos: number; fileBytes: number; read: PhotoReader };
+// `fresh` reads the part from its file again even when that part is the one kept decrypted; the decrypted copy is reused
+// only if the file's text is exactly what was decrypted before.
+export type PhotoReader = (imageId: string, variant: 'main' | 'thumb', fresh?: boolean) => Promise<Uint8Array<ArrayBuffer>>;
+// `order` lists every main photo in the order its parts are stored, so reading them in turn decrypts each part once.
+export type ReadBackup = { data: RestoreData; parts: number; photos: number; fileBytes: number; read: PhotoReader; order: string[] };
+const mainOrder = (locate: ReadonlyMap<string, { part: number; ref: FileRef }>) => [...locate.values()]
+  .filter(place => place.ref.variant === 'main').sort((a, b) => a.part - b.part).map(place => place.ref.imageId);
 
 // Re-reads the part that holds a photo when it is needed, keeping one decrypted part, and checks its hash again.
 function photoReader(source: PartSource, passphrase: string, version: 1 | 2, exportId: string, count: number,
   locate: ReadonlyMap<string, { part: number; ref: FileRef }>): PhotoReader {
-  let cached: { index: number; part: ExportPart } | null = null;
-  return async (imageId, variant) => {
+  let cached: { index: number; text: string; part: ExportPart } | null = null;
+  return async (imageId, variant, fresh = false) => {
     const place = locate.get(`${imageId}|${variant}`);
     if (!place) return fail();
-    if (cached?.index !== place.part) {
-      cached = null;
-      const part = await decryptPart(await source.read(place.part), passphrase, version);
-      if (part.exportId !== exportId || part.partIndex !== place.part || part.partCount !== count) fail();
-      cached = { index: place.part, part };
+    if (fresh || cached?.index !== place.part) {
+      const text = await source.read(place.part);
+      if (cached?.index !== place.part || cached.text !== text) {
+        cached = null;
+        const part = await decryptPart(text, passphrase, version);
+        if (part.exportId !== exportId || part.partIndex !== place.part || part.partCount !== count) fail();
+        cached = { index: place.part, text, part };
+      }
     }
     const file = cached.part.files.find(entry => isObject(entry) && entry.imageId === imageId && entry.variant === variant);
     if (!file) return fail('incomplete');
@@ -138,12 +146,12 @@ function photoReader(source: PartSource, passphrase: string, version: 1 | 2, exp
   };
 }
 
-export async function readBackupV2(source: PartSource, passphrase: string, checkJpeg: JpegCheck): Promise<ReadBackup> {
+export async function readBackupV2(source: PartSource, passphrase: string, checkJpeg: JpegCheck, files: PartSource = source): Promise<ReadBackup> {
   const summary = await verifyBackup(source, passphrase, checkJpeg);
   const locate = new Map<string, { part: number; ref: FileRef }>();
   planParts(summary.metadata).forEach((refs, index) => { for (const ref of refs) locate.set(`${ref.imageId}|${ref.variant}`, { part: index + 1, ref }); });
   return { data: describeSaved(summary.metadata, 2), parts: summary.parts, photos: summary.photos, fileBytes: summary.fileBytes,
-    read: photoReader(source, passphrase, 2, summary.exportId, summary.parts, locate) };
+    read: photoReader(files, passphrase, 2, summary.exportId, summary.parts, locate), order: mainOrder(locate) };
 }
 
 // Version 1 manifests predate some columns: a missing column takes its later default, an unknown table or column is refused.
@@ -173,7 +181,7 @@ export function normalizeV1Manifest(value: unknown, exportId: string): RawManife
   return { export_id: exportId, owner_id: owner, created_at: createdAt, tables };
 }
 
-export async function readBackupV1(source: PartSource, passphrase: string, checkJpeg: JpegCheck): Promise<ReadBackup> {
+export async function readBackupV1(source: PartSource, passphrase: string, checkJpeg: JpegCheck, files: PartSource = source): Promise<ReadBackup> {
   if (!Number.isSafeInteger(source.count) || source.count < 1 || source.count > BACKUP_LIMITS.parts) fail('incomplete');
   const head = await decryptPart(await source.read(0), passphrase, 1);
   if (head.partIndex !== 0 || !Object.hasOwn(head, 'manifest') || source.exportId !== undefined && head.exportId !== source.exportId) fail();
@@ -220,13 +228,14 @@ export async function readBackupV1(source: PartSource, passphrase: string, check
   // Same saved-only rules as the app's export; version 1 has no tag history.
   const saved = projectSaved(raw, new Map(savedItemIds(raw).map(id => [id, []])));
   return { data: describeSaved(saved, 1), parts: head.partCount, photos: saved.tables.item_images.length, fileBytes,
-    read: photoReader(source, passphrase, 1, head.exportId, head.partCount, locate) };
+    read: photoReader(files, passphrase, 1, head.exportId, head.partCount, locate), order: mainOrder(locate) };
 }
 
 // Reads part 0's schema version without trusting anything else in it.
 export async function readBackup(source: PartSource, passphrase: string, checkJpeg: JpegCheck): Promise<ReadBackup> {
   const first = await source.read(0);
-  const v1 = () => readBackupV1({ ...source, read: index => index === 0 ? Promise.resolve(first) : source.read(index) }, passphrase, checkJpeg);
+  // Photos read later come from the files themselves, not this copy of part 0.
+  const v1 = () => readBackupV1({ ...source, read: index => index === 0 ? Promise.resolve(first) : source.read(index) }, passphrase, checkJpeg, source);
   // Version 1 keeps photos in part 0, so its part 0 may be up to the encrypted part limit. A part 0 over the version 2
   // metadata limit is decrypted first; only a version 1 part may continue, anything else is too large.
   if (first.length > BACKUP_LIMITS.metadataPartBytes) {
@@ -234,7 +243,7 @@ export async function readBackup(source: PartSource, passphrase: string, checkJp
     catch (error) { throw error instanceof BackupFormatError && error.problem === 'passphrase' ? error : new BackupFormatError('tooLarge'); }
     return v1();
   }
-  try { return await readBackupV2({ ...source, read: index => index === 0 ? Promise.resolve(first) : source.read(index) }, passphrase, checkJpeg); }
+  try { return await readBackupV2({ ...source, read: index => index === 0 ? Promise.resolve(first) : source.read(index) }, passphrase, checkJpeg, source); }
   catch (error) {
     if (!(error instanceof BackupFormatError) || error.problem !== 'invalid') throw error;
     let version: unknown;

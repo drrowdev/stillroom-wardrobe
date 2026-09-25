@@ -214,6 +214,55 @@ async function verifyAndHash(image: EncodedImage, signal?: AbortSignal): Promise
   }
 }
 
+/** Restore (Q6): the decoded size of already-checked bytes, with the decoder released before returning. */
+export async function decodedSize(blob: Blob, signal?: AbortSignal): Promise<{ width: number; height: number }> {
+  let decoded: DecodedImage | undefined;
+  try {
+    if (typeof document === 'undefined') throw new ImagePreparationError('unavailable');
+    decoded = await decode(blob, signal, true);
+    checkAbort(signal);
+    return { width: decoded.width, height: decoded.height };
+  } catch (error) {
+    checkAbort(signal);
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    throw new ImagePreparationError(error instanceof ImagePreparationError ? error.code : 'invalid', 'decode');
+  } finally {
+    decoded?.release();
+  }
+}
+
+/** Restore (Q6): a thumbnail made from the final main JPEG bytes by the usual thumbnail rule. */
+export async function thumbnailFromMain(main: Blob, width: number, height: number, signal?: AbortSignal): Promise<{
+  blob: Blob; sha256: string; width: number; height: number;
+}> {
+  let decoded: DecodedImage | undefined;
+  let thumb: EncodedImage | undefined;
+  let stage: ImagePreparationStage = 'decode';
+  try {
+    if (typeof document === 'undefined' || !globalThis.crypto?.subtle) throw new ImagePreparationError('unavailable');
+    decoded = await decode(main, signal, true);
+    checkAbort(signal);
+    if (decoded.width !== width || decoded.height !== height) throw new ImagePreparationError('invalid');
+    stage = 'thumbEncode';
+    thumb = await encode(decoded.source, width, height, JPEG_LIMITS.thumbSide, JPEG_LIMITS.thumbBytes, 160,
+      signal, undefined, true);
+    decoded.release();
+    decoded = undefined;
+    const sha256 = await verifyAndHash(thumb, signal);
+    return { blob: thumb.blob, sha256, width: thumb.canvas.width, height: thumb.canvas.height };
+  } catch (error) {
+    checkAbort(signal);
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    throw new ImagePreparationError(
+      error instanceof ImagePreparationError ? error.code : 'invalid',
+      error instanceof ImagePreparationError ? error.stage ?? stage : stage,
+    );
+  } finally {
+    decoded?.release();
+    if (thumb) releaseCanvas(thumb.canvas);
+  }
+}
+
 /** Phase 0: JPEG pixels only, prepared locally; no source upload or persistent storage. */
 export async function prepareJpeg(file: Blob, signal?: AbortSignal): Promise<PreparedPhoto> {
   return prepareSource(file, () => admitJpeg(file, signal), ORIGINAL_EDIT, signal);
