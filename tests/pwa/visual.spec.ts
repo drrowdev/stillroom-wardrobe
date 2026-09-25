@@ -1,7 +1,8 @@
 import { devices, expect, test, type Page } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
-import { messages, type Language } from '../../src/i18n';
+import { languages, messages, type Language } from '../../src/i18n';
 import { mockBackend, signIn } from '../browser/mock-backend';
 import { builds } from './builds';
 import { controlled, serve, updateAndSettle, type DistServer } from './helpers';
@@ -91,3 +92,83 @@ test.describe('mobile', () => {
     await installHint(page, 'sv', 'other', 'install-sv-mobile.png');
   });
 });
+
+// I24: the update prompt and the install hint only exist in the production build, so their checks live here.
+// The production CSP blocks injected style sheets, so 200% text is applied through the CSSOM instead.
+const setLargeText = (page: Page, on: boolean) => page.evaluate((enlarged) => {
+  document.documentElement.style.fontSize = enlarged ? '200%' : '';
+  document.body.style.fontSize = enlarged ? '32px' : '';
+}, on);
+/**
+ * These screens are signed in: exactly one skip link, off-screen until focused, the first Tab stop, then
+ * fully visible with a focus ring, and Enter moves focus to #main.
+ */
+async function skipLink(page: Page, label: string) {
+  const links = page.locator('.skip-link');
+  await expect(page.locator('.workspace'), label).toHaveCount(1);
+  expect(await links.count(), label).toBe(1);
+  const hidden = await links.evaluate((element) => {
+    const box = element.getBoundingClientRect(), style = getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && box.width > 0 && box.bottom <= 0;
+  });
+  expect(hidden, `${label} skip link off-screen until focused`).toBe(true);
+  await page.evaluate(() => { document.documentElement.setAttribute('tabindex', '-1'); document.documentElement.focus(); });
+  await page.keyboard.press('Tab');
+  await page.evaluate(() => { document.documentElement.removeAttribute('tabindex'); });
+  await expect(links, label).toBeFocused();
+  expect(await links.evaluate((element) => {
+    const box = element.getBoundingClientRect(), style = getComputedStyle(element);
+    return { inView: box.top >= 0 && box.left >= 0 && box.bottom <= innerHeight && box.right <= innerWidth,
+      ring: style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2 || style.boxShadow !== 'none' };
+  }), label).toEqual({ inView: true, ring: true });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#main'), label).toBeFocused();
+}
+async function narrowAndEnlarged(page: Page, scope: string, language: Language, capture?: string) {
+  await expect(page.locator('html')).toHaveAttribute('lang', language);
+  await page.setViewportSize({ width: 320, height: 800 });
+  for (const enlarged of [false, true]) {
+    await setLargeText(page, enlarged);
+    const found = await page.evaluate((selector) => {
+      const root = document.querySelector(selector)!;
+      const clipped = [root, ...root.querySelectorAll('h2, p, span, button')]
+        .filter((element) => element.scrollWidth > element.clientWidth + 1 || element.getBoundingClientRect().right > innerWidth + 1)
+        .map((element) => element.textContent);
+      const small = [...root.querySelectorAll('button')].map((element) => element.getBoundingClientRect())
+        .filter((box) => box.width < 44 || box.height < 44).length;
+      return { overflow: document.documentElement.scrollWidth > innerWidth, clipped, small };
+    }, scope);
+    const label = `${scope} ${language} ${enlarged ? '200%' : '100%'}`;
+    expect(found, label).toEqual({ overflow: false, clipped: [], small: 0 });
+    await skipLink(page, label);
+    expect((await new AxeBuilder({ page }).analyze()).violations, `${scope} ${language} axe`).toEqual([]);
+    if (enlarged && capture) {
+      await mkdir(path.join('test-results', 'i24-visual'), { recursive: true });
+      await page.screenshot({ path: path.join('test-results', 'i24-visual', capture), fullPage: false });
+    }
+  }
+  await setLargeText(page, false);
+}
+
+for (const language of languages) {
+  test.describe(`I24 ${language}`, () => {
+    test('the update prompt fits 320px and 200% text, passes axe and Reload takes focus by keyboard', async ({ page }) => {
+      await signedIn(page, language);
+      await server.setRoot(builds.b);
+      expect((await updateAndSettle(page)).waiting).toBe(true);
+      const status = page.getByRole('status').filter({ hasText: messages['update.available'][language] });
+      await expect(status).toBeVisible();
+      await narrowAndEnlarged(page, '.update-notice', language, language === 'sv' ? 'update-sv-320-200.png' : undefined);
+      const reload = status.getByRole('button', { name: messages['update.reload'][language], exact: true });
+      await page.locator('body').focus();
+      for (let presses = 0; presses < 40 && !await reload.evaluate((element) => element === document.activeElement); presses++) await page.keyboard.press('Tab');
+      await expect(reload).toBeFocused();
+      expect(await reload.evaluate((element) => { const style = getComputedStyle(element);
+        return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2 || style.boxShadow !== 'none'; })).toBe(true);
+    });
+    test('the install hint fits 320px and 200% text and passes axe', async ({ page }) => {
+      await openSettings(page, language);
+      await narrowAndEnlarged(page, 'section[aria-labelledby="install-heading"]', language);
+    });
+  });
+}

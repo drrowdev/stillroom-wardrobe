@@ -264,6 +264,18 @@ jobs:
             test-results/i23-visual/install-fi-iphone.png
           if-no-files-found: error
           retention-days: 1
+      - name: Preserve bounded synthetic I24 visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: i24-a11y-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/i24-visual/leave-dialog-fi-320-200.png
+            test-results/i24-visual/delete-card-fi-320-200.png
+            test-results/i24-visual/outfit-leave-sv-320-200.png
+            test-results/i24-visual/deletion-resume-sv-320-200.png
+            test-results/i24-visual/update-sv-320-200.png
+          if-no-files-found: error
+          retention-days: 1
 
   webkit-photo:
     name: WebKit photo contracts

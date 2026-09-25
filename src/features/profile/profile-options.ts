@@ -6,12 +6,22 @@ type Kind = 'timeZone' | 'currency';
 function supported(kind: Kind): readonly string[] | null {
   try { return typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf(kind) : null; } catch { return null; }
 }
-// A short current offset keeps the closed select readable at 320px.
+// A short current offset keeps the closed select readable at 320px. Locales disagree on "GMT" and "UTC",
+// so the offset is read in a fixed form and written as UTC in every language.
+export function utcOffset(value: string, now: Date): string | null {
+  const offset = new Intl.DateTimeFormat('en-US', { timeZone: value, timeZoneName: 'longOffset' })
+    .formatToParts(now).find((part) => part.type === 'timeZoneName')?.value;
+  const match = offset?.match(/^GMT(?:([+-])(\d{2}):(\d{2}))?$/);
+  if (!match) return null;
+  // ICU versions differ: UTC can come back as "GMT", "GMT+00:00" or "GMT-00:00".
+  if (!match[1] || Number(match[2]) === 0 && match[3] === '00') return 'UTC';
+  const hours = String(Number(match[2]));
+  return `UTC${match[1] === '-' ? '\u2212' : '+'}${match[3] === '00' ? hours : `${hours}:${match[3]}`}`;
+}
 function timeZoneLabel(language: Language, value: string, now: Date): string {
   const city = (value.split('/').pop() ?? value).replaceAll('_', ' ');
   try {
-    const name = new Intl.DateTimeFormat(locales[language], { timeZone: value, timeZoneName: 'shortOffset' })
-      .formatToParts(now).find((part) => part.type === 'timeZoneName')?.value;
+    const name = utcOffset(value, now);
     return name ? translate(language, 'settings.timeZoneOption', { city, name }) : value;
   } catch { return value; }
 }

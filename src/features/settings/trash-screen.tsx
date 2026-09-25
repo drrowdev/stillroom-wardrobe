@@ -25,7 +25,7 @@ function DeleteDialog({ preview, busy, t, language, returnFocus, onCancel, onCon
     <h2 id="delete-item-heading">{t('lifecycle.deleteTitle', { name: preview.title })}</h2>
     <div id="delete-item-body"><p>{t(plural === 'one' ? 'lifecycle.photos_one' : 'lifecycle.photos_other', { count: new Intl.NumberFormat(locales[language]).    format(preview.photo_count) })}</p>
           <p>{t('lifecycle.history')}</p><p>{t('deletion.garmentWarning')}</p></div>
-    <div className="settings-actions"><button type="button" autoFocus className="button button-secondary" disabled={busy} onClick={onCancel}>{t('common.cancel')}</button>
+    <div className="dialog-actions"><button type="button" autoFocus className="button button-secondary" disabled={busy} onClick={onCancel}>{t('common.cancel')}</button>
       <button type="button" className="button button-danger" disabled={busy} onClick={onConfirm}>{t('lifecycle.delete')}</button></div>
   </dialog>;
 }

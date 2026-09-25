@@ -27,9 +27,8 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .button-quiet:hover:not(:disabled) { background: var(--well); color: var(--ink); }
 .button-danger { color: var(--error); background: transparent; border-color: var(--error); }
 .button-wide { width: 100%; }
-.text-button { border: 0; background: transparent; color: var(--primary); min-height: 44px; padding: 8px 0; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: .875rem; font-weight: 550; }
+.text-button { border: 0; background: transparent; color: var(--primary); min-width: 44px; min-height: 44px; padding: 8px 0; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: .875rem; font-weight: 550; }
 .text-button:hover { text-decoration: underline; text-underline-offset: 4px; }
-.settings-page > .text-button, .trash-page > .text-button { min-width: 44px; }
 .icon-button { display: inline-flex; justify-content: center; align-items: center; background: transparent; border: 0; color: inherit; min-width: 44px; min-height: 44px; }
 .brand { display: inline-flex; align-items: center; gap: 11px; text-decoration: none; font-size: 1.1875rem; letter-spacing: -.045em; font-weight: 550; line-height: 1.1; flex-shrink: 0; }
 .brand-icon { color: var(--primary); width: 38px; height: 44px; display: grid; place-items: center; }
@@ -248,17 +247,19 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .notice-offline { color: var(--ink); background: #F1E6D6; border-color: #D8C6AC; }
 .language-warning { margin: 16px auto 0; width: min(1120px, calc(100% - 64px)); }
 .language-warning .text-button { margin-left: auto; }
-.update-notice .text-button { min-width: 44px; padding-inline: 8px; }
-.dialog { color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 30px; width: min(440px, calc(100vw - 32px)); box-shadow: 0 16px 80px #24332E26; }
+.update-notice { flex-wrap: wrap; overflow-wrap: anywhere; }
+.update-notice > span { min-width: 0; }
+.update-notice .text-button { min-width: 44px; max-width: 100%; padding-inline: 8px; white-space: normal; text-align: start; }
+.dialog { color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 30px; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; box-shadow: 0 16px 80px #24332E26; hyphens: auto; overflow-wrap: break-word; }
 .dialog::backdrop { background: #24332E60; backdrop-filter: blur(3px); }
-.dialog h2 { font-size: 1.375rem; }
+.dialog h2 { font-size: 1.375rem; hyphens: manual; }
 .dialog-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
-.dialog-actions .button { flex: 1; }
+.dialog-actions .button { flex: 1 1 10rem; white-space: normal; hyphens: manual; }
 .spinner { width: 20px; height: 20px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; flex: 0 0 auto; }
 .skeleton { animation: breathe 1.8s ease-in-out infinite; background: #E7E6DC; }
 .loading-line { width: 65%; height: 12px; border-radius: 5px; margin: 17px 0; }
-.skip-link { position: absolute; top: -80px; left: 16px; padding: 10px 16px; background: var(--primary); color: white; z-index: 30; }
-.skip-link:focus { top: 8px; }
+.skip-link { position: absolute; top: 0; left: 16px; padding: 10px 16px; background: var(--primary); color: white; z-index: 30; transform: translateY(calc(-100% - 16px)); }
+.skip-link:focus { transform: translateY(8px); }
 .fatal-error { width: min(540px, calc(100% - 40px)); margin: 20vh auto; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes breathe { 50% { opacity: .55; } }
@@ -312,8 +313,13 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
   .details-panel { padding-bottom: 10px; }
   .language-warning { width: calc(100% - 32px); }
   .dialog { padding: 24px; }
+  .dialog-actions { flex-direction: column; }
+  .dialog-actions .button { flex: none; width: 100%; }
 }
 @media (max-width: 359px) {
+  .dialog { width: calc(100vw - 16px); padding: 16px; }
+  .dialog h2 { font-size: 1.1875rem; }
+  .dialog-actions .button { padding-inline: 12px; }
   .item-grid { column-gap: 8px; }
   .entry-header { padding: 14px 16px; }
   .entry-main { padding-inline: 16px; }
