@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Offline check of a Stillroom backup: `node scripts/verify-backup.mjs --input DIR`.
 // The passphrase is read from the terminal (hidden) or from piped standard input, never from arguments or the
-// environment. Only counts, sizes and the metadata hash are printed; nothing in the backup is opened as a path or URL.
-import { lstat, readdir, readFile } from 'node:fs/promises';
+// environment. The metadata part is checked first, then one photo part at a time. Only counts, sizes and the metadata hash are printed; nothing in the backup is opened as a path or URL.
+import { lstat, open, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { BACKUP_LIMITS, BackupFormatError, verifyParts } from '../src/domain/export-format.ts';
+import { BACKUP_LIMITS, BackupFormatError, verifyBackup } from '../src/domain/export-format.ts';
 import { assertSanitizedJpeg, JPEG_LIMITS, readJpegHeader } from '../src/images/jpeg.ts';
 
 const partName = /^stillroom-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-(\d{1,3})\.json\.enc$/;
@@ -31,25 +31,53 @@ export function checkJpeg(bytes, variant, width, height) {
   assertSanitizedJpeg(bytes, header.width, header.height);
 }
 
-export async function readParts(directory) {
+// Lists the parts by name and size only; nothing is read until every name, type, per-file and total limit passes.
+export async function listParts(directory, limits = BACKUP_LIMITS) {
   const info = await lstat(directory);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new BackupFormatError('invalid');
-  const names = (await readdir(directory)).sort();
-  if (names.length < 1 || names.length > BACKUP_LIMITS.parts) throw new BackupFormatError('incomplete');
+  const names = await readdir(directory);
+  if (names.length < 1 || names.length > limits.parts) throw new BackupFormatError('incomplete');
+  const paths = new Map();
+  let exportId;
   let total = 0;
-  const texts = [];
   for (const name of names) {
-    if (!partName.test(name)) throw new BackupFormatError('invalid');
+    const match = partName.exec(name);
+    if (!match || (exportId !== undefined && match[1] !== exportId)) throw new BackupFormatError('invalid');
+    exportId = match[1];
+    const index = Number(match[2]);
+    if (String(index) !== match[2] || paths.has(index)) throw new BackupFormatError('invalid');
     const path = join(directory, name);
     const file = await lstat(path);
-    if (!file.isFile() || file.isSymbolicLink() || file.size > BACKUP_LIMITS.encryptedPartBytes) throw new BackupFormatError('tooLarge');
+    if (!file.isFile() || file.isSymbolicLink()) throw new BackupFormatError('invalid');
+    const limit = index === 0 ? limits.metadataPartBytes : limits.encryptedPartBytes;
+    if (file.size > limit) throw new BackupFormatError('tooLarge');
     total += file.size;
-    if (total > BACKUP_LIMITS.parts * BACKUP_LIMITS.encryptedPartBytes) throw new BackupFormatError('tooLarge');
-    texts.push(await readFile(path, 'utf8'));
+    if (total > limits.totalEncryptedBytes) throw new BackupFormatError('tooLarge');
+    paths.set(index, { path, size: file.size, limit });
   }
-  return texts;
+  for (let index = 0; index < names.length; index++) if (!paths.has(index)) throw new BackupFormatError('incomplete');
+  return { exportId, count: names.length, paths };
 }
 
+// Reads one part, refusing a file that grew past its limit after it was listed.
+async function readBounded({ path, limit }) {
+  const handle = await open(path, 'r');
+  try {
+    const { size } = await handle.stat();
+    if (size > limit) throw new BackupFormatError('tooLarge');
+    const buffer = Buffer.alloc(size);
+    const { bytesRead } = await handle.read(buffer, 0, size, 0);
+    if (bytesRead !== size || (await handle.read(Buffer.alloc(1), 0, 1, size)).bytesRead !== 0) throw new BackupFormatError('invalid');
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch (error) {
+    if (error instanceof BackupFormatError) throw error;
+    throw new BackupFormatError('invalid');
+  } finally { await handle.close(); }
+}
+
+export function partSource(listing) {
+  return { count: listing.count, exportId: listing.exportId, read: (index) => readBounded(listing.paths.get(index)) };
+}
 async function readPassphrase() {
   const input = process.stdin;
   if (!input.isTTY) {
@@ -86,10 +114,10 @@ async function readPassphrase() {
 
 async function main() {
   const directory = parseArguments(process.argv.slice(2));
-  const texts = await readParts(directory);
+  const listing = await listParts(directory);
   const passphrase = await readPassphrase();
   if (passphrase.length < BACKUP_LIMITS.passphrase) usage('The passphrase is too short.');
-  const summary = await verifyParts(texts, passphrase, checkJpeg);
+  const summary = await verifyBackup(partSource(listing), passphrase, checkJpeg);
   process.stdout.write(`Backup verified: ${summary.parts} parts, ${summary.items} items, ${summary.photos} photos, `
     + `${summary.fileBytes} photo bytes, metadata sha256 ${summary.manifestSha256}.\n`);
 }

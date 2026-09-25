@@ -6,6 +6,10 @@ export const BACKUP_LIMITS = Object.freeze({
   partFileBytes: 12 * MiB,
   metadataBytes: 8 * MiB,
   encryptedPartBytes: 40 * MiB,
+  // Part 0 holds only metadata (at most 8 MiB before base64 and encryption).
+  metadataPartBytes: 12 * MiB,
+  // Largest honest backup: 4 GiB of photos, base64 twice (16/9), plus metadata and per-file overhead.
+  totalEncryptedBytes: 7680 * MiB,
   parts: 400,
   totalFileBytes: 4096 * MiB,
   rowsPerTable: 20_000,
@@ -99,9 +103,10 @@ export function toBase64(bytes: Uint8Array): string {
   for (let offset = 0; offset < bytes.length; offset += 0x8000) text += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
   return btoa(text);
 }
-const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+// A flat character class: a grouped repetition overflows the regex stack on multi-megabyte parts. The round trip below keeps it canonical.
+const base64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
 export function fromBase64(text: unknown, maximumBytes: number): Uint8Array<ArrayBuffer> {
-  if (typeof text !== 'string' || text.length > Math.ceil(maximumBytes / 3) * 4 || !base64Pattern.test(text)) return fail();
+  if (typeof text !== 'string' || text.length > Math.ceil(maximumBytes / 3) * 4 || text.length % 4 !== 0 || !base64Pattern.test(text)) return fail();
   const binary = atob(text);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
@@ -201,7 +206,7 @@ export function projectSaved(raw: RawManifest, attributions: ReadonlyMap<string,
       const linked = row.source_image_id !== null && imageIds.has(String(row.source_image_id))
         && images.some(image => image.id === row.source_image_id && image.item_id === itemId);
       itemAttributions.push({ owner_id: owner, item_id: itemId, position, source_image_id: linked ? row.source_image_id : null,
-        source_image_excluded: row.source_image_id !== null && !linked, image_sha256: row.image_sha256, model_id: row.model_id,
+        source_image_excluded: !linked, image_sha256: row.image_sha256, model_id: row.model_id,
         prompt_version: row.prompt_version, fields: row.fields });
     });
   }
@@ -260,7 +265,8 @@ export function assertMetadata(value: unknown): asserts value is SavedMetadata {
   if (ready.size !== items.size) fail();
   for (const entry of t.item_attributions) {
     if (!items.has(String(entry.item_id)) || !isCount(entry.position, 0, 999) || typeof entry.source_image_excluded !== 'boolean'
-      || (entry.source_image_id !== null && (entry.source_image_excluded || images.get(String(entry.source_image_id))?.item_id !== entry.item_id))) fail();
+      || (entry.source_image_id === null) !== entry.source_image_excluded
+      || (entry.source_image_id !== null && images.get(String(entry.source_image_id))?.item_id !== entry.item_id)) fail();
   }
   const outfits = new Set(t.outfits.map(outfit => { if (!isUuid(outfit.id) || outfit.deleted_at !== null) fail(); return String(outfit.id); }));
   const linked = new Set<string>();
@@ -354,36 +360,37 @@ export async function decryptPart(text: string, passphrase: string): Promise<Exp
 
 export type BackupSummary = { exportId: string; parts: number; items: number; photos: number; fileBytes: number; manifestSha256: string; metadata: SavedMetadata };
 export type JpegCheck = (bytes: Uint8Array, variant: 'main' | 'thumb', width: number, height: number) => void;
+// Parts are read one at a time by index; `read(0)` is the metadata part. `exportId`, when known from file names, must match.
+export type PartSource = { count: number; exportId?: string; read: (index: number) => Promise<string> };
 
-// Checks a complete set of parts: identity, completeness, the metadata hash and every photo's bytes. Nothing inside
-// the backup is used as a path or address.
-export async function verifyParts(texts: readonly string[], passphrase: string, checkJpeg: JpegCheck): Promise<BackupSummary> {
-  if (texts.length < 1 || texts.length > BACKUP_LIMITS.parts) fail('incomplete');
-  const parts: ExportPart[] = [];
-  for (const text of texts) parts.push(await decryptPart(text, passphrase));
-  const first = parts[0]!;
-  const byIndex = new Map<number, ExportPart>();
-  for (const part of parts) {
-    if (part.exportId !== first.exportId || part.partCount !== first.partCount || part.manifestSha256 !== first.manifestSha256
-      || byIndex.has(part.partIndex)) fail();
-    byIndex.set(part.partIndex, part);
-  }
-  if (byIndex.size !== first.partCount) fail('incomplete');
-  const head = byIndex.get(0)!;
+// Checks a complete backup: identity, completeness, the metadata hash and every photo's bytes. The metadata part is checked
+// first; each photo part is then read, checked and released before the next, so memory holds the metadata and one part.
+// Nothing inside the backup is used as a path or address.
+export async function verifyBackup(source: PartSource, passphrase: string, checkJpeg: JpegCheck): Promise<BackupSummary> {
+  if (!isCount(source.count, 1, BACKUP_LIMITS.parts)) fail('incomplete');
+  const firstText = await source.read(0);
+  if (firstText.length > BACKUP_LIMITS.metadataPartBytes) fail('tooLarge');
+  const head = await decryptPart(firstText, passphrase);
+  if (head.partIndex !== 0 || !Object.hasOwn(head, 'manifest') || head.files.length
+    || (source.exportId !== undefined && head.exportId !== source.exportId)) fail();
+  if (head.partCount !== source.count) fail('incomplete');
   const metadata = head.manifest;
   assertMetadata(metadata);
-  if (metadata.export_id !== first.exportId || await metadataDigest(metadata) !== first.manifestSha256 || head.files.length) fail();
+  if (metadata.export_id !== head.exportId || await metadataDigest(metadata) !== head.manifestSha256) fail();
   const plan = planParts(metadata);
-  if (plan.length + 1 !== first.partCount) fail('incomplete');
+  if (plan.length + 1 !== head.partCount) fail('incomplete');
   const images = new Map(metadata.tables.item_images.map(image => [String(image.id), image]));
   let fileBytes = 0;
-  for (let index = 1; index < first.partCount; index++) {
-    const part = byIndex.get(index)!, expected = plan[index - 1]!;
-    if (Object.hasOwn(part, 'manifest') || part.files.length !== expected.length) fail('incomplete');
+  for (let index = 1; index < head.partCount; index++) {
+    const part = await decryptPart(await source.read(index), passphrase), expected = plan[index - 1]!;
+    if (part.exportId !== head.exportId || part.partCount !== head.partCount || part.manifestSha256 !== head.manifestSha256
+      || part.partIndex !== index || Object.hasOwn(part, 'manifest')) fail();
+    if (part.files.length !== expected.length) fail('incomplete');
     for (let position = 0; position < expected.length; position++) {
       const file: unknown = part.files[position], ref = expected[position]!;
       if (!isObject(file) || !sameKeys(file, ['imageId', 'variant', 'sha256', 'byteLength', 'mime', 'base64']) || file.imageId !== ref.imageId
         || file.variant !== ref.variant || file.sha256 !== ref.sha256 || file.byteLength !== ref.byteLength || file.mime !== 'image/jpeg') fail('incomplete');
+      if (fileBytes + ref.byteLength > BACKUP_LIMITS.totalFileBytes) fail('tooLarge');
       const bytes = fromBase64((file as Row).base64, ref.byteLength);
       if (bytes.length !== ref.byteLength || await sha256Hex(bytes) !== ref.sha256) fail();
       const image = images.get(ref.imageId)!;
@@ -391,6 +398,11 @@ export async function verifyParts(texts: readonly string[], passphrase: string, 
       fileBytes += bytes.length;
     }
   }
-  return { exportId: first.exportId, parts: first.partCount, items: metadata.tables.items.length, photos: images.size, fileBytes,
-    manifestSha256: first.manifestSha256, metadata };
+  return { exportId: head.exportId, parts: head.partCount, items: metadata.tables.items.length, photos: images.size, fileBytes,
+    manifestSha256: head.manifestSha256, metadata };
+}
+
+// In-memory form for parts that were just downloaded, in part order.
+export function verifyParts(texts: readonly string[], passphrase: string, checkJpeg: JpegCheck): Promise<BackupSummary> {
+  return verifyBackup({ count: texts.length, read: async index => texts[index]! }, passphrase, checkJpeg);
 }

@@ -3,8 +3,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
-import { encryptPart, metadataDigest, partFileName, planParts, sha256Hex, toBase64, type SavedMetadata } from '../../src/domain/export-format';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BACKUP_LIMITS, BackupFormatError, encryptPart, metadataDigest, partFileName, planParts, sha256Hex, toBase64, type SavedMetadata } from '../../src/domain/export-format';
 
 const owner = '11111111-1111-4111-8111-111111111111';
 const exportId = '33333333-3333-4333-8333-333333333333';
@@ -15,6 +15,8 @@ const passphrase = 'a long synthetic passphrase';
 const jpeg = new Uint8Array(readFileSync(new URL('../security/fixture.jpg', import.meta.url)));
 const script = new URL('../../scripts/verify-backup.mjs', import.meta.url);
 const directories: string[] = [];
+type Listing = { exportId: string; count: number };
+const { listParts } = await vi.importActual<{ listParts: (directory: string, limits?: Record<keyof typeof BACKUP_LIMITS, number>) => Promise<Listing> }>('../../scripts/verify-backup.mjs');
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
 
 const nulls = (columns: string[]) => Object.fromEntries(columns.map(column => [column, null]));
@@ -66,6 +68,30 @@ describe('offline backup verifier', { timeout: 60_000 }, () => {
     const bad = jpeg.slice();
     bad.set([0xff, 0xfe, 0, 4, 0x41, 0x42], 2);
     expect(run(['--input', await backup(bad)]).status).toBe(1);
+  });
+  it('refuses oversized, misnamed or incomplete sets from their names and sizes, before reading any part', async () => {
+    const huge = await backup();
+    writeFileSync(join(huge, partFileName(exportId, 1)), Buffer.alloc(BACKUP_LIMITS.encryptedPartBytes + 1, 0x41));
+    expect(run(['--input', huge])).toMatchObject({ status: 1, stderr: 'Backup check failed: tooLarge.\n' });
+    const heavy = await backup();
+    writeFileSync(join(heavy, partFileName(exportId, 0)), Buffer.alloc(BACKUP_LIMITS.metadataPartBytes + 1, 0x41));
+    expect(run(['--input', heavy])).toMatchObject({ status: 1, stderr: 'Backup check failed: tooLarge.\n' });
+    const mixed = await backup();
+    writeFileSync(join(mixed, partFileName('66666666-6666-4666-8666-666666666666', 2)), '{}');
+    expect(run(['--input', mixed])).toMatchObject({ status: 1, stderr: 'Backup check failed: invalid.\n' });
+    const gap = await backup();
+    writeFileSync(join(gap, partFileName(exportId, 2)), readFileSync(join(gap, partFileName(exportId, 1))));
+    rmSync(join(gap, partFileName(exportId, 1)));
+    expect(run(['--input', gap])).toMatchObject({ status: 1, stderr: 'Backup check failed: incomplete.\n' });
+    const padded = await backup();
+    writeFileSync(join(padded, `stillroom-${exportId}-01.json.enc`), '{}');
+    expect(run(['--input', padded]).status).toBe(1);
+    const total = await backup();
+    expect(await listParts(total)).toMatchObject({ exportId, count: 2 });
+    const error = await listParts(total, { ...BACKUP_LIMITS, totalEncryptedBytes: 100 }).catch((caught: unknown) => caught);
+    expect(error instanceof BackupFormatError && error.problem).toBe('tooLarge');
+    const fewer = await listParts(total, { ...BACKUP_LIMITS, parts: 1 }).catch((caught: unknown) => caught);
+    expect(fewer instanceof BackupFormatError && fewer.problem).toBe('incomplete');
   });
   it('takes no passphrase from arguments and accepts only --input DIR', async () => {
     const directory = await backup();

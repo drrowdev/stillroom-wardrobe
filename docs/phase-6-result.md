@@ -38,8 +38,10 @@ Saved data only, as one closed projection:
 - Saved items and their saved non-pending photos, including retired photos and
   their descriptions (F4). Pending uploads and unsaved drafts are excluded.
 - Saved-only attribution history per item (F2): model ID, prompt version, image
-  hash, source-image link and fields. A link whose image is not in the backup
-  is marked `source_image_excluded: true`. Charge receipts, analysis requests,
+  hash, source-image link and fields. A link whose image is not in the backup,
+  or whose image was already removed (the link is then null), is marked
+  `source_image_excluded: true`; the recorded hash, model, prompt and fields
+  are kept. Charge receipts, analysis requests,
   results and AI consent are excluded.
 - Outfits, their items and history. An `outfit_id` pointing at a trashed
   outfit or one emptied by filtering is set to null, and the historical text is
@@ -52,9 +54,12 @@ against its recorded size and SHA-256 before it is encrypted.
 ## Offline verifier
 
 `node scripts/verify-backup.mjs --input DIR` reads the passphrase from stdin or
-a hidden prompt. It never resolves URLs or paths from the files (F6). It checks
-file names, rejects symlinks, limits the part count (400), per-part and
-aggregate bytes, JSON depth, string and row sizes, requires unique part and
+a hidden prompt. It never resolves URLs or paths from the files (F6). Before
+reading anything it checks file names, rejects symlinks and limits the part
+count (400), per-part bytes (metadata part 12 MiB, photo parts 40 MiB) and the
+total (7.5 GiB). It then checks the metadata part first and reads, checks and
+releases one photo part at a time, keeping the decoded photo total within
+4 GiB. It also bounds JSON depth, string and row sizes, requires unique part and
 file IDs, strict base64, exact completeness against the manifest hash, and
 sanitized JPEGs (exact main dimensions, thumbnails ≤ 320 px, orientation 1).
 Exit 1 means a failed check; exit 2 a usage error.

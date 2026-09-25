@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { Database } from '../../src/data/database.types';
 import {
-  BACKUP_LIMITS, BackupFormatError, assertBounded, canonical, decryptPart, encryptPart, fromBase64, metadataDigest, planParts,
-  projectSaved, rawColumns, readRawManifest, savedColumns, savedItemIds, sha256Hex, toBase64, verifyParts,
-  type ExportPart, type RawManifest, type SavedMetadata,
+  BACKUP_LIMITS, BackupFormatError, assertBounded, assertMetadata, canonical, decryptPart, encryptPart, fromBase64, metadataDigest, planParts,
+  projectSaved, rawColumns, readRawManifest, savedColumns, savedItemIds, sha256Hex, toBase64, verifyBackup, verifyParts,
+  type ExportPart, type FileRef, type RawManifest, type SavedMetadata,
 } from '../../src/domain/export-format';
 type Reference = { encryptPart: (part: unknown, passphrase: string) => Promise<unknown>; decryptPart: (envelope: unknown, passphrase: string) => Promise<unknown> };
 const { decryptPart: referenceDecrypt, encryptPart: referenceEncrypt } = await vi.importActual<Reference>('../../blueprint/reference-scripts/export-own.mjs');
@@ -142,9 +142,21 @@ describe('saved-only projection', () => {
   it('exports attribution history and marks links to photos that are not in the backup', async () => {
     const rows = (await saved()).tables.item_attributions;
     expect(rows.map(row => [row.item_id, row.position, row.source_image_id, row.source_image_excluded])).toEqual([
-      [A, 0, uuid(11), false], [A, 1, null, true], [A, 2, null, true], [B, 0, null, false]]);
+      [A, 0, uuid(11), false], [A, 1, null, true], [A, 2, null, true], [B, 0, null, true]]);
     expect(rows[0]).toMatchObject({ model_id: 'model-x', prompt_version: 2, fields: { title: 'X' } });
     expect(Object.keys(rows[0]!).sort()).toEqual([...savedColumns.item_attributions].sort());
+  });
+  it('marks a source photo that was already removed and keeps what was recorded about it', async () => {
+    const meta = await saved();
+    const purged = meta.tables.item_attributions.find(row => row.item_id === B)!;
+    expect(purged).toMatchObject({ source_image_id: null, source_image_excluded: true, image_sha256: await sha256Hex(jpeg),
+      model_id: 'model-x', prompt_version: 2, fields: { title: 'X' } });
+    const unmarked = structuredClone(meta);
+    unmarked.tables.item_attributions.find(row => row.item_id === B)!.source_image_excluded = false;
+    expect(() => assertMetadata(unmarked)).toThrow(BackupFormatError);
+    const linked = structuredClone(meta);
+    linked.tables.item_attributions.find(row => row.source_image_id === uuid(11))!.source_image_excluded = true;
+    expect(() => assertMetadata(linked)).toThrow(BackupFormatError);
   });
   it('refuses unknown columns, other owners and incomplete attribution', async () => {
     const raw = await rawManifest();
@@ -163,14 +175,14 @@ describe('saved-only projection', () => {
   });
 });
 
-async function parts(meta: SavedMetadata, bytes = jpeg): Promise<string[]> {
+async function parts(meta: SavedMetadata, bytes: Uint8Array | ((ref: FileRef) => Uint8Array) = jpeg): Promise<string[]> {
   const digest = await metadataDigest(meta);
   const plan = planParts(meta);
   const count = plan.length + 1;
   const base = { format: 'stillroom-export', schemaVersion: 2, exportId, partCount: count, manifestSha256: digest } as const;
   const out: ExportPart[] = [{ ...base, partIndex: 0, manifest: meta, files: [] }];
   plan.forEach((refs, index) => out.push({ ...base, partIndex: index + 1, files: refs.map(ref => ({ imageId: ref.imageId, variant: ref.variant,
-    sha256: ref.sha256, byteLength: ref.byteLength, mime: 'image/jpeg', base64: toBase64(bytes) })) }));
+    sha256: ref.sha256, byteLength: ref.byteLength, mime: 'image/jpeg', base64: toBase64(typeof bytes === 'function' ? bytes(ref) : bytes) })) }));
   return Promise.all(out.map(async part => JSON.stringify(await encryptPart(part, passphrase))));
 }
 const noJpegCheck = () => undefined;
@@ -223,8 +235,42 @@ describe('encrypted parts', { timeout: 60_000 }, () => {
     other.tables.items[0]!.title = 'Changed';
     const mixed = await parts(other);
     expect(problem(await verifyParts([mixed[0]!, texts[1]!], passphrase, noJpegCheck).catch(error => error))).toBe('invalid');
+    const longer = await parts(meta, new Uint8Array([...jpeg, 0, 0, 0]));
+    expect(problem(await verifyParts([texts[0]!, longer[1]!], passphrase, noJpegCheck).catch(error => error))).toBe('invalid');
     const rejecting = () => { throw new BackupFormatError('invalid'); };
     expect(problem(await verifyParts(texts, passphrase, rejecting).catch(error => error))).toBe('invalid');
+  });
+  it('checks the metadata first and then reads, checks and releases one photo part at a time', async () => {
+    const big = Uint8Array.from({ length: 500_000 }, (_, n) => (n * 2_654_435_761) >>> 24), small = jpeg;
+    const raw = await rawManifest();
+    const extra = Array.from({ length: 26 }, (_, n) => uuid(200 + n));
+    for (const [n, id] of extra.entries()) {
+      raw.tables.items.push(item(id));
+      raw.tables.item_images.push({ ...await image(id, uuid(300 + n), 'ready', big), thumb_bytes: small.length, thumb_sha256: await sha256Hex(small) });
+    }
+    const hash = await sha256Hex(jpeg);
+    const meta = projectSaved(raw, new Map<string, unknown>([[A, [history(uuid(11), hash)]], [B, []], ...extra.map(id => [id, []] as const)]));
+    const plan = planParts(meta);
+    expect(plan).toHaveLength(2);
+    const texts = await parts(meta, ref => ref.variant === 'main' && ref.byteLength === big.length ? big : small);
+    const log: string[] = [];
+    const source = (list: string[], count = list.length) => ({ count, read: async (index: number) => { log.push(`read ${index}`); return list[index]!; } });
+    const check = () => { log.push('check'); };
+    expect(await verifyBackup(source(texts), passphrase, check)).toMatchObject({ parts: 3, items: 28 });
+    expect(log.slice(0, 2)).toEqual(['read 0', 'read 1']);
+    expect(log.indexOf('read 2')).toBe(2 + plan[0]!.length);
+    expect(log).toHaveLength(3 + plan.flat().length);
+    log.length = 0;
+    expect(problem(await verifyBackup(source([texts[0]!, texts[2]!, texts[1]!]), passphrase, check).catch(error => error))).toBe('invalid');
+    expect(log).toEqual(['read 0', 'read 1']);
+    log.length = 0;
+    expect(problem(await verifyBackup(source(texts, 2), passphrase, check).catch(error => error))).toBe('incomplete');
+    expect(log).toEqual(['read 0']);
+    log.length = 0;
+    expect(problem(await verifyBackup(source(['x'.repeat(BACKUP_LIMITS.metadataPartBytes + 1), ...texts.slice(1)]), passphrase, check)
+      .catch(error => error))).toBe('tooLarge');
+    expect(log).toEqual(['read 0']);
+    expect(problem(await verifyBackup(source(texts, BACKUP_LIMITS.parts + 1), passphrase, check).catch(error => error))).toBe('incomplete');
   });
   it('refuses metadata over its size limit', async () => {
     const meta = await saved();
