@@ -699,9 +699,15 @@ export type Database = {
         Returns: undefined
       }
       deletion_control: {
-        Args: { p_action: string; p_code?: string; p_owner_id: string }
+        Args: {
+          p_action: string
+          p_code?: string
+          p_op?: string
+          p_owner_id: string
+        }
         Returns: Json
       }
+      deletion_status: { Args: never; Returns: Json }
       export_manifest: { Args: { p_export_id: string }; Returns: Json }
       finalize_item_save: {
         Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
@@ -770,6 +776,7 @@ export type Database = {
         }
         Returns: Json
       }
+      purge_deletion_receipts: { Args: never; Returns: number }
       reconcile_item_deletion_target: {
         Args: { p_item_id: string; p_ordinal: number; p_request_id: string }
         Returns: Json

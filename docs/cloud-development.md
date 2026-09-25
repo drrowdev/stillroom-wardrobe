@@ -561,6 +561,17 @@ includes P6b. Restore never calls analysis. It is partial: attribution history
 is not restored (Q5 is open) and Phase 6 is not accepted. See
 `docs/phase-6-result.md`.
 
+**P6c account deletion (source only; hosted activation owner-gated).** The P6c
+draft PR adds the Settings Delete account card, the `delete-account` Edge
+Function, `scripts/resume-deletion.mjs`, the serialized `deletion-rehearsal` CI
+job and two migrations, `20260925120000_account_deletion.sql` (not additive:
+it replaces `deletion_control` and the Storage publication guard and adds an
+`auth.users` trigger) and `20260925120100_deletion_receipt_purge_schedule.sql`
+(one inactive job). Nothing runs on hosted until the owner approves Q5, Q2,
+the non-additive replacements and triggers, the Edge deploy, the schedule
+activation and a disposable hosted drill. Builders make no hosted call. See
+`docs/phase-6-result.md`.
+
 **AI activation, owner account only** (from
 [`5815445262`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815445262)).
 

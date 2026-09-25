@@ -240,6 +240,17 @@ jobs:
             test-results/p6b-visual/restore-progress-sv-mobile.png
           if-no-files-found: error
           retention-days: 1
+      - name: Preserve bounded synthetic P6c visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p6c-delete-account-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/p6c-visual/delete-account-en-desktop.png
+            test-results/p6c-visual/delete-account-fi-mobile.png
+            test-results/p6c-visual/delete-recovery-sv-desktop.png
+            test-results/p6c-visual/delete-recovery-en-mobile.png
+          if-no-files-found: error
+          retention-days: 1
 
   webkit-photo:
     name: WebKit photo contracts
@@ -321,3 +332,45 @@ jobs:
         run: |
           git ls-files --error-unmatch src/data/database.types.ts
           git diff --exit-code -- src/data/database.types.ts
+
+  deletion-rehearsal:
+    name: Account deletion rehearsal
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    concurrency:
+      group: deletion-rehearsal
+      cancel-in-progress: false
+    env:
+      STILLROOM_DELETION_REHEARSAL: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-fund
+      - name: Refuse an inherited Docker endpoint before anything starts
+        shell: bash -eo pipefail {0}
+        run: |
+          if DOCKER_HOST=tcp://127.0.0.1:9 node scripts/run-deletion-rehearsal.mjs > "$RUNNER_TEMP/refusal.txt"; then
+            exit 1
+          else
+            code=$?
+          fi
+          test "$code" -eq 3
+          grep -Fqx 'REFUSED: ENDPOINT_OVERRIDE' "$RUNNER_TEMP/refusal.txt"
+          test -z "$(docker ps -a --filter label=com.supabase.cli.project -q)"
+      - name: Publish container ports on loopback only
+        shell: bash -eo pipefail {0}
+        run: |
+          sudo install -d -m 0755 /etc/docker
+          if sudo test -s /etc/docker/daemon.json; then current="$(sudo cat /etc/docker/daemon.json)"; else current='{}'; fi
+          printf '%s' "$current" | jq '. + {"ip": "127.0.0.1", "default-network-opts": {"bridge": {"com.docker.network.bridge.host_binding_ipv4": "127.0.0.1"}}}' \
+            | sudo tee /etc/docker/daemon.json > /dev/null
+          sudo systemctl restart docker
+          docker info > /dev/null
+      - run: node scripts/run-deletion-rehearsal.mjs

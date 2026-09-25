@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import {
   ROOT, assertNoServiceSecrets, readCredentialCache, normalSessionEnvironment,
-  validateSessionEnvironment, fail, reportError,
+  validateSessionEnvironment, fail, reportError, startAnalysisServer,
 } from './backend/local.mjs';
 import { privilegedEnvironment, trackPhase } from './isolation-catalog.mjs';
 
@@ -90,6 +90,16 @@ async function main() {
     child.on('close', (value) => resolve(value ?? 2));
   });
   if (outfitCode !== 0) { process.exitCode = outfitCode; return; }
+  if (suite === 'security') {
+    const deletionCode = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [path.join(ROOT, 'tests', suite, 'delete-account.sessions.mjs')], {
+        cwd: ROOT, env, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'],
+      });
+      child.on('error', () => resolve(2));
+      child.on('close', (value) => resolve(value ?? 2));
+    });
+    if (deletionCode !== 0) { process.exitCode = deletionCode; return; }
+  }
   if (suite === 'integration') {
     const feedbackCode = await new Promise((resolve) => {
       const child = spawn(process.execPath, [path.join(ROOT, 'tests', suite, 'feedback.sessions.mjs')], {
@@ -118,8 +128,17 @@ async function main() {
     if (recoveryCode !== 0) process.exitCode = recoveryCode;
   }
   if (suite === 'security') {
-    const isolationCode = await isolationAudit(env);
-    if (isolationCode !== 0) process.exitCode = isolationCode;
+    // The Edge probes are mandatory, so the functions are served for the audit with the local stack's own
+    // configuration. A serve that does not start fails the suite; nothing is skipped.
+    let served;
+    try { served = await startAnalysisServer(); }
+    catch { console.error('FAIL: I17 Edge functions could not be served for the isolation audit'); process.exitCode = 1; return; }
+    try {
+      const isolationCode = await isolationAudit(env);
+      if (isolationCode !== 0) process.exitCode = isolationCode;
+    } finally {
+      await served.stop();
+    }
   }
 }
 

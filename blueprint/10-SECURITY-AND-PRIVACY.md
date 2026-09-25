@@ -71,7 +71,9 @@ fence. It is **not** physical erasure, provider-backup removal or a cleanup
 deadline for inaccessible interrupted-upload remnants. Retained wear history
 keeps its existing title/category snapshots with null item links. I10a-D routine
 maintenance is deferred, not passed; I22 still needs owner-prefix capability
-for Phase 6 account deletion and is not implemented by this packet.
+for Phase 6 account deletion and is not implemented by this packet. P6c
+(Phase 6, source only) adds it as a frozen-owner Storage exception; its hosted
+activation is owner-gated (see `docs/phase-6-result.md`).
 
 Stage A adds READ COMMITTED admission using the existing approved-account row:
 ordinary mutations take SHARE NOWAIT; short deletion fence transitions take
