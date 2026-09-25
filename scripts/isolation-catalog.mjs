@@ -316,6 +316,14 @@ const placeholders = (value, ids) => {
 export function sameOutcome(foreign, missing, foreignIds, missingIds) {
   return placeholders(outcomeOf(foreign), foreignIds) === placeholders(outcomeOf(missing), missingIds);
 }
+/**
+ * The complete response (status plus every body field) with only the caller-substituted IDs masked. Missing and null
+ * fields stay distinct, and constraint names, details and hints are never masked.
+ */
+export function fullOutcome(result, ids = []) {
+  const value = result.ok ? { status: result.status, data: result.data ?? null } : { status: result.status, body: result.data ?? null };
+  return JSON.parse(placeholders(value, ids));
+}
 /** Returns forbidden tokens found in a response body, exempting values the caller itself sent (reflected inputs). */
 export function scanLeaks(body, forbidden, reflected = []) {
   const text = (typeof body === 'string' ? body : JSON.stringify(body) ?? '').toLowerCase();
@@ -459,26 +467,88 @@ export function tupleConstructionProblems(name, payload, attacker, victim, inten
 }
 
 /**
- * Existence oracles that are known, reported on PR #47 and accepted pending a separate fix packet. Each pins the
- * exact response pair (peer-owned reference vs. nonexistent/new reference); they reveal existence, never content.
- * Any other differing surface, or an accepted surface whose pair changes, fails the audit. An accepted entry that
- * stops reproducing is reported for removal.
+ * Accepted-risk inventory of existence oracles (foreign reference vs. nonexistent/new reference); they reveal
+ * existence, never content. Each pins the exact response pair. Any other differing surface, or an accepted surface
+ * whose pair changes, fails the audit; an accepted entry that stops reproducing is reported for removal.
+ *
+ * Create-ID residuals: IDs are client-chosen and globally unique, so a create with an ID another account already
+ * holds is refused while a fresh ID succeeds. Conflict-response normalization makes that refusal identical to the
+ * caller's own conflicting create (see TAKEN_ID_SURFACES), but the caller still learns that a candidate UUID it
+ * already knows is taken. Removing this needs server-generated IDs plus owner-scoped idempotency keys (not built).
+ * REST inserts on combination_rules, suggestion_feedback and item_images share the same primary-key residual and
+ * are not probed individually.
  */
-const pinned = (foreign, missing, summary) => Object.freeze({ foreign: Object.freeze(foreign), missing: Object.freeze(missing),
-  summary: `${summary} (known, reported on PR #47, accepted pending a fix packet)` });
+const pinned = (foreign, missing, summary, reason) => Object.freeze({ foreign: Object.freeze(foreign), missing: Object.freeze(missing),
+  summary: `${summary} (${reason})` });
+const RESIDUAL = "create-ID residual: needs a candidate UUID; same response as the caller's own conflicting create";
+const residual = (foreign, missing, summary) => pinned(foreign, missing, summary, RESIDUAL);
 const duplicate = (constraint) => ({ status: 409, code: '23505', message: `duplicate key value violates unique constraint "${constraint}"` });
+const CONFLICT_P0001 = { status: 400, code: 'P0001', message: 'Request conflict' };
 export const ACCEPTED_ORACLES = Object.freeze({
-  'save_outfit p_id': pinned(duplicate('outfits_pkey'), { status: 200 }, 'peer-owned outfit ID returns 409/23505; a new ID saves (200)'),
-  'save_wear_event p_id': pinned(duplicate('wear_events_pkey'), { status: 200 }, 'peer-owned wear-event ID returns 409/23505; a new ID saves (200)'),
-  'REST items id': pinned(duplicate('items_pkey'), { status: 201 }, 'peer-owned item ID returns 409/23505 on REST insert; a new ID inserts (201)'),
-  'restore_history_entry p_id': pinned({ status: 400, code: 'P0001', message: 'Request conflict' }, { status: 204 },
+  'save_outfit p_id': residual(CONFLICT_P0001, { status: 200 }, 'peer-owned outfit ID returns 400/P0001; a new ID saves (200)'),
+  'save_wear_event p_id': residual(CONFLICT_P0001, { status: 200 }, 'peer-owned wear-event ID returns 400/P0001; a new ID saves (200)'),
+  'REST items id': residual(duplicate('items_pkey'), { status: 201 }, 'peer-owned item ID returns 409/23505 on REST insert; a new ID inserts (201)'),
+  'REST outfits id': residual(duplicate('outfits_pkey'), { status: 201 }, 'peer-owned outfit ID returns 409/23505 on REST insert; a new ID inserts (201)'),
+  'REST wear_events id': residual(duplicate('wear_events_pkey'), { status: 201 },
+    'peer-owned wear-event ID returns 409/23505 on REST insert; a new ID inserts (201)'),
+  'REST wear_event_items id': residual(duplicate('wear_event_items_pkey'), { status: 201 },
+    'peer-owned wear-event-item ID returns 409/23505 on REST insert; a new ID inserts (201)'),
+  'restore_history_entry p_id': residual(CONFLICT_P0001, { status: 204 },
     'peer-owned wear-event-item ID returns 400/P0001; a new ID restores (204)'),
-  'reserve_item_save p_item.id': pinned({ status: 400, code: '22023', message: 'Request conflict' }, { status: 200 },
+  'reserve_item_save p_item.id': residual({ status: 400, code: '22023', message: 'Request conflict' }, { status: 200 },
     'peer-owned item ID returns 400/22023; a new ID reserves (200)'),
   'Storage DELETE object': pinned({ status: 400, code: 'AccessDenied', message: 'Access denied' },
     { status: 400, code: 'NoSuchKey', message: 'Object not found' },
-    'peer-owned object path returns 400/AccessDenied; a nonexistent path returns 400/NoSuchKey'),
+    'peer-owned object path returns 400/AccessDenied; a nonexistent path returns 400/NoSuchKey',
+    "Storage checks existence before RLS; no policy-only fix for that execution path; needs the peer's full object path"),
 });
+
+/**
+ * Taken-ID surfaces: an otherwise-valid create whose ID the caller already holds (own conflict) and one whose ID
+ * another account holds (foreign) must both return exactly `conflict` (full body, only the substituted ID masked),
+ * and a fresh ID must return `fresh`. Pins are absolute, so two identical but wrong responses still fail.
+ */
+const conflictOf = (code) => ({ status: 400, body: { code, details: null, hint: null, message: 'Request conflict' } });
+const duplicateOf = (constraint) => ({ status: 409, body: { code: '23505', details: 'Key (id)=(<ID>) already exists.', hint: null,
+  message: `duplicate key value violates unique constraint "${constraint}"` } });
+const takenSurface = (oracle, conflict, fresh) => Object.freeze({ oracle, conflict: Object.freeze(conflict), fresh: Object.freeze(fresh) });
+export const TAKEN_ID_SURFACES = Object.freeze({
+  'save_outfit p_id': takenSurface('save_outfit p_id', conflictOf('P0001'), { status: 200, data: 1 }),
+  'save_wear_event p_id': takenSurface('save_wear_event p_id', conflictOf('P0001'), { status: 200, data: 1 }),
+  'restore_history_entry p_id': takenSurface('restore_history_entry p_id', conflictOf('P0001'), { status: 204, data: null }),
+  'reserve_item_save p_item.id (save attempt)': takenSurface('reserve_item_save p_item.id', conflictOf('22023'), { status: 200 }),
+  'reserve_item_save p_item.id (plain item)': takenSurface('reserve_item_save p_item.id', conflictOf('22023'), { status: 200 }),
+  'REST items id': takenSurface('REST items id', duplicateOf('items_pkey'), { status: 201, data: null }),
+  'REST outfits id': takenSurface('REST outfits id', duplicateOf('outfits_pkey'), { status: 201, data: null }),
+  'REST wear_events id': takenSurface('REST wear_events id', duplicateOf('wear_events_pkey'), { status: 201, data: null }),
+  'REST wear_event_items id': takenSurface('REST wear_event_items id', duplicateOf('wear_event_items_pkey'), { status: 201, data: null }),
+});
+const freshMatches = (pin, outcome) => outcome.status === pin.status && Object.hasOwn(outcome, 'data')
+  && (!Object.hasOwn(pin, 'data') || isDeepStrictEqual(outcome.data, pin.data));
+/**
+ * `records[`${surface} ${direction}`]` holds `{ foreign, own, fresh }` fullOutcome shapes (plus `persisted`, the
+ * read-back of the fresh create). Every surface needs all three controls in both directions; anything missing,
+ * unknown or different from its pin is a problem.
+ */
+export function takenIdProblems(records, surfaces = TAKEN_ID_SURFACES) {
+  const problems = [], expected = new Set();
+  for (const [surface, pin] of Object.entries(surfaces)) {
+    for (const [attacker, victim] of DIRECTIONS) {
+      const key = `${surface} ${attacker}>${victim}`, r = records[key];
+      expected.add(key);
+      if (!r) { problems.push(`${key}: no taken-ID probes`); continue; }
+      for (const part of ['foreign', 'own', 'fresh']) if (!r[part]) problems.push(`${key}: missing ${part} control`);
+      if (!r.foreign || !r.own || !r.fresh) continue;
+      if (!isDeepStrictEqual(r.own, pin.conflict)) problems.push(`${key}: own conflicting create ${JSON.stringify(r.own)} differs from the pinned ${JSON.stringify(pin.conflict)}`);
+      if (!isDeepStrictEqual(r.foreign, pin.conflict)) problems.push(`${key}: foreign ID ${JSON.stringify(r.foreign)} differs from the pinned ${JSON.stringify(pin.conflict)}`);
+      if (!isDeepStrictEqual(r.foreign, r.own)) problems.push(`${key}: foreign ID response differs from the own conflicting create`);
+      if (!freshMatches(pin.fresh, r.fresh)) problems.push(`${key}: fresh ID ${JSON.stringify(r.fresh)} is not the pinned ${JSON.stringify(pin.fresh)}`);
+      else if (r.persisted !== true) problems.push(`${key}: fresh create was not read back`);
+    }
+  }
+  for (const key of Object.keys(records)) if (!expected.has(key)) problems.push(`${key}: unknown taken-ID surface`);
+  return problems;
+}
 const matchesPin = (pin, outcome) => outcome.status === pin.status
   && (pin.code === undefined ? Object.hasOwn(outcome, 'data') : outcome.code === pin.code && outcome.message === pin.message);
 /**

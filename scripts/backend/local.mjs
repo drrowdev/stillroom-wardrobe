@@ -286,6 +286,7 @@ export function describeStartupOrResetFailure(result, elapsedMs) {
     '20260922020000_checked_image_changes.sql',
     '20260924100000_garment_colours.sql',
     '20260924100100_azure_colour_manifest.sql',
+    '20260925100000_uniform_id_conflicts.sql',
   ];
   let lastAnnouncement = -1;
   for (const [index, filename] of migrations.entries()) {

@@ -151,9 +151,8 @@ and real-device account-switch and cache checks.
 
 ## Findings
 
-These are reported, not patched; a separate fix packet is queued. Each is an
-existence oracle only: a peer's reference and a nonexistent or new one get
-different responses, but no peer content is returned. All six are named in
+Each is an existence oracle only: a peer's reference and a nonexistent or new
+one get different responses, but no peer content is returned. All are named in
 `ACCEPTED_ORACLES` with their exact response pair (status, code and message),
 and each run still prints them as `FINDING` lines. Any other differing surface,
 or a changed pair on an accepted surface, fails the audit. An accepted entry
@@ -161,12 +160,49 @@ that stops reproducing is reported for removal.
 
 | Surface | Peer-owned reference | Nonexistent or new reference |
 | --- | --- | --- |
-| `save_outfit p_id` (null version) | `409 23505` `outfits_pkey` | `200` |
-| `save_wear_event p_id` (null version) | `409 23505` `wear_events_pkey` | `200` |
+| `save_outfit p_id` (null version) | `400 P0001` Request conflict (was `409 23505` `outfits_pkey`) | `200` |
+| `save_wear_event p_id` (null version) | `400 P0001` Request conflict (was `409 23505` `wear_events_pkey`) | `200` |
 | `REST items id` (insert) | `409 23505` `items_pkey` | `201` |
+| `REST outfits id` (insert) | `409 23505` `outfits_pkey` | `201` |
+| `REST wear_events id` (insert) | `409 23505` `wear_events_pkey` | `201` |
+| `REST wear_event_items id` (insert) | `409 23505` `wear_event_items_pkey` | `201` |
 | `restore_history_entry p_id` | `400 P0001` Request conflict | `204` |
 | `reserve_item_save p_item.id` | `400 22023` Request conflict | `200` |
 | `Storage DELETE object` | `400 AccessDenied` | `400 NoSuchKey` |
+
+### Conflict-response normalization (25 September 2026)
+
+Source only; hosted keeps the old `save_outfit`/`save_wear_event` responses
+until the owner approves applying the migration (see the development guide).
+
+- `20260925100000_uniform_id_conflicts.sql` replaces `save_outfit` and
+  `save_wear_event` (`create or replace`, same signatures and grants). Only the
+  parent primary-key violation (`public.outfits`/`outfits_pkey`,
+  `public.wear_events`/`wear_events_pkey`, read with `GET STACKED DIAGNOSTICS`)
+  becomes `Request conflict`; everything else is re-raised unchanged, and child
+  inserts stay outside the handler. Exact own replays still return the version.
+- Target, for otherwise-valid conflicting creates only: a foreign ID gets the
+  same full response (status, code, message, details, hint) as the caller's own
+  conflicting create. The audit pins that response per surface in
+  `TAKEN_ID_SURFACES`, in both directions, with foreign, own-conflict and fresh
+  controls; a missing control, an unread fresh create or any field difference
+  fails. REST inserts and `restore_history_entry`/`reserve_item_save` already
+  matched and are now pinned the same way (reserve for both an existing save
+  attempt and a plain REST-created item).
+- Residual (owner question Q1): a caller that already knows another account's
+  ID still learns that it is taken, because a fresh ID succeeds. These create-ID
+  oracles stay in the accepted inventory, relabelled as a residual that needs a
+  candidate UUID. REST inserts on `combination_rules`, `suggestion_feedback`
+  and `item_images` share the same primary-key residual and are not probed
+  individually. Removing it would need server-generated IDs plus owner-scoped
+  idempotency keys; that option is documented, not built.
+- Storage `DELETE`: the Storage service checks whether the object exists
+  before RLS applies, so there is no policy-only fix for that execution path.
+  It stays accepted; a probe needs the peer's full object path.
+- No client classifier changes: `outfits.ts` already maps `P0001` Request
+  conflict and `23505` to `changed`; `upload.ts` keeps its strict null
+  details/hint check.
+
 ## Pending
 
 - CI `database` job evidence for this head (catalogue, matrix, freeze).

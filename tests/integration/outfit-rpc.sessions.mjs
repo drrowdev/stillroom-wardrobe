@@ -124,6 +124,29 @@ async function ownerCases(client, owner, h) {
   eq(state.parent[0].version, 3);
   requireEvidence(['First session', 'Second session'].includes(state.parent[0].title));
 
+  // Two sessions of the same owner create the same new ID with different valid payloads: exactly one wins and the
+  // loser gets the full normalized conflict, whether it lost on the row lookup or on the primary key.
+  const createRace = h.args(randomUUID(), [first.id], { p_title: 'First create' });
+  h.outfits.push(createRace.p_id);
+  const creates = await Promise.all([
+    h.call(createRace),
+    h.call({ ...createRace, p_title: 'Second create', p_item_ids: [second.id] }, again.token),
+  ]);
+  eq(creates.filter((result) => result.ok).length, 1);
+  requireEvidence(creates.find((result) => result.ok).data === 1);
+  const createLoser = creates.find((result) => !result.ok);
+  requireEvidence(createLoser.status === 400);
+  eq(createLoser.data, { code: 'P0001', details: null, hint: null, message: 'Request conflict' });
+  const created = await h.read(createRace.p_id);
+  eq(created.parent.length, 1); eq(created.parent[0].version, 1);
+  const winner = created.parent[0].title === 'First create' ? [first.id] : [second.id];
+  requireEvidence(['First create', 'Second create'].includes(created.parent[0].title));
+  eq(created.links.map((link) => link.item_id), winner);
+  // An exact own replay of the winning payload still returns the stored version.
+  const replayed = await h.call(created.parent[0].title === 'First create' ? createRace
+    : { ...createRace, p_title: 'Second create', p_item_ids: [second.id] });
+  requireEvidence(replayed.ok && replayed.data === 1);
+
   // Base wear RPC fixture only: an outfit edit never touches existing wear rows.
   const event = randomUUID();
   h.events.push(event);
@@ -137,6 +160,24 @@ async function ownerCases(client, owner, h) {
   });
   const before = await wear();
   eq(before.events.length, 1); eq(before.links.length, 2);
+
+  // The same-owner create race on save_wear_event: one winner, the loser gets the full normalized conflict.
+  const wearRace = randomUUID();
+  h.events.push(wearRace);
+  const wearBody = (label, itemIds) => ({ p_id: wearRace, p_local_date: '2026-01-02', p_timezone: 'Europe/Helsinki', p_state: 'worn',
+    p_label: label, p_outfit_id: null, p_item_ids: itemIds, p_expected_version: null });
+  const wearCreates = await Promise.all([
+    client.request(owner.token, '/rest/v1/rpc/save_wear_event', { method: 'POST', body: wearBody('First look', [first.id]) }),
+    client.request(again.token, '/rest/v1/rpc/save_wear_event', { method: 'POST', body: wearBody('Second look', [second.id]) }),
+  ]);
+  eq(wearCreates.filter((result) => result.ok).length, 1);
+  const wearLoser = wearCreates.find((result) => !result.ok);
+  requireEvidence(wearLoser.status === 400);
+  eq(wearLoser.data, { code: 'P0001', details: null, hint: null, message: 'Request conflict' });
+  const raced = (await client.request(owner.token, `/rest/v1/wear_events?id=eq.${wearRace}&select=label,version`)).data;
+  requireEvidence(raced.length === 1 && raced[0].version === 1 && ['First look', 'Second look'].includes(raced[0].label));
+  const racedLinks = (await client.request(owner.token, `/rest/v1/wear_event_items?event_id=eq.${wearRace}&select=item_id`)).data;
+  eq(racedLinks, [{ item_id: raced[0].label === 'First look' ? first.id : second.id }]);
   const wearEdit = await h.call({ ...outfit, p_title: 'After wear', p_item_ids: [second.id], p_expected_version: 3 });
   requireEvidence(wearEdit.ok && wearEdit.data === 4);
   eq(await wear(), before);
@@ -176,7 +217,7 @@ export async function outfitIntegration(env) {
 if (isMain(import.meta.url)) {
   try {
     requireEvidence(process.argv.length === 2); await outfitIntegration(process.env);
-    console.log('PASS: I11 both normal owners: save_outfit create/replay/conflict/edit/stale, bounds, atomicity, item states, soft delete, same-owner race, untouched wear rows, owned embed and item-deletion cascade');
+    console.log('PASS: I11 both normal owners: save_outfit create/replay/conflict/edit/stale, bounds, atomicity, item states, soft delete, same-owner edit and create races (normalized loser), untouched wear rows, owned embed and item-deletion cascade');
   } catch {
     console.error('FAIL: I11 outfit RPC integration; private evidence withheld'); process.exitCode = 1;
   }
