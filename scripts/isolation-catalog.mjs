@@ -509,7 +509,8 @@ export const ACCEPTED_ORACLES = Object.freeze({
  * and a fresh ID must return `fresh`. Pins are absolute, so two identical but wrong responses still fail.
  */
 const conflictOf = (code) => ({ status: 400, body: { code, details: null, hint: null, message: 'Request conflict' } });
-const duplicateOf = (constraint) => ({ status: 409, body: { code: '23505', details: 'Key (id)=(<ID>) already exists.', hint: null,
+// With RLS active PostgreSQL suppresses the key DETAIL for a normal-owner caller.
+const duplicateOf = (constraint) => ({ status: 409, body: { code: '23505', details: null, hint: null,
   message: `duplicate key value violates unique constraint "${constraint}"` } });
 const takenSurface = (oracle, conflict, fresh) => Object.freeze({ oracle, conflict: Object.freeze(conflict), fresh: Object.freeze(fresh) });
 export const TAKEN_ID_SURFACES = Object.freeze({

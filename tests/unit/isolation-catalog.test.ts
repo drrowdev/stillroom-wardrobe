@@ -409,16 +409,16 @@ describe('I17 taken-ID conflict-response normalization', () => {
   type Body = Record<string, unknown>;
   const failure = (status: number, body: Body): Result => ({ ok: false, status, data: body });
   const conflict = (code = 'P0001'): Body => ({ code, details: null, hint: null, message: 'Request conflict' });
-  const duplicate = (constraint: string, id: string): Body => ({ code: '23505', details: `Key (id)=(${id}) already exists.`, hint: null,
+  const duplicate = (constraint: string): Body => ({ code: '23505', details: null, hint: null,
     message: `duplicate key value violates unique constraint "${constraint}"` });
   const surfaces = catalog.TAKEN_ID_SURFACES as Record<string, { conflict: { status: number; body: Body }; fresh: { status: number; data?: unknown } }>;
   const good = (surface: string) => {
     const pin = surfaces[surface]!;
-    const body = (id: string) => (pin.conflict.status === 409 ? duplicate(String(pin.conflict.body.message).match(/"(.+)"/)![1]!, id) : conflict(String(pin.conflict.body.code)));
+    const body = () => (pin.conflict.status === 409 ? duplicate(String(pin.conflict.body.message).match(/"(.+)"/)![1]!) : conflict(String(pin.conflict.body.code)));
     const freshResult: Result = { ok: true, status: pin.fresh.status, data: Object.hasOwn(pin.fresh, 'data') ? pin.fresh.data : [{ item: { id: fresh } }] };
     return {
-      foreign: catalog.fullOutcome(failure(pin.conflict.status, body(peer)), [peer]),
-      own: catalog.fullOutcome(failure(pin.conflict.status, body(own)), [own]),
+      foreign: catalog.fullOutcome(failure(pin.conflict.status, body()), [peer]),
+      own: catalog.fullOutcome(failure(pin.conflict.status, body()), [own]),
       fresh: catalog.fullOutcome(freshResult, [fresh]), persisted: true,
     };
   };
@@ -436,7 +436,7 @@ describe('I17 taken-ID conflict-response normalization', () => {
     for (const pin of Object.values(surfaces)) expect(Object.isFrozen(pin.conflict)).toBe(true);
     expect(surfaces['save_outfit p_id']!.conflict).toEqual({ status: 400, body: conflict() });
     expect(surfaces['reserve_item_save p_item.id (plain item)']!.conflict).toEqual({ status: 400, body: conflict('22023') });
-    expect(surfaces['REST items id']!.conflict).toEqual({ status: 409, body: duplicate('items_pkey', '<ID>') });
+    expect(surfaces['REST items id']!.conflict).toEqual({ status: 409, body: duplicate('items_pkey') });
   });
 
   it('passes only when foreign and own conflicts equal the pinned full response and the fresh create reads back', () => {
@@ -447,9 +447,10 @@ describe('I17 taken-ID conflict-response normalization', () => {
     const withNull = catalog.fullOutcome(failure(400, conflict()), [peer]);
     const without = catalog.fullOutcome(failure(400, { code: 'P0001', hint: null, message: 'Request conflict' }), [peer]);
     expect(withNull).not.toEqual(without);
-    const masked = catalog.fullOutcome(failure(409, duplicate('outfits_pkey', peer)), [peer]);
-    expect(masked).toEqual({ status: 409, body: duplicate('outfits_pkey', '<ID>') });
-    expect(catalog.fullOutcome(failure(409, duplicate('outfits_pkey', peer)), [])).not.toEqual(masked);
+    const keyed = (id: string): Body => ({ ...duplicate('outfits_pkey'), details: `Key (id)=(${id}) already exists.` });
+    const masked = catalog.fullOutcome(failure(409, keyed(peer)), [peer]);
+    expect(masked).toEqual({ status: 409, body: keyed('<ID>') });
+    expect(catalog.fullOutcome(failure(409, keyed(peer)), [])).not.toEqual(masked);
   });
 
   it.each([
@@ -473,13 +474,20 @@ describe('I17 taken-ID conflict-response normalization', () => {
   it('fails identical but wrong responses, such as the old 23505 on both sides', () => {
     const records = complete();
     const key = 'save_outfit p_id B>A';
-    const old = (id: string) => catalog.fullOutcome(failure(409, duplicate('outfits_pkey', id)), [id]);
+    const old = (id: string) => catalog.fullOutcome(failure(409, duplicate('outfits_pkey')), [id]);
     records[key] = { ...records[key]!, foreign: old(peer), own: old(own) };
     const problems = catalog.takenIdProblems(records);
     expect(problems).not.toContain(`${key}: foreign ID response differs from the own conflicting create`);
     expect(problems.filter((p: string) => p.startsWith(key))).toHaveLength(2);
   });
 
+  it('fails a REST duplicate that exposes a key DETAIL, even when both sides match', () => {
+    const records = complete();
+    const key = 'REST items id A>B';
+    const keyed = (id: string) => catalog.fullOutcome(failure(409, { ...duplicate('items_pkey'), details: `Key (id)=(${id}) already exists.` }), [id]);
+    records[key] = { ...records[key]!, foreign: keyed(peer), own: keyed(own) };
+    expect(catalog.takenIdProblems(records).filter((p: string) => p.startsWith(key))).toHaveLength(2);
+  });
   it('fails a missing control, a missing direction, an unread fresh create or an unknown surface', () => {
     const missingOwn = complete();
     const key = 'REST outfits id A>B';

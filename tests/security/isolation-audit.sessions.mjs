@@ -702,9 +702,11 @@ async function oracles(attacker, victim) {
     { surface: 'REST wear_events id', foreignId: v.event, ownId: a.event, ...rest('wear_events', () => ({ local_date: '2026-01-03' })),
       state: wearState, cleanup: (id) => del('wear_events', id)(), persisted: async (id) => (await one('wear_events', id)).length === 1 },
     { surface: 'REST wear_event_items id', foreignId: v.eventItem, ownId: a.eventItem,
-      ...rest('wear_event_items', () => ({ event_id: a.event, item_id: null, title_snapshot: 'Isolation oracle', category_snapshot: 'top' })),
+      // A real owned item in an unused (event_id, item_id) pair: wear_snapshot accepts it and only the PK can collide.
+      ...rest('wear_event_items', () => ({ event_id: a.event, item_id: a.plain, title_snapshot: 'Isolation oracle', category_snapshot: 'top' })),
       state: byId('wear_event_items'), cleanup: (id) => del('wear_event_items', id)(),
-      persisted: async (id) => (await one('wear_event_items', id)).length === 1 },
+      persisted: async (id) => { const r = await one('wear_event_items', id);
+        return r.length === 1 && r[0].event_id === a.event && r[0].item_id === a.plain && r[0].import_id === null; } },
   ];
   const pairs = {};
   for (const s of surfaces) {
@@ -749,7 +751,7 @@ async function unrelatedErrors(attacker, rows) {
     const result = await call(attacker, name, build(id));
     const body = result.data && typeof result.data === 'object' ? result.data : {};
     need(!result.ok && result.status === 400 && isDeepStrictEqual(Object.keys(body).sort(), ['code', 'details', 'hint', 'message'])
-      && body.code === '23514' && body.message === message && typeof body.details === 'string' && body.hint === null,
+      && body.code === '23514' && body.message === message && body.details === null && body.hint === null,
     `${stage}: a check violation must stay 23514, observed ${describe(result)}`);
     need((await rows(table, `id=eq.${id}`)).length === 0, `${stage}: a failed create left a row`);
   }
