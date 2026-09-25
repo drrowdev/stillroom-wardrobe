@@ -33,7 +33,14 @@ const profileUrl = 'http://127.0.0.1:54321/rest/v1/profiles*';
 test('AI consent shares profile/language mutex and rebases only its own exact plus-one ACK', async ({ page }) => {
   const api = await aiFixture(page, 'en', false);
   await settings(page);
-  await page.locator('#profile-display_name').fill('Preserved unsaved name');
+  const name = page.locator('#profile-display_name');
+  const saveProfile = page.getByRole('button', { name: messages['settings.saveProfile'].en, exact: true });
+  // Diagnostics for a rare WebKit reset: a marker on the element shows whether the editor remounted,
+  // and Save turning enabled shows that React received the edit before consent starts.
+  await name.evaluate((element) => { (element as HTMLInputElement & { stillroomProbe?: string }).stillroomProbe = 'first-mount'; });
+  const sameInput = () => name.evaluate((element) => (element as HTMLInputElement & { stillroomProbe?: string }).stillroomProbe === 'first-mount');
+  await name.fill('Preserved unsaved name');
+  await expect(saveProfile, 'the edit reached React (Save enables only when the form is dirty)').toBeEnabled();
   let held: Route | undefined;
   await page.route('**/rest/v1/rpc/ai_set_consent', (route) => { held = route; });
   await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
@@ -42,8 +49,9 @@ test('AI consent shares profile/language mutex and rebases only its own exact pl
   await expect(page.locator('#profile-display_name')).toBeDisabled();
   await held!.fallback();
   await expect(page.getByRole('heading', { name: messages['aiC.enabled'].en, exact: true })).toBeVisible();
-  await expect(page.locator('#profile-display_name')).toHaveValue('Preserved unsaved name');
-  await page.getByRole('button', { name: messages['settings.saveProfile'].en, exact: true }).click();
+  expect(await sameInput(), 'the profile editor was not remounted during the consent save').toBe(true);
+  await expect(name).toHaveValue('Preserved unsaved name');
+  await saveProfile.click();
   await expect(page.getByText(messages['settings.profileSaved'].en, { exact: true })).toBeVisible();
   expect(api.profiles[owners.a]).toMatchObject({ version: 3, display_name: 'Preserved unsaved name', ui_language: 'en' });
   expect(api.calls.filter((call) => call.route.endsWith('/ai_set_consent'))).toHaveLength(1);
