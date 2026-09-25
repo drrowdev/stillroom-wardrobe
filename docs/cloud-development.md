@@ -591,6 +591,18 @@ the profile weather columns are in the installed base schema.
   (`azure-eu-terra-devtest-v1`, prompt 1) are the recorded state as of those
   dates, not a claim about the current state.
 
+**Create-ID conflict normalization (source only, 25 September 2026).**
+
+- Source `20260925100000_uniform_id_conflicts.sql` replaces `save_outfit` and
+  `save_wear_event` with `create or replace` (same signatures and grants). It is
+  not additive, so the owner's additive pre-approval does not cover it.
+- Hosted mapping: **PENDING owner approval** (owner question Q2). No hosted
+  version exists yet; hosted keeps the `409 23505` responses until then. After
+  an approved apply, the coordinator records the hosted version and reads back
+  `md5(prosrc)` of both functions against the source bodies.
+- Owner question Q1: accept the remaining create-ID residual (see the Phase 5
+  result, Findings).
+
 **Scope.** Recorded as live by these comments: add/edit/Save/photo replacement,
 AI-filled details for the owner's account only, and the simplified UI (L1a, L1b,
 L2a). Not built: outfits, suggestions and weather (Phases 3–5). The owner moved

@@ -21,9 +21,10 @@ async function directionCases(client, owner, peer, h, p) {
   for (const itemIds of [[own.id, foreignItem.id], [own.id, randomUUID()]]) {
     h.rejected(await h.call({ ...mine, p_title: 'Foreign link attempt', p_item_ids: itemIds, p_expected_version: 1 }), 'Invalid selection');
   }
-  // A foreign outfit ID is invisible: a create collides on the key, an edit conflicts.
+  // A foreign outfit ID is invisible: a create gets the normalized conflict (same as an own conflicting create), an edit conflicts.
   const collision = await h.call(h.args(theirs.p_id, [own.id]));
-  requireEvidence(!collision.ok && collision.status === 409 && collision.data?.code === '23505');
+  requireEvidence(!collision.ok && collision.status === 400);
+  eq(collision.data, { code: 'P0001', details: null, hint: null, message: 'Request conflict' });
   h.rejected(await h.call(h.args(theirs.p_id, [own.id], { p_expected_version: 1 })), 'Request conflict');
   eq(await snapshot(), before);
 

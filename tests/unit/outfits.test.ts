@@ -167,6 +167,8 @@ describe('I11 save arguments and unknown results', () => {
     }
     expect(classifySaveError({ code: '42501' }, 403)).toBe('rejected');
     expect(classifySaveError({ code: '23505' }, 409)).toBe('changed');
+    // A create whose ID is already taken (by this or another account) now returns the normalized conflict body.
+    expect(classifySaveError({ code: 'P0001', details: null, hint: null, message: 'Request conflict' }, 400)).toBe('changed');
     expect(classifySaveError({ code: 'P0001', message: 'Invalid selection' }, 400)).toBe('invalidSelection');
   });
   it('decides a create from one reread', () => {

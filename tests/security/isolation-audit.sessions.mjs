@@ -8,7 +8,7 @@ import {
 import {
   EXPOSED_RPCS, SERVICE_ONLY_RPCS, PUBLIC_TABLES, RELATIONSHIP_NAMES, ACCEPTED_ORACLES, worstOracle, COVERAGE_REQUIREMENTS,
   matchOutcome, outcomeOf, sameOutcome, scanLeaks, validateCoverage, applicationCode, isInconclusive, classifyOracle,
-  restoreThenCleanup, tupleConstructionProblems,
+  restoreThenCleanup, tupleConstructionProblems, fullOutcome, TAKEN_ID_SURFACES, takenIdProblems, stableExport,
 } from '../../scripts/isolation-catalog.mjs';
 import { normalClient } from '../integration/preservation.sessions.mjs';
 import { intent, saveHarness } from '../integration/item-save.sessions.mjs';
@@ -387,10 +387,7 @@ async function ownerState(owner) {
   for (const path of f.paths) state.objects[path] = await objectState(owner, path);
   const exported = (await call(owner, 'export_manifest', { p_export_id: randomUUID() })).data;
   fatal(exported && typeof exported === 'object', 'state-export');
-  const stableExport = { ...exported };
-  delete stableExport.created_at;
-  delete stableExport.export_id;
-  state.export = stableExport;
+  state.export = stableExport(exported);
   const read = async (name, body) => outcomeOf(await call(owner, name, body));
   state.change = await read('image_change_status', { p_item_id: f.changeItem, p_request_id: f.changeRequest });
   state.requests = await read('image_change_requests', { p_item_id: f.changeItem });
@@ -632,52 +629,139 @@ function reportOracle(surface, d, pairs, detail) {
   const verdict = worstOracle(pairs.map((p) => classifyOracle(surface, p.differs, p.foreign, p.missing)));
   if (verdict === 'fail') oracleFailures.push(`${surface} ${d}: ${detail} (not allowlisted)`);
   else if (verdict === 'changed') oracleFailures.push(`${surface} ${d}: ${detail} (allowlisted pair changed; pinned ${JSON.stringify(ACCEPTED_ORACLES[surface].foreign)} vs ${JSON.stringify(ACCEPTED_ORACLES[surface].missing)})`);
-  else if (verdict === 'accepted') findings.push(`(accepted pending fix) ${surface} ${d}: ${detail} [${ACCEPTED_ORACLES[surface].summary}]`);
+  else if (verdict === 'accepted') findings.push(`(accepted residual) ${surface} ${d}: ${detail} [${ACCEPTED_ORACLES[surface].summary}]`);
   else if (verdict === 'accepted-not-reproduced') note(`accepted oracle ${surface} ${d} no longer reproduces; remove its allowlist entry`);
 }
+const takenRecords = {};
+/**
+ * Conflict-response normalization for create IDs. Per surface: an otherwise-valid create with the victim's ID
+ * (foreign), the same create with the attacker's own taken ID (own conflict) and with a fresh ID. Foreign and own
+ * must match the pinned full response; the fresh create must succeed and read back. Rejections must leave the
+ * caller's parent and link rows unchanged. Foreign vs fresh stays the accepted create-ID residual.
+ */
 async function oracles(attacker, victim) {
   const a = fixtures[attacker.label], v = fixtures[victim.label], d = `${attacker.label}>${victim.label}`;
-  const sh = saveHarness(client, attacker);
-  const record = async (name, surface, expectedForeign, foreign, missing, cleanup) => {
-    stage = `oracle-${d}-${surface}`;
-    const expected = expectMatch(`${stage} foreign`, expectedForeign, foreign);
-    need(!foreign.ok, `${stage}: foreign create succeeded`);
-    if (need(missing.ok, `${stage}: new-ID control ${describe(missing)}`)) { await cleanup(); control(attacker, name, true); }
-    if (expected && missing.ok) {
-      tag(name, `${d}:collision`);
-      reportOracle(surface, d, [pairOf(foreign, missing)], `a peer-owned ID returns ${describe(foreign)}, a new ID ${describe(missing)}`);
-    }
+  const rows = async (table, filter) => {
+    const result = await raw(attacker.token, `/rest/v1/${table}?${filter}&select=*&order=${ORDER[table] ?? 'id'}`);
+    fatal(result.ok && Array.isArray(result.data), `oracle-read-${table}`);
+    return result.data;
   };
+  const del = (table, id) => async () => fatal((await raw(attacker.token, `/rest/v1/${table}?owner_id=eq.${attacker.uid}&id=eq.${id}`, { method: 'DELETE' })).ok, 'oracle-cleanup');
+  const rpc = (name, build) => ({ route: rpcRoute(name), request: (id) => ({ method: 'POST', body: build(id) }) });
+  const rest = (table, build) => ({ route: `/rest/v1/${table}`, request: (id) => ({ method: 'POST', body: { id, owner_id: attacker.uid, ...build() } }) });
   const outfit = (id) => ({ p_id: id, p_title: 'Isolation oracle', p_occasion: 'everyday', p_notes: '', p_favourite: false,
     p_item_ids: [a.plain], p_expected_version: null });
-  const del = (table, id) => async () => fatal((await raw(attacker.token, `/rest/v1/${table}?owner_id=eq.${attacker.uid}&id=eq.${id}`, { method: 'DELETE' })).ok, 'oracle-cleanup');
-  let id = randomUUID();
-  await record('save_outfit', 'save_outfit p_id', { status: 409, code: '23505' }, await probeRpc(attacker, victim, 'save_outfit', outfit(v.outfit)),
-    await call(attacker, 'save_outfit', outfit(id)), del('outfits', id));
-  const wear = (x) => ({ p_id: x, p_local_date: '2026-01-03', p_timezone: 'Europe/Helsinki', p_state: 'worn', p_label: 'Isolation oracle',
+  const wear = (id) => ({ p_id: id, p_local_date: '2026-01-03', p_timezone: 'Europe/Helsinki', p_state: 'worn', p_label: 'Isolation oracle',
     p_outfit_id: null, p_item_ids: [a.plain], p_expected_version: null });
-  id = randomUUID();
-  await record('save_wear_event', 'save_wear_event p_id', { status: 409, code: '23505' }, await probeRpc(attacker, victim, 'save_wear_event', wear(v.event)),
-    await call(attacker, 'save_wear_event', wear(id)), del('wear_events', id));
-  id = randomUUID();
-  const item = (x) => ({ method: 'POST', body: { id: x, owner_id: attacker.uid, title: 'Isolation oracle', category: 'top' } });
-  stage = `oracle-${d}-REST items id`;
-  const restForeign = await probe(attacker, victim, '/rest/v1/items', item(v.item));
-  const restMissing = await raw(attacker.token, '/rest/v1/items', item(id));
-  expectMatch(`${stage} foreign`, { status: 409, code: '23505' }, restForeign);
-  if (need(restMissing.ok, `${stage}: new-ID control ${describe(restMissing)}`)) await del('items', id)();
-  if (restMissing.ok) reportOracle('REST items id', d, [pairOf(restForeign, restMissing)],
-    `a peer-owned ID returns ${describe(restForeign)}, a new ID ${describe(restMissing)}`);
-  const history = (x) => ({ p_id: x, p_event_id: a.event, p_item_id: null, p_title: 'Isolation oracle', p_category: 'top', p_import_id: randomUUID() });
-  id = randomUUID();
-  await record('restore_history_entry', 'restore_history_entry p_id', CONFLICT_PLAIN,
-    await probeRpc(attacker, victim, 'restore_history_entry', history(v.eventItem)),
-    await call(attacker, 'restore_history_entry', history(id)), del('wear_event_items', id));
-  const foreignSave = intent(); foreignSave.p_item.id = v.item;
-  const saveControl = sh.track(intent());
-  await record('reserve_item_save', 'reserve_item_save p_item.id', { status: 400, code: '22023' },
-    await probeRpc(attacker, victim, 'reserve_item_save', foreignSave), await call(attacker, 'reserve_item_save', saveControl), () => sh.cleanup());
+  const importId = randomUUID();
+  const history = (id) => ({ p_id: id, p_event_id: a.event, p_item_id: null, p_title: 'Isolation oracle', p_category: 'top', p_import_id: importId });
+  const reserveOf = (id) => { const value = intent(); value.p_item.id = id; return value; };
+  const inList = (ids) => `in.(${ids.join(',')})`;
+  const outfitState = (ids) => async () => ({ parent: await rows('outfits', `id=${inList(ids)}`),
+    links: await rows('outfit_items', `outfit_id=${inList(ids)}`) });
+  const wearState = (ids) => async () => ({ parent: await rows('wear_events', `id=${inList(ids)}`),
+    links: await rows('wear_event_items', `event_id=${inList(ids)}`) });
+  const itemState = (ids) => async () => ({ parent: await rows('items', `id=${inList(ids)}`),
+    links: await rows('item_images', `item_id=${inList(ids)}`) });
+  const byId = (table) => (ids) => async () => ({ parent: await rows(table, `id=${inList(ids)}`) });
+  const one = async (table, id) => rows(table, `id=eq.${id}`);
+  // Surface 5 covers both an existing save attempt (saveItem) and a plain REST-created item; each fresh reserve is
+  // tracked by its own harness so cleanup removes exactly that attempt.
+  const reserve = (surface, foreignId, ownId) => {
+    const h = saveHarness(client, attacker);
+    return { surface, name: 'reserve_item_save', foreignId, ownId, route: rpcRoute('reserve_item_save'),
+      request: (id, kind) => ({ method: 'POST', body: kind === 'fresh' ? h.track(reserveOf(id)) : reserveOf(id) }),
+      state: itemState, cleanup: () => h.cleanup(),
+      persisted: async (id, result) => Array.isArray(result.data) && result.data.length === 1 && result.data[0].item?.id === id
+        && (await one('items', id)).length === 1 };
+  };
+  const surfaces = [
+    { surface: 'save_outfit p_id', name: 'save_outfit', foreignId: v.outfit, ownId: a.outfit, ...rpc('save_outfit', outfit),
+      state: outfitState, cleanup: (id) => del('outfits', id)(),
+      persisted: async (id) => { const s = await outfitState([id])();
+        return s.parent.length === 1 && s.parent[0].title === 'Isolation oracle' && s.parent[0].version === 1
+          && isDeepStrictEqual(s.links.map((l) => [l.item_id, l.position]), [[a.plain, 0]]); } },
+    { surface: 'save_wear_event p_id', name: 'save_wear_event', foreignId: v.event, ownId: a.event, ...rpc('save_wear_event', wear),
+      state: wearState, cleanup: (id) => del('wear_events', id)(),
+      persisted: async (id) => { const s = await wearState([id])();
+        return s.parent.length === 1 && s.parent[0].label === 'Isolation oracle' && s.parent[0].version === 1
+          && isDeepStrictEqual(s.links.map((l) => l.item_id), [a.plain]); } },
+    { surface: 'restore_history_entry p_id', name: 'restore_history_entry', foreignId: v.eventItem, ownId: a.eventItem,
+      ...rpc('restore_history_entry', history), state: byId('wear_event_items'), cleanup: (id) => del('wear_event_items', id)(),
+      persisted: async (id) => { const r = await one('wear_event_items', id);
+        return r.length === 1 && r[0].event_id === a.event && r[0].title_snapshot === 'Isolation oracle' && r[0].import_id === importId; } },
+    reserve('reserve_item_save p_item.id (save attempt)', v.saveItem, a.saveItem),
+    reserve('reserve_item_save p_item.id (plain item)', v.plain, a.plain),
+    { surface: 'REST items id', foreignId: v.item, ownId: a.item, ...rest('items', () => ({ title: 'Isolation oracle', category: 'top' })),
+      state: itemState, cleanup: (id) => del('items', id)(), persisted: async (id) => (await one('items', id)).length === 1 },
+    { surface: 'REST outfits id', foreignId: v.outfit, ownId: a.outfit, ...rest('outfits', () => ({ title: 'Isolation oracle' })),
+      state: outfitState, cleanup: (id) => del('outfits', id)(), persisted: async (id) => (await one('outfits', id)).length === 1 },
+    { surface: 'REST wear_events id', foreignId: v.event, ownId: a.event, ...rest('wear_events', () => ({ local_date: '2026-01-03' })),
+      state: wearState, cleanup: (id) => del('wear_events', id)(), persisted: async (id) => (await one('wear_events', id)).length === 1 },
+    { surface: 'REST wear_event_items id', foreignId: v.eventItem, ownId: a.eventItem,
+      // A real owned item in an unused (event_id, item_id) pair: wear_snapshot accepts it and only the PK can collide.
+      ...rest('wear_event_items', () => ({ event_id: a.event, item_id: a.plain, title_snapshot: 'Isolation oracle', category_snapshot: 'top' })),
+      state: byId('wear_event_items'), cleanup: (id) => del('wear_event_items', id)(),
+      persisted: async (id) => { const r = await one('wear_event_items', id);
+        return r.length === 1 && r[0].event_id === a.event && r[0].item_id === a.plain && r[0].import_id === null; } },
+  ];
+  const pairs = {};
+  for (const s of surfaces) {
+    stage = `oracle-${d}-${s.surface}`;
+    need(Boolean(s.foreignId && s.ownId), `${stage}: fixture reference missing`);
+    if (!s.foreignId || !s.ownId) continue;
+    const fresh = randomUUID(), state = s.state([s.ownId, s.foreignId]);
+    const before = await state();
+    const foreign = await probe(attacker, victim, s.route, s.request(s.foreignId, 'foreign'));
+    const own = await raw(attacker.token, s.route, s.request(s.ownId, 'own'));
+    need(isDeepStrictEqual(await state(), before), `${stage}: a rejected create changed parent or link rows`);
+    const made = await raw(attacker.token, s.route, s.request(fresh, 'fresh'));
+    const persisted = made.ok && await s.persisted(fresh, made) === true;
+    if (made.ok) {
+      await s.cleanup(fresh);
+      need(Object.values(await s.state([fresh])()).every((list) => list.length === 0), `${stage}: a fresh control row was left behind`);
+    }
+    takenRecords[`${s.surface} ${d}`] = { foreign: fullOutcome(foreign, [s.foreignId]), own: fullOutcome(own, [s.ownId]),
+      fresh: fullOutcome(made, [fresh]), persisted };
+    const pin = TAKEN_ID_SURFACES[s.surface];
+    const normalized = isDeepStrictEqual(fullOutcome(foreign, [s.foreignId]), pin.conflict)
+      && isDeepStrictEqual(fullOutcome(own, [s.ownId]), pin.conflict);
+    if (s.name && persisted) control(attacker, s.name, true);
+    if (s.name && normalized && persisted) tag(s.name, `${d}:collision`);
+    if (made.ok) (pairs[pin.oracle] ??= []).push({ ...pairOf(foreign, made), detail: `a peer-owned ID returns ${describe(foreign)}, a new ID ${describe(made)}` });
+  }
+  for (const [surface, list] of Object.entries(pairs)) reportOracle(surface, d, list, list.map((p) => p.detail).join('; '));
+  await unrelatedErrors(attacker, rows);
   await aiCollision(attacker, victim);
+}
+
+/** Only the parent primary-key violation is normalized: other errors on the create path keep their own response. */
+async function unrelatedErrors(attacker, rows) {
+  const a = fixtures[attacker.label], d = attacker.label;
+  const cases = [
+    ['save_outfit', 'outfits', (id) => ({ p_id: id, p_title: '', p_occasion: 'everyday', p_notes: '', p_favourite: false,
+      p_item_ids: [a.plain], p_expected_version: null }), 'new row for relation "outfits" violates check constraint "outfits_title_check"'],
+    ['save_wear_event', 'wear_events', (id) => ({ p_id: id, p_local_date: '2026-01-03', p_timezone: 'Europe/Helsinki', p_state: 'unknown',
+      p_label: 'Isolation oracle', p_outfit_id: null, p_item_ids: [a.plain], p_expected_version: null }),
+    'new row for relation "wear_events" violates check constraint "wear_events_state_check"'],
+  ];
+  for (const [name, table, build, message] of cases) {
+    stage = `oracle-${d}-${name}-unrelated`;
+    const id = randomUUID();
+    const result = await call(attacker, name, build(id));
+    const body = result.data && typeof result.data === 'object' ? result.data : {};
+    need(!result.ok && result.status === 400 && isDeepStrictEqual(Object.keys(body).sort(), ['code', 'details', 'hint', 'message'])
+      && body.code === '23514' && body.message === message && body.details === null && body.hint === null,
+    `${stage}: a check violation must stay 23514, observed ${describe(result)}`);
+    need((await rows(table, `id=eq.${id}`)).length === 0, `${stage}: a failed create left a row`);
+  }
+  const race = randomUUID();
+  stage = `oracle-${d}-save_wear_event-foreign-key`;
+  const missingOutfit = await call(attacker, 'save_wear_event', { p_id: race, p_local_date: '2026-01-03', p_timezone: 'Europe/Helsinki',
+    p_state: 'worn', p_label: 'Isolation oracle', p_outfit_id: randomUUID(), p_item_ids: [a.plain], p_expected_version: null });
+  need(!missingOutfit.ok && missingOutfit.status === 409 && missingOutfit.data?.code === '23503',
+    `${stage}: a foreign-key violation must stay 23503, observed ${describe(missingOutfit)}`);
+  need((await rows('wear_events', `id=eq.${race}`)).length === 0, `${stage}: a failed create left a row`);
 }
 
 /** AI request keys are owner-scoped: a peer's request ID must behave exactly like the attacker's own new ID. */
@@ -973,6 +1057,7 @@ try {
       { skipAi: aiSelfMutated[owner.label] });
   }
   problems.push(...validateCoverage(covered));
+  oracleFailures.push(...takenIdProblems(takenRecords));
   await freezeCase(owners[0], owners[1]);
   await freezeCase(owners[1], owners[0]);
 } catch (error) {

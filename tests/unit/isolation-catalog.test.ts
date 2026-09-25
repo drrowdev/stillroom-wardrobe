@@ -327,13 +327,17 @@ describe('I17 existence oracles and restore ordering', () => {
   const ok = (status: number, data: unknown = null) => ({ status, data });
   const dup = (constraint: string) => err(409, '23505', `duplicate key value violates unique constraint "${constraint}"`);
 
-  it('accepts only the six named oracles with their exact pinned response pairs', () => {
-    expect(Object.keys(catalog.ACCEPTED_ORACLES).sort()).toEqual(['REST items id', 'Storage DELETE object',
-      'reserve_item_save p_item.id', 'restore_history_entry p_id', 'save_outfit p_id', 'save_wear_event p_id']);
+  it('keeps every create-ID residual and Storage in the accepted inventory with exact pinned pairs', () => {
+    expect(Object.keys(catalog.ACCEPTED_ORACLES).sort()).toEqual(['REST items id', 'REST outfits id', 'REST wear_event_items id',
+      'REST wear_events id', 'Storage DELETE object', 'reserve_item_save p_item.id', 'restore_history_entry p_id', 'save_outfit p_id',
+      'save_wear_event p_id']);
     const cases: [string, object, object][] = [
-      ['save_outfit p_id', dup('outfits_pkey'), ok(200, { id: 'x' })],
-      ['save_wear_event p_id', dup('wear_events_pkey'), ok(200, { id: 'x' })],
+      ['save_outfit p_id', err(400, 'P0001', 'Request conflict'), ok(200, 1)],
+      ['save_wear_event p_id', err(400, 'P0001', 'Request conflict'), ok(200, 1)],
       ['REST items id', dup('items_pkey'), ok(201, [])],
+      ['REST outfits id', dup('outfits_pkey'), ok(201)],
+      ['REST wear_events id', dup('wear_events_pkey'), ok(201)],
+      ['REST wear_event_items id', dup('wear_event_items_pkey'), ok(201)],
       ['restore_history_entry p_id', err(400, 'P0001', 'Request conflict'), ok(204)],
       ['reserve_item_save p_item.id', err(400, '22023', 'Request conflict'), ok(200, {})],
       ['Storage DELETE object', err(400, 'AccessDenied', 'Access denied'), err(400, 'NoSuchKey', 'Object not found')],
@@ -342,11 +346,18 @@ describe('I17 existence oracles and restore ordering', () => {
       expect(catalog.classifyOracle(surface, true, foreign, missing)).toBe('accepted');
       expect(catalog.classifyOracle(surface, false, foreign, foreign)).toBe('accepted-not-reproduced');
     }
+    for (const [surface, entry] of Object.entries(catalog.ACCEPTED_ORACLES as Record<string, { summary: string }>)) {
+      expect(entry.summary).toContain(surface === 'Storage DELETE object' ? 'no policy-only fix for that execution path' : 'needs a candidate UUID');
+      expect(entry.summary).not.toMatch(/no owner information/i);
+    }
   });
 
   it('fails a changed pair on an accepted surface and any surface outside the allowlist', () => {
+    // The pre-normalization 23505 response on save_outfit/save_wear_event is no longer accepted.
+    expect(catalog.classifyOracle('save_outfit p_id', true, dup('outfits_pkey'), ok(200))).toBe('changed');
+    expect(catalog.classifyOracle('save_wear_event p_id', true, dup('wear_events_pkey'), ok(200))).toBe('changed');
     expect(catalog.classifyOracle('save_outfit p_id', true, dup('items_pkey'), ok(200))).toBe('changed');
-    expect(catalog.classifyOracle('save_outfit p_id', true, dup('outfits_pkey'), ok(201))).toBe('changed');
+    expect(catalog.classifyOracle('save_outfit p_id', true, err(400, 'P0001', 'Request conflict'), ok(201))).toBe('changed');
     expect(catalog.classifyOracle('restore_history_entry p_id', true, err(400, 'P0001', 'Not available'), ok(204))).toBe('changed');
     expect(catalog.classifyOracle('Storage DELETE object', true, err(403, 'AccessDenied', 'Access denied'),
       err(400, 'NoSuchKey', 'Object not found'))).toBe('changed');
@@ -389,6 +400,112 @@ describe('I17 existence oracles and restore ordering', () => {
     expect(await catalog.restoreThenCleanup(false, barrier, async () => { throw new Error('x'); }))
       .toEqual({ cleaned: true, errors: ['cleanup'] });
     expect(barrier).not.toHaveBeenCalled();
+  });
+});
+
+describe('I17 taken-ID conflict-response normalization', () => {
+  const peer = '11111111-1111-4111-8111-111111111111', own = '22222222-2222-4222-8222-222222222222';
+  const fresh = '33333333-3333-4333-8333-333333333333';
+  type Body = Record<string, unknown>;
+  const failure = (status: number, body: Body): Result => ({ ok: false, status, data: body });
+  const conflict = (code = 'P0001'): Body => ({ code, details: null, hint: null, message: 'Request conflict' });
+  const duplicate = (constraint: string): Body => ({ code: '23505', details: null, hint: null,
+    message: `duplicate key value violates unique constraint "${constraint}"` });
+  const surfaces = catalog.TAKEN_ID_SURFACES as Record<string, { conflict: { status: number; body: Body }; fresh: { status: number; data?: unknown } }>;
+  const good = (surface: string) => {
+    const pin = surfaces[surface]!;
+    const body = () => (pin.conflict.status === 409 ? duplicate(String(pin.conflict.body.message).match(/"(.+)"/)![1]!) : conflict(String(pin.conflict.body.code)));
+    const freshResult: Result = { ok: true, status: pin.fresh.status, data: Object.hasOwn(pin.fresh, 'data') ? pin.fresh.data : [{ item: { id: fresh } }] };
+    return {
+      foreign: catalog.fullOutcome(failure(pin.conflict.status, body()), [peer]),
+      own: catalog.fullOutcome(failure(pin.conflict.status, body()), [own]),
+      fresh: catalog.fullOutcome(freshResult, [fresh]), persisted: true,
+    };
+  };
+  const complete = () => {
+    const records: Record<string, ReturnType<typeof good>> = {};
+    for (const surface of Object.keys(surfaces)) for (const d of ['A>B', 'B>A']) records[`${surface} ${d}`] = good(surface);
+    return records;
+  };
+
+  it('keeps a closed, frozen inventory covering every create-ID RPC and REST insert that is probed', () => {
+    expect(Object.isFrozen(catalog.TAKEN_ID_SURFACES)).toBe(true);
+    expect(Object.keys(surfaces).sort()).toEqual(['REST items id', 'REST outfits id', 'REST wear_event_items id', 'REST wear_events id',
+      'reserve_item_save p_item.id (plain item)', 'reserve_item_save p_item.id (save attempt)', 'restore_history_entry p_id',
+      'save_outfit p_id', 'save_wear_event p_id']);
+    for (const pin of Object.values(surfaces)) expect(Object.isFrozen(pin.conflict)).toBe(true);
+    expect(surfaces['save_outfit p_id']!.conflict).toEqual({ status: 400, body: conflict() });
+    expect(surfaces['reserve_item_save p_item.id (plain item)']!.conflict).toEqual({ status: 400, body: conflict('22023') });
+    expect(surfaces['REST items id']!.conflict).toEqual({ status: 409, body: duplicate('items_pkey') });
+  });
+
+  it('passes only when foreign and own conflicts equal the pinned full response and the fresh create reads back', () => {
+    expect(catalog.takenIdProblems(complete())).toEqual([]);
+  });
+
+  it('keeps missing and null fields distinct and masks only the substituted IDs', () => {
+    const withNull = catalog.fullOutcome(failure(400, conflict()), [peer]);
+    const without = catalog.fullOutcome(failure(400, { code: 'P0001', hint: null, message: 'Request conflict' }), [peer]);
+    expect(withNull).not.toEqual(without);
+    const keyed = (id: string): Body => ({ ...duplicate('outfits_pkey'), details: `Key (id)=(${id}) already exists.` });
+    const masked = catalog.fullOutcome(failure(409, keyed(peer)), [peer]);
+    expect(masked).toEqual({ status: 409, body: keyed('<ID>') });
+    expect(catalog.fullOutcome(failure(409, keyed(peer)), [])).not.toEqual(masked);
+  });
+
+  it.each([
+    ['details only', { details: 'Key (id) exists' }],
+    ['hint only', { hint: 'Try another ID' }],
+    ['message only', { message: 'Request rejected' }],
+    ['code only', { code: '23505' }],
+    ['a missing field', { details: undefined }],
+    ['an extra field', { owner: 'hidden' }],
+  ])('fails when the foreign response differs from the own conflict by %s', (_label, change) => {
+    const records = complete();
+    const key = 'save_outfit p_id A>B';
+    const body = { ...conflict(), ...change } as Body;
+    for (const [field, value] of Object.entries(change)) if (value === undefined) delete body[field];
+    records[key] = { ...records[key]!, foreign: catalog.fullOutcome(failure(400, body), [peer]) };
+    const problems = catalog.takenIdProblems(records);
+    expect(problems).toContain(`${key}: foreign ID response differs from the own conflicting create`);
+    expect(problems.some((p: string) => p.startsWith(`${key}: foreign ID `) && p.includes('differs from the pinned'))).toBe(true);
+  });
+
+  it('fails identical but wrong responses, such as the old 23505 on both sides', () => {
+    const records = complete();
+    const key = 'save_outfit p_id B>A';
+    const old = (id: string) => catalog.fullOutcome(failure(409, duplicate('outfits_pkey')), [id]);
+    records[key] = { ...records[key]!, foreign: old(peer), own: old(own) };
+    const problems = catalog.takenIdProblems(records);
+    expect(problems).not.toContain(`${key}: foreign ID response differs from the own conflicting create`);
+    expect(problems.filter((p: string) => p.startsWith(key))).toHaveLength(2);
+  });
+
+  it('fails a REST duplicate that exposes a key DETAIL, even when both sides match', () => {
+    const records = complete();
+    const key = 'REST items id A>B';
+    const keyed = (id: string) => catalog.fullOutcome(failure(409, { ...duplicate('items_pkey'), details: `Key (id)=(${id}) already exists.` }), [id]);
+    records[key] = { ...records[key]!, foreign: keyed(peer), own: keyed(own) };
+    expect(catalog.takenIdProblems(records).filter((p: string) => p.startsWith(key))).toHaveLength(2);
+  });
+  it('fails a missing control, a missing direction, an unread fresh create or an unknown surface', () => {
+    const missingOwn = complete();
+    const key = 'REST outfits id A>B';
+    delete (missingOwn[key] as Partial<ReturnType<typeof good>>).own;
+    expect(catalog.takenIdProblems(missingOwn)).toContain(`${key}: missing own control`);
+    const missingDirection = complete();
+    delete missingDirection['reserve_item_save p_item.id (plain item) B>A'];
+    expect(catalog.takenIdProblems(missingDirection)).toContain('reserve_item_save p_item.id (plain item) B>A: no taken-ID probes');
+    const unread = complete();
+    unread['save_wear_event p_id A>B'] = { ...unread['save_wear_event p_id A>B']!, persisted: false };
+    expect(catalog.takenIdProblems(unread)).toContain('save_wear_event p_id A>B: fresh create was not read back');
+    const failedFresh = complete();
+    failedFresh['restore_history_entry p_id A>B'] = { ...failedFresh['restore_history_entry p_id A>B']!,
+      fresh: catalog.fullOutcome(failure(400, conflict()), [fresh]) };
+    expect(catalog.takenIdProblems(failedFresh).some((p: string) => p.startsWith('restore_history_entry p_id A>B: fresh ID'))).toBe(true);
+    const unknown = { ...complete(), 'REST items id A>C': good('REST items id') };
+    expect(catalog.takenIdProblems(unknown)).toContain('REST items id A>C: unknown taken-ID surface');
+    expect(catalog.takenIdProblems({})).toHaveLength(Object.keys(surfaces).length * 2);
   });
 });
 
@@ -465,5 +582,24 @@ describe('I17 closed privileged control', () => {
     expect(child).not.toHaveProperty('SUPABASE_PUBLISHABLE_KEY');
     expect(child).not.toHaveProperty('DOCKER_HOST');
     expect(() => catalog.privilegedEnvironment({ ...ciEnv, SUPABASE_SERVICE_ROLE_KEY: 'x' })).toThrow('REFUSED');
+  });
+});
+
+describe('export snapshot comparison', () => {
+  const row = (id: string, title: string) => ({ id, owner_id: 'o', title, tags: ['b', 'a'] });
+  const exported = (items: unknown[]) => ({ schema_version: 2, export_id: crypto.randomUUID(), owner_id: 'o',
+    created_at: new Date().toISOString(), tables: { items, outfits: [] } });
+  it('ignores only aggregate row order and the per-call export identity', () => {
+    const before = catalog.stableExport(exported([row('1', 'A'), row('2', 'B')]));
+    expect(catalog.stableExport(exported([row('2', 'B'), row('1', 'A')]))).toEqual(before);
+    expect(before).not.toHaveProperty('export_id');
+    expect(before).not.toHaveProperty('created_at');
+  });
+  it('catches a leftover, missing or altered control row', () => {
+    const before = catalog.stableExport(exported([row('1', 'A'), row('2', 'B')]));
+    expect(catalog.stableExport(exported([row('1', 'A'), row('2', 'B'), row('3', 'Isolation oracle')]))).not.toEqual(before);
+    expect(catalog.stableExport(exported([row('1', 'A')]))).not.toEqual(before);
+    expect(catalog.stableExport(exported([row('1', 'A'), row('2', 'C')]))).not.toEqual(before);
+    expect(catalog.stableExport(exported([row('1', 'A'), { ...row('2', 'B'), tags: ['a', 'b'] }]))).not.toEqual(before);
   });
 });
