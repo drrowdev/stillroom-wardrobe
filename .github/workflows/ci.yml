@@ -240,6 +240,7 @@ jobs:
           path: |
             test-results/p6b-visual/restore-preview-en-desktop.png
             test-results/p6b-visual/restore-progress-sv-mobile.png
+            test-results/p6b-visual/restore-reencoded-fi-mobile.png
           if-no-files-found: error
           retention-days: 1
       - name: Preserve bounded synthetic P6c visual evidence
