@@ -428,6 +428,13 @@ password HTTP sessions in `normalSessionEnvironment`; only setup, trusted-server
 RPC calls, named timestamp seeding and SQL metadata inspection use privileged
 local SQL. No values, UUIDs, tokens, SQL or HTTP bodies are printed.
 
+S7 (25 September) inspects the `pg_cron` purge job created by
+`20260925090000_ai_purge_schedule.sql`. The job is created **inactive** in
+every environment, so it never fires during reset, fixtures or preservation
+rehearsal and cannot purge the deliberately expired fixtures. S7 requires the
+exact job row, `active=false` and zero run-history rows, and prints only the
+cron timezone, run logging and each `cron` function signature/ACL.
+
 * **P1:** normal UNCONFIGURED/default-deny, failed enable leaves profiles exact,
   withdrawal without configuration.
 * **S2:** setup fictional policies with the **same** model `fictional:controls/v1`,

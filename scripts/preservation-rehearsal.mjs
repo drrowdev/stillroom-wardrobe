@@ -45,6 +45,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260922020000_checked_image_changes.sql', version: '20260922020000', time: '2026-09-22 02:00:00', bytes: 82482, sha256: SOURCE_HASHES.imageChanges },
   { name: '20260924100000_garment_colours.sql', version: '20260924100000', time: '2026-09-24 10:00:00', bytes: 20945, sha256: SOURCE_HASHES.colours },
   { name: '20260924100100_azure_colour_manifest.sql', version: '20260924100100', time: '2026-09-24 10:01:00', bytes: 16215, sha256: SOURCE_HASHES.colourManifest },
+  { name: '20260925090000_ai_purge_schedule.sql', version: '20260925090000', time: '2026-09-25 09:00:00', bytes: 2382, sha256: SOURCE_HASHES.purgeSchedule },
   { name: '20260925100000_uniform_id_conflicts.sql', version: '20260925100000', time: '2026-09-25 10:00:00', bytes: 5677, sha256: SOURCE_HASHES.uniformIdConflicts },
 ]);
 
@@ -1270,17 +1271,17 @@ async function main() {
       await history('colours'); await verifyCiStorageGuard();
       stage = 'COL1-A3-twelve-compare';
       await verifyColourStage(colourSnapshot, privilegedLocalSql, 'colours');
-      stage = 'COL1-A4-twelve-to-fourteen';
+      stage = 'COL1-A4-twelve-to-fifteen';
       await migrateToStage(run, 'colours', 'target');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
       await history('target'); await verifyCiStorageGuard();
-      stage = 'COL1-A5-fourteen-compare';
+      stage = 'COL1-A5-fifteen-compare';
       await verifyColourStage(colourSnapshot, privilegedLocalSql, 'target');
-      stage = 'COL1-A6-fourteen-probes';
+      stage = 'COL1-A6-fifteen-probes';
       await colourProbes(sixEnv, privilegedLocalSql, 'target');
       colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
-    console.log('PASS: COL1 populated11/twelve/fourteen; rows, v1 manifest and unchanged bodies preserved at each compare; probes only after fourteen; no provider calls');
+    console.log('PASS: COL1 populated11/twelve/fifteen; rows, v1 manifest and unchanged bodies preserved at each compare; probes only after fifteen; no provider calls');
     stage = 'COL1-B-twelve-reset';
     requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', COLOUR_VERSION], 10 * 60_000)).code === 0);
     await assertMigrationInventory(); await history('colours'); await verifyCiStorageGuard();

@@ -56,6 +56,20 @@ async function main() {
       requireEvidence(!denied.ok && denied.status === 401 && denied.data.code === '42501');
     }
     eq(await requireReady(client, owners), ready);
+    // The scheduler schema is not exposed: no read of jobs/runs and no call of cron functions through the Data API.
+    for (const token of [owners[0].token, owners[1].token, null]) {
+      for (const [route, init] of [
+        ['job?select=*', { headers: { 'Accept-Profile': 'cron' } }],
+        ['job_run_details?select=*', { headers: { 'Accept-Profile': 'cron' } }],
+        ['rpc/schedule', { method: 'POST', headers: { 'Content-Profile': 'cron' },
+          body: { job_name: 'forbidden', schedule: '* * * * *', command: 'select 1' } }],
+        ['rpc/alter_job', { method: 'POST', headers: { 'Content-Profile': 'cron' }, body: { job_id: 1, active: true } }],
+        ['rpc/unschedule', { method: 'POST', headers: { 'Content-Profile': 'cron' }, body: { job_name: 'stillroom-ai-purge-expired' } }],
+      ]) {
+        const hidden = await client.request(token, `/rest/v1/${route}`, init);
+        requireEvidence(!hidden.ok && hidden.status === 406 && hidden.data.code === 'PGRST106');
+      }
+    }
     console.log('PASS: AI controls security; normal owners=2 anonymous=1; Data API refusal, not SQL metadata proof');
   } catch {
     console.error('FAIL: AI controls security evidence; reset disposable fixtures with npm run db:reset; no self-repair');

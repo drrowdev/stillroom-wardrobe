@@ -567,8 +567,11 @@ the profile weather columns are in the installed base schema.
     observation `expected_snapshot` (an observation, not proof of the exact
     snapshot); control `ordinary`; cache read/write 0/0; 8 counters; no anomaly.
   - A wine-red coat was returned as `brown`, which led to COL1.
-- **Open gate.** Scheduled purge of expired results is still open. Results are
-  cleared by hand after supervised use for now.
+- **Open gate.** Scheduled purge of expired results is still open on hosted.
+  Results are cleared by hand after supervised use for now. The source (an
+  inactive `pg_cron` job, 25 September) is described under "Scheduled purge of
+  expired AI results"; hosted H1 install and the owner-approved H2 activation
+  are pending.
 
 **COL1.** #37 merged as `a6a027eb`.
 
@@ -620,7 +623,7 @@ workflow and not Phase 0 or product acceptance.
 | Website | Git-backed Pages project `stillroom-wardrobe` created; selected GitHub repo access verified. Automatic production deployments OFF, preview deployments NONE, no production backend in preview environment. Deployments since 23 September are owner-run create-deployments of production main HEAD. | Coordinator through official Cloudflare connection only |
 | Live deployment | Latest cited deployment: `27a1c642` of `3ed08147` (PR #36 comment `5813432944`, 24 September). Earlier: `f0016398` and `6e01b747`; the 6 September shell `91462a90` is history. Each replacement needs separate approval and fresh evidence. A deployment is not acceptance. | Coordinator; owner runs the create-deployment |
 | Edge Functions | Three functions v1 ACTIVE, `verify_jwt=true`, source-identical as recorded on 23 September (`5800183953`). COL1 R3 (functions) was recorded as not yet done at R1 on 24 September (`5815899879`). The out-of-EU Edge location is accepted for the 23 September test rollout only, with owner test photos; general residency remains OPEN. Redeployment needs separate approval. | Coordinator/operator with owner approval; source writers have no access |
-| Photo analysis (AI) | Activated for the owner's account only on 23 September (`5815445262`): `azure-eu-terra-devtest-v1`, prompt 1, notice 2, a USD 20/month application allowance (not an invoice ceiling), 20 requests per hour, 3600 s result TTL, review expiry 21 October 2026. The 24 September single-photo probe had no anomaly. Still open: scheduled purge (manual clearing for now), other accounts, quality (see COL1), privacy/retention and device acceptance, and renewal before expiry. | Owner decides; coordinator/operator executes each change |
+| Photo analysis (AI) | Activated for the owner's account only on 23 September (`5815445262`): `azure-eu-terra-devtest-v1`, prompt 1, notice 2, a USD 20/month application allowance (not an invoice ceiling), 20 requests per hour, 3600 s result TTL, review expiry 21 October 2026. The 24 September single-photo probe had no anomaly. Still open: scheduled purge (manual clearing for now; source job ready inactive, hosted H1 pending, H2 activation needs owner approval, physical retention PENDING until H3), other accounts, quality (see COL1), privacy/retention and device acceptance, and renewal before expiry. | Owner decides; coordinator/operator executes each change |
 | Not built / backlog | Outfits, suggestions and weather (Phases 3–5) are not built. The calendar (I12/I13) is in the backlog (`5815445262`). Hosted deletion and recovery flows are not exercised. | Owner prioritises; separate approved packets |
 | Hosted smoke | BLOCKED until both intended ordinary sessions and prepared non-personal item/main/thumb fixtures exist. Run the separate read-only command below privately and report only coarse result plus reviewed code head. The 23 September owner journey was a manual single-account check, not this two-owner runner. | Approved private operator, not cloud agent or public CI |
 | Phone/accessibility | Actual iPhone/Safari and Android camera/library, rotation/compatible-photo fallback, explicit Save/Discard, own login/logout, EN/FI/SV, VoiceOver/TalkBack and narrow/zoomed layout checks remain open. Emulation/axe is insufficient. | Human owners/testers |
@@ -809,6 +812,98 @@ v2 switch needs no new consent. Preservation stages now include `colours`
 of nine to thirteen. Hosted order is M1, M2, Pages, the three Edge Functions
 together (they share `protocol.ts`), then the owner's controls switch to v2;
 each step is separately approved.
+
+### Scheduled purge of expired AI results - 25 September 2026
+
+`20260925090000_ai_purge_schedule.sql` is the fourteenth migration. It adds
+extension/config objects and new inactive job metadata without modifying
+pre-existing application data or objects. In one `do` block it:
+
+- raises and aborts unless `current_user` and `current_database()` are both
+  `postgres`, `pg_cron` is absent or already in `pg_catalog`,
+  `cron.database_name` is this database, `postgres` can use `cron` and execute
+  `cron.schedule(text,text,text)` and
+  `cron.alter_job(bigint,text,text,text,text,boolean)`, neither `anon` nor
+  `authenticated` has USAGE or CREATE on `cron` (including inherited), and no
+  job named `stillroom-ai-purge-expired` exists;
+- creates `pg_cron` in `pg_catalog` only if absent, with the two Supabase
+  default grants to `postgres`; an existing installation's ACLs are checked,
+  never changed;
+- schedules `select public.ai_purge_expired(500)` every 15 minutes
+  (`*/15 * * * *`) as `postgres` and sets the job inactive in the same statement.
+
+The job stays inactive because a live job would purge the deliberately expired
+CI fixtures at an arbitrary moment. No existing function, grant or row is
+changed; `ai_purge_expired` stays SECURITY DEFINER, service-role/owner only,
+bounded to 1–1000 rows and owner-agnostic. Preservation `target` is now
+fifteen (with `20260925100000_uniform_id_conflicts.sql` after it) and the
+storage guard accepts exact prefixes of nine to fifteen.
+
+Local evidence (CI DB job only): AI controls S7 checks the exact job row,
+`active=false`, zero rows in `cron.job_run_details`, `cron.log_run=on`, a UTC
+`cron.timezone`, the purge function owner `postgres`, and `INVALID_INPUT` for
+limits 0, 1001 and null; it records each `cron` function ACL by OID without
+requiring EXECUTE to be revoked (PUBLIC EXECUTE is the default; the schema USAGE
+denial blocks invocation). The security suite requires 406/`PGRST106` for
+`cron` reads and RPCs from both owners and anonymous. S4's `removed: 1` is
+bounded-purge evidence, not proof that the job never fired; that proof is the
+inactive state plus zero runs.
+
+**Retention.** Logical expiry and physical cleanup are separate. A result is
+unavailable to its owner as soon as `expires_at` passes (the status/control RPCs
+check expiry). Physical cleanup, which closes the request as `EXPIRED` and keeps
+only the minimal ledger, happens at the next successful run: the worst case is
+about TTL + 15 minutes, plus any run that hits the 500-row bound. With the
+current 3600 s owner TTL that stays well under 24 hours; it is not guaranteed
+for an 86400 s TTL. A scheduler outage breaks any wall-clock guarantee. The
+physical-retention gate stays **PENDING** until H3 below passes; this packet
+changes no TTL.
+
+**Hosted runbook.** The coordinator runs each step; STOP on any unexpected
+state. H1 is covered by the owner's additive pre-approval; **H2 needs the
+owner's separate approval** and is not run by this packet.
+
+- **H0, read-only baseline.** `pg_extension` and `pg_available_extensions` rows
+  for `pg_cron` (schema, version); the migration ledger; the live owner of
+  `public.ai_purge_expired(integer)` (`pg_get_userbyid(proowner)`, expected
+  `postgres`) with its md5, ACL and SECURITY DEFINER; and, from ONE captured
+  timestamp `t0`, aggregates only: `private.ai_requests` total and with
+  `expires_at <= t0`, and `private.ai_usage` total. STOP if `pg_cron` is in
+  another schema, a job with this name exists, or the function owner differs.
+- **H1, install (inert).** Check the Git blob bytes (2382) and md5
+  (`0d92c55403e3b093d9d886f1ec7abff3`), then one `apply_migration`; no
+  `db push`, replay or history repair. The migration aborts as a whole if any
+  guard fails, including if it does not run as `postgres`. Readback: ledger
+  statement md5 equals the blob; extension in `pg_catalog`; the job row exact
+  (name, schedule, command, `postgres`, `postgres`, `active=false`) with zero
+  runs; `anon`/`authenticated` without cron USAGE/CREATE; `cron.timezone` and
+  `cron.log_run` recorded; H0 aggregates recomputed at the same `t0` are
+  unchanged; the function md5/ACL/owner are unchanged. Rollback:
+  `select cron.unschedule('stillroom-ai-purge-expired');` (the extension can
+  stay).
+- **H2, activate (owner approval required).**
+  `select cron.alter_job((select jobid from cron.job where jobname='stillroom-ai-purge-expired' and username='postgres'), active := true);`
+  Readback: `active=true`, the rest of the row unchanged.
+- **H3, liveness acceptance.** Within 45 minutes of H2 there must be at least
+  one `cron.job_run_details` row for this job with `status='succeeded'` and
+  `end_time` after H2; an empty history or only failures is a FAIL. Then record:
+  last-success age (expected under 20 minutes), the expired backlog
+  (`count(*)` with `expires_at <= now()`, expected 0 unless more than 500 per
+  interval) and the oldest-expired age (expected under 15 minutes plus TTL
+  slack). Ledger and usage counts must be unchanged, because closures keep the
+  ledger.
+- **Monitoring and response.** On each supervised check, read the same three
+  values. If the last success is older than 30 minutes, or the oldest expired
+  row is older than 30 minutes: pause (`cron.alter_job(..., active := false)`),
+  run one manual bounded `select public.ai_purge_expired(500);` as today, record
+  the failing run's `status`/`return_message` (no row data), and report to the
+  owner before re-activating. Pausing or unscheduling does not restore rows
+  already closed by committed runs. It MAY terminate a run in progress
+  (pg_cron 1.6 stops the worker or closes its connection when a job changes or
+  is removed), and that run's uncommitted changes are rolled back. After any
+  pause, unschedule or manual fallback, check `cron.job_run_details` for this
+  job for a run still `starting`/`running` or one that `failed` (record only
+  `status`/`return_message`), and read the expired backlog again.
 
 ## Delivery rules
 

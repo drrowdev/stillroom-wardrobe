@@ -220,6 +220,36 @@ async function main() {
     eq(final, { requests: 2, ready: 2, unexplained: 0, held: 0, ledger: 14, accounted: '16001',
       expiry: { reason: 'EXPIRED', amount: '0', full: false } });
     console.log('PASS: AI controls S6; structural retention and accounting, not owner access');
+    stage = 'S7-purge-schedule';
+    const schedule = JSON.parse(await privilegedLocalSql(`select jsonb_build_object(
+      'extension',(select jsonb_agg(extnamespace::regnamespace::text) from pg_catalog.pg_extension where extname='pg_cron'),
+      'jobs',(select coalesce(jsonb_agg(jsonb_build_object('name',jobname,'schedule',schedule,'command',command,
+        'username',username,'database',database,'active',active) order by jobid),'[]'::jsonb) from cron.job),
+      'runs',(select count(*) from cron.job_run_details),
+      'timezone',current_setting('cron.timezone',true),'logRun',current_setting('cron.log_run',true),
+      'schemaDenied',(select bool_and(not has_schema_privilege(r,'cron','USAGE') and not has_schema_privilege(r,'cron','CREATE'))
+        from unnest(array['anon','authenticated']) r),
+      'functions',(select jsonb_agg(jsonb_build_object('oid',p.oid::bigint,'signature',p.oid::regprocedure::text,
+        'acl',coalesce(p.proacl::text,'default'),'anon',has_function_privilege('anon',p.oid,'EXECUTE'),
+        'authenticated',has_function_privilege('authenticated',p.oid,'EXECUTE')) order by p.oid)
+        from pg_catalog.pg_proc p where p.pronamespace='cron'::regnamespace),
+      'purge',(select jsonb_build_object('owner',pg_get_userbyid(proowner),'definer',prosecdef,'config',proconfig)
+        from pg_catalog.pg_proc where oid='public.ai_purge_expired(integer)'::regprocedure),
+      'invalid',jsonb_build_array(public.ai_purge_expired(0),public.ai_purge_expired(1001),public.ai_purge_expired(null)));`));
+    eq(schedule.extension, ['pg_catalog']);
+    eq(schedule.jobs, [{ name: 'stillroom-ai-purge-expired', schedule: '*/15 * * * *', command: 'select public.ai_purge_expired(500)',
+      username: 'postgres', database: 'postgres', active: false }]);
+    // Inactive and never run: the structural proof that the schedule did not touch the fixtures above.
+    requireEvidence(schedule.runs === 0 && schedule.schemaDenied === true && schedule.logRun === 'on');
+    requireEvidence(['GMT', 'UTC', 'Etc/UTC'].includes(schedule.timezone));
+    requireEvidence(Array.isArray(schedule.functions) && schedule.functions.length > 0);
+    eq(schedule.purge, { owner: 'postgres', definer: true, config: ['search_path=""'] });
+    eq(schedule.invalid, [{ code: 'INVALID_INPUT' }, { code: 'INVALID_INPUT' }, { code: 'INVALID_INPUT' }]);
+    console.log(`PASS: AI controls S7; purge job inactive with zero runs; cron.timezone=${schedule.timezone} cron.log_run=on; anon/authenticated lack cron USAGE/CREATE`);
+    // Recorded, not required: PUBLIC EXECUTE is the default; the schema USAGE denial above blocks invocation.
+    for (const f of schedule.functions) {
+      console.log(`RECORD: cron function oid=${f.oid} ${f.signature} acl=${f.acl} anonExecute=${f.anon} authenticatedExecute=${f.authenticated}`);
+    }
   } catch {
     console.error(`FAIL: AI controls fixture ${stage}; reset required; no SQL, credentials or fixture values disclosed`);
     process.exitCode = 1;
