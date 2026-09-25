@@ -450,6 +450,11 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .weather-results legend { font-weight: 600; margin-bottom: 8px; }
 .weather-results .choice { display: flex; gap: 8px; align-items: flex-start; overflow-wrap: anywhere; }
 .weather-credit a { color: inherit; }
+.backup-parts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.backup-parts li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.backup-parts .button { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+.backup-part-done { color: var(--secondary); font-size: .875rem; }
+.backup-card .button { max-width: 100%; white-space: normal; }
 @media (max-width: 650px) {
   .today-ideas { grid-template-columns: minmax(0, 1fr); }
   .today-context .field { max-width: none; }

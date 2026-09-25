@@ -8,6 +8,7 @@ import type { Language } from '../../src/i18n';
 import { garmentFields, garmentPayload, parseGarmentValues, sameValue } from '../../src/domain/garment-fields';
 import { parseFieldProvenance, provenanceFields } from '../../src/domain/attribute-provenance';
 import { isRecord, isUuid } from '../../src/domain/wardrobe';
+import { rawColumns } from '../../src/domain/export-format';
 import type { ImageChangeReceipt } from '../../src/domain/image-replacement';
 import type { DeletionOperation } from '../../src/domain/item-lifecycle';
 import { wardrobeTargetDeleteRoute } from '../../src/data/storage-delete';
@@ -536,6 +537,9 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     minimum_upper_coverage: 0, minimum_lower_coverage: 0, cold_sensitivity: 0, repeat_gap_days: 2,
   }]));
   const images: JsonRow[] = [];
+  // Backup fixture: attribution histories by item, a hook that runs before each attribution read, and manifest reads.
+  const exportControl: { attributions: Map<string, unknown[]>; beforeAttribution: (() => void) | null; manifests: number } = {
+    attributions: new Map(), beforeAttribution: null, manifests: 0 };
   const files = new Map<string, Buffer>();
   const deletionClaims = new Map<string, { request_id: string; expected_version: number; started_at: string }>();
   let lifecycleReplyLost = false;
@@ -1321,6 +1325,27 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const projected = select ? selected.map(row => Object.fromEntries(select.split(',').filter(key => Object.hasOwn(row, key)).map(key => [key, row[key]]))) : selected;
       await json(singular ? projected[0] ?? null : projected); return;
     }
+    if (url.pathname === '/rest/v1/rpc/export_manifest') {
+      const body = request.postDataJSON() as JsonRow;
+      if (method !== 'POST' || Object.keys(body).length !== 1 || typeof body.p_export_id !== 'string') { await json({ code: '22023', message: 'Invalid input' }, 400); return; }
+      exportControl.manifests++;
+      const stamp = '2026-09-09T00:00:00Z';
+      const fill = (table: keyof typeof rawColumns, rows: JsonRow[]) => rows.filter(row => row.owner_id === owner).map(row => Object.fromEntries(
+        rawColumns[table].map(column => [column, Object.hasOwn(row, column) ? row[column] : column === 'created_at' || column === 'updated_at' ? stamp : null])));
+      await json({ schema_version: 2, export_id: body.p_export_id, owner_id: owner, created_at: stamp, tables: {
+        profiles: fill('profiles', [profiles[owner]!]), style_preferences: fill('style_preferences', [preferences[owner]!]), items: fill('items', items),
+        item_images: fill('item_images', images), outfits: fill('outfits', outfits), outfit_items: fill('outfit_items', outfitItems),
+        wear_events: fill('wear_events', wearEvents), wear_event_items: fill('wear_event_items', wearLinks),
+        combination_rules: fill('combination_rules', combinationRules), suggestion_feedback: fill('suggestion_feedback', suggestionFeedback),
+      } }); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/item_attribution_history') {
+      const body = request.postDataJSON() as JsonRow;
+      exportControl.beforeAttribution?.();
+      const item = items.find(row => row.id === body.p_item_id && row.owner_id === owner && row.deleted_at === null);
+      if (method !== 'POST' || !item) { await json({ code: '42501', message: 'Not available', details: null, hint: null }, 403); return; }
+      await json(exportControl.attributions.get(String(item.id)) ?? []); return;
+    }
     if (url.pathname === '/rest/v1/rpc/update_image_description') {
       const body = request.postDataJSON() as JsonRow;
       if (method !== 'POST' || Object.keys(body).length !== 3 || typeof body.p_alt_text !== 'string'
@@ -1384,7 +1409,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, feedbackControl, holdFeedbackReads, outfitControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, holdFeedbackReads, outfitControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),
