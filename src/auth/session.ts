@@ -254,7 +254,7 @@ export class SessionController {
     }
   }
   chooseLanguage(language: Language): void {
-    if (this.state.phase !== 'signed-out') return;
+    if (this.state.phase !== 'signed-out' && this.state.phase !== 'locked') return;
     this.choice = language;
     this.publish({ ...this.state, language });
   }
