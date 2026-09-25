@@ -140,12 +140,14 @@ async function narrowAndEnlarged(page: Page, scope: string, language: Language, 
     }, scope);
     const label = `${scope} ${language} ${enlarged ? '200%' : '100%'}`;
     expect(found, label).toEqual({ overflow: false, clipped: [], small: 0 });
-    await skipLink(page, label);
-    expect((await new AxeBuilder({ page }).analyze()).violations, `${scope} ${language} axe`).toEqual([]);
+    // Captured before the skip link moves focus and scroll to #main, so the surface itself is in view.
     if (enlarged && capture) {
       await mkdir(path.join('test-results', 'i24-visual'), { recursive: true });
+      await page.locator(scope).scrollIntoViewIfNeeded();
       await page.screenshot({ path: path.join('test-results', 'i24-visual', capture), fullPage: false });
     }
+    await skipLink(page, label);
+    expect((await new AxeBuilder({ page }).analyze()).violations, `${scope} ${language} axe`).toEqual([]);
   }
   await setLargeText(page, false);
 }

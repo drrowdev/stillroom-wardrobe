@@ -277,7 +277,7 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 @media (max-width: 650px) {
   .entry-header { padding: 18px 20px; gap: 10px; flex-wrap: wrap; }
   .language-selector button { padding-inline: 10px; }
-  .entry-main { grid-template-columns: 1fr; gap: 26px; padding: 16px 20px 30px; max-width: 510px; }
+  .entry-main { grid-template-columns: 1fr; gap: 26px; padding: 16px 20px 30px; max-width: 510px; margin: 0 auto auto; }
   .intro { display: none; }
   .entry-card { padding: 25px; border-radius: 14px; }
   .entry-card .small-mark { display: none; }

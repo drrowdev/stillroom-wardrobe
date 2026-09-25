@@ -65,9 +65,37 @@ async function file(root, relative) {
   }
 }
 
-// Starts a host for `root`. `setRoot` swaps the served build (a deploy); `requests` records each request;
-// `hold(pathname)` delays that path until the returned release function runs.
-export async function startDistServer({ root, port = 0, host = '127.0.0.1' }) {
+const chunkBytes = 16_384;
+const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, Math.max(0, ms)); });
+
+// One shared link for every connection: each 16 KB chunk reserves the next free slot at `bytesPerSecond`, so
+// concurrent responses (page and service worker alike) interleave and share the bandwidth.
+export function createLink({ bytesPerSecond, latencyMs = 0 }) {
+  if (!(bytesPerSecond > 0) || !(latencyMs >= 0)) throw new Error('Invalid link throttle.');
+  let freeAt = 0;
+  return {
+    latencyMs,
+    bytesPerSecond,
+    async send(response, body) {
+      for (let offset = 0; offset < body.length; offset += chunkBytes) {
+        const chunk = body.subarray(offset, offset + chunkBytes);
+        const now = performance.now();
+        const start = Math.max(now, freeAt);
+        freeAt = start + (chunk.length / bytesPerSecond) * 1000;
+        await sleep(freeAt - now);
+        if (!response.write(chunk)) await new Promise((resolve) => { response.once('drain', resolve); });
+      }
+      response.end();
+    },
+  };
+}
+
+// Starts a host for `root`. `setRoot` swaps the served build (a deploy); `requests` records each request, the body bytes sent and
+// its start/end times (performance.now()); `hold(pathname)` delays that path until the returned release function runs. With
+// `throttle`, every response waits `latencyMs` and its body goes through one shared link (test-only network shaping that,
+// unlike CDP emulation of a page target, also covers service-worker fetches).
+export async function startDistServer({ root, port = 0, host = '127.0.0.1', throttle }) {
+  const link = throttle ? createLink(throttle) : null;
   let current = path.resolve(root);
   let rules = [];
   const loadRules = async () => { rules = parseHeaders(await readFile(path.join(current, '_headers'), 'utf8')); };
@@ -78,7 +106,9 @@ export async function startDistServer({ root, port = 0, host = '127.0.0.1' }) {
     try {
       const url = new URL(request.url ?? '/', 'http://host');
       const pathname = decodeURIComponent(url.pathname);
-      requests.push({ method: request.method, pathname, mode: request.headers['sec-fetch-mode'] ?? '', dest: request.headers['sec-fetch-dest'] ?? '' });
+      const entry = { method: request.method, pathname, mode: request.headers['sec-fetch-mode'] ?? '', dest: request.headers['sec-fetch-dest'] ?? '', bytes: 0,
+        start: performance.now(), end: 0 };
+      requests.push(entry);
       const held = holds.get(pathname);
       if (held) await held;
       if (request.method !== 'GET' && request.method !== 'HEAD') { response.writeHead(405).end(); return; }
@@ -101,8 +131,12 @@ export async function startDistServer({ root, port = 0, host = '127.0.0.1' }) {
         headers.Vary = 'Accept-Encoding';
       }
       headers['Content-Length'] = String(body.length);
+      entry.bytes = request.method === 'HEAD' ? 0 : body.length;
+      if (link) await sleep(link.latencyMs);
       response.writeHead(200, headers);
-      response.end(request.method === 'HEAD' ? undefined : body);
+      if (link && request.method !== 'HEAD') await link.send(response, body);
+      else response.end(request.method === 'HEAD' ? undefined : body);
+      entry.end = performance.now();
     } catch {
       if (!response.headersSent) response.writeHead(500);
       response.end();
