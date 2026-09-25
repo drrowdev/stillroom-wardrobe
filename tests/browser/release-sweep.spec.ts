@@ -71,13 +71,32 @@ test('the manifest describes an installable standalone app and no service worker
   const manifest = JSON.parse(await readFile('public/manifest.webmanifest', 'utf8')) as Record<string, unknown>;
   expect(manifest).toMatchObject({ name: 'Stillroom Wardrobe', short_name: 'Stillroom', start_url: '/', scope: '/', display: 'standalone',
     theme_color: '#F6F3ED', background_color: '#F6F3ED' });
-  expect(manifest.icons).toEqual([expect.objectContaining({ src: '/icon.svg', type: 'image/svg+xml', sizes: 'any' })]);
+  expect(manifest.icons).toEqual([
+    { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+    { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+  ]);
   const { api } = await start(page, 'en');
   void api;
   await page.goto('/');
   await expect(page.locator('link[rel=manifest]')).toHaveAttribute('href', '/manifest.webmanifest');
+  await expect(page.locator('link[rel=apple-touch-icon]')).toHaveAttribute('href', '/apple-touch-icon.png');
   await expect(page.locator('meta[name=theme-color]')).toHaveAttribute('content', '#F6F3ED');
   expect((await page.request.get('/icon.svg')).ok()).toBe(true);
+  // Each PNG is served as a PNG of its declared size. Maskable and Apple icons are opaque, because the platform crops them.
+  const png = async (src: string) => {
+    const response = await page.request.get(src);
+    expect(response.ok()).toBe(true);
+    const bytes = await response.body();
+    expect(bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe(true);
+    expect(bytes.toString('ascii', 12, 16)).toBe('IHDR');
+    return { size: `${bytes.readUInt32BE(16)}x${bytes.readUInt32BE(20)}`, alpha: bytes[25] === 4 || bytes[25] === 6 };
+  };
+  expect(await png('/icon-192.png')).toEqual({ size: '192x192', alpha: true });
+  expect(await png('/icon-512.png')).toEqual({ size: '512x512', alpha: true });
+  expect(await png('/icon-maskable-512.png')).toEqual({ size: '512x512', alpha: false });
+  expect(await png('/apple-touch-icon.png')).toEqual({ size: '180x180', alpha: false });
   await signIn(page);
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   expect(await page.evaluate(async () => ({
