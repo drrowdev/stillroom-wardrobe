@@ -37,6 +37,7 @@ jobs:
       - run: npm run check:bundle
       - run: npm run scan:secrets
       - run: npm run check:dependencies
+      - run: npm run check:deploy-artifacts
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser -- --project=chromium --project=mobile
       - run: npm run test:pwa
@@ -359,6 +360,7 @@ jobs:
         run: |
           git ls-files --error-unmatch src/data/database.types.ts
           git diff --exit-code -- src/data/database.types.ts
+      - run: npm run test:edge
 
   deletion-rehearsal:
     name: Account deletion rehearsal

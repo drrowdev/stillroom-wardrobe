@@ -22,10 +22,12 @@
     "db:types": "node scripts/db.mjs types",
     "test:integration": "node scripts/run-local-tests.mjs integration",
     "test:security": "node scripts/run-local-tests.mjs security",
+    "test:edge": "node scripts/run-local-tests.mjs edge",
     "check:translations": "node scripts/check-translations.mjs",
     "check:bundle": "node scripts/check-bundle-budget.mjs dist",
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "check:dependencies": "node scripts/check-dependencies.mjs",
+    "check:deploy-artifacts": "node scripts/check-deploy-artifacts.mjs",
     "dependencies:record": "node scripts/check-dependencies.mjs --write"
   },
   "dependencies": {

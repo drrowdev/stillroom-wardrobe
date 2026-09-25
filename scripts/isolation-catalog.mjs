@@ -762,7 +762,7 @@ commit;
 select 'I17_RESTORE_OK';`;
 }
 
-async function psql(sql, env, run, maxOutputBytes) {
+export async function psql(sql, env, run, maxOutputBytes) {
   const result = await run('docker', ['exec', '-i', DB_CONTAINER, 'psql', '-X', '--no-password', '-h', '127.0.0.1',
     '-p', '5432', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-A'],
   { input: sql, env: commandEnvironment(env), timeout: 30_000, maxOutputBytes });
