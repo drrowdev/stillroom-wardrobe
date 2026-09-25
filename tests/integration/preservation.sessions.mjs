@@ -21,6 +21,7 @@ export const SOURCE_HASHES = Object.freeze({
   imageChanges: '28f0c87f9db6c643bc68d86843dffc905449280bd26483721503389281d7ec93',
   colours: '21c63831d49416e7322e21de63902554e9382fe3c51489776d3d1a2d9ccb2195',
   colourManifest: 'b90043a542e65c683c04e075021c08d31019804f157bfbd1dde1dea3488155c5',
+  purgeSchedule: '77597565a92e6b70b2c86d2f6ae96c0eabc144a0aa86552633f7600630addf9a',
   uniformIdConflicts: '77354b56af25cbdbf46118158d788892cca922c8950cf8c5652937546bc0694b',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;

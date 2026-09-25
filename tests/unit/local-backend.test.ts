@@ -2098,6 +2098,7 @@ describe('safe startup/reset failure description', () => {
     '20260911200000_checked_ai_item_save.sql', '20260913120000_item_lifecycle.sql',
     '20260921193000_azure_terra_analysis.sql', '20260922020000_checked_image_changes.sql',
     '20260924100000_garment_colours.sql', '20260924100100_azure_colour_manifest.sql',
+    '20260925090000_ai_purge_schedule.sql',
     '20260925100000_uniform_id_conflicts.sql',
   ]);
 
@@ -2225,7 +2226,7 @@ describe('safe startup/reset failure description', () => {
   it('counts distinct announcements and uses stderr order rather than version order', () => {
     const lines = [...migrations, migrations[1], migrations[0]];
     expect(failure(lines.map((name) => `Applying migration ${name}...\n`).join('')))
-      .toMatchObject({ announcedKnownMigrationCount: 14, lastAnnouncedKnownMigrationIndex: 1 });
+      .toMatchObject({ announcedKnownMigrationCount: 15, lastAnnouncedKnownMigrationIndex: 1 });
   });
 
   it('keeps eighth/ninth announcements distinct from the observed statement ordinal', () => {
@@ -2360,7 +2361,7 @@ describe('safe startup/reset failure description', () => {
     const maximum = { ...defaults, tag: 'nonzero-with-stderr', exitCode: 255, elapsedMs: Number.MAX_SAFE_INTEGER,
       stdoutBytes: 16777216, stderrBytes: 16777216, stderrDockerOperation: 'inspect-container',
       stderrContainerExitBucket: 'other-nonzero', stderrSqlState: 'unclassified',
-      announcedKnownMigrationCount: 14, lastAnnouncedKnownMigrationIndex: 13, stderrPortAllocationMarker: false,
+      announcedKnownMigrationCount: 15, lastAnnouncedKnownMigrationIndex: 14, stderrPortAllocationMarker: false,
       stderrStatementIndex: 9999, stderrPermissionMarker: 'rls-policy-violation' };
     expect(Reflect.ownKeys(maximum)).toEqual(keys);
     expect(Buffer.byteLength(JSON.stringify(maximum), 'utf8')).toBeLessThan(512);

@@ -31,7 +31,7 @@ const inspection = (): Outcome => ({ code: 0, stdout: JSON.stringify(metadata())
 const receipt = (): Outcome => ({ code: 0, stdout: 'CI_STORAGE_GUARD_VERIFIED\n', stderr: '' });
 const versions = ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000',
   '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000',
-  '20260924100000', '20260924100100', '20260925100000'];
+  '20260924100000', '20260924100100', '20260925090000', '20260925100000'];
 const read = (name: string) => readFile(new URL('../../' + name, import.meta.url), 'utf8');
 function ordered(source: string, steps: string[]) {
   let offset = 0;
@@ -237,7 +237,7 @@ describe('CI Storage guard scope and transport (mocked, no backend proof)', () =
 });
 
 describe('fixed SQL/source contracts (not executed PostgreSQL assertions)', () => {
-  it.each([9, 10, 11, 12, 13, 14])('selects the single exact trigger/body pair only from history length %s', async (length) => {
+  it.each([9, 10, 11, 12, 13, 14, 15])('selects the single exact trigger/body pair only from history length %s', async (length) => {
     mocks.run.mockResolvedValueOnce(inspection())
       .mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(versions.slice(0, length)), stderr: '' });
     const sql = await verificationSql();
@@ -249,7 +249,7 @@ describe('fixed SQL/source contracts (not executed PostgreSQL assertions)', () =
   it.each([[], versions.slice(1), [...versions, '20260923000000'], versions.slice(0, 6), versions.slice(0, 7), versions.slice(0, 8),
     [...versions.slice(0, 9), versions[10]], [...versions.slice(0, 9), versions[8]], null, {},
     [...versions.slice(0, 11), versions[12]], [...versions.slice(0, 10), versions[11]], [...versions.slice(0, 11), versions[10]],
-    [...versions.slice(0, 11), versions[12], versions[11]], [...versions.slice(0, 12), versions[11]], [...versions.slice(0, 12), versions[13]], [...versions.slice(0, 5), ...versions.slice(6)]])(
+    [...versions.slice(0, 11), versions[12], versions[11]], [...versions.slice(0, 12), versions[11]], [...versions.slice(0, 12), versions[13]], [...versions.slice(0, 13), versions[14]], [...versions.slice(0, 5), ...versions.slice(6)]])(
     'rejects unsupported history %# before catalog verification without observed-body fallback', async (value) => {
       mocks.run.mockResolvedValueOnce(inspection())
         .mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(value), stderr: '' });

@@ -8135,7 +8135,10 @@ Coordinator-recorded evidence; the sections above are not edited.
   `expected_snapshot` (an observation, not proof of the exact snapshot); cache
   0/0; no anomaly. A wine-red coat was returned as `brown`, which led to COL1.
   Scheduled purge of expired results is an **open gate**; results are cleared
-  manually after supervised use.
+  manually after supervised use. On 25 September the source added an inactive
+  `pg_cron` job (`20260925090000_ai_purge_schedule.sql`); hosted install,
+  owner-approved activation and the liveness/physical-retention check are
+  pending (see the development guide).
 - **COL1.** #37 merged as `a6a027eb`. The owner approved the hosted rollout
   (annex above) at about 13:05Z on 24 September; R0 was recorded at 13:33:04Z
   (`5815445262`). COL1 was last recorded at R1 on 24 September
