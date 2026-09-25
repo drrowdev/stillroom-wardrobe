@@ -8,7 +8,7 @@ import {
 import {
   EXPOSED_RPCS, SERVICE_ONLY_RPCS, PUBLIC_TABLES, RELATIONSHIP_NAMES, ACCEPTED_ORACLES, worstOracle, COVERAGE_REQUIREMENTS,
   matchOutcome, outcomeOf, sameOutcome, scanLeaks, validateCoverage, applicationCode, isInconclusive, classifyOracle,
-  restoreThenCleanup, tupleConstructionProblems, fullOutcome, TAKEN_ID_SURFACES, takenIdProblems,
+  restoreThenCleanup, tupleConstructionProblems, fullOutcome, TAKEN_ID_SURFACES, takenIdProblems, stableExport,
 } from '../../scripts/isolation-catalog.mjs';
 import { normalClient } from '../integration/preservation.sessions.mjs';
 import { intent, saveHarness } from '../integration/item-save.sessions.mjs';
@@ -387,10 +387,7 @@ async function ownerState(owner) {
   for (const path of f.paths) state.objects[path] = await objectState(owner, path);
   const exported = (await call(owner, 'export_manifest', { p_export_id: randomUUID() })).data;
   fatal(exported && typeof exported === 'object', 'state-export');
-  const stableExport = { ...exported };
-  delete stableExport.created_at;
-  delete stableExport.export_id;
-  state.export = stableExport;
+  state.export = stableExport(exported);
   const read = async (name, body) => outcomeOf(await call(owner, name, body));
   state.change = await read('image_change_status', { p_item_id: f.changeItem, p_request_id: f.changeRequest });
   state.requests = await read('image_change_requests', { p_item_id: f.changeItem });
@@ -720,7 +717,10 @@ async function oracles(attacker, victim) {
     need(isDeepStrictEqual(await state(), before), `${stage}: a rejected create changed parent or link rows`);
     const made = await raw(attacker.token, s.route, s.request(fresh, 'fresh'));
     const persisted = made.ok && await s.persisted(fresh, made) === true;
-    if (made.ok) await s.cleanup(fresh);
+    if (made.ok) {
+      await s.cleanup(fresh);
+      need(Object.values(await s.state([fresh])()).every((list) => list.length === 0), `${stage}: a fresh control row was left behind`);
+    }
     takenRecords[`${s.surface} ${d}`] = { foreign: fullOutcome(foreign, [s.foreignId]), own: fullOutcome(own, [s.ownId]),
       fresh: fullOutcome(made, [fresh]), persisted };
     const pin = TAKEN_ID_SURFACES[s.surface];

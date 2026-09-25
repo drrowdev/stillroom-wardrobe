@@ -584,3 +584,22 @@ describe('I17 closed privileged control', () => {
     expect(() => catalog.privilegedEnvironment({ ...ciEnv, SUPABASE_SERVICE_ROLE_KEY: 'x' })).toThrow('REFUSED');
   });
 });
+
+describe('export snapshot comparison', () => {
+  const row = (id: string, title: string) => ({ id, owner_id: 'o', title, tags: ['b', 'a'] });
+  const exported = (items: unknown[]) => ({ schema_version: 2, export_id: crypto.randomUUID(), owner_id: 'o',
+    created_at: new Date().toISOString(), tables: { items, outfits: [] } });
+  it('ignores only aggregate row order and the per-call export identity', () => {
+    const before = catalog.stableExport(exported([row('1', 'A'), row('2', 'B')]));
+    expect(catalog.stableExport(exported([row('2', 'B'), row('1', 'A')]))).toEqual(before);
+    expect(before).not.toHaveProperty('export_id');
+    expect(before).not.toHaveProperty('created_at');
+  });
+  it('catches a leftover, missing or altered control row', () => {
+    const before = catalog.stableExport(exported([row('1', 'A'), row('2', 'B')]));
+    expect(catalog.stableExport(exported([row('1', 'A'), row('2', 'B'), row('3', 'Isolation oracle')]))).not.toEqual(before);
+    expect(catalog.stableExport(exported([row('1', 'A')]))).not.toEqual(before);
+    expect(catalog.stableExport(exported([row('1', 'A'), row('2', 'C')]))).not.toEqual(before);
+    expect(catalog.stableExport(exported([row('1', 'A'), { ...row('2', 'B'), tags: ['a', 'b'] }]))).not.toEqual(before);
+  });
+});

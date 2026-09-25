@@ -294,6 +294,28 @@ export async function helperBodyMd5(root = ROOT) {
 }
 
 // --- Response matching used by the normal-session audit ---------------------------------------
+/**
+ * export_manifest aggregates each table without an ORDER BY, so row order follows the scan plan and can change when
+ * unrelated rows are inserted and deleted. Only that order and the per-call export_id/created_at are normalized; every
+ * row and field is still compared, so a leftover, missing or altered row is a mismatch.
+ */
+export function stableExport(exported) {
+  if (!exported || typeof exported !== 'object' || Array.isArray(exported)) return exported;
+  const rest = { ...exported };
+  delete rest.created_at;
+  delete rest.export_id;
+  if (rest.tables && typeof rest.tables === 'object' && !Array.isArray(rest.tables)) {
+    rest.tables = Object.fromEntries(Object.entries(rest.tables).map(([table, rows]) => [table, Array.isArray(rows)
+      ? rows.map((row) => [JSON.stringify(canonicalValue(row)), row]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, row]) => row)
+      : rows]));
+  }
+  return rest;
+}
+function canonicalValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalValue(value[key])]));
+  return value;
+}
 export function outcomeOf(result) {
   if (result.ok) return { status: result.status, data: result.data };
   const data = result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : {};
