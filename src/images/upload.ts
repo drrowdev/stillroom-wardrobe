@@ -105,6 +105,8 @@ export async function ensureFile(
 
 export async function saveItem(
   client: AppClient, scope: OwnerScope, attempt: SaveAttempt, onStage: (stage: SaveStage) => void,
+  // A restore keeps the backup's field kinds through its own reservation; the rest of the checked Save is shared.
+  reservation: 'reserve_item_save' | 'reserve_restored_item_save' = 'reserve_item_save',
 ): Promise<void> {
   const checkScope = () => {
     throwIfAborted(scope.signal);
@@ -114,7 +116,7 @@ export async function saveItem(
   const { photo } = attempt;
   onStage('capture.reserving');
   checkScope();
-  const reserved = await client.rpc('reserve_item_save', {
+  const reserved = await client.rpc(reservation, {
     p_item: { ...attempt.payload, id: attempt.itemId },
     p_image: {
       id: attempt.imageId, main_bytes: photo.main.size, thumb_bytes: photo.thumb.size,

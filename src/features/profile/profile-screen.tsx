@@ -9,6 +9,7 @@ import { LanguageSettings } from '../settings/language-settings';
 import { AiSettings } from '../settings/ai-settings';
 import { WeatherSettings } from '../settings/weather-settings';
 import { BackupSettings } from '../settings/backup-settings';
+import { RestoreSettings } from '../settings/restore-settings';
 import type { AiClient } from '../../data/ai';
 import { currencyOptions, timeZoneOptions } from './profile-options';
 
@@ -99,6 +100,7 @@ export function ProfileScreen({ client, ai, unresolved, controller, scope, profi
       <AiSettings ai={ai} controller={controller} scope={scope} profile={profile} busy={busy || reading}
         unresolved={unresolved} language={language} online={online} t={t} />
       <BackupSettings client={client} scope={scope} language={language} online={online} t={t} />
+      <RestoreSettings client={client} scope={scope} language={language} online={online} t={t} />
     </div>
   </div>;
 }

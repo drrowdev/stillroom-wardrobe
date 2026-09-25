@@ -2100,6 +2100,7 @@ describe('safe startup/reset failure description', () => {
     '20260924100000_garment_colours.sql', '20260924100100_azure_colour_manifest.sql',
     '20260925090000_ai_purge_schedule.sql',
     '20260925100000_uniform_id_conflicts.sql',
+    '20260925110000_restore_item_save.sql',
   ]);
 
   function report(result: unknown, ...elapsed: [] | [unknown]) {
@@ -2226,7 +2227,7 @@ describe('safe startup/reset failure description', () => {
   it('counts distinct announcements and uses stderr order rather than version order', () => {
     const lines = [...migrations, migrations[1], migrations[0]];
     expect(failure(lines.map((name) => `Applying migration ${name}...\n`).join('')))
-      .toMatchObject({ announcedKnownMigrationCount: 15, lastAnnouncedKnownMigrationIndex: 1 });
+      .toMatchObject({ announcedKnownMigrationCount: 16, lastAnnouncedKnownMigrationIndex: 1 });
   });
 
   it('keeps eighth/ninth announcements distinct from the observed statement ordinal', () => {

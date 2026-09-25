@@ -23,6 +23,7 @@ export const SOURCE_HASHES = Object.freeze({
   colourManifest: 'b90043a542e65c683c04e075021c08d31019804f157bfbd1dde1dea3488155c5',
   purgeSchedule: '77597565a92e6b70b2c86d2f6ae96c0eabc144a0aa86552633f7600630addf9a',
   uniformIdConflicts: '77354b56af25cbdbf46118158d788892cca922c8950cf8c5652937546bc0694b',
+  restoreItemSave: '0ef587332beac90ec41499748408ebb999b085ac87339bed54b00aa4efe2c533',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const voidRpcs = new Set(['commit_image', 'retire_image', 'forget_image']);

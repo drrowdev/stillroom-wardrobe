@@ -56,6 +56,9 @@ export const EXPOSED_RPCS = Object.freeze([
   fn('item_deletion_next_target', 'uuid, uuid', ['p_item_id', 'p_request_id']),
   fn('reconcile_item_deletion_target', 'uuid, uuid, bigint', ['p_item_id', 'p_request_id', 'p_ordinal']),
   fn('begin_prepared_item_deletion', 'uuid, uuid', ['p_item_id', 'p_request_id']),
+  fn('reserve_restored_item_save', 'jsonb, jsonb', ['p_item', 'p_image']),
+  fn('restore_image_change_status', 'uuid, uuid', ['p_item_id', 'p_request_id']),
+  fn('restore_item_save_status', 'uuid', ['p_item_id']),
 ]);
 
 // Public functions reachable only with service credentials (Edge/operator); normal sessions must be denied.
@@ -416,6 +419,9 @@ export const COVERAGE_REQUIREMENTS = Object.freeze({
   item_deletion_next_target: req(['removeItem', 'removeRequest'], { tuple: true }),
   reconcile_item_deletion_target: req(['removeItem', 'removeRequest'], { tuple: true }),
   begin_prepared_item_deletion: req(['removeItem', 'removeRequest'], { tuple: true }),
+  reserve_restored_item_save: req([], { collision: true }),
+  restore_image_change_status: req(['changeItem', 'changeRequest'], { tuple: true }),
+  restore_item_save_status: req(['saveItem']),
 });
 const DIRECTIONS = [['A', 'B'], ['B', 'A']];
 const TAG = /^(?:anon|normal-[AB]|[AB]:control|[AB]>[AB]:(?:owner-only|mixed|collision|unverified|tuple|ref:[A-Za-z]+))$/;
@@ -519,6 +525,8 @@ export const ACCEPTED_ORACLES = Object.freeze({
     'peer-owned wear-event-item ID returns 400/P0001; a new ID restores (204)'),
   'reserve_item_save p_item.id': residual({ status: 400, code: '22023', message: 'Request conflict' }, { status: 200 },
     'peer-owned item ID returns 400/22023; a new ID reserves (200)'),
+  'reserve_restored_item_save p_item.id': residual({ status: 400, code: '22023', message: 'Request conflict' }, { status: 200 },
+    'peer-owned item ID returns 400/22023; a new ID reserves a restored save (200)'),
   'Storage DELETE object': pinned({ status: 400, code: 'AccessDenied', message: 'Access denied' },
     { status: 400, code: 'NoSuchKey', message: 'Object not found' },
     'peer-owned object path returns 400/AccessDenied; a nonexistent path returns 400/NoSuchKey',
@@ -541,6 +549,8 @@ export const TAKEN_ID_SURFACES = Object.freeze({
   'restore_history_entry p_id': takenSurface('restore_history_entry p_id', conflictOf('P0001'), { status: 204, data: null }),
   'reserve_item_save p_item.id (save attempt)': takenSurface('reserve_item_save p_item.id', conflictOf('22023'), { status: 200 }),
   'reserve_item_save p_item.id (plain item)': takenSurface('reserve_item_save p_item.id', conflictOf('22023'), { status: 200 }),
+  'reserve_restored_item_save p_item.id (save attempt)': takenSurface('reserve_restored_item_save p_item.id', conflictOf('22023'), { status: 200 }),
+  'reserve_restored_item_save p_item.id (plain item)': takenSurface('reserve_restored_item_save p_item.id', conflictOf('22023'), { status: 200 }),
   'REST items id': takenSurface('REST items id', duplicateOf('items_pkey'), { status: 201, data: null }),
   'REST outfits id': takenSurface('REST outfits id', duplicateOf('outfits_pkey'), { status: 201, data: null }),
   'REST wear_events id': takenSurface('REST wear_events id', duplicateOf('wear_events_pkey'), { status: 201, data: null }),

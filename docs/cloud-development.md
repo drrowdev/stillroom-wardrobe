@@ -550,6 +550,17 @@ hosted call from builders. The card appears on the hosted site only after the
 owner runs a Pages deploy of a main that includes P6a. See
 `docs/phase-6-result.md` for scope, deferrals and pending gates.
 
+**P6b restore (source only, not deployed; hosted migration pending).** The
+P6b draft PR adds the Settings Restore card and the additive migration
+`20260925110000_restore_item_save.sql`: three new authenticated functions,
+`reserve_restored_item_save`, `restore_image_change_status` and
+`restore_item_save_status`, and no change to any existing object. The hosted apply of that migration waits for the
+separately authorized responsible actor; builders make no hosted call. The
+card needs both that migration and an owner-run Pages deploy of a main that
+includes P6b. Restore never calls analysis. It is partial: attribution history
+is not restored (Q5 is open) and Phase 6 is not accepted. See
+`docs/phase-6-result.md`.
+
 **AI activation, owner account only** (from
 [`5815445262`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815445262)).
 
