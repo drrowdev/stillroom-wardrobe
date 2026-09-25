@@ -3,11 +3,17 @@ import type { Database } from './database.types';
 import type { PublicConfig } from './config';
 import type { RecoveryLink } from '../auth/recovery-callback';
 import { profileColumns } from './rows';
+import { DELETE_TIMEOUT_MS } from './delete-account';
 
 export type AppClient = SupabaseClient<Database>;
 export const authStorageKey = 'stillroom.auth';
 const requestContexts = new WeakMap<AppClient, { signal?: AbortSignal }>();
 const clients = new Map<string, AppClient>();
+export const REQUEST_TIMEOUT_MS = 20_000;
+// Account deletion may legitimately run for up to 100 s on the server; every other request gets 20 s.
+export function requestTimeoutMs(pathname: string): number {
+  return pathname.endsWith('/functions/v1/delete-account') ? DELETE_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+}
 export function makeClient(config: PublicConfig): AppClient {
   const identity = `${config.url}|${config.publishableKey}`;
   const existing = clients.get(identity);
@@ -25,9 +31,10 @@ export function makeClient(config: PublicConfig): AppClient {
     global: {
       fetch: (input, init) => {
         const address = input instanceof Request ? input.url : String(input);
-        const signals = [AbortSignal.timeout(20_000)];
+        const pathname = new URL(address).pathname;
+        const signals = [AbortSignal.timeout(requestTimeoutMs(pathname))];
         if (init?.signal) signals.push(init.signal);
-        if (context.signal && !new URL(address).pathname.startsWith('/auth/v1/')) signals.push(context.signal);
+        if (context.signal && !pathname.startsWith('/auth/v1/')) signals.push(context.signal);
         return fetch(input, { ...init, cache: 'no-store', signal: AbortSignal.any(signals) });
       },
     },

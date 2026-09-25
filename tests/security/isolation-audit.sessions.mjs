@@ -579,6 +579,11 @@ async function foreignMatrix(attacker, victim) {
   const status = await probeRpc(attacker, victim, 'ai_status', {});
   if (control(attacker, 'ai_status', status.ok && status.data !== null && typeof status.data === 'object'
     && applicationCode(status) !== 'UNAVAILABLE', describe(status))) tag('ai_status', `${d}:owner-only`);
+  // The caller's own job only: neither owner has one here, so both directions must read `none`.
+  const deletion = await probeRpc(attacker, victim, 'deletion_status', {});
+  if (control(attacker, 'deletion_status', deletion.ok && isDeepStrictEqual(deletion.data, { state: 'none' }), describe(deletion))) {
+    tag('deletion_status', `${d}:owner-only`);
+  }
   // A stale expected version reaches the owner's own version check and must return the HTTP-200 CONFLICT envelope.
   const consent = await probeRpc(attacker, victim, 'ai_set_consent', { p_enabled: false, p_notice_revision: null, p_expected_version: 999_999_999 });
   if (control(attacker, 'ai_set_consent', matchOutcome({ status: 200, data: { code: 'CONFLICT' } }, consent), describe(consent))) {
@@ -923,6 +928,19 @@ async function edgeProbes(attacker, victim) {
       if (!unverified.includes(note)) unverified.push(note);
     }
     need(scanLeaks(result.text, v.tokens, v.tokens.filter((t) => JSON.stringify(body).includes(t))).length === 0, `${stage}: leaked peer values`);
+  }
+  // Mandatory, never UNVERIFIED: the security job serves the functions, so a missing or unconfigured
+  // delete-account function fails this gate. The owner comes only from the caller's session; a body naming
+  // another owner is refused as INVALID_INPUT before re-authentication, and no deletion job starts.
+  stage = `edge-${direction}-delete-account`;
+  const body = { password: 'fictional-wrong-password', ownerId: victim.uid };
+  const refused = await raw(attacker.token, '/functions/v1/delete-account', { method: 'POST', body });
+  need(refused.status === 400 && isDeepStrictEqual(refused.data, { code: 'INVALID_INPUT' }),
+    `${stage}: expected exactly 400 INVALID_INPUT, got ${refused.transport ? 'no response' : refused.status}`);
+  need(scanLeaks(refused.text, v.tokens, v.tokens.filter((t) => JSON.stringify(body).includes(t))).length === 0, `${stage}: leaked peer values`);
+  for (const owner of [attacker, victim]) {
+    const status = await call(owner, 'deletion_status', {});
+    need(status.ok && isDeepStrictEqual(status.data, { state: 'none' }), `${stage}: ${owner.label} deletion state changed ${describe(status)}`);
   }
 }
 

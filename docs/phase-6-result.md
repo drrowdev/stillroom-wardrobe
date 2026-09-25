@@ -176,3 +176,83 @@ integration (`tests/integration/restore-save.sessions.mjs`) and security
   database, but not a full backup -> restore replacement chain through
   Storage and `finalize-image-change`. That needs browser image encoding and
   the Edge runtime in one job, beyond the current CI time budget.
+
+# P6c account deletion (source only; hosted activation owner-gated)
+
+Status: **engineering in review.** P6c adds owner-confirmed account deletion
+(blueprint `06` I22, `08` deletion, `10` privacy/deletion, `14` Phase 6)
+under plan rev1-rev5 and their binding amendments. Attribution restore (Q5)
+stays open, so Phase 6 acceptance is not claimed.
+
+- Base: `960aed483116e382a18883041096112dc7965dd1` (origin/main, after P6b).
+- Migrations (not additive; the hosted apply needs owner approval):
+  - `20260925120000_account_deletion.sql`: admission generations on
+    `private.approved_accounts`; a replaced, service-only
+    `deletion_control(owner, action, op, code)` with a lease and operation
+    token, lock order admission row then job, a bounded attempt budget, an
+    existing-job-only operator grant and absence-verified terminal
+    reconciliation; the frozen-owner branch in front of the unchanged Storage
+    publication guard body; a `before delete on auth.users` trigger that
+    removes the exact admission row only for a job at `auth` with the recorded
+    generation (Q2). It waits for a held admission row for at most a
+    function-local 5 s lock timeout (no NOWAIT); service-only `purge_deletion_receipts()`; and
+    `deletion_status()`, which returns only the signed-in owner's own job
+    state (`none`, `in_progress`, `retry`, `contact`, `complete`) so a
+    frozen account can reach the recovery screen.
+  - `20260925120100_deletion_receipt_purge_schedule.sql`: one inactive daily
+    job that purges completed receipts older than seven days.
+- Edge Function `delete-account`: verifies the user token, re-authenticates
+  with the password, takes the owner from the token (no owner in the body) and
+  runs the shared stage loop (`supabase/functions/_shared/deletion-loop.ts`):
+  freeze -> storage (per-object removal of the owner's prefix) -> rows ->
+  auth (GoTrue hard delete) -> complete. The operator tool
+  `scripts/resume-deletion.mjs` runs the same loop for an existing job only.
+  Before every external request the loop checks the deadline and its lease,
+  and checks the deadline again after a renewal. The app gives the deletion
+  request its own 120 s transport limit; every other request keeps 20 s.
+
+## What the owner can do
+
+Settings > Delete account: **Make a backup first** moves to the Backup card.
+**Delete account** shows the password field, "I understand this can't be
+undone" and a typed phrase ("delete my account", "poista tilini", "radera mitt
+konto"); **Delete account permanently** runs the deletion. When it finishes the
+app signs out and says the account has been deleted. An unfinished deletion
+says what to do: enter the password again, wait, or contact the app's
+administrator. What is already deleted stays deleted. A frozen account that
+signs in again sees only "Account deletion hasn't finished", with its password
+field, **Finish deleting** and **Sign out**; no profile or wardrobe data is
+read.
+
+## What is deleted
+
+Every owner-keyed row, all of the owner's Storage objects, AI requests,
+results, usage and charge receipts, the Auth identity and the exact admission
+row. The completed deletion receipt is kept seven days, then purged by the
+scheduled job once activated. Downloaded backups and the hosting provider's own
+backups are not affected; the card says so.
+
+## Validation (builder, local)
+
+See the P6c PR description for exact commands and results. The database,
+security (`tests/security/delete-account.sessions.mjs`) and the serialized
+`deletion-rehearsal` CI job (a separately isolated disposable local stack,
+with owner C and a control account D) run in CI; the builder has no local
+Docker or database stack.
+
+## Pending
+
+- GPT-6 Astra code review, green exact-head CI including the rehearsal job,
+  and coordinator visual review of the `p6c-delete-account-ui-<sha>` captures.
+- Owner gates before anything runs on hosted: Q5, Q2 (admission row removal),
+  the non-additive replacements and triggers, the Edge deploy, activating the
+  purge schedule, and a disposable hosted drill; then an owner-run Pages deploy.
+- The security suite now serves the Edge functions and requires the
+  cross-owner `delete-account` probe to return exactly `INVALID_INPUT` with
+  both owners' deletion state unchanged; a missing Edge configuration fails
+  the gate. It sends no valid password, so nothing destructive runs there.
+- The rehearsal job sets Docker's default host binding to `127.0.0.1` before
+  the stack starts; the script itself never changes Docker configuration and
+  refuses any effective published address other than `127.0.0.1`. A failed
+  rehearsal SQL step prints its step, SQLSTATE and a redacted first error line.
+- The deferred `export-own`/`restore-own` CLIs.

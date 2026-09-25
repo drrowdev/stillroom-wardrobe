@@ -31,7 +31,8 @@ const inspection = (): Outcome => ({ code: 0, stdout: JSON.stringify(metadata())
 const receipt = (): Outcome => ({ code: 0, stdout: 'CI_STORAGE_GUARD_VERIFIED\n', stderr: '' });
 const versions = ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000',
   '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000',
-  '20260924100000', '20260924100100', '20260925090000', '20260925100000', '20260925110000'];
+  '20260924100000', '20260924100100', '20260925090000', '20260925100000', '20260925110000',
+  '20260925120000', '20260925120100'];
 const read = (name: string) => readFile(new URL('../../' + name, import.meta.url), 'utf8');
 function ordered(source: string, steps: string[]) {
   let offset = 0;
@@ -68,7 +69,7 @@ afterEach(() => vi.unstubAllEnvs());
 describe('CI Storage guard scope and transport (mocked, no backend proof)', () => {
   it('exports only a zero-argument mutation preflight and read-only verifier plus exact body pins', () => {
     expect(Object.keys(guard).sort()).toEqual([
-      'IMAGE_CHANGE_PUBLICATION_BODY_MD5', 'PUBLICATION_BODY_MD5', 'assertCiDatabaseMutationAllowed', 'verifyCiStorageGuard',
+      'ACCOUNT_DELETION_PUBLICATION_BODY_MD5', 'IMAGE_CHANGE_PUBLICATION_BODY_MD5', 'PUBLICATION_BODY_MD5', 'assertCiDatabaseMutationAllowed', 'verifyCiStorageGuard',
     ]);
     for (const name of ['assertCiDatabaseMutationAllowed', 'verifyCiStorageGuard']) {
       expect(guard[name].length).toBe(0);
@@ -237,19 +238,25 @@ describe('CI Storage guard scope and transport (mocked, no backend proof)', () =
 });
 
 describe('fixed SQL/source contracts (not executed PostgreSQL assertions)', () => {
-  it.each([9, 10, 11, 12, 13, 14, 15, 16])('selects the single exact trigger/body pair only from history length %s', async (length) => {
+  it.each([9, 10, 11, 12, 13, 14, 15, 16, 17, 18])('selects the single exact trigger/body pair only from history length %s', async (length) => {
     mocks.run.mockResolvedValueOnce(inspection())
       .mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(versions.slice(0, length)), stderr: '' });
     const sql = await verificationSql();
     expect(sql).toContain(`t.tgtype=${length >= 11 ? 29 : 21}`);
     expect(sql).not.toContain(`t.tgtype=${length >= 11 ? 21 : 29}`);
-    expect(sql).toContain(`pg_catalog.md5(p.prosrc)='${length >= 11 ? guard.IMAGE_CHANGE_PUBLICATION_BODY_MD5 : guard.PUBLICATION_BODY_MD5}'`);
+    const pinned = length >= 17 ? guard.ACCOUNT_DELETION_PUBLICATION_BODY_MD5
+      : length >= 11 ? guard.IMAGE_CHANGE_PUBLICATION_BODY_MD5 : guard.PUBLICATION_BODY_MD5;
+    expect(sql).toContain(`pg_catalog.md5(p.prosrc)='${pinned}'`);
+    for (const other of [guard.PUBLICATION_BODY_MD5, guard.IMAGE_CHANGE_PUBLICATION_BODY_MD5, guard.ACCOUNT_DELETION_PUBLICATION_BODY_MD5]) {
+      if (other !== pinned) expect(sql).not.toContain(other);
+    }
     expect(mocks.sql).not.toHaveBeenCalled();
   });
   it.each([[], versions.slice(1), [...versions, '20260923000000'], versions.slice(0, 6), versions.slice(0, 7), versions.slice(0, 8),
     [...versions.slice(0, 9), versions[10]], [...versions.slice(0, 9), versions[8]], null, {},
     [...versions.slice(0, 11), versions[12]], [...versions.slice(0, 10), versions[11]], [...versions.slice(0, 11), versions[10]],
-    [...versions.slice(0, 11), versions[12], versions[11]], [...versions.slice(0, 12), versions[11]], [...versions.slice(0, 12), versions[13]], [...versions.slice(0, 13), versions[14]], [...versions.slice(0, 14), versions[15]], [...versions.slice(0, 5), ...versions.slice(6)]])(
+    [...versions.slice(0, 11), versions[12], versions[11]], [...versions.slice(0, 12), versions[11]], [...versions.slice(0, 12), versions[13]], [...versions.slice(0, 13), versions[14]], [...versions.slice(0, 14), versions[15]], [...versions.slice(0, 15), versions[16]], [...versions.slice(0, 16), versions[17]],
+    [...versions.slice(0, 17), versions[16]], [...versions.slice(0, 5), ...versions.slice(6)]])(
     'rejects unsupported history %# before catalog verification without observed-body fallback', async (value) => {
       mocks.run.mockResolvedValueOnce(inspection())
         .mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(value), stderr: '' });
@@ -275,6 +282,19 @@ describe('fixed SQL/source contracts (not executed PostgreSQL assertions)', () =
     const body = migration.match(/create or replace function private\.guard_item_object_publication\(\)[\s\S]*?as \$\$([\s\S]*?)\$\$;/)?.[1];
     if (!body) throw new Error('Missing target publication body');
     expect(createHash('md5').update(body).digest('hex')).toBe(guard.IMAGE_CHANGE_PUBLICATION_BODY_MD5);
+  });
+  it('pins the account-deletion body as the image-change body plus only the frozen-owner branch', async () => {
+    const original = (await read('supabase/migrations/20260922020000_checked_image_changes.sql'))
+      .match(/create or replace function private\.guard_item_object_publication\(\)[\s\S]*?as \$\$([\s\S]*?)\$\$;/)?.[1];
+    const body = (await read('supabase/migrations/20260925120000_account_deletion.sql'))
+      .match(/create or replace function private\.guard_item_object_publication\(\)[\s\S]*?as \$\$([\s\S]*?)\$\$;/)?.[1];
+    if (!original || !body) throw new Error('Missing publication body');
+    expect(createHash('md5').update(body).digest('hex')).toBe(guard.ACCOUNT_DELETION_PUBLICATION_BODY_MD5);
+    const declaration = '  fa private.approved_accounts; fj private.deletion_jobs; fn smallint; fu uuid;\n';
+    const start = body.indexOf('begin\n') + 'begin\n'.length;
+    const end = body.indexOf("  if tg_op='DELETE' then object := old; else object := new; end if;\n");
+    expect(body.slice(start, end)).toMatch(/^ {2}-- P6c:[\s\S]*\n {2}end if;\n$/);
+    expect(body.slice(0, start).split(declaration).join('') + body.slice(end)).toBe(original);
   });
   it('bounds one read-only transaction and emits only a fixed receipt after commit', async () => {
     const sql = await verificationSql();

@@ -56,7 +56,9 @@ async function main() {
       env: { ...commandEnvironment(), ALLOW_SECURITY_TESTS: process.env.ALLOW_SECURITY_TESTS },
     });
     if (ai.code !== 0) {
-      console.error('FAIL: local AI control fixtures did not complete; reset required.');
+      // The fixture's stderr is a single coarse stage code with no SQL, credentials or values.
+      const reason = /^FAIL: AI controls fixture ([A-Za-z0-9-]{1,40});/.exec(ai.stderr.trim())?.[1] ?? 'unknown';
+      console.error(`FAIL: local AI control fixtures did not complete (stage=${reason}); reset required.`);
       process.exitCode = ai.code;
       return;
     }

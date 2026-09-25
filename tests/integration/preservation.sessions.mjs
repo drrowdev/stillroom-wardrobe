@@ -24,6 +24,8 @@ export const SOURCE_HASHES = Object.freeze({
   purgeSchedule: '77597565a92e6b70b2c86d2f6ae96c0eabc144a0aa86552633f7600630addf9a',
   uniformIdConflicts: '77354b56af25cbdbf46118158d788892cca922c8950cf8c5652937546bc0694b',
   restoreItemSave: '0ef587332beac90ec41499748408ebb999b085ac87339bed54b00aa4efe2c533',
+  accountDeletion: 'fcf1931c03a23702fcf608b50addc481a61084d1104ec421c682cf8575caed7f',
+  deletionPurgeSchedule: '6eb9b23fbca078f5336d39e3c3b5f407ec2654703527942a0c5000e9955fb07d',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const voidRpcs = new Set(['commit_image', 'retire_image', 'forget_image']);

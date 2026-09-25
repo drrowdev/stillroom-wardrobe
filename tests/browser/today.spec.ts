@@ -337,9 +337,14 @@ test('I15 Save as outfit opens a filled-in editor and saves once through save_ou
   await expect(page.locator('dialog[aria-labelledby="outfit-leave-title"]')).toBeVisible();
   await page.locator('dialog[aria-labelledby="outfit-leave-title"]').getByRole('button').first().click();
   await expect(page.locator('#outfit-editor-title')).toBeVisible();
+  // Staying closes the dialog and returns focus to the Today link on the next frame; typing before that lands
+  // while focus is still moving.
+  await expect(page.locator('dialog[aria-labelledby="outfit-leave-title"]')).toHaveCount(0);
+  await expect(navLink(page, 'nav.today')).toBeFocused();
   const bodies: Row[] = [];
   page.on('request', request => { if (new URL(request.url()).pathname === '/rest/v1/rpc/save_outfit') bodies.push(request.postDataJSON() as Row); });
   await page.locator('#outfit-name').fill('Friday');
+  await expect(page.locator('#outfit-name')).toHaveValue('Friday');
   const response = page.waitForResponse(value => new URL(value.url()).pathname === '/rest/v1/rpc/save_outfit');
   await button(page, 'outfits.saveOutfit').click();
   await response;

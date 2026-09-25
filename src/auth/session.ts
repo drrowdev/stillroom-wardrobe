@@ -9,10 +9,13 @@ import { holdsStoredSession } from './stored-session';
 import { AiError, type AiClient } from '../data/ai';
 import { aiPolicyBinding, supportedAiPolicy, type AiStatus } from '../domain/ai-controls';
 import { sameProfileFields } from '../domain/preferences';
+import { deletionStatus } from '../data/delete-account';
 
 export type OwnerScope = { ownerId: string; epoch: number; signal: AbortSignal };
 export type SessionState = {
-  phase: 'loading' | 'signed-out' | 'ready' | 'locked';
+  // `deleting`: an unfinished account deletion. The owner scope stays open only for finishing it.
+  phase: 'loading' | 'signed-out' | 'ready' | 'locked' | 'deleting';
+  deletion?: 'in_progress' | 'retry' | 'contact';
   language: Language;
   profile: ProfileRow | null;
   scope: OwnerScope | null;
@@ -55,12 +58,14 @@ export class SessionController {
     for (const timer of this.scheduled) clearTimeout(timer);
     this.scheduled.clear();
   }
-  private signedOut(): void {
+  private signedOut(notice?: MessageKey): void {
+    // The Auth SIGNED_OUT event that follows a finished deletion must not hide its confirmation.
+    const kept = notice ?? (this.state.phase === 'signed-out' && this.state.notice === 'delete.done' ? 'delete.done' : undefined);
     this.invalidate();
     this.choice = null;
     this.publish({
       phase: 'signed-out', language: resolveLanguage(this.browserLanguages),
-      profile: null, scope: null, languageUnsaved: false,
+      profile: null, scope: null, languageUnsaved: false, ...(kept ? { notice: kept } : {}),
     });
   }
   start(): () => void {
@@ -80,7 +85,8 @@ export class SessionController {
     const { data } = this.client.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || !session) { this.signedOut(); return; }
       if (!this.allowSession || !this.holdsSession(session)) return;
-      if (this.state.scope?.ownerId === session.user.id && !this.state.scope.signal.aborted && this.state.phase === 'ready') return;
+      if (this.state.scope?.ownerId === session.user.id && !this.state.scope.signal.aborted
+        && (this.state.phase === 'ready' || this.state.phase === 'deleting')) return;
       // Supabase holds its auth lock during this callback; data requests must run after it returns.
       const epoch = this.epoch;
       const timer = setTimeout(() => {
@@ -128,9 +134,23 @@ export class SessionController {
       this.publish({ phase: 'ready', language, profile, scope, languageUnsaved });
     } catch (error) {
       if (scope.signal.aborted || isAborted(error)) return;
+      // A frozen account cannot read its profile. If its own deletion is unfinished, offer to finish it.
+      const deletion = await deletionStatus(this.client, scope.signal).catch(() => null);
+      if (scope.signal.aborted || scope.epoch !== this.epoch) return;
+      if (deletion === 'complete') { await this.signOut(true, 'delete.done'); return; }
+      if (deletion === 'in_progress' || deletion === 'retry' || deletion === 'contact') {
+        this.publish({ phase: 'deleting', language: resolveLanguage(this.browserLanguages, null, this.choice), profile: null, scope,
+          languageUnsaved: false, deletion });
+        return;
+      }
       this.request.abort();
       this.publish({ phase: 'locked', language: resolveLanguage(this.browserLanguages), profile: null, scope: null, languageUnsaved: false });
     }
+  }
+  /** Records the latest answer from a recovery attempt; ignored once the scope has changed. */
+  deletionState(scope: OwnerScope, deletion: 'in_progress' | 'retry' | 'contact'): void {
+    if (scope.signal.aborted || this.state.phase !== 'deleting' || this.state.scope?.epoch !== scope.epoch) return;
+    this.publish({ ...this.state, deletion });
   }
   private async checkMembership(): Promise<void> {
     const { scope } = this.state;
@@ -254,7 +274,7 @@ export class SessionController {
     }
   }
   chooseLanguage(language: Language): void {
-    if (this.state.phase !== 'signed-out' && this.state.phase !== 'locked') return;
+    if (this.state.phase !== 'signed-out' && this.state.phase !== 'locked' && this.state.phase !== 'deleting') return;
     this.choice = language;
     this.publish({ ...this.state, language });
   }
@@ -285,10 +305,10 @@ export class SessionController {
       if (!scope.signal.aborted && this.state.scope?.epoch === scope.epoch) this.publish({ ...this.state, profileSaving: false });
     }
   }
-  async signOut(broadcast = true): Promise<void> {
+  async signOut(broadcast = true, notice?: MessageKey): Promise<void> {
     if (this.signingOut) return this.signingOut;
     this.allowSession = false;
-    this.signedOut();
+    this.signedOut(notice);
     const operation = this.finishSignOut(broadcast);
     this.signingOut = operation;
     try { await operation; } finally { this.signingOut = null; }

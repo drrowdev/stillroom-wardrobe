@@ -26,6 +26,7 @@ export const EXPOSED_RPCS = Object.freeze([
     ['p_id', 'p_event_id', 'p_item_id', 'p_title', 'p_category', 'p_import_id']),
   fn('update_image_description', 'uuid, bigint, text', ['p_image_id', 'p_expected_description_version', 'p_alt_text']),
   fn('ai_status', '', []),
+  fn('deletion_status', '', []),
   fn('ai_set_consent', 'boolean, integer, bigint', ['p_enabled', 'p_notice_revision', 'p_expected_version']),
   fn('ai_begin_request', 'uuid, uuid, integer, text', ['p_request_id', 'p_draft_id', 'p_generation', 'p_image_sha256']),
   fn('ai_request_control', 'uuid, text', ['p_request_id', 'p_action']),
@@ -63,7 +64,8 @@ export const EXPOSED_RPCS = Object.freeze([
 
 // Public functions reachable only with service credentials (Edge/operator); normal sessions must be denied.
 export const SERVICE_ONLY_RPCS = Object.freeze([
-  fn('deletion_control', 'uuid, text, text', ['p_owner_id', 'p_action', 'p_code']),
+  fn('deletion_control', 'uuid, text, uuid, text', ['p_owner_id', 'p_action', 'p_op', 'p_code']),
+  fn('purge_deletion_receipts', '', []),
   fn('ai_mark_dispatched', 'uuid, uuid', ['p_owner_id', 'p_request_id']),
   fn('ai_settle_request', 'uuid, uuid, jsonb, bigint, text', ['p_owner_id', 'p_request_id', 'p_facts', 'p_billed_micro', 'p_code']),
   fn('ai_purge_expired', 'integer', ['p_limit']),
@@ -106,6 +108,8 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'image_change_receipt(private.image_change_attempts)', 'reserve_image_change(uuid, jsonb, jsonb)',
   'item_deletion_target_supported(uuid, uuid, text)', 'item_deletion_receipt(private.item_deletion_operations)',
   'item_deletion_inventory_valid(private.item_deletion_operations)',
+  'rotate_admission_generation()', 'deletion_receipt(private.deletion_jobs)', 'deletion_owner_rows_absent(uuid)',
+  'release_deleted_admission()',
 ]);
 
 // Supabase-provided GraphQL entrypoint; its privileges are provider-managed and recorded, not asserted.
@@ -389,6 +393,7 @@ export const COVERAGE_REQUIREMENTS = Object.freeze({
   restore_history_entry: req(['event', 'item'], { alternatives: true, collision: true }),
   update_image_description: req(['image']),
   ai_status: req([], { ownerOnly: true }),
+  deletion_status: req([], { ownerOnly: true }),
   ai_set_consent: req([], { ownerOnly: true }),
   ai_begin_request: req([], { collision: true, runtime: true }),
   ai_request_control: req(['aiRequest'], { runtime: true }),

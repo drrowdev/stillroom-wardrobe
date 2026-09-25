@@ -53,18 +53,20 @@ const browserArtifacts: Record<string, string[]> = {
     .map((name) => `i16-visual/${name}.png`),
   'p6a-backup-ui': ['backup-en-desktop', 'backup-parts-fi-mobile'].map((name) => `p6a-visual/${name}.png`),
   'p6b-restore-ui': ['restore-preview-en-desktop', 'restore-progress-sv-mobile'].map((name) => `p6b-visual/${name}.png`),
+  'p6c-delete-account-ui': ['delete-account-en-desktop', 'delete-account-fi-mobile', 'delete-recovery-sv-desktop', 'delete-recovery-en-mobile'].map((name) => `p6c-visual/${name}.png`),
 };
 
 describe('CI workflow browser split', () => {
-  it('declares exactly the App, WebKit photo and database jobs with fixed names and timeouts', () => {
-    expect([...jobs.keys()]).toEqual(['app', 'webkit-photo', 'database']);
+  it('declares exactly the App, WebKit photo, database and deletion rehearsal jobs with fixed names and timeouts', () => {
+    expect([...jobs.keys()]).toEqual(['app', 'webkit-photo', 'database', 'deletion-rehearsal']);
     const names = [...jobs.values()].map((text) => /\n {4}name: (.+)\n/.exec(text)?.[1]);
-    expect(names).toEqual(['App and browser contracts', 'WebKit photo contracts', 'Real local Supabase']);
+    expect(names).toEqual(['App and browser contracts', 'WebKit photo contracts', 'Real local Supabase', 'Account deletion rehearsal']);
     expect(new Set(names).size).toBe(names.length);
     expect(job('app')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n    steps:\n');
     expect(job('webkit-photo')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    steps:\n');
     expect(job('database')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n');
-    expect(count(workflow, 'timeout-minutes:')).toBe(3);
+    expect(job('deletion-rehearsal')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 25\n');
+    expect(count(workflow, 'timeout-minutes:')).toBe(4);
   });
 
   it('selects every Playwright project exactly once across the two browser jobs', () => {
@@ -72,7 +74,7 @@ describe('CI workflow browser split', () => {
     expect(projects).toEqual(['chromium', 'mobile', 'webkit-photo']);
     expect(config).toContain("testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', "
       + "'item-details.spec.ts', 'garment-fields.spec.ts', 'ai-photo-first.spec.ts', 'items.spec.ts', 'ux-l1a.spec.ts', "
-      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts'],");
+      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts'],");
     expect(config).toContain('  failOnFlakyTests: Boolean(process.env.CI),\n');
     expect(config).toContain('  forbidOnly: Boolean(process.env.CI),\n');
     const app = job('app'), webkit = job('webkit-photo');
@@ -96,10 +98,10 @@ describe('CI workflow browser split', () => {
     for (const forbidden of ['upload-artifact', 'secrets.', 'env:', 'CI:', 'if:']) expect(webkit).not.toContain(forbidden);
   });
 
-  it('uploads each of the 17 browser artifacts exactly once, from the App job, success-only and exact-head named', () => {
+  it('uploads each of the 18 browser artifacts exactly once, from the App job, success-only and exact-head named', () => {
     const app = job('app');
     const uploads = steps(app).filter((step) => step.includes(upload));
-    expect(uploads).toHaveLength(17);
+    expect(uploads).toHaveLength(18);
     const seen = uploads.map((step) => {
       const name = /\n {10}name: ([a-z0-9-]+)-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}\n/.exec(step)?.[1];
       expect(name, step).toBeDefined();
@@ -112,10 +114,28 @@ describe('CI workflow browser split', () => {
     });
     expect(seen).toEqual(Object.keys(browserArtifacts));
     for (const name of seen) expect(count(workflow, `name: ${name}${headSuffix}\n`)).toBe(1);
-    expect(count(workflow, upload)).toBe(18);
+    expect(count(workflow, upload)).toBe(19);
     expect(count(job('database'), upload)).toBe(1);
     expect(job('database')).toContain('          name: database-types\n          path: src/data/database.types.ts\n'
       + '          if-no-files-found: error\n          retention-days: 1\n');
+  });
+
+  it('serializes the deletion rehearsal, checks the endpoint refusal first and gives it no secrets or uploads', () => {
+    const rehearsal = job('deletion-rehearsal');
+    expect(rehearsal).toContain('\n    permissions:\n      contents: read\n    concurrency:\n      group: deletion-rehearsal\n'
+      + "      cancel-in-progress: false\n    env:\n      STILLROOM_DELETION_REHEARSAL: '1'\n    steps:\n");
+    expect(steps(rehearsal)).toEqual([
+      checkout, setupNode, '      - run: npm ci --no-fund\n',
+      '      - name: Refuse an inherited Docker endpoint before anything starts\n        shell: bash -eo pipefail {0}\n        run: |\n'
+        + '          if DOCKER_HOST=tcp://127.0.0.1:9 node scripts/run-deletion-rehearsal.mjs > "$RUNNER_TEMP/refusal.txt"; then\n'
+        + '            exit 1\n          else\n            code=$?\n          fi\n          test "$code" -eq 3\n'
+        + "          grep -Fqx 'REFUSED: ENDPOINT_OVERRIDE' \"$RUNNER_TEMP/refusal.txt\"\n"
+        + '          test -z "$(docker ps -a --filter label=com.supabase.cli.project -q)"\n',
+      '      - name: Publish container ports on loopback only\n        shell: bash -eo pipefail {0}\n        run: |\n          sudo install -d -m 0755 /etc/docker\n          if sudo test -s /etc/docker/daemon.json; then current="$(sudo cat /etc/docker/daemon.json)"; else current=\'{}\'; fi\n          printf \'%s\' "$current" | jq \'. + {"ip": "127.0.0.1", "default-network-opts": {"bridge": {"com.docker.network.bridge.host_binding_ipv4": "127.0.0.1"}}}\' \\\n            | sudo tee /etc/docker/daemon.json > /dev/null\n          sudo systemctl restart docker\n          docker info > /dev/null\n',
+      '      - run: node scripts/run-deletion-rehearsal.mjs\n\n',
+    ]);
+    for (const forbidden of ['upload-artifact', 'secrets.', 'ALLOW_', 'SERVICE', 'db:start', 'playwright']) expect(rehearsal).not.toContain(forbidden);
+    expect(count(workflow, 'run-deletion-rehearsal.mjs')).toBe(2);
   });
 
   it('pins every action and never tolerates errors or disables flaky-test failure', () => {
@@ -125,7 +145,7 @@ describe('CI workflow browser split', () => {
       'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020',
       upload,
     ]));
-    for (const id of ['app', 'webkit-photo']) {
+    for (const id of ['app', 'webkit-photo', 'deletion-rehearsal']) {
       expect(job(id).split(checkout).length - 1).toBe(1);
       expect(job(id).split(setupNode).length - 1).toBe(1);
     }

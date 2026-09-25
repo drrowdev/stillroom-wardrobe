@@ -462,6 +462,12 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .backup-card .backup-plain { margin-top: 20px; }
 .restore-card .button { max-width: 100%; white-space: normal; }
 .restore-card input[type=file] { max-width: 100%; }
+.delete-card { border-color: #DDB9AE; }
+.delete-card .button { max-width: 100%; white-space: normal; }
+.delete-card .text-button { white-space: normal; text-align: start; }
+.delete-card .delete-actions { align-items: flex-start; gap: 8px; margin-bottom: 20px; }
+.delete-card .check { align-self: flex-start; }
+.delete-card .check input { flex: none; width: 20px; height: 20px; min-height: 0; margin: 0; padding: 0; }
 .restore-counts { margin: 0; padding-left: 1.25rem; }
 @media (max-width: 650px) {
   .today-ideas { grid-template-columns: minmax(0, 1fr); }

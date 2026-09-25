@@ -21,6 +21,7 @@ import { ItemLifecycleClient } from '../data/item-lifecycle';
 import { newUndo, type LifecycleSnapshot, type UndoItem } from '../domain/item-lifecycle';
 import type { ProfileRow } from '../data/rows';
 import { PasswordRecovery, RecoveryRequest } from '../auth/password-recovery';
+import { DeletionRecovery } from '../auth/deletion-recovery';
 import { leaveDialogFor, navFamilyFor, outfitRouteId, type NavFamily } from '../domain/outfits';
 import { OutfitLeaveDialog } from '../features/outfits/leave-dialog';
 import { LazyBoundary } from './lazy';
@@ -316,8 +317,11 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
       {refusal ? <RecoveryRefusal kind={refusal.kind} notice={refusal.notice} t={t} />
         : state.phase === 'signed-out' && requestPassword ? <RecoveryRequest config={config} online={online} t={t} language={state.language} onReturn={returnFromRequest} />
         : state.phase === 'loading' ? <section className="entry-card connecting" aria-busy="true"><span className="spinner" /><p role="status">{t('common.loading')}</p></section>
+        : state.phase === 'deleting' && state.scope && state.deletion ? <DeletionRecovery key={state.scope.epoch} client={client} controller={controller}
+          scope={state.scope} deletion={state.deletion} online={online} t={t} onSignOut={() => { void signOut(); }} />
         : state.phase === 'locked' ? <section className="entry-card"><h1>{t('common.errorTitle')}</h1><p className="muted">{t('account.locked')}</p><div className="stack"><button className="button button-primary" onClick={() => { void controller.retry(); }} disabled={!online}>{t('common.retry')}</button><button className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div></section>
-          : <div>{callback.kind === 'none' && callback.notice && <p role="status" className="notice">{t(callback.notice)}</p>}{!online && <p role="status" className="notice notice-offline">{t('common.offline')}</p>}{(signOutError || state.notice) && <p className="notice notice-error" role="alert">{t(state.notice ?? 'auth.localSignOut')}</p>}<Login controller={controller} online={online} t={t} onAuthActivity={clearRecoveryNotice} onRecovery={() => { clearRecoveryNotice(); setRequestPassword(true); }} /></div>}
+          : <div>{callback.kind === 'none' && callback.notice && <p role="status" className="notice">{t(callback.notice)}</p>}{!online && <p role="status" className="notice notice-offline">{t('common.offline')}</p>}{state.notice === 'delete.done' ? <p className="notice notice-success" role="status">{t('delete.done')}</p>
+            : (signOutError || state.notice) && <p className="notice notice-error" role="alert">{t(state.notice ?? 'auth.localSignOut')}</p>}<Login controller={controller} online={online} t={t} onAuthActivity={clearRecoveryNotice} onRecovery={() => { clearRecoveryNotice(); setRequestPassword(true); }} /></div>}
     </EntryLayout>;
   }
   return (

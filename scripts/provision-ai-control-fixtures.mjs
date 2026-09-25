@@ -235,17 +235,29 @@ async function main() {
         from pg_catalog.pg_proc p where p.pronamespace='cron'::regnamespace),
       'purge',(select jsonb_build_object('owner',pg_get_userbyid(proowner),'definer',prosecdef,'config',proconfig)
         from pg_catalog.pg_proc where oid='public.ai_purge_expired(integer)'::regprocedure),
+      'receiptPurge',(select jsonb_build_object('owner',pg_get_userbyid(proowner),'definer',prosecdef,'config',proconfig,
+        'anon',has_function_privilege('anon',oid,'EXECUTE'),'authenticated',has_function_privilege('authenticated',oid,'EXECUTE'))
+        from pg_catalog.pg_proc where oid='public.purge_deletion_receipts()'::regprocedure),
+      'releaseAdmission',(select jsonb_build_object('owner',pg_get_userbyid(p.proowner),'definer',p.prosecdef,'config',p.proconfig,
+        'triggers',(select jsonb_agg(jsonb_build_object('name',t.tgname,'enabled',t.tgenabled) order by t.tgname)
+          from pg_catalog.pg_trigger t where t.tgfoid=p.oid and t.tgrelid='auth.users'::regclass))
+        from pg_catalog.pg_proc p where p.oid='private.release_deleted_admission()'::regprocedure),
       'invalid',jsonb_build_array(public.ai_purge_expired(0),public.ai_purge_expired(1001),public.ai_purge_expired(null)));`));
     eq(schedule.extension, ['pg_catalog']);
     eq(schedule.jobs, [{ name: 'stillroom-ai-purge-expired', schedule: '*/15 * * * *', command: 'select public.ai_purge_expired(500)',
-      username: 'postgres', database: 'postgres', active: false }]);
+      username: 'postgres', database: 'postgres', active: false }, { name: 'stillroom-deletion-receipt-purge', schedule: '17 3 * * *',
+      command: 'select public.purge_deletion_receipts()', username: 'postgres', database: 'postgres', active: false }]);
     // Inactive and never run: the structural proof that the schedule did not touch the fixtures above.
     requireEvidence(schedule.runs === 0 && schedule.schemaDenied === true && schedule.logRun === 'on');
     requireEvidence(['GMT', 'UTC', 'Etc/UTC'].includes(schedule.timezone));
     requireEvidence(Array.isArray(schedule.functions) && schedule.functions.length > 0);
     eq(schedule.purge, { owner: 'postgres', definer: true, config: ['search_path=""'] });
+    eq(schedule.receiptPurge, { owner: 'postgres', definer: true, config: ['search_path=""'], anon: false, authenticated: false });
+    // The Auth deletion trigger function runs as its owner; it must be postgres, and its trigger enabled on auth.users.
+    eq(schedule.releaseAdmission, { owner: 'postgres', definer: true, config: ['search_path=""', 'lock_timeout=5s'],
+      triggers: [{ name: 'stillroom_release_admission', enabled: 'O' }] });
     eq(schedule.invalid, [{ code: 'INVALID_INPUT' }, { code: 'INVALID_INPUT' }, { code: 'INVALID_INPUT' }]);
-    console.log(`PASS: AI controls S7; purge job inactive with zero runs; cron.timezone=${schedule.timezone} cron.log_run=on; anon/authenticated lack cron USAGE/CREATE`);
+    console.log(`PASS: AI controls S7; AI and deletion-receipt purge jobs inactive with zero runs; cron.timezone=${schedule.timezone} cron.log_run=on; anon/authenticated lack cron USAGE/CREATE`);
     // Recorded, not required: PUBLIC EXECUTE is the default; the schema USAGE denial above blocks invocation.
     for (const f of schedule.functions) {
       console.log(`RECORD: cron function oid=${f.oid} ${f.signature} acl=${f.acl} anonExecute=${f.anon} authenticatedExecute=${f.authenticated}`);
