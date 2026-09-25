@@ -128,6 +128,9 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
   const state = {
     get listening() { return server.listening; },
     get connections() { return sockets.size; },
+    // Accepted uploads whose connection was open and kept alive when the response was sent. The browser may
+    // close an idle keep-alive connection at any time afterwards, so the live count alone can't prove one existed.
+    keptAlive: 0,
     closed: false, posts: 0, preflights: 0, rejected: 0, receivedBytes: 0, payloadBytes: 0, peakBufferedBytes: 0,
   };
   const analysisState = { forwarded: 0, routeRejected: 0, posts: 0, preflights: 0, rejected: 0, callbacks: 0,
@@ -344,6 +347,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
     const timer = setTimeout(() => { state.rejected++; recordRejection('receiver-timeout', facts); void close(); }, 5000);
     const finish = (body: JsonRow, status = 200, responseStage: WireStage = 'none') => {
       response.writeHead(status, { ...cors, 'content-type': 'application/json', ...(status >= 400 ? { connection: 'close' } : {}) });
+      if (status < 400 && request.method === 'POST' && response.shouldKeepAlive && !request.socket.destroyed && sockets.has(request.socket)) state.keptAlive++;
       response.end(JSON.stringify(decorateWireResponses && diagnostic ? { ...body, wireBackend: diagnostic.backend, wireStage: responseStage } : body),
         () => { if (status >= 400) void close(); });
     };

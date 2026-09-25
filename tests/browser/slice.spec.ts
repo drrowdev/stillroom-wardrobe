@@ -147,8 +147,12 @@ async function sendWireForm(page: Page, path: string, formKind: WireForm, bytes 
       formFileSize: entry instanceof Blob ? boundedSize(entry.size) : null,
     } : undefined;
     try {
+      // WebKit reads a Blob request body only when the request is sent. While a route holds the request, keep the form
+      // reachable so it can't be collected first; otherwise the file part arrives empty.
+      const retained: unknown[] = [form, body];
       const response = await fetch('http://127.0.0.1:54321/storage/v1/object/wardrobe/' + path,
         { method: 'POST', headers, body, credentials: 'omit' });
+      retained.length = 0;
       const result = { status: response.status, ok: response.ok, ...(observation ? { observation } : {}) };
       if (!diagnostic) return result;
       try {
@@ -435,8 +439,8 @@ for (const diagnostic of [false, true]) {
           routeRejected: 1, receiverRejected: 0, routeStage: 'none', receiverStage: 'none',
           rejections: { 'route-reservation-credentials': 1 } });
       }
-      expect(firstBackend.uploadWire.connections).toBeGreaterThan(0);
-      expect(secondBackend.uploadWire.connections).toBeGreaterThan(0);
+      expect(firstBackend.uploadWire.keptAlive).toBe(1);
+      expect(secondBackend.uploadWire.keptAlive).toBe(1);
       await page.close();
       await expect.poll(() => ({ closed: firstBackend!.uploadWire.closed, listening: firstBackend!.uploadWire.listening, connections: firstBackend!.uploadWire.connections }))
         .toEqual({ closed: true, listening: false, connections: 0 });
@@ -446,6 +450,7 @@ for (const diagnostic of [false, true]) {
       expect(observed.afterFirstClose).toEqual({ ok: true, status: 200,
         observation: { call: 'after-first-close', sourceArrayLength: 5, blobSize: 5, formFileSize: 5 },
         ...(diagnostic ? { diagnostic: { backend: 'second', stage: 'none', parse: 'ok' } } : {}) });
+      expect(secondBackend.uploadWire.keptAlive).toBe(2);
       if (diagnostic) {
         expect(secondBackend.wireDiagnostic).toMatchObject({ routePosts: 3, receiverPosts: 2, success: 2, routeRejected: 1, receiverRejected: 0 });
       }
