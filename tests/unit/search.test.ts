@@ -14,7 +14,8 @@ function fixture(n: number, patch: Partial<WardrobeItem> = {}): WardrobeItem {
     imageId: uuid(n + 1000), mainPath: `${owner}/${uuid(n)}/${uuid(n + 1000)}/main.jpg`,
     thumbPath: `${owner}/${uuid(n)}/${uuid(n + 1000)}/thumb.jpg`, altText: '',
     favourite: false, availability: 'ready', lifecycle: 'active', excludeSuggestions: false,
-    brand: null, tags: [], colours: [], seasons: [], formality: null, purchasePrice: null, currency: 'EUR', ...patch,
+    brand: null, tags: [], colours: [], seasons: [], formality: null, purchasePrice: null, currency: 'EUR',
+    weather: { warmth: null, lowerCoverage: null, minTemp: null, maxTemp: null, rainRating: null, windproof: null }, ...patch,
   };
 }
 describe('owned wardrobe search and facets', () => {
@@ -106,7 +107,7 @@ describe('strict paged wardrobe metadata', () => {
     const item = fixture(n);
     return { id: item.id, owner_id: owner, title: item.title, category: item.category, created_at: item.createdAt, deleted_at: null,
       favourite: false, availability: 'ready', lifecycle: 'active', exclude_suggestions: false, brand: null, tags: [], colours: [],
-      seasons: [], formality: null, purchase_price: null, currency: 'EUR' };
+      seasons: [], formality: null, purchase_price: null, currency: 'EUR', warmth: null, lower_coverage: null, min_temp: null, max_temp: null, rain_rating: null, windproof: null, field_provenance: {} };
   }
   function image(n: number) {
     const item = fixture(n);

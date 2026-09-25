@@ -482,6 +482,7 @@ export type MockOptions = {
   imageChangeLoss?: 'reservation' | 'finalizer' | 'cancel';
   lifecycleLoss?: 'begin' | 'delete' | 'finish' | 'change';
   initialLanguage?: Language | null; failCommitOnce?: boolean; failLanguageSave?: boolean;
+  weather?: Partial<Record<'a' | 'b', JsonRow>>;
   loseFinalizeReplyOnce?: boolean;
   loseAnalyzedReserveReplyOnce?: boolean;
   recoverStatus?: number; updateStatus?: number; logoutStatus?: number; recoveryUser?: string;
@@ -500,8 +501,10 @@ export function recoveryHash(owner = owners.a, seconds = 3600): string {
 }
 export async function mockBackend(page: Page, options: MockOptions = {}) {
   const profiles: Record<string, JsonRow> = {
-    [owners.a]: { owner_id: owners.a, display_name: 'Alex', ui_language: options.initialLanguage ?? null, timezone: 'Europe/Helsinki', currency: 'EUR', version: 1 },
-    [owners.b]: { owner_id: owners.b, display_name: 'Robin', ui_language: 'sv', timezone: 'Europe/Helsinki', currency: 'EUR', version: 1 },
+    [owners.a]: { owner_id: owners.a, display_name: 'Alex', ui_language: options.initialLanguage ?? null, timezone: 'Europe/Helsinki', currency: 'EUR', version: 1,
+      weather_enabled: false, weather_city: null, latitude: null, longitude: null, ...options.weather?.a },
+    [owners.b]: { owner_id: owners.b, display_name: 'Robin', ui_language: 'sv', timezone: 'Europe/Helsinki', currency: 'EUR', version: 1,
+      weather_enabled: false, weather_city: null, latitude: null, longitude: null, ...options.weather?.b },
   };
   const items: JsonRow[] = [];
   const wearEvents: JsonRow[] = [];
@@ -612,6 +615,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     postCount: 0, overflow: false, evidenceError: false, posts: [], firstAttemptedPost400: null,
   } : undefined;
   const receiver = await uploadReceiver(page, items, images, files, tokens, decorateWireResponses, wireDiagnostic, options.analysis, rawAnalysisObservation);
+  // The weather service is never reached from tests; a spec that needs it adds its own route, which runs first.
+  await page.route(/^https:\/\/(geocoding-api|api)\.open-meteo\.com\//, route => route.abort('blockedbyclient'));
   await page.route('http://127.0.0.1:54321/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -696,13 +701,15 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         const body = request.postDataJSON() as JsonRow;
         if (options.failLanguageSave && 'ui_language' in body) { await json({ message: 'Unavailable' }, 503); return; }
         if (url.searchParams.get('version') !== `eq.${profile.version}` || url.searchParams.get('ui_language') === 'is.null' && profile.ui_language !== null) { await json(null); return; }
-        const allowed = url.pathname === '/rest/v1/profiles' ? ['display_name', 'timezone', 'currency', 'ui_language']
+        const allowed = url.pathname === '/rest/v1/profiles' ? ['display_name', 'timezone', 'currency', 'ui_language', 'weather_enabled', 'weather_city', 'latitude', 'longitude']
           : ['preferred_colours', 'style_tags', 'excluded_categories', 'minimum_upper_coverage', 'minimum_lower_coverage', 'cold_sensitivity', 'repeat_gap_days'];
         if (Object.keys(body).some((key) => !allowed.includes(key))) { await json({ code: '42501' }, 403); return; }
         Object.assign(profile, body);
         profile.version = Number(profile.version) + 1;
       }
-      await json(profile); return;
+      // Like PostgREST, a profile reply holds only the selected columns.
+      const select = url.pathname === '/rest/v1/profiles' ? url.searchParams.get('select') : null;
+      await json(select ? Object.fromEntries(select.split(',').filter(column => column in profile).map(column => [column, profile[column]])) : profile); return;
     }
     if (url.pathname === '/rest/v1/rpc/ai_status') {
       if (!admitAiStatus(request)) { await json({ code: 'UNAUTHENTICATED' }, 401); return; }

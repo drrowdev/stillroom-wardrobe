@@ -6,8 +6,9 @@ import { parseProfile, updateProfile } from '../../src/data/profile';
 import type { AppClient } from '../../src/data/client';
 import type { PreferencesRow, ProfileRow } from '../../src/data/rows';
 
+const noWeather = { weather_enabled: false, weather_city: null, latitude: null, longitude: null };
 const owner = '10000000-0000-4000-8000-000000000001';
-const profile: ProfileRow = { owner_id: owner, version: 4, display_name: 'Åsa 🌿', ui_language: 'fi', timezone: 'Europe/Helsinki', currency: 'EUR' };
+const profile: ProfileRow = { owner_id: owner, version: 4, display_name: 'Åsa 🌿', ui_language: 'fi', timezone: 'Europe/Helsinki', currency: 'EUR', ...noWeather };
 const preferences: PreferencesRow = { owner_id: owner, version: 3, style_tags: [], preferred_colours: [], excluded_categories: [], minimum_upper_coverage: 0, minimum_lower_coverage: 0, cold_sensitivity: 0, repeat_gap_days: 2 };
 function backend(...responses: Array<{ data: unknown; error?: unknown }>) {
   const calls: Array<[string, ...unknown[]]> = [];

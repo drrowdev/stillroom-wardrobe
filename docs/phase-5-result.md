@@ -173,3 +173,96 @@ that stops reproducing is reported for removal.
 - The GPT-6 Astra code review and the coordinator's merge note.
 - Edge probes remain unverified if the functions are not served in CI.
 - I16 and Phase 5 acceptance; manual and device checks.
+
+## I16 weather-aware suggestions (partial)
+
+**Implemented locally on a draft PR for review. It is not merged, deployed or
+accepted by the owner.** The browser, unit and static checks listed below passed
+on the local machine. The real local Supabase integration and security suites
+were not run here (see its Pending list below).
+
+- Requirements: R10 (weather is off until the owner picks a city; approximate
+  coordinates only; forecast date and freshness shown; manual override; turning
+  it off clears the city and the cache), R09 (suggestions still work without
+  weather) and R27 (EN/FI/SV for every new string). Blueprint 09 weather rules;
+  blueprint 06 (no weather table, memory cache of at most 3 hours).
+- Packet: I16, Tier A. The plan was approved with GPT-6 Astra's five findings
+  as binding amendments B1–B5 and coordinator decisions Q1 (Option A, no schema
+  change), Q2 (manual entry and Staying in both kept) and Q3 (honest partial
+  results). Rebased onto main after I15 (PR #46) and I17 (PR #47) merged.
+- Provider: Open-Meteo, chosen by the owner. Free, no key, account or secret.
+- Writer: one persistent local session (`claude-opus-5.5`). Node v24.19.0.
+
+### What changed
+
+- **No migration and no hosted database change.** The installed base profile
+  columns `weather_enabled`, `weather_city`, `latitude` and `longitude` hold the
+  setting. Coordinates are rounded to one decimal before saving. `updated_at`
+  is not a consent time and is not described as one.
+- **Profile projection.** One shared `profileColumns` list is used by the
+  profile reads, the session start, the language save and recovery. A stored
+  weather setting that is incomplete never rejects the profile: the app sends no
+  request and offers a new search or Turn off. New weather writes are validated
+  strictly and version-checked like the other profile saves.
+- **Browser calls Open-Meteo directly** (geocoding and forecast), with no
+  credentials, no referrer, `no-store` and a 5 s timeout. The CSP `connect-src`
+  adds only the two Open-Meteo hosts. Nothing is sent on mount, typing, focus or
+  a language change. Search is the consent step; the visible disclosure before
+  Search names both stages and says the city and IP address go to Open-Meteo,
+  and clothes and account details do not.
+- **Settings card "Weather".** Search, pick a city, Use this city, Change city
+  and Turn off. Turning it off clears the city and coordinates.
+- **Today.** A short forecast line with the city, forecast date and time zone,
+  the daytime low, rain chance, wind and the update time, with the Open-Meteo
+  credit. Loading, offline, failed (Try again after a short pause) and
+  incomplete states keep the ideas working.
+- **Manual entry and Staying in.** Both work without a weather setting and
+  override a forecast, including one that arrives later. They are kept in
+  memory only and marked as entered by you. Staying in turns every weather rule
+  off, including the temperature fit.
+- **Engine `rules-v2`.** Blueprint 09 cold, rain and wind rules. Item warmth,
+  coverage, rain and wind protection and temperature limits count only from the
+  owner's own entries or, for coverage, supported AI observations; unknown
+  facts are shown as a missing detail and never exclude an item or support a
+  claim. Each idea says what is missing ("add a coat", "no garment is marked as
+  rain-ready", "check the length") and only claims warmth, rain or wind
+  suitability when it is confirmed.
+- **Caching.** The forecast is kept in memory per signed-in owner for up to
+  3 hours or until the city's midnight, whichever is first, keyed by city and coordinates, and dropped on a city change, Turn
+  off, sign-out or owner change. One request per city is in flight at a time. Replies are read with byte ceilings (64 KiB search, 256 KiB forecast) and larger bodies are cancelled before parsing.
+  Nothing weather-related goes to the service worker or browser storage.
+
+### Export and restore
+
+The export already includes the profile row, so `weather_enabled`, the city
+and coordinates are exported (the security suite asserts non-null values). No
+restore path writes them today. A future restore must not treat an imported
+`weather_enabled` as fresh consent: the owner has to search and choose a city
+again on the restored account.
+
+### Validation (local)
+
+- `npm run lint`, `npm run typecheck`: pass.
+- `npm run check:translations`: 669 keys in en/fi/sv.
+- `npm run test:unit`: pass, including the new `weather.test.ts` (provenance,
+  profile parsing, forecast summary across time zones and midnight, the 3-hour
+  lifetime, the manual range, the store, the exact provider requests and the
+  generated CSP header). Under machine load `ai-schema`, `preservation` and
+  `local-backend` time out at 5 s; the first two pass when run alone, and one `local-backend` timing test still timed out alone on the loaded machine (file not touched by I16).
+- Playwright `weather.spec.ts`, `today.spec.ts` and `profile.spec.ts` on
+  chromium, mobile and webkit-photo: 185 passed. External network is blocked
+  before navigation, and the provider is mocked.
+- Accessibility: axe, keyboard order, 320 px and 200 % text for the weather
+  card and the forecast line.
+- Bounded synthetic captures (`test-results/i16-visual/`, App job artifact
+  `i16-weather-ui-<head>`): settings (en-desktop, fi-mobile), today forecast
+  (en-desktop) and today unavailable (fi-mobile).
+
+### Pending
+
+- `tests/security/rls.sessions.mjs` weather isolation (own save, invalid
+  bodies rejected, another owner's save has no effect, export) runs in the CI
+  database job. There is no local Docker here.
+- Coordinator visual review of the four captures.
+- The owner-run Pages deploy: the new CSP only takes effect after it.
+- An owner check with a real city and the real forecast service.

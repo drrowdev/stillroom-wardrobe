@@ -19,7 +19,7 @@ export type SessionState = {
   languageUnsaved: boolean;
   notice?: MessageKey;
   profileSaving?: boolean;
-  profileChange?: { kind: 'profile' | 'language' | 'ai' | 'refresh'; previous: ProfileRow };
+  profileChange?: { kind: 'profile' | 'language' | 'weather' | 'ai' | 'refresh'; previous: ProfileRow };
   aiConsentUnresolved?: boolean;
 };
 export const logoutKey = 'stillroom.logout';
@@ -145,7 +145,7 @@ export class SessionController {
       this.publish({ phase: 'locked', language: resolveLanguage(this.browserLanguages), profile: null, scope: null, languageUnsaved: false });
     }
   }
-  private publishProfile(scope: OwnerScope, profile: ProfileRow, kind: 'profile' | 'language' | 'ai' | 'refresh'): void {
+  private publishProfile(scope: OwnerScope, profile: ProfileRow, kind: 'profile' | 'language' | 'weather' | 'ai' | 'refresh'): void {
     const current = this.state;
     if (scope.signal.aborted || current.phase !== 'ready' || current.scope?.epoch !== scope.epoch
       || current.scope.ownerId !== scope.ownerId || profile.owner_id !== scope.ownerId || !current.profile
