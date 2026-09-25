@@ -13,10 +13,11 @@ async function settings(page: Page, language: Language = 'en') {
   await expect(page.locator('#profile-timezone')).toBeVisible();
 }
 const preferenceRequests = (api: { requests: { path: string }[] }) => api.requests.filter((request) => request.path.startsWith('/rest/v1/style_preferences'));
-const timeZoneLabel = (page: Page, locale: string, zone: string) => page.evaluate(({ locale, zone }) => {
-  const name = new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: 'shortOffset' }).formatToParts(new Date()).find((part) => part.type === 'timeZoneName')!.value;
-  return `${zone.split('/').pop()!.replaceAll('_', ' ')} (${name})`;
-}, { locale, zone });
+// Every language shows the same "UTC+3" style offset, so the label no longer depends on the locale's GMT/UTC wording.
+const timeZoneLabel = (page: Page, _locale: string, zone: string) => page.evaluate((zone) => {
+  const name = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'shortOffset' }).formatToParts(new Date()).find((part) => part.type === 'timeZoneName')!.value;
+  return `${zone.split('/').pop()!.replaceAll('_', ' ')} (${name.replace(/^GMT/, 'UTC').replace('-', '\u2212')})`;
+}, zone);
 const currencyLabel = (page: Page, locale: string, code: string) => page.evaluate(({ locale, code }) =>
   `${new Intl.DisplayNames(locale, { type: 'currency' }).of(code)} (${code})`, { locale, code });
 const selectedText = (page: Page, id: string) => page.locator(id).evaluate((select) => (select as HTMLSelectElement).selectedOptions[0]?.text);

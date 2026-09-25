@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { currencyOptions, timeZoneOptions } from '../../src/features/profile/profile-options';
+import { currencyOptions, timeZoneOptions, utcOffset } from '../../src/features/profile/profile-options';
 import { validTimezone } from '../../src/domain/preferences';
 import type { Language } from '../../src/i18n';
 
-const zoneName = (locale: string, zone: string) => new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: 'shortOffset' })
-  .formatToParts(new Date()).find((part) => part.type === 'timeZoneName')!.value;
+const zoneName = (_locale: string, zone: string) => utcOffset(zone, new Date())!;
+
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -25,6 +25,29 @@ describe('profile time zone and currency options', () => {
     const locale = { en: 'en-GB', fi: 'fi-FI', sv: 'sv-FI' }[language];
     expect(timeZoneOptions(language, [], ['Europe/Helsinki'])).toEqual([{ value: 'Europe/Helsinki', label: `Helsinki (${zoneName(locale, 'Europe/Helsinki')})` }]);
     expect(currencyOptions(language, [], ['EUR'])).toEqual([{ value: 'EUR', label: `${new Intl.DisplayNames(locale, { type: 'currency' }).of('EUR')} (EUR)` }]);
+  });
+
+  it('writes the offset as UTC in every language, so English and Finnish agree', () => {
+    const summer = new Date('2026-07-01T12:00:00Z');
+    const winter = new Date('2026-01-15T12:00:00Z');
+    expect(utcOffset('Europe/Helsinki', summer)).toBe('UTC+3');
+    expect(utcOffset('Europe/Helsinki', winter)).toBe('UTC+2');
+    expect(utcOffset('Asia/Kolkata', summer)).toBe('UTC+5:30');
+    expect(utcOffset('America/New_York', winter)).toBe('UTC\u22125');
+    expect(utcOffset('UTC', summer)).toBe('UTC');
+    const labels = (['en', 'fi', 'sv'] as const).map((language) => timeZoneOptions(language, [], ['Europe/Helsinki'])![0]!.label);
+    expect(new Set(labels).size).toBe(1);
+    expect(labels[0]).toMatch(/^Helsinki \(UTC\+[23]\)$/);
+  });
+
+  it.each(['GMT', 'GMT+00:00', 'GMT-00:00'])('writes a zero offset reported as %s as plain UTC', (value) => {
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts').mockReturnValue([{ type: 'timeZoneName', value }]);
+    expect(utcOffset('Etc/UTC', new Date('2026-07-01T12:00:00Z'))).toBe('UTC');
+  });
+
+  it('keeps non-zero minute offsets that have a zero hour', () => {
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts').mockReturnValue([{ type: 'timeZoneName', value: 'GMT-00:30' }]);
+    expect(utcOffset('Etc/UTC', new Date('2026-07-01T12:00:00Z'))).toBe('UTC\u22120:30');
   });
 
   it('falls back to the raw value when Intl formatting fails', () => {
