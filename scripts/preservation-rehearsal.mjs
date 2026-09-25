@@ -47,6 +47,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260924100100_azure_colour_manifest.sql', version: '20260924100100', time: '2026-09-24 10:01:00', bytes: 16215, sha256: SOURCE_HASHES.colourManifest },
   { name: '20260925090000_ai_purge_schedule.sql', version: '20260925090000', time: '2026-09-25 09:00:00', bytes: 2382, sha256: SOURCE_HASHES.purgeSchedule },
   { name: '20260925100000_uniform_id_conflicts.sql', version: '20260925100000', time: '2026-09-25 10:00:00', bytes: 5677, sha256: SOURCE_HASHES.uniformIdConflicts },
+  { name: '20260925110000_restore_item_save.sql', version: '20260925110000', time: '2026-09-25 11:00:00', bytes: 5648, sha256: SOURCE_HASHES.restoreItemSave },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.

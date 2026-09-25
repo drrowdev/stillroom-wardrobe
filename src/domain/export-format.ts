@@ -333,7 +333,8 @@ export async function encryptPart(part: ExportPart, passphrase: string): Promise
 
 const envelopeKeys = ['format', 'version', 'kdf', 'iterations', 'salt', 'iv', 'aad', 'ciphertext'];
 const partKeys = ['format', 'schemaVersion', 'exportId', 'partIndex', 'partCount', 'manifestSha256', 'files'];
-export async function decryptPart(text: string, passphrase: string): Promise<ExportPart> {
+// Restore also reads version 1 parts (the reference exporter): the same envelope, with photos in part 0 as well.
+export async function decryptPart(text: string, passphrase: string, schemaVersion: 1 | 2 = 2): Promise<ExportPart> {
   if (text.length > BACKUP_LIMITS.encryptedPartBytes) fail();
   let envelope: unknown;
   try { envelope = JSON.parse(text); } catch { return fail(); }
@@ -352,7 +353,7 @@ export async function decryptPart(text: string, passphrase: string): Promise<Exp
   try { part = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(plain)); } catch { return fail(); }
   if (!isObject(part)) return fail();
   const keys = Object.hasOwn(part, 'manifest') ? [...partKeys, 'manifest'] : partKeys;
-  if (!sameKeys(part, keys) || part.format !== 'stillroom-export' || part.schemaVersion !== 2 || !isUuid(part.exportId)
+  if (!sameKeys(part, keys) || part.format !== 'stillroom-export' || part.schemaVersion !== schemaVersion || !isUuid(part.exportId)
     || !isCount(part.partCount, 1, BACKUP_LIMITS.parts) || !isCount(part.partIndex, 0, part.partCount - 1) || !isHash(part.manifestSha256)
     || envelope.aad !== aadFor(part.exportId, part.partIndex, part.partCount) || !Array.isArray(part.files)) return fail();
   return part as ExportPart;

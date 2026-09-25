@@ -1739,7 +1739,7 @@ describe('I08 SQL source contract, not live database proof', () => {
   });
   it('pins actual ninth bytes and preserves literal privileges plus positive catalog assertions', () => {
     const entries = MIGRATIONS as Array<{ name: string; bytes: number; sha256: string }>;
-    expect(entries).toHaveLength(15);
+    expect(entries).toHaveLength(16);
     const entry = entries[8];
     if (!entry) throw new Error('Missing migration');
     expect(entry.name).toBe('20260913120000_item_lifecycle.sql');

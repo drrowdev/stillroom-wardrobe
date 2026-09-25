@@ -9,10 +9,10 @@ const JOB = "cron.schedule('stillroom-ai-purge-expired', '*/15 * * * *', 'select
 const statements = (sql: string) => sql.replace(/--[^\n]*/g, '').replace(/'(?:[^']|'')*'/g, "''").toLowerCase();
 
 describe('scheduled AI purge migration', () => {
-  it('is the fourteenth of fifteen migrations, followed only by the uniform ID conflicts migration', async () => {
+  it('is the fourteenth of sixteen migrations, followed by the uniform ID conflicts and restore migrations', async () => {
     const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
-    expect(names).toHaveLength(15);
-    expect(names.slice(-2)).toEqual([NAME, '20260925100000_uniform_id_conflicts.sql']);
+    expect(names).toHaveLength(16);
+    expect(names.slice(-3)).toEqual([NAME, '20260925100000_uniform_id_conflicts.sql', '20260925110000_restore_item_save.sql']);
   });
 
   it('schedules exactly one fixed, bounded, inactive job', async () => {

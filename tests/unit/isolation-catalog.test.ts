@@ -82,7 +82,7 @@ function policyOf(snapshot: Snapshot, tableName: string, name: string): Policy {
 describe('I17 isolation catalogue validator', () => {
   it('accepts the reviewed inventory and separates its families', () => {
     expect(catalog.validateCatalog(validSnapshot(), helperMd5)).toEqual([]);
-    expect(catalog.EXPOSED_RPCS).toHaveLength(39);
+    expect(catalog.EXPOSED_RPCS).toHaveLength(41);
     expect(catalog.SERVICE_ONLY_RPCS).toHaveLength(9);
     expect(catalog.PRIVATE_TABLES).toHaveLength(21);
     expect(Object.keys(catalog.PUBLIC_TABLES)).toHaveLength(10);
@@ -329,8 +329,8 @@ describe('I17 existence oracles and restore ordering', () => {
 
   it('keeps every create-ID residual and Storage in the accepted inventory with exact pinned pairs', () => {
     expect(Object.keys(catalog.ACCEPTED_ORACLES).sort()).toEqual(['REST items id', 'REST outfits id', 'REST wear_event_items id',
-      'REST wear_events id', 'Storage DELETE object', 'reserve_item_save p_item.id', 'restore_history_entry p_id', 'save_outfit p_id',
-      'save_wear_event p_id']);
+      'REST wear_events id', 'Storage DELETE object', 'reserve_item_save p_item.id', 'reserve_restored_item_save p_item.id',
+      'restore_history_entry p_id', 'save_outfit p_id', 'save_wear_event p_id']);
     const cases: [string, object, object][] = [
       ['save_outfit p_id', err(400, 'P0001', 'Request conflict'), ok(200, 1)],
       ['save_wear_event p_id', err(400, 'P0001', 'Request conflict'), ok(200, 1)],
@@ -340,6 +340,7 @@ describe('I17 existence oracles and restore ordering', () => {
       ['REST wear_event_items id', dup('wear_event_items_pkey'), ok(201)],
       ['restore_history_entry p_id', err(400, 'P0001', 'Request conflict'), ok(204)],
       ['reserve_item_save p_item.id', err(400, '22023', 'Request conflict'), ok(200, {})],
+      ['reserve_restored_item_save p_item.id', err(400, '22023', 'Request conflict'), ok(200, {})],
       ['Storage DELETE object', err(400, 'AccessDenied', 'Access denied'), err(400, 'NoSuchKey', 'Object not found')],
     ];
     for (const [surface, foreign, missing] of cases) {
@@ -431,7 +432,8 @@ describe('I17 taken-ID conflict-response normalization', () => {
   it('keeps a closed, frozen inventory covering every create-ID RPC and REST insert that is probed', () => {
     expect(Object.isFrozen(catalog.TAKEN_ID_SURFACES)).toBe(true);
     expect(Object.keys(surfaces).sort()).toEqual(['REST items id', 'REST outfits id', 'REST wear_event_items id', 'REST wear_events id',
-      'reserve_item_save p_item.id (plain item)', 'reserve_item_save p_item.id (save attempt)', 'restore_history_entry p_id',
+      'reserve_item_save p_item.id (plain item)', 'reserve_item_save p_item.id (save attempt)',
+      'reserve_restored_item_save p_item.id (plain item)', 'reserve_restored_item_save p_item.id (save attempt)', 'restore_history_entry p_id',
       'save_outfit p_id', 'save_wear_event p_id']);
     for (const pin of Object.values(surfaces)) expect(Object.isFrozen(pin.conflict)).toBe(true);
     expect(surfaces['save_outfit p_id']!.conflict).toEqual({ status: 400, body: conflict() });

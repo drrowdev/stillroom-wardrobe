@@ -487,6 +487,7 @@ function foreignCases(a) {
     one('reserve_image_change', ['freeItem', 'freeCurrent'], (x) => ({ p_intent: freeIntent(x) }), CONFLICT,
       { bundle: { freeItem: ['freeVersion'] }, tupleBundle: ['freeIntent'], tupleIntent: 'freeIntent' }),
     one('image_change_status', ['changeItem', 'changeRequest'], pair(['changeItem', 'changeRequest']), NULL),
+    one('restore_image_change_status', ['changeItem', 'changeRequest'], pair(['changeItem', 'changeRequest']), NULL),
     one('image_change_requests', ['changeItem'], (x) => ({ p_item_id: x.changeItem }), EMPTY),
     one('image_recovery_preflight', ['recItem', 'recCurrent', 'recSource'], (x) => ({ p_intent: recoveryIntent(x) }), CONFLICT,
       { tupleBundle: ['recIntent'], tupleIntent: 'recIntent' }),
@@ -667,9 +668,9 @@ async function oracles(attacker, victim) {
   const one = async (table, id) => rows(table, `id=eq.${id}`);
   // Surface 5 covers both an existing save attempt (saveItem) and a plain REST-created item; each fresh reserve is
   // tracked by its own harness so cleanup removes exactly that attempt.
-  const reserve = (surface, foreignId, ownId) => {
+  const reserve = (surface, foreignId, ownId, name = 'reserve_item_save') => {
     const h = saveHarness(client, attacker);
-    return { surface, name: 'reserve_item_save', foreignId, ownId, route: rpcRoute('reserve_item_save'),
+    return { surface, name, foreignId, ownId, route: rpcRoute(name),
       request: (id, kind) => ({ method: 'POST', body: kind === 'fresh' ? h.track(reserveOf(id)) : reserveOf(id) }),
       state: itemState, cleanup: () => h.cleanup(),
       persisted: async (id, result) => Array.isArray(result.data) && result.data.length === 1 && result.data[0].item?.id === id
@@ -692,6 +693,9 @@ async function oracles(attacker, victim) {
         return r.length === 1 && r[0].event_id === a.event && r[0].title_snapshot === 'Isolation oracle' && r[0].import_id === importId; } },
     reserve('reserve_item_save p_item.id (save attempt)', v.saveItem, a.saveItem),
     reserve('reserve_item_save p_item.id (plain item)', v.plain, a.plain),
+    // The restored save (P6b) shares the checked Save chain and must answer a taken ID exactly the same way.
+    reserve('reserve_restored_item_save p_item.id (save attempt)', v.saveItem, a.saveItem, 'reserve_restored_item_save'),
+    reserve('reserve_restored_item_save p_item.id (plain item)', v.plain, a.plain, 'reserve_restored_item_save'),
     { surface: 'REST items id', foreignId: v.item, ownId: a.item, ...rest('items', () => ({ title: 'Isolation oracle', category: 'top' })),
       state: itemState, cleanup: (id) => del('items', id)(), persisted: async (id) => (await one('items', id)).length === 1 },
     { surface: 'REST outfits id', foreignId: v.outfit, ownId: a.outfit, ...rest('outfits', () => ({ title: 'Isolation oracle' })),
@@ -947,6 +951,8 @@ async function ownPositiveControls(owner) {
     ['item_deletion_operation_status', { p_item_id: f.prepItem, p_request_id: f.prepRequest }, (d) => d?.phase === 'preparing'],
     ['image_change_status', { p_item_id: f.changeItem, p_request_id: f.changeRequest }, (d) => d?.requestId === f.changeRequest && d.state === 'reserved'],
     ['image_change_requests', { p_item_id: f.changeItem }, (d) => Array.isArray(d) && d.length === 1 && d[0].requestId === f.changeRequest],
+    ['restore_image_change_status', { p_item_id: f.changeItem, p_request_id: f.changeRequest }, (d) => d?.requestId === f.changeRequest
+      && d.state === 'reserved' && Number.isInteger(d.expectedVersion) && typeof d.currentImageId === 'string' && d.image?.state === 'pending'],
     ['item_attribution_history', { p_item_id: f.item }, (d) => Array.isArray(d)],
   ];
   for (const [name, body, check] of checks) {

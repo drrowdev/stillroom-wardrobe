@@ -288,6 +288,7 @@ export function describeStartupOrResetFailure(result, elapsedMs) {
     '20260924100100_azure_colour_manifest.sql',
     '20260925090000_ai_purge_schedule.sql',
     '20260925100000_uniform_id_conflicts.sql',
+    '20260925110000_restore_item_save.sql',
   ];
   let lastAnnouncement = -1;
   for (const [index, filename] of migrations.entries()) {

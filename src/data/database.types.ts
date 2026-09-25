@@ -797,6 +797,15 @@ export type Database = {
           state: string
         }[]
       }
+      reserve_restored_item_save: {
+        Args: { p_image: Json; p_item: Json }
+        Returns: {
+          fingerprint: string
+          image: Json
+          item: Json
+          state: string
+        }[]
+      }
       restore_history_entry: {
         Args: {
           p_category: string
@@ -807,6 +816,10 @@ export type Database = {
           p_title: string
         }
         Returns: undefined
+      }
+      restore_image_change_status: {
+        Args: { p_item_id: string; p_request_id: string }
+        Returns: Json
       }
       retire_image: { Args: { p_image_id: string }; Returns: undefined }
       save_outfit: {

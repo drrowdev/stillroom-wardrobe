@@ -564,6 +564,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   type Operation = { owner: string; manifest: string; receipt: DeletionOperation; targets: Target[]; imagePage: number; objectPage: number; imagesDone: boolean };
   const deletionOperations: Operation[] = [];
   let imageChangeLost = false;
+  const restoreControl = { reservations: 0 };
   const fenced = (owner: string, itemId: unknown) => deletionOperations.some(value => value.owner === owner
     && value.receipt.itemId === itemId && value.receipt.phase !== 'cancelled');
   const imageBytesMatch = (image: JsonRow) => ['main', 'thumb'].every(kind => {
@@ -830,8 +831,21 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (options.imageChangeLoss === 'reservation' && !imageChangeLost) { imageChangeLost = true; await route.abort('failed'); return; }
       await json(existing.receipt); return;
     }
-    if (url.pathname === '/rest/v1/rpc/reserve_item_save' || url.pathname === '/rest/v1/rpc/reserve_analyzed_item_save') {
+    if (url.pathname === '/rest/v1/rpc/restore_image_change_status') {
+      const body: unknown = request.postDataJSON();
+      if (method !== 'POST' || !isRecord(body) || !sameValue(Object.keys(body).sort(), ['p_item_id', 'p_request_id'])
+        || !isUuid(body.p_item_id) || !isUuid(body.p_request_id)) { await json({ code: '22023', message: 'Invalid input', details: null, hint: null }, 400); return; }
+      const found = imageChanges.find(value => value.owner === owner && value.receipt.itemId === body.p_item_id && value.receipt.requestId === body.p_request_id);
+      if (!found) { await json(null); return; }
+      const image = images.find(row => row.owner_id === owner && row.item_id === found.receipt.itemId && row.id === found.receipt.imageId);
+      await json({ ...found.receipt, expectedVersion: found.intent.expectedVersion, currentImageId: found.intent.currentImageId,
+        descriptionVersion: found.intent.descriptionVersion, image: image ? Object.fromEntries(['state', 'main_path', 'thumb_path', 'main_bytes', 'thumb_bytes',
+          'main_sha256', 'thumb_sha256', 'width', 'height', 'alt_text', 'description_version'].map(key => [key, image[key]])) : null }); return;
+    }
+    if (['reserve_item_save', 'reserve_analyzed_item_save', 'reserve_restored_item_save'].some(name => url.pathname === `/rest/v1/rpc/${name}`)) {
       const analyzed = url.pathname.endsWith('/reserve_analyzed_item_save');
+      const restored = url.pathname.endsWith('/reserve_restored_item_save');
+      if (restored) restoreControl.reservations++;
       const body: unknown = request.postDataJSON();
       const invalid = () => json({ code: '22023', message: 'Invalid input', details: null, hint: null }, 400);
       const conflict = () => json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400);
@@ -846,7 +860,9 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       let fingerprint: string;
       try {
         const provenance = parseFieldProvenance(item.field_provenance);
-        if (Object.values(provenance).some((entry) => (!analyzed && entry.kind !== 'user') || entry.revision !== 1)) throw new Error('Invalid fixture intent');
+        if (Object.values(provenance).some((entry) => (!analyzed && !restored && entry.kind !== 'user') || entry.revision !== 1)) throw new Error('Invalid fixture intent');
+        if (restored && Object.entries(provenance).some(([field, entry]) => entry.kind.startsWith('ai_')
+          && (item[field] === null || item[field] === '' || Array.isArray(item[field]) && item[field].length === 0))) throw new Error('Invalid fixture intent');
         if (analyzed && !existing) {
           const claim = body.p_claim;
           if (claim !== null) {
@@ -885,6 +901,10 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         }
         fingerprint = fingerprintFor(item, image);
       } catch { await invalid(); return; }
+      // A restored save may only replay while its photo is still pending and nothing else has touched the item.
+      if (restored && (imageChanges.some(row => row.owner === owner && row.receipt.itemId === item.id)
+        || items.some(row => row.owner_id === owner && row.id === item.id && row.deleted_at !== null)
+        || images.some(row => row.owner_id === owner && row.item_id === item.id && row.state !== 'pending'))) { await conflict(); return; }
       if (existing) {
         if (existing.itemId !== item.id || existing.imageId !== image.id || existing.fingerprint !== fingerprint) { await conflict(); return; }
         const current = currentSave(existing);
@@ -1193,6 +1213,58 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (script?.mode === 'committedLost') { await json({ message: 'Service unavailable' }, 503); return; }
       await json(version); return;
     }
+    if (url.pathname === '/rest/v1/wear_events' && owner) {
+      if (method === 'POST') {
+        const body = request.postDataJSON() as JsonRow;
+        const keys = ['id', 'owner_id', 'outfit_id', 'local_date', 'timezone', 'state', 'label'];
+        if (body.owner_id !== owner || !sameValue(Object.keys(body).sort(), [...keys].sort()) || !isUuid(body.id)
+          || !['planned', 'worn'].includes(String(body.state)) || body.outfit_id !== null && !outfits.some(row => row.owner_id === owner && row.id === body.outfit_id)) {
+          await json({ code: '42501' }, 403); return;
+        }
+        if (wearEvents.some(row => row.id === body.id)) { await json({ code: '23505', message: 'duplicate key' }, 409); return; }
+        const now = new Date().toISOString();
+        wearEvents.push({ ...body, deleted_at: null, version: 1, created_at: now, updated_at: now });
+        await route.fulfill({ status: 201, body: '' }); return;
+      }
+      const select = 'id,owner_id,outfit_id,local_date,timezone,state,label,deleted_at';
+      const id = url.searchParams.get('id');
+      if (method !== 'GET' || url.searchParams.get('select') !== select || url.searchParams.get('owner_id') !== `eq.${owner}`
+        || !id?.startsWith('eq.')) { await json({ code: '42501' }, 403); return; }
+      await json(wearEvents.filter(row => row.owner_id === owner && `eq.${row.id}` === id)
+        .map(row => Object.fromEntries(select.split(',').map(key => [key, row[key] ?? null])))); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/restore_history_entry') {
+      const body = request.postDataJSON() as JsonRow;
+      if (!owner || method !== 'POST' || !sameValue(Object.keys(body).sort(), ['p_category', 'p_event_id', 'p_id', 'p_import_id', 'p_item_id', 'p_title'])
+        || !isUuid(body.p_import_id) || !wearEvents.some(row => row.owner_id === owner && row.id === body.p_event_id)
+        || body.p_item_id !== null && !items.some(row => row.owner_id === owner && row.id === body.p_item_id)) {
+        await json({ code: '42501', message: 'Not available' }, 403); return;
+      }
+      const existing = wearLinks.find(row => row.id === body.p_id);
+      if (existing) {
+        if (existing.owner_id === owner && existing.event_id === body.p_event_id && existing.item_id === body.p_item_id
+          && existing.title_snapshot === body.p_title && existing.category_snapshot === body.p_category && existing.import_id === body.p_import_id) {
+          await route.fulfill({ status: 204 }); return;
+        }
+        await json({ code: 'P0001', message: 'Request conflict' }, 400); return;
+      }
+      wearLinks.push({ id: body.p_id, owner_id: owner, event_id: body.p_event_id, item_id: body.p_item_id, title_snapshot: body.p_title,
+        category_snapshot: body.p_category, import_id: body.p_import_id });
+      await route.fulfill({ status: 204 }); return;
+    }
+    if (url.pathname === '/rest/v1/combination_rules' && method === 'POST' && owner) {
+      const raw = request.postDataJSON() as JsonRow | JsonRow[];
+      const body = Array.isArray(raw) ? raw[0]! : raw;
+      if (url.searchParams.get('on_conflict') !== 'owner_id,item_low,item_high' || !request.headers().prefer?.includes('resolution=ignore-duplicates')
+        || body.owner_id !== owner || typeof body.item_low !== 'string' || typeof body.item_high !== 'string' || !(body.item_low < body.item_high)
+        || ![body.item_low, body.item_high].every(value => items.some(item => item.id === value && item.owner_id === owner))) {
+        await json({ code: '23503', message: 'Invalid selection' }, 409); return;
+      }
+      if (!combinationRules.some(row => row.owner_id === owner && row.item_low === body.item_low && row.item_high === body.item_high)) {
+        combinationRules.push({ id: randomUUID(), owner_id: owner, item_low: body.item_low, item_high: body.item_high, created_at: new Date().toISOString() });
+      }
+      await route.fulfill({ status: 201, body: '' }); return;
+    }
     if (url.pathname === '/rest/v1/combination_rules' || url.pathname === '/rest/v1/suggestion_feedback') {
       const store = url.pathname === '/rest/v1/combination_rules' ? combinationRules : suggestionFeedback;
       if (!owner || method !== 'POST' && url.searchParams.get('owner_id') !== `eq.${owner}`) { await json({ code: '42501' }, 403); return; }
@@ -1227,7 +1299,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         const sorted = [...ids].map(String).sort();
         const signature = signatureOf(sorted);
         const existing = suggestionFeedback.find(row => row.owner_id === owner && row.signature === signature);
-        if (existing) existing.vote = body.vote;
+        if (existing) { if (!request.headers().prefer?.includes('resolution=ignore-duplicates')) existing.vote = body.vote; }
         else suggestionFeedback.push({ id: randomUUID(), owner_id: owner, item_ids: sorted, signature, vote: body.vote, created_at: new Date().toISOString() });
         if (fault) { await failFeedback(fault); return; }
         await route.fulfill({ status: 201, body: '' }); return;
@@ -1409,7 +1481,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, holdFeedbackReads, outfitControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, holdFeedbackReads, outfitControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

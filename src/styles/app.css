@@ -460,6 +460,9 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .backup-part-done { color: var(--secondary); font-size: .875rem; }
 .backup-card .button { max-width: 100%; white-space: normal; }
 .backup-card .backup-plain { margin-top: 20px; }
+.restore-card .button { max-width: 100%; white-space: normal; }
+.restore-card input[type=file] { max-width: 100%; }
+.restore-counts { margin: 0; padding-left: 1.25rem; }
 @media (max-width: 650px) {
   .today-ideas { grid-template-columns: minmax(0, 1fr); }
   .today-context .field { max-width: none; }

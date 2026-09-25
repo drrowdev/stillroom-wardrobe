@@ -52,6 +52,7 @@ const browserArtifacts: Record<string, string[]> = {
   'i16-weather-ui': ['settings-en-desktop', 'settings-fi-mobile', 'today-forecast-en-desktop', 'today-unavailable-fi-mobile']
     .map((name) => `i16-visual/${name}.png`),
   'p6a-backup-ui': ['backup-en-desktop', 'backup-parts-fi-mobile'].map((name) => `p6a-visual/${name}.png`),
+  'p6b-restore-ui': ['restore-preview-en-desktop', 'restore-progress-sv-mobile'].map((name) => `p6b-visual/${name}.png`),
 };
 
 describe('CI workflow browser split', () => {
@@ -71,7 +72,7 @@ describe('CI workflow browser split', () => {
     expect(projects).toEqual(['chromium', 'mobile', 'webkit-photo']);
     expect(config).toContain("testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', "
       + "'item-details.spec.ts', 'garment-fields.spec.ts', 'ai-photo-first.spec.ts', 'items.spec.ts', 'ux-l1a.spec.ts', "
-      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts'],");
+      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts'],");
     expect(config).toContain('  failOnFlakyTests: Boolean(process.env.CI),\n');
     expect(config).toContain('  forbidOnly: Boolean(process.env.CI),\n');
     const app = job('app'), webkit = job('webkit-photo');
@@ -95,10 +96,10 @@ describe('CI workflow browser split', () => {
     for (const forbidden of ['upload-artifact', 'secrets.', 'env:', 'CI:', 'if:']) expect(webkit).not.toContain(forbidden);
   });
 
-  it('uploads each of the 16 browser artifacts exactly once, from the App job, success-only and exact-head named', () => {
+  it('uploads each of the 17 browser artifacts exactly once, from the App job, success-only and exact-head named', () => {
     const app = job('app');
     const uploads = steps(app).filter((step) => step.includes(upload));
-    expect(uploads).toHaveLength(16);
+    expect(uploads).toHaveLength(17);
     const seen = uploads.map((step) => {
       const name = /\n {10}name: ([a-z0-9-]+)-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}\n/.exec(step)?.[1];
       expect(name, step).toBeDefined();
@@ -111,7 +112,7 @@ describe('CI workflow browser split', () => {
     });
     expect(seen).toEqual(Object.keys(browserArtifacts));
     for (const name of seen) expect(count(workflow, `name: ${name}${headSuffix}\n`)).toBe(1);
-    expect(count(workflow, upload)).toBe(17);
+    expect(count(workflow, upload)).toBe(18);
     expect(count(job('database'), upload)).toBe(1);
     expect(job('database')).toContain('          name: database-types\n          path: src/data/database.types.ts\n'
       + '          if-no-files-found: error\n          retention-days: 1\n');
