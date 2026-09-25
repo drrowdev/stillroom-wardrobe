@@ -103,6 +103,10 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   const discardFocus = useRef<HTMLElement | null>(null);
   const navigation = useRef({ route: currentRoute(), position: Number.isSafeInteger(history.state?.wardrobePosition) ? Number(history.state.wardrobePosition) : 0, restoring: false });
   const dirty = useRef({ dirty: false, incomplete: false, busy: false });
+  // A route asked for while Settings is saving. It is followed once the save settles, through the normal leave guard.
+  // A Back/Forward request keeps its history position so it is replayed as a traversal, not a new entry.
+  const queued = useRef<{ next: WorkspaceRoute; position?: number } | null>(null);
+  const [settled, setSettled] = useState(0);
   const images = useMemo(() => new PrivateImages(client, scope), [client, scope]);
   const ai = useMemo(() => new AiClient(client, config, scope), [client, config, scope]);
   const lifecycle = useMemo(() => new ItemLifecycleClient(client, config, scope), [client, config, scope]);
@@ -118,7 +122,11 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   }, [route]);
   const beforeDiscard = useRef<BeforeDiscard | null>(null);
   const onBeforeDiscard = useCallback((handler: BeforeDiscard | null) => { beforeDiscard.current = handler; }, []);
-  const onDirty = useCallback((isDirty: boolean, incomplete: boolean, busy: boolean) => { dirty.current = { dirty: isDirty, incomplete, busy }; }, []);
+  const onDirty = useCallback((isDirty: boolean, incomplete: boolean, busy: boolean) => {
+    const wasBusy = dirty.current.busy;
+    dirty.current = { dirty: isDirty, incomplete, busy };
+    if (wasBusy && !busy && queued.current) setSettled(value => value + 1);
+  }, []);
   useEffect(() => { images.activate(); return () => images.clear(); }, [images]);
   useEffect(preloadChunks, []);
   const changeRoute = useCallback((next: WorkspaceRoute) => {
@@ -127,9 +135,10 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       if (!dirty.current.busy) {
         discardFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         setDiscard({ next });
-      }
+      } else if (navigation.current.route === 'settings') queued.current = { next };
       return;
     }
+    queued.current = null;
     dirty.current = { dirty: false, incomplete: false, busy: false };
     navigation.current = { route: next, position: navigation.current.position + 1, restoring: false };
     history.pushState({ ...history.state, wardrobePosition: navigation.current.position }, '', hashForRoute(next));
@@ -140,7 +149,10 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
     const onHash = () => {
       const current = navigation.current;
       if (current.restoring) {
-        if (history.state?.wardrobePosition === current.position) current.restoring = false;
+        if (history.state?.wardrobePosition === current.position) {
+          current.restoring = false;
+          if (queued.current && !dirty.current.busy) setSettled(value => value + 1);
+        }
         return;
       }
       const next = currentRoute();
@@ -152,11 +164,12 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
         if (!dirty.current.busy) {
           discardFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
           setDiscard({ next, position });
-        }
+        } else if (current.route === 'settings') queued.current = { next, position };
         history.go(current.position - position);
         return;
       }
       navigation.current = { route: next, position, restoring: false };
+      queued.current = null;
       dirty.current = { dirty: false, incomplete: false, busy: false };
       setRoute(next);
     };
@@ -178,6 +191,17 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       dirty.current = { dirty: false, incomplete: false, busy: false };
     };
   }, [changeRoute]);
+  useEffect(() => {
+    const request = queued.current;
+    if (!request || dirty.current.busy || navigation.current.restoring || scope.signal.aborted) return;
+    queued.current = null;
+    if (navigation.current.route !== 'settings') return;
+    if (request.position === undefined) changeRoute(request.next);
+    else if (dirty.current.dirty) {
+      discardFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setDiscard({ next: request.next, position: request.position });
+    } else history.go(request.position - navigation.current.position);
+  }, [settled, changeRoute, scope]);
   const focusRoute = useCallback(() => { document.getElementById(routeFocus[route] ?? (route.startsWith('detail:') ? 'item-detail-title' : route.startsWith('outfit:') ? 'outfit-detail-title' : 'wardrobe-title'))?.focus(); }, [route]);
   useEffect(focusRoute, [focusRoute]);
   function trashed(item: LifecycleSnapshot) {
