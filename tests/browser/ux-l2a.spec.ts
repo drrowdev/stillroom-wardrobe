@@ -256,6 +256,9 @@ test('L2a unavailable states show one line and only Turn off for stored consent'
   await reread(page, unavailable);
   expect(traffic.consent()).toHaveLength(0);
   await cardButton(page, 'aiC.disable').click();
+  // Turn off re-reads status before it writes, and its label reads Saving meanwhile, so wait for the write to settle.
+  await expect.poll(() => traffic.consent().map((entry) => entry.body)).toMatchObject([{ p_enabled: false, p_notice_revision: null }]);
+  await expect(cardButton(page, 'common.saving')).toHaveCount(0);
   await expect(cardButton(page, 'aiC.disable')).toHaveCount(0);
   await unavailable();
   expect(traffic.consent().map((entry) => entry.body)).toMatchObject([{ p_enabled: false, p_notice_revision: null }]);
