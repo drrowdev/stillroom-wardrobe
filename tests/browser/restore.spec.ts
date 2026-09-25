@@ -192,8 +192,9 @@ for (const loss of ['save reply', 'replacement reply', 'replacement reservation'
 
 test('I21 restore: an item that could not be restored is reported, and running the restore again continues', async ({ page }) => {
   const { api, thumb } = await start(page);
-  seed(api, thumb, 'Fictional linen shirt', 2);
-  seed(api, thumb, 'Fictional wool trousers');
+  const shirt = seed(api, thumb, 'Fictional linen shirt', 2);
+  const trousers = seed(api, thumb, 'Fictional wool trousers');
+  seedHistory(api, shirt.item, trousers.item);
   await settings(page, 'a');
   const parts = await backup(page);
   await signOut(page);
@@ -209,12 +210,25 @@ test('I21 restore: an item that could not be restored is reported, and running t
   const card = restoreCard(page);
   await expect(card.getByRole('alert')).toHaveText(text('restore.stopped'), slow);
   await expect(card.getByRole('alert')).toBeFocused();
-  await expect(card).toContainText(text('restore.notRestored', 'en', { n: '1' }));
+  // The shirt and the outfit, rule, feedback and history that refer to it wait for the next run; nothing is written without it.
+  await expect(card).toContainText(text('restore.notRestored', 'en', { n: '5' }));
   expect(own(api.items)).toHaveLength(2);
+  for (const rows of [api.outfits, api.outfitItems, api.combinationRules, api.suggestionFeedback, api.wearEvents, api.wearLinks]) expect(own(rows)).toEqual([]);
   await button(page, 'restore.again').click();
   await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
-  expect(own(api.items)).toHaveLength(2);
+  await expect(card).not.toContainText(text('restore.conflicts', 'en', { n: '1' }));
+  const items = own(api.items);
+  expect(items).toHaveLength(2);
   expect(own(api.images).map(image => image.state).sort()).toEqual(['ready', 'ready', 'retired']);
+  const outfits = own(api.outfits);
+  expect(outfits).toEqual([expect.objectContaining({ title: 'Fictional office outfit' })]);
+  expect(own(api.outfitItems).map(link => link.item_id).sort()).toEqual(items.map(row => row.id).sort());
+  expect(own(api.combinationRules)).toHaveLength(1);
+  expect(own(api.suggestionFeedback)).toHaveLength(1);
+  expect(own(api.wearEvents)).toEqual([expect.objectContaining({ outfit_id: outfits[0]!.id })]);
+  const shirtId = items.find(row => row.title === 'Fictional linen shirt')!.id;
+  expect(own(api.wearLinks).map(link => [link.title_snapshot, link.item_id]).sort())
+    .toEqual([['Fictional linen shirt', shirtId], ['Fictional old scarf', null]]);
 });
 
 test('I20 restore: an item in Trash or changed here is skipped and left as it is', async ({ page }) => {
@@ -242,6 +256,45 @@ test('I20 restore: an item in Trash or changed here is skipped and left as it is
   await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
   expect([first, second, changed]).toEqual(before);
   expect(own(api.items)).toHaveLength(2);
+});
+
+test('I20 restore: an item edited here, or with a missing or different stored photo, is skipped and left as it is', async ({ page }) => {
+  const { api, thumb } = await start(page);
+  seed(api, thumb, 'Fictional linen shirt');
+  seed(api, thumb, 'Fictional wool trousers', 2);
+  seed(api, thumb, 'Fictional rain jacket');
+  await settings(page, 'a');
+  const parts = await backup(page);
+  await signOut(page);
+  await settings(page, 'b');
+  await check(page, parts);
+  await button(page, 'restore.start').click();
+  const card = restoreCard(page);
+  await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
+  await button(page, 'backup.finish').click();
+  const byTitle = (title: string) => own(api.items).find(row => row.title === title)!;
+  const edited = byTitle('Fictional linen shirt');
+  Object.assign(edited, { title: 'Fictional linen shirt, edited', version: Number(edited.version) + 1 });
+  // The retired first photo of the trousers is gone from storage, and the jacket's thumbnail holds different bytes.
+  const trousersPhotos = own(api.images).filter(image => image.item_id === byTitle('Fictional wool trousers').id);
+  const retired = trousersPhotos.find(image => image.state === 'retired')!;
+  api.files.delete(String(retired.main_path));
+  const jacket = own(api.images).find(image => image.item_id === byTitle('Fictional rain jacket').id)!;
+  const original = api.files.get(String(jacket.thumb_path))!;
+  const different = Buffer.from(original); different.writeUInt8(different.readUInt8(different.length - 3) ^ 0xff, different.length - 3);
+  api.files.set(String(jacket.thumb_path), different);
+  const before = structuredClone({ items: own(api.items), images: own(api.images) });
+  const reservations = api.restoreControl.reservations, changes = api.imageChanges.length;
+  await check(page, parts);
+  await expect(card).toContainText(text('restore.conflicts', 'en', { n: '1' }), slow);
+  await button(page, 'restore.start').click();
+  await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
+  await expect(card).toContainText(text('restore.conflicts', 'en', { n: '3' }));
+  expect({ items: own(api.items), images: own(api.images) }).toEqual(before);
+  expect(api.files.has(String(retired.main_path))).toBe(false);
+  expect(api.files.get(String(jacket.thumb_path))).toEqual(different);
+  expect(api.restoreControl.reservations).toBe(reservations);
+  expect(api.imageChanges).toHaveLength(changes);
 });
 
 test('I20 restore: wrong passphrase, missing parts, other files and too many files are refused before anything is written', async ({ page }) => {

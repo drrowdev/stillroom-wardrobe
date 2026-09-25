@@ -821,6 +821,7 @@ export type Database = {
         Args: { p_item_id: string; p_request_id: string }
         Returns: Json
       }
+      restore_item_save_status: { Args: { p_item_id: string }; Returns: Json }
       retire_image: { Args: { p_image_id: string }; Returns: undefined }
       save_outfit: {
         Args: {

@@ -1,4 +1,4 @@
--- Phase 6 I20/I21 restore (P6b). Additive only: two new owner-scoped functions; no existing object changes.
+-- Phase 6 I20/I21 restore (P6b). Additive only: three new owner-scoped functions; no existing object changes.
 -- reserve_restored_item_save lets a restore keep the exported provenance kinds of a saved item through the same
 -- checked Save chain (private.reserve_item_save -> upload -> finalize_item_save). There is no receipt, manifest,
 -- consent or inference: an owner can only re-assert kinds on their own values. Revisions start again at 1.
@@ -75,9 +75,22 @@ begin
 end;
 $$;
 
-revoke all on function public.reserve_restored_item_save(jsonb,jsonb),public.restore_image_change_status(uuid,uuid)
-  from public,anon,authenticated,service_role;
-grant execute on function public.reserve_restored_item_save(jsonb,jsonb),public.restore_image_change_status(uuid,uuid)
-  to authenticated;
+-- restore_item_save_status is the checked-save evidence for a restored item's first photo: the owner's own save attempt,
+-- its image and whether it was finalized. Another owner's or an unknown item reads as null.
+create function public.restore_item_save_status(p_item_id uuid) returns jsonb
+language plpgsql volatile security definer set search_path = '' as $$
+declare a private.item_save_attempts;
+begin
+  perform private.image_change_lock(auth.uid());
+  select * into a from private.item_save_attempts where owner_id=auth.uid() and item_id=p_item_id;
+  if not found then return null; end if;
+  return jsonb_build_object('itemId',a.item_id,'imageId',a.image_id,'state',a.state);
+end;
+$$;
+
+revoke all on function public.reserve_restored_item_save(jsonb,jsonb),public.restore_image_change_status(uuid,uuid),
+  public.restore_item_save_status(uuid) from public,anon,authenticated,service_role;
+grant execute on function public.reserve_restored_item_save(jsonb,jsonb),public.restore_image_change_status(uuid,uuid),
+  public.restore_item_save_status(uuid) to authenticated;
 
 commit;

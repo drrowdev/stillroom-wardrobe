@@ -58,6 +58,7 @@ export const EXPOSED_RPCS = Object.freeze([
   fn('begin_prepared_item_deletion', 'uuid, uuid', ['p_item_id', 'p_request_id']),
   fn('reserve_restored_item_save', 'jsonb, jsonb', ['p_item', 'p_image']),
   fn('restore_image_change_status', 'uuid, uuid', ['p_item_id', 'p_request_id']),
+  fn('restore_item_save_status', 'uuid', ['p_item_id']),
 ]);
 
 // Public functions reachable only with service credentials (Edge/operator); normal sessions must be denied.
@@ -420,6 +421,7 @@ export const COVERAGE_REQUIREMENTS = Object.freeze({
   begin_prepared_item_deletion: req(['removeItem', 'removeRequest'], { tuple: true }),
   reserve_restored_item_save: req([], { collision: true }),
   restore_image_change_status: req(['changeItem', 'changeRequest'], { tuple: true }),
+  restore_item_save_status: req(['saveItem']),
 });
 const DIRECTIONS = [['A', 'B'], ['B', 'A']];
 const TAG = /^(?:anon|normal-[AB]|[AB]:control|[AB]>[AB]:(?:owner-only|mixed|collision|unverified|tuple|ref:[A-Za-z]+))$/;

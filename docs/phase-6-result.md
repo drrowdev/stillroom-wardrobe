@@ -96,8 +96,9 @@ or reference-exporter (v1) backup. Account deletion (P6c), attribution restore
 - Requirements: blueprint `06` I20/I21, `08` import, `10` privacy, `14`
   Phase 6, `20` (no AI call). Plan rev4 with binding amendments R1 and R2.
 - Additive migration `20260925110000_restore_item_save.sql`: new
-  `reserve_restored_item_save(jsonb, jsonb)` and
-  `restore_image_change_status(uuid, uuid)`, authenticated only. No existing
+  `reserve_restored_item_save(jsonb, jsonb)`,
+  `restore_image_change_status(uuid, uuid)` and
+  `restore_item_save_status(uuid)`, authenticated only. No existing
   function, table, policy or trigger changes. The hosted apply is pending
   separate authorization.
 
@@ -122,11 +123,26 @@ photos, outfits and history to the signed-in account.
   (`prepareImage`), thumbnails are generated from the restored main photo, and
   uploaded bytes match the newly recorded hashes. Retired photos are replayed as
   a replacement chain through the existing `finalize-image-change` function,
-  with the latest photo current (R1 completed-prefix validation; photo 0 is
-  checked through its saved image).
+  with the latest photo current (R1 completed-prefix validation).
+- Before an item is skipped as already here, or resumed, every completed photo
+  is checked: both stored files by size and SHA-256, photo 0's checked save
+  (`restore_item_save_status`: completed, same image) and each later photo's
+  completed replacement request (same image, previous photo, expected
+  version). The item's values and provenance kinds must equal the restored
+  ones and its version must equal the completed prefix; an edit made here, a
+  missing or different stored file, or a mismatched request makes the item a
+  conflict, left as it is.
+- An item that failed in a way that can be retried holds back every outfit,
+  rule, feedback entry and history event that refers to it, so their
+  deterministic IDs are only written once, complete. The run then reports
+  them as not restored and never says it is complete; running it again
+  continues. Conflicting or trashed items are final and are left out.
+- A v1 part 0 carries photos and may be up to the 40 MiB part limit: a part 0
+  over the v2 12 MiB metadata limit is decrypted and accepted only as v1.
 - Available dependencies: new, resumed and identical items. Unavailable:
-  conflicting, trashed or deleted, fenced or failed items; outfits drop them
-  and history keeps its text with the item link cleared. History uses the
+  conflicting, trashed or deleted and fenced items; outfits drop them and
+  history keeps its text with the item link cleared. Failed items defer their
+  dependants instead (above). History uses the
   checked `restore_history_entry` RPC.
 - Not restored: profile and style preferences, `weather_enabled`, AI consent,
   analysis drafts, requests, results, receipts and attribution history. The
@@ -152,3 +168,10 @@ integration (`tests/integration/restore-save.sessions.mjs`) and security
 - Hosted apply of the additive migration and an owner-run Pages deploy.
 - Q5 (attribution restore), P6c account deletion, and the deferred
   `export-own`/`restore-own` CLIs.
+- No real-backend restore round trip: the browser restore specs run against
+  the mock backend, and the integration suite checks the new functions
+  (`reserve_restored_item_save`, `restore_image_change_status`,
+  `restore_item_save_status`) and their owner isolation against the local
+  database, but not a full backup -> restore replacement chain through
+  Storage and `finalize-image-change`. That needs browser image encoding and
+  the Edge runtime in one job, beyond the current CI time budget.

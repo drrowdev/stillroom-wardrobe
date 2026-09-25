@@ -488,6 +488,7 @@ function foreignCases(a) {
       { bundle: { freeItem: ['freeVersion'] }, tupleBundle: ['freeIntent'], tupleIntent: 'freeIntent' }),
     one('image_change_status', ['changeItem', 'changeRequest'], pair(['changeItem', 'changeRequest']), NULL),
     one('restore_image_change_status', ['changeItem', 'changeRequest'], pair(['changeItem', 'changeRequest']), NULL),
+    one('restore_item_save_status', ['saveItem'], (x) => ({ p_item_id: x.saveItem }), NULL),
     one('image_change_requests', ['changeItem'], (x) => ({ p_item_id: x.changeItem }), EMPTY),
     one('image_recovery_preflight', ['recItem', 'recCurrent', 'recSource'], (x) => ({ p_intent: recoveryIntent(x) }), CONFLICT,
       { tupleBundle: ['recIntent'], tupleIntent: 'recIntent' }),
@@ -953,6 +954,8 @@ async function ownPositiveControls(owner) {
     ['image_change_requests', { p_item_id: f.changeItem }, (d) => Array.isArray(d) && d.length === 1 && d[0].requestId === f.changeRequest],
     ['restore_image_change_status', { p_item_id: f.changeItem, p_request_id: f.changeRequest }, (d) => d?.requestId === f.changeRequest
       && d.state === 'reserved' && Number.isInteger(d.expectedVersion) && typeof d.currentImageId === 'string' && d.image?.state === 'pending'],
+    ['restore_item_save_status', { p_item_id: f.saveItem }, (d) => d?.itemId === f.saveItem && d.imageId === f.saveImage
+      && ['reserved', 'completed'].includes(d.state)],
     ['item_attribution_history', { p_item_id: f.item }, (d) => Array.isArray(d)],
   ];
   for (const [name, body, check] of checks) {

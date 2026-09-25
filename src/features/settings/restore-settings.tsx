@@ -65,7 +65,7 @@ export function RestoreSettings({ client, scope, language, online, t }: Props) {
       });
       if (controller.signal.aborted || scope.signal.aborted) return;
       // Anything not confirmed can be continued by running the same restore again.
-      if (result.failed > 0) { setState({ kind: 'stopped', preview, failed: result.failed }); return; }
+      if (result.failed + result.deferred > 0) { setState({ kind: 'stopped', preview, failed: result.failed + result.deferred }); return; }
       setFiles([]); setPassphrase('');
       setState({ kind: 'done', result });
     } catch (error) {
@@ -126,6 +126,9 @@ export function RestoreSettings({ client, scope, language, online, t }: Props) {
     </div>}
     {state.kind === 'done' && <div className="stack">
       <p role="status">{t('restore.done')}</p>
+      {state.result.conflicts + state.result.outfitConflicts + state.result.historyConflicts > 0 && <p>{t('restore.conflicts',
+        { n: number(state.result.conflicts + state.result.outfitConflicts + state.result.historyConflicts) })}</p>}
+      {state.result.trash > 0 && <p>{t('restore.inTrash', { n: number(state.result.trash) })}</p>}
       <button type="button" className="button button-secondary" onClick={reset}>{t('backup.finish')}</button>
     </div>}
     {state.kind === 'failed' && <div className="stack">

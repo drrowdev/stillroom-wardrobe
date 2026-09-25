@@ -45,6 +45,13 @@ async function ownerCases(client, owner, other) {
       { method: 'POST', body: { p_item_id: value.p_item.id, p_request_id: randomUUID() } }).then((r) => r.data), null);
     eq(await h.read('items', value.p_item.id), [row.item]);
 
+    phase = 'save-status';
+    eq(await h.call('restore_item_save_status', { p_item_id: value.p_item.id }).then((r) => r.data),
+      { itemId: value.p_item.id, imageId: value.p_image.id, state: 'reserved' });
+    eq(await client.request(other.token, '/rest/v1/rpc/restore_item_save_status',
+      { method: 'POST', body: { p_item_id: value.p_item.id } }).then((r) => r.data), null);
+    eq(await h.call('restore_item_save_status', { p_item_id: randomUUID() }).then((r) => r.data), null);
+
     phase = 'unknown-request-status';
     const missing = await h.call('restore_image_change_status', { p_item_id: value.p_item.id, p_request_id: randomUUID() });
     requireEvidence(missing.ok); eq(missing.data, null);
@@ -53,6 +60,8 @@ async function ownerCases(client, owner, other) {
     await h.upload(value);
     await h.finalize(value, row);
     eq((await h.read('item_images', value.p_image.id))[0].state, 'ready');
+    eq(await h.call('restore_item_save_status', { p_item_id: value.p_item.id }).then((r) => r.data),
+      { itemId: value.p_item.id, imageId: value.p_image.id, state: 'completed' });
     denied(await reserve(value));
     eq((await h.read('items', value.p_item.id))[0].field_provenance, value.p_item.field_provenance);
 

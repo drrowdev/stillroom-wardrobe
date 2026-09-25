@@ -115,6 +115,43 @@ describe('version 1 manifests', () => {
     expect(await problem(() => readBackup({ count: 1, read: async () => bad }, passphrase, () => undefined))).toBe('invalid');
     expect(await problem(() => readBackup({ count: 1, read: async () => text }, `${passphrase}!`, () => undefined))).toBe('passphrase');
   }, 60_000);
+
+  it('reads a version 1 part 0 larger than the version 2 metadata limit, and refuses one that is not version 1', async () => {
+    const id = (n: number, tail: string) => `${tail}${n.toString(16).padStart(4, '0')}-0000-4000-8000-000000000000`;
+    const bytes = (length: number, seed: number) => new Uint8Array(length).map((_, index) => (index * seed + 7) & 255);
+    const items: Record<string, unknown>[] = [], images: Record<string, unknown>[] = [], files: Record<string, unknown>[] = [];
+    let thumb = new Uint8Array();
+    for (let n = 0; n < 16; n++) {
+      const item = id(n, '5555'), photo = id(n, '4444');
+      const main = bytes(500_000, 31 + n * 2);
+      thumb = bytes(60_000, 17 + n * 2);
+      const [mainHash, thumbHash] = [await sha256Hex(main), await sha256Hex(thumb)];
+      items.push({ id: item, owner_id: owner, title: `Fictional coat ${n}`, category: 'outerwear', colours: [], seasons: [], style_tags: [], tags: [],
+        favourite: false, availability: 'available', lifecycle: 'active', exclude_suggestions: false, wear_more: false, deleted_at: null,
+        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', version: 1 });
+      images.push({ id: photo, owner_id: owner, item_id: item, state: 'ready', retired_at: null, main_path: `${owner}/${item}/${photo}/main.jpg`,
+        thumb_path: `${owner}/${item}/${photo}/thumb.jpg`, main_bytes: main.length, thumb_bytes: thumb.length, main_sha256: mainHash,
+        thumb_sha256: thumbHash, width: 1200, height: 1600, alt_text: 'A coat', created_at: '2026-01-01T00:00:00Z' });
+      files.push({ imageId: photo, variant: 'main', sha256: mainHash, byteLength: main.length, mime: 'image/jpeg', base64: toBase64(main) },
+        { imageId: photo, variant: 'thumb', sha256: thumbHash, byteLength: thumb.length, mime: 'image/jpeg', base64: toBase64(thumb) });
+    }
+    const manifest = { export_id: exportId, owner_id: owner, created_at: '2026-01-02T00:00:00Z', tables: {
+      profiles: [{ owner_id: owner, display_name: 'Owner', ui_language: 'en', timezone: 'Europe/Helsinki', currency: 'EUR',
+        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', version: 1 }], items, item_images: images } };
+    const part = { format: 'stillroom-export' as const, schemaVersion: 1, exportId, partIndex: 0, partCount: 1,
+      manifestSha256: await sha256Hex(canonical(manifest)), files, manifest };
+    const text = JSON.stringify(await encryptPart(part as never, passphrase));
+    expect(text.length).toBeGreaterThan(BACKUP_LIMITS.metadataPartBytes);
+    expect(text.length).toBeLessThan(BACKUP_LIMITS.encryptedPartBytes);
+    const backup = await readBackup({ count: 1, exportId, read: async () => text }, passphrase, () => undefined);
+    expect(backup.data.version).toBe(1);
+    expect(backup.data.items).toHaveLength(16);
+    expect(backup.fileBytes).toBe(16 * 560_000);
+    expect(Array.from(await backup.read(id(15, '4444'), 'thumb'))).toEqual(Array.from(thumb));
+    expect(await problem(() => readBackup({ count: 1, read: async () => text }, `${passphrase}!`, () => undefined))).toBe('passphrase');
+    const v2 = JSON.stringify(await encryptPart({ ...part, schemaVersion: 2 } as never, passphrase));
+    expect(await problem(() => readBackup({ count: 1, read: async () => v2 }, passphrase, () => undefined))).toBe('tooLarge');
+  }, 120_000);
 });
 
 describe('photo chains resume only from a completed prefix', () => {

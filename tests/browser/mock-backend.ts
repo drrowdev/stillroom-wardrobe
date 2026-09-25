@@ -842,6 +842,14 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         descriptionVersion: found.intent.descriptionVersion, image: image ? Object.fromEntries(['state', 'main_path', 'thumb_path', 'main_bytes', 'thumb_bytes',
           'main_sha256', 'thumb_sha256', 'width', 'height', 'alt_text', 'description_version'].map(key => [key, image[key]])) : null }); return;
     }
+    if (url.pathname === '/rest/v1/rpc/restore_item_save_status') {
+      const body: unknown = request.postDataJSON();
+      if (method !== 'POST' || !isRecord(body) || !sameValue(Object.keys(body), ['p_item_id']) || !isUuid(body.p_item_id)) {
+        await json({ code: '22023', message: 'Invalid input', details: null, hint: null }, 400); return;
+      }
+      const save = saves.find(value => value.owner === owner && value.itemId === body.p_item_id);
+      await json(save ? { itemId: save.itemId, imageId: save.imageId, state: save.state } : null); return;
+    }
     if (['reserve_item_save', 'reserve_analyzed_item_save', 'reserve_restored_item_save'].some(name => url.pathname === `/rest/v1/rpc/${name}`)) {
       const analyzed = url.pathname.endsWith('/reserve_analyzed_item_save');
       const restored = url.pathname.endsWith('/reserve_restored_item_save');

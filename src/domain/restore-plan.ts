@@ -226,13 +226,21 @@ export async function readBackupV1(source: PartSource, passphrase: string, check
 // Reads part 0's schema version without trusting anything else in it.
 export async function readBackup(source: PartSource, passphrase: string, checkJpeg: JpegCheck): Promise<ReadBackup> {
   const first = await source.read(0);
+  const v1 = () => readBackupV1({ ...source, read: index => index === 0 ? Promise.resolve(first) : source.read(index) }, passphrase, checkJpeg);
+  // Version 1 keeps photos in part 0, so its part 0 may be up to the encrypted part limit. A part 0 over the version 2
+  // metadata limit is decrypted first; only a version 1 part may continue, anything else is too large.
+  if (first.length > BACKUP_LIMITS.metadataPartBytes) {
+    try { await decryptPart(first, passphrase, 1); }
+    catch (error) { throw error instanceof BackupFormatError && error.problem === 'passphrase' ? error : new BackupFormatError('tooLarge'); }
+    return v1();
+  }
   try { return await readBackupV2({ ...source, read: index => index === 0 ? Promise.resolve(first) : source.read(index) }, passphrase, checkJpeg); }
   catch (error) {
     if (!(error instanceof BackupFormatError) || error.problem !== 'invalid') throw error;
     let version: unknown;
     try { await decryptPart(first, passphrase, 1); version = 1; } catch { version = 2; }
     if (version !== 1) throw error;
-    return readBackupV1({ ...source, read: index => index === 0 ? Promise.resolve(first) : source.read(index) }, passphrase, checkJpeg);
+    return v1();
   }
 }
 

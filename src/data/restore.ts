@@ -4,13 +4,13 @@ import type { OwnerScope } from '../auth/session';
 import type { AppClient } from './client';
 import type { Json } from './database.types';
 import { AppError, isAborted, requireSuccess, throwIfAborted } from './errors';
-import { BackupFormatError, sha256Hex, type JpegCheck, type PartSource } from '../domain/export-format';
+import { BackupFormatError, canonical, sha256Hex, type JpegCheck, type PartSource } from '../domain/export-format';
 import {
   chainState, missingPart, readBackup, restoreId, selectBackupFiles,
   type ChainImage, type ChainState, type ReadBackup, type RestoreItem,
 } from '../domain/restore-plan';
 import { parseFieldProvenance, type FieldProvenance } from '../domain/attribute-provenance';
-import { garmentPayload, parseGarmentValues } from '../domain/garment-fields';
+import { garmentPayload, parseGarmentValues, type GarmentPayload, type GarmentValues } from '../domain/garment-fields';
 import { itemDetailColumns } from '../domain/item-details';
 import { parseImageChangeReceipt, type ImageChangeAttempt, type ImageChangeIntent } from '../domain/image-replacement';
 import { isRecord } from '../domain/wardrobe';
@@ -44,8 +44,9 @@ export type RestorePreview = {
   counts: { add: number; same: number; conflicts: number; trash: number; outfits: number };
   ids: { outfits: string[]; events: string[]; entries: string[][] };
 };
-export type RestoreResult = { restored: number; same: number; conflicts: number; trash: number; failed: number;
-  outfits: number; outfitConflicts: number; history: number };
+// `failed` can be retried; `deferred` counts outfits, rules, feedback and history held back until a failed item is restored.
+export type RestoreResult = { restored: number; same: number; conflicts: number; trash: number; failed: number; deferred: number;
+  outfits: number; outfitConflicts: number; history: number; historyConflicts: number };
 
 type StoredImage = ChainImage & { descriptionVersion: number; mainPath: string; thumbPath: string;
   mainBytes: number; thumbBytes: number; mainSha256: string; thumbSha256: string };
@@ -81,12 +82,45 @@ async function readTargets(client: AppClient, scope: OwnerScope, ids: string[], 
   return { rows, images };
 }
 
+// The values, kinds and photo as the restore writes them for photo 0. Empty fields carry no kind.
+type Restored = { values: GarmentValues; payload: GarmentPayload; provenance: FieldProvenance };
+function restoredFields(source: RestoreItem): Restored {
+  const values = parseGarmentValues(source.row);
+  const payload = garmentPayload(values);
+  const provenance: FieldProvenance = {};
+  for (const [field, kind] of Object.entries(source.kinds)) {
+    const value = (payload as Record<string, unknown>)[field];
+    if (value === null || value === '' || Array.isArray(value) && value.length === 0) continue;
+    (provenance as Record<string, unknown>)[field] = { kind, revision: 1 };
+  }
+  return { values, payload, provenance };
+}
+const kindsOf = (value: unknown) => {
+  try { return canonical(Object.fromEntries(Object.entries(parseFieldProvenance(value)).map(([field, entry]) => [field, entry.kind]))); }
+  catch { return null; }
+};
+// An item this restore wrote still has exactly the restored values and kinds; any edit made here since makes it different.
+function sameFields(plan: Omit<ItemPlan, 'status'>, row: Record<string, unknown>): boolean {
+  try {
+    const restored = restoredFields(plan.source);
+    return canonical(garmentPayload(parseGarmentValues(row))) === canonical(restored.payload)
+      && kindsOf(row.field_provenance) === kindsOf(restored.provenance);
+  } catch { return false; }
+}
+
+// Structural comparison only (values, kinds, photo chain and item version); stored files and requests are checked while restoring.
 function classify(plan: Omit<ItemPlan, 'status'>, row: Record<string, unknown> | undefined, images: readonly ChainImage[]): { status: ItemStatus; chain: ChainState } {
   const targets = plan.source.photos.map((photo, index) => ({ imageId: plan.imageIds[index]!, altText: photo.altText, width: photo.width, height: photo.height }));
-  if (!row) return { status: images.length ? 'conflict' : 'new', chain: images.length ? { kind: 'conflict' } : { kind: 'new' } };
+  const conflict = { status: 'conflict' as const, chain: { kind: 'conflict' as const } };
+  if (!row) return images.length ? conflict : { status: 'new', chain: { kind: 'new' } };
   if (row.deleted_at !== null) return { status: 'trash', chain: { kind: 'conflict' } };
+  if (!sameFields(plan, row)) return conflict;
   const chain = chainState(targets, images);
-  return { status: chain.kind === 'complete' ? 'same' : chain.kind === 'resume' ? 'resume' : 'conflict', chain };
+  if (chain.kind === 'conflict' || chain.kind === 'new') return conflict;
+  // Photo 0 creates version 1 and each completed replacement adds one; anything else is an edit made here.
+  const completed = chain.kind === 'complete' ? targets.length - 1 : Math.max(chain.completed, 0);
+  if (row.version !== completed + 1) return conflict;
+  return { status: chain.kind === 'complete' ? 'same' : 'resume', chain };
 }
 
 // Reads and checks the backup, then compares it with this account using owner-scoped reads only. Nothing is written.
@@ -163,7 +197,38 @@ async function restoreStatus(client: AppClient, itemId: string, requestId: strin
   return { receipt: parseImageChangeReceipt(receipt, itemId, requestId), expectedVersion, currentImageId, descriptionVersion, image };
 }
 
+type SaveStatus = { itemId: string; imageId: string | null; state: string };
+async function saveStatus(client: AppClient, itemId: string, signal: AbortSignal): Promise<SaveStatus | null> {
+  const result = await client.rpc('restore_item_save_status', { p_item_id: itemId }).abortSignal(signal);
+  throwIfAborted(signal);
+  requireSuccess(result.error);
+  const value: unknown = result.data;
+  if (value === null) return null;
+  if (!isRecord(value) || typeof value.itemId !== 'string' || value.imageId !== null && typeof value.imageId !== 'string'
+    || typeof value.state !== 'string') throw new AppError('error.conflict');
+  return { itemId: value.itemId, imageId: value.imageId, state: value.state };
+}
+
+// Every completed photo is checked before it is skipped: its stored files, and the checked save (photo 0) or the completed
+// replacement request (later photos) that created it, with the item version that request expected.
+async function verifyPrefix(client: AppClient, plan: ItemPlan, images: readonly StoredImage[], completed: number, signal: AbortSignal): Promise<boolean> {
+  for (let index = 0; index <= completed; index++) {
+    const image = images.find(entry => entry.id === plan.imageIds[index]);
+    if (!image || !await storedMatches(client, image, signal)) return false;
+    if (index === 0) {
+      const saved = await saveStatus(client, plan.id, signal);
+      if (!saved || saved.itemId !== plan.id || saved.imageId !== plan.imageIds[0] || saved.state !== 'completed') return false;
+      continue;
+    }
+    const known = await restoreStatus(client, plan.id, plan.requestIds[index]!, signal);
+    if (!known || known.receipt.state !== 'completed' || known.receipt.kind !== 'replacement' || known.receipt.imageId !== plan.imageIds[index]
+      || known.currentImageId !== plan.imageIds[index - 1] || known.expectedVersion !== index || known.receipt.completedVersion !== index + 1) return false;
+  }
+  return true;
+}
+
 // One item: the checked Save for photo 0, then one replacement per later photo, resuming from the completed prefix.
+// 'failed' can be retried; 'conflict' and 'trash' are final for this item, and nothing here is changed.
 async function restoreItem(client: AppClient, scope: OwnerScope, backup: ReadBackup, plan: ItemPlan, signal: AbortSignal): Promise<ItemStatus | 'failed'> {
   const photos = plan.source.photos;
   const read = async () => {
@@ -174,53 +239,42 @@ async function restoreItem(client: AppClient, scope: OwnerScope, backup: ReadBac
   let state = await read();
   const initial = state.status;
   if (state.status === 'conflict' || state.status === 'trash') return state.status;
+  let completed = state.chain.kind === 'resume' ? state.chain.completed : state.chain.kind === 'complete' ? photos.length - 1 : -1;
+  if (completed >= 0 && !await verifyPrefix(client, plan, state.images, completed, signal)) return 'conflict';
   if (state.status === 'same') return 'same';
-  let completed = state.chain.kind === 'resume' ? state.chain.completed : -1;
+  const restored = restoredFields(plan.source);
   if (completed < 0) {
-    const values = parseGarmentValues(plan.source.row);
-    const payload = garmentPayload(values);
-    const kinds = plan.source.kinds;
-    const field_provenance: FieldProvenance = {};
-    for (const [field, kind] of Object.entries(kinds)) {
-      const value = (payload as Record<string, unknown>)[field];
-      if (value === null || value === '' || Array.isArray(value) && value.length === 0) continue;
-      (field_provenance as Record<string, unknown>)[field] = { kind, revision: 1 };
-    }
     const photo = await preparePhoto(backup, photos[0]!.sourceId, signal);
-    const attempt: SaveAttempt = { itemId: plan.id, imageId: plan.imageIds[0]!, values, payload: { ...payload, field_provenance },
-      altText: photos[0]!.altText, photo, ownerId: scope.ownerId, epoch: scope.epoch };
+    const attempt: SaveAttempt = { itemId: plan.id, imageId: plan.imageIds[0]!, values: restored.values,
+      payload: { ...restored.payload, field_provenance: restored.provenance }, altText: photos[0]!.altText, photo,
+      ownerId: scope.ownerId, epoch: scope.epoch };
     await saveItem(client, { ...scope, signal }, attempt, () => undefined, 'reserve_restored_item_save');
     completed = 0;
-  } else {
-    // Checked-save verification of the latest completed photo: it is the current photo and its stored files match it.
-    const current = state.images.find(image => image.id === plan.imageIds[completed])!;
-    if (!await storedMatches(client, current, signal)) return 'failed';
   }
   const changes = new ImageChangeClient(client, { ...scope, signal });
   for (let index = completed + 1; index < photos.length; index++) {
+    // The item must still be exactly as this restore left it: the restored values, the previous photo current, version index.
     state = await read();
-    if (!state.row || state.status === 'conflict' || state.status === 'trash') return 'failed';
+    if (state.status === 'trash') return 'trash';
+    if (state.status !== 'resume' || state.chain.kind !== 'resume' || state.chain.completed !== index - 1 || !state.row) return 'conflict';
     const photo = await preparePhoto(backup, photos[index]!.sourceId, signal);
     const requestId = plan.requestIds[index]!, imageId = plan.imageIds[index]!;
+    const current = state.images.find(image => image.id === plan.imageIds[index - 1]);
+    if (!current || current.state !== 'ready') return 'conflict';
     const known = await restoreStatus(client, plan.id, requestId, signal);
-    if (known && known.receipt.state === 'cancelled') return 'failed';
-    const row = state.row, current = state.images.find(image => image.id === plan.imageIds[index - 1]);
-    if (!current || current.state !== 'ready') return 'failed';
-    const expectedVersion = known ? known.expectedVersion : Number(row.version);
-    const currentImageId = known ? known.currentImageId : current.id;
+    if (known && (known.receipt.state === 'cancelled' || known.expectedVersion !== index || known.currentImageId !== current.id)) return 'conflict';
     const descriptionVersion = known ? known.descriptionVersion : current.descriptionVersion;
     const image = { id: imageId, main_bytes: photo.main.size, thumb_bytes: photo.thumb.size, main_sha256: photo.mainSha256,
       thumb_sha256: photo.thumbSha256, width: photo.width, height: photo.height, alt_text: photos[index]!.altText };
     // A reserved replacement is resumed only with the intent it was reserved with, down to the prepared bytes.
-    if (known?.receipt.state === 'reserved' && (!known.image || known.image.state !== 'pending' || currentImageId !== current.id
-      || Number(row.version) !== expectedVersion
-      || (['main_bytes', 'thumb_bytes', 'main_sha256', 'thumb_sha256', 'width', 'height', 'alt_text'] as const).some(key => known.image![key] !== image[key]))) return 'failed';
-    const provenance = parseFieldProvenance(row.field_provenance);
-    const intent: ImageChangeIntent = { requestId, itemId: plan.id, imageId, expectedVersion, currentImageId, descriptionVersion,
-      item: { ...garmentPayload(parseGarmentValues(row)), field_provenance: provenance as Json } as Record<string, Json>,
+    if (known?.receipt.state === 'reserved' && (!known.image || known.image.state !== 'pending'
+      || (['main_bytes', 'thumb_bytes', 'main_sha256', 'thumb_sha256', 'width', 'height', 'alt_text'] as const).some(key => known.image![key] !== image[key]))) return 'conflict';
+    const intent: ImageChangeIntent = { requestId, itemId: plan.id, imageId, expectedVersion: index, currentImageId: current.id, descriptionVersion,
+      item: { ...restored.payload, field_provenance: parseFieldProvenance(state.row.field_provenance) as Json } as Record<string, Json>,
       image, claim: null, sourceImageId: null };
     const attempt: ImageChangeAttempt = { ownerId: scope.ownerId, epoch: scope.epoch, intent, photo };
     const receipt = await changes.save(attempt, () => undefined, () => undefined, signal);
+    if (receipt.state === 'cancelled') return 'conflict';
     if (receipt.state !== 'completed') return 'failed';
   }
   return initial === 'new' ? 'new' : 'resume';
@@ -229,13 +283,18 @@ async function restoreItem(client: AppClient, scope: OwnerScope, backup: ReadBac
 export type RestoreProgress = { done: number; total: number };
 // Items one at a time, then outfits, rules, feedback and history. A lost reply is followed by one fresh read and a
 // resume; anything still unconfirmed is counted as not restored, and running the restore again continues from there.
+// Nothing that refers to an item still to be retried is written yet, so a later run writes it once, complete.
 export async function runRestore(client: AppClient, scope: OwnerScope, preview: RestorePreview, signal: AbortSignal,
   onProgress: (progress: RestoreProgress) => void): Promise<RestoreResult> {
   const lifetime = AbortSignal.any([scope.signal, signal]);
   if (preview.ownerId !== scope.ownerId || preview.epoch !== scope.epoch) throw new AppError('error.conflict');
   const { backup } = preview, { data } = backup;
-  const result: RestoreResult = { restored: 0, same: 0, conflicts: 0, trash: 0, failed: 0, outfits: 0, outfitConflicts: 0, history: 0 };
+  const result: RestoreResult = { restored: 0, same: 0, conflicts: 0, trash: 0, failed: 0, deferred: 0,
+    outfits: 0, outfitConflicts: 0, history: 0, historyConflicts: 0 };
   const available = new Map<string, string>();
+  // Items that may still be restored by running again. Anything that refers to one waits, so its deterministic ID is only
+  // ever written with its final contents; excluded items (different here, in Trash) are left out for good.
+  const retry = new Set<string>();
   const total = preview.items.length;
   onProgress({ done: 0, total });
   for (const [position, plan] of preview.items.entries()) {
@@ -251,12 +310,14 @@ export async function runRestore(client: AppClient, scope: OwnerScope, preview: 
     else if (outcome === 'same') result.same++;
     else if (outcome === 'conflict') result.conflicts++;
     else if (outcome === 'trash') result.trash++;
-    else result.failed++;
+    else { result.failed++; retry.add(plan.source.sourceId); }
     if (outcome === 'new' || outcome === 'resume' || outcome === 'same') available.set(plan.source.sourceId, plan.id);
     onProgress({ done: position + 1, total });
   }
-  const restoredOutfits = new Map<string, string>();
+  const waits = (ids: readonly (string | null)[]) => ids.some(id => id !== null && retry.has(id));
+  const restoredOutfits = new Map<string, string>(), heldOutfits = new Set<string>();
   for (const [index, outfit] of data.outfits.entries()) {
+    if (waits(outfit.itemIds)) { result.deferred++; heldOutfits.add(outfit.sourceId); continue; }
     const itemIds = outfit.itemIds.flatMap(id => available.has(id) ? [available.get(id)!] : []);
     if (!itemIds.length) continue;
     const saved = await client.rpc('save_outfit', { p_id: preview.ids.outfits[index]!, p_title: outfit.title, p_occasion: outfit.occasion,
@@ -264,17 +325,19 @@ export async function runRestore(client: AppClient, scope: OwnerScope, preview: 
     throwIfAborted(lifetime);
     if (!saved.error) { result.outfits++; restoredOutfits.set(outfit.sourceId, preview.ids.outfits[index]!); }
     else if (conflictError(saved.error)) result.outfitConflicts++;
-    else result.failed++;
+    else { result.failed++; heldOutfits.add(outfit.sourceId); }
   }
-  const rules = data.rules.flatMap(rule => available.has(rule.low) && available.has(rule.high)
-    ? [[available.get(rule.low)!, available.get(rule.high)!].sort() as [string, string]] : []);
-  for (const [low, high] of rules) {
+  for (const rule of data.rules) {
+    if (waits([rule.low, rule.high])) { result.deferred++; continue; }
+    if (!available.has(rule.low) || !available.has(rule.high)) continue;
+    const [low, high] = [available.get(rule.low)!, available.get(rule.high)!].sort() as [string, string];
     const saved = await client.from('combination_rules').upsert({ owner_id: scope.ownerId, item_low: low, item_high: high },
       { onConflict: 'owner_id,item_low,item_high', ignoreDuplicates: true }).abortSignal(lifetime);
     throwIfAborted(lifetime);
     if (saved.error) result.failed++;
   }
   for (const entry of data.feedback) {
+    if (waits(entry.itemIds)) { result.deferred++; continue; }
     if (!entry.itemIds.every(id => available.has(id))) continue;
     const saved = await client.from('suggestion_feedback').upsert({ owner_id: scope.ownerId,
       item_ids: entry.itemIds.map(id => available.get(id)!).sort(), vote: entry.vote },
@@ -283,6 +346,7 @@ export async function runRestore(client: AppClient, scope: OwnerScope, preview: 
     if (saved.error) result.failed++;
   }
   for (const [index, event] of data.events.entries()) {
+    if (event.outfitId !== null && heldOutfits.has(event.outfitId) || waits(event.entries.map(entry => entry.itemId))) { result.deferred++; continue; }
     const id = preview.ids.events[index]!;
     const outfitId = event.outfitId === null ? null : restoredOutfits.get(event.outfitId) ?? null;
     const row = { id, owner_id: scope.ownerId, outfit_id: outfitId, local_date: event.localDate, timezone: event.timezone,
@@ -294,21 +358,24 @@ export async function runRestore(client: AppClient, scope: OwnerScope, preview: 
       const existing = await client.from('wear_events').select('id,owner_id,outfit_id,local_date,timezone,state,label,deleted_at')
         .eq('owner_id', scope.ownerId).eq('id', id).abortSignal(lifetime);
       throwIfAborted(lifetime);
+      if (existing.error) { result.failed++; continue; }
       const found: unknown = existing.data?.[0];
-      if (existing.error || !isRecord(found) || found.deleted_at !== null
-        || (['outfit_id', 'local_date', 'timezone', 'state', 'label'] as const).some(key => found[key] !== row[key])) { result.failed++; continue; }
+      // Changed or deleted here since the last run: left as it is.
+      if (!isRecord(found) || found.deleted_at !== null
+        || (['outfit_id', 'local_date', 'timezone', 'state', 'label'] as const).some(key => found[key] !== row[key])) { result.historyConflicts++; continue; }
     }
-    let complete = true;
+    let failed = false, conflicted = false;
     for (const [position, entry] of event.entries.entries()) {
       const restored = await client.rpc('restore_history_entry', { p_id: preview.ids.entries[index]![position]!, p_event_id: id,
         // Generated types mark every argument as a string; the function keeps the text without an item link.
         p_item_id: (entry.itemId === null ? null : available.get(entry.itemId) ?? null) as string, p_title: entry.title, p_category: entry.category,
         p_import_id: data.exportId }).abortSignal(lifetime);
       throwIfAborted(lifetime);
-      if (restored.error) complete = false;
+      if (restored.error) { if (conflictError(restored.error)) conflicted = true; else failed = true; }
     }
-    if (complete) result.history++;
-    else result.failed++;
+    if (failed) result.failed++;
+    else if (conflicted) result.historyConflicts++;
+    else result.history++;
   }
   return result;
 }

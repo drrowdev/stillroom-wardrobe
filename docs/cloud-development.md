@@ -552,9 +552,9 @@ owner runs a Pages deploy of a main that includes P6a. See
 
 **P6b restore (source only, not deployed; hosted migration pending).** The
 P6b draft PR adds the Settings Restore card and the additive migration
-`20260925110000_restore_item_save.sql`: two new authenticated functions,
-`reserve_restored_item_save` and `restore_image_change_status`, and no change
-to any existing object. The hosted apply of that migration waits for the
+`20260925110000_restore_item_save.sql`: three new authenticated functions,
+`reserve_restored_item_save`, `restore_image_change_status` and
+`restore_item_save_status`, and no change to any existing object. The hosted apply of that migration waits for the
 separately authorized responsible actor; builders make no hosted call. The
 card needs both that migration and an owner-run Pages deploy of a main that
 includes P6b. Restore never calls analysis. It is partial: attribution history
