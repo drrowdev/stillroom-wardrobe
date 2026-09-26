@@ -7,7 +7,7 @@ import { loadWardrobe } from '../../data/items';
 import { loadComponents, loadOutfits } from '../../data/outfits';
 import { createLook, dropPendingCreate, loadLooks, pendingCreate, saveLook, setLookRemoved, type CreateReply } from '../../data/wear-events';
 import {
-  addDays, addMonths, firstWeekday, formatDay, formatMonth, monthGrid, monthOf, monthRange, todayIn, weekdayNames,
+  addDays, addMonths, dayParts, firstWeekday, formatMonth, monthGrid, monthOf, monthRange, todayIn, weekdayNames,
 } from '../../domain/local-date';
 import { canMarkWorn, stateAttempt, validateLook, wearProblems, type Look, type LookAttempt, type LookErrors, type WearProblem, type WearReply } from '../../domain/wear-events';
 import type { WardrobeItem } from '../../domain/wardrobe';
@@ -21,6 +21,7 @@ type Props = {
 type View = 'month' | 'agenda';
 type Problem = WearProblem;
 type Notice = { key: MessageKey; undo?: () => Promise<WearReply> };
+const dayHeading = (t: Translate, locale: string, iso: string) => t('calendar.dayHeading', dayParts(iso, locale));
 
 function useLooks(client: AppClient, scope: OwnerScope, month: string, online: boolean, invalidation: number) {
   const [state, setState] = useState<{ month: string; looks: Look[] | null; error: boolean }>({ month, looks: null, error: false });
@@ -142,7 +143,7 @@ export function CalendarScreen({ client, scope, online, language, t, timeZone, i
     requestAnimationFrame(() => { if (opener.current?.isConnected) opener.current.focus(); else document.getElementById('calendar-title')?.focus(); });
   }, []);
   const dayLabel = (date: string, count: number) => {
-    const day = formatDay(date, locale);
+    const day = dayHeading(t, locale, date);
     if (!count) return day;
     const key = new Intl.PluralRules(locale).select(count) === 'one' ? 'calendar.dayLooks_one' : 'calendar.dayLooks_other';
     return t(key, { date: day, count: new Intl.NumberFormat(locale).format(count) });
@@ -199,12 +200,12 @@ export function CalendarScreen({ client, scope, online, language, t, timeZone, i
           })}</tr>)}</tbody>
         </table>
         {monthOf(selected) === month && <section className="calendar-day-panel" aria-labelledby="calendar-day-title">
-          <h3 id="calendar-day-title">{formatDay(selected, locale)}</h3>
+          <h3 id="calendar-day-title">{dayHeading(t, locale, selected)}</h3>
           {selectedLooks.length ? lookList(selectedLooks) : <p className="muted">{t('calendar.empty')}</p>}
         </section>}
       </div>
       : agendaDays.length ? <ol className="calendar-agenda">
-        {agendaDays.map(date => <li key={date}><h3>{formatDay(date, locale)}</h3>{lookList(byDay.get(date)!)}</li>)}
+        {agendaDays.map(date => <li key={date}><h3>{dayHeading(t, locale, date)}</h3>{lookList(byDay.get(date)!)}</li>)}
       </ol> : <p className="muted">{t('calendar.agendaEmpty')}</p>}
     {planning && <PlanDialog client={client} scope={scope} t={t} locale={locale} online={online} timeZone={timeZone} today={today} initial={planning}
       invalidation={invalidation} onBusy={setPlanSaving} onClose={closePlan} onSaved={(date, key) => {
@@ -339,7 +340,7 @@ function PlanDialog({ client, scope, t, locale, online, timeZone, today, initial
     onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
     <h2 id="plan-title">{t('calendar.planLook')}</h2>
     {kept ? <div className="stack">
-      <p><strong>{kept.label}</strong><br />{formatDay(kept.localDate, locale)}</p>
+      <p><strong>{kept.label}</strong><br />{dayHeading(t, locale, kept.localDate)}</p>
       {checking ? <p role="status">{t('calendar.checkingPlan')}</p> : busy ? <p role="status">{t('common.saving')}</p>
         : problem && <p className="notice notice-error" role="alert">{t(problem)}</p>}
       <div className="dialog-actions">

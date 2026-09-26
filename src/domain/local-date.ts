@@ -80,6 +80,15 @@ export function formatDay(iso: string, locale: string, style: 'long' | 'short' =
     ? { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }
     : { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(noon(iso));
 }
+// A standalone day heading: some languages inflect the weekday inside a full date (Finnish "keskiviikkona"),
+// so the weekday and the date are formatted apart and joined by the catalog's template.
+export function dayParts(iso: string, locale: string): { weekday: string; date: string } {
+  const date = noon(iso);
+  return {
+    weekday: new Intl.DateTimeFormat(locale, { weekday: 'long', timeZone: 'UTC' }).format(date),
+    date: new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(date),
+  };
+}
 export function formatMonth(month: string, locale: string): string {
   if (!validMonth(month)) throw new Error('Invalid month');
   return new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(noon(`${month}-01`));
