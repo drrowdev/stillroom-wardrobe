@@ -85,6 +85,11 @@ export function useWardrobeBrowse(client: AppClient, scope: OwnerScope, language
   const refresh = useCallback(() => {
     if (online) void execute(true, current.current.requested);
   }, [execute, online]);
+  // A wear change makes the cached history stale; a wear-ordered list is reloaded, any other sort reads it when chosen.
+  const invalidateHistory = useCallback(() => {
+    current.current.history = null;
+    if (wearSort(current.current.sort)) refresh();
+  }, [refresh]);
   useEffect(() => {
     if (online && current.current.items === null) refresh();
   }, [online, refresh]);
@@ -120,7 +125,7 @@ export function useWardrobeBrowse(client: AppClient, scope: OwnerScope, language
     setFacets: (value: Facets) => { setFacets(value); setViewWindow({ count: 40, language }); },
     clear: () => { setQuery(''); setFacets(emptyFacets()); setViewWindow({ count: 40, language }); },
     showMore: () => setViewWindow({ count: count + 40, language }),
-    chooseSort, remove, refresh,
+    chooseSort, remove, refresh, invalidateHistory,
     retryHistory: () => { if (online) void execute(true, current.current.retry); },
   };
 }

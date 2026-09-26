@@ -40,6 +40,7 @@ const OutfitsScreen = lazyNamed(() => import('../features/outfits/outfits-screen
 const NewOutfit = lazyNamed(() => import('../features/outfits/detail'), 'NewOutfit');
 const OutfitDetail = lazyNamed(() => import('../features/outfits/detail'), 'OutfitDetail');
 const TodayScreen = lazyNamed(() => import('../features/today/today-screen'), 'TodayScreen');
+const CalendarScreen = lazyNamed(() => import('../features/calendar/calendar'), 'CalendarScreen');
 const configuration = readConfiguration(import.meta.env);
 const browserLanguages = navigator.languages;
 function Brand() {
@@ -74,10 +75,10 @@ function Unconfigured({ status }: { status: Configuration['status'] }) {
   useEffect(() => { document.documentElement.lang = language; }, [language]);
   return <EntryLayout language={language} onLanguage={setLanguage} t={t}><section className="entry-card setup-card"><div className="small-mark"><Icon name="wardrobe" /></div><h1>{t('setup.title')}</h1><p className="muted">{t(status === 'invalid' ? 'setup.invalid' : 'setup.body')}</p><details className="copy-details"><summary>{t('setup.instructions')}</summary><ol className="setup-steps"><li>{t('setup.step1')}<code>npm run db:start</code></li><li>{t('setup.step2')}<code>.env.local</code></li><li>{t('setup.step3')}</li></ol></details><p className="privacy-note"><Icon name="lock" />{t('setup.note')}</p></section></EntryLayout>;
 }
-type WorkspaceRoute = 'today' | 'wardrobe' | 'add' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | `detail:${string}` | `outfit:${string}`;
-const routeHash = { today: '#/today', wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new' };
+type WorkspaceRoute = 'today' | 'wardrobe' | 'add' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | 'calendar' | `detail:${string}` | `outfit:${string}`;
+const routeHash = { today: '#/today', wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new', calendar: '#/calendar' };
 function currentRoute(hash = location.hash): WorkspaceRoute {
-  return hash === '#/today' ? 'today' : hash === '#/items/new' ? 'add' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
+  return hash === '#/today' ? 'today' : hash === '#/calendar' ? 'calendar' : hash === '#/items/new' ? 'add' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
     : hash === '#/outfits' ? 'outfits' : hash === '#/outfits/new' ? 'outfit-new'
       : hash.startsWith('#/outfits/') ? `outfit:${hash.slice(10)}`
         : hash.startsWith('#/items/') ? `detail:${hash}` : 'wardrobe';
@@ -85,20 +86,24 @@ function currentRoute(hash = location.hash): WorkspaceRoute {
 function hashForRoute(route: WorkspaceRoute) {
   return route.startsWith('detail:') ? route.slice(7) : route.startsWith('outfit:') ? `#/outfits/${route.slice(7)}` : routeHash[route as keyof typeof routeHash];
 }
-const routeFocus: Partial<Record<WorkspaceRoute, string>> = { today: 'today-title', add: 'capture-title', settings: 'settings-title', trash: 'trash-title', outfits: 'outfits-title', 'outfit-new': 'outfit-editor-title' };
+const routeFocus: Partial<Record<WorkspaceRoute, string>> = { today: 'today-title', add: 'capture-title', settings: 'settings-title', trash: 'trash-title', outfits: 'outfits-title', 'outfit-new': 'outfit-editor-title', calendar: 'calendar-title' };
 function OwnedWardrobe({ client, config, controller, scope, profile, change, busy, unresolved, t, language, online, onRouteCommitted }: { client: AppClient; config: PublicConfig; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; unresolved: boolean; t: Translate; language: Language; online: boolean; onRouteCommitted: (family: NavFamily) => void }) {
   const [route, setRoute] = useState<WorkspaceRoute>(() => currentRoute());
   const [outfitUnresolved, setOutfitUnresolved] = useState(false);
   const [outfitsInvalidation, setOutfitsInvalidation] = useState(0);
   const [outfitNotice, setOutfitNotice] = useState<string | null>(null);
   const [outfitSeed, setOutfitSeed] = useState<{ itemIds: string[]; occasion: string } | null>(null);
+  const [calendarSeed, setCalendarSeed] = useState<{ outfitId: string } | null>(null);
   const invalidateOutfits = useCallback(() => setOutfitsInvalidation(value => value + 1), []);
   useEffect(() => {
     onRouteCommitted(navFamilyFor(route));
     setOutfitNotice(current => current !== null && route !== `outfit:${current}` ? null : current);
     if (route !== 'outfit-new') setOutfitSeed(null);
+    if (route !== 'calendar') setCalendarSeed(null);
   }, [route, onRouteCommitted]);
   const browse = useWardrobeBrowse(client, scope, language, online);
+  const invalidateHistory = browse.invalidateHistory;
+  const calendarSeedUsed = useCallback(() => setCalendarSeed(null), []);
   const refresh = browse.refresh;
   const [notice, setNotice] = useState(false);
   const [undo, setUndo] = useState<UndoItem | null>(null);
@@ -108,7 +113,9 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   const dirty = useRef({ dirty: false, incomplete: false, busy: false });
   // A route asked for while Settings is saving. It is followed once the save settles, through the normal leave guard.
   // A Back/Forward request keeps its history position so it is replayed as a traversal, not a new entry.
-  const queued = useRef<{ next: WorkspaceRoute; position?: number } | null>(null);
+  // Calendar and outfit wear writes hold navigation the same way, from their own page.
+  const queued = useRef<{ from: WorkspaceRoute; next: WorkspaceRoute; position?: number } | null>(null);
+  const writing = useRef(false);
   const [settled, setSettled] = useState(0);
   const images = useMemo(() => new PrivateImages(client, scope), [client, scope]);
   const ai = useMemo(() => new AiClient(client, config, scope), [client, config, scope]);
@@ -130,15 +137,20 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
     dirty.current = { dirty: isDirty, incomplete, busy };
     if (wasBusy && !busy && queued.current) setSettled(value => value + 1);
   }, []);
+  const onWriting = useCallback((busy: boolean) => {
+    const was = writing.current;
+    writing.current = busy;
+    if (was && !busy && queued.current) setSettled(value => value + 1);
+  }, []);
   useEffect(() => { images.activate(); return () => images.clear(); }, [images]);
   useEffect(preloadChunks, []);
   const changeRoute = useCallback((next: WorkspaceRoute) => {
     if (next === navigation.current.route) return;
-    if (dirty.current.dirty || dirty.current.busy) {
-      if (!dirty.current.busy) {
+    if (dirty.current.dirty || dirty.current.busy || writing.current) {
+      if (!dirty.current.busy && !writing.current) {
         discardFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         setDiscard({ next });
-      } else if (navigation.current.route === 'settings') queued.current = { next };
+      } else if (writing.current || navigation.current.route === 'settings') queued.current = { from: navigation.current.route, next };
       return;
     }
     queued.current = null;
@@ -154,7 +166,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       if (current.restoring) {
         if (history.state?.wardrobePosition === current.position) {
           current.restoring = false;
-          if (queued.current && !dirty.current.busy) setSettled(value => value + 1);
+          if (queued.current && !dirty.current.busy && !writing.current) setSettled(value => value + 1);
         }
         return;
       }
@@ -162,12 +174,12 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       const position = typeof history.state?.wardrobePosition === 'number' ? history.state.wardrobePosition : current.position + 1;
       if (history.state?.wardrobePosition !== position) history.replaceState({ ...history.state, wardrobePosition: position }, '', location.href);
       if (next === current.route) { current.position = position; return; }
-      if ((dirty.current.dirty || dirty.current.busy) && next !== current.route && position !== current.position) {
+      if ((dirty.current.dirty || dirty.current.busy || writing.current) && next !== current.route && position !== current.position) {
         current.restoring = true;
-        if (!dirty.current.busy) {
+        if (!dirty.current.busy && !writing.current) {
           discardFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
           setDiscard({ next, position });
-        } else if (current.route === 'settings') queued.current = { next, position };
+        } else if (writing.current || current.route === 'settings') queued.current = { from: current.route, next, position };
         history.go(current.position - position);
         return;
       }
@@ -196,9 +208,9 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   }, [changeRoute]);
   useEffect(() => {
     const request = queued.current;
-    if (!request || dirty.current.busy || navigation.current.restoring || scope.signal.aborted) return;
+    if (!request || dirty.current.busy || writing.current || navigation.current.restoring || scope.signal.aborted) return;
     queued.current = null;
-    if (navigation.current.route !== 'settings') return;
+    if (navigation.current.route !== request.from) return;
     if (request.position === undefined) changeRoute(request.next);
     else if (dirty.current.dirty) {
       discardFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -262,7 +274,10 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           : route === 'outfits' ? <OutfitsScreen client={client} scope={scope} invalidation={outfitsInvalidation} images={images} online={online} language={language} t={t}
             onCreate={() => changeRoute('outfit-new')} onAddItem={() => changeRoute('add')} />
           : route === 'outfit-new' ? <NewOutfit key={outfitSeed ? outfitSeed.itemIds.join('|') : 'blank'} {...outfitProps} initial={outfitSeed ?? undefined} />
-          : route.startsWith('outfit:') ? <OutfitDetail key={route} {...outfitProps} id={outfitRouteId(route.slice(7))} />
+          : route.startsWith('outfit:') ? <OutfitDetail key={route} {...outfitProps} id={outfitRouteId(route.slice(7))} timeZone={profile.timezone}
+            onPlan={outfitId => { setCalendarSeed({ outfitId }); changeRoute('calendar'); }} onWorn={invalidateHistory} onWriting={onWriting} />
+          : route === 'calendar' ? <CalendarScreen client={client} scope={scope} online={online} language={language} t={t} timeZone={profile.timezone}
+            invalidation={outfitsInvalidation} seed={calendarSeed} onSeedUsed={calendarSeedUsed} onChanged={invalidateHistory} onWriting={onWriting} />
           : route === 'today' ? <TodayScreen client={client} scope={scope} images={images} online={online} language={language} t={t}
             timeZone={profile.timezone} invalidation={outfitsInvalidation} weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')} onTurnOnWeather={() => { weatherFocus.current = true; }}
             onSave={(itemIds, occasion) => { setOutfitSeed({ itemIds, occasion }); changeRoute('outfit-new'); }} />
@@ -342,6 +357,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
         <a className={`nav-link${navFamily === 'today' ? ' active-nav' : ''}`} aria-current={navFamily === 'today' ? 'page' : undefined} href="#/today"><Icon name="today" />{t('nav.today')}</a>
         <a className={`nav-link${navFamily === 'wardrobe' ? ' active-nav' : ''}`} aria-current={navFamily === 'wardrobe' ? 'page' : undefined} href="#/wardrobe"><Icon name="wardrobe" />{t('nav.wardrobe')}</a>
         <a className={`nav-link${navFamily === 'outfits' ? ' active-nav' : ''}`} aria-current={navFamily === 'outfits' ? 'page' : undefined} href="#/outfits"><Icon name="outfits" />{t('nav.outfits')}</a>
+        <a className={`nav-link${navFamily === 'calendar' ? ' active-nav' : ''}`} aria-current={navFamily === 'calendar' ? 'page' : undefined} href="#/calendar"><Icon name="calendar" />{t('nav.calendar')}</a>
       </nav><div className="account-controls"><button type="button" className="account-button" aria-expanded={menu} aria-label={t('account.menu')} onClick={() => setMenu(!menu)}><span className="avatar">{state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)}</span><span>{state.profile.display_name}</span><Icon name="chevron" /></button>{menu && <div className="account-popover"><a className="text-button" href="#/settings" onClick={() => setMenu(false)}>{t('nav.settings')}</a><a className="text-button" href="#/trash" onClick={() => setMenu(false)}>{t('nav.trash')}</a><LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} /><button className="text-button" type="button" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div>}</div></header>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online || state.profileSaving} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}
       <UpdatePrompt t={t} />

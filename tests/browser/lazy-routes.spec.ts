@@ -29,6 +29,7 @@ const routes = [
   { name: 'Today', hash: '#/today', heading: '#today-title' },
   { name: 'Outfits', hash: '#/outfits', heading: '#outfits-title' },
   { name: 'New outfit', hash: '#/outfits/new', heading: '#outfit-editor-title' },
+  { name: 'Calendar', hash: '#/calendar', heading: '#calendar-title' },
   { name: 'Settings', hash: '#/settings', heading: '#settings-title' },
   { name: 'Trash', hash: '#/trash', heading: '#trash-title' },
   { name: 'Add item', hash: '#/items/new', heading: '#capture-title' },

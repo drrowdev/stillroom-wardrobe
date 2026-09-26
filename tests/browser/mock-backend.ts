@@ -542,6 +542,9 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   // Scripts the next outfit save or outfit reads: lost replies, commits whose reply is lost, and failed rereads.
   const outfitControl: { nextSave: null | { mode: 'lost' | 'committedLost' | 'transport' } | { mode: 'error'; status: number; body: unknown };
     readFailures: number; readFailureStatus: number; saves: number } = { nextSave: null, readFailures: 0, readFailureStatus: 500, saves: 0 };
+  // Scripts the next calendar save or removal: a lost reply, a commit whose reply is lost, or a scripted error.
+  const wearControl: { next: null | { mode: 'lost' | 'committedLost' } | { mode: 'error'; status: number; body: unknown }; saves: number; patches: number; now: Date | null }
+    = { next: null, saves: 0, patches: 0, now: null };
   const preferences: Record<string, JsonRow> = Object.fromEntries(Object.values(owners).map((owner) => [owner, {
     owner_id: owner, version: 1, preferred_colours: [], style_tags: [], excluded_categories: [],
     minimum_upper_coverage: 0, minimum_lower_coverage: 0, cold_sensitivity: 0, repeat_gap_days: 2,
@@ -1231,6 +1234,95 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (script?.mode === 'committedLost') { await json({ message: 'Service unavailable' }, 503); return; }
       await json(version); return;
     }
+    if (url.pathname === '/rest/v1/rpc/save_wear_event') {
+      wearControl.saves++;
+      const body = request.postDataJSON() as JsonRow;
+      const script = wearControl.next;
+      wearControl.next = null;
+      if (script?.mode === 'lost') { await json({ message: 'Service unavailable' }, 503); return; }
+      if (script?.mode === 'error') { await json(script.body, script.status); return; }
+      const keys = Object.keys(body).sort().join(',');
+      const create = 'p_id,p_item_ids,p_label,p_local_date,p_outfit_id,p_state,p_timezone', edit = `p_expected_version,${create}`;
+      if (!owner || method !== 'POST' || keys !== create && keys !== edit) { await json({ code: '42501', message: 'Not available' }, 403); return; }
+      const ids = body.p_item_ids;
+      const conflict = () => json({ code: 'P0001', message: 'Request conflict' }, 400);
+      if (!Array.isArray(ids) || !ids.length || ids.length > 12 || new Set(ids).size !== ids.length
+        || ids.some(value => !items.some(item => item.id === value && item.owner_id === owner && item.deleted_at === null))) {
+        await json({ code: 'P0001', message: 'Invalid selection' }, 400); return;
+      }
+      if (!isUuid(body.p_id) || typeof body.p_label !== 'string' || !body.p_label || typeof body.p_local_date !== 'string'
+        || !['planned', 'worn'].includes(String(body.p_state)) || body.p_timezone !== 'Europe/Helsinki') { await json({ code: '23514', message: 'Invalid input' }, 400); return; }
+      if (body.p_outfit_id !== null && !outfits.some(row => row.owner_id === owner && row.id === body.p_outfit_id)) {
+        await json({ code: '23503', message: 'foreign key violation' }, 409); return;
+      }
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Helsinki' }).format(wearControl.now ?? new Date());
+      if (body.p_state === 'worn' && body.p_local_date > today) { await json({ code: 'P0001', message: 'A future plan cannot count as worn' }, 400); return; }
+      const existing = wearEvents.find(row => row.id === body.p_id);
+      if (existing && existing.owner_id !== owner) { await conflict(); return; }
+      const linked = (id: unknown) => wearLinks.filter(link => link.event_id === id && link.item_id !== null).map(link => String(link.item_id)).sort();
+      const fields = { local_date: body.p_local_date, timezone: body.p_timezone, state: body.p_state, label: body.p_label, outfit_id: body.p_outfit_id };
+      let version: number;
+      if (keys === create && existing) {
+        const same = Object.entries(fields).every(([key, value]) => existing[key] === value) && existing.deleted_at === null
+          && linked(existing.id).join(',') === [...ids].map(String).sort().join(',');
+        if (!same) { await conflict(); return; }
+        version = Number(existing.version);
+      } else {
+        if (keys === edit && (!existing || existing.deleted_at !== null || existing.version !== body.p_expected_version)) { await conflict(); return; }
+        const now = new Date().toISOString();
+        let row = existing;
+        if (row) Object.assign(row, fields, { version: Number(row.version) + 1, updated_at: now });
+        else { row = { id: body.p_id, owner_id: owner, ...fields, deleted_at: null, version: 1, created_at: now, updated_at: now }; wearEvents.push(row); }
+        for (let i = wearLinks.length - 1; i >= 0; i--) {
+          const link = wearLinks[i]!;
+          if (link.event_id === row.id && link.item_id !== null && !ids.includes(link.item_id)) wearLinks.splice(i, 1);
+        }
+        for (const itemId of ids) {
+          if (wearLinks.some(link => link.event_id === row.id && link.item_id === itemId)) continue;
+          const item = items.find(value => value.id === itemId)!;
+          wearLinks.push({ id: randomUUID(), owner_id: owner, event_id: row.id, item_id: itemId, title_snapshot: item.title, category_snapshot: item.category });
+        }
+        version = Number(row.version);
+      }
+      if (script?.mode === 'committedLost') { await json({ message: 'Service unavailable' }, 503); return; }
+      await json(version); return;
+    }
+    const lookColumns = 'id,owner_id,outfit_id,local_date,timezone,state,label,deleted_at,version,created_at,'
+      + 'wear_event_items!wear_event_items_owner_id_event_id_fkey(id,owner_id,event_id,item_id,title_snapshot,category_snapshot)';
+    const lookRow = (row: JsonRow) => ({
+      ...Object.fromEntries('id,owner_id,outfit_id,local_date,timezone,state,label,deleted_at,version,created_at'.split(',').map(key => [key, row[key] ?? null])),
+      wear_event_items: wearLinks.filter(link => link.event_id === row.id && link.owner_id === row.owner_id).map(link => ({
+        id: link.id, owner_id: link.owner_id, event_id: link.event_id, item_id: link.item_id, title_snapshot: link.title_snapshot, category_snapshot: link.category_snapshot })),
+    });
+    if (url.pathname === '/rest/v1/wear_events' && owner && method === 'GET' && url.searchParams.get('select') === lookColumns) {
+      if (url.searchParams.get('owner_id') !== `eq.${owner}`) { await json({ code: '42501' }, 403); return; }
+      const id = url.searchParams.get('id');
+      if (id) {
+        const found = wearEvents.filter(row => row.owner_id === owner && `eq.${row.id}` === id).map(lookRow);
+        await json(request.headers().accept?.includes('vnd.pgrst.object') ? found[0] ?? null : found); return;
+      }
+      const range = url.searchParams.getAll('local_date');
+      const first = range.find(value => value.startsWith('gte.'))?.slice(4), last = range.find(value => value.startsWith('lte.'))?.slice(4);
+      if (!first || !last || url.searchParams.get('deleted_at') !== 'is.null' || url.searchParams.get('order') !== 'local_date.asc,id.asc'
+        || url.searchParams.get('limit') !== '500' || url.searchParams.has('or')) { await json({ code: '42501' }, 403); return; }
+      await json(wearEvents.filter(row => row.owner_id === owner && row.deleted_at === null && String(row.local_date) >= first && String(row.local_date) <= last)
+        .sort((a, b) => String(a.local_date).localeCompare(String(b.local_date)) || String(a.id).localeCompare(String(b.id))).map(lookRow)); return;
+    }
+    if (url.pathname === '/rest/v1/wear_events' && owner && method === 'PATCH') {
+      wearControl.patches++;
+      const script = wearControl.next;
+      wearControl.next = null;
+      if (script?.mode === 'lost') { await json({ message: 'Service unavailable' }, 503); return; }
+      if (script?.mode === 'error') { await json(script.body, script.status); return; }
+      const body = request.postDataJSON() as JsonRow;
+      const id = url.searchParams.get('id'), version = url.searchParams.get('version');
+      if (!sameValue(Object.keys(body), ['deleted_at']) || url.searchParams.get('owner_id') !== `eq.${owner}` || !id?.startsWith('eq.') || !version?.startsWith('eq.')
+        || url.searchParams.get('select') !== 'id,owner_id,version,deleted_at') { await json({ code: '42501' }, 403); return; }
+      const matched = wearEvents.filter(row => row.owner_id === owner && `eq.${row.id}` === id && `eq.${row.version}` === version);
+      for (const row of matched) Object.assign(row, { deleted_at: body.deleted_at, version: Number(row.version) + 1, updated_at: new Date().toISOString() });
+      if (script?.mode === 'committedLost') { await json({ message: 'Service unavailable' }, 503); return; }
+      await json(matched.map(row => ({ id: row.id, owner_id: row.owner_id, version: row.version, deleted_at: row.deleted_at }))); return;
+    }
     if (url.pathname === '/rest/v1/wear_events' && owner) {
       if (method === 'POST') {
         const body = request.postDataJSON() as JsonRow;
@@ -1523,7 +1615,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, holdFeedbackReads, outfitControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, holdFeedbackReads, outfitControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

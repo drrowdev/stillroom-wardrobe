@@ -240,6 +240,19 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Preserve bounded synthetic I12 visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: i12-calendar-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/i12-visual/month-en-desktop.png
+            test-results/i12-visual/day-looks-en-desktop.png
+            test-results/i12-visual/agenda-fi-mobile.png
+            test-results/i12-visual/plan-sv-mobile.png
+            test-results/i12-visual/month-fi-320-200.png
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Preserve bounded synthetic P6a visual evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
