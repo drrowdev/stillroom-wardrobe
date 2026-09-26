@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -697,7 +698,7 @@ export function ownAnalysisProcess(child, lifetimeMs = 600_000, startupMs = 60_0
     };
   }
 
-export async function probeAnalysisHandler(transport = fetch, timeout = 2000) {
+export async function probeAnalysisHandler(transport = closingFetch, timeout = 2000) {
   if (!Number.isSafeInteger(timeout) || timeout <= 0) throw new AnalysisStartupError('deadline');
   const response = await transport(`${LOCAL_API}/functions/v1/analyze-clothing`, {
     method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'POST' },
@@ -716,7 +717,7 @@ export async function probeAnalysisHandler(transport = fetch, timeout = 2000) {
 // Every served function besides analyze-clothing. Each worker must answer its own preflight before "ready".
 export const WARM_FUNCTIONS = Object.freeze(['finalize-analyzed-item', 'finalize-image-change', 'delete-account']);
 
-export async function probeServedFunction(name, transport = fetch, timeout = 2000) {
+export async function probeServedFunction(name, transport = closingFetch, timeout = 2000) {
   if (!WARM_FUNCTIONS.includes(name)) throw new AnalysisStartupError('reader-failed');
   if (!Number.isSafeInteger(timeout) || timeout <= 0) throw new AnalysisStartupError('deadline');
   const response = await transport(`${LOCAL_API}/functions/v1/${name}`, {
@@ -740,7 +741,7 @@ function transientWarmFailure(error) {
   } catch { return false; }
 }
 
-export async function warmServedFunctions(owned, deadline, transport = fetch, pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
+export async function warmServedFunctions(owned, deadline, transport = closingFetch, pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
   const started = Date.now();
   const evidence = { functions: 0, attempts: 0, elapsedMs: 0, reason: 'ready', lastStatus: null };
   let current = WARM_FUNCTIONS[0];
@@ -782,6 +783,137 @@ export async function warmServedFunctions(owned, deadline, transport = fetch, pa
   }
 }
 
+// Readiness, warm-up and settle probes each use a fresh connection that is closed afterwards, so none of them leaves
+// a pooled keep-alive socket behind for the next request. Failures are shaped like fetch's own transport errors.
+export function closingFetch(url, { method = 'GET', headers = {}, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(signal.reason); return; }
+    const request = http.request(url, { method, headers, agent: false, signal }, (response) => {
+      const values = new Headers();
+      for (const [name, value] of Object.entries(response.headers)) {
+        if (value !== undefined) values.set(name, Array.isArray(value) ? value.join(', ') : value);
+      }
+      response.on('error', () => {});
+      response.resume();
+      resolve({ status: response.statusCode ?? 0, headers: values, body: { cancel: async () => { response.destroy(); } } });
+    });
+    request.on('error', (error) => reject(signal?.aborted ? signal.reason
+      : Object.assign(new TypeError('fetch failed'), { cause: { code: typeof error?.code === 'string' ? error.code : 'UNKNOWN' } })));
+    request.end();
+  });
+}
+
+// True only when fetch failed before any response because the connection was closed or reset.
+export function failedBeforeResponse(error) {
+  try {
+    return error instanceof TypeError && error.message === 'fetch failed'
+      && ['UND_ERR_SOCKET', 'ECONNRESET'].includes(error.cause?.code);
+  } catch { return false; }
+}
+
+// Repeats an operation only after a connection closed or reset before any response, at most `attempts` times.
+// A response of any status, or any other failure, is returned or thrown at once.
+export async function retryBeforeResponse(operation, attempts = 3) {
+  for (let attempt = 1; ; attempt++) {
+    try { return await operation(); }
+    catch (error) { if (attempt >= attempts || !failedBeforeResponse(error)) throw error; }
+  }
+}
+
+// `supabase functions serve` reloads Kong after it starts the runtime. The reload's old nginx workers close their
+// idle keep-alive connections, so a request right after readiness can meet a socket the gateway is closing. The
+// reload is observed through Kong's worker processes: it is done once no worker is draining and none is from before.
+const KONG_CONTAINER = `supabase_kong_${PROJECT_ID}`;
+export function parseKongWorkers(stdout) {
+  if (typeof stdout !== 'string' || Buffer.byteLength(stdout) > 16384) return null;
+  const lines = stdout.split(/\r?\n/).filter((line) => line.trim() !== '');
+  if (!/^\s*PID\s+/.test(lines[0] ?? '')) return null;
+  const workers = [];
+  let draining = 0;
+  for (const line of lines.slice(1)) {
+    const match = /^\s*(\d{1,10})\s+(.+?)\s*$/.exec(line);
+    if (!match) return null;
+    if (!match[2].startsWith('nginx: worker process')) continue;
+    if (match[2].includes('is shutting down')) draining++; else workers.push(match[1]);
+  }
+  return workers.length || draining ? { workers, draining } : null;
+}
+export async function readKongWorkers(deadline, run = runCommand) {
+  let result;
+  try {
+    result = await run('docker', ['top', KONG_CONTAINER, '-o', 'pid,args'],
+      { timeout: Math.min(startupRemaining(deadline), 5000), maxOutputBytes: 16384 });
+  } catch (error) {
+    if (error instanceof AnalysisStartupError) throw error;
+    return null;
+  }
+  return result?.code === 0 ? parseKongWorkers(result.stdout) : null;
+}
+export function kongReloaded(before, now) {
+  return now !== null && now.draining === 0 && now.workers.length > 0 && now.workers.every((pid) => !before.workers.includes(pid));
+}
+export async function probeAuthHealth(key, transport = closingFetch, timeout = 2000) {
+  if (!Number.isSafeInteger(timeout) || timeout <= 0) throw new AnalysisStartupError('deadline');
+  const response = await transport(`${LOCAL_API}/auth/v1/health`, {
+    method: 'GET', headers: { apikey: key }, redirect: 'error', signal: AbortSignal.timeout(Math.min(timeout, 2000)),
+  });
+  await response.body?.cancel();
+  return response.status;
+}
+
+// Waits up to 15 s for the observed Kong reload, then for three consecutive healthy Auth answers 250 ms apart
+// through the gateway. Only a closed, reset or refused connection, this probe's own timeout and a gateway 502/503
+// are waited through; anything else, or the deadline, fails closed. When the workers cannot be read, or no reload
+// is seen within the bound (the CLI's reload is best-effort), the healthy answers alone are a timing heuristic.
+const RELOAD_WAIT_MS = 15_000;
+export async function settleGateway(owned, deadline, { before, key, readWorkers = readKongWorkers, transport = closingFetch,
+  pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
+  const started = Date.now();
+  const evidence = { reload: before === null ? 'unobserved' : 'pending', attempts: 0, socketErrors: 0, elapsedMs: 0,
+    reason: 'ready', lastStatus: null };
+  let healthy = 0;
+  try {
+    for (;;) {
+      startupRemaining(deadline); owned.assertRunning();
+      if (evidence.reload === 'pending') {
+        const now = await readWorkers(deadline);
+        if (now === null) evidence.reload = 'unobserved';
+        else if (kongReloaded(before, now)) evidence.reload = 'observed';
+        else if (Date.now() - started >= RELOAD_WAIT_MS) evidence.reload = 'not-seen';
+        else { await pause(Math.min(250, startupRemaining(deadline))); continue; }
+      }
+      evidence.attempts++;
+      let status = null;
+      try {
+        status = await probeAuthHealth(key, transport, Math.min(startupRemaining(deadline), 2000));
+        evidence.lastStatus = Number.isInteger(status) && status >= 100 && status <= 599 ? status : 0;
+      } catch (error) {
+        evidence.lastStatus = 'transport';
+        if (error instanceof AnalysisStartupError) throw error;
+        if (!transientWarmFailure(error)) throw new AnalysisStartupError('transport-other');
+        evidence.socketErrors++;
+      }
+      owned.assertRunning();
+      if (status === 200) {
+        if (++healthy >= 3) return;
+      } else {
+        healthy = 0;
+        if (status !== null && ![502, 503].includes(status)) {
+          throw new AnalysisStartupError(`status-${Number.isInteger(status) && status >= 100 && status <= 599 ? `${Math.floor(status / 100)}xx` : 'other'}`);
+        }
+      }
+      await pause(Math.min(250, startupRemaining(deadline)));
+    }
+  } catch (error) {
+    const reason = error instanceof AnalysisStartupError ? error.reason : 'reader-failed';
+    evidence.reason = `gateway-${reason}`;
+    throw new AnalysisStartupError(evidence.reason);
+  } finally {
+    evidence.elapsedMs = Math.max(0, Math.min(60_000, Date.now() - started));
+    try { console.log('B1-GATEWAY ' + JSON.stringify(evidence)); } catch { /* Evidence cannot change readiness. */ }
+  }
+}
+
 // Fixed, content-free step and cause codes for rehearsal failures. Anything outside the lists prints as "other".
 export const PROBE_STEPS = Object.freeze([
   'server-start', 'server-running', 'fixture', 'child',
@@ -800,7 +932,7 @@ const STARTUP_REASONS = ['deadline', 'reader-failed', 'reader-ambiguous', 'ident
 export const PROBE_CAUSES = Object.freeze([
   ...PROBE_HTTP.map((status) => `http-${status}`), 'http-4xx', 'http-5xx', 'http-other',
   'transport-timeout', 'transport-aborted', 'transport-refused', 'transport-reset', 'transport-socket', 'transport-failed',
-  'unexpected-body', 'assert', ...STARTUP_REASONS.map((reason) => `startup-${reason}`), 'startup-warm', 'other',
+  'unexpected-body', 'assert', ...STARTUP_REASONS.map((reason) => `startup-${reason}`), 'startup-warm', 'startup-gateway', 'other',
 ]);
 const PROBE_LINE = /^PROBE-REASON ([a-z0-9-]{1,48}) ([a-z0-9-]{1,48})$/;
 let probeState = { step: null, cause: null };
@@ -821,6 +953,7 @@ export function probeErrorCause(error) {
   try {
     if (error instanceof AnalysisStartupError) {
       if (typeof error.reason === 'string' && error.reason.startsWith('warm-')) return 'startup-warm';
+      if (typeof error.reason === 'string' && error.reason.startsWith('gateway-')) return 'startup-gateway';
       return STARTUP_REASONS.includes(error.reason) ? `startup-${error.reason}` : 'other';
     }
     if (error instanceof Error && error.message === 'EVIDENCE_REQUIRED') return 'assert';
@@ -962,7 +1095,7 @@ export async function readAnalysisRuntime(deadline, run = runCommand) {
   }
 }
 
-export async function waitForAnalysisHandler(owned, { deadline, spawnedAt, previous, readRuntime = readAnalysisRuntime }, transport = fetch) {
+export async function waitForAnalysisHandler(owned, { deadline, spawnedAt, previous, readRuntime = readAnalysisRuntime }, transport = closingFetch) {
   const evidence = { replacement: false, running: false, fresh: false, stable: false,
     elapsedMs: 0, reason: 'deadline', lastHttp: null, transportFailure: false };
   let waitingReason = previous === null ? 'absent-no-replacement' : 'identity-unchanged';
@@ -1062,6 +1195,7 @@ export async function startAnalysisServer() {
     const require = createRequire(import.meta.url);
     const packagePath = require.resolve('supabase/package.json');
     const pkg = JSON.parse(await readFile(packagePath, 'utf8'));
+    const { key } = await localStatus();
     const deadline = Date.now() + 60_000;
     let previous;
     try { previous = await readAnalysisRuntime(deadline); }
@@ -1073,6 +1207,8 @@ export async function startAnalysisServer() {
       } catch { /* Evidence cannot replace the primary failure. */ }
       throw new AnalysisStartupError(error instanceof AnalysisStartupError ? error.reason : 'reader-failed');
     }
+    // Kong's workers before serve starts, to observe the reload that serve triggers afterwards.
+    const kongBefore = await readKongWorkers(deadline);
     const spawnedAt = Date.now();
     startupRemaining(deadline);
     const child = spawn(process.execPath, [path.join(path.dirname(packagePath), pkg.bin.supabase),
@@ -1083,6 +1219,7 @@ export async function startAnalysisServer() {
     try {
       await waitForAnalysisHandler(owned, { deadline, spawnedAt, previous });
       await warmServedFunctions(owned, deadline);
+      await settleGateway(owned, deadline, { before: kongBefore, key });
       return owned;
     } catch (error) {
       await owned.stop();

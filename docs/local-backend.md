@@ -973,6 +973,24 @@ number of attempts, the elapsed time, the reason and the last status. Before
 this step, the first real request to a function that had not booted yet raced
 its worker startup.
 
+`supabase functions serve` reloads Kong after it starts the runtime, and the
+reload's old nginx workers close their idle keep-alive connections. So the
+server is also not returned until the gateway has settled. Kong's worker
+process IDs are read with `docker top` before serve starts; startup waits up
+to 15 seconds for every worker to be new and none to be shutting down. It then
+needs three consecutive 200 answers from `/auth/v1/health`, 250 ms apart,
+within the same deadline. Closed, reset or refused connections, the probe's own
+timeout and gateway 502/503 answers restart the count; any other answer fails
+at once as `gateway-status-<class>`. If the workers cannot be read or no reload
+is seen, the healthy answers alone are a timing heuristic. One `B1-GATEWAY`
+line records whether the reload was `observed`, `not-seen` or `unobserved`,
+the attempts, the socket errors, the elapsed time, the reason and the last
+status. The readiness, warm-up and settle probes each use a fresh connection
+that is closed afterwards, so they leave no pooled socket for the next request.
+The normal-session password sign-in shared by COL1, I10b and B2 retries, at
+most three times in total, only when the connection closed or reset
+(`UND_ERR_SOCKET`, `ECONNRESET`) before any response; any answer is final.
+
 Rehearsal failures keep their existing `FAIL:` prefixes and add
 `; step=<step>; cause=<cause>` from fixed lists (`PROBE_STEPS`, `PROBE_CAUSES`
 in `scripts/backend/local.mjs`). Any other value prints as `other`. Causes are

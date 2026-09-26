@@ -135,9 +135,12 @@ describe('served-function warm-up', () => {
     await expect(probeServedFunction('analyze-clothing', vi.fn<typeof fetch>())).rejects.toMatchObject({ reason: 'reader-failed' });
   });
 
-  it('starts the warm-up only after the analyzer readiness gate and before returning the server', async () => {
+  it('starts the warm-up only after the analyzer readiness gate and settles the gateway before returning the server', async () => {
     const source = await readFile(path.join(ROOT, 'scripts', 'backend', 'local.mjs'), 'utf8');
-    expect(source).toContain('await waitForAnalysisHandler(owned, { deadline, spawnedAt, previous });\n      await warmServedFunctions(owned, deadline);\n      return owned;');
+    expect(source).toContain('await waitForAnalysisHandler(owned, { deadline, spawnedAt, previous });\n      await warmServedFunctions(owned, deadline);\n      await settleGateway(owned, deadline, { before: kongBefore, key });\n      return owned;');
+    const start = source.slice(source.indexOf('export async function startAnalysisServer('));
+    expect(start.indexOf('const kongBefore = await readKongWorkers(deadline);')).toBeGreaterThan(0);
+    expect(start.indexOf('const kongBefore = await readKongWorkers(deadline);')).toBeLessThan(start.indexOf('const child = spawn('));
   });
 });
 
