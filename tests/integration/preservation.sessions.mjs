@@ -5,7 +5,7 @@ import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
   ROOT, PROJECT_ID, MIGRATION_HASH, TEST_EMAILS, validateSessionEnvironment, assertLocalApi, jwtClaims,
-  probeCause, probeHttpCause,
+  probeCause, probeHttpCause, retryBeforeResponse,
 } from '../../scripts/backend/local.mjs';
 import { isMain } from '../../scripts/quality/files.mjs';
 
@@ -374,9 +374,10 @@ export function normalClient(env, phaseSignal) {
     return result.data[0];
   };
   const signIn = async (label) => {
-    const login = await request(null, '/auth/v1/token?grant_type=password', {
+    // Only a connection closed or reset before any response is retried; any answer is final.
+    const login = await retryBeforeResponse(() => request(null, '/auth/v1/token?grant_type=password', {
       method: 'POST', body: { email: env[`TEST_${label}_EMAIL`], password: env[`TEST_${label}_PASSWORD`] },
-    });
+    }));
     requireEvidence(login.ok && record(login.data) && typeof login.data.access_token === 'string');
     const token = login.data.access_token;
     const user = await request(token, '/auth/v1/user');
