@@ -172,7 +172,11 @@ describe('restore-own run', () => {
     expect((await run([backup, '--local', origin, '--yes'], invalid)).stderr).toContain('(invalid)');
     const wrong = world({ preflight: async () => { throw Object.assign(new Error('x'), { messageKey: 'restore.wrong' }); } });
     expect((await run([backup, '--local', origin, '--yes'], wrong)).stderr).toContain('(passphrase)');
-    for (const w of [missing, sandbox, invalid, wrong]) expect(w.fetchImpl).not.toHaveBeenCalled();
+    const garment = world({ preflight: async () => { throw Object.assign(new Error('x'), { messageKey: 'restore.invalidGarment', item: 2, total: 5 }); } });
+    const refused = await run([backup, '--local', origin, '--yes'], garment);
+    expect(refused.code).toBe(EXIT.refused);
+    expect(refused.stderr).toContain('Restore refused (garment). This backup can\'t be restored: garment 2 of 5 has details that can\'t be saved. Nothing was changed.');
+    for (const w of [missing, sandbox, invalid, wrong, garment]) expect(w.fetchImpl).not.toHaveBeenCalled();
     expect(invalid.closed).toHaveBeenCalled();
   });
 

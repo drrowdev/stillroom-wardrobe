@@ -108,6 +108,7 @@ function engineProblem(error, guard) {
   const key = error?.messageKey;
   if (key === 'restore.wrong') return 'passphrase';
   if (key === 'restore.invalid') return 'invalid';
+  if (key === 'restore.invalidGarment') return 'garment';
   if (key === 'restore.missing') return 'missing';
   if (key === 'restore.tooLarge') return 'tooLarge';
   if (error?.name === 'BackupFormatError') return { passphrase: 'passphrase', incomplete: 'missing', tooLarge: 'tooLarge' }[error.problem] ?? 'invalid';
@@ -241,6 +242,8 @@ export async function runRestoreOwn(deps) {
     if (problem === 'unavailable' && !context.guard.owner) problem = 'unreachable';
     const message = problem === 'images' && code === EXIT.retry
       ? 'Photos couldn\'t be checked: Chromium stopped. Completed changes remain. Run the same command again to continue.'
+      // Only the garment's position is reported, never its title or ID.
+      : problem === 'garment' ? `This backup can't be restored: garment ${failure.item} of ${failure.total} has details that can't be saved. Nothing was changed.`
       : `${MESSAGES[problem] ?? MESSAGES.unavailable}${failure?.detail ?? ''}`;
     say(`Restore ${code === EXIT.refused ? 'refused' : 'incomplete'} (${problem}). ${message}`);
     return code;

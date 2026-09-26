@@ -53,6 +53,13 @@ export type PhotoOutcome = { sourceImageId: string; planned: Pick<PhotoPlan, 'ma
 export type RestoreResult = { restored: number; same: number; conflicts: number; trash: number; failed: number; blocked: number; deferred: number;
   outfits: number; outfitConflicts: number; history: number; historyConflicts: number; photos: PhotoOutcome[] };
 
+/** A garment row in the backup that the restore couldn't write. Only its position is kept, never its content or ID. */
+export class RestoreGarmentError extends AppError {
+  readonly item: number;
+  readonly total: number;
+  constructor(item: number, total: number) { super('restore.invalidGarment'); this.item = item; this.total = total; this.name = 'RestoreGarmentError'; }
+}
+
 /** A backup photo changed or failed its checks after Check: the whole restore stops, and the backup must be checked again. */
 export class RestoreRecheckError extends Error {
   constructor() { super('restore.recheck'); this.name = 'RestoreRecheckError'; }
@@ -181,6 +188,12 @@ export async function preflightBackup(files: readonly BackupFile[], passphrase: 
     backup = await readBackup(source, passphrase, checkJpeg);
   } catch (error) { if (isAborted(error)) throw error; return readProblem(error); }
   throwIfAborted(signal);
+  // Every garment exactly as the restore would write it: one that can't be written refuses the whole backup here, so
+  // nothing is decoded, read from the account or written.
+  const items = backup.data.items;
+  items.forEach((item, index) => {
+    try { restoredFields(item); } catch { throw new RestoreGarmentError(index + 1, items.length); }
+  });
   // Every photo's structure passed while reading; only now is any photo decoded.
   const sizes = new Map(backup.data.items.flatMap(item => item.photos.map(photo => [photo.sourceId, photo] as const)));
   const photos = new Map<string, PhotoPlan>();

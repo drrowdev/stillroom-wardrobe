@@ -436,6 +436,7 @@
   "restore.checking": {"en":"Checking the backup…","fi":"Tarkistetaan varmuuskopiota…","sv":"Kontrollerar säkerhetskopian …"},
   "restore.wrong": {"en":"Wrong passphrase.","fi":"Väärä tunnuslause.","sv":"Fel lösenfras."},
   "restore.invalid": {"en":"These files aren't a Stillroom backup, or they're damaged.","fi":"Nämä tiedostot eivät ole Stillroom-varmuuskopio, tai ne ovat vioittuneet.","sv":"Filerna är inte en säkerhetskopia från Stillroom, eller så är de skadade."},
+  "restore.invalidGarment": {"en":"This backup can't be restored: garment {item} of {total} has details that can't be saved. Nothing was changed.","fi":"Varmuuskopiota ei voi palauttaa: vaatteessa {item}/{total} on tietoja, joita ei voi tallentaa. Mitään ei muutettu.","sv":"Säkerhetskopian kan inte återställas: plagg {item} av {total} har uppgifter som inte kan sparas. Ingenting ändrades."},
   "restore.missing": {"en":"Some parts of this backup are missing. Choose all of its files.","fi":"Varmuuskopiosta puuttuu osia. Valitse sen kaikki tiedostot.","sv":"Delar av säkerhetskopian saknas. Välj alla dess filer."},
   "restore.tooLarge": {"en":"These files are too large to restore.","fi":"Nämä tiedostot ovat liian suuria palautettaviksi.","sv":"Filerna är för stora för att återställas."},
   "restore.madeOn": {"en":"Made on {date}","fi":"Tehty {date}","sv":"Skapad {date}"},

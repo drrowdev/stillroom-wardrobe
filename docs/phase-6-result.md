@@ -191,6 +191,13 @@ Owner decision Q6 (PR #54 comment 5829003129): restore keeps a backup photo's
 bytes when they pass strict checks. B1-2 plan rev1 with binding amendments
 A1-A7.
 
+- **Garment details, before any photo:** Check parses every garment exactly as
+  Restore would write it (`parseGarmentValues`, the payload and the field
+  kinds). One garment that fails refuses the whole backup before any photo is
+  decoded or the account is read, so nothing is written. The message names
+  only its position ("garment 2 of 5"), never its title or ID. The browser,
+  `restore-own` (before sign-in, exit 1) and `verify-backup --decode` share
+  this check.
 - **Before any decoder starts**, Check validates every main photo's structure
   (src/images/restore-jpeg.ts): monotonic offsets, bounds checked before
   every read, at most 512 segments and 32 scans, the main byte cap and the
