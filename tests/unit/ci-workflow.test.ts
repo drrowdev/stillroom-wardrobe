@@ -136,6 +136,16 @@ describe('CI workflow browser split', () => {
     expect(pwaConfig).not.toContain('tests/performance');
   });
 
+  it('runs the Edge runtime gate last in the database job and the deploy-artifact check in the App job', () => {
+    const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
+    expect(pkg.scripts['test:edge']).toBe('node scripts/run-local-tests.mjs edge');
+    expect(pkg.scripts['check:deploy-artifacts']).toBe('node scripts/check-deploy-artifacts.mjs');
+    expect(steps(job('database')).at(-1)).toBe('      - run: npm run test:edge\n\n');
+    expect(count(workflow, 'npm run test:edge')).toBe(1);
+    expect(job('app')).toContain('      - run: npm run check:dependencies\n      - run: npm run check:deploy-artifacts\n');
+    expect(count(workflow, 'npm run check:deploy-artifacts')).toBe(1);
+  });
+
   it('keeps the WebKit job minimal: pinned setup, no uploads, secrets, env or suppression', () => {
     const webkit = job('webkit-photo');
     expect(steps(webkit)).toEqual([

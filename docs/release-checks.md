@@ -1,7 +1,7 @@
 # Release checks
 
 Status: **partial**. This file records the automated performance budgets (I25, R21) and the gates that
-stay with the owner. The later I25/I26 security, dependency and restore checks will be added here by
+stay with the owner. It also describes the CI-only Edge runtime gate (PR-3b). The later I26 dependency and restore checks will be added here by
 their own PRs. Nothing here claims Phase 7 acceptance.
 
 ## Automated budgets
@@ -119,3 +119,63 @@ value stays reported in the job log.
 | Real-photo performance on the phone: capture, crop, re-encode and upload of a full-size camera image | R21 | Pending: owner device. |
 | Pre-save analysis latency, measured separately, with the form staying editable | R21 | Pending: owner hosted use. |
 | LCP and layout on a real phone over mobile data | R21 | Pending: owner device. |
+
+## Edge runtime gate (PR-3b, CI only)
+
+`npm run test:edge` is the last step of the **Real local Supabase** job, after the types check. It uses
+the disposable CI database only: no hosted access, no real provider credential and no paid inference.
+Every line carries one label:
+
+- **EDGE-RUNTIME / PROVIDER-DOUBLE**: the production `analyze-clothing` handler served by the stack's
+  pinned edge-runtime image, with the provider replaced only through its injected `azureTransport`. The
+  CI-only entrypoint `tests/edge-fixtures/analyze-clothing-double/index.ts` accepts only the exact pinned
+  Azure URL and forwards to the provider double; anything else is rejected and counted.
+- **EDGE-RUNTIME**: `finalize-analyzed-item`, `finalize-image-change` and `delete-account` as served by
+  the stack.
+- **HANDLER**: the existing unit tests of the handler code, not served.
+
+A `FAIL` or `BLOCKED` line, or an I17 `DELEGATED` subcase that the gate did not pass, fails the job.
+Missing evidence is BLOCKED, never a pass.
+
+How it is isolated:
+
+- A privileged controller (`scripts/edge-fixture.mjs`) runs behind the I17 CI guards and accepts only
+  closed operations (freeze/restore owner A or B, count, verify-deleted, down). The normal-session gate
+  (`tests/security/edge-runtime.sessions.mjs`) never receives credentials.
+- The fixture runtime sits on an internal network in Docker's isolated gateway mode
+  (`com.docker.network.bridge.gateway_mode_ipv4=isolated`, IPv6 off), so the bridge has no host
+  address. The controller asserts the mode, that no host interface holds a fixture-subnet address and
+  that binding the bridge gateway address fails with `EADDRNOTAVAIL`. Its only route out is a fixed-upstream gateway
+  (`tests/edge-fixtures/fixture-gateway.mjs`) to the verified stack Kong, with exact route, method and
+  header allowlists. The controller compares the gateway's effective config before activation.
+- An egress probe in the runtime's network namespace must fail to reach a canary, public TCP and Kong
+  directly, and every forbidden route class must be refused (the gateway's 403, or a parser 400 for the backslash and duplicate-Host classes) and absent from both the gateway's upstream record and Kong's log.
+  The canary must record no hit. A host canary listening on `0.0.0.0` (proven live from the host on
+  loopback and both host-held bridge gateways) and the host-published stack API must stay dark from the
+  fixture bridge gateway, `docker0`, the stack network gateway and `0.0.0.0`.
+- The stack and fixture runtimes must both run edge-runtime v1.74.3 by the digest pinned in
+  `scripts/edge-fixture.mjs`; the fixture is launched by that immutable reference and its image ID must
+  equal the stack container's.
+- `AZURE_REVIEW_EXPIRES` blocks the gate once the review date passes.
+- Owner-scoped request IDs are tested as fresh UUIDs: a foreign ID gives the same result as a new one
+  and leaves the victim unchanged.
+
+Each endpoint gets owned positive controls, then foreign-ID, anonymous and frozen-owner negatives. The
+victim's rows, object statuses and SHA-256 hashes, AI status and the relevant receipt are read with its
+own session immediately before and after every negative and must not change. Two approved accounts are
+the most the schema admits, so the `delete-account` positive deletes owner B as the final case, with a
+seeded item and image for both owners that must download first; afterwards owner A is unchanged and B's
+rows, images, objects and login are gone. Owner A's AI consent is
+left at revision 2; the CI database is discarded after the job. Restore is asserted: frozen owners are unfrozen, `ai_controls` must equal the pre-activation snapshot and no `e3b0` gate rows may remain.
+
+`npm run check:deploy-artifacts` (App job) walks the static import graph of every deployable function
+(each `[functions.*]` entry and every function directory) and fails if it reaches `tests/`, `scripts/`, a seed
+file or an edge fixture, uses a non-literal dynamic import, or if a migration or seed file contains a
+fixture marker. It parses `supabase/config.toml` with a strict subset parser that rejects anything it
+does not understand (literal or multi-line strings, quoted or dotted keys, inline or array tables,
+unknown function keys), and resolves import maps the way the runtime does: the configured `import_map`,
+else the function's `deno.json` or `deno.jsonc` (both is an error), else `functions/import_map.json`,
+including `scopes`. Keys, targets and scopes follow import-map URL rules: every scope key and every
+relative key or target is joined against the map's URL (so a bare `"sub/"` scope applies), a bare
+target is an invalid address, and a prefix match that backtracks out of its target fails. Every mapped
+target in every map file is checked.

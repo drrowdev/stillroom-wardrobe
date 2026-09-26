@@ -8,7 +8,7 @@ import { privilegedEnvironment, trackPhase } from './isolation-catalog.mjs';
 
 async function main() {
   const [suite, ...args] = process.argv.slice(2);
-  if (!['integration', 'security'].includes(suite) || args.length) fail('REFUSED: choose integration or security with no extra arguments.');
+  if (!['integration', 'security', 'edge'].includes(suite) || args.length) fail('REFUSED: choose integration, security or edge with no extra arguments.');
   assertNoServiceSecrets(process.env);
   if (process.env.ALLOW_SECURITY_TESTS !== '1') fail('NOT RUN: set ALLOW_SECURITY_TESTS=1 explicitly for disposable local tests.');
   const names = ['SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY', 'TEST_A_EMAIL', 'TEST_A_PASSWORD', 'TEST_B_EMAIL', 'TEST_B_PASSWORD'];
@@ -23,6 +23,15 @@ async function main() {
     if (!response.ok) fail('NOT RUN: the local Auth service is not healthy; no test assertions ran.');
   } catch {
     fail('NOT RUN: the local Auth service is unavailable; no test assertions ran.');
+  }
+  if (suite === 'edge') {
+    // PR-3b: the stack serves delete-account and both finalizers (EDGE-RUNTIME); the privileged controller builds
+    // the isolated fixture runtime for analyze-clothing (EDGE-RUNTIME / PROVIDER-DOUBLE).
+    let served;
+    try { served = await startAnalysisServer(); }
+    catch { console.error('FAIL: EDGE-RUNTIME stack functions could not be served'); process.exitCode = 1; return; }
+    try { process.exitCode = await edgeGate(env); } finally { await served.stop(); }
+    return;
   }
   const script = suite === 'security' ? ['security', 'rls.sessions.mjs'] : ['integration', 'local.sessions.mjs'];
   // No CLI status/admin request runs here. Only the normal-session allowlist reaches the child.
@@ -205,6 +214,61 @@ async function isolationAudit(normalEnv) {
   if (catalogCode !== 0) console.error('FAIL: I17 catalogue check failed');
   if (auditCode !== 0) console.error('FAIL: I17 normal-session isolation audit failed');
   return [catalogCode, auditCode, restoreCode].find((code) => code !== 0) ?? 0;
+}
+
+// PR-3b: one long-lived privileged controller (closed IPC operations) and one normal-session gate child.
+const EDGE_DEADLINE_MS = 14 * 60_000, EDGE_RESTORE_RESERVE_MS = 2 * 60_000;
+async function edgeGate(normalEnv) {
+  const started = Date.now(), remaining = () => EDGE_DEADLINE_MS - (Date.now() - started);
+  const controller = spawn(process.execPath, [path.join(ROOT, 'scripts', 'edge-fixture.mjs')], {
+    cwd: ROOT, env: privilegedEnvironment(process.env), shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+  });
+  const controllerClosed = new Promise((resolve) => {
+    controller.on('error', () => resolve(2));
+    controller.on('close', (value) => resolve(value ?? 2));
+  });
+  const results = new Map();
+  let gate = null, downId = null;
+  const ready = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), Math.max(1_000, remaining() - EDGE_RESTORE_RESERVE_MS));
+    controller.on('message', (message) => {
+      if (message?.type === 'ready' && typeof message.ingress === 'string') { clearTimeout(timer); resolve(message.ingress); return; }
+      if (message?.type === 'result') {
+        if (message.id === downId) { results.set('down', message); return; }
+        if (gate?.connected) gate.send(message);
+      }
+    });
+    controllerClosed.then(() => { clearTimeout(timer); resolve(null); });
+  });
+  let gateCode = 2;
+  if (ready) {
+    gate = spawn(process.execPath, [path.join(ROOT, 'tests', 'security', 'edge-runtime.sessions.mjs')], {
+      cwd: ROOT, env: normalEnv, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+    });
+    gate.on('message', (message) => { if (message?.type === 'op' && message.op !== 'down' && controller.connected) controller.send(message); });
+    gate.send({ type: 'start', ingress: ready });
+    const deadline = setTimeout(() => gate.kill(), Math.max(1_000, remaining() - EDGE_RESTORE_RESERVE_MS));
+    gateCode = await new Promise((resolve) => {
+      gate.on('error', () => resolve(2));
+      gate.on('close', (value) => resolve(value ?? 2));
+    });
+    clearTimeout(deadline);
+  } else console.error('FAIL: EDGE-RUNTIME fixture controller did not become ready');
+  // Restore (approval, AI controls, fixture teardown) always runs before this suite reports.
+  let restoreCode = 0;
+  if (controller.connected) {
+    downId = -1;
+    controller.send({ type: 'op', id: downId, op: 'down' });
+    const timer = setTimeout(() => controller.kill(), EDGE_RESTORE_RESERVE_MS);
+    await controllerClosed;
+    clearTimeout(timer);
+    if (results.get('down')?.ok !== true) { restoreCode = 1; console.error('FAIL: EDGE-RUNTIME restore was not confirmed'); }
+    for (const failure of results.get('down')?.data ?? []) console.error(`FAIL: EDGE-RUNTIME restore ${failure}`);
+  }
+  const controllerCode = await controllerClosed;
+  if (gateCode !== 0) console.error('FAIL: EDGE-RUNTIME normal-session gate failed');
+  if (controllerCode !== 0) console.error('FAIL: EDGE-RUNTIME fixture controller reported a failure');
+  return [gateCode, restoreCode, controllerCode].find((code) => code !== 0) ?? 0;
 }
 
 main().catch(reportError);

@@ -14,6 +14,7 @@ import { normalClient } from '../integration/preservation.sessions.mjs';
 import { intent, saveHarness } from '../integration/item-save.sessions.mjs';
 import { imageChangeHarness } from '../integration/image-replacement.sessions.mjs';
 import { classifyObjectDeletion } from '../../src/data/storage-delete.ts';
+import { EDGE_DELEGATIONS, delegatedLine } from './edge-delegations.mjs';
 
 try {
   validateSessionEnvironment(process.env);
@@ -37,6 +38,8 @@ const control = (owner, name, ok, detail = '') => {
   return ok;
 };
 const note = (text) => { if (!unverified.includes(text)) unverified.push(text); };
+const delegated = new Set();
+const delegate = (key) => { need(Object.hasOwn(EDGE_DELEGATIONS, key), `unknown Edge delegation ${key}`); delegated.add(key); };
 const need = (condition, label) => { if (!condition) problems.push(label); return condition; };
 function fatal(condition, label = stage) { if (!condition) throw new Error(`I17_FATAL:${label}`); }
 const describe = (result) => {
@@ -517,7 +520,8 @@ async function foreignMatrix(attacker, victim) {
     const runnable = test.refs.every((k) => v[k] !== null && v[k] !== undefined && a[k] !== null && a[k] !== undefined);
     if (test.runtime && (!controlled || !runnable)) {
       tag(test.name, `${d}:unverified`);
-      note(`${test.name} ${d}: no successful owned control in this job; foreign lookups asserted but not counted as ownership proof`);
+      if (test.name === 'ai_analysis_status') { delegate('analysis-status-owned'); delegate('analyze-foreign'); }
+      else note(`${test.name} ${d}: no successful owned control in this job; foreign lookups asserted but not counted as ownership proof`);
     }
     need(runnable || test.runtime, `matrix-${d}-${test.name}: fixture reference missing`);
     if (!runnable) continue;
@@ -603,7 +607,8 @@ async function analyzedSaveProbes(attacker, victim) {
     const result = await probeRpc(attacker, victim, name, { p_item_id: v.saveItem, p_image_id: v.saveImage, p_fingerprint: v.saveFingerprint });
     expectMatch(`${stage} ${name}`, CONFLICT, result);
   }
-  note('analyzed Save (reserve/preflight/cancel): peer references refused, but an owned analyzed claim is unreachable with normal sessions here; ownership UNVERIFIED');
+  // An owned analyzed claim needs a served provider path; PR-3b's EDGE-RUNTIME gate proves it (test:edge).
+  delegate('analyzed-save-owned');
 }
 
 function exportShape(owner, result) {
@@ -915,20 +920,18 @@ async function edgeProbes(attacker, victim) {
   for (const [name, body] of [
     ['finalize-image-change', { action: 'complete', intent: v.changeIntent }],
     ['finalize-analyzed-item', { itemId: v.saveItem, imageId: v.saveImage, fingerprint: v.saveFingerprint }],
-    ['analyze-clothing', { requestId: v.aiRequest ?? randomUUID(), draftId: randomUUID(), generation: 1 }],
   ]) {
     stage = `edge-${direction}-${name}`;
     const result = await raw(attacker.token, `/functions/v1/${name}`, { method: 'POST', body });
-    const unconfigured = result.transport || result.status >= 500 || result.status === 404
-      || /UNCONFIGURED/.test(result.text);
-    if (unconfigured) { const note = `Edge ${name} not served with configuration in this job (${result.status})`; if (!unverified.includes(note)) unverified.push(note); continue; }
+    // The security job serves these functions; a missing or failing function fails, never UNVERIFIED.
+    need(!result.transport && result.status < 500 && result.status !== 404 && !/UNCONFIGURED/.test(result.text),
+      `${stage}: function not served (${result.transport ? 'no response' : result.status})`);
     need(!result.ok, `${stage}: peer request accepted (${result.status})`);
-    if (name === 'analyze-clothing' && [400, 413, 415, 422].includes(result.status)) {
-      const note = `Edge analyze-clothing rejected the probe input (${result.status}) before any ownership decision`;
-      if (!unverified.includes(note)) unverified.push(note);
-    }
     need(scanLeaks(result.text, v.tokens, v.tokens.filter((t) => JSON.stringify(body).includes(t))).length === 0, `${stage}: leaked peer values`);
   }
+  // The stack runtime has no provider configuration; analyze-clothing ownership runs in PR-3b's isolated
+  // EDGE-RUNTIME / PROVIDER-DOUBLE gate (test:edge), which fails unless these delegations pass.
+  delegate('analyze-foreign');
   // Mandatory, never UNVERIFIED: the security job serves the functions, so a missing or unconfigured
   // delete-account function fails this gate. The owner comes only from the caller's session; a body naming
   // another owner is refused as INVALID_INPUT before re-authentication, and no deletion job starts.
@@ -986,9 +989,9 @@ async function ownPositiveControls(owner) {
     else note(`own ai_request_control ${owner.label} returned ${applicationCode(status) ?? describe(status)}; not ownership-verified`);
     const analysis = await call(owner, 'ai_analysis_status', { p_request_id: f.aiRequest });
     if (applicationCode(analysis) === 'OK') control(owner, 'ai_analysis_status', true);
-    else note(`own ai_analysis_status ${owner.label} returned ${applicationCode(analysis) ?? describe(analysis)}: it needs provider claim evidence that normal sessions cannot create; ownership UNVERIFIED`);
+    else delegate('analysis-status-owned');
   }
-  note('populated AI attribution history needs a provider-analyzed Save; attribution is compared (empty) but its population is UNVERIFIED here');
+  delegate('attribution-populated');
 }
 
 // --- Freeze (A4): same issued token before, during and after --------------------------------------------
@@ -1103,6 +1106,7 @@ try {
 }
 for (const text of findings.slice(0, 40)) console.log(`FINDING: ${text}`);
 for (const text of unverified.slice(0, 40)) console.log(`UNVERIFIED: ${text}`);
+for (const key of delegated) console.log(delegatedLine(key));
 for (const text of oracleFailures) console.error(`FAIL: existence oracle ${text.replace(uuidPattern, '<id>')}`);
 if (oracleFailures.length) exitCode = 1;
 if (problems.length) {
