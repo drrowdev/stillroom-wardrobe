@@ -126,6 +126,14 @@ async function main() {
       child.on('close', (value) => resolve(value ?? 2));
     });
     if (restoreCode !== 0) { process.exitCode = restoreCode; return; }
+    const wearCode = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [path.join(ROOT, 'tests', suite, 'wear-rpc.sessions.mjs')], {
+        cwd: ROOT, env, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'],
+      });
+      child.on('error', () => resolve(2));
+      child.on('close', (value) => resolve(value ?? 2));
+    });
+    if (wearCode !== 0) { process.exitCode = wearCode; return; }
     // I26 and restore-own: the restore drill and the restore-own CLI write replacement photos through the stack's own
     // finalize-image-change, so the functions are served once for all local browser specs. A serve that does not start
     // fails the suite; nothing is skipped or mocked.

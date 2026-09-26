@@ -406,6 +406,8 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .outfit-slot .outfit-thumb { width: 56px; border-radius: 4px; }
 .outfit-slot-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; }
 .icon-up { transform: rotate(180deg); }
+.icon-left { transform: rotate(90deg); }
+.icon-right { transform: rotate(-90deg); }
 .outfit-component-text { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
 .outfit-component-name { font-weight: 550; }
 .outfit-component-meta, .outfit-component-state { color: var(--secondary); font-size: .875rem; }
@@ -497,4 +499,52 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 @media (max-width: 650px) {
   .today-ideas { grid-template-columns: minmax(0, 1fr); }
   .today-context .field { max-width: none; }
+}
+.calendar-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; margin-bottom: 20px; }
+.calendar-months { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.calendar-months h2 { margin: 0; min-width: 9rem; text-align: center; font-size: 1.125rem; overflow-wrap: anywhere; }
+.calendar-month-view { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 24px; align-items: start; }
+.calendar-grid { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 4px; }
+.calendar-grid th { color: var(--secondary); font-size: .75rem; font-weight: 600; text-align: center; padding-bottom: 4px; }
+.calendar-grid abbr { text-decoration: none; }
+.calendar-grid td { padding: 0; }
+.calendar-day { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px; width: 100%; min-width: 0; min-height: 56px; padding: 6px 2px; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: .875rem; }
+.calendar-day:hover { background: var(--well); }
+.calendar-day[aria-pressed="true"] { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+/* Today is marked on the number itself and the selected day on the cell, so neither can grow past its cell. */
+.calendar-day-number { max-width: 100%; line-height: 1.5; }
+.calendar-today .calendar-day-number { color: var(--primary); font-weight: 700; text-decoration: underline 2px; text-underline-offset: 3px; }
+.calendar-day[aria-pressed="true"] { background: var(--well); }
+/* Every cell keeps room for the dots, so rows stay the same height whether a day has looks or not. */
+.calendar-marks { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; min-height: 7px; max-width: 100%; }
+.calendar-mark { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--primary); }
+.calendar-mark-worn { background: var(--primary); }
+.calendar-day-panel, .calendar-agenda > li { min-width: 0; overflow-wrap: anywhere; }
+.calendar-day-panel h3, .calendar-agenda h3 { font-size: 1rem; margin: 0 0 12px; }
+.calendar-agenda { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 24px; }
+.look-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.look-card { padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); min-width: 0; }
+.look-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; }
+.look-head h4 { margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
+.look-state { font-size: .8125rem; font-weight: 600; color: var(--secondary); }
+.look-state-worn { color: var(--primary); }
+.look-pieces { margin: 8px 0 0; padding-left: 1.25rem; font-size: .875rem; }
+.look-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 12px; }
+.look-hint { margin: 8px 0 0; font-size: .875rem; }
+.calendar-notice .text-button { margin-left: auto; }
+.plan-dialog { width: min(520px, calc(100vw - 32px)); }
+.plan-fields { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.plan-source, .plan-items { border: 0; margin: 0; padding: 0; min-width: 0; }
+.plan-source { display: flex; flex-wrap: wrap; gap: 0 24px; }
+.plan-source legend, .plan-items legend { font-weight: 550; margin-bottom: 4px; }
+.plan-items ul { list-style: none; margin: 0; padding: 0; max-height: 16rem; overflow-y: auto; }
+.plan-items .check, .plan-source .check, .plan-fields .field .check { overflow-wrap: anywhere; }
+.plan-fields .check input { flex: none; width: 20px; height: 20px; min-height: 0; margin: 0; accent-color: var(--primary); }
+@media (max-width: 800px) {
+  .calendar-month-view { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 420px) {
+  .calendar-grid { border-spacing: 2px; }
+  .calendar-day { min-height: 44px; padding: 4px 0; border-radius: 6px; }
+  .calendar-months h2 { min-width: 0; flex: 1 1 100%; order: -1; text-align: start; }
 }

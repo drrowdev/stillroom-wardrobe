@@ -55,6 +55,8 @@ const browserArtifacts: Record<string, string[]> = {
   'i16-weather-ui': ['settings-en-desktop', 'settings-fi-mobile', 'today-forecast-en-desktop', 'today-forecast-fi-mobile', 'today-forecast-fi-320-200',
     'today-off-en-desktop', 'today-off-sv-320-200', 'today-indoors-sv-mobile', 'today-unavailable-fi-mobile']
     .map((name) => `i16-visual/${name}.png`),
+  'i12-calendar-ui': ['month-en-desktop', 'day-looks-en-desktop', 'agenda-fi-mobile', 'plan-sv-mobile', 'month-fi-320-200']
+    .map((name) => `i12-visual/${name}.png`),
   'p6a-backup-ui': ['backup-en-desktop', 'backup-parts-fi-mobile'].map((name) => `p6a-visual/${name}.png`),
   'p6b-restore-ui': ['restore-preview-en-desktop', 'restore-progress-sv-mobile', 'restore-reencoded-fi-mobile'].map((name) => `p6b-visual/${name}.png`),
   'p6c-delete-account-ui': ['delete-account-en-desktop', 'delete-account-fi-mobile', 'delete-recovery-sv-desktop', 'delete-recovery-en-mobile'].map((name) => `p6c-visual/${name}.png`),
@@ -183,10 +185,10 @@ describe('CI workflow browser split', () => {
     for (const forbidden of ['upload-artifact', 'secrets.', 'env:', 'CI:', 'if:']) expect(webkit).not.toContain(forbidden);
   });
 
-  it('uploads each of the 20 browser artifacts exactly once, from the App job, success-only and exact-head named', () => {
+  it('uploads each of the 21 browser artifacts exactly once, from the App job, success-only and exact-head named', () => {
     const app = job('app');
     const uploads = steps(app).filter((step) => step.includes(upload));
-    expect(uploads).toHaveLength(20);
+    expect(uploads).toHaveLength(21);
     const seen = uploads.map((step) => {
       const name = /\n {10}name: ([a-z0-9-]+)-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}\n/.exec(step)?.[1];
       expect(name, step).toBeDefined();
@@ -199,7 +201,7 @@ describe('CI workflow browser split', () => {
     });
     expect(seen).toEqual(Object.keys(browserArtifacts));
     for (const name of seen) expect(count(workflow, `name: ${name}${headSuffix}\n`)).toBe(1);
-    expect(count(workflow, upload)).toBe(21);
+    expect(count(workflow, upload)).toBe(22);
     expect(count(job('database'), upload)).toBe(1);
     expect(job('database')).toContain('          name: database-types\n          path: src/data/database.types.ts\n'
       + '          if-no-files-found: error\n          retention-days: 1\n');
