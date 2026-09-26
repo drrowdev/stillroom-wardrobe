@@ -957,6 +957,30 @@ failure, never container IDs/timestamps or child output. A later received HTTP
 response clears the latest-attempt transport-failure flag; a transport failure
 does not erase the last received HTTP indicators.
 
+After that gate, the server is not returned until every other served function
+(`finalize-analyzed-item`, `finalize-image-change`, `delete-account`) answers one
+side-effect-free OPTIONS preflight with its own handler signature (204,
+`no-store`, `nosniff`, `Allow-Methods: POST`). Only gateway 404/502/503 answers
+and the transport errors `ECONNREFUSED`, `ECONNRESET`, `UND_ERR_SOCKET` or the
+probe's own timeout mean the worker is still booting; they are retried every
+250 ms within the same 60-second startup deadline. Any other exception fails at
+once as `warm-<function>-transport-other`. Redirects are not followed, so a 3xx
+fails as `status-3xx`, like any other status (for example `status-5xx` for a
+router 500 on an invalid worker response), without reading the body. A 204
+without the signature, a dead owned process or the deadline also fails startup
+closed as `warm-<function>-<reason>`. One `B1-WARM` line records the function count, the
+number of attempts, the elapsed time, the reason and the last status. Before
+this step, the first real request to a function that had not booted yet raced
+its worker startup.
+
+Rehearsal failures keep their existing `FAIL:` prefixes and add
+`; step=<step>; cause=<cause>` from fixed lists (`PROBE_STEPS`, `PROBE_CAUSES`
+in `scripts/backend/local.mjs`). Any other value prints as `other`. Causes are
+HTTP status classes, transport classes, `assert`, `unexpected-body` or startup
+reasons, never IDs, paths, bodies or messages. A B2 child prints one
+`PROBE-REASON <step> <cause>` line, and the parent adopts it only after the same
+validation.
+
 Separate ordinary-session children receive the existing strict environment
 allowlist and only an ephemeral loopback origin/stage argument. The parent alone
 holds local service/fixture authority and an ephemeral synthetic signing key.

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isMain } from '../../scripts/quality/files.mjs';
-import { LOCAL_API } from '../../scripts/backend/local.mjs';
+import { LOCAL_API, probeStep, probeCause, probeHttpCause, probeReasonLine } from '../../scripts/backend/local.mjs';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
 import { intent, saveClients, saveHarness, denied, eq } from './item-save.sessions.mjs';
 import { analysisId, analysisHash, analysisRequest } from './ai-analysis.sessions.mjs';
@@ -58,11 +58,16 @@ export function analyzedHarness(client, owner, env) {
       headers: { Authorization: 'Bearer '.concat(token), apikey: env.SUPABASE_PUBLISHABLE_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemId: value.p_item.id, imageId: value.p_image.id, fingerprint: row.fingerprint, ...extras }),
     });
+    if (result.status >= 500) probeCause(probeHttpCause(result.status));
     requireEvidence(result.status < 500);
     if (result.status === 204) { requireEvidence(result.body === null); return { status: 204 }; }
     return { status: result.status, data: await result.json() };
   };
-  const finalize = async (value, row) => eq(await endpoint(value, row), { status: 204 });
+  const finalize = async (value, row) => {
+    const result = await endpoint(value, row);
+    if (result.status !== 204) probeCause(probeHttpCause(result.status));
+    eq(result, { status: 204 });
+  };
   const preflight = async (value, row) => {
     const result = await h.call('analyzed_item_save_preflight', h.finalizeArgs(value, row));
     requireEvidence(result.ok); return result.data;
@@ -94,15 +99,19 @@ export async function analyzedBaseline(env) {
 }
 
 async function prepare(env, origin) {
+  probeStep('b2-sign-in');
   const { client, owners } = await saveClients(env);
   for (const owner of owners) {
     const h = analyzedHarness(client, owner, env);
     for (let n = 21; n <= 31; n++) {
+      probeStep('b2-analysis-request');
       const response = await analysisRequest(origin, env, owner, n);
+      if (response.status !== 200) probeCause(probeHttpCause(response.status));
       requireEvidence(response.status === 200 && response.data.status === 'ready');
       const value = analyzedIntent(owner, n);
       if (n === 31) continue;
       if (n === 30) {
+        probeStep('b2-reserve-refusals');
         for (const alter of [
           (v) => { v.p_claim.requestId = randomUUID(); },
           (v) => { v.p_claim.generation = 2; },
@@ -121,9 +130,11 @@ async function prepare(env, origin) {
           eq(await h.read('items', value.p_item.id), []);
         }
       }
+      probeStep('b2-reserve');
       const row = await h.reserve(value);
       eq(await h.reserve(value), row);
       eq(await client.rpc(owner, 'item_attribution_history', { p_item_id: value.p_item.id }), []);
+      probeStep('b2-upload');
       await h.upload(value);
     }
   }
@@ -250,10 +261,12 @@ async function main() {
     requireEvidence(extra.length === 0 && (phase === 'prepare' ? !!origin : origin === undefined));
     if (phase === 'baseline') await analyzedBaseline(process.env);
     else if (phase === 'prepare') await prepare(process.env, origin);
-    else await full(process.env, phase);
+    else { probeStep('b2-phase'); await full(process.env, phase); }
     console.log(`PASS: B2 ${phase}; normal owners=2; ${phase === 'baseline' ? 'reservation baseline only, no finalizer proof' : 'actual Auth/DB/Storage; synthetic JPEG fixture'}`);
-  } catch {
+  } catch (error) {
     console.error(`FAIL: B2 integration ${phase}; private details withheld; fixture state retained`);
+    const reason = probeReasonLine(error);
+    if (reason) console.error(reason);
     process.exitCode = 1;
   }
 }

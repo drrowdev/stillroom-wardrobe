@@ -192,6 +192,7 @@ describe('I10b owned-server entry after C restoration (extracted source, mocked 
         before, b2Before, b2Tables, receipts, privilegedLocalSql, literal, restore,
         consentRevision, requireReady, ready, baseline, env, startAnalysisServer,
         requireEvidence, equal, console, process, server, Date } = f;
+      const probeStep = () => {}, resetProbe = () => {}, probeFailureDetail = () => '';
       let stage = 'C-ui-child', owned = f.previous, generations = 36;
       const cStarted = 0;
       const imageReplacementServed = async (value) => {

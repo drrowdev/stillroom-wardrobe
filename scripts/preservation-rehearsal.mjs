@@ -8,6 +8,7 @@ import {
   ROOT, assertNoServiceSecrets, assertProjectConfig, requireDocker, requireLocalContainer,
   cli, runCommand, normalSessionEnvironment, readCredentialCache, validateSessionEnvironment, privilegedLocalSql,
   DB_CONTAINER, commandEnvironment, jwtClaims, reportError, startAnalysisServer,
+  probeStep, resetProbe, probeFailureDetail,
 } from './backend/local.mjs';
 import { PUBLICATION_BODY_MD5, assertCiDatabaseMutationAllowed, verifyCiStorageGuard } from './backend/ci-storage-guard.mjs';
 import { isMain } from './quality/files.mjs';
@@ -1260,7 +1261,9 @@ async function main() {
       requireLifecyclePrefixEmpty, requireLifecycleClaimFence });
     console.log('PASS: populated6/target11; owners=2 publicRows=38 objects=16 attempts=4 usedIds=6 registry=10; exact preservation before replay and original late-publication/catalog-zero cases; no provider calls');
     stage = 'COL1-A-finalizer';
+    probeStep('server-start');
     const colourFinalizer = await startAnalysisServer();
+    resetProbe();
     try {
       colourFinalizer.assertRunning();
       stage = 'COL1-A1-eleven-capture';
@@ -1292,16 +1295,19 @@ async function main() {
     const twelveEnv = normalSessionEnvironment(process.env, await readCredentialCache());
     validateSessionEnvironment(twelveEnv);
     stage = 'COL1-B-twelve-probes';
+    probeStep('server-start');
     const twelveFinalizer = await startAnalysisServer();
     try {
       twelveFinalizer.assertRunning();
       await colourProbes(twelveEnv, privilegedLocalSql, 'colours');
       await history('colours');
+      probeStep('server-running');
       twelveFinalizer.assertRunning();
+      resetProbe();
     } finally { await twelveFinalizer.stop(); }
     console.log('PASS: COL1 twelve-only probes; new colours accepted, invalid refused, v1 analysis Save works, v2 claim UNCONFIGURED');
   } catch (error) {
-    console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}${lifecycleFailureDetail(error)}; subsequent stages NOT RUN`);
+    console.error(`FAIL: preservation ${stage}; EVIDENCE_REQUIRED${historyFailureDetail(error)}${lifecycleFailureDetail(error)}; subsequent stages NOT RUN${probeFailureDetail(error)}`);
     process.exitCode = 1;
   } finally {
     if (ownsSnapshot) {

@@ -6,6 +6,7 @@ import { analyzedHarness, analyzedIntent } from './analyzed-save.sessions.mjs';
 import { saveHarness, denied } from './item-save.sessions.mjs';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
 import { imageChangeHarness } from './image-replacement.sessions.mjs';
+import { probeStep, resetProbe } from '../../scripts/backend/local.mjs';
 
 const literal = (value) => "'" + String(value).replaceAll("'", "''") + "'";
 const json = (value) => `${literal(JSON.stringify(value))}::jsonb`;
@@ -488,9 +489,11 @@ const colourClaim = async (sql, owner, n, manifest) => JSON.parse(await sql(`sel
   120,80,${literal(manifest)});`));
 
 // One Azure analysis plus analyzed Save; the item carries the stated colours from the stored result.
-async function colourAnalyzedSave(client, owner, env, sql, n, manifest, colours) {
+async function colourAnalyzedSave(client, owner, env, sql, n, manifest, colours, mark = () => {}) {
+  mark('colour-analysis-claim');
   const claim = await colourClaim(sql, owner, n, manifest);
   requireEvidence(claim.claimed === true && claim.manifestId === manifest);
+  mark('colour-analysis-finish');
   const facts = { ...analysisFacts, fields: { ...analysisFacts.fields, colours } };
   const finish = JSON.parse(await sql(`select public.ai_finish_analysis(${literal(owner.uid)},${literal(analysisId(owner.label, n))},
     ${literal(manifest)},${json(facts)},${json(analysisUsage)},'SUCCESS');`));
@@ -498,8 +501,13 @@ async function colourAnalyzedSave(client, owner, env, sql, n, manifest, colours)
   const h = analyzedHarness(client, owner, env), value = analyzedIntent(owner, n);
   value.p_item.colours = colours;
   value.p_claim.fields.colours = { kind: 'ai_observed', value: colours };
+  mark('colour-analyzed-reserve');
   const row = await h.reserve(value);
-  await h.upload(value); await h.finalize(value, row);
+  mark('colour-analyzed-upload');
+  await h.upload(value);
+  mark('colour-analyzed-finalize');
+  await h.finalize(value, row);
+  mark('colour-history');
   const history = await client.rpc(owner, 'item_attribution_history', { p_item_id: value.p_item.id });
   requireEvidence(history.length === 1);
   equal(history[0].fields.colours, { kind: 'ai_observed', revision: 1 });
@@ -564,29 +572,38 @@ export async function verifyColourStage(snapshot, sql, stage) {
 // A6 (thirteen applied) and Pass B (twelve applied). Only called after the read-only comparisons.
 export async function colourProbes(env, sql, stage) {
   requireEvidence(['colours', 'target'].includes(stage));
+  probeStep('colour-sign-in');
   const client = normalClient(env), owners = [await client.signIn('A'), await client.signIn('B')];
   requireEvidence(owners[0].uid !== owners[1].uid);
   for (const owner of owners) {
+    probeStep('colour-manual-save');
     await colourManualSave(client, owner, ['burgundy', 'light_blue', 'silver']);
     await colourManualSave(client, owner, ['navy']);
+    probeStep('colour-invalid-saves');
     await colourInvalidManualSaves(client, owner);
+    probeStep('colour-controls');
     await colourControls(sql, owner, COLOUR_MANIFEST.v1, 1);
+    probeStep('colour-consent');
     await colourConsent(client, owner);
-    const legacy = await colourAnalyzedSave(client, owner, env, sql, stage === 'target' ? 27 : 29, COLOUR_MANIFEST.v1, ['green']);
+    const legacy = await colourAnalyzedSave(client, owner, env, sql, stage === 'target' ? 27 : 29, COLOUR_MANIFEST.v1, ['green'], probeStep);
     equal(legacy.history.prompt_version, 1);
+    probeStep('colour-v2-claim');
     const v2 = await colourClaim(sql, owner, stage === 'target' ? 28 : 30, COLOUR_MANIFEST.v2);
     equal(v2, { code: stage === 'target' ? 'CONFIG_CHANGED' : 'UNCONFIGURED', claimed: false });
     if (stage === 'target') {
+      probeStep('colour-target');
       await colourControls(sql, owner, COLOUR_MANIFEST.v2, 2);
       equal(await colourClaim(sql, owner, 31, COLOUR_MANIFEST.v1), { code: 'CONFIG_CHANGED', claimed: false });
       await sql(`update private.ai_controls set prompt_version=1 where owner_id=${literal(owner.uid)};`);
       equal(await colourClaim(sql, owner, 31, COLOUR_MANIFEST.v2), { code: 'CONFIG_CHANGED', claimed: false });
       await sql(`update private.ai_controls set prompt_version=2 where owner_id=${literal(owner.uid)};`);
       const current = await colourAnalyzedSave(client, owner, env, sql, 31, COLOUR_MANIFEST.v2, ['burgundy', 'gold']);
+      probeStep('colour-target');
       equal(current.history.prompt_version, 2);
       const manifest = JSON.parse(await sql(`select jsonb_build_object('manifest',(select manifest_id from private.item_attribution_history
         where owner_id=${literal(owner.uid)} and item_id=${literal(current.value.p_item.id)}));`));
       equal(manifest, { manifest: COLOUR_MANIFEST.v2 });
     }
   }
+  resetProbe();
 }
