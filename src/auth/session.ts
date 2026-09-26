@@ -132,30 +132,34 @@ export class SessionController {
     this.invalidate();
     this.request = new AbortController();
     const scope = { ownerId: session.user.id, epoch: this.epoch, signal: this.request.signal };
-    bindDataRequests(this.client, scope.signal);
+    const client = this.client;
+    // Every resume below drops its result once a sign-out or a newer sign-in has taken over.
+    const stale = () => scope.signal.aborted || !this.current(client, scope.epoch);
+    bindDataRequests(client, scope.signal);
     this.publish({ phase: 'loading', language: resolveLanguage(this.browserLanguages, null, this.choice), profile: null, scope: null, languageUnsaved: false });
     try {
       if (!isUuid(scope.ownerId)) throw new AppError('account.locked');
-      let profile = await fetchProfile(this.client, scope.ownerId, scope.signal);
+      let profile = await fetchProfile(client, scope.ownerId, scope.signal);
+      if (stale()) return;
       let language = resolveLanguage(this.browserLanguages, profile.ui_language, this.choice);
       let languageUnsaved = false;
       if (profile.ui_language === null) {
         try {
-          profile = await saveInitialLanguage(this.client, profile, language, scope.signal);
+          profile = await saveInitialLanguage(client, profile, language, scope.signal);
           language = resolveLanguage(this.browserLanguages, profile.ui_language, this.choice);
           languageUnsaved = profile.ui_language === null;
         } catch (error) {
-          if (scope.signal.aborted || isAborted(error)) return;
+          if (stale() || isAborted(error)) return;
           languageUnsaved = true;
         }
       }
-      if (scope.signal.aborted || scope.epoch !== this.epoch) return;
+      if (stale()) return;
       this.publish({ phase: 'ready', language, profile, scope, languageUnsaved });
     } catch (error) {
-      if (scope.signal.aborted || isAborted(error)) return;
+      if (stale() || isAborted(error)) return;
       // A frozen account cannot read its profile. If its own deletion is unfinished, offer to finish it.
-      const deletion = await deletionStatus(this.client, scope.signal).catch(() => null);
-      if (scope.signal.aborted || scope.epoch !== this.epoch) return;
+      const deletion = await deletionStatus(client, scope.signal).catch(() => null);
+      if (stale()) return;
       if (deletion === 'complete') { await this.signOut(true, 'delete.done'); return; }
       if (deletion === 'in_progress' || deletion === 'retry' || deletion === 'contact') {
         this.publish({ phase: 'deleting', language: resolveLanguage(this.browserLanguages, null, this.choice), profile: null, scope,
@@ -174,12 +178,14 @@ export class SessionController {
   private async checkMembership(): Promise<void> {
     const { scope } = this.state;
     if (!scope) return;
+    const client = this.client;
+    const stale = () => scope.signal.aborted || !this.current(client, scope.epoch);
     try {
-      const profile = await fetchProfile(this.client, scope.ownerId, scope.signal);
-      if (scope.epoch !== this.epoch || scope.signal.aborted) return;
+      const profile = await fetchProfile(client, scope.ownerId, scope.signal);
+      if (stale()) return;
       this.publishProfile(scope, profile, 'refresh');
     } catch (error) {
-      if (scope.signal.aborted || isAborted(error)) return;
+      if (stale() || isAborted(error)) return;
       this.invalidate();
       this.publish({ phase: 'locked', language: resolveLanguage(this.browserLanguages), profile: null, scope: null, languageUnsaved: false });
     }
@@ -305,8 +311,15 @@ export class SessionController {
     if (client !== this.client) return;
     if (error) throw new AppError('auth.failed');
   }
+  /** True while a continuation started for `client` at `epoch` still belongs to the current generation. */
+  private current(client: AppClient, epoch: number): boolean {
+    return client === this.client && epoch === this.epoch;
+  }
   async retry(): Promise<void> {
-    const { data, error } = await this.client.auth.getSession();
+    const client = this.client, epoch = this.epoch;
+    const { data, error } = await client.auth.getSession();
+    // A sign-out or another sign-in while this was waiting: the answer belongs to an older generation.
+    if (!this.current(client, epoch)) return;
     if (error || !data.session) { this.signedOut(); return; }
     await this.open(data.session);
   }

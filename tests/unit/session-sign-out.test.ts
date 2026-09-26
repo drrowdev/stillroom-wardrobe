@@ -259,6 +259,102 @@ describe('sign-out without the network', () => {
   });
 });
 
+const profileFor = (owner: string) => ({ owner_id: owner, display_name: 'Alex', ui_language: 'en', timezone: 'Europe/Helsinki',
+  currency: 'EUR', version: 3, weather_enabled: false, weather_city: null, latitude: null, longitude: null });
+const isA = (call: Call) => call.auth?.includes('token-a') ?? false;
+type Controls = { profileA?: Promise<Response>; deletionA?: Promise<Response>; refreshA?: Promise<Response>; lockedA?: boolean; shortA?: boolean };
+/** A scripted backend where B is an ordinary account and A's answers can be held or refused. */
+function backend(controls: Controls) {
+  reply = (call) => {
+    // A short session makes the next session read wait on a refresh.
+    if (call.grant === 'password') return json(call.body.includes('a@example.test') ? sessionFor('token-a', USER_A, controls.shortA ? 10 : 3600) : sessionFor('token-b', USER_B));
+    if (call.grant === 'refresh_token') return call.body.includes('refresh-token-a') ? controls.refreshA ?? json(sessionFor('token-a2', USER_A, 10)) : json(sessionFor('token-b2', USER_B));
+    if (call.path === '/auth/v1/logout') return new Response(null, { status: 204 });
+    if (call.path === '/rest/v1/profiles') {
+      if (!isA(call)) return json([profileFor(USER_B)]);
+      return controls.profileA ?? (controls.lockedA ? json({ message: 'denied' }, 403) : json([profileFor(USER_A)]));
+    }
+    if (call.path === '/rest/v1/rpc/deletion_status') return isA(call) ? controls.deletionA ?? json({ state: 'none' }) : json({ state: 'none' });
+    return json({ message: 'unexpected' }, 500);
+  };
+}
+/** Signs A out and B in, then records every signed-out or open the older generation might still cause. */
+async function handOverToB(controller: SessionController) {
+  await controller.signOut(false);
+  await controller.signIn('b@example.test', 'password');
+  await until(() => controller.getSnapshot().phase === 'ready');
+  expect(controller.getSnapshot().profile?.owner_id).toBe(USER_B);
+  const internals = controller as unknown as { signedOut: () => void; open: () => Promise<void> };
+  return { signedOut: vi.spyOn(internals, 'signedOut'), open: vi.spyOn(internals, 'open') };
+}
+function expectBUntouched(controller: SessionController, spies: Awaited<ReturnType<typeof handOverToB>>) {
+  expect(spies.signedOut).not.toHaveBeenCalled();
+  expect(spies.open).not.toHaveBeenCalled();
+  expect(controller.getSnapshot()).toMatchObject({ phase: 'ready', profile: { owner_id: USER_B } });
+  expect(stored()?.access_token).toBe('token-b');
+}
+
+describe('a continuation from an older sign-in', () => {
+  it('drops a locked account\'s Retry whose refresh is answered after sign-out and the next sign-in', async () => {
+    const { controller } = await controllerSetup();
+    const refreshA = deferred<Response>();
+    backend({ lockedA: true, shortA: true });
+    await controller.signIn('a@example.test', 'password');
+    await until(() => controller.getSnapshot().phase === 'locked');
+    backend({ lockedA: true, shortA: true, refreshA: refreshA.promise });
+    // A's session is close to expiry, so Retry's session read waits on a refresh.
+    const retry = controller.retry();
+    await until(() => tokenGrants().some((call) => call.grant === 'refresh_token'));
+    backend({ lockedA: true, shortA: true, refreshA: refreshA.promise });
+    const spies = await handOverToB(controller);
+    refreshA.resolve(json(sessionFor('token-a2', USER_A)));
+    await retry;
+    await settle();
+    expectBUntouched(controller, spies);
+    // A reload restores B, not a signed-out screen and not A.
+    expect(sessionStore.authKeys()).toEqual(['stillroom.auth']);
+  });
+
+  it.each([
+    ['Retry after a failed refresh', 'retry-error'],
+    ['the profile read while opening', 'profile'],
+    ['the deletion check of a frozen account', 'deletion'],
+    ['the membership check on return to the app', 'membership'],
+  ] as const)('cannot sign out or reopen the newer account: %s', async (_name, path) => {
+    const { controller } = await controllerSetup();
+    const held = deferred<Response>();
+    const controls: Controls = path === 'profile' ? { profileA: held.promise } : path === 'deletion' ? { lockedA: true, deletionA: held.promise }
+      : path === 'retry-error' ? { lockedA: true, shortA: true } : {};
+    backend(controls);
+    await controller.signIn('a@example.test', 'password');
+    let pending: Promise<unknown> = Promise.resolve();
+    if (path === 'profile') await until(() => calls.some((call) => call.path === '/rest/v1/profiles' && isA(call)));
+    if (path === 'deletion') await until(() => calls.some((call) => call.path === '/rest/v1/rpc/deletion_status'));
+    if (path === 'retry-error') {
+      await until(() => controller.getSnapshot().phase === 'locked');
+      backend({ ...controls, refreshA: held.promise });
+      pending = controller.retry();
+      await until(() => tokenGrants().some((call) => call.grant === 'refresh_token'));
+    }
+    if (path === 'membership') {
+      await until(() => controller.getSnapshot().phase === 'ready');
+      backend({ profileA: held.promise });
+      const reads = calls.length;
+      pending = (controller as unknown as { checkMembership: () => Promise<void> }).checkMembership();
+      await until(() => calls.slice(reads).some((call) => call.path === '/rest/v1/profiles' && isA(call)));
+    }
+    backend(path === 'membership' || path === 'profile' ? { profileA: held.promise } : { ...controls, refreshA: held.promise });
+    const spies = await handOverToB(controller);
+    // Each older answer is the one that would have ended or replaced the newer account.
+    held.resolve(path === 'profile' ? json([profileFor(USER_A)]) : path === 'deletion' ? json({ state: 'complete' })
+      : path === 'retry-error' ? json({ error: 'invalid_grant', error_description: 'gone' }, 400) : json({ message: 'denied' }, 403));
+    await pending;
+    await settle();
+    expectBUntouched(controller, spies);
+    expect(calls.filter((call) => call.path === '/auth/v1/logout')).toHaveLength(1);
+  });
+});
+
 describe('server revoke', () => {
   it('posts a local logout with the captured token and treats a gone session as done', async () => {
     const { revokeSession } = await modules();
