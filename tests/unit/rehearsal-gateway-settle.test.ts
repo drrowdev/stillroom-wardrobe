@@ -113,6 +113,34 @@ describe('gateway settle', () => {
     expect(transport).toHaveBeenCalledTimes(3);
   });
 
+  it('keeps its own reload budget so slow reads with a tight deadline still leave time for the health probes', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const deadline = Date.now() + 18_000;
+    const budgets: number[] = [];
+    const readWorkers = vi.fn(async (until: number) => {
+      budgets.push(until);
+      vi.setSystemTime(Date.now() + Math.min(4_800, Math.max(0, until - Date.now())));
+      return before;
+    });
+    const pause = async (ms: number) => { vi.setSystemTime(Date.now() + ms); };
+    const transport = vi.fn<typeof fetch>(async () => healthy());
+    await settleGateway(owned(), deadline, { before, key: 'k', readWorkers, transport, pause });
+    expect(budgets.every((until) => until <= deadline - 7_000)).toBe(true);
+    expect(transport).toHaveBeenCalledTimes(3);
+    expect(gatewayLine(log)).toMatchObject({ reload: 'not-seen', attempts: 3, reason: 'ready' });
+  });
+
+  it('treats a read that runs out of the observation budget as not seen, not as a startup failure', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const readWorkers = vi.fn(async (until: number) => readKongWorkers(until, vi.fn()));
+    const deadline = Date.now() + 6_000;
+    const transport = vi.fn<typeof fetch>(async () => healthy());
+    await settleGateway(owned(), deadline, { before, key: 'k', readWorkers, transport, pause: noPause });
+    expect(readWorkers).not.toHaveBeenCalled();
+    expect(transport).toHaveBeenCalledTimes(3);
+  });
+
   it('stops when the owned server dies', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const server = owned();

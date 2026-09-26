@@ -977,7 +977,9 @@ its worker startup.
 reload's old nginx workers close their idle keep-alive connections. So the
 server is also not returned until the gateway has settled. Kong's worker
 process IDs are read with `docker top` before serve starts; startup waits up
-to 15 seconds for every worker to be new and none to be shutting down. It then
+to 15 seconds for every worker to be new and none to be shutting down. That
+wait has its own budget, checked before each read, and always leaves 7 seconds
+of the startup deadline for the health answers. It then
 needs three consecutive 200 answers from `/auth/v1/health`, 250 ms apart,
 within the same deadline. Closed, reset or refused connections, the probe's own
 timeout and gateway 502/503 answers restart the count; any other answer fails

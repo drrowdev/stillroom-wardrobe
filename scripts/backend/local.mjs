@@ -861,26 +861,37 @@ export async function probeAuthHealth(key, transport = closingFetch, timeout = 2
   return response.status;
 }
 
-// Waits up to 15 s for the observed Kong reload, then for three consecutive healthy Auth answers 250 ms apart
-// through the gateway. Only a closed, reset or refused connection, this probe's own timeout and a gateway 502/503
+// Waits up to 15 s for the observed Kong reload, always leaving 7 s of the startup deadline, then for three
+// consecutive healthy Auth answers 250 ms apart through the gateway. Only a closed, reset or refused connection, this probe's own timeout and a gateway 502/503
 // are waited through; anything else, or the deadline, fails closed. When the workers cannot be read, or no reload
 // is seen within the bound (the CLI's reload is best-effort), the healthy answers alone are a timing heuristic.
 const RELOAD_WAIT_MS = 15_000;
+// Enough for three health probes at their 2 s timeout and the pauses between them.
+const HEALTH_RESERVE_MS = 7_000;
 export async function settleGateway(owned, deadline, { before, key, readWorkers = readKongWorkers, transport = closingFetch,
   pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
   const started = Date.now();
   const evidence = { reload: before === null ? 'unobserved' : 'pending', attempts: 0, socketErrors: 0, elapsedMs: 0,
     reason: 'ready', lastStatus: null };
+  const observeUntil = Math.min(started + RELOAD_WAIT_MS, deadline - HEALTH_RESERVE_MS);
   let healthy = 0;
   try {
     for (;;) {
       startupRemaining(deadline); owned.assertRunning();
       if (evidence.reload === 'pending') {
-        const now = await readWorkers(deadline);
-        if (now === null) evidence.reload = 'unobserved';
+        // The observation has its own budget, checked before each read, so a slow read cannot use up the time
+        // the health answers need.
+        if (observeUntil - Date.now() <= 0) { evidence.reload = 'not-seen'; continue; }
+        let now;
+        try { now = await readWorkers(observeUntil); }
+        catch (error) {
+          if (!(error instanceof AnalysisStartupError && error.reason === 'deadline')) throw error;
+          evidence.reload = 'not-seen'; continue;
+        }
+        if (now === null) evidence.reload = observeUntil - Date.now() <= 0 ? 'not-seen' : 'unobserved';
         else if (kongReloaded(before, now)) evidence.reload = 'observed';
-        else if (Date.now() - started >= RELOAD_WAIT_MS) evidence.reload = 'not-seen';
-        else { await pause(Math.min(250, startupRemaining(deadline))); continue; }
+        else if (observeUntil - Date.now() <= 0) evidence.reload = 'not-seen';
+        else { await pause(Math.min(250, observeUntil - Date.now())); continue; }
       }
       evidence.attempts++;
       let status = null;
