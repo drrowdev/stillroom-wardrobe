@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AppClient } from '../../data/client';
 import type { OwnerScope } from '../../auth/session';
 import { errorKey, isAborted } from '../../data/errors';
-import { checkBackup, RestoreRecheckError, restoreReport, runRestore, type RestorePreview, type RestoreProgress, type RestoreResult } from '../../data/restore';
+import { checkBackup, RestoreGarmentError, RestoreRecheckError, restoreReport, runRestore, type RestorePreview, type RestoreProgress, type RestoreResult } from '../../data/restore';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 
 type Props = { client: AppClient; scope: OwnerScope; language: Language; online: boolean; t: Translate };
@@ -11,7 +11,7 @@ type Props = { client: AppClient; scope: OwnerScope; language: Language; online:
 type State = { kind: 'idle'; recheck?: true; report?: RestoreResult | null } | { kind: 'checking' } | { kind: 'preview'; preview: RestorePreview }
   | { kind: 'restoring'; preview: RestorePreview; progress: RestoreProgress | null }
   | { kind: 'stopped'; preview: RestorePreview; failed: number | null; blocked: number; report: RestoreResult | null } | { kind: 'done'; result: RestoreResult }
-  | { kind: 'incomplete'; result: RestoreResult } | { kind: 'failed'; message: MessageKey };
+  | { kind: 'incomplete'; result: RestoreResult } | { kind: 'failed'; message: MessageKey; garment?: { item: number; total: number } };
 
 // The passphrase and chosen files stay in this component's memory only; they are never stored or sent.
 export function RestoreSettings({ client, scope, language, online, t }: Props) {
@@ -57,7 +57,8 @@ export function RestoreSettings({ client, scope, language, online, t }: Props) {
       setState({ kind: 'preview', preview });
     } catch (error) {
       if (scope.signal.aborted || isAborted(error)) return;
-      setState({ kind: 'failed', message: errorKey(error) });
+      setState({ kind: 'failed', message: errorKey(error),
+        ...error instanceof RestoreGarmentError ? { garment: { item: error.item, total: error.total } } : {} });
     }
   }
   async function restore(preview: RestorePreview) {
@@ -149,7 +150,8 @@ export function RestoreSettings({ client, scope, language, online, t }: Props) {
       <button type="button" className="button button-secondary" onClick={reset}>{t('backup.finish')}</button>
     </div>}
     {state.kind === 'failed' && <div className="stack">
-      <p ref={alert} tabIndex={-1} role="alert" className="notice notice-error">{t(state.message)}</p>
+      <p ref={alert} tabIndex={-1} role="alert" className="notice notice-error">{state.garment
+        ? t(state.message, { item: number(state.garment.item), total: number(state.garment.total) }) : t(state.message)}</p>
       <button type="button" className="button button-secondary" onClick={reset}>{t('backup.startAgain')}</button>
     </div>}
     {!online && <p role="status">{t('restore.offline')}</p>}

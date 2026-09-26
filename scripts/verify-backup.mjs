@@ -70,8 +70,8 @@ export async function decodedReadiness(listing, passphrase) {
       .map(([index, part]) => ({ name: part.path.split(/[\\/]/).pop(), size: part.size, text: () => source.read(index) }));
     const { photos } = await preflightBackup(files, passphrase, new AbortController().signal, worker.deps);
     return { ok: true, photos: photos.size };
-  } catch {
-    return { ok: false, problem: worker.failure() ? 'images' : 'invalid' };
+  } catch (error) {
+    return { ok: false, problem: worker.failure() ? 'images' : error?.messageKey === 'restore.invalidGarment' ? 'garment' : 'invalid' };
   } finally { await worker.close(); }
 }
 
@@ -136,6 +136,7 @@ const DECODE_PROBLEMS = {
   sandbox: 'Chromium couldn\'t start its sandbox on this system (see docs/phase-6-result.md, Linux: Chromium sandbox)',
   images: 'Chromium didn\'t start or stopped',
   invalid: 'a photo failed to decode or its re-encoded result failed its checks',
+  garment: 'a garment has details a restore can\'t save',
 };
 
 async function main() {

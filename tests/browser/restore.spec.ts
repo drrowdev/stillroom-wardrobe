@@ -476,7 +476,7 @@ test.describe('bounded P6b visual evidence', () => {
 });
 
 // ---- Q6 byte-preserving restore (ADR22). ----
-type Q6Photo = { main: Uint8Array; thumb: Uint8Array; width: number; height: number; thumbSha?: string; thumbLength?: number };
+type Q6Photo = { main: Uint8Array; thumb: Uint8Array; width: number; height: number; thumbSha?: string; thumbLength?: number; item?: Row };
 // A version 1 backup written directly, so a test controls every photo byte and manifest value; one item per photo.
 async function v1Backup(photos: readonly Q6Photo[], exportId: string = randomUUID()): Promise<Part[]> {
   const owner = owners.a, now = '2026-09-01T00:00:00Z';
@@ -487,7 +487,7 @@ async function v1Backup(photos: readonly Q6Photo[], exportId: string = randomUUI
     const thumbLength = photo.thumbLength ?? photo.thumb.length;
     items.push({ id: item, owner_id: owner, title: `Fictional coat ${index + 1}`, category: 'outerwear', notes: '', currency: 'EUR', colours: [], seasons: [], style_tags: [], tags: [],
       favourite: false, availability: 'ready', lifecycle: 'active', exclude_suggestions: false, wear_more: false, deleted_at: null,
-      created_at: now, updated_at: now, version: 1 });
+      created_at: now, updated_at: now, version: 1, ...photo.item });
     images.push({ id: image, owner_id: owner, item_id: item, state: 'ready', retired_at: null, main_path: `${owner}/${item}/${image}/main.jpg`,
       thumb_path: `${owner}/${item}/${image}/thumb.jpg`, main_bytes: photo.main.length, thumb_bytes: thumbLength, main_sha256: mainHash,
       thumb_sha256: thumbHash, width: photo.width, height: photo.height, alt_text: `A coat, photo ${index + 1}`, created_at: now });
@@ -715,6 +715,26 @@ test.describe('Q6 byte-preserving restore', () => {
       await button(page, 'backup.startAgain').click();
     }
     expect(writeUrls(urls)).toHaveLength(before);
+    expect(own(api.items)).toEqual([]);
+    expect(own(api.images)).toEqual([]);
+  });
+
+  test('a garment the restore could not save refuses the whole backup at Check, naming only its position', async ({ page }) => {
+    const decodes = await countDecodes(page);
+    const { api, urls } = await start(page);
+    await settings(page, 'b');
+    const photo = () => q6(flatJpeg({ width: 40, height: 40 }), 40, 40);
+    const card = restoreCard(page);
+    for (const [name, item] of [['empty title', { title: '' }], ['unknown category', { category: 'cape' }],
+      ['out-of-range value', { formality: 9 }], ['colour that is not text', { colours: [7] }]] as const) {
+      const start = await decodes.count();
+      await check(page, await v1Backup([photo(), { ...photo(), item }, photo()]));
+      await expect(card.getByRole('alert'), name).toHaveText(text('restore.invalidGarment', 'en', { item: 2, total: 3 }), slow);
+      await expect(card.getByRole('alert'), name).not.toContainText('Fictional coat');
+      expect([name, await decodes.count()]).toEqual([name, start]);
+      await button(page, 'backup.startAgain').click();
+    }
+    expect(writeUrls(urls)).toEqual([]);
     expect(own(api.items)).toEqual([]);
     expect(own(api.images)).toEqual([]);
   });
