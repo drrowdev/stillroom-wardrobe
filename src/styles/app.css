@@ -545,6 +545,7 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .plan-source legend, .plan-items legend { font-weight: 550; margin-bottom: 4px; }
 .plan-items ul { list-style: none; margin: 0; padding: 0; max-height: 16rem; overflow-y: auto; }
 .plan-items .check, .plan-source .check, .plan-fields .field .check { overflow-wrap: anywhere; }
+.plan-fields .field input, .plan-fields .field select { min-width: 0; max-width: 100%; }
 .plan-fields .check input { flex: none; width: 20px; height: 20px; min-height: 0; margin: 0; accent-color: var(--primary); }
 @media (max-width: 800px) {
   .calendar-month-view { grid-template-columns: minmax(0, 1fr); }

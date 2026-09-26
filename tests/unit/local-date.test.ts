@@ -1,9 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addDays, addMonths, firstWeekday, formatDay, formatMonth, monthGrid, monthOf, monthRange, todayIn, validMonth, weekday, weekdayNames,
+  addDays, addMonths, dayParts, firstWeekday, formatDay, formatMonth, monthGrid, monthOf, monthRange, todayIn, validMonth, weekday, weekdayNames,
 } from '../../src/domain/local-date';
+import { languages, locales, translate } from '../../src/i18n';
 
 describe('local calendar dates', () => {
+  it('builds day headings with a standalone weekday, leaving English and Swedish as the full Intl date', () => {
+    const heading = (language: (typeof languages)[number], iso: string) => translate(language, 'calendar.dayHeading', dayParts(iso, locales[language]));
+    for (const iso of ['2026-09-14', '2026-09-16', '2026-01-01', '2026-12-27']) {
+      expect(heading('en', iso)).toBe(formatDay(iso, locales.en));
+      expect(heading('sv', iso)).toBe(formatDay(iso, locales.sv));
+      const { weekday } = dayParts(iso, locales.fi);
+      expect(heading('fi', iso).startsWith(`${weekday} `)).toBe(true);
+    }
+    expect(heading('fi', '2026-09-16')).toBe('keskiviikko 16. syyskuuta 2026');
+    expect(formatDay('2026-09-16', locales.fi)).toBe('keskiviikkona 16. syyskuuta 2026');
+  });
+
   it('reads today in the profile time zone, not the device zone', () => {
     const now = new Date('2026-09-16T22:30:00Z');
     expect(todayIn('Europe/Helsinki', now)).toBe('2026-09-17');

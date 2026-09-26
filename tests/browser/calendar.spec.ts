@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { locales, translate, type Language, type MessageKey } from '../../src/i18n';
-import { formatDay, formatMonth } from '../../src/domain/local-date';
+import { dayParts, formatMonth } from '../../src/domain/local-date';
 import { mockBackend, owners, signIn } from './mock-backend';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
@@ -39,6 +39,8 @@ function seedLook(api: Api, date: string, label: string, items: Row[], state: 'p
   for (const item of items) api.wearLinks.push({ id: randomUUID(), owner_id: owner, event_id: id, item_id: item.id, title_snapshot: item.title, category_snapshot: item.category });
   return id;
 }
+const heading = (iso: string, language: Language) => text('calendar.dayHeading', language, dayParts(iso, locales[language]));
+
 async function start(page: Page, language: Language = 'en', seed?: (api: Api, clothes: ReturnType<typeof seedClothes>) => void, hash = '#/calendar') {
   await page.clock.setFixedTime(now);
   const api = await mockBackend(page, { initialLanguage: language });
@@ -71,7 +73,7 @@ test('I12 plans a look from a saved outfit, marks it worn, undoes it, removes it
   await expect(page.locator('#calendar-month')).toHaveText(formatMonth('2026-09', 'en-GB'));
   await expect(day(page, today)).toHaveAttribute('aria-current', 'date');
   await expect(day(page, today)).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('#calendar-day-title')).toHaveText(formatDay(today, 'en-GB'));
+  await expect(page.locator('#calendar-day-title')).toHaveText(heading(today, 'en'));
   await expect(page.locator('.calendar-day-panel')).toContainText(text('calendar.empty'));
 
   const opener = button(page, 'calendar.planLook');
@@ -91,7 +93,7 @@ test('I12 plans a look from a saved outfit, marks it worn, undoes it, removes it
   await expect(card.getByRole('heading', { name: 'Weekend' })).toBeVisible();
   await expect(card).toContainText(text('calendar.planned'));
   await expect(card.getByRole('link', { name: 'Olive overshirt' })).toHaveAttribute('href', `#/items/${clothes.top.id}`);
-  await expect(day(page, today)).toHaveAccessibleName(text('calendar.dayLooks_one', 'en', { date: formatDay(today, 'en-GB'), count: 1 }));
+  await expect(day(page, today)).toHaveAccessibleName(text('calendar.dayLooks_one', 'en', { date: heading(today, 'en'), count: 1 }));
 
   await card.getByRole('button', { name: text('calendar.markWorn') }).click();
   await expect(page.locator('.calendar-notice')).toContainText(text('calendar.markedWornDone'));
@@ -388,7 +390,9 @@ test('I12 in Finnish and Swedish: Monday-first weeks, arrow keys, the agenda, an
   await button(page, 'calendar.agenda', 'fi').click();
   await expect(button(page, 'calendar.agenda', 'fi')).toHaveAttribute('aria-pressed', 'true');
   const headings = page.locator('.calendar-agenda > li > h3');
-  await expect(headings).toHaveText([formatDay('2026-09-14', fi), formatDay('2026-09-22', fi)]);
+  await expect(headings).toHaveText([heading('2026-09-14', 'fi'), heading('2026-09-22', 'fi')]);
+  // The Finnish heading names the weekday in the nominative, as a standalone heading should.
+  await expect(headings.first()).toHaveText(/^maanantai 14\. syyskuuta 2026$/);
   await expect(page.locator('.calendar-agenda')).toContainText(text('calendar.worn', 'fi'));
   await page.getByRole('button', { name: text('calendar.nextMonth', 'fi') }).click();
   await expect(page.locator('.calendar-page')).toContainText(text('calendar.agendaEmpty', 'fi'));
@@ -447,6 +451,13 @@ test('I12 in Swedish at 320px and 200% text: the grid, the nav and the plan dial
     const [a, b] = labels.map(label => label.getBoundingClientRect());
     return !!a && !!b && (a.right + 8 <= b.left || a.bottom <= b.top);
   })).toBe(true);
+  // Every control, including the native date field, stays inside its field.
+  expect(await page.locator('.plan-fields .field').evaluateAll(fields => fields.flatMap(field => {
+    const box = field.getBoundingClientRect();
+    return [...field.querySelectorAll('input:not([type=checkbox]):not([type=radio]), select, textarea')]
+      .filter(control => { const inner = control.getBoundingClientRect(); return inner.left < box.left - 0.5 || inner.right > box.right + 0.5; })
+      .map(control => control.id);
+  }))).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.keyboard.press('Escape');
