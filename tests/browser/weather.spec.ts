@@ -15,6 +15,14 @@ const bar = (page: Page) => page.locator('.weather-bar');
 const place = (page: Page, key: 'setting.outdoors' | 'setting.indoors', language: Language = 'en') =>
   bar(page).getByRole('group', { name: text('weather.place', language) }).getByRole('button', { name: text(key, language), exact: true });
 const turnOn = (page: Page, language: Language = 'en') => bar(page).getByRole('link', { name: text('weather.turnOn', language), exact: true });
+// On phones the credit has its own line and no separator; wider, both share one line with the "·" between them.
+async function footerFits(page: Page) {
+  const layout = await bar(page).locator('.weather-footer').evaluate(footer => {
+    const [updated, credit] = [...footer.children].map(child => child.getBoundingClientRect());
+    return { separator: getComputedStyle(footer.children[1]!, '::before').content, ownLine: credit!.top >= updated!.bottom - 0.5, width: innerWidth };
+  });
+  expect(layout.width <= 650 ? layout.separator === 'none' && layout.ownLine : layout.separator !== 'none' && !layout.ownLine, JSON.stringify(layout)).toBe(true);
+}
 const user = { kind: 'user', revision: 1 };
 const oulu = { weather_enabled: true, weather_city: 'Oulu, Finland', latitude: 65, longitude: 25.5 };
 const malmo = { weather_enabled: true, weather_city: 'Malmö, Sweden', latitude: 55.6, longitude: 13 };
@@ -171,6 +179,7 @@ test('I16 sends nothing until Search, then only the typed city; Use this city tu
   await expect(bar(page)).toContainText(await lowLine(page, 0));
   await expect(bar(page).getByRole('link', { name: 'Open-Meteo.com' })).toHaveAttribute('href', 'https://open-meteo.com/');
   await expect(bar(page).locator('.weather-footer')).toContainText(text('weather.credit'));
+  await footerFits(page);
   // With a forecast, the only control is Outdoors | Indoors.
   await expect(place(page, 'setting.outdoors')).toHaveAttribute('aria-pressed', 'true');
   await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
@@ -624,6 +633,7 @@ test('I16 accessibility: axe, keyboard, 320px and 200% text for the weather card
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     if (route === 'today') {
       await expect(bar(page)).toContainText(await lowLine(page, 0));
+      await footerFits(page);
       // Both choices stay whole and inside the bar.
       for (const key of ['setting.outdoors', 'setting.indoors'] as const) {
         expect(await place(page, key).evaluate(element => {
@@ -672,6 +682,7 @@ test.describe('bounded I16 visual evidence', () => {
         service.weather.set('65.0', { temperature: 4, rain: 70, wind: 6 });
       } });
       await expect(bar(page)).toContainText(await lowLine(page, 4, language));
+      await footerFits(page);
       await expect(cards(page).first()).toContainText(text('today.reasonRain', language));
       await expect(button(page, 'weather.enterTemperature', language)).toHaveCount(0);
     } else if (selected.scene === 'today-off') {

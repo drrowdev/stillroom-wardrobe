@@ -470,6 +470,8 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .weather-heading { font-weight: 600; }
 .weather-footer { display: flex; flex-wrap: wrap; gap: 0 .4em; }
 .weather-credit::before { content: "·" / ""; margin-inline-end: .4em; }
+/* On phones the credit gets its own line, so a separator never starts a wrapped line. */
+@media (max-width: 650px) { .weather-footer { flex-direction: column; } .weather-credit::before { content: none; } }
 .weather-place { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; max-width: 100%; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; }
 .weather-place button { flex: 1 1 auto; min-width: 44px; min-height: 44px; padding: 8px 14px; border: 0; border-radius: 6px; background: transparent; color: var(--secondary); font-size: .875rem; font-weight: 550; }
 .weather-place button[aria-pressed="true"] { background: #E6EAE1; color: var(--primary); }
