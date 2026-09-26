@@ -89,6 +89,19 @@ test('I13: distinct-day counts, the lists and cost per wear kept in each currenc
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
+test('I13: with one priced currency there is no currency choice', async ({ page }) => {
+  await start(page, 'en', api => {
+    const w = wardrobe(api);
+    w.jeans.purchase_price = null;
+    return w;
+  });
+  const table = page.getByRole('table', { name: text('stats.costCaption', 'en', { currency: 'EUR' }) });
+  await expect(table.getByRole('row')).toHaveCount(4);
+  await expect(page.getByLabel(text('stats.currency'))).toHaveCount(0);
+  await expect(page.locator('.stats-currency')).toHaveCount(0);
+  await expect(page.locator('.stats-note')).toHaveText(text('stats.unpriced_other', 'en', { count: 2 }));
+});
+
 test('I13: the item page shows the same count and last worn as Statistics', async ({ page }) => {
   const { seeded } = await start(page, 'en', wardrobe);
   const coat = card(page, 'stats-most').locator('li').first();
