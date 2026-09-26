@@ -45,6 +45,18 @@ export function servedCode(value: unknown): string;
 export const WARM_FUNCTIONS: readonly string[];
 export function probeServedFunction(name: string, transport?: typeof fetch, timeout?: number): Promise<{ status: number; signed: boolean; ready: boolean }>;
 export function warmServedFunctions(owned: AnalysisProcess, deadline: number, transport?: typeof fetch, pause?: (ms: number) => Promise<void>): Promise<void>;
+export function closingFetch(url: string, init?: { method?: string; headers?: Record<string, string>; signal?: AbortSignal; redirect?: string }): Promise<{ status: number; headers: Headers; body: { cancel(): Promise<void> } }>;
+export function failedBeforeResponse(error: unknown): boolean;
+export function retryBeforeResponse<T>(operation: () => Promise<T>, attempts?: number): Promise<T>;
+export type KongWorkers = { workers: string[]; draining: number };
+export function parseKongWorkers(stdout: unknown): KongWorkers | null;
+export function readKongWorkers(deadline: number, run?: typeof runCommand): Promise<KongWorkers | null>;
+export function kongReloaded(before: KongWorkers, now: KongWorkers | null): boolean;
+export function probeAuthHealth(key: string, transport?: typeof fetch, timeout?: number): Promise<number>;
+export function settleGateway(owned: AnalysisProcess, deadline: number, options: {
+  before: KongWorkers | null; key: string; readWorkers?: (deadline: number) => Promise<KongWorkers | null>;
+  transport?: typeof fetch; pause?: (ms: number) => Promise<void>;
+}): Promise<void>;
 export const PROBE_STEPS: readonly string[];
 export const PROBE_CAUSES: readonly string[];
 export function probeStep(step: string): void;
