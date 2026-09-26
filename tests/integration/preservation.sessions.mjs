@@ -5,6 +5,7 @@ import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
   ROOT, PROJECT_ID, MIGRATION_HASH, TEST_EMAILS, validateSessionEnvironment, assertLocalApi, jwtClaims,
+  probeCause, probeHttpCause,
 } from '../../scripts/backend/local.mjs';
 import { isMain } from '../../scripts/quality/files.mjs';
 
@@ -300,7 +301,7 @@ export function normalClient(env, phaseSignal) {
         ...(body === undefined ? {} : { 'Content-Type': binary ? 'image/jpeg' : 'application/json' }), ...headers },
       ...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) }),
     });
-    if (!(response.status < 500)) onFailure(`status5xx-${diagnosticHttpStatus(response.status)}`);
+    if (!(response.status < 500)) { onFailure(`status5xx-${diagnosticHttpStatus(response.status)}`); probeCause(probeHttpCause(response.status)); }
     requireEvidence(response.status < 500);
     if (response.status === 204) {
       if (response.body !== null) onFailure('body-on-204');

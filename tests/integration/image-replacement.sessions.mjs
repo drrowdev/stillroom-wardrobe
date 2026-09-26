@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { isMain } from '../../scripts/quality/files.mjs';
-import { LOCAL_API } from '../../scripts/backend/local.mjs';
+import { LOCAL_API, probeStep, probeCause, probeHttpCause, resetProbe } from '../../scripts/backend/local.mjs';
 import { intent, saveClients, saveHarness, denied, eq, equalAiStatusState } from './item-save.sessions.mjs';
 import { requireEvidence, diagnosticHttpStatus } from './preservation.sessions.mjs';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
@@ -76,6 +76,7 @@ export function imageChangeHarness(client, owner, env, mark = () => {}) {
       headers: { Authorization: 'Bearer '.concat(token), apikey: env.SUPABASE_PUBLISHABLE_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, intent: value }),
     });
+    if (result.status >= 500) probeCause(probeHttpCause(result.status));
     requireEvidence(result.status < 500);
     if (result.status === 204) { requireEvidence(result.body === null); return { status: 204 }; }
     const text = await result.text(); requireEvidence(Buffer.byteLength(text) <= 16384);
@@ -144,15 +145,28 @@ export async function imageReplacementBaseline(env) {
 export async function imageReplacementServed(env) {
   const { client, owners } = await saveClients(env);
   for (const owner of owners) {
+    probeStep('replacement-create');
     const h = imageChangeHarness(client, owner, env), base = await h.create();
     const before = await client.rpc(owner, 'ai_status', {});
     const value = h.make(base.item, base.image);
     value.item.notes = 'Explicit reviewed replacement';
     value.item.field_provenance = { ...value.item.field_provenance, notes: { kind: 'user', revision: 1 } };
-    await h.reserve(value); await h.upload(value, ['thumb']);
-    eq(await h.endpoint(value), { status: 409, data: { code: 'UPLOAD_INCOMPLETE' } });
+    probeStep('replacement-reserve');
+    await h.reserve(value);
+    probeStep('replacement-upload-thumb');
+    await h.upload(value, ['thumb']);
+    probeStep('replacement-incomplete');
+    const incomplete = await h.endpoint(value);
+    if (incomplete.status !== 409) probeCause(probeHttpCause(incomplete.status));
+    eq(incomplete, { status: 409, data: { code: 'UPLOAD_INCOMPLETE' } });
     eq(await h.read('items', base.item.id), [base.item]); eq(await h.read('item_images', base.image.id), [base.image]);
-    await h.upload(value, ['main']); eq(await h.endpoint(value), { status: 204 });
+    probeStep('replacement-upload-main');
+    await h.upload(value, ['main']);
+    probeStep('replacement-complete');
+    const completed = await h.endpoint(value);
+    if (completed.status !== 204) probeCause(probeHttpCause(completed.status));
+    eq(completed, { status: 204 });
+    probeStep('replacement-verify');
     const saved = (await h.read('items', base.item.id))[0], ready = (await h.read('item_images', value.imageId))[0];
     const retired = (await h.read('item_images', base.image.id))[0];
     requireEvidence(saved.version === base.item.version + 1 && ready.state === 'ready' && retired.state === 'retired'
@@ -167,6 +181,7 @@ export async function imageReplacementServed(env) {
     const versions = await client.rpc(owner, 'image_recovery_versions', { p_item_id: saved.id, p_after: null });
     requireEvidence(versions.length === 1 && versions[0].eligible); eq(versions[0].image, retired);
     const recovery = h.make(saved, ready, retired);
+    probeStep('recovery-accept');
     const accepted = await h.endpoint(recovery, 'accept-recovery');
     requireEvidence(accepted.status === 200 && accepted.data.state === 'reserved' && accepted.data.kind === 'recovery');
     eq(await h.endpoint(recovery, 'accept-recovery'), accepted);
@@ -174,6 +189,7 @@ export async function imageReplacementServed(env) {
     await h.remove({ itemId: saved.id, imageId: retired.id });
     await client.rpc(owner, 'forget_image', { p_image_id: retired.id });
     eq(await h.endpoint(recovery, 'accept-recovery'), accepted);
+    probeStep('recovery-complete');
     await h.upload(recovery); eq(await h.endpoint(recovery), { status: 204 });
     const restored = (await h.read('items', saved.id))[0];
     requireEvidence(restored.version === saved.version + 1);
@@ -181,6 +197,7 @@ export async function imageReplacementServed(env) {
     const restoredImage = (await h.read('item_images', recovery.imageId))[0];
     requireEvidence(restoredImage.state === 'ready' && restoredImage.id !== retired.id);
     eq(await client.rpc(owner, 'item_attribution_history', { p_item_id: saved.id }), []);
+    probeStep('stale-caption');
     const stale = h.make(restored, restoredImage);
     await h.reserve(stale); await h.upload(stale);
     await client.rpc(owner, 'update_image_description', {
@@ -188,6 +205,7 @@ export async function imageReplacementServed(env) {
     });
     eq(await h.endpoint(stale), { status: 409, data: { code: 'CONFLICT' } });
     eq((await h.cancel(stale)).state, 'cancelled');
+    probeStep('completion-race');
     const raceBase = (await h.read('items', saved.id))[0], raceImage = (await h.read('item_images', recovery.imageId))[0];
     const race = h.make(raceBase, raceImage);
     await h.reserve(race); await h.upload(race);
@@ -209,10 +227,12 @@ export async function imageReplacementServed(env) {
       requireEvidence(cancellation.ok); eq(cancellation.data.state, 'cancelled');
       eq(await h.read('items', saved.id), [raceBase]); eq(await h.read('item_images', raceImage.id), [raceImage]);
     }
+    probeStep('replacement-cleanup');
     equalAiStatusState(await client.rpc(owner, 'ai_status', {}), before);
     for (const v of [{ itemId: base.item.id, imageId: base.image.id }, value, recovery, stale, race]) await h.remove(v);
     await h.deleteItem(base.value);
   }
+  resetProbe();
 }
 
 export async function imageDeletionCases(env, { withLifecycleLateUpload, requireLifecyclePrefixEmpty, withLifecycleParentLock, mark = () => {} } = {}) {

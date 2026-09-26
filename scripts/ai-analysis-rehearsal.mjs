@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ROOT, LOCAL_API, assertNoServiceSecrets, readCredentialCache, normalSessionEnvironment,
-  localStatus, privilegedLocalSql, runCommand, startAnalysisServer, parseServedDiagnostics, withAnalyzedSaveFixtureLock } from './backend/local.mjs';
+  localStatus, privilegedLocalSql, runCommand, startAnalysisServer, parseServedDiagnostics, withAnalyzedSaveFixtureLock,
+  probeStep, resetProbe, probeFailureDetail, adoptProbeReason } from './backend/local.mjs';
 import { isMain } from './quality/files.mjs';
 import { createHandler } from '../supabase/functions/analyze-clothing/handler.ts';
 import { AZURE_MODEL, AZURE_ENDPOINT, AZURE_MANIFEST, azureRequest } from '../supabase/functions/analyze-clothing/azure-openai.ts';
@@ -498,6 +499,7 @@ async function main() {
       requireEvidence(Date.now() < deadline);
       const result = await runCommand(process.execPath, [`${ROOT}tests/${suite}/analyzed-save.sessions.mjs`,
         phase, ...(origin ? [origin] : [])], { env, timeout: 120_000 });
+      if (result.code !== 0) adoptProbeReason(result.stderr);
       requireEvidence(result.code === 0);
       console.log(`PASS: B2 ${suite}/${phase} normal-session child`);
     };
@@ -506,7 +508,9 @@ async function main() {
       result_ttl_seconds=3600,execution_manifest_id=${literal(manifest)} where ${ownerWhere};`);
     await consentRevision(2);
     mode = 'ready';
+    probeStep('server-start');
     owned = await startAnalysisServer();
+    resetProbe();
     await b2Child('integration', 'prepare', origin);
     requireEvidence(generations - countBefore === 22);
     owned.assertRunning();
@@ -713,7 +717,9 @@ async function main() {
     requireEvidence(headroom() > 0);
     console.log(`PASS: AZ1 C ordinary-owner UI; generations=2; consent migration/restoration plus UI CAS=4 per owner; language initialization/restoration CAS=2 only for originally-null language; exact cleanup/restoration; elapsedMs=${Date.now() - cStarted}; remainingMs=${headroom()}`);
     stage = 'I10b-real-finalizer';
+    probeStep('server-start');
     owned = await startAnalysisServer();
+    resetProbe();
     owned.assertRunning();
     const finalGenerationCount = generations;
     await imageReplacementServed(env);
@@ -722,8 +728,8 @@ async function main() {
     equal(await snapshot(), before); equal(await requireReady(client, owners), ready); await baseline(client, owners);
     requireEvidence(headroom() > 0);
     console.log('PASS: I10b actual Deno/Auth/DB/Storage replacement and new-identity recovery; incomplete-upload/caption conflicts, completed retries and no inference');
-  } catch {
-    console.error(`FAIL: AI rehearsal at ${stage}; private evidence withheld; fixture state preserved, no automatic recovery`);
+  } catch (error) {
+    console.error(`FAIL: AI rehearsal at ${stage}; private evidence withheld; fixture state preserved, no automatic recovery${probeFailureDetail(error)}`);
     process.exitCode = 1;
   } finally {
     await owned?.stop();

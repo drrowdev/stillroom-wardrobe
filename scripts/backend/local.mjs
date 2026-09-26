@@ -713,6 +713,154 @@ export async function probeAnalysisHandler(transport = fetch, timeout = 2000) {
   return { ...indicators, ready: indicators.status === 204 && indicators.noStore && indicators.nosniff && indicators.post };
 }
 
+// Every served function besides analyze-clothing. Each worker must answer its own preflight before "ready".
+export const WARM_FUNCTIONS = Object.freeze(['finalize-analyzed-item', 'finalize-image-change', 'delete-account']);
+
+export async function probeServedFunction(name, transport = fetch, timeout = 2000) {
+  if (!WARM_FUNCTIONS.includes(name)) throw new AnalysisStartupError('reader-failed');
+  if (!Number.isSafeInteger(timeout) || timeout <= 0) throw new AnalysisStartupError('deadline');
+  const response = await transport(`${LOCAL_API}/functions/v1/${name}`, {
+    method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'POST' },
+    redirect: 'manual', signal: AbortSignal.timeout(Math.min(timeout, 2000)),
+  });
+  await response.body?.cancel();
+  const signed = response.headers.get('Cache-Control') === 'no-store'
+    && response.headers.get('X-Content-Type-Options') === 'nosniff'
+    && response.headers.get('Access-Control-Allow-Methods') === 'POST';
+  return { status: response.status, signed, ready: response.status === 204 && signed };
+}
+
+// Only gateway 404/502/503 answers (before the worker serves) and transport failures are retried until the startup
+// deadline. Any other status, or a 204 without the handler's own signature, fails at once without reading the body.
+// Only a refused or reset connection, a socket error or this probe's own timeout means the worker may still boot.
+function transientWarmFailure(error) {
+  try {
+    if (error?.name === 'TimeoutError') return true;
+    return error instanceof TypeError && ['ECONNREFUSED', 'ECONNRESET', 'UND_ERR_SOCKET'].includes(error.cause?.code);
+  } catch { return false; }
+}
+
+export async function warmServedFunctions(owned, deadline, transport = fetch, pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
+  const started = Date.now();
+  const evidence = { functions: 0, attempts: 0, elapsedMs: 0, reason: 'ready', lastStatus: null };
+  let current = WARM_FUNCTIONS[0];
+  try {
+    for (const name of WARM_FUNCTIONS) {
+      current = name;
+      for (;;) {
+        startupRemaining(deadline); owned.assertRunning();
+        evidence.attempts++;
+        let result = null;
+        try {
+          result = await probeServedFunction(name, transport, Math.min(startupRemaining(deadline), 2000));
+          evidence.lastStatus = Number.isInteger(result.status) && result.status >= 100 && result.status <= 599 ? result.status : 0;
+        } catch (error) {
+          evidence.lastStatus = 'transport';
+          if (error instanceof AnalysisStartupError) throw error;
+          if (!transientWarmFailure(error)) throw new AnalysisStartupError('transport-other');
+        }
+        owned.assertRunning();
+        if (result?.ready) break;
+        if (result?.status === 204) throw new AnalysisStartupError('signature-mismatch');
+        // Only gateway answers before the worker serves are transient; any other status fails at once.
+        if (result !== null && ![404, 502, 503].includes(result.status)) {
+          const status = result.status;
+          const statusClass = Number.isInteger(status) && status >= 100 && status <= 599 ? `${Math.floor(status / 100)}xx` : 'other';
+          throw new AnalysisStartupError(`status-${statusClass}`);
+        }
+        await pause(Math.min(250, startupRemaining(deadline)));
+      }
+      evidence.functions++;
+    }
+  } catch (error) {
+    const reason = error instanceof AnalysisStartupError ? error.reason : 'reader-failed';
+    evidence.reason = `warm-${current}-${reason}`;
+    throw new AnalysisStartupError(evidence.reason);
+  } finally {
+    evidence.elapsedMs = Math.max(0, Math.min(60_000, Date.now() - started));
+    try { console.log('B1-WARM ' + JSON.stringify(evidence)); } catch { /* Evidence cannot change readiness. */ }
+  }
+}
+
+// Fixed, content-free step and cause codes for rehearsal failures. Anything outside the lists prints as "other".
+export const PROBE_STEPS = Object.freeze([
+  'server-start', 'server-running', 'fixture', 'child',
+  'replacement-create', 'replacement-reserve', 'replacement-upload-thumb', 'replacement-incomplete',
+  'replacement-upload-main', 'replacement-complete', 'replacement-verify', 'recovery-accept', 'recovery-complete',
+  'stale-caption', 'completion-race', 'replacement-cleanup',
+  'colour-sign-in', 'colour-manual-save', 'colour-invalid-saves', 'colour-controls', 'colour-consent',
+  'colour-analysis-claim', 'colour-analysis-finish', 'colour-analyzed-reserve', 'colour-analyzed-upload',
+  'colour-analyzed-finalize', 'colour-history', 'colour-v2-claim', 'colour-target',
+  'b2-sign-in', 'b2-analysis-request', 'b2-reserve-refusals', 'b2-reserve', 'b2-upload', 'b2-phase',
+]);
+const PROBE_HTTP = [400, 401, 403, 404, 409, 429, 500, 502, 503, 504];
+const STARTUP_REASONS = ['deadline', 'reader-failed', 'reader-ambiguous', 'identity-unstable', 'signature-mismatch',
+  'boot-error', 'missing-module', 'output-limit', 'child-exit', 'absent-no-replacement', 'identity-unchanged',
+  'replacement-not-started', 'replacement-not-serving'];
+export const PROBE_CAUSES = Object.freeze([
+  ...PROBE_HTTP.map((status) => `http-${status}`), 'http-4xx', 'http-5xx', 'http-other',
+  'transport-timeout', 'transport-aborted', 'transport-refused', 'transport-reset', 'transport-socket', 'transport-failed',
+  'unexpected-body', 'assert', ...STARTUP_REASONS.map((reason) => `startup-${reason}`), 'startup-warm', 'other',
+]);
+const PROBE_LINE = /^PROBE-REASON ([a-z0-9-]{1,48}) ([a-z0-9-]{1,48})$/;
+let probeState = { step: null, cause: null };
+
+export function probeStep(step) {
+  probeState = { step: PROBE_STEPS.includes(step) ? step : 'other', cause: null };
+}
+export function probeCause(cause) {
+  if (probeState.step !== null && probeState.cause === null) probeState.cause = PROBE_CAUSES.includes(cause) ? cause : 'other';
+}
+export function resetProbe() { probeState = { step: null, cause: null }; }
+export function probeHttpCause(status) {
+  if (PROBE_HTTP.includes(status)) return `http-${status}`;
+  return Number.isInteger(status) && status >= 400 && status < 500 ? 'http-4xx'
+    : Number.isInteger(status) && status >= 500 && status < 600 ? 'http-5xx' : 'http-other';
+}
+export function probeErrorCause(error) {
+  try {
+    if (error instanceof AnalysisStartupError) {
+      if (typeof error.reason === 'string' && error.reason.startsWith('warm-')) return 'startup-warm';
+      return STARTUP_REASONS.includes(error.reason) ? `startup-${error.reason}` : 'other';
+    }
+    if (error instanceof Error && error.message === 'EVIDENCE_REQUIRED') return 'assert';
+    if (error instanceof SyntaxError) return 'unexpected-body';
+    if (error?.name === 'TimeoutError') return 'transport-timeout';
+    if (error?.name === 'AbortError') return 'transport-aborted';
+    if (error instanceof TypeError && error.message === 'fetch failed') {
+      const code = error.cause?.code;
+      return code === 'ECONNREFUSED' ? 'transport-refused' : code === 'ECONNRESET' ? 'transport-reset'
+        : typeof code === 'string' && code.startsWith('UND_ERR_SOCKET') ? 'transport-socket' : 'transport-failed';
+    }
+  } catch { /* Classification never replaces the failure. */ }
+  return 'other';
+}
+function probeCodes(error) {
+  const { step, cause } = probeState;
+  resetProbe();
+  if (step === null) return null;
+  const resolved = cause ?? probeErrorCause(error);
+  return [PROBE_STEPS.includes(step) ? step : 'other', PROBE_CAUSES.includes(resolved) ? resolved : 'other'];
+}
+// Suffix for a FAIL line: empty unless a step was marked since the last reset.
+export function probeFailureDetail(error) {
+  const codes = probeCodes(error);
+  return codes ? `; step=${codes[0]}; cause=${codes[1]}` : '';
+}
+// A child process reports its codes as one line; the parent adopts them only if both are known codes.
+export function probeReasonLine(error) {
+  const codes = probeCodes(error);
+  return codes ? `PROBE-REASON ${codes[0]} ${codes[1]}` : null;
+}
+export function adoptProbeReason(output) {
+  if (typeof output !== 'string' || output.length > 65_536) return;
+  const lines = output.split(/\r?\n/).filter((line) => line.startsWith('PROBE-REASON'));
+  const match = lines.length === 1 ? PROBE_LINE.exec(lines[0]) : null;
+  if (lines.length === 0) return;
+  probeStep(match && PROBE_STEPS.includes(match[1]) ? match[1] : 'other');
+  probeCause(match && PROBE_CAUSES.includes(match[2]) ? match[2] : 'other');
+}
+
 class AnalysisStartupError extends LocalBackendError {
   constructor(reason) { super(`FAIL: analysis startup ${reason}.`, 1); this.reason = reason; }
 }
@@ -934,6 +1082,7 @@ export async function startAnalysisServer() {
     const owned = ownAnalysisProcess(child, 600_000, Math.max(1, deadline - Date.now()));
     try {
       await waitForAnalysisHandler(owned, { deadline, spawnedAt, previous });
+      await warmServedFunctions(owned, deadline);
       return owned;
     } catch (error) {
       await owned.stop();

@@ -42,5 +42,18 @@ export function waitForAnalysisHandler(owned: AnalysisProcess, options: {
   readRuntime?: (deadline: number) => Promise<AnalysisRuntime | null>;
 }, transport?: typeof fetch): Promise<void>;
 export function servedCode(value: unknown): string;
+export const WARM_FUNCTIONS: readonly string[];
+export function probeServedFunction(name: string, transport?: typeof fetch, timeout?: number): Promise<{ status: number; signed: boolean; ready: boolean }>;
+export function warmServedFunctions(owned: AnalysisProcess, deadline: number, transport?: typeof fetch, pause?: (ms: number) => Promise<void>): Promise<void>;
+export const PROBE_STEPS: readonly string[];
+export const PROBE_CAUSES: readonly string[];
+export function probeStep(step: string): void;
+export function probeCause(cause: string): void;
+export function resetProbe(): void;
+export function probeHttpCause(status: number): string;
+export function probeErrorCause(error: unknown): string;
+export function probeFailureDetail(error: unknown): string;
+export function probeReasonLine(error: unknown): string | null;
+export function adoptProbeReason(output: unknown): void;
 export function createServedDiagnostics(emit?: (line: string) => void): (record: unknown) => void;
 export function parseServedDiagnostics(stdout: string, stderr: string): string[];
