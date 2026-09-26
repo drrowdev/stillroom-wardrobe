@@ -124,6 +124,8 @@ value stays reported in the job log.
 
 Backups, the restore drill and recovery steps are in [operations.md](operations.md).
 
+The status of every release gate, with evidence links, is in [release-gates.md](release-gates.md).
+
 ## Edge runtime gate (PR-3b, CI only)
 
 `npm run test:edge` is the last step of the **Real local Supabase** job, after the types check. It uses
