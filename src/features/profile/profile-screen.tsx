@@ -12,14 +12,16 @@ import { BackupSettings } from '../settings/backup-settings';
 import { RestoreSettings } from '../settings/restore-settings';
 import { DeleteAccountSettings } from '../settings/delete-account';
 import { InstallHint } from '../settings/install-hint';
+import { AvoidedPairs } from '../settings/avoided-pairs';
+import type { PrivateImages } from '../../images/private-images';
 import type { AiClient } from '../../data/ai';
 import { currencyOptions, timeZoneOptions } from './profile-options';
 
 // Style preferences stay stored but are not shown until suggestions use them (ADR20).
-type Props = { client: AppClient; ai: AiClient; unresolved: boolean; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; language: Language; online: boolean; t: Translate; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void; onBack: () => void };
+type Props = { client: AppClient; ai: AiClient; images: PrivateImages; unresolved: boolean; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; language: Language; online: boolean; t: Translate; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void; onBack: () => void };
 const fieldLabels = { display_name: 'profile.displayName', timezone: 'profile.timezone', currency: 'profile.currency' } as const;
 const fieldErrors = { display_name: 'settings.invalidName', timezone: 'settings.invalidTimezone', currency: 'settings.invalidCurrency' } as const;
-export function ProfileScreen({ client, ai, unresolved, controller, scope, profile, change, busy, language, online, t, onDirty, onBack }: Props) {
+export function ProfileScreen({ client, ai, images, unresolved, controller, scope, profile, change, busy, language, online, t, onDirty, onBack }: Props) {
   const [base, setBase] = useState(profile);
   const [seen, setSeen] = useState(profile);
   const [fields, setFields] = useState<ProfileFields>(() => profileFields(profile));
@@ -101,6 +103,7 @@ export function ProfileScreen({ client, ai, unresolved, controller, scope, profi
       <WeatherSettings controller={controller} scope={scope} profile={profile} busy={busy || reading} language={language} online={online} t={t} />
       <AiSettings ai={ai} controller={controller} scope={scope} profile={profile} busy={busy || reading}
         unresolved={unresolved} language={language} online={online} t={t} />
+      <AvoidedPairs client={client} scope={scope} images={images} language={language} online={online} t={t} />
       <InstallHint t={t} />
       <BackupSettings client={client} scope={scope} language={language} online={online} t={t} />
       <RestoreSettings client={client} scope={scope} language={language} online={online} t={t} />

@@ -522,6 +522,12 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   const feedbackControl: { faults: FeedbackFault[]; hold: (() => void) | null } = { faults: [], hold: null };
   let feedbackReadGate: Promise<void> | null = null;
   let feedbackReadsHeld = 0;
+  // Faults for avoided-pair writes and read-backs, in the same shape as the feedback faults.
+  const pairControl: { faults: FeedbackFault[] } = { faults: [] };
+  const takePairFault = (method: string) => {
+    const index = pairControl.faults.findIndex(fault => fault.method === method);
+    return index < 0 ? null : pairControl.faults.splice(index, 1)[0]!;
+  };
   const takeFeedbackFault = (method: string) => {
     const index = feedbackControl.faults.findIndex(fault => fault.method === method);
     return index < 0 ? null : feedbackControl.faults.splice(index, 1)[0]!;
@@ -1272,9 +1278,12 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         || ![body.item_low, body.item_high].every(value => items.some(item => item.id === value && item.owner_id === owner))) {
         await json({ code: '23503', message: 'Invalid selection' }, 409); return;
       }
+      const fault = takePairFault('POST');
+      if (fault && !fault.commit) { await failFeedback(fault); return; }
       if (!combinationRules.some(row => row.owner_id === owner && row.item_low === body.item_low && row.item_high === body.item_high)) {
         combinationRules.push({ id: randomUUID(), owner_id: owner, item_low: body.item_low, item_high: body.item_high, created_at: new Date().toISOString() });
       }
+      if (fault) { await failFeedback(fault); return; }
       await route.fulfill({ status: 201, body: '' }); return;
     }
     if (url.pathname === '/rest/v1/combination_rules' || url.pathname === '/rest/v1/suggestion_feedback') {
@@ -1290,6 +1299,14 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
           if (fault) { await failFeedback(fault); return; }
           await json(suggestionFeedback.filter(row => row.owner_id === owner && row.signature === exact.slice(3)).map(row => ({ ...row }))); return;
         }
+        const low = url.searchParams.get('item_low');
+        const high = url.searchParams.get('item_high');
+        if (store === combinationRules && (low !== null || high !== null)) {
+          if (url.searchParams.get('select') !== expected || url.searchParams.get('limit') !== '2' || !low?.startsWith('eq.') || !high?.startsWith('eq.')) { await json({ code: '22023' }, 400); return; }
+          const fault = takePairFault('READ');
+          if (fault) { await failFeedback(fault); return; }
+          await json(combinationRules.filter(row => row.owner_id === owner && row.item_low === low.slice(3) && row.item_high === high.slice(3)).map(row => ({ ...row }))); return;
+        }
         const cursor = url.searchParams.get('id');
         if (url.searchParams.get('select') !== expected || url.searchParams.get('order') !== 'id.asc' || url.searchParams.get('limit') !== '500'
           || cursor && (!cursor.startsWith('gt.') || !isUuid(cursor.slice(3)))) { await json({ code: '22023' }, 400); return; }
@@ -1298,7 +1315,20 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         if (store === suggestionFeedback && feedbackReadGate) { feedbackReadsHeld++; await feedbackReadGate; }
         await json(snapshot).catch(() => undefined); return;
       }
-      if (store !== suggestionFeedback) { await json({ code: '42501' }, 403); return; }
+      if (store === combinationRules) {
+        const low = url.searchParams.get('item_low');
+        const high = url.searchParams.get('item_high');
+        if (method !== 'DELETE') { await json({ code: '42501' }, 403); return; }
+        if (!low?.startsWith('eq.') || !high?.startsWith('eq.')) { await json({ code: '22023' }, 400); return; }
+        const fault = takePairFault('DELETE');
+        if (fault && !fault.commit) { await failFeedback(fault); return; }
+        for (let i = combinationRules.length - 1; i >= 0; i--) {
+          const row = combinationRules[i]!;
+          if (row.owner_id === owner && row.item_low === low.slice(3) && row.item_high === high.slice(3)) combinationRules.splice(i, 1);
+        }
+        if (fault) { await failFeedback(fault); return; }
+        await route.fulfill({ status: 204 }); return;
+      }
       const fault = takeFeedbackFault(method);
       if (fault && !fault.commit) { await failFeedback(fault); return; }
       if (method === 'POST') {
@@ -1493,7 +1523,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, holdFeedbackReads, outfitControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, holdFeedbackReads, outfitControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { classifyVoteError, parseFeedbackRows, parseRuleRows, parseStoredVote } from '../../src/data/suggestions';
+import type { AppClient } from '../../src/data/client';
+import { avoidedRows, classifyVoteError, parseFeedbackRows, parseRuleRows, parseStoredVote, readPair, writePair } from '../../src/data/suggestions';
 import { navFamilyFor } from '../../src/domain/outfits';
 import type { WardrobeItem } from '../../src/domain/wardrobe';
-import { defaultSeason, localDate, mergeVotes, rankingVotes, suggestionPool } from '../../src/features/today/use-suggestions';
+import type { Suggestion } from '../../src/domain/recommendations';
+import { defaultSeason, localDate, mergePairs, mergeVotes, rankingPairs, rankingVotes, suggestionPool, visibleIdeas } from '../../src/features/today/use-suggestions';
 
 const owner = '00000000-0000-4000-8000-00000000000a';
 const other = '00000000-0000-4000-8000-00000000000b';
@@ -103,5 +105,104 @@ describe('rankingVotes', () => {
     const ranked = new Map<string, 1 | -1>([['b', -1], ['d', 1]]);
     expect([...rankingVotes(fresh, ranked, new Set(['a', 'b', 'd']))].sort()).toEqual([['b', -1], ['c', -1], ['d', 1]]);
     expect([...rankingVotes(fresh, ranked, new Set())]).toEqual([...fresh]);
+  });
+});
+
+type Call = { table: string; steps: [string, unknown[]][] };
+// A stand-in client that records each query chain and answers it with the next scripted reply.
+function fakeClient(replies: ({ data?: unknown; error?: unknown; status?: number } | 'throw')[]) {
+  const calls: Call[] = [];
+  const client = {
+    from(table: string) {
+      const call: Call = { table, steps: [] };
+      calls.push(call);
+      const chain: Record<string, unknown> = {};
+      for (const name of ['select', 'upsert', 'delete', 'eq', 'limit']) chain[name] = (...args: unknown[]) => { call.steps.push([name, args]); return chain; };
+      chain.abortSignal = () => {
+        const reply = replies.shift();
+        if (reply === 'throw') return Promise.reject(new TypeError('Failed to fetch'));
+        return Promise.resolve({ data: reply?.data ?? null, error: reply?.error ?? null, status: reply?.status ?? 200 });
+      };
+      return chain;
+    },
+  };
+  return { client: client as unknown as AppClient, calls };
+}
+
+describe('avoided pairs', () => {
+  const scope = { ownerId: owner, epoch: 1, signal: new AbortController().signal };
+  const pair = `${id(2)}|${id(3)}`;
+  const attempt = (avoid: boolean, key = pair) => ({ ownerId: owner, epoch: 1, pair: key, avoid });
+
+  it('stores a pair once, keyed by owner and the lower ID first', async () => {
+    const { client, calls } = fakeClient([{ status: 201 }]);
+    expect(await writePair(client, scope, attempt(true), new AbortController().signal)).toBe('done');
+    expect(calls).toEqual([{ table: 'combination_rules', steps: [['upsert', [{ owner_id: owner, item_low: id(2), item_high: id(3) },
+      { onConflict: 'owner_id,item_low,item_high', ignoreDuplicates: true }]]] }]);
+  });
+
+  it('removes exactly this owner\'s pair', async () => {
+    const { client, calls } = fakeClient([{ status: 204 }]);
+    expect(await writePair(client, scope, attempt(false), new AbortController().signal)).toBe('done');
+    expect(calls[0]!.steps).toEqual([['delete', []], ['eq', ['owner_id', owner]], ['eq', ['item_low', id(2)]], ['eq', ['item_high', id(3)]]]);
+  });
+
+  it('refuses a pair that is not two different canonical item IDs without sending anything', async () => {
+    for (const key of [`${id(3)}|${id(2)}`, `${id(2)}|${id(2)}`, `${id(2)}|${id(3)}|${id(4)}`, id(2), `${id(2)}|${other.toUpperCase()}`]) {
+      const { client, calls } = fakeClient([]);
+      await expect(writePair(client, scope, attempt(true, key), new AbortController().signal)).rejects.toThrow();
+      await expect(readPair(client, scope, attempt(true, key), new AbortController().signal)).rejects.toThrow();
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it('treats a lost reply as unknown and a refusal as rejected', async () => {
+    expect(await writePair(fakeClient(['throw']).client, scope, attempt(true), new AbortController().signal)).toBe('unknown');
+    expect(await writePair(fakeClient([{ error: { code: '' }, status: 503 }]).client, scope, attempt(true), new AbortController().signal)).toBe('unknown');
+    expect(await writePair(fakeClient([{ error: { code: '23503' }, status: 409 }]).client, scope, attempt(true), new AbortController().signal)).toBe('rejected');
+  });
+
+  it('does not write for a scope that has changed owner or session', async () => {
+    const { client, calls } = fakeClient([]);
+    await expect(writePair(client, { ...scope, epoch: 2 }, attempt(true), new AbortController().signal)).rejects.toThrow(/Cancelled/);
+    expect(calls).toEqual([]);
+  });
+
+  it('reads back whether exactly this pair is stored', async () => {
+    const row = { id: id(9), owner_id: owner, item_low: id(2), item_high: id(3) };
+    expect(await readPair(fakeClient([{ data: [row] }]).client, scope, attempt(true), new AbortController().signal)).toBe(true);
+    expect(await readPair(fakeClient([{ data: [] }]).client, scope, attempt(false), new AbortController().signal)).toBe(false);
+    await expect(readPair(fakeClient([{ data: [{ ...row, item_high: id(4) }] }]).client, scope, attempt(true), new AbortController().signal)).rejects.toThrow();
+    await expect(readPair(fakeClient([{ data: [row, { ...row, id: id(10) }] }]).client, scope, attempt(true), new AbortController().signal)).rejects.toThrow();
+    await expect(readPair(fakeClient([{ data: [{ ...row, owner_id: other }] }]).client, scope, attempt(true), new AbortController().signal)).rejects.toThrow();
+  });
+
+  it('lists pairs only while both pieces are in the wardrobe with a photo; trashed pieces are not loaded', () => {
+    const items = [item(1), item(2), item(3, { lifecycle: 'archived' }), item(4, { imageId: '' })];
+    const rows = avoidedRows([`${id(1)}|${id(2)}`, `${id(1)}|${id(3)}`, `${id(2)}|${id(4)}`, `${id(1)}|${id(5)}`], items);
+    expect(rows.map(row => [row.pair, row.items.map(entry => entry.id)])).toEqual([[`${id(1)}|${id(2)}`, [id(1), id(2)]], [`${id(1)}|${id(3)}`, [id(1), id(3)]]]);
+    const ordered = avoidedRows([`${id(1)}|${id(2)}`], [item(1, { category: 'footwear' }), item(2, { category: 'top' })]);
+    expect(ordered[0]!.items.map(entry => entry.id)).toEqual([id(2), id(1)]);
+  });
+});
+
+describe('pair ranking on a page', () => {
+  it('lays pairs changed after a read started over its snapshot', () => {
+    const confirmed = new Map([['a|b', { avoided: false, seq: 3 }], ['c|d', { avoided: true, seq: 2 }], ['e|f', { avoided: true, seq: 1 }]]);
+    expect([...mergePairs(new Set(['a|b', 'x|y']), confirmed, 1)].sort()).toEqual(['c|d', 'x|y']);
+    expect([...mergePairs(new Set(['a|b']), confirmed, 3)]).toEqual(['a|b']);
+  });
+  it('keeps the ranking value of pairs changed on the shown page', () => {
+    expect([...rankingPairs(new Set(['a|b', 'c|d']), new Set(['e|f']), new Set(['a|b', 'e|f']))].sort()).toEqual(['c|d', 'e|f']);
+    expect([...rankingPairs(new Set(['a|b']), new Set(), new Set())]).toEqual(['a|b']);
+  });
+  it('leaves out ideas holding a newly avoided pair, except the card it was chosen on', () => {
+    const idea = (key: string, itemIds: string[]) => ({ key, itemIds }) as unknown as Suggestion;
+    const ideas = [idea('one', ['a', 'b', 'c']), idea('two', ['a', 'b', 'd']), idea('three', ['a', 'd']), idea('four', ['c', 'd'])];
+    const keys = (live: string[], ranked: string[], chosen: [string, string][]) =>
+      visibleIdeas(ideas, new Set(live), new Set(ranked), new Map(chosen)).map(entry => entry.key);
+    expect(keys(['a|b'], [], [['one', 'a|b']])).toEqual(['one', 'three', 'four']);
+    expect(keys(['a|b'], ['a|b'], [])).toEqual(['one', 'two', 'three', 'four']);
+    expect(keys([], [], [])).toEqual(['one', 'two', 'three', 'four']);
   });
 });

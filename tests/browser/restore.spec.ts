@@ -73,7 +73,8 @@ async function start(page: Page, options: MockOptions = {}, language: Language =
   const api = await mockBackend(page, { initialLanguage: language, ...options });
   api.profiles[owners.b]!.ui_language = language;
   const urls: string[] = [];
-  page.on('request', request => { urls.push(request.url()); });
+  // Each entry is `METHOD url`, so a read can be told from a write to the same address.
+  page.on('request', request => { urls.push(`${request.method()} ${request.url()}`); });
   await page.goto('/#/settings');
   const thumb = await thumbnail(page);
   return { api, urls, thumb };
@@ -527,8 +528,16 @@ async function countDecodes(page: Page) {
       state.__q6Fault = state.__q6Decodes + value; }, calls),
   };
 }
-const writeUrls = (urls: string[]) => urls.filter(url => /reserve_|finalize_|save_outfit|restore_history_entry|combination_rules|suggestion_feedback|wear_events|image-change|\/storage\/v1\/object\/wardrobe\/(?!.*\?)/.test(url));
+// Settings also lists avoided pairs with a GET, which is not a write. Any other method there is, even one asking for rows back.
+const writeUrls = (urls: string[]) => urls.filter(url => !/^GET \S+\/rest\/v1\/combination_rules\?select=/.test(url) && /reserve_|finalize_|save_outfit|restore_history_entry|combination_rules|suggestion_feedback|wear_events|image-change|\/storage\/v1\/object\/wardrobe\/(?!.*\?)/.test(url));
 type Report = import('../../src/data/restore').RestoreResult;
+test('the restore write filter exempts only the Settings GET of avoided pairs', () => {
+  const base = 'http://127.0.0.1:54321/rest/v1/combination_rules';
+  const read = `GET ${base}?select=id%2Cowner_id%2Citem_low%2Citem_high&owner_id=eq.x&order=id.asc&limit=500`;
+  const writes = ['POST', 'PATCH', 'DELETE'].map(method => `${method} ${base}?select=id%2Cowner_id&on_conflict=owner_id%2Citem_low%2Citem_high`);
+  expect(writeUrls([read, ...writes, `POST ${base}?on_conflict=owner_id%2Citem_low%2Citem_high`])).toEqual([...writes, `POST ${base}?on_conflict=owner_id%2Citem_low%2Citem_high`]);
+  expect(writeUrls([`GET http://127.0.0.1:54321/rest/v1/suggestion_feedback?select=id`])).toHaveLength(1);
+});
 // The last restore's report, from the app's own module instance in the page.
 const report = (page: Page) => page.evaluate(async () => {
   const module = '/src/data/restore.ts';
