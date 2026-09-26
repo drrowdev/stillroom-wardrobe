@@ -108,6 +108,15 @@ async function main() {
       child.on('close', (value) => resolve(value ?? 2));
     });
     if (deletionCode !== 0) { process.exitCode = deletionCode; return; }
+    // I13: statistics read only the owner's own wear rows.
+    const statisticsCode = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [path.join(ROOT, 'tests', suite, 'statistics.sessions.mjs')], {
+        cwd: ROOT, env, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'],
+      });
+      child.on('error', () => resolve(2));
+      child.on('close', (value) => resolve(value ?? 2));
+    });
+    if (statisticsCode !== 0) { process.exitCode = statisticsCode; return; }
   }
   if (suite === 'integration') {
     const feedbackCode = await new Promise((resolve) => {

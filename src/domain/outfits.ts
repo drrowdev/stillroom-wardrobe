@@ -44,13 +44,14 @@ export function occasionLabel(record: Pick<OutfitRecord, 'occasion'>): MessageKe
 export function outfitRouteId(value: string): string | null {
   return isUuid(value) && value === value.toLowerCase() ? value : null;
 }
-export type NavFamily = 'today' | 'wardrobe' | 'outfits' | 'calendar' | null;
+export type NavFamily = 'today' | 'wardrobe' | 'outfits' | 'calendar' | 'statistics' | null;
 export function isOutfitRoute(route: string): boolean {
   return route === 'outfits' || route === 'outfit-new' || route.startsWith('outfit:');
 }
 export function navFamilyFor(route: string): NavFamily {
   if (route === 'today') return 'today';
   if (route === 'calendar') return 'calendar';
+  if (route === 'statistics') return 'statistics';
   return isOutfitRoute(route) ? 'outfits' : route === 'wardrobe' || route === 'add' || route.startsWith('detail:') ? 'wardrobe' : null;
 }
 // Outfit editors never use the shared discard dialog: there is nothing to cancel or refund.

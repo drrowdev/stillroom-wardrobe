@@ -19,6 +19,8 @@ import { TrashAction } from '../settings/trash';
 import type { AiClient } from '../../data/ai';
 import { LazyBoundary } from '../../app/lazy';
 import { lazyNamed } from '../../app/lazy-load';
+import { loadWearHistory, type WearSummary } from '../../data/wear-history';
+import { wearLineText } from '../statistics/wear-text';
 
 const ReplacePhoto = lazyNamed(() => import('./replace-photo'), 'ReplacePhoto');
 
@@ -135,6 +137,23 @@ function SavedPhoto({ image, images, t }: { image: ImageBaseline; images: Privat
   return <div className="detail-photo">{url ? <img src={url} alt={image.altText} /> :
     <p role="status">{failed ? <><Icon name="photo" />{t('photo.missing')}</> : t('common.loading')}</p>}</div>;
 }
+// The same distinct-day count as Statistics and the wardrobe sorts.
+function WearLine({ client, scope, itemId, online, language, t }: Pick<Shared, 'client' | 'scope' | 'online' | 'language' | 't'> & { itemId: string }) {
+  const [wear, setWear] = useState<WearSummary | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setWear(null); setFailed(false);
+    void loadWearHistory(client, scope, [{ id: itemId, ownerId: scope.ownerId }], controller.signal, itemId).then(history => {
+      if (!controller.signal.aborted) setWear(history.items.get(itemId) ?? null);
+    }, (problem: unknown) => { if (!controller.signal.aborted && !isAborted(problem)) setFailed(true); });
+    return () => controller.abort();
+  }, [client, scope, itemId, reload]);
+  if (failed) return <p className="detail-wear" role="status">{t('wardrobe.historyUnavailable')} <button type="button" className="text-button" disabled={!online} onClick={() => setReload(value => value + 1)}>{t('common.retry')}</button></p>;
+  if (!wear) return <p className="detail-wear" role="status">{t('wardrobe.historyLoading')}</p>;
+  return <p className="detail-wear">{wearLineText(wear.count, wear.lastWorn, language, t)}</p>;
+}
 function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecycle: ItemLifecycleClient; onTrashed: (item: LifecycleSnapshot) => void; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void;
   ai: AiClient; onBeforeDiscard: (handler: BeforeDiscard | null) => void; onReload: () => void; onTitle: (title: string) => void }) {
   const [outcome, setOutcome] = useState<'saved' | 'partial' | null>(null);
@@ -203,6 +222,7 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
         <button className="button button-secondary" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('replacement'); }}>{t('imageChange.replace')}</button>
         <button className="text-button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('recovery'); }}>{t('imageChange.recover')}</button>
       </div>
+      <WearLine client={props.client} scope={props.scope} itemId={props.detail.item.id} online={props.online} language={props.language} t={t} />
     </div>
     <div className="detail-sections">
       <fieldset className="lifecycle-edit-lock" disabled={lifecycleState.busy || lifecycleState.pending}>

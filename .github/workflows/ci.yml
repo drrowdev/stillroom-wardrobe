@@ -253,6 +253,17 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Preserve bounded synthetic I13 visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: i13-statistics-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/i13-visual/overview-en-desktop.png
+            test-results/i13-visual/overview-fi-mobile.png
+            test-results/i13-visual/overview-sv-320-200.png
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Preserve bounded synthetic P6a visual evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

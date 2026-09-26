@@ -1147,13 +1147,17 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const expected = 'id,owner_id,item_id,event_id,event:wear_events!wear_event_items_owner_id_event_id_fkey!inner(id,owner_id,local_date,state,deleted_at)';
       if (!owner || url.searchParams.get('select') !== expected || url.searchParams.get('owner_id') !== `eq.${owner}`
         || url.searchParams.get('event.owner_id') !== `eq.${owner}` || url.searchParams.get('event.state') !== 'eq.worn'
-        || url.searchParams.get('event.deleted_at') !== 'is.null' || url.searchParams.get('item_id') !== 'not.is.null'
-        || url.searchParams.get('order') !== 'id.asc' || url.searchParams.get('limit') !== '500') {
+        || url.searchParams.get('event.deleted_at') !== 'is.null' || url.searchParams.getAll('item_id')[0] !== 'not.is.null'
+        || url.searchParams.getAll('item_id').length > 2 || url.searchParams.get('order') !== 'id.asc' || url.searchParams.get('limit') !== '500') {
         await json({ code: '42501' }, 403); return;
       }
+      // The item page reads only its own item's links.
+      const only = url.searchParams.getAll('item_id')[1];
+      if (only !== undefined && (!only.startsWith('eq.') || !isUuid(only.slice(3)))) { await json({ code: '22023' }, 400); return; }
       const cursor = url.searchParams.get('id');
       if (cursor && (!cursor.startsWith('gt.') || !isUuid(cursor.slice(3)))) { await json({ code: '22023' }, 400); return; }
-      const result = wearLinks.filter(row => row.owner_id === owner && row.item_id !== null && (!cursor || String(row.id) > cursor.slice(3)))
+      const result = wearLinks.filter(row => row.owner_id === owner && row.item_id !== null && (!only || row.item_id === only.slice(3))
+        && (!cursor || String(row.id) > cursor.slice(3)))
         .flatMap(row => {
           const event = wearEvents.find(event => event.id === row.event_id && event.owner_id === owner && event.state === 'worn' && event.deleted_at === null);
           return event ? [{ id: row.id, owner_id: row.owner_id, item_id: row.item_id, event_id: row.event_id,
