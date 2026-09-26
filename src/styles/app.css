@@ -119,8 +119,12 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .workspace-header nav { align-self: stretch; display: flex; align-items: center; gap: 28px; }
 .nav-link { color: var(--secondary); text-decoration: none; display: flex; gap: 9px; align-items: center; min-height: 44px; font-size: .875rem; font-weight: 550; }
 .active-nav { color: var(--primary); text-decoration: none; display: flex; gap: 9px; align-items: center; min-height: 44px; font-size: .875rem; font-weight: 550; }
-.account-controls { margin-left: auto; position: relative; }
-.account-button { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 0 0 8px; color: var(--ink); background: transparent; border: 0; font-size: .875rem; }
+.account-controls { margin-left: auto; position: relative; min-width: 0; }
+/* header-fit.ts sets data-stacked when the brand, the links and the account menu don't fit on one row. */
+.workspace-header { flex-wrap: wrap; row-gap: 8px; }
+.workspace-header:not([data-stacked]) .nav-link, .workspace-header:not([data-stacked]) .active-nav { white-space: nowrap; }
+.workspace-header[data-stacked] nav { order: 3; flex-basis: 100%; flex-wrap: wrap; min-width: 0; }
+.account-button { max-width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 0 0 8px; color: var(--ink); background: transparent; border: 0; font-size: .875rem; }
 .account-button > span:not(.avatar) { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .avatar { width: 34px; height: 34px; background: #E8EBDD; color: var(--primary); display: grid; place-items: center; border-radius: 50%; font-weight: 550; flex: 0 0 auto; }
 .account-button .icon { width: 16px; }
@@ -547,4 +551,31 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
   .calendar-grid { border-spacing: 2px; }
   .calendar-day { min-height: 44px; padding: 4px 0; border-radius: 6px; }
   .calendar-months h2 { min-width: 0; flex: 1 1 100%; order: -1; text-align: start; }
+}
+.stats-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; }
+.stats-card h2 { font-size: 1.125rem; margin-bottom: 14px; }
+.stats-cost, .stats-empty { grid-column: 1 / -1; }
+.stats-empty { display: grid; justify-items: start; gap: 14px; }
+.stats-empty p { margin: 0; }
+.stats-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+.stats-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; }
+.stats-list a, .stats-table a { color: var(--ink); min-height: 24px; }
+.stats-list span, .stats-note, .detail-wear { color: var(--secondary); font-size: .875rem; }
+.stats-currency { max-width: 220px; margin-bottom: 16px; }
+.stats-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.stats-table th, .stats-table td { padding: 10px 12px 10px 0; text-align: start; border-bottom: 1px solid var(--border); vertical-align: top; }
+.stats-table thead th { color: var(--secondary); font-weight: 550; }
+.stats-table tbody th { font-weight: 450; }
+.stats-note { margin: 14px 0 0; }
+.detail-wear { margin: 12px 0 0; }
+@media (max-width: 800px) {
+  .stats-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 420px) {
+  .stats-card { padding: 18px; }
+  .stats-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .stats-table, .stats-table tbody, .stats-table tr, .stats-table th, .stats-table td { display: block; }
+  .stats-table tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .stats-table th, .stats-table td { padding: 2px 0; border: 0; }
+  .stats-table td::before { content: attr(data-label) ": "; color: var(--secondary); }
 }

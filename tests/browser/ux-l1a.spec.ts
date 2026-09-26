@@ -308,7 +308,7 @@ test.describe('UX L1c saved item layout', () => {
       };
     });
     expect(shape).toEqual({
-      layout: ['detail-media', 'detail-sections'], media: ['detail-photo', 'photo-actions'],
+      layout: ['detail-media', 'detail-sections'], media: ['detail-photo', 'photo-actions', 'detail-wear'],
       sections: ['lifecycle-edit-lock', 'detail-item-actions'], row: ['detail-archive', 'settings-card lifecycle-actions'],
       actions: [[text('imageChange.replace'), text('imageChange.recover')]],
       underPhoto: true, inColumn: true, oneRow: true, afterCard: true,
