@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { readConfiguration, type Configuration, type PublicConfig } from '../data/config';
-import { makeClient } from '../data/client';
+import { makeClient, retireClient, revokeSession } from '../data/client';
 import { SessionController, type OwnerScope, type SessionState } from '../auth/session';
 import { Login } from '../auth/login';
 import { translate, resolveLanguage, type Language, type MessageKey, type Translate } from '../i18n';
@@ -307,9 +307,14 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   );
 }
 function Connected({ config, callback }: { config: PublicConfig; callback: RecoveryCallback }) {
-  const [client] = useState(() => { markNormalAuthStarted(); return makeClient(config); });
-  const [controller] = useState(() => new SessionController(client, browserLanguages));
+  const [controller] = useState(() => {
+    markNormalAuthStarted();
+    return new SessionController(makeClient(config), browserLanguages, {
+      make: () => makeClient(config), retire: retireClient, revoke: (token) => revokeSession(config, token),
+    });
+  });
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const client = state.client;
   const [menu, setMenu] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
   const [requestPassword, setRequestPassword] = useState(false);
@@ -330,6 +335,9 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
     });
     return () => data.subscription.unsubscribe();
   }, [client]);
+  // Every sign-out, including one from another tab, replaces the client; like any auth activity it clears the notice.
+  const firstClient = useRef(client);
+  useEffect(() => { if (client !== firstClient.current) clearRecoveryNotice(); }, [client]);
   useEffect(() => { document.documentElement.lang = state.language; }, [state.language]);
   useEffect(() => {
     if (state.phase === 'signed-out' && !requestPassword && callback.kind === 'none') document.getElementById('login-title')?.focus();

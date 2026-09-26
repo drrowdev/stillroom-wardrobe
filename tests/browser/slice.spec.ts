@@ -841,6 +841,125 @@ test('sign-out is broadcast across tabs without sending account data', async ({ 
   await second.close();
 });
 
+// Sign-out must not depend on the network: nothing a reload or a late reply could reuse survives the click.
+const fixtureConfig = { url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_browser_fixture_only', version: 'browser-fixture' };
+const storedAuthKeys = (page: Page) => page.evaluate(() => [sessionStorage, localStorage]
+  .flatMap((store) => Object.keys(store).filter((key) => key.startsWith('stillroom.auth'))));
+async function holdAuthRoute(page: Page, path: string, grant?: string) {
+  const received = latch(), release = latch();
+  await page.route((url) => url.pathname === path && (!grant || url.searchParams.get('grant_type') === grant), async (route) => {
+    received.resolve();
+    await release.promise;
+    await route.fallback().catch(() => undefined);
+  });
+  return { received: received.promise, release: release.resolve };
+}
+async function signOutFromMenu(page: Page) {
+  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await page.getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
+}
+type LateRefresh = Window & { lateRefresh?: Promise<'error' | 'ok'>; firstClient?: unknown };
+
+test('a reload during a slow sign-out finds nothing to restore', async ({ page }) => {
+  await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto('/');
+  await signIn(page);
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  const logout = await holdAuthRoute(page, '/auth/v1/logout');
+  await signOutFromMenu(page);
+  await logout.received;
+  await expect(page.locator('#email')).toBeVisible();
+  expect(await storedAuthKeys(page)).toEqual([]);
+  const sent: string[] = [];
+  page.on('request', (request) => { const value = request.headers().authorization; if (value?.endsWith('.browser-fixture')) sent.push(new URL(request.url()).pathname); });
+  await page.reload();
+  await expect(page.locator('#email')).toBeVisible();
+  await expect(page.locator('.workspace')).toHaveCount(0);
+  logout.release();
+  expect(await storedAuthKeys(page)).toEqual([]);
+  expect(sent).toEqual([]);
+});
+
+test('sign-out offline stays signed out and says the server did not confirm it', async ({ page }) => {
+  await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto('/');
+  await signIn(page);
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  await page.route('**/auth/v1/logout**', (route) => route.abort('internetdisconnected'));
+  await signOutFromMenu(page);
+  await expect(page.locator('#email')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveText(messages['auth.localSignOut'].en);
+  expect(await storedAuthKeys(page)).toEqual([]);
+  await page.reload();
+  await expect(page.locator('#email')).toBeVisible();
+});
+
+test('a refresh answered after sign-out is never stored or sent', async ({ page }) => {
+  await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto('/');
+  await signIn(page);
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  const received = latch(), release = latch();
+  await page.route((url) => url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'refresh_token', async (route) => {
+    received.resolve();
+    await release.promise;
+    await route.fulfill({ json: { access_token: 'late-rotated-token', refresh_token: 'late-rotated-refresh', expires_in: 3600, token_type: 'bearer',
+      user: { id: owners.a, email: 'user-a@example.test', aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: '2026-09-06T00:00:00Z' } } });
+  });
+  const sent: string[] = [];
+  page.on('request', (request) => { if (request.headers().authorization?.includes('late-rotated')) sent.push(new URL(request.url()).pathname); });
+  await page.evaluate(async (config) => {
+    const modulePath = '/src/data/client.ts';
+    const { makeClient } = await import(modulePath) as typeof import('../../src/data/client');
+    (window as LateRefresh).lateRefresh = makeClient(config).auth.refreshSession().then((result) => result.error ? 'error' : 'ok');
+  }, fixtureConfig);
+  await received.promise;
+  await signOutFromMenu(page);
+  await expect(page.locator('#email')).toBeVisible();
+  release.resolve();
+  // The retired client finishes its refresh against storage it can no longer reach.
+  await page.evaluate(() => (window as LateRefresh).lateRefresh);
+  expect(await storedAuthKeys(page)).toEqual([]);
+  await signIn(page, 'b');
+  await expect(page.locator('.account-button')).toContainText('Robin');
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('stillroom.auth') ?? '{}').access_token)).toMatch(/\.browser-fixture$/);
+  expect(sent).toEqual([]);
+});
+
+test('a sign-in answered after another tab signed out is not kept', async ({ page, context }) => {
+  const second = await context.newPage();
+  await mockBackend(page, { initialLanguage: 'en' });
+  await mockBackend(second, { initialLanguage: 'en' });
+  await page.goto('/');
+  await second.goto('/');
+  await signIn(page);
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  await second.evaluate(async (config) => {
+    const modulePath = '/src/data/client.ts';
+    const { makeClient } = await import(modulePath) as typeof import('../../src/data/client');
+    (window as LateRefresh).firstClient = makeClient(config);
+  }, fixtureConfig);
+  const token = await holdAuthRoute(second, '/auth/v1/token', 'password');
+  await signIn(second, 'b');
+  await token.received;
+  await signOutFromMenu(page);
+  await expect(page.locator('#email')).toBeVisible();
+  // The other tab has retired the client that is still waiting for its sign-in reply.
+  await expect.poll(() => second.evaluate(async (config) => {
+    const modulePath = '/src/data/client.ts';
+    const { makeClient } = await import(modulePath) as typeof import('../../src/data/client');
+    return makeClient(config) !== (window as LateRefresh).firstClient;
+  }, fixtureConfig)).toBe(true);
+  token.release();
+  await expect(second.locator('button[type="submit"]')).toBeEnabled();
+  await expect(second.locator('#email')).toBeVisible();
+  await expect(second.locator('.workspace')).toHaveCount(0);
+  expect(await storedAuthKeys(second)).toEqual([]);
+  await second.reload();
+  await expect(second.locator('#email')).toBeVisible();
+  await second.close();
+});
+
 type AuthMarkers = Window & { authEvents?: Array<{ event: string; owner: string | null }> };
 type ProfileSignal = { sequence: number; present: boolean; aborted: boolean; reason: 'AbortError' | 'TimeoutError' | 'other' };
 type ProfileProbe = Window & typeof globalThis & { profileProbe: { armed: boolean; count: number; snapshot: () => ProfileSignal[] } };

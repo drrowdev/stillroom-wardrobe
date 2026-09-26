@@ -174,6 +174,8 @@ test('I22 a frozen account signs in to the recovery screen, retries and finishes
   await expect(page.locator('#email')).toBeVisible();
   await expect(page.getByRole('status').filter({ hasText: text('delete.done') })).toBeVisible();
   await arrived;
+  // The logout request is still held: the credentials must already be gone.
+  expect(await authKeys(page)).toEqual([]);
   release();
   expect(bodies).toEqual([JSON.stringify({ password: secret }), JSON.stringify({ password: secret })]);
   await expectNoSessionLeft(page, auth);
