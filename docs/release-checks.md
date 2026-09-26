@@ -119,6 +119,10 @@ value stays reported in the job log.
 | Real-photo performance on the phone: capture, crop, re-encode and upload of a full-size camera image | R21 | Pending: owner device. |
 | Pre-save analysis latency, measured separately, with the form staying editable | R21 | Pending: owner hosted use. |
 | LCP and layout on a real phone over mobile data | R21 | Pending: owner device. |
+| VoiceOver (iPhone) and TalkBack (Android) pass over the release journey | I26 | Pending: owner device. The automated journey is `tests/browser/release-journey.spec.ts`. |
+| Hosted H1: backup, offline verify and non-committing restore check on the owner's account | I26, R20 | Pending: owner. See [operations.md](operations.md#hosted-operations). |
+
+Backups, the restore drill and recovery steps are in [operations.md](operations.md).
 
 ## Edge runtime gate (PR-3b, CI only)
 
