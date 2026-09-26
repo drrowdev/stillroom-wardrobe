@@ -66,3 +66,27 @@ here (see [Pending](#pending)).
 - Coordinator visual review of the four captures.
 - The ten-decision usefulness sample with the owner's real wardrobe.
 - The phone performance check on a real device.
+
+## Later addition: Don't pair these
+
+Owner priority after PR #66; Tier B, no schema change. This section records
+that packet; the I15 record above is unchanged.
+
+- **Today**: each idea with two or more pieces offers **Don't pair these**.
+  With two pieces it applies at once; with more, it asks which two. The card
+  then shows the two pieces, "These two won't be suggested together." and
+  **Undo**. Other ideas on the page with both pieces disappear, and later
+  pages, Start over and reloads never pair them.
+- **Settings > Avoided pairs** lists each pair with both thumbnails and titles
+  and a **Remove** button; with none, one plain line. A pair is skipped while
+  either piece is in trash and returns if the piece is restored; permanent
+  deletion removes it by cascade.
+- Writes go to the installed combination_rules table (idempotent insert on
+  owner_id,item_low,item_high, exact owner delete). A lost reply is checked
+  by reading the pair back; an unsettled change offers Try again and locks the
+  other choices, as for votes.
+- 	ests/integration/feedback.sessions.mjs now also covers insert, duplicate,
+  ordering and self-pair refusal, removal and owner isolation for pairs.
+- Captures added to i15-today-ui-<head>: pair-chooser-fi-mobile,
+  pair-chooser-fi-320-200, pair-hidden-en-desktop,
+  voided-pairs-sv-mobile.

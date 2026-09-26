@@ -443,6 +443,17 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .today-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
 .today-actions .button[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); }
 .today-missing { margin: 0; color: var(--secondary); }
+.today-pair { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.today-pair legend { padding: 0 4px; font-weight: 600; }
+.today-pair-option { display: grid; grid-template-columns: auto 48px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.today-pair-option .outfit-thumb { width: 48px; }
+.today-pair .today-actions { margin-top: 4px; }
+.avoided-pairs { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 16px; }
+.avoided-pair { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.avoided-pair:last-child { padding-bottom: 0; border-bottom: 0; }
+.avoided-pair-items { list-style: none; padding: 0; margin: 0; flex: 1 1 240px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-width: 0; }
+.avoided-pair-items .outfit-thumb { max-width: 96px; }
+.avoided-pair .notice { flex-basis: 100%; }
 .today-hint { margin: 0 0 16px; }
 .today-more { margin-top: 24px; }
 .today-empty { padding: 32px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }

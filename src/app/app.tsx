@@ -252,7 +252,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
         {outfitNotice && route === `outfit:${outfitNotice}` && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('outfits.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setOutfitNotice(null)}><Icon name="close" /></button></div>}
         <LazyBoundary key={route} t={t} onReady={focusRoute}>{route === 'add'
           ? <AddItem client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} />
-          : route === 'settings' ? <ProfileScreen client={client} ai={ai} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} />
+          : route === 'settings' ? <ProfileScreen client={client} ai={ai} images={images} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} />
           : route === 'trash' ? <Trash lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
             onDeleting={itemId => setUndo(current => current?.item.id === itemId ? null : current)}
             onBack={() => changeRoute('wardrobe')} onChanged={() => { setUndo(null); void refresh(); invalidateOutfits(); }} />

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../app/icon';
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
@@ -61,7 +61,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
       : result.status === 'partial' ? <div className="today-ideas">
         {result.suggestions.map(suggestion => <article key={suggestion.key} className="today-card" aria-labelledby={`idea-${suggestion.key}`}>
           <h2 id={`idea-${suggestion.key}`} className="sr-only">{t('today.idea', { number: 1 })}</h2>
-          <Pieces suggestion={suggestion} byId={byId} images={images} t={t} />
+          <Pieces ids={suggestion.itemIds} byId={byId} images={images} t={t} />
           <p className="today-missing">{t('today.missing', { categories: list(suggestion.missingSlots) })}</p>
           {notes(suggestion).map(key => <p key={key} className="today-missing">{t(key)}</p>)}
           <div className="today-actions"><button type="button" className="button button-primary" onClick={onAddItem}><Icon name="plus" />{t('wardrobe.add')}</button></div>
@@ -75,19 +75,20 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
       : <>
         {result.missingDetails.includes('formality') && <p className="muted today-hint">{t('today.missingFormality')}</p>}
         <div className="today-ideas">
-          {result.suggestions.map((suggestion, index) => <Idea key={suggestion.key} suggestion={suggestion} number={index + 1} byId={byId} images={images} t={t} list={list}
+          {ideas.ideas.map((suggestion, index) => <Idea key={suggestion.key} suggestion={suggestion} number={index + 1} byId={byId} images={images} t={t} list={list}
             online={online} vote={ideas.votes.get(suggestion.key) ?? null} pending={ideas.pending} failed={ideas.failed === suggestion.key} unresolved={ideas.unresolved === suggestion.key} locked={ideas.unresolved !== null} onRetry={ideas.retry}
             onSave={() => onSave(suggestion.itemIds, occasion)} onLike={() => ideas.like(suggestion.key)}
-            onHide={() => ideas.hide(suggestion.key)} onUndo={() => ideas.undo(suggestion.key)} />)}
+            onHide={() => ideas.hide(suggestion.key)} onUndo={() => ideas.undo(suggestion.key)}
+            avoided={ideas.avoided(suggestion.key)} unsettled={ideas.unsettledPair(suggestion.key)} onAvoid={(first, second) => ideas.avoid(suggestion.key, first, second)} onAllow={() => ideas.allow(suggestion.key)} />)}
         </div>
         <div className="today-more"><button type="button" className="button button-secondary" disabled={ideas.settling} onClick={ideas.more}><Icon name="refresh" />{t('today.more')}</button></div>
       </>}
   </section>;
 }
 
-function Pieces({ suggestion, byId, images, t }: { suggestion: Suggestion; byId: ReadonlyMap<string, WardrobeItem>; images: PrivateImages; t: Translate }) {
+function Pieces({ ids, byId, images, t }: { ids: readonly string[]; byId: ReadonlyMap<string, WardrobeItem>; images: PrivateImages; t: Translate }) {
   return <ul className="today-pieces">
-    {suggestion.itemIds.map(id => {
+    {ids.map(id => {
       const item = byId.get(id);
       if (!item) return null;
       const component = pickerComponent(item);
@@ -101,33 +102,98 @@ type IdeaProps = {
   list: (categories: readonly Category[]) => string;
   vote: 1 | -1 | null; pending: Pending | null; failed: boolean; unresolved: boolean; locked: boolean;
   onSave: () => void; onLike: () => void; onHide: () => void; onUndo: () => void; onRetry: () => void;
+  avoided: string | null; unsettled: string | null; onAvoid: (first: string, second: string) => void; onAllow: () => void;
 };
-function Idea({ suggestion, number, byId, images, t, list, online, vote, pending, failed, unresolved, locked, onSave, onLike, onHide, onUndo, onRetry }: IdeaProps) {
+function Idea({ suggestion, number, byId, images, t, list, online, vote, pending, failed, unresolved, locked, onSave, onLike, onHide, onUndo, onRetry,
+  avoided, unsettled, onAvoid, onAllow }: IdeaProps) {
   const title = `idea-${number}-title`;
+  const [choosing, setChoosing] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const legend = useRef<HTMLLegendElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  const undoPair = useRef<HTMLButtonElement>(null);
+  const wasChoosing = useRef(false);
+  const wasAvoided = useRef(avoided);
+  const retry = useRef<HTMLButtonElement>(null);
+  const card = useRef<HTMLElement>(null);
+  const wasUnsettled = useRef(unsettled);
+  useEffect(() => {
+    if (choosing) legend.current?.focus();
+    else if (wasChoosing.current) opener.current?.focus();
+    wasChoosing.current = choosing;
+  }, [choosing]);
+  // Keyboard focus follows the card as it collapses to its Undo and back.
+  useEffect(() => {
+    if (avoided && !wasAvoided.current) undoPair.current?.focus();
+    else if (!avoided && wasAvoided.current) opener.current?.focus();
+    wasAvoided.current = avoided;
+  }, [avoided]);
+  // An uncertain pair choice turns the card into its Try again, and back once it is settled, without taking focus from elsewhere.
+  useEffect(() => {
+    const here = document.activeElement === document.body || card.current?.contains(document.activeElement) === true;
+    if (here && unsettled && !wasUnsettled.current && !avoided) retry.current?.focus();
+    else if (here && !unsettled && wasUnsettled.current && !avoided) opener.current?.focus();
+    wasUnsettled.current = unsettled;
+  }, [unsettled, avoided]);
+  const pieces = suggestion.itemIds.filter(id => byId.has(id));
   // Until an uncertain choice is settled, only its Try again is offered on the page.
   const busy = pending !== null || locked;
   const problem = unresolved
-    ? <div className="notice notice-error" role="alert"><span>{t('today.voteFailed')}</span><button type="button" className="text-button" disabled={!online || pending !== null} onClick={onRetry}>{t('common.retry')}</button></div>
+    ? <div className="notice notice-error" role="alert"><span>{t('today.voteFailed')}</span><button ref={retry} type="button" className="text-button" disabled={!online || pending !== null} onClick={onRetry}>{t('common.retry')}</button></div>
     : failed && <p className="notice notice-error" role="alert">{t('today.voteFailed')}</p>;
   const mine = pending?.key === suggestion.key;
+  if (avoided) return <article ref={card} className="today-card today-card-hidden" aria-labelledby={title}>
+    <h2 id={title} className="sr-only">{t('today.idea', { number })}</h2>
+    <Pieces ids={suggestion.itemIds.filter(id => avoided.split('|').includes(id))} byId={byId} images={images} t={t} />
+    <p role="status">{t('today.pairHidden')}</p>
+    {problem}
+    <button ref={undoPair} type="button" className="text-button" disabled={!online || busy} aria-busy={mine || undefined} onClick={onAllow}>{t('common.undo')}</button>
+  </article>;
+  // Until it is settled the pair may already be avoided, so the card offers nothing but its Try again.
+  if (unsettled) return <article ref={card} className="today-card today-card-hidden" aria-labelledby={title}>
+    <h2 id={title} className="sr-only">{t('today.idea', { number })}</h2>
+    <Pieces ids={suggestion.itemIds.filter(id => unsettled.split('|').includes(id))} byId={byId} images={images} t={t} />
+    {problem}
+  </article>;
   if (vote === -1) return <article className="today-card today-card-hidden" aria-labelledby={title}>
     <h2 id={title} className="sr-only">{t('today.idea', { number })}</h2>
     <p role="status">{t('today.hidden')}</p>
     {problem}
     <button type="button" className="text-button" disabled={!online || busy} aria-busy={mine || undefined} onClick={onUndo}>{t('common.undo')}</button>
   </article>;
-  return <article className="today-card" aria-labelledby={title}>
+  // Saving waits while a pair on this card is being written.
+  const pairing = mine && (pending.kind === 'avoid' || pending.kind === 'allow');
+  return <article ref={card} className="today-card" aria-labelledby={title}>
     <h2 id={title} className="sr-only">{t('today.idea', { number })}</h2>
-    <Pieces suggestion={suggestion} byId={byId} images={images} t={t} />
+    <Pieces ids={suggestion.itemIds} byId={byId} images={images} t={t} />
     {suggestion.reasons.length > 0 && <ul className="today-reasons">{suggestion.reasons.map(reason => <li key={reason.key}><Icon name="check" />{t(reasonKeys[reason.key])}</li>)}</ul>}
     {notes(suggestion).map(key => <p key={key} className="today-missing">{t(key)}</p>)}
     {!suggestion.weatherNeeds && suggestion.missingSlots.length > 0 && <p className="today-missing">{t('today.missing', { categories: list(suggestion.missingSlots) })}</p>}
     {problem}
     <div className="today-actions">
-      <button type="button" className="button button-primary" disabled={!online} onClick={onSave}>{t('today.save')}</button>
+      <button type="button" className="button button-primary" disabled={!online || pairing} onClick={onSave}>{t('today.save')}</button>
       <button type="button" className="button button-secondary" aria-pressed={vote === 1} disabled={!online || busy} aria-busy={mine && pending.kind === 'like' || undefined} onClick={onLike}>{t('today.like')}</button>
       <button type="button" className="button button-quiet" disabled={!online || busy} aria-busy={mine && pending.kind === 'hide' || undefined} onClick={onHide}>{t('today.notForMe')}</button>
+      {pieces.length >= 2 && !choosing && <button ref={opener} type="button" className="button button-quiet" disabled={!online || busy}
+        aria-busy={mine && pending.kind === 'avoid' || undefined}
+        onClick={() => { if (pieces.length === 2) onAvoid(pieces[0]!, pieces[1]!); else { setPicked([]); setChoosing(true); } }}>{t('today.dontPair')}</button>}
     </div>
+    {choosing && <fieldset className="today-pair">
+      <legend ref={legend} tabIndex={-1}>{t('today.pickPair')}</legend>
+      {pieces.map(id => {
+        const component = pickerComponent(byId.get(id)!);
+        return <label key={id} className="today-pair-option">
+          <input type="checkbox" checked={picked.includes(id)}
+            onChange={event => setPicked(current => event.target.checked ? [...current, id] : current.filter(entry => entry !== id))} />
+          <OutfitThumb component={component} images={images} t={t} decorative /><ComponentText component={component} t={t} />
+        </label>;
+      })}
+      <div className="today-actions">
+        <button type="button" className="button button-primary" disabled={!online || busy || picked.length !== 2}
+          onClick={() => { const [first, second] = picked; setChoosing(false); onAvoid(first!, second!); }}>{t('today.pairConfirm')}</button>
+        <button type="button" className="button button-quiet" onClick={() => setChoosing(false)}>{t('common.cancel')}</button>
+      </div>
+    </fieldset>}
   </article>;
 }
 

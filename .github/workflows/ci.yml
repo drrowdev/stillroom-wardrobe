@@ -216,6 +216,10 @@ jobs:
             test-results/i15-visual/missing-en-desktop.png
             test-results/i15-visual/ideas-fi-mobile.png
             test-results/i15-visual/missing-fi-mobile.png
+            test-results/i15-visual/pair-chooser-fi-mobile.png
+            test-results/i15-visual/pair-chooser-fi-320-200.png
+            test-results/i15-visual/pair-hidden-en-desktop.png
+            test-results/i15-visual/avoided-pairs-sv-mobile.png
           if-no-files-found: error
           retention-days: 1
 

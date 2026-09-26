@@ -49,7 +49,8 @@ const browserArtifacts: Record<string, string[]> = {
     'i10b-visual/deletion-resume-sv-mobile.png'],
   'i11-outfits-ui': ['list-en-desktop', 'editor-en-desktop', 'detail-en-desktop', 'list-fi-mobile', 'editor-fi-mobile', 'detail-fi-mobile']
     .map((name) => `i11-visual/${name}.png`),
-  'i15-today-ui': ['ideas-en-desktop', 'missing-en-desktop', 'ideas-fi-mobile', 'missing-fi-mobile']
+  'i15-today-ui': ['ideas-en-desktop', 'missing-en-desktop', 'ideas-fi-mobile', 'missing-fi-mobile', 'pair-chooser-fi-mobile',
+    'pair-chooser-fi-320-200', 'pair-hidden-en-desktop', 'avoided-pairs-sv-mobile']
     .map((name) => `i15-visual/${name}.png`),
   'i16-weather-ui': ['settings-en-desktop', 'settings-fi-mobile', 'today-forecast-en-desktop', 'today-forecast-fi-mobile', 'today-forecast-fi-320-200',
     'today-off-en-desktop', 'today-off-sv-320-200', 'today-indoors-sv-mobile', 'today-unavailable-fi-mobile']
