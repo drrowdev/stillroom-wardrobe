@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Page, type Request, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
@@ -12,9 +12,37 @@ const button = (page: Page, key: MessageKey, language: Language = 'en') =>
   card(page).getByRole('button', { name: text(key, language), exact: true });
 const functionUrl = 'http://127.0.0.1:54321/functions/v1/delete-account';
 const secret = 'fictional delete password';
+const authKeys = (page: Page) => page.evaluate(() => [...Object.keys(localStorage), ...Object.keys(sessionStorage)]
+  .filter((key) => /auth|token|sb-/i.test(key)));
+const isAuthRequest = (url: string) => url.startsWith('http://127.0.0.1:54321/auth/v1/');
+function trackAuth(page: Page) {
+  const pending = new Set<unknown>();
+  page.on('request', (request) => { if (isAuthRequest(request.url())) pending.add(request); });
+  const done = (request: Request) => { pending.delete(request); };
+  page.on('requestfinished', done);
+  page.on('requestfailed', done);
+  return () => pending.size;
+}
+/** After sign-out: no auth request left in flight, storage empty and still empty, and a reload restores nothing. */
+async function expectNoSessionLeft(page: Page, pendingAuth: () => number) {
+  await expect.poll(async () => ({ pending: pendingAuth(), keys: await authKeys(page) })).toEqual({ pending: 0, keys: [] });
+  expect(await authKeys(page)).toEqual([]);
+  // A restored session would send its token again, even where the app then signs out on its own.
+  const reused: string[] = [];
+  const watch = (request: Request) => { if ((request.headers().authorization ?? '').endsWith('.browser-fixture')) reused.push(request.url()); };
+  page.on('request', watch);
+  await page.reload();
+  await expect(page.locator('#email')).toBeVisible();
+  await expect(page.locator('#settings-title, #deletion-recovery-title')).toHaveCount(0);
+  await expect.poll(pendingAuth).toBe(0);
+  page.off('request', watch);
+  expect(reused).toEqual([]);
+  expect(await authKeys(page)).toEqual([]);
+}
 
 async function start(page: Page, replies: Reply[], language: Language = 'en', frozen?: 'retry' | 'in_progress' | 'contact') {
   await mockBackend(page, { initialLanguage: language });
+  const auth = trackAuth(page);
   const bodies: string[] = [];
   const status = { value: frozen ?? 'none' };
   if (frozen) {
@@ -37,7 +65,7 @@ async function start(page: Page, replies: Reply[], language: Language = 'en', fr
     await page.locator(`.language-selector button[lang="${language}"]`).click();
     await expect(page.locator('html')).toHaveAttribute('lang', language);
   }
-  return { bodies, status };
+  return { bodies, status, auth };
 }
 async function openForm(page: Page, language: Language = 'en') {
   await button(page, 'delete.title', language).click();
@@ -112,20 +140,19 @@ test('I22 unfinished deletion replies explain what to do next', async ({ page })
 });
 
 test('I22 a finished deletion signs out, says so and leaves no session behind', async ({ page }) => {
-  await start(page, [{ status: 200, json: { state: 'complete' } }], 'fi');
+  const { auth } = await start(page, [{ status: 200, json: { state: 'complete' } }], 'fi');
   await openForm(page, 'fi');
   await fill(page, 'fi');
   await button(page, 'delete.button', 'fi').click();
   await expect(page.locator('#email')).toBeVisible();
   // Signing out drops the account's language, so the sign-in screen uses the browser language.
   await expect(page.getByRole('status').filter({ hasText: text('delete.done') })).toBeVisible();
-  expect(await page.evaluate(() => [...Object.keys(localStorage), ...Object.keys(sessionStorage)]
-    .filter((key) => /auth|token|sb-/i.test(key)))).toEqual([]);
+  await expectNoSessionLeft(page, auth);
 });
 
 const recovery = (page: Page) => page.locator('section[aria-labelledby="deletion-recovery-title"]');
 test('I22 a frozen account signs in to the recovery screen, retries and finishes', async ({ page }) => {
-  const { bodies } = await start(page, [{ status: 503, json: { state: 'retry' } }, { status: 200, json: { state: 'complete' } }], 'en', 'retry');
+  const { bodies, auth } = await start(page, [{ status: 503, json: { state: 'retry' } }, { status: 200, json: { state: 'complete' } }], 'en', 'retry');
   await expect(page.locator('#settings-title')).toHaveCount(0);
   await expect(page.locator('.workspace-identity')).toHaveCount(0);
   const finish = recovery(page).getByRole('button', { name: text('delete.finish'), exact: true });
@@ -137,12 +164,19 @@ test('I22 a frozen account signs in to the recovery screen, retries and finishes
   await expect(field).toHaveValue('');
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await field.fill(secret);
+  // Hold the local sign-out's logout request until the signed-out screen shows, then release it.
+  let release = () => {};
+  let received = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const arrived = new Promise<void>((resolve) => { received = resolve; });
+  await page.route('http://127.0.0.1:54321/auth/v1/logout**', async (route) => { received(); await held; await route.fallback(); });
   await finish.click();
   await expect(page.locator('#email')).toBeVisible();
   await expect(page.getByRole('status').filter({ hasText: text('delete.done') })).toBeVisible();
+  await arrived;
+  release();
   expect(bodies).toEqual([JSON.stringify({ password: secret }), JSON.stringify({ password: secret })]);
-  expect(await page.evaluate(() => [...Object.keys(localStorage), ...Object.keys(sessionStorage)]
-    .filter((key) => /auth|token|sb-/i.test(key)))).toEqual([]);
+  await expectNoSessionLeft(page, auth);
 });
 
 test('I22 a frozen account past its retry budget is told to contact the operator and can sign out', async ({ page }) => {
