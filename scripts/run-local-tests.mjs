@@ -126,15 +126,24 @@ async function main() {
       child.on('close', (value) => resolve(value ?? 2));
     });
     if (restoreCode !== 0) { process.exitCode = restoreCode; return; }
-    const recoveryCode = await new Promise((resolve) => {
-      const child = spawn(process.execPath, [
-        path.join(ROOT, 'node_modules', '@playwright', 'test', 'cli.js'),
-        'test', '--config', path.join(ROOT, 'playwright.local.config.ts'),
-      ], { cwd: ROOT, env, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'] });
-      child.on('error', () => resolve(2));
-      child.on('close', (value) => resolve(value ?? 2));
-    });
-    if (recoveryCode !== 0) process.exitCode = recoveryCode;
+    // I26: the restore drill writes replacement photos through finalize-image-change, so the functions are served for
+    // the browser specs. A serve that does not start fails the suite; nothing is skipped.
+    let served;
+    try { served = await startAnalysisServer(); }
+    catch { console.error('FAIL: I26 Edge functions could not be served for the restore drill'); process.exitCode = 1; return; }
+    try {
+      const recoveryCode = await new Promise((resolve) => {
+        const child = spawn(process.execPath, [
+          path.join(ROOT, 'node_modules', '@playwright', 'test', 'cli.js'),
+          'test', '--config', path.join(ROOT, 'playwright.local.config.ts'),
+        ], { cwd: ROOT, env, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'] });
+        child.on('error', () => resolve(2));
+        child.on('close', (value) => resolve(value ?? 2));
+      });
+      if (recoveryCode !== 0) process.exitCode = recoveryCode;
+    } finally {
+      await served.stop();
+    }
   }
   if (suite === 'security') {
     // The Edge probes are mandatory, so the functions are served for the audit with the local stack's own

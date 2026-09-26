@@ -7,7 +7,7 @@ validateSessionEnvironment(process.env);
 
 export default defineConfig({
   testDir: './tests/integration',
-  testMatch: ['recovery.spec.ts', 'item-lifecycle.spec.ts', 'wardrobe-query.spec.ts', 'export-own.spec.ts'],
+  testMatch: ['recovery.spec.ts', 'item-lifecycle.spec.ts', 'wardrobe-query.spec.ts', 'export-own.spec.ts', 'restore-roundtrip.spec.ts'],
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,
