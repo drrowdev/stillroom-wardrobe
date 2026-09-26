@@ -447,10 +447,17 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .today-more { margin-top: 24px; }
 .today-empty { padding: 32px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
 .weather-bar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 24px; margin: -8px 0 24px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
-.weather-line { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.weather-line { display: flex; flex: 1 1 16rem; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .weather-line p { margin: 0; }
-.weather-line[role="status"] { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+.weather-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0 12px; }
 .weather-heading { font-weight: 600; }
+.weather-footer { display: flex; flex-wrap: wrap; gap: 0 .4em; }
+.weather-credit::before { content: "·" / ""; margin-inline-end: .4em; }
+.weather-place { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; max-width: 100%; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; }
+.weather-place button { flex: 1 1 auto; min-width: 44px; min-height: 44px; padding: 8px 14px; border: 0; border-radius: 6px; background: transparent; color: var(--secondary); font-size: .875rem; font-weight: 550; }
+.weather-place button[aria-pressed="true"] { background: #E6EAE1; color: var(--primary); }
+.weather-place button[aria-pressed="false"]:hover:not(:disabled) { background: var(--well); }
+@media (min-width: 651px) { .weather-place { order: 1; } }
 .weather-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
 .weather-manual-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
 .weather-manual-form .field { max-width: 160px; }

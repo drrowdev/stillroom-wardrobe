@@ -205,7 +205,15 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       setDiscard({ next: request.next, position: request.position });
     } else history.go(request.position - navigation.current.position);
   }, [settled, changeRoute, scope]);
-  const focusRoute = useCallback(() => { document.getElementById(routeFocus[route] ?? (route.startsWith('detail:') ? 'item-detail-title' : route.startsWith('outfit:') ? 'outfit-detail-title' : 'wardrobe-title'))?.focus(); }, [route]);
+  // Today's "Turn on weather" opens Settings at the Weather card.
+  const weatherFocus = useRef(false);
+  const focusRoute = useCallback(() => {
+    // The flag stays set while Settings is shown, since focusRoute can run twice for one visit.
+    const card = weatherFocus.current && route === 'settings' ? document.getElementById('weather-heading') : null;
+    if (card) { card.focus(); return; }
+    if (route !== 'settings') weatherFocus.current = false;
+    document.getElementById(routeFocus[route] ?? (route.startsWith('detail:') ? 'item-detail-title' : route.startsWith('outfit:') ? 'outfit-detail-title' : 'wardrobe-title'))?.focus();
+  }, [route]);
   useEffect(focusRoute, [focusRoute]);
   function trashed(item: LifecycleSnapshot) {
     dirty.current = { dirty: false, incomplete: false, busy: false };
@@ -256,7 +264,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           : route === 'outfit-new' ? <NewOutfit key={outfitSeed ? outfitSeed.itemIds.join('|') : 'blank'} {...outfitProps} initial={outfitSeed ?? undefined} />
           : route.startsWith('outfit:') ? <OutfitDetail key={route} {...outfitProps} id={outfitRouteId(route.slice(7))} />
           : route === 'today' ? <TodayScreen client={client} scope={scope} images={images} online={online} language={language} t={t}
-            timeZone={profile.timezone} invalidation={outfitsInvalidation} weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')}
+            timeZone={profile.timezone} invalidation={outfitsInvalidation} weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')} onTurnOnWeather={() => { weatherFocus.current = true; }}
             onSave={(itemIds, occasion) => { setOutfitSeed({ itemIds, occasion }); changeRoute('outfit-new'); }} />
           : <WardrobeScreen browse={browse} images={images} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={refresh} />}</LazyBoundary>
       </main>

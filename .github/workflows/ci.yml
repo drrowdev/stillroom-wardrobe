@@ -227,6 +227,11 @@ jobs:
             test-results/i16-visual/settings-en-desktop.png
             test-results/i16-visual/settings-fi-mobile.png
             test-results/i16-visual/today-forecast-en-desktop.png
+            test-results/i16-visual/today-forecast-fi-mobile.png
+            test-results/i16-visual/today-forecast-fi-320-200.png
+            test-results/i16-visual/today-off-en-desktop.png
+            test-results/i16-visual/today-off-sv-320-200.png
+            test-results/i16-visual/today-indoors-sv-mobile.png
             test-results/i16-visual/today-unavailable-fi-mobile.png
           if-no-files-found: error
           retention-days: 1
