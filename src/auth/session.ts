@@ -1,5 +1,5 @@
 import type { Session } from '@supabase/supabase-js';
-import { authStorageKey, bindDataRequests, type AppClient } from '../data/client';
+import { authStorageKey, bindDataRequests, type AppClient, type RevokeResult } from '../data/client';
 import { fetchProfile, saveInitialLanguage, updateProfile, type ProfileUpdate } from '../data/profile';
 import type { ProfileRow } from '../data/rows';
 import { isUuid } from '../domain/wardrobe';
@@ -24,8 +24,17 @@ export type SessionState = {
   profileSaving?: boolean;
   profileChange?: { kind: 'profile' | 'language' | 'weather' | 'ai' | 'refresh'; previous: ProfileRow };
   aiConsentUnresolved?: boolean;
+  // The auth client of the current sign-in generation. Signing out replaces it.
+  client: AppClient;
 };
+type PublishedState = Omit<SessionState, 'client'> & { client?: AppClient };
 export const logoutKey = 'stillroom.logout';
+/** Creates, retires and revokes auth clients. Each sign-in generation gets its own client. */
+export type SessionClients = {
+  make(): AppClient;
+  retire(client: AppClient): { token: string | null };
+  revoke(token: string | null): Promise<RevokeResult>;
+};
 
 export class SessionController {
   private state: SessionState;
@@ -34,21 +43,22 @@ export class SessionController {
   private epoch = 0;
   private choice: Language | null = null;
   private allowSession = true;
-  private signingOut: Promise<void> | null = null;
   private channel: BroadcastChannel | null = null;
   private scheduled = new Set<ReturnType<typeof setTimeout>>();
   private aiAckFloor: bigint | null = null;
+  private subscription: { unsubscribe(): void } | null = null;
+  private started = false;
 
-  constructor(private client: AppClient, private browserLanguages: readonly string[]) {
-    this.state = { phase: 'loading', language: resolveLanguage(browserLanguages), profile: null, scope: null, languageUnsaved: false };
+  constructor(private client: AppClient, private browserLanguages: readonly string[], private clients?: SessionClients) {
+    this.state = { phase: 'loading', language: resolveLanguage(browserLanguages), profile: null, scope: null, languageUnsaved: false, client };
   }
   getSnapshot = (): SessionState => this.state;
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
-  private publish(next: SessionState): void {
-    this.state = next;
+  private publish(next: PublishedState): void {
+    this.state = { ...next, client: this.client };
     for (const listener of this.listeners) listener();
   }
   private invalidate(): void {
@@ -59,8 +69,8 @@ export class SessionController {
     this.scheduled.clear();
   }
   private signedOut(notice?: MessageKey): void {
-    // The Auth SIGNED_OUT event that follows a finished deletion must not hide its confirmation.
-    const kept = notice ?? (this.state.phase === 'signed-out' && this.state.notice === 'delete.done' ? 'delete.done' : undefined);
+    // A later signed-out event (such as the next client's empty start) must not hide the sign-out's notice.
+    const kept = notice ?? (this.state.phase === 'signed-out' ? this.state.notice : undefined);
     this.invalidate();
     this.choice = null;
     this.publish({
@@ -82,7 +92,23 @@ export class SessionController {
     };
     window.addEventListener('storage', onStorage);
     window.addEventListener('focus', onFocus);
-    const { data } = this.client.auth.onAuthStateChange((event, session) => {
+    this.started = true;
+    this.watch(this.client);
+    return () => {
+      this.started = false;
+      this.subscription?.unsubscribe();
+      this.subscription = null;
+      this.channel?.close();
+      this.channel = null;
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('focus', onFocus);
+      this.invalidate();
+    };
+  }
+  private watch(client: AppClient): void {
+    const { data } = client.auth.onAuthStateChange((event, session) => {
+      // A retired client's late events belong to a finished generation.
+      if (client !== this.client) return;
       if (event === 'SIGNED_OUT' || !session) { this.signedOut(); return; }
       if (!this.allowSession || !this.holdsSession(session)) return;
       if (this.state.scope?.ownerId === session.user.id && !this.state.scope.signal.aborted
@@ -91,18 +117,11 @@ export class SessionController {
       const epoch = this.epoch;
       const timer = setTimeout(() => {
         this.scheduled.delete(timer);
-        if (epoch === this.epoch && this.allowSession) void this.open(session);
+        if (epoch === this.epoch && this.allowSession && client === this.client) void this.open(session);
       }, 0);
       this.scheduled.add(timer);
     });
-    return () => {
-      data.subscription.unsubscribe();
-      this.channel?.close();
-      this.channel = null;
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('focus', onFocus);
-      this.invalidate();
-    };
+    this.subscription = data.subscription;
   }
   // Sessions live in this tab's sessionStorage. The SDK also broadcasts sign-ins
   // and refreshes between tabs; a tab must ignore any session it does not hold.
@@ -113,30 +132,34 @@ export class SessionController {
     this.invalidate();
     this.request = new AbortController();
     const scope = { ownerId: session.user.id, epoch: this.epoch, signal: this.request.signal };
-    bindDataRequests(this.client, scope.signal);
+    const client = this.client;
+    // Every resume below drops its result once a sign-out or a newer sign-in has taken over.
+    const stale = () => scope.signal.aborted || !this.current(client, scope.epoch);
+    bindDataRequests(client, scope.signal);
     this.publish({ phase: 'loading', language: resolveLanguage(this.browserLanguages, null, this.choice), profile: null, scope: null, languageUnsaved: false });
     try {
       if (!isUuid(scope.ownerId)) throw new AppError('account.locked');
-      let profile = await fetchProfile(this.client, scope.ownerId, scope.signal);
+      let profile = await fetchProfile(client, scope.ownerId, scope.signal);
+      if (stale()) return;
       let language = resolveLanguage(this.browserLanguages, profile.ui_language, this.choice);
       let languageUnsaved = false;
       if (profile.ui_language === null) {
         try {
-          profile = await saveInitialLanguage(this.client, profile, language, scope.signal);
+          profile = await saveInitialLanguage(client, profile, language, scope.signal);
           language = resolveLanguage(this.browserLanguages, profile.ui_language, this.choice);
           languageUnsaved = profile.ui_language === null;
         } catch (error) {
-          if (scope.signal.aborted || isAborted(error)) return;
+          if (stale() || isAborted(error)) return;
           languageUnsaved = true;
         }
       }
-      if (scope.signal.aborted || scope.epoch !== this.epoch) return;
+      if (stale()) return;
       this.publish({ phase: 'ready', language, profile, scope, languageUnsaved });
     } catch (error) {
-      if (scope.signal.aborted || isAborted(error)) return;
+      if (stale() || isAborted(error)) return;
       // A frozen account cannot read its profile. If its own deletion is unfinished, offer to finish it.
-      const deletion = await deletionStatus(this.client, scope.signal).catch(() => null);
-      if (scope.signal.aborted || scope.epoch !== this.epoch) return;
+      const deletion = await deletionStatus(client, scope.signal).catch(() => null);
+      if (stale()) return;
       if (deletion === 'complete') { await this.signOut(true, 'delete.done'); return; }
       if (deletion === 'in_progress' || deletion === 'retry' || deletion === 'contact') {
         this.publish({ phase: 'deleting', language: resolveLanguage(this.browserLanguages, null, this.choice), profile: null, scope,
@@ -155,12 +178,14 @@ export class SessionController {
   private async checkMembership(): Promise<void> {
     const { scope } = this.state;
     if (!scope) return;
+    const client = this.client;
+    const stale = () => scope.signal.aborted || !this.current(client, scope.epoch);
     try {
-      const profile = await fetchProfile(this.client, scope.ownerId, scope.signal);
-      if (scope.epoch !== this.epoch || scope.signal.aborted) return;
+      const profile = await fetchProfile(client, scope.ownerId, scope.signal);
+      if (stale()) return;
       this.publishProfile(scope, profile, 'refresh');
     } catch (error) {
-      if (scope.signal.aborted || isAborted(error)) return;
+      if (stale() || isAborted(error)) return;
       this.invalidate();
       this.publish({ phase: 'locked', language: resolveLanguage(this.browserLanguages), profile: null, scope: null, languageUnsaved: false });
     }
@@ -279,14 +304,22 @@ export class SessionController {
     this.publish({ ...this.state, language });
   }
   async signIn(email: string, password: string): Promise<void> {
-    if (this.signingOut) await this.signingOut;
+    const client = this.client;
     this.allowSession = true;
-    await this.client.auth.startAutoRefresh();
-    const { error } = await this.client.auth.signInWithPassword({ email: email.trim(), password });
+    const { error } = await client.auth.signInWithPassword({ email: email.trim(), password });
+    // Signed out while this was in flight: its result belongs to a retired client and is dropped.
+    if (client !== this.client) return;
     if (error) throw new AppError('auth.failed');
   }
+  /** True while a continuation started for `client` at `epoch` still belongs to the current generation. */
+  private current(client: AppClient, epoch: number): boolean {
+    return client === this.client && epoch === this.epoch;
+  }
   async retry(): Promise<void> {
-    const { data, error } = await this.client.auth.getSession();
+    const client = this.client, epoch = this.epoch;
+    const { data, error } = await client.auth.getSession();
+    // A sign-out or another sign-in while this was waiting: the answer belongs to an older generation.
+    if (!this.current(client, epoch)) return;
     if (error || !data.session) { this.signedOut(); return; }
     await this.open(data.session);
   }
@@ -305,17 +338,22 @@ export class SessionController {
       if (!scope.signal.aborted && this.state.scope?.epoch === scope.epoch) this.publish({ ...this.state, profileSaving: false });
     }
   }
+  /**
+   * Signs out on this device without waiting for the network: the stored credentials are gone and the old client
+   * is retired before anything shows signed out. The server revoke that follows is best effort.
+   */
   async signOut(broadcast = true, notice?: MessageKey): Promise<void> {
-    if (this.signingOut) return this.signingOut;
     this.allowSession = false;
+    this.subscription?.unsubscribe();
+    this.subscription = null;
+    let token: string | null = null;
+    if (this.clients) {
+      token = this.clients.retire(this.client).token;
+      this.client = this.clients.make();
+      if (this.started) this.watch(this.client);
+    }
     this.signedOut(notice);
-    const operation = this.finishSignOut(broadcast);
-    this.signingOut = operation;
-    try { await operation; } finally { this.signingOut = null; }
-  }
-  private async finishSignOut(broadcast: boolean): Promise<void> {
     try {
-      await this.client.auth.stopAutoRefresh();
       if (broadcast) {
         if (this.channel) this.channel.postMessage('sign-out');
         else {
@@ -323,15 +361,11 @@ export class SessionController {
           window.localStorage.removeItem(logoutKey);
         }
       }
-      const { error } = await this.client.auth.signOut({ scope: 'local' });
-      if (error) throw new AppError('auth.expired');
-    } catch {
+    } catch { /* Other tabs notice on their next request. */ }
+    const client = this.client;
+    const result = this.clients ? await this.clients.revoke(token) : 'ok';
+    if (result === 'failed' && client === this.client && this.state.phase === 'signed-out' && this.state.notice !== 'delete.done') {
       this.publish({ ...this.state, notice: 'auth.localSignOut' });
-    } finally {
-      for (const store of [window.sessionStorage, window.localStorage]) {
-        store.removeItem(authStorageKey);
-        store.removeItem(`${authStorageKey}-code-verifier`);
-      }
     }
   }
 }

@@ -323,6 +323,24 @@ signs in again sees only "Account deletion hasn't finished", with its password
 field, **Finish deleting** and **Sign out**; no profile or wardrobe data is
 read.
 
+## Sign-out without the network (later hardening)
+
+Signing out, a sign-out from another tab and the sign-out after a finished
+deletion no longer wait for the server. Before the sign-in screen shows, the
+app clears every `stillroom.auth*` key from both stores (session, user and all
+PKCE verifier slots) and retires that sign-in's Supabase client: its storage
+closes for good and any late reply, refresh or retry it still receives is
+answered locally and never reaches storage or the network. The next sign-in
+uses a fresh client. The captured token is then revoked best effort with
+`POST /auth/v1/logout?scope=local`; 401, 403 and 404 count as done, and any
+other failure shows "Signed out on this device, but the server didn't confirm
+it." A reload during a slow sign-out finds nothing to restore. The recovery
+client is separate and unchanged. Every session step that waits on the SDK or
+the network (a locked account's Retry, the profile and language reads while
+opening, the frozen-account deletion check and the membership check) drops its
+answer when the client or sign-in has changed meanwhile, so an older sign-in
+can never sign out or reopen a newer one.
+
 ## What is deleted
 
 Every owner-keyed row, all of the owner's Storage objects, AI requests,

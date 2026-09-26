@@ -17,9 +17,10 @@ function status(allowance = '20000000', enabled = false): AiStatus {
     policy: { ...policy, monthlyAllowanceMicro: allowance }, usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } };
 }
 function setup(current: AiStatus) {
-  const controller = new SessionController({} as AppClient, ['en']);
+  const client = {} as AppClient;
+  const controller = new SessionController(client, ['en']);
   const scope: OwnerScope = { ownerId, epoch: 1, signal: new AbortController().signal };
-  const state: SessionState = { phase: 'ready', language: 'en', profile, scope, languageUnsaved: false };
+  const state: SessionState = { phase: 'ready', language: 'en', profile, scope, languageUnsaved: false, client };
   (controller as unknown as { state: SessionState }).state = state;
   const writes: unknown[] = [];
   let reads = 0;

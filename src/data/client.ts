@@ -4,10 +4,12 @@ import type { PublicConfig } from './config';
 import type { RecoveryLink } from '../auth/recovery-callback';
 import { profileColumns } from './rows';
 import { DELETE_TIMEOUT_MS } from './delete-account';
+import { ClosableAuthStorage, clearAuthNamespace, storedAccessToken } from '../auth/auth-storage';
 
 export type AppClient = SupabaseClient<Database>;
 export const authStorageKey = 'stillroom.auth';
-const requestContexts = new WeakMap<AppClient, { signal?: AbortSignal }>();
+type ClientContext = { signal?: AbortSignal; retired: boolean; storage: ClosableAuthStorage; identity: string };
+const requestContexts = new WeakMap<AppClient, ClientContext>();
 const clients = new Map<string, AppClient>();
 export const REQUEST_TIMEOUT_MS = 20_000;
 // Account deletion may legitimately run for up to 100 s on the server; every other request gets 20 s.
@@ -18,10 +20,10 @@ export function makeClient(config: PublicConfig): AppClient {
   const identity = `${config.url}|${config.publishableKey}`;
   const existing = clients.get(identity);
   if (existing) return existing;
-  const context: { signal?: AbortSignal } = {};
+  const context: ClientContext = { retired: false, storage: new ClosableAuthStorage(() => window.sessionStorage), identity };
   const client = createClient<Database>(config.url, config.publishableKey, {
     auth: {
-      storage: window.sessionStorage,
+      storage: context.storage,
       storageKey: authStorageKey,
       persistSession: true,
       autoRefreshToken: true,
@@ -30,6 +32,8 @@ export function makeClient(config: PublicConfig): AppClient {
     },
     global: {
       fetch: (input, init) => {
+        // A signed-out client's late refreshes, retries and requests end here, off the network.
+        if (context.retired) return Promise.resolve(retiredResponse());
         const address = input instanceof Request ? input.url : String(input);
         const pathname = new URL(address).pathname;
         const signals = [AbortSignal.timeout(requestTimeoutMs(pathname))];
@@ -46,6 +50,55 @@ export function makeClient(config: PublicConfig): AppClient {
 export function bindDataRequests(client: AppClient, signal: AbortSignal): void {
   const context = requestContexts.get(client);
   if (context) context.signal = signal;
+}
+
+function retiredResponse(): Response {
+  return new Response(JSON.stringify({ code: 'signed_out', message: 'Signed out.' }), {
+    status: 401, headers: { 'content-type': 'application/json' },
+  });
+}
+
+/**
+ * Signs a client out on this device, synchronously: the stored session is cleared and the client can no longer
+ * read, write or send anything. The next `makeClient` call returns a fresh client. Returns the access token for a
+ * best-effort server revoke.
+ */
+export function retireClient(client: AppClient): { token: string | null } {
+  const context = requestContexts.get(client);
+  const token = storedAccessToken(context && !context.storage.closed ? context.storage.getItem(authStorageKey) : null)
+    ?? storedAccessToken(window.localStorage.getItem(authStorageKey));
+  if (context) {
+    context.retired = true;
+    context.storage.close();
+    if (clients.get(context.identity) === client) clients.delete(context.identity);
+  }
+  clearAuthNamespace([window.sessionStorage, window.localStorage]);
+  void settleRetired(client);
+  return { token };
+}
+
+// dispose() is not a latch: an initialization still in flight re-registers its visibility listener and auto-refresh
+// when it finishes, so the teardown runs again once it has settled.
+async function settleRetired(client: AppClient): Promise<void> {
+  const teardown = () => client.auth.dispose().catch(() => undefined);
+  void teardown();
+  await client.auth.initialize().catch(() => undefined);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await teardown();
+}
+
+export type RevokeResult = 'ok' | 'failed';
+/** Best-effort server logout for a captured token. A missing account or an expired token also counts as done. */
+export async function revokeSession(config: PublicConfig, token: string | null): Promise<RevokeResult> {
+  if (!token) return 'ok';
+  try {
+    const response = await fetch(`${config.url}/auth/v1/logout?scope=local`, {
+      method: 'POST', headers: { apikey: config.publishableKey, authorization: `Bearer ${token}` },
+      cache: 'no-store', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    await response.body?.cancel().catch(() => undefined);
+    return response.ok || [401, 403, 404].includes(response.status) ? 'ok' : 'failed';
+  } catch { return 'failed'; }
 }
 
 export function makeRecoveryClient(config: PublicConfig, link: RecoveryLink | null, redirect: string) {
