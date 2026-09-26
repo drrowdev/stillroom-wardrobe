@@ -20,7 +20,10 @@ function checked(error: unknown): void {
 export class ImageChangeClient {
   private readonly owner: string;
   private readonly epoch: number;
-  constructor(private client: AppClient, readonly scope: OwnerScope) {
+  private client: AppClient;
+  readonly scope: OwnerScope;
+  constructor(client: AppClient, scope: OwnerScope) {
+    this.client = client; this.scope = scope;
     this.owner = scope.ownerId; this.epoch = scope.epoch;
   }
   private async bounded<T>(outer: AbortSignal | undefined, action: (scope: OwnerScope) => Promise<T>): Promise<T> {

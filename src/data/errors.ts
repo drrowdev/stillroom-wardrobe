@@ -1,12 +1,16 @@
 import type { MessageKey } from '../i18n';
 import { isRecord } from '../domain/wardrobe';
 
+// Explicit fields rather than parameter properties, so the Node restore CLI can load this without a TypeScript transform.
 export class AppError extends Error {
-  constructor(public readonly messageKey: MessageKey) { super(messageKey); this.name = 'AppError'; }
+  readonly messageKey: MessageKey;
+  constructor(messageKey: MessageKey) { super(messageKey); this.messageKey = messageKey; this.name = 'AppError'; }
 }
 export class AnalyzedSaveRefusedError extends AppError {
-  constructor(public readonly itemId: string, public readonly imageId: string) {
-    super('aiC.saveRefused'); this.name = 'AnalyzedSaveRefusedError';
+  readonly itemId: string;
+  readonly imageId: string;
+  constructor(itemId: string, imageId: string) {
+    super('aiC.saveRefused'); this.itemId = itemId; this.imageId = imageId; this.name = 'AnalyzedSaveRefusedError';
   }
 }
 export function errorKey(error: unknown): MessageKey {

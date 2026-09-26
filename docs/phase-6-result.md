@@ -64,6 +64,22 @@ file IDs, strict base64, exact completeness against the manifest hash, and
 sanitized JPEGs (exact main dimensions, thumbnails ≤ 320 px, orientation 1).
 Exit 1 means a failed check; exit 2 a usage error.
 
+Under B1-3 (below) the verifier reports three levels separately:
+
+1. **Integrity and structure** (decides the exit code): every part, file hash
+   and length, and the structure Restore checks before any decoder starts
+   (the full structure of each main photo; each thumbnail a JPEG header within
+   the thumbnail byte and side limits, since restore regenerates thumbnails).
+2. **Eligible to keep**: how many photos Restore can keep byte for byte and how
+   many it will encode again, subject to a full Check.
+3. **Decoded** (`--decode` only): every photo decoded and planned in the
+   locked Playwright Chromium the way Restore does. A failure, or Chromium not
+   being installed, exits nonzero. Without `--decode` no browser is needed and
+   the output says `Decoded check: not checked`.
+
+A pass still does not mean a restore will succeed: Check also compares the
+backup with the account.
+
 What the verifier checks, and what it does not (corrected under B1-2 A6): it
 is not a header-only check. Every file's size and SHA-256 are checked against
 the manifest, and each JPEG's structure goes through `assertSanitizedJpeg`
@@ -71,8 +87,9 @@ the manifest, and each JPEG's structure goes through `assertSanitizedJpeg`
 not apply restore's stricter Q6 profile (the entropy walk, the one-frame and
 one-scan limits, the decoded-size check and the thumbnail checks). **A
 verifier pass means the backup is complete and intact; it does not mean every
-photo is ready to restore.** Aligning the verifier with the restore check is
-deferred to the estore-own packet (B1-2 Q3).
+photo is ready to restore.** B1-3 aligned the verifier with the restore check
+(the three levels above); the export's own stricter check of the files it
+writes is unchanged.
 
 ## Validation (builder, local)
 
@@ -89,8 +106,8 @@ deferred to the estore-own packet (B1-2 Q3).
 
 - **Scope deferral (not completion):** the `export-own` and `restore-own`
   CLIs of I19/I21 were moved to the backlog by coordinator decision under the
-  owner's standing approval. `export-own` now follows in B1-1 below; I21 is
-  not complete.
+  owner's standing approval. `export-own` follows in B1-1 and `restore-own`
+  in B1-3 below.
 - Restore (P6b) and account deletion (P6c) follow in their own PRs, in that
   order.
 - Pending: GPT-6 Astra code review, green exact-head CI (including the
@@ -242,8 +259,8 @@ integration (`tests/integration/restore-save.sessions.mjs`) and security
 - Q5 (attribution restore), P6c account deletion, and the deferred
   `export-own`/`restore-own` CLIs.
 - B1-2 (Q6): GPT-6 Astra code review, green exact-head CI, coordinator visual
-  review of `restore-reencoded-fi-mobile`; aligning `verify-backup.mjs` with the
-  restore check is deferred to `restore-own`.
+  review of `restore-reencoded-fi-mobile`. Aligning `verify-backup.mjs` with the
+  restore check follows in B1-3.
 - No real-backend restore round trip: the browser restore specs run against
   the mock backend, and the integration suite checks the new functions
   (`reserve_restored_item_save`, `restore_image_change_status`,
@@ -444,4 +461,156 @@ using that folder), delete the lock, and run again to continue.
 
 - GPT-6 Astra code review and green exact-head CI, including the local-stack
   integration run. No hosted run; the first hosted export is the owner's own.
-- `restore-own.mjs` (I21 remainder) follows separately.
+- `restore-own.mjs` (I21 remainder) follows in B1-3 below.
+
+# B1-3 restoring from the command line (I21 remainder)
+
+- Requirements: R13, R20; blueprint `06`/`15` I21 (restore CLI), `08` import,
+  `10` privacy. Plan rev1 + rev2 delta with binding amendments B1–B6.
+- `scripts/restore-own.mjs` restores a v2 backup made by the Backup card or
+  `export-own` into your own account through your normal sign-in. It runs the
+  app's restore code (`src/data/restore.ts`, `src/domain/restore-plan.ts`),
+  loaded by a small source loader, so the order, checks and results are the
+  browser's: items in dependency order, identical entries skipped, items
+  changed here or in Trash left as they are, history through
+  `restore_history_entry` (entries whose item is gone keep their text without
+  a link), field kinds, descriptions and manual clears kept, and the account's
+  own profile, preferences and consent unchanged. Nothing is overwritten or
+  deleted, no analysis is requested, and no consent or analysis result is
+  imported.
+
+## Running it
+
+1. Once: set `SUPABASE_PUBLISHABLE_KEY` as for `export-own`, and install the
+   locked Playwright Chromium in the repository with
+   `npx playwright install chromium`. The command never installs it, never
+   uses another browser and refuses to start without it. Windows and macOS
+   need nothing else; for Linux see **Linux: Chromium sandbox** below.
+2. Optionally run
+   `node scripts/verify-backup.mjs --input D:\StillroomBackups\stillroom-<id> --decode`
+   first for the full photo check on its own.
+3. Run `node scripts/restore-own.mjs D:\StillroomBackups\stillroom-<id>`. It
+   asks for your email, password and the backup passphrase (or reads three
+   piped lines, as `export-own` does). Before signing in it checks every part
+   and photo and prepares every photo; a backup that fails there makes no
+   request at all. It then shows what will be added, including
+   `N photos will be re-encoded`, and asks you to type `yes` (`--yes` skips
+   the question; piped input needs it).
+4. `--report json` adds one line with the counts and, per photo, the planned
+   hashes and the stored ones.
+
+Photos are prepared the way the app does it, in Chromium: kept byte for byte
+when they meet the Q6 profile, otherwise encoded again at the same size, and
+every thumbnail made again from the final photo. Credentials, the passphrase
+and all Stillroom requests stay in Node. Chromium only receives photo bytes, in
+a page that loads nothing but the app's image code: it has no network access
+(requests are intercepted before it opens and a `connect-src 'none'` policy
+applies), no service workers, no saved profile, traces or screenshots, and it
+is closed when the run ends. This is isolation inside the browser, not an
+operating-system sandbox. The same photo can come out as different bytes in a
+different Chromium or app version; restore then reports that photo as blocked
+instead of writing it (see below).
+
+**Linux: Chromium sandbox.** Chromium always runs with its own sandbox; the
+command never turns it off. Ubuntu 23.10 and later (including 24.04) block the
+user namespaces the sandbox needs unless an AppArmor profile allows them for
+that binary, as Google Chrome's package does for Chrome. Without one the
+command stops with `Restore refused (sandbox)` and nothing is changed. Add a
+profile for exactly the path printed by
+`node -e "console.log(require('@playwright/test').chromium.executablePath())"`,
+allowing `userns` (the CI step in `.github/workflows/ci.yml` shows the
+four-line profile), load it with `sudo apparmor_parser --replace`, and run
+again. Or use Restore in the app.
+
+Requests go only to the Stillroom project (or `--local`), with the publishable
+key and your session, and only to the exact addresses a restore needs: sign-in,
+the restore functions, reading your items, photos, outfits and history, your
+own photo paths in Storage, and `finalize-image-change` for replacement photos.
+Anything else is refused.
+
+**Another account's backup.** A backup made by a different account is refused
+unless you add `--allow-other-account` and type `restore` at a terminal; piped
+runs can't do this. The account is the one you signed in with, as confirmed by
+the server, never guessed from the email. The app can't tell whether the other
+account was you. Everything is written to your account with new IDs; nothing
+links back to the other account.
+
+## Messages and exit codes
+
+| Exit | Message | Meaning and next step |
+| --- | --- | --- |
+| 0 | `Restore complete.` | Everything in the backup is here. |
+| 5 | `Restore complete. Some entries were changed here or are in Trash…` | Those entries were left as they are. |
+| 1 | `Restore refused (…)` | Nothing was changed: arguments, key, environment, folder, input, passphrase, a failed part or photo, Chromium (`chromium` not installed, `sandbox` not available on this Linux system, `images` didn't start or stopped), another account or `busy`. |
+| 2 | `Restore incomplete (unavailable)` / `Restore incomplete: N not finished` | Completed changes remain. Run the same command again to continue. |
+| 3 | `Restore incomplete (recheck)` | A backup file changed or failed its checks after it was checked. Completed changes remain; the next run checks every file again. |
+| 6 | `Restore incomplete. Completed changes remain; blocked photos and their dependents were not completed.` | A photo reserved by an earlier run (for example one started in the browser) doesn't match what this run would write. It is never overwritten, and running again won't change that. |
+| 130 | `Restore incomplete (cancelled)` | Ctrl+C. Completed changes remain. |
+
+Messages contain only counts and fixed text: no email, title, folder, token or
+ID.
+
+## Interruptions and the lock
+
+A restore is not one transaction. Each item, photo, outfit and history entry is
+written with the app's checked, repeatable steps, so running the same command
+again with the same backup continues where it stopped and does not duplicate
+anything. Before each photo is written it is read and prepared again and must
+match the earlier check; the first difference stops the run (exit 3).
+
+Only one restore at a time can use the folder that contains the backup folder
+(`.stillroom-restore.lock` there). This keeps two runs over backups in the same
+parent folder apart; it does not cover a copy of the backup elsewhere or a
+restore running in the browser. A normal finish, failure or Ctrl+C removes the
+lock. If the run was killed, the next run reports `busy` with the time the lock
+was created. Nothing removes it automatically: check that no restore is running,
+delete the lock, and run again.
+
+## Validation (builder, local)
+
+- Unit: `tests/unit/restore-own.test.ts` (arguments, refusals before any
+  request, redaction, confirmation, cross-account rules against the signed-in
+  account, the lock, exit codes and resume through a fake engine),
+  `tests/unit/owner-transport.test.ts` (the export and restore policies:
+  exact methods, paths and queries, refresh and retries),
+  `tests/unit/restore-own-loader.test.ts` (the source loader, the worker
+  client and request validation) and `tests/unit/verify-backup.test.ts`
+  (the three levels and `--decode`).
+- Browser (chromium): `tests/browser/restore-own-images.spec.ts` checks that a
+  canary in an ambient `.env` file reaches neither the image bundle nor the
+  page; that direct-IP fetch, POST, WebSocket, image, beacon and navigation
+  attempts from the page reach a local listener zero times; and that the
+  isolated page gives the same results as the app's own image steps for a kept
+  and a re-encoded photo. On Linux it also stops a real renderer mid-step and
+  checks that the timeout kills the worker and that no Chromium process
+  outlives it, and that renderers run under the seccomp-bpf sandbox.
+- CI: an approved step in the App and database jobs loads an AppArmor profile
+  for exactly the pinned Playwright Chromium binary (Ubuntu 24.04 blocks the
+  sandbox's user namespaces otherwise) and then checks, with
+  `scripts/ci-chromium-sandbox.mjs --verify`, that it starts sandboxed with its
+  renderer under seccomp-bpf. The runner-wide setting is unchanged and
+  `--no-sandbox` is never used.
+- Integration (CI only, local stack): `tests/integration/restore-own.spec.ts`
+  restores a multi-photo synthetic backup with an outfit, rule, feedback and
+  history (including an entry whose item is gone). It checks rows, versions and
+  stored file hashes against the plan and the app's image steps, and reruns
+  with no further changes. It also covers a kept conflict, another account, a
+  retryable failure, Ctrl+C, a file changed or deleted after Check, a late
+  fatal photo on a fresh and on a resumed run, a mismatched reservation, a
+  missing Chromium, and kills after a reservation, between uploads, after
+  completion before the reply, during a replacement and during history, each
+  resumed to the same result. Account B and A's profile, preferences and
+  consent stay unchanged. Reruns compare every owner row (versions and
+  timestamps included) and the owner's Storage objects by name and hash. An
+  owner session lists only objects that its photo rows name, so an object with
+  no row at all would not show in that listing; uploads need a pending row,
+  which the comparison does cover.
+
+## Pending
+
+- GPT-6 Astra code review and green exact-head CI. The branch is rebased onto
+  PR-3b (`167cb3fb`), which serves `finalize-image-change` in CI; the
+  integration gate is claimed only from green exact-head CI.
+- Chromium's sandbox and the hung-renderer cleanup run on the CI Linux runners
+  only (Linux `/proc`); locally on Windows they are skipped.
+- No hosted run; the first hosted restore is the owner's own.
