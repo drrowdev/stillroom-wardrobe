@@ -61,6 +61,32 @@ const browserArtifacts: Record<string, string[]> = {
     .map((name) => `i24-visual/${name}.png`),
   };
 
+// Approved CI-infrastructure change (PR #66): Ubuntu 24.04 blocks the sandboxed Chromium that restore-own uses unless an
+// AppArmor profile lets exactly the pinned Playwright binary create user namespaces. The sandbox itself stays on.
+const sandboxStep = [
+  '      - name: Let the pinned Playwright Chromium use its sandbox (Ubuntu AppArmor user-namespace restriction)',
+  '        shell: bash -euo pipefail {0}',
+  '        run: |',
+  '          chrome="$(node scripts/ci-chromium-sandbox.mjs --path)"',
+  `          printf 'abi <abi/4.0>,\\ninclude <tunables/global>\\n\\nprofile stillroom-playwright-chromium "%s" flags=(unconfined) {\\n  userns,\\n}\\n' "$chrome" | sudo tee /etc/apparmor.d/stillroom-playwright-chromium > /dev/null`,
+  '          sudo apparmor_parser --replace /etc/apparmor.d/stillroom-playwright-chromium',
+  '          node scripts/ci-chromium-sandbox.mjs --verify',
+  '',
+].join('\n');
+
+describe('CI Chromium sandbox profile', () => {
+  it('loads the profile for the pinned binary right after the Chromium install in the App and database jobs only', () => {
+    const install = '      - run: npx playwright install --with-deps chromium\n';
+    expect(workflow.split(sandboxStep).length - 1).toBe(2);
+    for (const name of ['app', 'database']) expect(job(name).split(install + sandboxStep).length - 1).toBe(1);
+    for (const name of ['webkit-photo', 'deletion-rehearsal', 'performance']) expect(job(name)).not.toContain('ci-chromium-sandbox');
+    for (const forbidden of ['--no-sandbox', 'apparmor_restrict_unprivileged_userns', 'sysctl', '|| true', 'continue-on-error', '*']) {
+      expect(sandboxStep.includes(forbidden)).toBe(false);
+    }
+    expect(workflow).not.toContain('--no-sandbox');
+  });
+});
+
 describe('CI workflow browser split', () => {
   it('declares exactly the App, WebKit photo, database, deletion rehearsal and performance jobs with fixed names and timeouts', () => {
     expect([...jobs.keys()]).toEqual(['app', 'webkit-photo', 'database', 'deletion-rehearsal', 'performance']);
@@ -87,7 +113,7 @@ describe('CI workflow browser split', () => {
     const app = job('app'), webkit = job('webkit-photo');
     expect(count(workflow, 'npm run test:browser')).toBe(2);
     expect(count(workflow, 'npx playwright install')).toBe(4);
-    expect(app).toContain('      - run: npx playwright install --with-deps chromium\n'
+    expect(app).toContain('      - run: npx playwright install --with-deps chromium\n' + sandboxStep
       + '      - run: npm run test:browser -- --project=chromium --project=mobile\n'
       + '      - run: npm run test:pwa\n');
     expect(count(workflow, 'npm run test:pwa')).toBe(1);

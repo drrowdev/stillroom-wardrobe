@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { flatJpeg } from '../fixtures/restore-jpeg-fixtures';
 import { BACKUP_LIMITS, BackupFormatError, encryptPart, metadataDigest, partFileName, planParts, sha256Hex, toBase64, type SavedMetadata } from '../../src/domain/export-format';
 
 const owner = '11111111-1111-4111-8111-111111111111';
@@ -20,7 +21,7 @@ const { listParts } = await vi.importActual<{ listParts: (directory: string, lim
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
 
 const nulls = (columns: string[]) => Object.fromEntries(columns.map(column => [column, null]));
-async function backup(bytes = jpeg): Promise<string> {
+async function backup(bytes: Uint8Array = jpeg, size = 2): Promise<string> {
   const hash = await sha256Hex(bytes);
   const meta: SavedMetadata = { format: 'stillroom-saved', schema_version: 2, export_id: exportId, owner_id: owner, created_at: stamp, tables: {
     profiles: [{ ...nulls(['display_name', 'ui_language', 'timezone', 'currency', 'weather_city', 'latitude', 'longitude', 'created_at', 'updated_at', 'version']), owner_id: owner }],
@@ -31,7 +32,7 @@ async function backup(bytes = jpeg): Promise<string> {
       'pattern', 'sleeve_length', 'garment_length', 'field_provenance']), id: item, owner_id: owner }],
     item_images: [{ id: image, owner_id: owner, item_id: item, state: 'ready', retired_at: null, main_path: `${owner}/${item}/${image}/main.jpg`,
       thumb_path: `${owner}/${item}/${image}/thumb.jpg`, main_bytes: bytes.length, thumb_bytes: bytes.length, main_sha256: hash, thumb_sha256: hash,
-      width: 2, height: 2, alt_text: 'Photo', created_at: stamp, description_version: 1 }],
+      width: size, height: size, alt_text: 'Photo', created_at: stamp, description_version: 1 }],
     item_attributions: [], outfits: [], outfit_items: [], wear_events: [], wear_event_items: [], combination_rules: [], suggestion_feedback: [],
   } };
   const digest = await metadataDigest(meta);
@@ -54,8 +55,14 @@ describe('offline backup verifier', { timeout: 60_000 }, () => {
     const result = run(['--input', await backup()]);
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/^Backup verified: 2 parts, 1 items, 1 photos, 1264 photo bytes, metadata sha256 [0-9a-f]{64}\.\n$/);
+    expect(result.stdout).toMatch(/^Backup verified: 2 parts, 1 items, 1 photos, 1264 photo bytes, metadata sha256 [0-9a-f]{64}\.\nRestore can keep 1 photos as they are and will encode 0 again, subject to a full Check against your account\.\nDecoded check: not checked\. Add --decode to decode every photo the way Restore does\.\n$/);
     expect(result.stdout).not.toContain(passphrase);
+  });
+  it('counts a photo Restore will encode again without failing the backup (restore-compatible check)', async () => {
+    const result = run(['--input', await backup(flatJpeg({ width: 16, height: 16, mode: 'progressive' }), 16)]);
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Restore can keep 0 photos as they are and will encode 1 again, subject to a full Check against your account.\n');
   });
   it('fails on a wrong passphrase, a missing part, an unexpected file or a tampered photo', async () => {
     const directory = await backup();
@@ -93,8 +100,10 @@ describe('offline backup verifier', { timeout: 60_000 }, () => {
     const fewer = await listParts(total, { ...BACKUP_LIMITS, parts: 1 }).catch((caught: unknown) => caught);
     expect(fewer instanceof BackupFormatError && fewer.problem).toBe('incomplete');
   });
-  it('takes no passphrase from arguments and accepts only --input DIR', async () => {
+  it('takes no passphrase from arguments and accepts only --input DIR [--decode]', async () => {
     const directory = await backup();
+    expect(run(['--input', directory, '--verbose']).status).toBe(2);
+    expect(run(['--decode', '--input', directory]).status).toBe(2);
     expect(run(['--input', directory, '--passphrase', passphrase]).status).toBe(2);
     expect(run(['--passphrase', passphrase]).status).toBe(2);
     expect(run(['--input', directory], 'short\n').status).toBe(2);

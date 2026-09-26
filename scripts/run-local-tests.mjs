@@ -126,11 +126,12 @@ async function main() {
       child.on('close', (value) => resolve(value ?? 2));
     });
     if (restoreCode !== 0) { process.exitCode = restoreCode; return; }
-    // I26: the restore drill writes replacement photos through finalize-image-change, so the functions are served for
-    // the browser specs. A serve that does not start fails the suite; nothing is skipped.
+    // I26 and restore-own: the restore drill and the restore-own CLI write replacement photos through the stack's own
+    // finalize-image-change, so the functions are served once for all local browser specs. A serve that does not start
+    // fails the suite; nothing is skipped or mocked.
     let served;
     try { served = await startAnalysisServer(); }
-    catch { console.error('FAIL: I26 Edge functions could not be served for the restore drill'); process.exitCode = 1; return; }
+    catch { console.error('FAIL: Edge functions could not be served for the restore drill and the restore-own gate'); process.exitCode = 1; return; }
     try {
       const recoveryCode = await new Promise((resolve) => {
         const child = spawn(process.execPath, [

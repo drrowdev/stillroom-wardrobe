@@ -1,26 +1,36 @@
 #!/usr/bin/env node
-// Offline check of a Stillroom backup: `node scripts/verify-backup.mjs --input DIR`.
+// Offline check of a Stillroom backup: `node scripts/verify-backup.mjs --input DIR [--decode]`.
 // The passphrase is read from the terminal (hidden) or from piped standard input, never from arguments or the
 // environment. The metadata part is checked first, then one photo part at a time. Only counts, sizes and the metadata hash are printed; nothing in the backup is opened as a path or URL.
+// Three levels, reported separately:
+//   1. integrity and structure (decides the exit code): every part, hash and length, and the structure Restore checks
+//      before any decoder starts (the full structure of each main photo; each thumbnail a JPEG within the thumbnail limits);
+//   2. which photos Restore can keep byte for byte and which it will encode again, subject to a full Check;
+//   3. with --decode only: every photo decoded and planned in the locked Playwright Chromium, the way Restore does.
+//      A failure, or Chromium not being available, exits nonzero.
+// Passing does not mean a restore will succeed: Check still compares the backup with the account.
 import { lstat, open, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { BACKUP_LIMITS, BackupFormatError, verifyBackup } from '../src/domain/export-format.ts';
 import { assertSanitizedJpeg, JPEG_LIMITS, readJpegHeader } from '../src/images/jpeg.ts';
+import { checkRestoreJpeg } from '../src/images/restore-jpeg.ts';
 import { readPipedInput, readTerminalLine } from './backup-prompt.mjs';
 
 const partName = /^stillroom-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-(\d{1,3})\.json\.enc$/;
 
 function usage(message) {
-  process.stderr.write(`${message}\nUsage: node scripts/verify-backup.mjs --input DIR\n`);
+  process.stderr.write(`${message}\nUsage: node scripts/verify-backup.mjs --input DIR [--decode]\n`);
   process.exit(2);
 }
 
 export function parseArguments(argv) {
-  if (argv.length !== 2 || argv[0] !== '--input' || !argv[1] || argv[1].startsWith('-')) usage('Expected exactly --input DIR.');
-  return resolve(argv[1]);
+  const decode = argv.length === 3 && argv[2] === '--decode';
+  if ((argv.length !== 2 && !decode) || argv[0] !== '--input' || !argv[1] || argv[1].startsWith('-')) usage('Expected --input DIR, optionally followed by --decode.');
+  return { directory: resolve(argv[1]), decode };
 }
 
+// The export's own check of the files it writes (used by scripts/export-own.mjs). It is stricter than Restore needs.
 export function checkJpeg(bytes, variant, width, height) {
   const header = readJpegHeader(bytes);
   if (variant === 'main') {
@@ -30,6 +40,39 @@ export function checkJpeg(bytes, variant, width, height) {
   }
   if (header.orientation !== 1) throw new BackupFormatError('invalid');
   assertSanitizedJpeg(bytes, header.width, header.height);
+}
+
+/**
+ * Restore's own checks while reading (src/images/restore-jpeg.ts `checkRestoreJpeg`), counting which main photos Restore
+ * can keep byte for byte (`kept`) and which it will encode again (`encoded`).
+ */
+export function restoreReadiness() {
+  const tally = { kept: 0, encoded: 0 };
+  const check = (bytes, variant, width, height) => {
+    let verdict;
+    try { verdict = checkRestoreJpeg(bytes, variant, width, height); } catch { throw new BackupFormatError('invalid'); }
+    if (variant === 'main') tally[verdict.kind === 'preserve' ? 'kept' : 'encoded']++;
+  };
+  return { check, tally };
+}
+
+// Level 3: every photo decoded and planned the way Restore does, in the locked Playwright Chromium.
+export async function decodedReadiness(listing, passphrase) {
+  const { registerSourceLoader } = await import('./src-loader.mjs');
+  const { startImageWorker } = await import('./restore-image-client.mjs');
+  registerSourceLoader();
+  const { preflightBackup } = await import('../src/data/restore.ts');
+  let worker;
+  try { worker = await startImageWorker(); } catch (error) { return { ok: false, problem: error?.code === 'missing' ? 'chromium' : error?.code === 'sandbox' ? 'sandbox' : 'images' }; }
+  try {
+    const source = partSource(listing);
+    const files = [...listing.paths.entries()].sort(([a], [b]) => a - b)
+      .map(([index, part]) => ({ name: part.path.split(/[\\/]/).pop(), size: part.size, text: () => source.read(index) }));
+    const { photos } = await preflightBackup(files, passphrase, new AbortController().signal, worker.deps);
+    return { ok: true, photos: photos.size };
+  } catch {
+    return { ok: false, problem: worker.failure() ? 'images' : 'invalid' };
+  } finally { await worker.close(); }
 }
 
 // Lists the parts by name and size only; nothing is read until every name, type, per-file and total limit passes.
@@ -88,14 +131,35 @@ async function readPassphrase() {
   return readTerminalLine({ input: process.stdin, output: process.stderr, prompt: 'Backup passphrase: ', hidden: true, limit: 4096, overflow: 'ignore' });
 }
 
+const DECODE_PROBLEMS = {
+  chromium: 'the Playwright Chromium isn\'t installed (run `npx playwright install chromium` in the repository)',
+  sandbox: 'Chromium couldn\'t start its sandbox on this system (see docs/phase-6-result.md, Linux: Chromium sandbox)',
+  images: 'Chromium didn\'t start or stopped',
+  invalid: 'a photo failed to decode or its re-encoded result failed its checks',
+};
+
 async function main() {
-  const directory = parseArguments(process.argv.slice(2));
+  const { directory, decode } = parseArguments(process.argv.slice(2));
   const listing = await listParts(directory);
   const passphrase = await readPassphrase();
   if (passphrase.length < BACKUP_LIMITS.passphrase) usage('The passphrase is too short.');
-  const summary = await verifyBackup(partSource(listing), passphrase, checkJpeg);
+  const readiness = restoreReadiness();
+  const summary = await verifyBackup(partSource(listing), passphrase, readiness.check);
   process.stdout.write(`Backup verified: ${summary.parts} parts, ${summary.items} items, ${summary.photos} photos, `
     + `${summary.fileBytes} photo bytes, metadata sha256 ${summary.manifestSha256}.\n`);
+  process.stdout.write(`Restore can keep ${readiness.tally.kept} photos as they are and will encode ${readiness.tally.encoded} again, `
+    + 'subject to a full Check against your account.\n');
+  if (!decode) {
+    process.stdout.write('Decoded check: not checked. Add --decode to decode every photo the way Restore does.\n');
+    return;
+  }
+  const decoded = await decodedReadiness(listing, passphrase);
+  if (!decoded.ok) {
+    process.stderr.write(`Decoded check failed: ${DECODE_PROBLEMS[decoded.problem]}.\n`);
+    process.exit(1);
+  }
+  process.stdout.write(`Decoded check: all ${decoded.photos} photos decoded and planned the way Restore does. `
+    + 'A restore still depends on a full Check against your account.\n');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

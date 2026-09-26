@@ -14,8 +14,8 @@ import { garmentPayload, parseGarmentValues, type GarmentPayload, type GarmentVa
 import { itemDetailColumns } from '../domain/item-details';
 import { parseImageChangeReceipt, type ImageChangeAttempt, type ImageChangeIntent } from '../domain/image-replacement';
 import { isRecord } from '../domain/wardrobe';
-import { readJpegHeader, JPEG_LIMITS, ImagePreparationError } from '../images/jpeg';
-import { inspectRestoreJpeg } from '../images/restore-jpeg';
+import { ImagePreparationError } from '../images/jpeg';
+import { checkRestoreJpeg } from '../images/restore-jpeg';
 import { planRestorePhoto, restorePhotoDeps, type PhotoPlan, type RestorePhotoDeps } from '../images/restore-photo';
 import type { PreparedPhoto } from '../images/process-jpeg';
 import { ImageChangeClient } from '../images/replace';
@@ -24,11 +24,7 @@ import { saveItem, type SaveAttempt } from '../images/upload';
 // While reading, before any photo is decoded: the whole structure of every main photo (Q6), and the size of every thumbnail.
 // Thumbnails are never stored from a backup; a new one is always made from the main photo.
 const checkJpeg: JpegCheck = (bytes, variant, width, height) => {
-  try {
-    if (variant === 'main') { inspectRestoreJpeg(bytes, width, height); return; }
-    const header = readJpegHeader(bytes);
-    if (header.width > JPEG_LIMITS.thumbSide || header.height > JPEG_LIMITS.thumbSide || bytes.length > JPEG_LIMITS.thumbBytes) throw new Error('size');
-  } catch { throw new BackupFormatError('invalid'); }
+  try { checkRestoreJpeg(bytes, variant, width, height); } catch { throw new BackupFormatError('invalid'); }
 };
 function readProblem(error: unknown): never {
   if (error instanceof BackupFormatError) {
@@ -85,7 +81,7 @@ async function checkPhoto(backup: ReadBackup, sourceImageId: string, width: numb
 
 type StoredImage = ChainImage & { descriptionVersion: number; mainPath: string; thumbPath: string;
   mainBytes: number; thumbBytes: number; mainSha256: string; thumbSha256: string };
-const imageColumns = 'id,owner_id,item_id,state,alt_text,width,height,description_version,main_path,thumb_path,main_bytes,thumb_bytes,main_sha256,thumb_sha256';
+export const imageColumns = 'id,owner_id,item_id,state,alt_text,width,height,description_version,main_path,thumb_path,main_bytes,thumb_bytes,main_sha256,thumb_sha256';
 function storedImage(row: unknown, ownerId: string): StoredImage & { itemId: string } {
   if (!isRecord(row) || row.owner_id !== ownerId || typeof row.id !== 'string' || typeof row.item_id !== 'string'
     || !['pending', 'ready', 'retired'].includes(String(row.state)) || typeof row.alt_text !== 'string') throw new AppError('error.unavailable');
@@ -158,10 +154,17 @@ function classify(plan: Omit<ItemPlan, 'status'>, row: Record<string, unknown> |
   return { status: chain.kind === 'complete' ? 'same' : 'resume', chain };
 }
 
-// Reads and checks the backup, then compares it with this account using owner-scoped reads only. Nothing is written.
-export async function checkBackup(client: AppClient, scope: OwnerScope, files: readonly File[], passphrase: string,
-  signal: AbortSignal, deps: RestorePhotoDeps = restorePhotoDeps): Promise<RestorePreview> {
-  const lifetime = AbortSignal.any([scope.signal, signal]);
+/** What the restore needs of a chosen file; the Node restore CLI gives a fresh read from disk on each `text()`. */
+export type BackupFile = Pick<File, 'name' | 'size' | 'text'>;
+export type CheckedBackup = { backup: ReadBackup; photos: ReadonlyMap<string, PhotoPlan> };
+
+/**
+ * The part of Check that needs no account: every part read and verified (the structure of every photo first), then every
+ * main photo decoded and planned. `signal` bounds this check; `readSignal` alone bounds the later reads made while
+ * restoring. The Node restore CLI runs this before signing in, so a backup that fails here makes no request at all.
+ */
+export async function preflightBackup(files: readonly BackupFile[], passphrase: string, signal: AbortSignal,
+  deps: RestorePhotoDeps = restorePhotoDeps, readSignal: AbortSignal = signal): Promise<CheckedBackup> {
   let backup: ReadBackup;
   try {
     const selection = selectBackupFiles(files.map(file => ({ name: file.name, size: file.size })));
@@ -172,21 +175,30 @@ export async function checkBackup(client: AppClient, scope: OwnerScope, files: r
       if (!file) throw new BackupFormatError('incomplete');
       const text = await file.text();
       // Photos are read again while restoring, after this check has finished, so only the account's lifetime applies.
-      throwIfAborted(scope.signal);
+      throwIfAborted(readSignal);
       return text;
     } };
     backup = await readBackup(source, passphrase, checkJpeg);
   } catch (error) { if (isAborted(error)) throw error; return readProblem(error); }
-  throwIfAborted(lifetime);
-  const { data } = backup, uid = scope.ownerId;
+  throwIfAborted(signal);
   // Every photo's structure passed while reading; only now is any photo decoded.
-  const sizes = new Map(data.items.flatMap(item => item.photos.map(photo => [photo.sourceId, photo] as const)));
+  const sizes = new Map(backup.data.items.flatMap(item => item.photos.map(photo => [photo.sourceId, photo] as const)));
   const photos = new Map<string, PhotoPlan>();
   for (const id of backup.order) {
     const photo = sizes.get(id);
-    if (photo) photos.set(id, await checkPhoto(backup, id, photo.width, photo.height, lifetime, deps));
+    if (photo) photos.set(id, await checkPhoto(backup, id, photo.width, photo.height, signal, deps));
   }
   if (photos.size !== sizes.size) return readProblem(new BackupFormatError('incomplete'));
+  return { backup, photos };
+}
+
+// Reads and checks the backup, then compares it with this account using owner-scoped reads only. Nothing is written.
+export async function checkBackup(client: AppClient, scope: OwnerScope, files: readonly BackupFile[], passphrase: string,
+  signal: AbortSignal, deps: RestorePhotoDeps = restorePhotoDeps): Promise<RestorePreview> {
+  const lifetime = AbortSignal.any([scope.signal, signal]);
+  const { backup, photos } = await preflightBackup(files, passphrase, lifetime, deps, scope.signal);
+  throwIfAborted(lifetime);
+  const { data } = backup, uid = scope.ownerId;
   const map = (table: string, id: string) => restoreId(data.version, uid, data.exportId, table, id);
   const base = await Promise.all(data.items.map(async (source) => ({ source, id: await map('items', source.sourceId),
     imageIds: await Promise.all(source.photos.map(photo => map('item_images', photo.sourceId))),

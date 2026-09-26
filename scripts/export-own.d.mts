@@ -21,7 +21,7 @@ export function guardedFetch(options: {
 }): (input: string | URL, init?: RequestInit) => Promise<Response>;
 export function syncDirectory(files: ExportFiles, path: string, platform: string): Promise<void>;
 export type LockContext = { files: ExportFiles; output: string; now(): number; platform: string; lock?: { path: string; token: string } | null };
-export function acquireLock(context: LockContext): Promise<void>;
+export function acquireLock(context: LockContext, dir?: string, name?: string): Promise<void>;
 export function releaseLock(context: LockContext): Promise<void>;
 export type ExportDeps = {
   argv: string[]; env: Record<string, string | undefined>; stdin: unknown; stdout: { write(text: string): unknown }; stderr: { write(text: string): unknown };

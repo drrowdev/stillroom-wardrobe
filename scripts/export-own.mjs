@@ -15,9 +15,10 @@ import { assertMetadata, BACKUP_LIMITS, BackupFormatError, decryptPart, fromBase
 import { assemblePart, collectSnapshot, fromMetadata } from '../src/domain/export-run.ts';
 import { PromptError, readPipedInput, readTerminalLine } from './backup-prompt.mjs';
 import { HOSTED_URL } from './hosted-smoke.mjs';
+import { exportPolicy, ownerTransport, REQUEST_TIMEOUT_MS } from './owner-transport.mjs';
 import { checkJpeg, listParts, partSource } from './verify-backup.mjs';
 
-export const REQUEST_TIMEOUT_MS = 30_000;
+export { REQUEST_TIMEOUT_MS };
 export const RESUME_WINDOW_MS = 24 * 60 * 60 * 1000;
 const CLOCK_SKEW_MS = 10 * 60 * 1000;
 const INPUT_BYTES = 4096;
@@ -25,7 +26,7 @@ const LOCK = '.stillroom-export.lock';
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const uuidPattern = new RegExp(`^${uuid}$`);
 const stagingPattern = new RegExp(`^\\.stillroom-export-(${uuid})\\.partial$`);
-const storagePattern = new RegExp(`^/storage/v1/object/authenticated/wardrobe/(${uuid})/${uuid}/${uuid}/(?:main|thumb)\\.jpg$`);
+
 
 // Only fixed text leaves the process: counts, part numbers, the random export ID, the metadata hash and generated folder names.
 const MESSAGES = {
@@ -116,7 +117,7 @@ function checkSecrets(email, password, passphrase) {
     || passphrase.length < BACKUP_LIMITS.passphrase || passphrase.length > 1024) refuse('input');
 }
 
-async function readSecrets({ stdin, stderr }, confirm) {
+export async function readSecrets({ stdin, stderr }, confirm) {
   if (!stdin.isTTY) {
     try { return parseSecrets(await readPipedInput(stdin, INPUT_BYTES)); } catch (error) { if (error instanceof PromptError) refuse('input'); throw error; }
   }
@@ -130,44 +131,28 @@ async function readSecrets({ stdin, stderr }, confirm) {
   return { email, password, passphrase };
 }
 
-// Every request the SDK or the downloader makes passes here: one origin, a fixed set of paths, the owner's storage prefix,
-// no redirects, no cookies, no caching and a deadline.
+// Every request the SDK or the downloader makes passes the shared gate with the export policy: one origin, sign-in, the
+// two export RPCs and the owner's storage prefix, no redirects, no cookies, no caching and a deadline.
 export function guardedFetch({ origin, key, fetchImpl, state }) {
-  return async (input, init = {}) => {
-    if (typeof input !== 'string' && !(input instanceof URL)) { state.refused = true; throw new ExportError('invalid'); }
-    const address = String(input);
-    let url;
-    try { url = new URL(address); } catch { state.refused = true; throw new ExportError('invalid'); }
-    const method = String(init.method ?? 'GET').toUpperCase();
-    const path = url.pathname, query = url.search;
-    const storage = storagePattern.exec(path);
-    const allowed = url.origin === origin && !url.username && !url.password && !url.hash && address.startsWith(`${origin}/`)
-      && new Headers(init.headers).get('apikey') === key
-      && ((method === 'POST' && path === '/auth/v1/token' && ['?grant_type=password', '?grant_type=refresh_token'].includes(query))
-        || (method === 'POST' && path === '/auth/v1/logout' && query === '?scope=local')
-        || (method === 'POST' && ['/rest/v1/rpc/export_manifest', '/rest/v1/rpc/item_attribution_history'].includes(path) && !query)
-        || (method === 'GET' && storage !== null && storage[1] === state.owner && !query));
-    if (!allowed) { state.refused = true; throw new ExportError('invalid'); }
-    const signals = [AbortSignal.timeout(REQUEST_TIMEOUT_MS), ...(init.signal ? [init.signal] : []), ...(state.signal ? [state.signal] : [])];
-    return fetchImpl(address, { ...init, method, redirect: 'error', credentials: 'omit', cache: 'no-store', signal: AbortSignal.any(signals) });
-  };
+  return ownerTransport({ origin, key, fetchImpl, state, policy: exportPolicy, refusal: () => new ExportError('invalid') });
 }
 
-function memoryStorage() {
+export function memoryStorage() {
   const values = new Map();
   return { getItem: (name) => values.get(name) ?? null, setItem: (name, value) => { values.set(name, value); }, removeItem: (name) => { values.delete(name); } };
 }
 
-const claimsOf = (token) => {
+export const claimsOf = (token) => {
   try { return JSON.parse(Buffer.from(String(token).split('.')[1] ?? '', 'base64url').toString('utf8')); } catch { return {}; }
 };
 const retryable = (error) => !error || error.name === 'AuthRetryableFetchError' || Number(error.status) >= 500 || Number(error.status) === 0;
 
-async function signIn(context, secrets) {
+// `context.transport` (restore-own) replaces the export gate with another policy on the same shared gate.
+export async function signIn(context, secrets) {
   const { origin, key, fetchImpl, guard } = context;
   const client = createClient(origin, key, {
-    auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false, storage: memoryStorage(), storageKey: `stillroom-export-${randomUUID()}` },
-    global: { fetch: guardedFetch({ origin, key, fetchImpl, state: guard }) },
+    auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false, storage: memoryStorage(), storageKey: `${context.storagePrefix ?? 'stillroom-export'}-${randomUUID()}` },
+    global: { fetch: context.transport ?? guardedFetch({ origin, key, fetchImpl, state: guard }) },
   });
   context.client = client;
   const { data, error } = await client.auth.signInWithPassword({ email: secrets.email, password: secrets.password });
@@ -343,7 +328,6 @@ async function readBounded(files, path, limit) {
 // ---- Lock: one writer per output folder. The lock is created exclusively, so a second run always reports busy. A lock
 // left by a run that was killed is never removed automatically: the owner checks that no backup is running and deletes
 // it. A `.reclaim` file (from earlier development builds) is treated the same way.
-const RECLAIM = `${LOCK}.reclaim`;
 
 function ago(ms) {
   const minutes = Math.max(0, Math.round(ms / 60_000));
@@ -361,9 +345,10 @@ async function busy(context, path) {
   throw Object.assign(new ExportError('busy'), { detail });
 }
 
-export async function acquireLock(context) {
-  const { files, output } = context;
-  const path = join(output, LOCK), reclaim = join(output, RECLAIM);
+// `dir` and `name` let restore-own keep its own lock beside the backup folder; export-own uses the defaults.
+export async function acquireLock(context, dir = context.output, name = LOCK) {
+  const { files } = context, output = dir;
+  const path = join(output, name), reclaim = join(output, `${name}.reclaim`);
   if (await present(files, reclaim)) await busy(context, reclaim);
   const token = randomUUID();
   let handle;

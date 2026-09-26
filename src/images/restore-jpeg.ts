@@ -3,7 +3,7 @@
 // APP segment and every table validated. Anything else that parses safely is re-encoded; anything malformed, over a
 // budget or changing the dimensions is refused before a decoder starts. This checks structure only: it is not a proof
 // of where a photo came from, and says nothing about what its pixels contain.
-import { ImagePreparationError, JPEG_LIMITS, type ImagePreparationErrorCode } from './jpeg';
+import { ImagePreparationError, JPEG_LIMITS, readJpegHeader, type ImagePreparationErrorCode } from './jpeg.ts';
 
 export type RestoreJpegVerdict = { kind: 'preserve' } | { kind: 'reencode'; reason: 'metadata' | 'encoding' };
 export const RESTORE_JPEG_BUDGET = Object.freeze({ segments: 512, scans: 32, fill: 1024 });
@@ -39,7 +39,9 @@ function huffman(counts: Uint8Array, values: Uint8Array): Huffman {
 class BitReader {
   private buffer = 0;
   private count = 0;
-  constructor(private readonly bytes: Uint8Array, public position: number) {}
+  private readonly bytes: Uint8Array;
+  position: number;
+  constructor(bytes: Uint8Array, position: number) { this.bytes = bytes; this.position = position; }
   private byte(): number {
     const bytes = this.bytes, position = this.position;
     if (position >= bytes.length) fail();
@@ -295,4 +297,17 @@ export function inspectRestoreJpeg(bytes: Uint8Array, width: number, height: num
   if (metadata) return { kind: 'reencode', reason: 'metadata' };
   if (encoding || !walked || scans !== 1) return { kind: 'reencode', reason: 'encoding' };
   return { kind: 'preserve' };
+}
+
+/**
+ * The checks a restore makes on each backup file while reading it, before any decoder starts (shared with
+ * scripts/verify-backup.mjs). A main photo gets the full structural check above and returns its verdict. A thumbnail is
+ * never stored from a backup (a new one is made from the main photo), so it only has to be a JPEG within the thumbnail
+ * side and byte limits; its hash and length are checked by the backup reader. Throws ImagePreparationError otherwise.
+ */
+export function checkRestoreJpeg(bytes: Uint8Array, variant: 'main' | 'thumb', width: number, height: number): RestoreJpegVerdict | null {
+  if (variant === 'main') return inspectRestoreJpeg(bytes, width, height);
+  const header = readJpegHeader(bytes);
+  if (header.width > JPEG_LIMITS.thumbSide || header.height > JPEG_LIMITS.thumbSide || bytes.length > JPEG_LIMITS.thumbBytes) fail('tooLarge');
+  return null;
 }
