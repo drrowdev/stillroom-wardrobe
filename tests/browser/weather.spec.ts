@@ -11,6 +11,10 @@ const text = (key: MessageKey, language: Language = 'en', parameters?: Record<st
 const button = (page: Page, key: MessageKey, language: Language = 'en') => page.getByRole('button', { name: text(key, language), exact: true });
 const cards = (page: Page) => page.locator('.today-card');
 const bar = (page: Page) => page.locator('.weather-bar');
+// The Outdoors | Indoors choice on Today.
+const place = (page: Page, key: 'setting.outdoors' | 'setting.indoors', language: Language = 'en') =>
+  bar(page).getByRole('group', { name: text('weather.place', language) }).getByRole('button', { name: text(key, language), exact: true });
+const turnOn = (page: Page, language: Language = 'en') => bar(page).getByRole('link', { name: text('weather.turnOn', language), exact: true });
 const user = { kind: 'user', revision: 1 };
 const oulu = { weather_enabled: true, weather_city: 'Oulu, Finland', latitude: 65, longitude: 25.5 };
 const malmo = { weather_enabled: true, weather_city: 'Malmö, Sweden', latitude: 55.6, longitude: 13 };
@@ -160,10 +164,17 @@ test('I16 sends nothing until Search, then only the typed city; Use this city tu
   await expect(card.getByText(text('weather.onFor', 'en', { city: 'Oulu, Finland' }), { exact: true })).toBeVisible();
 
   await goTo(page, 'today');
-  await expect(bar(page)).toContainText('Oulu, Finland');
-  await expect(bar(page)).toContainText('(Europe/Helsinki)');
+  // City and date only: the saved "Oulu, Finland" is shortened and the zone matches the profile's, so it isn't named.
+  await expect(bar(page).locator('.weather-heading')).toContainText('Oulu, ');
+  await expect(bar(page)).not.toContainText('Finland');
+  await expect(bar(page)).not.toContainText('Europe/Helsinki');
   await expect(bar(page)).toContainText(await lowLine(page, 0));
   await expect(bar(page).getByRole('link', { name: 'Open-Meteo.com' })).toHaveAttribute('href', 'https://open-meteo.com/');
+  await expect(bar(page).locator('.weather-footer')).toContainText(text('weather.credit'));
+  // With a forecast, the only control is Outdoors | Indoors.
+  await expect(place(page, 'setting.outdoors')).toHaveAttribute('aria-pressed', 'true');
+  await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
+  await expect(turnOn(page)).toHaveCount(0);
   expect(weather.forecasts().map(url => Object.fromEntries(url.searchParams))).toEqual([{ latitude: '65.0', longitude: '25.5',
     hourly: 'temperature_2m,precipitation_probability,wind_speed_10m', wind_speed_unit: 'ms', timezone: 'auto', forecast_days: '2' }]);
   // Going back to Today, focus and a language change reuse the forecast held in memory.
@@ -227,20 +238,22 @@ test('I16 an incomplete stored setting sends nothing and offers a new search or 
   expect(weather.requests).toEqual([]);
 });
 
-test('I16 a failed forecast pauses before Try again, suggestions keep working, and manual entry and Staying in stay available', async ({ page }) => {
+test('I16 a failed forecast pauses before Try again, suggestions keep working, and manual entry and Indoors stay available', async ({ page }) => {
   await page.clock.install();
   const { weather } = await start(page, { weather: oulu, seed: (api, service) => { basics(api); service.status.forecast = 503; } });
   await expect(bar(page)).toContainText(text('weather.failed'));
   await expect(cards(page).first()).toBeVisible();
   await expect(bar(page).getByRole('button', { name: text('common.retry'), exact: true })).toBeDisabled();
   await expect(button(page, 'weather.enterTemperature')).toBeEnabled();
-  await expect(button(page, 'weather.stayingIn')).toBeEnabled();
+  await expect(place(page, 'setting.indoors')).toBeEnabled();
+  await expect(turnOn(page)).toHaveCount(0);
   await goTo(page, 'settings'); await goTo(page, 'today');
   expect(weather.forecasts()).toHaveLength(1);
   weather.status.forecast = 200;
   await page.clock.fastForward('01:05');
   await bar(page).getByRole('button', { name: text('common.retry'), exact: true }).click();
   await expect(bar(page)).toContainText(await lowLine(page, 0));
+  await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
   expect(weather.forecasts()).toHaveLength(2);
   await page.context().setOffline(true);
   await expect(bar(page)).toContainText(await lowLine(page, 0));
@@ -271,6 +284,7 @@ test('I16 a forecast stops counting after three hours; suggestions drop it and i
   expect(weather.forecasts()).toHaveLength(1);
   await page.clock.fastForward('00:01:01');
   await expect(bar(page)).toContainText(text('weather.loading'));
+  await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
   await expect(cards(page).first()).not.toContainText(text('today.addCoat'));
   // "Loading" renders before the mocked route logs the new request.
   await expect.poll(() => weather.forecasts().length).toBe(2);
@@ -304,7 +318,9 @@ test('I16 an unfinished outfit still names what the weather needs, without claim
 test('I16 a manual temperature needs no weather setting, is marked as yours and a late forecast never replaces it', async ({ page }) => {
   const { weather } = await start(page, { seed: api => { basics(api); add(api, 'Wool coat', { category: 'outerwear', colours: ['grey'] }); } });
   await expect(cards(page).first()).toBeVisible();
+  await expect(bar(page)).toContainText(text('weather.noForecast'));
   await button(page, 'weather.enterTemperature').click();
+  await expect(page.locator('#weather-temperature')).toBeFocused();
   for (const bad of ['', 'cold', '51', '2.5']) {
     await page.locator('#weather-temperature').fill(bad);
     await button(page, 'weather.useTemperature').click();
@@ -314,41 +330,136 @@ test('I16 a manual temperature needs no weather setting, is marked as yours and 
   await page.locator('#weather-temperature').fill('-5');
   await button(page, 'weather.useTemperature').click();
   await expect(bar(page)).toContainText(text('weather.manualLine', 'en', { temperature: await celsius(page, -5) }));
+  await expect(bar(page)).not.toContainText(text('weather.noForecast'));
+  await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
   await expect(cards(page).first()).toContainText('Wool coat');
   expect(weather.requests).toEqual([]);
   await button(page, 'weather.clearManual').click();
   await expect(bar(page)).not.toContainText(await celsius(page, -5));
+  await expect(bar(page)).toContainText(text('weather.noForecast'));
   await expect(button(page, 'weather.enterTemperature')).toBeVisible();
   expect(weather.requests).toEqual([]);
 });
 
+// Enter temperature is only offered without a forecast; one entered then keeps priority when a forecast arrives later.
 test('I16 a manual temperature overrides a forecast, including one that arrives later', async ({ page }) => {
-  const { weather } = await start(page, { weather: oulu, seed: (api, service) => { basics(api); service.hold.forecast.add('65.0'); } });
+  const { weather } = await start(page, { seed: (api, service) => { basics(api); service.hold.forecast.add('65.0'); } });
   await expect(cards(page).first()).toBeVisible();
-  await expect(bar(page)).toContainText(text('weather.loading'));
   await button(page, 'weather.enterTemperature').click();
   await page.locator('#weather-temperature').fill('22');
   await button(page, 'weather.useTemperature').click();
   const manual = text('weather.manualLine', 'en', { temperature: await celsius(page, 22) });
   await expect(bar(page)).toContainText(manual);
+  await goTo(page, 'settings');
+  await search(page, 'Oulu');
+  await button(page, 'weather.useCity').click();
+  await expect(page.getByText(text('weather.savedOn', 'en', { city: 'Oulu, Finland' }), { exact: true })).toBeVisible();
+  await goTo(page, 'today');
+  await expect.poll(() => weather.held.length).toBe(1);
+  await expect(bar(page)).toContainText(manual);
   await weather.release('forecast', forecastReply({ temperature: -8 }));
+  await expect(cards(page).first()).toBeVisible();
   await expect(bar(page)).toContainText(manual);
   await expect(bar(page)).not.toContainText(await lowLine(page, -8));
   await expect(page.getByText(text('today.addCoat'), { exact: true })).toHaveCount(0);
   await button(page, 'weather.clearManual').click();
   await expect(bar(page)).toContainText(await lowLine(page, -8));
   await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
 });
 
-test('I16 Staying in turns every weather rule off, including the temperature', async ({ page }) => {
+test('I16 Indoors turns every weather rule off, including the temperature', async ({ page }) => {
   await start(page, { weather: oulu, seed: api => basics(api) });
   await expect(cards(page).first()).toContainText(text('today.addCoat'));
-  await button(page, 'weather.stayingIn').click();
+  await expect(place(page, 'setting.outdoors')).toHaveAttribute('aria-pressed', 'true');
+  await expect(place(page, 'setting.indoors')).toHaveAttribute('aria-pressed', 'false');
+  await place(page, 'setting.indoors').click();
+  await expect(place(page, 'setting.indoors')).toHaveAttribute('aria-pressed', 'true');
+  await expect(place(page, 'setting.outdoors')).toHaveAttribute('aria-pressed', 'false');
   await expect(bar(page)).toContainText(text('weather.indoorsLine'));
+  await expect(bar(page)).not.toContainText(await lowLine(page, 0));
+  await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
   await expect(cards(page).first()).not.toContainText(text('today.addCoat'));
   await expect(cards(page).first().getByRole('button', { name: text('today.save'), exact: true })).toBeVisible();
-  await button(page, 'weather.goingOut').click();
+  await place(page, 'setting.outdoors').click();
+  await expect(place(page, 'setting.outdoors')).toHaveAttribute('aria-pressed', 'true');
+  await expect(bar(page)).toContainText(await lowLine(page, 0));
   await expect(cards(page).first()).toContainText(text('today.addCoat'));
+});
+
+test('Indoors also replaces a manual temperature, and has no temperature actions without a forecast', async ({ page }) => {
+  await start(page, { seed: api => basics(api) });
+  await button(page, 'weather.enterTemperature').click();
+  await page.locator('#weather-temperature').fill('3');
+  await button(page, 'weather.useTemperature').click();
+  await expect(bar(page)).toContainText(text('weather.manualLine', 'en', { temperature: await celsius(page, 3) }));
+  await place(page, 'setting.indoors').click();
+  await expect(bar(page)).toContainText(text('weather.indoorsLine'));
+  await expect(bar(page)).not.toContainText(text('weather.noForecast'));
+  await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
+  await expect(button(page, 'weather.clearManual')).toHaveCount(0);
+  await expect(turnOn(page)).toHaveCount(0);
+  await place(page, 'setting.outdoors').click();
+  await expect(bar(page)).toContainText(text('weather.noForecast'));
+  await expect(bar(page)).not.toContainText(await celsius(page, 3));
+});
+
+test('with weather off, Today says there is no forecast and Turn on weather opens the Weather card in Settings', async ({ page }) => {
+  const { weather } = await start(page, { seed: api => basics(api) });
+  await expect(cards(page).first()).toBeVisible();
+  await expect(bar(page)).toContainText(text('weather.noForecast'));
+  await expect(turnOn(page)).toHaveAttribute('href', '#/settings');
+  await expect(button(page, 'weather.enterTemperature')).toBeVisible();
+  await expect(place(page, 'setting.outdoors')).toHaveAttribute('aria-pressed', 'true');
+  await turnOn(page).click();
+  await expect(page.locator('#settings-title')).toBeVisible();
+  await expect(page.locator('#weather-heading')).toBeFocused();
+  await expect(page.locator('#weather-city')).toBeVisible();
+  expect(weather.requests).toEqual([]);
+  // A later, ordinary visit to Settings focuses the page heading again.
+  await goTo(page, 'today'); await goTo(page, 'settings');
+  await expect(page.locator('#settings-title')).toBeFocused();
+});
+
+test('while the forecast loads there are no temperature actions, and Outdoors | Indoors stays available', async ({ page }) => {
+  const { weather } = await start(page, { weather: oulu, seed: (api, service) => { basics(api); service.hold.forecast.add('65.0'); } });
+  await expect(bar(page)).toContainText(text('weather.loading'));
+  await expect.poll(() => weather.held.length).toBe(1);
+  await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
+  await expect(turnOn(page)).toHaveCount(0);
+  await expect(place(page, 'setting.indoors')).toBeEnabled();
+  await expect(place(page, 'setting.outdoors')).toBeEnabled();
+  await weather.release('forecast', forecastReply({ temperature: 0 }));
+  await expect(bar(page)).toContainText(await lowLine(page, 0));
+  await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
+});
+
+test('an incomplete setting says why there is no forecast and offers only Enter temperature', async ({ page }) => {
+  await start(page, { weather: { weather_enabled: true, weather_city: null, latitude: 65, longitude: 25.5 }, seed: api => basics(api) });
+  await expect(bar(page)).toContainText(text('weather.incompleteToday'));
+  await expect(button(page, 'weather.enterTemperature')).toBeVisible();
+  await expect(turnOn(page)).toHaveCount(0);
+});
+
+test('going offline before the forecast arrives says so and offers Enter temperature', async ({ page }) => {
+  const { weather } = await start(page, { weather: oulu, seed: (api, service) => { basics(api); service.hold.forecast.add('65.0'); } });
+  await expect.poll(() => weather.held.length).toBe(1);
+  await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
+  await page.context().setOffline(true);
+  await expect(bar(page)).toContainText(text('weather.offline'));
+  await expect(button(page, 'weather.enterTemperature')).toBeEnabled();
+  await expect(turnOn(page)).toHaveCount(0);
+  await page.context().setOffline(false);
+});
+
+test('the forecast names its time zone only when it differs from the profile\'s, in plain words', async ({ page }) => {
+  await start(page, { weather: oulu, seed: api => { basics(api); api.profiles[owners.a]!.timezone = 'Europe/Stockholm'; } });
+  await expect(bar(page)).toContainText(await lowLine(page, 0));
+  const zone = await page.evaluate(() => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Helsinki', timeZoneName: 'longGeneric' })
+    .formatToParts(Date.now()).find(part => part.type === 'timeZoneName')?.value ?? '');
+  expect(zone).not.toBe('');
+  await expect(bar(page).locator('.weather-heading')).toContainText(`(${zone})`);
+  await expect(bar(page)).not.toContainText('Europe/Helsinki');
 });
 
 test.describe('I16 weather gaps on each idea, without suitability claims', () => {
@@ -382,7 +493,7 @@ for (const [from, to] of [['a', 'b'], ['b', 'a']] as const) {
   test(`I16 a held forecast for one owner never reaches the next (${from} to ${to})`, async ({ page }) => {
     const language = { a: 'en', b: 'sv' } as const;
     const latitude = { a: '65.0', b: '55.6' } as const;
-    const city = { a: 'Oulu, Finland', b: 'Malmö, Sweden' } as const;
+    const city = { a: 'Oulu', b: 'Malmö' } as const;
     const api = await mockBackend(page, { initialLanguage: 'en', weather: { a: oulu, b: malmo } });
     const weather = await service(page);
     basics(api, 'a'); basics(api, 'b');
@@ -410,7 +521,7 @@ test('I16 a held forecast or search is dropped after a city change, Turn off or 
   await button(page, 'weather.useCity').click();
   await expect(page.getByText(text('weather.savedOn', 'en', { city: 'Malmö, Sweden' }), { exact: true })).toBeVisible();
   await goTo(page, 'today');
-  await expect(bar(page)).toContainText('Malmö, Sweden');
+  await expect(bar(page)).toContainText('Malmö');
   await weather.release('forecast', forecastReply({ temperature: -30 }));
   await expect(bar(page)).toContainText(await lowLine(page, 12));
   await expect(bar(page)).not.toContainText('Oulu');
@@ -480,25 +591,50 @@ test('I16 accessibility: axe, keyboard, 320px and 200% text for the weather card
   const axe = async () => expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await expect(bar(page)).toContainText(await lowLine(page, 0));
   await axe();
+  await place(page, 'setting.indoors').focus();
+  await page.keyboard.press('Enter');
+  await expect(bar(page)).toContainText(text('weather.indoorsLine'));
+  await axe();
+  await page.keyboard.press('Shift+Tab');
+  await expect(place(page, 'setting.outdoors')).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(bar(page)).toContainText(await lowLine(page, 0));
+  // Without a forecast: No forecast, Turn on weather and the temperature form with its error.
+  await goTo(page, 'settings');
+  await button(page, 'weather.turnOff').click();
+  await expect(page.getByText(text('weather.savedOff'), { exact: true })).toBeVisible();
+  await goTo(page, 'today');
+  await expect(turnOn(page)).toBeVisible();
+  await axe();
   await button(page, 'weather.enterTemperature').click();
   await button(page, 'weather.useTemperature').click();
   await expect(page.locator('#weather-temperature-error')).toBeVisible();
   await axe();
+  await button(page, 'common.cancel').click();
   await goTo(page, 'settings');
-  await button(page, 'weather.changeCity').click();
   await search(page, 'Oulu');
   await expect(page.getByRole('radio')).toHaveCount(1);
   await axe();
+  await button(page, 'weather.useCity').click();
+  await expect(page.getByText(text('weather.savedOn', 'en', { city: 'Oulu, Finland' }), { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 320, height: 900 });
   for (const route of ['settings', 'today'] as const) for (const zoom of [false, true]) {
     await goTo(page, route);
     if (zoom) await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     if (route === 'today') {
-      await button(page, 'weather.stayingIn').focus();
+      await expect(bar(page)).toContainText(await lowLine(page, 0));
+      // Both choices stay whole and inside the bar.
+      for (const key of ['setting.outdoors', 'setting.indoors'] as const) {
+        expect(await place(page, key).evaluate(element => {
+          const box = element.getBoundingClientRect(), parent = element.closest('.weather-bar')!.getBoundingClientRect();
+          return element.scrollWidth <= element.clientWidth && box.left >= parent.left && box.right <= parent.right;
+        })).toBe(true);
+      }
+      await place(page, 'setting.indoors').focus();
       await page.keyboard.press('Enter');
       await expect(bar(page)).toContainText(text('weather.indoorsLine'));
-      await button(page, 'weather.goingOut').click();
+      await place(page, 'setting.outdoors').click();
     }
     await axe();
   }
@@ -507,10 +643,15 @@ test('I16 accessibility: axe, keyboard, 320px and 200% text for the weather card
 test.describe('bounded I16 visual evidence', () => {
   test.describe.configure({ retries: 0 });
   const scenes = [
-    { scene: 'settings', project: 'chromium', language: 'en', width: 1280, suffix: 'en-desktop' },
-    { scene: 'settings', project: 'mobile', language: 'fi', width: 320, suffix: 'fi-mobile' },
-    { scene: 'today-forecast', project: 'chromium', language: 'en', width: 1280, suffix: 'en-desktop' },
-    { scene: 'today-unavailable', project: 'mobile', language: 'fi', width: 320, suffix: 'fi-mobile' },
+    { scene: 'settings', project: 'chromium', language: 'en', width: 1280, zoom: false, suffix: 'en-desktop' },
+    { scene: 'settings', project: 'mobile', language: 'fi', width: 320, zoom: false, suffix: 'fi-mobile' },
+    { scene: 'today-forecast', project: 'chromium', language: 'en', width: 1280, zoom: false, suffix: 'en-desktop' },
+    { scene: 'today-forecast', project: 'mobile', language: 'fi', width: 320, zoom: false, suffix: 'fi-mobile' },
+    { scene: 'today-forecast', project: 'mobile', language: 'fi', width: 320, zoom: true, suffix: 'fi-320-200' },
+    { scene: 'today-off', project: 'chromium', language: 'en', width: 1280, zoom: false, suffix: 'en-desktop' },
+    { scene: 'today-off', project: 'mobile', language: 'sv', width: 320, zoom: true, suffix: 'sv-320-200' },
+    { scene: 'today-indoors', project: 'mobile', language: 'sv', width: 320, zoom: false, suffix: 'sv-mobile' },
+    { scene: 'today-unavailable', project: 'mobile', language: 'fi', width: 320, zoom: false, suffix: 'fi-mobile' },
   ] as const;
   for (const selected of scenes) test(`${selected.scene} ${selected.suffix} retains functional assertions in every project`, async ({ page }, testInfo: TestInfo) => {
     const language: Language = selected.language;
@@ -532,13 +673,35 @@ test.describe('bounded I16 visual evidence', () => {
       } });
       await expect(bar(page)).toContainText(await lowLine(page, 4, language));
       await expect(cards(page).first()).toContainText(text('today.reasonRain', language));
+      await expect(button(page, 'weather.enterTemperature', language)).toHaveCount(0);
+    } else if (selected.scene === 'today-off') {
+      await start(page, { language, seed: api => basics(api) });
+      await expect(bar(page)).toContainText(text('weather.noForecast', language));
+      await expect(turnOn(page, language)).toBeVisible();
+      await expect(button(page, 'weather.enterTemperature', language)).toBeVisible();
+      await expect(cards(page).first()).toBeVisible();
+    } else if (selected.scene === 'today-indoors') {
+      await start(page, { language, weather: oulu, seed: api => basics(api) });
+      await expect(bar(page)).toContainText(await lowLine(page, 0, language));
+      await place(page, 'setting.indoors', language).click();
+      await expect(bar(page)).toContainText(text('weather.indoorsLine', language));
+      await expect(cards(page).first()).toBeVisible();
     } else {
       await start(page, { language, weather: oulu, seed: (api, service) => { basics(api); service.status.forecast = 503; } });
       await expect(bar(page)).toContainText(text('weather.failed', language));
       await expect(cards(page).first()).toBeVisible();
     }
     expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
+    if (selected.zoom) {
+      await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' });
+      expect(await place(page, 'setting.outdoors', language).evaluate(element => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(27);
+    }
     await expect(page.locator('.workspace-identity')).toContainText('Alex');
+    if (selected.scene.startsWith('today')) {
+      // The place choice leads on narrow screens and sits to the right on wide ones.
+      const [group, line] = await Promise.all([bar(page).locator('.weather-place').boundingBox(), bar(page).locator('.weather-line').first().boundingBox()]);
+      expect(group && line && (selected.width < 651 ? group.y + group.height <= line.y : group.x >= line.x + line.width)).toBe(true);
+    }
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     expect(await page.evaluate(({ expectedLanguage, width }) => {
       const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;

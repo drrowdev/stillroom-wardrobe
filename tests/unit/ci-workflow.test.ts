@@ -51,7 +51,8 @@ const browserArtifacts: Record<string, string[]> = {
     .map((name) => `i11-visual/${name}.png`),
   'i15-today-ui': ['ideas-en-desktop', 'missing-en-desktop', 'ideas-fi-mobile', 'missing-fi-mobile']
     .map((name) => `i15-visual/${name}.png`),
-  'i16-weather-ui': ['settings-en-desktop', 'settings-fi-mobile', 'today-forecast-en-desktop', 'today-unavailable-fi-mobile']
+  'i16-weather-ui': ['settings-en-desktop', 'settings-fi-mobile', 'today-forecast-en-desktop', 'today-forecast-fi-mobile', 'today-forecast-fi-320-200',
+    'today-off-en-desktop', 'today-off-sv-320-200', 'today-indoors-sv-mobile', 'today-unavailable-fi-mobile']
     .map((name) => `i16-visual/${name}.png`),
   'p6a-backup-ui': ['backup-en-desktop', 'backup-parts-fi-mobile'].map((name) => `p6a-visual/${name}.png`),
   'p6b-restore-ui': ['restore-preview-en-desktop', 'restore-progress-sv-mobile', 'restore-reencoded-fi-mobile'].map((name) => `p6b-visual/${name}.png`),

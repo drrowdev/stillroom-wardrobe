@@ -60,7 +60,7 @@ export function WeatherSettings({ controller, scope, profile, busy, language, on
   const choice = results?.find(result => result.id === selected) ?? null;
 
   return <section className="settings-card weather-card" aria-labelledby="weather-heading">
-    <h2 id="weather-heading">{t('weather.title')}</h2>
+    <h2 id="weather-heading" tabIndex={-1}>{t('weather.title')}</h2>
     {config.status === 'on' && <p className="weather-city">{t('weather.onFor', { city: config.place.city })}</p>}
     {config.status === 'off' && !saved && <p className="muted fine">{t('weather.intro')}</p>}
     {config.status === 'incomplete' && <p className="notice">{t('weather.incomplete')}</p>}

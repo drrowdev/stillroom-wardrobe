@@ -27,9 +27,9 @@ const isSeason = (value: string): value is Season => seasonCodes.some(code => co
 type Props = {
   client: AppClient; scope: OwnerScope; images: PrivateImages; online: boolean; language: Language; t: Translate;
   timeZone: string; invalidation: number; weather: WeatherConfig; weatherStore: WeatherStore;
-  onSave: (itemIds: string[], occasion: Occasion) => void; onAddItem: () => void;
+  onSave: (itemIds: string[], occasion: Occasion) => void; onAddItem: () => void; onTurnOnWeather: () => void;
 };
-export function TodayScreen({ client, scope, images, online, language, t, timeZone, invalidation, weather, weatherStore, onSave, onAddItem }: Props) {
+export function TodayScreen({ client, scope, images, online, language, t, timeZone, invalidation, weather, weatherStore, onSave, onAddItem, onTurnOnWeather }: Props) {
   const [occasion, setOccasion] = useState<Occasion>('everyday');
   const [season, setSeason] = useState<Season>(() => defaultSeason(timeZone));
   const forecast = useWeather(weatherStore, weather, online);
@@ -50,7 +50,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
           {seasonCodes.map(code => <option key={code} value={code}>{t(seasonKeys[code])}</option>)}
         </select></label>
     </div>
-    <WeatherBar weather={forecast} language={language} online={online} locked={ideas.settling} t={t} />
+    <WeatherBar weather={forecast} language={language} timeZone={timeZone} online={online} locked={ideas.settling} t={t} onTurnOnWeather={onTurnOnWeather} />
     {ideas.error && <div className="notice notice-error" role="alert"><span>{t('today.loadFailed')}</span><button type="button" className="text-button" disabled={!online} onClick={ideas.reload}>{t('common.retry')}</button></div>}
     {!result ? !ideas.error && <div className="today-ideas" aria-busy="true"><p role="status" className="sr-only">{t('common.loading')}</p>
       {Array.from({ length: 3 }, (_, index) => <div key={index} className="loading-card"><div className="loading-photo skeleton" /><div className="loading-line skeleton" /></div>)}</div>
