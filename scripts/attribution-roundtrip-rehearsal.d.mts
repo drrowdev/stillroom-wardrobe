@@ -9,3 +9,4 @@ export function terminal(answers: string[]): {
 };
 export function expectedImported<T extends { source_image_id: string | null }>(entries: T[], photos: Map<string, string>):
   (T & { origin: 'imported' })[];
+export function differing(actual: unknown, expected: Record<string, unknown>[], copies: Set<string>): string;

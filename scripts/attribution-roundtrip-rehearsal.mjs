@@ -75,6 +75,20 @@ export function expectedImported(entries, photos) {
   });
 }
 
+// Which entry keys differ, and where a differing photo points: nothing but key names and fixed words.
+export function differing(actual, expected, copies) {
+  if (!Array.isArray(actual) || actual.length !== expected.length) return `length-${Array.isArray(actual) ? actual.length : 'none'}-${expected.length}`;
+  const keys = new Set();
+  let photo = '';
+  actual.forEach((entry, index) => {
+    for (const key of ENTRY_KEYS) if (!isDeepStrictEqual(entry?.[key], expected[index][key])) keys.add(key);
+    if (!isDeepStrictEqual(entry?.source_image_id, expected[index].source_image_id)) {
+      photo = entry?.source_image_id === null ? 'null' : copies.has(entry?.source_image_id) ? 'other-copy' : 'unknown';
+    }
+  });
+  return [...keys].sort().join('+') + (photo ? `-${photo}` : '') || 'order';
+}
+
 async function main() {
   const started = performance.now();
   let stage = 'guards', server, parent;
@@ -83,7 +97,9 @@ async function main() {
     process.exit(1);
   }, ROUNDTRIP_BOUND_MS);
   watchdog.unref();
-  const check = (condition) => { if (!condition) throw new Error('EVIDENCE'); };
+  let step = 'start';
+  // Failure codes are fixed words and schema key names, never values.
+  const check = (condition, code = 'evidence') => { if (!condition) throw Object.assign(new Error('EVIDENCE'), { code }); };
   const equal = (a, b) => check(isDeepStrictEqual(a, b));
   try {
     check(process.argv.length === 2 && process.env.ALLOW_SECURITY_TESTS === '1' && process.env.ALLOW_CI_DATABASE_MUTATION === '1');
@@ -231,33 +247,43 @@ async function main() {
       const itemMap = await ids('items', items), imageMap = await ids('item_images', images);
       const present = (rows) => new Set(rows.map((row) => row.id));
       const storedItems = present(await client.rows(owner, 'items')), storedImages = present(await client.rows(owner, 'item_images'));
-      check([...itemMap.values()].every((id) => storedItems.has(id)) && [...imageMap.values()].every((id) => storedImages.has(id)));
+      step = 'mapped-copies';
+      check([...itemMap.values()].every((id) => storedItems.has(id)), 'items-missing');
+      check([...imageMap.values()].every((id) => storedImages.has(id)),
+        `images-missing-${[...imageMap.values()].filter((id) => !storedImages.has(id)).length}-of-${imageMap.size}`);
       return { itemMap, imageMap };
     };
     const generation = async (label, from, to, items, images, expected) => {
       const backup = await exportOwn(label, from);
       const { code, report } = await restoreOwn(label, backup, to);
-      equal(code, 0);
+      step = 'report';
+      check(code === 0, `exit-${Number.isInteger(code) ? code : 'other'}`);
       check(report.counts.restored === items.length && report.counts.attributions === items.length && report.counts.attributionsKept === 0
-        && report.counts.failed === 0 && report.counts.blocked === 0 && report.counts.deferred === 0);
-      check(report.photos.length === images.length && report.photos.every((entry) => ['written', 'present'].includes(entry.outcome)));
+        && report.counts.failed === 0 && report.counts.blocked === 0 && report.counts.deferred === 0, 'report-counts');
+      check(report.photos.length === images.length && report.photos.every((entry) => ['written', 'present'].includes(entry.outcome)),
+        `report-photos-${report.photos.length}-of-${images.length}`);
       stage = `compare-${label}`;
       const { itemMap, imageMap } = await mappingOf(to, backup, items, images);
       const next = new Map();
       for (const [source, entries] of expected) {
         const target = itemMap.get(source);
+        step = 'imported-history';
         const current = await history(to, target);
-        equal(current, expectedImported(entries, imageMap));
+        const wanted = expectedImported(entries, imageMap);
+        check(isDeepStrictEqual(current, wanted), `entries-${differing(current, wanted, new Set(imageMap.values()))}`);
+        step = 'legacy-history';
         // The legacy projection keeps returning only server-recorded attribution.
-        equal(await client.rpc(to, 'item_attribution_history', { p_item_id: target }), []);
+        check(isDeepStrictEqual(await client.rpc(to, 'item_attribution_history', { p_item_id: target }), []), 'legacy-not-empty');
         next.set(target, current);
       }
       stage = `rerun-${label}`;
       const again = await restoreOwn(`${label}-again`, backup, to);
-      equal(again.code, 0);
+      step = 'rerun-report';
+      check(again.code === 0, `exit-${Number.isInteger(again.code) ? again.code : 'other'}`);
       // An earlier run of the same backup counts as restored; nothing is kept and nothing changes.
       check(again.report.counts.attributions === items.length && again.report.counts.attributionsKept === 0
-        && again.report.counts.restored === 0 && again.report.counts.same === items.length);
+        && again.report.counts.restored === 0 && again.report.counts.same === items.length, 'rerun-counts');
+      step = 'rerun-history';
       for (const [target, entries] of next) equal(await history(to, target), entries);
       return { next, itemMap, imageMap };
     };
@@ -274,8 +300,9 @@ async function main() {
     const seconds = ((performance.now() - started) / 1000).toFixed(1);
     console.log(`PASS: P6d genuine round trip; recorded history (analyzed Save + analyzed replacement) -> export-own -> restore-own into B -> re-export -> restore into A; items=2 entries=3 photos=3 generations=2 reruns=2; all imported, order/values/photo mappings equal; ${seconds}s`);
     return 0;
-  } catch {
-    console.error(`FAIL: P6d genuine round trip ${stage}; ${((performance.now() - started) / 1000).toFixed(1)}s`);
+  } catch (error) {
+    const code = typeof error?.code === 'string' && /^[a-z0-9+_-]{1,80}$/.test(error.code) ? error.code : 'other';
+    console.error(`FAIL: P6d genuine round trip ${stage}; step=${step}; cause=${code}; ${((performance.now() - started) / 1000).toFixed(1)}s`);
     return 1;
   } finally {
     clearTimeout(watchdog);

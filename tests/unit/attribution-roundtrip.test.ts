@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { cliEnvironment, expectedImported, terminal } from '../../scripts/attribution-roundtrip-rehearsal.mjs';
+import { cliEnvironment, differing, expectedImported, terminal } from '../../scripts/attribution-roundtrip-rehearsal.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -32,6 +32,16 @@ describe('P6d genuine round-trip rehearsal helpers', () => {
     expect(expectedImported([entry, { ...entry, source_image_id: null }], new Map([['old', 'new']])))
       .toEqual([{ ...entry, origin: 'imported', source_image_id: 'new' }, { ...entry, origin: 'imported', source_image_id: null }]);
     expect(() => expectedImported([entry], new Map())).toThrow('UNMAPPED');
+  });
+
+  it('names differing entry keys and photo targets without values', () => {
+    const entry = { fields: {}, image_sha256: 'a'.repeat(64), model_id: 'm', origin: 'imported', prompt_version: 2, source_image_id: 'x' };
+    expect(differing([entry], [entry], new Set())).toBe('order');
+    expect(differing([], [entry], new Set())).toBe('length-0-1');
+    expect(differing(null, [entry], new Set())).toBe('length-none-1');
+    expect(differing([{ ...entry, source_image_id: null, model_id: 'secret-value' }], [entry], new Set())).toBe('model_id+source_image_id-null');
+    expect(differing([{ ...entry, source_image_id: 'y' }], [entry], new Set(['y']))).toBe('source_image_id-other-copy');
+    expect(differing([{ ...entry, source_image_id: 'z' }], [entry], new Set(['y']))).toBe('source_image_id-unknown');
   });
 
   it('loads the decodable restore fixtures from Node through the narrow loader', () => {
