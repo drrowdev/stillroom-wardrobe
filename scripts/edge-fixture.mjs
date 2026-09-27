@@ -205,7 +205,9 @@ async function ownerIds() {
 const ACTIVATE = (where) => `-- stillroom-edge-gate-activation (CI fixture only; never a migration or seed)
 update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.6-terra-2026-07-09',prompt_version=2,
   max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,result_ttl_seconds=3600,
-  execution_manifest_id='azure-eu-terra-devtest-v2' where ${where};`;
+  execution_manifest_id='azure-eu-terra-devtest-v2',stylist_activated=true,stylist_notice_revision=1,
+  stylist_manifest_id='azure-eu-terra-stylist-v1',stylist_max_request_micro=129360,stylist_monthly_allowance_micro=10000000,
+  stylist_max_requests_per_hour=50 where ${where};`;
 
 async function main() {
   const deadline = Date.now() + 5 * 60_000;
@@ -278,6 +280,7 @@ async function main() {
       '--network-alias', 'edge-runtime', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--memory', '1g',
       '-e', 'SUPABASE_ANON_KEY', '-e', 'SUPABASE_SERVICE_ROLE_KEY',
       ...mount('supabase/functions', '/work/supabase/functions'), ...mount('src/images', '/work/src/images'),
+      ...mount('src/domain/stylist.ts', '/work/src/domain/stylist.ts'),
       ...mount('tests/edge-fixtures', '/work/tests/edge-fixtures'),
       '--pull', 'never', '--entrypoint', 'edge-runtime', runtimeReference, 'start', '--main-service', '/work/tests/edge-fixtures/analyze-clothing-double',
       '--port', '9000'], 'fixture-runtime', { secrets: { SUPABASE_ANON_KEY: keys.anon, SUPABASE_SERVICE_ROLE_KEY: keys.service } });

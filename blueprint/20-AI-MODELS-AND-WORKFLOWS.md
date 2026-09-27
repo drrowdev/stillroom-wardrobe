@@ -232,6 +232,18 @@ Before adoption, use `21`'s comparison procedure with at least 30 authorized rep
 
 The final release includes working automatic tagging for enabled accounts, plus the existing real dressing-usefulness evaluation for deterministic suggestions. No AI service has been configured or evaluated by this blueprint revision.
 
+## ST1a stylist chat backend (inactive) - 28 September 2026
+
+ADR25 in `18`. An optional stylist chat, separate from the deterministic suggestions. ST1a adds the backend only and activates nothing.
+
+- **Route.** `stylist-chat` Edge function, manifest `azure-eu-terra-stylist-v1`, the existing EU Data Zone deployment `eval-terra-20260709` (`gpt-5.6-terra-2026-07-09`), `v1/chat/completions` with a strict JSON schema, `store:false`, `prompt_cache_options:{mode:'explicit'}` without breakpoints, one call and no retry or fallback. The prompt, schema and settings (including the body controls) are hashed into the manifest.
+- **Context.** Only the verified user's saved items: a current ready photo, active, available, not excluded, not in Trash, no deletion claim and no deletion fence, all checked in Postgres before anything leaves it. Items are sent as enum, number and boolean fields under local aliases; titles, notes, brands, photos and IDs are not sent. The complete serialized `messages` stay within 20,000 UTF-8 bytes; the input envelope of 24,000 tokens is an operational estimate enforced by the anomaly shutdown.
+- **Accounting.** A claim holds the reservation (USD 0.12936, the envelope valued at LongCo 4.40/19.80 as a conservative allowance valuation; the applicable tariff is ShortCo 2.20/13.20) in the shared `private.ai_usage` ledger with `purpose='stylist'`. Finish settles once: `observed`, `terminal_anomaly` (invalid usage, an unexpected model or control observation, or an envelope overrun; stylist dispatch is switched off until reviewed), `non_dispatch` or `provisional_expiry`, which a later valid finish can replace. A replay with the same code and usage returns the recorded result; different ones are `USAGE_CONFLICT`. Missing usage is never counted as zero.
+- **Locks.** Claim takes the approved-account row (share, no wait), the profile and then the AI controls, the same order as checked item and photo writers; an account freeze takes the approved-account row exclusively, so a freeze and a claim never overlap. Contention returns `BUSY`. Finish rechecks consent, activation and approval and releases content only on `OK`.
+- **Expiry.** `stylist_expire_due` is callable only by the database owner and runs from the inactive job `stillroom-stylist-expire` every five minutes once activated, independent of later stylist or tagging use. The Edge function refuses to dispatch after five seconds from the claim.
+- **Direct calls (D1).** Before any ST0 or probe call made outside the app, `stylist_direct_allocation` lowers the owner's monthly allowance by the allocated USD operational amount, under the admission locks, and refuses when accounted and held usage would no longer fit. ST0 and the probe are not run in ST1a.
+- **Open gates.** Hosted apply of both migrations, the job's activation, the stylist allowance and consent notice, the direct-call allocation, and the exact-route synthetic probe all need owner approval. The client UI is ST1b.
+
 ## I29 B1 source implementation boundary — 11 September 2026
 
 The approved B1 packet supplies a real, inactive-by-default server adapter and

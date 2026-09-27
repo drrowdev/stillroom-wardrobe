@@ -396,16 +396,18 @@ describe('owned B1 function lifecycle', () => {
   const config = '[edge_runtime]\nenabled = true\n\n[functions.analyze-clothing]\nenabled = true\nverify_jwt = true\n'
     + '\n[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = true\n'
     + '\n[functions.finalize-image-change]\nenabled = true\nverify_jwt = true\n'
-    + '\n[functions.delete-account]\nenabled = true\nverify_jwt = true\n';
+    + '\n[functions.delete-account]\nenabled = true\nverify_jwt = true\n'
+    + '\n[functions.stylist-chat]\nenabled = true\nverify_jwt = true\n';
   const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json', 'azure-openai.ts'];
-  const directories = ['finalize-analyzed-item', 'analyze-clothing', 'finalize-image-change', 'delete-account', '_shared'];
+  const directories = ['finalize-analyzed-item', 'analyze-clothing', 'finalize-image-change', 'delete-account', '_shared', 'stylist-chat'];
   const finalizerFiles = ['index.ts', 'handler.ts', 'deno.json', 'verify-image.ts'];
   const imageChangeFiles = ['index.ts', 'handler.ts', 'deno.json'];
   const deleteFiles = ['index.ts', 'handler.ts', 'deno.json'];
   const sharedFiles = ['deletion-loop.ts', 'deletion-service.ts'];
+  const stylistFiles = ['azure.ts', 'deno.json', 'handler.ts', 'index.ts'];
   const help = { code: 0, stdout: '  Serve all Functions locally.\n  supabase functions serve [flags] [<Function name...>]\n', stderr: '' };
   it('requires the observed all-functions capability and closed enabled inventory', () => {
-    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles)).not.toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles)).not.toThrow();
     for (const text of [config.replace('verify_jwt = true', 'verify_jwt = false'),
       config.replace('[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = true',
         '[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = false'),
@@ -413,40 +415,51 @@ describe('owned B1 function lifecycle', () => {
         '[functions.finalize-image-change]\nenabled = true\nverify_jwt = false'),
       config.replace('[functions.delete-account]\nenabled = true\nverify_jwt = true',
         '[functions.delete-account]\nenabled = true\nverify_jwt = false'),
+      config.replace('[functions.stylist-chat]\nenabled = true\nverify_jwt = true',
+        '[functions.stylist-chat]\nenabled = true\nverify_jwt = false'),
       config.replace('[edge_runtime]\nenabled = true', '[edge_runtime]\nenabled = false'),
       config + '\n[functions.other]\nenabled = true\n']) {
-      expect(() => assertAnalysisServeContract(text, directories, files, help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles)).toThrow();
+      expect(() => assertAnalysisServeContract(text, directories, files, help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles)).toThrow();
     }
-    expect(() => assertAnalysisServeContract(config, ['other'], files, help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles)).toThrow();
-    expect(() => assertAnalysisServeContract(config, directories, [...files, '.env'], help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['other'], files, help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, [...files, '.env'], help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles)).toThrow();
     for (const missing of files) {
-      expect(() => assertAnalysisServeContract(config, directories, files.filter((file) => file !== missing), help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles)).toThrow();
+      expect(() => assertAnalysisServeContract(config, directories, files.filter((file) => file !== missing), help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles)).toThrow();
     }
-    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, code: 1 }, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles)).toThrow();
-    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, stdout: '' }, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles)).toThrow();
-    expect(() => assertAnalysisServeContract(config, directories, files, help, [...finalizerFiles, 'deno.d.ts'], imageChangeFiles, deleteFiles, sharedFiles)).toThrow();
-    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, code: 1 }, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, { ...help, stdout: '' }, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, help, [...finalizerFiles, 'deno.d.ts'], imageChangeFiles, deleteFiles, sharedFiles, stylistFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, ['analyze-clothing'], files, help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles)).toThrow();
     for (const missing of finalizerFiles) {
       expect(() => assertAnalysisServeContract(config, directories, files, help,
-        finalizerFiles.filter((file) => file !== missing), imageChangeFiles, deleteFiles, sharedFiles)).toThrow();
+        finalizerFiles.filter((file) => file !== missing), imageChangeFiles, deleteFiles, sharedFiles, stylistFiles)).toThrow();
     }
     for (const missing of imageChangeFiles) {
       expect(() => assertAnalysisServeContract(config, directories, files, help,
-        finalizerFiles, imageChangeFiles.filter((file) => file !== missing), deleteFiles, sharedFiles)).toThrow();
+        finalizerFiles, imageChangeFiles.filter((file) => file !== missing), deleteFiles, sharedFiles, stylistFiles)).toThrow();
     }
-    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, [...imageChangeFiles, '.env'], deleteFiles, sharedFiles)).toThrow();
+    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, [...imageChangeFiles, '.env'], deleteFiles, sharedFiles, stylistFiles)).toThrow();
     for (const missing of deleteFiles) {
       expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles,
-        deleteFiles.filter((file) => file !== missing), sharedFiles)).toThrow();
+        deleteFiles.filter((file) => file !== missing), sharedFiles, stylistFiles)).toThrow();
     }
     for (const missing of sharedFiles) {
       expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles,
-        deleteFiles, sharedFiles.filter((file) => file !== missing))).toThrow();
+        deleteFiles, sharedFiles.filter((file) => file !== missing), stylistFiles)).toThrow();
     }
     expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles,
-      deleteFiles, [...sharedFiles, 'secret.ts'])).toThrow();
+      deleteFiles, [...sharedFiles, 'secret.ts'], stylistFiles)).toThrow();
+    for (const missing of stylistFiles) {
+      expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles,
+        deleteFiles, sharedFiles, stylistFiles.filter((file) => file !== missing))).toThrow();
+    }
+    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles,
+      deleteFiles, sharedFiles, [...stylistFiles, '.env'])).toThrow();
+    // @ts-expect-error the stylist file list is required
+    expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles,
+      deleteFiles, sharedFiles)).toThrow();
     expect(() => assertAnalysisServeContract(config, directories.filter((name) => name !== '_shared'), files, help,
-      finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles)).toThrow();
+      finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles)).toThrow();
   });
   it.each(['stop', 'output', 'startup', 'lifetime', 'exit'] as const)('owns only its child on %s', async (reason) => {
     vi.useFakeTimers();
@@ -2122,6 +2135,8 @@ describe('safe startup/reset failure description', () => {
     '20260925120000_account_deletion.sql',
     '20260925120100_deletion_receipt_purge_schedule.sql',
     '20260927090000_restore_attribution.sql',
+    '20260928090000_stylist_chat.sql',
+    '20260928090100_stylist_expire_schedule.sql',
   ]);
 
   function report(result: unknown, ...elapsed: [] | [unknown]) {
@@ -2248,7 +2263,7 @@ describe('safe startup/reset failure description', () => {
   it('counts distinct announcements and uses stderr order rather than version order', () => {
     const lines = [...migrations, migrations[1], migrations[0]];
     expect(failure(lines.map((name) => `Applying migration ${name}...\n`).join('')))
-      .toMatchObject({ announcedKnownMigrationCount: 19, lastAnnouncedKnownMigrationIndex: 1 });
+      .toMatchObject({ announcedKnownMigrationCount: 21, lastAnnouncedKnownMigrationIndex: 1 });
   });
 
   it('keeps eighth/ninth announcements distinct from the observed statement ordinal', () => {

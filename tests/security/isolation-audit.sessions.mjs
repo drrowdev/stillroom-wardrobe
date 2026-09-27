@@ -609,6 +609,13 @@ async function foreignMatrix(attacker, victim) {
   if (control(attacker, 'ai_set_consent', matchOutcome({ status: 200, data: { code: 'CONFLICT' } }, consent), describe(consent))) {
     tag('ai_set_consent', `${d}:owner-only`);
   }
+  // Stylist status and consent act only on the caller's own controls; a null choice reaches the owner's own check.
+  const stylist = await probeRpc(attacker, victim, 'stylist_status', {});
+  if (control(attacker, 'stylist_status', stylist.ok && typeof stylist.data?.code === 'string'
+    && applicationCode(stylist) !== 'UNAVAILABLE', describe(stylist))) tag('stylist_status', `${d}:owner-only`);
+  const stylistConsent = await probeRpc(attacker, victim, 'stylist_set_consent', { p_enabled: null, p_notice_revision: null });
+  if (control(attacker, 'stylist_set_consent', matchOutcome({ status: 200, data: { code: 'INVALID_INPUT' } }, stylistConsent),
+    describe(stylistConsent))) tag('stylist_set_consent', `${d}:owner-only`);
 }
 
 /** Analyzed Save needs a provider-completed claim; these assertions stay, but carry no coverage credit. */
@@ -1058,6 +1065,8 @@ async function freezeCase(frozen, other) {
       ['item_attribution_history_v2', { p_item_id: f.item }, { status: 403, code: '42501' }],
       ['attribution_digest', {}, { status: 403, code: '42501' }],
       ['ai_request_control', { p_request_id: f.aiRequest ?? randomUUID(), p_action: 'status' }, UNAVAILABLE],
+      ['stylist_status', {}, UNAVAILABLE],
+      ['stylist_set_consent', { p_enabled: false, p_notice_revision: null }, UNAVAILABLE],
     ]) expectMatch(`${stage}: frozen ${name}`, expected, await call(frozen, name, body));
     const ai = await call(frozen, 'ai_status', {});
     need(!ai.ok || ai.data?.code === 'UNAVAILABLE' || ai.data?.available === false || ai.data?.approved === false,

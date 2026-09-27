@@ -63,9 +63,12 @@ export const EXPOSED_RPCS = Object.freeze([
   fn('restore_item_attribution', 'uuid, uuid, jsonb', ['p_item_id', 'p_import_id', 'p_entries']),
   fn('item_attribution_history_v2', 'uuid', ['p_item_id']),
   fn('attribution_digest', '', []),
+  fn('stylist_status', '', []),
+  fn('stylist_set_consent', 'boolean, integer', ['p_enabled', 'p_notice_revision']),
 ]);
 
-// Public functions reachable only with service credentials (Edge/operator); normal sessions must be denied.
+// Public functions reachable only with service credentials (Edge/operator) or only by the database owner (scheduled
+// expiry and the operator's direct-call allocation); normal sessions must be denied.
 export const SERVICE_ONLY_RPCS = Object.freeze([
   fn('deletion_control', 'uuid, text, uuid, text', ['p_owner_id', 'p_action', 'p_op', 'p_code']),
   fn('purge_deletion_receipts', '', []),
@@ -79,6 +82,10 @@ export const SERVICE_ONLY_RPCS = Object.freeze([
   fn('complete_analyzed_item_save', 'uuid, uuid, uuid, text, jsonb', ['p_owner_id', 'p_item_id', 'p_image_id', 'p_fingerprint', 'p_objects']),
   fn('reserve_image_recovery', 'uuid, jsonb, jsonb', ['p_owner_id', 'p_intent', 'p_objects']),
   fn('complete_image_change', 'uuid, jsonb, jsonb', ['p_owner_id', 'p_intent', 'p_objects']),
+  fn('stylist_claim', 'uuid, uuid, text', ['p_owner_id', 'p_request_id', 'p_manifest_id']),
+  fn('stylist_finish', 'uuid, uuid, text, jsonb', ['p_owner_id', 'p_request_id', 'p_code', 'p_usage']),
+  fn('stylist_expire_due', 'integer', ['p_limit']),
+  fn('stylist_direct_allocation', 'uuid, bigint, bigint', ['p_owner_id', 'p_allocation_micro', 'p_expected_total_micro']),
 ]);
 
 // Private helpers that RLS/Storage policies evaluate as `authenticated`; their bodies are pinned to migrations.
@@ -114,6 +121,9 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'rotate_admission_generation()', 'deletion_receipt(private.deletion_jobs)', 'deletion_owner_rows_absent(uuid)',
   'release_deleted_admission()', 'backup_bounded(jsonb, integer)', 'backup_number_bytes(numeric)',
   'backup_compact_bytes(jsonb)',
+  'stylist_permission(public.profiles, private.ai_controls)', 'stylist_azure_usage(jsonb, private.ai_execution_manifests)',
+  'stylist_expire(uuid, timestamp with time zone, integer)', 'stylist_usage(uuid, timestamp with time zone)',
+  'stylist_replay(private.ai_usage_evidence, private.ai_usage, public.profiles, private.ai_controls)',
 ]);
 
 // Supabase-provided GraphQL entrypoint; its privileges are provider-managed and recorded, not asserted.
@@ -399,6 +409,8 @@ export const COVERAGE_REQUIREMENTS = Object.freeze({
   ai_status: req([], { ownerOnly: true }),
   deletion_status: req([], { ownerOnly: true }),
   ai_set_consent: req([], { ownerOnly: true }),
+  stylist_status: req([], { ownerOnly: true }),
+  stylist_set_consent: req([], { ownerOnly: true }),
   ai_begin_request: req([], { collision: true, runtime: true }),
   ai_request_control: req(['aiRequest'], { runtime: true }),
   ai_analysis_status: req(['aiRequest'], { runtime: true }),

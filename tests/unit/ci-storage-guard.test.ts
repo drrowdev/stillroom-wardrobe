@@ -32,7 +32,7 @@ const receipt = (): Outcome => ({ code: 0, stdout: 'CI_STORAGE_GUARD_VERIFIED\n'
 const versions = ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000',
   '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000',
   '20260924100000', '20260924100100', '20260925090000', '20260925100000', '20260925110000',
-  '20260925120000', '20260925120100', '20260927090000'];
+  '20260925120000', '20260925120100', '20260927090000', '20260928090000', '20260928090100'];
 const read = (name: string) => readFile(new URL('../../' + name, import.meta.url), 'utf8');
 function ordered(source: string, steps: string[]) {
   let offset = 0;
@@ -238,7 +238,7 @@ describe('CI Storage guard scope and transport (mocked, no backend proof)', () =
 });
 
 describe('fixed SQL/source contracts (not executed PostgreSQL assertions)', () => {
-  it.each([9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19])('selects the single exact trigger/body pair only from history length %s', async (length) => {
+  it.each([9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])('selects the single exact trigger/body pair only from history length %s', async (length) => {
     mocks.run.mockResolvedValueOnce(inspection())
       .mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(versions.slice(0, length)), stderr: '' });
     const sql = await verificationSql();

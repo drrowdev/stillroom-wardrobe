@@ -30,7 +30,7 @@ export function withAnalyzedSaveFixtureLock(ownerId: string, itemId: string, ima
   resource: 'profile' | 'item' | 'image' | 'objects', operation: () => Promise<void>): Promise<void>;
 export function readCredentialCache(): Promise<Record<string, string>>;
 export function assertAnalysisServeContract(config: string, directories: string[], files: string[], help: CommandResult, finalizerFiles: string[], imageChangeFiles: string[],
-  deleteAccountFiles: string[], sharedFiles: string[]): void;
+  deleteAccountFiles: string[], sharedFiles: string[], stylistFiles: string[]): void;
 export type AnalysisProcess = { stop(): Promise<void>; ready(): void; assertRunning(): void };
 export function ownAnalysisProcess(child: import('node:child_process').ChildProcessWithoutNullStreams, lifetimeMs?: number, startupMs?: number): AnalysisProcess;
 export function startAnalysisServer(): Promise<AnalysisProcess>;
