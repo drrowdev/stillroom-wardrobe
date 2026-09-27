@@ -80,45 +80,6 @@ test.describe('production background removal', () => {
     if (port === undefined) delete process.env.PLAYWRIGHT_PORT; else process.env.PLAYWRIGHT_PORT = port;
   });
 
-  test('the build serves the exact inventory, nothing loads before a photo, and logout keeps only the shell and verified model caches', async ({ page }) => {
-    test.setTimeout(120_000);
-    server = await serve('a');
-    // Receipt check against the production server: exact bytes, digests and headers, no redirects.
-    // The script accepts only an https origin; its requests are sent to the local production server.
-    const deployed = await checkDeployedAssets('https://pages.example.test', modelAssets,
-      (url, init) => fetch(new URL(url.pathname, server.url), init));
-    expect(deployed.map((entry) => ({ path: entry.path, status: entry.status, problems: entry.problems }))).toEqual(
-      modelAssets.map((file) => ({ path: file.path, status: 200, problems: [] })));
-    for (const file of modelAssets) {
-      const response = await fetch(`${server.url}${file.path}`, { redirect: 'manual' });
-      const bytes = Buffer.from(await response.arrayBuffer());
-      expect(createHash('sha256').update(bytes).digest('hex'), file.path).toBe(file.sha256);
-      expect(response.headers.get('cache-control'), file.path).toMatch(/\bimmutable\b/);
-      expect(response.headers.get('x-content-type-options'), file.path).toBe('nosniff');
-      if (file.path.endsWith('.wasm')) expect(response.headers.get('content-type')).toBe('application/wasm');
-    }
-    server.requests.length = 0;
-
-    const egress = await observeEgress(page.context(), server.url);
-    const api = await fixture(page, server);
-    expect(await controlled(page)).toHaveLength(1);
-    await openAdd(page);
-    expect(modelRequests(server)).toEqual([]);
-    expect(await page.evaluate((name) => caches.has(name), modelCacheName)).toBe(false);
-
-    await choose(page, await shirt(page));
-    await expect(page.locator('.capture-photo img')).toBeVisible({ timeout: 60_000 });
-    expect(near(await corner(page), FILL)).toBe(true);
-    await expect.poll(() => api.inputs.length).toBe(1);
-    // Each binary is fetched once, directly from the network (the worker never serves or stores it).
-    expect(modelRequests(server).map((entry) => entry.pathname).sort()).toEqual(modelPaths);
-    expect(modelRequests(server).every((entry) => entry.bytes === modelAssets.find((file) => file.path === entry.pathname)!.bytes)).toBe(true);
-    expectApprovedEgress(await egress.read(), server, 1);
-
-    await signOut(page);
-    await expectOnlyShell(page, 'a', ['user-a@example.test', 'fictional-test-password'], true);
-  });
-
   test('a throttled first download falls back for that photo, then serves the next photo without a new download', async ({ page }) => {
     test.setTimeout(180_000);
     // About 31 s for the ~19 MB of binaries: longer than the 25 s a photo waits.
@@ -173,21 +134,68 @@ test.describe('production background removal', () => {
     await context.setOffline(false);
   });
 
-  test('a corrupted cached model is replaced by a verified download', async ({ page }) => {
-    test.setTimeout(120_000);
-    server = await serve('a');
-    await fixture(page, server);
-    await controlled(page);
-    const model = modelAssets.find((file) => file.role === 'model')!;
-    await page.evaluate(async ({ name, path }) => {
-      await (await caches.open(name)).put(path, new Response(new Uint8Array(16), { headers: { 'content-type': 'application/octet-stream' } }));
-    }, { name: modelCacheName, path: model.path });
-    await openAdd(page);
-    await choose(page, await shirt(page));
-    await expect(page.locator('.capture-photo img')).toBeVisible({ timeout: 60_000 });
-    expect(near(await corner(page), FILL)).toBe(true);
-    expect(modelRequests(server).map((entry) => entry.pathname).sort()).toEqual(modelPaths);
-    await signOut(page);
-    await expectOnlyShell(page, 'a', [], true);
+  // These two run full model inference in their own browsers and each takes over a minute. On two CI workers they
+  // competed for CPU and the inventory test overran its limit (run 36324111399), so they run one after the other in
+  // one worker. 'default' rather than 'serial' mode: a failure does not skip the other test, and a retry reruns only
+  // the test that failed.
+  test.describe('full inference, one at a time', () => {
+    test.describe.configure({ mode: 'default' });
+
+    test('the build serves the exact inventory, nothing loads before a photo, and logout keeps only the shell and verified model caches', async ({ page }) => {
+      test.setTimeout(120_000);
+      server = await serve('a');
+      // Receipt check against the production server: exact bytes, digests and headers, no redirects.
+      // The script accepts only an https origin; its requests are sent to the local production server.
+      const deployed = await checkDeployedAssets('https://pages.example.test', modelAssets,
+        (url, init) => fetch(new URL(url.pathname, server.url), init));
+      expect(deployed.map((entry) => ({ path: entry.path, status: entry.status, problems: entry.problems }))).toEqual(
+        modelAssets.map((file) => ({ path: file.path, status: 200, problems: [] })));
+      for (const file of modelAssets) {
+        const response = await fetch(`${server.url}${file.path}`, { redirect: 'manual' });
+        const bytes = Buffer.from(await response.arrayBuffer());
+        expect(createHash('sha256').update(bytes).digest('hex'), file.path).toBe(file.sha256);
+        expect(response.headers.get('cache-control'), file.path).toMatch(/\bimmutable\b/);
+        expect(response.headers.get('x-content-type-options'), file.path).toBe('nosniff');
+        if (file.path.endsWith('.wasm')) expect(response.headers.get('content-type')).toBe('application/wasm');
+      }
+      server.requests.length = 0;
+
+      const egress = await observeEgress(page.context(), server.url);
+      const api = await fixture(page, server);
+      expect(await controlled(page)).toHaveLength(1);
+      await openAdd(page);
+      expect(modelRequests(server)).toEqual([]);
+      expect(await page.evaluate((name) => caches.has(name), modelCacheName)).toBe(false);
+
+      await choose(page, await shirt(page));
+      await expect(page.locator('.capture-photo img')).toBeVisible({ timeout: 60_000 });
+      expect(near(await corner(page), FILL)).toBe(true);
+      await expect.poll(() => api.inputs.length).toBe(1);
+      // Each binary is fetched once, directly from the network (the worker never serves or stores it).
+      expect(modelRequests(server).map((entry) => entry.pathname).sort()).toEqual(modelPaths);
+      expect(modelRequests(server).every((entry) => entry.bytes === modelAssets.find((file) => file.path === entry.pathname)!.bytes)).toBe(true);
+      expectApprovedEgress(await egress.read(), server, 1);
+
+      await signOut(page);
+      await expectOnlyShell(page, 'a', ['user-a@example.test', 'fictional-test-password'], true);
+    });
+
+    test('a corrupted cached model is replaced by a verified download', async ({ page }) => {
+      test.setTimeout(120_000);
+      server = await serve('a');
+      await fixture(page, server);
+      await controlled(page);
+      const model = modelAssets.find((file) => file.role === 'model')!;
+      await page.evaluate(async ({ name, path }) => {
+        await (await caches.open(name)).put(path, new Response(new Uint8Array(16), { headers: { 'content-type': 'application/octet-stream' } }));
+      }, { name: modelCacheName, path: model.path });
+      await openAdd(page);
+      await choose(page, await shirt(page));
+      await expect(page.locator('.capture-photo img')).toBeVisible({ timeout: 60_000 });
+      expect(near(await corner(page), FILL)).toBe(true);
+      expect(modelRequests(server).map((entry) => entry.pathname).sort()).toEqual(modelPaths);
+      await signOut(page);
+      await expectOnlyShell(page, 'a', [], true);
+    });
   });
 });
