@@ -356,6 +356,46 @@ describe('fresh JPEG output validation', () => {
     );
     expect(() => assertSanitizedJpeg(multiScan, 120, 80)).not.toThrow();
   });
+
+  const frame = (marker: number, height = 0xffff, width = 0xffff) =>
+    jpegSegment(marker, new Uint8Array([8, height >> 8, height & 255, width >> 8, width & 255, 1, 1, 0x11, 0]));
+  const afterFirstScan = (base: Uint8Array, ...parts: Uint8Array[]) => joinBytes(base.subarray(0, -2), ...parts, base.subarray(-2));
+
+  it.each([
+    ['a second baseline frame declaring 65535x65535', 0xc0, frame(0xc0)],
+    ['a second frame with the same dimensions', 0xc0, frame(0xc0, 80, 120)],
+    ['a second progressive frame', 0xc2, frame(0xc2)],
+    ['a lossless frame', 0xc0, frame(0xc3)],
+    ['a hierarchical DHP', 0xc0, jpegSegment(0xde, new Uint8Array([8, 0, 80, 0, 120, 1, 1, 0x11, 0]))],
+    ['an EXP segment', 0xc0, jpegSegment(0xdf, new Uint8Array([0x11]))],
+    ['a DNL segment', 0xc0, jpegSegment(0xdc, new Uint8Array([0xff, 0xff]))],
+  ])('rejects %s after the first scan, also behind FF fill bytes', (_label, sof, segment) => {
+    const base = jpegHeaderFixture(120, 80, sof);
+    expectCode(() => assertSanitizedJpeg(afterFirstScan(base, segment), 120, 80), 'invalid');
+    expectCode(() => assertSanitizedJpeg(afterFirstScan(base, new Uint8Array([0xff, 0xff]), segment), 120, 80), 'invalid');
+    expect(readJpegHeader(afterFirstScan(base, segment))).toMatchObject({ width: 120, height: 80 });
+  });
+
+  it('rejects a second frame followed by another scan, and DHP or DNL before the first scan', () => {
+    const base = jpegHeaderFixture(120, 80, 0xc2);
+    const scan = joinBytes(jpegSegment(0xda, new Uint8Array([1, 1, 0, 1, 63, 0])), new Uint8Array([0x12]));
+    expectCode(() => assertSanitizedJpeg(afterFirstScan(base, frame(0xc2), scan), 120, 80), 'invalid');
+    for (const marker of [0xdc, 0xde, 0xdf]) {
+      const early = insertSegments(jpegHeaderFixture(), jpegSegment(marker, new Uint8Array([0, 80, 0, 120])));
+      expectCode(() => assertSanitizedJpeg(early, 120, 80), 'invalid');
+    }
+  });
+
+  it('still accepts a progressive stream with tables and restart intervals between scans', () => {
+    const base = jpegHeaderFixture(120, 80, 0xc2);
+    const tables = joinBytes(
+      jpegSegment(0xc4, new Uint8Array([0x10, 1, ...new Array<number>(15).fill(0), 0])),
+      jpegSegment(0xdb, new Uint8Array([0, ...new Array<number>(64).fill(1)])),
+      jpegSegment(0xdd, new Uint8Array([0, 4])),
+    );
+    const scan = joinBytes(jpegSegment(0xda, new Uint8Array([1, 1, 0, 1, 63, 0])), new Uint8Array([0x12, 0xff, 0x00, 0x34]));
+    expect(() => assertSanitizedJpeg(afterFirstScan(base, tables, scan, tables, scan), 120, 80)).not.toThrow();
+  });
 });
 
 describe('bounded dimensions', () => {

@@ -282,6 +282,8 @@ export function assertSanitizedJpeg(bytes: Uint8Array, width: number, height: nu
       if (!sawScan || end !== bytes.length) invalid();
       return;
     }
+    // parseHeader checked only up to the first scan; a later frame could declare other dimensions.
+    if ((isFrame(marker) && offset >= header.scanStart) || marker === 0xdc || marker === 0xde || marker === 0xdf) invalid();
     if (marker === 0xfe || (marker >= 0xe0 && marker <= 0xef)) {
       // A fresh encoder may emit JFIF, but no arbitrary APP data or embedded thumbnail.
       if (marker !== 0xe0 || end - start !== 14 ||

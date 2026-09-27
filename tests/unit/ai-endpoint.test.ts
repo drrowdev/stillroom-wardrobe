@@ -7,7 +7,7 @@ import { analyzeGoogle, estimatedMicro, googleToken, normalizeUsage, TOKEN_URL }
 import {
   GENERATION_CONFIG, MANIFEST_ID, MODEL_ID, PROMPT, RESPONSE_SCHEMA, SAFETY_SETTINGS, readBounded, validFacts,
 } from '../../supabase/functions/analyze-clothing/protocol';
-import { exifSegment, insertSegments, jpegHeaderFixture, joinBytes } from '../fixtures/jpeg-helpers';
+import { exifSegment, insertSegments, jpegHeaderFixture, jpegSegment, joinBytes } from '../fixtures/jpeg-helpers';
 // @ts-expect-error Existing executable fixture vectors have no declaration.
 import { AI_FACT_VECTORS } from '../integration/ai-controls.sessions.mjs';
 const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service', azure: {} };
@@ -88,6 +88,19 @@ describe('B1 source runtime and fixed protocol', () => {
       expect(google).not.toHaveBeenCalled();
     },
   );
+  it('rejects a second frame after the first scan before DB/provider allocation', async () => {
+    const base = jpegHeaderFixture();
+    const image = joinBytes(base.subarray(0, -2),
+      jpegSegment(0xc0, new Uint8Array([8, 0xff, 0xff, 0xff, 0xff, 1, 1, 0x11, 0])), base.subarray(-2));
+    const fetcher = vi.fn(async () => Response.json({ id, role: 'authenticated', is_anonymous: false }));
+    vi.stubGlobal('fetch', fetcher);
+    const google = vi.fn();
+    const response = await createHandler(config, google)(request({ body: image }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: 'INVALID_INPUT' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(google).not.toHaveBeenCalled();
+  });
   it('requires actual ordinary server Auth identity, not claims or service identity', async () => {
     for (const user of [{ id, role: 'service_role', is_anonymous: false }, { id, role: 'authenticated', is_anonymous: true },
       { id, role: 'authenticated' }, { id: 'wrong', role: 'authenticated', is_anonymous: false }]) {
