@@ -1006,6 +1006,100 @@ owner's separate approval** and is not run by this packet.
   job for a run still `starting`/`running` or one that `failed` (record only
   `status`/`return_message`), and read the expired backlog again.
 
+### Stylist exact-route probe (ST-OP) - 28 September 2026
+
+Hosted stylist state at the start of this packet: **installed and activated, but
+unconsented**. The owner's stylist consent stays null for the whole packet; the
+probe calls Azure directly and never touches Supabase, the Edge Function or any
+account data. The ST0 Terra-vs-Sol comparison is not approved and is not in the
+repository.
+
+**What a PASS means, and what it does not.** Two synthetic requests (`min` and
+`max`) go to the exact production route (`STYLIST_ENDPOINT`, Terra
+deployment) with the production body builder, controls and response parser. A
+PASS records route, schema and control observations plus token calibration at
+two synthetic sizes. It is not a token-bound proof, a quality evaluation, an RLS
+test or a hosted Edge test.
+
+**Fixtures.** Both are built by `buildStylistRequest` from committed synthetic
+data and must pass `parseStylistBody`, the message, history, conversation and
+ingress-body limits, item parsing and weather eligibility before anything is
+recorded. The `max` fixture is tuned offline to 19,950–20,000 message bytes
+(currently 19,980); no calls are spent searching for it. Each run record stores
+the source commit, manifest ID, request/settings/controls digests, the Node
+version and every call timestamp. `send` refuses a checkout whose probe source
+files are untracked or modified.
+
+**Allocation (coordinator, Q1).** Before `init`, the coordinator runs
+`stylist_direct_allocation` for USD 0.26 (260,000 micro, total
+20,000,000 → 19,740,000) and reads back the owner's allowances. The receipt is a
+private JSON file with exactly these keys:
+`kind` (`stylist-probe-allocation-v1`), `ownerRef` (SHA-256 hex of the owner
+UUID), `allocationMicro`, `reply` (the RPC's `code`, `previousTotalMicro`,
+`newTotalMicro`), `readBack` (`monthlyAllowanceMicro`,
+`stylistMonthlyAllowanceMicro`), `allocatedAt` (ISO UTC) and `approvalRef` (the
+approving GitHub comment URL). `init` refuses a receipt whose arithmetic,
+read-back or month does not match, or whose allocation cannot cover both slots
+(2 × 129,360 = 258,720 micro; the 1,280 left over is not a third call). The value
+is a USD operational allocation, not the Azure budget, which is in billing
+currency.
+
+**One record per allocation (H1).** The allocation ID is derived from the
+receipt, and its run record is created exclusively as
+`~/.stillroom-operator/stylist-probe/<id>/` (append-only `probe.jsonl` plus a
+`probe.lock` directory). A second `init` of the same allocation fails with
+`ALLOCATION_ALREADY_RECORDED` from any working directory or process. The root
+must not be inside the repository or an agent session folder. This is
+cooperative, not tamper-proof: it stops accidental reuse by an operator using
+this tool, not a deliberate edit of the file system.
+
+**Commands.** Run from a clean checkout of the merged commit, with the pinned
+Node:
+
+- `node scripts/ai-evaluation/stylist-probe.mjs init <absolute receipt.json>`
+  prints the allocation ID; nothing is sent.
+- `node scripts/ai-evaluation/stylist-probe.mjs status <id>` prints the summary
+  and verdict (`PASS`, `REVISE_ENVELOPE`, `INCOMPLETE`, `UNRESOLVED` or
+  `HALTED`) without the key or reply text.
+- `node scripts/ai-evaluation/stylist-probe-launch.mjs --subscription <guid> send <id> min`,
+  then the same with `max` only after `min` is OK. The coordinator runs `send`
+  (Q3).
+- `node scripts/ai-evaluation/stylist-probe.mjs reconcile <id> min|max` marks an
+  intent without a result as **counted**. It cannot mark a call as not sent.
+
+**Secret-safe launcher (Q3).** The launcher targets resource group
+`rg-stillroom-ai-eval`, resource `stillroom-ai-eval` and key `key1` in the
+subscription given on the command line, and makes exactly two Azure CLI calls
+with `--only-show-errors -o json`: `account show` (the endpoint origin must equal
+`STYLIST_ENDPOINT`'s, before any key is listed) and `account keys list --query
+key1`. The output is captured in memory; the key goes only into the probe child's
+environment as `STILLROOM_AZURE_PROBE_KEY`, never into arguments, files, logs or
+tool output, and is deleted in `finally`. The child removes it from its own
+environment on start. Errors are fixed codes (`USAGE`, `RESOURCE_MISMATCH`,
+`KEY_RETRIEVAL_FAILED`, `AZURE_CLI_FAILED`, `LAUNCH_FAILED`); do not add
+`--debug` or `--verbose`. If retrieval fails, stop: do not rotate keys, change
+RBAC or substitute another resource or deployment.
+
+**Reconciliation rules (M3).** Each slot is used at most once: a durable intent
+permanently consumes it, and there is no retry or replacement under the same
+allocation. `send` checks the allocation month and review validity, syncs the
+intent, then checks both again; only that post-intent check writes `NOT_SENT`,
+the sole affirmative evidence that the provider call never began. A crash,
+timeout or reset after the intent is not that evidence, so the slot stays
+counted. If the intent cannot be synced nothing is dispatched; if the result or
+close cannot be synced the lock and the uncertain state remain until
+`reconcile`. Reconciliation never creates a success: without an OK `min`, `max`
+is refused, and without an OK `max` there is no PASS. The run stops on invalid
+usage, a model or control anomaly, or an input (24,000) or output (1,200) token
+envelope violation.
+
+**Restoring the total (Q2, separately approved).** After the probe's UTC month
+ends, and only after `status` shows no uncertain slot, the coordinator restores
+the total with an expected-value guard:
+`update private.ai_controls set monthly_allowance_micro = 20000000 where owner_id = <owner> and
+monthly_allowance_micro = 19740000`, expecting exactly one row, then reads it
+back. Any other value means STOP and report.
+
 ## Delivery rules
 
 ### I10b staged local source authority - 22 September 2026
