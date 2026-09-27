@@ -47,7 +47,6 @@ jobs:
           sudo apparmor_parser --replace /etc/apparmor.d/stillroom-playwright-chromium
           node scripts/ci-chromium-sandbox.mjs --verify
       - run: npm run test:browser -- --project=chromium --project=mobile
-      - run: npm run test:pwa
       - name: Preserve bounded synthetic I06 visual evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -306,6 +305,33 @@ jobs:
             test-results/p6c-visual/delete-recovery-en-mobile.png
           if-no-files-found: error
           retention-days: 1
+      - name: Preserve bounded synthetic I24 visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: i24-a11y-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/i24-visual/leave-dialog-fi-320-200.png
+            test-results/i24-visual/delete-card-fi-320-200.png
+            test-results/i24-visual/outfit-leave-sv-320-200.png
+            test-results/i24-visual/deletion-resume-sv-320-200.png
+          if-no-files-found: error
+          retention-days: 1
+
+  pwa:
+    name: PWA production contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:pwa
       - name: Preserve bounded synthetic I23 visual evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -318,15 +344,11 @@ jobs:
             test-results/i23-visual/install-fi-iphone.png
           if-no-files-found: error
           retention-days: 1
-      - name: Preserve bounded synthetic I24 visual evidence
+      - name: Preserve bounded synthetic I24 shell visual evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: i24-a11y-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          name: i24-shell-ui-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
-            test-results/i24-visual/leave-dialog-fi-320-200.png
-            test-results/i24-visual/delete-card-fi-320-200.png
-            test-results/i24-visual/outfit-leave-sv-320-200.png
-            test-results/i24-visual/deletion-resume-sv-320-200.png
             test-results/i24-visual/update-sv-320-200.png
           if-no-files-found: error
           retention-days: 1

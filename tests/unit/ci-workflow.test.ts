@@ -62,10 +62,14 @@ const browserArtifacts: Record<string, string[]> = {
   'p6a-backup-ui': ['backup-en-desktop', 'backup-parts-fi-mobile'].map((name) => `p6a-visual/${name}.png`),
   'p6b-restore-ui': ['restore-preview-en-desktop', 'restore-progress-sv-mobile', 'restore-reencoded-fi-mobile'].map((name) => `p6b-visual/${name}.png`),
   'p6c-delete-account-ui': ['delete-account-en-desktop', 'delete-account-fi-mobile', 'delete-recovery-sv-desktop', 'delete-recovery-en-mobile'].map((name) => `p6c-visual/${name}.png`),
-    'i23-shell-ui': ['update-en-desktop', 'install-en-desktop', 'update-fi-mobile', 'install-sv-mobile', 'install-fi-iphone'].map((name) => `i23-visual/${name}.png`),
-  'i24-a11y-ui': ['leave-dialog-fi-320-200', 'delete-card-fi-320-200', 'outfit-leave-sv-320-200', 'deletion-resume-sv-320-200', 'update-sv-320-200']
+  'i24-a11y-ui': ['leave-dialog-fi-320-200', 'delete-card-fi-320-200', 'outfit-leave-sv-320-200', 'deletion-resume-sv-320-200']
     .map((name) => `i24-visual/${name}.png`),
   };
+// Written by tests/pwa/visual.spec.ts, so they upload from the PWA job that runs it.
+const pwaArtifacts: Record<string, string[]> = {
+  'i23-shell-ui': ['update-en-desktop', 'install-en-desktop', 'update-fi-mobile', 'install-sv-mobile', 'install-fi-iphone'].map((name) => `i23-visual/${name}.png`),
+  'i24-shell-ui': ['i24-visual/update-sv-320-200.png'],
+};
 
 // Approved CI-infrastructure change (PR #66): Ubuntu 24.04 blocks the sandboxed Chromium that restore-own uses unless an
 // AppArmor profile lets exactly the pinned Playwright binary create user namespaces. The sandbox itself stays on.
@@ -85,7 +89,7 @@ describe('CI Chromium sandbox profile', () => {
     const install = '      - run: npx playwright install --with-deps chromium\n';
     expect(workflow.split(sandboxStep).length - 1).toBe(2);
     for (const name of ['app', 'database']) expect(job(name).split(install + sandboxStep).length - 1).toBe(1);
-    for (const name of ['webkit-photo', 'deletion-rehearsal', 'performance']) expect(job(name)).not.toContain('ci-chromium-sandbox');
+    for (const name of ['pwa', 'webkit-photo', 'deletion-rehearsal', 'performance']) expect(job(name)).not.toContain('ci-chromium-sandbox');
     for (const forbidden of ['--no-sandbox', 'apparmor_restrict_unprivileged_userns', 'sysctl', '|| true', 'continue-on-error', '*']) {
       expect(sandboxStep.includes(forbidden)).toBe(false);
     }
@@ -94,18 +98,19 @@ describe('CI Chromium sandbox profile', () => {
 });
 
 describe('CI workflow browser split', () => {
-  it('declares exactly the App, WebKit photo, database, deletion rehearsal and performance jobs with fixed names and timeouts', () => {
-    expect([...jobs.keys()]).toEqual(['app', 'webkit-photo', 'database', 'deletion-rehearsal', 'performance']);
+  it('declares exactly the App, PWA, WebKit photo, database, deletion rehearsal and performance jobs with fixed names and timeouts', () => {
+    expect([...jobs.keys()]).toEqual(['app', 'pwa', 'webkit-photo', 'database', 'deletion-rehearsal', 'performance']);
     const names = [...jobs.values()].map((text) => /\n {4}name: (.+)\n/.exec(text)?.[1]);
-    expect(names).toEqual(['App and browser contracts', 'WebKit photo contracts', 'Real local Supabase', 'Account deletion rehearsal',
+    expect(names).toEqual(['App and browser contracts', 'PWA production contracts', 'WebKit photo contracts', 'Real local Supabase', 'Account deletion rehearsal',
       'Performance budgets']);
     expect(new Set(names).size).toBe(names.length);
     expect(job('app')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n    steps:\n');
+    expect(job('pwa')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    steps:\n');
     expect(job('webkit-photo')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    steps:\n');
     expect(job('database')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n');
     expect(job('deletion-rehearsal')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 25\n');
     expect(job('performance')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 15\n    steps:\n');
-    expect(count(workflow, 'timeout-minutes:')).toBe(5);
+    expect(count(workflow, 'timeout-minutes:')).toBe(6);
   });
 
   it('selects every Playwright project exactly once across the two browser jobs', () => {
@@ -118,10 +123,11 @@ describe('CI workflow browser split', () => {
     expect(config).toContain('  forbidOnly: Boolean(process.env.CI),\n');
     const app = job('app'), webkit = job('webkit-photo');
     expect(count(workflow, 'npm run test:browser')).toBe(2);
-    expect(count(workflow, 'npx playwright install')).toBe(4);
+    expect(count(workflow, 'npx playwright install')).toBe(5);
     expect(app).toContain('      - run: npx playwright install --with-deps chromium\n' + sandboxStep
       + '      - run: npm run test:browser -- --project=chromium --project=mobile\n'
-      + '      - run: npm run test:pwa\n');
+      + '      - name: Preserve bounded synthetic I06 visual evidence\n');
+    expect(app).not.toContain('test:pwa');
     expect(count(workflow, 'npm run test:pwa')).toBe(1);
     // images.spec.ts launches Chromium to generate WebP fixtures when WebKit's canvas cannot encode them.
     expect(webkit).toContain('      - run: npx playwright install --with-deps chromium webkit\n'
@@ -130,7 +136,12 @@ describe('CI workflow browser split', () => {
     expect(selected).toEqual([...projects].sort());
   });
 
-  it('runs the production shell suite once, in the App job, as its own Playwright config that fails when nothing ran', () => {
+  it('runs the production shell suite once, in its own minimal PWA job and Playwright config that fails when nothing ran', () => {
+    expect(steps(job('pwa')).filter((step) => !step.includes(upload))).toEqual([
+      checkout, setupNode, '      - run: npm ci --no-fund\n', '      - run: npx playwright install --with-deps chromium\n',
+      '      - run: npm run test:pwa\n',
+    ]);
+    for (const forbidden of ['secrets.', 'env:', 'if:', 'permissions:']) expect(job('pwa')).not.toContain(forbidden);
     const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     expect(pkg.scripts['test:pwa']).toBe('playwright test --config playwright.pwa.config.ts');
     expect(pwaConfig).toContain("  testDir: './tests/pwa',\n");
@@ -191,23 +202,24 @@ describe('CI workflow browser split', () => {
     for (const forbidden of ['upload-artifact', 'secrets.', 'env:', 'CI:', 'if:']) expect(webkit).not.toContain(forbidden);
   });
 
-  it('uploads each of the 23 browser artifacts exactly once, from the App job, success-only and exact-head named', () => {
-    const app = job('app');
-    const uploads = steps(app).filter((step) => step.includes(upload));
-    expect(uploads).toHaveLength(23);
-    const seen = uploads.map((step) => {
+  it('uploads each browser artifact exactly once, from the job whose suite writes it, success-only and exact-head named', () => {
+    const uploaded = (id: string, expected: Record<string, string[]>) => steps(job(id)).filter((step) => step.includes(upload)).map((step) => {
       const name = /\n {10}name: ([a-z0-9-]+)-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}\n/.exec(step)?.[1];
       expect(name, step).toBeDefined();
       expect(step).toContain(`        uses: ${upload}\n`);
       expect(step).toContain('\n          if-no-files-found: error\n          retention-days: 1\n');
       expect(step).not.toContain('if:');
       const files = [...step.matchAll(/\n {12}test-results\/(\S+)/g)].map((match) => match[1]);
-      expect(files).toEqual(browserArtifacts[name!]);
+      expect(files).toEqual(expected[name!]);
       return name!;
     });
-    expect(seen).toEqual(Object.keys(browserArtifacts));
-    for (const name of seen) expect(count(workflow, `name: ${name}${headSuffix}\n`)).toBe(1);
-    expect(count(workflow, upload)).toBe(24);
+    const app = uploaded('app', browserArtifacts), pwa = uploaded('pwa', pwaArtifacts);
+    expect(app).toEqual(Object.keys(browserArtifacts));
+    expect(pwa).toEqual(Object.keys(pwaArtifacts));
+    // The PWA uploads come after the suite that writes them.
+    expect(steps(job('pwa')).findIndex((step) => step.includes(upload))).toBe(steps(job('pwa')).indexOf('      - run: npm run test:pwa\n') + 1);
+    for (const name of [...app, ...pwa]) expect(count(workflow, `name: ${name}${headSuffix}\n`)).toBe(1);
+    expect(count(workflow, upload)).toBe(app.length + pwa.length + 1);
     expect(count(job('database'), upload)).toBe(1);
     expect(job('database')).toContain('          name: database-types\n          path: src/data/database.types.ts\n'
       + '          if-no-files-found: error\n          retention-days: 1\n');
@@ -238,7 +250,7 @@ describe('CI workflow browser split', () => {
       'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020',
       upload,
     ]));
-    for (const id of ['app', 'webkit-photo', 'deletion-rehearsal', 'performance']) {
+    for (const id of ['app', 'pwa', 'webkit-photo', 'deletion-rehearsal', 'performance']) {
       expect(job(id).split(checkout).length - 1).toBe(1);
       expect(job(id).split(setupNode).length - 1).toBe(1);
     }
