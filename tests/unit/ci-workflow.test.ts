@@ -104,7 +104,7 @@ describe('CI workflow browser split', () => {
     expect(names).toEqual(['App and browser contracts', 'PWA production contracts', 'WebKit photo contracts', 'Real local Supabase', 'Account deletion rehearsal',
       'Performance budgets']);
     expect(new Set(names).size).toBe(names.length);
-    expect(job('app')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n    steps:\n');
+    expect(job('app')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 40\n    steps:\n');
     expect(job('pwa')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    steps:\n');
     expect(job('webkit-photo')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    steps:\n');
     expect(job('database')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n');
