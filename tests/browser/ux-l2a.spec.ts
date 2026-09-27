@@ -55,7 +55,7 @@ async function start(page: Page, language: Language = 'en', enabled = false) {
     status: () => log.filter((entry) => entry.path === '/rest/v1/rpc/ai_status').length,
     consent: () => log.filter((entry) => entry.path === '/rest/v1/rpc/ai_set_consent'),
     writes: () => log.filter((entry) => !['GET', 'HEAD'].includes(entry.method) && entry.path.startsWith('/rest/v1/')
-      && entry.path !== '/rest/v1/rpc/ai_status').length,
+      && !['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status'].includes(entry.path)).length,
     analysis: () => log.filter((entry) => entry.path.startsWith('/functions/v1/')).length,
   };
   return { api, traffic, setStatus: (next: StatusPatch | null) => { patch = next; } };

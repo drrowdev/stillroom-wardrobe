@@ -13,6 +13,8 @@ import { pickerComponent } from '../outfits/use-outfits';
 import { defaultSeason, useSuggestions, type Pending } from './use-suggestions';
 import { useWeather, type WeatherStore } from './use-weather';
 import { WeatherBar } from './weather-bar';
+import type { StylistStore } from '../stylist/stylist-store';
+import { useStylist, useStylistStatus, viewOf } from '../stylist/use-stylist';
 
 const seasonKeys: Record<Season, MessageKey> = { spring: 'season.spring', summer: 'season.summer', autumn: 'season.autumn', winter: 'season.winter' };
 const categoryKeys: Record<Category, MessageKey> = {
@@ -28,8 +30,11 @@ type Props = {
   client: AppClient; scope: OwnerScope; images: PrivateImages; online: boolean; language: Language; t: Translate;
   timeZone: string; invalidation: number; weather: WeatherConfig; weatherStore: WeatherStore;
   onSave: (itemIds: string[], occasion: Occasion) => void; onAddItem: () => void; onTurnOnWeather: () => void;
+  stylist: StylistStore; onStylist: () => void;
 };
-export function TodayScreen({ client, scope, images, online, language, t, timeZone, invalidation, weather, weatherStore, onSave, onAddItem, onTurnOnWeather }: Props) {
+export function TodayScreen({ client, scope, images, online, language, t, timeZone, invalidation, weather, weatherStore, onSave, onAddItem, onTurnOnWeather, stylist, onStylist }: Props) {
+  useStylistStatus(stylist);
+  const stylistEntry = viewOf(useStylist(stylist)).entry;
   const [occasion, setOccasion] = useState<Occasion>('everyday');
   const [season, setSeason] = useState<Season>(() => defaultSeason(timeZone));
   const forecast = useWeather(weatherStore, weather, online);
@@ -83,6 +88,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
         </div>
         <div className="today-more"><button type="button" className="button button-secondary" disabled={ideas.settling} onClick={ideas.more}><Icon name="refresh" />{t('today.more')}</button></div>
       </>}
+    {stylistEntry && <div className="today-more"><button type="button" className="button button-secondary" onClick={onStylist}>{t('stylist.open')}</button></div>}
   </section>;
 }
 

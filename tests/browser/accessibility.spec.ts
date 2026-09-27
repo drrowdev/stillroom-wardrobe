@@ -4,7 +4,7 @@ import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { languages, messages, translate, type Language, type MessageKey } from '../../src/i18n';
 import { aiFixture, manualEntry } from './ai-photo-first-support';
-import { mockBackend, recoveryHash, signIn } from './mock-backend';
+import { mockBackend, owners, recoveryHash, signIn } from './mock-backend';
 
 // I24: dialogs, editors and the P6c/service-worker surfaces in every language, at 320px and with 200% text.
 const text = (language: Language, key: MessageKey, parameters?: Record<string, string | number>) => translate(language, key, parameters);
@@ -340,6 +340,29 @@ for (const language of languages) {
       await expect(consent.getByText(text(language, 'aiC.azureNotice'), { exact: true })).toBeVisible();
       await audit(page, language, 'section[aria-labelledby="ai-consent-title"]');
       await focusOrder(page, 'section[aria-labelledby="ai-consent-title"]');
+    });
+
+    test('the stylist chat and its Settings card with the notice', async ({ page }) => {
+      const api = await mockBackend(page, { initialLanguage: language });
+      api.seedSavedItem('a', 'Fictional linen shirt');
+      api.stylistControl.setup[owners.a] = { configured: true, activated: true };
+      api.stylistControl.consent[owners.a] = 1;
+      api.stylistControl.replies.push({ status: 200, body: { code: 'OK', reply: 'Fictional reply.', outfits: [] } });
+      await page.goto('/#/stylist'); await signIn(page);
+      await expect(page.locator('#stylist-title')).toBeVisible();
+      await audit(page, language, '.workspace-main');
+      await focusOrder(page, '.stylist-composer');
+      await page.locator('#stylist-message').fill('Fictional question');
+      await button(page, language, 'stylist.send').click();
+      await expect(page.getByText('Fictional reply.', { exact: true })).toBeVisible();
+      await expect(page.locator('#stylist-message')).toBeFocused();
+      await audit(page, language, '.workspace-main');
+      await page.evaluate(() => { location.hash = '#/settings'; });
+      const card = page.locator('section[aria-labelledby="stylist-heading"]');
+      await card.locator('summary').click();
+      await expect(card.getByText(text(language, 'stylistC.azureNotice'), { exact: true })).toBeVisible();
+      await audit(page, language, 'section[aria-labelledby="stylist-heading"]');
+      await focusOrder(page, 'section[aria-labelledby="stylist-heading"]');
     });
 
     test('signing out returns focus to the sign-in heading, which passes the same checks', async ({ page }) => {
