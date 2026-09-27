@@ -63,7 +63,7 @@ export function useBackground(scope: { signal: AbortSignal }) {
       setState('working');
       try {
         const result = await imaging.prepareCutout(file, inner, edit, segmenter.current.value, wantCrop);
-        testLog(imaging, { outcome: 'removed', coverage: result.coverage, width: result.photo.width, height: result.photo.height });
+        testLog(imaging, { outcome: 'removed', coverage: result.coverage, framed: result.framed ? 1 : 0, width: result.photo.width, height: result.photo.height });
         return { photo: result.photo, crop: result.crop ?? result.photo, state: 'removed' };
       } catch (error) {
         if (signal.aborted || !(controller.signal.aborted || error instanceof imaging.BackgroundRemovalError)) throw error;

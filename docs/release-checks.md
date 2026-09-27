@@ -121,7 +121,7 @@ value stays reported in the job log.
 | LCP and layout on a real phone over mobile data | R21 | Pending: owner device. |
 | VoiceOver (iPhone) and TalkBack (Android) pass over the release journey | I26 | Pending: owner device. The automated journey is `tests/browser/release-journey.spec.ts`. |
 | Hosted H1: backup, offline verify and non-committing restore check on the owner's account | I26, R20 | Pending: owner. See [operations.md](operations.md#hosted-operations). |
-| G1 Background removal quality on the owner's real garments (edges, light-on-light, patterns) | ADR24 | Pending: owner. If u2netp fails, model selection is reopened. |
+| G1 Background removal quality on the owner's real garments (edges, light-on-light, patterns), and the BG2a framing (no trimmed sleeve or strap, no mis-centring from shadows) | ADR24 | Pending: owner. If u2netp fails, model selection is reopened. |
 | G2 Background removal on iPhone Safari and Android Chrome: tap to usable prepared photo under 10 s, measured separately from the first ~19 MB download; no tab termination | ADR24, R21 | Pending: owner device. |
 | G3 FI/SV wording of the background-removal lines | ADR24 | Pending: native speakers (row O3 in the ledger). |
 
