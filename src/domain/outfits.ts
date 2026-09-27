@@ -49,7 +49,7 @@ export function isOutfitRoute(route: string): boolean {
   return route === 'outfits' || route === 'outfit-new' || route.startsWith('outfit:');
 }
 export function navFamilyFor(route: string): NavFamily {
-  if (route === 'today') return 'today';
+  if (route === 'today' || route === 'stylist') return 'today';
   if (route === 'calendar') return 'calendar';
   if (route === 'statistics') return 'statistics';
   return isOutfitRoute(route) ? 'outfits' : route === 'wardrobe' || route === 'add' || route.startsWith('detail:') ? 'wardrobe' : null;

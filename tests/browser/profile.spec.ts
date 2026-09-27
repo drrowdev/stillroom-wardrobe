@@ -597,7 +597,7 @@ test('synthetic settings visual evidence retains functional assertions in every 
       && api.profiles[owners.a]?.ui_language === capture.language
       && api.requests.filter((request) => request.path.startsWith('/rest/'))
         .every((request) => request.owner === owners.a && (request.ownerFilter === `eq.${owners.a}`
-          || request.path === '/rest/v1/rpc/ai_status' && request.ownerFilter === null))).toBe(true);
+          || ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status'].includes(request.path) && request.ownerFilter === null))).toBe(true);
     expect(await page.evaluate(({ origin, language }) => {
       const visible = (element: Element) => element.getClientRects().length > 0
         && getComputedStyle(element).visibility === 'visible';

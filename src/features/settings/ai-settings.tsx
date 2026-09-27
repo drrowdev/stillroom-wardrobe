@@ -8,10 +8,10 @@ import { usdCents } from '../../domain/ai-presentation';
 import type { Language, MessageKey, Translate } from '../../i18n';
 
 type Props = { ai: AiClient; controller: SessionController; scope: OwnerScope; profile: ProfileRow;
-  busy: boolean; unresolved: boolean; online: boolean; language: Language; t: Translate };
+  busy: boolean; unresolved: boolean; sharedLimit?: boolean; online: boolean; language: Language; t: Translate };
 type Pending = 'on' | 'off' | 'retry' | null;
 // Status is read on load, focus, visibility and reconnect; those reads never write. Only Turn on and Turn off change consent.
-export function AiSettings({ ai, controller, scope, profile, busy, unresolved, online, language, t }: Props) {
+export function AiSettings({ ai, controller, scope, profile, busy, unresolved, sharedLimit = false, online, language, t }: Props) {
   const [status, setStatus] = useState<AiStatus | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<MessageKey | null>(null);
@@ -108,6 +108,7 @@ export function AiSettings({ ai, controller, scope, profile, busy, unresolved, o
       {card.state === 'unavailable' && <p>{t('aiC.inactive')}</p>}
       {card.state === 'renew' && <p>{t('aiC.changed')}</p>}
       {card.state === 'on' && status && <p className="ai-usage">{t('aiC.usage', { used: usdCents(status.usage.accountedMicro, language, 'used'), limit })}</p>}
+      {card.state === 'on' && sharedLimit && <p className="ai-usage">{t('aiC.sharedLimit')}</p>}
       {card.state === 'on' && status?.usage.warning && <p className="notice">{t('aiC.warning')}</p>}
     </div>
     {(card.state === 'off' || card.state === 'renew') && <p>{t('aiC.offSummary', { limit })}</p>}

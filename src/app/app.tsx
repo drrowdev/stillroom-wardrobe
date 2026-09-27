@@ -28,6 +28,7 @@ import { LazyBoundary } from './lazy';
 import { UpdatePrompt } from '../pwa/update-prompt';
 import { lazyNamed, preloadChunks } from './lazy-load';
 import { WeatherStore, weatherKey } from '../features/today/use-weather';
+import { StylistStore } from '../features/stylist/stylist-store';
 import { weatherConfig } from '../domain/weather';
 import { fitHeader } from './header-fit';
 import {
@@ -43,6 +44,7 @@ const OutfitDetail = lazyNamed(() => import('../features/outfits/detail'), 'Outf
 const TodayScreen = lazyNamed(() => import('../features/today/today-screen'), 'TodayScreen');
 const CalendarScreen = lazyNamed(() => import('../features/calendar/calendar'), 'CalendarScreen');
 const StatisticsScreen = lazyNamed(() => import('../features/statistics/statistics-screen'), 'StatisticsScreen');
+const StylistScreen = lazyNamed(() => import('../features/stylist/stylist-screen'), 'StylistScreen');
 const configuration = readConfiguration(import.meta.env);
 const browserLanguages = navigator.languages;
 function Brand() {
@@ -77,10 +79,10 @@ function Unconfigured({ status }: { status: Configuration['status'] }) {
   useEffect(() => { document.documentElement.lang = language; }, [language]);
   return <EntryLayout language={language} onLanguage={setLanguage} t={t}><section className="entry-card setup-card"><div className="small-mark"><Icon name="wardrobe" /></div><h1>{t('setup.title')}</h1><p className="muted">{t(status === 'invalid' ? 'setup.invalid' : 'setup.body')}</p><details className="copy-details"><summary>{t('setup.instructions')}</summary><ol className="setup-steps"><li>{t('setup.step1')}<code>npm run db:start</code></li><li>{t('setup.step2')}<code>.env.local</code></li><li>{t('setup.step3')}</li></ol></details><p className="privacy-note"><Icon name="lock" />{t('setup.note')}</p></section></EntryLayout>;
 }
-type WorkspaceRoute = 'today' | 'wardrobe' | 'add' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | 'calendar' | 'statistics' | `detail:${string}` | `outfit:${string}`;
-const routeHash = { today: '#/today', wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new', calendar: '#/calendar', statistics: '#/statistics' };
+type WorkspaceRoute = 'today' | 'stylist' | 'wardrobe' | 'add' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | 'calendar' | 'statistics' | `detail:${string}` | `outfit:${string}`;
+const routeHash = { today: '#/today', stylist: '#/stylist', wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new', calendar: '#/calendar', statistics: '#/statistics' };
 function currentRoute(hash = location.hash): WorkspaceRoute {
-  return hash === '#/today' ? 'today' : hash === '#/calendar' ? 'calendar' : hash === '#/statistics' ? 'statistics' : hash === '#/items/new' ? 'add' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
+  return hash === '#/today' ? 'today' : hash === '#/stylist' ? 'stylist' : hash === '#/calendar' ? 'calendar' : hash === '#/statistics' ? 'statistics' : hash === '#/items/new' ? 'add' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
     : hash === '#/outfits' ? 'outfits' : hash === '#/outfits/new' ? 'outfit-new'
       : hash.startsWith('#/outfits/') ? `outfit:${hash.slice(10)}`
         : hash.startsWith('#/items/') ? `detail:${hash}` : 'wardrobe';
@@ -88,7 +90,7 @@ function currentRoute(hash = location.hash): WorkspaceRoute {
 function hashForRoute(route: WorkspaceRoute) {
   return route.startsWith('detail:') ? route.slice(7) : route.startsWith('outfit:') ? `#/outfits/${route.slice(7)}` : routeHash[route as keyof typeof routeHash];
 }
-const routeFocus: Partial<Record<WorkspaceRoute, string>> = { today: 'today-title', add: 'capture-title', settings: 'settings-title', trash: 'trash-title', outfits: 'outfits-title', 'outfit-new': 'outfit-editor-title', calendar: 'calendar-title', statistics: 'statistics-title' };
+const routeFocus: Partial<Record<WorkspaceRoute, string>> = { today: 'today-title', stylist: 'stylist-title', add: 'capture-title', settings: 'settings-title', trash: 'trash-title', outfits: 'outfits-title', 'outfit-new': 'outfit-editor-title', calendar: 'calendar-title', statistics: 'statistics-title' };
 function OwnedWardrobe({ client, config, controller, scope, profile, change, busy, unresolved, t, language, online, onRouteCommitted }: { client: AppClient; config: PublicConfig; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; unresolved: boolean; t: Translate; language: Language; online: boolean; onRouteCommitted: (family: NavFamily) => void }) {
   const [route, setRoute] = useState<WorkspaceRoute>(() => currentRoute());
   const [outfitUnresolved, setOutfitUnresolved] = useState(false);
@@ -123,6 +125,9 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   const ai = useMemo(() => new AiClient(client, config, scope), [client, config, scope]);
   const lifecycle = useMemo(() => new ItemLifecycleClient(client, config, scope), [client, config, scope]);
   const [weatherStore] = useState(() => new WeatherStore());
+  // Memory only, for this owner scope: a new owner or epoch mounts a new OwnedWardrobe and so a new, empty store.
+  const [stylist] = useState(() => new StylistStore(client, config, scope));
+  useEffect(() => { stylist.setBusy(busy); }, [stylist, busy]);
   const weather = weatherConfig(profile);
   const weatherId = weatherKey(weather);
   useEffect(() => { weatherStore.keep(weatherId); }, [weatherStore, weatherId]);
@@ -219,13 +224,15 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       setDiscard({ next: request.next, position: request.position });
     } else history.go(request.position - navigation.current.position);
   }, [settled, changeRoute, scope]);
-  // Today's "Turn on weather" opens Settings at the Weather card.
+  // Today's "Turn on weather" opens Settings at the Weather card, and the stylist's "Turn on in Settings" at the Stylist card.
   const weatherFocus = useRef(false);
+  const stylistFocus = useRef(false);
   const focusRoute = useCallback(() => {
-    // The flag stays set while Settings is shown, since focusRoute can run twice for one visit.
-    const card = weatherFocus.current && route === 'settings' ? document.getElementById('weather-heading') : null;
+    // The flags stay set while Settings is shown, since focusRoute can run twice for one visit.
+    const card = route !== 'settings' ? null : weatherFocus.current ? document.getElementById('weather-heading')
+      : stylistFocus.current ? document.getElementById('stylist-heading') : null;
     if (card) { card.focus(); return; }
-    if (route !== 'settings') weatherFocus.current = false;
+    if (route !== 'settings') { weatherFocus.current = false; stylistFocus.current = false; }
     document.getElementById(routeFocus[route] ?? (route.startsWith('detail:') ? 'item-detail-title' : route.startsWith('outfit:') ? 'outfit-detail-title' : 'wardrobe-title'))?.focus();
   }, [route]);
   useEffect(focusRoute, [focusRoute]);
@@ -266,7 +273,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
         {outfitNotice && route === `outfit:${outfitNotice}` && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('outfits.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setOutfitNotice(null)}><Icon name="close" /></button></div>}
         <LazyBoundary key={route} t={t} onReady={focusRoute}>{route === 'add'
           ? <AddItem client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} />
-          : route === 'settings' ? <ProfileScreen client={client} ai={ai} images={images} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} />
+          : route === 'settings' ? <ProfileScreen client={client} ai={ai} stylist={stylist} images={images} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} />
           : route === 'trash' ? <Trash lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
             onDeleting={itemId => setUndo(current => current?.item.id === itemId ? null : current)}
             onBack={() => changeRoute('wardrobe')} onChanged={() => { setUndo(null); void refresh(); invalidateOutfits(); }} />
@@ -282,7 +289,12 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
             invalidation={outfitsInvalidation} seed={calendarSeed} onSeedUsed={calendarSeedUsed} onChanged={invalidateHistory} onWriting={onWriting} />
           : route === 'statistics' ? <StatisticsScreen client={client} scope={scope} online={online} language={language} t={t} currency={profile.currency} />
           : route === 'today' ? <TodayScreen client={client} scope={scope} images={images} online={online} language={language} t={t}
-            timeZone={profile.timezone} invalidation={outfitsInvalidation} weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')} onTurnOnWeather={() => { weatherFocus.current = true; }}
+            timeZone={profile.timezone} invalidation={outfitsInvalidation} weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')} onTurnOnWeather={() => { stylistFocus.current = false; weatherFocus.current = true; }}
+            stylist={stylist} onStylist={() => changeRoute('stylist')}
+            onSave={(itemIds, occasion) => { setOutfitSeed({ itemIds, occasion }); changeRoute('outfit-new'); }} />
+          : route === 'stylist' ? <StylistScreen store={stylist} images={images} online={online} t={t} timeZone={profile.timezone}
+            weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')}
+            onSettings={() => { weatherFocus.current = false; stylistFocus.current = true; changeRoute('settings'); }}
             onSave={(itemIds, occasion) => { setOutfitSeed({ itemIds, occasion }); changeRoute('outfit-new'); }} />
           : <WardrobeScreen browse={browse} images={images} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={refresh} />}</LazyBoundary>
       </main>

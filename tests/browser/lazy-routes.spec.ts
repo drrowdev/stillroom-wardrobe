@@ -27,6 +27,7 @@ async function expectRoute(page: Page, heading: string) {
 
 const routes = [
   { name: 'Today', hash: '#/today', heading: '#today-title' },
+  { name: 'Stylist', hash: '#/stylist', heading: '#stylist-title' },
   { name: 'Outfits', hash: '#/outfits', heading: '#outfits-title' },
   { name: 'New outfit', hash: '#/outfits/new', heading: '#outfit-editor-title' },
   { name: 'Calendar', hash: '#/calendar', heading: '#calendar-title' },

@@ -64,6 +64,7 @@ const browserArtifacts: Record<string, string[]> = {
   'p6c-delete-account-ui': ['delete-account-en-desktop', 'delete-account-fi-mobile', 'delete-recovery-sv-desktop', 'delete-recovery-en-mobile'].map((name) => `p6c-visual/${name}.png`),
   'i24-a11y-ui': ['leave-dialog-fi-320-200', 'delete-card-fi-320-200', 'outfit-leave-sv-320-200', 'deletion-resume-sv-320-200']
     .map((name) => `i24-visual/${name}.png`),
+  'st1b-stylist-ui': ['chat-en-desktop', 'chat-fi-mobile', 'consent-sv-mobile', 'paused-en-320-200'].map((name) => `st1b-visual/${name}.png`),
   };
 // Written by tests/pwa/visual.spec.ts, so they upload from the PWA job that runs it.
 const pwaArtifacts: Record<string, string[]> = {

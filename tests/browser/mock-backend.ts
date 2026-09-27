@@ -12,6 +12,7 @@ import { rawColumns } from '../../src/domain/export-format';
 import type { ImageChangeReceipt } from '../../src/domain/image-replacement';
 import type { DeletionOperation } from '../../src/domain/item-lifecycle';
 import { wardrobeTargetDeleteRoute } from '../../src/data/storage-delete';
+import { STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_REVIEW_EXPIRES } from '../../src/domain/stylist';
 
 export const owners = {
   a: '10000000-0000-4000-8000-000000000001',
@@ -504,6 +505,27 @@ export function recoveryHash(owner = owners.a, seconds = 3600): string {
   return '#' + new URLSearchParams({ access_token: token, refresh_token: 'unused-opaque-fixture',
     expires_at: String(expires), expires_in: String(Math.max(1, seconds)), token_type: 'bearer', type: 'recovery', sb: '' });
 }
+export type StylistSetup = { configured: boolean; activated: boolean; noticeRevision: number; manifestId: string; modelId: string;
+  maxRequestMicro: string; stylistAllowanceMicro: string; totalAllowanceMicro: string; stylistMicro: string; totalMicro: string };
+export type StylistReply = { status: number; body: unknown; hold?: Promise<void> }
+  | ((body: unknown, owner: string) => { status: number; body: unknown; hold?: Promise<void> });
+const stylistDefaults: StylistSetup = { configured: false, activated: false, noticeRevision: 1, manifestId: STYLIST_MANIFEST, modelId: STYLIST_MODEL,
+  maxRequestMicro: '129360', stylistAllowanceMicro: '5000000', totalAllowanceMicro: '17940000', stylistMicro: '0', totalMicro: '0' };
+// The stylist_status reply as the ST1a function builds it.
+function stylistStatus(setup: StylistSetup, consent: number | null) {
+  const code = !setup.configured ? 'UNCONFIGURED' : !setup.activated ? 'INACTIVE' : consent !== setup.noticeRevision ? 'CONSENT_REQUIRED' : 'OK';
+  const policy = setup.configured ? { activated: setup.activated, noticeRevision: setup.noticeRevision, manifestId: setup.manifestId,
+    modelId: setup.modelId, maxRequestMicro: setup.maxRequestMicro, stylistAllowanceMicro: setup.stylistAllowanceMicro,
+    totalAllowanceMicro: setup.totalAllowanceMicro, maxRequestsPerHour: 20 } : null;
+  const warning = policy !== null && (BigInt(setup.stylistMicro) * 10n >= BigInt(setup.stylistAllowanceMicro) * 8n
+    || BigInt(setup.totalMicro) * 10n >= BigInt(setup.totalAllowanceMicro) * 8n);
+  // Kept inside the reviewed period so the fixture doesn't expire with the app's notice review.
+  const now = Math.min(Date.now(), STYLIST_REVIEW_EXPIRES - 86_400_000);
+  return { code, period: new Date(now).toISOString().slice(0, 7), serverTimeMs: now,
+    consent: { enabled: consent !== null, noticeRevision: consent, consentedAt: consent === null ? null : '2026-10-01T00:00:00Z' },
+    policy, usage: { stylistMicro: setup.stylistMicro, totalMicro: setup.totalMicro, stylistLastHour: 0, warning } };
+}
+
 export async function mockBackend(page: Page, options: MockOptions = {}) {
   const profiles: Record<string, JsonRow> = {
     [owners.a]: { owner_id: owners.a, display_name: 'Alex', ui_language: options.initialLanguage ?? null, timezone: 'Europe/Helsinki', currency: 'EUR', version: 1,
@@ -550,6 +572,18 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     minimum_upper_coverage: 0, minimum_lower_coverage: 0, cold_sensitivity: 0, repeat_gap_days: 2,
   }]));
   const images: JsonRow[] = [];
+  // ST1b stylist: per-owner setup (unconfigured unless a spec configures it), consent, scripted faults and replies.
+  // A reply entry may be a function of the request body and owner, and may wait on `hold` before answering.
+  const stylistControl = {
+    missing: false,
+    setup: {} as Record<string, Partial<StylistSetup>>,
+    consent: {} as Record<string, number | null>,
+    statusFaults: [] as ('fail' | 'abort')[],
+    consentFaults: [] as ('fail' | 'lost')[],
+    replies: [] as StylistReply[],
+    chats: [] as { owner: string; body: unknown }[],
+    statusReads: 0,
+  };
   // Backup fixture: attribution histories by item, a hook that runs before each attribution read, and manifest reads.
   const exportControl: { attributions: Map<string, unknown[]>; beforeAttribution: (() => void) | null; manifests: number } = {
     attributions: new Map(), beforeAttribution: null, manifests: 0 };
@@ -735,6 +769,35 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       // Like PostgREST, a profile reply holds only the selected columns.
       const select = url.pathname === '/rest/v1/profiles' ? url.searchParams.get('select') : null;
       await json(select ? Object.fromEntries(select.split(',').filter(column => column in profile).map(column => [column, profile[column]])) : profile); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/stylist_status' || url.pathname === '/rest/v1/rpc/stylist_set_consent') {
+      if (stylistControl.missing) { await json({ code: 'PGRST202', details: null, hint: null, message: 'Could not find the function' }, 404); return; }
+      const setup = { ...stylistDefaults, ...stylistControl.setup[owner] };
+      if (url.pathname.endsWith('stylist_set_consent')) {
+        const body = request.postDataJSON() as { p_enabled?: unknown; p_notice_revision?: unknown };
+        const fault = stylistControl.consentFaults.shift();
+        if (fault === 'fail') { await json({ message: 'Service unavailable' }, 503); return; }
+        if (typeof body.p_enabled !== 'boolean') { await json({ code: 'INVALID_INPUT' }); return; }
+        if (!setup.configured) { await json({ code: 'UNCONFIGURED' }); return; }
+        if (body.p_enabled && body.p_notice_revision !== setup.noticeRevision) { await json({ code: 'CONFIG_CHANGED' }); return; }
+        stylistControl.consent[owner] = body.p_enabled ? setup.noticeRevision : null;
+        if (fault === 'lost') { await route.abort('failed'); return; }
+      } else {
+        stylistControl.statusReads++;
+        const fault = stylistControl.statusFaults.shift();
+        if (fault === 'fail') { await json({ message: 'Service unavailable' }, 503); return; }
+        if (fault === 'abort') { await route.abort('failed'); return; }
+      }
+      await json(stylistStatus(setup, stylistControl.consent[owner] ?? null)); return;
+    }
+    if (url.pathname === '/functions/v1/stylist-chat') {
+      const body: unknown = request.postDataJSON();
+      stylistControl.chats.push({ owner, body });
+      const next = stylistControl.replies.shift() ?? { status: 200, body: { code: 'OK', reply: 'Here is an idea.', outfits: [] } };
+      const reply = typeof next === 'function' ? next(body, owner) : next;
+      if (reply.hold) await reply.hold;
+      try { await json(reply.body, reply.status); } catch { /* The page may have gone away while the reply was held. */ }
+      return;
     }
     if (url.pathname === '/rest/v1/rpc/ai_status') {
       if (!admitAiStatus(request)) { await json({ code: 'UNAUTHENTICATED' }, 401); return; }
@@ -1652,7 +1715,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, holdFeedbackReads, outfitControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { stylistControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, holdFeedbackReads, outfitControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

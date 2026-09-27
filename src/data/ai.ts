@@ -45,8 +45,9 @@ export class AiClient {
     catch (error) { throw error instanceof AiError ? error : new AiError(signal.aborted ? 'TIMEOUT' : 'UNAVAILABLE'); }
     finally { clearTimeout(timer); signal.removeEventListener('abort', abort); }
   }
-  private async request(path: '/rest/v1/rpc/ai_status' | '/rest/v1/rpc/ai_set_consent'
-    | '/rest/v1/rpc/ai_analysis_status' | '/rest/v1/rpc/ai_request_control' | '/functions/v1/analyze-clothing',
+  protected async request(path: '/rest/v1/rpc/ai_status' | '/rest/v1/rpc/ai_set_consent'
+    | '/rest/v1/rpc/ai_analysis_status' | '/rest/v1/rpc/ai_request_control' | '/functions/v1/analyze-clothing'
+    | '/rest/v1/rpc/stylist_status' | '/rest/v1/rpc/stylist_set_consent' | '/functions/v1/stylist-chat',
     body: object | Blob, ms: number, extra: Record<string, string> = {}, outer?: AbortSignal) {
     return this.bounded(ms, async (signal, wait) => {
       if (signal.aborted) throw new AiError('TIMEOUT');

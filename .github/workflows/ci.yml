@@ -316,6 +316,17 @@ jobs:
             test-results/i24-visual/deletion-resume-sv-320-200.png
           if-no-files-found: error
           retention-days: 1
+      - name: Preserve bounded synthetic ST1b visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: st1b-stylist-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/st1b-visual/chat-en-desktop.png
+            test-results/st1b-visual/chat-fi-mobile.png
+            test-results/st1b-visual/consent-sv-mobile.png
+            test-results/st1b-visual/paused-en-320-200.png
+          if-no-files-found: error
+          retention-days: 1
 
   pwa:
     name: PWA production contracts
