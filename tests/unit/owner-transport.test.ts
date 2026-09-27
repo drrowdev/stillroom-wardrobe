@@ -47,11 +47,14 @@ describe('owner transport', () => {
     await expect(guarded({ url: `${origin}/rest/v1/rpc/save_outfit` } as never, { method: 'POST' })).rejects.toThrow('refused');
   });
 
-  it('leaves the export policy as it was: the two export RPCs and authenticated downloads of the owner\'s photos', async () => {
+  it('leaves the export policy as it was: its export RPCs and authenticated downloads of the owner\'s photos', async () => {
     const { allowed } = gate(exportPolicy);
     expect(await allowed('/auth/v1/token?grant_type=password', { method: 'POST' })).toBe(true);
     expect(await allowed('/rest/v1/rpc/export_manifest', { method: 'POST' })).toBe(true);
-    expect(await allowed('/rest/v1/rpc/item_attribution_history', { method: 'POST' })).toBe(true);
+    expect(await allowed('/rest/v1/rpc/item_attribution_history_v2', { method: 'POST' })).toBe(true);
+    expect(await allowed('/rest/v1/rpc/attribution_digest', { method: 'POST' })).toBe(true);
+    // The legacy five-key projection has no origin, so the export no longer asks for it.
+    expect(await allowed('/rest/v1/rpc/item_attribution_history', { method: 'POST' })).toBe(false);
     expect(await allowed(`/storage/v1/object/authenticated/wardrobe/${owner}/${item}/${image}/main.jpg`)).toBe(true);
     expect(await allowed(`/storage/v1/object/authenticated/wardrobe/${other}/${item}/${image}/main.jpg`)).toBe(false);
     for (const rpc of RESTORE_RPCS) expect(await allowed(`/rest/v1/rpc/${rpc}`, { method: 'POST' })).toBe(false);
@@ -80,7 +83,7 @@ describe('owner transport', () => {
     expect(await allowed(photo('thumb'))).toBe(true);
     const finalize = { action: 'complete', intent: { itemId: item, sourceImageId: null, claim: null } };
     expect(await allowed('/functions/v1/finalize-image-change', { method: 'POST', headers: { authorization: 'Bearer token' }, body: json(finalize) })).toBe(true);
-    expect(seen).toHaveLength(22);
+    expect(seen).toHaveLength(23);
   });
 
   it('refuses every other method, query, path, owner and body', async () => {

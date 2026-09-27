@@ -33,6 +33,7 @@ describe('export parity with the pre-refactor browser export', { timeout: 120_00
     const source = {
       manifest: async (exportId: string) => ({ ...world.raw, export_id: exportId }),
       attribution: async (id: string) => world.attributions.get(id),
+      digest: async () => world.digest,
     };
     const parts = await withEntropy(async () => {
       const prepared = await collectSnapshot(source, PARITY_OWNER, crypto.randomUUID(), new AbortController().signal);
@@ -102,9 +103,22 @@ describe('browser export behaviour kept by the refactor', () => {
     expect(blob.type).toBe('application/octet-stream');
   });
 
+  it('refuses a snapshot when tag history changes while it is read, with no item or photo change', async () => {
+    const world = parityWorld(2, 1000, 100);
+    let reads = 0;
+    const importing = { manifest: async (id: string) => ({ ...world.raw, export_id: id }), attribution: async (id: string) => world.attributions.get(id),
+      digest: async () => (reads++ === 0 ? world.digest : 'f'.repeat(64)) };
+    await expect(collectSnapshot(importing, PARITY_OWNER, PARITY_EXPORT, new AbortController().signal)).rejects.toEqual(new BackupFormatError('changed'));
+    const malformed = { ...importing, digest: async () => 'not-a-digest' };
+    await expect(collectSnapshot(malformed, PARITY_OWNER, PARITY_EXPORT, new AbortController().signal)).rejects.toEqual(new BackupFormatError('invalid'));
+    const steady = { ...importing, digest: async () => world.digest };
+    await expect(collectSnapshot(steady, PARITY_OWNER, PARITY_EXPORT, new AbortController().signal)).resolves.toMatchObject({ items: 2 });
+  });
+
   it('the shared steps report a changed photo as a format problem', async () => {
     const world = parityWorld(1, 1000, 100);
-    const source = { manifest: async (id: string) => ({ ...world.raw, export_id: id }), attribution: async (id: string) => world.attributions.get(id) };
+    const source = { manifest: async (id: string) => ({ ...world.raw, export_id: id }), attribution: async (id: string) => world.attributions.get(id),
+      digest: async () => world.digest };
     const prepared = await collectSnapshot(source, PARITY_OWNER, PARITY_EXPORT, new AbortController().signal);
     await expect(assemblePart(prepared, 1, async () => new Uint8Array(3), PARITY_PASSPHRASE)).rejects.toEqual(new BackupFormatError('changed'));
     await expect(assemblePart(prepared, 5, async () => new Uint8Array(3), PARITY_PASSPHRASE)).rejects.toEqual(new BackupFormatError('invalid'));

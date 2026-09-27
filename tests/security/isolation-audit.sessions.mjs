@@ -396,7 +396,9 @@ async function ownerState(owner) {
   state.requests = await read('image_change_requests', { p_item_id: f.changeItem });
   state.recovery = await read('image_recovery_versions', { p_item_id: f.recItem, p_after: null });
   state.attribution = [await read('item_attribution_history', { p_item_id: f.item }),
-    await read('item_attribution_history', { p_item_id: f.changeItem })];
+    await read('item_attribution_history', { p_item_id: f.changeItem }),
+    await read('item_attribution_history_v2', { p_item_id: f.item }),
+    await read('item_attribution_history_v2', { p_item_id: f.changeItem }), await read('attribution_digest', {})];
   state.operation = [];
   for (const [item, request] of [[f.prepItem, f.prepRequest], [f.readyItem, f.readyRequest], [f.removeItem, f.removeRequest]]) {
     state.operation.push(await read('item_deletion_operation_status', { p_item_id: item, p_request_id: request }));
@@ -421,6 +423,10 @@ const NA_PLAIN = { status: 400, code: 'P0001', message: 'Not available' };
 const CONFLICT = { status: 400, code: '22023', message: 'Request conflict' };
 const CONFLICT_PLAIN = { status: 400, code: 'P0001', message: 'Request conflict' };
 const SELECTION = { status: 400, code: 'P0001', message: 'Invalid selection' };
+const INVALID = { status: 400, code: '22023', message: 'Invalid input' };
+// One tag-history entry for restore_item_attribution (P6d), linked to `image` or to no photo.
+const tagEntries = (image) => [{ position: 0, source_image_id: image, image_sha256: 'a'.repeat(64), model_id: 'isolation-model',
+  prompt_version: 1, fields: { category: { kind: 'ai_observed', revision: 1 } } }];
 const UNAVAILABLE = { status: 200, data: { code: 'UNAVAILABLE' } };
 const NULL = { status: 200, data: null }, EMPTY = { status: 200, data: [] }, VOID = { status: 204, data: null };
 const expectMatch = (label, expected, result) => {
@@ -466,6 +472,10 @@ function foreignCases(a) {
     one('update_image_description', ['image'], (x) => ({ p_image_id: x.image, p_expected_description_version: x.imageDescVersion,
       p_alt_text: 'Forbidden' }), NA, { bundle: { image: ['imageDescVersion'] } }),
     one('item_attribution_history', ['item', 'changeItem'], (x, k) => ({ p_item_id: x[k] }), NA),
+    one('item_attribution_history_v2', ['item', 'changeItem'], (x, k) => ({ p_item_id: x[k] }), NA),
+    // The peer's item is Not available; the attacker's own item with the peer's photo is refused as input, like a random one.
+    one('restore_item_attribution', ['item', 'image'], (x, k) => ({ p_item_id: k === 'item' ? x.item : a.item, p_import_id: n2,
+      p_entries: tagEntries(k === 'image' ? x.image : null) }), (k) => (k === 'item' ? NA : INVALID)),
     one('image_recovery_versions', ['recItem'], (x) => ({ p_item_id: x.recItem, p_after: null }), NA),
     one('restore_history_entry', ['event', 'item'], (x, k) => ({ p_id: n1, p_event_id: k === 'event' ? x.event : a.event,
       p_item_id: k === 'item' ? x.item : null, p_title: 'Forbidden', p_category: 'top', p_import_id: n2 }), NA),
@@ -580,6 +590,12 @@ async function foreignMatrix(attacker, victim) {
   stage = `matrix-${d}-owner-only`;
   const exported = await probeRpc(attacker, victim, 'export_manifest', { p_export_id: randomUUID() });
   if (exportShape(attacker, exported)) { control(attacker, 'export_manifest', true); tag('export_manifest', `${d}:owner-only`); }
+  // The caller's own tag-history digest, whoever else exists.
+  const ownDigest = await call(attacker, 'attribution_digest', {});
+  const digest = await probeRpc(attacker, victim, 'attribution_digest', {});
+  if (control(attacker, 'attribution_digest', digest.ok && hex64.test(String(digest.data)) && digest.data === ownDigest.data, describe(digest))) {
+    tag('attribution_digest', `${d}:owner-only`);
+  }
   const status = await probeRpc(attacker, victim, 'ai_status', {});
   if (control(attacker, 'ai_status', status.ok && status.data !== null && typeof status.data === 'object'
     && applicationCode(status) !== 'UNAVAILABLE', describe(status))) tag('ai_status', `${d}:owner-only`);
@@ -983,6 +999,30 @@ async function ownPositiveControls(owner) {
     const result = await call(owner, name, body);
     control(owner, name, result.ok && check(result.data), describe(result));
   }
+  // P6d: same-owner refusals first (another item's photo, a pending or nonexistent photo, Trash, a deletion in
+  // progress), then the owner's own import, its exact replay and the kept outcomes. Nothing is written by a refusal.
+  stage = `positive-${owner.label}-tag-history`;
+  for (const [label, item, image, expected] of [['other-item-photo', f.item, f.recCurrent, INVALID], ['pending-photo', f.item, f.pendingImage, INVALID],
+    ['nonexistent-photo', f.item, randomUUID(), INVALID], ['trash', f.trashItem, null, NA], ['deletion-fence', f.prepItem, null, NA]]) {
+    expectMatch(`${stage} ${label}`, expected, await call(owner, 'restore_item_attribution',
+      { p_item_id: item, p_import_id: randomUUID(), p_entries: tagEntries(image) }));
+  }
+  const empty = await call(owner, 'item_attribution_history_v2', { p_item_id: f.item });
+  need(empty.ok && isDeepStrictEqual(empty.data, []), `${stage}: refusals wrote tag history ${describe(empty)}`);
+  const importId = randomUUID(), restore = (body) => call(owner, 'restore_item_attribution', { p_item_id: f.item, ...body });
+  const outcomes = [await restore({ p_import_id: importId, p_entries: tagEntries(f.image) }),
+    await restore({ p_import_id: importId, p_entries: tagEntries(f.image) }),
+    await restore({ p_import_id: randomUUID(), p_entries: tagEntries(f.image) }),
+    await restore({ p_import_id: importId, p_entries: tagEntries(null) })].map((result) => (result.ok ? result.data : describe(result)));
+  control(owner, 'restore_item_attribution', isDeepStrictEqual(outcomes, [{ state: 'created', reason: null }, { state: 'equal', reason: null },
+    { state: 'kept', reason: 'other-import' }, { state: 'kept', reason: 'differs' }]), JSON.stringify(outcomes));
+  const [legacy, current] = [await call(owner, 'item_attribution_history', { p_item_id: f.item }),
+    await call(owner, 'item_attribution_history_v2', { p_item_id: f.item })];
+  control(owner, 'item_attribution_history_v2', legacy.ok && isDeepStrictEqual(legacy.data, []) && current.ok
+    && isDeepStrictEqual(current.data, [{ origin: 'imported', source_image_id: f.image,
+      image_sha256: 'a'.repeat(64), model_id: 'isolation-model', prompt_version: 1, fields: { category: { kind: 'ai_observed', revision: 1 } } }]), describe(current));
+  const digest = await call(owner, 'attribution_digest', {});
+  control(owner, 'attribution_digest', digest.ok && hex64.test(String(digest.data)), describe(digest));
   if (f.aiRequest) {
     const status = await call(owner, 'ai_request_control', { p_request_id: f.aiRequest, p_action: 'status' });
     if (applicationCode(status) === 'OK' && status.data.status === 'reserved') control(owner, 'ai_request_control', true);
@@ -1014,6 +1054,9 @@ async function freezeCase(frozen, other) {
       ['export_manifest', { p_export_id: randomUUID() }, NULL],
       ['item_deletion_status', { p_item_ids: [f.item] }, { status: 403, code: '42501' }],
       ['image_change_status', { p_item_id: f.changeItem, p_request_id: f.changeRequest }, { status: 403, code: '42501' }],
+      ['restore_item_attribution', { p_item_id: f.item, p_import_id: randomUUID(), p_entries: tagEntries(null) }, { status: 403, code: '42501' }],
+      ['item_attribution_history_v2', { p_item_id: f.item }, { status: 403, code: '42501' }],
+      ['attribution_digest', {}, { status: 403, code: '42501' }],
       ['ai_request_control', { p_request_id: f.aiRequest ?? randomUUID(), p_action: 'status' }, UNAVAILABLE],
     ]) expectMatch(`${stage}: frozen ${name}`, expected, await call(frozen, name, body));
     const ai = await call(frozen, 'ai_status', {});

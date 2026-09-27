@@ -422,7 +422,7 @@ export const COLOUR_FUNCTIONS = Object.freeze({
   manifest: Object.freeze(['public.ai_claim_analysis', 'private.ai_analysis_permitted', 'public.ai_finish_analysis',
     'public.complete_analyzed_item_save']),
 });
-const COLOUR_MANIFEST = Object.freeze({ v1: 'azure-eu-terra-devtest-v1', v2: 'azure-eu-terra-devtest-v2' });
+export const COLOUR_MANIFEST = Object.freeze({ v1: 'azure-eu-terra-devtest-v1', v2: 'azure-eu-terra-devtest-v2' });
 const digest = (relation, order) => `(select jsonb_build_object('n',count(*),'md5',
   md5(coalesce(string_agg(to_jsonb(t)::text,E'\n' order by ${order}),''))) from ${relation} t)`;
 const colourDigestSql = `select jsonb_build_object('rows',jsonb_build_object(
@@ -489,7 +489,7 @@ const colourClaim = async (sql, owner, n, manifest) => JSON.parse(await sql(`sel
   120,80,${literal(manifest)});`));
 
 // One Azure analysis plus analyzed Save; the item carries the stated colours from the stored result.
-async function colourAnalyzedSave(client, owner, env, sql, n, manifest, colours, mark = () => {}) {
+export async function colourAnalyzedSave(client, owner, env, sql, n, manifest, colours, mark = () => {}) {
   mark('colour-analysis-claim');
   const claim = await colourClaim(sql, owner, n, manifest);
   requireEvidence(claim.claimed === true && claim.manifestId === manifest);

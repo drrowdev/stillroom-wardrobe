@@ -1,4 +1,4 @@
-// Saved-only backup format (metadata v2, encryption envelope v1; blueprint 08). The app and scripts/verify-backup.mjs
+// Saved-only backup format (metadata v3, encryption envelope v1; blueprint 08). Version 2 is still read and resumed. The app and scripts/verify-backup.mjs
 // share this module, so it has no imports and uses only syntax that Node can load by stripping types.
 
 const MiB = 1024 * 1024;
@@ -48,26 +48,36 @@ export const rawColumns = {
 } as const;
 export type RawTable = keyof typeof rawColumns;
 export const attributionEntryKeys = ['source_image_id', 'image_sha256', 'model_id', 'prompt_version', 'fields'] as const;
+// One entry of item_attribution_history_v2: the legacy keys plus the origin the server derives from where it is stored.
+export const attributionOriginKeys = ['origin', ...attributionEntryKeys] as const;
+export const attributionOrigins = ['recorded', 'imported'] as const;
+export type AttributionOrigin = typeof attributionOrigins[number];
+// New backups are version 3 (history carries its origin). Version 2 is still read, verified and resumed as version 2.
+export const SAVED_VERSION = 3;
+export type SavedVersion = 2 | 3;
+const attributionColumnsV2 = ['owner_id', 'item_id', 'position', 'source_image_id', 'source_image_excluded', 'image_sha256', 'model_id',
+  'prompt_version', 'fields'] as const;
 // Weather on/off is consent, so it is never exported; the chosen city stays as owner data.
 export const savedColumns = {
   ...rawColumns,
   profiles: rawColumns.profiles.filter(column => column !== 'weather_enabled'),
-  item_attributions: ['owner_id', 'item_id', 'position', 'source_image_id', 'source_image_excluded', 'image_sha256', 'model_id',
-    'prompt_version', 'fields'],
+  item_attributions: [...attributionColumnsV2, 'origin'],
 } as const;
 export type SavedTable = keyof typeof savedColumns;
 const savedTables = Object.keys(savedColumns) as SavedTable[];
 const rawTables = Object.keys(rawColumns) as RawTable[];
+export const savedColumnsFor = (version: SavedVersion, table: SavedTable): readonly string[] =>
+  version === 2 && table === 'item_attributions' ? attributionColumnsV2 : savedColumns[table];
 
 export type SavedMetadata = {
-  format: 'stillroom-saved'; schema_version: 2; export_id: string; owner_id: string; created_at: string;
+  format: 'stillroom-saved'; schema_version: SavedVersion; export_id: string; owner_id: string; created_at: string;
   tables: Record<SavedTable, Row[]>;
 };
 export type RawManifest = { export_id: string; owner_id: string; created_at: string; tables: Record<RawTable, Row[]> };
 export type FileRef = { imageId: string; variant: 'main' | 'thumb'; path: string; sha256: string; byteLength: number };
 export type FileEntry = { imageId: string; variant: 'main' | 'thumb'; sha256: string; byteLength: number; mime: 'image/jpeg'; base64: string };
 export type ExportPart = {
-  format: 'stillroom-export'; schemaVersion: 2; exportId: string; partIndex: number; partCount: number; manifestSha256: string;
+  format: 'stillroom-export'; schemaVersion: 1 | SavedVersion; exportId: string; partIndex: number; partCount: number; manifestSha256: string;
   manifest?: SavedMetadata; files: FileEntry[];
 };
 export type Envelope = { format: 'stillroom-encrypted'; version: 1; kdf: 'PBKDF2-SHA256'; iterations: number; salt: string; iv: string; aad: string; ciphertext: string };
@@ -132,6 +142,21 @@ export function assertBounded(value: unknown, depth = 0): void {
   if (value !== null && typeof value !== 'boolean' && !(typeof value === 'number' && Number.isFinite(value))) fail();
 }
 
+// Text the database can hold in jsonb: no NUL character and no unpaired surrogate. Recorded history never has either.
+const loneSurrogate = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+const storable = (text: string) => !text.includes('\u0000') && !loneSurrogate.test(text);
+function isStorable(value: unknown): boolean {
+  if (typeof value === 'string') return storable(value);
+  if (Array.isArray(value)) return value.every(isStorable);
+  if (isObject(value)) return Object.keys(value).every(key => storable(key) && isStorable(value[key]));
+  return true;
+}
+// One tag-history entry's values: the same checks restore_item_attribution makes.
+function validAttribution(entry: Row): boolean {
+  return isHash(entry.image_sha256) && typeof entry.model_id === 'string' && isCount(entry.prompt_version, 0, 2_147_483_647)
+    && isObject(entry.fields) && isStorable(entry.model_id) && isStorable(entry.fields);
+}
+
 function rowKey(table: SavedTable, row: Row): string {
   if (table === 'profiles' || table === 'style_preferences') return String(row.owner_id);
   if (table === 'outfit_items') return `${String(row.outfit_id)}|${String(row.item_id)}`;
@@ -183,6 +208,7 @@ export function savedItemIds(raw: RawManifest): string[] {
 
 // Only what was saved leaves the account: no drafts, pending photos, Trash, analysis requests, receipts or consent.
 // Every reference inside the result points at an exported row; history keeps its text when its item is left out.
+// `attributions` holds each saved item's item_attribution_history_v2 entries, in order.
 export function projectSaved(raw: RawManifest, attributions: ReadonlyMap<string, unknown>): SavedMetadata {
   const t = raw.tables, owner = raw.owner_id;
   const items = new Set(savedItemIds(raw));
@@ -199,15 +225,14 @@ export function projectSaved(raw: RawManifest, attributions: ReadonlyMap<string,
   for (const [itemId, entries] of attributions) {
     if (!Array.isArray(entries) || entries.length > 1000) fail();
     (entries as unknown[]).forEach((entry, position) => {
-      if (!isObject(entry) || !sameKeys(entry, attributionEntryKeys) || !(entry.source_image_id === null || isUuid(entry.source_image_id))
-        || !isHash(entry.image_sha256) || typeof entry.model_id !== 'string' || !isCount(entry.prompt_version, 0, 2_147_483_647)
-        || !isObject(entry.fields)) fail();
+      if (!isObject(entry) || !sameKeys(entry, attributionOriginKeys) || !(entry.source_image_id === null || isUuid(entry.source_image_id))
+        || !attributionOrigins.some(origin => origin === entry.origin) || !validAttribution(entry)) fail();
       const row = entry as Row;
       const linked = row.source_image_id !== null && imageIds.has(String(row.source_image_id))
         && images.some(image => image.id === row.source_image_id && image.item_id === itemId);
       itemAttributions.push({ owner_id: owner, item_id: itemId, position, source_image_id: linked ? row.source_image_id : null,
         source_image_excluded: !linked, image_sha256: row.image_sha256, model_id: row.model_id,
-        prompt_version: row.prompt_version, fields: row.fields });
+        prompt_version: row.prompt_version, fields: row.fields, origin: row.origin });
     });
   }
   const tables: Record<SavedTable, Row[]> = {
@@ -226,19 +251,20 @@ export function projectSaved(raw: RawManifest, attributions: ReadonlyMap<string,
       && entry.item_ids.every(id => items.has(String(id)))),
   };
   for (const table of savedTables) tables[table] = [...tables[table]].sort(byKey(table));
-  const metadata: SavedMetadata = { format: 'stillroom-saved', schema_version: 2, export_id: raw.export_id, owner_id: owner,
+  const metadata: SavedMetadata = { format: 'stillroom-saved', schema_version: SAVED_VERSION, export_id: raw.export_id, owner_id: owner,
     created_at: raw.created_at, tables };
   assertMetadata(metadata);
   return metadata;
 }
 
-// Structural and referential check of saved metadata; used when writing and again by the offline verifier.
+// Structural and referential check of saved metadata (version 2 or 3); used when writing, by the offline verifier and by
+// restore's Check before anything is written.
 export function assertMetadata(value: unknown): asserts value is SavedMetadata {
   if (!isObject(value) || !sameKeys(value, ['format', 'schema_version', 'export_id', 'owner_id', 'created_at', 'tables'])
-    || value.format !== 'stillroom-saved' || value.schema_version !== 2 || !isUuid(value.export_id) || !isUuid(value.owner_id)
+    || value.format !== 'stillroom-saved' || (value.schema_version !== 2 && value.schema_version !== 3) || !isUuid(value.export_id) || !isUuid(value.owner_id)
     || !isStamp(value.created_at) || !isObject(value.tables) || !sameKeys(value.tables, savedTables)) return fail();
   assertBounded(value.tables);
-  const owner = value.owner_id;
+  const owner = value.owner_id, version = value.schema_version as SavedVersion;
   const tables = value.tables as Record<SavedTable, unknown>;
   for (const table of savedTables) {
     const rows = tables[table];
@@ -246,7 +272,7 @@ export function assertMetadata(value: unknown): asserts value is SavedMetadata {
     const keys = new Set<string>();
     let previous = '';
     for (const row of rows) {
-      if (!isObject(row) || !sameKeys(row, savedColumns[table]) || row.owner_id !== owner) fail();
+      if (!isObject(row) || !sameKeys(row, savedColumnsFor(version, table)) || row.owner_id !== owner) fail();
       const key = rowKey(table, row as Row);
       if (keys.has(key) || key < previous) fail();
       keys.add(key); previous = key;
@@ -263,10 +289,15 @@ export function assertMetadata(value: unknown): asserts value is SavedMetadata {
     images.set(String(image.id), image);
   }
   if (ready.size !== items.size) fail();
+  // Rows are sorted by item, then position, so each item's positions must run 0, 1, 2, ... with no gap.
+  let historyItem: unknown = null, nextPosition = 0;
   for (const entry of t.item_attributions) {
     if (!items.has(String(entry.item_id)) || !isCount(entry.position, 0, 999) || typeof entry.source_image_excluded !== 'boolean'
       || (entry.source_image_id === null) !== entry.source_image_excluded
-      || (entry.source_image_id !== null && images.get(String(entry.source_image_id))?.item_id !== entry.item_id)) fail();
+      || (entry.source_image_id !== null && images.get(String(entry.source_image_id))?.item_id !== entry.item_id)
+      || !validAttribution(entry) || version === 3 && !attributionOrigins.some(origin => origin === entry.origin)) fail();
+    if (entry.item_id !== historyItem) { historyItem = entry.item_id; nextPosition = 0; }
+    if (entry.position !== nextPosition++) fail();
   }
   const outfits = new Set(t.outfits.map(outfit => { if (!isUuid(outfit.id) || outfit.deleted_at !== null) fail(); return String(outfit.id); }));
   const linked = new Set<string>();
@@ -334,7 +365,8 @@ export async function encryptPart(part: ExportPart, passphrase: string): Promise
 const envelopeKeys = ['format', 'version', 'kdf', 'iterations', 'salt', 'iv', 'aad', 'ciphertext'];
 const partKeys = ['format', 'schemaVersion', 'exportId', 'partIndex', 'partCount', 'manifestSha256', 'files'];
 // Restore also reads version 1 parts (the reference exporter): the same envelope, with photos in part 0 as well.
-export async function decryptPart(text: string, passphrase: string, schemaVersion: 1 | 2 = 2): Promise<ExportPart> {
+// 'saved' accepts version 2 or 3; every later part must then have part 0's version.
+export async function decryptPart(text: string, passphrase: string, schemaVersion: 1 | SavedVersion | 'saved' = 'saved'): Promise<ExportPart> {
   if (text.length > BACKUP_LIMITS.encryptedPartBytes) fail();
   let envelope: unknown;
   try { envelope = JSON.parse(text); } catch { return fail(); }
@@ -353,7 +385,8 @@ export async function decryptPart(text: string, passphrase: string, schemaVersio
   try { part = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(plain)); } catch { return fail(); }
   if (!isObject(part)) return fail();
   const keys = Object.hasOwn(part, 'manifest') ? [...partKeys, 'manifest'] : partKeys;
-  if (!sameKeys(part, keys) || part.format !== 'stillroom-export' || part.schemaVersion !== schemaVersion || !isUuid(part.exportId)
+  const versionOk = schemaVersion === 'saved' ? part.schemaVersion === 2 || part.schemaVersion === 3 : part.schemaVersion === schemaVersion;
+  if (!sameKeys(part, keys) || part.format !== 'stillroom-export' || !versionOk || !isUuid(part.exportId)
     || !isCount(part.partCount, 1, BACKUP_LIMITS.parts) || !isCount(part.partIndex, 0, part.partCount - 1) || !isHash(part.manifestSha256)
     || envelope.aad !== aadFor(part.exportId, part.partIndex, part.partCount) || !Array.isArray(part.files)) return fail();
   return part as ExportPart;
@@ -377,13 +410,13 @@ export async function verifyBackup(source: PartSource, passphrase: string, check
   if (head.partCount !== source.count) fail('incomplete');
   const metadata = head.manifest;
   assertMetadata(metadata);
-  if (metadata.export_id !== head.exportId || await metadataDigest(metadata) !== head.manifestSha256) fail();
+  if (metadata.schema_version !== head.schemaVersion || metadata.export_id !== head.exportId || await metadataDigest(metadata) !== head.manifestSha256) fail();
   const plan = planParts(metadata);
   if (plan.length + 1 !== head.partCount) fail('incomplete');
   const images = new Map(metadata.tables.item_images.map(image => [String(image.id), image]));
   let fileBytes = 0;
   for (let index = 1; index < head.partCount; index++) {
-    const part = await decryptPart(await source.read(index), passphrase), expected = plan[index - 1]!;
+    const part = await decryptPart(await source.read(index), passphrase, metadata.schema_version), expected = plan[index - 1]!;
     if (part.exportId !== head.exportId || part.partCount !== head.partCount || part.manifestSha256 !== head.manifestSha256
       || part.partIndex !== index || Object.hasOwn(part, 'manifest')) fail();
     if (part.files.length !== expected.length) fail('incomplete');

@@ -1,5 +1,6 @@
 // Synthetic, fictional v2 backups for the restore-own integration gate: real decodable JPEG bytes, several photos per item,
-// an outfit, a rule, feedback and history that keeps the text of an item that is permanently gone. Nothing here is personal.
+// an outfit, a rule, feedback, history that keeps the text of an item that is permanently gone and tag history for the first
+// item (version 2 has no origin, so it is restored as imported). Nothing here is personal.
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { encryptPart, metadataDigest, partFileName, planParts, savedColumns, sha256Hex, toBase64, type SavedMetadata, type SavedTable } from '../../src/domain/export-format';
@@ -8,13 +9,22 @@ export type SyntheticPhoto = { bytes: Uint8Array; width: number; height: number 
 export type SyntheticItem = { title: string; photos: readonly SyntheticPhoto[]; category?: string; notes?: string;
   provenance?: Record<string, { kind: string; revision: number }> };
 export type SyntheticBackup = { owner: string; exportId: string; items: readonly SyntheticItem[];
-  /** Adds an outfit of the first two items, a rule and feedback for them, and history naming item 0 and a gone item. */
+  /** Adds an outfit of the first two items, a rule and feedback for them, history naming item 0 and a gone item, and item 0's
+   * tag history (syntheticHistory). */
   extras?: boolean };
 
 const stamp = '2026-09-20T10:00:00+00:00';
 // Deterministic IDs within one backup, distinct between backups (the export ID seeds them).
 export const syntheticId = (exportId: string, group: number, n: number) =>
   `${exportId.slice(0, 8)}-${group.toString(16).padStart(4, '0')}-4000-8000-${n.toString(16).padStart(12, '0')}`;
+
+// Item 0's tag history in backup order: one entry for its first photo, one whose photo is not in the backup.
+export const syntheticHistory = (exportId: string) => [
+  { position: 0, source_image_id: syntheticId(exportId, 2, 0), image_sha256: 'e'.repeat(64), model_id: 'fictional-model', prompt_version: 1,
+    fields: { category: { kind: 'ai_observed', revision: 1 } } },
+  { position: 1, source_image_id: null, image_sha256: 'f'.repeat(64), model_id: 'fictional-model', prompt_version: 2,
+    fields: { colours: { kind: 'ai_observed', revision: 1 } } },
+];
 
 function row(owner: string, table: SavedTable, values: Record<string, unknown>) {
   const known: readonly string[] = savedColumns[table];
@@ -49,7 +59,9 @@ export async function syntheticMetadata(backup: SyntheticBackup): Promise<SavedM
       profiles: [row(owner, 'profiles', { display_name: 'Fictional', ui_language: 'fi', timezone: 'Europe/Helsinki', currency: 'EUR',
         created_at: stamp, updated_at: stamp, version: 1 })],
       style_preferences: [row(owner, 'style_preferences', { preferred_colours: ['red'], style_tags: [], excluded_categories: [], created_at: stamp, updated_at: stamp, version: 1 })],
-      items, item_images: images, item_attributions: [],
+      items, item_images: images,
+      item_attributions: extras ? syntheticHistory(exportId).map(entry => ({ owner_id: owner, item_id: first, ...entry,
+        source_image_excluded: entry.source_image_id === null })) : [],
       outfits: extras ? [row(owner, 'outfits', { id: outfit, title: 'Fictional outfit', occasion: 'everyday', notes: '', favourite: false, deleted_at: null,
         created_at: stamp, updated_at: stamp, version: 1 })] : [],
       outfit_items: extras ? [row(owner, 'outfit_items', { outfit_id: outfit, item_id: first, position: 0 }),

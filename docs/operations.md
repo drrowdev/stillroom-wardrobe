@@ -72,9 +72,12 @@ builders don't reset or provision the shared local stack). It:
    regenerated thumbnail use the planned hash) and **actual** (downloaded from
    Storage through A's normal session).
 5. Checks the expected per-table differences: mapped IDs owned by A, the retired
-   chain, descriptions, field provenance and manual clears. Saved attribution
-   history is not restored (Q5): A's `item_attribution_history` stays empty, a
-   recorded gap rather than a pass.
+   chain, descriptions, field provenance and manual clears. Saved tag
+   history is restored (Q5, P6d) and compared three ways too: the source history,
+   the backup manifest's `item_attributions` and A's `item_attribution_history_v2`,
+   where every restored entry is labelled `imported`. A's legacy
+   `item_attribution_history` stays empty, because it returns only history the
+   server recorded. A re-export of A carries the same imported history.
 6. Restores the **same** backup a second time into A. Every item is already present,
    and rows, versions and Storage objects are unchanged, with no uploads or save
    reservations.

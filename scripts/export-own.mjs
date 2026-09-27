@@ -186,10 +186,16 @@ function snapshotSource(context) {
       return data;
     },
     attribution: async (itemId, signal) => {
-      const { data, error, status } = await context.client.rpc('item_attribution_history', { p_item_id: itemId }).abortSignal(signal);
+      const { data, error, status } = await context.client.rpc('item_attribution_history_v2', { p_item_id: itemId }).abortSignal(signal);
       if (signal.aborted) refuse('cancelled');
       // The item left the saved set (Trash or deletion) after the snapshot.
       if (error?.code === '42501') throw new BackupFormatError('changed');
+      if (error) rpcFailure(context, error, status);
+      return data;
+    },
+    digest: async (signal) => {
+      const { data, error, status } = await context.client.rpc('attribution_digest').abortSignal(signal);
+      if (signal.aborted) refuse('cancelled');
       if (error) rpcFailure(context, error, status);
       return data;
     },
@@ -465,7 +471,8 @@ const decryptOrRefuse = async (text, passphrase, staging) => {
 async function checkPhotoPart(prepared, index, text, passphrase, staging) {
   const part = await decryptOrRefuse(text, passphrase, staging);
   const expected = prepared.plan[index - 1];
-  if (part.exportId !== prepared.exportId || part.partIndex !== index || part.partCount !== prepared.partCount
+  if (part.schemaVersion !== prepared.metadata.schema_version || part.exportId !== prepared.exportId || part.partIndex !== index
+    || part.partCount !== prepared.partCount
     || part.manifestSha256 !== prepared.manifestSha256 || Object.hasOwn(part, 'manifest') || part.files.length !== expected.length) refuse('conflict', staging);
   for (let position = 0; position < expected.length; position++) {
     const file = part.files[position], ref = expected[position];
@@ -520,7 +527,8 @@ async function resume(context, exportId, ownerId, passphrase) {
   if (head.partIndex !== 0 || !Object.hasOwn(head, 'manifest') || head.files.length || head.exportId !== exportId) refuse('conflict', label);
   const metadata = head.manifest;
   try { assertMetadata(metadata); } catch { refuse('conflict', label); }
-  if (metadata.export_id !== exportId) refuse('conflict', label);
+  // A backup started as version 2 is finished as version 2: parts keep the version and digest of its own part 0.
+  if (metadata.schema_version !== head.schemaVersion || metadata.export_id !== exportId) refuse('conflict', label);
   if (metadata.owner_id !== ownerId) refuse('conflict', label);
   let digest, prepared;
   try { digest = await metadataDigest(metadata); prepared = fromMetadata(metadata, digest); } catch { refuse('conflict', label); }

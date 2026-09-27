@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { assertMetadata } from '../../src/domain/export-format';
 import { parseGarmentValues } from '../../src/domain/garment-fields';
 import { occasions } from '../../src/domain/outfits';
 import { flatJpeg } from '../fixtures/restore-jpeg-fixtures';
@@ -14,5 +15,8 @@ describe('restore-own synthetic backup', () => {
     expect(items).toHaveLength(2);
     for (const row of items!) expect(() => parseGarmentValues(row)).not.toThrow();
     for (const outfit of outfits!) expect(occasions).toContain(outfit.occasion);
+    // Version 2 tag history, as the app's own Check reads it (P6d).
+    expect(() => assertMetadata(metadata)).not.toThrow();
+    expect(metadata.tables.item_attributions).toHaveLength(2);
   });
 });

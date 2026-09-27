@@ -27,7 +27,8 @@ export function photoBytes(seed: number, length: number): Uint8Array {
   return bytes;
 }
 
-export type ParityWorld = { raw: Row; objects: Map<string, Uint8Array>; attributions: Map<string, unknown> };
+// `digest` is what attribution_digest returns; `attributions` what item_attribution_history_v2 returns per item.
+export type ParityWorld = { raw: Row; objects: Map<string, Uint8Array>; attributions: Map<string, unknown>; digest: string };
 
 export function parityWorld(itemCount = 26, mainBytes = 512_000, thumbBytes = 61_440): ParityWorld {
   const objects = new Map<string, Uint8Array>();
@@ -73,9 +74,9 @@ export function parityWorld(itemCount = 26, mainBytes = 512_000, thumbBytes = 61
     },
   };
   const attributions = new Map<string, unknown>(items.filter(item => item.deleted_at === null).map(item => [String(item.id), []]));
-  attributions.set(first, [{ source_image_id: parityId(3, 900), image_sha256: images.find(image => image.id === parityId(3, 900))!.main_sha256,
+  attributions.set(first, [{ origin: 'recorded', source_image_id: parityId(3, 900), image_sha256: images.find(image => image.id === parityId(3, 900))!.main_sha256,
     model_id: 'synthetic-model', prompt_version: 3, fields: { category: 'top' } }]);
-  return { raw, objects, attributions };
+  return { raw, objects, attributions, digest: sha256('synthetic attribution digest') };
 }
 
 // The subset of the supabase-js surface that src/data/export.ts calls.
@@ -86,7 +87,8 @@ export function parityClient(world: ParityWorld, calls: string[] = []) {
         calls.push(name);
         if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
         if (name === 'export_manifest') return { data: { ...world.raw, export_id: args.p_export_id }, error: null };
-        if (name === 'item_attribution_history') {
+        if (name === 'attribution_digest') return { data: world.digest, error: null };
+        if (name === 'item_attribution_history_v2') {
           const value = world.attributions.get(String(args.p_item_id));
           return value === undefined ? { data: null, error: { code: '42501' } } : { data: value, error: null };
         }

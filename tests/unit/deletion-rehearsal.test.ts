@@ -120,6 +120,13 @@ describe('deletion rehearsal guards', () => {
       'REHEARSAL_D_EMAIL', 'REHEARSAL_D_PASSWORD', 'REHEARSAL_PUBLISHABLE_KEY', 'REHEARSAL_URL']);
   });
 
+  it('checks the owner tables of the latest deletion_owner_rows_absent, including restored tag history (P6d)', async () => {
+    const tables = await rehearsal.ownerTables(realFs, ROOT);
+    expect(tables).toContain('private.imported_attribution_history');
+    expect(tables).toContain('public.items');
+    expect(new Set(tables).size).toBe(tables.length);
+  });
+
   it('has exactly one process-spawn site and no shell helpers', () => {
     expect(SOURCE.match(/\bspawnImpl\(/g)).toHaveLength(1);
     expect(SOURCE.match(/\bspawn\b/g)).toHaveLength(2);

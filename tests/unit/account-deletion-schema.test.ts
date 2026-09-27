@@ -22,7 +22,14 @@ describe('account deletion migration', () => {
       }
     }
     owned.delete('private.deletion_jobs');
-    const absent = between(await read(NAME), 'create function private.deletion_owner_rows_absent', '$$;\n');
+    // The latest definition in migration order is the one in effect; P6d replaces P6c's with the same signature.
+    let absent = '';
+    for (const name of names) {
+      const sql = await read(name);
+      const at = sql.search(/create (?:or replace )?function private\.deletion_owner_rows_absent\(/);
+      if (at >= 0) absent = sql.slice(at, sql.indexOf('$$;\n', sql.indexOf('as $$', at) + 5));
+    }
+    expect(absent).toContain('private.imported_attribution_history');
     const checked = new Set([...absent.matchAll(/from ((?:public|private)\.\w+) where owner_id=p_owner/g)].map((match) => match[1]!));
     expect([...checked].sort()).toEqual([...owned].sort());
   });

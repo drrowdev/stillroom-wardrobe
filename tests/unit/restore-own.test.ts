@@ -29,7 +29,7 @@ const token = (sub: string) => `h.${Buffer.from(JSON.stringify({ role: 'authenti
 type Result = ReturnType<typeof emptyResult>;
 function emptyResult() {
   return { restored: 0, same: 0, conflicts: 0, trash: 0, failed: 0, blocked: 0, deferred: 0, outfits: 0, outfitConflicts: 0, history: 0,
-    historyConflicts: 0, photos: [] as { sourceImageId: string; outcome: string; planned: unknown; stored: unknown }[] };
+    historyConflicts: 0, attributions: 0, attributionsKept: 0, photos: [] as { sourceImageId: string; outcome: string; planned: unknown; stored: unknown }[] };
 }
 function world(options: { sourceOwner?: string; account?: string; result?: Partial<Result>; run?: (client: { rpc: (name: string) => Promise<unknown> }) => Promise<Result>; preflight?: () => Promise<unknown>;
   worker?: () => Promise<unknown>; drift?: boolean } = {}) {
@@ -274,6 +274,8 @@ describe('restore-own outcome', () => {
   it('separates complete, kept, retry and blocked', () => {
     expect(outcomeOf(emptyResult())).toEqual({ code: EXIT.complete, message: 'Restore complete.' });
     expect(outcomeOf({ ...emptyResult(), conflicts: 1 }).code).toBe(EXIT.kept);
+    expect(outcomeOf({ ...emptyResult(), attributions: 2 }).code).toBe(EXIT.complete);
+    expect(outcomeOf({ ...emptyResult(), attributionsKept: 1 }).code).toBe(EXIT.kept);
     expect(outcomeOf({ ...emptyResult(), failed: 1 }).code).toBe(EXIT.retry);
     expect(outcomeOf({ ...emptyResult(), deferred: 1 }).code).toBe(EXIT.retry);
     const blocked = outcomeOf({ ...emptyResult(), blocked: 2, deferred: 3, failed: 1,

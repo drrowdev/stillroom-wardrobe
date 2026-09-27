@@ -175,8 +175,8 @@ photos, outfits and history to the signed-in account.
   dependants instead (above). History uses the
   checked `restore_history_entry` RPC.
 - Not restored: profile and style preferences, `weather_enabled`, AI consent,
-  analysis drafts, requests, results, receipts and attribution history. The
-  preview says tag history isn't restored.
+  analysis drafts, requests, results and receipts. Tag history was not restored
+  by P6b; P6d (below) adds it.
 - Limits (R2): selection is bounded by the P6a `BACKUP_LIMITS`
   (400 parts, 40 MiB per part, 7.5 GiB encrypted in total); the 4 GiB decoded
   photo total is enforced during verification. v1 inputs keep the v1 ID
@@ -639,3 +639,54 @@ delete the lock, and run again.
 - Chromium's sandbox and the hung-renderer cleanup run on the CI Linux runners
   only (Linux `/proc`); locally on Windows they are skipped.
 - No hosted run; the first hosted restore is the owner's own.
+
+# P6d tag-history restore (Q5; hosted apply owner-gated)
+
+Status: **engineering in review.** The owner decided Q5
+([#54 c5853455574](https://github.com/drrowdev/stillroom-wardrobe/pull/54#issuecomment-5853455574)):
+a restored item comes back as it was before the deletion, including its saved
+tag history. Tier A, under plan rev1 (`C2F3F59F`) and rev2 (`E9E1309B`) with the
+coordinator's three binding amendments (busy contract, check before any write,
+export resume version). Phase 6 acceptance is not claimed.
+
+- Base: `76f55cc7` (origin/main).
+- Migration `20260927090000_restore_attribution.sql`. **Not additive**: it
+  adds `private.imported_attribution_history`, `private.backup_bounded`,
+  `restore_item_attribution`, `item_attribution_history_v2` and
+  `attribution_digest`, and replaces P6c's `private.deletion_owner_rows_absent`
+  (same signature) so account deletion also checks the new table. It refuses to
+  run without P6c. Hosted apply needs owner approval of the exact bodies, then a
+  body/ACL/owner/search_path read-back.
+- Origin (Q1): imported claims stay apart from server-recorded attribution. The
+  v2 projection labels each entry `imported` or `recorded` from the table it is
+  stored in; the legacy 5-key projection is unchanged and returns only recorded
+  history (canonical equality is checked on initial-only, replacement-only,
+  combined and forgotten-photo fixtures).
+- Backups are format version 3 and carry the origin. A resumed version 2 export
+  keeps version 2 and its digest; metadata and parts must share one version.
+  Version 1/2 history restores as imported and keeps its restore ID namespace.
+  Export refuses a snapshot whose tag history changed while it was read
+  (`attribution_digest`), without touching item versions.
+- Existing history is never changed (Q2): the same import again is `equal`; a
+  different import, differing entries or history recorded since are kept and
+  reported as not applied. Lock contention is busy and retried, never kept.
+- Check validates every entry (field types, 64-hex hashes, contiguous 0-based
+  positions, v3 origins and the export bounds) before any write; a malformed
+  entry refuses the whole backup with zero writes.
+- Both the browser restore and `restore-own` restore tag history; the preview
+  and report say restored history is labelled as imported.
+- Tests: unit (format, bounds, resume version, digest change), browser
+  (`restore.spec.ts` P6d), integration (I26 drill, `restore-own.spec.ts`), the
+  preservation rehearsal (`attribution-restore.sessions.mjs`: structure
+  read-back, v2 versus legacy, genuine export-restore-reexport, a genuine
+  replacement after an import, a second-generation restore, concurrent imports
+  and an import racing a completion), the isolation audit and the deletion
+  rehearsal (C's imported history removed, D's unchanged, a frozen owner's import
+  refused). The database suites run in CI only.
+
+## Pending
+
+- GPT-6 Astra code review, green exact-head CI and coordinator visual review of
+  any restore captures.
+- Owner approval and hosted apply of the migration, then an owner-run Pages
+  deploy.

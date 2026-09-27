@@ -1,7 +1,8 @@
 // Normal-session child for the P6c deletion rehearsal. It receives only the rehearsal API URL, the
 // publishable key and two fictional passwords; it never sees a service key or any Docker setting.
-//   seed:   owners C and D each save two items with photos and one outfit; both are refused the service RPCs.
-//   verify: C can no longer sign in; D still signs in and reads its own items and photos.
+//   seed:   owners C and D each save two items with photos, one outfit and two restored (imported) tag-history
+//           entries on the first item; both are refused the service RPCs.
+//   verify: C can no longer sign in; D still signs in and reads its own items, photos and imported tag history.
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 import { isMain } from '../../scripts/quality/files.mjs';
@@ -38,9 +39,14 @@ async function signIn(env, label) {
   return result.ok && typeof result.data?.access_token === 'string' ? { token: result.data.access_token, uid: result.data.user.id } : null;
 }
 
+const importedEntries = (imageId) => [
+  { position: 0, source_image_id: imageId, image_sha256: 'a'.repeat(64), model_id: 'rehearsal-model', prompt_version: 1, fields: { category: 'top' } },
+  { position: 1, source_image_id: null, image_sha256: 'b'.repeat(64), model_id: 'rehearsal-model', prompt_version: 2, fields: { colours: ['navy'] } },
+];
+
 async function seedOwner(env, owner) {
   const rpc = (name, body) => request(env, owner.token, `/rest/v1/rpc/${name}`, { method: 'POST', body });
-  const items = [];
+  const items = [], images = [];
   for (let n = 0; n < 2; n += 1) {
     phase = `seed-item-${n}`;
     const value = intent();
@@ -55,7 +61,11 @@ async function seedOwner(env, owner) {
       p_fingerprint: reserved.data[0].fingerprint });
     need(finalized.ok);
     items.push(value.p_item.id);
+    images.push(value.p_image.id);
   }
+  phase = 'seed-imported-history';
+  const restored = await rpc('restore_item_attribution', { p_item_id: items[0], p_import_id: randomUUID(), p_entries: importedEntries(images[0]) });
+  need(restored.ok && restored.data?.state === 'created');
   phase = 'seed-outfit';
   const outfit = await rpc('save_outfit', { p_id: randomUUID(), p_title: 'Fictional rehearsal outfit', p_item_ids: items,
     p_occasion: '', p_notes: '', p_favourite: false });
@@ -97,7 +107,13 @@ async function main() {
         need(photo.ok && photo.length > 0);
       }
     }
-    console.log('PASS: deleted owner cannot sign in; control owner keeps its items and photos');
+    phase = 'verify-control-history';
+    const history = await Promise.all(items.data.map((item) => request(env, d.token, '/rest/v1/rpc/item_attribution_history_v2',
+      { method: 'POST', body: { p_item_id: item.id } })));
+    need(history.every((reply) => reply.ok && Array.isArray(reply.data)));
+    const entries = history.flatMap((reply) => reply.data);
+    need(entries.length === 2 && entries.every((entry) => entry.origin === 'imported' && entry.model_id === 'rehearsal-model'));
+    console.log('PASS: deleted owner cannot sign in; control owner keeps its items, photos and imported tag history');
   } catch {
     console.error(`FAIL: deletion rehearsal normal sessions; phase=${phase}; no private details logged`);
     process.exitCode = 1;

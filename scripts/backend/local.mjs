@@ -292,6 +292,7 @@ export function describeStartupOrResetFailure(result, elapsedMs) {
     '20260925110000_restore_item_save.sql',
     '20260925120000_account_deletion.sql',
     '20260925120100_deletion_receipt_purge_schedule.sql',
+    '20260927090000_restore_attribution.sql',
   ];
   let lastAnnouncement = -1;
   for (const [index, filename] of migrations.entries()) {

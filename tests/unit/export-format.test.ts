@@ -84,11 +84,12 @@ async function rawManifest(): Promise<RawManifest> {
   };
   return readRawManifest({ schema_version: 2, export_id: exportId, owner_id: owner, created_at: stamp, tables }, owner, exportId);
 }
-const history = (source: string | null, hash: string) => ({ source_image_id: source, image_sha256: hash, model_id: 'model-x', prompt_version: 2, fields: { title: 'X' } });
+const history = (source: string | null, hash: string, origin = 'recorded') => ({ origin, source_image_id: source, image_sha256: hash, model_id: 'model-x',
+  prompt_version: 2, fields: { title: 'X' } });
 async function saved(): Promise<SavedMetadata> {
   const hash = await sha256Hex(jpeg);
   return projectSaved(await rawManifest(), new Map<string, unknown>([
-    [A, [history(uuid(11), hash), history(uuid(16), hash), history(uuid(14), hash)]],
+    [A, [history(uuid(11), hash, 'imported'), history(uuid(16), hash), history(uuid(14), hash)]],
     [B, [history(null, hash)]],
   ]));
 }
@@ -143,7 +144,8 @@ describe('saved-only projection', () => {
     const rows = (await saved()).tables.item_attributions;
     expect(rows.map(row => [row.item_id, row.position, row.source_image_id, row.source_image_excluded])).toEqual([
       [A, 0, uuid(11), false], [A, 1, null, true], [A, 2, null, true], [B, 0, null, true]]);
-    expect(rows[0]).toMatchObject({ model_id: 'model-x', prompt_version: 2, fields: { title: 'X' } });
+    expect(rows[0]).toMatchObject({ model_id: 'model-x', prompt_version: 2, fields: { title: 'X' }, origin: 'imported' });
+    expect(rows.map(row => row.origin)).toEqual(['imported', 'recorded', 'recorded', 'recorded']);
     expect(Object.keys(rows[0]!).sort()).toEqual([...savedColumns.item_attributions].sort());
   });
   it('marks a source photo that was already removed and keeps what was recorded about it', async () => {
@@ -179,7 +181,7 @@ async function parts(meta: SavedMetadata, bytes: Uint8Array | ((ref: FileRef) =>
   const digest = await metadataDigest(meta);
   const plan = planParts(meta);
   const count = plan.length + 1;
-  const base = { format: 'stillroom-export', schemaVersion: 2, exportId, partCount: count, manifestSha256: digest } as const;
+  const base = { format: 'stillroom-export', schemaVersion: meta.schema_version, exportId, partCount: count, manifestSha256: digest } as const;
   const out: ExportPart[] = [{ ...base, partIndex: 0, manifest: meta, files: [] }];
   plan.forEach((refs, index) => out.push({ ...base, partIndex: index + 1, files: refs.map(ref => ({ imageId: ref.imageId, variant: ref.variant,
     sha256: ref.sha256, byteLength: ref.byteLength, mime: 'image/jpeg', base64: toBase64(typeof bytes === 'function' ? bytes(ref) : bytes) })) }));
@@ -277,5 +279,81 @@ describe('encrypted parts', { timeout: 60_000 }, () => {
     const huge = structuredClone(meta);
     huge.tables.items = Array.from({ length: 1100 }, (_, n) => ({ ...meta.tables.items[0]!, id: uuid(1000 + n), notes: 'x'.repeat(8000) }));
     expect(problem(await metadataDigest(huge).catch(error => error))).toBe('tooLarge');
+  });
+});
+
+// P6d: the same bounds and entry checks in export, restore's Check and restore_item_attribution.
+describe('tag history in saved metadata (P6d)', { timeout: 60_000 }, () => {
+  type Entry = SavedMetadata['tables']['item_attributions'][number];
+  const withEntry = async (change: (entry: Entry) => void) => {
+    const meta = await saved();
+    change(meta.tables.item_attributions.find(row => row.item_id === B)!);
+    return meta;
+  };
+  const accepts = async (change: (entry: Entry) => void) => { assertMetadata(await withEntry(change)); return true; };
+  const verdict = (meta: unknown) => { try { assertMetadata(meta); return 'accepted'; } catch (error) { return problem(error); } };
+  const refuses = async (change: (entry: Entry) => void) => verdict(await withEntry(change));
+
+  it('accepts what export can write back: 73,801 JSON bytes of fields and 4,096 astral characters', async () => {
+    const wide = Object.fromEntries([...'abcdefghi'].map(key => [key, 'x'.repeat(8192)]));
+    const fields = { ...wide, j: 'xx' };
+    expect(new TextEncoder().encode(JSON.stringify(fields)).length).toBe(73_801);
+    expect(await accepts(entry => { entry.fields = fields; })).toBe(true);
+    expect(await accepts(entry => { entry.fields = { title: '\u{1F455}'.repeat(4096) }; })).toBe(true);
+    expect(await accepts(entry => { entry.fields = { ['k'.repeat(64)]: 1, text: 'Pellava – linne ✓' }; })).toBe(true);
+  });
+  it('refuses what export could not write back: long strings, astral overflow, depth, keys and unstorable text', async () => {
+    let nested: unknown = 1;
+    for (let level = 0; level < 9; level++) nested = { n: nested };
+    expect(await accepts(entry => { entry.fields = nested as Record<string, unknown>; })).toBe(true);
+    const tooDeep = { n: nested };
+    for (const [name, fields] of [
+      ['8,193 characters', { title: 'x'.repeat(8193) }], ['4,097 astral characters', { title: '\u{1F455}'.repeat(4097) }],
+      ['depth 13', tooDeep], ['65 keys', Object.fromEntries(Array.from({ length: 65 }, (_, n) => [`k${n}`, 1]))],
+      ['a 65-character key', { ['k'.repeat(65)]: 1 }], ['a NUL character', { title: 'a\u0000b' }], ['a lone surrogate', { title: '\ud800' }],
+    ] as const) expect([name, await refuses(entry => { entry.fields = fields as Record<string, unknown>; })]).toEqual([name, 'invalid']);
+  });
+  it('refuses malformed entries: hash, model, prompt version, fields, positions and origin', async () => {
+    for (const [name, bad] of [['a hash that is not a hash', { image_sha256: 'invalid' }], ['an upper-case hash', { image_sha256: 'A'.repeat(64) }],
+      ['a model that is not text', { model_id: 42 }], ['a negative prompt version', { prompt_version: -1 }],
+      ['a fractional prompt version', { prompt_version: 1.5 }], ['fields that are a list', { fields: [] }], ['fields that are null', { fields: null }],
+      ['a lone entry at position 2', { position: 2 }], ['position 1000', { position: 1000 }], ['an unknown origin', { origin: 'server' }],
+      ] as const) {
+      expect([name, await refuses(entry => { Object.assign(entry, bad); })]).toEqual([name, 'invalid']);
+    }
+    expect(await refuses(entry => { delete (entry as Row).origin; })).toBe('invalid');
+    const meta = await saved();
+    const rows = meta.tables.item_attributions;
+    const gap = structuredClone(meta);
+    gap.tables.item_attributions = rows.filter(row => !(row.item_id === A && row.position === 1));
+    expect(verdict(gap)).toBe('invalid');
+    const duplicate = structuredClone(meta);
+    duplicate.tables.item_attributions = [...rows.slice(0, 2), { ...rows[1]! }, ...rows.slice(2)];
+    expect(verdict(duplicate)).toBe('invalid');
+    expect(verdict(meta)).toBe('accepted');
+  });
+  it('reads version 2 metadata without origin and refuses version 2 with an origin column or version 3 without one', async () => {
+    const meta = await saved();
+    const v2 = structuredClone(meta) as unknown as { schema_version: number; tables: { item_attributions: Row[] } };
+    v2.schema_version = 2;
+    for (const row of v2.tables.item_attributions) delete row.origin;
+    expect(() => assertMetadata(v2)).not.toThrow();
+    const v2WithOrigin = structuredClone(meta) as unknown as { schema_version: number };
+    v2WithOrigin.schema_version = 2;
+    expect(() => assertMetadata(v2WithOrigin)).toThrow(BackupFormatError);
+    const v3WithoutOrigin = structuredClone(v2) as { schema_version: number };
+    v3WithoutOrigin.schema_version = 3;
+    expect(() => assertMetadata(v3WithoutOrigin)).toThrow(BackupFormatError);
+    expect(meta.schema_version).toBe(3);
+  });
+  it('refuses a backup whose parts do not all have the metadata version', async () => {
+    const meta = await saved();
+    const texts = await parts(meta);
+    expect(await verifyParts(texts, passphrase, noJpegCheck)).toMatchObject({ parts: 2 });
+    const head = await decryptPart(texts[0]!, passphrase), photos = await decryptPart(texts[1]!, passphrase);
+    const olderPhotos = JSON.stringify(await encryptPart({ ...photos, schemaVersion: 2 }, passphrase));
+    expect(problem(await verifyParts([texts[0]!, olderPhotos], passphrase, noJpegCheck).catch(error => error))).toBe('invalid');
+    const olderHead = JSON.stringify(await encryptPart({ ...head, schemaVersion: 2 }, passphrase));
+    expect(problem(await verifyParts([olderHead, texts[1]!], passphrase, noJpegCheck).catch(error => error))).toBe('invalid');
   });
 });
