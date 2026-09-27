@@ -65,6 +65,13 @@ export const EXPOSED_RPCS = Object.freeze([
   fn('attribution_digest', '', []),
   fn('stylist_status', '', []),
   fn('stylist_set_consent', 'boolean, integer', ['p_enabled', 'p_notice_revision']),
+  fn('reserve_restored_item_save_v2', 'jsonb, jsonb, uuid, text', ['p_item', 'p_image', 'p_import_id', 'p_mode']),
+  fn('reserve_restored_image_change', 'jsonb, uuid, text', ['p_intent', 'p_import_id', 'p_mode']),
+  fn('restore_image_provenance', 'uuid, uuid, uuid, jsonb', ['p_item_id', 'p_image_id', 'p_import_id', 'p_entry']),
+  fn('image_provenance_v1', '', []),
+  fn('image_provenance_digest_v1', '', []),
+  fn('enhance_status', '', []),
+  fn('enhance_set_consent', 'boolean, integer', ['p_enabled', 'p_notice_revision']),
 ]);
 
 // Public functions reachable only with service credentials (Edge/operator) or only by the database owner (scheduled
@@ -86,6 +93,13 @@ export const SERVICE_ONLY_RPCS = Object.freeze([
   fn('stylist_finish', 'uuid, uuid, text, jsonb', ['p_owner_id', 'p_request_id', 'p_code', 'p_usage']),
   fn('stylist_expire_due', 'integer', ['p_limit']),
   fn('stylist_direct_allocation', 'uuid, bigint, bigint', ['p_owner_id', 'p_allocation_micro', 'p_expected_total_micro']),
+  fn('enhance_claim', 'uuid, uuid, text, text, uuid', ['p_owner_id', 'p_request_id', 'p_manifest_id', 'p_input_sha256', 'p_probe_id']),
+  fn('enhance_finish', 'uuid, uuid, text, jsonb, text, integer',
+    ['p_owner_id', 'p_request_id', 'p_code', 'p_usage', 'p_output_sha256', 'p_output_bytes']),
+  fn('enhance_expire_due', 'integer', ['p_limit']),
+  fn('enhance_probe_authorise', 'uuid, uuid, text, integer, bigint, text, timestamp with time zone',
+    ['p_id', 'p_owner_id', 'p_manifest_id', 'p_max_calls', 'p_allocation_micro', 'p_approval_ref', 'p_expires_at']),
+  fn('enhance_provider_control', 'text, boolean, text', ['p_deployment_key', 'p_enabled', 'p_reason']),
 ]);
 
 // Private helpers that RLS/Storage policies evaluate as `authenticated`; their bodies are pinned to migrations.
@@ -124,6 +138,13 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'stylist_permission(public.profiles, private.ai_controls)', 'stylist_azure_usage(jsonb, private.ai_execution_manifests)',
   'stylist_expire(uuid, timestamp with time zone, integer)', 'stylist_usage(uuid, timestamp with time zone)',
   'stylist_replay(private.ai_usage_evidence, private.ai_usage, public.profiles, private.ai_controls)',
+  'enhance_allowance_clamp()', 'restore_marker_immutable()', 'enhancement_admission()', 'enhancement_attach()',
+  'restore_marker(uuid, uuid, uuid, uuid, text, text, uuid, text)', 'image_provenance_rows(uuid)',
+  'enhance_permission(public.profiles, private.ai_controls)',
+  'enhance_probe_permission(public.profiles, private.ai_controls, private.enhancement_probe_authorisations, timestamp with time zone)',
+  'enhance_azure_usage(jsonb, private.ai_execution_manifests)', 'enhance_expire(uuid, timestamp with time zone, integer)',
+  'enhance_usage(uuid, timestamp with time zone)',
+  'enhance_replay(private.ai_usage_evidence, private.ai_usage, public.profiles, private.ai_controls, private.enhancement_probe_authorisations, timestamp with time zone)',
 ]);
 
 // Supabase-provided GraphQL entrypoint; its privileges are provider-managed and recorded, not asserted.
@@ -151,6 +172,8 @@ export const PRIVATE_TABLES = Object.freeze([
   'ai_save_used_receipts', 'ai_item_save_attempts', 'ai_item_save_context', 'item_attribution_history',
   'item_image_used_ids', 'item_deletion_claims', 'image_change_attempts', 'image_change_context',
   'image_change_history', 'item_deletion_operations', 'item_deletion_targets', 'imported_attribution_history',
+  'provider_capacity', 'provider_deployments', 'provider_slots', 'image_enhancements', 'enhancement_outputs', 'image_provenance',
+  'image_enhancement_bindings', 'restore_image_markers', 'enhancement_probe_authorisations',
 ]);
 const OWNER_EXPRESSION = '(private.is_approved() AND (owner_id = ( SELECT auth.uid() AS uid)))';
 export const OWNER_POLICIES = Object.freeze([
@@ -446,6 +469,13 @@ export const COVERAGE_REQUIREMENTS = Object.freeze({
   restore_item_attribution: req(['item', 'image'], { alternatives: true }),
   item_attribution_history_v2: req(['item', 'changeItem'], { alternatives: true }),
   attribution_digest: req([], { ownerOnly: true }),
+  reserve_restored_item_save_v2: req([], { collision: true }),
+  reserve_restored_image_change: req(['freeItem', 'freeCurrent'], { tuple: true }),
+  restore_image_provenance: req(['provItem', 'provImage'], { alternatives: true }),
+  image_provenance_v1: req([], { ownerOnly: true }),
+  image_provenance_digest_v1: req([], { ownerOnly: true }),
+  enhance_status: req([], { ownerOnly: true }),
+  enhance_set_consent: req([], { ownerOnly: true }),
 });
 const DIRECTIONS = [['A', 'B'], ['B', 'A']];
 const TAG = /^(?:anon|normal-[AB]|[AB]:control|[AB]>[AB]:(?:owner-only|mixed|collision|unverified|tuple|ref:[A-Za-z]+))$/;
@@ -551,6 +581,8 @@ export const ACCEPTED_ORACLES = Object.freeze({
     'peer-owned item ID returns 400/22023; a new ID reserves (200)'),
   'reserve_restored_item_save p_item.id': residual({ status: 400, code: '22023', message: 'Request conflict' }, { status: 200 },
     'peer-owned item ID returns 400/22023; a new ID reserves a restored save (200)'),
+  'reserve_restored_item_save_v2 p_item.id': residual({ status: 400, code: '22023', message: 'Request conflict' }, { status: 200 },
+    'peer-owned item ID returns 400/22023; a new ID reserves a restore-only v2 save (200)'),
   'Storage DELETE object': pinned({ status: 400, code: 'AccessDenied', message: 'Access denied' },
     { status: 400, code: 'NoSuchKey', message: 'Object not found' },
     'peer-owned object path returns 400/AccessDenied; a nonexistent path returns 400/NoSuchKey',
@@ -575,6 +607,8 @@ export const TAKEN_ID_SURFACES = Object.freeze({
   'reserve_item_save p_item.id (plain item)': takenSurface('reserve_item_save p_item.id', conflictOf('22023'), { status: 200 }),
   'reserve_restored_item_save p_item.id (save attempt)': takenSurface('reserve_restored_item_save p_item.id', conflictOf('22023'), { status: 200 }),
   'reserve_restored_item_save p_item.id (plain item)': takenSurface('reserve_restored_item_save p_item.id', conflictOf('22023'), { status: 200 }),
+  'reserve_restored_item_save_v2 p_item.id (save attempt)': takenSurface('reserve_restored_item_save_v2 p_item.id', conflictOf('22023'), { status: 200 }),
+  'reserve_restored_item_save_v2 p_item.id (plain item)': takenSurface('reserve_restored_item_save_v2 p_item.id', conflictOf('22023'), { status: 200 }),
   'REST items id': takenSurface('REST items id', duplicateOf('items_pkey'), { status: 201, data: null }),
   'REST outfits id': takenSurface('REST outfits id', duplicateOf('outfits_pkey'), { status: 201, data: null }),
   'REST wear_events id': takenSurface('REST wear_events id', duplicateOf('wear_events_pkey'), { status: 201, data: null }),

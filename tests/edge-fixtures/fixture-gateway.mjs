@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 export const UPSTREAM_PORT = 8000;
 export const INGRESS_PORT = 8081;
 export const MAX_BODY_BYTES = 1024 * 1024;
-/** Routes the fixture analyze-clothing and stylist-chat runtime may reach, exact raw request target. */
+/** Routes the fixture analyze-clothing, stylist-chat and enhance-photo runtime may reach, exact raw request target. */
 export const ALLOWED_ROUTES = Object.freeze([
   'GET /auth/v1/user',
   'POST /rest/v1/rpc/ai_status',
@@ -17,13 +17,20 @@ export const ALLOWED_ROUTES = Object.freeze([
   'POST /rest/v1/rpc/stylist_status',
   'POST /rest/v1/rpc/stylist_claim',
   'POST /rest/v1/rpc/stylist_finish',
+  'POST /rest/v1/rpc/enhance_status',
+  'POST /rest/v1/rpc/enhance_claim',
+  'POST /rest/v1/rpc/enhance_finish',
 ]);
 export const FORWARDED_HEADERS = Object.freeze(['authorization', 'apikey', 'content-type', 'content-length']);
 /** The only requests the host-side gate may send in, towards the fixture runtime. */
-export const INGRESS_ROUTES = Object.freeze(['POST /functions/v1/analyze-clothing', 'POST /functions/v1/stylist-chat']);
+export const INGRESS_ROUTES = Object.freeze(['POST /functions/v1/analyze-clothing', 'POST /functions/v1/stylist-chat',
+  'POST /functions/v1/enhance-photo']);
 export const INGRESS_HEADERS = Object.freeze([...FORWARDED_HEADERS,
   'x-stillroom-request-id', 'x-stillroom-draft-id', 'x-stillroom-generation']);
 export const INGRESS_TARGET = 'http://edge-runtime:9000';
+/** Response headers relayed back; the two enhancement headers carry only the released photo's hash and expiry. */
+export const RELAYED_RESPONSE_HEADERS = Object.freeze(['content-type', 'content-length', 'cache-control', 'x-content-type-options',
+  'vary', 'x-stillroom-enhancement-sha256', 'x-stillroom-enhancement-usable-until']);
 
 const SUSPICIOUS = [/\.\./, /\/\//, /%2e/i, /%2f/i, /%5c/i, /;/, /\\/];
 const header = (rawHeaders, name) => rawHeaders.filter((_, index) => index % 2 === 1
@@ -77,7 +84,7 @@ function relay(req, res, target, headers) {
     const status = relayedStatus(upstream.statusCode);
     const back = {};
     if (status === upstream.statusCode) {
-      for (const name of ['content-type', 'content-length', 'cache-control', 'x-content-type-options', 'vary']) {
+      for (const name of RELAYED_RESPONSE_HEADERS) {
         if (upstream.headers[name] !== undefined) back[name] = upstream.headers[name];
       }
     }

@@ -709,6 +709,49 @@ export type Database = {
         Returns: Json
       }
       deletion_status: { Args: never; Returns: Json }
+      enhance_claim: {
+        Args: {
+          p_input_sha256: string
+          p_manifest_id: string
+          p_owner_id: string
+          p_probe_id: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
+      enhance_expire_due: { Args: { p_limit: number }; Returns: Json }
+      enhance_finish: {
+        Args: {
+          p_code: string
+          p_output_bytes: number
+          p_output_sha256: string
+          p_owner_id: string
+          p_request_id: string
+          p_usage: Json
+        }
+        Returns: Json
+      }
+      enhance_probe_authorise: {
+        Args: {
+          p_allocation_micro: number
+          p_approval_ref: string
+          p_expires_at: string
+          p_id: string
+          p_manifest_id: string
+          p_max_calls: number
+          p_owner_id: string
+        }
+        Returns: Json
+      }
+      enhance_provider_control: {
+        Args: { p_deployment_key: string; p_enabled: boolean; p_reason: string }
+        Returns: Json
+      }
+      enhance_set_consent: {
+        Args: { p_enabled: boolean; p_notice_revision: number }
+        Returns: Json
+      }
+      enhance_status: { Args: never; Returns: Json }
       export_manifest: { Args: { p_export_id: string }; Returns: Json }
       finalize_item_save: {
         Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
@@ -727,6 +770,8 @@ export type Database = {
         Args: { p_item_id: string; p_request_id: string }
         Returns: Json
       }
+      image_provenance_digest_v1: { Args: never; Returns: string }
+      image_provenance_v1: { Args: never; Returns: Json }
       image_recovery_preflight: { Args: { p_intent: Json }; Returns: Json }
       image_recovery_versions: {
         Args: { p_after?: string; p_item_id: string }
@@ -809,8 +854,26 @@ export type Database = {
           state: string
         }[]
       }
+      reserve_restored_image_change: {
+        Args: { p_import_id: string; p_intent: Json; p_mode: string }
+        Returns: Json
+      }
       reserve_restored_item_save: {
         Args: { p_image: Json; p_item: Json }
+        Returns: {
+          fingerprint: string
+          image: Json
+          item: Json
+          state: string
+        }[]
+      }
+      reserve_restored_item_save_v2: {
+        Args: {
+          p_image: Json
+          p_import_id: string
+          p_item: Json
+          p_mode: string
+        }
         Returns: {
           fingerprint: string
           image: Json
@@ -831,6 +894,15 @@ export type Database = {
       }
       restore_image_change_status: {
         Args: { p_item_id: string; p_request_id: string }
+        Returns: Json
+      }
+      restore_image_provenance: {
+        Args: {
+          p_entry: Json
+          p_image_id: string
+          p_import_id: string
+          p_item_id: string
+        }
         Returns: Json
       }
       restore_item_attribution: {

@@ -33,6 +33,8 @@ const EDGE_RUNTIME_REPOS = Object.freeze(['public.ecr.aws/supabase/edge-runtime'
   'supabase/edge-runtime', 'docker.io/supabase/edge-runtime']);
 export const GATEWAY_MODE_OPTION = 'com.docker.network.bridge.gateway_mode_ipv4';
 export const REQUEST_PREFIX = 'e3b0';
+/** The immutable image deployment identity whose shared capacity the fixture opens and closes again. */
+export const ENHANCE_CAPACITY_KEY = 'stillroom-ai-eval/eval-image25-sunburst-20260908/2026-09-08';
 export const OPERATIONS = Object.freeze(['freeze', 'restore', 'count', 'verify-deleted', 'down', 'fence', 'unfence']);
 // The one fixture fence request (owner A only); its e3b0 prefix is swept by teardown.
 export const FENCE_REQUEST = 'e3b0af00-0000-4000-8000-000000000001';
@@ -211,7 +213,17 @@ update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.
   max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,result_ttl_seconds=3600,
   execution_manifest_id='azure-eu-terra-devtest-v2',stylist_activated=true,stylist_notice_revision=1,
   stylist_manifest_id='azure-eu-terra-stylist-v1',stylist_max_request_micro=129360,stylist_monthly_allowance_micro=10000000,
-  stylist_max_requests_per_hour=50 where ${where};`;
+  stylist_max_requests_per_hour=50,enhance_activated=true,enhance_notice_revision=1,
+  enhance_manifest_id='azure-global-image25-sunburst-enhance-v1',enhance_max_request_micro=300000,
+  enhance_monthly_allowance_micro=4000000,enhance_max_requests_per_hour=6 where ${where};
+-- The shared image capacity: eight dispatches per window for the fixture; teardown restores the exact snapshot.
+update private.provider_capacity set max_dispatch=8,dispatch_enabled=true,disabled_reason=null,disabled_at=null
+  where deployment_key=${literal(ENHANCE_CAPACITY_KEY)};`;
+const CAPACITY_ROW = `select to_jsonb(k)::text from private.provider_capacity k where deployment_key=${literal(ENHANCE_CAPACITY_KEY)};`;
+const capacityRestore = (row) => `update private.provider_capacity k set window_seconds=v.window_seconds,max_dispatch=v.max_dispatch,
+  dispatch_enabled=v.dispatch_enabled,disabled_reason=v.disabled_reason,disabled_at=v.disabled_at,updated_at=v.updated_at
+  from jsonb_populate_record(null::private.provider_capacity,${literal(JSON.stringify(row))}::jsonb) v
+  where k.deployment_key=v.deployment_key;`;
 
 async function main() {
   const deadline = Date.now() + 5 * 60_000;
@@ -228,7 +240,7 @@ async function main() {
   const ids = await ownerIds();
   const where = `owner_id in (${literal(ids.A)},${literal(ids.B)})`;
   const frozen = new Set();
-  let snapshot = null, created = false, activated = false, hostCanary = null;
+  let snapshot = null, capacity = null, created = false, activated = false, hostCanary = null;
   const down = async () => {
     const failures = [];
     for (const owner of [...frozen]) {
@@ -245,15 +257,22 @@ async function main() {
           delete from private.item_deletion_operations where ${where} and request_id::text like '${REQUEST_PREFIX}%';
           delete from private.ai_save_used_receipts where ${where} and request_id::text like '${REQUEST_PREFIX}%';
           delete from private.ai_usage where ${where} and request_id::text like '${REQUEST_PREFIX}%';
+          delete from private.image_enhancements where ${where} and request_id::text like '${REQUEST_PREFIX}%';
+          delete from private.enhancement_outputs where ${where} and first_request_id::text like '${REQUEST_PREFIX}%';
+          ${capacityRestore(capacity)}
           ${restore}
           commit;`);
         const after = JSON.parse(await db(`select coalesce(jsonb_agg(to_jsonb(c) order by owner_id),'[]')::text from private.ai_controls c
           where owner_id=${literal(ids.A)};`));
         if (!isDeepStrictEqual(after, snapshot.filter((row) => row.owner_id === ids.A))) failures.push('ai-controls-restore');
+        if (!isDeepStrictEqual(JSON.parse(await db(CAPACITY_ROW)), capacity)) failures.push('capacity-restore');
         const residue = await db(`select (select count(*) from private.ai_save_used_receipts where request_id::text like '${REQUEST_PREFIX}%')
-          + (select count(*) from private.ai_usage where request_id::text like '${REQUEST_PREFIX}%');`);
+          + (select count(*) from private.ai_usage where request_id::text like '${REQUEST_PREFIX}%')
+          + (select count(*) from private.image_enhancements where request_id::text like '${REQUEST_PREFIX}%');`);
         if (residue !== '0') failures.push('gate-row-cleanup');
-        else if (!failures.includes('ai-controls-restore')) say('PASS: EDGE-RUNTIME restore; ai_controls equal the pre-activation snapshot and no e3b0 gate rows remain');
+        else if (!failures.includes('ai-controls-restore') && !failures.includes('capacity-restore')) {
+          say('PASS: EDGE-RUNTIME restore; ai_controls and image capacity equal the pre-activation snapshot and no e3b0 gate rows remain');
+        }
       } catch { failures.push('ai-controls-restore'); }
     }
     if (created) {
@@ -285,7 +304,7 @@ async function main() {
       '--network-alias', 'edge-runtime', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--memory', '1g',
       '-e', 'SUPABASE_ANON_KEY', '-e', 'SUPABASE_SERVICE_ROLE_KEY',
       ...mount('supabase/functions', '/work/supabase/functions'), ...mount('src/images', '/work/src/images'),
-      ...mount('src/domain/stylist.ts', '/work/src/domain/stylist.ts'),
+      ...mount('src/domain/stylist.ts', '/work/src/domain/stylist.ts'), ...mount('src/domain/enhancement.ts', '/work/src/domain/enhancement.ts'),
       ...mount('tests/edge-fixtures', '/work/tests/edge-fixtures'),
       '--pull', 'never', '--entrypoint', 'edge-runtime', runtimeReference, 'start', '--main-service', '/work/tests/edge-fixtures/analyze-clothing-double',
       '--port', '9000'], 'fixture-runtime', { secrets: { SUPABASE_ANON_KEY: keys.anon, SUPABASE_SERVICE_ROLE_KEY: keys.service } });
@@ -391,6 +410,8 @@ async function main() {
 
     snapshot = JSON.parse(await db(`select coalesce(jsonb_agg(to_jsonb(c) order by owner_id),'[]')::text from private.ai_controls c where ${where};`));
     if (!Array.isArray(snapshot) || snapshot.length !== 2) fail('BLOCKED: EDGE-RUNTIME AI control rows unavailable', 1);
+    capacity = JSON.parse(await db(CAPACITY_ROW) || 'null');
+    if (capacity?.deployment_key !== ENHANCE_CAPACITY_KEY || capacity.dispatch_enabled !== false) fail('BLOCKED: EDGE-RUNTIME image capacity row unavailable or not closed', 1);
     const leftover = await db(`select count(*) from private.ai_usage where ${where} and request_id::text like '${REQUEST_PREFIX}%';`);
     if (leftover !== '0') fail('REFUSED: EDGE-RUNTIME request namespace is not empty', 2);
     activated = true;

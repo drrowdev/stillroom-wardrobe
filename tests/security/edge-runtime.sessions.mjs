@@ -11,7 +11,7 @@ import { analysisHash } from '../integration/ai-analysis.sessions.mjs';
 import { analyzedIntent, analyzedHarness } from '../integration/analyzed-save.sessions.mjs';
 import { imageChangeHarness } from '../integration/image-replacement.sessions.mjs';
 import { intent, saveHarness } from '../integration/item-save.sessions.mjs';
-import { READY_FACTS } from '../edge-fixtures/provider-double.mjs';
+import { enhanceOutput, flatBaselineJpeg, READY_FACTS } from '../edge-fixtures/provider-double.mjs';
 import { EDGE_DELEGATIONS } from './edge-delegations.mjs';
 
 const PROVIDER = 'EDGE-RUNTIME / PROVIDER-DOUBLE', STACK = 'EDGE-RUNTIME';
@@ -392,6 +392,91 @@ async function main() {
       stage = 'stylist-cleanup';
       await h.remove({ itemId: seeded.value.p_item.id, imageId: seeded.value.p_image.id });
       await h.deleteItem(seeded.value);
+    }
+
+    stage = 'enhance';
+    // BG2b-1: the production enhance-photo handler with the images edit double, on ordinary A/B sessions. The fixture
+    // opens eight shared dispatches and six per owner per hour. A's six dispatches cover success, stripping and every
+    // rejection, then A is rate-limited; B's missing-usage anomaly turns the shared switch off for both owners.
+    {
+      const enhance = async (token, requestId, width) => {
+        const response = await fetch(`${ingress}/functions/v1/enhance-photo`, {
+          method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(60_000),
+          headers: { ...(token === null ? {} : { Authorization: 'Bearer '.concat(token) }), apikey: env.SUPABASE_PUBLISHABLE_KEY,
+            'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': requestId }, body: flatBaselineJpeg(width, 1000) });
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const jpeg = response.headers.get('content-type') === 'image/jpeg';
+        let data = null;
+        if (!jpeg) { try { data = JSON.parse(new TextDecoder().decode(bytes)); } catch { /* compared as null */ } }
+        return { status: response.status, data, jpeg, bytes, noStore: response.headers.get('cache-control') === 'no-store',
+          sha: response.headers.get('x-stillroom-enhancement-sha256'), until: response.headers.get('x-stillroom-enhancement-usable-until') };
+      };
+      const hex = (bytes) => createHash('sha256').update(bytes).digest('hex');
+      const expected = enhanceOutput('enhance-ok');
+      const released = (r) => r.status === 200 && r.jpeg && r.noStore && Buffer.from(r.bytes).equals(expected)
+        && r.sha === hex(expected) && /^[0-9]{13}$/.test(r.until ?? '');
+      const refused = (r, status, code) => r.status === status && !r.jpeg && isDeepStrictEqual(r.data, { code }) && r.bytes.length < 256;
+      const enhanceStatus = (owner) => client.rpc(owner, 'enhance_status', {});
+      for (const owner of [A, B]) {
+        const status = await enhanceStatus(owner);
+        const consented = await client.rpc(owner, 'enhance_set_consent', { p_enabled: true, p_notice_revision: status?.policy?.noticeRevision ?? null });
+        check(PROVIDER, `enhance-consent-${owner.label}`, consented?.code === 'OK' && consented.consent?.enabled === true
+          && consented.policy?.manifestId === 'azure-global-image25-sunburst-enhance-v1' && consented.policy?.providerAvailable === true,
+        { code: consented?.code });
+      }
+      const before = await count();
+      const id = (owner, n) => gateId(owner.label, n, '6');
+
+      stage = 'enhance-owned';
+      const okA = await enhance(A.token, id(A, 1), 800), okB = await enhance(B.token, id(B, 1), 800);
+      check(PROVIDER, 'enhance-owned-A', released(okA), summary(okA));
+      check(PROVIDER, 'enhance-owned-B', released(okB), summary(okB));
+      const stripped = await enhance(A.token, id(A, 2), 801);
+      check(PROVIDER, 'enhance-metadata-stripped', released(stripped), summary(stripped));
+      stage = 'enhance-rejected';
+      const trailing = await enhance(A.token, id(A, 3), 802), secondFrame = await enhance(A.token, id(A, 4), 803);
+      check(PROVIDER, 'enhance-trailing-data-rejected', refused(trailing, 422, 'OUTPUT_REJECTED'), summary(trailing));
+      check(PROVIDER, 'enhance-second-frame-rejected', refused(secondFrame, 422, 'OUTPUT_REJECTED'), summary(secondFrame));
+      const filtered = await enhance(A.token, id(A, 5), 804), limited = await enhance(A.token, id(A, 6), 805);
+      check(PROVIDER, 'enhance-filtered', refused(filtered, 422, 'FILTERED'), summary(filtered));
+      check(PROVIDER, 'enhance-provider-429-failed', refused(limited, 502, 'FAILED'), summary(limited));
+      let counted = await count();
+      check(PROVIDER, 'enhance-dispatch-count', counted.served === before.served + 7 && counted.refused === 0 && counted.rejected === 0, counted);
+
+      stage = 'enhance-negatives';
+      const usageA = (await enhanceStatus(A))?.usage?.enhanceLastHour, usageB = (await enhanceStatus(B))?.usage?.enhanceLastHour;
+      check(PROVIDER, 'enhance-usage-own-rows-only', usageA === 6 && usageB === 1, { usageA, usageB });
+      const hourly = await enhance(A.token, id(A, 7), 800);
+      const replay = await enhance(A.token, id(A, 1), 800);
+      const anonymous = await enhance(null, id(A, 8), 800);
+      check(PROVIDER, 'enhance-hourly-rate-limit', refused(hourly, 429, 'RATE_LIMIT'), summary(hourly));
+      check(PROVIDER, 'enhance-replay-terminal', refused(replay, 409, 'TERMINAL'), summary(replay));
+      check(PROVIDER, 'enhance-anonymous', anonymous.status === 401 && !anonymous.jpeg, summary(anonymous));
+      const frozenEnhance = await frozenCall(B, () => enhance(B.token, id(B, 2), 800))();
+      check(PROVIDER, 'enhance-frozen-same-token', refused(frozenEnhance, 403, 'UNAVAILABLE'), summary(frozenEnhance));
+      const revoked = await client.rpc(B, 'enhance_set_consent', { p_enabled: false, p_notice_revision: null });
+      const noConsent = await enhance(B.token, id(B, 3), 800);
+      const reconsented = await client.rpc(B, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 1 });
+      check(PROVIDER, 'enhance-consent-required', revoked?.code === 'CONSENT_REQUIRED' && refused(noConsent, 403, 'CONSENT_REQUIRED')
+        && reconsented?.code === 'OK', { revoked: revoked?.code, call: summary(noConsent) });
+      counted = await count();
+      check(PROVIDER, 'enhance-negatives-no-dispatch', counted.served === before.served + 7, counted.served);
+
+      stage = 'enhance-anomaly';
+      const noUsage = await enhance(B.token, id(B, 4), 806);
+      check(PROVIDER, 'enhance-missing-usage-suppresses-output', refused(noUsage, 502, 'FAILED'), summary(noUsage));
+      const statusA = await enhanceStatus(A), statusB = await enhanceStatus(B);
+      const afterB = await enhance(B.token, id(B, 5), 800), afterA = await enhance(A.token, id(A, 10), 800);
+      check(PROVIDER, 'enhance-anomaly-switches-off-shared-capacity', statusB?.code === 'INACTIVE'
+        && statusB.policy?.providerAvailable === false && statusA?.code === 'OK' && statusA.policy?.providerAvailable === false
+        && refused(afterB, 503, 'INACTIVE') && refused(afterA, 403, 'UNAVAILABLE'),
+      { A: statusA?.code, B: statusB?.code, afterA: summary(afterA), afterB: summary(afterB) });
+      check(PROVIDER, 'enhance-anomaly-no-foreign-data', !JSON.stringify(statusA).includes(B.uid) && statusA?.usage?.enhanceLastHour === 6,
+        statusA?.usage);
+      counted = await count();
+      check(PROVIDER, 'enhance-double-totals', counted.served === before.served + 8 && counted.rejected === 0 && counted.refused === 0
+        && isDeepStrictEqual(counted.modes, { ...before.modes, 'enhance-ok': 2, 'enhance-metadata': 1, 'enhance-trailing': 1,
+          'enhance-second-frame': 1, 'enhance-filtered': 1, 'enhance-rate-limited': 1, 'enhance-no-usage': 1 }), counted);
     }
 
     stage = 'finalize-image-change';

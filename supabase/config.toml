@@ -84,5 +84,9 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
+[functions.enhance-photo]
+enabled = true
+verify_jwt = true
+
 [analytics]
 enabled = false

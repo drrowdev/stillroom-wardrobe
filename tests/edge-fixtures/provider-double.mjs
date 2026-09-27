@@ -1,5 +1,6 @@
 // CI-only PR-3b provider double. Runs on the internal fixture network as `provider-double:8080`; the fixture
 // runtime's injected azureTransport forwards only the exact pinned Azure request here. No real provider is reached.
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 
@@ -88,6 +89,99 @@ export function stylistCompletion(mode, refs = []) {
       : { role: 'assistant', refusal: null, content };
   return { model: RETURNED_MODEL, usage, choices: [{ index: 0, finish_reason: mode === 'stylist-tool' ? 'tool_calls' : 'stop', message }] };
 }
+// BG2b-1: the images edit double. The exact frozen multipart (L1) is required; the input width selects the mode.
+export const ENHANCE_DEPLOYMENT = 'eval-image25-sunburst-20260908';
+export const ENHANCE_FIELDS = Object.freeze([['model', ENHANCE_DEPLOYMENT], ['n', '1'], ['size', '1024x1280'], ['quality', 'medium'],
+  ['output_format', 'jpeg'], ['output_compression', '85'], ['background', 'opaque']]);
+/** sha256 of ENHANCE_PROMPT, as pinned in the enhancement manifest's prompt_sha256. */
+export const ENHANCE_PROMPT_SHA256 = '9a102c3c5b614cfa34fc1a0447a4410f9dfaa46ef8f53fb33316e1d15b3f9afe';
+export const ENHANCE_MODES = Object.freeze({ 800: 'enhance-ok', 801: 'enhance-metadata', 802: 'enhance-trailing',
+  803: 'enhance-second-frame', 804: 'enhance-filtered', 805: 'enhance-rate-limited', 806: 'enhance-no-usage' });
+export const ENHANCE_USAGE = Object.freeze({ input_tokens: 1400, output_tokens: 2000, total_tokens: 3400,
+  input_tokens_details: { text_tokens: 150, image_tokens: 1250 } });
+
+const segment = (marker, payload) => Buffer.concat([Buffer.from([0xff, marker, (payload.length + 2) >> 8, (payload.length + 2) & 0xff]),
+  Buffer.from(payload)]);
+/**
+ * A decodable flat-colour baseline JPEG, byte-identical to tests/fixtures/restore-jpeg-fixtures.ts flatJpeg in its
+ * default baseline form (canonical JFIF, all quantizers 8, 4:2:0, one DC value per component and no AC detail).
+ */
+export function flatBaselineJpeg(width, height, colour = [180, 110, 150]) {
+  const bytes = [];
+  let buffer = 0, count = 0;
+  const write = (value, length) => {
+    for (let bit = length - 1; bit >= 0; bit--) {
+      buffer = (buffer << 1) | ((value >> bit) & 1);
+      if (++count === 8) { bytes.push(buffer); if (buffer === 0xff) bytes.push(0); buffer = 0; count = 0; }
+    }
+  };
+  const writeDc = (diff) => {
+    let size = 0;
+    for (let magnitude = Math.abs(diff); magnitude; magnitude >>= 1) size++;
+    write(size, 4);
+    if (size) write(diff >= 0 ? diff : diff + (1 << size) - 1, size);
+  };
+  const sampling = [[2, 2], [1, 1], [1, 1]];
+  const dc = colour.map((value) => Math.round(value) - 128), predictors = [0, 0, 0];
+  const mcus = Math.ceil(width / 16) * Math.ceil(height / 16);
+  for (let mcu = 0; mcu < mcus; mcu++) {
+    for (let index = 0; index < 3; index++) {
+      for (let block = 0; block < sampling[index][0] * sampling[index][1]; block++) {
+        writeDc(dc[index] - predictors[index]);
+        predictors[index] = dc[index];
+        write(0, 2);
+      }
+    }
+  }
+  while (count) write(1, 1);
+  const dht = (tc, counts, values) => segment(0xc4, [tc << 4, ...counts, ...values]);
+  return Buffer.concat([Buffer.from([0xff, 0xd8]), segment(0xe0, [0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]),
+    segment(0xdb, [0, ...new Array(64).fill(8)]),
+    segment(0xc0, [8, height >> 8, height & 0xff, width >> 8, width & 0xff, 3, 1, 0x22, 0, 2, 0x11, 0, 3, 0x11, 0]),
+    dht(0, [0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]),
+    dht(1, [0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0x00, 0xf0]),
+    segment(0xda, [3, 1, 0, 2, 0, 3, 0, 0, 63, 0]), Buffer.from(bytes), Buffer.from([0xff, 0xd9])]);
+}
+/** The generated output for a mode: the admitted 1024x1280 photo, or a hostile variant the admission profile refuses. */
+export function enhanceOutput(mode) {
+  const good = flatBaselineJpeg(1024, 1280, [200, 120, 140]);
+  const jfifEnd = 2 + 18;
+  if (mode === 'enhance-metadata') {
+    return Buffer.concat([good.subarray(0, jfifEnd), segment(0xe1, [...Buffer.from('Exif\0\0'), 0x4d, 0x4d, 0, 42]),
+      segment(0xfe, [...Buffer.from('provider comment')]), good.subarray(jfifEnd)]);
+  }
+  if (mode === 'enhance-trailing') return Buffer.concat([good, Buffer.from([0, 1, 2, 3])]);
+  if (mode === 'enhance-second-frame') {
+    return Buffer.concat([good.subarray(0, good.length - 2),
+      segment(0xc0, [8, 0xff, 0xff, 0xff, 0xff, 3, 1, 0x22, 0, 2, 0x11, 0, 3, 0x11, 0]), Buffer.from([0xff, 0xd9])]);
+  }
+  return good;
+}
+/** Bounded inspection of one images edit request. Returns the mode or a content-free reason. */
+export async function enhanceVerdict(headers, body) {
+  if (headers['api-key'] !== DUMMY_API_KEY) return { reason: 'api-key' };
+  const type = headers['content-type'];
+  if (typeof type !== 'string' || !/^multipart\/form-data; ?boundary=/.test(type)) return { reason: 'content-type' };
+  let form;
+  try { form = await new Response(body, { headers: { 'content-type': type } }).formData(); } catch { return { reason: 'multipart' }; }
+  const entries = [...form.entries()];
+  const keys = entries.map(([key]) => key);
+  if (keys.join(',') !== [...ENHANCE_FIELDS.map(([key]) => key), 'prompt', 'image'].join(',')) return { reason: 'enhance-keys' };
+  if (!ENHANCE_FIELDS.every(([key, value]) => form.get(key) === value)) return { reason: 'enhance-parameters' };
+  const prompt = form.get('prompt');
+  if (typeof prompt !== 'string' || createHash('sha256').update(prompt).digest('hex') !== ENHANCE_PROMPT_SHA256) return { reason: 'enhance-prompt' };
+  const image = form.get('image');
+  if (typeof image === 'string' || image.type !== 'image/jpeg') return { reason: 'enhance-image' };
+  const width = jpegWidth(new Uint8Array(await image.arrayBuffer()));
+  return width === null ? { reason: 'jpeg' } : { mode: ENHANCE_MODES[width] ?? 'enhance-ok' };
+}
+/** The status and JSON body the double returns for an enhancement mode. */
+export function enhanceResponse(mode) {
+  if (mode === 'enhance-filtered') return { status: 400, body: { error: { code: 'content_policy_violation', message: 'synthetic' } } };
+  if (mode === 'enhance-rate-limited') return { status: 429, body: { error: { code: '429', message: 'synthetic' } } };
+  const data = [{ b64_json: enhanceOutput(mode).toString('base64') }];
+  return { status: 200, body: mode === 'enhance-no-usage' ? { created: 1, data } : { created: 1, data, usage: ENHANCE_USAGE } };
+}
 export function completion(mode) {
   const content = mode === 'malformed' ? '{"outcome":"ready","fields":' : JSON.stringify(mode === 'unclear' ? UNCLEAR_FACTS : READY_FACTS);
   return { model: RETURNED_MODEL, usage: USAGE, choices: [{ index: 0, finish_reason: 'stop',
@@ -100,7 +194,7 @@ function main() {
     const chunks = [];
     let size = 0;
     req.on('data', (chunk) => { size += chunk.length; if (size <= 2 * 1024 * 1024) chunks.push(chunk); });
-    req.on('end', () => {
+    req.on('end', async () => {
       const local = req.socket.remoteAddress === '127.0.0.1' || req.socket.remoteAddress === '::ffff:127.0.0.1';
       if (req.method === 'GET' && req.url === '/__count' && local) {
         res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(counts)); return;
@@ -108,8 +202,11 @@ function main() {
       if (req.method === 'POST' && req.url === '/rejected') {
         counts.rejected += 1; res.writeHead(204); res.end(); return;
       }
-      const verdict = req.method !== 'POST' || req.url !== '/chat/completions' ? { reason: 'route' }
-        : size > 2 * 1024 * 1024 ? { reason: 'size' } : requestVerdict(req.headers, Buffer.concat(chunks).toString('utf8'));
+      const enhance = req.method === 'POST' && req.url === '/images/edits';
+      const verdict = req.method !== 'POST' || (req.url !== '/chat/completions' && !enhance) ? { reason: 'route' }
+        : size > 2 * 1024 * 1024 ? { reason: 'size' }
+          : enhance ? await enhanceVerdict(req.headers, Buffer.concat(chunks))
+            : requestVerdict(req.headers, Buffer.concat(chunks).toString('utf8'));
       const mode = verdict.mode ?? null;
       if (mode === null) {
         counts.refused += 1;
@@ -122,6 +219,12 @@ function main() {
       if (mode === 'server-error') {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: { code: 'InternalServerError', message: 'synthetic' } }));
+        return;
+      }
+      if (mode.startsWith('enhance-')) {
+        const { status, body } = enhanceResponse(mode);
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(body));
         return;
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });

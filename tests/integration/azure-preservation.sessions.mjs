@@ -430,7 +430,16 @@ export const STYLIST_ADDED_COLUMNS = Object.freeze({
   ai_usage: Object.freeze(['purpose']),
   ai_usage_evidence: Object.freeze(['stylist_code', 'settlement_origin', 'settlement_digest']),
 });
-const strip = (table) => (STYLIST_ADDED_COLUMNS[table] ? ` - array[${STYLIST_ADDED_COLUMNS[table].map(literal).join(',')}]` : '');
+// BG2b-1 adds defaulted columns to the same three tables; they are stripped and asserted the same way.
+export const ENHANCEMENT_ADDED_COLUMNS = Object.freeze({
+  ai_controls: Object.freeze(['enhance_activated', 'enhance_notice_revision', 'enhance_manifest_id', 'enhance_max_request_micro',
+    'enhance_monthly_allowance_micro', 'enhance_max_requests_per_hour', 'enhance_consent_revision', 'enhance_consented_at']),
+  ai_usage: Object.freeze(['provider_slot_id']),
+  ai_usage_evidence: Object.freeze(['enhance_code', 'enhance_settlement_origin', 'enhance_settlement_digest', 'enhance_input_sha256',
+    'enhance_probe_id']),
+});
+const addedColumns = (table) => [...(STYLIST_ADDED_COLUMNS[table] ?? []), ...(ENHANCEMENT_ADDED_COLUMNS[table] ?? [])];
+const strip = (table) => (addedColumns(table).length ? ` - array[${addedColumns(table).map(literal).join(',')}]` : '');
 const digest = (relation, order) => `(select jsonb_build_object('n',count(*),'md5',
   md5(coalesce(string_agg((to_jsonb(t)${strip(relation.split('.')[1])})::text,E'\n' order by ${order}),''))) from ${relation} t)`;
 const colourDigestSql = `select jsonb_build_object('rows',jsonb_build_object(
@@ -455,6 +464,14 @@ const stylistDefaultsSql = `select jsonb_build_object(
     stylist_consent_revision,stylist_consented_at)>0),
   'usage',(select count(*) from private.ai_usage where purpose is distinct from 'analysis'),
   'evidence',(select count(*) from private.ai_usage_evidence where num_nonnulls(stylist_code,settlement_origin,settlement_digest)>0));`;
+// Pre-existing rows keep the inactive enhancement defaults after BG2b-1.
+const enhancementDefaultsSql = `select jsonb_build_object(
+  'controls',(select count(*) from private.ai_controls where enhance_activated or num_nonnulls(enhance_notice_revision,
+    enhance_manifest_id,enhance_max_request_micro,enhance_monthly_allowance_micro,enhance_max_requests_per_hour,
+    enhance_consent_revision,enhance_consented_at)>0),
+  'usage',(select count(*) from private.ai_usage where provider_slot_id is not null or purpose='enhancement'),
+  'evidence',(select count(*) from private.ai_usage_evidence where num_nonnulls(enhance_code,enhance_settlement_origin,
+    enhance_settlement_digest,enhance_input_sha256,enhance_probe_id)>0));`;
 // The one immutable manifest ST1a adds, validated field by field.
 const STYLIST_TARIFF_DESCRIPTION = 'INACTIVE stylist text chat on existing DEV/TEST eval-terra-20260709; expected snapshot gpt-5.6-terra-2026-07-09. Applicable tariff ShortCo USD2.20 input/13.20 output per1M (retail API SwedenCentral/USD, product DZH318Z0T9WD). Reservation 129360 micro values the 24000 input/1200 output envelope at LongCo 4.40/19.80 as a conservative allowance valuation; input envelope is an operational estimate over the bounded 20000-byte messages plus schema/framing, enforced by anomaly shutdown. Enum/number/boolean item fields only; no photos or item text. Explicit cache mode without breakpoints; store:false is not zero retention. Exact-route probe and paid activation remain owner gates.';
 export const STYLIST_MANIFEST_ROW = Object.freeze({
@@ -468,6 +485,20 @@ export const STYLIST_MANIFEST_ROW = Object.freeze({
   input_rate_hundredths: 220, output_rate_hundredths: 1320, input_envelope: 24000, output_envelope: 1200,
   reservation_micro: 129360, maximum_image_bytes: 0, maximum_side: 0, maximum_response_bytes: 262144,
   maximum_result_bytes: 8192, request_seconds: 25, review_expires_at: '2026-12-01T00:00:00+00:00',
+});
+const ENHANCEMENT_TARIFF_DESCRIPTION = 'INACTIVE photo enhancement on existing DEV/TEST eval-image25-sunburst-20260908 (GlobalStandard, 2 requests/min). Retail API USD per1M: text input 5.00, image input 8.00, image output 30.00. Reservation 300000 micro values the 7500 input/8000 output envelope with all input at image-in 8.00; the images API has no token cap, so this is an estimated envelope with possible in-flight overrun, handled by the anomaly kill switch. Frozen parameters n1 1024x1280 medium jpeg compression85 opaque, no input_fidelity. Only the prepared garment photo is sent. Global processing may happen outside the EU. Probe and paid activation remain owner gates.';
+// The one immutable manifest BG2b-1 adds, validated field by field.
+export const ENHANCEMENT_MANIFEST_ROW = Object.freeze({
+  id: 'azure-global-image25-sunburst-enhance-v1', model_id: 'gpt-image-2.5-sunburst', prompt_version: 1,
+  prompt_sha256: '9a102c3c5b614cfa34fc1a0447a4410f9dfaa46ef8f53fb33316e1d15b3f9afe',
+  schema_sha256: '20cefa4d2f2fd2c381ac50f30af286f48ea804d9e6fb6d58ca5c5dbd45fa8efe',
+  settings_sha256: '5b78ccfddc0814bd9d8b5f46f871647bc791dad57aadcf0d7acfb7b7b8ecdcd5',
+  product: 'Azure OpenAI', host: 'stillroom-ai-eval.openai.azure.com', api_version: 'v1/images/edits', region: 'Global',
+  traffic: 'GlobalStandard', tariff_url: 'https://prices.azure.com/api/retail/prices',
+  tariff_retrieved_at: '2026-09-27T00:00:00+00:00', tariff_description: ENHANCEMENT_TARIFF_DESCRIPTION, currency: 'USD',
+  input_rate_hundredths: 800, output_rate_hundredths: 3000, input_envelope: 7500, output_envelope: 8000,
+  reservation_micro: 300000, maximum_image_bytes: 512000, maximum_side: 1600, maximum_response_bytes: 4194304,
+  maximum_result_bytes: 512000, request_seconds: 85, review_expires_at: '2027-01-01T00:00:00+00:00',
 });
 
 // PostgreSQL stores the exact dollar-quoted text, including the newlines after "as $$" and before "$$;".
@@ -594,12 +625,15 @@ export async function verifyColourStage(snapshot, sql, stage) {
     equal(after.functions[name], stage === 'colours' ? before.functions[name] : expected.manifest[name]);
   }
   const added = Object.keys(after.manifests).filter((id) => !Object.hasOwn(before.manifests, id)).sort();
-  equal(added, stage === 'colours' ? [] : [COLOUR_MANIFEST.v2, STYLIST_MANIFEST_ROW.id]);
+  equal(added, stage === 'colours' ? [] : [ENHANCEMENT_MANIFEST_ROW.id, COLOUR_MANIFEST.v2, STYLIST_MANIFEST_ROW.id]);
   for (const [id, md5] of Object.entries(before.manifests)) equal(after.manifests[id], md5);
   if (stage === 'target') {
     equal(JSON.parse(await sql(stylistDefaultsSql)), { controls: 0, usage: 0, evidence: 0 });
     equal(JSON.parse(await sql(`select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(STYLIST_MANIFEST_ROW.id)};`)),
       STYLIST_MANIFEST_ROW);
+    equal(JSON.parse(await sql(enhancementDefaultsSql)), { controls: 0, usage: 0, evidence: 0 });
+    equal(JSON.parse(await sql(`select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(ENHANCEMENT_MANIFEST_ROW.id)};`)),
+      ENHANCEMENT_MANIFEST_ROW);
   }
   return after;
 }
