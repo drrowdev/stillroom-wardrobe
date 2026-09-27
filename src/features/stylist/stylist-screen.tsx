@@ -63,6 +63,8 @@ export function StylistScreen({ store, images, online, t, timeZone, weather, wea
   // A refusal that the limit line already explains isn't repeated.
   const error = state.error && state.error.key !== limitLine ? state.error : null;
   const pending = state.pending !== null;
+  // Anything the conversation holds, including an unsent draft, can be cleared in every state.
+  const clearable = state.turns.length > 0 || pending || state.draft !== '';
   const submit = () => {
     field.current?.focus();
     void send(store, { online, season: defaultSeason(timeZone), weather: context });
@@ -85,7 +87,7 @@ export function StylistScreen({ store, images, online, t, timeZone, weather, wea
     </ol> : null}
     {wardrobe.failed && state.turns.length > 0 && <div className="notice notice-error" role="alert"><span>{t('stylist.wardrobeFailed')}</span>
       <button type="button" className="text-button" disabled={!online || wardrobe.loading} onClick={wardrobe.retry}>{t('common.retry')}</button></div>}
-    {(view.kind !== 'on' || !usable) && (state.turns.length > 0 || pending) && <div className="stylist-actions">
+    {(view.kind !== 'on' || !usable) && clearable && <div className="stylist-actions">
       <button type="button" className="button button-secondary" onClick={() => { clear(store); document.getElementById('stylist-title')?.focus(); }}>
         {t('stylist.clear')}</button></div>}
     {view.kind === 'on' && <>
@@ -107,7 +109,7 @@ export function StylistScreen({ store, images, online, t, timeZone, weather, wea
           <div className="stylist-actions">
             <button type="submit" className="button button-primary" disabled={!online || pending || !canSend(state) || state.draft.trim() === ''}>
               {t(pending ? 'stylist.sending' : 'stylist.send')}</button>
-            {(state.turns.length > 0 || pending) && <button type="button" className="button button-secondary"
+            {clearable && <button type="button" className="button button-secondary"
               onClick={() => { clear(store); field.current?.focus(); }}>{t('stylist.clear')}</button>}
           </div>
           <p className="muted fine">{t('stylist.notKept')}</p>
