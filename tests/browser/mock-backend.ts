@@ -577,7 +577,14 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   type Operation = { owner: string; manifest: string; receipt: DeletionOperation; targets: Target[]; imagePage: number; objectPage: number; imagesDone: boolean };
   const deletionOperations: Operation[] = [];
   let imageChangeLost = false;
-  const restoreControl = { reservations: 0 };
+  // `attributionImports` holds tag history a restore added, by item: kept apart from recorded history, as on the server.
+  // `attributionReplies` are answers restore_item_attribution gives next, in order, before it looks at anything.
+  const restoreControl = { reservations: 0, attributionImports: new Map<string, { importId: string; entries: JsonRow[] }>(),
+    attributionReplies: [] as ('busy' | 'kept')[] };
+  const attributionOf = (itemId: string) => [
+    ...(restoreControl.attributionImports.get(itemId)?.entries ?? []).map(entry => { const copy: JsonRow = { origin: 'imported', ...entry }; delete copy.position; return copy; }),
+    ...(exportControl.attributions.get(itemId) ?? []).map(entry => ({ origin: 'recorded', ...(entry as JsonRow) })),
+  ];
   const fenced = (owner: string, itemId: unknown) => deletionOperations.some(value => value.owner === owner
     && value.receipt.itemId === itemId && value.receipt.phase !== 'cancelled');
   const imageBytesMatch = (image: JsonRow) => ['main', 'thumb'].every(kind => {
@@ -1549,12 +1556,38 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         combination_rules: fill('combination_rules', combinationRules), suggestion_feedback: fill('suggestion_feedback', suggestionFeedback),
       } }); return;
     }
-    if (url.pathname === '/rest/v1/rpc/item_attribution_history') {
+    if (url.pathname === '/rest/v1/rpc/item_attribution_history_v2') {
       const body = request.postDataJSON() as JsonRow;
       exportControl.beforeAttribution?.();
       const item = items.find(row => row.id === body.p_item_id && row.owner_id === owner && row.deleted_at === null);
       if (method !== 'POST' || !item) { await json({ code: '42501', message: 'Not available', details: null, hint: null }, 403); return; }
-      await json(exportControl.attributions.get(String(item.id)) ?? []); return;
+      await json(attributionOf(String(item.id))); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/attribution_digest') {
+      if (method !== 'POST' || !owner) { await json({ code: '42501', message: 'Not available', details: null, hint: null }, 403); return; }
+      const mine = items.filter(row => row.owner_id === owner).map(row => String(row.id)).sort();
+      await json(createHash('sha256').update(JSON.stringify(mine.map(id => [id, attributionOf(id)]))).digest('hex')); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/restore_item_attribution') {
+      const body = request.postDataJSON() as JsonRow;
+      const item = items.find(row => row.id === body.p_item_id && row.owner_id === owner && row.deleted_at === null);
+      if (method !== 'POST' || !item || !sameValue(Object.keys(body).sort(), ['p_entries', 'p_import_id', 'p_item_id'])) {
+        await json({ code: '42501', message: 'Not available' }, 403); return;
+      }
+      const forced = restoreControl.attributionReplies.shift();
+      if (forced) { await json({ state: forced, reason: forced === 'kept' ? 'recorded' : null }); return; }
+      const entries = body.p_entries as JsonRow[];
+      if (!isUuid(body.p_import_id) || !Array.isArray(entries) || entries.length === 0 || entries.some((entry, index) => entry.position !== index
+        || entry.source_image_id !== null && !images.some(image => image.id === entry.source_image_id && image.item_id === item.id && image.state !== 'pending'))) {
+        await json({ code: '22023', message: 'Invalid input' }, 400); return;
+      }
+      const stored = restoreControl.attributionImports.get(String(item.id));
+      const state = (exportControl.attributions.get(String(item.id)) ?? []).length > 0 ? { state: 'kept', reason: 'recorded' }
+        : stored ? stored.importId !== body.p_import_id ? { state: 'kept', reason: 'other-import' }
+          : sameValue(stored.entries, entries) ? { state: 'equal', reason: null } : { state: 'kept', reason: 'differs' }
+          : { state: 'created', reason: null };
+      if (state.state === 'created') restoreControl.attributionImports.set(String(item.id), { importId: String(body.p_import_id), entries });
+      await json(state); return;
     }
     if (url.pathname === '/rest/v1/rpc/update_image_description') {
       const body = request.postDataJSON() as JsonRow;

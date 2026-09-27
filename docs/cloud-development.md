@@ -572,6 +572,15 @@ the non-additive replacements and triggers, the Edge deploy, the schedule
 activation and a disposable hosted drill. Builders make no hosted call. See
 `docs/phase-6-result.md`.
 
+**P6d tag-history restore (source only; hosted apply owner-gated).** The P6d
+draft PR adds `20260927090000_restore_attribution.sql`. It is not additive: it
+adds the imported-history table and three authenticated functions and replaces
+P6c's `private.deletion_owner_rows_absent` with the same signature. It requires
+P6c to be installed first. Nothing runs on hosted until the owner approves the
+exact bodies; the responsible actor then applies it and reads back the bodies,
+ACLs, owners and search paths. Builders make no hosted call. See
+`docs/phase-6-result.md`.
+
 **I23 service worker (source only, not deployed).** The Phase 7 PR-1 draft
 adds `src/service-worker.ts`, the Update/Reload prompt and the Settings install
 hint. The worker precaches only the public shell listed in the generated

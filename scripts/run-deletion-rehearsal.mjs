@@ -250,11 +250,16 @@ export async function verifyStack({ docker, supabase, id, containers }) {
   return { api: API_URL, serviceKey, publishable };
 }
 
-const OWNER_TABLES_SOURCE = 'supabase/migrations/20260925120000_account_deletion.sql';
+// The definition in effect is the latest one in migration order: P6d replaces P6c's with the same signature.
+const MIGRATIONS_DIR = 'supabase/migrations';
+const DEFINITION = /create (?:or replace )?function private\.deletion_owner_rows_absent\(/;
 export async function ownerTables(fs, root) {
-  const sql = await fs.readFile(path.join(root, OWNER_TABLES_SOURCE), 'utf8');
-  const start = sql.indexOf('create function private.deletion_owner_rows_absent');
-  const body = sql.slice(start, sql.indexOf('$$;', start));
+  let body = '';
+  for (const name of (await fs.readdir(path.join(root, MIGRATIONS_DIR))).filter((entry) => entry.endsWith('.sql')).sort()) {
+    const sql = await fs.readFile(path.join(root, MIGRATIONS_DIR, name), 'utf8');
+    const start = sql.search(DEFINITION);
+    if (start >= 0) body = sql.slice(start, sql.indexOf('$$;', sql.indexOf('as $$', start) + 5));
+  }
   const tables = [...body.matchAll(/from ((?:public|private)\.[a-z_]+) where owner_id=p_owner/g)].map((match) => match[1]);
   if (tables.length < 20 || new Set(tables).size !== tables.length) throw new Error('TABLES');
   return tables;
@@ -323,6 +328,9 @@ async function exercise(ctx) {
   const before = await digest(d);
   const cBefore = JSON.parse(await digest(c));
   if (cBefore.storage[0] < 4 || cBefore['public.items'][0] < 2 || cBefore['public.outfits'][0] < 1) throw new Error('SEED');
+  // P6d: both owners hold restored (imported) tag history; C's goes with the account, D's stays exactly as it was.
+  const imported = 'private.imported_attribution_history';
+  if (cBefore[imported]?.[0] !== 2 || JSON.parse(before)[imported]?.[0] !== 2) throw new Error('SEED:imported');
 
   step = 'catalog';
   // The Auth deletion trigger function is owned by postgres and its trigger is enabled on auth.users.
@@ -383,6 +391,22 @@ async function exercise(ctx) {
   const afterFirst = JSON.parse(await sql(`select jsonb_build_object('stage',stage,'code',last_code,'lease',lease_id,'attempts',attempts)::text from private.deletion_jobs where owner_id=${literal(c)};`));
   if (afterFirst.stage !== 'storage' || afterFirst.code !== 'UPSTREAM_UNAVAILABLE' || afterFirst.lease !== null || afterFirst.attempts !== 1) throw new Error('LOOP:first-state');
   if (await sql(`select enabled from private.approved_accounts where user_id=${literal(c)};`) !== 'f') throw new Error('LOOP:not-frozen');
+
+  step = 'frozen-import';
+  // A frozen owner's tag-history import is refused as the owner's own session would be, and writes nothing.
+  const cItem = await sql(`select id from public.items where owner_id=${literal(c)} order by id limit 1;`);
+  literal(cItem);
+  const entry = JSON.stringify([{ position: 0, source_image_id: null, image_sha256: 'a'.repeat(64), model_id: 'rehearsal-model',
+    prompt_version: 1, fields: { category: 'top' } }]);
+  let refusedImport = null;
+  try {
+    await sql(`begin; set local role authenticated;
+      select set_config('request.jwt.claims','{"sub":"${c}","role":"authenticated"}',true);
+      select public.restore_item_attribution(${literal(cItem)},gen_random_uuid(),'${entry}'::jsonb); commit;`);
+  } catch (error) { refusedImport = String(error.message); }
+  if (refusedImport !== 'SQL:frozen-import:42501:Not available') throw new Error('FROZEN:import');
+  step = 'frozen-import-check';
+  if (await sql(`select count(*) from ${imported} where owner_id=${literal(c)};`) !== '2') throw new Error('FROZEN:import-wrote');
 
   step = 'loop-busy';
   // A second worker while another holds the lease reports in progress and changes nothing.

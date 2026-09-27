@@ -24,7 +24,7 @@ import { canonical } from '../../src/domain/export-format';
 import { deletionIntent } from '../../src/domain/item-lifecycle';
 import { restoreId } from '../../src/domain/restore-plan';
 import { flatJpeg } from '../fixtures/restore-jpeg-fixtures';
-import { syntheticId, writeSyntheticBackup, type SyntheticItem } from '../fixtures/restore-own-backup';
+import { syntheticHistory, syntheticId, writeSyntheticBackup, type SyntheticItem } from '../fixtures/restore-own-backup';
 import { restoreDiagnostics } from '../fixtures/restore-own-diagnostics';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -284,7 +284,20 @@ async function world() {
     for (const client of clients) await client.auth.signOut({ scope: 'local' }).catch(() => problems.push('sign-out'));
     return problems;
   };
-  return { a, b, proxy, children, parent, backup, cli, quiet, removeLock, cleanup };
+  // P6d: item 0's tag history as A should now have it: version 2 entries are imported, photo IDs mapped, never in the
+  // recorded-only projection; the other items have none.
+  const tagHistory = async (exportId: string, ids: readonly string[]) => {
+    const expected = await Promise.all(syntheticHistory(exportId).map(async entry => ({ origin: 'imported',
+      source_image_id: entry.source_image_id === null ? null : await restoreId(2, a.scope.ownerId, exportId, 'item_images', entry.source_image_id),
+      image_sha256: entry.image_sha256, model_id: entry.model_id, prompt_version: entry.prompt_version, fields: entry.fields })));
+    for (const [n, id] of ids.entries()) {
+      const current = await a.client.rpc('item_attribution_history_v2', { p_item_id: id });
+      const legacy = await a.client.rpc('item_attribution_history', { p_item_id: id });
+      check(!current.error && !legacy.error && canonical(legacy.data) === '[]');
+      check(canonical(current.data) === canonical(n === 0 ? expected : []));
+    }
+  };
+  return { a, b, proxy, children, parent, backup, cli, quiet, removeLock, cleanup, tagHistory };
 }
 
 // The browser's own photo steps, in the app page, for the parity check against what the CLI stored.
@@ -339,6 +352,7 @@ test('restore-own: restore, parity with the browser steps, idempotent rerun, con
     stage = 'restore:report';
     const report = jsonReport(restored.stdout);
     check(report && report.counts.restored === 3 && report.photos.length === 6 && report.photos.every(photo => photo.outcome === 'written'));
+    check(report.counts.attributions === 1 && report.counts.attributionsKept === 0);
     stage = 'restore:rows';
     const after = await snapshot(a);
     const own = after.items.filter(item => main.ids.includes(String(item.id)));
@@ -373,6 +387,8 @@ test('restore-own: restore, parity with the browser steps, idempotent rerun, con
     const entries = after.wear_event_items.filter(entry => entry.event_id === event);
     check(entries.length === 2 && entries.some(entry => entry.item_id === main.ids[0])
       && entries.some(entry => entry.item_id === null && entry.title_snapshot === 'Fictional scarf, long gone' && entry.category_snapshot === 'accessory'));
+    stage = 'restore:tag-history';
+    await w.tagHistory(main.exportId, main.ids);
     stage = 'restore:related';
     check(after.outfits.length === beforeA.outfits.length + 1 && after.combination_rules.length === beforeA.combination_rules.length + 1
       && after.suggestion_feedback.length === beforeA.suggestion_feedback.length + 1);
@@ -397,6 +413,7 @@ test('restore-own: restore, parity with the browser steps, idempotent rerun, con
     check(!proxy.state.paths.some(path => /rpc\/reserve_|POST \/storage|functions/.test(path)));
     const unchanged = await snapshot(a, new Set(main.ids));
     check(canonical(unchanged) === canonical(settled));
+    await w.tagHistory(main.exportId, main.ids);
     await storedFilesMatch(a, unchanged.item_images.filter(image => own.some(item => item.id === image.item_id)));
 
     stage = 'conflict';
@@ -562,6 +579,7 @@ test('restore-own: interrupted at each write step, then resumed to the same resu
       ['between-uploads', (m, path, count) => m === 'POST' && path.startsWith('/storage/v1/object/wardrobe/') && path.endsWith('/thumb.jpg') && count === 1],
       ['after-completion-before-reply', (_m, path, count) => path === '/rest/v1/rpc/finalize_item_save' && count === 1],
       ['during-replacement', (_m, path, count) => path === '/functions/v1/finalize-image-change' && count === 1],
+      ['during-tag-history', (_m, path, count) => path === '/rest/v1/rpc/restore_item_attribution' && count === 1],
       ['during-history', (_m, path, count) => path === '/rest/v1/rpc/restore_history_entry' && count === 1],
     ];
     for (const [index, [name, matches]] of points.entries()) {
@@ -611,6 +629,8 @@ test('restore-own: interrupted at each write step, then resumed to the same resu
     check(after.wear_events.filter(entry => entry.id === event).length === 1);
     const entries = after.wear_event_items.filter(entry => entry.event_id === event);
     check(entries.length === 2 && entries.some(entry => entry.item_id === main.ids[0]) && entries.some(entry => entry.item_id === null));
+    // Tag history restored once despite the interruption during it.
+    await w.tagHistory(main.exportId, main.ids);
 
     stage = 'no-further-changes';
     const settled = await snapshot(a, new Set(main.ids));

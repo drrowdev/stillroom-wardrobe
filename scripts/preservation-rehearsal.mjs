@@ -51,6 +51,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260925110000_restore_item_save.sql', version: '20260925110000', time: '2026-09-25 11:00:00', bytes: 6420, sha256: SOURCE_HASHES.restoreItemSave },
   { name: '20260925120000_account_deletion.sql', version: '20260925120000', time: '2026-09-25 12:00:00', bytes: 20416, sha256: SOURCE_HASHES.accountDeletion },
   { name: '20260925120100_deletion_receipt_purge_schedule.sql', version: '20260925120100', time: '2026-09-25 12:01:00', bytes: 2007, sha256: SOURCE_HASHES.deletionPurgeSchedule },
+  { name: '20260927090000_restore_attribution.sql', version: '20260927090000', time: '2026-09-27 09:00:00', bytes: 16198, sha256: SOURCE_HASHES.restoreAttribution },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1286,8 +1287,13 @@ async function main() {
       stage = 'COL1-A6-fifteen-probes';
       await colourProbes(sixEnv, privilegedLocalSql, 'target');
       colourFinalizer.assertRunning();
+      stage = 'P6d-attribution-roundtrip';
+      const { attributionRestoreProbes } = await import('../tests/integration/attribution-restore.sessions.mjs');
+      await attributionRestoreProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `P6d-attribution-${label}`; });
+      colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
     console.log('PASS: COL1 populated11/twelve/fifteen; rows, v1 manifest and unchanged bodies preserved at each compare; probes only after fifteen; no provider calls');
+    console.log('PASS: P6d tag history; v2 equals legacy for recorded history, recorded history re-imported through the RPC and a second generation imported, concurrent and completion races settle serially; no provider calls');
     stage = 'COL1-B-twelve-reset';
     requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', COLOUR_VERSION], 10 * 60_000)).code === 0);
     await assertMigrationInventory(); await history('colours'); await verifyCiStorageGuard();

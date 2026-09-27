@@ -13,7 +13,8 @@ import {
 } from '../../scripts/export-own.mjs';
 import { PromptError, readTerminalLine } from '../../scripts/backup-prompt.mjs';
 import { listParts, partSource } from '../../scripts/verify-backup.mjs';
-import { decryptPart, verifyBackup } from '../../src/domain/export-format';
+import { decryptPart, encryptPart, metadataDigest, verifyBackup, type SavedMetadata } from '../../src/domain/export-format';
+import { readBackup, restoreId } from '../../src/domain/restore-plan';
 import { parityWorld, PARITY_OWNER, type ParityWorld } from '../fixtures/export-parity';
 
 const ORIGIN = 'http://127.0.0.1:54321';
@@ -62,7 +63,8 @@ function fakeServer(world: ParityWorld): Server {
         const args = JSON.parse(String(init.body));
         return json(200, { ...world.raw, export_id: args.p_export_id });
       }
-      if (route === 'POST /rest/v1/rpc/item_attribution_history') {
+      if (route === 'POST /rest/v1/rpc/attribution_digest') return json(200, world.digest);
+      if (route === 'POST /rest/v1/rpc/item_attribution_history_v2') {
         const value = world.attributions.get(JSON.parse(String(init.body)).p_item_id);
         return value === undefined ? json(403, { code: '42501', message: 'not saved' }) : json(200, value);
       }
@@ -395,6 +397,51 @@ describe('export-own backups', { timeout: 600_000 }, () => {
     expect(await readdir(dir)).toEqual([name]);
   });
 
+  it('finishes a backup begun as version 2 as version 2, and restore reads its tag history (P6d)', async () => {
+    const dir = await workspace();
+    const world = parityWorld(2, 3000, 500);
+    const server = fakeServer(world);
+    server.failStorage = () => 503;
+    expect((await run(server, dir)).code).toBe(1);
+    const [staging] = (await readdir(dir)).filter(name => name.endsWith('.partial'));
+    const partsDir = join(dir, staging!, 'parts');
+    // Rewrite what the interrupted run left as an unfinished version 2 backup, as the previous release wrote it.
+    const names = await readdir(partsDir);
+    const decoded = await Promise.all(names.map(async name => decryptPart(await readFile(join(partsDir, name), 'utf8'), PASSPHRASE)));
+    const head = decoded.find(part => part.partIndex === 0)!;
+    const v2 = structuredClone(head.manifest!) as SavedMetadata;
+    v2.schema_version = 2;
+    for (const row of v2.tables.item_attributions) delete (row as Record<string, unknown>).origin;
+    const digest = await metadataDigest(v2);
+    for (const [index, name] of names.entries()) {
+      const part = decoded[index]!;
+      await writeFile(join(partsDir, name), JSON.stringify(await encryptPart({ ...part, schemaVersion: 2, manifestSha256: digest,
+        ...part.partIndex === 0 ? { manifest: v2 } : {} }, PASSPHRASE)));
+    }
+    const statePath = join(dir, staging!, 'state.json');
+    const state = await readFile(statePath, 'utf8').catch(() => null);
+    if (state !== null) await writeFile(statePath, state.replaceAll(head.manifestSha256, digest));
+    server.failStorage = () => null;
+    const second = await run(server, dir);
+    expect(second.code, second.stderr).toBe(0);
+    expect(second.stderr).toContain('Continuing the unfinished backup.');
+    const [name] = await finished(dir);
+    const summary = await verifyFinal(dir, name!);
+    expect(summary.metadata.schema_version).toBe(2);
+    expect(summary.manifestSha256).toBe(digest);
+    for (const file of await readdir(join(dir, name!))) {
+      expect((await decryptPart(await readFile(join(dir, name!, file), 'utf8'), PASSPHRASE)).schemaVersion).toBe(2);
+    }
+    const restored = await readBackup(partSource(await listParts(join(dir, name!))), PASSPHRASE, permissive);
+    expect(restored.data.version).toBe(2);
+    expect(restored.data.attributionCount).toBe(1);
+    expect([...restored.data.attributions.values()].flat()).toEqual([expect.objectContaining({ position: 0, model_id: 'synthetic-model',
+      prompt_version: 3, fields: { category: 'top' } })]);
+    // Version 2 keeps its own restore IDs, so an item restored from it before is recognised again.
+    const target = '33333333-3333-4333-8333-333333333333';
+    expect(await restoreId(2, target, summary.exportId, 'items', PARITY_OWNER)).not.toBe(await restoreId(3, target, summary.exportId, 'items', PARITY_OWNER));
+  });
+
   it('completes or reports unresumable after a crash between any two file operations', async () => {
     const world = parityWorld(2, 3000, 500);
     let at = 1;
@@ -716,7 +763,7 @@ describe('nothing private is printed when things fail', { timeout: 300_000 }, ()
   const cases: Array<[string, 'body' | 'throw', number?]> = [
     ['POST /auth/v1/token?grant_type=password', 'body', 400], ['POST /auth/v1/token?grant_type=password', 'throw'],
     ['POST /rest/v1/rpc/export_manifest', 'body'], ['POST /rest/v1/rpc/export_manifest', 'throw'],
-    ['POST /rest/v1/rpc/item_attribution_history', 'body'], ['storage', 'body'], ['storage', 'throw'],
+    ['POST /rest/v1/rpc/item_attribution_history_v2', 'body'], ['storage', 'body'], ['storage', 'throw'],
     ['POST /auth/v1/token?grant_type=refresh_token', 'body', 400], ['POST /auth/v1/token?grant_type=refresh_token', 'throw'],
   ];
 

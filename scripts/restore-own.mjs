@@ -123,6 +123,8 @@ function summaryLines(result) {
     `Items: ${result.restored} restored, ${result.same} already here, ${result.conflicts} changed here and left as they are, `
       + `${result.trash} in Trash and left, ${result.failed} not finished, ${result.blocked} blocked, ${result.deferred} held back.`,
     `Outfits: ${result.outfits} restored, ${result.outfitConflicts} left as they are. History: ${result.history} restored, ${result.historyConflicts} left as they are.`,
+    `Tag history: ${result.attributions} items restored and marked as imported.`,
+    ...result.attributionsKept > 0 ? [`Tag history for ${result.attributionsKept} ${result.attributionsKept === 1 ? 'item' : 'items'} was already here and wasn't changed from the backup.`] : [],
     `Photos: ${photos.written} written, ${photos.present} already here, ${photos.skipped} not needed or not reached, ${photos.failed} not finished, ${photos.blocked} blocked.`,
   ];
 }
@@ -142,7 +144,7 @@ export function outcomeOf(result) {
   if (result.failed > 0 || result.deferred > 0) {
     return { code: EXIT.retry, message: `Restore incomplete: ${result.failed} not finished, ${result.deferred} held back. Completed changes remain. Run the same command again to continue.` };
   }
-  if (result.conflicts + result.trash + result.outfitConflicts + result.historyConflicts > 0) {
+  if (result.conflicts + result.trash + result.outfitConflicts + result.historyConflicts + result.attributionsKept > 0) {
     return { code: EXIT.kept, message: 'Restore complete. Some entries were changed here or are in Trash, and were left as they are.' };
   }
   return { code: EXIT.complete, message: 'Restore complete.' };

@@ -422,7 +422,7 @@ export const COLOUR_FUNCTIONS = Object.freeze({
   manifest: Object.freeze(['public.ai_claim_analysis', 'private.ai_analysis_permitted', 'public.ai_finish_analysis',
     'public.complete_analyzed_item_save']),
 });
-const COLOUR_MANIFEST = Object.freeze({ v1: 'azure-eu-terra-devtest-v1', v2: 'azure-eu-terra-devtest-v2' });
+export const COLOUR_MANIFEST = Object.freeze({ v1: 'azure-eu-terra-devtest-v1', v2: 'azure-eu-terra-devtest-v2' });
 const digest = (relation, order) => `(select jsonb_build_object('n',count(*),'md5',
   md5(coalesce(string_agg(to_jsonb(t)::text,E'\n' order by ${order}),''))) from ${relation} t)`;
 const colourDigestSql = `select jsonb_build_object('rows',jsonb_build_object(

@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { translate, type Language, type MessageKey } from '../../src/i18n';
-import { canonical, encryptPart, sha256Hex, toBase64 } from '../../src/domain/export-format';
+import { canonical, decryptPart, encryptPart, metadataDigest, sha256Hex, toBase64, type SavedMetadata } from '../../src/domain/export-format';
 import { fitDimensions, JPEG_LIMITS, readJpegHeader } from '../../src/images/jpeg';
 import { exifSegment, joinBytes, jpegSegment, listJpegMarkers } from '../fixtures/jpeg-helpers';
 import { findMarker, findMarkers, flatJpeg } from '../fixtures/restore-jpeg-fixtures';
@@ -134,7 +134,7 @@ test('I20 restore: a backup from another account is added through the checked sa
   await expect(card).toContainText(text('restore.contents', 'en', { items: '2 items', outfits: '1 outfit' }));
   await expect(card).toContainText(text('restore.otherAccount'));
   await expect(card).toContainText(text('restore.kept'));
-  await expect(card).toContainText(text('restore.attributions'));
+  await expect(card).toContainText(text('restore.attributionsImported'));
   expect(own(api.items)).toHaveLength(0);
   await button(page, 'restore.start').click();
   await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
@@ -147,6 +147,11 @@ test('I20 restore: a backup from another account is added through the checked sa
   const photos = own(api.images).filter(image => image.item_id === restoredShirt.id);
   expect(photos.map(image => image.state).sort()).toEqual(['ready', 'retired', 'retired']);
   expect(photos.find(image => image.state === 'ready')!.alt_text).toBe(shirt.images[2]!.alt_text);
+  // The shirt's tag history comes back on the restored item, linked to its restored photo; the trousers had none.
+  const history = api.restoreControl.attributionImports;
+  expect([...history.keys()]).toEqual([restoredShirt.id]);
+  expect(history.get(String(restoredShirt.id))!.entries).toEqual([{ position: 0, source_image_id: photos.find(image => image.state === 'ready')!.id,
+    image_sha256: shirt.images[2]!.main_sha256, model_id: 'fixture-model', prompt_version: 1, fields: { category: 'top' } }]);
   for (const image of own(api.images)) {
     const main = api.files.get(String(image.main_path)), small = api.files.get(String(image.thumb_path));
     expect(main && sha(main) === image.main_sha256 && small && sha(small) === image.thumb_sha256).toBeTruthy();
@@ -173,6 +178,7 @@ test('I20 restore: a backup from another account is added through the checked sa
   await button(page, 'restore.start').click();
   await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
   expect(api.restoreControl.reservations).toBe(reservations);
+  expect([...api.restoreControl.attributionImports.keys()]).toEqual([restoredShirt.id]);
   expect(api.items).toHaveLength(count);
   expect(own(api.wearLinks)).toHaveLength(2);
 });
@@ -377,6 +383,74 @@ test('I20 restore: wrong passphrase, missing parts, other files and too many fil
   expect(own(api.items, 'a')).toHaveLength(1);
 });
 
+// Re-encrypts a real backup after changing its metadata, with every part moved to the new metadata digest.
+async function rewrite(parts: Part[], change: (metadata: SavedMetadata) => void): Promise<Part[]> {
+  const decoded = await Promise.all(parts.map(part => decryptPart(part.buffer.toString('utf8'), passphrase)));
+  const metadata = structuredClone(decoded[0]!.manifest as SavedMetadata);
+  change(metadata);
+  const digest = await metadataDigest(metadata);
+  return Promise.all(decoded.map(async (part, index) => ({ ...parts[index]!, buffer: Buffer.from(JSON.stringify(await encryptPart(
+    { ...part, manifestSha256: digest, ...index === 0 ? { manifest: metadata } : {} }, passphrase))) })));
+}
+
+test('P6d restore: a malformed tag-history entry refuses the whole backup at Check, with nothing written', async ({ page }) => {
+  const { api, urls, thumb } = await start(page);
+  const shirt = seed(api, thumb, 'Fictional linen shirt');
+  api.exportControl.attributions.set(String(shirt.item.id), [{ source_image_id: shirt.images[0]!.id, image_sha256: shirt.images[0]!.main_sha256,
+    model_id: 'fixture-model', prompt_version: 1, fields: { category: 'top' } }]);
+  await settings(page, 'a');
+  const parts = await backup(page);
+  await signOut(page);
+  await settings(page, 'b');
+  const seen = urls.length;
+  const card = restoreCard(page);
+  type Entry = SavedMetadata['tables']['item_attributions'][number];
+  for (const [name, bad] of [['a hash that is not a hash', { image_sha256: 'invalid' }], ['a model that is not text', { model_id: 42 }],
+    ['a negative prompt version', { prompt_version: -1 }], ['fields that are a list', { fields: [] }],
+    ['a lone entry at position 2', { position: 2 }], ['an unknown origin', { origin: 'server' }]] as const) {
+    await check(page, await rewrite(parts, metadata => { Object.assign(metadata.tables.item_attributions[0]! as Entry, bad); }));
+    await expect(card.getByRole('alert'), name).toHaveText(text('restore.invalid'), slow);
+    await button(page, 'backup.startAgain').click();
+  }
+  // The unchanged backup still passes Check, so the refusals above came from the tag history alone.
+  await check(page, parts);
+  await expect(card.getByText(text('restore.add', 'en', { n: '1' }))).toBeVisible(slow);
+  expect(writeUrls(urls.slice(seen))).toEqual([]);
+  expect(own(api.items)).toEqual([]);
+  expect(own(api.images)).toEqual([]);
+  expect(api.restoreControl.attributionImports.size).toBe(0);
+});
+
+test('P6d restore: busy tag history is retried by running again; history already here is kept and reported', async ({ page }) => {
+  const { api, thumb } = await start(page);
+  const shirt = seed(api, thumb, 'Fictional linen shirt');
+  api.exportControl.attributions.set(String(shirt.item.id), [{ source_image_id: shirt.images[0]!.id, image_sha256: shirt.images[0]!.main_sha256,
+    model_id: 'fixture-model', prompt_version: 1, fields: { category: 'top' } }]);
+  await settings(page, 'a');
+  const parts = await backup(page);
+  await signOut(page);
+  await settings(page, 'b');
+  const card = restoreCard(page);
+  await check(page, parts);
+  api.restoreControl.attributionReplies.push('busy', 'busy');
+  await button(page, 'restore.start').click();
+  await expect(card.getByRole('alert')).toHaveText(text('restore.stopped'), slow);
+  expect(own(api.items)).toHaveLength(1);
+  expect(api.restoreControl.attributionImports.size).toBe(0);
+  api.restoreControl.attributionReplies.push('kept');
+  await button(page, 'restore.again').click();
+  await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
+  await expect(card).toContainText(text('restore.attributionsKept_one', 'en', { count: '1' }));
+  expect(api.restoreControl.attributionImports.size).toBe(0);
+  await button(page, 'backup.finish').click();
+  await check(page, parts);
+  await button(page, 'restore.start').click();
+  await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
+  await expect(card).not.toContainText(text('restore.attributionsKept_one', 'en', { count: '1' }));
+  expect([...api.restoreControl.attributionImports.keys()]).toEqual([own(api.items)[0]!.id]);
+  expect(api.restoreControl.attributionReplies).toEqual([]);
+});
+
 test('I20 restore: offline, signing out and accessibility at 320px and 200% text', async ({ page, context }) => {
   const { api, thumb } = await start(page);
   seed(api, thumb, 'Fictional linen shirt');
@@ -529,7 +603,7 @@ async function countDecodes(page: Page) {
   };
 }
 // Settings also lists avoided pairs with a GET, which is not a write. Any other method there is, even one asking for rows back.
-const writeUrls = (urls: string[]) => urls.filter(url => !/^GET \S+\/rest\/v1\/combination_rules\?select=/.test(url) && /reserve_|finalize_|save_outfit|restore_history_entry|combination_rules|suggestion_feedback|wear_events|image-change|\/storage\/v1\/object\/wardrobe\/(?!.*\?)/.test(url));
+const writeUrls = (urls: string[]) => urls.filter(url => !/^GET \S+\/rest\/v1\/combination_rules\?select=/.test(url) && /reserve_|finalize_|save_outfit|restore_history_entry|restore_item_attribution|combination_rules|suggestion_feedback|wear_events|image-change|\/storage\/v1\/object\/wardrobe\/(?!.*\?)/.test(url));
 type Report = import('../../src/data/restore').RestoreResult;
 test('the restore write filter exempts only the Settings GET of avoided pairs', () => {
   const base = 'http://127.0.0.1:54321/rest/v1/combination_rules';

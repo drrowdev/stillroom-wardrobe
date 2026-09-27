@@ -1,4 +1,4 @@
-// Restore (I20/I21, P6b): adds a backup's saved wardrobe to the signed-in account. Only owner-scoped reads and the
+// Restore (I20/I21, P6b, P6d): adds a backup's saved wardrobe, with each item's tag history, to the signed-in account. Only owner-scoped reads and the
 // existing checked write paths are used; nothing is overwritten or deleted, and no analysis is ever requested.
 import type { OwnerScope } from '../auth/session';
 import type { AppClient } from './client';
@@ -7,7 +7,7 @@ import { AppError, isAborted, requireSuccess, throwIfAborted } from './errors';
 import { BackupFormatError, canonical, sha256Hex, type JpegCheck, type PartSource } from '../domain/export-format';
 import {
   chainState, missingPart, readBackup, restoreId, selectBackupFiles,
-  type ChainImage, type ChainState, type ReadBackup, type RestoreItem,
+  type ChainImage, type ChainState, type ReadBackup, type RestoreAttribution, type RestoreItem,
 } from '../domain/restore-plan';
 import { parseFieldProvenance, type FieldProvenance } from '../domain/attribute-provenance';
 import { garmentPayload, parseGarmentValues, type GarmentPayload, type GarmentValues } from '../domain/garment-fields';
@@ -50,8 +50,11 @@ export type PhotoOutcome = { sourceImageId: string; planned: Pick<PhotoPlan, 'ma
   outcome: 'written' | 'present' | 'skipped' | 'failed' | 'blocked'; stored: { mainSha256: string; thumbSha256: string } | null };
 // `failed` can be retried; `blocked` items were started by a different restore and can't be finished from this backup;
 // `deferred` counts outfits, rules, feedback and history held back until a failed or blocked item is restored.
+// `attributions` counts items whose tag history from the backup is now here (restored now or by an earlier run of the same
+// backup); `attributionsKept` counts items that already had tag history of their own, which was left as it is.
 export type RestoreResult = { restored: number; same: number; conflicts: number; trash: number; failed: number; blocked: number; deferred: number;
-  outfits: number; outfitConflicts: number; history: number; historyConflicts: number; photos: PhotoOutcome[] };
+  outfits: number; outfitConflicts: number; history: number; historyConflicts: number; attributions: number; attributionsKept: number;
+  photos: PhotoOutcome[] };
 
 /** A garment row in the backup that the restore couldn't write. Only its position is kept, never its content or ID. */
 export class RestoreGarmentError extends AppError {
@@ -404,7 +407,7 @@ export async function runRestore(client: AppClient, scope: OwnerScope, preview: 
   onProgress: (progress: RestoreProgress) => void): Promise<RestoreResult> {
   if (preview.ownerId !== scope.ownerId || preview.epoch !== scope.epoch) throw new AppError('error.conflict');
   const result: RestoreResult = { restored: 0, same: 0, conflicts: 0, trash: 0, failed: 0, blocked: 0, deferred: 0,
-    outfits: 0, outfitConflicts: 0, history: 0, historyConflicts: 0, photos: [] };
+    outfits: 0, outfitConflicts: 0, history: 0, historyConflicts: 0, attributions: 0, attributionsKept: 0, photos: [] };
   throwIfAborted(scope.signal);
   const entry = { result };
   lastReport = entry;
@@ -424,6 +427,31 @@ function recordPhotos(result: RestoreResult, preview: RestorePreview, plan: Item
     result.photos.push({ sourceImageId: photo.sourceId, planned: { main: planned.main, reason: planned.reason, sourceSha256: planned.sourceSha256,
       mainSha256: planned.mainSha256, thumbSha256: planned.thumbSha256 }, ...done.get(index) ?? { outcome: rest, stored: null } });
   }
+}
+
+type AttributionOutcome = 'restored' | 'kept' | 'failed';
+// One item's tag history after its photos are in place. The server decides under the item's writer lock: `created` or
+// `equal` (this backup's history is here), `kept` (the item has other history, never changed) or `busy` (tried once more;
+// still busy counts as failed, and running the restore again repeats the call).
+async function restoreAttribution(client: AppClient, plan: ItemPlan, exportId: string, entries: readonly RestoreAttribution[],
+  signal: AbortSignal): Promise<AttributionOutcome> {
+  const photos = plan.source.photos;
+  const p_entries = entries.map(entry => {
+    const index = entry.sourceImageId === null ? -1 : photos.findIndex(photo => photo.sourceId === entry.sourceImageId);
+    return { position: entry.position, source_image_id: index < 0 ? null : plan.imageIds[index]!, image_sha256: entry.image_sha256,
+      model_id: entry.model_id, prompt_version: entry.prompt_version, fields: entry.fields };
+  });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data, error } = await client.rpc('restore_item_attribution', { p_item_id: plan.id, p_import_id: exportId,
+      p_entries: p_entries as unknown as Json }).abortSignal(signal);
+    throwIfAborted(signal);
+    if (error) return 'failed';
+    const state = isRecord(data) ? data.state : null;
+    if (state === 'created' || state === 'equal') return 'restored';
+    if (state === 'kept') return 'kept';
+    if (state !== 'busy') return 'failed';
+  }
+  return 'failed';
 }
 
 async function restoreAll(client: AppClient, scope: OwnerScope, preview: RestorePreview, signal: AbortSignal,
@@ -463,7 +491,16 @@ async function restoreAll(client: AppClient, scope: OwnerScope, preview: Restore
     else if (outcome === 'blocked') { result.blocked++; retry.add(plan.source.sourceId); }
     else { result.failed++; retry.add(plan.source.sourceId); }
     recordPhotos(result, preview, plan, done, outcome === 'failed' ? 'failed' : outcome === 'blocked' ? 'blocked' : 'skipped');
-    if (outcome === 'new' || outcome === 'resume' || outcome === 'same') available.set(plan.source.sourceId, plan.id);
+    if (outcome === 'new' || outcome === 'resume' || outcome === 'same') {
+      available.set(plan.source.sourceId, plan.id);
+      const entries = data.attributions.get(plan.source.sourceId);
+      if (entries?.length) {
+        const history = await restoreAttribution(client, plan, data.exportId, entries, lifetime);
+        if (history === 'restored') result.attributions++;
+        else if (history === 'kept') result.attributionsKept++;
+        else result.failed++;
+      }
+    }
     onProgress({ done: position + 1, total });
   }
   const waits = (ids: readonly (string | null)[]) => ids.some(id => id !== null && retry.has(id));

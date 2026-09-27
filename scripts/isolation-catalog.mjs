@@ -60,6 +60,9 @@ export const EXPOSED_RPCS = Object.freeze([
   fn('reserve_restored_item_save', 'jsonb, jsonb', ['p_item', 'p_image']),
   fn('restore_image_change_status', 'uuid, uuid', ['p_item_id', 'p_request_id']),
   fn('restore_item_save_status', 'uuid', ['p_item_id']),
+  fn('restore_item_attribution', 'uuid, uuid, jsonb', ['p_item_id', 'p_import_id', 'p_entries']),
+  fn('item_attribution_history_v2', 'uuid', ['p_item_id']),
+  fn('attribution_digest', '', []),
 ]);
 
 // Public functions reachable only with service credentials (Edge/operator); normal sessions must be denied.
@@ -109,7 +112,8 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'item_deletion_target_supported(uuid, uuid, text)', 'item_deletion_receipt(private.item_deletion_operations)',
   'item_deletion_inventory_valid(private.item_deletion_operations)',
   'rotate_admission_generation()', 'deletion_receipt(private.deletion_jobs)', 'deletion_owner_rows_absent(uuid)',
-  'release_deleted_admission()',
+  'release_deleted_admission()', 'backup_bounded(jsonb, integer)', 'backup_number_bytes(numeric)',
+  'backup_compact_bytes(jsonb)',
 ]);
 
 // Supabase-provided GraphQL entrypoint; its privileges are provider-managed and recorded, not asserted.
@@ -136,7 +140,7 @@ export const PRIVATE_TABLES = Object.freeze([
   'item_save_attempts', 'ai_execution_manifests', 'ai_usage_evidence', 'ai_analysis_attestations',
   'ai_save_used_receipts', 'ai_item_save_attempts', 'ai_item_save_context', 'item_attribution_history',
   'item_image_used_ids', 'item_deletion_claims', 'image_change_attempts', 'image_change_context',
-  'image_change_history', 'item_deletion_operations', 'item_deletion_targets',
+  'image_change_history', 'item_deletion_operations', 'item_deletion_targets', 'imported_attribution_history',
 ]);
 const OWNER_EXPRESSION = '(private.is_approved() AND (owner_id = ( SELECT auth.uid() AS uid)))';
 export const OWNER_POLICIES = Object.freeze([
@@ -427,6 +431,9 @@ export const COVERAGE_REQUIREMENTS = Object.freeze({
   reserve_restored_item_save: req([], { collision: true }),
   restore_image_change_status: req(['changeItem', 'changeRequest'], { tuple: true }),
   restore_item_save_status: req(['saveItem']),
+  restore_item_attribution: req(['item', 'image'], { alternatives: true }),
+  item_attribution_history_v2: req(['item', 'changeItem'], { alternatives: true }),
+  attribution_digest: req([], { ownerOnly: true }),
 });
 const DIRECTIONS = [['A', 'B'], ['B', 'A']];
 const TAG = /^(?:anon|normal-[AB]|[AB]:control|[AB]>[AB]:(?:owner-only|mixed|collision|unverified|tuple|ref:[A-Za-z]+))$/;

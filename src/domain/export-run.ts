@@ -9,10 +9,12 @@ export type PreparedSnapshot = {
   exportId: string; ownerId: string; metadata: SavedMetadata; manifestSha256: string; plan: FileRef[][]; partCount: number;
   items: number; photos: number;
 };
-// `manifest` returns the raw export_manifest result; `attribution` returns one saved item's attribution history.
+// `manifest` returns the raw export_manifest result, `attribution` one saved item's item_attribution_history_v2 and
+// `digest` the attribution_digest of all the owner's tag history.
 export type SnapshotSource = {
   manifest: (exportId: string, signal: AbortSignal) => Promise<unknown>;
   attribution: (itemId: string, signal: AbortSignal) => Promise<unknown>;
+  digest: (signal: AbortSignal) => Promise<unknown>;
 };
 export type FetchFile = (ref: FileRef) => Promise<Uint8Array>;
 
@@ -20,9 +22,17 @@ async function manifest(source: SnapshotSource, ownerId: string, exportId: strin
   return readRawManifest(await source.manifest(exportId, signal), ownerId, exportId);
 }
 
-// One snapshot, the attribution of each saved item, then a second snapshot: if items or photos moved in between,
-// the backup is refused rather than mixing two states.
+async function digest(source: SnapshotSource, signal: AbortSignal): Promise<string> {
+  const value = await source.digest(signal);
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) throw new BackupFormatError('invalid');
+  return value;
+}
+
+// The tag-history digest, one snapshot, the attribution of each saved item, then a second snapshot and digest: if items,
+// photos or any tag history changed in between, the backup is refused rather than mixing two states. Tag history is
+// covered by the digest, never by item versions (restore relies on a version equal to the photo-chain length).
 export async function collectSnapshot(source: SnapshotSource, ownerId: string, exportId: string, signal: AbortSignal): Promise<PreparedSnapshot> {
+  const before = await digest(source, signal);
   const raw = await manifest(source, ownerId, exportId, signal);
   const ids = savedItemIds(raw);
   const attributions = new Map<string, unknown>();
@@ -34,7 +44,8 @@ export async function collectSnapshot(source: SnapshotSource, ownerId: string, e
     }
   }));
   const again = await manifest(source, ownerId, exportId, signal);
-  if (canonical(again.tables.items) !== canonical(raw.tables.items) || canonical(again.tables.item_images) !== canonical(raw.tables.item_images)) {
+  if (canonical(again.tables.items) !== canonical(raw.tables.items) || canonical(again.tables.item_images) !== canonical(raw.tables.item_images)
+    || await digest(source, signal) !== before) {
     throw new BackupFormatError('changed');
   }
   const metadata = projectSaved(raw, new Map([...attributions].sort(([a], [b]) => a < b ? -1 : 1)));
@@ -48,7 +59,8 @@ export function fromMetadata(metadata: SavedMetadata, manifestSha256: string): P
     items: metadata.tables.items.length, photos: metadata.tables.item_images.length };
 }
 
-// Builds and encrypts one part; photo bytes are checked against the snapshot before they are included.
+// Builds and encrypts one part; photo bytes are checked against the snapshot before they are included. Every part has the
+// metadata's version, so a resumed version 2 backup stays version 2.
 export async function assemblePart(prepared: PreparedSnapshot, index: number, fetchFile: FetchFile, passphrase: string): Promise<Envelope> {
   if (!Number.isSafeInteger(index) || index < 0 || index >= prepared.partCount) throw new BackupFormatError('invalid');
   const files: FileEntry[] = [];
@@ -57,7 +69,7 @@ export async function assemblePart(prepared: PreparedSnapshot, index: number, fe
     if (bytes.length !== ref.byteLength || await sha256Hex(bytes) !== ref.sha256) throw new BackupFormatError('changed');
     files.push({ imageId: ref.imageId, variant: ref.variant, sha256: ref.sha256, byteLength: ref.byteLength, mime: 'image/jpeg', base64: toBase64(bytes) });
   }
-  const part: ExportPart = { format: 'stillroom-export', schemaVersion: 2, exportId: prepared.exportId, partIndex: index,
+  const part: ExportPart = { format: 'stillroom-export', schemaVersion: prepared.metadata.schema_version, exportId: prepared.exportId, partIndex: index,
     partCount: prepared.partCount, manifestSha256: prepared.manifestSha256, ...(index === 0 ? { manifest: prepared.metadata } : {}), files };
   return encryptPart(part, passphrase);
 }

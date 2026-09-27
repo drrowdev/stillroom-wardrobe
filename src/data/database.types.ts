@@ -644,6 +644,7 @@ export type Database = {
         Args: { p_fingerprint: string; p_image_id: string; p_item_id: string }
         Returns: Json
       }
+      attribution_digest: { Args: never; Returns: string }
       authorize_item_deletion: {
         Args: {
           p_inventory_hash: string
@@ -736,6 +737,10 @@ export type Database = {
         Returns: Json
       }
       item_attribution_history: { Args: { p_item_id: string }; Returns: Json }
+      item_attribution_history_v2: {
+        Args: { p_item_id: string }
+        Returns: Json
+      }
       item_deletion_next_target: {
         Args: { p_item_id: string; p_request_id: string }
         Returns: Json
@@ -826,6 +831,10 @@ export type Database = {
       }
       restore_image_change_status: {
         Args: { p_item_id: string; p_request_id: string }
+        Returns: Json
+      }
+      restore_item_attribution: {
+        Args: { p_entries: Json; p_import_id: string; p_item_id: string }
         Returns: Json
       }
       restore_item_save_status: { Args: { p_item_id: string }; Returns: Json }

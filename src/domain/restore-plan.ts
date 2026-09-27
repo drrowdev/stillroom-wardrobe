@@ -1,9 +1,9 @@
-// Restore reading and planning (I20/I21). Pure: no Supabase access. Reads version 2 backups (the app) and version 1 backups
+// Restore reading and planning (I20/I21). Pure: no Supabase access. Reads version 3 and 2 backups (the app) and version 1 backups
 // (the reference exporter), checks every photo's original bytes before anything is converted, and describes the saved
 // wardrobe under deterministic IDs for the signed-in account.
 import {
   BACKUP_LIMITS, BackupFormatError, canonical, decryptPart, fromBase64, planParts, projectSaved, rawColumns, savedItemIds, sha256Hex, verifyBackup,
-  type ExportPart, type FileRef, type JpegCheck, type PartSource, type RawManifest, type RawTable, type SavedMetadata,
+  type ExportPart, type FileRef, type JpegCheck, type PartSource, type RawManifest, type RawTable, type SavedMetadata, type SavedVersion,
 } from './export-format';
 import { provenanceFields, provenanceKinds, type ProvenanceField, type ProvenanceKind } from './attribute-provenance';
 
@@ -43,7 +43,8 @@ export function missingPart(indices: readonly number[], count: number): number |
 }
 
 // ---- Deterministic IDs: UUIDv8 from SHA-256, bound to the format version, target account and backup. ----
-export async function restoreId(version: 1 | 2, targetUid: string, exportId: string, table: string, sourceId: string): Promise<string> {
+export type BackupVersion = 1 | SavedVersion;
+export async function restoreId(version: BackupVersion, targetUid: string, exportId: string, table: string, sourceId: string): Promise<string> {
   const hex = await sha256Hex(`stillroom/restore/v${version}|${targetUid}|${exportId}|${table}|${sourceId}`);
   const bytes = hex.slice(0, 32).match(/../g)!.map(pair => parseInt(pair, 16));
   bytes[6] = (bytes[6]! & 0x0f) | 0x80;
@@ -59,12 +60,17 @@ export type RestoreItem = { sourceId: string; row: Row; kinds: Partial<Record<Pr
 export type RestoreOutfit = { sourceId: string; title: string; occasion: string; notes: string; favourite: boolean; itemIds: string[] };
 export type RestoreEntry = { sourceId: string; itemId: string | null; title: string; category: string };
 export type RestoreEvent = { sourceId: string; outfitId: string | null; localDate: string; timezone: string; state: string; label: string; entries: RestoreEntry[] };
+// One tag-history entry as restore_item_attribution takes it; `sourceImageId` is the backup's photo ID (null when the photo
+// wasn't exported) and is mapped to the restored photo when the call is made. The origin isn't sent: every restored entry
+// is stored as imported.
+export type RestoreAttribution = { position: number; sourceImageId: string | null; image_sha256: string; model_id: string;
+  prompt_version: number; fields: Row };
 export type RestoreData = {
-  version: 1 | 2; exportId: string; sourceOwner: string; createdAt: string;
+  version: BackupVersion; exportId: string; sourceOwner: string; createdAt: string;
   items: RestoreItem[]; outfits: RestoreOutfit[]; events: RestoreEvent[];
   rules: Array<{ low: string; high: string }>; feedback: Array<{ itemIds: string[]; vote: number }>;
-  // Tag history (model, prompt and source photo hash) is read but not restored yet.
-  attributions: number;
+  // Tag history per backup item ID, in order; only items that have some are present.
+  attributions: ReadonlyMap<string, RestoreAttribution[]>; attributionCount: number;
 };
 const aiEstimated: readonly string[] = ['material', 'seasons', 'formality', 'style_tags'];
 const aiObserved: readonly string[] = ['category', 'subcategory', 'colours', 'pattern', 'sleeve_length', 'garment_length',
@@ -92,7 +98,7 @@ function photoOf(image: Row): RestorePhoto {
     main: { sha256: String(image.main_sha256), byteLength: Number(image.main_bytes) },
     thumb: { sha256: String(image.thumb_sha256), byteLength: Number(image.thumb_bytes) } };
 }
-export function describeSaved(metadata: SavedMetadata, version: 1 | 2): RestoreData {
+export function describeSaved(metadata: SavedMetadata, version: BackupVersion): RestoreData {
   const t = metadata.tables;
   const items = t.items.map((row): RestoreItem => {
     const own = t.item_images.filter(image => image.item_id === row.id);
@@ -110,7 +116,18 @@ export function describeSaved(metadata: SavedMetadata, version: 1 | 2): RestoreD
   return { version, exportId: metadata.export_id, sourceOwner: metadata.owner_id, createdAt: metadata.created_at, items, outfits, events,
     rules: t.combination_rules.map(rule => ({ low: String(rule.item_low), high: String(rule.item_high) })),
     feedback: t.suggestion_feedback.map(entry => ({ itemIds: (entry.item_ids as unknown[]).map(String), vote: Number(entry.vote) })),
-    attributions: t.item_attributions.length };
+    attributions: attributionsOf(t.item_attributions), attributionCount: t.item_attributions.length };
+}
+// assertMetadata has already checked every entry, the positions (0, 1, ... per item) and each photo's item.
+function attributionsOf(rows: readonly Row[]): Map<string, RestoreAttribution[]> {
+  const byItem = new Map<string, RestoreAttribution[]>();
+  for (const row of rows) {
+    const list = byItem.get(String(row.item_id)) ?? [];
+    list.push({ position: Number(row.position), sourceImageId: row.source_image_id === null ? null : String(row.source_image_id),
+      image_sha256: String(row.image_sha256), model_id: String(row.model_id), prompt_version: Number(row.prompt_version), fields: row.fields as Row });
+    byItem.set(String(row.item_id), list);
+  }
+  return byItem;
 }
 
 // ---- Reading a backup. ----
@@ -123,7 +140,7 @@ const mainOrder = (locate: ReadonlyMap<string, { part: number; ref: FileRef }>) 
   .filter(place => place.ref.variant === 'main').sort((a, b) => a.part - b.part).map(place => place.ref.imageId);
 
 // Re-reads the part that holds a photo when it is needed, keeping one decrypted part, and checks its hash again.
-function photoReader(source: PartSource, passphrase: string, version: 1 | 2, exportId: string, count: number,
+function photoReader(source: PartSource, passphrase: string, version: BackupVersion, exportId: string, count: number,
   locate: ReadonlyMap<string, { part: number; ref: FileRef }>): PhotoReader {
   let cached: { index: number; text: string; part: ExportPart } | null = null;
   return async (imageId, variant, fresh = false) => {
@@ -150,8 +167,9 @@ export async function readBackupV2(source: PartSource, passphrase: string, check
   const summary = await verifyBackup(source, passphrase, checkJpeg);
   const locate = new Map<string, { part: number; ref: FileRef }>();
   planParts(summary.metadata).forEach((refs, index) => { for (const ref of refs) locate.set(`${ref.imageId}|${ref.variant}`, { part: index + 1, ref }); });
-  return { data: describeSaved(summary.metadata, 2), parts: summary.parts, photos: summary.photos, fileBytes: summary.fileBytes,
-    read: photoReader(files, passphrase, 2, summary.exportId, summary.parts, locate), order: mainOrder(locate) };
+  const version = summary.metadata.schema_version;
+  return { data: describeSaved(summary.metadata, version), parts: summary.parts, photos: summary.photos, fileBytes: summary.fileBytes,
+    read: photoReader(files, passphrase, version, summary.exportId, summary.parts, locate), order: mainOrder(locate) };
 }
 
 // Version 1 manifests predate some columns: a missing column takes its later default, an unknown table or column is refused.
@@ -227,6 +245,7 @@ export async function readBackupV1(source: PartSource, passphrase: string, check
   }
   // Same saved-only rules as the app's export; version 1 has no tag history.
   const saved = projectSaved(raw, new Map(savedItemIds(raw).map(id => [id, []])));
+  if (saved.tables.item_attributions.length) fail();
   return { data: describeSaved(saved, 1), parts: head.partCount, photos: saved.tables.item_images.length, fileBytes,
     read: photoReader(files, passphrase, 1, head.exportId, head.partCount, locate), order: mainOrder(locate) };
 }

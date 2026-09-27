@@ -2121,6 +2121,7 @@ describe('safe startup/reset failure description', () => {
     '20260925110000_restore_item_save.sql',
     '20260925120000_account_deletion.sql',
     '20260925120100_deletion_receipt_purge_schedule.sql',
+    '20260927090000_restore_attribution.sql',
   ]);
 
   function report(result: unknown, ...elapsed: [] | [unknown]) {
@@ -2247,7 +2248,7 @@ describe('safe startup/reset failure description', () => {
   it('counts distinct announcements and uses stderr order rather than version order', () => {
     const lines = [...migrations, migrations[1], migrations[0]];
     expect(failure(lines.map((name) => `Applying migration ${name}...\n`).join('')))
-      .toMatchObject({ announcedKnownMigrationCount: 18, lastAnnouncedKnownMigrationIndex: 1 });
+      .toMatchObject({ announcedKnownMigrationCount: 19, lastAnnouncedKnownMigrationIndex: 1 });
   });
 
   it('keeps eighth/ninth announcements distinct from the observed statement ordinal', () => {

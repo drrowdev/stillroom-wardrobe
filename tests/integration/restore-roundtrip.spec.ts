@@ -76,6 +76,7 @@ function languageInitializationOnly(label: string, actual: Snapshot, expected: S
 // and close old AI requests (private.ai_close).
 const READ_ONLY_RPCS = new Set(['analyzed_item_save_preflight', 'deletion_status', 'image_change_preflight',
   'image_change_requests', 'image_change_status', 'image_recovery_preflight', 'image_recovery_versions', 'item_attribution_history',
+  'item_attribution_history_v2', 'attribution_digest',
   'item_deletion_operation_status', 'item_deletion_operations', 'item_deletion_status', 'restore_image_change_status',
   'restore_item_save_status']);
 
@@ -232,6 +233,24 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     cEdit = editGarmentField(editGarmentField(editGarmentField(cEdit, 'brand', '', 'en'), 'pattern', '', 'en'), 'seasons', [], 'en');
     const cWrite = buildGarmentWrite(cEdit, cBaseline.values, cBaseline.provenance);
     await saveItemFields(owner.client, owner.scope, { epoch: owner.scope.epoch, baseline: cBaseline, fields: cWrite.values, patch: cWrite.patch });
+    // P6d: C carries tag history B restored from an earlier (fictional) backup, one entry linked to C's photo and one
+    // not. P has none, like an item from a backup made before tag history was saved.
+    const cPhoto = await owner.client.from('item_images').select('id').eq('owner_id', owner.scope.ownerId).eq('item_id', cAttempt.itemId).single();
+    check(!cPhoto.error && cPhoto.data);
+    const cHistory = [
+      { position: 0, source_image_id: cPhoto.data.id, image_sha256: 'c'.repeat(64), model_id: 'fictional-model', prompt_version: 1,
+        fields: { category: { kind: 'ai_observed', revision: 1 } } },
+      { position: 1, source_image_id: null, image_sha256: 'd'.repeat(64), model_id: 'fictional-model', prompt_version: 2,
+        fields: { pattern: { kind: 'ai_observed', revision: 1 } } },
+    ];
+    const seeded = await owner.client.rpc('restore_item_attribution', { p_item_id: cAttempt.itemId, p_import_id: randomUUID(), p_entries: cHistory as Json });
+    check(!seeded.error && canonical(seeded.data) === canonical({ state: 'created', reason: null }));
+    const imported = (entries: typeof cHistory, image: (id: string) => string | Promise<string>) => Promise.all(entries.map(async entry => ({
+      origin: 'imported', source_image_id: entry.source_image_id === null ? null : await image(entry.source_image_id),
+      image_sha256: entry.image_sha256, model_id: entry.model_id, prompt_version: entry.prompt_version, fields: entry.fields })));
+    const cSourceHistory = await imported(cHistory, id => id);
+    const bHistory = await owner.client.rpc('item_attribution_history_v2', { p_item_id: cAttempt.itemId });
+    check(!bHistory.error && canonical(bHistory.data) === canonical(cSourceHistory));
     // T: saved, then moved to Trash. A backup leaves it out.
     const tAttempt = newSaveAttempt(draft('Fictional trashed scarf', 'accessory'), 'A scarf', photo(64, 48, [120, 128, 128]), owner.scope);
     created.b.items.push(tAttempt.itemId);
@@ -285,10 +304,17 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     const pOld = pImages.find(image => image.state === 'retired')!, pNew = pImages.find(image => image.state === 'ready')!;
     check(pOld && pNew && pNew.main_sha256 === replacement.mainSha256);
     const cImage = sourceImages.find(image => image.item_id === cAttempt.itemId)!;
+    // New backups are version 3 and carry each item's tag history with its origin, in order.
+    check(manifest.schema_version === 3);
+    const historyOf = (tables: typeof manifest.tables, id: string) => tables.item_attributions.filter(row => row.item_id === id)
+      .sort((x, y) => Number(x.position) - Number(y.position))
+      .map(({ origin, source_image_id, image_sha256, model_id, prompt_version, fields }) => ({ origin, source_image_id, image_sha256, model_id, prompt_version, fields }));
+    check(canonical(historyOf(manifest.tables, cAttempt.itemId)) === canonical(cSourceHistory));
+    check(historyOf(manifest.tables, pAttempt.itemId).length === 0);
 
     const bBefore = await snapshot(owner);
     let aBefore = await snapshot(a);
-    const map = (table: string, id: unknown) => restoreId(2, a!.scope.ownerId, exportId, table, String(id));
+    const map = (table: string, id: unknown) => restoreId(manifest.schema_version, a!.scope.ownerId, exportId, table, String(id));
     const [pId, cId] = [await map('items', pAttempt.itemId), await map('items', cAttempt.itemId)];
     created.a.items.push(pId, cId);
     const aOutfitId = await map('outfits', outfitId), aEventId = await map('wear_events', eventId);
@@ -377,6 +403,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
       return restoreReport();
     }) as RestoreResult | null;
     check(report && report.photos.length === 3 && report.failed === 0 && report.blocked === 0 && report.deferred === 0);
+    check(report.attributions === 1 && report.attributionsKept === 0);
     const after = await snapshot(a);
 
     // Hashes: source (manifest and carried bytes) -> expected (Q6 plan) -> actual (row and the object downloaded as A).
@@ -445,11 +472,23 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     check(rowsOf(after, 'combination_rules').some(row => row.item_low === mappedPair[0] && row.item_high === mappedPair[1]));
     check(rowsOf(after, 'suggestion_feedback').some(row => canonical(row.item_ids) === canonical(mappedPair) && row.vote === 1));
     for (const table of ['profiles', 'style_preferences'] as const) check(canonical(rowsOf(after, table)) === canonical(rowsOf(aBefore, table)));
-    // Q5: saved attribution history is not restored; the restored items have none.
-    for (const id of [pId, cId]) {
-      const history = await a.client.rpc('item_attribution_history', { p_item_id: id });
-      check(!history.error && canonical(history.data) === '[]');
-    }
+    // Q5 (P6d), checked three ways: the backup's tag history -> the restored item's history (image IDs mapped, still
+    // labelled imported, never shown as recorded) -> a new backup of A, which carries it again as imported.
+    stage = 'history';
+    const aHistory = async (id: string) => {
+      const [legacy, current] = [await a!.client.rpc('item_attribution_history', { p_item_id: id }),
+        await a!.client.rpc('item_attribution_history_v2', { p_item_id: id })];
+      check(!legacy.error && canonical(legacy.data) === '[]' && !current.error);
+      return current.data;
+    };
+    const cRestoredHistory = await imported(cHistory, id => map('item_images', id));
+    check(canonical(await aHistory(cId)) === canonical(cRestoredHistory));
+    check(canonical(await aHistory(pId)) === '[]');
+    const again = await prepareExport(a.client, a.scope, new AbortController().signal);
+    const againFirst = await decryptPart(await (await buildPart(a.client, a.scope, again, 0, PASSPHRASE, new AbortController().signal)).text(), PASSPHRASE);
+    check(againFirst.manifest?.schema_version === 3);
+    check(canonical(historyOf(againFirst.manifest.tables, cId)) === canonical(cRestoredHistory));
+    check(historyOf(againFirst.manifest.tables, pId).length === 0);
 
     // ---- Second run of the same backup: everything is already here and nothing persistent changes. ----
     stage = 'second-run';
@@ -461,6 +500,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     await button(page, 'restore.start').click();
     await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
     unchanged('A after the second restore', await snapshot(a), after);
+    check(canonical(await aHistory(cId)) === canonical(cRestoredHistory));
     check(storageWrites(secondFrom).length === 0 && reservations(secondFrom).length === 0 && functionCalls(secondFrom).length === 0);
 
     // ---- Tripwire and the other owner. ----

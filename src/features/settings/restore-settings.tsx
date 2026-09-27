@@ -35,7 +35,7 @@ export function RestoreSettings({ client, scope, language, online, t }: Props) {
     if (state.kind === 'failed' || state.kind === 'stopped' || state.kind === 'incomplete' || state.kind === 'idle' && state.recheck) alert.current?.focus();
   }, [state]);
   const number = (value: number) => new Intl.NumberFormat(locales[language]).format(value);
-  const plural = (key: 'backup.items' | 'restore.outfits' | 'restore.reencoded', value: number) => t(
+  const plural = (key: 'backup.items' | 'restore.outfits' | 'restore.reencoded' | 'restore.attributionsKept', value: number) => t(
     new Intl.PluralRules(locales[language]).select(value) === 'one' ? `${key}_one` : `${key}_other`, { count: number(value) });
 
   function reset() {
@@ -124,7 +124,7 @@ export function RestoreSettings({ client, scope, language, online, t }: Props) {
       </ul>
       {state.preview.otherAccount && <p className="notice">{t('restore.otherAccount')}</p>}
       <p className="muted fine">{t('restore.kept')}</p>
-      {state.preview.backup.data.attributions > 0 && <p className="muted fine">{t('restore.attributions')}</p>}
+      {state.preview.backup.data.attributionCount > 0 && <p className="muted fine">{t('restore.attributionsImported')}</p>}
       {state.kind === 'stopped' && <p ref={alert} tabIndex={-1} role="alert" className="notice notice-error">{t('restore.stopped')}</p>}
       {state.kind === 'stopped' && state.failed !== null && <p>{t('restore.notRestored', { n: number(state.failed) })}</p>}
       {state.kind === 'stopped' && state.blocked > 0 && <p>{t('restore.blocked', { n: number(state.blocked) })}</p>}
@@ -141,11 +141,13 @@ export function RestoreSettings({ client, scope, language, online, t }: Props) {
       {state.result.conflicts + state.result.outfitConflicts + state.result.historyConflicts > 0 && <p>{t('restore.conflicts',
         { n: number(state.result.conflicts + state.result.outfitConflicts + state.result.historyConflicts) })}</p>}
       {state.result.trash > 0 && <p>{t('restore.inTrash', { n: number(state.result.trash) })}</p>}
+      {state.result.attributionsKept > 0 && <p>{plural('restore.attributionsKept', state.result.attributionsKept)}</p>}
       <button type="button" className="button button-secondary" onClick={reset}>{t('backup.finish')}</button>
     </div>}
     {state.kind === 'incomplete' && <div className="stack">
       <p ref={alert} tabIndex={-1} role="alert" className="notice notice-error">{t('restore.incomplete')}</p>
       <p>{t('restore.blocked', { n: number(state.result.blocked) })}</p>
+      {state.result.attributionsKept > 0 && <p>{plural('restore.attributionsKept', state.result.attributionsKept)}</p>}
       {state.result.deferred > 0 && <p>{t('restore.notRestored', { n: number(state.result.deferred) })}</p>}
       <button type="button" className="button button-secondary" onClick={reset}>{t('backup.finish')}</button>
     </div>}

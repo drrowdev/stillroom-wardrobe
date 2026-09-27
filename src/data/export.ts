@@ -21,7 +21,7 @@ async function manifest(client: AppClient, exportId: string, signal: AbortSignal
 }
 
 async function attribution(client: AppClient, itemId: string, signal: AbortSignal): Promise<unknown> {
-  const { data, error } = await client.rpc('item_attribution_history', { p_item_id: itemId }).abortSignal(signal);
+  const { data, error } = await client.rpc('item_attribution_history_v2', { p_item_id: itemId }).abortSignal(signal);
   throwIfAborted(signal);
   // The item left the saved set (Trash or deletion) after the snapshot.
   if (error && (error as { code?: string }).code === '42501') throw new AppError('backup.changed');
@@ -29,7 +29,14 @@ async function attribution(client: AppClient, itemId: string, signal: AbortSigna
   return data;
 }
 
-// One snapshot, the attribution of each saved item, then a second snapshot (src/domain/export-run.ts).
+async function digest(client: AppClient, signal: AbortSignal): Promise<unknown> {
+  const { data, error } = await client.rpc('attribution_digest').abortSignal(signal);
+  throwIfAborted(signal);
+  requireSuccess(error);
+  return data;
+}
+
+// Digest, one snapshot, the attribution of each saved item, then a second snapshot and digest (src/domain/export-run.ts).
 export async function prepareExport(client: AppClient, scope: OwnerScope, signal: AbortSignal): Promise<PreparedExport> {
   const lifetime = AbortSignal.any([scope.signal, signal]);
   const exportId = crypto.randomUUID();
@@ -37,6 +44,7 @@ export async function prepareExport(client: AppClient, scope: OwnerScope, signal
     return await collectSnapshot({
       manifest: (id, abort) => manifest(client, id, abort),
       attribution: (id, abort) => attribution(client, id, abort),
+      digest: abort => digest(client, abort),
     }, scope.ownerId, exportId, lifetime);
   } catch (failure) { return problem(failure); }
 }
