@@ -8,7 +8,7 @@ Two invited logins; independent profiles/preferences; camera/library image captu
 
 **Approved revision 1.3:** paid AI automatically fills an editable form from a photo, including title/category. The user can edit every garment field before explicit Save to library; analysis never automatically saves an item. One-time provider consent replaces a separate "Suggest" action, not the final Save. This supersedes revision 1.2's post-save enrichment. Outfits stay deterministic. `20` defines the revised I29 contract.
 
-The initial release deliberately has **no background segmentation model**. Automatic background removal is optional in the brief, and model download/phone memory/licence work does not justify delaying the useful app. A neutral crop background, rotation and manual framing are included. `ImageEnhancementProvider` is a disabled interface. The local open-source candidate and adoption test are documented in `05`.
+Background removal is automatic and runs on the device (ADR24, owner request #84). After the crop, a small open segmentation model (u2netp, Apache-2.0) replaces the background with the warm neutral colour before the normal encode and checks. The model and its runtime (about 19 MB) download from the app's own origin on first use and are cached; no photo or pixel leaves the device for this. If removal fails, times out or cannot download, the photo keeps its original background and the flow continues. Rotation and manual framing stay. `ImageEnhancementProvider` remains a disabled interface for anything beyond this. Details are in `05` and `08` step 9. It was not in the initial release: it was added after the owner's request, and real-garment quality and phone timing remain owner gates.
 
 ## Deferred Features
 
@@ -26,7 +26,7 @@ implicit waiver of deletion, backup, recovery or security.
 | Feature | Stage / reason |
 |---|---|
 | Trips and packing lists | Optional Phase 8, after MVP acceptance. Useful but adds date/destination/checklist state. Specify owned trips and item references only; no collaborative trip editing. |
-| Local background removal | Optional separate iteration after representative iPhone/Android benchmarks and licence review; app remains usable without it. |
+| Local background removal | In scope (ADR24): automatic, on the device, with automatic fallback to the original background. Real-garment quality and iPhone/Android timing are owner gates. |
 | Native Expo app or native wrapper | Only after a measured PWA limitation blocks daily use; would add distribution/signing and another platform test burden. |
 | Push notifications | No recurring reminders in the first app; browser installation/permission differences add work without wardrobe value. |
 | Persistent private offline wardrobe | Requires encrypted device storage, explicit device trust, eviction and revocation design. Shell-only offline support is intentional. |

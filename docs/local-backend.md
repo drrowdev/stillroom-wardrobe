@@ -747,6 +747,15 @@ Playwright project is not selected by exactly one job or an upload moves. The
 timeouts are estimates from the ~19.6-minute single job; measured durations
 must stay within 60 % of each timeout.
 
+Since BG1 (#86) `test:pwa` runs in its own "PWA production contracts" job
+(timeout 20 minutes, no uploads, same pinned setup and Chromium install), because
+the App job reached 29m17s of its 30 minutes before `test:pwa` started. Its
+global setup builds the fixture shells it serves, so it does not depend on the
+App job's `dist`.
+It also uploads the captures that `tests/pwa/visual.spec.ts` writes: `i23-shell-ui`
+and `i24-shell-ui` (`update-sv-320-200`, formerly part of `i24-a11y-ui`). The App job timeout rose from 30 to 40 minutes
+(coordinator decision): on run 36312039128 its test:browser step alone took 25m28s.
+
 Only the existing oversized analysis call adds its pre-fetch `constructedBytes`,
 expecting exactly413/response/512001. The other eleven authorization/envelope
 results retain two keys and their original statuses. The closed copier retains

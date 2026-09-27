@@ -6,7 +6,7 @@ import { validDescription } from '../../domain/item-details';
 import { ItemForm } from './item-form';
 import { Icon } from '../../app/icon';
 import type { Language, MessageKey, Translate } from '../../i18n';
-import type { ImagePreparationError, PreparedPhoto } from '../../images/process-jpeg';
+import type { CropSource, ImagePreparationError, PreparedPhoto } from '../../images/process-jpeg';
 import { ORIGINAL_EDIT, type PhotoEdit } from '../../images/photo-edit';
 import { LazyBoundary } from '../../app/lazy';
 import { lazyNamed, preloadable } from '../../app/lazy-load';
@@ -17,6 +17,8 @@ import type { AiClient } from '../../data/ai';
 import { useAiDraft } from './use-ai-draft';
 import { AnalysisStatus } from './analysis-status';
 import type { BeforeDiscard } from '../../app/dialog';
+import { BackgroundNote, BackgroundStatus } from './background';
+import { preparingMessage, useBackground } from './use-background';
 
 const loadImaging = preloadable(() => import('../../images/imaging'));
 const CropEditor = lazyNamed(() => import('../../images/crop-editor'), 'CropEditor');
@@ -43,12 +45,13 @@ type Props = {
 export function AddItem({ client, scope, currency, online, t, language, onSaved, onBack, onDirty, ai, onBeforeDiscard }: Props) {
   const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [fullPhoto, setFullPhoto] = useState<PreparedPhoto | null>(null);
+  const [fullPhoto, setFullPhoto] = useState<CropSource | null>(null);
   const [fullPreview, setFullPreview] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [acceptedEdit, setAcceptedEdit] = useState<PhotoEdit>(ORIGINAL_EDIT);
   const [initialCurrency] = useState(currency);
   const analysis = useAiDraft(ai, currency, language);
+  const background = useBackground(scope);
   const { draft, description: altText } = analysis;
   const title = draft.raw.title;
   const [preparing, setPreparing] = useState(false);
@@ -62,6 +65,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   const library = useRef<HTMLInputElement>(null);
   const camera = useRef<HTMLInputElement>(null);
   const preparation = useRef<AbortController | null>(null);
+  const pendingCrop = useRef(false);
   const preparationWork = useRef<Promise<void>>(Promise.resolve());
   const original = useRef<Blob | null>(null);
   const focusEditorButton = useRef(false);
@@ -128,10 +132,14 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     setFullPhoto(null);
     setAcceptedEdit(ORIGINAL_EDIT);
     setPhoto(null);
+    background.reset();
     await prepare(file, ORIGINAL_EDIT, true);
   }
   async function prepare(file: Blob, edit: PhotoEdit, replacing = false): Promise<void> {
     if (frozen || submitLatch.current || scope.signal.aborted) return;
+    // Work that supersedes an unfinished new-photo preparation still owes that photo its crop preview.
+    replacing ||= pendingCrop.current;
+    pendingCrop.current = replacing;
     analysis.stop();
     preparation.current?.abort();
     const controller = new AbortController();
@@ -146,17 +154,22 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
       let imaging: Awaited<ReturnType<typeof loadImaging>> | null = null;
       try {
         imaging = await loadImaging();
-        const prepared = await imaging.prepareImage(file, signal, edit);
+        // The first settled photo is analysed once: removal (or its fallback) finishes before commitPhoto.
+        const prepared = await background.prepare(imaging, file, edit, signal, replacing, () => preparation.current === controller);
         if (!signal.aborted) {
-          setPhoto(prepared);
-          void analysis.commitPhoto(prepared);
-          if (replacing) setFullPhoto(prepared);
+          setPhoto(prepared.photo);
+          background.settle(prepared.state);
+          void analysis.commitPhoto(prepared.photo);
+          if (replacing) setFullPhoto(prepared.crop);
+          pendingCrop.current = false;
           setAcceptedEdit(edit);
           setEditing(false);
           if (!replacing) focusEditorButton.current = true;
         }
       } catch (problem) {
         if (!signal.aborted && !isAborted(problem)) {
+          background.settle('none');
+          pendingCrop.current = false;
           if (replacing) original.current = null;
           setError(!imaging ? 'chunk.failed' : problem instanceof imaging.ImagePreparationError ? preparationErrors[problem.code] : 'photo.invalid');
         }
@@ -217,6 +230,11 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
       }
     } finally { if (!scope.signal.aborted) { submitLatch.current = false; setStage(null); } }
   }
+  function useOriginalBackground() {
+    if (frozen || submitLatch.current || scope.signal.aborted) return;
+    // After a finished removal this is a new photo generation, analysed again.
+    if (background.useOriginal() === 'again' && original.current) void prepare(original.current, acceptedEdit);
+  }
   function cancelEdit() {
     preparation.current?.abort();
     setPreparing(false);
@@ -237,13 +255,15 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
               onApply={(edit) => { if (original.current) void prepare(original.current, edit); }}
               onCancel={cancelEdit} /></LazyBoundary>
           : !editing && <div className={`capture-photo ${preview ? 'has-photo' : ''}`} aria-busy={preparing}>
-            {preview ? <img src={preview} alt={altText || title || t('capture.photo')} /> : preparing ? <div className="photo-prompt"><span className="spinner" /><p role="status">{t('capture.preparing')}</p></div> : <div className="photo-prompt"><span className="photo-prompt-icon"><Icon name="photo" /></span><h2>{t('capture.photo')}</h2><p>{t('capture.photoHint')}</p></div>}
+            {preview ? <img src={preview} alt={altText || title || t('capture.photo')} /> : preparing ? <div className="photo-prompt"><span className="spinner" /><p role="status">{t(preparingMessage(background.state, background.downloading, 'capture.preparing'))}</p></div> : <div className="photo-prompt"><span className="photo-prompt-icon"><Icon name="photo" /></span><h2>{t('capture.photo')}</h2><p>{t('capture.photoHint')}</p><BackgroundNote t={t} language={language} /></div>}
           </div>}
           <input ref={library} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1} aria-label={t('capture.library')} disabled={frozen} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
           <input ref={camera} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" tabIndex={-1} aria-label={t('capture.camera')} disabled={frozen} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
           {!editing && <div className="photo-actions"><button id="choose-photo" className="button button-secondary" type="button" disabled={frozen || preparing} onClick={() => library.current?.click()}><Icon name="photo" />{t(photo ? 'capture.replace' : 'capture.library')}</button><button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => camera.current?.click()}><Icon name="camera" />{t('capture.camera')}</button>
             {fullPhoto && fullPreview && <button id="edit-photo" className="button button-secondary" type="button"
               disabled={frozen || preparing} aria-expanded={editing} onClick={() => setEditing(true)}><Icon name="crop" />{t('photo.edit')}</button>}</div>}
+          {!editing && <BackgroundStatus state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
+            disabled={frozen || preparing || busy} t={t} onUseOriginal={useOriginalBackground} />}
           {(editing || preparing) && <p id="photo-pending" tabIndex={-1} role="status" className="notice">{t(preparing ? 'photo.pendingPreparation' : 'photo.pendingCrop')}</p>}
           {invalid && !photo && <p className="field-error">{t('common.required')}</p>}
           <details className="copy-details"><summary>{t('photo.cameraHelp')}</summary><p>{t('photo.cameraFallback')}</p></details>

@@ -23,9 +23,11 @@ describe('shell artifact classification', () => {
     for (const file of ['_headers', '_redirects', 'precache-manifest.json', 'service-worker.js', 'assets/index-Bfi6nLlj.js.map', 'assets/index.js', 'assets/x-Bfi6nLlj.json', 'robots.txt', '../index.html']) {
       expect(isShellArtifact(file), file).toBe(false);
     }
-    for (const file of ['_headers', '_redirects', 'precache-manifest.json', 'service-worker.js', 'assets/index-Bfi6nLlj.js.map']) {
+    for (const file of ['_headers', '_redirects', 'precache-manifest.json', 'service-worker.js', 'assets/index-Bfi6nLlj.js.map',
+      'models/u2netp-309c8469.onnx', 'models/ort-wasm-simd-threaded-3398c10d.wasm']) {
       expect(isExcludedArtifact(file), file).toBe(true);
     }
+    for (const file of ['models/u2netp-309c8469.onnx', 'models/ort-wasm-simd-threaded-3398c10d.wasm']) expect(isShellArtifact(file), file).toBe(false);
     expect(isExcludedArtifact('robots.txt')).toBe(false);
     expect(artifactUrl('index.html')).toBe('/');
     expect(artifactUrl('assets/a-12345678.js')).toBe('/assets/a-12345678.js');
@@ -94,6 +96,10 @@ describe('worker routing', () => {
 
   it('answers only exact verified files, without a query, for their own request destination', () => {
     expect(route('/assets/index-Bfi6nLlj.js', 'cors', 'script')).toBe('file');
+    // A module worker script (background removal) is a shell file too, so it starts offline.
+    expect(route('/assets/index-Bfi6nLlj.js', 'same-origin', 'worker')).toBe('file');
+    expect(route('/assets/index-AbCdEf12.css', 'same-origin', 'worker')).toBeNull();
+    expect(route('/models/u2netp-309c8469.onnx', 'cors', '')).toBeNull();
     expect(route('/assets/index-AbCdEf12.css', 'no-cors', 'style')).toBe('file');
     expect(route('/icon-192.png', 'no-cors', 'image')).toBe('file');
     expect(route('/manifest.webmanifest', 'cors', 'manifest')).toBe('file');

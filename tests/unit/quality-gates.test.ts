@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -10,7 +10,7 @@ import { checkSource, parseCatalog, validateCatalogs } from '../../scripts/check
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
 import { excludedPath, scanProject, scanText } from '../../scripts/scan-secrets.mjs';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
-import { buildInventory, isReviewedSpdx, releaseEvidence, renderNotices, summarizeAudit } from '../../scripts/check-dependencies.mjs';
+import { buildInventory, isReviewedSpdx, modelRecord, releaseEvidence, renderNotices, summarizeAudit } from '../../scripts/check-dependencies.mjs';
 
 const roots: string[] = [];
 const catalog = {
@@ -164,7 +164,7 @@ describe('secret quality gate', () => {
 describe('dependency quality gate', () => {
   async function dependencyFixture() {
     const root = await fixture();
-    const dependencies = { react: '1.0.0', 'react-dom': '1.0.0', '@supabase/supabase-js': '1.0.0' };
+    const dependencies = { react: '1.0.0', 'react-dom': '1.0.0', '@supabase/supabase-js': '1.0.0', 'onnxruntime-web': '1.0.0' };
     const packages: Record<string, unknown> = { '': { dependencies } };
     const production = [];
     for (const [name, version] of Object.entries({ ...dependencies, 'fictional-transitive': '1.0.0' })) {
@@ -187,7 +187,28 @@ describe('dependency quality gate', () => {
     const lock = { lockfileVersion: 3, packages };
     await put(root, 'package.json', JSON.stringify(manifest));
     await put(root, 'package-lock.json', JSON.stringify(lock));
-    return { root, previous: { production }, manifest, lock };
+    const model = await modelFixture(root);
+    return { root, previous: { production }, manifest, lock, model };
+  }
+  const digest = (text: string, algorithm = 'sha256') => createHash(algorithm).update(text).digest('hex');
+  async function modelFixture(root: string) {
+    const weights = 'fictional model bytes';
+    const licences = { 'licenses/models/fictional/LICENSE-A': 'Fictional weights licence.', 'licenses/models/fictional/LICENSE-B': 'Fictional distribution licence.' };
+    await put(root, 'public/models/fictional.onnx', weights);
+    for (const [file, text] of Object.entries(licences)) await put(root, file, text);
+    const upstream = { upstream: 'https://github.com/example/weights', spdx: 'Apache-2.0', licenceBlob: 'a'.repeat(40) };
+    const record = {
+      schemaVersion: 1, statement: 'Local digests, not a publisher attestation.',
+      models: [{
+        name: 'fictional', file: 'public/models/fictional.onnx', bytes: weights.length, sha256: digest(weights), md5: digest(weights, 'md5'),
+        release: { repository: 'https://github.com/example/dist', tag: 'v1', releaseId: 1, assetId: 2, url: 'https://github.com/example/dist/releases/download/v1/fictional.onnx' },
+        weights: upstream, distribution: { ...upstream, upstream: 'https://github.com/example/dist', spdx: 'MIT' },
+        licenceFiles: Object.entries(licences).map(([file, text]) => ({ file, sha256: digest(text) })),
+        trainingData: 'Fictional training-data residual.',
+      }],
+    };
+    await put(root, 'docs/model-assets.json', JSON.stringify(record));
+    return record;
   }
   const audit = (critical = 0) => ({
     vulnerabilities: critical ? { example: { severity: 'critical' } } : {},
@@ -240,10 +261,47 @@ describe('dependency quality gate', () => {
     const text = 'Copyright Example\nPermission and all conditions.\nComplete warranty disclaimer.';
     expect(renderNotices([{ name: 'example', version: '1.0.0', license: 'MIT', upstream: 'https://example.test', location: 'node_modules/example', texts: [{ file: 'LICENSE', text }] }])).toContain(text);
   });
+  it('renders committed model provenance and licence texts, and rejects model or licence drift', async () => {
+    const { root, previous, model } = await dependencyFixture();
+    const result = await buildInventory(root, previous);
+    expect(result.inventory.models).toEqual([{ name: 'fictional', file: 'public/models/fictional.onnx', bytes: 21, sha256: model.models[0]!.sha256, licenses: ['Apache-2.0', 'MIT'] }]);
+    for (const text of ['Model assets', 'Local digests, not a publisher attestation.', 'Fictional weights licence.', 'Fictional distribution licence.', 'Fictional training-data residual.', `MD5: ${model.models[0]!.md5}`]) {
+      expect(result.notices).toContain(text);
+    }
+    await put(root, 'public/models/fictional.onnx', 'fictional model bytez');
+    await expect(modelRecord(root)).rejects.toThrow('MODEL_ASSET_DRIFT');
+    await put(root, 'public/models/fictional.onnx', 'fictional model bytes');
+    await put(root, 'licenses/models/fictional/LICENSE-B', 'Changed licence.');
+    await expect(modelRecord(root)).rejects.toThrow('MODEL_LICENCE_DRIFT');
+    await put(root, 'licenses/models/fictional/LICENSE-B', 'Fictional distribution licence.');
+    await expect(modelRecord(root)).resolves.toBeTruthy();
+    for (const broken of [{ ...model.models[0], md5: undefined }, { ...model.models[0], trainingData: '' }, { ...model.models[0], file: '../outside.onnx' },
+      { ...model.models[0], weights: { ...model.models[0]!.weights, spdx: 'Invented' } }, { ...model.models[0], extra: true }]) {
+      await put(root, 'docs/model-assets.json', JSON.stringify({ ...model, models: [broken] }));
+      await expect(modelRecord(root)).rejects.toThrow('MODEL_RECORD_INVALID');
+    }
+    await rm(path.join(root, 'docs', 'model-assets.json'));
+    await expect(buildInventory(root, previous)).rejects.toThrow('MODEL_RECORD_UNAVAILABLE');
+  });
+  it('uses an exact-version licence supplement only when a package ships no licence text', async () => {
+    const { root, previous } = await dependencyFixture();
+    await rm(path.join(root, 'node_modules', 'onnxruntime-web', 'LICENSE'));
+    await expect(buildInventory(root, previous)).rejects.toThrow('MISSING_PRODUCTION_LICENCE_TEXT');
+    await put(root, 'licenses/packages/onnxruntime-web@2.0.0/LICENSE', 'Wrong version.');
+    await put(root, 'licenses/packages/onnxruntime-web@2.0.0/SOURCE', 'Wrong version.');
+    await expect(buildInventory(root, previous)).rejects.toThrow('MISSING_PRODUCTION_LICENCE_TEXT');
+    await put(root, 'licenses/packages/onnxruntime-web@1.0.0/LICENSE', 'Upstream licence text.');
+    await expect(buildInventory(root, previous)).rejects.toThrow('MISSING_PRODUCTION_LICENCE_TEXT');
+    await put(root, 'licenses/packages/onnxruntime-web@1.0.0/SOURCE', 'Copied from the upstream repository.');
+    const result = await buildInventory(root, previous);
+    expect(result.inventory.production.find((entry: { name: string }) => entry.name === 'onnxruntime-web')).toMatchObject({ licenceSource: 'supplement' });
+    expect(result.notices).toContain('Upstream licence text.');
+    expect(result.notices).toContain('Copied from the upstream repository.');
+  });
   it('finds every transitive production package and its introducing parent', async () => {
     const { root, previous } = await dependencyFixture();
     const result = await buildInventory(root, previous);
-    expect(result.inventory.production).toHaveLength(4);
+    expect(result.inventory.production).toHaveLength(5);
     expect(result.inventory.production.find((entry: { name: string }) => entry.name === 'fictional-transitive').introducingParents)
       .toEqual(['react-dom@1.0.0 (node_modules/react-dom)']);
   });

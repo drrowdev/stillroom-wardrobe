@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "statement": "Digests are computed locally from the downloaded release asset; they are not a publisher attestation. The md5 equals the value that rembg pins in its own downloader.",
+  "models": [
+    {
+      "name": "u2netp",
+      "file": "public/models/u2netp-309c8469.onnx",
+      "bytes": 4574861,
+      "sha256": "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8",
+      "md5": "8e83ca70e441ab06c318d82300c84806",
+      "release": {
+        "repository": "https://github.com/danielgatis/rembg",
+        "tag": "v0.0.0",
+        "releaseId": 84129341,
+        "assetId": 85857953,
+        "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx"
+      },
+      "weights": {
+        "upstream": "https://github.com/xuebinqin/U-2-Net",
+        "spdx": "Apache-2.0",
+        "licenceBlob": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+      },
+      "distribution": {
+        "upstream": "https://github.com/danielgatis/rembg",
+        "spdx": "MIT",
+        "licenceBlob": "efe94fb589c9801994f763754fad5c978fd39a14"
+      },
+      "licenceFiles": [
+        {
+          "file": "licenses/models/u2netp/LICENSE-U-2-Net",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        },
+        {
+          "file": "licenses/models/u2netp/LICENSE-rembg",
+          "sha256": "90a3215072968fd304669c5389f04f1274a587abdd0507d99dead0f5511f8999"
+        }
+      ],
+      "trainingData": "The U-2-Net paper and repository report training on DUTS-TR. The repository states no licence for the training data and the DUTS terms were not verified; whether they affect use of the released Apache-2.0 weights remains an open residual (ADR24)."
+    }
+  ]
+}

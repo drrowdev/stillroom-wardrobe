@@ -17,9 +17,10 @@ export function isShellArtifact(file: string): boolean {
   return file === 'index.html' || file === 'manifest.webmanifest' || assetFile.test(file) || iconFile.test(file);
 }
 
-// Files the host serves (or, for `_*` control files, never serves) that the worker never caches.
+// Files the host serves (or, for `_*` control files, never serves) that the worker never caches. The public
+// background-removal model and runtime under models/ are fetched on first use and kept in their own cache (ADR24).
 export function isExcludedArtifact(file: string): boolean {
-  return file.startsWith('_') || file.endsWith('.map') || file === manifestPath.slice(1) || file === workerPath.slice(1);
+  return file.startsWith('_') || file.startsWith('models/') || file.endsWith('.map') || file === manifestPath.slice(1) || file === workerPath.slice(1);
 }
 
 export const shellCacheName = (buildId: string) => `${shellCachePrefix}${buildId}`;
@@ -51,7 +52,7 @@ export function parsePrecacheManifest(value: unknown, buildId: string): Precache
 // The app routes with the URL fragment, so `/` is its only document path. A navigation anywhere else
 // (`/rest/`, `/auth/`, `/storage/`, `/functions/`, `/_headers`, a file) is never answered by the worker.
 const destinations: ReadonlyArray<[RegExp, ReadonlySet<string>]> = [
-  [/\.js$/, new Set(['script'])], [/\.css$/, new Set(['style'])], [/\.(?:png|svg)$/, new Set(['image'])],
+  [/\.js$/, new Set(['script', 'worker'])], [/\.css$/, new Set(['style'])], [/\.(?:png|svg)$/, new Set(['image'])],
   [/\.webmanifest$/, new Set(['manifest'])],
 ];
 export type RoutedRequest = { method: string; url: string; mode: string; destination: string };

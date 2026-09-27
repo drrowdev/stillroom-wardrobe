@@ -6,19 +6,66 @@ import { promisify } from 'node:util';
 import { isMain } from './quality/files.mjs';
 
 const execute = promisify(execFile);
-const approvedRuntime = new Set(['react', 'react-dom', '@supabase/supabase-js']);
+const approvedRuntime = new Set(['react', 'react-dom', '@supabase/supabase-js', 'onnxruntime-web']);
 // These SPDX identifiers cover the reviewed lockfile, not an automatic approval of new licences.
 const reviewedSpdx = new Set(['MIT', '0BSD', 'Apache-2.0', 'ISC', 'BSD-2-Clause', 'BSD-3-Clause', 'MPL-2.0', 'CC-BY-4.0', 'BlueOak-1.0.0']);
 const purposes = {
   react: 'Component and state model for the browser UI.',
   'react-dom': 'Browser rendering of React components; kept at the same version as React.',
   '@supabase/supabase-js': 'Authenticated owner-scoped Auth, REST/RPC, private Storage and function access.',
+  'onnxruntime-web': 'On-device background removal (ADR24): runs the committed u2netp model in a browser worker with the single-thread WASM runtime.',
 };
 const alternatives = {
   react: 'Plain DOM removes React but increases manual form, async-state and accessibility coordination; retain the approved component model.',
   'react-dom': 'Native DOM rendering requires replacing the approved React UI; retain while React is used.',
   '@supabase/supabase-js': 'Direct fetch avoids the SDK but requires custom session refresh and recovery; retain the supported SDK authentication lifecycle.',
+  'onnxruntime-web': 'transformers.js wraps the same runtime with more code; a server or provider removes the on-device guarantee. Remove with the background-removal feature.',
 };
+
+const md5Pattern = /^[0-9a-f]{32}$/;
+const sha256Pattern = /^[0-9a-f]{64}$/;
+const blobPattern = /^[0-9a-f]{40}$/;
+const repoPath = /^(?:[\w.-]+\/)*[\w.-]+$/;
+const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
+  && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort());
+const httpsUrl = (value) => typeof value === 'string' && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:\/[\w./-]+)?$/.test(value);
+const readRepoFile = async (root, file) => {
+  if (typeof file !== 'string' || !repoPath.test(file) || file.split('/').some((part) => part === '..' || part === '.')) fail('MODEL_RECORD_INVALID');
+  try { return await readFile(path.join(root, ...file.split('/'))); } catch { fail('MODEL_ASSET_UNAVAILABLE'); }
+};
+
+// Committed model weights are not npm packages, so their provenance, digests and licence texts are checked from
+// docs/model-assets.json and rendered into the notices like a production package (ADR24).
+export async function modelRecord(root) {
+  let record;
+  try { record = JSON.parse(await readFile(path.join(root, 'docs', 'model-assets.json'), 'utf8')); } catch { fail('MODEL_RECORD_UNAVAILABLE'); }
+  if (!exactKeys(record, ['schemaVersion', 'statement', 'models']) || record.schemaVersion !== 1 || typeof record.statement !== 'string'
+    || !record.statement || !Array.isArray(record.models) || !record.models.length) fail('MODEL_RECORD_INVALID');
+  const models = [];
+  for (const model of record.models) {
+    const upstream = (value) => exactKeys(value, ['upstream', 'spdx', 'licenceBlob']) && httpsUrl(value.upstream)
+      && isReviewedSpdx(value.spdx) && blobPattern.test(value.licenceBlob);
+    if (!exactKeys(model, ['name', 'file', 'bytes', 'sha256', 'md5', 'release', 'weights', 'distribution', 'licenceFiles', 'trainingData'])
+      || typeof model.name !== 'string' || !/^[\w.-]+$/.test(model.name) || !Number.isSafeInteger(model.bytes) || model.bytes <= 0
+      || !sha256Pattern.test(model.sha256) || !md5Pattern.test(model.md5) || typeof model.trainingData !== 'string' || !model.trainingData
+      || !exactKeys(model.release, ['repository', 'tag', 'releaseId', 'assetId', 'url']) || !httpsUrl(model.release.repository)
+      || !httpsUrl(model.release.url) || typeof model.release.tag !== 'string' || !Number.isSafeInteger(model.release.releaseId)
+      || !Number.isSafeInteger(model.release.assetId) || !upstream(model.weights) || !upstream(model.distribution)
+      || !Array.isArray(model.licenceFiles) || model.licenceFiles.length < 2) fail('MODEL_RECORD_INVALID');
+    const bytes = await readRepoFile(root, model.file);
+    if (bytes.length !== model.bytes || createHash('sha256').update(bytes).digest('hex') !== model.sha256
+      || createHash('md5').update(bytes).digest('hex') !== model.md5) fail('MODEL_ASSET_DRIFT');
+    const texts = [];
+    for (const licence of model.licenceFiles) {
+      if (!exactKeys(licence, ['file', 'sha256']) || !sha256Pattern.test(licence.sha256)) fail('MODEL_RECORD_INVALID');
+      const text = (await readRepoFile(root, licence.file)).toString('utf8').replaceAll('\r\n', '\n');
+      if (!text.trim() || createHash('sha256').update(text).digest('hex') !== licence.sha256) fail('MODEL_LICENCE_DRIFT');
+      texts.push({ file: licence.file, text: text.trimEnd() });
+    }
+    models.push({ ...model, texts });
+  }
+  return { statement: record.statement, models };
+}
 
 export function isReviewedSpdx(value) {
   return typeof value === 'string' && reviewedSpdx.has(value);
@@ -55,6 +102,9 @@ function resolveDependency(packages, parent, dependency) {
 function upstreamFor(metadata) {
   const repository = typeof metadata.repository === 'string' ? metadata.repository : metadata.repository?.url;
   if (!repository) return null;
+  // npm's "owner/repo" (or github:owner/repo) shorthand means a GitHub repository.
+  const shorthand = /^(?:github:)?([\w.-]+\/[\w.-]+)$/.exec(repository);
+  if (shorthand) return `https://github.com/${shorthand[1]}`;
   const normalized = repository.replace(/^git\+/, '').replace(/^git:\/\//, 'https://').replace(/\.git$/, '');
   try {
     const url = new URL(normalized);
@@ -82,6 +132,16 @@ async function licenceFiles(directory) {
   }
   await visit(directory);
   return results.sort((left, right) => left.file.localeCompare(right.file, 'en'));
+}
+
+async function supplementFiles(root, name, version) {
+  const base = `licenses/packages/${name}@${version}`;
+  const read = async (file) => {
+    try { return (await readFile(path.join(root, ...base.split('/'), file), 'utf8')).replaceAll('\r\n', '\n'); } catch { return null; }
+  };
+  const [licence, source] = [await read('LICENSE'), await read('SOURCE')];
+  if (!licence?.trim() || !source?.trim()) return null;
+  return [{ file: `${base}/LICENSE`, text: licence.trim() }, { file: `${base}/SOURCE`, text: source.trim() }];
 }
 
 function assertMaintenance(evidence, name) {
@@ -130,6 +190,7 @@ export async function buildInventory(root, previous = null, refresh = false) {
   if (JSON.stringify(Object.entries(manifest.devDependencies ?? {}).sort()) !== JSON.stringify(Object.entries(lock.packages[''].devDependencies ?? {}).sort())) fail('DEVELOPMENT_LOCKFILE_DRIFT');
   const records = new Map();
   const notices = [];
+  const models = await modelRecord(root);
   for (const [location, entry] of Object.entries(lock.packages).sort(([a], [b]) => a.localeCompare(b, 'en'))) {
     if (!location) continue;
     const directory = installedPath(root, location);
@@ -154,8 +215,15 @@ export async function buildInventory(root, previous = null, refresh = false) {
     if (production) {
       const upstream = upstreamFor(metadata);
       if (!upstream) fail('MISSING_UPSTREAM');
-      const texts = await licenceFiles(directory);
-      if (!texts.some((notice) => /^(?:licen[cs]e|copying)/i.test(notice.file))) fail('MISSING_PRODUCTION_LICENCE_TEXT');
+      let texts = await licenceFiles(directory);
+      // A package that ships no licence text may use a reviewed supplement: licenses/packages/<name>@<version>/
+      // holding the licence text and a SOURCE note saying where it came from (the upstream file, or the canonical SPDX text
+// when upstream publishes none, as for guid-typescript). Only exact versions match.
+      if (!texts.some((notice) => /^(?:licen[cs]e|copying)/i.test(notice.file))) {
+        texts = await supplementFiles(root, name, entry.version);
+        if (texts) record.licenceSource = 'supplement';
+      }
+      if (!texts) fail('MISSING_PRODUCTION_LICENCE_TEXT');
       notices.push({ name, version: entry.version, license: licence, location, upstream, texts });
       record.upstream = upstream;
       record.purpose = purposes[name] ?? 'Transitive runtime support; see introducingParents for the exact reason this package is resolved.';
@@ -197,15 +265,18 @@ export async function buildInventory(root, previous = null, refresh = false) {
   const inventory = {
     schemaVersion: 1,
     lockfileSha256: createHash('sha256').update(lockText.replaceAll('\r\n', '\n')).digest('hex'),
-    licencePolicy: 'Reviewed SPDX identifiers; new identifiers require review rather than an invented licence. Every production notice is copied from the installed exact-version package.',
+    licencePolicy: 'Reviewed SPDX identifiers; new identifiers require review rather than an invented licence. Every production notice is copied from the installed exact-version package, except a reviewed exact-version supplement (licenceSource \'supplement\') for a package that ships no licence file: guid-typescript@1.0.9 declares ISC, and its supplement holds the canonical SPDX ISC text, not an upstream file.',
     developmentPolicy: 'Build/test packages are not browser runtime additions. Optional platform packages absent on this host are inventoried from their pinned lockfile metadata; installed manifests must match.',
     production: [...records.values()].filter((item) => item.production).map((item) => item.record),
     development: [...records.values()].filter((item) => !item.production).map((item) => item.record),
+    models: models.models.map(({ name, file, bytes, sha256, weights, distribution }) => ({
+      name, file, bytes, sha256, licenses: [weights.spdx, distribution.spdx],
+    })),
   };
-  return { inventory, notices: renderNotices(notices) };
+  return { inventory, notices: renderNotices(notices, models) };
 }
 
-export function renderNotices(packages) {
+export function renderNotices(packages, models = { statement: '', models: [] }) {
   const blocks = [
     'Stillroom Wardrobe - resolved production dependency notices',
     'Generated by npm run dependencies:record from package-lock.json and installed package licence files.',
@@ -216,6 +287,15 @@ export function renderNotices(packages) {
     blocks.push('='.repeat(78), `${entry.name}@${entry.version}`, `SPDX: ${entry.license}`,
       `Resolved location: ${entry.location}`, `Upstream: ${entry.upstream}`);
     for (const notice of entry.texts) blocks.push(`--- ${notice.file} ---`, notice.text);
+  }
+  if (models.models.length) blocks.push('='.repeat(78), 'Model assets', models.statement);
+  for (const model of models.models) {
+    blocks.push('='.repeat(78), `${model.name} (${model.file})`, `Bytes: ${model.bytes}`, `SHA-256: ${model.sha256}`, `MD5: ${model.md5}`,
+      `Release: ${model.release.url} (release ${model.release.releaseId}, asset ${model.release.assetId})`,
+      `Weights: ${model.weights.upstream} (SPDX: ${model.weights.spdx})`,
+      `Distribution: ${model.distribution.upstream} (SPDX: ${model.distribution.spdx})`,
+      `Training data: ${model.trainingData}`);
+    for (const notice of model.texts) blocks.push(`--- ${notice.file} ---`, notice.text);
   }
   return `${blocks.join('\n\n')}\n`;
 }
@@ -269,6 +349,11 @@ export async function checkDependencies(root = process.cwd(), write = false) {
     if (!write || error.code !== 'ENOENT') fail('INVENTORY_UNAVAILABLE');
   }
   const result = await buildInventory(root, previous, write);
+  // The served asset inventory (vite build, check-deployed-assets) must name the same model bytes as this record.
+  const served = JSON.parse(await readFile(path.join(root, 'src', 'images', 'background', 'model-assets.json'), 'utf8')).files
+    .filter((file) => file.role === 'model');
+  if (JSON.stringify(served.map(({ source, bytes, sha256 }) => [source, bytes, sha256]).sort())
+    !== JSON.stringify(result.inventory.models.map(({ file, bytes, sha256 }) => [file, bytes, sha256]).sort())) fail('MODEL_INVENTORY_DRIFT');
   const text = `${JSON.stringify(result.inventory, null, 2)}\n`;
   if (write) {
     await mkdir(path.dirname(inventoryPath), { recursive: true });

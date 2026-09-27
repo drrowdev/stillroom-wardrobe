@@ -1,0 +1,3 @@
+The npm package onnxruntime-web@1.30.0 ships no licence file; its README points to the onnxruntime repository licence.
+LICENSE here is copied verbatim from https://github.com/microsoft/onnxruntime/blob/v1.30.0/LICENSE
+(git blob 48bc6bb4996ac924359e8e28b9ae88970e5ed3fc), matching the package's declared SPDX identifier MIT.
