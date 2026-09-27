@@ -1111,7 +1111,9 @@ envelope violation.
 `probe.pending` marker, removed only after the line is synced and closed. While
 the marker exists (or the lock is held) `status` reports `UNRESOLVED`, never
 `PASS`, and `send` and `reconcile` refuse with `PERSISTENCE_UNCERTAIN`; removing
-the lock by hand changes nothing. `recover <id> <slot>` drops a torn final line,
+the lock by hand changes nothing. The marker and lock are checked both before
+and after the ledger is read, so a `status` that overlaps a write keeps any
+uncertainty it saw at either point. `recover <id> <slot>` drops a torn final line,
 appends a `recover` event, and only then clears the marker and the lock. A
 recovered slot is **counted** at the full valuation whatever its visible result
 says, so a result written under a failed sync or close can never become a PASS.

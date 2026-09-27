@@ -286,6 +286,11 @@ async function append(directory, event, initial = false, fs = { open }) {
   try { await (fs.unlink ?? unlink)(marker); } catch { throw new ProbeError('LEDGER_WRITE_UNCERTAIN'); }
 }
 const present = async (filename) => (await lstat(filename).catch(() => null)) !== null;
+async function persistenceState(directory) {
+  const marker = await pendingMarker(directory);
+  requireThat(marker?.type !== 'init', 'ALLOCATION_UNUSABLE');
+  return { pending: marker !== null, locked: await present(path.join(directory, LOCK)) };
+}
 /** The pending marker's recorded event, `{ unknown: true }` if it is unreadable, or null if there is none. */
 async function pendingMarker(directory) {
   const filename = path.join(directory, PENDING);
@@ -361,13 +366,14 @@ function validObservation(o) {
     && (o.state !== 'OK' || (o.code === 'OK' && o.reply?.valid === true && o.estimateMicro !== null));
 }
 /** Reads and checks the whole record. Any unexpected event, digest or order refuses. */
-export async function readRecord({ root, id, source = gitSource }) {
+export async function readRecord({ root, id, source = gitSource, readLedger = boundedFile }) {
   requireThat(typeof id === 'string' && /^[a-f0-9]{32}$/.test(id), 'USAGE');
   const directory = await privateDirectory(path.join(await privateDirectory(root), id));
-  const marker = await pendingMarker(directory);
-  requireThat(marker?.type !== 'init', 'ALLOCATION_UNUSABLE');
-  const persistence = { pending: marker !== null, locked: await present(path.join(directory, LOCK)) };
-  const raw = await boundedFile(path.join(directory, LEDGER), LEDGER_LIMIT);
+  // Persistence is checked on both sides of the ledger read, so a write that overlaps it can't look confirmed.
+  const before = await persistenceState(directory);
+  const raw = await readLedger(path.join(directory, LEDGER), LEDGER_LIMIT);
+  const after = await persistenceState(directory);
+  const persistence = { pending: before.pending || after.pending, locked: before.locked || after.locked };
   requireThat(raw.length > 0 && raw.at(-1) === 10, persistence.pending ? 'PERSISTENCE_UNCERTAIN' : 'LEDGER_TORN');
   const lines = new TextDecoder('utf-8', { fatal: true }).decode(raw).slice(0, -1).split('\n');
   requireThat(lines.length >= 1 && lines.length <= 9, 'LEDGER_INVALID');

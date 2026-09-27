@@ -40,7 +40,8 @@ type SlotRecord = { intent: Record<string, unknown> | null; result: Observation 
 export type ProbeRecord = { directory: string; init: Record<string, unknown> & { receipt: Record<string, unknown>; bodies: Record<Slot, string> }; slots: Record<Slot, SlotRecord>; cumulative: number;
   persistence: { pending: boolean; locked: boolean } };
 export function initialize(options: Options & { receipt: unknown }): Promise<string>;
-export function readRecord(options: { root: string; id: string; source?: () => string }): Promise<ProbeRecord>;
+export function readRecord(options: { root: string; id: string; source?: () => string;
+  readLedger?: (filename: string, limit: number) => Promise<Buffer> }): Promise<ProbeRecord>;
 export function verdict(record: ProbeRecord): 'PASS' | 'REVISE_ENVELOPE' | 'INCOMPLETE' | 'UNRESOLVED' | 'HALTED';
 export function summary(record: ProbeRecord): Record<string, unknown> & { verdict: string; notes: Record<string, string>; slots: Record<Slot, Record<string, unknown> & { state: string }> };
 export function observe(options: { outcome: StylistOutcome | null; httpStatus: number | null; built: StylistRequest;

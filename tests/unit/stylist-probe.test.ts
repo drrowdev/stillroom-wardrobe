@@ -373,6 +373,24 @@ describe('ST-OP month, review and persistence (M3)', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it.each(['sync', 'close'] as const)('a status read that overlaps a failed max-result %s never shows PASS', async (stage) => {
+    const id = await init();
+    const { calls, fetchImpl } = provider([{}, {}]);
+    await send(id, 'min', fetchImpl);
+    // The write runs after status has checked the marker and lock, and before it reads the ledger.
+    const overlapping = async (filename: string, limit: number) => {
+      await expect(send(id, 'max', fetchImpl, { fs: failingLedger(2, stage) })).rejects.toThrow('LEDGER_WRITE_UNCERTAIN');
+      const bytes = await readFile(filename);
+      expect(bytes.length).toBeLessThanOrEqual(limit);
+      return bytes;
+    };
+    const state = await readRecord({ root, id, source, readLedger: overlapping });
+    expect(calls).toHaveLength(2);
+    expect(state.slots.max?.result?.state).toBe('OK');
+    expect(state.persistence).toEqual({ pending: true, locked: true });
+    expect(verdict(state)).toBe('UNRESOLVED');
+    expect(summary(state).verdict).toBe('UNRESOLVED');
+  });
   it('recovers from a torn final line and re-syncs a recovery line whose own sync failed', async () => {
     const id = await init();
     const { fetchImpl } = provider([{}]);
