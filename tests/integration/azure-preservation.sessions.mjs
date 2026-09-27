@@ -423,8 +423,16 @@ export const COLOUR_FUNCTIONS = Object.freeze({
     'public.complete_analyzed_item_save']),
 });
 export const COLOUR_MANIFEST = Object.freeze({ v1: 'azure-eu-terra-devtest-v1', v2: 'azure-eu-terra-devtest-v2' });
+// ST1a adds defaulted columns; existing fields stay byte-exact and the additions are asserted separately.
+export const STYLIST_ADDED_COLUMNS = Object.freeze({
+  ai_controls: Object.freeze(['stylist_activated', 'stylist_notice_revision', 'stylist_manifest_id', 'stylist_max_request_micro',
+    'stylist_monthly_allowance_micro', 'stylist_max_requests_per_hour', 'stylist_consent_revision', 'stylist_consented_at']),
+  ai_usage: Object.freeze(['purpose']),
+  ai_usage_evidence: Object.freeze(['stylist_code', 'settlement_origin', 'settlement_digest']),
+});
+const strip = (table) => (STYLIST_ADDED_COLUMNS[table] ? ` - array[${STYLIST_ADDED_COLUMNS[table].map(literal).join(',')}]` : '');
 const digest = (relation, order) => `(select jsonb_build_object('n',count(*),'md5',
-  md5(coalesce(string_agg(to_jsonb(t)::text,E'\n' order by ${order}),''))) from ${relation} t)`;
+  md5(coalesce(string_agg((to_jsonb(t)${strip(relation.split('.')[1])})::text,E'\n' order by ${order}),''))) from ${relation} t)`;
 const colourDigestSql = `select jsonb_build_object('rows',jsonb_build_object(
   'profiles',${digest('public.profiles', 't.owner_id')},
   'style_preferences',${digest('public.style_preferences', 't.owner_id')},
@@ -439,6 +447,28 @@ const colourDigestSql = `select jsonb_build_object('rows',jsonb_build_object(
   'functions',(select jsonb_object_agg(n.nspname||'.'||p.proname,md5(p.prosrc)) from pg_proc p
     join pg_namespace n on n.oid=p.pronamespace
     where n.nspname||'.'||p.proname in (${[...COLOUR_FUNCTIONS.colours, ...COLOUR_FUNCTIONS.manifest].map(literal).join(',')})));`;
+
+// Pre-existing rows keep the inactive defaults after ST1a.
+const stylistDefaultsSql = `select jsonb_build_object(
+  'controls',(select count(*) from private.ai_controls where stylist_activated or num_nonnulls(stylist_notice_revision,
+    stylist_manifest_id,stylist_max_request_micro,stylist_monthly_allowance_micro,stylist_max_requests_per_hour,
+    stylist_consent_revision,stylist_consented_at)>0),
+  'usage',(select count(*) from private.ai_usage where purpose is distinct from 'analysis'),
+  'evidence',(select count(*) from private.ai_usage_evidence where num_nonnulls(stylist_code,settlement_origin,settlement_digest)>0));`;
+// The one immutable manifest ST1a adds, validated field by field.
+const STYLIST_TARIFF_DESCRIPTION = 'INACTIVE stylist text chat on existing DEV/TEST eval-terra-20260709; expected snapshot gpt-5.6-terra-2026-07-09. Applicable tariff ShortCo USD2.20 input/13.20 output per1M (retail API SwedenCentral/USD, product DZH318Z0T9WD). Reservation 129360 micro values the 24000 input/1200 output envelope at LongCo 4.40/19.80 as a conservative allowance valuation; input envelope is an operational estimate over the bounded 20000-byte messages plus schema/framing, enforced by anomaly shutdown. Enum/number/boolean item fields only; no photos or item text. Explicit cache mode without breakpoints; store:false is not zero retention. Exact-route probe and paid activation remain owner gates.';
+export const STYLIST_MANIFEST_ROW = Object.freeze({
+  id: 'azure-eu-terra-stylist-v1', model_id: 'gpt-5.6-terra-2026-07-09', prompt_version: 1,
+  prompt_sha256: '36867782e8c701e1a0b42e772d4f4be31870758935a0fd8a65ba1b387a61cbca',
+  schema_sha256: '003b745ceaca59678e2f274104fe7b0d3d2c34a181e1e9102df76c232d78409a',
+  settings_sha256: '8c627868d8702f76ed68e0bbeec2f0587d355a4b92e42a28f61ba30e1abd3e02',
+  product: 'Azure OpenAI', host: 'stillroom-ai-eval.openai.azure.com', api_version: 'v1/chat/completions', region: 'EU',
+  traffic: 'DataZoneStandard', tariff_url: 'https://prices.azure.com/api/retail/prices',
+  tariff_retrieved_at: '2026-09-21T00:00:00+00:00', tariff_description: STYLIST_TARIFF_DESCRIPTION, currency: 'USD',
+  input_rate_hundredths: 220, output_rate_hundredths: 1320, input_envelope: 24000, output_envelope: 1200,
+  reservation_micro: 129360, maximum_image_bytes: 0, maximum_side: 0, maximum_response_bytes: 262144,
+  maximum_result_bytes: 8192, request_seconds: 25, review_expires_at: '2026-12-01T00:00:00+00:00',
+});
 
 // PostgreSQL stores the exact dollar-quoted text, including the newlines after "as $$" and before "$$;".
 export function sourceBodyMd5(sql, name) {
@@ -563,9 +593,14 @@ export async function verifyColourStage(snapshot, sql, stage) {
   for (const name of COLOUR_FUNCTIONS.manifest) {
     equal(after.functions[name], stage === 'colours' ? before.functions[name] : expected.manifest[name]);
   }
-  const added = Object.keys(after.manifests).filter((id) => !Object.hasOwn(before.manifests, id));
-  equal(added, stage === 'colours' ? [] : [COLOUR_MANIFEST.v2]);
+  const added = Object.keys(after.manifests).filter((id) => !Object.hasOwn(before.manifests, id)).sort();
+  equal(added, stage === 'colours' ? [] : [COLOUR_MANIFEST.v2, STYLIST_MANIFEST_ROW.id]);
   for (const [id, md5] of Object.entries(before.manifests)) equal(after.manifests[id], md5);
+  if (stage === 'target') {
+    equal(JSON.parse(await sql(stylistDefaultsSql)), { controls: 0, usage: 0, evidence: 0 });
+    equal(JSON.parse(await sql(`select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(STYLIST_MANIFEST_ROW.id)};`)),
+      STYLIST_MANIFEST_ROW);
+  }
   return after;
 }
 

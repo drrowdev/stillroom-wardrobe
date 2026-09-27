@@ -66,14 +66,20 @@ describe('fixture gateway (rev5 A1)', () => {
     expect(config.routes).toEqual([...gateway.ALLOWED_ROUTES]);
     expect(config.diagnostics).toEqual(['GET /__config', 'GET /__forwarded']);
     for (const route of config.diagnostics as string[]) expect(gateway.ALLOWED_ROUTES).not.toContain(route);
-    expect(config.ingress).toEqual({ route: 'POST /functions/v1/analyze-clothing', headers: [...gateway.INGRESS_HEADERS],
-      target: 'http://edge-runtime:9000' });
+    expect(config.ingress).toEqual({ routes: ['POST /functions/v1/analyze-clothing', 'POST /functions/v1/stylist-chat'],
+      headers: [...gateway.INGRESS_HEADERS], target: 'http://edge-runtime:9000' });
   });
-  it('allowlists exactly the backend calls the analyze handler makes', async () => {
-    const source = await read('supabase/functions/analyze-clothing/handler.ts');
-    const rpcs = [...source.matchAll(/rpc\('([a-z_]+)'/g)].map((m) => `POST /rest/v1/rpc/${m[1]}`);
-    expect(source).toContain('/auth/v1/user');
+  it('allowlists exactly the backend calls the analyze and stylist handlers make', async () => {
+    const rpcs: string[] = [];
+    for (const file of ['supabase/functions/analyze-clothing/handler.ts', 'supabase/functions/stylist-chat/handler.ts']) {
+      const source = await read(file);
+      expect(source).toContain('/auth/v1/user');
+      rpcs.push(...[...source.matchAll(/rpc\('([a-z_]+)'/g)].map((m) => `POST /rest/v1/rpc/${m[1]}`));
+    }
     expect(new Set(['GET /auth/v1/user', ...rpcs])).toEqual(new Set(gateway.ALLOWED_ROUTES));
+    expect(gateway.decide(request('POST', '/functions/v1/stylist-chat'), gateway.INGRESS_ROUTES)).toBe('forward');
+    expect(gateway.decide(request('POST', '/rest/v1/rpc/stylist_direct_allocation'))).toBe('route');
+    expect(gateway.decide(request('POST', '/rest/v1/rpc/stylist_expire_due'))).toBe('route');
   });
 });
 
@@ -201,6 +207,13 @@ describe('privileged controller', () => {
     expect(controller.validOperation({ type: 'op', id: 5, op: 'count', owner: 'A' })).toBe(false);
     expect(controller.validOperation({ type: 'op', id: 6, op: 'sql' })).toBe(false);
     expect(controller.validOperation({ type: 'op', id: 1.5, op: 'count' })).toBe(false);
+    const item = '0b1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8';
+    expect(controller.validOperation({ type: 'op', id: 7, op: 'fence', item })).toBe(true);
+    expect(controller.validOperation({ type: 'op', id: 8, op: 'unfence', item })).toBe(true);
+    expect(controller.validOperation({ type: 'op', id: 9, op: 'fence', item: "x' or true --" })).toBe(false);
+    expect(controller.validOperation({ type: 'op', id: 10, op: 'fence', item, owner: 'B' })).toBe(false);
+    expect(controller.validOperation({ type: 'op', id: 11, op: 'fence' })).toBe(false);
+    expect(controller.FENCE_REQUEST.startsWith(controller.REQUEST_PREFIX)).toBe(true);
   });
   it('rejects any topology other than the isolated one', () => {
     const c = controller.CONTAINERS;
@@ -281,7 +294,8 @@ describe('deploy-artifact check (rev5 A2)', () => {
   it('passes the real repository and a clean synthetic one', async () => {
     const real = await deploy.analyzeDeployArtifacts(root);
     expect(real.problems).toEqual([]);
-    expect(Object.keys(real.graph).sort()).toEqual(['analyze-clothing', 'delete-account', 'finalize-analyzed-item', 'finalize-image-change']);
+    expect(Object.keys(real.graph).sort()).toEqual(['analyze-clothing', 'delete-account', 'finalize-analyzed-item', 'finalize-image-change',
+      'stylist-chat']);
     expect((await repo({})).problems).toEqual([]);
   });
   it('fails an entrypoint that points at a fixture', async () => {

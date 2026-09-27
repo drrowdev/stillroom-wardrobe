@@ -581,6 +581,17 @@ exact bodies; the responsible actor then applies it and reads back the bodies,
 ACLs, owners and search paths. Builders make no hosted call. See
 `docs/phase-6-result.md`.
 
+**ST1a stylist chat backend (source only; inactive; hosted apply owner-gated).**
+The ST1a draft PR adds `20260928090000_stylist_chat.sql`, the inactive job
+`20260928090100_stylist_expire_schedule.sql` and a fourth Edge Function,
+`stylist-chat`. It is behaviour-changing, not additive: stylist requests share
+`private.ai_usage` with a `purpose` column, so tagging's unchanged admission
+counts them. The stylist manifest and dispatch stay off, and no stylist
+allowance is set. Nothing runs on hosted until the owner approves the bodies,
+the Edge deploy, the job's activation, the allowance and consent notice, the
+direct-call allocation and an exact-route synthetic probe. Builders make no
+hosted or paid call. See ADR25 in `blueprint/18` and `blueprint/20`.
+
 **I23 service worker (source only, not deployed).** The Phase 7 PR-1 draft
 adds `src/service-worker.ts`, the Update/Reload prompt and the Settings install
 hint. The worker precaches only the public shell listed in the generated

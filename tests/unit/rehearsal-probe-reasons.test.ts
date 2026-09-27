@@ -28,7 +28,7 @@ describe('served-function warm-up', () => {
       WARM_FUNCTIONS.map((name) => [`http://127.0.0.1:54321/functions/v1/${name}`, 'OPTIONS']));
     const line = log.mock.calls.at(-1)?.[0] as string;
     expect(line.startsWith('B1-WARM ')).toBe(true);
-    expect(JSON.parse(line.slice(8))).toMatchObject({ functions: 3, attempts: 3, reason: 'ready', lastStatus: 204 });
+    expect(JSON.parse(line.slice(8))).toMatchObject({ functions: WARM_FUNCTIONS.length, attempts: WARM_FUNCTIONS.length, reason: 'ready', lastStatus: 204 });
   });
 
   it('keeps waiting through gateway 404/502/503 and transport failures, never treating them as ready', async () => {
@@ -40,7 +40,7 @@ describe('served-function warm-up', () => {
     });
     vi.spyOn(console, 'log').mockImplementation(() => {});
     await warmServedFunctions(owned(), Date.now() + 60_000, transport, noPause);
-    expect(transport).toHaveBeenCalledTimes(7);
+    expect(transport).toHaveBeenCalledTimes(WARM_FUNCTIONS.length + 4);
   });
 
   it('fails closed with a named reason when a worker never boots before the deadline', async () => {
@@ -99,7 +99,7 @@ describe('served-function warm-up', () => {
     });
     vi.spyOn(console, 'log').mockImplementation(() => {});
     await warmServedFunctions(owned(), Date.now() + 60_000, transport, noPause);
-    expect(transport).toHaveBeenCalledTimes(5);
+    expect(transport).toHaveBeenCalledTimes(WARM_FUNCTIONS.length + 2);
   });
 
   it('retries a timed-out preflight', async () => {
@@ -110,7 +110,7 @@ describe('served-function warm-up', () => {
     });
     vi.spyOn(console, 'log').mockImplementation(() => {});
     await warmServedFunctions(owned(), Date.now() + 60_000, transport, noPause);
-    expect(transport).toHaveBeenCalledTimes(4);
+    expect(transport).toHaveBeenCalledTimes(WARM_FUNCTIONS.length + 1);
   });
 
   it('refuses at once when a 204 lacks the handler signature', async () => {

@@ -7,17 +7,20 @@ import { pathToFileURL } from 'node:url';
 export const UPSTREAM_PORT = 8000;
 export const INGRESS_PORT = 8081;
 export const MAX_BODY_BYTES = 1024 * 1024;
-/** Routes the fixture analyze-clothing runtime may reach, exact raw request target. */
+/** Routes the fixture analyze-clothing and stylist-chat runtime may reach, exact raw request target. */
 export const ALLOWED_ROUTES = Object.freeze([
   'GET /auth/v1/user',
   'POST /rest/v1/rpc/ai_status',
   'POST /rest/v1/rpc/ai_claim_analysis',
   'POST /rest/v1/rpc/ai_analysis_status',
   'POST /rest/v1/rpc/ai_finish_analysis',
+  'POST /rest/v1/rpc/stylist_status',
+  'POST /rest/v1/rpc/stylist_claim',
+  'POST /rest/v1/rpc/stylist_finish',
 ]);
 export const FORWARDED_HEADERS = Object.freeze(['authorization', 'apikey', 'content-type', 'content-length']);
-/** The only request the host-side gate may send in, towards the fixture runtime. */
-export const INGRESS_ROUTE = 'POST /functions/v1/analyze-clothing';
+/** The only requests the host-side gate may send in, towards the fixture runtime. */
+export const INGRESS_ROUTES = Object.freeze(['POST /functions/v1/analyze-clothing', 'POST /functions/v1/stylist-chat']);
 export const INGRESS_HEADERS = Object.freeze([...FORWARDED_HEADERS,
   'x-stillroom-request-id', 'x-stillroom-draft-id', 'x-stillroom-generation']);
 export const INGRESS_TARGET = 'http://edge-runtime:9000';
@@ -58,7 +61,7 @@ export const DIAGNOSTIC_ROUTES = Object.freeze(['GET /__config', 'GET /__forward
 export function effectiveConfig(upstream) {
   return { upstream, routes: [...ALLOWED_ROUTES], headers: [...FORWARDED_HEADERS], maxBodyBytes: MAX_BODY_BYTES,
     diagnostics: [...DIAGNOSTIC_ROUTES],
-    ingress: { route: INGRESS_ROUTE, headers: [...INGRESS_HEADERS], target: INGRESS_TARGET } };
+    ingress: { routes: [...INGRESS_ROUTES], headers: [...INGRESS_HEADERS], target: INGRESS_TARGET } };
 }
 /** Upstream 3xx is never followed; it becomes 502. */
 export const relayedStatus = (status) => (Number.isInteger(status) && status >= 200 && status < 600
@@ -122,7 +125,7 @@ function main() {
       res.end(JSON.stringify(forwarded));
       return;
     }
-    const verdict = decide(req, [INGRESS_ROUTE]);
+    const verdict = decide(req, INGRESS_ROUTES);
     const headers = verdict === 'forward' ? filterHeaders(req.rawHeaders, INGRESS_HEADERS) : null;
     if (verdict !== 'forward' || headers === null) { deny(res, verdict === 'forward' ? 'header-duplicate' : verdict); return; }
     relay(req, res, `${INGRESS_TARGET}${req.url}`, headers);

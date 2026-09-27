@@ -1,0 +1,8 @@
+import { createStylistHandler } from './handler.ts';
+
+Deno.serve(createStylistHandler({
+  supabaseUrl: Deno.env.get('SUPABASE_URL') ?? '',
+  publicKey: Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+  serviceKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+  azure: { apiKey: Deno.env.get('AI_AZURE_OPENAI_API_KEY') },
+}));

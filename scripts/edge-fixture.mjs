@@ -33,7 +33,9 @@ const EDGE_RUNTIME_REPOS = Object.freeze(['public.ecr.aws/supabase/edge-runtime'
   'supabase/edge-runtime', 'docker.io/supabase/edge-runtime']);
 export const GATEWAY_MODE_OPTION = 'com.docker.network.bridge.gateway_mode_ipv4';
 export const REQUEST_PREFIX = 'e3b0';
-export const OPERATIONS = Object.freeze(['freeze', 'restore', 'count', 'verify-deleted', 'down']);
+export const OPERATIONS = Object.freeze(['freeze', 'restore', 'count', 'verify-deleted', 'down', 'fence', 'unfence']);
+// The one fixture fence request (owner A only); its e3b0 prefix is swept by teardown.
+export const FENCE_REQUEST = 'e3b0af00-0000-4000-8000-000000000001';
 
 /** AZURE_REVIEW_EXPIRES blocks the gate: an expired or invalid review date is BLOCKED, never a pass. */
 export function reviewGate(now, expires = AZURE_REVIEW_EXPIRES) {
@@ -44,6 +46,8 @@ export function validOperation(message) {
   if (!message || typeof message !== 'object' || message.type !== 'op' || !Number.isSafeInteger(message.id)) return false;
   const keys = Object.keys(message).sort().join(',');
   if (['freeze', 'restore'].includes(message.op)) return keys === 'id,op,owner,type' && ['A', 'B'].includes(message.owner);
+  if (['fence', 'unfence'].includes(message.op)) return keys === 'id,item,op,type' && typeof message.item === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(message.item);
   return OPERATIONS.includes(message.op) && keys === 'id,op,type';
 }
 /** Topology proof over `docker inspect` values (rev5 A1). Returns problems; empty means verified. */
@@ -205,7 +209,9 @@ async function ownerIds() {
 const ACTIVATE = (where) => `-- stillroom-edge-gate-activation (CI fixture only; never a migration or seed)
 update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.6-terra-2026-07-09',prompt_version=2,
   max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,result_ttl_seconds=3600,
-  execution_manifest_id='azure-eu-terra-devtest-v2' where ${where};`;
+  execution_manifest_id='azure-eu-terra-devtest-v2',stylist_activated=true,stylist_notice_revision=1,
+  stylist_manifest_id='azure-eu-terra-stylist-v1',stylist_max_request_micro=129360,stylist_monthly_allowance_micro=10000000,
+  stylist_max_requests_per_hour=50 where ${where};`;
 
 async function main() {
   const deadline = Date.now() + 5 * 60_000;
@@ -236,6 +242,7 @@ async function main() {
         const restore = snapshot.map((row) => `update private.ai_controls c set ${columns.map((c) => `${c}=v.${c}`).join(',')}
           from jsonb_populate_record(null::private.ai_controls,${literal(JSON.stringify(row))}::jsonb) v where c.owner_id=v.owner_id;`).join('\n');
         await db(`begin;
+          delete from private.item_deletion_operations where ${where} and request_id::text like '${REQUEST_PREFIX}%';
           delete from private.ai_save_used_receipts where ${where} and request_id::text like '${REQUEST_PREFIX}%';
           delete from private.ai_usage where ${where} and request_id::text like '${REQUEST_PREFIX}%';
           ${restore}
@@ -278,6 +285,7 @@ async function main() {
       '--network-alias', 'edge-runtime', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--memory', '1g',
       '-e', 'SUPABASE_ANON_KEY', '-e', 'SUPABASE_SERVICE_ROLE_KEY',
       ...mount('supabase/functions', '/work/supabase/functions'), ...mount('src/images', '/work/src/images'),
+      ...mount('src/domain/stylist.ts', '/work/src/domain/stylist.ts'),
       ...mount('tests/edge-fixtures', '/work/tests/edge-fixtures'),
       '--pull', 'never', '--entrypoint', 'edge-runtime', runtimeReference, 'start', '--main-service', '/work/tests/edge-fixtures/analyze-clothing-double',
       '--port', '9000'], 'fixture-runtime', { secrets: { SUPABASE_ANON_KEY: keys.anon, SUPABASE_SERVICE_ROLE_KEY: keys.service } });
@@ -400,6 +408,14 @@ async function main() {
           } else if (message.op === 'restore') {
             ok = await db(restoreSql(message.owner)) === 'I17_RESTORE_OK';
             if (ok) frozen.delete(message.owner);
+          } else if (message.op === 'fence') {
+            // Fixture-only fence on A's live item, so the claim's fence predicate is observed apart from Trash.
+            ok = await db(`insert into private.item_deletion_operations(owner_id,request_id,item_id,phase)
+              select owner_id,${literal(FENCE_REQUEST)},id,'removing_registered' from public.items
+              where owner_id=${literal(ids.A)} and id=${literal(message.item)} and deleted_at is null returning 'FENCED';`) === 'FENCED';
+          } else if (message.op === 'unfence') {
+            ok = await db(`delete from private.item_deletion_operations where owner_id=${literal(ids.A)}
+              and request_id=${literal(FENCE_REQUEST)} and item_id=${literal(message.item)} returning 'UNFENCED';`) === 'UNFENCED';
           } else if (message.op === 'count') {
             const result = await docker(['exec', CONTAINERS.double, 'node', '-e',
               "fetch('http://127.0.0.1:8080/__count').then(r=>r.text()).then(t=>process.stdout.write(t))"]);

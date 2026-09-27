@@ -325,6 +325,18 @@ async function exercise(ctx) {
     'storage',(select jsonb_build_array(count(*),md5(coalesce(string_agg(o.name||':'||coalesce(o.metadata->>'size','')||':'||coalesce(o.metadata->>'eTag',''),'|' order by o.name),'')))
       from storage.objects o where o.bucket_id='wardrobe' and split_part(o.name,'/',1)=${literal(uid)}::text),
     'admission',(select jsonb_build_array(a.admission_no,a.email,a.enabled,a.user_id,a.generation) from private.approved_accounts a where a.user_id=${literal(uid)}))::text;`);
+  // ST1a: both owners hold a stylist reservation in the shared ledger, written the way stylist_claim writes it.
+  step = 'fixture-stylist';
+  await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,dispatched_at,purpose)
+    select o,gen_random_uuid(),to_char(clock_timestamp() at time zone 'UTC','YYYY-MM'),clock_timestamp(),129360,129360,'held',clock_timestamp(),'stylist'
+    from unnest(array[${literal(c)},${literal(d)}]::uuid[]) o;
+  insert into private.ai_usage_evidence(owner_id,request_id,manifest_id,model_observation)
+    select owner_id,request_id,'azure-eu-terra-stylist-v1','not_observed' from private.ai_usage
+    where purpose='stylist' and owner_id in (${literal(c)},${literal(d)});`);
+  const stylistRows = (uid) => sql(`select count(*) from private.ai_usage u join private.ai_usage_evidence e using (owner_id,request_id)
+    where u.owner_id=${literal(uid)} and u.purpose='stylist';`);
+  if (await stylistRows(c) !== '1' || await stylistRows(d) !== '1') throw new Error('SEED:stylist');
+  step = 'fixture';
   const before = await digest(d);
   const cBefore = JSON.parse(await digest(c));
   if (cBefore.storage[0] < 4 || cBefore['public.items'][0] < 2 || cBefore['public.outfits'][0] < 1) throw new Error('SEED');
@@ -526,6 +538,10 @@ async function exercise(ctx) {
     'admission',(select count(*) from private.approved_accounts where admission_no=1 or email='${EMAILS.C}'))::text;`);
   if (gone !== '{"auth": 0, "rows": true, "objects": 0, "admission": 0}') throw new Error('RESULT:owner-c');
   if (await digest(d) !== before) throw new Error('RESULT:control-changed');
+  // C's usage and evidence are both gone (stylistRows joins them; each table is also checked alone); D's are unchanged.
+  if (await stylistRows(c) !== '0' || await stylistRows(d) !== '1') throw new Error('RESULT:stylist');
+  if (await sql(`select (select count(*) from private.ai_usage where owner_id=${literal(c)})
+    +(select count(*) from private.ai_usage_evidence where owner_id=${literal(c)});`) !== '0') throw new Error('RESULT:stylist');
   const purged = await call('/rest/v1/rpc/purge_deletion_receipts', { method: 'POST', ...service, body: {} }, 10_000);
   if (!purged?.response.ok || (await purged.response.text()).trim() !== '0') throw new Error('RESULT:purge');
   const verified = await child('verify');

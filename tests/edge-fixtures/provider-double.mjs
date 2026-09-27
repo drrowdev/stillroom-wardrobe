@@ -30,6 +30,34 @@ export function jpegWidth(bytes) {
   }
   return null;
 }
+/** The exact final user message selects the stylist double's behaviour (text only, never an image). */
+export const STYLIST_MODES = Object.freeze({ 'Stylist fixture refusal': 'stylist-refusal', 'Stylist fixture tool': 'stylist-tool',
+  'Stylist fixture unknown ref': 'stylist-unknown-ref', 'Stylist fixture overrun': 'stylist-overrun',
+  'Stylist fixture tool text': 'stylist-tool-text' });
+export const STYLIST_FORBIDDEN_KEYS = Object.freeze(['title', 'brand', 'material', 'subcategory', 'style_tags', 'tags', 'notes',
+  'size_label', 'image_url', 'owner_id', 'id']);
+/**
+ * Bounded inspection of one stylist request: the exact controls, a system prompt, at most nine text messages within
+ * 20,000 serialized bytes, the minimised context and no image or free-text item fields. Returns the mode or a reason.
+ */
+export function stylistVerdict(body) {
+  const messages = body?.messages;
+  const controls = body?.model === DEPLOYMENT && body.stream === false && body.n === 1 && body.store === false
+    && body.reasoning_effort === 'low' && body.max_completion_tokens === 1200
+    && JSON.stringify(body.prompt_cache_options) === '{"mode":"explicit"}' && body.response_format?.json_schema?.strict === true;
+  if (!controls) return { reason: 'stylist-parameters' };
+  if (!Array.isArray(messages) || messages.length < 3 || messages.length > 9 || messages[0]?.role !== 'system'
+    || messages.some((m) => typeof m?.content !== 'string' || !['system', 'user', 'assistant'].includes(m.role))
+    || Buffer.byteLength(JSON.stringify(messages)) > 20000) return { reason: 'stylist-messages' };
+  let context;
+  try { context = JSON.parse(messages[1].content); } catch { return { reason: 'stylist-context' }; }
+  const clothes = context?.clothes;
+  if (!Array.isArray(clothes) || clothes.some((c) => typeof c?.ref !== 'string'
+    || STYLIST_FORBIDDEN_KEYS.some((key) => Object.hasOwn(c, key)))) return { reason: 'stylist-context' };
+  const last = messages.at(-1);
+  if (last.role !== 'user') return { reason: 'stylist-messages' };
+  return { mode: STYLIST_MODES[last.content] ?? 'stylist-ready', refs: clothes.slice(0, 2).map((c) => c.ref), clothes: clothes.length };
+}
 /** Validates the forwarded Azure request body; returns the mode or null for a request the double refuses. */
 export function requestMode(headers, text) {
   return requestVerdict(headers, text).mode ?? null;
@@ -40,11 +68,25 @@ export function requestVerdict(headers, text) {
   if (headers['content-type'] !== 'application/json') return { reason: 'content-type' };
   let body;
   try { body = JSON.parse(text); } catch { return { reason: text.length === 0 ? 'empty-body' : 'json' }; }
+  if (body?.response_format?.json_schema?.name === 'stylist_reply') return stylistVerdict(body);
   const url = body?.messages?.[1]?.content?.[0]?.image_url?.url;
   if (body?.model !== DEPLOYMENT || body.stream !== false || body.n !== 1 || body.store !== false) return { reason: 'parameters' };
   if (typeof url !== 'string' || !url.startsWith('data:image/jpeg;base64,')) return { reason: 'image-url' };
   const width = jpegWidth(Buffer.from(url.slice('data:image/jpeg;base64,'.length), 'base64'));
   return width === null ? { reason: 'jpeg' } : { mode: MODES[width] ?? 'ready' };
+}
+export function stylistCompletion(mode, refs = []) {
+  // Above both envelopes and the reservation: ceil((30000*220 + 5000*1320)/100) = 132000 > 129360 micro-USD.
+  const usage = mode === 'stylist-overrun' ? { ...USAGE, prompt_tokens: 30000, completion_tokens: 5000, total_tokens: 35000 } : USAGE;
+  const reply = mode === 'stylist-tool-text' ? '{"tool_calls":[{"function":{"name":"save_outfit","arguments":"{}"}}]}'
+    : 'Try these together.';
+  const content = JSON.stringify({ reply, outfits: mode === 'stylist-unknown-ref' ? [{ refs: ['i999'], note: '' }]
+    : refs.length ? [{ refs, note: 'Everyday' }] : [] });
+  const message = mode === 'stylist-refusal' ? { role: 'assistant', refusal: 'I cannot help with that.', content: null }
+    : mode === 'stylist-tool' ? { role: 'assistant', refusal: null, content: null,
+      tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'save_outfit', arguments: '{}' } }] }
+      : { role: 'assistant', refusal: null, content };
+  return { model: RETURNED_MODEL, usage, choices: [{ index: 0, finish_reason: mode === 'stylist-tool' ? 'tool_calls' : 'stop', message }] };
 }
 export function completion(mode) {
   const content = mode === 'malformed' ? '{"outcome":"ready","fields":' : JSON.stringify(mode === 'unclear' ? UNCLEAR_FACTS : READY_FACTS);
@@ -53,7 +95,7 @@ export function completion(mode) {
 }
 
 function main() {
-  const counts = { served: 0, rejected: 0, refused: 0, modes: {}, refusals: [] };
+  const counts = { served: 0, rejected: 0, refused: 0, modes: {}, refusals: [], stylistClothes: null };
   createServer((req, res) => {
     const chunks = [];
     let size = 0;
@@ -83,6 +125,11 @@ function main() {
         return;
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (mode.startsWith('stylist-')) {
+        counts.stylistClothes = verdict.clothes;
+        res.end(JSON.stringify(stylistCompletion(mode, verdict.refs)));
+        return;
+      }
       res.end(JSON.stringify(completion(mode)));
     });
   }).listen(8080, '0.0.0.0');
