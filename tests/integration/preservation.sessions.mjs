@@ -30,7 +30,7 @@ export const SOURCE_HASHES = Object.freeze({
   restoreAttribution: '101aad1322be5623c316c4deab06c5236ef3f09f23eab828a9e1f6400521c605',
   stylistChat: '8e7b11a4bf1269657f6a0bc2637de0140abd4419ca48391fd36b95b6cb794add',
   stylistExpireSchedule: 'd8e5968e02f52a8f79702ac5e9d49e512180c8af2359dbe2891be230cd853d61',
-  photoEnhancement: '8e73d00de7b2968ed6543ce388bdf4a0c201326c186a10eda78c9e3938bad754',
+  photoEnhancement: 'c1d960ee9ccbeab5b92e04f0244535122986bd427023f57036918517f809903e',
   enhanceExpireSchedule: '99a5943b7e580db9e36fdd78bce404cc6e7aba4533b89af8fd0ac8ca1c9d9098',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;

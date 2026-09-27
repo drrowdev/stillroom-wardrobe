@@ -745,7 +745,9 @@ Request lifetime is 85 seconds, the provider stage 70 seconds, Auth/RPC stages
 response is capped at 4 MiB while reading. The client bounds the whole
 enhancement stage at 90 seconds. Output bytes are released only after
 `enhance_finish` returns `OK`, which has committed the evidence for that hash
-and length.
+and length. Once a request is claimed, the provider call and `enhance_finish`
+run on the server's own lifetime: a browser that cancels gets no bytes, but
+the usage is still settled.
 
 Authenticated RPCs: `enhance_status()`, `enhance_set_consent(boolean,integer)`,
 `image_provenance_v1()`, `image_provenance_digest_v1()`,
@@ -758,5 +760,7 @@ unchanged. Service-role only: `enhance_claim`, `enhance_finish`,
 `enhance_probe_authorise`. Database owner only: `enhance_expire_due` (run by
 the inactive job `stillroom-enhance-expire`) and `enhance_provider_control`.
 Provenance is attached server-side on an image's pending -> ready publication;
-the client never asserts it. Export v3 is unchanged; v4 and its reader are
+the client never asserts it. `restore_image_provenance` accepts a v4-marked
+image that was published (ready, or retired by a later restored photo) and
+refuses pending images and images retired without publication. Export v3 is unchanged; v4 and its reader are
 BG2b-2.

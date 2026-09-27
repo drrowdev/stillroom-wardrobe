@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { requireEvidence } from './preservation.sessions.mjs';
 import { equal, analysisHash } from './ai-analysis.sessions.mjs';
 import { intent, saveHarness, denied, bytes } from './item-save.sessions.mjs';
+import { imageChangeIntent } from './image-replacement.sessions.mjs';
 import { COLOUR_MANIFEST } from './azure-preservation.sessions.mjs';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
 
@@ -213,8 +214,9 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
     };
     await terminal({ ...VALID, total: 4999 }, 'INVALID_USAGE', RESERVED);
     await terminal({ ...VALID, modelObservation: 'response_unrecognised_model' }, 'USAGE_ANOMALY', RESERVED);
-    // Overrun above the 7500-token input envelope: ceil((8000*800 + 100*3000)/100) = 67000, kept as observed.
-    await terminal({ ...VALID, input: 8000, inputImage: 7900, output: 100, total: 8100 }, 'USAGE_ANOMALY', 67000);
+    // Overrun above the 7500-token input envelope: the observed ceil((8000*800 + 100*3000)/100) = 67000 is below the
+    // reservation, so the row settles at greatest(estimate, reserved).
+    await terminal({ ...VALID, input: 8000, inputImage: 7900, output: 100, total: 8100 }, 'USAGE_ANOMALY', RESERVED);
     // Simultaneous anomaly finishes for both owners: both settle, the switch goes off once and each owner's own
     // enhancement activation stops.
     await freeSlots();
@@ -334,12 +336,30 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
     await limits(total + BigInt(STYLIST_RESERVATION) - 1n, total + BigInt(STYLIST_RESERVATION) - 1n);
     equal((await one(`select public.stylist_claim(${literal(a.uid)},${literal(randomUUID())},${literal(STYLIST)});`)).code, 'ALLOWANCE');
     requireEvidence(await rows() === count);
-    // R1 clamp: lowering the shared total lowers the enhancement sub-limit in the same update.
+    // R1 clamp: lowering the shared total lowers the enhancement sub-limit in the same update. The stylist sub-limit
+    // is set within the lowered total first (its own constraint) and restored afterwards.
+    const stylistLimit = (await controls(a)).stylist_monthly_allowance_micro;
+    const setStylist = (value) => sql(`update private.ai_controls set stylist_monthly_allowance_micro=${value} where owner_id=${literal(a.uid)};`);
     await sql(`update private.ai_controls set monthly_allowance_micro=40000000 where owner_id=${literal(a.uid)};`);
     await limits(40000000n, 40000000n);
+    await setStylist(1000000);
     await sql(`update private.ai_controls set monthly_allowance_micro=1000000 where owner_id=${literal(a.uid)};`);
     equal(String((await controls(a)).enhance_monthly_allowance_micro), '1000000');
     await reactivate(a);
+    // The stylist direct-allocation helper lowers the total; the stylist helper clamps its own sub-limit and the
+    // enhancement trigger clamps the enhancement sub-limit in the same update. A stale expected total conflicts.
+    const directTotal = (await used(a)) + 50000000n, directNew = directTotal - 20000000n;
+    await sql(`update private.ai_controls set monthly_allowance_micro=${directTotal},stylist_monthly_allowance_micro=${directTotal - 1000000n},
+      enhance_monthly_allowance_micro=${directTotal - 2000000n} where owner_id=${literal(a.uid)};`);
+    const direct = (expected) => one(`select public.stylist_direct_allocation(${literal(a.uid)},20000000,${expected});`);
+    equal(await direct(directTotal), { code: 'OK', previousTotalMicro: String(directTotal), newTotalMicro: String(directNew) });
+    const allocated = await controls(a);
+    equal([allocated.monthly_allowance_micro, allocated.stylist_monthly_allowance_micro, allocated.enhance_monthly_allowance_micro].map(String),
+      [String(directNew), String(directNew), String(directNew)]);
+    equal(await direct(directTotal), { code: 'CONFLICT' });
+    equal(String((await controls(a)).monthly_allowance_micro), String(directNew));
+    await reactivate(a);
+    await setStylist(stylistLimit);
     // Hourly: the shared cap counts every purpose; the enhancement cap counts enhancement rows only.
     const hour = async (purpose) => Number(await scalar(`select count(*) from private.ai_usage where owner_id=${literal(a.uid)}
       and created_at>clock_timestamp()-interval '1 hour' ${purpose ? `and purpose=${literal(purpose)}` : ''};`));
@@ -408,6 +428,22 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
     requireEvidence((await one(`select public.enhance_expire_due(1000);`)).expired >= 1);
     equal(await one(`select jsonb_build_object('reason',stopped_reason) from private.enhancement_probe_authorisations where id=${literal(lapsing)};`),
       { reason: 'MISSING_USAGE' });
+    // A claim that meets its own overdue held probe row, with no earlier enhance_expire_due, expires it first and
+    // then refuses on the reloaded (stopped) authorisation, before any slot or usage row is allocated.
+    const staleProbe = randomUUID();
+    equal((await authorise(staleProbe, 6, 1500000, `ledger-stale-${staleProbe}`, expires)).code, 'OK');
+    const p5 = randomUUID();
+    requireEvidence((await claim(a, p5, { probe: staleProbe })).claimed === true);
+    await sql(`update private.ai_usage set dispatched_at=dispatched_at-interval '3 minutes' where owner_id=${literal(a.uid)} and request_id=${literal(p5)};`);
+    const slotCount = () => scalar(`select count(*) from private.provider_slots where deployment_key=${literal(KEY)};`);
+    const [slotsBefore, rowsBefore] = [await slotCount(), await rows()];
+    equal(await claim(a, randomUUID(), { probe: staleProbe }), { code: 'INACTIVE', claimed: false });
+    equal([await slotCount(), await rows()], [slotsBefore, rowsBefore]);
+    equal(await one(`select jsonb_build_object('reason',stopped_reason) from private.enhancement_probe_authorisations where id=${literal(staleProbe)};`),
+      { reason: 'MISSING_USAGE' });
+    const staleRow = await ledger(a, p5);
+    requireEvidence(staleRow.usage.closed_reason === 'EXPIRED' && staleRow.usage.accounted_micro === RESERVED
+      && staleRow.evidence.enhance_settlement_origin === 'provisional_expiry');
     await reactivate(a);
     equal((await client.rpc(a, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 1 })).code, 'OK');
     await freeSlots();
@@ -528,6 +564,48 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
       requireEvidence(await provenanceRow(a, unlabelled.value.p_image.id) === null);
       denied(await sh.call('restore_image_provenance', { p_item_id: unlabelled.value.p_item.id, p_image_id: unlabelled.value.p_image.id,
         p_import_id: unlabelled.importId, p_entry: entry }));
+      // Multi-photo v4 restore: photo 1 is published, its provenance step is interrupted, and the restore-only
+      // replacement retires it. The retried reservation replays exactly; both published photos (one now retired) then
+      // take provenance, idempotently. Pending photos and photos retired without publication are refused.
+      const sha1 = hex(), sha2 = hex();
+      const multi = await restore(sh, a, sha1, 'v4');
+      const [item1] = await sh.read('items', multi.value.p_item.id);
+      const [image1] = await sh.read('item_images', multi.value.p_image.id);
+      const change = imageChangeIntent(item1, image1);
+      change.image = { ...change.image, id: change.imageId, main_sha256: sha2, main_bytes: bytes.length, thumb_bytes: bytes.length };
+      const changeArgs = { p_intent: change, p_import_id: multi.importId, p_mode: 'v4' };
+      const changed = await sh.call('reserve_restored_image_change', changeArgs);
+      requireEvidence(changed.ok && changed.data?.imageId === change.imageId && changed.data.requestId === change.requestId);
+      const photo2 = sh.track({ p_item: { id: change.itemId }, p_image: { id: change.imageId } });
+      await sh.upload(photo2);
+      await sql(`select public.complete_image_change(${literal(a.uid)},${json(change)},private.image_change_objects(${literal(a.uid)},
+        (select x from public.item_images x where x.owner_id=${literal(a.uid)} and x.id=${literal(change.imageId)})));`);
+      const retry = await sh.call('reserve_restored_image_change', changeArgs);
+      requireEvidence(retry.ok && retry.data?.fingerprint === changed.data.fingerprint && retry.data.state === 'completed');
+      requireEvidence((await sh.read('item_images', image1.id))[0].state === 'retired'
+        && (await sh.read('item_images', change.imageId))[0].state === 'ready');
+      const multiArgs = (image) => ({ p_item_id: item1.id, p_image_id: image, p_import_id: multi.importId });
+      for (const [image, sha] of [[image1.id, sha1], [change.imageId, sha2]]) {
+        const body = { ...multiArgs(image), p_entry: { ...entry, backup_sha256: sha } };
+        equal(await client.rpc(a, 'restore_image_provenance', body), { state: 'created' });
+        equal(await client.rpc(a, 'restore_image_provenance', body), { state: 'equal' });
+        equal(await provenanceRow(a, image), { owner_id: a.uid, image_id: image, kind: 'ai_edited', origin: 'imported',
+          request_id: null, import_id: multi.importId, model_id: MODEL, manifest_id: MANIFEST, input_sha256: null,
+          backup_sha256: sha, stored_sha256: sha });
+      }
+      const unpublished = async (retire) => {
+        const sha = hex(), value = saveWith(sh, sha), importId = randomUUID();
+        const reserved = await sh.call('reserve_restored_item_save_v2', { ...value, p_import_id: importId, p_mode: 'v4' });
+        requireEvidence(reserved.ok && reserved.data?.[0]?.image?.state === 'pending');
+        await sh.upload(value);
+        if (retire) requireEvidence((await sh.call('retire_image', { p_image_id: value.p_image.id })).ok);
+        requireEvidence((await sh.read('item_images', value.p_image.id))[0].state === (retire ? 'retired' : 'pending'));
+        denied(await sh.call('restore_image_provenance', { p_item_id: value.p_item.id, p_image_id: value.p_image.id,
+          p_import_id: importId, p_entry: { ...entry, backup_sha256: sha } }));
+        requireEvidence(await provenanceRow(a, value.p_image.id) === null);
+      };
+      await unpublished(false);
+      await unpublished(true);
       // v1 pending -> v2 resume: the v1 reservation copied a binding from A's provenance; v2 replaces it with an
       // unlabelled marker in the same transaction. Exact replay succeeds, a conflicting mode fails.
       const resumed = saveWith(sh, first.sha);

@@ -198,6 +198,7 @@ create table private.restore_image_markers (
   request_id uuid,
   mode text not null check (mode in ('legacy','v4','unlabelled')),
   created_at timestamptz not null default clock_timestamp(),
+  published_at timestamptz,
   primary key(owner_id,image_id),
   foreign key(owner_id,image_id) references public.item_images(owner_id,id) on delete cascade deferrable initially deferred,
   check ((operation='image_change') = (request_id is not null))
@@ -205,6 +206,11 @@ create table private.restore_image_markers (
 create function private.restore_marker_immutable() returns trigger
 language plpgsql set search_path = '' as $$
 begin
+  -- The one permitted change: the attach trigger records the image's pending -> ready publication, once.
+  if old.published_at is null and new.published_at is not null
+    and (to_jsonb(new)-'published_at')=(to_jsonb(old)-'published_at') then
+    return new;
+  end if;
   raise exception using errcode='42501',message='Not available';
 end;
 $$;
@@ -298,12 +304,15 @@ for each row execute function private.enhancement_admission();
 
 -- R4: attach only on the pending -> ready publication, once. Pending -> retired, ready -> retired and unrelated updates
 -- never attach or consume a binding. The finalizer's attempt row is not read: it is updated after this trigger.
--- It inserts only into image_provenance and deletes only the consumed binding; item_images is never written.
+-- It inserts only into image_provenance, deletes only the consumed binding and records a restore marker's publication;
+-- item_images is never written.
 create function private.enhancement_attach() returns trigger
 language plpgsql volatile security definer set search_path = '' as $$
 declare b private.image_enhancement_bindings; k private.restore_image_markers; t private.enhancement_outputs;
   s private.image_provenance;
 begin
+  update private.restore_image_markers set published_at=clock_timestamp()
+    where owner_id=new.owner_id and image_id=new.id and published_at is null;
   delete from private.image_enhancement_bindings where owner_id=new.owner_id and image_id=new.id returning * into b;
   if found then
     if b.stored_sha256=new.main_sha256 then
@@ -440,7 +449,9 @@ end;
 $$;
 
 -- v4 restore authority (N4, Q6). Exact replay first (works after the marker's image is replaced or long after the
--- restore); otherwise a v4 marker, a ready image on that item with the marker's hash, and backup = restored.
+-- restore); otherwise a v4 marker, a published image on that item with the marker's hash, and backup = restored.
+-- Published means it went pending -> ready (the marker records it): still ready, or retired by a later restored photo
+-- (multi-photo restore). Pending images, and images retired without publication, are refused.
 create function public.restore_image_provenance(p_item_id uuid,p_image_id uuid,p_import_id uuid,p_entry jsonb) returns jsonb
 language plpgsql volatile security definer set search_path = '' set lock_timeout = '2s' as $$
 declare u uuid := auth.uid(); s private.image_provenance; k private.restore_image_markers; im public.item_images;
@@ -484,7 +495,7 @@ begin
     where owner_id=u and image_id=p_image_id and item_id=p_item_id and import_id=p_import_id and mode='v4';
   if not found then raise exception using errcode='22023',message='Request conflict'; end if;
   select * into im from public.item_images where owner_id=u and id=p_image_id and item_id=p_item_id;
-  if not found or im.state<>'ready' or im.main_sha256<>k.restored_sha256
+  if not found or im.state not in ('ready','retired') or k.published_at is null or im.main_sha256<>k.restored_sha256
     or p_entry->>'backup_sha256'<>k.restored_sha256 then
     raise exception using errcode='22023',message='Request conflict';
   end if;
@@ -697,6 +708,12 @@ begin
     when insufficient_privilege then return jsonb_build_object('code','UNAVAILABLE','claimed',false);
   end;
   v_now := clock_timestamp();
+  -- Outstanding work expires before the permission decision: it can stop this probe authorisation (MISSING_USAGE),
+  -- so the already-locked authorisation is reloaded before it is judged.
+  perform private.enhance_expire(p.owner_id,v_now,100);
+  if p_probe_id is not null then
+    select * into a from private.enhancement_probe_authorisations where id=p_probe_id and owner_id=p_owner_id;
+  end if;
   v_code := case when p_probe_id is null then private.enhance_permission(p,c) else private.enhance_probe_permission(p,c,a,v_now) end;
   if v_code<>'OK' then return jsonb_build_object('code',v_code,'claimed',false); end if;
   if p_request_id is null or p_request_id::text!~'^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -711,7 +728,6 @@ begin
     return jsonb_build_object('code','CONFIG_CHANGED','claimed',false);
   end if;
   if c.enhance_max_request_micro<m.reservation_micro then return jsonb_build_object('code','UNCONFIGURED','claimed',false); end if;
-  perform private.enhance_expire(p.owner_id,v_now,100);
   if exists(select 1 from private.ai_usage where owner_id=p.owner_id and request_id=p_request_id) then
     return jsonb_build_object('code','TERMINAL','claimed',false);
   end if;
@@ -843,7 +859,8 @@ begin
   select * into m from private.ai_execution_manifests where id=e.manifest_id;
   select * into o from private.enhance_azure_usage(p_usage,m);
   if not o.valid or o.bad or o.over then
-    v_accounted := case when not o.valid then u.reserved_micro when o.bad then greatest(o.estimate,u.reserved_micro) else o.estimate end;
+    -- An anomaly never settles below the reservation (rev3 §5.2: max(estimate, reservation)).
+    v_accounted := case when not o.valid then u.reserved_micro else greatest(o.estimate,u.reserved_micro) end;
     update private.ai_usage set charge_state='estimated',accounted_micro=v_accounted,
       closed_reason=coalesce(closed_reason,case when not o.valid then 'FAILED' else 'UNAVAILABLE' end),closed_at=coalesce(closed_at,v_now)
       where owner_id=p_owner_id and request_id=p_request_id returning * into u;

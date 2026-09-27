@@ -76,7 +76,7 @@ describe('enhancement request contract', () => {
 });
 
 describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
-  afterEach(() => { vi.unstubAllGlobals(); });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
   const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service',
     azure: { apiKey: 'fictional-azure-image' } };
   const status = { code: 'OK', consent: { enabled: true, noticeRevision: 1 }, policy: { activated: true, noticeRevision: 1,
@@ -84,7 +84,8 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
   const accounting = { basis: 'estimated', amountMicro: '71200', currency: 'USD' };
   type Call = { url: string; body: Record<string, unknown> | null; auth: string | null; at: number };
   let clock = 0;
-  function backend(options: { status?: unknown; claim?: Record<string, unknown>; finish?: Record<string, unknown> } = {}) {
+  function backend(options: { status?: unknown; claim?: Record<string, unknown>; finish?: Record<string, unknown>;
+    finishGate?: Promise<void> } = {}) {
     const calls: Call[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       const parsed = typeof init.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null;
@@ -93,7 +94,12 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
       if (url.endsWith('/rpc/enhance_status')) return Response.json(options.status ?? status);
       if (url.endsWith('/rpc/enhance_claim')) return Response.json(options.claim ?? { code: 'OK', claimed: true,
         manifestId: ENHANCE_MANIFEST, dispatchBeforeMs: Date.now() + 5000, requestSeconds: 85 });
-      if (url.endsWith('/rpc/enhance_finish')) return Response.json(options.finish ?? { code: 'OK', accounting, usableUntilMs: 1_900_000_000_000 });
+      if (url.endsWith('/rpc/enhance_finish')) {
+        // Like a real fetch, an aborted signal fails the settlement: this proves which lifetime finish runs on.
+        if (options.finishGate) await options.finishGate;
+        init.signal?.throwIfAborted();
+        return Response.json(options.finish ?? { code: 'OK', accounting, usableUntilMs: 1_900_000_000_000 });
+      }
       throw new Error(`unexpected fetch ${url}`);
     }));
     return calls;
@@ -222,22 +228,81 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     }
   });
 
-  it('leaves a provider timeout held for provisional expiry without calling finish', async () => {
+  it('leaves a provider that misses the real 70 s deadline held for provisional expiry, without finish', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const calls = backend();
+    let calledAt = 0, abortedAt = 0, reason: unknown;
+    let called!: () => void;
+    const dispatched = new Promise<void>((resolve) => { called = resolve; });
     const transport = vi.fn(async (_url: string, init: RequestInit) => {
-      await new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason)));
+      calledAt = Date.now();
+      called();
+      await new Promise((_, reject) => init.signal!.addEventListener('abort', () => {
+        abortedAt = Date.now(); reason = init.signal!.reason; reject(init.signal!.reason);
+      }));
       return Response.json({});
     });
-    const controller = new AbortController();
-    const request = new Request(post(), { signal: controller.signal });
-    const pending = createEnhanceHandler(config, transport)(request);
-    await vi.waitFor(() => expect(transport).toHaveBeenCalled());
-    controller.abort();
+    const pending = createEnhanceHandler(config, transport)(post());
+    await dispatched;
+    await vi.advanceTimersByTimeAsync(69_999);
+    expect(abortedAt).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(abortedAt - calledAt).toBe(70_000);
+    expect((reason as DOMException).name).toBe('TimeoutError');
     const response = await pending;
     expect(await response.json()).toEqual({ code: 'TIMEOUT' });
     expect(finishBody(calls)).toBeUndefined();
   });
 
+  it('keeps the provider call running when the browser cancels, settles its usage and delivers nothing', async () => {
+    const calls = backend();
+    const controller = new AbortController();
+    let providerSignal: AbortSignal | undefined;
+    const overrun = { ...usage, input_tokens: 1400, output_tokens: 10_000, total_tokens: 11_400 };
+    const transport = vi.fn(async (_url: string, init: RequestInit) => {
+      providerSignal = init.signal!;
+      controller.abort();
+      await Promise.resolve();
+      return Response.json(imageBody(OUTPUT, { usage: overrun }));
+    });
+    const response = await createEnhanceHandler(config, transport)(new Request(post(), { signal: controller.signal }));
+    expect(providerSignal!.aborted).toBe(false);
+    expect(finishBody(calls)).toMatchObject({ p_code: 'OK', p_usage: { output: 10_000, total: 11_400 }, p_output_sha256: sha(OUTPUT) });
+    expect(response.headers.get('Content-Type')).toContain('application/json');
+    expect(await response.json()).toEqual({ code: 'TIMEOUT' });
+  });
+
+  it('completes settlement when the browser cancels while finish is in flight', async () => {
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    const calls = backend({ finish: { code: 'USAGE_ANOMALY', accounting }, finishGate: gate });
+    const controller = new AbortController();
+    const { transport } = provider(() => Response.json(imageBody()));
+    const pending = createEnhanceHandler(config, transport)(new Request(post(), { signal: controller.signal }));
+    await vi.waitFor(() => expect(finishBody(calls)).toBeDefined());
+    controller.abort();
+    open();
+    const response = await pending;
+    expect(await response.json()).toEqual({ code: 'TIMEOUT' });
+    expect(calls.filter((call) => call.url.endsWith('/rpc/enhance_finish'))).toHaveLength(1);
+    expect(finishBody(calls)).toMatchObject({ p_code: 'OK', p_output_sha256: sha(OUTPUT) });
+  });
+
+  it('settles as not dispatched when the browser cancels between claim and dispatch', async () => {
+    const controller = new AbortController();
+    const calls = backend();
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      const response = await original(url, init);
+      if (String(url).endsWith('/rpc/enhance_claim')) controller.abort();
+      return response;
+    });
+    const { transport } = provider(() => Response.json(imageBody()));
+    const response = await createEnhanceHandler(config, transport)(new Request(post(), { signal: controller.signal }));
+    expect(await response.json()).toEqual({ code: 'TIMEOUT' });
+    expect(transport).not.toHaveBeenCalled();
+    expect(finishBody(calls)).toMatchObject({ p_code: 'NOT_DISPATCHED', p_usage: null });
+  });
   it('refuses unknown request headers in preflight and any query string', async () => {
     const options = new Request('http://127.0.0.1:54321/functions/v1/enhance-photo', { method: 'OPTIONS', headers: {
       Origin: 'http://127.0.0.1:5173', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'x-stillroom-draft-id' } });

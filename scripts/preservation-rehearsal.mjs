@@ -54,7 +54,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260927090000_restore_attribution.sql', version: '20260927090000', time: '2026-09-27 09:00:00', bytes: 16198, sha256: SOURCE_HASHES.restoreAttribution },
   { name: '20260928090000_stylist_chat.sql', version: '20260928090000', time: '2026-09-28 09:00:00', bytes: 27527, sha256: SOURCE_HASHES.stylistChat },
   { name: '20260928090100_stylist_expire_schedule.sql', version: '20260928090100', time: '2026-09-28 09:01:00', bytes: 1934, sha256: SOURCE_HASHES.stylistExpireSchedule },
-  { name: '20260929090000_photo_enhancement.sql', version: '20260929090000', time: '2026-09-29 09:00:00', bytes: 72409, sha256: SOURCE_HASHES.photoEnhancement },
+  { name: '20260929090000_photo_enhancement.sql', version: '20260929090000', time: '2026-09-29 09:00:00', bytes: 73577, sha256: SOURCE_HASHES.photoEnhancement },
   { name: '20260929090100_enhance_expire_schedule.sql', version: '20260929090100', time: '2026-09-29 09:01:00', bytes: 1974, sha256: SOURCE_HASHES.enhanceExpireSchedule },
 ]);
 

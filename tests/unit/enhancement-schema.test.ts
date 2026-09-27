@@ -51,6 +51,13 @@ describe('photo enhancement migration (BG2b-1)', () => {
     expect(claim).toContain('s.total_micro+c.enhance_max_request_micro>c.monthly_allowance_micro');
     expect(claim).toContain('s.enhance_micro+c.enhance_max_request_micro>c.enhance_monthly_allowance_micro');
     expect(claim).toContain('private.enhance_probe_permission(p,c,a,v_now)');
+    // The expiry that can stop a probe authorisation runs, and the authorisation is reloaded, before the decision.
+    expect(claim.match(/perform private\.enhance_expire\(/g)).toHaveLength(1);
+    expect(claim.indexOf('perform private.enhance_expire(')).toBeLessThan(claim.indexOf('v_code := case'));
+    expect(claim.lastIndexOf('from private.enhancement_probe_authorisations where id=p_probe_id'))
+      .toBeGreaterThan(claim.indexOf('perform private.enhance_expire('));
+    // Anomalies never settle below the reservation (rev3 §5.2).
+    expect(finish).toContain('else greatest(o.estimate,u.reserved_micro) end;');
   });
 
   it('R1: clamps the enhancement sub-limit in a non-recursive BEFORE UPDATE', async () => {
@@ -97,7 +104,10 @@ describe('photo enhancement migration (BG2b-1)', () => {
     const provenance = between(sql, 'create function public.restore_image_provenance(', '\n$$;');
     expect(provenance).toContain("p_entry->>'backup_sha256'<>k.restored_sha256");
     expect(provenance).toContain("mode='v4'");
-    expect(provenance).toContain("im.state<>'ready'");
+    expect(provenance).toContain("im.state not in ('ready','retired') or k.published_at is null");
+    const immutable = between(sql, 'create function private.restore_marker_immutable()', '\n$$;');
+    expect(immutable).toContain("(to_jsonb(new)-'published_at')=(to_jsonb(old)-'published_at')");
+    expect(immutable).toContain('old.published_at is null and new.published_at is not null');
     expect(sql).not.toMatch(/re-?encod[a-z]*[^\n]*provenance[^\n]*=|source_sha256/);
   });
 
@@ -108,6 +118,7 @@ describe('photo enhancement migration (BG2b-1)', () => {
     const attach = between(sql, 'create function private.enhancement_attach()', '\n$$;');
     expect(attach).not.toMatch(/attempts|completed/);
     expect(attach).not.toMatch(/update public\.item_images|insert into public\.item_images/);
+    expect(attach.match(/\bupdate [a-z_.]+/g)).toEqual(['update private.restore_image_markers']);
     expect(sql.match(/create trigger [a-z_]+ [^\n]* on public\.item_images/g)).toHaveLength(2);
   });
 

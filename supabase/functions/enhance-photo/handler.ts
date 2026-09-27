@@ -20,7 +20,6 @@ const finishCodes: Record<string, string> = {
 };
 const allowedHeaders = ['authorization', 'apikey', 'content-type', 'x-client-info', 'x-stillroom-request-id'];
 const exposedHeaders = ['x-stillroom-enhancement-sha256', 'x-stillroom-enhancement-usable-until'];
-function stageSignal(signal: AbortSignal, ms: number) { return AbortSignal.any([signal, AbortSignal.timeout(ms)]); }
 function closedCode(value: unknown): string {
   const code = typeof value === 'string' && Object.hasOwn(finishCodes, value) ? finishCodes[value] : value;
   return typeof code === 'string' && Object.hasOwn(statusCodes, code) ? code : 'FAILED';
@@ -43,6 +42,8 @@ const microText = (value: unknown) => typeof value === 'string' && /^[1-9][0-9]{
  * the cap enforced; no RPC on invalid input), verified /auth/v1/user, status preflight, service claim for the verified
  * owner only, dispatch deadline, one provider call, strict output admission, finish. H2 bytes are released only after
  * finish returns OK, which has already committed the evidence and tombstone for this output hash and length.
+ * From the claim on, the provider call and settlement run on a server-owned lifetime, independent of the browser: a
+ * cancelled request still settles its usage, and only the delivery of H2 to the gone client is suppressed.
  * Only the photo is sent; no item fields, titles, notes or identifiers other than the opaque request UUID for accounting,
  * which stays on the server.
  */
@@ -54,7 +55,15 @@ export function createEnhanceHandler(config: EnhanceConfig, azureTransport: Azur
     const error = (code: string) => reply({ code: closedCode(code) }, statusCodes[closedCode(code)]!);
     if (!allowedOrigin(origin, config.supabaseUrl)) return error('UNAVAILABLE');
     if (origin !== null) headers.set('Access-Control-Allow-Origin', origin);
-    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(ENHANCE_LIMITS.requestMs)]);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const deadline = (ms: number) => {
+      const controller = new AbortController();
+      timers.push(setTimeout(() => controller.abort(new DOMException('Deadline exceeded', 'TimeoutError')), ms));
+      return controller.signal;
+    };
+    const stageSignal = (base: AbortSignal, ms: number) => AbortSignal.any([base, deadline(ms)]);
+    const server = deadline(ENHANCE_LIMITS.requestMs);
+    const signal = AbortSignal.any([request.signal, server]);
     try {
       const url = new URL(request.url);
       if (url.search || !['/enhance-photo', '/functions/v1/enhance-photo'].includes(url.pathname)) return error('INVALID_INPUT');
@@ -91,8 +100,9 @@ export function createEnhanceHandler(config: EnhanceConfig, azureTransport: Azur
       if (!auth.ok || !object(user) || typeof user.id !== 'string' || !UUID.test(user.id)
         || user.role !== 'authenticated' || user.is_anonymous !== false) return error('UNAUTHENTICATED');
       const owner = user.id;
-      const rpc = async (name: (typeof ENHANCE_RPCS)[number], body: JsonObject, service = false): Promise<JsonObject> => {
-        const dbSignal = stageSignal(signal, 5000);
+      const rpc = async (name: (typeof ENHANCE_RPCS)[number], body: JsonObject, service = false,
+        base: AbortSignal = signal): Promise<JsonObject> => {
+        const dbSignal = stageSignal(base, 5000);
         const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
           method: 'POST', redirect: 'error', cache: 'no-store', signal: dbSignal,
           headers: { Authorization: service ? 'Bearer '.concat(config.serviceKey) : bearer,
@@ -105,6 +115,7 @@ export function createEnhanceHandler(config: EnhanceConfig, azureTransport: Azur
       };
 
       const preflight = await rpc('enhance_status', {});
+      // The claim writes a held row, so it and everything after it run on the server-owned lifetime.
       if (preflight.code !== 'OK') return error(closedCode(preflight.code));
       const policy = preflight.policy, consent = preflight.consent;
       if (!object(policy) || policy.activated !== true) return error('INACTIVE');
@@ -115,22 +126,25 @@ export function createEnhanceHandler(config: EnhanceConfig, azureTransport: Azur
       if (policy.providerAvailable !== true) return error('UNAVAILABLE');
 
       const claim = await rpc('enhance_claim', { p_owner_id: owner, p_request_id: requestId, p_manifest_id: ENHANCE_MANIFEST,
-        p_input_sha256: inputHash, p_probe_id: null }, true);
+        p_input_sha256: inputHash, p_probe_id: null }, true, server);
       if (claim.code !== 'OK' || claim.claimed !== true) return error(closedCode(claim.code));
       if (!exact(claim, ['code', 'claimed', 'manifestId', 'dispatchBeforeMs', 'requestSeconds']) || claim.manifestId !== ENHANCE_MANIFEST
         || typeof claim.dispatchBeforeMs !== 'number' || !Number.isSafeInteger(claim.dispatchBeforeMs)) throw new ProtocolError('FAILED');
       const finish = async (code: EnhanceOutcome['code'] | 'NOT_DISPATCHED', usage: EnhanceOutcome['usage'],
         output: { sha256: string; bytes: number } | null) => {
         const result = await rpc('enhance_finish', { p_owner_id: owner, p_request_id: requestId, p_code: code, p_usage: usage,
-          p_output_sha256: output?.sha256 ?? null, p_output_bytes: output?.bytes ?? null }, true);
+          p_output_sha256: output?.sha256 ?? null, p_output_bytes: output?.bytes ?? null }, true, server);
         if (result.code !== 'BUSY' && !validAccounting(result.accounting)) throw new ProtocolError('FAILED');
         return result;
       };
-      if (Date.now() >= claim.dispatchBeforeMs) { await finish('NOT_DISPATCHED', null, null); return error('TIMEOUT'); }
-      signal.throwIfAborted();
-      const outcome = await callEnhance(config.azure, image, stageSignal(signal, ENHANCE_LIMITS.providerMs), azureTransport);
+      if (Date.now() >= claim.dispatchBeforeMs || request.signal.aborted) {
+        await finish('NOT_DISPATCHED', null, null);
+        return error('TIMEOUT');
+      }
+      const outcome = await callEnhance(config.azure, image, stageSignal(server, ENHANCE_LIMITS.providerMs), azureTransport);
       const output = outcome.code === 'OK' ? { sha256: await sha256(outcome.image), bytes: outcome.image.length } : null;
       const finished = await finish(outcome.code, outcome.usage, output);
+      if (request.signal.aborted) return error('TIMEOUT');
       if (finished.code !== 'OK' || outcome.code !== 'OK' || !output) {
         return error(finished.code === 'OK' ? outcome.code : String(finished.code));
       }
@@ -144,6 +158,8 @@ export function createEnhanceHandler(config: EnhanceConfig, azureTransport: Azur
     } catch (failure) {
       return error(signal.aborted || failure instanceof DOMException && ['TimeoutError', 'AbortError'].includes(failure.name)
         ? 'TIMEOUT' : failure instanceof ProtocolError ? failure.code : 'FAILED');
+    } finally {
+      for (const timer of timers) clearTimeout(timer);
     }
   };
 }

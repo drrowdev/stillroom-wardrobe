@@ -625,7 +625,7 @@ export async function verifyColourStage(snapshot, sql, stage) {
     equal(after.functions[name], stage === 'colours' ? before.functions[name] : expected.manifest[name]);
   }
   const added = Object.keys(after.manifests).filter((id) => !Object.hasOwn(before.manifests, id)).sort();
-  equal(added, stage === 'colours' ? [] : [ENHANCEMENT_MANIFEST_ROW.id, COLOUR_MANIFEST.v2, STYLIST_MANIFEST_ROW.id]);
+  equal(added, stage === 'colours' ? [] : [ENHANCEMENT_MANIFEST_ROW.id, COLOUR_MANIFEST.v2, STYLIST_MANIFEST_ROW.id].sort());
   for (const [id, md5] of Object.entries(before.manifests)) equal(after.manifests[id], md5);
   if (stage === 'target') {
     equal(JSON.parse(await sql(stylistDefaultsSql)), { controls: 0, usage: 0, evidence: 0 });
