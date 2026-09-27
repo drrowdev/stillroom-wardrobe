@@ -8,6 +8,7 @@ import {
   type ImagePreparationStage,
 } from './jpeg';
 import { cropGeometry, ORIGINAL_EDIT, type PhotoEdit } from './crop';
+import { framePlan } from './background/frame';
 import { BackgroundRemovalError, MASK_SIDE, maskPixels } from './background/mask';
 import type { Segmenter, SegmentJob } from './background/remover';
 
@@ -146,11 +147,16 @@ function context2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   return context;
 }
 
-// Fills the neutral background, then draws `source` through the crop geometry scaled to the canvas size.
-function draw(canvas: HTMLCanvasElement, source: CanvasImageSource, geometry?: ReturnType<typeof cropGeometry>): void {
+function fillBackground(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const context = context2d(canvas);
   context.fillStyle = PHOTO_BACKGROUND;
   context.fillRect(0, 0, canvas.width, canvas.height);
+  return context;
+}
+
+// Fills the neutral background, then draws `source` through the crop geometry scaled to the canvas size.
+function draw(canvas: HTMLCanvasElement, source: CanvasImageSource, geometry?: ReturnType<typeof cropGeometry>): void {
+  const context = fillBackground(canvas);
   if (!geometry || geometry.identity) {
     context.drawImage(source, 0, 0, canvas.width, canvas.height);
   } else {
@@ -360,7 +366,8 @@ export async function prepareSource(
 
 /** A bounded, oriented and unsegmented JPEG of the whole photo, kept in memory for the crop editor only. */
 export type CropSource = { main: Blob; width: number; height: number };
-export type SegmentedPhoto = { photo: PreparedPhoto; crop: CropSource | null; coverage: number };
+/** `framed` is false when the mask box was too small to trust and the unframed cut-out was kept. */
+export type SegmentedPhoto = { photo: PreparedPhoto; crop: CropSource | null; coverage: number; framed: boolean };
 
 function canvasOf(width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
@@ -437,10 +444,18 @@ export async function prepareSegmentedSource(
     cutContext.drawImage(mask, 0, 0, size.width, size.height);
     releaseCanvas(working);
     releaseCanvas(mask);
-    const composite = temporary(size.width, size.height);
-    draw(composite, cut);
+    // Packshot framing (BG2a): the garment's box, centred on a 4:5 canvas. A box too small to trust keeps the
+    // unframed cut-out.
+    const frame = framePlan(alpha, size.width, size.height);
+    const composite = temporary(frame?.canvas.width ?? size.width, frame?.canvas.height ?? size.height);
+    if (frame) {
+      const { source, dest } = frame;
+      const context = fillBackground(composite);
+      context.imageSmoothingQuality = 'high';
+      context.drawImage(cut, source.x, source.y, source.width, source.height, dest.x, dest.y, dest.width, dest.height);
+    } else draw(composite, cut);
     releaseCanvas(cut);
-    main = await encode(composite, size.width, size.height, JPEG_LIMITS.mainSide, JPEG_LIMITS.mainBytes, 800, signal, undefined, true);
+    main = await encode(composite, composite.width, composite.height, JPEG_LIMITS.mainSide, JPEG_LIMITS.mainBytes, 800, signal, undefined, true);
     releaseCanvas(composite);
     stage = 'thumbEncode';
     thumb = await encode(main.canvas, main.canvas.width, main.canvas.height, JPEG_LIMITS.thumbSide, JPEG_LIMITS.thumbBytes, 160, signal, undefined, true);
@@ -451,6 +466,7 @@ export async function prepareSegmentedSource(
       photo: { main: main.blob, thumb: thumb.blob, width: main.canvas.width, height: main.canvas.height, mainSha256, thumbSha256 },
       crop,
       coverage,
+      framed: frame !== null,
     };
   } catch (error) {
     checkAbort(signal);

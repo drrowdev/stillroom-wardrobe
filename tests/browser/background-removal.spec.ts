@@ -83,6 +83,26 @@ const near = (actual: number[] | undefined, expected: number[], tolerance = 12) 
   actual!.forEach((value, index) => expect(Math.abs(value - expected[index]!), `${actual!.join(',')} vs ${expected.join(',')}`).toBeLessThanOrEqual(tolerance));
 };
 const RED = [209, 44, 44], NAVY = [31, 58, 147];
+// The box of pixels that differ from the neutral fill, read from an <img>'s own decoded pixels, as numbers only.
+function contentBox(page: Page, selector: string) {
+  return page.locator(selector).evaluate(async (image: HTMLImageElement, fill) => {
+    const bitmap = await createImageBitmap(await (await fetch(image.src)).blob());
+    const { width, height } = bitmap;
+    const canvas = Object.assign(document.createElement('canvas'), { width, height });
+    const context = canvas.getContext('2d')!;
+    context.drawImage(bitmap, 0, 0);
+    const data = context.getImageData(0, 0, width, height).data;
+    let x0 = width, y0 = height, x1 = -1, y1 = -1;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const at = (y * width + x) * 4;
+        if (Math.max(...[0, 1, 2].map((channel) => Math.abs(data[at + channel]! - fill[channel]!))) <= 16) continue;
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+    }
+    return { width, height, left: x0 / width, right: (width - 1 - x1) / width, top: y0 / height, bottom: (height - 1 - y1) / height };
+  }, FILL);
+}
 
 // The mobile project runs the same Chromium engine; it keeps the disclosure, layout and capture checks, and the
 // behaviour tests run once on desktop Chromium (and on WebKit through the webkit-photo project).
@@ -135,7 +155,8 @@ test('removal settles before the single analysis; the cut-out replaces the backg
   const photo = await syntheticPhoto(page);
   await choose(page, photo);
   await settled(page, 1, 75_000);
-  expect((await log(page))[0]).toMatchObject({ outcome: 'removed', width: 640, height: 800 });
+  // The kept left half (322 × 800 working pixels) is framed on a 4:5 canvas (BG2a).
+  expect((await log(page))[0]).toMatchObject({ outcome: 'removed', framed: 1, width: 764, height: 955 });
   const coverage = Number((await log(page))[0]!.coverage);
   expect(coverage).toBeGreaterThan(0.4);
   expect(coverage).toBeLessThan(0.6);
@@ -143,7 +164,7 @@ test('removal settles before the single analysis; the cut-out replaces the backg
   // Each approved asset once, same origin; the only tagging request is the one analysis.
   expect((await requests.segmentation()).sort()).toEqual(inventoryPaths);
   expect((await requests.read()).tagging.map((entry) => entry.method)).toEqual(['POST']);
-  const [left, right] = await sample(page, '.capture-photo img', [[0.26, 0.5], [0.73, 0.5]]);
+  const [left, right] = await sample(page, '.capture-photo img', [[0.5, 0.5], [0.73, 0.5]]);
   near(left, NAVY);
   near(right, FILL);
   // The analysed bytes are the cut-out that is shown, never the intermediate original.
@@ -470,6 +491,32 @@ for (const flow of ['add', 'replace'] as const) {
   });
 }
 
+test('the cut-out is centred on a 4:5 canvas with 8 % padding; the original background is not framed', async ({ page }) => {
+  engineOnly();
+  await hook(page, { mask: 'left' });
+  const api = await aiFixture(page);
+  await openAdd(page);
+  await choose(page, await syntheticPhoto(page));
+  await settled(page, 1);
+  const framed = await contentBox(page, '.capture-photo img');
+  expect(Math.abs(framed.width * 5 - framed.height * 4)).toBeLessThanOrEqual(5);
+  // Strictly centred within 2 %; the height limits the frame, so top and bottom are about 8 %.
+  expect(Math.abs(framed.left - framed.right)).toBeLessThanOrEqual(0.02);
+  expect(Math.abs(framed.top - framed.bottom)).toBeLessThanOrEqual(0.02);
+  expect(framed.top).toBeGreaterThan(0.065);
+  expect(framed.top).toBeLessThan(0.095);
+  expect(framed.left).toBeGreaterThan(0.08);
+  await expect.poll(() => analyses(api)).toBe(1);
+  await page.locator('#background-original').click();
+  await expect.poll(() => analyses(api)).toBe(2);
+  await expect(page.locator('#background-original')).toHaveCount(0);
+  const original = await contentBox(page, '.capture-photo img');
+  expect([original.width, original.height]).toEqual([640, 800]);
+  // The backdrop fills the whole original, edge to edge.
+  expect([original.left, original.right, original.top, original.bottom]).toEqual([0, 0, 0, 0]);
+  expect(await log(page)).toHaveLength(1);
+});
+
 test('Add item: crop editing uses the unsegmented photo, and re-preparing removes the background again', async ({ page }) => {
   engineOnly();
   await hook(page, { mask: 'left' });
@@ -484,7 +531,8 @@ test('Add item: crop editing uses the unsegmented photo, and re-preparing remove
   await page.locator('#crop-rotate').click();
   await page.locator('#apply-crop').click();
   await settled(page, 2);
-  expect((await log(page))[1]).toMatchObject({ outcome: 'removed', width: 800, height: 640 });
+  // Rotated to 800 × 640, the kept left half (403 × 640) is framed again on a 4:5 canvas.
+  expect((await log(page))[1]).toMatchObject({ outcome: 'removed', framed: 1, width: 612, height: 765 });
   await expect.poll(() => analyses(api)).toBe(2);
   await page.locator('#edit-photo').click();
   near((await sample(page, '.crop-stage img', [[0.73, 0.5]]))[0], RED);
