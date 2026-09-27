@@ -231,12 +231,34 @@ export function orderStylistItems(items: readonly StylistItem[], input: StylistI
   return result;
 }
 
-export type StylistRequest = { body: JsonObject; aliases: Map<string, string>; included: number; omitted: number; messagesBytes: number };
+export type StylistRequest = {
+  body: JsonObject; aliases: Map<string, string>; included: number; omitted: number; messagesBytes: number;
+  /** Earlier outfits left out of the history, oldest first, so the items they name fit in the context. */
+  trimmedOutfits: number;
+};
+/** The input without its oldest history outfit, or null when no history outfit is left. */
+function withoutOldestOutfit(input: StylistInput): StylistInput | null {
+  const index = input.history.findIndex((turn) => turn.role === 'assistant' && (turn.outfits?.length ?? 0) > 0);
+  if (index < 0) return null;
+  const history = input.history.map((turn, n) => n === index && turn.role === 'assistant'
+    ? { ...turn, outfits: turn.outfits!.slice(1) } : turn);
+  return { ...input, history };
+}
 /**
  * Builds the complete provider body. Items are added in ranked order while the exact serialized `messages` JSON stays
- * within 20,000 UTF-8 bytes. Throws when the fixed parts alone exceed the budget (the handler refuses those first).
+ * within 20,000 UTF-8 bytes. When the items earlier outfits name do not all fit, the oldest history outfits are left
+ * out one at a time and the aliases are rebuilt, so every ref in the history names an item in the context. Throws
+ * only when the fixed parts alone exceed the budget, which the handler refuses before the claim.
  */
 export function buildStylistRequest(input: StylistInput, items: readonly StylistItem[]): StylistRequest {
+  let current: StylistInput | null = input;
+  for (let trimmed = 0; current; trimmed++, current = withoutOldestOutfit(current)) {
+    const built = attemptStylistRequest(current, items);
+    if (built) return { ...built, trimmedOutfits: trimmed };
+  }
+  throw new Error('TOO_LARGE');
+}
+function attemptStylistRequest(input: StylistInput, items: readonly StylistItem[]): Omit<StylistRequest, 'trimmedOutfits'> | null {
   // Items that earlier outfits used, and that are still eligible, come first so they keep an alias; then the rest.
   const byId = new Map(items.map((item) => [item.id, item]));
   const referenced = historyRefs(input).map((id) => byId.get(id)).filter((item): item is StylistItem => item !== undefined);
@@ -257,7 +279,7 @@ export function buildStylistRequest(input: StylistInput, items: readonly Stylist
     const added = utf8Bytes(JSON.stringify(JSON.stringify(entry))) - 2 + (clothes.length ? 1 : 0);
     if (total + added > STYLIST_LIMITS.messagesBytes) {
       // A referenced item that does not fit would leave its ref dangling in the history.
-      if (pinned.has(item.id)) throw new Error('TOO_LARGE');
+      if (pinned.has(item.id)) return null;
       break;
     }
     total += added; clothes.push(entry); aliases.set(ref, item.id);

@@ -258,6 +258,18 @@ export async function stylistLedgerProbes(snapshot, sql, mark) {
   equal(BigInt((await controls(b)).monthly_allowance_micro), lowered);
   equal((await one(`select public.stylist_direct_allocation(${literal(b.uid)},0,${lowered});`)).code, 'INVALID_INPUT');
   await reactivate(b);
+  // Headroom: the new total clears the per-request minimum but is below the used (accounted plus held) total. A has
+  // usage; its per-request minimum is lowered inside a rolled-back transaction, so only the used-total rule can DEFER.
+  const beforeA = await controls(a);
+  const usedA = await used(a);
+  requireEvidence(usedA > 2n);
+  const headroom = BigInt(beforeA.monthly_allowance_micro) - (usedA - 1n);
+  const deferred = await sql(`begin; update private.ai_controls set max_request_micro=1 where owner_id=${literal(a.uid)};
+    select 'ALLOC:'||public.stylist_direct_allocation(${literal(a.uid)},${headroom},${beforeA.monthly_allowance_micro})::text; rollback;`);
+  const result = JSON.parse(deferred.split('\n').find((line) => line.startsWith('ALLOC:')).slice('ALLOC:'.length));
+  equal(result, { code: 'DEFER', usedMicro: String(usedA), newTotalMicro: String(usedA - 1n) });
+  requireEvidence(usedA - 1n >= 1n);
+  equal(await controls(a), beforeA);
 
   mark('cross-request');
   // Request IDs are owner-scoped and purpose-checked: a tagging request cannot be claimed or settled as a stylist request,

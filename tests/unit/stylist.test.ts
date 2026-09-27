@@ -122,6 +122,36 @@ describe('stylist request contract', () => {
     expect(built.messagesBytes).toBeLessThanOrEqual(STYLIST_LIMITS.messagesBytes);
   });
 
+  it('trims the oldest history outfits when every referenced item does not fit, leaving no dangling ref', () => {
+    // Six assistant turns naming 36 distinct items: valid input that fits the conversation budget, but the pinned
+    // items alone exceed the messages budget.
+    const history = Array.from({ length: STYLIST_LIMITS.historyTurns }, (_, n) => ({ role: 'assistant' as const, text: 'ä'.repeat(340),
+      outfits: Array.from({ length: 2 }, (_, m) => Array.from({ length: 3 }, (_, k) => id(n * 6 + m * 3 + k + 1))) }));
+    const value = parseStylistBody(body({ history }))!;
+    expect(value).not.toBeNull();
+    expect(conversationBytes(value)).toBeLessThanOrEqual(STYLIST_LIMITS.conversationBytes);
+    const wide = { colours: ['light_blue', 'burgundy', 'silver'], pattern: 'abstract', sleeve_length: 'three_quarter',
+      garment_length: 'cropped', seasons: ['spring', 'summer', 'autumn', 'winter'], min_temp: -40, max_temp: -40, windproof: true };
+    const referenced = history.flatMap((turn) => turn.outfits.flat()).map((uuid, n) => item(n + 1, { ...wide, id: uuid }));
+    expect(referenced).toHaveLength(STYLIST_LIMITS.historyOutfitRefs);
+    const built = buildStylistRequest(value, [...referenced, ...Array.from({ length: 50 }, (_, n) => item(1000 + n, wide))]);
+    expect(built.trimmedOutfits).toBeGreaterThan(0);
+    expect(built.messagesBytes).toBe(utf8Bytes(JSON.stringify(built.body.messages)));
+    expect(built.messagesBytes).toBeLessThanOrEqual(STYLIST_LIMITS.messagesBytes);
+    const messages = built.body.messages as Array<{ role: string; content: string }>;
+    const sent = messages.slice(2, -1).map((m) => JSON.parse(m.content) as { outfits: Array<{ refs: string[] }> });
+    const refs = sent.flatMap((turn) => turn.outfits.flatMap((outfit) => outfit.refs));
+    expect(refs.length).toBeGreaterThan(0);
+    for (const ref of refs) expect(built.aliases.has(ref)).toBe(true);
+    // Oldest first: the kept outfits are the most recent ones, in order, and map back to their original items.
+    const kept = history.flatMap((turn) => turn.outfits).slice(built.trimmedOutfits);
+    expect(sent.flatMap((turn) => turn.outfits.map((outfit) => outfit.refs.map((ref) => built.aliases.get(ref))))).toEqual(kept);
+    const context = JSON.parse(messages[1]!.content) as { clothes: Array<{ ref: string }> };
+    expect(context.clothes.map((entry) => entry.ref)).toEqual([...built.aliases.keys()]);
+    // Deterministic, and the handler's post-claim build no longer fails for this input.
+    expect(buildStylistRequest(value, [...referenced].reverse()).trimmedOutfits).toBe(buildStylistRequest(value, referenced).trimmedOutfits);
+  });
+
   it('projects weather fields only when the owner confirmed them (claim SQL mirrors confirmedWeather)', async () => {
     const sql = await readFile(new URL('../../supabase/migrations/20260928090000_stylist_chat.sql', import.meta.url), 'utf8');
     for (const field of ['warmth', 'min_temp', 'max_temp', 'rain_rating', 'windproof']) {

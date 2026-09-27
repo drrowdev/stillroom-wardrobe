@@ -428,7 +428,7 @@ export const STYLIST_ADDED_COLUMNS = Object.freeze({
   ai_controls: Object.freeze(['stylist_activated', 'stylist_notice_revision', 'stylist_manifest_id', 'stylist_max_request_micro',
     'stylist_monthly_allowance_micro', 'stylist_max_requests_per_hour', 'stylist_consent_revision', 'stylist_consented_at']),
   ai_usage: Object.freeze(['purpose']),
-  ai_usage_evidence: Object.freeze(['stylist_code', 'settlement_origin', 'settlement_digest', 'purpose']),
+  ai_usage_evidence: Object.freeze(['stylist_code', 'settlement_origin', 'settlement_digest']),
 });
 const strip = (table) => (STYLIST_ADDED_COLUMNS[table] ? ` - array[${STYLIST_ADDED_COLUMNS[table].map(literal).join(',')}]` : '');
 const digest = (relation, order) => `(select jsonb_build_object('n',count(*),'md5',
@@ -454,8 +454,7 @@ const stylistDefaultsSql = `select jsonb_build_object(
     stylist_manifest_id,stylist_max_request_micro,stylist_monthly_allowance_micro,stylist_max_requests_per_hour,
     stylist_consent_revision,stylist_consented_at)>0),
   'usage',(select count(*) from private.ai_usage where purpose is distinct from 'analysis'),
-  'evidence',(select count(*) from private.ai_usage_evidence where purpose is distinct from 'analysis'
-    or num_nonnulls(stylist_code,settlement_origin,settlement_digest)>0));`;
+  'evidence',(select count(*) from private.ai_usage_evidence where num_nonnulls(stylist_code,settlement_origin,settlement_digest)>0));`;
 // The one immutable manifest ST1a adds, validated field by field.
 const STYLIST_TARIFF_DESCRIPTION = 'INACTIVE stylist text chat on existing DEV/TEST eval-terra-20260709; expected snapshot gpt-5.6-terra-2026-07-09. Applicable tariff ShortCo USD2.20 input/13.20 output per1M (retail API SwedenCentral/USD, product DZH318Z0T9WD). Reservation 129360 micro values the 24000 input/1200 output envelope at LongCo 4.40/19.80 as a conservative allowance valuation; input envelope is an operational estimate over the bounded 20000-byte messages plus schema/framing, enforced by anomaly shutdown. Enum/number/boolean item fields only; no photos or item text. Explicit cache mode without breakpoints; store:false is not zero retention. Exact-route probe and paid activation remain owner gates.';
 export const STYLIST_MANIFEST_ROW = Object.freeze({
