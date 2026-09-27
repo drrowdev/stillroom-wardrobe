@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { cliEnvironment, differing, expectedImported, terminal } from '../../scripts/attribution-roundtrip-rehearsal.mjs';
+import { cliEnvironment, differing, expectedImported, failureCode, terminal } from '../../scripts/attribution-roundtrip-rehearsal.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -32,6 +32,15 @@ describe('P6d genuine round-trip rehearsal helpers', () => {
     expect(expectedImported([entry, { ...entry, source_image_id: null }], new Map([['old', 'new']])))
       .toEqual([{ ...entry, origin: 'imported', source_image_id: 'new' }, { ...entry, origin: 'imported', source_image_id: null }]);
     expect(() => expectedImported([entry], new Map())).toThrow('UNMAPPED');
+  });
+
+  it('reduces any failure to a fixed word, never its message', () => {
+    expect(failureCode(Object.assign(new Error('x'), { code: 'report-counts' }))).toBe('report-counts');
+    expect(failureCode(new Error('EVIDENCE_REQUIRED'))).toBe('evidence-required');
+    expect(failureCode(new TypeError('fetch failed', { cause: { code: 'UND_ERR_SOCKET' } }))).toBe('transport-UND_ERR_SOCKET');
+    expect(failureCode(new TypeError('secret text'))).toBe('error-TypeError');
+    expect(failureCode(Object.assign(new Error('secret'), { code: 'Has Spaces' }))).toBe('other');
+    expect(failureCode('secret')).toBe('other');
   });
 
   it('names differing entry keys and photo targets without values', () => {

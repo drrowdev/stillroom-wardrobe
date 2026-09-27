@@ -76,6 +76,17 @@ export function expectedImported(entries, photos) {
 }
 
 // Which entry keys differ, and where a differing photo points: nothing but key names and fixed words.
+// A fixed word for any failure: our own codes, the shared evidence marker, a transport code or an error class name.
+export function failureCode(error) {
+  if (typeof error?.code === 'string' && /^[a-z0-9+_-]{1,80}$/.test(error.code)) return error.code;
+  if (error instanceof Error && error.message === 'EVIDENCE_REQUIRED') return 'evidence-required';
+  const transport = error?.cause?.code;
+  if (typeof transport === 'string' && /^[A-Z][A-Z0-9_]{1,40}$/.test(transport)) return `transport-${transport}`;
+  if (error instanceof Error && ['TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'AbortError', 'TimeoutError']
+    .includes(error.name)) return `error-${error.name}`;
+  return 'other';
+}
+
 export function differing(actual, expected, copies) {
   if (!Array.isArray(actual) || actual.length !== expected.length) return `length-${Array.isArray(actual) ? actual.length : 'none'}-${expected.length}`;
   const keys = new Set();
@@ -244,9 +255,13 @@ async function main() {
     const mappingOf = async (owner, backup, items, images) => {
       const ids = async (table, source) => new Map(await Promise.all(source.map(async (id) =>
         [id, await restoreId(3, owner.uid, backup.exportId, table, id)])));
+      step = 'restore-ids';
       const itemMap = await ids('items', items), imageMap = await ids('item_images', images);
       const present = (rows) => new Set(rows.map((row) => row.id));
-      const storedItems = present(await client.rows(owner, 'items')), storedImages = present(await client.rows(owner, 'item_images'));
+      step = 'read-items';
+      const storedItems = present(await client.rows(owner, 'items'));
+      step = 'read-images';
+      const storedImages = present(await client.rows(owner, 'item_images'));
       step = 'mapped-copies';
       check([...itemMap.values()].every((id) => storedItems.has(id)), 'items-missing');
       check([...imageMap.values()].every((id) => storedImages.has(id)),
@@ -301,7 +316,7 @@ async function main() {
     console.log(`PASS: P6d genuine round trip; recorded history (analyzed Save + analyzed replacement) -> export-own -> restore-own into B -> re-export -> restore into A; items=2 entries=3 photos=3 generations=2 reruns=2; all imported, order/values/photo mappings equal; ${seconds}s`);
     return 0;
   } catch (error) {
-    const code = typeof error?.code === 'string' && /^[a-z0-9+_-]{1,80}$/.test(error.code) ? error.code : 'other';
+    const code = failureCode(error);
     console.error(`FAIL: P6d genuine round trip ${stage}; step=${step}; cause=${code}; ${((performance.now() - started) / 1000).toFixed(1)}s`);
     return 1;
   } finally {
