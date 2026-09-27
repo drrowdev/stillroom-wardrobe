@@ -257,11 +257,20 @@ async function main() {
         [id, await restoreId(3, owner.uid, backup.exportId, table, id)])));
       step = 'restore-ids';
       const itemMap = await ids('items', items), imageMap = await ids('item_images', images);
-      const present = (rows) => new Set(rows.map((row) => row.id));
+      // Only the IDs, read directly so a refusal names its HTTP status rather than a generic marker.
+      const present = async (table) => {
+        const response = await fetch(`${LOCAL_API}/rest/v1/${table}?select=id&owner_id=eq.${owner.uid}&limit=33`, {
+          cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15_000),
+          headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${owner.token}` } });
+        check(response.status === 200, `status-${response.status >= 100 && response.status < 600 ? response.status : 'other'}`);
+        const rows = await response.json();
+        check(Array.isArray(rows) && rows.length <= 32 && rows.every((row) => typeof row?.id === 'string'), 'rows-shape');
+        return new Set(rows.map((row) => row.id));
+      };
       step = 'read-items';
-      const storedItems = present(await client.rows(owner, 'items'));
+      const storedItems = await present('items');
       step = 'read-images';
-      const storedImages = present(await client.rows(owner, 'item_images'));
+      const storedImages = await present('item_images');
       step = 'mapped-copies';
       check([...itemMap.values()].every((id) => storedItems.has(id)), 'items-missing');
       check([...imageMap.values()].every((id) => storedImages.has(id)),
