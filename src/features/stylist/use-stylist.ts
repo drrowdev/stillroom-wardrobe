@@ -15,7 +15,9 @@ export const statusOf = (state: StylistState): StylistStatus | null => state.rea
 
 function apply(store: StylistStore, read: StylistRead) {
   const state = store.get();
-  store.update({ read, unresolved: false, known: state.known || shownStylistView(stylistView(read, state.known, false)) });
+  // Only a status that carries the consent state settles an unknown consent change.
+  const settles = read.kind === 'ready' && read.status.consent !== null;
+  store.update({ read, unresolved: state.unresolved && !settles, known: state.known || shownStylistView(stylistView(read, state.known, false)) });
 }
 
 /**
@@ -24,11 +26,14 @@ function apply(store: StylistStore, read: StylistRead) {
  * profile write starts is left to finish; if it fails meanwhile it may have hit that write's lock, so it is not shown
  * and is read again afterwards. A read's result is applied only if no consent write began after it and no newer read
  * was applied. `fresh` waits for any running read and starts a new one, so its result postdates the caller's event.
+ * While consent is changing no read starts: passive reads are deferred, and active or fresh reads wait for the write to
+ * finish and then read. A write's completion also invalidates every read that began before it.
  */
 export function readStatus(store: StylistStore, mode: 'passive' | 'active' | 'fresh'): Promise<StylistStatus | null> {
   if (store.disposed) return Promise.resolve(null);
   store.onIdle ??= () => { void readStatus(store, 'passive'); };
-  if (mode === 'passive' && (store.busy || store.get().writing)) { store.deferred = true; return Promise.resolve(null); }
+  if (mode === 'passive' && (store.busy || store.writePromise)) { store.deferred = true; return Promise.resolve(null); }
+  if (store.writePromise) return store.writePromise.then(() => readStatus(store, 'active'));
   if (store.readPromise) return mode === 'fresh' ? store.readPromise.then(() => readStatus(store, 'active')) : store.readPromise;
   const at = ++store.seq, busyAtStart = store.busy, client = api(store);
   store.update({ reading: true });
@@ -47,48 +52,60 @@ export function readStatus(store: StylistStore, mode: 'passive' | 'active' | 'fr
   }).finally(() => {
     if (store.readPromise === promise) store.readPromise = null;
     store.update({ reading: false });
-    if (store.deferred && !store.busy && !store.get().writing && !store.disposed) { store.deferred = false; void readStatus(store, 'passive'); }
+    if (store.deferred && !store.busy && !store.writePromise && !store.disposed) { store.deferred = false; void readStatus(store, 'passive'); }
   });
   store.readPromise = promise;
   return promise;
 }
 
 /**
- * Turns stylist use on or off. Writes run one at a time, after any running read has settled, and supersede reads that
- * began before them. An applied write returns the new status itself; after a refusal or an unknown outcome status is
- * read again, and an unknown outcome stays unresolved until a later read succeeds.
+ * Turns stylist use on or off. Writes run one at a time, after any running read has settled, and supersede every read
+ * that began before they finished. The permission is checked again after that read, so a status that changed meanwhile
+ * (for example to an unsupported policy) stops the write. An applied write returns the new status itself; after a
+ * refusal or an unknown outcome status is read again, and an unknown outcome stays unresolved until a later read
+ * returns the consent state.
  */
-export async function writeConsent(store: StylistStore, enabled: boolean): Promise<void> {
-  if (store.disposed || store.busy || store.get().writing) return;
+const permitted = (store: StylistStore, enabled: boolean) => {
   const view = viewOf(store.get());
-  if (enabled ? !view.turnOn : !view.turnOff) return;
+  return enabled ? view.turnOn : view.turnOff;
+};
+export function writeConsent(store: StylistStore, enabled: boolean): Promise<void> {
+  if (store.disposed || store.busy || store.writePromise || !permitted(store, enabled)) return Promise.resolve();
+  let release!: () => void;
+  store.writePromise = new Promise<void>((resolve) => { release = resolve; });
+  return runWrite(store, enabled).finally(() => {
+    store.lastWrite = ++store.seq;
+    store.writePromise = null;
+    store.update({ writing: false });
+    release();
+    if (store.deferred && !store.busy && !store.disposed) { store.deferred = false; void readStatus(store, 'passive'); }
+  });
+}
+async function runWrite(store: StylistStore, enabled: boolean): Promise<void> {
   const client = api(store);
   store.update({ writing: true, settingsError: null });
+  if (store.readPromise) await store.readPromise;
+  if (store.disposed || store.busy || !permitted(store, enabled)) return;
+  const at = ++store.seq;
+  store.lastWrite = at;
   try {
-    if (store.readPromise) await store.readPromise;
+    const result = await client.stylistConsent(enabled);
     if (store.disposed) return;
-    const at = ++store.seq;
-    store.lastWrite = at;
-    try {
-      const result = await client.stylistConsent(enabled);
-      if (store.disposed) return;
-      if (result.kind === 'applied') { store.applied = at; apply(store, { kind: 'ready', status: result.status }); return; }
-      store.update({ settingsError: result.code === 'CONFIG_CHANGED' ? 'stylistC.changed' : 'stylistC.failed' });
-    } catch {
-      if (!store.disposed) store.update({ unresolved: true });
-    }
-  } finally {
-    store.update({ writing: false });
+    if (result.kind === 'applied') { store.applied = at; apply(store, { kind: 'ready', status: result.status }); return; }
+    store.update({ settingsError: result.code === 'CONFIG_CHANGED' ? 'stylistC.changed' : 'stylistC.failed' });
+  } catch {
+    if (!store.disposed) store.update({ unresolved: true });
   }
+  // This read waits for the write to finish, so its result postdates it.
   void readStatus(store, 'active');
 }
 
 export type SendContext = { online: boolean; season: StylistSeason | null; weather: StylistWeather | null };
 const rereadCodes = new Set(['CONSENT_REQUIRED', 'INACTIVE', 'UNCONFIGURED', 'CONFIG_CHANGED', 'UNAVAILABLE', 'FAILED', 'TERMINAL']);
-/** Can a message be sent now, as far as the last status shows. */
+/** Can a message be sent now, as far as the last status shows. Not while consent is changing. */
 export function canSend(state: StylistState): boolean {
   const status = statusOf(state);
-  if (!viewOf(state).send || !status) return false;
+  if (state.writing || !viewOf(state).send || !status) return false;
   const limits = stylistLimits(status);
   return !limits.own && !limits.shared;
 }

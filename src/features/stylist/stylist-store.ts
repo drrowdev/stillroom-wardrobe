@@ -33,6 +33,8 @@ export class StylistStore {
   applied = 0;
   lastWrite = 0;
   readPromise: Promise<StylistStatus | null> | null = null;
+  /** Set while a consent write runs; reads wait for it. */
+  writePromise: Promise<void> | null = null;
   inflight: { token: number; controller: AbortController } | null = null;
   token = 0;
   nextId = 0;
@@ -57,10 +59,19 @@ export class StylistStore {
     this.busy = busy;
     if (!busy && this.deferred && !this.disposed) { this.deferred = false; this.onIdle?.(); }
   }
+  /** Ends the scope: the conversation and status are wiped and everything outstanding is invalidated. */
   dispose() {
+    if (this.disposed) return;
     this.disposed = true;
     this.inflight?.controller.abort();
     this.inflight = null;
+    this.readPromise = null;
+    this.deferred = false;
+    this.onIdle = null;
+    this.lastWrite = ++this.seq;
+    this.token++;
+    this.state = { ...initial, generation: this.state.generation + 1 };
+    for (const listener of this.listeners) listener();
     this.listeners.clear();
   }
 }

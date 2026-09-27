@@ -47,7 +47,10 @@ export function StylistScreen({ store, images, online, t, timeZone, weather, wea
   const view = viewOf(state);
   const status = statusOf(state);
   const forecast = useWeather(weatherStore, weather, online);
-  const context = useMemo(() => stylistWeather(weatherContext(forecast.forecast, forecast.override)), [forecast.forecast, forecast.override]);
+  // Weather that is turned off is not sent, even if an override is still set for Today.
+  const weatherOn = weather.status === 'on';
+  const context = useMemo(() => weatherOn ? stylistWeather(weatherContext(forecast.forecast, forecast.override)) : null,
+    [weatherOn, forecast.forecast, forecast.override]);
   const replies = state.turns.filter((turn) => turn.role === 'assistant').length;
   const wardrobe = useWardrobe(store, replies);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -82,6 +85,9 @@ export function StylistScreen({ store, images, online, t, timeZone, weather, wea
     </ol> : null}
     {wardrobe.failed && state.turns.length > 0 && <div className="notice notice-error" role="alert"><span>{t('stylist.wardrobeFailed')}</span>
       <button type="button" className="text-button" disabled={!online || wardrobe.loading} onClick={wardrobe.retry}>{t('common.retry')}</button></div>}
+    {(view.kind !== 'on' || !usable) && (state.turns.length > 0 || pending) && <div className="stylist-actions">
+      <button type="button" className="button button-secondary" onClick={() => { clear(store); document.getElementById('stylist-title')?.focus(); }}>
+        {t('stylist.clear')}</button></div>}
     {view.kind === 'on' && <>
       {limitLine && <p className="notice">{t(limitLine)}</p>}
       {!usable ? <div className="today-empty"><p>{t('stylist.empty')}</p>

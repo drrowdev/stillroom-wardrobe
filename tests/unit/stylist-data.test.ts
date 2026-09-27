@@ -5,7 +5,7 @@ import { StylistClient } from '../../src/data/stylist';
 import { STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_REVIEW_EXPIRES } from '../../src/domain/stylist';
 import { parseStylistStatus, type StylistAnswer, type StylistStatus } from '../../src/domain/stylist-controls';
 import { StylistStore } from '../../src/features/stylist/stylist-store';
-import { clear, readStatus, send, viewOf, writeConsent } from '../../src/features/stylist/use-stylist';
+import { canSend, clear, readStatus, send, viewOf, writeConsent } from '../../src/features/stylist/use-stylist';
 
 const owner = '10000000-0000-4000-8000-000000000001';
 const config = { url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_test_only', version: 'test' };
@@ -93,11 +93,11 @@ function deferred<T>(): Deferred<T> {
 function harness() {
   const abort = new AbortController();
   const store = new StylistStore(supabase(), config, { ownerId: owner, epoch: 1, signal: abort.signal });
-  const reads: Deferred<{ kind: 'ready'; status: StylistStatus }>[] = [];
+  const reads: Deferred<{ kind: 'ready'; status: StylistStatus } | { kind: 'missing' }>[] = [];
   const writes: Deferred<{ kind: 'applied'; status: StylistStatus }>[] = [];
   const chats: { body: unknown; reply: Deferred<StylistAnswer>; signal?: AbortSignal }[] = [];
   const fake = {
-    stylistStatus: vi.fn(() => { const d = deferred<{ kind: 'ready'; status: StylistStatus }>(); reads.push(d); return d.promise; }),
+    stylistStatus: vi.fn(() => { const d = deferred<{ kind: 'ready'; status: StylistStatus } | { kind: 'missing' }>(); reads.push(d); return d.promise; }),
     stylistConsent: vi.fn(() => { const d = deferred<{ kind: 'applied'; status: StylistStatus }>(); writes.push(d); return d.promise; }),
     chat: vi.fn((body: unknown, signal?: AbortSignal) => { const reply = deferred<StylistAnswer>(); chats.push({ body, reply, signal }); return reply.promise; }),
   };
@@ -225,5 +225,114 @@ describe('ST1b stylist ordering (M3)', () => {
     h.reads[1]!.resolve({ kind: 'ready', status: status('OK', true) });
     await sent;
     expect(h.store.get()).toMatchObject({ draft: 'Question', pending: null, error: { key: 'stylist.failed', retry: true } });
+  });
+
+  it('blocks sending while Turn off is pending', async () => {
+    const h = harness();
+    const first = readStatus(h.store, 'active');
+    h.reads[0]!.resolve({ kind: 'ready', status: status('OK', true) });
+    await first;
+    h.store.update({ draft: 'Question' });
+    expect(canSend(h.store.get())).toBe(true);
+    const write = writeConsent(h.store, false);
+    expect(canSend(h.store.get())).toBe(false);
+    await send(h.store, { online: true, season: null, weather: null });
+    expect(h.fake.chat).not.toHaveBeenCalled();
+    h.writes[0]!.resolve({ kind: 'applied', status: status('CONSENT_REQUIRED', false) });
+    await write;
+    expect(canSend(h.store.get())).toBe(false);
+    expect(viewOf(h.store.get()).kind).toBe('off');
+  });
+
+  it('holds an active read asked for during a withdrawal until it completes, so it cannot restore On', async () => {
+    const h = harness();
+    const first = readStatus(h.store, 'active');
+    h.reads[0]!.resolve({ kind: 'ready', status: status('OK', true) });
+    await first;
+    const write = writeConsent(h.store, false);
+    await tick();
+    expect(h.fake.stylistConsent).toHaveBeenCalledTimes(1);
+    // Retry, a fresh reread and a passive focus read all arrive while the write is running.
+    const active = readStatus(h.store, 'active');
+    const fresh = readStatus(h.store, 'fresh');
+    void readStatus(h.store, 'passive');
+    await tick();
+    expect(h.fake.stylistStatus).toHaveBeenCalledTimes(1);
+    h.writes[0]!.resolve({ kind: 'applied', status: status('CONSENT_REQUIRED', false) });
+    await write;
+    await tick();
+    expect(viewOf(h.store.get()).kind).toBe('off');
+    // The waiting reads start only now, and share one request that postdates the write.
+    expect(h.fake.stylistStatus).toHaveBeenCalledTimes(2);
+    h.reads[1]!.resolve({ kind: 'ready', status: status('CONSENT_REQUIRED', false) });
+    await active; await fresh;
+    expect(viewOf(h.store.get())).toMatchObject({ kind: 'off', send: false });
+  });
+
+  it('checks the permission again after the read it waited for, and does not write for an unsupported policy', async () => {
+    const h = harness();
+    const first = readStatus(h.store, 'active');
+    h.reads[0]!.resolve({ kind: 'ready', status: status('CONSENT_REQUIRED', false) });
+    await first;
+    const held = readStatus(h.store, 'active');
+    const write = writeConsent(h.store, true);
+    const unsupported = status('CONSENT_REQUIRED', false);
+    h.reads[1]!.resolve({ kind: 'ready', status: { ...unsupported, policy: { ...unsupported.policy!, modelId: 'another-model' } } });
+    await held;
+    await write;
+    expect(h.fake.stylistConsent).not.toHaveBeenCalled();
+    expect(viewOf(h.store.get())).toMatchObject({ kind: 'unavailable', turnOn: false });
+    expect(h.store.get().writing).toBe(false);
+  });
+
+  it('keeps an unknown consent change unresolved across a missing RPC, a failure and a status without consent', async () => {
+    const h = harness();
+    const first = readStatus(h.store, 'active');
+    h.reads[0]!.resolve({ kind: 'ready', status: status('OK', true) });
+    await first;
+    const write = writeConsent(h.store, false);
+    await tick();
+    h.writes[0]!.reject(new Error('unknown'));
+    await write;
+    expect(viewOf(h.store.get()).kind).toBe('unresolved');
+    await tick();
+    h.reads[1]!.resolve({ kind: 'missing' });
+    await tick(); await tick();
+    expect(viewOf(h.store.get()).kind).toBe('unresolved');
+    const failing = readStatus(h.store, 'active');
+    h.reads[2]!.reject(new Error('network'));
+    await failing;
+    expect(viewOf(h.store.get()).kind).toBe('unresolved');
+    const noConsent = readStatus(h.store, 'active');
+    h.reads[3]!.resolve({ kind: 'ready', status: parseStylistStatus({ code: 'UNAVAILABLE' })! });
+    await noConsent;
+    expect(viewOf(h.store.get()).kind).toBe('unresolved');
+    const settled = readStatus(h.store, 'active');
+    h.reads[4]!.resolve({ kind: 'ready', status: status('CONSENT_REQUIRED', false) });
+    await settled;
+    expect(viewOf(h.store.get()).kind).toBe('off');
+  });
+
+  it('wipes a populated conversation and its status when the owner scope ends', async () => {
+    const h = harness();
+    const first = readStatus(h.store, 'active');
+    h.reads[0]!.resolve({ kind: 'ready', status: status('OK', true) });
+    await first;
+    h.store.update({ draft: 'Question' });
+    const sent = send(h.store, { online: true, season: null, weather: null });
+    h.chats[0]!.reply.resolve({ code: 'OK', reply: 'Reply', outfits: [] });
+    await sent;
+    h.store.update({ draft: 'Unsent words', occasion: 'business' });
+    const later = readStatus(h.store, 'active');
+    const seen: string[] = [];
+    h.store.subscribe(() => { seen.push(h.store.get().draft); });
+    h.abort.abort();
+    expect(seen).toEqual(['']);
+    expect(h.store.get()).toMatchObject({ turns: [], draft: '', pending: null, occasion: 'everyday', read: { kind: 'unknown' },
+      known: false, error: null, announce: null });
+    h.reads[1]!.resolve({ kind: 'ready', status: status('OK', true) });
+    await later;
+    expect(h.store.get().read).toEqual({ kind: 'unknown' });
+    expect(h.store.readPromise).toBeNull();
   });
 });

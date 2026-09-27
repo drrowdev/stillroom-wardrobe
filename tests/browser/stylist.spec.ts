@@ -276,6 +276,50 @@ test.describe('ST1b stylist', () => {
     await expect(page.getByText('Question before signing out')).toHaveCount(0);
   });
 
+  test('Clear still works after consent is withdrawn and after a pause', async ({ page }) => {
+    const { api, clothes } = await start(page, { setup: {}, consent: true });
+    const clearButton = page.getByRole('button', { name: text('stylist.clear'), exact: true });
+    api.stylistControl.replies.push(reply(clothes));
+    await ask(page, 'Before turning off');
+    await expect(ideas(page)).toHaveCount(2);
+    await page.evaluate(() => { location.hash = '#/settings'; });
+    await card(page).getByRole('button', { name: text('aiC.disable'), exact: true }).click();
+    await expect(page.locator('#stylist-heading')).toHaveText(text('stylistC.disabled'));
+    await page.evaluate(() => { location.hash = '#/stylist'; });
+    await expect(page.getByText(text('stylist.off'), { exact: true })).toBeVisible();
+    await expect(message(page)).toHaveCount(0);
+    await expect(page.locator('.stylist-turn')).toHaveCount(2);
+    await clearButton.click();
+    await expect(page.locator('.stylist-turn')).toHaveCount(0);
+    await expect(clearButton).toHaveCount(0);
+    await expect(page.locator('#stylist-title')).toBeFocused();
+    // On again, then paused by the server while a conversation is on screen.
+    api.stylistControl.consent[owners.a] = 1;
+    await page.evaluate(() => dispatchEvent(new Event('focus')));
+    api.stylistControl.replies.push(reply(clothes));
+    await ask(page, 'Before the pause');
+    await expect(ideas(page)).toHaveCount(2);
+    api.stylistControl.setup[owners.a] = { configured: true, activated: false };
+    await page.evaluate(() => dispatchEvent(new Event('focus')));
+    await expect(page.getByText(text('stylist.paused'), { exact: true })).toBeVisible();
+    await expect(message(page)).toHaveCount(0);
+    await clearButton.click();
+    await expect(page.locator('.stylist-turn')).toHaveCount(0);
+  });
+
+  test('a manual temperature on Today is not sent while weather is turned off', async ({ page }) => {
+    const { api, clothes } = await start(page, { setup: {}, consent: true, hash: '/#/today' });
+    await page.getByRole('button', { name: text('weather.enterTemperature'), exact: true }).click();
+    await page.locator('#weather-temperature').fill('22');
+    await page.getByRole('button', { name: text('weather.useTemperature'), exact: true }).click();
+    await expect(page.locator('#weather-temperature')).toHaveCount(0);
+    await page.evaluate(() => { location.hash = '#/stylist'; });
+    api.stylistControl.replies.push(reply(clothes));
+    await ask(page, 'What should I wear?');
+    await expect(ideas(page)).toHaveCount(2);
+    expect((api.stylistControl.chats[0]!.body as Row).weather).toBeNull();
+  });
+
   test('offline keeps the draft and sends nothing; nothing is stored in the browser', async ({ page, context }) => {
     const { api, clothes } = await start(page, { setup: {}, consent: true });
     api.stylistControl.replies.push(reply(clothes, { reply: 'reply-marker-7f3a' }));
