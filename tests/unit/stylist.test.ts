@@ -8,7 +8,7 @@ import {
   type StylistItem,
 } from '../../src/domain/stylist';
 import { eligible } from '../../src/domain/recommendations';
-import { classifyStylistResponse } from '../../supabase/functions/stylist-chat/azure';
+import { classifyStylistResponse, UNUSABLE_RESPONSE_USAGE } from '../../supabase/functions/stylist-chat/azure';
 import { createStylistHandler, STYLIST_RPCS } from '../../supabase/functions/stylist-chat/handler';
 
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -85,6 +85,50 @@ describe('stylist request contract', () => {
     expect(built.included).toBeLessThan(items.length);
     expect(built.included + built.omitted).toBe(items.length);
     expect((built.body.messages as unknown[]).length).toBeLessThanOrEqual(STYLIST_LIMITS.messageCount);
+  });
+
+  it('maps earlier outfits to current refs after the context order changes and drops unavailable items', () => {
+    const history = [{ role: 'user' as const, text: 'Something for work' },
+      { role: 'assistant' as const, text: 'Try these.', outfits: [[id(7), id(3)], [id(9)]] }];
+    const parsed = parseStylistBody(body({ history }))!;
+    expect(parsed.history).toEqual(history);
+    // Item 7 now ranks last and item 9 is no longer eligible.
+    const items = [item(1, { favourite: true }), item(3, { category: 'bottom' }), item(7, { seasons: [] })];
+    const built = buildStylistRequest({ ...parsed, message: 'And for Friday?' }, items);
+    expect([...built.aliases].slice(0, 2)).toEqual([['i1', id(7)], ['i2', id(3)]]);
+    const messages = built.body.messages as Array<{ role: string; content: string }>;
+    expect(JSON.parse(messages[3]!.content)).toEqual({ reply: 'Try these.', outfits: [{ refs: ['i1', 'i2'], note: '' }] });
+    expect(JSON.stringify(built.body)).not.toContain(id(9));
+    expect(built.messagesBytes).toBe(utf8Bytes(JSON.stringify(built.body.messages)));
+    expect(conversationBytes(parsed)).toBeGreaterThan(utf8Bytes(JSON.stringify(messages.slice(2, 4))));
+  });
+
+  it('bounds history outfit refs and refuses them on user turns', () => {
+    const outfits = (count: number, from = 1) => Array.from({ length: count }, (_, n) => [id(from + n)]);
+    expect(parseStylistBody(body({ history: [{ role: 'assistant', text: 'x', outfits: [] }] }))).not.toBeNull();
+    const full = Array.from({ length: 3 }, (_, n) => ({ role: 'assistant', text: 'x',
+      outfits: Array.from({ length: 3 }, (_, m) => Array.from({ length: 4 }, (_, k) => id(n * 100 + m * 10 + k + 1))) }));
+    expect(parseStylistBody(body({ history: full }))).not.toBeNull();
+    for (const bad of [[{ role: 'user', text: 'x', outfits: outfits(1) }], [{ role: 'assistant', text: 'x', outfits: outfits(4) }],
+      [{ role: 'assistant', text: 'x', outfits: [[]] }], [{ role: 'assistant', text: 'x', outfits: [[id(1), id(1)]] }],
+      [{ role: 'assistant', text: 'x', outfits: [['i1']] }], [{ role: 'assistant', text: 'x', outfits: [Array.from({ length: 13 }, (_, n) => id(n + 1))] }],
+      [...full, { role: 'assistant', text: 'x', outfits: outfits(1, 900) }]]) {
+      expect(parseStylistBody(body({ history: bad }))).toBeNull();
+    }
+    const value = parseStylistBody(body({ history: full }))!;
+    const items = full.flatMap((turn) => turn.outfits.flat()).map((uuid, n) => item(n + 1, { id: uuid }));
+    const built = buildStylistRequest(value, [...items, ...Array.from({ length: 200 }, (_, n) => item(1000 + n))]);
+    expect([...built.aliases.values()].slice(0, items.length)).toEqual(items.map((entry) => entry.id));
+    expect(built.messagesBytes).toBeLessThanOrEqual(STYLIST_LIMITS.messagesBytes);
+  });
+
+  it('projects weather fields only when the owner confirmed them (claim SQL mirrors confirmedWeather)', async () => {
+    const sql = await readFile(new URL('../../supabase/migrations/20260928090000_stylist_chat.sql', import.meta.url), 'utf8');
+    for (const field of ['warmth', 'min_temp', 'max_temp', 'rain_rating', 'windproof']) {
+      expect(sql).toContain(`'${field}',case when i.field_provenance->'${field}'->>'kind'='user' then i.${field} end,`);
+    }
+    expect(sql).toContain(`'lower_coverage',case when i.field_provenance->'lower_coverage'->>'kind' in ('user','ai_observed') then i.lower_coverage end,`);
+    expect(sql).not.toMatch(/'field_provenance',|'kind',/);
   });
 
   it('refuses a conversation above its own byte budget', () => {
@@ -291,6 +335,38 @@ describe('stylist handler (mocked Auth, RPC and provider)', () => {
       expect(calls.at(-1)!.url).toMatch(/stylist_finish$/);
       expect(calls.at(-1)!.body).toMatchObject({ p_code: code, p_usage: { input: 1000 } });
       expect(calls.some((call) => /save_outfit|rpc\/(?!stylist_)/.test(call.url))).toBe(false);
+    }
+  });
+
+  it('settles a received but unusable response as invalid usage without keeping the body', async () => {
+    const secret = 'raw-provider-body-marker';
+    for (const make of [
+      () => new Response(`<html>${secret}</html>`, { status: 200, headers: { 'Content-Type': 'text/html' } }),
+      () => new Response(`{"broken":${secret}`, { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      () => new Response(`["${secret}"]`, { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      () => new Response(`"${'x'.repeat(STYLIST_LIMITS.responseBytes)}"`, { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ]) {
+      const calls = backend({ finish: { code: 'INVALID_USAGE', accounting } });
+      const transport = vi.fn(async () => make());
+      const response = await createStylistHandler(config, transport)(post(body()));
+      expect([response.status, await response.json()]).toEqual([502, { code: 'FAILED' }]);
+      const finish = calls.at(-1)!;
+      expect(finish.url).toMatch(/stylist_finish$/);
+      expect(finish.body).toEqual({ p_owner_id: OWNER, p_request_id: REQUEST, p_code: 'FAILED', p_usage: UNUSABLE_RESPONSE_USAGE });
+      expect(JSON.stringify(calls)).not.toContain(secret);
+    }
+  });
+
+  it('leaves transport uncertainty held for expiry without calling finish', async () => {
+    for (const transport of [
+      vi.fn(async () => { throw new TypeError('connection reset'); }),
+      vi.fn(async () => new Response(new ReadableStream({ pull(controller) { controller.error(new TypeError('reset mid-body')); } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } })),
+    ]) {
+      const calls = backend();
+      const response = await createStylistHandler(config, transport)(post(body()));
+      expect(response.status).toBe(502);
+      expect(calls.map((call) => call.url.split('/').pop())).toEqual(['user', 'stylist_status', 'stylist_claim']);
     }
   });
 

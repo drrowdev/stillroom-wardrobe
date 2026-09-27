@@ -38,9 +38,9 @@ alter table private.ai_controls
 -- the 24,000/1,200 envelope at LongCo 4.40/19.80 as a conservative allowance valuation, not an invoice ceiling.
 insert into private.ai_execution_manifests values (
   'azure-eu-terra-stylist-v1','gpt-5.6-terra-2026-07-09',1,
-  '6914bd8af3f9f95f6a6c5be55bacf711354d1a077d89aeea6e46d64612ad3659',
+  '36867782e8c701e1a0b42e772d4f4be31870758935a0fd8a65ba1b387a61cbca',
   '003b745ceaca59678e2f274104fe7b0d3d2c34a181e1e9102df76c232d78409a',
-  '16d79575eb9d2673ce1d500ba16ff3f14c61f7fa0f2f6c4f54a755f20b184441',
+  '8c627868d8702f76ed68e0bbeec2f0587d355a4b92e42a28f61ba30e1abd3e02',
   'Azure OpenAI','stillroom-ai-eval.openai.azure.com','v1/chat/completions','EU','DataZoneStandard',
   'https://prices.azure.com/api/retail/prices',
   '2026-09-21T00:00:00Z',
@@ -221,8 +221,14 @@ begin
   select coalesce(jsonb_agg(x.j order by x.id),'[]'::jsonb) into v_items from (
     select i.id,jsonb_build_object('id',i.id,'category',i.category,'colours',to_jsonb(i.colours),'pattern',i.pattern,
       'sleeve_length',i.sleeve_length,'garment_length',i.garment_length,'seasons',to_jsonb(i.seasons),'formality',i.formality,
-      'warmth',i.warmth,'min_temp',i.min_temp,'max_temp',i.max_temp,'rain_rating',i.rain_rating,'windproof',i.windproof,
-      'upper_coverage',i.upper_coverage,'lower_coverage',i.lower_coverage,'favourite',i.favourite) j
+      'warmth',case when i.field_provenance->'warmth'->>'kind'='user' then i.warmth end,
+      'min_temp',case when i.field_provenance->'min_temp'->>'kind'='user' then i.min_temp end,
+      'max_temp',case when i.field_provenance->'max_temp'->>'kind'='user' then i.max_temp end,
+      'rain_rating',case when i.field_provenance->'rain_rating'->>'kind'='user' then i.rain_rating end,
+      'windproof',case when i.field_provenance->'windproof'->>'kind'='user' then i.windproof end,
+      'upper_coverage',i.upper_coverage,
+      'lower_coverage',case when i.field_provenance->'lower_coverage'->>'kind' in ('user','ai_observed') then i.lower_coverage end,
+      'favourite',i.favourite) j
     from public.items i
     where i.owner_id=p.owner_id and i.deleted_at is null and i.lifecycle='active' and i.availability='ready'
       and not i.exclude_suggestions

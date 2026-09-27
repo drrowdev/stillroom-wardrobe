@@ -1,8 +1,19 @@
 import { STYLIST_ENDPOINT, STYLIST_LIMITS, utf8Bytes } from '../../../src/domain/stylist.ts';
 import { observeAzureUsage, azureConfigured, type AzureConfig, type AzureTransport, type AzureUsage } from '../analyze-clothing/azure-openai.ts';
-import { object, ProtocolError, readJson, type JsonObject } from '../analyze-clothing/protocol.ts';
+import { object, ProtocolError, readBounded, type JsonObject } from '../analyze-clothing/protocol.ts';
 
-export type StylistOutcome = { code: 'OK' | 'FAILED' | 'FILTERED'; content: string | null; usage: AzureUsage };
+export type StylistOutcome = { code: 'OK' | 'FAILED' | 'FILTERED'; content: string | null; usage: AzureUsage; unusable?: true };
+
+/**
+ * Fixed marker for a response that arrived but cannot be read (wrong media type, invalid or oversized JSON, not an
+ * object). Finish rejects it as invalid usage: the reservation stays accounted and the stylist is disabled. The raw
+ * body is never kept.
+ */
+export const UNUSABLE_RESPONSE_USAGE: AzureUsage = Object.freeze({
+  modelObservation: 'not_observed', controlObservation: 'ordinary',
+  input: null, output: null, total: null, reasoning: null, cacheRead: null, cacheWrite: null,
+}) as AzureUsage;
+const unusable = (): StylistOutcome => ({ code: 'FAILED', content: null, usage: UNUSABLE_RESPONSE_USAGE, unusable: true });
 
 /**
  * Classifies one provider response (D5). A null or absent refusal is ordinary; a real refusal or content filter is
@@ -36,9 +47,17 @@ export async function callStylist(config: AzureConfig, body: JsonObject, signal:
   const response = await transport(STYLIST_ENDPOINT, { method: 'POST', redirect: 'error', cache: 'no-store', signal,
     headers: { 'Content-Type': 'application/json', 'api-key': config.apiKey! }, body: JSON.stringify(body) });
   if (response.headers.get('Content-Type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') {
-    await response.body?.cancel(); throw new ProtocolError('FAILED');
+    await response.body?.cancel().catch(() => {}); return unusable();
   }
-  const value = await readJson(response, STYLIST_LIMITS.responseBytes, signal);
-  if (!object(value)) throw new ProtocolError('FAILED');
+  // A read that fails mid-body (abort, timeout, reset) is transport uncertainty and stays on the held/expiry path;
+  // a complete body that is oversized or not JSON is unusable.
+  let raw: Uint8Array<ArrayBuffer>;
+  try { raw = await readBounded(response.body, STYLIST_LIMITS.responseBytes, signal); } catch (failure) {
+    if (failure instanceof ProtocolError && !signal.aborted) return unusable();
+    throw failure;
+  }
+  let value: unknown;
+  try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(raw)); } catch { return unusable(); }
+  if (!object(value)) return unusable();
   return classifyStylistResponse(response.status, value);
 }

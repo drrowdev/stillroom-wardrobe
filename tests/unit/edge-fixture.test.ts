@@ -207,6 +207,13 @@ describe('privileged controller', () => {
     expect(controller.validOperation({ type: 'op', id: 5, op: 'count', owner: 'A' })).toBe(false);
     expect(controller.validOperation({ type: 'op', id: 6, op: 'sql' })).toBe(false);
     expect(controller.validOperation({ type: 'op', id: 1.5, op: 'count' })).toBe(false);
+    const item = '0b1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8';
+    expect(controller.validOperation({ type: 'op', id: 7, op: 'fence', item })).toBe(true);
+    expect(controller.validOperation({ type: 'op', id: 8, op: 'unfence', item })).toBe(true);
+    expect(controller.validOperation({ type: 'op', id: 9, op: 'fence', item: "x' or true --" })).toBe(false);
+    expect(controller.validOperation({ type: 'op', id: 10, op: 'fence', item, owner: 'B' })).toBe(false);
+    expect(controller.validOperation({ type: 'op', id: 11, op: 'fence' })).toBe(false);
+    expect(controller.FENCE_REQUEST.startsWith(controller.REQUEST_PREFIX)).toBe(true);
   });
   it('rejects any topology other than the isolated one', () => {
     const c = controller.CONTAINERS;

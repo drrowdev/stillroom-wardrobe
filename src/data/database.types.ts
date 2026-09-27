@@ -877,6 +877,37 @@ export type Database = {
           version: number
         }[]
       }
+      stylist_claim: {
+        Args: {
+          p_manifest_id: string
+          p_owner_id: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
+      stylist_direct_allocation: {
+        Args: {
+          p_allocation_micro: number
+          p_expected_total_micro: number
+          p_owner_id: string
+        }
+        Returns: Json
+      }
+      stylist_expire_due: { Args: { p_limit: number }; Returns: Json }
+      stylist_finish: {
+        Args: {
+          p_code: string
+          p_owner_id: string
+          p_request_id: string
+          p_usage: Json
+        }
+        Returns: Json
+      }
+      stylist_set_consent: {
+        Args: { p_enabled: boolean; p_notice_revision: number }
+        Returns: Json
+      }
+      stylist_status: { Args: never; Returns: Json }
       update_image_description: {
         Args: {
           p_alt_text: string

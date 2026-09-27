@@ -28,7 +28,7 @@ export const SOURCE_HASHES = Object.freeze({
   accountDeletion: 'fcf1931c03a23702fcf608b50addc481a61084d1104ec421c682cf8575caed7f',
   deletionPurgeSchedule: '6eb9b23fbca078f5336d39e3c3b5f407ec2654703527942a0c5000e9955fb07d',
   restoreAttribution: '101aad1322be5623c316c4deab06c5236ef3f09f23eab828a9e1f6400521c605',
-  stylistChat: '4441660b676fec000ab95670b9dbd18d55a2688b9a50de43bea6d11bbb17e75e',
+  stylistChat: '8e7b11a4bf1269657f6a0bc2637de0140abd4419ca48391fd36b95b6cb794add',
   stylistExpireSchedule: 'd8e5968e02f52a8f79702ac5e9d49e512180c8af2359dbe2891be230cd853d61',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;

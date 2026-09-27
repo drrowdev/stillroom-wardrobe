@@ -76,7 +76,8 @@ export function requestVerdict(headers, text) {
   return width === null ? { reason: 'jpeg' } : { mode: MODES[width] ?? 'ready' };
 }
 export function stylistCompletion(mode, refs = []) {
-  const usage = mode === 'stylist-overrun' ? { ...USAGE, prompt_tokens: 30000, total_tokens: 30030 } : USAGE;
+  // Above both envelopes and the reservation: ceil((30000*220 + 5000*1320)/100) = 132000 > 129360 micro-USD.
+  const usage = mode === 'stylist-overrun' ? { ...USAGE, prompt_tokens: 30000, completion_tokens: 5000, total_tokens: 35000 } : USAGE;
   const reply = mode === 'stylist-tool-text' ? '{"tool_calls":[{"function":{"name":"save_outfit","arguments":"{}"}}]}'
     : 'Try these together.';
   const content = JSON.stringify({ reply, outfits: mode === 'stylist-unknown-ref' ? [{ refs: ['i999'], note: '' }]

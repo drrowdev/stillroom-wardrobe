@@ -41,12 +41,12 @@ process.on('message', (message) => {
   if (message?.type === 'start' && typeof message.ingress === 'string') { ingress = message.ingress; pending.get('start')?.(); return; }
   if (message?.type === 'result' && pending.has(message.id)) { pending.get(message.id)(message); pending.delete(message.id); }
 });
-function op(name, owner) {
+function op(name, owner, extra = {}) {
   const id = nextId++;
   return new Promise((resolve) => {
     const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false }); }, 90_000);
     pending.set(id, (message) => { clearTimeout(timer); resolve(message); });
-    process.send({ type: 'op', id, op: name, ...(owner ? { owner } : {}) });
+    process.send({ type: 'op', id, op: name, ...(owner ? { owner } : {}), ...extra });
   });
 }
 
@@ -332,11 +332,16 @@ async function main() {
       await saves.upload(pending);
       await saves.finalize(pending, pendingRow);
       const withSaved = await clothesAfter(14);
+      // The same saved item under an active deletion fence is not context either (fixture fence, then removed).
+      requireEvidence((await op('fence', null, { item: pending.p_item.id })).ok === true);
+      const withFenced = await clothesAfter(16);
+      requireEvidence((await op('unfence', null, { item: pending.p_item.id })).ok === true);
       const savedItem = (await saves.read('items', pending.p_item.id))[0];
       const trashed = await client.rpc(A, 'set_item_trashed', { p_item_id: pending.p_item.id, p_expected_version: savedItem?.version, p_trashed: true });
       const withTrashed = await clothesAfter(15);
       check(PROVIDER, 'stylist-context-saved-only', Number.isInteger(withPending) && withSaved === withPending + 1
-        && withTrashed === withPending && Array.isArray(trashed) && trashed[0]?.deleted_at !== null, { withPending, withSaved, withTrashed });
+        && withFenced === withPending && withTrashed === withPending && Array.isArray(trashed) && trashed[0]?.deleted_at !== null,
+        { withPending, withSaved, withFenced, withTrashed });
       await client.rpc(A, 'set_item_trashed', { p_item_id: pending.p_item.id, p_expected_version: trashed?.[0]?.version, p_trashed: false });
       await saves.cleanup();
 
@@ -354,7 +359,7 @@ async function main() {
       check(PROVIDER, 'stylist-frozen-same-token', frozenStylist.status === 403 && isDeepStrictEqual(frozenStylist.data, { code: 'UNAVAILABLE' }),
         summary(frozenStylist));
       counted = await count();
-      check(PROVIDER, 'stylist-negatives-no-dispatch', counted.served === before.served + 5 && await stylistUsage(A) === usageBefore,
+      check(PROVIDER, 'stylist-negatives-no-dispatch', counted.served === before.served + 6 && await stylistUsage(A) === usageBefore,
         { served: counted.served, usage: usageBefore });
 
       stage = 'stylist-modes';
@@ -371,15 +376,18 @@ async function main() {
       const noConsent = await stylist(B.token, ask(10, B));
       check(PROVIDER, 'stylist-consent-required', revoked?.code === 'CONSENT_REQUIRED' && noConsent.status === 403
         && isDeepStrictEqual(noConsent.data, { code: 'CONSENT_REQUIRED' }), summary(noConsent));
+      const microBefore = (await client.rpc(A, 'stylist_status', {}))?.usage?.stylistMicro;
       const overrun = await stylist(A.token, ask(11, A, 'Stylist fixture overrun'));
+      const microAfter = (await client.rpc(A, 'stylist_status', {}))?.usage?.stylistMicro;
       const afterOverrun = await stylist(A.token, ask(12, A));
       const disabled = await client.rpc(A, 'stylist_status', {});
       check(PROVIDER, 'stylist-overrun-disables', overrun.status === 502 && isDeepStrictEqual(overrun.data, { code: 'FAILED' })
         && afterOverrun.status === 503 && isDeepStrictEqual(afterOverrun.data, { code: 'INACTIVE' }) && disabled?.code === 'INACTIVE'
-        && isDeepStrictEqual(await outfitRows(A), outfitsBefore), { overrun: summary(overrun), after: summary(afterOverrun) });
+        && isDeepStrictEqual(await outfitRows(A), outfitsBefore) && typeof microBefore === 'string' && typeof microAfter === 'string'
+        && BigInt(microAfter) - BigInt(microBefore) === 132000n, { overrun: summary(overrun), after: summary(afterOverrun), microBefore, microAfter });
       counted = await count();
-      check(PROVIDER, 'stylist-double-totals', counted.served === before.served + 10 && counted.rejected === 0 && counted.refused === 0
-        && isDeepStrictEqual(counted.modes, { ...before.modes, 'stylist-ready': 5, 'stylist-refusal': 1, 'stylist-tool': 1,
+      check(PROVIDER, 'stylist-double-totals', counted.served === before.served + 11 && counted.rejected === 0 && counted.refused === 0
+        && isDeepStrictEqual(counted.modes, { ...before.modes, 'stylist-ready': 6, 'stylist-refusal': 1, 'stylist-tool': 1,
           'stylist-unknown-ref': 1, 'stylist-tool-text': 1, 'stylist-overrun': 1 }), counted);
       stage = 'stylist-cleanup';
       await h.remove({ itemId: seeded.value.p_item.id, imageId: seeded.value.p_image.id });
