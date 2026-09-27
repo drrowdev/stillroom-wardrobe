@@ -667,9 +667,13 @@ export resume version). Phase 6 acceptance is not claimed.
   Version 1/2 history restores as imported and keeps its restore ID namespace.
   Export refuses a snapshot whose tag history changed while it was read
   (`attribution_digest`), without touching item versions.
-- Existing history is never changed (Q2): the same import again is `equal`; a
-  different import, differing entries or history recorded since are kept and
+- Existing history is never changed (Q2). Server-recorded history comes first:
+  an item with any is kept (`recorded`). Otherwise the same import again is
+  `equal`, and a different import or differing entries are kept; both are
   reported as not applied. Lock contention is busy and retried, never kept.
+- The RPC's 8 MiB bound counts compact JSON bytes
+  (`private.backup_compact_bytes`), the same measure as the backup's metadata
+  limit, so anything Check accepts is not refused for jsonb's longer text.
 - Check validates every entry (field types, 64-hex hashes, contiguous 0-based
   positions, v3 origins and the export bounds) before any write; a malformed
   entry refuses the whole backup with zero writes.
@@ -678,14 +682,20 @@ export resume version). Phase 6 acceptance is not claimed.
 - Tests: unit (format, bounds, resume version, digest change), browser
   (`restore.spec.ts` P6d), integration (I26 drill, `restore-own.spec.ts`), the
   preservation rehearsal (`attribution-restore.sessions.mjs`: structure
-  read-back, v2 versus legacy, genuine export-restore-reexport, a genuine
-  replacement after an import, a second-generation restore, concurrent imports
-  and an import racing a completion), the isolation audit and the deletion
+  read-back, v2 versus legacy, genuine recorded history re-imported through the
+  RPC with every photo mapped, a genuine replacement after an import, a
+  second-generation restore, the compact 8 MiB bound at the limit, concurrent
+  imports and an import racing a completion), the isolation audit and the deletion
   rehearsal (C's imported history removed, D's unchanged, a frozen owner's import
   refused). The database suites run in CI only.
 
 ## Pending
 
+- A round trip of genuine server-recorded history through the shared export
+  code, the shared restore engine and a second export. The rehearsal builds the
+  RPC entries itself, and the I26 drill and `restore-own.spec.ts` use imported
+  history, because only the privileged rehearsals can create recorded history
+  and their accounts hold photos that restore can't decode.
 - GPT-6 Astra code review, green exact-head CI and coordinator visual review of
   any restore captures.
 - Owner approval and hosted apply of the migration, then an owner-run Pages
