@@ -1,18 +1,22 @@
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, open, readFile, rm, appendFile, writeFile, rmdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  PROBE, SLOTS, allocationId, assertRuntime, controlsDigest, executeSlot, fixture, initialize, operatorRoot, parseArguments,
-  readRecord, reconcile, summary, validateReceipt, verdict,
+  PROBE, SLOTS, allocationId, assertRuntime, controlsDigest, executeSlot, fixture, initialize, main, operatorRoot, parseArguments,
+  readRecord, reconcile, recover, summary, validateReceipt, verdict,
 } from '../../scripts/ai-evaluation/stylist-probe.mjs';
-import { AZURE_TARGET, azureCommands, childEnvironment, launch, parseLauncherArguments, runAzure } from '../../scripts/ai-evaluation/stylist-probe-launch.mjs';
+import {
+  AZURE_FIXED, AZURE_TARGET, azureCommands, azureEnvironment, launch, parseLauncherArguments, probeEnvironment, runAzure, runChild,
+} from '../../scripts/ai-evaluation/stylist-probe-launch.mjs';
 import {
   STYLIST_BODY_CONTROLS, STYLIST_ENDPOINT, STYLIST_LIMITS, STYLIST_RESERVATION_MICRO, buildStylistRequest, parseStylistBody, utf8Bytes,
 } from '../../src/domain/stylist.ts';
 
 const COMMIT = 'a'.repeat(40);
+const RUNTIME = { versions: { node: readFileSync('.node-version', 'utf8').trim() }, execArgv: [] };
 const source = () => COMMIT;
 const KEY = 'probe-key-SENTINEL-0123456789abcdef';
 const OCTOBER = Date.parse('2026-10-05T10:00:00.000Z');
@@ -302,43 +306,94 @@ describe('ST-OP month, review and persistence (M3)', () => {
     expect(verdict(await record(id))).toBe('HALTED');
   });
 
-  const failingSync = (failOn: number) => {
+  /** Fails the Nth ledger open's sync or close; the bytes are still written, so the line looks complete. */
+  const failingLedger = (failOn: number, stage: 'sync' | 'close' = 'sync') => {
     let opens = 0;
     return { open: async (...args: Parameters<typeof open>) => {
       const handle = await open(...args);
-      if (++opens !== failOn) return handle;
-      return { writeFile: handle.writeFile.bind(handle), close: handle.close.bind(handle), sync: async () => { throw new Error('EIO'); } };
+      if (!String(args[0]).endsWith('probe.jsonl') || ++opens !== failOn) return handle;
+      return { writeFile: handle.writeFile.bind(handle), truncate: handle.truncate.bind(handle),
+        sync: stage === 'sync' ? async () => { throw new Error('EIO'); } : handle.sync.bind(handle),
+        close: stage === 'close' ? async () => { await handle.close(); throw new Error('EIO'); } : handle.close.bind(handle) };
     } };
   };
+  const lock = (id: string) => path.join(root, id, 'probe.lock');
+  const pending = (id: string) => path.join(root, id, 'probe.pending');
 
-  it('does not dispatch when the intent sync fails, keeps the lock, and only counts it after reconciliation', async () => {
+  it('does not dispatch when the intent sync fails, and only an explicit recovery counts the slot', async () => {
     const id = await init();
     const { calls, fetchImpl } = provider([{}]);
-    await expect(send(id, 'min', fetchImpl, { fs: failingSync(1) })).rejects.toThrow('LEDGER_WRITE_UNCERTAIN');
+    await expect(send(id, 'min', fetchImpl, { fs: failingLedger(1) })).rejects.toThrow('LEDGER_WRITE_UNCERTAIN');
     expect(calls).toHaveLength(0);
-    await expect(send(id, 'min', fetchImpl)).rejects.toThrow('LOCKED_NO_AUTOMATIC_RECOVERY');
-    await rmdir(path.join(root, id, 'probe.lock'));
-    expect(summary(await record(id)).slots.min.state).toBe('UNCERTAIN_INTENT');
     expect(verdict(await record(id))).toBe('UNRESOLVED');
-    await expect(send(id, 'min', fetchImpl)).rejects.toThrow('PRIOR_UNCERTAINTY');
-    await expect(send(id, 'max', fetchImpl)).rejects.toThrow('PRIOR_UNCERTAINTY');
-    await reconcile({ root, id, slot: 'min', source });
+    await expect(send(id, 'min', fetchImpl)).rejects.toThrow('PERSISTENCE_UNCERTAIN');
+    await rmdir(lock(id));
+    expect(summary(await record(id)).persistence).toEqual({ pending: true, locked: false });
+    expect(verdict(await record(id))).toBe('UNRESOLVED');
+    await expect(send(id, 'min', fetchImpl)).rejects.toThrow('PERSISTENCE_UNCERTAIN');
+    await expect(reconcile({ root, id, slot: 'min', source })).rejects.toThrow('PERSISTENCE_UNCERTAIN');
+    await expect(recover({ root, id, slot: 'max', source })).rejects.toThrow('RECOVERY_SLOT_MISMATCH');
+    await recover({ root, id, slot: 'min', source });
     const state = await record(id);
-    expect(summary(state).slots.min.state).toBe('COUNTED');
+    expect(state.persistence).toEqual({ pending: false, locked: false });
+    expect(summary(state).slots.min).toMatchObject({ state: 'COUNTED', recovered: true });
     expect(summary(state).consumedMicro).toBe(STYLIST_RESERVATION_MICRO);
     expect(verdict(state)).toBe('HALTED');
     await expect(send(id, 'min', fetchImpl)).rejects.toThrow('SLOT_CONSUMED');
     await expect(send(id, 'max', fetchImpl)).rejects.toThrow('VALID_MIN_REQUIRED');
     await expect(reconcile({ root, id, slot: 'min', source })).rejects.toThrow('NOTHING_TO_RECONCILE');
+    await expect(recover({ root, id, slot: 'min', source })).rejects.toThrow('NOTHING_TO_RECOVER');
     expect(calls).toHaveLength(0);
   });
 
-  it('keeps the locked, uncertain state when the result sync fails after dispatch', async () => {
+  it.each(['sync', 'close'] as const)('never shows PASS for a complete-looking max result after a failed %s', async (stage) => {
     const id = await init();
-    const { calls, fetchImpl } = provider([{}]);
-    await expect(send(id, 'min', fetchImpl, { fs: failingSync(2) })).rejects.toThrow('LEDGER_WRITE_UNCERTAIN');
-    expect(calls).toHaveLength(1);
-    await expect(send(id, 'max', fetchImpl)).rejects.toThrow('LOCKED_NO_AUTOMATIC_RECOVERY');
+    const { calls, fetchImpl } = provider([{}, {}]);
+    await send(id, 'min', fetchImpl);
+    // The max call's ledger opens are the intent (1) and the result (2).
+    await expect(send(id, 'max', fetchImpl, { fs: failingLedger(2, stage) })).rejects.toThrow('LEDGER_WRITE_UNCERTAIN');
+    expect(calls).toHaveLength(2);
+    expect(await ledger(id)).toContain('"type":"result","slot":"max"');
+    // Status, then a restart with the lock removed by hand: still unresolved, and nothing can continue.
+    expect(summary(await record(id)).verdict).toBe('UNRESOLVED');
+    await rmdir(lock(id));
+    const restarted = await readRecord({ root, id, source });
+    expect(restarted.persistence).toEqual({ pending: true, locked: false });
+    expect(verdict(restarted)).toBe('UNRESOLVED');
+    await expect(reconcile({ root, id, slot: 'max', source })).rejects.toThrow('PERSISTENCE_UNCERTAIN');
+    await expect(send(id, 'max', fetchImpl)).rejects.toThrow('PERSISTENCE_UNCERTAIN');
+    await expect(send(id, 'min', fetchImpl)).rejects.toThrow('PERSISTENCE_UNCERTAIN');
+    await recover({ root, id, slot: 'max', source });
+    const state = await record(id);
+    expect(summary(state).slots.max).toMatchObject({ state: 'COUNTED', recovered: true });
+    expect(summary(state).slots.min.state).toBe('OK');
+    expect(verdict(state)).toBe('HALTED');
+    await expect(reconcile({ root, id, slot: 'max', source })).rejects.toThrow('NOTHING_TO_RECONCILE');
+    await expect(send(id, 'max', fetchImpl)).rejects.toThrow('SLOT_CONSUMED');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('recovers from a torn final line and re-syncs a recovery line whose own sync failed', async () => {
+    const id = await init();
+    const { fetchImpl } = provider([{}]);
+    await expect(send(id, 'min', fetchImpl, { fs: failingLedger(2) })).rejects.toThrow('LEDGER_WRITE_UNCERTAIN');
+    await appendFile(path.join(root, id, 'probe.jsonl'), '{"type":"res');
+    await expect(record(id)).rejects.toThrow('PERSISTENCE_UNCERTAIN');
+    await expect(recover({ root, id, slot: 'min', source, fs: failingLedger(2) })).rejects.toThrow('LEDGER_WRITE_UNCERTAIN');
+    expect((await record(id)).slots.min?.recovered).toBe(true);
+    expect(verdict(await record(id))).toBe('UNRESOLVED');
+    await recover({ root, id, slot: 'min', source });
+    const state = await record(id);
+    expect(state.persistence).toEqual({ pending: false, locked: false });
+    expect((await ledger(id)).match(/"type":"recover"/g)).toHaveLength(1);
+    expect(verdict(state)).toBe('HALTED');
+  });
+
+  it('treats an unconfirmed init as an unusable allocation', async () => {
+    const id = await init();
+    await writeFile(pending(id), '{"type":"init","slot":null}\n');
+    await expect(record(id)).rejects.toThrow('ALLOCATION_UNUSABLE');
+    await expect(recover({ root, id, slot: 'min', source })).rejects.toThrow('ALLOCATION_UNUSABLE');
   });
 
   it('refuses a torn line, changed controls, a changed source commit and a tampered intent', async () => {
@@ -404,6 +459,24 @@ describe('ST-OP key and privacy', () => {
     expect(() => assertRuntime({ versions: { node: pinned }, execArgv: [], env: { NODE_OPTIONS: '--require x' } })).toThrow('TRACING_OR_PRELOAD_REFUSED');
   });
 
+  it.each([{ CI: 'true' }, { GITHUB_ACTIONS: 'true' }, { TF_BUILD: 'True' }, { tf_build: 'True' }, { CI: '' }, { JENKINS_URL: 'x' }])(
+    'refuses a recognised CI environment %o', (env) => {
+      expect(() => assertRuntime({ ...RUNTIME, env })).toThrow('CI_ENVIRONMENT_REFUSED');
+    });
+
+  it('refuses CI in the probe entrypoint before any record, key or provider access', async () => {
+    const id = await init();
+    const before = await ledger(id);
+    const { calls, fetchImpl } = provider([{}]);
+    for (const command of [['send', id, 'min'], ['reconcile', id, 'min'], ['recover', id, 'min'], ['status', id]]) {
+      const env: Record<string, string> = { GITHUB_ACTIONS: 'true', [PROBE.keyVariable]: KEY };
+      await expect(main(command, { env, runtime: RUNTIME, root, fetchImpl, log: () => { throw new Error('no output'); } }))
+        .rejects.toThrow('CI_ENVIRONMENT_REFUSED');
+    }
+    expect(calls).toHaveLength(0);
+    expect(await ledger(id)).toBe(before);
+  });
+
   it('loads the production modules under plain Node', async () => {
     const program = "import('./scripts/ai-evaluation/stylist-probe.mjs').then((m) => console.log(m.controlsDigest()))";
     const out = await new Promise<string>((resolve) => {
@@ -423,13 +496,20 @@ describe('ST-OP launcher (Q3)', () => {
   const args = ['--subscription', SUBSCRIPTION, 'send', id, 'min'];
   const azure = (endpoint: string, key: string | Error) => {
     const calls: string[][] = [];
-    return { calls, run: async (command: string[]) => {
+    const envs: Record<string, string>[] = [];
+    return { calls, envs, run: async (command: string[], env: Record<string, string>) => {
       calls.push(command);
+      envs.push(env);
       if (command.includes('show')) return JSON.stringify(endpoint);
       if (key instanceof Error) throw key;
       return JSON.stringify(key);
     } };
   };
+  const ENDPOINT = 'https://stillroom-ai-eval.openai.azure.com/';
+  const HOSTILE = { Path: 'C:\\bin', SystemRoot: 'C:\\Windows', AZURE_LOGGING_ENABLE_LOG_FILE: 'true', azure_logging_log_dir: 'C:\\logs',
+    AZURE_CORE_ONLY_SHOW_ERRORS: 'false', AZURE_CORE_COLLECT_TELEMETRY: 'true', GIT_DIR: 'elsewhere', EDITOR: 'vi',
+    AZURE_CONFIG_DIR: 'C:\\az', [PROBE.keyVariable]: 'inherited-old-key-value' };
+  const noChild = async () => { throw new Error('child must not start'); };
 
   it('pins the resource and uses only a read of the endpoint and the key list', () => {
     const commands = azureCommands(SUBSCRIPTION);
@@ -442,42 +522,93 @@ describe('ST-OP launcher (Q3)', () => {
     expect(AZURE_TARGET).toEqual({ resourceGroup: 'rg-stillroom-ai-eval', resource: 'stillroom-ai-eval', keyName: 'key1' });
   });
 
-  it('refuses malformed arguments and shell metacharacters', async () => {
+  it('refuses malformed arguments, shell metacharacters and an az environment without the logging override', async () => {
     for (const bad of [['send', id, 'min'], ['--subscription', 'x', 'send', id, 'min'], [...args, 'extra'], ['--subscription', SUBSCRIPTION, 'init', id, 'min']]) {
       expect(() => parseLauncherArguments(bad)).toThrow('USAGE');
     }
-    await expect(runAzure(['account', 'show', '&', 'calc'])).rejects.toThrow('USAGE');
+    await expect(runAzure(['account', 'show', '&', 'calc'], azureEnvironment({}))).rejects.toThrow('USAGE');
+    await expect(runAzure(['account', 'show'], {})).rejects.toThrow('UNSAFE_ENVIRONMENT');
+  });
+
+  it('builds narrow child environments that override hostile inherited logging settings', () => {
+    const az = azureEnvironment(HOSTILE);
+    expect(az).toEqual({ Path: 'C:\\bin', SystemRoot: 'C:\\Windows', AZURE_CONFIG_DIR: 'C:\\az', ...AZURE_FIXED });
+    expect(az.AZURE_LOGGING_ENABLE_LOG_FILE).toBe('false');
+    expect(az.AZURE_CORE_ONLY_SHOW_ERRORS).toBe('true');
+    expect(probeEnvironment(HOSTILE, KEY)).toEqual({ Path: 'C:\\bin', SystemRoot: 'C:\\Windows', [PROBE.keyVariable]: KEY });
+  });
+
+  it.each(['AZURE_CLI_DISABLE_CONNECTION_VERIFICATION', 'requests_ca_bundle', 'CURL_CA_BUNDLE', 'SSL_CERT_FILE', 'ADAL_PYTHON_SSL_NO_VERIFY',
+    'PYTHONHTTPSVERIFY', 'SSLKEYLOGFILE', 'PYTHONPATH', 'NODE_OPTIONS', 'NODE_TLS_REJECT_UNAUTHORIZED'])(
+    'refuses an inherited %s with a fixed code before either Azure CLI call', async (name) => {
+      const fake = azure(ENDPOINT, KEY);
+      await expect(launch(args, { azure: fake.run, child: noChild, baseEnv: { PATH: 'x', [name]: '0' }, runtime: RUNTIME }))
+        .rejects.toThrow(/^(UNSAFE_ENVIRONMENT|TRACING_OR_PRELOAD_REFUSED)$/);
+      expect(fake.calls).toHaveLength(0);
+    });
+
+  it.each([{ CI: 'true' }, { GITHUB_ACTIONS: 'true' }, { TF_BUILD: 'True' }])('refuses CI %o before key retrieval', async (env) => {
+    const fake = azure(ENDPOINT, KEY);
+    await expect(launch(args, { azure: fake.run, child: noChild, baseEnv: { PATH: 'x', ...env }, runtime: RUNTIME }))
+      .rejects.toThrow('CI_ENVIRONMENT_REFUSED');
+    expect(fake.calls).toHaveLength(0);
   });
 
   it('passes the key only in the child environment and clears it afterwards', async () => {
-    const fake = azure('https://stillroom-ai-eval.openai.azure.com/', KEY);
-    const base = { PATH: 'x', [PROBE.keyVariable]: 'inherited-old-key-value' };
-    let seen: { env: Record<string, string | undefined>; args: string[]; key: string | undefined } | null = null;
-    const code = await launch(args, { azure: fake.run, baseEnv: base, child: async (env, childArgs) => {
-      seen = { env, args: childArgs, key: env[PROBE.keyVariable] };
+    const fake = azure(ENDPOINT, KEY);
+    const seen: { env?: Record<string, string | undefined>; args?: string[]; snapshot?: Record<string, string | undefined> } = {};
+    const code = await launch(args, { azure: fake.run, baseEnv: HOSTILE, runtime: RUNTIME, child: async (env, childArgs) => {
+      Object.assign(seen, { env, args: childArgs, snapshot: { ...env } });
       return 0;
     } });
     expect(code).toBe(0);
     expect(fake.calls).toHaveLength(2);
-    expect(seen!.key).toBe(KEY);
-    expect(seen!.args).toEqual(['send', id, 'min']);
-    expect(seen!.args.join(' ')).not.toContain(KEY);
-    expect(seen!.env[PROBE.keyVariable]).toBeUndefined();
-    expect(base[PROBE.keyVariable]).toBe('inherited-old-key-value');
-    expect(childEnvironment({ A: '1' }, KEY)).toEqual({ A: '1', [PROBE.keyVariable]: KEY });
+    for (const env of fake.envs) expect(env).toEqual(azureEnvironment(HOSTILE));
+    expect(seen.snapshot).toEqual(probeEnvironment(HOSTILE, KEY));
+    expect(seen.args).toEqual(['send', id, 'min']);
+    expect(seen.args!.join(' ')).not.toContain(KEY);
+    expect(seen.env![PROBE.keyVariable]).toBeUndefined();
+    expect(HOSTILE[PROBE.keyVariable]).toBe('inherited-old-key-value');
   });
 
+  const osBase = () => Object.fromEntries(Object.entries({ PATH: process.env.PATH, SystemRoot: process.env.SystemRoot ?? process.env.SYSTEMROOT })
+    .filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+
+  it('runs az as a real subprocess with exactly the narrow environment', async () => {
+    const hostile = { ...osBase(), AZURE_LOGGING_ENABLE_LOG_FILE: 'true', AZURE_CORE_ONLY_SHOW_ERRORS: 'false', NODE_DEBUG: 'x', GIT_DIR: 'y' };
+    const script = 'process.stdout.write(JSON.stringify({ env: process.env, args: process.argv.slice(1) }))';
+    const out = JSON.parse(await runAzure(['account', 'show'], azureEnvironment(hostile), { file: process.execPath, prefix: ['-e', script] }));
+    expect(out.args).toEqual(['account', 'show']);
+    expect(out.env.AZURE_LOGGING_ENABLE_LOG_FILE).toBe('false');
+    expect(out.env.AZURE_CORE_ONLY_SHOW_ERRORS).toBe('true');
+    for (const name of ['NODE_DEBUG', 'GIT_DIR', PROBE.keyVariable]) expect(out.env[name]).toBeUndefined();
+    await expect(runAzure(['account', 'show'], azureEnvironment(osBase()), { file: process.execPath, prefix: ['-e', 'process.exit(2)'] }))
+      .rejects.toThrow(/^AZURE_CLI_FAILED$/);
+  }, 30000);
+
+  it('reports the real child exit code, maps a start failure to 1, and clears the key after a child failure', async () => {
+    const check = `process.exit(process.env.${PROBE.keyVariable} === ${JSON.stringify(KEY)} && !process.env.GIT_DIR ? 3 : 9)`;
+    const fake = azure(ENDPOINT, KEY);
+    let passed: Record<string, string | undefined> | undefined;
+    const code = await launch(args, { azure: fake.run, baseEnv: { ...osBase(), GIT_DIR: 'y' }, runtime: RUNTIME, child: (env, childArgs) => {
+      passed = env;
+      return runChild(env, childArgs, { file: process.execPath, prefix: ['-e', check] });
+    } });
+    expect(code).toBe(3);
+    expect(passed![PROBE.keyVariable]).toBeUndefined();
+    expect(await runChild(probeEnvironment(osBase(), KEY), ['send', id, 'min'], { file: path.join(root, 'missing-node'), prefix: [] })).toBe(1);
+  }, 30000);
+
   it('stops with fixed errors on another resource or a failed key retrieval, never trying anything else', async () => {
-    const child = async () => { throw new Error('child must not start'); };
     const other = azure('https://another.openai.azure.com/', KEY);
-    await expect(launch(args, { azure: other.run, child, baseEnv: {} })).rejects.toThrow(/^RESOURCE_MISMATCH$/);
+    await expect(launch(args, { azure: other.run, child: noChild, baseEnv: {}, runtime: RUNTIME })).rejects.toThrow(/^RESOURCE_MISMATCH$/);
     expect(other.calls).toHaveLength(1);
-    const failed = azure('https://stillroom-ai-eval.openai.azure.com/', new Error(`az leaked ${KEY}`));
-    const error = await launch(args, { azure: failed.run, child, baseEnv: {} }).catch((e: Error) => e);
+    const failed = azure(ENDPOINT, new Error(`az leaked ${KEY}`));
+    const error = await launch(args, { azure: failed.run, child: noChild, baseEnv: {}, runtime: RUNTIME }).catch((e: Error) => e);
     expect((error as Error).message).toBe('KEY_RETRIEVAL_FAILED');
     expect(failed.calls).toHaveLength(2);
-    const malformed = azure('https://stillroom-ai-eval.openai.azure.com/', `${KEY} with space`);
-    const bad = await launch(args, { azure: malformed.run, child, baseEnv: {} }).catch((e: Error) => e);
+    const malformed = azure(ENDPOINT, `${KEY} with space`);
+    const bad = await launch(args, { azure: malformed.run, child: noChild, baseEnv: {}, runtime: RUNTIME }).catch((e: Error) => e);
     expect((bad as Error).message).toBe('KEY_RETRIEVAL_FAILED');
   });
 });

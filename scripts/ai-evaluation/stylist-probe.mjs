@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { constants, readFileSync } from 'node:fs';
-import { lstat, mkdir, open, realpath, rmdir } from 'node:fs/promises';
+import { lstat, mkdir, open, realpath, rmdir, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,7 +40,13 @@ export const SOURCE_PATHS = Object.freeze([
 ]);
 const LEDGER = 'probe.jsonl';
 const LOCK = 'probe.lock';
+const PENDING = 'probe.pending';
+const PENDING_LIMIT = 256;
 const LEDGER_LIMIT = 65536;
+/** Recognised CI markers, matched by name in any case and with any value. There is no bypass. */
+export const CI_VARIABLES = Object.freeze(['CI', 'CONTINUOUS_INTEGRATION', 'GITHUB_ACTIONS', 'TF_BUILD', 'SYSTEM_TEAMFOUNDATIONCOLLECTIONURI',
+  'GITLAB_CI', 'BUILDKITE', 'CIRCLECI', 'TRAVIS', 'JENKINS_URL', 'TEAMCITY_VERSION', 'APPVEYOR', 'CODEBUILD_BUILD_ID',
+  'BITBUCKET_BUILD_NUMBER', 'DRONE', 'RUNNER_TEMP']);
 const RECEIPT_LIMIT = 8192;
 
 export class ProbeError extends Error {
@@ -64,8 +70,9 @@ export const digest = (value) => createHash('sha256').update(value).digest('hex'
 const jsonDigest = (value) => digest(JSON.stringify(value));
 export const utcMonth = (ms) => new Date(ms).toISOString().slice(0, 7);
 
-/** The pinned Node from `.node-version`, and no preload, tracing, debugging or TLS override. */
+/** Not in CI; the pinned Node from `.node-version`; and no preload, tracing, debugging or TLS override. */
 export function assertRuntime({ versions = process.versions, execArgv = process.execArgv, env = process.env } = {}) {
+  requireThat(!Object.keys(env).some((name) => CI_VARIABLES.includes(name.toUpperCase())), 'CI_ENVIRONMENT_REFUSED');
   const pinned = readFileSync(path.join(REPO, '.node-version'), 'utf8').trim();
   requireThat(versions.node === pinned, 'PINNED_NODE_REQUIRED');
   requireThat(execArgv.length === 0 && ['NODE_OPTIONS', 'NODE_DEBUG', 'NODE_DEBUG_NATIVE', 'NODE_V8_COVERAGE', 'SSLKEYLOGFILE',
@@ -253,17 +260,42 @@ async function locked(directory, operation) {
   if (failed) throw primary;
   return result;
 }
-async function append(directory, event, initial = false, fs = { open }) {
+async function writeSynced(fs, filename, flags, text) {
   let handle, ok = true;
   try {
-    handle = await fs.open(path.join(directory, LEDGER), initial ? 'wx' : constants.O_WRONLY | constants.O_APPEND, 0o600);
-    await handle.writeFile(`${JSON.stringify(event)}\n`, 'utf8');
+    handle = await fs.open(filename, flags, 0o600);
+    if (text !== null) await handle.writeFile(text, 'utf8');
     await handle.sync();
   } catch { ok = false; }
   if (handle) {
     try { await handle.close(); } catch { ok = false; }
   }
-  if (!ok) throw new ProbeError('LEDGER_WRITE_UNCERTAIN');
+  return ok;
+}
+/**
+ * The pending marker is synced before the ledger line and removed only after that line is synced and closed. A failed
+ * sync or close therefore leaves the marker, so the record stays UNRESOLVED even if the lock is removed by hand; only
+ * `recover` clears it.
+ */
+async function append(directory, event, initial = false, fs = { open }) {
+  const marker = path.join(directory, PENDING);
+  const pending = `${JSON.stringify({ type: event.type, slot: event.slot ?? null })}\n`;
+  if (!await writeSynced(fs, marker, 'wx', pending)) throw new ProbeError('LEDGER_WRITE_UNCERTAIN');
+  const flags = initial ? 'wx' : constants.O_WRONLY | constants.O_APPEND;
+  if (!await writeSynced(fs, path.join(directory, LEDGER), flags, `${JSON.stringify(event)}\n`)) throw new ProbeError('LEDGER_WRITE_UNCERTAIN');
+  try { await (fs.unlink ?? unlink)(marker); } catch { throw new ProbeError('LEDGER_WRITE_UNCERTAIN'); }
+}
+const present = async (filename) => (await lstat(filename).catch(() => null)) !== null;
+/** The pending marker's recorded event, `{ unknown: true }` if it is unreadable, or null if there is none. */
+async function pendingMarker(directory) {
+  const filename = path.join(directory, PENDING);
+  if (!await present(filename)) return null;
+  try {
+    const value = parseJson(await boundedFile(filename, PENDING_LIMIT));
+    if (exact(value, ['type', 'slot']) && ['init', 'intent', 'result', 'reconcile', 'recover'].includes(value.type)
+      && (value.slot === null || SLOTS.includes(value.slot))) return value;
+  } catch { /* unreadable below */ }
+  return { unknown: true };
 }
 
 /** The checkout's commit; every probe source file must be tracked and unmodified. */
@@ -332,10 +364,13 @@ function validObservation(o) {
 export async function readRecord({ root, id, source = gitSource }) {
   requireThat(typeof id === 'string' && /^[a-f0-9]{32}$/.test(id), 'USAGE');
   const directory = await privateDirectory(path.join(await privateDirectory(root), id));
+  const marker = await pendingMarker(directory);
+  requireThat(marker?.type !== 'init', 'ALLOCATION_UNUSABLE');
+  const persistence = { pending: marker !== null, locked: await present(path.join(directory, LOCK)) };
   const raw = await boundedFile(path.join(directory, LEDGER), LEDGER_LIMIT);
-  requireThat(raw.length > 0 && raw.at(-1) === 10, 'LEDGER_TORN');
+  requireThat(raw.length > 0 && raw.at(-1) === 10, persistence.pending ? 'PERSISTENCE_UNCERTAIN' : 'LEDGER_TORN');
   const lines = new TextDecoder('utf-8', { fatal: true }).decode(raw).slice(0, -1).split('\n');
-  requireThat(lines.length >= 1 && lines.length <= 5, 'LEDGER_INVALID');
+  requireThat(lines.length >= 1 && lines.length <= 9, 'LEDGER_INVALID');
   const events = lines.map((line) => parseJson(Buffer.from(line)));
   const init = events[0];
   requireThat(exact(init, ['type', 'allocationId', 'receipt', 'controls', 'source', 'manifestId', 'settingsDigest', 'bodies', 'time'])
@@ -355,28 +390,40 @@ export async function readRecord({ root, id, source = gitSource }) {
       requireThat(exact(event, ['type', 'slot', 'bodyDigest', 'valuationMicro', 'cumulativeMicro', 'time']) && slot === null
         && event.bodyDigest === init.bodies[event.slot] && event.valuationMicro === PROBE.valuationMicro
         && event.cumulativeMicro === cumulative + PROBE.valuationMicro && event.cumulativeMicro <= allocation && isoTime(event.time)
-        && (event.slot === 'min' ? slots.max === null : slots.min?.result?.state === 'OK'), 'LEDGER_INVALID');
+        && (event.slot === 'min' ? slots.max === null : slotState(slots.min) === 'OK'), 'LEDGER_INVALID');
       cumulative = event.cumulativeMicro;
-      slots[event.slot] = { intent: event, result: null, reconciled: false };
+      slots[event.slot] = { intent: event, result: null, reconciled: false, recovered: false };
     } else if (event.type === 'result') {
-      requireThat(exact(event, ['type', 'slot', 'observation', 'time']) && slot && !slot.result && !slot.reconciled
+      requireThat(exact(event, ['type', 'slot', 'observation', 'time']) && slot && !slot.result && !slot.reconciled && !slot.recovered
         && validObservation(event.observation) && isoTime(event.time), 'LEDGER_INVALID');
       slot.result = event.observation;
+    } else if (event.type === 'recover') {
+      requireThat(exact(event, ['type', 'slot', 'time']) && isoTime(event.time) && !slot?.recovered, 'LEDGER_INVALID');
+      if (slot) slot.recovered = true;
+      else {
+        // The intent line may never have reached the ledger; the slot is still consumed at the full valuation.
+        requireThat(cumulative + PROBE.valuationMicro <= allocation, 'LEDGER_INVALID');
+        cumulative += PROBE.valuationMicro;
+        slots[event.slot] = { intent: null, result: null, reconciled: false, recovered: true };
+      }
     } else {
       requireThat(event.type === 'reconcile' && exact(event, ['type', 'slot', 'resolution', 'time']) && event.resolution === 'counted'
-        && slot && !slot.result && !slot.reconciled && isoTime(event.time), 'LEDGER_INVALID');
+        && slot && !slot.result && !slot.reconciled && !slot.recovered && isoTime(event.time), 'LEDGER_INVALID');
       slot.reconciled = true;
     }
   }
-  return { directory, init, slots, cumulative };
+  return { directory, init, slots, cumulative, persistence };
 }
 
-const slotState = (slot) => !slot ? 'UNUSED' : slot.result ? slot.result.state : slot.reconciled ? 'COUNTED' : 'UNCERTAIN_INTENT';
+/** A recovered slot is counted whatever its visible result says: a result written under a failed sync is untrusted. */
+const slotState = (slot) => !slot ? 'UNUSED' : slot.recovered ? 'COUNTED' : slot.result ? slot.result.state
+  : slot.reconciled ? 'COUNTED' : 'UNCERTAIN_INTENT';
 /**
- * PASS only when both calls returned valid, in-envelope results and the maximum request used at most 20,000 input
- * tokens. Reconciliation never creates a success.
+ * PASS only when both calls returned valid, in-envelope results, every write was confirmed, and the maximum request
+ * used at most 20,000 input tokens. Reconciliation and recovery never create a success.
  */
 export function verdict(record) {
+  if (record.persistence.pending || record.persistence.locked) return 'UNRESOLVED';
   const min = slotState(record.slots.min), max = slotState(record.slots.max);
   if (min === 'UNCERTAIN_INTENT' || max === 'UNCERTAIN_INTENT') return 'UNRESOLVED';
   if (min === 'OK' && max === 'OK') return record.slots.max.result.usage.input <= PROBE.calibrationInputTokens ? 'PASS' : 'REVISE_ENVELOPE';
@@ -389,10 +436,12 @@ export function summary(record) {
     sourceCommit: record.init.source.commit, runtime: `node ${record.init.source.node}`,
     allocationMicro: record.init.receipt.allocationMicro, allocationMonth: record.init.receipt.allocatedAt.slice(0, 7),
     consumedMicro: String(record.cumulative),
+    persistence: { ...record.persistence },
     observedEstimateMicro: String(SLOTS.reduce((sum, name) => sum + Number(record.slots[name]?.result?.estimateMicro ?? 0), 0)),
     slots: Object.fromEntries(SLOTS.map((name) => {
       const slot = record.slots[name];
-      return [name, { state: slotState(slot), bodyDigest: record.init.bodies[name], intentAt: slot?.intent.time ?? null, ...(slot?.result ?? {}) }];
+      return [name, { ...(slot?.result ?? {}), state: slotState(slot), recovered: slot?.recovered ?? false,
+        bodyDigest: record.init.bodies[name], intentAt: slot?.intent?.time ?? null }];
     })),
     verdict: verdict(record),
     notes: {
@@ -401,6 +450,7 @@ export function summary(record) {
       meaning: 'Route, schema and control observations and token calibration at two synthetic sizes only. Not a token-bound proof, '
         + 'a quality evaluation, an RLS test or a hosted Edge test.',
       record: 'Cooperative local record, not tamper-proof.',
+      persistence: 'UNRESOLVED while a write is unconfirmed (pending marker) or the lock is held; run recover, which counts the slot.',
     },
   };
 }
@@ -443,8 +493,10 @@ export async function executeSlot({ root, id, slot, key, fetchImpl = fetch, now 
   requireThat(SLOTS.includes(slot), 'INVALID_SLOT');
   requireThat(typeof key === 'string' && /^[\x21-\x7e]{16,512}$/.test(key), 'PRIVATE_KEY_REQUIRED');
   const record = await readRecord({ root, id, source });
+  requireThat(!record.persistence.pending, 'PERSISTENCE_UNCERTAIN');
   return locked(record.directory, async () => {
-    const { init, slots, cumulative } = await readRecord({ root, id, source });
+    const { init, slots, cumulative, persistence } = await readRecord({ root, id, source });
+    requireThat(!persistence.pending, 'PERSISTENCE_UNCERTAIN');
     requireThat(SLOTS.every((name) => slotState(slots[name]) !== 'UNCERTAIN_INTENT'), 'PRIOR_UNCERTAINTY');
     requireThat(slots[slot] === null, 'SLOT_CONSUMED');
     requireThat(slot === 'min' ? slots.max === null : slotState(slots.min) === 'OK', 'VALID_MIN_REQUIRED');
@@ -481,11 +533,50 @@ export async function executeSlot({ root, id, slot, key, fetchImpl = fetch, now 
 export async function reconcile({ root, id, slot, now = Date.now, source = gitSource }) {
   requireThat(SLOTS.includes(slot), 'INVALID_SLOT');
   const record = await readRecord({ root, id, source });
+  requireThat(!record.persistence.pending, 'PERSISTENCE_UNCERTAIN');
   return locked(record.directory, async () => {
-    const { slots } = await readRecord({ root, id, source });
+    const { slots, persistence } = await readRecord({ root, id, source });
+    requireThat(!persistence.pending, 'PERSISTENCE_UNCERTAIN');
     requireThat(slotState(slots[slot]) === 'UNCERTAIN_INTENT', 'NOTHING_TO_RECONCILE');
     await append(record.directory, { type: 'reconcile', slot, resolution: 'counted', time: new Date(now()).toISOString() });
   });
+}
+
+/**
+ * Explicit recovery after a failed sync or close, run only when no probe process is running. The affected slot is
+ * counted at the full valuation and any result visible for it is untrusted, so recovery never creates a success. It
+ * adopts the retained lock (or retakes one removed by hand), drops a torn final line, appends `recover` (or re-syncs a
+ * recover line that is already visible), and only then clears the pending marker and the lock.
+ */
+export async function recover({ root, id, slot, now = Date.now, source = gitSource, fs = { open } }) {
+  requireThat(SLOTS.includes(slot), 'INVALID_SLOT');
+  requireThat(typeof id === 'string' && /^[a-f0-9]{32}$/.test(id), 'USAGE');
+  const directory = await privateDirectory(path.join(await privateDirectory(root), id));
+  const marker = await pendingMarker(directory);
+  requireThat(marker !== null, 'NOTHING_TO_RECOVER');
+  requireThat(marker.type !== 'init', 'ALLOCATION_UNUSABLE');
+  requireThat(marker.unknown || marker.slot === slot, 'RECOVERY_SLOT_MISMATCH');
+  const lock = path.join(directory, LOCK);
+  try { await mkdir(lock, { mode: 0o700 }); }
+  catch (error) { requireThat(error?.code === 'EEXIST', 'LOCK_FAILED'); }
+  const ledger = path.join(directory, LEDGER);
+  const raw = await boundedFile(ledger, LEDGER_LIMIT);
+  if (raw.at(-1) !== 10) {
+    const keep = raw.lastIndexOf(10) + 1;
+    requireThat(keep > 0, 'ALLOCATION_UNUSABLE');
+    let handle, ok = true;
+    try { handle = await fs.open(ledger, 'r+'); await handle.truncate(keep); await handle.sync(); } catch { ok = false; }
+    if (handle) { try { await handle.close(); } catch { ok = false; } }
+    requireThat(ok, 'LEDGER_WRITE_UNCERTAIN');
+  }
+  const { slots } = await readRecord({ root, id, source });
+  const synced = slots[slot]?.recovered
+    ? await writeSynced(fs, ledger, 'r+', null)
+    : await writeSynced(fs, ledger, constants.O_WRONLY | constants.O_APPEND, `${JSON.stringify({ type: 'recover', slot, time: new Date(now()).toISOString() })}\n`);
+  requireThat(synced, 'LEDGER_WRITE_UNCERTAIN');
+  requireThat((await readRecord({ root, id, source })).slots[slot]?.recovered === true, 'LEDGER_INVALID');
+  try { await (fs.unlink ?? unlink)(path.join(directory, PENDING)); } catch { throw new ProbeError('LEDGER_WRITE_UNCERTAIN'); }
+  try { await rmdir(lock); } catch { throw new ProbeError('LOCK_RELEASE_FAILED'); }
 }
 
 export function parseArguments(args) {
@@ -493,14 +584,14 @@ export function parseArguments(args) {
   requireThat(rest.length === 0, 'USAGE');
   if (command === 'init') requireThat(typeof first === 'string' && second === undefined, 'USAGE');
   else if (command === 'status') requireThat(typeof first === 'string' && /^[a-f0-9]{32}$/.test(first) && second === undefined, 'USAGE');
-  else requireThat(['send', 'reconcile'].includes(command) && typeof first === 'string' && /^[a-f0-9]{32}$/.test(first)
+  else requireThat(['send', 'reconcile', 'recover'].includes(command) && typeof first === 'string' && /^[a-f0-9]{32}$/.test(first)
     && SLOTS.includes(second), 'USAGE');
   return { command, first, second };
 }
-export async function main(args, { env = process.env, log = console.log } = {}) {
-  assertRuntime({ env });
+/** Refuses CI and the unpinned runtime first, before any file, key or network access. */
+export async function main(args, { env = process.env, log = console.log, runtime = {}, root = operatorRoot(), fetchImpl = fetch } = {}) {
+  assertRuntime({ env, ...runtime });
   const { command, first, second } = parseArguments(args);
-  const root = operatorRoot();
   let id = first;
   if (command === 'init') {
     requireThat(path.isAbsolute(first), 'PRIVATE_PATH_INVALID');
@@ -509,10 +600,12 @@ export async function main(args, { env = process.env, log = console.log } = {}) 
   } else if (command === 'send') {
     const key = env[PROBE.keyVariable];
     delete env[PROBE.keyVariable];
-    const observation = await executeSlot({ root, id, slot: second, key });
+    const observation = await executeSlot({ root, id, slot: second, key, fetchImpl });
     if (observation.state !== 'OK') process.exitCode = 1;
   } else if (command === 'reconcile') {
     await reconcile({ root, id, slot: second });
+  } else if (command === 'recover') {
+    await recover({ root, id, slot: second });
   }
   log(JSON.stringify(summary(await readRecord({ root, id })), null, 2));
 }

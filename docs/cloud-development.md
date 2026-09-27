@@ -1054,7 +1054,9 @@ cooperative, not tamper-proof: it stops accidental reuse by an operator using
 this tool, not a deliberate edit of the file system.
 
 **Commands.** Run from a clean checkout of the merged commit, with the pinned
-Node:
+Node, on the operator's own machine. Both entrypoints refuse recognised CI
+environments (`CI`, `GITHUB_ACTIONS`, `TF_BUILD` and similar, any value) before
+any record, key or network access; there is no bypass.
 
 - `node scripts/ai-evaluation/stylist-probe.mjs init <absolute receipt.json>`
   prints the allocation ID; nothing is sent.
@@ -1066,10 +1068,22 @@ Node:
   (Q3).
 - `node scripts/ai-evaluation/stylist-probe.mjs reconcile <id> min|max` marks an
   intent without a result as **counted**. It cannot mark a call as not sent.
+- `node scripts/ai-evaluation/stylist-probe.mjs recover <id> min|max` is the only
+  way out of an unconfirmed write (see below). Run it only when no probe process
+  is running.
 
 **Secret-safe launcher (Q3).** The launcher targets resource group
 `rg-stillroom-ai-eval`, resource `stillroom-ai-eval` and key `key1` in the
-subscription given on the command line, and makes exactly two Azure CLI calls
+subscription given on the command line. Before either Azure CLI call it refuses
+an inherited TLS-verification override, key log, tracing or code-injection
+variable (for example `AZURE_CLI_DISABLE_CONNECTION_VERIFICATION`,
+`REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `SSLKEYLOGFILE`, `PYTHONPATH`,
+`NODE_OPTIONS`). Each `az` call gets a narrow environment: OS basics,
+`AZURE_CONFIG_DIR` and any proxy variables, plus fixed overrides that beat the
+operator's az config file, including `AZURE_LOGGING_ENABLE_LOG_FILE=false` (az
+file logging writes DEBUG output whatever the console verbosity) and telemetry
+off. The operator's global az configuration is not changed. The probe child gets
+only the OS basics plus the key. It makes exactly two Azure CLI calls
 with `--only-show-errors -o json`: `account show` (the endpoint origin must equal
 `STYLIST_ENDPOINT`'s, before any key is listed) and `account keys list --query
 key1`. The output is captured in memory; the key goes only into the probe child's
@@ -1088,10 +1102,20 @@ the sole affirmative evidence that the provider call never began. A crash,
 timeout or reset after the intent is not that evidence, so the slot stays
 counted. If the intent cannot be synced nothing is dispatched; if the result or
 close cannot be synced the lock and the uncertain state remain until
-`reconcile`. Reconciliation never creates a success: without an OK `min`, `max`
+`reconcile` or `recover`. Reconciliation never creates a success: without an OK `min`, `max`
 is refused, and without an OK `max` there is no PASS. The run stops on invalid
 usage, a model or control anomaly, or an input (24,000) or output (1,200) token
 envelope violation.
+
+**Unconfirmed writes.** Every ledger line is preceded by a synced
+`probe.pending` marker, removed only after the line is synced and closed. While
+the marker exists (or the lock is held) `status` reports `UNRESOLVED`, never
+`PASS`, and `send` and `reconcile` refuse with `PERSISTENCE_UNCERTAIN`; removing
+the lock by hand changes nothing. `recover <id> <slot>` drops a torn final line,
+appends a `recover` event, and only then clears the marker and the lock. A
+recovered slot is **counted** at the full valuation whatever its visible result
+says, so a result written under a failed sync or close can never become a PASS.
+An unconfirmed `init` makes the allocation unusable: stop and ask for a new one.
 
 **Restoring the total (Q2, separately approved).** After the probe's UTC month
 ends, and only after `status` shows no uncertain slot, the coordinator restores

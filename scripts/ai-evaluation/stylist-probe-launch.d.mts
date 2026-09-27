@@ -1,10 +1,18 @@
+type Env = Record<string, string | undefined>;
+type Program = { file: string; prefix: string[] };
+type Runtime = { versions?: { node?: string }; execArgv?: string[] };
 export const AZURE_TARGET: Readonly<{ resourceGroup: string; resource: string; keyName: string }>;
+export const AZURE_FIXED: Readonly<Record<string, string>>;
+export const REFUSED_VARIABLES: readonly string[];
 export function parseLauncherArguments(args: string[]): { subscription: string; id: string; slot: 'min' | 'max' };
 export function azureCommands(subscription: string): { endpoint: string[]; keys: string[] };
-export function runAzure(args: string[]): Promise<string>;
-export function childEnvironment(base: Record<string, string | undefined>, key: string): Record<string, string | undefined>;
+export function azureEnvironment(base: Env): Record<string, string>;
+export function probeEnvironment(base: Env, key: string): Record<string, string>;
+export function runAzure(args: string[], env: Env | undefined, program?: Program): Promise<string>;
+export function runChild(env: Env, args: string[], program?: Program): Promise<number>;
 export function launch(args: string[], options?: {
-  azure?: (args: string[]) => Promise<string>;
-  child?: (env: Record<string, string | undefined>, args: string[]) => Promise<number>;
-  baseEnv?: Record<string, string | undefined>;
+  azure?: (args: string[], env: Record<string, string>) => Promise<string>;
+  child?: (env: Env, args: string[]) => Promise<number>;
+  baseEnv?: Env;
+  runtime?: Runtime;
 }): Promise<number>;
