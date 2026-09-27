@@ -248,6 +248,8 @@ async function main() {
       username: 'postgres', database: 'postgres', active: false }, { name: 'stillroom-deletion-receipt-purge', schedule: '17 3 * * *',
       command: 'select public.purge_deletion_receipts()', username: 'postgres', database: 'postgres', active: false },
     { name: 'stillroom-stylist-expire', schedule: '*/5 * * * *', command: 'select public.stylist_expire_due(500)',
+      username: 'postgres', database: 'postgres', active: false },
+    { name: 'stillroom-enhance-expire', schedule: '*/5 * * * *', command: 'select public.enhance_expire_due(500)',
       username: 'postgres', database: 'postgres', active: false }]);
     // Inactive and never run: the structural proof that the schedule did not touch the fixtures above.
     requireEvidence(schedule.runs === 0 && schedule.schemaDenied === true && schedule.logRun === 'on');

@@ -17,6 +17,10 @@ import * as deploy from '../../scripts/check-deploy-artifacts.mjs';
 // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
 import { EDGE_DELEGATIONS, delegatedLine } from '../../tests/security/edge-delegations.mjs';
 import { AZURE_REVIEW_EXPIRES } from '../../supabase/functions/analyze-clothing/azure-openai';
+import { classifyEnhanceResponse, enhanceForm } from '../../supabase/functions/enhance-photo/azure';
+import { ENHANCE_DEPLOYMENT, ENHANCE_PARAMETERS, ENHANCE_PROMPT } from '../../src/domain/enhancement';
+import { flatJpeg } from '../fixtures/restore-jpeg-fixtures';
+import { createHash } from 'node:crypto';
 // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
 import { analysisFacts } from '../integration/ai-analysis.sessions.mjs';
 
@@ -66,12 +70,14 @@ describe('fixture gateway (rev5 A1)', () => {
     expect(config.routes).toEqual([...gateway.ALLOWED_ROUTES]);
     expect(config.diagnostics).toEqual(['GET /__config', 'GET /__forwarded']);
     for (const route of config.diagnostics as string[]) expect(gateway.ALLOWED_ROUTES).not.toContain(route);
-    expect(config.ingress).toEqual({ routes: ['POST /functions/v1/analyze-clothing', 'POST /functions/v1/stylist-chat'],
+    expect(config.ingress).toEqual({ routes: ['POST /functions/v1/analyze-clothing', 'POST /functions/v1/stylist-chat',
+      'POST /functions/v1/enhance-photo'],
       headers: [...gateway.INGRESS_HEADERS], target: 'http://edge-runtime:9000' });
   });
-  it('allowlists exactly the backend calls the analyze and stylist handlers make', async () => {
+  it('allowlists exactly the backend calls the analyze, stylist and enhance handlers make', async () => {
     const rpcs: string[] = [];
-    for (const file of ['supabase/functions/analyze-clothing/handler.ts', 'supabase/functions/stylist-chat/handler.ts']) {
+    for (const file of ['supabase/functions/analyze-clothing/handler.ts', 'supabase/functions/stylist-chat/handler.ts',
+      'supabase/functions/enhance-photo/handler.ts']) {
       const source = await read(file);
       expect(source).toContain('/auth/v1/user');
       rpcs.push(...[...source.matchAll(/rpc\('([a-z_]+)'/g)].map((m) => `POST /rest/v1/rpc/${m[1]}`));
@@ -80,6 +86,17 @@ describe('fixture gateway (rev5 A1)', () => {
     expect(gateway.decide(request('POST', '/functions/v1/stylist-chat'), gateway.INGRESS_ROUTES)).toBe('forward');
     expect(gateway.decide(request('POST', '/rest/v1/rpc/stylist_direct_allocation'))).toBe('route');
     expect(gateway.decide(request('POST', '/rest/v1/rpc/stylist_expire_due'))).toBe('route');
+    expect(gateway.decide(request('POST', '/functions/v1/enhance-photo'), gateway.INGRESS_ROUTES)).toBe('forward');
+    for (const name of ['enhance_expire_due', 'enhance_provider_control', 'enhance_probe_authorise', 'enhance_set_consent']) {
+      expect(gateway.decide(request('POST', `/rest/v1/rpc/${name}`))).toBe('route');
+    }
+  });
+  it('relays only the fixed response headers, including the two the enhance handler exposes', async () => {
+    const source = await read('supabase/functions/enhance-photo/handler.ts');
+    const exposed = [...source.matchAll(/'(X-Stillroom-Enhancement-[A-Za-z0-9-]+)'/g)].map((m) => m[1]!.toLowerCase());
+    expect(new Set(exposed)).toEqual(new Set(['x-stillroom-enhancement-sha256', 'x-stillroom-enhancement-usable-until']));
+    expect(gateway.RELAYED_RESPONSE_HEADERS).toEqual(['content-type', 'content-length', 'cache-control', 'x-content-type-options',
+      'vary', ...exposed.sort()]);
   });
 });
 
@@ -122,6 +139,66 @@ describe('provider double', () => {
     expect(double.READY_FACTS).toEqual(analysisFacts);
     expect(JSON.parse(double.completion('ready').choices[0].message.content)).toEqual(analysisFacts);
     expect(() => JSON.parse(double.completion('malformed').choices[0].message.content)).toThrow();
+  });
+});
+
+async function multipart(form: FormData) {
+  const request = new Request('http://provider-double:8080/images/edits', { method: 'POST', body: form });
+  return { type: request.headers.get('content-type')!, body: Buffer.from(await request.arrayBuffer()) };
+}
+const enhanceHeaders = (type: string) => ({ 'api-key': 'local-dummy-not-a-credential', 'content-type': type });
+
+describe('image edit double (BG2b-1)', () => {
+  it('writes the same bytes as the flat JPEG fixture and pins the frozen request', () => {
+    for (const [width, height] of [[800, 1000], [1024, 1280], [17, 33]] as const) {
+      expect(new Uint8Array(double.flatBaselineJpeg(width, height))).toEqual(flatJpeg({ width, height }));
+    }
+    expect(new Uint8Array(double.flatBaselineJpeg(1024, 1280, [200, 120, 140]))).toEqual(flatJpeg({ width: 1024, height: 1280,
+      colour: [200, 120, 140] }));
+    expect(double.ENHANCE_DEPLOYMENT).toBe(ENHANCE_DEPLOYMENT);
+    expect(double.ENHANCE_FIELDS).toEqual(Object.entries(ENHANCE_PARAMETERS).map(([key, value]) => [key, String(value)]));
+    expect(double.ENHANCE_PROMPT_SHA256).toBe(createHash('sha256').update(ENHANCE_PROMPT).digest('hex'));
+  });
+  it('accepts only the exact production multipart and selects the mode by input width', async () => {
+    for (const [width, mode] of Object.entries(double.ENHANCE_MODES)) {
+      const { type, body } = await multipart(enhanceForm(flatJpeg({ width: Number(width), height: 1000 })));
+      expect(await double.enhanceVerdict(enhanceHeaders(type), body)).toEqual({ mode });
+    }
+    const good = await multipart(enhanceForm(flatJpeg({ width: 800, height: 1000 })));
+    const reason = async (headers: Record<string, string>, body: Buffer) => (await double.enhanceVerdict(headers, body)).reason;
+    expect(await reason({ ...enhanceHeaders(good.type), 'api-key': 'real' }, good.body)).toBe('api-key');
+    expect(await reason(headers, good.body)).toBe('content-type');
+    const changed = async (edit: (form: FormData) => void) => {
+      const form = enhanceForm(flatJpeg({ width: 800, height: 1000 }));
+      edit(form);
+      const { type, body } = await multipart(form);
+      return reason(enhanceHeaders(type), body);
+    };
+    expect(await changed((form) => form.append('user', 'owner'))).toBe('enhance-keys');
+    expect(await changed((form) => form.set('quality', 'high'))).toBe('enhance-parameters');
+    expect(await changed((form) => form.set('prompt', `${ENHANCE_PROMPT} Change the colour.`))).toBe('enhance-prompt');
+    const png = new FormData();
+    for (const [key, value] of Object.entries(ENHANCE_PARAMETERS)) png.append(key, String(value));
+    png.append('prompt', ENHANCE_PROMPT);
+    png.append('image', new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }), 'garment.png');
+    const notJpeg = await multipart(png);
+    expect(await reason(enhanceHeaders(notJpeg.type), notJpeg.body)).toBe('enhance-image');
+  });
+  it('returns outputs that the production classifier admits, strips or rejects as the security stage expects', () => {
+    const expected = new Uint8Array(double.enhanceOutput('enhance-ok'));
+    const classify = (mode: string) => {
+      const { status, body } = double.enhanceResponse(mode);
+      return classifyEnhanceResponse(status, body);
+    };
+    expect(classify('enhance-ok')).toMatchObject({ code: 'OK', image: expected });
+    expect(classify('enhance-ok').usage).not.toBeNull();
+    expect(classify('enhance-metadata')).toMatchObject({ code: 'OK', image: expected });
+    expect(double.enhanceOutput('enhance-metadata').length).toBeGreaterThan(expected.length);
+    expect(classify('enhance-trailing')).toMatchObject({ code: 'OUTPUT_REJECTED', image: null });
+    expect(classify('enhance-second-frame')).toMatchObject({ code: 'OUTPUT_REJECTED', image: null });
+    expect(classify('enhance-filtered')).toMatchObject({ code: 'FILTERED', usage: null });
+    expect(classify('enhance-rate-limited')).toMatchObject({ code: 'FAILED', usage: null });
+    expect(classify('enhance-no-usage')).toMatchObject({ code: 'OK', image: expected, usage: null });
   });
 });
 
@@ -294,8 +371,8 @@ describe('deploy-artifact check (rev5 A2)', () => {
   it('passes the real repository and a clean synthetic one', async () => {
     const real = await deploy.analyzeDeployArtifacts(root);
     expect(real.problems).toEqual([]);
-    expect(Object.keys(real.graph).sort()).toEqual(['analyze-clothing', 'delete-account', 'finalize-analyzed-item', 'finalize-image-change',
-      'stylist-chat']);
+    expect(Object.keys(real.graph).sort()).toEqual(['analyze-clothing', 'delete-account', 'enhance-photo', 'finalize-analyzed-item',
+      'finalize-image-change', 'stylist-chat']);
     expect((await repo({})).problems).toEqual([]);
   });
   it('fails an entrypoint that points at a fixture', async () => {

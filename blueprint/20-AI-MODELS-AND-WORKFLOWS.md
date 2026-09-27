@@ -244,6 +244,20 @@ ADR25 in `18`. An optional stylist chat, separate from the deterministic suggest
 - **Direct calls (D1).** Before any ST0 or probe call made outside the app, `stylist_direct_allocation` lowers the owner's monthly allowance by the allocated USD operational amount, under the admission locks, and refuses when accounted and held usage would no longer fit. ST0 and the probe are not run in ST1a.
 - **Open gates.** Hosted apply of both migrations, the job's activation, the stylist allowance and consent notice, the direct-call allocation, and the exact-route synthetic probe all need owner approval. The client UI is ST1b.
 
+## BG2b-1 photo enhancement backend (inactive) - 29 September 2026
+
+ADR26 in `18`. Every new garment photo will be redrawn automatically after BG1/BG2a; BG2b-1 adds the backend only and activates nothing. The client, consent screen and label are BG2b-2.
+
+- **Route.** `enhance-photo` Edge function, manifest `azure-global-image25-sunburst-enhance-v1`, the existing Global deployment `eval-image25-sunburst-20260908` (`gpt-image-2.5-sunburst`, 2 requests/min) on `stillroom-ai-eval`, the images edit API with one frozen parameter set (`1024x1280`, `medium`, JPEG 85, `n:1`), one call and no retry or fallback processor. Processing may happen outside the EU. Any other quality or parameter is a new manifest and probe.
+- **Ordering (a).** Enhance first; the one analysis then runs on the enhanced JPEG and binds to its hash as today. Ordering (b) needs a new plan and critique.
+- **Output admission.** Provider output is admitted only through `admitProviderJpeg` (`src/images/provider-jpeg.ts`): the byte-preservable baseline profile of `inspectRestoreJpeg`, exactly 1024×1280, at most 512,000 bytes, one frame and scan, no trailing data, checked on the server and again on the client before decoding. The response body is capped at 4 MiB while reading. Accepted bytes are never re-encoded.
+- **Fidelity.** `src/images/fidelity.ts` is a heuristic rejection of some large changes (mask-weighted colour and structure metrics), failing closed on an empty, tiny or ambiguous mask and on non-finite metrics. It is not a fidelity guarantee.
+- **Accounting.** A claim reserves USD 0.30 (`300000` micro) in `private.ai_usage` with `purpose='enhancement'` and settles through enhancement-specific columns (R1), never `stylist_code`. The per-owner monthly sub-limit sits inside the shared allowance, with a hard server stop, the shared hourly gate and a clamp when the allowance is lowered. Missing or invalid usage, an unexpected model or an overrun is a terminal anomaly that switches enhancement dispatch off for the deployment (every account) until reviewed. Rates: USD 8/M image input, USD 30/M image output.
+- **Capacity.** One non-identifying slot table per immutable provider deployment holds each dispatch for the window plus a margin, across all owners; a settled request doesn't free its slot early, and account deletion doesn't release it. A global kill switch (`enhance_provider_control`, database owner only) stops dispatch for everyone.
+- **Provenance.** An accepted output records evidence (output hash and length) for 24 hours and a tombstone. A new image with that hash gets `recorded` `ai_edited` provenance on its pending → ready publication (R4). Reuse copies provenance from a snapshot taken at reservation (R2). Restores use explicit modes (R3); only a byte-preserved v4 restore is labelled imported (Q6).
+- **Probe.** Operator-only `enhance_probe_authorise`, bound to one owner, the manifest, the allocation and at most six calls; normal dispatch stays off. The probe itself is run later, after owner spend approval.
+- **Open gates.** Hosted apply, the Edge deploy, the probe spend, the sub-limit, the consent notice and activation.
+
 ## I29 B1 source implementation boundary — 11 September 2026
 
 The approved B1 packet supplies a real, inactive-by-default server adapter and

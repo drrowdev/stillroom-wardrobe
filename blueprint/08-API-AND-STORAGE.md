@@ -719,3 +719,48 @@ persisted result 8192 bytes. OPTIONS performs no Auth/DB/Google work. An absent
 Origin is distinct from literal `"null"` (denied); approved production/loopback
 browser origins retain explicit validation. The local originless startup probe
 is not browser CORS or deployed-wire acceptance; those remain separate gates.
+
+## BG2b-1 photo enhancement contract (inactive)
+
+`POST /functions/v1/enhance-photo` takes the prepared garment JPEG as the raw
+body (`Content-Type: image/jpeg`, no `Content-Encoding`, at most 512,000 bytes,
+longest side at most 1600, byte-preservable baseline) plus a user bearer token
+and `X-Stillroom-Request-Id` (a v1-8 UUID). No item, image or path target is
+accepted, and the endpoint writes no wardrobe data. On success it returns 200
+with the admitted 1024x1280 JPEG and the exposed headers
+`X-Stillroom-Enhancement-Sha256` and `X-Stillroom-Enhancement-Usable-Until`;
+every other response is `{code}`:
+
+| HTTP | Codes |
+| --- | --- |
+| 400 / 401 | `INVALID_INPUT` / `UNAUTHENTICATED` |
+| 403 | `UNAVAILABLE`, `CONSENT_REQUIRED` |
+| 409 / 413 / 415 | `TERMINAL` / `TOO_LARGE` / `UNSUPPORTED_MEDIA` |
+| 422 | `FILTERED`, `OUTPUT_REJECTED` |
+| 429 | `RATE_LIMIT`, `ALLOWANCE` |
+| 502 / 503 / 504 | `FAILED` / `UNCONFIGURED`, `INACTIVE`, `CONFIG_CHANGED`, `BUSY` / `TIMEOUT` |
+
+Request lifetime is 85 seconds, the provider stage 70 seconds, Auth/RPC stages
+5 seconds, dispatch must start within 5 seconds of the claim, and the provider
+response is capped at 4 MiB while reading. The client bounds the whole
+enhancement stage at 90 seconds. Output bytes are released only after
+`enhance_finish` returns `OK`, which has committed the evidence for that hash
+and length. Once a request is claimed, the provider call and `enhance_finish`
+run on the server's own lifetime: a browser that cancels gets no bytes, but
+the usage is still settled.
+
+Authenticated RPCs: `enhance_status()`, `enhance_set_consent(boolean,integer)`,
+`image_provenance_v1()`, `image_provenance_digest_v1()`,
+`restore_image_provenance(uuid,uuid,uuid,jsonb)`,
+`reserve_restored_item_save_v2(jsonb,jsonb,uuid,text)` and
+`reserve_restored_image_change(jsonb,uuid,text)`. The restore entrypoints take
+an explicit import ID and a provenance mode (`legacy`, `v4` or `unlabelled`);
+the existing `reserve_restored_item_save`, replacement and recovery writers are
+unchanged. Service-role only: `enhance_claim`, `enhance_finish`,
+`enhance_probe_authorise`. Database owner only: `enhance_expire_due` (run by
+the inactive job `stillroom-enhance-expire`) and `enhance_provider_control`.
+Provenance is attached server-side on an image's pending -> ready publication;
+the client never asserts it. `restore_image_provenance` accepts a v4-marked
+image that was published (ready, or retired by a later restored photo) and
+refuses pending images and images retired without publication. Export v3 is unchanged; v4 and its reader are
+BG2b-2.

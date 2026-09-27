@@ -341,6 +341,45 @@ async function buildFixture(owner) {
   await sh.upload(pending);
   f.saveItem = pending.p_item.id; f.saveImage = pending.p_image.id; f.saveFingerprint = row.fingerprint;
 
+  stage = `fixture-${L}-provenance`;
+  // BG2b-1: a byte-preserved v4 restore (marker, checked Save, then the imported ai_edited provenance) is the
+  // owner's positive control for the restore-only writer, the provenance restore and the provenance reads.
+  const restored = sh.track(intent());
+  f.provImport = randomUUID();
+  const restoredRow = await call(owner, 'reserve_restored_item_save_v2', { ...restored, p_import_id: f.provImport, p_mode: 'v4' });
+  control(owner, 'reserve_restored_item_save_v2', restoredRow.ok && Array.isArray(restoredRow.data) && restoredRow.data.length === 1
+    && restoredRow.data[0].item?.id === restored.p_item.id && restoredRow.data[0].image?.id === restored.p_image.id, describe(restoredRow));
+  fatal(restoredRow.ok && Array.isArray(restoredRow.data) && restoredRow.data.length === 1, `fixture-${L}-restored-save`);
+  await sh.upload(restored);
+  await sh.finalize(restored, restoredRow.data[0]);
+  f.provItem = restored.p_item.id; f.provImage = restored.p_image.id;
+  f.provEntry = { kind: 'ai_edited', model_id: 'isolation-model', manifest_id: 'isolation-manifest', backup_sha256: restored.p_image.main_sha256 };
+  const provenanceArgs = { p_item_id: f.provItem, p_image_id: f.provImage, p_import_id: f.provImport, p_entry: f.provEntry };
+  const provenanceOutcomes = [await call(owner, 'restore_image_provenance', provenanceArgs),
+    await call(owner, 'restore_image_provenance', provenanceArgs)].map((result) => (result.ok ? result.data : describe(result)));
+  control(owner, 'restore_image_provenance', isDeepStrictEqual(provenanceOutcomes, [{ state: 'created' }, { state: 'equal' }]),
+    JSON.stringify(provenanceOutcomes));
+  f.provRows = [{ image_id: f.provImage, kind: 'ai_edited', origin: 'imported', model_id: 'isolation-model',
+    manifest_id: 'isolation-manifest', stored_sha256: restored.p_image.main_sha256, backup_sha256: restored.p_image.main_sha256 }];
+  const provenance = await call(owner, 'image_provenance_v1', {});
+  control(owner, 'image_provenance_v1', provenance.ok && isDeepStrictEqual(provenance.data, f.provRows), describe(provenance));
+  const provenanceDigest = await call(owner, 'image_provenance_digest_v1', {});
+  control(owner, 'image_provenance_digest_v1', provenanceDigest.ok && hex64.test(String(provenanceDigest.data)), describe(provenanceDigest));
+  f.paths.push(...sh.paths(restored));
+  // A restore-only later photo on its own ready item, reserved then cancelled; the free item stays untouched.
+  const restoreBase = await ich.create(), restoreChange = ich.make(restoreBase.item, restoreBase.image);
+  cleanups.push(async () => {
+    await client.rpc(owner, 'cancel_image_change', { p_item_id: restoreChange.itemId, p_request_id: restoreChange.requestId });
+    await ich.remove(restoreChange);
+    await ich.remove({ itemId: restoreBase.item.id, imageId: restoreBase.image.id });
+    await sh.deleteItem(restoreBase.value);
+  });
+  const restoredChange = await call(owner, 'reserve_restored_image_change', { p_intent: restoreChange, p_import_id: randomUUID(), p_mode: 'unlabelled' });
+  control(owner, 'reserve_restored_image_change', restoredChange.ok && restoredChange.data?.state === 'reserved'
+    && restoredChange.data.requestId === restoreChange.requestId && restoredChange.data.imageId === restoreChange.imageId, describe(restoredChange));
+  const restoredCancel = await call(owner, 'cancel_image_change', { p_item_id: restoreChange.itemId, p_request_id: restoreChange.requestId });
+  fatal(restoredCancel.ok && restoredCancel.data?.state === 'cancelled', `fixture-${L}-restored-change-cancel`);
+
   stage = `fixture-${L}-ai`;
   f.aiRequest = randomUUID(); f.aiDraft = randomUUID();
   const aiBegin = await call(owner, 'ai_begin_request', { p_request_id: f.aiRequest, p_draft_id: f.aiDraft,
@@ -361,7 +400,7 @@ async function buildFixture(owner) {
     f.rule, f.feedback, f.changeItem, f.changeRequest, f.changeImage, f.changeCurrent, f.recItem, f.recSource,
     f.trashItem, f.trashManifest, f.prepItem, f.prepRequest, f.readyItem, f.readyRequest, f.readyHash, f.removeItem,
     f.removeRequest, f.saveItem, f.saveImage, f.saveFingerprint, f.aiRequest, f.aiDraft, f.freeItem, f.freeCurrent,
-    f.recCurrent, `Isolation canary ${L}`,
+    f.recCurrent, f.provItem, f.provImage, f.provImport, `Isolation canary ${L}`,
     `Isolation plain ${L}`, `Isolation outfit ${L}`, `Isolation look ${L}`, `Isolation description ${L}`].filter(Boolean);
   return f;
 }
@@ -406,6 +445,7 @@ async function ownerState(owner) {
   state.deletion = await read('item_deletion_status', { p_item_ids: [f.item, f.trashItem, f.prepItem, f.readyItem, f.removeItem] });
   const ai = (await call(owner, 'ai_status', {})).data;
   if (ai && typeof ai === 'object') { const rest = { ...ai }; delete rest.serverTimeMs; state.ai = rest; } else state.ai = ai;
+  state.provenance = [await read('image_provenance_v1', {}), await read('image_provenance_digest_v1', {})];
   state.request = f.aiRequest ? await read('ai_request_control', { p_request_id: f.aiRequest, p_action: 'status' }) : null;
   return state;
 }
@@ -413,7 +453,7 @@ async function ownerState(owner) {
 function compareState(label, before, after, { skipAi = false } = {}) {
   for (const table of TABLES) need(isDeepStrictEqual(before.tables[table], after.tables[table]), `${label}: ${table} rows changed`);
   need(isDeepStrictEqual(before.objects, after.objects), `${label}: object bytes changed`);
-  const parts = ['export', 'change', 'requests', 'recovery', 'attribution', 'operation', 'deletion', ...(skipAi ? [] : ['ai', 'request'])];
+  const parts = ['export', 'change', 'requests', 'recovery', 'attribution', 'provenance', 'operation', 'deletion', ...(skipAi ? [] : ['ai', 'request'])];
   for (const part of parts) need(isDeepStrictEqual(before[part], after[part]), `${label}: ${part} changed`);
 }
 
@@ -499,6 +539,13 @@ function foreignCases(a) {
       (k) => (k === 'removeItem' ? { status: 200, data: [{ state: 'absent' }] } : CONFLICT)),
     one('reserve_image_change', ['freeItem', 'freeCurrent'], (x) => ({ p_intent: freeIntent(x) }), CONFLICT,
       { bundle: { freeItem: ['freeVersion'] }, tupleBundle: ['freeIntent'], tupleIntent: 'freeIntent' }),
+    // The restore-only later photo marks the attacker's new image before the unchanged writer runs; both roll back together.
+    one('reserve_restored_image_change', ['freeItem', 'freeCurrent'], (x) => ({ p_intent: freeIntent(x), p_import_id: n2, p_mode: 'unlabelled' }),
+      CONFLICT, { bundle: { freeItem: ['freeVersion'] }, tupleBundle: ['freeIntent'], tupleIntent: 'freeIntent' }),
+    // The peer's item is Not available; the attacker's own item with the peer's photo has no v4 marker, like a random one.
+    one('restore_image_provenance', ['provItem', 'provImage'], (x, k) => ({ p_item_id: k === 'provItem' ? x.provItem : a.provItem,
+      p_image_id: k === 'provImage' ? x.provImage : a.provImage, p_import_id: a.provImport, p_entry: a.provEntry }),
+    (k) => (k === 'provItem' ? NA : CONFLICT)),
     one('image_change_status', ['changeItem', 'changeRequest'], pair(['changeItem', 'changeRequest']), NULL),
     one('restore_image_change_status', ['changeItem', 'changeRequest'], pair(['changeItem', 'changeRequest']), NULL),
     one('restore_item_save_status', ['saveItem'], (x) => ({ p_item_id: x.saveItem }), NULL),
@@ -616,6 +663,22 @@ async function foreignMatrix(attacker, victim) {
   const stylistConsent = await probeRpc(attacker, victim, 'stylist_set_consent', { p_enabled: null, p_notice_revision: null });
   if (control(attacker, 'stylist_set_consent', matchOutcome({ status: 200, data: { code: 'INVALID_INPUT' } }, stylistConsent),
     describe(stylistConsent))) tag('stylist_set_consent', `${d}:owner-only`);
+  // Enhancement status and consent act only on the caller's own controls, like the stylist pair.
+  const enhance = await probeRpc(attacker, victim, 'enhance_status', {});
+  if (control(attacker, 'enhance_status', enhance.ok && typeof enhance.data?.code === 'string'
+    && applicationCode(enhance) !== 'UNAVAILABLE', describe(enhance))) tag('enhance_status', `${d}:owner-only`);
+  const enhanceConsent = await probeRpc(attacker, victim, 'enhance_set_consent', { p_enabled: null, p_notice_revision: null });
+  if (control(attacker, 'enhance_set_consent', matchOutcome({ status: 200, data: { code: 'INVALID_INPUT' } }, enhanceConsent),
+    describe(enhanceConsent))) tag('enhance_set_consent', `${d}:owner-only`);
+  // The caller's own provenance only: exactly its fixture row, and the digest of that same list.
+  const provenance = await probeRpc(attacker, victim, 'image_provenance_v1', {});
+  if (need(provenance.ok && isDeepStrictEqual(provenance.data, a.provRows), `${stage}: image_provenance_v1 ${describe(provenance)}`)) {
+    tag('image_provenance_v1', `${d}:owner-only`);
+  }
+  const ownProvenanceDigest = await call(attacker, 'image_provenance_digest_v1', {});
+  const provenanceDigest = await probeRpc(attacker, victim, 'image_provenance_digest_v1', {});
+  if (need(provenanceDigest.ok && hex64.test(String(provenanceDigest.data)) && provenanceDigest.data === ownProvenanceDigest.data,
+    `${stage}: image_provenance_digest_v1 ${describe(provenanceDigest)}`)) tag('image_provenance_digest_v1', `${d}:owner-only`);
 }
 
 /** Analyzed Save needs a provider-completed claim; these assertions stay, but carry no coverage credit. */
@@ -702,10 +765,10 @@ async function oracles(attacker, victim) {
   const one = async (table, id) => rows(table, `id=eq.${id}`);
   // Surface 5 covers both an existing save attempt (saveItem) and a plain REST-created item; each fresh reserve is
   // tracked by its own harness so cleanup removes exactly that attempt.
-  const reserve = (surface, foreignId, ownId, name = 'reserve_item_save') => {
+  const reserve = (surface, foreignId, ownId, name = 'reserve_item_save', extra = {}) => {
     const h = saveHarness(client, attacker);
     return { surface, name, foreignId, ownId, route: rpcRoute(name),
-      request: (id, kind) => ({ method: 'POST', body: kind === 'fresh' ? h.track(reserveOf(id)) : reserveOf(id) }),
+      request: (id, kind) => ({ method: 'POST', body: { ...(kind === 'fresh' ? h.track(reserveOf(id)) : reserveOf(id)), ...extra } }),
       state: itemState, cleanup: () => h.cleanup(),
       persisted: async (id, result) => Array.isArray(result.data) && result.data.length === 1 && result.data[0].item?.id === id
         && (await one('items', id)).length === 1 };
@@ -730,6 +793,11 @@ async function oracles(attacker, victim) {
     // The restored save (P6b) shares the checked Save chain and must answer a taken ID exactly the same way.
     reserve('reserve_restored_item_save p_item.id (save attempt)', v.saveItem, a.saveItem, 'reserve_restored_item_save'),
     reserve('reserve_restored_item_save p_item.id (plain item)', v.plain, a.plain, 'reserve_restored_item_save'),
+    // BG2b-1: the restore-only v2 writer marks first and then runs the same chain; a taken ID rolls both back.
+    reserve('reserve_restored_item_save_v2 p_item.id (save attempt)', v.saveItem, a.saveItem, 'reserve_restored_item_save_v2',
+      { p_import_id: importId, p_mode: 'unlabelled' }),
+    reserve('reserve_restored_item_save_v2 p_item.id (plain item)', v.plain, a.plain, 'reserve_restored_item_save_v2',
+      { p_import_id: importId, p_mode: 'unlabelled' }),
     { surface: 'REST items id', foreignId: v.item, ownId: a.item, ...rest('items', () => ({ title: 'Isolation oracle', category: 'top' })),
       state: itemState, cleanup: (id) => del('items', id)(), persisted: async (id) => (await one('items', id)).length === 1 },
     { surface: 'REST outfits id', foreignId: v.outfit, ownId: a.outfit, ...rest('outfits', () => ({ title: 'Isolation oracle' })),
@@ -1067,6 +1135,12 @@ async function freezeCase(frozen, other) {
       ['ai_request_control', { p_request_id: f.aiRequest ?? randomUUID(), p_action: 'status' }, UNAVAILABLE],
       ['stylist_status', {}, UNAVAILABLE],
       ['stylist_set_consent', { p_enabled: false, p_notice_revision: null }, UNAVAILABLE],
+      ['enhance_status', {}, UNAVAILABLE],
+      ['enhance_set_consent', { p_enabled: false, p_notice_revision: null }, UNAVAILABLE],
+      ['image_provenance_v1', {}, { status: 403, code: '42501' }],
+      ['image_provenance_digest_v1', {}, { status: 403, code: '42501' }],
+      ['restore_image_provenance', { p_item_id: f.provItem, p_image_id: f.provImage, p_import_id: f.provImport, p_entry: f.provEntry },
+        { status: 403, code: '42501' }],
     ]) expectMatch(`${stage}: frozen ${name}`, expected, await call(frozen, name, body));
     const ai = await call(frozen, 'ai_status', {});
     need(!ai.ok || ai.data?.code === 'UNAVAILABLE' || ai.data?.available === false || ai.data?.approved === false,

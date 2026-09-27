@@ -54,6 +54,8 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260927090000_restore_attribution.sql', version: '20260927090000', time: '2026-09-27 09:00:00', bytes: 16198, sha256: SOURCE_HASHES.restoreAttribution },
   { name: '20260928090000_stylist_chat.sql', version: '20260928090000', time: '2026-09-28 09:00:00', bytes: 27527, sha256: SOURCE_HASHES.stylistChat },
   { name: '20260928090100_stylist_expire_schedule.sql', version: '20260928090100', time: '2026-09-28 09:01:00', bytes: 1934, sha256: SOURCE_HASHES.stylistExpireSchedule },
+  { name: '20260929090000_photo_enhancement.sql', version: '20260929090000', time: '2026-09-29 09:00:00', bytes: 73577, sha256: SOURCE_HASHES.photoEnhancement },
+  { name: '20260929090100_enhance_expire_schedule.sql', version: '20260929090100', time: '2026-09-29 09:01:00', bytes: 1974, sha256: SOURCE_HASHES.enhanceExpireSchedule },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1297,10 +1299,15 @@ async function main() {
       const { stylistLedgerProbes } = await import('../tests/integration/stylist-ledger.sessions.mjs');
       await stylistLedgerProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `ST1a-stylist-${label}`; });
       colourFinalizer.assertRunning();
+      stage = 'BG2b-enhancement-ledger';
+      const { enhancementLedgerProbes } = await import('../tests/integration/enhancement-ledger.sessions.mjs');
+      await enhancementLedgerProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BG2b-enhancement-${label}`; });
+      colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
     console.log('PASS: COL1 populated11/twelve/fifteen; rows, v1 manifest and unchanged bodies preserved at each compare; probes only after fifteen; no provider calls');
     console.log('PASS: P6d tag history; v2 equals legacy for recorded history, recorded history re-imported through the RPC and a second generation imported, concurrent and completion races settle serially; no provider calls');
     console.log('PASS: ST1a stylist ledger; service-only claim/finish, idempotent and conflicting finish, invalid/anomaly/overrun precedence disables only the stylist, scheduled expiry then observed finish, UTC month, sub-limit and shared allowance, shared-limit and freeze races, operator allocation, confirmed-weather and fenced context, export unchanged; no provider calls');
+    console.log('PASS: BG2b enhancement ledger; service-only claim/finish/probe, idempotent finish over output hash, anomaly and operator shutdown on the shared switch, expiry then late finish without evidence, consent/freeze overlap, shared A/B slots, mixed tagging/stylist/enhancement admission and clamp, operator probe limits, snapshot bindings attached once on pending->ready, expired-output refusal, legacy/v4/unlabelled restore modes and v1->v2 resume; inactive state restored; no provider calls');
     stage = 'COL1-B-twelve-reset';
     requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', COLOUR_VERSION], 10 * 60_000)).code === 0);
     await assertMigrationInventory(); await history('colours'); await verifyCiStorageGuard();

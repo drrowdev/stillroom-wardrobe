@@ -592,6 +592,22 @@ the Edge deploy, the job's activation, the allowance and consent notice, the
 direct-call allocation and an exact-route synthetic probe. Builders make no
 hosted or paid call. See ADR25 in `blueprint/18` and `blueprint/20`.
 
+**BG2b-1 photo enhancement backend (source only; inactive; hosted apply owner-gated).**
+Adds `20260929090000_photo_enhancement.sql`, the inactive job
+`20260929090100_enhance_expire_schedule.sql` (`stillroom-enhance-expire`) and a
+fifth Edge Function, `enhance-photo`, for the Global deployment
+`eval-image25-sunburst-20260908` on `stillroom-ai-eval`. It is behaviour-changing
+and non-additive: enhancement rows share `private.ai_usage`, and two triggers on
+`public.item_images` run for every image writer. The provider kill switch starts
+off (`INITIAL`), no sub-limit or manifest activation is set and no account is
+activated. The function reads a new server-only secret, `AI_AZURE_IMAGE_API_KEY`,
+intended to hold the resource's *other* key: it can be rotated independently of
+tagging's `AI_AZURE_OPENAI_API_KEY`, but both keys have resource-wide scope (any
+deployment on `stillroom-ai-eval`). Nothing runs on hosted until the owner
+approves the bodies and the Edge deploy (rows M8, F4); the probe spend, the
+sub-limit, the consent notice and activation are separate owner gates. Builders
+make no hosted or paid call. See ADR26 in `blueprint/18` and `blueprint/20`.
+
 **I23 service worker (source only, not deployed).** The Phase 7 PR-1 draft
 adds `src/service-worker.ts`, the Update/Reload prompt and the Settings install
 hint. The worker precaches only the public shell listed in the generated

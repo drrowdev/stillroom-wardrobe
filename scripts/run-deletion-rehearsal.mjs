@@ -336,6 +336,34 @@ async function exercise(ctx) {
   const stylistRows = (uid) => sql(`select count(*) from private.ai_usage u join private.ai_usage_evidence e using (owner_id,request_id)
     where u.owner_id=${literal(uid)} and u.purpose='stylist';`);
   if (await stylistRows(c) !== '1' || await stylistRows(d) !== '1') throw new Error('SEED:stylist');
+  // BG2b-1 (N5): both owners hold an enhancement reservation on its own provider slot, released evidence, an output
+  // tombstone and a probe authorisation. Slots carry no owner data and must outlive the deletion (no early release).
+  step = 'fixture-enhancement';
+  const slots = {}, deployment = "'stillroom-ai-eval/eval-image25-sunburst-20260908/2026-09-08'";
+  const manifest = "'azure-global-image25-sunburst-enhance-v1'";
+  for (const [label, uid] of [['C', c], ['D', d]]) {
+    const slot = randomUUID(), request = randomUUID();
+    slots[label] = slot;
+    await sql(`insert into private.provider_slots(slot_id,deployment_key,held_until) values (${literal(slot)},${deployment},now()+interval '1 hour');
+  insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,dispatched_at,purpose,provider_slot_id)
+    values (${literal(uid)},${literal(request)},to_char(now() at time zone 'UTC','YYYY-MM'),now(),300000,300000,'held',now(),'enhancement',${literal(slot)});
+  insert into private.ai_usage_evidence(owner_id,request_id,manifest_id,model_observation) values (${literal(uid)},${literal(request)},${manifest},'not_observed');
+  insert into private.image_enhancements(owner_id,request_id,input_sha256,output_sha256,output_bytes,deployment_key,manifest_id,model_id,created_at,usable_until)
+    values (${literal(uid)},${literal(request)},repeat('c',64),repeat('b',64),1000,${deployment},${manifest},'gpt-image-2.5-sunburst',now(),now()+interval '24 hours');
+  insert into private.enhancement_outputs(owner_id,output_sha256,output_bytes,model_id,manifest_id,first_request_id,created_at)
+    values (${literal(uid)},repeat('b',64),1000,'gpt-image-2.5-sunburst',${manifest},${literal(request)},now());
+  insert into private.enhancement_probe_authorisations(id,owner_id,deployment_key,manifest_id,max_calls,allocation_micro,approval_ref,expires_at,created_at)
+    values (gen_random_uuid(),${literal(uid)},${deployment},${manifest},1,300000,'rehearsal-${label}',now()+interval '1 day',now());`);
+  }
+  const enhancementRows = (uid) => sql(`select (select count(*) from private.ai_usage where owner_id=${literal(uid)} and purpose='enhancement')
+    ||':'||(select count(*) from private.image_enhancements where owner_id=${literal(uid)})
+    ||':'||(select count(*) from private.enhancement_outputs where owner_id=${literal(uid)})
+    ||':'||(select count(*) from private.enhancement_probe_authorisations where owner_id=${literal(uid)});`);
+  const heldSlots = () => sql(`select count(*) from private.provider_slots
+    where slot_id in (${literal(slots.C)},${literal(slots.D)}) and held_until>now()+interval '30 minutes';`);
+  if (await enhancementRows(c) !== '1:1:1:1' || await enhancementRows(d) !== '1:1:1:1' || await heldSlots() !== '2') {
+    throw new Error('SEED:enhancement');
+  }
   step = 'fixture';
   const before = await digest(d);
   const cBefore = JSON.parse(await digest(c));
@@ -542,6 +570,9 @@ async function exercise(ctx) {
   if (await stylistRows(c) !== '0' || await stylistRows(d) !== '1') throw new Error('RESULT:stylist');
   if (await sql(`select (select count(*) from private.ai_usage where owner_id=${literal(c)})
     +(select count(*) from private.ai_usage_evidence where owner_id=${literal(c)});`) !== '0') throw new Error('RESULT:stylist');
+  // C's enhancement rows are gone, D's stay, and neither provider slot was released by the deletion.
+  if (await enhancementRows(c) !== '0:0:0:0' || await enhancementRows(d) !== '1:1:1:1') throw new Error('RESULT:enhancement');
+  if (await heldSlots() !== '2') throw new Error('RESULT:enhancement-slots');
   const purged = await call('/rest/v1/rpc/purge_deletion_receipts', { method: 'POST', ...service, body: {} }, 10_000);
   if (!purged?.response.ok || (await purged.response.text()).trim() !== '0') throw new Error('RESULT:purge');
   const verified = await child('verify');
