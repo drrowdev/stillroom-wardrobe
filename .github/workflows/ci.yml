@@ -407,6 +407,10 @@ jobs:
         run: |
           git ls-files --error-unmatch src/data/database.types.ts
           git diff --exit-code -- src/data/database.types.ts
+      - name: P6d genuine tag-history round trip on freshly reset accounts
+        run: |
+          npm run db:reset
+          node scripts/attribution-roundtrip-rehearsal.mjs
       - run: npm run test:edge
 
   deletion-rehearsal:

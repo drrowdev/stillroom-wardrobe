@@ -1293,7 +1293,7 @@ async function main() {
       colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
     console.log('PASS: COL1 populated11/twelve/fifteen; rows, v1 manifest and unchanged bodies preserved at each compare; probes only after fifteen; no provider calls');
-    console.log('PASS: P6d tag history; v2 equals legacy for recorded history, genuine export-restore-reexport and second generation imported, concurrent and completion races settle serially; no provider calls');
+    console.log('PASS: P6d tag history; v2 equals legacy for recorded history, recorded history re-imported through the RPC and a second generation imported, concurrent and completion races settle serially; no provider calls');
     stage = 'COL1-B-twelve-reset';
     requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', COLOUR_VERSION], 10 * 60_000)).code === 0);
     await assertMigrationInventory(); await history('colours'); await verifyCiStorageGuard();

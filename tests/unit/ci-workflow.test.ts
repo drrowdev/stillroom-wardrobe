@@ -172,6 +172,10 @@ describe('CI workflow browser split', () => {
     expect(pkg.scripts['test:edge']).toBe('node scripts/run-local-tests.mjs edge');
     expect(pkg.scripts['check:deploy-artifacts']).toBe('node scripts/check-deploy-artifacts.mjs');
     expect(steps(job('database')).at(-1)).toBe('      - run: npm run test:edge\n\n');
+    // P6d: the genuine tag-history round trip runs on freshly reset accounts, just before the Edge gate.
+    expect(steps(job('database')).at(-2)).toBe('      - name: P6d genuine tag-history round trip on freshly reset accounts\n        run: |\n'
+      + '          npm run db:reset\n          node scripts/attribution-roundtrip-rehearsal.mjs\n');
+    expect(count(workflow, 'attribution-roundtrip-rehearsal.mjs')).toBe(1);
     expect(count(workflow, 'npm run test:edge')).toBe(1);
     expect(job('app')).toContain('      - run: npm run check:dependencies\n      - run: npm run check:deploy-artifacts\n');
     expect(count(workflow, 'npm run check:deploy-artifacts')).toBe(1);
