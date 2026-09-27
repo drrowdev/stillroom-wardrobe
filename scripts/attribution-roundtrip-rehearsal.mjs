@@ -257,7 +257,7 @@ async function main() {
         [id, await restoreId(3, owner.uid, backup.exportId, table, id)])));
       step = 'restore-ids';
       const itemMap = await ids('items', items), imageMap = await ids('item_images', images);
-      // Only the IDs, read directly so a refusal names its HTTP status rather than a generic marker.
+      // Read directly: restored IDs are deterministic version-8 UUIDs, which the shared row helper (version 4 only) refuses.
       const present = async (table) => {
         const response = await fetch(`${LOCAL_API}/rest/v1/${table}?select=id&owner_id=eq.${owner.uid}&limit=33`, {
           cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15_000),
