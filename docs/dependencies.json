@@ -1,9 +1,244 @@
 {
   "schemaVersion": 1,
-  "lockfileSha256": "782126657c724fa11f6a85736cc60d52f38c6807d53fc882574fc047c65cc53a",
-  "licencePolicy": "Reviewed SPDX identifiers; new identifiers require review rather than an invented licence. Every production notice is copied from the installed exact-version package.",
+  "lockfileSha256": "354b76529528eb7186077001979a1c49984b963ac22dac7c45f241e18fffc5ac",
+  "licencePolicy": "Reviewed SPDX identifiers; new identifiers require review rather than an invented licence. Every production notice is copied from the installed exact-version package, except a reviewed exact-version supplement (licenceSource 'supplement') for a package that ships no licence file: guid-typescript@1.0.9 declares ISC, and its supplement holds the canonical SPDX ISC text, not an upstream file.",
   "developmentPolicy": "Build/test packages are not browser runtime additions. Optional platform packages absent on this host are inventoried from their pinned lockfile metadata; installed manifests must match.",
   "production": [
+    {
+      "name": "@protobufjs/aspromise",
+      "version": "1.1.2",
+      "license": "BSD-3-Clause",
+      "location": "node_modules/@protobufjs/aspromise",
+      "direct": false,
+      "introducingParents": [
+        "@protobufjs/fetch@1.1.1 (node_modules/@protobufjs/fetch)",
+        "protobufjs@7.6.6 (node_modules/protobufjs)"
+      ],
+      "upstream": "https://github.com/dcodeIO/protobuf.js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "56c9299ed8fb2684ea7f8ab70a828f088ca4df02bd06cd71f822cd9b1b01a78b"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40protobufjs%2Faspromise",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2017-04-24T10:38:32.963Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@protobufjs/base64",
+      "version": "1.1.2",
+      "license": "BSD-3-Clause",
+      "location": "node_modules/@protobufjs/base64",
+      "direct": false,
+      "introducingParents": [
+        "protobufjs@7.6.6 (node_modules/protobufjs)"
+      ],
+      "upstream": "https://github.com/dcodeIO/protobuf.js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "56c9299ed8fb2684ea7f8ab70a828f088ca4df02bd06cd71f822cd9b1b01a78b"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40protobufjs%2Fbase64",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2017-06-09T09:32:02.078Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@protobufjs/codegen",
+      "version": "2.0.5",
+      "license": "BSD-3-Clause",
+      "location": "node_modules/@protobufjs/codegen",
+      "direct": false,
+      "introducingParents": [
+        "protobufjs@7.6.6 (node_modules/protobufjs)"
+      ],
+      "upstream": "https://github.com/dcodeIO/protobuf.js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "56c9299ed8fb2684ea7f8ab70a828f088ca4df02bd06cd71f822cd9b1b01a78b"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40protobufjs%2Fcodegen",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2026-04-27T20:30:11.789Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@protobufjs/eventemitter",
+      "version": "1.1.1",
+      "license": "BSD-3-Clause",
+      "location": "node_modules/@protobufjs/eventemitter",
+      "direct": false,
+      "introducingParents": [
+        "protobufjs@7.6.6 (node_modules/protobufjs)"
+      ],
+      "upstream": "https://github.com/dcodeIO/protobuf.js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "56c9299ed8fb2684ea7f8ab70a828f088ca4df02bd06cd71f822cd9b1b01a78b"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40protobufjs%2Feventemitter",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2026-05-22T02:33:03.279Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@protobufjs/fetch",
+      "version": "1.1.1",
+      "license": "BSD-3-Clause",
+      "location": "node_modules/@protobufjs/fetch",
+      "direct": false,
+      "introducingParents": [
+        "protobufjs@7.6.6 (node_modules/protobufjs)"
+      ],
+      "upstream": "https://github.com/dcodeIO/protobuf.js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "56c9299ed8fb2684ea7f8ab70a828f088ca4df02bd06cd71f822cd9b1b01a78b"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40protobufjs%2Ffetch",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2026-05-17T12:41:02.731Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@protobufjs/float",
+      "version": "1.0.2",
+      "license": "BSD-3-Clause",
+      "location": "node_modules/@protobufjs/float",
+      "direct": false,
+      "introducingParents": [
+        "protobufjs@7.6.6 (node_modules/protobufjs)"
+      ],
+      "upstream": "https://github.com/dcodeIO/protobuf.js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "56c9299ed8fb2684ea7f8ab70a828f088ca4df02bd06cd71f822cd9b1b01a78b"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40protobufjs%2Ffloat",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2017-04-02T10:45:42.854Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@protobufjs/path",
+      "version": "1.1.2",
+      "license": "BSD-3-Clause",
+      "location": "node_modules/@protobufjs/path",
+      "direct": false,
+      "introducingParents": [
+        "protobufjs@7.6.6 (node_modules/protobufjs)"
+      ],
+      "upstream": "https://github.com/dcodeIO/protobuf.js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "56c9299ed8fb2684ea7f8ab70a828f088ca4df02bd06cd71f822cd9b1b01a78b"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40protobufjs%2Fpath",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2017-02-23T16:54:18.933Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@protobufjs/pool",
+      "version": "1.1.0",
+      "license": "BSD-3-Clause",
+      "location": "node_modules/@protobufjs/pool",
+      "direct": false,
+      "introducingParents": [
+        "protobufjs@7.6.6 (node_modules/protobufjs)"
+      ],
+      "upstream": "https://github.com/dcodeIO/protobuf.js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "56c9299ed8fb2684ea7f8ab70a828f088ca4df02bd06cd71f822cd9b1b01a78b"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40protobufjs%2Fpool",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2017-01-25T18:13:19.548Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "@protobufjs/utf8",
+      "version": "1.1.2",
+      "license": "BSD-3-Clause",
+      "location": "node_modules/@protobufjs/utf8",
+      "direct": false,
+      "introducingParents": [
+        "protobufjs@7.6.6 (node_modules/protobufjs)"
+      ],
+      "upstream": "https://github.com/protobufjs/protobuf.js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "56c9299ed8fb2684ea7f8ab70a828f088ca4df02bd06cd71f822cd9b1b01a78b"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40protobufjs%2Futf8",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2026-07-05T23:18:02.602Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
     {
       "name": "@supabase/auth-js",
       "version": "2.115.0",
@@ -187,6 +422,92 @@
       }
     },
     {
+      "name": "@types/node",
+      "version": "24.13.3",
+      "license": "MIT",
+      "location": "node_modules/@types/node",
+      "direct": false,
+      "introducingParents": [
+        "application",
+        "protobufjs@7.6.6 (node_modules/protobufjs)",
+        "vite@8.2.2 (node_modules/vite)",
+        "vitest@5.0.0 (node_modules/vitest)"
+      ],
+      "upstream": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "ff82c90f84945c60601e96b43246009b9bc589f3ebe1cd8a0fd39a3520d8c310"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/%40types%2Fnode",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2026-07-08T06:48:03.261Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "flatbuffers",
+      "version": "25.9.23",
+      "license": "Apache-2.0",
+      "location": "node_modules/flatbuffers",
+      "direct": false,
+      "introducingParents": [
+        "onnxruntime-web@1.30.0 (node_modules/onnxruntime-web)"
+      ],
+      "upstream": "https://github.com/google/flatbuffers",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "283ea6cc2997a1a70da0049e09adf9317bb60ca1b51279b65196b83a69e1996b"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/flatbuffers",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2025-09-24T05:25:45.967Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "guid-typescript",
+      "version": "1.0.9",
+      "license": "ISC",
+      "location": "node_modules/guid-typescript",
+      "direct": false,
+      "introducingParents": [
+        "onnxruntime-web@1.30.0 (node_modules/onnxruntime-web)"
+      ],
+      "licenceSource": "supplement",
+      "upstream": "https://github.com/NicolasDeveloper/guid-typescript",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "licenses/packages/guid-typescript@1.0.9/LICENSE",
+          "sha256": "f59b2d57323eb4d7538bc2444f49c159b7d04b84058fb481f3aa77ef981f127b"
+        },
+        {
+          "file": "licenses/packages/guid-typescript@1.0.9/SOURCE",
+          "sha256": "eaa37c0791ab1ceacee641984bac8540de2019c8038aef48e74c8400a1900e97"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/guid-typescript",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2018-10-28T04:22:18.066Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
       "name": "iceberg-js",
       "version": "0.8.1",
       "license": "MIT",
@@ -209,6 +530,147 @@
         "source": "https://registry.npmjs.org/iceberg-js",
         "checkedOn": "2026-09-06",
         "releasedAt": "2025-12-05T11:44:09.133Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "long",
+      "version": "5.3.2",
+      "license": "Apache-2.0",
+      "location": "node_modules/long",
+      "direct": false,
+      "introducingParents": [
+        "onnxruntime-web@1.30.0 (node_modules/onnxruntime-web)",
+        "protobufjs@7.6.6 (node_modules/protobufjs)"
+      ],
+      "upstream": "https://github.com/dcodeIO/long.js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "283ea6cc2997a1a70da0049e09adf9317bb60ca1b51279b65196b83a69e1996b"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/long",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2025-04-17T17:32:06.060Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "onnxruntime-common",
+      "version": "1.30.0",
+      "license": "MIT",
+      "location": "node_modules/onnxruntime-common",
+      "direct": false,
+      "introducingParents": [
+        "onnxruntime-web@1.30.0 (node_modules/onnxruntime-web)"
+      ],
+      "licenceSource": "supplement",
+      "upstream": "https://github.com/Microsoft/onnxruntime",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "licenses/packages/onnxruntime-common@1.30.0/LICENSE",
+          "sha256": "e9861036987ef519430f50a43532184b9fa0889cb6b3a0102acf7651181e8575"
+        },
+        {
+          "file": "licenses/packages/onnxruntime-common@1.30.0/SOURCE",
+          "sha256": "6fff80fed30d47e5bb55b457a5eb8d54ede23d4ae3212626437876a4001330b6"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/onnxruntime-common",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2026-09-14T20:04:01.073Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "onnxruntime-web",
+      "version": "1.30.0",
+      "license": "MIT",
+      "location": "node_modules/onnxruntime-web",
+      "direct": true,
+      "introducingParents": [
+        "application"
+      ],
+      "licenceSource": "supplement",
+      "upstream": "https://github.com/Microsoft/onnxruntime",
+      "purpose": "On-device background removal (ADR24): runs the committed u2netp model in a browser worker with the single-thread WASM runtime.",
+      "alternativeOrRemoval": "transformers.js wraps the same runtime with more code; a server or provider removes the on-device guarantee. Remove with the background-removal feature.",
+      "licenceFiles": [
+        {
+          "file": "licenses/packages/onnxruntime-web@1.30.0/LICENSE",
+          "sha256": "e9861036987ef519430f50a43532184b9fa0889cb6b3a0102acf7651181e8575"
+        },
+        {
+          "file": "licenses/packages/onnxruntime-web@1.30.0/SOURCE",
+          "sha256": "97b879d4e92957c62782084869319efa73c5a726a6c844f80dbaafc1fe78f10c"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/onnxruntime-web",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2026-09-14T20:20:13.234Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "platform",
+      "version": "1.3.6",
+      "license": "MIT",
+      "location": "node_modules/platform",
+      "direct": false,
+      "introducingParents": [
+        "onnxruntime-web@1.30.0 (node_modules/onnxruntime-web)"
+      ],
+      "upstream": "https://github.com/bestiejs/platform.js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "701af9df0b613036a1df8800dd4339c95a40350745d0b3897343341216457305"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/platform",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2020-07-04T11:35:56.386Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "protobufjs",
+      "version": "7.6.6",
+      "license": "BSD-3-Clause",
+      "location": "node_modules/protobufjs",
+      "direct": false,
+      "introducingParents": [
+        "onnxruntime-web@1.30.0 (node_modules/onnxruntime-web)"
+      ],
+      "upstream": "https://github.com/protobufjs/protobuf.js",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "79157668b36019266d89359c2fdc2fb4919c9f5751f16402c147138abf8c0f2b"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/protobufjs",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2026-08-27T10:15:37.337Z",
         "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
       }
     },
@@ -322,6 +784,32 @@
         "source": "https://registry.npmjs.org/tslib",
         "checkedOn": "2026-09-06",
         "releasedAt": "2024-10-31T22:42:48.624Z",
+        "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
+      }
+    },
+    {
+      "name": "undici-types",
+      "version": "7.18.2",
+      "license": "MIT",
+      "location": "node_modules/undici-types",
+      "direct": false,
+      "introducingParents": [
+        "@types/node@24.13.3 (node_modules/@types/node)"
+      ],
+      "upstream": "https://github.com/nodejs/undici",
+      "purpose": "Transitive runtime support; see introducingParents for the exact reason this package is resolved.",
+      "alternativeOrRemoval": "No independent app feature adds this package. Remove by updating or replacing its introducing parent; manually pruning a required transitive package is unsafe.",
+      "licenceFiles": [
+        {
+          "file": "LICENSE",
+          "sha256": "fe64958bfaef10b1c9628b4ee9f1c48170b0219bd4b2a7ef4a0c41aebd920c9e"
+        }
+      ],
+      "maintenance": {
+        "status": "verified",
+        "source": "https://registry.npmjs.org/undici-types",
+        "checkedOn": "2026-09-27",
+        "releasedAt": "2026-01-06T15:57:40.133Z",
         "reason": "The public npm registry records this exact resolved version and its release timestamp; recency alone is not a maintenance guarantee."
       }
     }
@@ -1113,18 +1601,6 @@
       "direct": false,
       "introducingParents": [
         "@eslint/core@1.2.1 (node_modules/@eslint/core)"
-      ]
-    },
-    {
-      "name": "@types/node",
-      "version": "24.13.3",
-      "license": "MIT",
-      "location": "node_modules/@types/node",
-      "direct": true,
-      "introducingParents": [
-        "application",
-        "vite@8.2.2 (node_modules/vite)",
-        "vitest@5.0.0 (node_modules/vitest)"
       ]
     },
     {
@@ -2527,16 +3003,6 @@
       ]
     },
     {
-      "name": "undici-types",
-      "version": "7.18.2",
-      "license": "MIT",
-      "location": "node_modules/undici-types",
-      "direct": false,
-      "introducingParents": [
-        "@types/node@24.13.3 (node_modules/@types/node)"
-      ]
-    },
-    {
       "name": "update-browserslist-db",
       "version": "1.3.2",
       "license": "MIT",
@@ -2648,6 +3114,18 @@
       "direct": false,
       "introducingParents": [
         "eslint-plugin-react-hooks@7.1.1 (node_modules/eslint-plugin-react-hooks)"
+      ]
+    }
+  ],
+  "models": [
+    {
+      "name": "u2netp",
+      "file": "public/models/u2netp-309c8469.onnx",
+      "bytes": 4574861,
+      "sha256": "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8",
+      "licenses": [
+        "Apache-2.0",
+        "MIT"
       ]
     }
   ]

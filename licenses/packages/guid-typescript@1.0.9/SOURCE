@@ -1,0 +1,5 @@
+The npm package guid-typescript@1.0.9 declares SPDX ISC (author "nicolas") but ships no licence file, and its
+repository https://github.com/NicolasDeveloper/guid-typescript (checked at commit f110c1f42b5c784511e322531e97928c2d8ffb1c)
+publishes none either. LICENSE here holds the ISC terms as published by SPDX (https://spdx.org/licenses/ISC.html);
+no copyright line was published by the author, so none is invented. It is resolved only as a dependency of
+onnxruntime-web.

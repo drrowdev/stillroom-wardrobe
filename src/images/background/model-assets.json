@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "role": "model",
+      "path": "/models/u2netp-309c8469.onnx",
+      "source": "public/models/u2netp-309c8469.onnx",
+      "bytes": 4574861,
+      "sha256": "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8"
+    },
+    {
+      "role": "runtime",
+      "path": "/models/ort-wasm-simd-threaded-3398c10d.wasm",
+      "source": "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm",
+      "bytes": 14239897,
+      "sha256": "3398c10d07d229bd91b364548e130e0e51a8e5704b88c7c083ebbeb78842dee2"
+    }
+  ]
+}

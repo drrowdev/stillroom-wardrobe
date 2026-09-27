@@ -1,10 +1,12 @@
 import react from '@vitejs/plugin-react';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { loadEnv, type Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 import { artifactUrl, isExcludedArtifact, isShellArtifact, joinShellUrls, manifestPath, parsePrecacheManifest, workerPath } from './src/pwa/shell-policy.ts';
+import { checkStaticTree, listTree, readInventory, type InventoryFile } from './scripts/check-static-assets.mjs';
 
 const publicKeys = new Set([
   'VITE_SUPABASE_URL',
@@ -56,6 +58,59 @@ export async function finalizeShell(outDir: string, killSwitch: boolean): Promis
   return { buildId, manifestSha256, files: files.map((file) => file.url) };
 }
 
+// ORT names its runtime with `new URL("ort-wasm-simd-threaded.wasm", import.meta.url)`, which the bundler would
+// emit as an extra, unapproved asset. The app always hands ORT verified bytes (env.wasm.wasmBinary), so those
+// references are pointed at the inventory path instead; an unexpected ORT build fails here.
+const ortRuntimeReference = 'new URL("ort-wasm-simd-threaded.wasm",import.meta.url).href';
+function ortRuntimePath(runtime: InventoryFile): Plugin {
+  return {
+    name: 'stillroom-ort-runtime-path',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!/[\\/]onnxruntime-web[\\/]dist[\\/]ort\.wasm\.bundle\.min\.mjs$/.test(id.split('?')[0]!)) return null;
+      if (code.split(ortRuntimeReference).length !== 3) throw new Error('Unexpected onnxruntime-web runtime references.');
+      return { code: code.replaceAll(ortRuntimeReference, JSON.stringify(runtime.path)), map: null };
+    },
+  };
+}
+async function runtimeBytes(runtime: InventoryFile): Promise<Buffer> {
+  const bytes = await readFile(path.resolve(runtime.source));
+  if (bytes.length !== runtime.bytes || sha256(bytes) !== runtime.sha256) throw new Error(`${runtime.source} does not match the approved runtime.`);
+  return bytes;
+}
+// Background removal assets (ADR24): the locked ORT runtime is emitted at its exact inventory path (the model is
+// in public/), and the finished tree is checked against the inventory and the Pages limits before it can deploy.
+function backgroundAssets(mode: string): Plugin {
+  let outDir = '';
+  let inventory: InventoryFile[] = [];
+  return {
+    name: 'stillroom-background-assets',
+    async config() { inventory = await readInventory(); },
+    configResolved(config) { outDir = path.resolve(config.root, config.build.outDir); },
+    configureServer(server) {
+      server.middlewares.use(async (request, response, next) => {
+        const runtime = inventory.find((file) => file.role === 'runtime')!;
+        if (request.url !== runtime.path) { next(); return; }
+        response.setHeader('content-type', 'application/wasm');
+        response.end(await runtimeBytes(runtime));
+      });
+    },
+    async generateBundle() {
+      const runtime = inventory.find((file) => file.role === 'runtime')!;
+      this.emitFile({ type: 'asset', fileName: runtime.path.slice(1), source: await runtimeBytes(runtime) });
+    },
+    async closeBundle() {
+      const problems = await checkStaticTree(outDir, inventory);
+      if (mode !== 'browser-test') {
+        for (const file of (await listTree(outDir)).filter((name) => name.endsWith('.js'))) {
+          if ((await readFile(path.join(outDir, file), 'utf8')).includes('__stillroomBackground')) problems.push(`test hook in ${file}`);
+        }
+      }
+      if (problems.length) throw new Error(`Static assets: ${problems.join('; ')}`);
+    },
+  };
+}
+
 function shellWorker(killSwitch: boolean): Plugin {
   let outDir = '';
   return {
@@ -79,11 +134,15 @@ export default defineConfig(({ mode }) => {
     : '';
   // Build-only switch for the emergency worker; it is not a browser variable and never reaches the bundle as a value.
   const killSwitch = process.env.STILLROOM_SW_KILL_SWITCH === '1';
+  const runtime = { role: 'runtime', ...JSON.parse(readFileSync(path.resolve('src/images/background/model-assets.json'), 'utf8'))
+    .files.find((file: InventoryFile) => file.role === 'runtime') } as InventoryFile;
   return {
     define: { __STILLROOM_SHELL_WORKER__: JSON.stringify(!killSwitch) },
     plugins: [
       react(),
       shellWorker(killSwitch),
+      ortRuntimePath(runtime),
+      backgroundAssets(mode),
       {
         name: 'private-app-headers',
         generateBundle() {
@@ -92,7 +151,7 @@ export default defineConfig(({ mode }) => {
             fileName: '_headers',
             source: [
               '/*',
-              `  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' ${backend} https://geocoding-api.open-meteo.com https://api.open-meteo.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
+              `  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' ${backend} https://geocoding-api.open-meteo.com https://api.open-meteo.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
               '  Referrer-Policy: no-referrer',
               '  X-Content-Type-Options: nosniff',
               '  Permissions-Policy: geolocation=(), microphone=()',
@@ -106,12 +165,17 @@ export default defineConfig(({ mode }) => {
               '  Cache-Control: no-cache',
               '/assets/*',
               '  Cache-Control: public, max-age=31536000, immutable',
+              '/models/*',
+              '  Cache-Control: public, max-age=31536000, immutable',
               '',
             ].join('\n'),
           });
         },
       },
     ],
+    worker: { format: 'es', plugins: () => [ortRuntimePath(runtime)] },
+    // Pre-bundle the lazily imported runtime so the dev server does not reload the page on first use.
+    optimizeDeps: { include: ['onnxruntime-web/wasm'] },
     build: {
       sourcemap: false,
       rolldownOptions: {

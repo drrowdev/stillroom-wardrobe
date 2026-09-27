@@ -7,7 +7,9 @@ import {
   stripEncoderMetadata,
   type ImagePreparationStage,
 } from './jpeg';
-import { cropGeometry, ORIGINAL_EDIT } from './crop';
+import { cropGeometry, ORIGINAL_EDIT, type PhotoEdit } from './crop';
+import { BackgroundRemovalError, MASK_SIDE, maskPixels } from './background/mask';
+import type { Segmenter, SegmentJob } from './background/remover';
 
 export { ImagePreparationError } from './jpeg';
 
@@ -135,6 +137,33 @@ function releaseCanvas(canvas: HTMLCanvasElement): void {
   canvas.height = 1;
 }
 
+/** The app's neutral photo background, also used where background removal took the original away. */
+export const PHOTO_BACKGROUND = '#f6f3ed';
+
+function context2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const context = canvas.getContext('2d', { colorSpace: 'srgb' });
+  if (!context) throw new ImagePreparationError('unavailable');
+  return context;
+}
+
+// Fills the neutral background, then draws `source` through the crop geometry scaled to the canvas size.
+function draw(canvas: HTMLCanvasElement, source: CanvasImageSource, geometry?: ReturnType<typeof cropGeometry>): void {
+  const context = context2d(canvas);
+  context.fillStyle = PHOTO_BACKGROUND;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  if (!geometry || geometry.identity) {
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+  } else {
+    const [a, b, c, d, e, f] = geometry.matrix;
+    const scaleX = canvas.width / geometry.width, scaleY = canvas.height / geometry.height;
+    context.setTransform(a * scaleX, b * scaleY, c * scaleX, d * scaleY,
+      (e - geometry.x) * scaleX, (f - geometry.y) * scaleY);
+    const rect = geometry.source;
+    context.drawImage(source, rect.x, rect.y, rect.width, rect.height, rect.x, rect.y, rect.width, rect.height);
+    context.setTransform(1, 0, 0, 1, 0, 0);
+  }
+}
+
 async function encode(
   source: CanvasImageSource,
   width: number,
@@ -155,22 +184,8 @@ async function encode(
       const dimensions = fitDimensions(width, height, side);
       canvas.width = dimensions.width;
       canvas.height = dimensions.height;
-      const context = canvas.getContext('2d', { colorSpace: 'srgb' });
-      if (!context || typeof canvas.toBlob !== 'function') {
-        throw new ImagePreparationError('unavailable');
-      }
-      context.fillStyle = '#f6f3ed';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      if (!geometry || geometry.identity) {
-        context.drawImage(source, 0, 0, canvas.width, canvas.height);
-      } else {
-        const [a, b, c, d, e, f] = geometry.matrix;
-        const scaleX = canvas.width / geometry.width, scaleY = canvas.height / geometry.height;
-        context.setTransform(a * scaleX, b * scaleY, c * scaleX, d * scaleY,
-          (e - geometry.x) * scaleX, (f - geometry.y) * scaleY);
-        const rect = geometry.source;
-        context.drawImage(source, rect.x, rect.y, rect.width, rect.height, rect.x, rect.y, rect.width, rect.height);
-      }
+      if (typeof canvas.toBlob !== 'function') throw new ImagePreparationError('unavailable');
+      draw(canvas, source, geometry);
       for (const quality of QUALITIES) {
         checkAbort(signal);
         const pending = new Promise<Blob>((resolve, reject) => {
@@ -338,6 +353,118 @@ export async function prepareSource(
     );
   } finally {
     decoded?.release();
+    if (main) releaseCanvas(main.canvas);
+    if (thumb) releaseCanvas(thumb.canvas);
+  }
+}
+
+/** A bounded, oriented and unsegmented JPEG of the whole photo, kept in memory for the crop editor only. */
+export type CropSource = { main: Blob; width: number; height: number };
+export type SegmentedPhoto = { photo: PreparedPhoto; crop: CropSource | null; coverage: number };
+
+function canvasOf(width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+/**
+ * Background removal (ADR24, blueprint 08 step 9): the model and runtime are verified and the worker is ready
+ * before the large source is decoded; the decoded source is released as soon as the bounded crop is drawn. The
+ * mask is applied to those pixels over the neutral background, and the result goes through the unchanged encode,
+ * metadata strip, output check and hash. A removal failure throws `BackgroundRemovalError`; nothing partial is
+ * returned.
+ */
+export async function prepareSegmentedSource(
+  file: Blob, admit: () => Promise<AdmittedSource>, edit: PhotoEdit, signal: AbortSignal | undefined,
+  segmenter: Segmenter, wantCrop: boolean,
+): Promise<SegmentedPhoto> {
+  let decoded: DecodedImage | undefined;
+  let job: SegmentJob | undefined;
+  const canvases: HTMLCanvasElement[] = [];
+  const temporary = (width: number, height: number) => { const canvas = canvasOf(width, height); canvases.push(canvas); return canvas; };
+  let main: EncodedImage | undefined;
+  let thumb: EncodedImage | undefined;
+  let cropImage: EncodedImage | undefined;
+  let stage: ImagePreparationStage = 'source';
+  try {
+    checkAbort(signal);
+    if (file.size > JPEG_LIMITS.sourceBytes) throw new ImagePreparationError('tooLarge');
+    const header = await admit();
+    checkAbort(signal);
+    const geometry = cropGeometry(header.width, header.height, header.orientation, edit);
+    if (typeof document === 'undefined' || !globalThis.crypto?.subtle) throw new ImagePreparationError('unavailable');
+    job = await segmenter.open(signal);
+    checkAbort(signal);
+    stage = 'decode';
+    decoded = await decode(header.blob, signal, true);
+    checkAbort(signal);
+    if (decoded.width !== header.width || decoded.height !== header.height) throw new ImagePreparationError('unsupported');
+    stage = 'mainEncode';
+    const size = fitDimensions(geometry.width, geometry.height, JPEG_LIMITS.mainSide);
+    const working = temporary(size.width, size.height);
+    draw(working, decoded.source, geometry);
+    decoded.release();
+    decoded = undefined;
+    let crop: CropSource | null = null;
+    if (wantCrop) {
+      cropImage = await encode(working, size.width, size.height, JPEG_LIMITS.mainSide, JPEG_LIMITS.mainBytes, 800, signal, undefined, true);
+      crop = { main: cropImage.blob, width: cropImage.canvas.width, height: cropImage.canvas.height };
+      releaseCanvas(cropImage.canvas);
+      cropImage = undefined;
+    }
+    const small = temporary(MASK_SIDE, MASK_SIDE);
+    const smallContext = context2d(small);
+    smallContext.imageSmoothingQuality = 'high';
+    smallContext.drawImage(working, 0, 0, MASK_SIDE, MASK_SIDE);
+    const alpha = await job.run(smallContext.getImageData(0, 0, MASK_SIDE, MASK_SIDE), signal);
+    job.close();
+    job = undefined;
+    checkAbort(signal);
+    let coverage = 0;
+    for (const value of alpha) coverage += value;
+    coverage /= alpha.length;
+    const mask = temporary(MASK_SIDE, MASK_SIDE);
+    context2d(mask).putImageData(new ImageData(maskPixels(alpha), MASK_SIDE, MASK_SIDE), 0, 0);
+    releaseCanvas(small);
+    // The cut-out keeps the photo's pixels where the mask is set, then sits on the neutral background.
+    const cut = temporary(size.width, size.height);
+    const cutContext = context2d(cut);
+    cutContext.drawImage(working, 0, 0);
+    cutContext.globalCompositeOperation = 'destination-in';
+    cutContext.imageSmoothingQuality = 'high';
+    cutContext.drawImage(mask, 0, 0, size.width, size.height);
+    releaseCanvas(working);
+    releaseCanvas(mask);
+    const composite = temporary(size.width, size.height);
+    draw(composite, cut);
+    releaseCanvas(cut);
+    main = await encode(composite, size.width, size.height, JPEG_LIMITS.mainSide, JPEG_LIMITS.mainBytes, 800, signal, undefined, true);
+    releaseCanvas(composite);
+    stage = 'thumbEncode';
+    thumb = await encode(main.canvas, main.canvas.width, main.canvas.height, JPEG_LIMITS.thumbSide, JPEG_LIMITS.thumbBytes, 160, signal, undefined, true);
+    const mainSha256 = await verifyAndHash(main, signal);
+    const thumbSha256 = await verifyAndHash(thumb, signal);
+    checkAbort(signal);
+    return {
+      photo: { main: main.blob, thumb: thumb.blob, width: main.canvas.width, height: main.canvas.height, mainSha256, thumbSha256 },
+      crop,
+      coverage,
+    };
+  } catch (error) {
+    checkAbort(signal);
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    if (error instanceof BackgroundRemovalError) throw error;
+    throw new ImagePreparationError(
+      error instanceof ImagePreparationError ? error.code : 'invalid',
+      error instanceof ImagePreparationError ? error.stage ?? stage : stage,
+    );
+  } finally {
+    job?.close();
+    decoded?.release();
+    for (const canvas of canvases) releaseCanvas(canvas);
+    if (cropImage) releaseCanvas(cropImage.canvas);
     if (main) releaseCanvas(main.canvas);
     if (thumb) releaseCanvas(thumb.canvas);
   }

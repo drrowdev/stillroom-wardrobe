@@ -11,14 +11,16 @@ import { newGarmentDraft } from '../../domain/garment-fields';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 import { ImageChangeClient } from '../../images/replace';
 import type { PrivateImages } from '../../images/private-images';
-import { prepareImage } from '../../images/process-image';
-import { ImagePreparationError, type PreparedPhoto } from '../../images/process-jpeg';
+import * as imaging from '../../images/imaging';
+import { ImagePreparationError, type CropSource, type PreparedPhoto } from '../../images/process-jpeg';
 import { CropEditor } from '../../images/crop-editor';
 import { ORIGINAL_EDIT, type PhotoEdit } from '../../images/crop';
 import type { SaveStage } from '../../images/upload';
 import { useAiDraft } from './use-ai-draft';
 import { AnalysisStatus } from './analysis-status';
 import { ItemForm } from './item-form';
+import { BackgroundNote, BackgroundStatus } from './background';
+import { preparingMessage, useBackground } from './use-background';
 
 type Props = {
   client: AppClient; scope: OwnerScope; ai: AiClient; images: PrivateImages;
@@ -27,7 +29,7 @@ type Props = {
   onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void;
   onBeforeDiscard: (handler: BeforeDiscard | null) => void;
 };
-function usePreview(photo: PreparedPhoto | null) {
+function usePreview(photo: CropSource | null) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!photo) { setUrl(null); return; }
@@ -152,7 +154,8 @@ function Replacement(props: Props) {
     return 'cancelled';
   });
   const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
-  const [full, setFull] = useState<PreparedPhoto | null>(null);
+  const [full, setFull] = useState<CropSource | null>(null);
+  const background = useBackground(props.scope);
   const [edit, setEdit] = useState<PhotoEdit>(ORIGINAL_EDIT);
   const [editing, setEditing] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -161,6 +164,7 @@ function Replacement(props: Props) {
   const work = useRef<AbortController | null>(null);
   const preparation = useRef<Promise<void>>(Promise.resolve());
   const focusEdit = useRef(false);
+  const pendingCrop = useRef(false);
   const library = useRef<HTMLInputElement>(null), camera = useRef<HTMLInputElement>(null);
   const preview = usePreview(photo), fullPreview = usePreview(full);
   const { onDirty } = props;
@@ -183,6 +187,9 @@ function Replacement(props: Props) {
   }, [props.scope]);
   async function prepare(source: Blob, next: PhotoEdit, replacing: boolean) {
     if (change.frozen) return;
+    // Work that supersedes an unfinished new-photo preparation still owes that photo its crop preview.
+    replacing ||= pendingCrop.current;
+    pendingCrop.current = replacing;
     work.current?.abort(); analysis.stop();
     const controller = new AbortController(); work.current = controller;
     const signal = AbortSignal.any([controller.signal, props.scope.signal]);
@@ -192,13 +199,17 @@ function Replacement(props: Props) {
       await previous;
       if (signal.aborted) return;
       try {
-        const value = await prepareImage(source, signal, next);
+        // The stored image and item stay as they are until Save; this only prepares the new photo in memory.
+        const prepared = await background.prepare(imaging, source, next, signal, replacing, () => work.current === controller);
         if (signal.aborted) return;
         if (!replacing) focusEdit.current = true;
-        setPhoto(value); setEdit(next); setEditing(false);
-        if (replacing) setFull(value);
-        void analysis.commitPhoto(value);
+        setPhoto(prepared.photo); setEdit(next); setEditing(false);
+        background.settle(prepared.state);
+        if (replacing) setFull(prepared.crop);
+        pendingCrop.current = false;
+        void analysis.commitPhoto(prepared.photo);
       } catch (error) {
+        if (!signal.aborted) { background.settle('none'); pendingCrop.current = false; }
         if (!signal.aborted) setError(error instanceof ImagePreparationError
           ? error.code === 'tooLarge' ? 'photo.prepareTooLarge' : error.code === 'unsupported' ? 'photo.prepareUnsupported'
             : error.code === 'unavailable' ? 'photo.prepareUnavailable' : 'photo.invalid' : 'photo.invalid');
@@ -208,7 +219,7 @@ function Replacement(props: Props) {
   }
   function choose(file?: File) {
     if (!file || change.frozen || preparing) return;
-    original.current = file; setPhoto(null); setFull(null); setEditing(false);
+    original.current = file; setPhoto(null); setFull(null); setEditing(false); background.reset();
     void prepare(file, ORIGINAL_EDIT, true);
   }
   const { t } = props;
@@ -246,7 +257,13 @@ function Replacement(props: Props) {
           {photo && <button id="image-change-edit" className="button button-secondary" type="button"
             disabled={change.frozen || preparing} onClick={() => setEditing(true)}>{t('photo.edit')}</button>}
         </div>}
-        {preparing && <p role="status">{t('capture.preparing')}</p>}
+        {!editing && <BackgroundStatus state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
+          disabled={change.frozen || preparing} t={t} onUseOriginal={() => {
+            if (change.frozen) return;
+            if (background.useOriginal() === 'again' && original.current) void prepare(original.current, edit, false);
+          }} />}
+        {!photo && !preparing && <BackgroundNote t={t} language={props.language} />}
+        {preparing && <p role="status">{t(preparingMessage(background.state, background.downloading, 'capture.preparing'))}</p>}
         {error && <p role="alert" className="notice notice-error">{t(error)}</p>}
       </div>
       <div className="details-panel">

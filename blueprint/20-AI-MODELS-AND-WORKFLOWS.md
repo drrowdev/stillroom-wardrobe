@@ -11,7 +11,8 @@ Revision **1.4**, 6 September 2026. The workflow remains **photo upload -> autom
 | Outfit explanations | Verified rule reasons rendered through the English/Finnish/Swedish catalog | No language model |
 | Weather | Opt-in weather API plus explicit context; no AI weather prediction | No model |
 | Crop, orientation, resizing and metadata removal | Browser pixel processing before upload | No model |
-| Background removal, multi-garment extraction, image generation, virtual try-on and chat | Deferred; none is required to deliver automatic tagging | No model installed or selected for MVP |
+| Background removal | Automatic on the device after the crop (ADR24); falls back to the original background | A local open model (u2netp) in the browser; no provider and no photo leaves the device |
+| Multi-garment extraction, image generation, virtual try-on and chat | Deferred; none is required to deliver automatic tagging | No model installed or selected for MVP |
 | A later conversational stylist or AI outfit reranker | Separate user decision and measured benefit over the rule baseline; the selected text-capable model could be evaluated again then | No first-release endpoint, calls or acceptance requirement |
 
 An image model supplies useful descriptions; it does not establish physical warmth or guarantee attractive outfits. More expensive models cannot recover information that is not visible. Do not add an embedding model, vector database, model-training pipeline or separate stylist model for a 500-item wardrobe.

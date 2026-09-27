@@ -264,6 +264,17 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Preserve bounded synthetic BG1 visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bg1-background-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/bg1-visual/removed-en-desktop.png
+            test-results/bg1-visual/working-sv-mobile.png
+            test-results/bg1-visual/fallback-fi-mobile.png
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Preserve bounded synthetic P6a visual evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

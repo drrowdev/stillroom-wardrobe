@@ -5,6 +5,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { checkStaticTree, readInventory } from './check-static-assets.mjs';
 
 export const bundleBudgets = Object.freeze({
   initialJsGzipBytes: 240_000,
@@ -83,6 +84,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const result = await checkDist(path.resolve(process.argv[2] ?? 'dist'));
   for (const row of result.report) console.log(`${row.kind.padEnd(7)} ${String(row.raw).padStart(8)} raw ${String(row.gzip).padStart(7)} gzip  ${row.file}`);
   console.log(`initial JS gzip: ${result.initialJsGzip} B (budget ${bundleBudgets.initialJsGzipBytes} B)`);
+  // The build already refuses these; repeating it here keeps a hand-assembled dist from passing (ADR24).
+  for (const problem of await checkStaticTree(path.resolve(process.argv[2] ?? 'dist'), await readInventory())) result.violations.push(`static assets: ${problem}`);
   if (result.violations.length) {
     for (const violation of result.violations) console.error(`BUDGET: ${violation}`);
     process.exit(1);

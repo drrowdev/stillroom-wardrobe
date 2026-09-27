@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { contentTypeFor, headersFor, parseHeaders, startDistServer, type DistServer } from '../../scripts/serve-dist.mjs';
 import { artifactBytes, builds, readManifest, type BuildName } from './builds';
+import { modelAssets, modelCacheName } from '../../src/images/background/model-assets';
 
 export type { DistServer };
 export const serve = (name: BuildName): Promise<DistServer> => startDistServer({ root: builds[name] });
@@ -46,8 +47,9 @@ export function expectedHeaders(name: BuildName, pathname: string) {
   return expected;
 }
 
-// Every cache entry must be a public file of the given build, byte for byte, with only public headers.
-export async function expectOnlyShell(page: Page, name: BuildName, privateMarkers: string[] = []) {
+// Every cache entry must be a public file of the given build, byte for byte, with only public headers. With
+// `models`, the background-removal cache may also exist and must hold exactly the verified inventory files.
+export async function expectOnlyShell(page: Page, name: BuildName, privateMarkers: string[] = [], models = false) {
   const snapshot = await page.evaluate(async () => {
     const result: Array<{ cache: string; url: string; headers: Array<[string, string]>; bytes: number[] }> = [];
     for (const cache of await caches.keys()) {
@@ -66,6 +68,17 @@ export async function expectOnlyShell(page: Page, name: BuildName, privateMarker
     for (const marker of privateMarkers) if (text.includes(marker)) throw new Error(`Marker is public in ${file.url}`);
   }
   const origin = new URL(page.url()).origin;
+  const modelEntries = snapshot.filter((entry) => entry.cache === modelCacheName);
+  if (models) {
+    expect(modelEntries.map((entry) => entry.url).sort()).toEqual(modelAssets.map((file) => `${origin}${file.path}`).sort());
+    for (const entry of modelEntries) {
+      const file = modelAssets.find((asset) => `${origin}${asset.path}` === entry.url)!;
+      const bytes = Buffer.from(entry.bytes);
+      expect(bytes.length, file.path).toBe(file.bytes);
+      expect(createHash('sha256').update(bytes).digest('hex'), file.path).toBe(file.sha256);
+    }
+    snapshot.splice(0, snapshot.length, ...snapshot.filter((entry) => entry.cache !== modelCacheName));
+  }
   expect(new Set(snapshot.map((entry) => entry.cache))).toEqual(new Set([cacheName(name)]));
   expect(snapshot.map((entry) => entry.url).sort()).toEqual(manifest.files.map((file) => `${origin}${file.url}`).sort());
   for (const entry of snapshot) {

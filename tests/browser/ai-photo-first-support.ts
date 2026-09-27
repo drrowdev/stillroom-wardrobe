@@ -12,7 +12,7 @@ export async function manualEntry(page: Page) {
   await expect(page.getByRole('button', { name: messages['aiC.keep'][language], exact: true })).toHaveCount(0);
 }
 export async function aiFixture(page: Page, language: Language = 'en', enabled = true, lost?: 'reservation' | 'finalizer',
-  observeRawAnalysis = false, imageChangeLoss?: MockOptions['imageChangeLoss']) {
+  observeRawAnalysis = false, imageChangeLoss?: MockOptions['imageChangeLoss'], start = '/') {
   const results = new Map<string, AiResult>();
   const consent = new Map<string, boolean>([[owners.a, enabled], [owners.b, false]]);
   const calls: Array<{ route: string; body: unknown }> = [];
@@ -98,7 +98,7 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
     }
     await json(result ? { code: 'OK', status: 'ready', result, accounting } : { code: 'UNAVAILABLE' });
   });
-  await page.goto('/'); await signIn(page);
+  await page.goto(start); await signIn(page);
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   return { ...api, results, calls, inputs, consent, mode: (mode: typeof analysisMode) => { analysisMode = mode; },
     policy: (next: Partial<typeof policy>) => { policy = { ...policy, ...next }; },
