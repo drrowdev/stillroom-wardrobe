@@ -112,7 +112,8 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'item_deletion_target_supported(uuid, uuid, text)', 'item_deletion_receipt(private.item_deletion_operations)',
   'item_deletion_inventory_valid(private.item_deletion_operations)',
   'rotate_admission_generation()', 'deletion_receipt(private.deletion_jobs)', 'deletion_owner_rows_absent(uuid)',
-  'release_deleted_admission()', 'backup_bounded(jsonb, integer)',
+  'release_deleted_admission()', 'backup_bounded(jsonb, integer)', 'backup_number_bytes(numeric)',
+  'backup_compact_bytes(jsonb)',
 ]);
 
 // Supabase-provided GraphQL entrypoint; its privileges are provider-managed and recorded, not asserted.

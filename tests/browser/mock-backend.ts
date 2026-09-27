@@ -1582,9 +1582,10 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         await json({ code: '22023', message: 'Invalid input' }, 400); return;
       }
       const stored = restoreControl.attributionImports.get(String(item.id));
-      const state = stored ? stored.importId !== body.p_import_id ? { state: 'kept', reason: 'other-import' }
-        : sameValue(stored.entries, entries) ? { state: 'equal', reason: null } : { state: 'kept', reason: 'differs' }
-        : (exportControl.attributions.get(String(item.id)) ?? []).length > 0 ? { state: 'kept', reason: 'recorded' } : { state: 'created', reason: null };
+      const state = (exportControl.attributions.get(String(item.id)) ?? []).length > 0 ? { state: 'kept', reason: 'recorded' }
+        : stored ? stored.importId !== body.p_import_id ? { state: 'kept', reason: 'other-import' }
+          : sameValue(stored.entries, entries) ? { state: 'equal', reason: null } : { state: 'kept', reason: 'differs' }
+          : { state: 'created', reason: null };
       if (state.state === 'created') restoreControl.attributionImports.set(String(item.id), { importId: String(body.p_import_id), entries });
       await json(state); return;
     }

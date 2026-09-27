@@ -489,7 +489,7 @@ const colourClaim = async (sql, owner, n, manifest) => JSON.parse(await sql(`sel
   120,80,${literal(manifest)});`));
 
 // One Azure analysis plus analyzed Save; the item carries the stated colours from the stored result.
-export async function colourAnalyzedSave(client, owner, env, sql, n, manifest, colours, mark = () => {}) {
+async function colourAnalyzedSave(client, owner, env, sql, n, manifest, colours, mark = () => {}) {
   mark('colour-analysis-claim');
   const claim = await colourClaim(sql, owner, n, manifest);
   requireEvidence(claim.claimed === true && claim.manifestId === manifest);

@@ -1,6 +1,7 @@
 -- Phase 6 P6d (Q5): a restore brings back each item's saved tag history.
--- New objects: private.imported_attribution_history, private.backup_bounded, public.restore_item_attribution,
--- public.item_attribution_history_v2 and public.attribution_digest.
+-- New objects: private.imported_attribution_history, private.backup_bounded, private.backup_number_bytes,
+-- private.backup_compact_bytes, public.restore_item_attribution, public.item_attribution_history_v2 and
+-- public.attribution_digest.
 -- NOT additive: replaces private.deletion_owner_rows_absent(uuid) with the same signature (P6c's list plus the new
 -- table). Hosted apply needs owner approval of the exact bodies, then a body/ACL/owner/search_path read-back.
 -- public.item_attribution_history is unchanged: it keeps returning only server-recorded attribution.
@@ -66,6 +67,45 @@ begin
 end;
 $$;
 
+-- The length of a number as JSON.stringify writes it: plain digits from 1e-6 up to 1e21, else d.ddde+n.
+create function private.backup_number_bytes(p numeric) returns integer
+language plpgsql immutable set search_path = '' as $$
+declare t text := trim_scale(abs(p))::text; whole text := split_part(t,'.',1); frac text := split_part(t,'.',2);
+  digits integer; exponent integer;
+begin
+  if p=0 then return 1; end if;
+  if abs(p)<1e21 and abs(p)>=1e-6 then return octet_length(trim_scale(p)::text); end if;
+  digits := length(trim(both '0' from whole||frac));
+  exponent := case when whole<>'0' then length(whole)-1 else -(length(frac)-length(ltrim(frac,'0'))+1) end;
+  return (p<0)::integer+digits+(digits>1)::integer+2+length(abs(exponent)::text);
+end;
+$$;
+
+-- UTF-8 bytes of the value as compact JSON, the form the backup's metadata limit measures. jsonb's own text adds
+-- a space after every ':' and ',' and writes numbers in full, so it is longer.
+create function private.backup_compact_bytes(p_value jsonb) returns bigint
+language plpgsql immutable set search_path = '' as $$
+declare k text; v jsonb; total bigint := 0; n integer := 0;
+begin
+  case jsonb_typeof(p_value)
+    when 'object' then
+      for k,v in select key,value from jsonb_each(p_value) loop
+        total := total+octet_length(to_jsonb(k)::text)+1+private.backup_compact_bytes(v); n := n+1;
+      end loop;
+      return total+2+greatest(n-1,0);
+    when 'array' then
+      for v in select value from jsonb_array_elements(p_value) loop
+        total := total+private.backup_compact_bytes(v); n := n+1;
+      end loop;
+      return total+2+greatest(n-1,0);
+    when 'number' then
+      return private.backup_number_bytes((p_value#>>'{}')::numeric);
+    else
+      return octet_length(p_value::text);
+  end case;
+end;
+$$;
+
 -- Restores one item's tag history from a backup. Outcomes are values: created, equal (the same import again),
 -- kept (differs, other-import or recorded: existing history is never changed) and busy (lock contention; retry).
 create function public.restore_item_attribution(p_item_id uuid,p_import_id uuid,p_entries jsonb) returns jsonb
@@ -94,8 +134,8 @@ begin
   end if;
   if p_import_id is null or p_entries is null or jsonb_typeof(p_entries)<>'array'
     or jsonb_array_length(p_entries) not between 1 and 1000
-    or octet_length(convert_to(p_entries::text,'UTF8'))>8388608
-    or not private.backup_bounded(p_entries,1) then
+    or not private.backup_bounded(p_entries,1)
+    or private.backup_compact_bytes(p_entries)>8388608 then
     raise exception using errcode='22023',message='Invalid input';
   end if;
   n := jsonb_array_length(p_entries);
@@ -121,6 +161,11 @@ begin
     end if;
   end loop;
   -- Decided and written under the locks above, so a concurrent import or completion cannot interleave.
+  -- Server-recorded history comes first: an item with any is kept as it is, whatever was imported before.
+  if exists(select 1 from private.item_attribution_history a where a.owner_id=u and a.item_id=p_item_id)
+    or exists(select 1 from private.image_change_history a where a.owner_id=u and a.item_id=p_item_id) then
+    return jsonb_build_object('state','kept','reason','recorded');
+  end if;
   select coalesce(jsonb_agg(jsonb_build_object('position',h.position,'source_image_id',h.source_image_id,
       'image_sha256',h.image_sha256,'model_id',h.model_id,'prompt_version',h.prompt_version,'fields',h.fields)
       order by h.position),'[]'::jsonb),
@@ -131,10 +176,6 @@ begin
     if imports<>array[p_import_id] then return jsonb_build_object('state','kept','reason','other-import'); end if;
     if stored=p_entries then return jsonb_build_object('state','equal','reason',null); end if;
     return jsonb_build_object('state','kept','reason','differs');
-  end if;
-  if exists(select 1 from private.item_attribution_history a where a.owner_id=u and a.item_id=p_item_id)
-    or exists(select 1 from private.image_change_history a where a.owner_id=u and a.item_id=p_item_id) then
-    return jsonb_build_object('state','kept','reason','recorded');
   end if;
   insert into private.imported_attribution_history(owner_id,item_id,position,source_image_id,image_sha256,model_id,
     prompt_version,fields,import_id)
@@ -227,7 +268,8 @@ language sql stable security definer set search_path = '' as $$
     or exists(select 1 from private.imported_attribution_history where owner_id=p_owner));
 $$;
 
-revoke all on function private.backup_bounded(jsonb,integer),private.deletion_owner_rows_absent(uuid)
+revoke all on function private.backup_bounded(jsonb,integer),private.backup_number_bytes(numeric),
+  private.backup_compact_bytes(jsonb),private.deletion_owner_rows_absent(uuid)
   from public,anon,authenticated,service_role;
 revoke all on function public.restore_item_attribution(uuid,uuid,jsonb),public.item_attribution_history_v2(uuid),
   public.attribution_digest() from public,anon,authenticated,service_role;
