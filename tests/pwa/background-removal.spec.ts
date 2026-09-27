@@ -80,33 +80,6 @@ test.describe('production background removal', () => {
     if (port === undefined) delete process.env.PLAYWRIGHT_PORT; else process.env.PLAYWRIGHT_PORT = port;
   });
 
-  test('a throttled first download falls back for that photo, then serves the next photo without a new download', async ({ page }) => {
-    test.setTimeout(180_000);
-    // About 31 s for the ~19 MB of binaries: longer than the 25 s a photo waits.
-    server = await startDistServer({ root: builds.a, throttle: { bytesPerSecond: 600_000 } });
-    const egress = await observeEgress(page.context(), server.url);
-    const api = await fixture(page, server);
-    await controlled(page);
-    await openAdd(page);
-    const photo = await shirt(page);
-    await choose(page, photo);
-    await expect(page.locator('.capture-photo img')).toBeVisible({ timeout: 60_000 });
-    expect(near(await corner(page), GREY)).toBe(true);
-    await expect.poll(() => api.inputs.length).toBe(1);
-    // The download continues in the background and is verified into the model cache.
-    await expect.poll(() => page.evaluate(async (name) => (await (await caches.open(name)).keys()).length, modelCacheName), { timeout: 90_000 }).toBe(2);
-    const downloaded = modelRequests(server).length;
-    expect(modelRequests(server).map((entry) => entry.pathname).sort()).toEqual(modelPaths);
-
-    await choose(page, photo);
-    await expect.poll(async () => near(await corner(page), FILL), { timeout: 60_000 }).toBe(true);
-    await expect.poll(() => api.inputs.length).toBe(2);
-    expect(modelRequests(server)).toHaveLength(downloaded);
-    expectApprovedEgress(await egress.read(), server, 2);
-    const total = modelRequests(server).reduce((sum, entry) => sum + entry.bytes, 0);
-    expect(total).toBe(modelAssets.reduce((sum, file) => sum + file.bytes, 0));
-  });
-
   test('offline, a cached model still removes the background', async ({ page, context }) => {
     test.setTimeout(120_000);
     server = await serve('a');
@@ -134,12 +107,45 @@ test.describe('production background removal', () => {
     await context.setOffline(false);
   });
 
-  // These two run full model inference in their own browsers and each takes over a minute. On two CI workers they
-  // competed for CPU and the inventory test overran its limit (run 36324111399), so they run one after the other in
-  // one worker. 'default' rather than 'serial' mode: a failure does not skip the other test, and a retry reruns only
-  // the test that failed.
+  // These three run full model inference in their own browsers. On two CI workers they competed for CPU: the inventory
+  // test overran its limit (run 36324111399), and the throttled download, running beside the other two, took the whole
+  // 3 min instead of about 45 s (runs 36351156967 attempts 1 and 2, passing alone on retry in 37 s). So they run one
+  // after the other in one worker. 'default' rather than 'serial' mode: a failure does not skip the others, and a retry
+  // reruns only the test that failed.
   test.describe('full inference, one at a time', () => {
     test.describe.configure({ mode: 'default' });
+
+    test('a throttled first download falls back for that photo, then serves the next photo without a new download', async ({ page }) => {
+      test.setTimeout(180_000);
+      // About 31 s for the ~19 MB of binaries: longer than the 25 s a photo waits.
+      server = await startDistServer({ root: builds.a, throttle: { bytesPerSecond: 600_000 } });
+      const began = performance.now();
+      const phase = (name: string) => { console.log(`throttled download: ${name} after ${Math.round(performance.now() - began)} ms`); };
+      const egress = await observeEgress(page.context(), server.url);
+      const api = await fixture(page, server);
+      await controlled(page);
+      await openAdd(page);
+      const photo = await shirt(page);
+      await choose(page, photo);
+      await expect(page.locator('.capture-photo img')).toBeVisible({ timeout: 60_000 });
+      expect(near(await corner(page), GREY)).toBe(true);
+      phase('fallback shown');
+      await expect.poll(() => api.inputs.length).toBe(1);
+      // The download continues in the background and is verified into the model cache.
+      await expect.poll(() => page.evaluate(async (name) => (await (await caches.open(name)).keys()).length, modelCacheName), { timeout: 90_000 }).toBe(2);
+      phase('model cached');
+      const downloaded = modelRequests(server).length;
+      expect(modelRequests(server).map((entry) => entry.pathname).sort()).toEqual(modelPaths);
+
+      await choose(page, photo);
+      await expect.poll(async () => near(await corner(page), FILL), { timeout: 60_000 }).toBe(true);
+      await expect.poll(() => api.inputs.length).toBe(2);
+      phase('second photo removed');
+      expect(modelRequests(server)).toHaveLength(downloaded);
+      expectApprovedEgress(await egress.read(), server, 2);
+      const total = modelRequests(server).reduce((sum, entry) => sum + entry.bytes, 0);
+      expect(total).toBe(modelAssets.reduce((sum, file) => sum + file.bytes, 0));
+    });
 
     test('the build serves the exact inventory, nothing loads before a photo, and logout keeps only the shell and verified model caches', async ({ page }) => {
       test.setTimeout(120_000);
