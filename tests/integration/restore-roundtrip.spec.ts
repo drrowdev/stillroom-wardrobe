@@ -73,7 +73,8 @@ function languageInitializationOnly(label: string, actual: Snapshot, expected: S
   if (!initialized) throw new Error(`${label}: profile changed beyond the first-language save (${fields.join(', ')}).`);
 }
 // Status and preflight RPCs that only read. ai_status and ai_analysis_status are deliberately absent: both can expire
-// and close old AI requests (private.ai_close).
+// and close old AI requests (private.ai_close). stylist_status is absent too: it expires old stylist requests
+// (private.stylist_expire), so it is locked with ai_status below.
 const READ_ONLY_RPCS = new Set(['analyzed_item_save_preflight', 'deletion_status', 'image_change_preflight',
   'image_change_requests', 'image_change_status', 'image_recovery_preflight', 'image_recovery_versions', 'item_attribution_history',
   'item_attribution_history_v2', 'attribution_digest',
@@ -151,10 +152,12 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
   const storageWrites = (from: number) => requests.slice(from).filter(({ method, url }) =>
     method !== 'GET' && method !== 'HEAD' && new URL(url).pathname.startsWith('/storage/v1/object/'));
   const reservations = (from: number) => requests.slice(from).filter(({ url }) => /\/rest\/v1\/rpc\/reserve_/.test(new URL(url).pathname));
-  // ai_status expires and closes the owner's old AI requests (private state the snapshots can't see). The app's Settings
-  // initialization may call it; it must finish before the restore baseline, and any later call is refused and fails.
+  // ai_status and stylist_status expire and close the owner's old AI requests (private state the snapshots can't see).
+  // The app's Settings initialization may call them; they must finish before the restore baseline, and any later call is
+  // refused and fails.
+  const STATUS_RPC_PATHS = new Set(['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status']);
   const isAiStatus = (request: import('@playwright/test').Request) =>
-    request.method() === 'POST' && new URL(request.url()).pathname === '/rest/v1/rpc/ai_status';
+    request.method() === 'POST' && STATUS_RPC_PATHS.has(new URL(request.url()).pathname);
   const aiInFlight = new Set<import('@playwright/test').Request>();
   // lateAiStatus counts refusals by the route; postLockAiStatus independently counts every post-lock POST seen by the
   // request listener, whatever its query string. Both must equal the drill's own refused probes.
@@ -165,8 +168,8 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
   });
   const settle = (request: import('@playwright/test').Request) => { if (aiInFlight.delete(request)) aiFinished++; };
   page.on('requestfinished', settle); page.on('requestfailed', settle);
-  // A URL predicate on the exact pathname: a glob would miss `/rest/v1/rpc/ai_status?…`.
-  await page.route(url => url.pathname === '/rest/v1/rpc/ai_status', async route => {
+  // A URL predicate on the exact pathnames: a glob would miss `/rest/v1/rpc/ai_status?…`.
+  await page.route(url => STATUS_RPC_PATHS.has(url.pathname), async route => {
     if (aiLocked && route.request().method() === 'POST') { lateAiStatus++; await route.abort('blockedbyclient'); return; }
     await route.fallback();
   });
@@ -331,24 +334,26 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     await expect(page.locator('#wardrobe-title')).toBeVisible(slow);
     await page.evaluate(() => { location.hash = '#/settings'; });
     await expect(page.locator('#settings-title')).toBeVisible();
-    // Settings initialization: let its ai_status call(s) finish and the network stay quiet, then lock ai_status.
+    // Settings initialization: let its status call(s) finish and the network stay quiet, then lock both status RPCs.
     await expect.poll(() => aiFinished > 0 && aiInFlight.size === 0, slow).toBe(true);
     await expect.poll(async () => { const seen = aiFinished; await page.waitForTimeout(1000); return aiInFlight.size === 0 && aiFinished === seen; }, slow).toBe(true);
     aiLocked = true;
-    // Negative control: a query-bearing ai_status POST from the page must be refused by the route and counted by both.
+    // Negative control: a query-bearing POST to each status RPC from the page must be refused by the route and counted by both.
     check(lateAiStatus === 0 && postLockAiStatus === 0);
-    aiProbes++;
-    const probe = await page.evaluate(async url => {
-      try { await fetch(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' }); return 'reached'; } catch { return 'refused'; }
-    }, `${base}/rest/v1/rpc/ai_status?select=*&probe=${randomUUID()}`);
-    if (probe !== 'refused') throw new Error('A query-bearing ai_status call escaped the lock.');
+    for (const name of ['ai_status', 'stylist_status']) {
+      aiProbes++;
+      const probe = await page.evaluate(async url => {
+        try { await fetch(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' }); return 'reached'; } catch { return 'refused'; }
+      }, `${base}/rest/v1/rpc/${name}?select=*&probe=${randomUUID()}`);
+      if (probe !== 'refused') throw new Error(`A query-bearing ${name} call escaped the lock.`);
+    }
     await expect.poll(() => [lateAiStatus, postLockAiStatus], slow).toEqual([aiProbes, aiProbes]);
     // Every write attempt while signing in and opening Settings, even one later undone: only Auth, the profile's
-    // first-language save, the initialization ai_status and read-only status RPCs are allowed.
+    // first-language save, the initialization ai_status and stylist_status, and read-only status RPCs are allowed.
     const signInAttempts = requests.slice(signInFrom).filter(({ method }) => !['GET', 'HEAD', 'OPTIONS'].includes(method))
       .map(({ method, url }) => ({ method, path: new URL(url).pathname }))
       .filter(({ method, path }) => !(path.startsWith('/auth/v1/') || method === 'PATCH' && path === '/rest/v1/profiles'
-        || method === 'POST' && (path === '/rest/v1/rpc/ai_status' || READ_ONLY_RPCS.has(path.replace('/rest/v1/rpc/', ''))
+        || method === 'POST' && (STATUS_RPC_PATHS.has(path) || READ_ONLY_RPCS.has(path.replace('/rest/v1/rpc/', ''))
           && path.startsWith('/rest/v1/rpc/'))));
     if (signInAttempts.length) throw new Error(`Write attempts while signing in: ${signInAttempts.map(({ method, path }) => `${method} ${path}`).join(', ')}.`);
     const opened = await snapshot(a);
@@ -510,12 +515,13 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     tripped('Refused function calls', refusedFunctions);
     tripped('Function calls other than finalize-image-change',
       paths(functionCalls(0)).filter(path => path !== '/functions/v1/finalize-image-change'));
-    // ai_status ran only during the Settings initialization, before the baseline (see aiLocked); any later call was refused.
+    // ai_status and stylist_status ran only during the Settings initialization, before the baseline (see aiLocked); any
+    // later call was refused.
     if (lateAiStatus !== aiProbes || postLockAiStatus !== aiProbes) {
-      throw new Error(`ai_status called after the restore baseline: ${postLockAiStatus - aiProbes} seen, ${lateAiStatus - aiProbes} refused beyond the probe.`);
+      throw new Error(`A status RPC called after the restore baseline: ${postLockAiStatus - aiProbes} seen, ${lateAiStatus - aiProbes} refused beyond the probe.`);
     }
-    tripped('Save or AI RPCs', paths(requests).filter(path => /\/rpc\/(reserve_item_save|reserve_analyzed_item_save|ai_)/.test(path)
-      && path !== '/rest/v1/rpc/ai_status'));
+    tripped('Save or AI RPCs', paths(requests).filter(path => /\/rpc\/(reserve_item_save|reserve_analyzed_item_save|ai_|stylist_)/.test(path)
+      && !STATUS_RPC_PATHS.has(path)));
     unchanged('B', await snapshot(owner), bBefore);
   } catch (problem) {
     throw new AggregateError([new Error(`restore drill primary failed at ${stage}.`)],
