@@ -37,6 +37,34 @@ async function edit(page: Page, number: 1 | 2) {
 }
 async function writes(api: Api, count: number) { await expect.poll(() => api.adminControl.writes.length).toBe(count); }
 
+// December 2026 back to July 2026 includes the longest month names in each language.
+const fixedMonths = {
+  en: ['December 2026', 'November 2026', 'October 2026', 'September 2026', 'August 2026', 'July 2026'],
+  fi: ['joulukuu 2026', 'marraskuu 2026', 'lokakuu 2026', 'syyskuu 2026', 'elokuu 2026', 'heinäkuu 2026'],
+  sv: ['december 2026', 'november 2026', 'oktober 2026', 'september 2026', 'augusti 2026', 'juli 2026'],
+} as const;
+async function expectMonthsFit(page: Page, language: Language) {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await start(page, { language, now: new Date(Date.UTC(2026, 11, 15)) });
+  await openScreen(page);
+  for (const zoomed of [false, true]) {
+    if (zoomed) await page.addStyleTag({ content: zoom });
+    if (zoomed) await expect(page.locator('html')).toHaveCSS('font-size', '32px');
+    const fit = await page.locator('#admin-month').evaluate((select: HTMLSelectElement) => {
+      const style = getComputedStyle(select);
+      // Only without a native appearance is the padding the whole space beside the text.
+      if (style.appearance !== 'none') throw new Error(`appearance ${style.appearance}`);
+      const context = document.createElement('canvas').getContext('2d')!;
+      context.font = style.font;
+      const room = select.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      return { room, labels: [...select.options].map((option) => ({ label: option.text, width: context.measureText(option.text).width })) };
+    });
+    expect(fit.labels.map((entry) => entry.label)).toEqual(fixedMonths[language]);
+    for (const entry of fit.labels) expect(entry.width, `${entry.label} zoomed=${String(zoomed)}`).toBeLessThanOrEqual(fit.room);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+}
+
 test.describe('AD1b admin spending and limits', () => {
   test('anyone who is not the admin sees the note, and the admin screen is not available', async ({ page }) => {
     const api = await start(page, { admin: false, hash: '/#/settings' });
@@ -326,35 +354,46 @@ test.describe('AD1b admin spending and limits', () => {
     await expect(page.getByText(text('admin.note', 'sv'), { exact: true })).toBeVisible();
   });
 
-  // December 2026 back to July 2026 includes the longest month names in each language.
-  const fixedMonths = {
-    en: ['December 2026', 'November 2026', 'October 2026', 'September 2026', 'August 2026', 'July 2026'],
-    fi: ['joulukuu 2026', 'marraskuu 2026', 'lokakuu 2026', 'syyskuu 2026', 'elokuu 2026', 'heinäkuu 2026'],
-    sv: ['december 2026', 'november 2026', 'oktober 2026', 'september 2026', 'augusti 2026', 'juli 2026'],
-  } as const;
   for (const language of ['en', 'fi', 'sv'] as const) {
     test(`every ${language} month label fits the select at 320 px, at 100 % and 200 % text size`, async ({ page }) => {
-      await page.setViewportSize({ width: 320, height: 900 });
-      await start(page, { language, now: new Date(Date.UTC(2026, 11, 15)) });
-      await openScreen(page);
-      for (const zoomed of [false, true]) {
-        if (zoomed) await page.addStyleTag({ content: zoom });
-        if (zoomed) await expect(page.locator('html')).toHaveCSS('font-size', '32px');
-        const fit = await page.locator('#admin-month').evaluate((select: HTMLSelectElement) => {
-          const style = getComputedStyle(select);
-          // Only without a native appearance is the padding the whole space beside the text.
-          if (style.appearance !== 'none') throw new Error(`appearance ${style.appearance}`);
-          const context = document.createElement('canvas').getContext('2d')!;
-          context.font = style.font;
-          const room = select.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-          return { room, labels: [...select.options].map((option) => ({ label: option.text, width: context.measureText(option.text).width })) };
-        });
-        expect(fit.labels.map((entry) => entry.label)).toEqual(fixedMonths[language]);
-        for (const entry of fit.labels) expect(entry.width, `${entry.label} zoomed=${String(zoomed)}`).toBeLessThanOrEqual(fit.room);
-      }
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await expectMonthsFit(page, language);
     });
   }
+
+  test.describe('in forced colours', () => {
+    test.use({ forcedColors: 'active' });
+    test('the month select keeps a visible arrow, a focus ring, keyboard use and the narrow fit', async ({ page }) => {
+      await expectMonthsFit(page, 'fi');
+      expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
+      const select = page.locator('#admin-month');
+      const drawn = await select.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { supported: CSS.supports('forced-color-adjust', 'none'), adjust: style.getPropertyValue('forced-color-adjust'), image: style.backgroundImage, color: style.color };
+      });
+      // Chromium computes the drawn arrow as 'none' in forced colours unless the select opts out; WebKit never forces colours.
+      if (drawn.supported) expect(drawn.adjust).toBe('none');
+      expect(drawn.image).toContain('linear-gradient');
+      // The arrow uses the same system colour as the text.
+      expect(drawn.image).toContain(drawn.color);
+
+      await page.locator('#admin-title').click();
+      let focused = false;
+      for (let step = 0; step < 40 && !focused; step += 1) {
+        await page.keyboard.press('Tab');
+        focused = await select.evaluate((element) => document.activeElement === element);
+      }
+      expect(focused).toBe(true);
+      const ring = await select.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { visible: element.matches(':focus-visible'), style: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+      });
+      expect(ring).toEqual({ visible: true, style: 'solid', width: 3 });
+      const first = await select.inputValue();
+      await page.keyboard.press('ArrowDown');
+      await expect(select).not.toHaveValue(first);
+      await expect(select.locator('option:checked')).toHaveText(fixedMonths.fi[1]);
+    });
+  });
 
   test('a failed load can be retried', async ({ page }) => {
     const api = await mockBackend(page);

@@ -613,6 +613,12 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 }
 /* The longest month names at 200 % text need a little of the page margin on the narrowest screens. */
 @media (max-width: 360px) { .admin-months select { width: calc(100% + 16px); margin-inline: -8px; } }
+/* Forced colours would drop the drawn arrow, so it is kept and painted in system colours. */
+@media (forced-colors: active) {
+  .admin-months select { forced-color-adjust: none; color: FieldText; background-color: Field; border-color: FieldText; background-image: linear-gradient(45deg, transparent 50%, FieldText 50%), linear-gradient(135deg, FieldText 50%, transparent 50%); }
+  .admin-months select option { color: FieldText; background-color: Field; }
+  .admin-months select:focus-visible { outline-color: Highlight; }
+}
 .admin-accounts { display: grid; gap: 24px; }
 .admin-page { overflow-wrap: anywhere; }
 .admin-card h3 { font-size: 1rem; margin: 22px 0 10px; }
