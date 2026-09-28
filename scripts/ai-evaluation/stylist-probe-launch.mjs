@@ -9,6 +9,11 @@ import { STYLIST_ENDPOINT } from '../../src/domain/stylist.ts';
 import { PROBE, ProbeError, SLOTS, assertRuntime } from './stylist-probe.mjs';
 
 export const AZURE_TARGET = Object.freeze({ resourceGroup: 'rg-stillroom-ai-eval', resource: 'stillroom-ai-eval', keyName: 'key1' });
+/**
+ * The AIServices resource reports several endpoints; `properties.endpoint` is the cognitiveservices one. The OpenAI origin
+ * is this entry of `properties.endpoints`. It is selected here, not in `--query`, so no argument contains spaces or quotes.
+ */
+export const OPENAI_ENDPOINT_NAME = 'OpenAI Language Model Instance API';
 const PROBE_SCRIPT = fileURLToPath(new URL('./stylist-probe.mjs', import.meta.url));
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const KEY = /^[\x21-\x7e]{16,512}$/;
@@ -23,7 +28,7 @@ export function parseLauncherArguments(args) {
 export function azureCommands(subscription) {
   const target = ['--subscription', subscription, '--resource-group', AZURE_TARGET.resourceGroup, '--name', AZURE_TARGET.resource];
   return {
-    endpoint: ['cognitiveservices', 'account', 'show', ...target, '--query', 'properties.endpoint', '--output', 'json', '--only-show-errors'],
+    endpoint: ['cognitiveservices', 'account', 'show', ...target, '--query', 'properties.endpoints', '--output', 'json', '--only-show-errors'],
     keys: ['cognitiveservices', 'account', 'keys', 'list', ...target, '--query', AZURE_TARGET.keyName, '--output', 'json', '--only-show-errors'],
   };
 }
@@ -87,6 +92,14 @@ function jsonString(text, code) {
   if (typeof value !== 'string') throw new ProbeError(code);
   return value;
 }
+/** The OpenAI endpoint from the `properties.endpoints` object, or RESOURCE_MISMATCH. */
+export function openAiEndpoint(text) {
+  let value;
+  try { value = JSON.parse(text); } catch { throw new ProbeError('RESOURCE_MISMATCH'); }
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || !Object.hasOwn(value, OPENAI_ENDPOINT_NAME)
+    || typeof value[OPENAI_ENDPOINT_NAME] !== 'string') throw new ProbeError('RESOURCE_MISMATCH');
+  return value[OPENAI_ENDPOINT_NAME];
+}
 const PROBE_PROGRAM = { file: process.execPath, prefix: [PROBE_SCRIPT] };
 /** Starts the probe child; any start failure or signal is exit code 1. */
 export function runChild(env, args, program = PROBE_PROGRAM) {
@@ -104,7 +117,7 @@ export async function launch(args, { azure = runAzure, child = runChild, baseEnv
   const azureEnv = azureEnvironment(baseEnv);
   const commands = azureCommands(subscription);
   let endpoint;
-  try { endpoint = jsonString(await azure(commands.endpoint, azureEnv), 'RESOURCE_MISMATCH'); } catch { throw new ProbeError('RESOURCE_MISMATCH'); }
+  try { endpoint = openAiEndpoint(await azure(commands.endpoint, azureEnv)); } catch { throw new ProbeError('RESOURCE_MISMATCH'); }
   let origin = null;
   try { origin = new URL(endpoint).origin; } catch { /* fixed error below */ }
   if (origin !== new URL(STYLIST_ENDPOINT).origin) throw new ProbeError('RESOURCE_MISMATCH');

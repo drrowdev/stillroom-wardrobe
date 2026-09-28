@@ -9,7 +9,7 @@ import {
   readRecord, reconcile, recover, summary, validateReceipt, verdict,
 } from '../../scripts/ai-evaluation/stylist-probe.mjs';
 import {
-  AZURE_FIXED, AZURE_TARGET, azureCommands, azureEnvironment, launch, parseLauncherArguments, probeEnvironment, runAzure, runChild,
+  AZURE_FIXED, AZURE_TARGET, OPENAI_ENDPOINT_NAME, azureCommands, openAiEndpoint, azureEnvironment, launch, parseLauncherArguments, probeEnvironment, runAzure, runChild,
 } from '../../scripts/ai-evaluation/stylist-probe-launch.mjs';
 import {
   STYLIST_BODY_CONTROLS, STYLIST_ENDPOINT, STYLIST_LIMITS, STYLIST_RESERVATION_MICRO, buildStylistRequest, parseStylistBody, utf8Bytes,
@@ -518,12 +518,16 @@ describe('ST-OP launcher (Q3)', () => {
     return { calls, envs, run: async (command: string[], env: Record<string, string>) => {
       calls.push(command);
       envs.push(env);
-      if (command.includes('show')) return JSON.stringify(endpoint);
+      if (command.includes('show')) return JSON.stringify(endpoints(endpoint));
       if (key instanceof Error) throw key;
       return JSON.stringify(key);
     } };
   };
   const ENDPOINT = 'https://stillroom-ai-eval.openai.azure.com/';
+  const COGNITIVE = 'https://stillroom-ai-eval.cognitiveservices.azure.com/';
+  /** The shape az reports for an AIServices resource's properties.endpoints. */
+  const endpoints = (openAi: string) => ({ 'AI Foundry API': 'https://stillroom-ai-eval.services.ai.azure.com/',
+    'Content Understanding': COGNITIVE, [OPENAI_ENDPOINT_NAME]: openAi, 'Azure OpenAI Legacy API - Latest moniker': ENDPOINT });
   const HOSTILE = { Path: 'C:\\bin', SystemRoot: 'C:\\Windows', AZURE_LOGGING_ENABLE_LOG_FILE: 'true', azure_logging_log_dir: 'C:\\logs',
     AZURE_CORE_ONLY_SHOW_ERRORS: 'false', AZURE_CORE_COLLECT_TELEMETRY: 'true', GIT_DIR: 'elsewhere', EDITOR: 'vi',
     AZURE_CONFIG_DIR: 'C:\\az', [PROBE.keyVariable]: 'inherited-old-key-value' };
@@ -537,6 +541,11 @@ describe('ST-OP launcher (Q3)', () => {
       expect(command.join(' ')).not.toMatch(/regenerate|role|assignment|--debug|--verbose|create|update|delete/);
     }
     expect(commands.keys.slice(0, 4)).toEqual(['cognitiveservices', 'account', 'keys', 'list']);
+    expect(commands.endpoint.slice(0, 3)).toEqual(['cognitiveservices', 'account', 'show']);
+    expect(commands.endpoint[commands.endpoint.indexOf('--query') + 1]).toBe('properties.endpoints');
+    expect(OPENAI_ENDPOINT_NAME).toBe('OpenAI Language Model Instance API');
+    // Every argument is one argv element with no spaces or quotes, so the Windows cmd.exe wrapper can't split it.
+    for (const command of Object.values(commands)) for (const arg of command) expect(arg).toMatch(/^[A-Za-z0-9._-]+$/);
     expect(AZURE_TARGET).toEqual({ resourceGroup: 'rg-stillroom-ai-eval', resource: 'stillroom-ai-eval', keyName: 'key1' });
   });
 
@@ -616,6 +625,25 @@ describe('ST-OP launcher (Q3)', () => {
     expect(passed![PROBE.keyVariable]).toBeUndefined();
     expect(await runChild(probeEnvironment(osBase(), KEY), ['send', id, 'min'], { file: path.join(root, 'missing-node'), prefix: [] })).toBe(1);
   }, 30000);
+
+  it('reads the OpenAI entry of the endpoints object and nothing else', () => {
+    expect(openAiEndpoint(JSON.stringify(endpoints(ENDPOINT)))).toBe(ENDPOINT);
+    for (const bad of [JSON.stringify(COGNITIVE), JSON.stringify(ENDPOINT), 'null', '[]', 'not json', JSON.stringify({ 'Content Understanding': ENDPOINT }),
+      JSON.stringify({ [OPENAI_ENDPOINT_NAME]: 7 }), JSON.stringify(Object.create(null)), '{"__proto__":{"OpenAI Language Model Instance API":"x"}}']) {
+      expect(() => openAiEndpoint(bad)).toThrow(/^RESOURCE_MISMATCH$/);
+    }
+  });
+
+  it.each([
+    ['the cognitiveservices endpoint as the OpenAI entry', JSON.stringify(endpoints(COGNITIVE))],
+    ['the old single properties.endpoint value', JSON.stringify(COGNITIVE)],
+    ['no OpenAI entry', JSON.stringify({ 'Content Understanding': COGNITIVE })],
+  ])('stops with RESOURCE_MISMATCH before any key is listed for %s', async (_, shown) => {
+    const calls: string[][] = [];
+    const run = async (command: string[]) => { calls.push(command); if (command.includes('show')) return shown; return JSON.stringify(KEY); };
+    await expect(launch(args, { azure: run, child: noChild, baseEnv: {}, runtime: RUNTIME })).rejects.toThrow(/^RESOURCE_MISMATCH$/);
+    expect(calls).toHaveLength(1);
+  });
 
   it('stops with fixed errors on another resource or a failed key retrieval, never trying anything else', async () => {
     const other = azure('https://another.openai.azure.com/', KEY);

@@ -1084,8 +1084,10 @@ operator's az config file, including `AZURE_LOGGING_ENABLE_LOG_FILE=false` (az
 file logging writes DEBUG output whatever the console verbosity) and telemetry
 off. The operator's global az configuration is not changed. The probe child gets
 only the OS basics plus the key. It makes exactly two Azure CLI calls
-with `--only-show-errors -o json`: `account show` (the endpoint origin must equal
-`STYLIST_ENDPOINT`'s, before any key is listed) and `account keys list --query
+with `--only-show-errors -o json`: `account show --query properties.endpoints`
+(the `OpenAI Language Model Instance API` entry, selected in Node rather than in
+the query, must have `STYLIST_ENDPOINT`'s exact origin before any key is listed;
+`properties.endpoint` is the cognitiveservices endpoint and is not accepted) and `account keys list --query
 key1`. The output is captured in memory; the key goes only into the probe child's
 environment as `STILLROOM_AZURE_PROBE_KEY`, never into arguments, files, logs or
 tool output, and is deleted in `finally`. The child removes it from its own
