@@ -110,7 +110,7 @@ describe('CI workflow browser split', () => {
     expect(new Set(names).size).toBe(names.length);
     expect(job('app')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 40\n    steps:\n');
     expect(job('pwa')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    steps:\n');
-    expect(job('webkit-photo')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    steps:\n');
+    expect(job('webkit-photo')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n    steps:\n');
     expect(job('database')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n');
     expect(job('deletion-rehearsal')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 25\n');
     expect(job('performance')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 15\n    steps:\n');
