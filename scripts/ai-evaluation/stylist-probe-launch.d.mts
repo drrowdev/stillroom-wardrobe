@@ -5,6 +5,8 @@ export const AZURE_TARGET: Readonly<{ resourceGroup: string; resource: string; k
 export const AZURE_FIXED: Readonly<Record<string, string>>;
 export const REFUSED_VARIABLES: readonly string[];
 export function parseLauncherArguments(args: string[]): { subscription: string; id: string; slot: 'min' | 'max' };
+export const OPENAI_ENDPOINT_NAME: string;
+export function openAiEndpoint(text: string): string;
 export function azureCommands(subscription: string): { endpoint: string[]; keys: string[] };
 export function azureEnvironment(base: Env): Record<string, string>;
 export function probeEnvironment(base: Env, key: string): Record<string, string>;
