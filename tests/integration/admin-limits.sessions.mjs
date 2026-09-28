@@ -44,6 +44,18 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
   const controls = (owner) => one(`select to_jsonb(c) from private.ai_controls c where owner_id=${literal(owner.uid)};`);
   const nonLimit = (row) => Object.fromEntries(Object.entries(row).filter(([key]) => !LIMIT_COLUMNS.includes(key) && key !== 'updated_at'));
   const audits = async () => Number(await scalar('select count(*) from private.ai_limit_audit;'));
+  // The allowance consumption belowUse compares against: stylist and shared from stylist_usage, enhancement from
+  // enhance_usage (current period plus any reserved or held row), as exact BigInts.
+  const usage = async (owner) => {
+    const found = await one(`select jsonb_build_object('stylist',s.stylist_micro::text,'total',s.total_micro::text,
+      'enhancement',e.enhance_micro::text) from private.stylist_usage(${literal(owner.uid)},clock_timestamp()) s,
+      private.enhance_usage(${literal(owner.uid)},clock_timestamp()) e;`);
+    return { stylist: BigInt(found.stylist), total: BigInt(found.total), enhancement: BigInt(found.enhancement) };
+  };
+  // Precondition for an expected belowUse:false: current use is within every configured limit of `limits`.
+  const withinLimits = (used, limits) => used.total <= BigInt(limits.shared.monthlyAllowanceMicro)
+    && (limits.stylist.monthlyAllowanceMicro === null || used.stylist <= BigInt(limits.stylist.monthlyAllowanceMicro))
+    && (limits.enhancement.monthlyAllowanceMicro === null || used.enhancement <= BigInt(limits.enhancement.monthlyAllowanceMicro));
   const lastAudit = () => one(`select to_jsonb(x)-'id'-'created_at' from private.ai_limit_audit x order by created_at desc limit 1;`);
   const status = (owner) => client.rpc(owner, 'admin_status', {});
   const spending = (owner, months) => client.rpc(owner, 'admin_ai_spending', months === undefined ? {} : { p_months: months });
@@ -319,20 +331,40 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
     // The 50,000,000 per-account app limit is accepted; untouched exact reservations round-trip unchanged.
     const nonLimitBefore = nonLimit(await controls(b));
     const raised = change({ shared: { monthlyAllowanceMicro: '50000000', maxRequestsPerHour: 999 } });
+    mark('write-raise-precondition');
+    requireEvidence(withinLimits(await usage(b), raised));
+    mark('write-raise');
     equal(await write(b, originalB, baseB, raised, 'RAISE'), { code: 'OK', limits: raised, belowUse: false });
     equal(await limitsOf(b), raised);
     equal(nonLimit(await controls(b)), nonLimitBefore);
+    mark('write-raise-audit');
     equal(await lastAudit(), { owner_id: b.uid, target_admission_no: originalB.no, actor_owner_id: a.uid, old_limits: baseB,
       new_limits: raised, reason_code: 'RAISE' });
     requireEvidence(await audits() === auditBefore + 1);
-    // PAUSE is only a label: the limits are validated and stored like any other change; activation is untouched.
+    mark('write-pause-fixture');
+    // PAUSE is only a label: the limits are validated and stored like any other change; activation is untouched. A known
+    // estimated stylist row (left to the reset, like the history rows) puts current stylist use above the paused limit.
+    await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,
+      dispatched_at,purpose) values (${literal(b.uid)},gen_random_uuid(),to_char(clock_timestamp() at time zone 'UTC','YYYY-MM'),
+      clock_timestamp()-interval '2 hours',${2 * STYLIST_RESERVATION},${2 * STYLIST_RESERVATION},'estimated',
+      clock_timestamp()-interval '2 hours','stylist');`);
     const paused = { ...raised, stylist: feature(String(STYLIST_RESERVATION), String(STYLIST_RESERVATION), 1) };
-    const pausedResult = await write(b, originalB, raised, paused, 'PAUSE');
-    equal(pausedResult, { code: 'OK', limits: paused, belowUse: true });
+    const pausedUse = await usage(b);
+    requireEvidence(pausedUse.stylist > BigInt(STYLIST_RESERVATION));
+    mark('write-pause');
+    equal(await write(b, originalB, raised, paused, 'PAUSE'), { code: 'OK', limits: paused, belowUse: true });
+    equal(await limitsOf(b), paused);
     equal(nonLimit(await controls(b)), nonLimitBefore);
+    equal(await lastAudit(), { owner_id: b.uid, target_admission_no: originalB.no, actor_owner_id: a.uid, old_limits: raised,
+      new_limits: paused, reason_code: 'PAUSE' });
+    mark('write-pause-invalid');
     equal(await write(b, originalB, paused, { ...paused, stylist: feature('0', '0', 1) }, 'PAUSE'),
       invalid('stylist.monthlyAllowanceMicro', 'NOT_POSITIVE'));
+    mark('write-restore-precondition');
+    requireEvidence(withinLimits(await usage(b), baseB));
+    mark('write-restore');
     equal(await write(b, originalB, paused, baseB, 'RESTORE'), { code: 'OK', limits: baseB, belowUse: false });
+    equal(await limitsOf(b), baseB);
     requireEvidence(await audits() === auditBefore + 3);
 
     mark('enhancement-clamp');
@@ -345,6 +377,9 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
       stylist: { ...withEnhance.stylist, monthlyAllowanceMicro: '5000000' } }), invalid('enhancement.monthlyAllowanceMicro', 'ABOVE_SHARED'));
     equal(await limitsOf(b), withEnhance);
     const lowered = { ...withEnhance, shared: { ...withEnhance.shared, monthlyAllowanceMicro: '10000000' } };
+    mark('enhancement-clamp-precondition');
+    requireEvidence(withinLimits(await usage(b), lowered));
+    mark('enhancement-clamp-lower');
     equal(await write(b, originalB, withEnhance, lowered, 'LOWER'), { code: 'OK', limits: lowered, belowUse: false });
     equal(await limitsOf(b), lowered);
 
@@ -419,6 +454,11 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
     mark('overlap-claim');
     // A stylist claim racing a limit reduction: it waits or refuses BUSY while the write holds the target, and is then
     // decided against the new limit, so no reservation exceeds it.
+    mark('overlap-claim-precondition');
+    const claimLimits = await limitsOf(b), claimUse = await usage(b);
+    requireEvidence(claimUse.stylist + BigInt(STYLIST_RESERVATION) <= BigInt(claimLimits.stylist.monthlyAllowanceMicro)
+      && claimUse.total + BigInt(STYLIST_RESERVATION) <= BigInt(claimLimits.shared.monthlyAllowanceMicro));
+    mark('overlap-claim-first');
     requireEvidence((await one(`select public.stylist_claim(${literal(b.uid)},${literal(randomUUID())},${literal(STYLIST)});`))
       .claimed === true);
     const used = BigInt(await scalar(`select stylist_micro from private.stylist_usage(${literal(b.uid)},clock_timestamp());`));
@@ -431,6 +471,7 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
       ${json(base)},${json(reduced)},'LOWER')::text`), 1.029);
     const raced = await one(`select public.stylist_claim(${literal(b.uid)},${literal(randomUUID())},${literal(STYLIST)});`);
     const heldOut = await writing.done;
+    mark('overlap-claim-result');
     const written = JSON.parse(heldOut.split('\n').find((line) => line.startsWith('W:')).slice(2));
     equal(written.code, 'OK');
     requireEvidence(['BUSY', 'ALLOWANCE'].includes(raced.code) && raced.claimed === false);
