@@ -8,7 +8,7 @@ import { deleteWardrobeObject } from '../../src/data/storage-delete';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
 import { MIGRATIONS, assertRehearsalEnvironment, validateInventory, assertMigrationInventory, assertCapabilities, parseMigrationHistory, assertHistory, assertHistoryResult, historyFailureDetail, exportBodyEvidence, sixPrivateCaptureSql, validateSixPrivate, compareSixPrivate } from '../../scripts/preservation-rehearsal.mjs';
 // @ts-expect-error Executable CLI JavaScript has no runtime TypeScript declaration.
-import { SOURCE_HASHES, MAX_SNAPSHOT_BYTES, COLUMNS, TABLES, COUNTS, IMPLICIT_FACTS, EXPLICIT_FACTS, NEW_COLUMNS, parsePhaseArguments, snapshotPath, assertSnapshotPath, validateSnapshotStat, rowIdentity, canonicalRows, validateSnapshot, comparePreservation, normalClient, captureData, functionalProbes, SIX_COUNTS, SIX_COLUMNS, validateSixSnapshot, compareSixPreservation } from '../integration/preservation.sessions.mjs';
+import { SOURCE_HASHES, MAX_SNAPSHOT_BYTES, COLUMNS, TABLES, COUNTS, IMPLICIT_FACTS, EXPLICIT_FACTS, NEW_COLUMNS, parsePhaseArguments, snapshotPath, assertSnapshotPath, validateSnapshotStat, rowIdentity, canonicalRows, canonicalTables, validateSnapshot, comparePreservation, normalClient, captureData, functionalProbes, SIX_COUNTS, SIX_COLUMNS, validateSixSnapshot, compareSixPreservation } from '../integration/preservation.sessions.mjs';
 // @ts-expect-error Executable integration fixture has no TypeScript declaration.
 import { imageChangeHarness } from '../integration/image-replacement.sessions.mjs';
 
@@ -1496,6 +1496,26 @@ describe('strict bounded base snapshots', () => {
       expect(() => rowIdentity(table, row)).toThrow();
     }
     expect(() => rowIdentity('unknown', {})).toThrow();
+  });
+  it('compares whole exports as row sets: order is ignored, every field and row still counts', () => {
+    const base = fixture().data[0].tables;
+    const tablesOf = () => structuredClone(base);
+    const reversed = Object.fromEntries(Object.entries(tablesOf()).map(([table, rows]) => [table, [...(rows as unknown[])].reverse()]));
+    expect(canonicalTables(reversed)).toEqual(canonicalTables(tablesOf()));
+    const changed = tablesOf();
+    (changed.items[0] as Record<string, unknown>).title = 'changed';
+    expect(canonicalTables(changed)).not.toEqual(canonicalTables(tablesOf()));
+    const missing: Record<string, unknown[]> = tablesOf();
+    missing.items = missing.items!.slice(1);
+    expect(canonicalTables(missing)).not.toEqual(canonicalTables(tablesOf()));
+    const duplicated: Record<string, unknown[]> = tablesOf();
+    duplicated.items = [...duplicated.items!, duplicated.items![0]];
+    expect(() => canonicalTables(duplicated)).toThrow();
+    const extra = { ...tablesOf(), app_admins: [] };
+    expect(() => canonicalTables(extra)).toThrow();
+    const absent: Record<string, unknown[]> = tablesOf();
+    delete absent.items;
+    expect(() => canonicalTables(absent)).toThrow();
   });
   it('refuses every binding mismatch, empty set, stale stage and post-target capture', () => {
     const snapshot = fixture();

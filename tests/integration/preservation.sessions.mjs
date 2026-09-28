@@ -142,6 +142,19 @@ export function canonicalRows(table, rows) {
   return entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([, row]) => row);
 }
 
+// export_manifest aggregates each table without an ORDER BY, so row order follows the scan plan. For before/after
+// comparisons: exactly the ten tables, each sorted by its primary key (unique), with every row and field kept.
+export function canonicalTables(tables) {
+  closed(tables, TABLES);
+  return Object.fromEntries(TABLES.map((table) => {
+    const rows = tables[table];
+    requireEvidence(Array.isArray(rows));
+    const entries = rows.map((row) => [rowIdentity(table, row), row]);
+    requireEvidence(new Set(entries.map(([id]) => id)).size === entries.length);
+    return [table, entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([, row]) => row)];
+  }));
+}
+
 function validateTables(tables, owner) {
   closed(tables, TABLES);
   for (const [index, table] of TABLES.entries()) {

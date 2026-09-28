@@ -11,7 +11,7 @@ import { AZURE_MODEL, AZURE_ENDPOINT, AZURE_MANIFEST, azureRequest } from '../su
 import { readJson } from '../supabase/functions/analyze-clothing/protocol.ts';
 import { aiClients, requireReady, AI_FACT_VECTORS } from '../tests/integration/ai-controls.sessions.mjs';
 import { baseline, analysisId, analysisFacts, analysisUsage, analysisHash, equal } from '../tests/integration/ai-analysis.sessions.mjs';
-import { TABLES, requireEvidence } from '../tests/integration/preservation.sessions.mjs';
+import { TABLES, canonicalTables, requireEvidence } from '../tests/integration/preservation.sessions.mjs';
 import { analyzedHarness, analyzedIntent, saveId } from '../tests/integration/analyzed-save.sessions.mjs';
 import { assertSanitizedJpeg, readJpegHeader } from '../src/images/jpeg.ts';
 import { imageReplacementServed } from '../tests/integration/image-replacement.sessions.mjs';
@@ -92,6 +92,7 @@ async function inventory(client, owners) {
     requireEvidence(metadata.tables.profiles.every((p) =>
       !['ai_enabled', 'ai_notice_revision', 'ai_consented_at'].some((key) => Object.hasOwn(p, key))));
     delete metadata.created_at;
+    metadata.tables = canonicalTables(metadata.tables);
     data.push({ tables, hashes, metadata });
     // AI consent/version timestamps are expected to advance through ordinary CAS.
     for (const key of ['version', 'updated_at', 'ai_enabled', 'ai_notice_revision', 'ai_consented_at'])

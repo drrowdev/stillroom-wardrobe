@@ -5,7 +5,7 @@
 // admissions and fixtures are restored in finally. Audit rows are append-only, so they stay until the reset. No
 // provider calls.
 import { createHash, randomUUID } from 'node:crypto';
-import { requireEvidence } from './preservation.sessions.mjs';
+import { canonicalTables, requireEvidence } from './preservation.sessions.mjs';
 import { equal } from './ai-analysis.sessions.mjs';
 
 const STYLIST = 'azure-eu-terra-stylist-v1';
@@ -63,7 +63,7 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
   const write = (target, targetAdmission, expected, limits, reason = null) => setLimits(a, { p_admission_no: targetAdmission.no,
     p_account_version: version(targetAdmission), p_expected: expected, p_limits: limits, p_reason_code: reason });
   const accountOf = (view, no) => { const found = view.accounts.find((x) => x.admissionNo === no); requireEvidence(found); return found; };
-  const exportTables = async (owner) => (await client.rpc(owner, 'export_manifest', { p_export_id: randomUUID() })).tables;
+  const exportTables = async (owner) => canonicalTables((await client.rpc(owner, 'export_manifest', { p_export_id: randomUUID() })).tables);
   const hold = async (statement, seconds, end = 'commit') => {
     const marker = `pg_sleep(${seconds})`;
     const held = sql(`begin; ${statement}; select 'HELD'; select ${marker}; ${end}; select 'DONE';`);

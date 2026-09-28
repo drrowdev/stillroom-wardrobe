@@ -4,7 +4,7 @@
 // way the Edge handler and cron call them; every access assertion uses the ordinary A/B sessions. No provider calls.
 import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
-import { requireEvidence } from './preservation.sessions.mjs';
+import { canonicalTables, requireEvidence } from './preservation.sessions.mjs';
 import { equal, analysisHash } from './ai-analysis.sessions.mjs';
 import { imageChangeHarness } from './image-replacement.sessions.mjs';
 import { COLOUR_MANIFEST } from './azure-preservation.sessions.mjs';
@@ -80,7 +80,7 @@ export async function stylistLedgerProbes(snapshot, sql, mark) {
   }
   const ichA = imageChangeHarness(client, a, env);
   const eligible = await ichA.create();
-  const exportTables = async () => (await client.rpc(a, 'export_manifest', { p_export_id: randomUUID() })).tables;
+  const exportTables = async () => canonicalTables((await client.rpc(a, 'export_manifest', { p_export_id: randomUUID() })).tables);
   const exportBefore = await exportTables();
 
   mark('normal-denied');
