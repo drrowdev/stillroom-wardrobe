@@ -2,9 +2,10 @@
 // VTO-1 operator probe (plan rev4 §11.1, ADR28). Run only by the coordinator, inside a separately approved probe window,
 // against the approved hosted project, with the owner's own prepared photo and explicit probe consent. At most 5 paid
 // calls, in the one order that fits the five-call authorisation: P1 steps 1-3, the P3 disconnect test, then the P2
-// filter challenge. No retries after a claim and no 6th call; a failed call still counts. Every refusal happens before
-// any network call. The report is text only: codes, numbers, hashes and IDs. It never contains tokens, JWTs, headers,
-// image bytes or base64. The final P1 picture is the only file written, to the owner's empty PROBE_OUTPUT folder.
+// filter challenge. An unpaid refusal proven to come before a claim may be tried again; nothing that may follow a claim is
+// ever re-sent, and there is no 6th call; a failed call still counts. Input refusals happen before any network call.
+// The report is text only: codes, numbers, lengths and request IDs. It never contains hashes, result IDs, tokens, JWTs,
+// headers, image bytes or base64. The final P1 picture is the only file written, to the owner's empty PROBE_OUTPUT folder.
 import { createHash, randomUUID } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -19,7 +20,6 @@ export const RESULT_JSON_BYTES = 800_000;
 export const CALL_TIMEOUT_MS = 100_000;
 export const DISCONNECT_AFTER_MS = 20_000;
 export const DISPATCH_SPACING_MS = 65_000;
-export const REFUSED_POLL_MS = 15_000;
 export const REFUSED_FOR_MS = 180_000;
 export const SETTLE_POLL_MS = 10_000;
 export const SETTLE_FOR_MS = 180_000;
@@ -117,170 +117,234 @@ async function status(run, deps) {
   return { ok: true, usage };
 }
 
-/** One step request. A claim refused as RATE_LIMIT or BUSY is unpaid and is re-polled; nothing is re-sent after a claim. */
+// Only these refusals are returned before a claim and nowhere after one, so only they are unpaid. Of those, RATE_LIMIT
+// and BUSY may clear, so they are tried again (the handler maps a post-claim BUSY to FAILED). Every other code, and any
+// transport failure, may follow a claim: it counts, is never retried and its request ID is kept for reconciliation.
+export const RETRY_BEFORE_CLAIM = Object.freeze(['RATE_LIMIT', 'BUSY']);
+export const REFUSED_BEFORE_CLAIM = Object.freeze([...RETRY_BEFORE_CLAIM, 'ALLOWANCE', 'RESULTS_FULL', 'NO_GARMENTS', 'CHAIN_MISMATCH',
+  'INACTIVE', 'CONSENT_REQUIRED', 'UNAUTHENTICATED', 'TOO_LARGE', 'UNSUPPORTED_MEDIA']);
+const CHAIN_STATES = ['running', 'complete', 'cancelled', 'withdrawn', 'expired', 'stale'];
+// The report carries codes, numbers, lengths and request IDs only: never hashes, result IDs, tokens or image data.
+const reportable = (outcome) => ({ outfit: outcome.outfit, step: outcome.step, requestId: outcome.requestId, status: outcome.status,
+  code: outcome.code, latencyMs: outcome.latencyMs, outputBytes: outcome.outputBytes });
+
+/** One step request, sent once. Nothing is re-sent here; the caller decides whether an unpaid refusal is tried again. */
 async function step(run, deps, plan) {
-  const started = deps.now();
-  for (;;) {
-    const requestId = (deps.newId ?? randomUUID)();
-    const body = new FormData();
-    body.append('chainId', plan.chainId);
-    body.append('step', String(plan.step));
-    body.append('requestId', requestId);
-    body.append('manifestId', MANIFEST);
-    if (plan.step === 1) body.append('outfitId', plan.outfitId);
-    body.append('person', new Blob([plan.person], { type: 'image/jpeg' }), 'person.jpg');
-    const controller = new AbortController();
-    const sentAt = deps.now();
-    const timer = (deps.setTimeout ?? setTimeout)(() => controller.abort(), plan.disconnect ? DISCONNECT_AFTER_MS : CALL_TIMEOUT_MS);
-    const result = { outfit: plan.outfit, step: plan.step, requestId };
-    try {
-      const response = await deps.fetch(`${run.url}/functions/v1/try-on`, {
-        method: 'POST', redirect: 'error', cache: 'no-store', signal: controller.signal, body,
-        headers: { apikey: run.key, Authorization: 'Bearer '.concat(run.jwt), 'X-Stillroom-Probe-Authorisation': run.authorisation,
-          'X-Stillroom-Probe-Token': run.token },
-      });
-      result.status = response.status;
-      const type = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
-      if (response.status === 200 && type === 'image/jpeg') {
-        const bytes = await readCapped(response, OUTPUT_BYTES);
-        result.latencyMs = Math.round(deps.now() - sentAt);
-        if (!bytes) return { ...result, code: 'OUTPUT_REJECTED', paid: true };
-        result.outputSha256 = sha256(bytes); result.outputBytes = bytes.byteLength;
-        if (response.headers.get('x-stillroom-tryon-sha256') !== result.outputSha256) return { ...result, code: 'EVIDENCE_MISMATCH', paid: true };
-        let admitted;
-        try { admitted = deps.admit(bytes); } catch { return { ...result, code: 'ADMISSION_REJECTED', paid: true }; }
-        if (admitted.stripped || admitted.width !== 1024 || admitted.height !== 1280) return { ...result, code: 'ADMISSION_REJECTED', paid: true };
-        return { ...result, code: 'OK', last: false, paid: true, image: bytes };
-      }
-      const value = await readJson(response);
+  const requestId = (deps.newId ?? randomUUID)();
+  const body = new FormData();
+  body.append('chainId', plan.chainId);
+  body.append('step', String(plan.step));
+  body.append('requestId', requestId);
+  body.append('manifestId', MANIFEST);
+  if (plan.step === 1) body.append('outfitId', plan.outfitId);
+  body.append('person', new Blob([plan.person], { type: 'image/jpeg' }), 'person.jpg');
+  const controller = new AbortController();
+  const sentAt = deps.now();
+  const timer = (deps.setTimeout ?? setTimeout)(() => controller.abort(), plan.disconnect ? DISCONNECT_AFTER_MS : CALL_TIMEOUT_MS);
+  const result = { outfit: plan.outfit, step: plan.step, requestId };
+  try {
+    const response = await deps.fetch(`${run.url}/functions/v1/try-on`, {
+      method: 'POST', redirect: 'error', cache: 'no-store', signal: controller.signal, body,
+      headers: { apikey: run.key, Authorization: 'Bearer '.concat(run.jwt), 'X-Stillroom-Probe-Authorisation': run.authorisation,
+        'X-Stillroom-Probe-Token': run.token },
+    });
+    result.status = response.status;
+    const type = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+    if (response.status === 200 && type === 'image/jpeg') {
+      const bytes = await readCapped(response, OUTPUT_BYTES);
       result.latencyMs = Math.round(deps.now() - sentAt);
-      const code = record(value) && typeof value.code === 'string' && CODE.test(value.code) ? value.code : 'UNREADABLE';
-      if (response.status === 200 && code === 'OK' && typeof value.resultId === 'string' && UUID.test(value.resultId)) {
-        return { ...result, code: 'OK', last: true, paid: true, resultId: value.resultId };
-      }
-      if ((code === 'RATE_LIMIT' || code === 'BUSY') && deps.now() - started + REFUSED_POLL_MS <= REFUSED_FOR_MS) {
-        (deps.clearTimeout ?? clearTimeout)(timer);
-        await deps.sleep(REFUSED_POLL_MS);
-        continue;
-      }
-      // A claim refusal is unpaid; anything after a claim counts.
-      const paid = !['RATE_LIMIT', 'BUSY', 'ALLOWANCE', 'RESULTS_FULL', 'NO_GARMENTS', 'NOT_FOUND', 'CHAIN_MISMATCH', 'CONFLICT',
-        'UNAVAILABLE', 'INACTIVE', 'UNCONFIGURED', 'INVALID_INPUT', 'UNAUTHENTICATED', 'CONFIG_CHANGED'].includes(code);
-      return { ...result, code, paid };
-    } catch {
-      result.latencyMs = Math.round(deps.now() - sentAt);
-      if (plan.disconnect && controller.signal.aborted) return { ...result, code: 'DISCONNECTED', paid: true };
-      return { ...result, code: controller.signal.aborted ? 'CLIENT_TIMEOUT' : 'TRANSPORT', paid: true };
-    } finally { (deps.clearTimeout ?? clearTimeout)(timer); }
-  }
+      if (!bytes) return { ...result, code: 'OUTPUT_REJECTED', paid: true };
+      result.outputBytes = bytes.byteLength;
+      // The hash check is transient: the hash itself never enters the report.
+      if (response.headers.get('x-stillroom-tryon-sha256') !== sha256(bytes)) return { ...result, code: 'EVIDENCE_MISMATCH', paid: true };
+      let admitted;
+      try { admitted = deps.admit(bytes); } catch { return { ...result, code: 'ADMISSION_REJECTED', paid: true }; }
+      if (admitted.stripped || admitted.width !== 1024 || admitted.height !== 1280) return { ...result, code: 'ADMISSION_REJECTED', paid: true };
+      return { ...result, code: 'OK', last: false, paid: true, image: bytes };
+    }
+    const value = await readJson(response);
+    result.latencyMs = Math.round(deps.now() - sentAt);
+    const code = record(value) && typeof value.code === 'string' && CODE.test(value.code) ? value.code : 'UNREADABLE';
+    if (response.status === 200 && code === 'OK' && typeof value.resultId === 'string' && UUID.test(value.resultId)) {
+      return { ...result, code: 'OK', last: true, paid: true, resultId: value.resultId };
+    }
+    return { ...result, code, paid: response.status === 200 || !REFUSED_BEFORE_CLAIM.includes(code) };
+  } catch {
+    result.latencyMs = Math.round(deps.now() - sentAt);
+    if (plan.disconnect && controller.signal.aborted) return { ...result, code: 'DISCONNECTED', paid: true };
+    return { ...result, code: controller.signal.aborted ? 'CLIENT_TIMEOUT' : 'TRANSPORT', paid: true };
+  } finally { (deps.clearTimeout ?? clearTimeout)(timer); }
 }
 
-// Stop (and, for a completed chain, delete its picture) so nothing of the probe stays on the server.
-async function tidy(run, deps, chainId, lines) {
+// Stop (and, for a completed chain, delete its picture) so nothing of the probe stays on the server. Never throws.
+async function tidy(run, deps, chain, lines) {
   try {
-    const cancelled = await rpc(run, deps, 'tryon_cancel', { p_chain_id: chainId });
+    const cancelled = await rpc(run, deps, 'tryon_cancel', { p_chain_id: chain.id });
     let removed = null;
     if (cancelled?.code === 'COMPLETED' && typeof cancelled.resultId === 'string') {
       removed = (await rpc(run, deps, 'tryon_delete_result', { p_result_id: cancelled.resultId }))?.code ?? 'UNREADABLE';
     }
-    lines.push(`Chain ${chainId}: ${JSON.stringify({ stop: cancelled?.code ?? 'UNREADABLE', resultDeleted: removed })}`);
-  } catch { lines.push(`Chain ${chainId}: tidy failed; try-on cleanup removes it.`); }
+    const stop = typeof cancelled?.code === 'string' && CODE.test(cancelled.code) ? cancelled.code : 'UNREADABLE';
+    const deleted = removed === null || CODE.test(removed) ? removed : 'UNREADABLE';
+    lines.push(`${chain.label} chain: ${JSON.stringify({ stop, resultDeleted: deleted })}`);
+  } catch { lines.push(`${chain.label} chain: tidy failed; try-on cleanup removes it.`); }
 }
 
-/** Runs the probe. Returns the text-only report lines; never throws after the first network call. */
+/**
+ * Runs the probe. Refusals before any network call throw ProbeRefusal; after that it never throws. Every chain it
+ * started is stopped in `finally`, and the report always ends with every request ID sent, the paid count and the
+ * outcome. COMPLETE means all five calls ran as planned; call 4 PASS is still decided only from the SQL evidence.
+ */
 export async function runProbe(env, deps) {
   const run = await prepareProbe(env, deps);
-  const lines = [], calls = [];
-  let lastStart = null;
-  const send = async (plan) => {
-    let pre;
-    try { pre = await status(run, deps); } catch { pre = { ok: false, code: 'statusUnreadable' }; }
-    if (!pre.ok) { lines.push(`Stopped before ${plan.outfit} step ${plan.step}: ${pre.code}.`); return null; }
-    if (lastStart !== null) {
-      const wait = DISPATCH_SPACING_MS - (deps.now() - lastStart);
-      if (wait > 0) await deps.sleep(wait);
-    }
-    lastStart = deps.now();
-    const outcome = await step(run, deps, plan);
-    if (outcome.paid) calls.push(outcome);
-    lines.push(`Call ${calls.length} (${plan.outfit} step ${plan.step}): ${JSON.stringify({ ...outcome, image: undefined, paid: undefined })}`);
-    return outcome;
+  const lines = [], calls = [], sent = [], chains = [];
+  let lastStart = null, complete = false, stage = 'P1';
+  const chain = (label) => {
+    const entry = { label, id: (deps.newId ?? randomUUID)(), tidied: false };
+    chains.push(entry);
+    return entry;
   };
-  let complete = false;
-  // Calls 1-3: P1, three steps. Intermediates stay in memory; only the final picture is written.
-  const p1 = (deps.newId ?? randomUUID)();
-  let person = run.person;
-  for (let index = 1; index <= 3; index++) {
-    const outcome = await send({ outfit: 'P1', outfitId: run.outfits.P1, chainId: p1, step: index, person, disconnect: false });
-    if (!outcome) break;
-    if (outcome.code !== 'OK' || outcome.last !== (index === 3)) {
-      lines.push(`Stopped after P1 step ${index}: ${outcome.code === 'OK' ? 'P1_NOT_THREE_STEPS' : outcome.code}.`);
-      break;
+  const tidyChain = async (entry) => {
+    if (entry.tidied) return;
+    entry.tidied = true;
+    await tidy(run, deps, entry, lines);
+  };
+  // Every attempt, including a retried unpaid refusal, starts at least 65 s after the previous attempt actually started,
+  // with a fresh status preflight immediately before it.
+  const send = async (plan) => {
+    const first = deps.now();
+    for (;;) {
+      if (lastStart !== null) {
+        const wait = DISPATCH_SPACING_MS - (deps.now() - lastStart);
+        if (wait > 0) await deps.sleep(wait);
+      }
+      let pre;
+      try { pre = await status(run, deps); } catch { pre = { ok: false, code: 'statusUnreadable' }; }
+      if (!pre.ok) { lines.push(`Stopped before ${plan.outfit} step ${plan.step}: ${pre.code}.`); return null; }
+      lastStart = deps.now();
+      const outcome = await step(run, deps, plan);
+      sent.push(outcome);
+      if (outcome.paid) calls.push(outcome);
+      lines.push(`${outcome.paid ? `Call ${calls.length}` : 'Refused before a claim'} (${plan.outfit} step ${plan.step}): `
+        .concat(JSON.stringify(reportable(outcome))));
+      if (!outcome.paid && RETRY_BEFORE_CLAIM.includes(outcome.code)
+        && deps.now() - first + DISPATCH_SPACING_MS <= REFUSED_FOR_MS) continue;
+      return outcome;
     }
-    if (index < 3) { person = outcome.image; continue; }
-    const image = await rpc(run, deps, 'tryon_result_image_v1', { p_result_id: outcome.resultId }, RESULT_JSON_BYTES);
-    const bytes = image?.code === 'OK' && typeof image.jpegBase64 === 'string' ? new Uint8Array(Buffer.from(image.jpegBase64, 'base64')) : null;
-    let admitted;
-    try { admitted = bytes && bytes.byteLength <= OUTPUT_BYTES ? deps.admit(bytes) : null; } catch { admitted = null; }
-    if (!admitted || admitted.stripped || admitted.width !== 1024 || admitted.height !== 1280) {
-      lines.push('Stopped after P1 step 3: RESULT_UNREADABLE.');
-      break;
+  };
+  try {
+    // Calls 1-3: P1, three steps. Intermediates stay in memory; only the final picture is written.
+    const p1 = chain('P1');
+    let person = run.person, p1Done = false;
+    for (let index = 1; index <= 3; index++) {
+      stage = `P1 step ${index}`;
+      const outcome = await send({ outfit: 'P1', outfitId: run.outfits.P1, chainId: p1.id, step: index, person, disconnect: false });
+      if (!outcome) break;
+      if (outcome.code !== 'OK' || outcome.last !== (index === 3)) {
+        lines.push(`Stopped after P1 step ${index}: ${outcome.code === 'OK' ? 'P1_NOT_THREE_STEPS' : outcome.code}.`);
+        break;
+      }
+      if (index < 3) { person = outcome.image; continue; }
+      stage = 'P1 result';
+      let image;
+      try { image = await rpc(run, deps, 'tryon_result_image_v1', { p_result_id: outcome.resultId }, RESULT_JSON_BYTES); } catch { image = null; }
+      const bytes = image?.code === 'OK' && typeof image.jpegBase64 === 'string' ? new Uint8Array(Buffer.from(image.jpegBase64, 'base64')) : null;
+      let admitted;
+      try { admitted = bytes && bytes.byteLength <= OUTPUT_BYTES ? deps.admit(bytes) : null; } catch { admitted = null; }
+      if (!admitted || admitted.stripped || admitted.width !== 1024 || admitted.height !== 1280) {
+        lines.push('Stopped after P1 step 3: RESULT_UNREADABLE.');
+        break;
+      }
+      stage = 'P1 write';
+      try { await deps.writeFile(join(run.output, 'p1-final.jpg'), bytes, { flag: 'wx' }); } catch {
+        lines.push('Stopped after P1 step 3: WRITE_FAILED.');
+        break;
+      }
+      lines.push(`P1 final picture: ${JSON.stringify({ bytes: bytes.byteLength })}`);
+      p1Done = true;
     }
-    await deps.writeFile(join(run.output, 'p1-final.jpg'), bytes, { flag: 'wx' });
-    lines.push(`P1 final picture: ${JSON.stringify({ resultId: outcome.resultId, sha256: sha256(bytes), bytes: bytes.byteLength })}`);
-    complete = true;
-  }
-  await tidy(run, deps, p1, lines);
-  // Call 4: P3, one step, disconnected 20 s after the request is sent. The evidence alone decides the outcome.
-  if (complete) {
-    complete = false;
-    const p3 = (deps.newId ?? randomUUID)();
-    const outcome = await send({ outfit: 'P3', outfitId: run.outfits.P3, chainId: p3, step: 1, person: run.person, disconnect: true });
-    if (outcome) {
-      if (outcome.code === 'DISCONNECTED' || outcome.code === 'OK') {
-        if (outcome.code === 'OK') lines.push('P3 responded before the disconnect: call 4 is incomplete.');
+    stage = 'P1 tidy';
+    await tidyChain(p1);
+    // Call 4: P3, one step, disconnected 20 s after the request is sent. The chain must then complete on its own; any
+    // other end, an unreadable status or no end within the wait stops the probe with call 4 incomplete.
+    let p3Done = false;
+    if (p1Done) {
+      stage = 'P3';
+      const p3 = chain('P3');
+      const outcome = await send({ outfit: 'P3', outfitId: run.outfits.P3, chainId: p3.id, step: 1, person: run.person, disconnect: true });
+      if (outcome && (outcome.code === 'DISCONNECTED' || outcome.code === 'OK')) {
+        if (outcome.code === 'OK') lines.push('P3 responded before the disconnect: call 4 acceptance is incomplete.');
+        let settled = 'SETTLE_TIMEOUT';
         for (let waited = 0; waited <= SETTLE_FOR_MS; waited += SETTLE_POLL_MS) {
           if (waited > 0) await deps.sleep(SETTLE_POLL_MS);
           let seen;
-          try { seen = await rpc(run, deps, 'tryon_chain_status', { p_chain_id: p3 }); } catch { seen = null; }
-          lines.push(`P3 chain after ${waited / 1000} s: ${JSON.stringify(seen ? { state: seen.state, activeAttempt: seen.activeAttempt }
+          try { seen = await rpc(run, deps, 'tryon_chain_status', { p_chain_id: p3.id }); } catch { seen = null; }
+          const state = seen?.code === 'OK' && CHAIN_STATES.includes(seen.state) ? seen.state : null;
+          const active = typeof seen?.activeAttempt === 'boolean' ? seen.activeAttempt : null;
+          lines.push(`P3 chain after ${waited / 1000} s: ${JSON.stringify(state && active !== null ? { state, activeAttempt: active }
             : { code: 'statusUnreadable' })}`);
-          if (seen && seen.activeAttempt === false) break;
+          if (state === null || active === null) { settled = 'STATUS_UNREADABLE'; break; }
+          if (state === 'running' && active) continue;
+          settled = state === 'complete' && !active && typeof seen.resultId === 'string' ? 'COMPLETE'
+            : state === 'running' ? 'P3_NO_ACTIVE_ATTEMPT' : `P3_${state.toUpperCase()}`;
+          break;
         }
-        complete = true;
-      } else {
+        if (settled === 'COMPLETE') p3Done = true;
+        else lines.push(`Stopped after P3: ${settled}; call 4 acceptance is incomplete.`);
+      } else if (outcome) {
         lines.push(`Stopped after P3: ${outcome.code}.`);
       }
+      stage = 'P3 tidy';
+      await tidyChain(p3);
     }
-    await tidy(run, deps, p3, lines);
+    // Call 5: P2, the filter challenge. OK and FILTERED are both evidence; it is last because a filter without usage
+    // stops the authorisation.
+    if (p3Done) {
+      stage = 'P2';
+      const p2 = chain('P2');
+      const outcome = await send({ outfit: 'P2', outfitId: run.outfits.P2, chainId: p2.id, step: 1, person: run.person, disconnect: false });
+      if (outcome) {
+        const evidence = outcome.code === 'OK' || outcome.code === 'FILTERED';
+        lines.push(`P2 filter challenge: ${evidence ? outcome.code : `${outcome.code} (recorded)`}.`);
+        complete = evidence;
+      }
+      stage = 'P2 tidy';
+      await tidyChain(p2);
+    }
+  } catch {
+    lines.push(`Stopped: unexpected failure during ${stage}; treat every request below as possibly paid.`);
+    complete = false;
+  } finally {
+    for (const entry of chains) await tidyChain(entry);
   }
-  // Call 5: P2, the filter challenge. OK and FILTERED are both evidence; it is last because a filter without usage
-  // stops the authorisation.
-  if (complete) {
-    const p2 = (deps.newId ?? randomUUID)();
-    const outcome = await send({ outfit: 'P2', outfitId: run.outfits.P2, chainId: p2, step: 1, person: run.person, disconnect: false });
-    if (outcome) lines.push(`P2 filter challenge: ${outcome.code === 'OK' || outcome.code === 'FILTERED' ? outcome.code : `${outcome.code} (recorded)`}.`);
-    await tidy(run, deps, p2, lines);
-  }
-  lines.push(`Request IDs: ${calls.map((entry) => entry.requestId).join(' ')}`);
+  lines.push(`Request IDs sent: ${sent.map((entry) => `${entry.requestId}${entry.paid ? '' : ' (refused before a claim)'}`).join(', ') || 'none'}`);
   lines.push(`Paid calls sent: ${calls.length} of at most ${PROBE_CALLS}.`);
+  lines.push(`Outcome: ${complete ? 'COMPLETE' : 'INCOMPLETE'}. Call 4 PASS is decided from the SQL evidence only.`);
   lines.push('Delete the photo and the final picture from PROBE_OUTPUT no later than 7 days after today, reviewed or not.');
-  return { lines, calls: calls.map((entry) => ({ ...entry, image: undefined })) };
+  return { lines, complete, calls: calls.map((entry) => ({ ...entry, image: undefined })) };
 }
 
 async function main() {
   const { registerSourceLoader } = await import('./src-loader.mjs');
   registerSourceLoader();
   const { admitProviderJpeg } = await import('../src/images/provider-jpeg.ts');
+  let result;
   try {
-    const { lines } = await runProbe(process.env, {
+    result = await runProbe(process.env, {
       fetch, readFile, readdir, writeFile, now: () => performance.now(), sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
       admit: admitProviderJpeg,
     });
-    for (const line of lines) process.stdout.write(`${line}\n`);
   } catch (error) {
-    process.stderr.write(`Probe refused (${error instanceof ProbeRefusal ? error.code : 'unexpected'}). Nothing was sent.\n`);
-    process.exitCode = 2;
+    if (error instanceof ProbeRefusal) {
+      process.stderr.write(`Probe refused (${error.code}). Nothing was sent.\n`);
+      process.exitCode = 2;
+    } else {
+      process.stderr.write('Probe stopped unexpectedly. Reconcile any try-on usage for this owner from the SQL evidence.\n');
+      process.exitCode = 3;
+    }
+    return;
   }
+  for (const line of result.lines) process.stdout.write(`${line}\n`);
+  if (!result.complete) process.exitCode = 1;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();

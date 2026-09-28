@@ -246,7 +246,8 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
     for (const [dispatch, code] of [[() => Response.json({ code: 'ALREADY_AUTHORISED' }), 'FAILED'],
       [() => Response.json({ code: 'WITHDRAWN' }), 'WITHDRAWN'], [() => Response.json({ code: 'CANCELLED' }), 'CANCELLED'],
       [() => Response.json({ code: 'EXPIRED' }), 'TIMEOUT'], [() => Response.json({ code: 'CLIENT_GONE' }), 'TIMEOUT'],
-      [() => Response.json({ code: 'PROBE_LIMIT' }), 'UNAVAILABLE'], [() => new Response('x', { status: 500 }), 'FAILED'],
+      [() => Response.json({ code: 'PROBE_LIMIT' }), 'UNAVAILABLE'], [() => Response.json({ code: 'BUSY' }), 'FAILED'],
+      [() => new Response('x', { status: 500 }), 'FAILED'],
       [() => Response.json({ code: 'AUTHORISED', authorisedAtMs: Date.now() }), 'FAILED'],
       [() => Response.json({ code: 'AUTHORISED', authorisedAtMs: Date.now() - 20, dispatchBeforeMs: Date.now() - 1 }), 'TIMEOUT'],
     ] as const) {
@@ -342,13 +343,15 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
 
   it('suppresses the picture when finish reports a late, withdrawn, expired or anomalous step', async () => {
     for (const [finished, code] of [['LATE', 'CONFLICT'], ['EXPIRED', 'TIMEOUT'], ['USAGE_ANOMALY', 'FAILED'],
-      ['INVALID_USAGE', 'FAILED'], ['CONSENT_REQUIRED', 'CONSENT_REQUIRED'], ['UNAVAILABLE', 'UNAVAILABLE'], ['BUSY', 'BUSY'],
+      ['INVALID_USAGE', 'FAILED'], ['CONSENT_REQUIRED', 'CONSENT_REQUIRED'], ['UNAVAILABLE', 'UNAVAILABLE'], ['BUSY', 'FAILED'],
       ['USAGE_CONFLICT', 'FAILED']] as const) {
       backend({ finish: { code: finished, accounting: finished === 'BUSY' ? null : accounting } });
       const { transport } = provider(() => Response.json(imageBody()));
       const response = await createTryOnHandler(config, register, transport)(post());
       expect(response.headers.get('Content-Type')).toContain('application/json');
       expect(await response.json()).toEqual({ code });
+      // The provider ran: a finish BUSY after it must never read as an unclaimed, retryable BUSY.
+      expect(transport).toHaveBeenCalledTimes(1);
       vi.unstubAllGlobals();
     }
   });

@@ -16,10 +16,12 @@ const statusCodes: Record<string, number> = {
   FAILED: 502, UNCONFIGURED: 503, INACTIVE: 503, CONFIG_CHANGED: 503, BUSY: 503, TIMEOUT: 504,
 };
 // Claim codes pass through; the dispatch mark and finish codes that are internal to the server map to the closed set.
-const markCodes: Record<string, string> = { EXPIRED: 'TIMEOUT', CLIENT_GONE: 'TIMEOUT', ALREADY_AUTHORISED: 'FAILED', PROBE_LIMIT: 'UNAVAILABLE' };
+// BUSY is returned only for a refused claim: after a claim it becomes FAILED, which no caller may retry as unclaimed.
+const markCodes: Record<string, string> = { EXPIRED: 'TIMEOUT', CLIENT_GONE: 'TIMEOUT', ALREADY_AUTHORISED: 'FAILED', PROBE_LIMIT: 'UNAVAILABLE',
+  BUSY: 'FAILED' };
 const finishCodes: Record<string, string> = {
   EXPIRED: 'TIMEOUT', LATE: 'CONFLICT', PRE_DISPATCH: 'FAILED', NOT_DISPATCHED: 'FAILED', INVALID_USAGE: 'FAILED',
-  USAGE_ANOMALY: 'FAILED', USAGE_CONFLICT: 'FAILED', PROBE_LIMIT: 'UNAVAILABLE',
+  USAGE_ANOMALY: 'FAILED', USAGE_CONFLICT: 'FAILED', PROBE_LIMIT: 'UNAVAILABLE', BUSY: 'FAILED',
 };
 const claimCodes: Record<string, string> = { PROBE_LIMIT: 'UNAVAILABLE' };
 const allowedHeaders = ['authorization', 'apikey', 'content-type', 'x-client-info'];
