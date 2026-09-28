@@ -15,7 +15,7 @@ const itemId = '20000000-0000-4000-8000-000000000001';
 const imageId = '30000000-0000-4000-8000-000000000001';
 const row = { id: itemId, owner_id: owner, title: 'Olive shirt', category: 'top', created_at: '2026-09-06T08:00:00Z', deleted_at: null,
   favourite: false, availability: 'ready', lifecycle: 'active', exclude_suggestions: false,
-  brand: null, tags: [], colours: [], seasons: [], formality: null, purchase_price: null, currency: 'EUR', warmth: null, lower_coverage: null, min_temp: null, max_temp: null, rain_rating: null, windproof: null, field_provenance: {} };
+  brand: null, tags: [], colours: [], seasons: [], formality: null, purchase_price: null, purchase_date: null, currency: 'EUR', warmth: null, lower_coverage: null, min_temp: null, max_temp: null, rain_rating: null, windproof: null, field_provenance: {} };
 const image = {
   id: imageId, item_id: itemId, owner_id: owner, state: 'ready', alt_text: 'Olive shirt',
   main_path: `${owner}/${itemId}/${imageId}/main.jpg`, thumb_path: `${owner}/${itemId}/${imageId}/thumb.jpg`,
@@ -39,16 +39,16 @@ describe('manual draft validation', () => {
 describe('private API boundaries', () => {
   it('requires complete finite browse facts without rewriting valid legacy text', () => {
     const legacy = { ...row, brand: ' Å ', colours: ['free '.repeat(20), 'unknown', 'unknown'],
-      tags: ['long'.repeat(20), 'long'.repeat(20)], seasons: ['winter', 'winter'], formality: 0, purchase_price: 0 };
+      tags: ['long'.repeat(20), 'long'.repeat(20)], seasons: ['winter', 'winter'], formality: 0, purchase_price: 0, purchase_date: '2026-09-01' };
     expect(parseWardrobeRows([legacy], [image], owner)[0]).toMatchObject({
-      brand: legacy.brand, colours: legacy.colours, tags: legacy.tags, seasons: legacy.seasons, formality: 0, purchasePrice: '0.00',
+      brand: legacy.brand, colours: legacy.colours, tags: legacy.tags, seasons: legacy.seasons, formality: 0, purchasePrice: '0.00', purchaseDate: '2026-09-01',
     });
-    for (const field of ['brand', 'tags', 'colours', 'seasons', 'formality', 'purchase_price', 'currency']) {
+    for (const field of ['brand', 'tags', 'colours', 'seasons', 'formality', 'purchase_price', 'purchase_date', 'currency']) {
       const missing: Record<string, unknown> = { ...row }; delete missing[field];
       expect(() => parseWardrobeRows([missing], [image], owner)).toThrow();
     }
     for (const patch of [{ brand: 'x'.repeat(101) }, { tags: ['x'.repeat(513)] }, { colours: ['a', 'b', 'c', 'd'] },
-      { seasons: ['invented'] }, { formality: 1.5 }, { purchase_price: 'NaN' }, { purchase_price: -1 },
+      { seasons: ['invented'] }, { formality: 1.5 }, { purchase_price: 'NaN' }, { purchase_price: -1 }, { purchase_date: '2026-02-30' }, { purchase_date: 20260901 },
       { currency: 'eur' }, { created_at: '2026-02-30T00:00:00Z' }]) {
       expect(() => parseWardrobeRows([{ ...row, ...patch }], [image], owner)).toThrow();
     }

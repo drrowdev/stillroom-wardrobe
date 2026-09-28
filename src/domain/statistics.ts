@@ -3,10 +3,13 @@
 
 export type WearDay = { itemId: string | null; localDate: string; state: 'worn' | 'planned'; deleted: boolean };
 export type WearSummary = { count: number; lastWorn: string | null };
-export type StatisticsItem = { id: string; title: string; lifecycle: string; purchasePrice: string | null; currency: string };
+export type StatisticsItem = {
+  id: string; title: string; lifecycle: string; purchasePrice: string | null; currency: string;
+  category: string; purchaseDate: string | null;
+};
 export type ItemStatistics = {
   id: string; title: string; active: boolean; count: number; lastWorn: string | null;
-  price: string | null; currency: string;
+  price: string | null; currency: string; category: string; purchaseDate: string | null;
   // Price ÷ worn days, unrounded. Null when the price is unknown or the item has not been worn.
   costPerWear: number | null;
 };
@@ -53,7 +56,8 @@ export function buildStatistics(items: readonly StatisticsItem[], summaries: Rea
     const summary = summaries.get(item.id) ?? { count: 0, lastWorn: null };
     return {
       id: item.id, title: item.title, active: item.lifecycle === 'active', count: summary.count, lastWorn: summary.lastWorn,
-      price: item.purchasePrice, currency: item.currency, costPerWear: costPerWear(item.purchasePrice, summary.count),
+      price: item.purchasePrice, currency: item.currency, category: item.category, purchaseDate: item.purchaseDate,
+      costPerWear: costPerWear(item.purchasePrice, summary.count),
     };
   });
   const active = rows.filter(row => row.active);
@@ -77,4 +81,45 @@ export function costTable(statistics: Statistics, currency: string): ItemStatist
   return statistics.items.filter(row => row.price !== null && row.currency === currency)
     .sort((a, b) => a.costPerWear === null ? b.costPerWear === null ? byTitle(a, b) : 1
       : b.costPerWear === null ? -1 : b.costPerWear - a.costPerWear || byTitle(a, b));
+}
+
+export type SpendGroup = { key: string; cents: bigint; count: number };
+export type Spending = {
+  // Active items only: what is in the wardrobe now.
+  total: number; priced: number;
+  cents: bigint; count: number;
+  // Worn priced items in this currency: their prices over their wear days.
+  wornCents: bigint; wears: number;
+  byCategory: SpendGroup[]; byMonth: SpendGroup[]; undated: number;
+};
+
+function add(groups: Map<string, SpendGroup>, key: string, amount: bigint) {
+  const group = groups.get(key) ?? { key, cents: 0n, count: 0 };
+  groups.set(key, { key, cents: group.cents + amount, count: group.count + 1 });
+}
+
+// Spending in one currency, summed in exact cents. Amounts in different currencies are never combined; an item with
+// no price, or no valid purchase date for the monthly view, is counted and reported rather than guessed.
+export function spending(statistics: Statistics, currency: string, categoryOrder: readonly string[]): Spending {
+  const active = statistics.items.filter(row => row.active);
+  const rows = active.filter(row => row.price !== null && row.currency === currency);
+  const byCategory = new Map<string, SpendGroup>(), byMonth = new Map<string, SpendGroup>();
+  let total = 0n, wornCents = 0n, wears = 0, undated = 0;
+  for (const row of rows) {
+    if (!/^\d{1,10}\.\d{2}$/.test(row.price!)) throw new Error('Invalid price');
+    const amount = BigInt(row.price!.replace('.', ''));
+    total += amount;
+    if (row.count > 0) { wornCents += amount; wears += row.count; }
+    add(byCategory, row.category, amount);
+    if (row.purchaseDate !== null && validDate(row.purchaseDate)) add(byMonth, row.purchaseDate.slice(0, 7), amount);
+    else undated += 1;
+  }
+  const rank = (key: string) => { const index = categoryOrder.indexOf(key); return index < 0 ? categoryOrder.length : index; };
+  return {
+    total: active.length, priced: active.filter(row => row.price !== null).length,
+    cents: total, count: rows.length, wornCents, wears,
+    byCategory: [...byCategory.values()].sort((a, b) => rank(a.key) - rank(b.key) || a.key.localeCompare(b.key)),
+    byMonth: [...byMonth.values()].sort((a, b) => b.key.localeCompare(a.key)),
+    undated,
+  };
 }

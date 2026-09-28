@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { buildStatistics, costPerWear, costTable, wearSummaries, type StatisticsItem, type WearDay } from '../../src/domain/statistics';
+import { buildStatistics, costPerWear, costTable, spending, wearSummaries, type StatisticsItem, type WearDay } from '../../src/domain/statistics';
 import { summarizeWear } from '../../src/data/wear-history';
-import { costPerWearText, lastWornText, wearCountText } from '../../src/features/statistics/wear-text';
+import { centsPerText, centsText, costPerWearText, lastWornText, wearCountText } from '../../src/features/statistics/wear-text';
 import { translate, type Language, type MessageKey } from '../../src/i18n';
+import { categories } from '../../src/domain/wardrobe';
 
 const owner = '10000000-0000-4000-8000-000000000001';
 const id = (n: number) => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const worn = (itemId: string | null, localDate: string, extra: Partial<WearDay> = {}): WearDay => ({ itemId, localDate, state: 'worn', deleted: false, ...extra });
 const item = (n: number, extra: Partial<StatisticsItem> = {}): StatisticsItem => ({
-  id: id(n), title: `Item ${n}`, lifecycle: 'active', purchasePrice: null, currency: 'EUR', ...extra,
+  id: id(n), title: `Item ${n}`, lifecycle: 'active', purchasePrice: null, currency: 'EUR', category: 'top', purchaseDate: null, ...extra,
 });
 
 describe('I13 wear counts (R08)', () => {
@@ -120,5 +121,61 @@ describe('I13 wording', () => {
     expect(lastWornText('2026-09-01', 'en', t('en'))).toBe(`Last worn ${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date('2026-09-01T12:00:00Z'))}`);
     expect(lastWornText('2026-12-31', 'fi', t('fi'))).toContain('2026');
     expect(lastWornText('2026-12-31', 'fi', t('fi'))).toContain('31');
+  });
+});
+
+describe('spending totals', () => {
+  const items = [
+    item(1, { title: 'Coat', category: 'outerwear', purchasePrice: '240.00', purchaseDate: '2026-09-02' }),
+    item(2, { title: 'Shirt', purchasePrice: '45.50', purchaseDate: '2026-08-31' }),
+    item(3, { title: 'Tee', purchasePrice: '19.99', purchaseDate: '2026-09-30' }),
+    item(4, { title: 'Boots', category: 'footwear', purchasePrice: '150.00' }),
+    item(5, { title: 'Jeans', category: 'bottom', purchasePrice: '80.00', currency: 'USD', purchaseDate: '2026-07-01' }),
+    item(6, { title: 'Scarf', category: 'accessory' }),
+    item(7, { title: 'Old dress', category: 'one_piece', lifecycle: 'sold', purchasePrice: '500.00', purchaseDate: '2025-01-01' }),
+  ];
+  const stats = buildStatistics(items, wearSummaries(items.map(row => row.id), [
+    worn(id(1), '2026-09-03'), worn(id(1), '2026-09-11'), worn(id(1), '2026-09-15'), worn(id(2), '2026-09-03'), worn(id(7), '2026-09-01'),
+  ]));
+  it('sums exact cents per currency over the active wardrobe, never mixing currencies', () => {
+    const eur = spending(stats, 'EUR', categories);
+    expect(eur).toMatchObject({ total: 6, priced: 5, cents: 45549n, count: 4, wornCents: 28550n, wears: 4, undated: 1 });
+    expect(spending(stats, 'USD', categories)).toMatchObject({ cents: 8000n, count: 1, wornCents: 0n, wears: 0, undated: 0 });
+    expect(spending(stats, 'GBP', categories)).toMatchObject({ total: 6, priced: 5, cents: 0n, count: 0, byCategory: [], byMonth: [] });
+  });
+  it('groups by category in wardrobe order and by purchase month, newest first', () => {
+    const eur = spending(stats, 'EUR', categories);
+    expect(eur.byCategory).toEqual([
+      { key: 'top', cents: 6549n, count: 2 }, { key: 'footwear', cents: 15000n, count: 1 }, { key: 'outerwear', cents: 24000n, count: 1 },
+    ].sort((a, b) => categories.indexOf(a.key as never) - categories.indexOf(b.key as never)));
+    expect(eur.byMonth).toEqual([{ key: '2026-09', cents: 25999n, count: 2 }, { key: '2026-08', cents: 4550n, count: 1 }]);
+  });
+  it('counts an invalid purchase date as undated instead of guessing a month', () => {
+    const odd = buildStatistics([item(1, { purchasePrice: '10.00', purchaseDate: '2026-02-30' })], new Map());
+    expect(spending(odd, 'EUR', categories)).toMatchObject({ byMonth: [], undated: 1, cents: 1000n });
+  });
+  it('is deterministic whatever the input order', () => {
+    const reversed = buildStatistics([...items].reverse(), wearSummaries(items.map(row => row.id), []));
+    const forward = buildStatistics(items, wearSummaries(items.map(row => row.id), []));
+    expect(spending(reversed, 'EUR', categories)).toEqual(spending(forward, 'EUR', categories));
+  });
+  it('stays exact beyond the safe range of floating point', () => {
+    const big = buildStatistics([item(1, { purchasePrice: '9999999999.99' }), item(2, { purchasePrice: '9999999999.99' })], new Map());
+    const eur = spending(big, 'EUR', categories);
+    expect(eur.cents).toBe(1999999999998n);
+    expect(centsText(eur.cents, 'EUR', 'en')).toBe('€19,999,999,999.98');
+  });
+  it('formats totals and averages from exact cents in the chosen language', () => {
+    expect(centsText(45549n, 'EUR', 'fi')).toBe(new Intl.NumberFormat('fi-FI', { style: 'currency', currency: 'EUR' }).format(455.49));
+    expect(centsPerText(28550n, 4, 'EUR', 'en')).toBe('€71.38');
+    expect(centsPerText(100n, 3, 'KWD', 'en').replace(/[^\d.]/g, '')).toBe('0.333');
+    for (const [amount, count] of [[-1n, 1], [1n, 0], [1n, 1.5]] as const) expect(() => centsPerText(amount, count, 'EUR', 'en')).toThrow();
+  });
+  it('words the price coverage and undated notes in each language', () => {
+    for (const language of ['en', 'fi', 'sv'] as const) {
+      expect(translate(language, 'stats.priced_other', { priced: 5, total: 6 })).toMatch(/5.*6/);
+      expect(translate(language, 'stats.undated_one', { count: 1 })).toContain('1');
+    }
+    expect(translate('en', 'stats.priced_other', { priced: 5, total: 6 })).toBe('5 of 6 items have a price.');
   });
 });

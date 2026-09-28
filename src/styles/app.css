@@ -571,7 +571,7 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 }
 .stats-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; }
 .stats-card h2 { font-size: 1.125rem; margin-bottom: 14px; }
-.stats-cost, .stats-empty { grid-column: 1 / -1; }
+.stats-cost, .stats-empty, .stats-spending { grid-column: 1 / -1; }
 .stats-empty { display: grid; justify-items: start; gap: 14px; }
 .stats-empty p { margin: 0; }
 .stats-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
@@ -584,9 +584,15 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .stats-table thead th { color: var(--secondary); font-weight: 550; }
 .stats-table tbody th { font-weight: 450; }
 .stats-note { margin: 14px 0 0; }
+.stats-figures { display: flex; flex-wrap: wrap; gap: 16px 40px; margin: 0 0 20px; }
+.stats-figures dt { color: var(--secondary); font-size: .875rem; }
+.stats-figures dd { margin: 4px 0 0; font-size: 1.375rem; font-weight: 550; overflow-wrap: anywhere; }
+.stats-spend-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.stats-spend h3 { font-size: 1rem; margin: 0 0 12px; }
 .detail-wear { margin: 12px 0 0; }
 @media (max-width: 800px) {
   .stats-layout { grid-template-columns: minmax(0, 1fr); }
+  .stats-spend-groups { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 420px) {
   .stats-card { padding: 18px; }

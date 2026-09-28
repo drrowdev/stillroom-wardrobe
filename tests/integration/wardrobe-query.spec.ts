@@ -191,7 +191,7 @@ test('real ordinary A/B metadata, composite history read and denial with isolate
       check(history.items.get(own.completed[0]!.itemId)?.count === 2 && history.items.get(own.completed[0]!.itemId)?.lastWorn === '2026-09-02');
       check(history.items.get(own.completed[1]!.itemId)?.count === 0 && !history.items.has(own.pending) && !history.items.has(own.interrupted.itemId));
       progress.stage = 'query.peer-items';
-      const deniedItems = await own.client.from('items').select('id,owner_id,brand,tags,colours,seasons,formality,purchase_price,currency').eq('owner_id', peer.scope.ownerId);
+      const deniedItems = await own.client.from('items').select('id,owner_id,brand,tags,colours,seasons,formality,purchase_price,purchase_date,currency').eq('owner_id', peer.scope.ownerId);
       check(!deniedItems.error && deniedItems.data?.length === 0);
       progress.stage = 'query.peer-history';
       const deniedHistory = await own.client.from('wear_event_items').select(wearProjection)
