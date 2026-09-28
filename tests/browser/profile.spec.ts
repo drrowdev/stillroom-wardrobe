@@ -35,17 +35,40 @@ const profileUrl = 'http://127.0.0.1:54321/rest/v1/profiles*';
 // on reload in CI (provisional; playwright#37766 is a similar earlier report). A profile Save sends exactly one PATCH
 // and then one status read. Wait for both to actually finish before reloading: a stuck, failed or repeated request fails.
 // Settings reads the AI, stylist and enhancement status once when it opens, and those reads can still be starting after
-// the fields are visible. openSettings waits until the fixtures have answered a new read of each, so tracking never
-// counts or holds a mount read as the post-save read. A later enhance_status or stylist_status is tracked, and unexpected.
-type StatusFixture = { calls: { route: string }[]; requests: { method: string; path: string }[] };
-const mountReads = (api: StatusFixture) => [api.calls.filter((call) => call.route === '/rest/v1/rpc/ai_status').length,
-  ...['/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status']
-    .map((path) => api.requests.filter((request) => request.method === 'POST' && request.path === path).length)];
-async function openSettings(page: Page, api: StatusFixture, language: Language = 'en') {
-  const before = mountReads(api);
+// the fields are visible. The mount barrier is registered before navigating and waits until the browser has finished
+// a new, successful (2xx) read of each, with none still open and none failed, so tracking never counts or holds a mount
+// read as the post-save read. A later enhance_status or stylist_status is tracked, and unexpected.
+const MOUNT_STATUS_PATHS = ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/enhance_status', '/rest/v1/rpc/stylist_status'];
+function mountBarrier(page: Page) {
+  const open = new Set<PlaywrightRequest>(), succeeded = new Set<string>(), failed: string[] = [];
+  const path = (request: PlaywrightRequest) => {
+    const { pathname } = new URL(request.url());
+    return request.method() === 'POST' && MOUNT_STATUS_PATHS.includes(pathname) ? pathname : null;
+  };
+  const onRequest = (request: PlaywrightRequest) => { if (path(request)) open.add(request); };
+  const onFinished = (request: PlaywrightRequest) => {
+    if (!open.has(request)) return;
+    void request.response().then((response) => {
+      if (response && response.status() >= 200 && response.status() < 300) succeeded.add(path(request)!);
+      else failed.push(`${path(request)}: ${response?.status() ?? 'no response'}`);
+    }, () => { failed.push(`${path(request)}: no response`); }).finally(() => { open.delete(request); });
+  };
+  const onFailed = (request: PlaywrightRequest) => {
+    if (open.delete(request)) failed.push(`${path(request)}: ${request.failure()?.errorText ?? 'failed'}`);
+  };
+  page.on('request', onRequest); page.on('requestfinished', onFinished); page.on('requestfailed', onFailed);
+  return {
+    async settled() {
+      await expect.poll(() => ({ succeeded: [...succeeded].sort(), open: open.size, failed }), { timeout: 10_000 })
+        .toEqual({ succeeded: MOUNT_STATUS_PATHS, open: 0, failed: [] });
+      page.off('request', onRequest); page.off('requestfinished', onFinished); page.off('requestfailed', onFailed);
+    },
+  };
+}
+async function openSettings(page: Page, language: Language = 'en') {
+  const barrier = mountBarrier(page);
   await settings(page, language);
-  await expect.poll(() => mountReads(api).map((count, index) => count > before[index]!), { timeout: 10_000 })
-    .toEqual([true, true, true]);
+  await barrier.settled();
 }
 function trackSaveTraffic(page: Page) {
   const started: string[] = [], finished: string[] = [], failed: string[] = [];
@@ -289,7 +312,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
   });
   test(`settings ${language}: private fields, pickers and persistence; style preferences stay hidden`, async ({ page }) => {
     const api = await aiFixture(page, language);
-    await openSettings(page, api, language);
+    await openSettings(page, language);
     const consent = page.locator('section[aria-labelledby="ai-consent-title"]');
     // The fixture starts with analysis on: one Turn off, no Turn on, and the notice only inside a closed disclosure.
     await expect(consent.getByRole('heading', { name: messages['aiC.enabled'][language], exact: true })).toBeVisible();
@@ -332,9 +355,30 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(patches.every((body) => !('owner_id' in body || 'version' in body))).toBe(true);
   });
 }
+test('settings mount barrier stays pending while a mount status reply is held', async ({ page }) => {
+  await aiFixture(page, 'en');
+  let release!: () => void, arrived!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const arrival = new Promise<void>((resolve) => { arrived = resolve; });
+  let held = 0;
+  await page.route(/\/rest\/v1\/rpc\/enhance_status$/, async (route) => {
+    if (route.request().method() === 'POST' && held++ === 0) { arrived(); await gate; }
+    await route.fallback();
+  });
+  const barrier = mountBarrier(page);
+  await settings(page, 'en');
+  await arrival;
+  let settled = false;
+  const settling = barrier.settled().then(() => { settled = true; });
+  await page.waitForTimeout(1_000);
+  expect(settled).toBe(false);
+  release();
+  await settling;
+  expect(settled).toBe(true);
+});
 test('settings save: the reload waits until the held post-save status read is released', async ({ page }) => {
   const api = await aiFixture(page, 'en');
-  await openSettings(page, api, 'en');
+  await openSettings(page, 'en');
   let armed = false, held = 0;
   let release!: () => void, arrived!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
