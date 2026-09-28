@@ -1,7 +1,6 @@
 // VTO virtual try-on (issue #84, plan rev4, ADR28). INACTIVE: nothing here dispatches until the owner's bootstrap,
 // probe and activation gates. The prompts, request parameters and settings are hashed into the manifest row of
 // 20261003090000_try_on.sql, and the garment selection below is re-run in SQL at chain start (tryon_claim step 1).
-import type { Category } from './wardrobe';
 
 export const TRYON_MANIFEST = 'azure-global-image25-sunburst-tryon-v1';
 export const TRYON_MODEL = 'gpt-image-2.5-sunburst';
@@ -16,6 +15,11 @@ export const TRYON_REVIEW_EXPIRES_AT = '2027-01-01T00:00:00Z';
 export const TRYON_RESERVATION_MICRO = '360000';
 export const TRYON_MAX_STEPS = 3;
 export const TRYON_MAX_RESULTS = 20;
+
+// The wardrobe categories, kept import-free so the try-on Edge function can load this module (pinned equal to
+// src/domain/wardrobe.ts in tests/unit/tryon-chain.test.ts).
+export const tryOnCategories = ['top', 'bottom', 'one_piece', 'footwear', 'layer', 'outerwear', 'accessory'] as const;
+type Category = (typeof tryOnCategories)[number];
 
 export const tryOnSlots = ['one_piece', 'top', 'bottom', 'footwear'] as const;
 export type TryOnSlot = (typeof tryOnSlots)[number];

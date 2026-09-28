@@ -88,5 +88,9 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
+[functions.try-on]
+enabled = true
+verify_jwt = true
+
 [analytics]
 enabled = false

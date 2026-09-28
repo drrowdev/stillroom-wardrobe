@@ -377,7 +377,7 @@ describe('deploy-artifact check (rev5 A2)', () => {
     const real = await deploy.analyzeDeployArtifacts(root);
     expect(real.problems).toEqual([]);
     expect(Object.keys(real.graph).sort()).toEqual(['analyze-clothing', 'delete-account', 'enhance-photo', 'finalize-analyzed-item',
-      'finalize-image-change', 'stylist-chat']);
+      'finalize-image-change', 'stylist-chat', 'try-on']);
     expect((await repo({})).problems).toEqual([]);
   });
   it('fails an entrypoint that points at a fixture', async () => {
