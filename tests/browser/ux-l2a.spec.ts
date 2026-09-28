@@ -64,6 +64,9 @@ async function openSettings(page: Page, language: Language = 'en') {
   await page.getByRole('button', { name: text('account.menu', language) }).click();
   await page.getByRole('link', { name: text('nav.settings', language), exact: true }).click();
   await expect(page.locator('#settings-title')).toBeVisible();
+  // The screen moves focus to its title in an effect after it appears (50-150 ms later in WebKit). Typing before that
+  // could land in the field and then lose focus to the title, so wait for the screen to finish arriving.
+  await expect(page.locator('#settings-title')).toBeFocused();
 }
 async function reread(page: Page, ready: () => Promise<void>) {
   await expect(async () => {
@@ -300,6 +303,7 @@ for (const trigger of ['focus', 'visibilitychange', 'online'] as const) {
     const { api, traffic } = await start(page);
     await openSettings(page);
     await page.locator('#profile-display_name').fill('My unsaved name');
+    await expect(page.locator('#profile-display_name')).toHaveValue('My unsaved name');
     await page.route('**/rest/v1/rpc/ai_set_consent', async (route) => {
       api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
       await route.abort('failed');
@@ -328,6 +332,7 @@ test('L2a a real offline and online transition resolves an unconfirmed Turn on o
   const { api, traffic } = await start(page);
   await openSettings(page);
   await page.locator('#profile-display_name').fill('My unsaved name');
+  await expect(page.locator('#profile-display_name')).toHaveValue('My unsaved name');
   await page.route('**/rest/v1/rpc/ai_set_consent', async (route) => {
     api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
     await route.abort('failed');

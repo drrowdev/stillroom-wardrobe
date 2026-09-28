@@ -31,6 +31,34 @@ const consentCard = (page: Page) => page.locator('section[aria-labelledby="ai-co
 const removedReviewNotice: Record<Language, string> = { en: 'Review every suggested detail before saving.',
   fi: 'Tarkista kaikki ehdotetut tiedot ennen tallennusta.', sv: 'Granska alla föreslagna uppgifter innan du sparar.' };
 const profileUrl = 'http://127.0.0.1:54321/rest/v1/profiles*';
+// Reloading while routed fixture requests are still open has coincided with "WebKit encountered an internal error"
+// on reload in CI (provisional; playwright#37766 is a similar earlier report). A profile Save sends exactly one PATCH
+// and then one status read. Wait for both to actually finish before reloading: a stuck, failed or repeated request fails.
+function trackSaveTraffic(page: Page) {
+  const started: string[] = [], finished: string[] = [], failed: string[] = [];
+  const open = new Map<PlaywrightRequest, string>();
+  const name = (request: PlaywrightRequest) => {
+    const { pathname } = new URL(request.url());
+    if (request.method() === 'PATCH' && pathname === '/rest/v1/profiles') return 'profile';
+    if (request.method() === 'POST' && /\/rest\/v1\/rpc\/(?:ai_status|stylist_status)$/.test(pathname)) return pathname.split('/').pop()!;
+    return null;
+  };
+  const onRequest = (request: PlaywrightRequest) => { const key = name(request); if (key) { started.push(key); open.set(request, key); } };
+  const onFinished = (request: PlaywrightRequest) => { const key = open.get(request); if (key) { open.delete(request); finished.push(key); } };
+  const onFailed = (request: PlaywrightRequest) => {
+    const key = open.get(request); if (key) { open.delete(request); failed.push(`${key}: ${request.failure()?.errorText ?? 'failed'}`); }
+  };
+  page.on('request', onRequest); page.on('requestfinished', onFinished); page.on('requestfailed', onFailed);
+  return {
+    async settledReload() {
+      await expect.poll(() => ({ finished: [...finished].sort(), open: open.size, failed }), { timeout: 10_000 })
+        .toEqual({ finished: ['ai_status', 'profile'], open: 0, failed: [] });
+      page.off('request', onRequest); page.off('requestfinished', onFinished); page.off('requestfailed', onFailed);
+      expect(started.sort()).toEqual(['ai_status', 'profile']);
+      await page.reload();
+    },
+  };
+}
 test('AI consent shares profile/language mutex and rebases only its own exact plus-one ACK', async ({ page }) => {
   const api = await aiFixture(page, 'en', false);
   await settings(page);
@@ -274,10 +302,11 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await page.locator('#profile-display_name').fill('Åsa oma stil 🌿');
     await page.locator('#profile-timezone').selectOption('Europe/Stockholm');
     await page.locator('#profile-currency').selectOption('SEK');
+    const saveTraffic = trackSaveTraffic(page);
     await page.getByRole('button', { name: messages['settings.saveProfile'][language] }).click();
     await expect(page.getByText(messages['settings.profileSaved'][language], { exact: true })).toBeVisible();
     await expect(page.locator('.workspace-identity')).toContainText('Åsa oma stil 🌿');
-    await page.reload();
+    await saveTraffic.settledReload();
     await expect(page.locator('#profile-display_name')).toHaveValue('Åsa oma stil 🌿');
     await expect(page.locator('#profile-timezone')).toHaveValue('Europe/Stockholm');
     await expect(page.locator('#profile-currency')).toHaveValue('SEK');
@@ -290,6 +319,34 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(patches.every((body) => !('owner_id' in body || 'version' in body))).toBe(true);
   });
 }
+test('settings save: the reload waits until the held post-save status read is released', async ({ page }) => {
+  const api = await aiFixture(page, 'en');
+  await settings(page, 'en');
+  let armed = false, held = 0;
+  let release!: () => void, arrived!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const arrival = new Promise<void>((resolve) => { arrived = resolve; });
+  await page.route(/\/rest\/v1\/rpc\/ai_status$/, async (route) => {
+    if (armed && route.request().method() === 'POST' && held++ === 0) { arrived(); await gate; }
+    await route.fallback();
+  });
+  const saveTraffic = trackSaveTraffic(page);
+  armed = true;
+  await page.locator('#profile-display_name').fill('Held status name');
+  await page.getByRole('button', { name: messages['settings.saveProfile'].en }).click();
+  await arrival;
+  let navigations = 0;
+  page.on('framenavigated', (frame) => { if (frame === page.mainFrame()) navigations += 1; });
+  let reloaded = false;
+  const reloading = saveTraffic.settledReload().then(() => { reloaded = true; });
+  await page.waitForTimeout(1_000);
+  expect({ reloaded, navigations }).toEqual({ reloaded: false, navigations: 0 });
+  release();
+  await reloading;
+  expect(navigations).toBe(1);
+  await expect(page.locator('#profile-display_name')).toHaveValue('Held status name');
+  expect(api.profiles[owners.a]!.display_name).toBe('Held status name');
+});
 test('consecutive profile/language saves preserve dirty inputs and do not remount', async ({ page }) => {
   const api = await setup(page);
   await page.locator('#profile-display_name').fill('Unsaved private name');
