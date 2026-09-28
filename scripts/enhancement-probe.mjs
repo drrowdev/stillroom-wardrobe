@@ -55,7 +55,7 @@ export async function prepareProbe(env, deps) {
     if (bytes.byteLength < 1 || bytes.byteLength > SAMPLE_BYTES || sha256(bytes) !== entry.sha256) refuse('sample');
     try {
       const { width, height } = deps.readHeader(bytes);
-      if (Math.max(width, height) > 1600 || deps.inspect(bytes, width, height).kind !== 'preserve') refuse('sample');
+      if (Math.max(width, height) > 1600 || deps.accepts(bytes, width, height) !== true) refuse('sample');
     } catch (error) { if (error instanceof ProbeRefusal) throw error; refuse('sample'); }
     samples.push({ role: entry.role, sha256: entry.sha256, bytes });
   }
@@ -194,12 +194,12 @@ async function main() {
   const { registerSourceLoader } = await import('./src-loader.mjs');
   registerSourceLoader();
   const { readJpegHeader } = await import('../src/images/jpeg.ts');
-  const { inspectRestoreJpeg } = await import('../src/images/restore-jpeg.ts');
+  const { isPhotoInputJpeg } = await import('../src/images/restore-jpeg.ts');
   const { admitProviderJpeg } = await import('../src/images/provider-jpeg.ts');
   try {
     const { lines } = await runProbe(process.env, {
       fetch, readFile, readdir, writeFile, mkdir, now: () => performance.now(), sleep: (ms) => new Promise(done => setTimeout(done, ms)),
-      readHeader: readJpegHeader, inspect: inspectRestoreJpeg, admit: admitProviderJpeg,
+      readHeader: readJpegHeader, accepts: isPhotoInputJpeg, admit: admitProviderJpeg,
     });
     for (const line of lines) process.stdout.write(`${line}\n`);
   } catch (error) {

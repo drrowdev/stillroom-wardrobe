@@ -2,7 +2,7 @@ import {
   ENHANCE_LIMITS, ENHANCE_MANIFEST, ENHANCE_MODEL, ENHANCE_NOTICE_REVISION, ENHANCE_RESERVATION_MICRO, ENHANCE_REVIEW_EXPIRES,
 } from '../../../src/domain/enhancement.ts';
 import { readJpegHeader } from '../../../src/images/jpeg.ts';
-import { inspectRestoreJpeg } from '../../../src/images/restore-jpeg.ts';
+import { isPhotoInputJpeg } from '../../../src/images/restore-jpeg.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
 import { UUID, exact, object, ProtocolError, readBounded, readJson, sha256, validAccounting, type JsonObject } from '../analyze-clothing/protocol.ts';
 import { callEnhance, type EnhanceOutcome } from './azure.ts';
@@ -39,7 +39,7 @@ const microText = (value: unknown) => typeof value === 'string' && /^[1-9][0-9]{
 
 /**
  * Photo enhancement (BG2b-1 backend, BG2b-2 lifetime; INACTIVE until the owner's switch). Order: closed ingress (the
- * app's byte-preservable baseline JPEG, read with the cap enforced; no RPC on invalid input), the operator probe gate
+ * photo input profile (isPhotoInputJpeg: one baseline scan, restart markers only in sequence), read with the cap enforced; no RPC on invalid input), the operator probe gate
  * when its headers are present, verified /auth/v1/user, status preflight, service claim for the verified owner only,
  * then the claimed work. H2 bytes are released only after finish returns OK, which has already committed the evidence
  * and tombstone for this output hash and length.
@@ -92,7 +92,7 @@ export function createEnhanceHandler(config: EnhanceConfig, registrar: EnhanceRe
       try {
         const { width, height } = readJpegHeader(image);
         if (width > ENHANCE_LIMITS.imageMaxSide || height > ENHANCE_LIMITS.imageMaxSide
-          || inspectRestoreJpeg(image, width, height).kind !== 'preserve') return error('INVALID_INPUT');
+          || !isPhotoInputJpeg(image, width, height)) return error('INVALID_INPUT');
       } catch { return error('INVALID_INPUT'); }
       const inputHash = await sha256(image);
 

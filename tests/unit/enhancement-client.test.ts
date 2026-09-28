@@ -5,6 +5,8 @@ import {
 } from '../../src/domain/enhance-controls';
 import { ENHANCE_LIMITS, ENHANCE_MANIFEST, ENHANCE_MODEL, ENHANCE_NOTICE_REVISION } from '../../src/domain/enhancement';
 import { FIDELITY } from '../../src/images/fidelity';
+import { isPhotoInputJpeg } from '../../src/images/restore-jpeg';
+import { appleLayoutJpeg } from '../fixtures/restore-jpeg-fixtures';
 import {
   EXPIRY_MARGIN_MS, EnhanceSession, anchorFrom, expiryDeadline, runEnhancementStage, type DecodedFrame, type StageDeps,
 } from '../../src/features/wardrobe/enhancement-stage';
@@ -172,6 +174,18 @@ describe('the stage core', () => {
     if (result.kind === 'enhanced') expect(result.photo).toMatchObject({ width: 1024, height: 1280, mainSha256: 'c'.repeat(64), thumbSha256: 'd'.repeat(64) });
     expect(calls.order).toEqual(['decode:f1', 'close:f1', 'decode:f2', 'close:f2']);
     expect(frames.every((frame) => frame.closed)).toBe(true);
+  });
+  it('sends an iPhone-style restart-interval photo unchanged', async () => {
+    const bytes = appleLayoutJpeg({ width: 1024, height: 1280, restartInterval: 4 });
+    expect(isPhotoInputJpeg(bytes, 1024, 1280)).toBe(true);
+    const { deps, calls } = harness(new EnhanceSession(() => 100));
+    const sent: Blob[] = [];
+    const client = deps.client;
+    deps.client = { ...client, enhance: (photo, requestId, signal) => { sent.push(photo.main); return client.enhance(photo, requestId, signal); } };
+    const result = await runEnhancementStage(input({ photo: { ...photo(), main: new Blob([bytes], { type: 'image/jpeg' }) } }), deps);
+    expect(result.kind).toBe('enhanced');
+    expect(calls.enhance).toBe(1);
+    expect(new Uint8Array(await sent[0]!.arrayBuffer())).toEqual(bytes);
   });
   it('sends nothing for an uncut photo, off, a missing function or a failed read', async () => {
     for (const [over, options, line] of [

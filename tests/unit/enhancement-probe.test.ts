@@ -39,7 +39,7 @@ function harness(options: { listing?: unknown; reply?: (call: number) => Respons
     now: () => 0, sleep: async () => undefined,
     newId: () => `22222222-2222-4222-8222-${String(fetches.length).padStart(12, '0')}`,
     readHeader: () => ({ width: 800, height: 1000 }),
-    inspect: () => ({ kind: 'preserve' }),
+    accepts: () => true,
     admit: (bytes: Uint8Array) => ({ bytes, width: 1024, height: 1280, stripped: false }),
     fetch: async (url: string, init: RequestInit) => {
       fetches.push({ url, init });

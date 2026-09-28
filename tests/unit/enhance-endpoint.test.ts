@@ -10,7 +10,7 @@ import { PROVIDER_JPEG } from '../../src/images/provider-jpeg';
 import { classifyEnhanceResponse, enhanceForm, enhanceUsagePayload } from '../../supabase/functions/enhance-photo/azure';
 import { claimedWorkObserver, createEnhanceHandler, ENHANCE_RPCS } from '../../supabase/functions/enhance-photo/handler';
 import { exifSegment, jpegSegment } from '../fixtures/jpeg-helpers';
-import { flatJpeg } from '../fixtures/restore-jpeg-fixtures';
+import { appleLayoutJpeg, flatJpeg, restartMarkers } from '../fixtures/restore-jpeg-fixtures';
 
 const sha = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 const REQUEST = '11111111-1111-4111-8111-111111111111';
@@ -121,8 +121,13 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
   it('refuses a non-preservable or oversized photo before any network call', async () => {
     const calls = backend();
     const { transport } = provider(() => Response.json(imageBody()));
+    const outOfOrder = appleLayoutJpeg({ width: 800, height: 1000, restartInterval: 4 });
+    outOfOrder[restartMarkers(outOfOrder)[0]! + 1] = 0xd1;
+    const progressiveDri = flatJpeg({ width: 800, height: 1000, mode: 'progressive' });
+    const scan = progressiveDri.findIndex((value, index) => value === 0xff && progressiveDri[index + 1] === 0xda);
     for (const bytes of [flatJpeg({ width: 800, height: 1000, mode: 'progressive' }), flatJpeg({ width: 1700, height: 1000 }),
-      flatJpeg({ width: 800, height: 1000, segments: [exifSegment(1)] }), new Uint8Array(PROVIDER_JPEG.acceptedBytes + 1)]) {
+      flatJpeg({ width: 800, height: 1000, segments: [exifSegment(1)] }), new Uint8Array(PROVIDER_JPEG.acceptedBytes + 1), outOfOrder,
+      new Uint8Array([...progressiveDri.subarray(0, scan), 0xff, 0xdd, 0, 4, 0, 4, ...progressiveDri.subarray(scan)])]) {
       const response = await createEnhanceHandler(config, register, transport)(post(bytes));
       expect([400, 413]).toContain(response.status);
     }
@@ -151,6 +156,18 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     expect(sent).toHaveLength(1);
     expect([...sent[0]!.keys()]).toEqual([...Object.keys(ENHANCE_PARAMETERS), 'prompt', 'image']);
     expect(JSON.stringify([...sent[0]!.entries()].filter(([, v]) => typeof v === 'string'))).not.toContain(OWNER);
+  });
+
+  it('accepts a restart-interval photo like the ones iPhone Safari prepares and sends it unchanged', async () => {
+    const calls = backend();
+    const { transport, sent } = provider(() => Response.json(imageBody()));
+    const input = appleLayoutJpeg({ width: 800, height: 1000, restartInterval: 4 });
+    const response = await createEnhanceHandler(config, register, transport)(post(input));
+    expect(response.status).toBe(200);
+    expect(calls.map((call) => call.url.split('/').pop())).toEqual(['user', 'enhance_status', 'enhance_claim', 'enhance_finish']);
+    expect(calls[2]!.body).toMatchObject({ p_input_sha256: sha(input) });
+    expect(sent).toHaveLength(1);
+    expect(new Uint8Array(await (sent[0]!.get('image') as Blob).arrayBuffer())).toEqual(input);
   });
 
   it('stays inactive, unconsented or switched off without a claim or provider call', async () => {
