@@ -1175,6 +1175,31 @@ the total with an expected-value guard:
 monthly_allowance_micro = 19740000`, expecting exactly one row, then reads it
 back. Any other value means STOP and report.
 
+### Admin grant runbook (AD1, ADR27) - 1 October 2026
+
+Source only until approved: `20261001090000_admin_limits` follows M8 (the two
+enhancement migrations) and is not applied to hosted. Applying it, the grant
+below and the Admin screen (AD1b) are separate owner gates. The coordinator runs
+these statements in the SQL editor as the database owner; no app, RPC, restore or
+client path writes `private.app_admins`.
+
+Grant (one row; the trigger refuses a stale generation, a disabled admission or
+a mismatched user):
+
+```sql
+insert into private.app_admins(owner_id,admission_no,admission_generation)
+select user_id,admission_no,generation from private.approved_accounts
+where admission_no=1 and enabled and user_id is not null;
+```
+
+Read-back: `select admission_no,created_at from private.app_admins;` returns one
+row. Revoke: `delete from private.app_admins;`. A re-invitation rotates the
+admission generation and ends the admin's authority until the operator deletes
+the row and grants again. Audit rows are read only here, by SQL:
+`select created_at,target_admission_no,reason_code,old_limits,new_limits from
+private.ai_limit_audit order by created_at desc limit 20;`. They are never
+exported, updated or deleted except by the account-deletion foreign keys.
+
 ## Delivery rules
 
 ### I10b staged local source authority - 22 September 2026

@@ -785,3 +785,38 @@ secret configured refuses every probe request before any RPC. After the claim,
 one work promise is registered with `EdgeRuntime.waitUntil` and awaited; without
 a registrar nothing is claimed, and a registration failure settles
 `NOT_DISPATCHED` with no provider call.
+
+## AD1a admin spending and limits contract (ADR27)
+
+Three authenticated RPCs, security definer with an empty search path. A caller
+who is not the current admin (bound admission generation, enabled, profile
+present, no deletion job) gets exactly `{code:'UNAVAILABLE'}` from all three,
+before any input validation, target lookup or lock.
+
+- `admin_status()` returns `{code:'OK'}` for the admin.
+- `admin_ai_spending(p_months integer default 6)` (1-12, else `INVALID_INPUT`)
+  returns `asOf`, the UTC `months` newest first and one entry per admitted
+  account with a profile: `admissionNo`, `enabled`, `accountVersion`, the nine
+  `limits` (null without a controls row), activation flags, per-month history
+  by purpose (`analysis`, `stylist`, `enhancement`, reserved `tryOn`) with
+  `confirmedMicro`, `estimatedMicro`, `reservedMicro`, `totalMicro` and
+  `requests`, current allowance consumption (including older holds) and
+  aggregate open probe allocation amounts. Amounts are exact micro-USD decimal
+  strings. They are app-recorded estimates, not invoices, and exclude direct
+  operator calls.
+- `admin_set_ai_limits(p_admission_no smallint, p_account_version text,
+  p_expected jsonb, p_limits jsonb, p_reason_code text default null)` sets
+  one account's nine limits. `accountVersion` is an opaque guard recomputed
+  from the locked admission row. Results: `OK {limits, belowUse}`,
+  `UNCHANGED`, `CONFLICT` (stale version or expected values, or a lock is
+  busy), `INVALID_LIMITS {field, reason}` (`REQUIRED`, `NOT_POSITIVE`,
+  `RANGE`, `APP_LIMIT` above USD 50 a month per account, `ABOVE_MONTHLY`,
+  `ABOVE_SHARED`, `BELOW_RESERVATION`), `INVALID_INPUT`, `UNCONFIGURED` or
+  `UNAVAILABLE`. Every check runs before the update and the stored values must
+  equal the request, so nothing is clamped. It never changes activation,
+  consent, notice, manifest or usage. Each change appends a
+  `private.ai_limit_audit` row; reason codes (`RAISE`, `LOWER`, `PAUSE`,
+  `RESTORE`, `CORRECTION`) are labels only.
+
+The admin grant and revocation are operator SQL (see the development guide);
+no RPC writes `private.app_admins`.

@@ -577,6 +577,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_ai_spending: { Args: { p_months?: number }; Returns: Json }
+      admin_set_ai_limits: {
+        Args: {
+          p_account_version: string
+          p_admission_no: number
+          p_expected: Json
+          p_limits: Json
+          p_reason_code?: string
+        }
+        Returns: Json
+      }
+      admin_status: { Args: never; Returns: Json }
       ai_analysis_status: { Args: { p_request_id: string }; Returns: Json }
       ai_begin_request: {
         Args: {

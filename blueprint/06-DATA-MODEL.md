@@ -228,7 +228,9 @@ The deletion receipt deliberately has no relationship edge to a deleted identity
 
 ## Ownership and admission
 
-Independent approved-account rows enforce a maximum of two logins and immediate account freeze. Application users cannot query the admissions, enumerate users, address another profile or see another account's name/email. There is no pair record, peer RPC or user-level administrator role.
+Independent approved-account rows enforce a maximum of two logins and immediate account freeze. Application users cannot query the admissions, enumerate users, address another profile or see another account's name/email. There is no pair record or peer RPC. The one exception is ADR27 (AD1a, migration `20261001090000_admin_limits`): the operator-designated admin in `private.app_admins` can read each admitted account's admission number, AI limits and app-recorded AI spending, and set its AI limits. It never sees email, user ID, profile, wardrobe, photo, chat or consent data.
+
+`private.app_admins` (one row, bound to the admin's current admission generation) and the append-only `private.ai_limit_audit` (target owner, admission number, actor, old/new limits, fixed reason label) have RLS on and no client grants. Neither is exported or restored, and restore cannot create admin authority. Deleting an account cascades its admin row and the audit rows about it; the admin's own deletion sets the actor to null on other accounts' rows. Both are in `deletion_owner_rows_absent`, including the actor column.
 
 All relationships capable of linking private records use `(owner_id, id)` FKs. A guessed foreign UUID cannot make an owned outfit or wear event refer to the spouse's original data. The original tables' four DML policies always require both `private.is_approved()` and `owner_id=auth.uid()`. Profile creation/deletion, image state, account admission and restore imports have narrower privileges documented in SQL.
 
