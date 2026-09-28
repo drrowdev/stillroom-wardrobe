@@ -443,6 +443,15 @@ test('settings never reads or writes stored style preferences', async ({ page })
   expect(preferenceRequests(api)).toEqual([]);
   expect(api.preferences[owners.a]).toEqual(stored);
 });
+test('settings shows the build version label in each language', async ({ page }) => {
+  await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto('/'); await signIn(page); await settings(page);
+  // The browser-test build has no Pages commit, so the label is VITE_APP_VERSION.
+  for (const language of ['en', 'fi', 'sv'] as const) {
+    await page.getByRole('button', { name: messages[`language.${language}`][language], exact: true }).click();
+    await expect(page.locator('.app-version')).toHaveText(messages['settings.version'][language].replace('{version}', 'browser-fixture'));
+  }
+});
 test('a saved time zone and currency missing from the browser list stay selected and unchanged', async ({ page }) => {
   await page.addInitScript(() => {
     const original = Intl.supportedValuesOf.bind(Intl);

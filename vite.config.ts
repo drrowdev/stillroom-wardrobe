@@ -6,6 +6,7 @@ import path from 'node:path';
 import { loadEnv, type Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 import { artifactUrl, isExcludedArtifact, isShellArtifact, joinShellUrls, manifestPath, parsePrecacheManifest, workerPath } from './src/pwa/shell-policy.ts';
+import { appVersion } from './src/data/app-version.ts';
 import { checkStaticTree, listTree, readInventory, type InventoryFile } from './scripts/check-static-assets.mjs';
 
 const publicKeys = new Set([
@@ -137,7 +138,12 @@ export default defineConfig(({ mode }) => {
   const runtime = { role: 'runtime', ...JSON.parse(readFileSync(path.resolve('src/images/background/model-assets.json'), 'utf8'))
     .files.find((file: InventoryFile) => file.role === 'runtime') } as InventoryFile;
   return {
-    define: { __STILLROOM_SHELL_WORKER__: JSON.stringify(!killSwitch) },
+    // The public version label replaces VITE_APP_VERSION at build time. CF_PAGES_COMMIT_SHA is read here only; it is
+    // not a browser variable, and only its short hash reaches the bundle.
+    define: {
+      __STILLROOM_SHELL_WORKER__: JSON.stringify(!killSwitch),
+      'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion({ CF_PAGES_COMMIT_SHA: process.env.CF_PAGES_COMMIT_SHA, VITE_APP_VERSION: environment.VITE_APP_VERSION })),
+    },
     plugins: [
       react(),
       shellWorker(killSwitch),

@@ -21,10 +21,10 @@ import type { AiClient } from '../../data/ai';
 import { currencyOptions, timeZoneOptions } from './profile-options';
 
 // Style preferences stay stored but are not shown until suggestions use them (ADR20).
-type Props = { client: AppClient; ai: AiClient; stylist: StylistStore; images: PrivateImages; unresolved: boolean; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; language: Language; online: boolean; t: Translate; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void; onBack: () => void };
+type Props = { client: AppClient; ai: AiClient; stylist: StylistStore; images: PrivateImages; unresolved: boolean; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; language: Language; online: boolean; t: Translate; version: string; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void; onBack: () => void };
 const fieldLabels = { display_name: 'profile.displayName', timezone: 'profile.timezone', currency: 'profile.currency' } as const;
 const fieldErrors = { display_name: 'settings.invalidName', timezone: 'settings.invalidTimezone', currency: 'settings.invalidCurrency' } as const;
-export function ProfileScreen({ client, ai, stylist, images, unresolved, controller, scope, profile, change, busy, language, online, t, onDirty, onBack }: Props) {
+export function ProfileScreen({ client, ai, stylist, images, unresolved, controller, scope, profile, change, busy, language, online, t, version, onDirty, onBack }: Props) {
   const [base, setBase] = useState(profile);
   const [seen, setSeen] = useState(profile);
   const [fields, setFields] = useState<ProfileFields>(() => profileFields(profile));
@@ -114,5 +114,6 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
       <RestoreSettings client={client} scope={scope} language={language} online={online} t={t} />
       <DeleteAccountSettings client={client} controller={controller} scope={scope} online={online} t={t} />
     </div>
+    <p className="fine muted app-version">{t('settings.version', { version })}</p>
   </div>;
 }
