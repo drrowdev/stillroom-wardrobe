@@ -11,7 +11,7 @@ import {
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 
 type Props = { client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate; onBack: () => void };
-type Load = { kind: 'checking' } | { kind: 'denied' } | { kind: 'failed' } | { kind: 'ready'; spending: AdminSpending; failed: boolean };
+type Load = { kind: 'checking' } | { kind: 'denied' } | { kind: 'failed' } | { kind: 'ready'; spending: AdminSpending; failed: boolean; read: number };
 
 const purposeKey: Record<SpendPurpose, MessageKey> = { analysis: 'admin.tagging', stylist: 'admin.stylist', enhancement: 'admin.enhancement' };
 const featureKey: Record<LimitFeature, MessageKey> = { shared: 'admin.allFeatures', stylist: 'admin.stylist', enhancement: 'admin.enhancement' };
@@ -33,6 +33,7 @@ export function AdminScreen({ client, scope, online, language, t, onBack }: Prop
   const [months, setMonths] = useState<6 | 12>(6);
   const [month, setMonth] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  const requested = useRef(0);
   const admin = useRef(false);
   useEffect(() => {
     const controller = new AbortController();
@@ -45,14 +46,15 @@ export function AdminScreen({ client, scope, online, language, t, onBack }: Prop
     })().then((result) => {
       if (controller.signal.aborted) return;
       if (result === 'denied' || result.kind === 'unavailable') { admin.current = false; setLoad({ kind: 'denied' }); return; }
-      setLoad({ kind: 'ready', spending: result.spending, failed: false });
+      setLoad({ kind: 'ready', spending: result.spending, failed: false, read: tick });
     }, (problem: unknown) => {
       if (controller.signal.aborted || isAborted(problem)) return;
       setLoad((current) => current.kind === 'ready' ? { ...current, failed: true } : { kind: 'failed' });
     });
     return () => controller.abort();
   }, [client, scope, months, tick]);
-  const reload = () => setTick((value) => value + 1);
+  // Returns the number of the requested read, so a card can wait for a read that started after its write.
+  const reload = () => { requested.current = Math.max(requested.current, tick) + 1; setTick(requested.current); return requested.current; };
   const heading = <div className="page-heading"><div><h1 id="admin-title" tabIndex={-1}>{t('admin.title')}</h1></div></div>;
   if (load.kind === 'checking') return <section className="admin-page" aria-labelledby="admin-title">{heading}<p role="status">{t('common.loading')}</p></section>;
   if (load.kind === 'denied') return <section className="admin-page" aria-labelledby="admin-title">{heading}
@@ -76,7 +78,7 @@ export function AdminScreen({ client, scope, online, language, t, onBack }: Prop
     </div>
     <div className="admin-accounts">
       {spending.accounts.map((account) => <AccountCard key={account.admissionNo} account={account} month={selected}
-        client={client} scope={scope} online={online} language={language} t={t} onReload={reload} />)}
+        client={client} scope={scope} online={online} language={language} t={t} read={load.read} readFailed={load.failed} onReload={reload} />)}
     </div>
   </section>;
 }
@@ -97,8 +99,9 @@ type Message = { key: MessageKey; tone: 'status' | 'alert'; belowUse?: boolean }
 type Edit = { base: Limits; version: string; initial: LimitDraft; draft: LimitDraft; errors: FieldErrors };
 type Confirm = { limits: Limits; changes: LimitChange[] };
 
-function AccountCard({ account, month, client, scope, online, language, t, onReload }: {
-  account: AdminAccount; month: string; client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate; onReload: () => void;
+function AccountCard({ account, month, client, scope, online, language, t, read, readFailed, onReload }: {
+  account: AdminAccount; month: string; client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate;
+  read: number; readFailed: boolean; onReload: () => number;
 }) {
   const id = `admin-account-${account.admissionNo}`;
   const history = account.history.find((entry) => entry.month === month) ?? account.history[0]!;
@@ -106,6 +109,9 @@ function AccountCard({ account, month, client, scope, online, language, t, onRel
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
   const [saving, setSaving] = useState(false);
+  // After a write, editing waits for a spending read requested after it, so the form never starts from values the write may have changed.
+  const [awaitRead, setAwaitRead] = useState<number | null>(null);
+  const reconciling = awaitRead !== null && read < awaitRead;
   const editButton = useRef<HTMLButtonElement>(null);
   const reviewButton = useRef<HTMLButtonElement>(null);
   const summary = useRef<HTMLDivElement>(null);
@@ -122,10 +128,11 @@ function AccountCard({ account, month, client, scope, online, language, t, onRel
   });
   const limits = account.limits;
   const canEdit = account.enabled && limits !== null;
+  const reconcile = () => setAwaitRead(onReload());
   const usedOf = (used: string, limit: string | null) => limit === null ? formatUsd(used, language)
     : t('admin.usedOf', { used: formatUsd(used, language), limit: formatUsd(limit, language) });
   const open = () => {
-    if (!limits) return;
+    if (!limits || reconciling || saving) return;
     const initial = draftOf(limits, language);
     setMessage(null);
     setEdit({ base: limits, version: account.accountVersion, initial, draft: initial, errors: {} });
@@ -162,12 +169,12 @@ function AccountCard({ account, month, client, scope, online, language, t, onRel
           : result.code === 'CONFLICT' ? { key: 'admin.conflict', tone: 'alert' }
             : result.code === 'UNAVAILABLE' ? { key: 'admin.unavailable', tone: 'alert' } : { key: 'admin.failed', tone: 'alert' });
       close('message');
-      onReload();
+      reconcile();
     } catch (problem) {
       if (controller.signal.aborted || isAborted(problem)) return;
       setMessage({ key: 'admin.unknown', tone: 'alert' });
       close('message');
-      onReload();
+      reconcile();
     } finally {
       if (!controller.signal.aborted) setSaving(false);
     }
@@ -192,19 +199,22 @@ function AccountCard({ account, month, client, scope, online, language, t, onRel
         <span className="stats-note">{t('admin.lastHour', { count: whole(account.current.shared.lastHour, language) })}</span></dd></div>
       <div><dt>{t('admin.tagging')}</dt><dd>{formatUsd(account.current.analysis.usedMicro, language)}</dd></div>
       {(['stylist', 'enhancement'] as const).map((feature) => <div key={feature}><dt>{t(purposeKey[feature])}</dt>
-        <dd>{account.features[feature].configured ? usedOf(account.current[feature].usedMicro, limits?.[feature].monthlyAllowanceMicro ?? null) : t('admin.notSetUp')}</dd></div>)}
+        <dd>{usedOf(account.current[feature].usedMicro, account.features[feature].configured ? limits?.[feature].monthlyAllowanceMicro ?? null : null)}
+          {!account.features[feature].configured && <span className="stats-note">{t('admin.notSetUp')}</span>}</dd></div>)}
     </dl>
     <p className="stats-note">{t('admin.currentNote')}</p>
     {account.probe.count > 0 && <p className="stats-note">{t('admin.probe', { amount: formatUsd(account.probe.allocationMicro, language) })}</p>}
     <h3>{t('admin.limits')}</h3>
     {!limits ? <p>{t('admin.notSetUp')}</p> : !edit ? <>
       <LimitsTable limits={limits} language={language} t={t} />
-      {canEdit && <button ref={editButton} type="button" className="button button-secondary" disabled={!online} onClick={open}>{t('admin.edit')}</button>}
+      {canEdit && <button ref={editButton} type="button" className="button button-secondary" disabled={!online || reconciling} onClick={open}>{t('admin.edit')}</button>}
     </> : <LimitsForm id={id} edit={edit} t={t} online={online} saving={saving} firstField={firstField} reviewButton={reviewButton}
       onChange={(draft) => setEdit({ ...edit, draft })} onReview={review} onCancel={() => { setMessage(null); close('edit'); }}
       summary={message?.key === 'admin.invalid' ? <div ref={summary} tabIndex={-1} role="alert" className="notice notice-error"><p>{t('admin.invalid')}</p></div> : null} />}
     {message && message.key !== 'admin.invalid' && <p ref={messageRef} tabIndex={-1} role={message.tone} className={message.tone === 'alert' ? 'notice notice-error' : 'settings-success'}>
       {t(message.key)}{message.belowUse ? ` ${t('admin.belowUse')}` : ''}</p>}
+    {reconciling && readFailed && <div className="notice notice-error"><span>{t('admin.checkFailed')}</span>
+      <button type="button" className="text-button" disabled={!online} onClick={reconcile}>{t('admin.checkAgain')}</button></div>}
     {edit && confirm && <ConfirmDialog number={account.admissionNo} changes={confirm.changes} saving={saving} language={language} t={t}
       onCancel={() => { setConfirm(null); requestAnimationFrame(() => reviewButton.current?.focus()); }} onConfirm={(reason) => { void save(reason); }} />}
   </section>;
@@ -219,7 +229,8 @@ function LimitsTable({ limits, language, t }: { limits: Limits; language: Langua
     <thead><tr><th scope="col">{t('admin.feature')}</th><th scope="col">{t('admin.monthly')}</th><th scope="col">{t('admin.perRequest')}</th>
       <th scope="col">{t('admin.perHour')}</th></tr></thead>
     <tbody>{LIMIT_FEATURES.map((feature) => <tr key={feature}><th scope="row">{t(featureKey[feature])}</th>
-      {keys.map((key) => <td key={key} data-label={t(keyLabel(feature, key))}>{valueText(key, limits[feature][key], language)}</td>)}</tr>)}</tbody>
+      {keys.map((key) => <td key={key} data-label={t(key === 'maxRequestMicro' ? 'admin.perRequest' : keyLabel(feature, key))}>{valueText(key, limits[feature][key], language)}
+        {feature === 'shared' && key === 'maxRequestMicro' && <span className="stats-note admin-cell-note">{t('admin.taggingReservation')}</span>}</td>)}</tr>)}</tbody>
   </table>;
 }
 

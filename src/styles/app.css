@@ -609,6 +609,7 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .admin-page { overflow-wrap: anywhere; }
 .admin-card h3 { font-size: 1rem; margin: 22px 0 10px; }
 .admin-table .admin-total th, .admin-table .admin-total td { font-weight: 600; }
+.admin-table .admin-cell-note { display: block; margin: 2px 0 0; }
 .admin-use { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr)); gap: 12px 24px; margin: 0; }
 .admin-use dt { color: var(--secondary); font-size: .875rem; }
 .admin-use dd { margin: 4px 0 0; overflow-wrap: anywhere; }

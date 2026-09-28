@@ -557,7 +557,9 @@ function enhanceStatus(setup: EnhanceSetup, consent: number | null) {
 
 // AD1b admin fixture: the admin_ai_spending reply for two synthetic accounts, in the shape the AD1a function builds.
 export type AdminLimits = Record<'shared' | 'stylist' | 'enhancement', { monthlyAllowanceMicro: string | null; maxRequestMicro: string | null; maxRequestsPerHour: number | null }>;
-export type AdminWriteReply = { status: number; body?: unknown } | 'lost';
+export type AdminWriteReply = { status: number; body?: unknown } | 'lost' | 'appliedLost';
+// Usage recorded outside the current month's history, such as a hold kept from an earlier month.
+export type AdminExtraUsage = Partial<Record<1 | 2, Partial<Record<'stylist' | 'enhancement', number>>>>;
 export const adminStartLimits = (): Record<1 | 2, AdminLimits | null> => ({
   1: { shared: { monthlyAllowanceMicro: '20000000', maxRequestMicro: '4097351', maxRequestsPerHour: 30 },
     stylist: { monthlyAllowanceMicro: '5000000', maxRequestMicro: '129360', maxRequestsPerHour: 20 },
@@ -568,7 +570,7 @@ export const adminStartLimits = (): Record<1 | 2, AdminLimits | null> => ({
 });
 const adminSpend = (confirmed: number, estimated: number, reserved: number, requests: number) => ({ confirmedMicro: String(confirmed),
   estimatedMicro: String(estimated), reservedMicro: String(reserved), totalMicro: String(confirmed + estimated + reserved), requests });
-export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits | null>, version: Record<1 | 2, number>) {
+export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits | null>, version: Record<1 | 2, number>, extra: AdminExtraUsage = {}) {
   const now = new Date();
   const months = Array.from({ length: count }, (_, index) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - index, 15)).toISOString().slice(0, 7));
   const account = (admissionNo: 1 | 2) => {
@@ -579,14 +581,16 @@ export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits |
       enhancement: admissionNo === 1 && index === 1 ? adminSpend(120_000, 0, 0, 1) : adminSpend(0, 0, 0, 0),
       tryOn: { available: false } }));
     const current = history[0]!;
-    const used = (spend: { totalMicro: string }) => spend.totalMicro;
+    const more = extra[admissionNo] ?? {};
+    const used = (spend: { totalMicro: string }, feature?: 'stylist' | 'enhancement') => String(BigInt(spend.totalMicro) + BigInt(feature ? more[feature] ?? 0 : 0));
     return { admissionNo, enabled: true, accountVersion: (admissionNo === 1 ? 'a' : 'b').repeat(63) + String(version[admissionNo] % 10),
-      features: { analysis: { configured: true, activated: true }, stylist: { configured: true, activated: true },
-        enhancement: { configured: admissionNo === 1, activated: false } },
+      features: { analysis: { configured: limits[admissionNo] !== null, activated: true },
+        stylist: { configured: limits[admissionNo]?.stylist.monthlyAllowanceMicro != null, activated: true },
+        enhancement: { configured: limits[admissionNo]?.enhancement.monthlyAllowanceMicro != null, activated: false } },
       limits: limits[admissionNo], history,
-      current: { period: months[0]!, shared: { usedMicro: String(BigInt(used(current.analysis)) + BigInt(used(current.stylist)) + BigInt(used(current.enhancement))), lastHour: 3 },
-        analysis: { usedMicro: used(current.analysis), lastHour: 2 }, stylist: { usedMicro: used(current.stylist), lastHour: 1 },
-        enhancement: { usedMicro: used(current.enhancement), lastHour: 0 } },
+      current: { period: months[0]!, shared: { usedMicro: String(BigInt(used(current.analysis)) + BigInt(used(current.stylist, 'stylist')) + BigInt(used(current.enhancement, 'enhancement'))), lastHour: 3 },
+        analysis: { usedMicro: used(current.analysis), lastHour: 2 }, stylist: { usedMicro: used(current.stylist, 'stylist'), lastHour: 1 },
+        enhancement: { usedMicro: used(current.enhancement, 'enhancement'), lastHour: 0 } },
       openAllocations: { enhancementProbe: admissionNo === 1 ? { count: 1, allocationMicro: '260000', maxCalls: 2 } : { count: 0, allocationMicro: '0', maxCalls: 0 } } };
   };
   return { code: 'OK', asOf: now.getTime(), months, accounts: [account(1), account(2)] };
@@ -672,7 +676,10 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     limits: adminStartLimits(),
     version: { 1: 1, 2: 1 } as Record<1 | 2, number>,
     statusFaults: [] as ('fail')[],
-    spendingFaults: [] as ('fail')[],
+    // 'hold' keeps a spending read open until releaseSpending() is called.
+    spendingFaults: [] as ('fail' | 'hold')[],
+    releaseSpending: null as (() => void) | null,
+    extraUsage: {} as AdminExtraUsage,
     writeReplies: [] as AdminWriteReply[],
     writes: [] as { owner: string; body: Record<string, unknown> }[],
     statusReads: 0,
@@ -1890,22 +1897,26 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (url.pathname.endsWith('admin_ai_spending')) {
         adminControl.spendingReads.push({ owner, months: body.p_months });
         if (!isAdmin) { await json({ code: 'UNAVAILABLE' }); return; }
-        if (adminControl.spendingFaults.shift() === 'fail') { await json({ message: 'Service unavailable' }, 503); return; }
+        const fault = adminControl.spendingFaults.shift();
+        if (fault === 'hold') await new Promise<void>((resolve) => { adminControl.releaseSpending = resolve; });
+        if (fault === 'fail') { await json({ message: 'Service unavailable' }, 503); return; }
         const count = body.p_months;
         if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > 12) { await json({ code: 'INVALID_INPUT' }); return; }
-        await json(adminSpending(count, adminControl.limits, adminControl.version)); return;
+        await json(adminSpending(count, adminControl.limits, adminControl.version, adminControl.extraUsage)); return;
       }
       adminControl.writes.push({ owner, body });
       if (!isAdmin) { await json({ code: 'UNAVAILABLE' }); return; }
       const scripted = adminControl.writeReplies.shift();
       if (scripted === 'lost') { await route.abort('failed'); return; }
-      if (scripted) { await json(scripted.body ?? null, scripted.status); return; }
+      if (scripted && scripted !== 'appliedLost') { await json(scripted.body ?? null, scripted.status); return; }
       const target = body.p_admission_no === 1 || body.p_admission_no === 2 ? body.p_admission_no : null;
       const current = target ? adminControl.limits[target] : null;
       if (!target || !current) { await json({ code: target ? 'UNCONFIGURED' : 'INVALID_INPUT' }); return; }
       if (JSON.stringify(body.p_expected) !== JSON.stringify(current)) { await json({ code: 'CONFLICT', limits: current }); return; }
       if (JSON.stringify(body.p_limits) === JSON.stringify(current)) { await json({ code: 'UNCHANGED', limits: current }); return; }
       adminControl.limits[target] = body.p_limits as AdminLimits;
+      adminControl.version[target]++;
+      if (scripted === 'appliedLost') { await route.abort('failed'); return; }
       await json({ code: 'OK', limits: body.p_limits, belowUse: false }); return;
     }
     await json({ message: 'Unknown browser fixture route' }, 404);

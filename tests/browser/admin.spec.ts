@@ -86,7 +86,10 @@ test.describe('AD1b admin spending and limits', () => {
     await expect(account(page, 1)).toContainText(text('admin.tryOn'));
     await expect(account(page, 2).locator('.admin-use')).toContainText(text('admin.notSetUp'));
     await expect(account(page, 2)).not.toContainText(text('admin.probe', { amount: '$0.00' }));
-    await expect(row(page, 1, 'admin.allFeatures', 1).locator('td')).toHaveText(['$20.00', '$4.097351', '30']);
+    // The shared per-request value is the tagging reservation, and says so at every width.
+    await expect(row(page, 1, 'admin.allFeatures', 1).locator('td')).toHaveText(['$20.00', `$4.097351${text('admin.taggingReservation')}`, '30']);
+    await expect(row(page, 1, 'admin.allFeatures', 1).getByText(text('admin.taggingReservation'), { exact: true })).toBeVisible();
+    await expect(row(page, 1, 'admin.stylist', 1).locator('td')).toHaveText(['$5.00', '$0.12936', '20']);
     await expect(row(page, 2, 'admin.enhancement', 1).locator('td')).toHaveText(['–', '–', '–']);
     const body = await page.locator('body').innerText();
     expect(body).not.toMatch(/@example|user-[ab]|10000000-0000|a{63}|b{63}/);
@@ -217,7 +220,8 @@ test.describe('AD1b admin spending and limits', () => {
     await button(dialog(page), 'admin.confirm').click();
     await expect(account(page, 2).getByRole('alert')).toHaveText(text('admin.conflict'));
     await expect(account(page, 2).locator('form')).toHaveCount(0);
-    await expect(row(page, 2, 'admin.allFeatures', 1).locator('td')).toHaveText(['$12.00', '$4.097351', '30']);
+    await expect(row(page, 2, 'admin.allFeatures', 1).locator('td')).toHaveText(['$12.00', `$4.097351${text('admin.taggingReservation')}`, '30']);
+    await expect(button(account(page, 2), 'admin.edit')).toBeEnabled();
     expect(api.adminControl.limits[2]?.shared.maxRequestsPerHour).toBe(30);
   });
 
@@ -237,6 +241,68 @@ test.describe('AD1b admin spending and limits', () => {
     await button(dialog(page), 'admin.confirm').click();
     await expect(page.getByText(text('admin.unchanged'), { exact: true })).toBeVisible();
     await writes(api, 2);
+  });
+
+  async function saveHourLost(page: Page, api: Api) {
+    api.adminControl.writeReplies.push('appliedLost');
+    await edit(page, 1);
+    await field(page, 1, 'shared', 'maxRequestsPerHour').fill('31');
+    await button(account(page, 1), 'admin.review').click();
+    await button(dialog(page), 'admin.confirm').click();
+    await expect(account(page, 1).getByRole('alert')).toHaveText(text('admin.unknown'));
+    expect(api.adminControl.limits[1]!.shared.maxRequestsPerHour).toBe(31);
+  }
+  const hourCell = (page: Page) => row(page, 1, 'admin.allFeatures', 1).locator('td').nth(2);
+
+  test('after a lost reply, editing waits until a fresh read has arrived', async ({ page }) => {
+    const api = await start(page);
+    await openScreen(page);
+    api.adminControl.spendingFaults.push('hold');
+    await saveHourLost(page, api);
+    await expect.poll(() => api.adminControl.releaseSpending !== null).toBe(true);
+    await expect(button(account(page, 1), 'admin.edit')).toBeDisabled();
+    await expect(hourCell(page)).toHaveText('30');
+    await expect(account(page, 1).getByRole('alert')).toHaveText(text('admin.unknown'));
+    api.adminControl.releaseSpending!();
+    await expect(hourCell(page)).toHaveText('31');
+    await expect(button(account(page, 1), 'admin.edit')).toBeEnabled();
+    expect(api.adminControl.writes).toHaveLength(1);
+    expect(api.adminControl.spendingReads).toHaveLength(2);
+  });
+
+  test('after a lost reply and a failed read, only a new read is offered', async ({ page }) => {
+    const api = await start(page);
+    await openScreen(page);
+    api.adminControl.spendingFaults.push('fail');
+    await saveHourLost(page, api);
+    await expect(account(page, 1).getByText(text('admin.checkFailed'), { exact: true })).toBeVisible();
+    await expect(button(account(page, 1), 'admin.edit')).toBeDisabled();
+    await expect(hourCell(page)).toHaveText('30');
+    await expect(account(page, 1).locator('form, dialog')).toHaveCount(0);
+    await axe(page);
+    await button(account(page, 1), 'admin.checkAgain').click();
+    await expect(hourCell(page)).toHaveText('31');
+    await expect(button(account(page, 1), 'admin.edit')).toBeEnabled();
+    await expect(account(page, 1).getByText(text('admin.checkFailed'), { exact: true })).toHaveCount(0);
+    expect(api.adminControl.writes).toHaveLength(1);
+    expect(api.adminControl.spendingReads).toHaveLength(3);
+  });
+
+  test('recorded use is shown even where a feature has no limits', async ({ page }) => {
+    const api = await mockBackend(page);
+    api.adminControl.admin = owners.a;
+    api.adminControl.limits[2] = null;
+    // Account 2 has enhancement use held from an earlier month and no enhancement use in this month's history.
+    api.adminControl.extraUsage = { 2: { enhancement: 150_000 } };
+    await page.goto('/#/admin'); await signIn(page);
+    await openScreen(page);
+    const use = account(page, 2).locator('.admin-use > div');
+    await expect(use.nth(0).locator('dd')).toContainText('$5.169475');
+    await expect(use.nth(2).locator('dd')).toHaveText(`$0.00484${text('admin.notSetUp')}`);
+    await expect(use.nth(3).locator('dd')).toHaveText(`$0.15${text('admin.notSetUp')}`);
+    await expect(row(page, 2, 'admin.enhancement').locator('td')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00', '0']);
+    await expect(account(page, 2)).toContainText(text('admin.notSetUp'));
+    await expect(button(account(page, 2), 'admin.edit')).toHaveCount(0);
   });
 
   test('signing out ends the admin view, and the next account cannot see it', async ({ page }) => {
