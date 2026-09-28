@@ -37,8 +37,9 @@ const profileUrl = 'http://127.0.0.1:54321/rest/v1/profiles*';
 // Settings reads the AI, stylist and enhancement status once when it opens, and those reads can still be starting after
 // the fields are visible. The mount barrier is registered before navigating and waits until the browser has finished
 // a new, successful (2xx) read of each, with none still open and none failed, so tracking never counts or holds a mount
-// read as the post-save read. A later enhance_status or stylist_status is tracked, and unexpected.
-const MOUNT_STATUS_PATHS = ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/enhance_status', '/rest/v1/rpc/stylist_status'];
+// read as the post-save read. A later enhance_status or stylist_status is tracked, and unexpected. The admin_status
+// read (AD1b) happens once per mount too.
+const MOUNT_STATUS_PATHS = ['/rest/v1/rpc/admin_status', '/rest/v1/rpc/ai_status', '/rest/v1/rpc/enhance_status', '/rest/v1/rpc/stylist_status'];
 function mountBarrier(page: Page) {
   const open = new Set<PlaywrightRequest>(), succeeded = new Set<string>(), failed: string[] = [];
   const path = (request: PlaywrightRequest) => {
@@ -720,7 +721,7 @@ test('synthetic settings visual evidence retains functional assertions in every 
       && api.profiles[owners.a]?.ui_language === capture.language
       && api.requests.filter((request) => request.path.startsWith('/rest/'))
         .every((request) => request.owner === owners.a && (request.ownerFilter === `eq.${owners.a}`
-          || ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status'].includes(request.path) && request.ownerFilter === null))).toBe(true);
+          || ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status', '/rest/v1/rpc/admin_status'].includes(request.path) && request.ownerFilter === null))).toBe(true);
     expect(await page.evaluate(({ origin, language }) => {
       const visible = (element: Element) => element.getClientRects().length > 0
         && getComputedStyle(element).visibility === 'visible';

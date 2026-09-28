@@ -45,6 +45,7 @@ const TodayScreen = lazyNamed(() => import('../features/today/today-screen'), 'T
 const CalendarScreen = lazyNamed(() => import('../features/calendar/calendar'), 'CalendarScreen');
 const StatisticsScreen = lazyNamed(() => import('../features/statistics/statistics-screen'), 'StatisticsScreen');
 const StylistScreen = lazyNamed(() => import('../features/stylist/stylist-screen'), 'StylistScreen');
+const AdminScreen = lazyNamed(() => import('../features/admin/admin-screen'), 'AdminScreen');
 const configuration = readConfiguration(import.meta.env);
 const browserLanguages = navigator.languages;
 function Brand() {
@@ -79,10 +80,10 @@ function Unconfigured({ status }: { status: Configuration['status'] }) {
   useEffect(() => { document.documentElement.lang = language; }, [language]);
   return <EntryLayout language={language} onLanguage={setLanguage} t={t}><section className="entry-card setup-card"><div className="small-mark"><Icon name="wardrobe" /></div><h1>{t('setup.title')}</h1><p className="muted">{t(status === 'invalid' ? 'setup.invalid' : 'setup.body')}</p><details className="copy-details"><summary>{t('setup.instructions')}</summary><ol className="setup-steps"><li>{t('setup.step1')}<code>npm run db:start</code></li><li>{t('setup.step2')}<code>.env.local</code></li><li>{t('setup.step3')}</li></ol></details><p className="privacy-note"><Icon name="lock" />{t('setup.note')}</p></section></EntryLayout>;
 }
-type WorkspaceRoute = 'today' | 'stylist' | 'wardrobe' | 'add' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | 'calendar' | 'statistics' | `detail:${string}` | `outfit:${string}`;
-const routeHash = { today: '#/today', stylist: '#/stylist', wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new', calendar: '#/calendar', statistics: '#/statistics' };
+type WorkspaceRoute = 'today' | 'stylist' | 'wardrobe' | 'add' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | 'calendar' | 'statistics' | 'admin' | `detail:${string}` | `outfit:${string}`;
+const routeHash = { today: '#/today', stylist: '#/stylist', wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new', calendar: '#/calendar', statistics: '#/statistics', admin: '#/admin' };
 function currentRoute(hash = location.hash): WorkspaceRoute {
-  return hash === '#/today' ? 'today' : hash === '#/stylist' ? 'stylist' : hash === '#/calendar' ? 'calendar' : hash === '#/statistics' ? 'statistics' : hash === '#/items/new' ? 'add' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
+  return hash === '#/today' ? 'today' : hash === '#/stylist' ? 'stylist' : hash === '#/calendar' ? 'calendar' : hash === '#/statistics' ? 'statistics' : hash === '#/admin' ? 'admin' : hash === '#/items/new' ? 'add' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
     : hash === '#/outfits' ? 'outfits' : hash === '#/outfits/new' ? 'outfit-new'
       : hash.startsWith('#/outfits/') ? `outfit:${hash.slice(10)}`
         : hash.startsWith('#/items/') ? `detail:${hash}` : 'wardrobe';
@@ -90,7 +91,7 @@ function currentRoute(hash = location.hash): WorkspaceRoute {
 function hashForRoute(route: WorkspaceRoute) {
   return route.startsWith('detail:') ? route.slice(7) : route.startsWith('outfit:') ? `#/outfits/${route.slice(7)}` : routeHash[route as keyof typeof routeHash];
 }
-const routeFocus: Partial<Record<WorkspaceRoute, string>> = { today: 'today-title', stylist: 'stylist-title', add: 'capture-title', settings: 'settings-title', trash: 'trash-title', outfits: 'outfits-title', 'outfit-new': 'outfit-editor-title', calendar: 'calendar-title', statistics: 'statistics-title' };
+const routeFocus: Partial<Record<WorkspaceRoute, string>> = { today: 'today-title', stylist: 'stylist-title', add: 'capture-title', settings: 'settings-title', trash: 'trash-title', outfits: 'outfits-title', 'outfit-new': 'outfit-editor-title', calendar: 'calendar-title', statistics: 'statistics-title', admin: 'admin-title' };
 function OwnedWardrobe({ client, config, controller, scope, profile, change, busy, unresolved, t, language, online, onRouteCommitted }: { client: AppClient; config: PublicConfig; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; unresolved: boolean; t: Translate; language: Language; online: boolean; onRouteCommitted: (family: NavFamily) => void }) {
   const [route, setRoute] = useState<WorkspaceRoute>(() => currentRoute());
   const [outfitUnresolved, setOutfitUnresolved] = useState(false);
@@ -288,6 +289,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           : route === 'calendar' ? <CalendarScreen client={client} scope={scope} online={online} language={language} t={t} timeZone={profile.timezone}
             invalidation={outfitsInvalidation} seed={calendarSeed} onSeedUsed={calendarSeedUsed} onChanged={invalidateHistory} onWriting={onWriting} />
           : route === 'statistics' ? <StatisticsScreen client={client} scope={scope} online={online} language={language} t={t} currency={profile.currency} />
+          : route === 'admin' ? <AdminScreen client={client} scope={scope} online={online} language={language} t={t} onBack={() => changeRoute('settings')} />
           : route === 'today' ? <TodayScreen client={client} scope={scope} images={images} online={online} language={language} t={t}
             timeZone={profile.timezone} invalidation={outfitsInvalidation} weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')} onTurnOnWeather={() => { stylistFocus.current = false; weatherFocus.current = true; }}
             stylist={stylist} onStylist={() => changeRoute('stylist')}

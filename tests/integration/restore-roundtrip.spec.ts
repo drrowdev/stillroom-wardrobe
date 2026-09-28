@@ -75,8 +75,8 @@ function languageInitializationOnly(label: string, actual: Snapshot, expected: S
 // Status and preflight RPCs that only read. ai_status and ai_analysis_status are deliberately absent: both can expire
 // and close old AI requests (private.ai_close). stylist_status is absent too: it expires old stylist requests
 // (private.stylist_expire), and enhance_status expires old enhancement requests (private.enhance_expire), so both are
-// locked with ai_status below.
-const READ_ONLY_RPCS = new Set(['analyzed_item_save_preflight', 'deletion_status', 'image_change_preflight',
+// locked with ai_status below. admin_status (AD1b) only reads the caller's admin row.
+const READ_ONLY_RPCS = new Set(['admin_status', 'analyzed_item_save_preflight', 'deletion_status', 'image_change_preflight',
   'image_change_requests', 'image_change_status', 'image_recovery_preflight', 'image_recovery_versions', 'item_attribution_history',
   'item_attribution_history_v2', 'attribution_digest',
   'item_deletion_operation_status', 'item_deletion_operations', 'item_deletion_status', 'restore_image_change_status',
