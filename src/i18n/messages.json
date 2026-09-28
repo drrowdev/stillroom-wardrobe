@@ -633,7 +633,7 @@
   "admin.title": {"en":"Spending and limits","fi":"Kulut ja rajat","sv":"Kostnader och gränser"},
   "admin.note": {"en":"AI limits are set by the app administrator.","fi":"Tekoälyn käyttörajat asettaa sovelluksen ylläpitäjä.","sv":"AI-gränserna ställs in av appens administratör."},
   "admin.unavailable": {"en":"Not available.","fi":"Ei käytettävissä.","sv":"Inte tillgängligt."},
-  "admin.estimates": {"en":"Spending recorded by the app. Some amounts are estimates.","fi":"Sovelluksen kirjaamat kulut. Osa summista on arvioita.","sv":"Kostnader som appen har registrerat. Vissa belopp är uppskattningar."},
+  "admin.estimates": {"en":"Spending recorded by the app. Some amounts are estimates. Calls made outside the app aren't included.","fi":"Sovelluksen kirjaamat kulut. Osa summista on arvioita. Sovelluksen ulkopuolella tehtyjä kutsuja ei lasketa mukaan.","sv":"Kostnader som appen har registrerat. Vissa belopp är uppskattningar. Anrop som görs utanför appen ingår inte."},
   "admin.loadFailed": {"en":"Spending couldn't be loaded.","fi":"Kuluja ei voitu ladata.","sv":"Kostnaderna kunde inte läsas in."},
   "admin.month": {"en":"Month","fi":"Kuukausi","sv":"Månad"},
   "admin.moreMonths": {"en":"Show 12 months","fi":"Näytä 12 kuukautta","sv":"Visa 12 månader"},

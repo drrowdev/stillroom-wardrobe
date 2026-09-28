@@ -570,8 +570,7 @@ export const adminStartLimits = (): Record<1 | 2, AdminLimits | null> => ({
 });
 const adminSpend = (confirmed: number, estimated: number, reserved: number, requests: number) => ({ confirmedMicro: String(confirmed),
   estimatedMicro: String(estimated), reservedMicro: String(reserved), totalMicro: String(confirmed + estimated + reserved), requests });
-export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits | null>, version: Record<1 | 2, number>, extra: AdminExtraUsage = {}) {
-  const now = new Date();
+export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits | null>, version: Record<1 | 2, number>, extra: AdminExtraUsage = {}, now = new Date()) {
   const months = Array.from({ length: count }, (_, index) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - index, 15)).toISOString().slice(0, 7));
   const account = (admissionNo: 1 | 2) => {
     const scale = admissionNo === 1 ? 1 : 0.5;
@@ -680,6 +679,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     spendingFaults: [] as ('fail' | 'hold')[],
     releaseSpending: null as (() => void) | null,
     extraUsage: {} as AdminExtraUsage,
+    // A fixed current month for the spending list; the runner's clock otherwise.
+    now: null as Date | null,
     writeReplies: [] as AdminWriteReply[],
     writes: [] as { owner: string; body: Record<string, unknown> }[],
     statusReads: 0,
@@ -1902,7 +1903,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         if (fault === 'fail') { await json({ message: 'Service unavailable' }, 503); return; }
         const count = body.p_months;
         if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > 12) { await json({ code: 'INVALID_INPUT' }); return; }
-        await json(adminSpending(count, adminControl.limits, adminControl.version, adminControl.extraUsage)); return;
+        await json(adminSpending(count, adminControl.limits, adminControl.version, adminControl.extraUsage, adminControl.now ?? undefined)); return;
       }
       adminControl.writes.push({ owner, body });
       if (!isAdmin) { await json({ code: 'UNAVAILABLE' }); return; }

@@ -17,10 +17,11 @@ const dialog = (page: Page) => page.locator('dialog[open]');
 const zoom = 'html { font-size: 200%; } body { font-size: 32px; }';
 const axe = async (page: Page) => expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
-async function start(page: Page, options: { language?: Language; admin?: boolean; hash?: string } = {}) {
+async function start(page: Page, options: { language?: Language; admin?: boolean; hash?: string; now?: Date } = {}) {
   const language = options.language ?? 'en';
   const api = await mockBackend(page, { initialLanguage: language });
   if (options.admin !== false) api.adminControl.admin = owners.a;
+  if (options.now) api.adminControl.now = options.now;
   await page.goto(options.hash ?? '/#/admin'); await signIn(page);
   await expect(page.locator('.workspace-identity')).toBeVisible();
   return api;
@@ -76,7 +77,7 @@ test.describe('AD1b admin spending and limits', () => {
     await page.locator('.ai-card').getByRole('link', { name: text('admin.title'), exact: true }).click();
     await openScreen(page);
     await expect(page.locator('#admin-title')).toBeFocused();
-    await expect(page.getByText('Spending recorded by the app. Some amounts are estimates.', { exact: true })).toBeVisible();
+    await expect(page.getByText('Spending recorded by the app. Some amounts are estimates. Calls made outside the app aren\'t included.', { exact: true })).toBeVisible();
     await expect(row(page, 1, 'admin.tagging').locator('td')).toHaveText(['$1.234567', '$0.30', '$4.097351', '$5.631918', '5']);
     await expect(row(page, 1, 'admin.stylist').locator('td')).toHaveText(['$0.00', '$0.00484', '$0.12936', '$0.1342', '2']);
     await expect(row(page, 1, 'admin.enhancement').locator('td')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00', '0']);
@@ -325,23 +326,29 @@ test.describe('AD1b admin spending and limits', () => {
     await expect(page.getByText(text('admin.note', 'sv'), { exact: true })).toBeVisible();
   });
 
+  // December 2026 back to July 2026 includes the longest month names in each language.
+  const fixedMonths = {
+    en: ['December 2026', 'November 2026', 'October 2026', 'September 2026', 'August 2026', 'July 2026'],
+    fi: ['joulukuu 2026', 'marraskuu 2026', 'lokakuu 2026', 'syyskuu 2026', 'elokuu 2026', 'heinäkuu 2026'],
+    sv: ['december 2026', 'november 2026', 'oktober 2026', 'september 2026', 'augusti 2026', 'juli 2026'],
+  } as const;
   for (const language of ['en', 'fi', 'sv'] as const) {
-    test(`the ${language} month label fits the select at 320 px, also at 200 % text size`, async ({ page }) => {
+    test(`every ${language} month label fits the select at 320 px, at 100 % and 200 % text size`, async ({ page }) => {
       await page.setViewportSize({ width: 320, height: 900 });
-      await start(page, { language });
+      await start(page, { language, now: new Date(Date.UTC(2026, 11, 15)) });
       await openScreen(page);
       for (const zoomed of [false, true]) {
         if (zoomed) await page.addStyleTag({ content: zoom });
+        if (zoomed) await expect(page.locator('html')).toHaveCSS('font-size', '32px');
         const fit = await page.locator('#admin-month').evaluate((select: HTMLSelectElement) => {
           const style = getComputedStyle(select);
           const context = document.createElement('canvas').getContext('2d')!;
           context.font = style.font;
-          const label = select.selectedOptions[0]!.text;
           const room = select.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-          return { label, text: context.measureText(label).width, room };
+          return { room, labels: [...select.options].map((option) => ({ label: option.text, width: context.measureText(option.text).width })) };
         });
-        expect(fit.label).toMatch(/2026/);
-        expect(fit.text, `${fit.label} zoomed=${zoomed}`).toBeLessThanOrEqual(fit.room);
+        expect(fit.labels.map((entry) => entry.label)).toEqual(fixedMonths[language]);
+        for (const entry of fit.labels) expect(entry.width, `${entry.label} zoomed=${String(zoomed)}`).toBeLessThanOrEqual(fit.room);
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     });
