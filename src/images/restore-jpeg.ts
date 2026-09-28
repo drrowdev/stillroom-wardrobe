@@ -3,6 +3,11 @@
 // APP segment and every table validated. Anything else that parses safely is re-encoded; anything malformed, over a
 // budget or changing the dimensions is refused before a decoder starts. This checks structure only: it is not a proof
 // of where a photo came from, and says nothing about what its pixels contain.
+//
+// The same walker also defines the photo input profile (`isPhotoInputJpeg`), used where a prepared photo is sent on
+// without being re-encoded (photo enhancement; later body photos). It is the preserve profile plus one addition: a
+// restart interval, with every RST0-RST7 marker checked in sequence at the exact MCU count. Apple's encoder writes
+// such files; restore still re-encodes them.
 import { ImagePreparationError, JPEG_LIMITS, readJpegHeader, type ImagePreparationErrorCode } from './jpeg.ts';
 
 export type RestoreJpegVerdict = { kind: 'preserve' } | { kind: 'reencode'; reason: 'metadata' | 'encoding' };
@@ -59,6 +64,8 @@ class BitReader {
     return (this.buffer >> this.count) & 1;
   }
   skip(bits: number): void { for (let index = 0; index < bits; index++) this.bit(); }
+  // Continues after a restart marker: the entropy coder starts again on a byte boundary.
+  restart(position: number): void { this.buffer = 0; this.count = 0; this.position = position; }
   decode(table: Huffman): number {
     let code = this.bit(), length = 1;
     while (code > table.maxcode[length]!) {
@@ -72,9 +79,20 @@ class BitReader {
 }
 
 // Walks every Huffman code of a baseline sequential scan (no IDCT): exactly the frame's blocks, then padding and a marker.
-// The caller decides whether that marker may follow: only EOI, straight after, keeps the bytes.
-function walkBaseline(bytes: Uint8Array, start: number, frame: Frame, scan: readonly ScanComponent[]): number {
+// The caller decides whether that marker may follow: only EOI, straight after, keeps the bytes. With a restart
+// `interval`, each interval but the last ends with padding and exactly the next RSTn (modulo 8), with no fill byte;
+// no restart marker may follow the last one.
+function walkBaseline(bytes: Uint8Array, start: number, frame: Frame, scan: readonly ScanComponent[], interval = 0): number {
   const reader = new BitReader(bytes, start);
+  let expected = 0;
+  const restartAfter = (done: number, total: number) => {
+    if (!interval || done === total || done % interval) return;
+    if (!reader.padded()) fail();
+    const at = reader.position;
+    if (at + 1 >= bytes.length || bytes[at] !== 0xff || bytes[at + 1] !== 0xd0 + (expected % 8)) fail();
+    expected++;
+    reader.restart(at + 2);
+  };
   const block = (entry: ScanComponent) => {
     const size = reader.decode(entry.dc);
     if (size > 11) fail();
@@ -99,11 +117,12 @@ function walkBaseline(bytes: Uint8Array, start: number, frame: Frame, scan: read
     const { component } = scan[0]!;
     const columns = Math.ceil(Math.ceil(frame.width * component.h / frame.hmax) / 8);
     const rows = Math.ceil(Math.ceil(frame.height * component.v / frame.vmax) / 8);
-    for (let index = 0; index < columns * rows; index++) block(scan[0]!);
+    for (let index = 0; index < columns * rows; index++) { block(scan[0]!); restartAfter(index + 1, columns * rows); }
   } else {
     const units = Math.ceil(frame.width / (8 * frame.hmax)) * Math.ceil(frame.height / (8 * frame.vmax));
     for (let unit = 0; unit < units; unit++) {
       for (const entry of scan) for (let index = 0; index < entry.component.h * entry.component.v; index++) block(entry);
+      restartAfter(unit + 1, units);
     }
   }
   if (!reader.padded()) fail();
@@ -141,17 +160,34 @@ const isJfif = (bytes: Uint8Array, start: number, end: number) => end - start ==
   && [0x4a, 0x46, 0x49, 0x46, 0].every((value, index) => bytes[start + index] === value)
   && bytes[end - 2] === 0 && bytes[end - 1] === 0;
 
+type JpegLimits = { bytes: number; side: number };
+const MAIN_LIMITS: JpegLimits = { bytes: JPEG_LIMITS.mainBytes, side: JPEG_LIMITS.mainSide };
+
 /**
  * Reads the whole file once with increasing offsets and a bounds check before every read. Throws for input that is
- * malformed, over a limit, or not exactly `width` x `height` in its frame header.
+ * malformed, over a limit, or not exactly `width` x `height` in its frame header. Restore's verdicts are unchanged by the
+ * photo input profile: a restart interval is always re-encoded here.
  */
-export function inspectRestoreJpeg(bytes: Uint8Array, width: number, height: number,
-  limits: { bytes: number; side: number } = { bytes: JPEG_LIMITS.mainBytes, side: JPEG_LIMITS.mainSide }): RestoreJpegVerdict {
+export function inspectRestoreJpeg(bytes: Uint8Array, width: number, height: number, limits: JpegLimits = MAIN_LIMITS): RestoreJpegVerdict {
+  return inspect(bytes, width, height, limits, false);
+}
+
+/**
+ * The photo input profile: true only for what `inspectRestoreJpeg` would preserve, or the same file with one restart
+ * interval (a single DRI before the scan, non-zero) whose RST0-RST7 markers all appear in order at the exact MCU count.
+ * Progressive, extended, multi-scan and metadata-bearing files are false. Throws, like `inspectRestoreJpeg`, for
+ * malformed input, a limit or a size other than `width` x `height`.
+ */
+export function isPhotoInputJpeg(bytes: Uint8Array, width: number, height: number, limits: JpegLimits = MAIN_LIMITS): boolean {
+  return inspect(bytes, width, height, limits, true).kind === 'preserve';
+}
+
+function inspect(bytes: Uint8Array, width: number, height: number, limits: JpegLimits, restarts: boolean): RestoreJpegVerdict {
   if (bytes.length > limits.bytes) fail('tooLarge');
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) fail();
   let offset = 2, segments = 0, scans = 0;
   let frame: Frame | undefined;
-  let metadata = false, encoding = false, app0 = 0, restart = 0, walked = false;
+  let metadata = false, encoding = false, app0 = 0, restart = 0, walked = false, dri = false;
   const budget = { fill: 0 };
   const quant = new Set<number>(), dc = new Map<number, Huffman>(), ac = new Map<number, Huffman>();
   const scanned = new Set<number>();
@@ -216,8 +252,11 @@ export function inspectRestoreJpeg(bytes: Uint8Array, width: number, height: num
     }
     if (marker === 0xdd) {
       if (scans || length !== 4) fail();
+      // The input profile takes one non-zero interval; anything else, and every interval in restore, is re-encoded.
+      if (!restarts || restart || dri) encoding = true;
+      dri = true;
       restart = bytes[start]! * 256 + bytes[start + 1]!;
-      encoding = true;
+      if (!restart) encoding = true;
       continue;
     }
     if (marker >= 0xc0 && marker <= 0xcf) {
@@ -279,9 +318,9 @@ export function inspectRestoreJpeg(bytes: Uint8Array, width: number, height: num
           if (spectralStart === 0 && !high) scanned.add(entry.component.id);
         }
       }
-      if (frame.marker === 0xc0 && scans === 1 && !restart && count === frame.components.length) {
+      if (frame.marker === 0xc0 && scans === 1 && (!restart || restarts) && count === frame.components.length) {
         offset = walkBaseline(bytes, end, frame, selected.map(entry => ({ component: entry.component,
-          dc: dc.get(entry.dc)!, ac: ac.get(entry.ac)! })));
+          dc: dc.get(entry.dc)!, ac: ac.get(entry.ac)! })), restart);
         walked = true;
         // Only EOI may follow the counted scan in a kept photo: no tables, fill bytes or anything else before it.
         if (bytes[offset + 1] !== 0xd9) encoding = true;

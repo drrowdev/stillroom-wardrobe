@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fitDimensions, ImagePreparationError, JPEG_LIMITS } from '../../src/images/jpeg';
-import { inspectRestoreJpeg, RESTORE_JPEG_BUDGET } from '../../src/images/restore-jpeg';
+import { inspectRestoreJpeg, isPhotoInputJpeg, RESTORE_JPEG_BUDGET } from '../../src/images/restore-jpeg';
 import { planRestorePhoto, type RestorePhotoDeps } from '../../src/images/restore-photo';
 import { verifyStoredImage } from '../../supabase/functions/finalize-analyzed-item/verify-image';
 import { exifSegment, joinBytes, jpegSegment } from '../fixtures/jpeg-helpers';
-import { findMarker, findMarkers, flatJpeg } from '../fixtures/restore-jpeg-fixtures';
+import { appleLayoutJpeg, findMarker, findMarkers, flatJpeg, restartMarkers } from '../fixtures/restore-jpeg-fixtures';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const text = (value: string) => new TextEncoder().encode(value);
@@ -324,6 +324,98 @@ describe('restore photo plan (Q6, A1-A2)', () => {
       { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'public-fixture', bearer: 'Bearer '.concat('fixture'), signal: new AbortController().signal }))
         .resolves.toBeUndefined();
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('photo input profile (isPhotoInputJpeg)', () => {
+  const profile = (bytes: Uint8Array, width: number, height: number) => {
+    try { return isPhotoInputJpeg(bytes, width, height) ? 'accepted' : 'refused'; }
+    catch (error) { return error instanceof ImagePreparationError ? error.code : 'other'; }
+  };
+  const restore = (bytes: Uint8Array, width: number, height: number) => {
+    try { return inspectRestoreJpeg(bytes, width, height); }
+    catch (error) { return error instanceof ImagePreparationError ? error.code : 'other'; }
+  };
+  const dri = (interval: number) => jpegSegment(0xdd, new Uint8Array([interval >> 8, interval & 0xff]));
+  const beforeScan = (bytes: Uint8Array, ...parts: Uint8Array[]) => insertAt(bytes, findMarker(bytes, 0xda), ...parts);
+  const removeDri = (bytes: Uint8Array) => {
+    const at = findMarker(bytes, 0xdd);
+    return joinBytes(bytes.subarray(0, at), bytes.subarray(at + 6));
+  };
+
+  it('answers exactly as restore does for every file without a restart interval', () => {
+    for (const [bytes, width, height] of [
+      [base, 1200, 900], [flatJpeg({ width: 17, height: 9, colour: [90] }), 17, 9],
+      [flatJpeg({ width: 1200, height: 900, mode: 'progressive' }), 1200, 900],
+      [flatJpeg({ width: 1200, height: 900, mode: 'extended' }), 1200, 900],
+      [flatJpeg({ width: 1200, height: 900, dqt16: true }), 1200, 900],
+      [flatJpeg({ width: 1200, height: 900, tableId: 2 }), 1200, 900],
+      [flatJpeg({ width: 1200, height: 900, segments: [exifSegment(1)] }), 1200, 900],
+      [flatJpeg({ width: 1200, height: 900, jfif: false }), 1200, 900],
+      [beforeEoi(base, new Uint8Array([0xff])), 1200, 900], [base.subarray(0, base.length - 1), 1200, 900], [base, 1200, 901],
+    ] as const) {
+      const verdict = restore(bytes, width, height);
+      expect(profile(bytes, width, height)).toBe(typeof verdict === 'string' ? verdict : verdict.kind === 'preserve' ? 'accepted' : 'refused');
+    }
+  });
+
+  it('accepts one restart interval with every RSTn in order at the exact MCU count; restore still re-encodes it', () => {
+    const cases = [
+      [flatJpeg({ width: 1200, height: 900, mode: 'restart', restartInterval: 1 }), 1200, 900],
+      [flatJpeg({ width: 1200, height: 900, mode: 'restart', restartInterval: 3 }), 1200, 900],
+      [flatJpeg({ width: 1200, height: 900, mode: 'restart', restartInterval: 9 }), 1200, 900],
+      // An interval longer than the scan: a DRI and no restart marker at all.
+      [flatJpeg({ width: 64, height: 48, mode: 'restart', restartInterval: 5000 }), 64, 48],
+      [flatJpeg({ width: 17, height: 9, colour: [90], mode: 'restart', restartInterval: 1 }), 17, 9],
+      [flatJpeg({ width: 33, height: 17, mode: 'restart', restartInterval: 2 }), 33, 17],
+      [appleLayoutJpeg({ width: 1280, height: 1600, restartInterval: 4 }), 1280, 1600],
+      [appleLayoutJpeg({ width: 1248, height: 1560, restartInterval: 7 }), 1248, 1560],
+    ] as const;
+    for (const [bytes, width, height] of cases) {
+      expect(profile(bytes, width, height)).toBe('accepted');
+      expect(inspectRestoreJpeg(bytes, width, height)).toEqual({ kind: 'reencode', reason: 'encoding' });
+    }
+    // Interval 1 on 1200 x 900 wraps RST7 back to RST0 many times.
+    const markers = restartMarkers(cases[0][0]);
+    expect(markers).toHaveLength(Math.ceil(1200 / 16) * Math.ceil(900 / 16) - 1);
+    expect(markers.slice(0, 10).map((at) => cases[0][0][at + 1])).toEqual([0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd0, 0xd1]);
+    expect(restartMarkers(cases[3][0])).toEqual([]);
+  });
+
+  it('refuses restart markers out of order, at the wrong MCU count, without a DRI, after the last interval or behind fill', () => {
+    const source = flatJpeg({ width: 1200, height: 900, mode: 'restart', restartInterval: 3 });
+    const [first, second] = restartMarkers(source) as [number, number];
+    const edited = (edit: (bytes: Uint8Array) => void) => { const copy = source.slice(); edit(copy); return copy; };
+    const cases: [string, Uint8Array, number][] = [
+      ['RST1 first', edited((bytes) => { bytes[first + 1] = 0xd1; }), 900],
+      ['RST0 twice', edited((bytes) => { bytes[second + 1] = 0xd0; }), 900],
+      ['interval says 2', edited((bytes) => { bytes[findMarker(bytes, 0xdd) + 5] = 2; }), 900],
+      ['interval says 4', edited((bytes) => { bytes[findMarker(bytes, 0xdd) + 5] = 4; }), 900],
+      ['taller frame', edited((bytes) => { setU16(bytes, findMarker(bytes, 0xc0) + 5, 916); }), 916],
+      ['no DRI', removeDri(source), 900],
+      ['RST after the last interval', beforeEoi(source, new Uint8Array([0xff, 0xd0 + ((restartMarkers(source).length) % 8)])), 900],
+      ['fill before an RST', insertAt(source, first, new Uint8Array([0xff])), 900],
+      ['truncated after an RST', joinBytes(source.subarray(0, second + 2), new Uint8Array([0xff, 0xd9])), 900],
+    ];
+    // A restart marker after the last interval is a stray marker, refused like any other.
+    for (const [name, bytes, height] of cases) {
+      expect([name, profile(bytes, 1200, height)]).toEqual([name, name === 'RST after the last interval' ? 'unsupported' : 'invalid']);
+    }
+  });
+
+  it('refuses DRI with a progressive, extended or multi-scan frame, a zero or repeated interval, and metadata', () => {
+    const restart = flatJpeg({ width: 1200, height: 900, mode: 'restart', restartInterval: 3 });
+    for (const [bytes, height] of [
+      [beforeScan(flatJpeg({ width: 1200, height: 900, mode: 'progressive' }), dri(3)), 900],
+      [beforeScan(flatJpeg({ width: 1200, height: 900, mode: 'extended' }), dri(3)), 900],
+      [beforeScan(base, dri(0)), 900],
+      [beforeScan(restart, dri(3)), 900],
+      [flatJpeg({ width: 1200, height: 900, mode: 'restart', restartInterval: 3, segments: [exifSegment(1)] }), 900],
+      [flatJpeg({ width: 1200, height: 900, mode: 'restart', restartInterval: 3, dqt16: true }), 900],
+    ] as const) {
+      expect(profile(bytes, 1200, height)).toBe('refused');
+      expect(restore(bytes, 1200, height)).toMatchObject({ kind: 'reencode' });
     }
   });
 });

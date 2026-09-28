@@ -132,6 +132,41 @@ export function flatJpeg(options: FlatJpegOptions): Uint8Array<ArrayBuffer> {
   return joinBytes(...parts);
 }
 
+/**
+ * A flat restart-interval JPEG rebuilt in the segment order iPhone Safari's encoder writes: JFIF, the frame, four
+ * single-table DHT segments, two DQT segments, DRI and one baseline scan. Synthetic pixels only.
+ */
+export function appleLayoutJpeg(options: Omit<FlatJpegOptions, 'mode' | 'restartInterval'> & { restartInterval: number }): Uint8Array<ArrayBuffer> {
+  const source = flatJpeg({ ...options, mode: 'restart' });
+  const found: Record<string, Uint8Array> = {};
+  const tables: Uint8Array[] = [];
+  let offset = 2;
+  for (;;) {
+    const marker = source[offset + 1]!, length = source[offset + 2]! * 256 + source[offset + 3]!;
+    if (marker === 0xda) break;
+    const segment = source.subarray(offset, offset + 2 + length);
+    if (marker === 0xc4) tables.push(segment); else found[marker.toString(16)] = segment;
+    offset += 2 + length;
+  }
+  // The same table under the other ID: byte 4 is the class/precision nibble and the table ID.
+  const retable = (segment: Uint8Array, id: number) => { const copy = segment.slice(); copy[4] = (copy[4]! & 0xf0) | id; return copy; };
+  const [dc, ac] = tables as [Uint8Array, Uint8Array];
+  return joinBytes(source.subarray(0, 2), found.e0!, found.c0!, dc, ac, retable(dc, 1), retable(ac, 1),
+    found.db!, retable(found.db!, 1), found.dd!, source.subarray(offset));
+}
+
+/** Offsets of the RSTn markers inside the first scan's entropy data. */
+export function restartMarkers(bytes: Uint8Array): number[] {
+  const sos = findMarker(bytes, 0xda);
+  const found: number[] = [];
+  for (let position = sos + 2 + bytes[sos + 2]! * 256 + bytes[sos + 3]!; position + 1 < bytes.length; position++) {
+    if (bytes[position] !== 0xff || bytes[position + 1] === 0) continue;
+    if (bytes[position + 1]! >= 0xd0 && bytes[position + 1]! <= 0xd7) found.push(position);
+    else if (bytes[position + 1] !== 0xff) break;
+  }
+  return found;
+}
+
 /** Byte offset of the first marker `marker` outside entropy data, or -1. */
 export function findMarker(bytes: Uint8Array, marker: number): number {
   return findMarkers(bytes, marker)[0] ?? -1;
