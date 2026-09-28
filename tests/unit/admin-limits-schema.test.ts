@@ -73,6 +73,9 @@ describe('admin limits migration (AD1a)', () => {
       'enhance_monthly_allowance_micro', 'enhance_max_request_micro', 'enhance_max_requests_per_hour']);
     expect(update).not.toMatch(/(enabled|consent|notice|manifest|activated|approval)/);
     expect(write).toContain("if v_saved<>p_limits then raise exception");
+    // The manifest floor applies to every proposed reservation, changed or not.
+    expect(write).toContain('if v_request is not null and v_manifest is not null then\n');
+    expect(write).not.toContain('is distinct from (v_current');
     expect(write).toContain('v_monthly>50000000');
     expect(write).toContain("p_reason_code not in ('RAISE','LOWER','PAUSE','RESTORE','CORRECTION')");
     // Reason labels are recorded only: they never appear in a validation or activation branch.

@@ -69,8 +69,18 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
   const originalA = await admission(a), originalB = await admission(b);
   const savedA = await controls(a), savedB = await controls(b);
   requireEvidence(savedA && savedB && originalA.no !== originalB.no);
-  const restoreLimits = (owner, saved) => sql(`update private.ai_controls set ${LIMIT_COLUMNS.map((column) =>
-    `${column}=(${json(saved)}->>${literal(column)})::${column.endsWith('hour') ? 'integer' : 'bigint'}`).join(',')},
+  // Whole-row restore: earlier stages (the BG2b probes) leave their own limits, so the positive probes set explicit
+  // fixtures for both accounts and put every column back afterwards.
+  const restoreControls = (owner, saved) => sql(`delete from private.ai_controls where owner_id=${literal(owner.uid)};
+    insert into private.ai_controls select * from jsonb_populate_record(null::private.ai_controls,${json(saved)});`);
+  // The tagging reservation: at least the active manifest's floor, so an unchanged value always passes the floor check.
+  const tagFloor = async (owner) => scalar(`select greatest(${TAG_RESERVATION},coalesce(m.reservation_micro,0))
+    from private.ai_controls c left join private.ai_execution_manifests m on m.id=c.execution_manifest_id
+    where c.owner_id=${literal(owner.uid)};`);
+  const fixture = async (owner) => sql(`update private.ai_controls set monthly_allowance_micro=20000000,
+    max_request_micro=${await tagFloor(owner)},max_requests_per_hour=1000,stylist_manifest_id=${literal(STYLIST)},
+    stylist_monthly_allowance_micro=5000000,stylist_max_request_micro=${STYLIST_RESERVATION},stylist_max_requests_per_hour=1000,
+    enhance_activated=false,enhance_monthly_allowance_micro=null,enhance_max_request_micro=null,enhance_max_requests_per_hour=null,
     updated_at=clock_timestamp() where owner_id=${literal(owner.uid)};`);
 
   mark('structure');
@@ -134,6 +144,15 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
     const promoted = await client.request(b.token, '/auth/v1/user', { method: 'PUT', body: { data: { admin: true, role: 'admin' } } });
     requireEvidence(promoted.ok);
     equal(await status(b), UNAVAILABLE);
+    // Nor can B's own profile: it has no admin field, so a profile write naming one is refused and changes nothing.
+    const profileBefore = await one(`select to_jsonb(p) from public.profiles p where owner_id=${literal(b.uid)};`);
+    for (const body of [{ is_admin: true }, { role: 'admin' }, { admin: true }, { app_admin: true, display_name: 'admin' }]) {
+      const patched = await client.request(b.token, `/rest/v1/profiles?owner_id=eq.${b.uid}`, { method: 'PATCH', body });
+      requireEvidence(!patched.ok && [400, 401, 403].includes(patched.status));
+    }
+    equal(await one(`select to_jsonb(p) from public.profiles p where owner_id=${literal(b.uid)};`), profileBefore);
+    equal(await status(b), UNAVAILABLE);
+    equal(await scalar('select count(*) from private.app_admins;'), '0');
 
     mark('operator-grant');
     // The operator row must name the current, enabled admission generation of the same account; only one row exists.
@@ -156,16 +175,16 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
     equal(await status(a), { code: 'OK' });
 
     mark('setup');
-    // B: tagging reservation and stylist reservation exact, stylist activated and consented, enhancement unconfigured.
-    await sql(`update private.ai_controls set monthly_allowance_micro=20000000,max_request_micro=${TAG_RESERVATION},
-      max_requests_per_hour=1000,stylist_activated=true,stylist_notice_revision=1,stylist_manifest_id=${literal(STYLIST)},
-      stylist_monthly_allowance_micro=5000000,stylist_max_request_micro=${STYLIST_RESERVATION},stylist_max_requests_per_hour=1000,
-      enhance_monthly_allowance_micro=null,enhance_max_request_micro=null,enhance_max_requests_per_hour=null,
-      enhance_activated=false,updated_at=clock_timestamp() where owner_id=${literal(b.uid)};`);
+    // Explicit, valid nine-field fixtures for both accounts; B's stylist is also activated and consented.
+    await fixture(a);
+    await fixture(b);
+    await sql(`update private.ai_controls set stylist_activated=true,stylist_notice_revision=1,updated_at=clock_timestamp()
+      where owner_id=${literal(b.uid)};`);
+    const tagB = await tagFloor(b);
     const consent = await client.rpc(b, 'stylist_set_consent', { p_enabled: true, p_notice_revision: 1 });
     requireEvidence(consent?.code === 'OK' && consent.consent?.enabled === true);
     const baseB = await limitsOf(b);
-    equal(baseB, { shared: feature('20000000', String(TAG_RESERVATION), 1000),
+    equal(baseB, { shared: feature('20000000', tagB, 1000),
       stylist: feature('5000000', String(STYLIST_RESERVATION), 1000), enhancement: feature(null, null, null) });
 
     mark('spending-shape');
@@ -279,6 +298,21 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
     equal(await write(b, originalB, change({ shared: { maxRequestsPerHour: 999 } }), baseB), { code: 'CONFLICT', limits: baseB });
     equal(await write(b, originalB, baseB, baseB), { code: 'UNCHANGED', limits: baseB });
     requireEvidence(await audits() === auditBefore);
+    equal(await limitsOf(b), baseB);
+
+    mark('reservation-floor');
+    // A stored reservation already below its manifest floor is refused even when only another field changes.
+    await sql(`update private.ai_controls set stylist_max_request_micro=${STYLIST_RESERVATION - 1} where owner_id=${literal(b.uid)};`);
+    try {
+      const below = await limitsOf(b), rowBelow = await controls(b);
+      equal(below.stylist.maxRequestMicro, String(STYLIST_RESERVATION - 1));
+      equal(await write(b, originalB, below, { ...below, stylist: { ...below.stylist, maxRequestsPerHour: 999 } }),
+        invalid('stylist.maxRequestMicro', 'BELOW_RESERVATION'));
+      equal(await controls(b), rowBelow);
+      requireEvidence(await audits() === auditBefore);
+    } finally {
+      await sql(`update private.ai_controls set stylist_max_request_micro=${STYLIST_RESERVATION} where owner_id=${literal(b.uid)};`);
+    }
     equal(await limitsOf(b), baseB);
 
     mark('write');
@@ -413,8 +447,10 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
       update private.approved_accounts set enabled=true,generation=${literal(originalB.generation)}::uuid where user_id=${literal(b.uid)};
       update private.approved_accounts set generation=${literal(originalA.generation)}::uuid where user_id=${literal(a.uid)};
       delete from private.deletion_jobs where owner_id in (${literal(a.uid)},${literal(b.uid)}) and stage='storage' and completed_at is null;`);
-    await restoreLimits(a, savedA);
-    await restoreLimits(b, savedB);
+    await restoreControls(a, savedA);
+    await restoreControls(b, savedB);
   }
+  equal(await controls(a), savedA);
+  equal(await controls(b), savedB);
   equal(await scalar('select count(*) from private.app_admins;'), '0');
 }

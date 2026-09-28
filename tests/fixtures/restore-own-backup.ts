@@ -11,7 +11,9 @@ export type SyntheticItem = { title: string; photos: readonly SyntheticPhoto[]; 
 export type SyntheticBackup = { owner: string; exportId: string; items: readonly SyntheticItem[];
   /** Adds an outfit of the first two items, a rule and feedback for them, history naming item 0 and a gone item, and item 0's
    * tag history (syntheticHistory). */
-  extras?: boolean };
+  extras?: boolean;
+  /** Edits the metadata before it is encrypted, for hostile-input cases. */
+  mutate?: (metadata: Record<string, unknown>) => void };
 
 const stamp = '2026-09-20T10:00:00+00:00';
 // Deterministic IDs within one backup, distinct between backups (the export ID seeds them).
@@ -84,6 +86,7 @@ export async function syntheticMetadata(backup: SyntheticBackup): Promise<SavedM
 /** Writes the backup's encrypted parts into `directory` and returns the part file names, in order. */
 export async function writeSyntheticBackup(directory: string, backup: SyntheticBackup, passphrase: string): Promise<string[]> {
   const meta = await syntheticMetadata(backup);
+  backup.mutate?.(meta as unknown as Record<string, unknown>);
   const bytes = new Map<string, Uint8Array>();
   for (const [n, item] of backup.items.entries()) for (const [p, photo] of item.photos.entries()) bytes.set(syntheticId(backup.exportId, 2, n * 16 + p), photo.bytes);
   const plan = planParts(meta);

@@ -279,11 +279,11 @@ begin
     if f<>'shared' and v_monthly>v_shared then
       return jsonb_build_object('code','INVALID_LIMITS','field',f||'.monthlyAllowanceMicro','reason','ABOVE_SHARED');
     end if;
-    -- A changed per-request value below the active manifest's reservation would make the feature silently unusable.
+    -- Every proposed per-request value, changed or not, must cover the active manifest's reservation: a value below it
+    -- would leave the feature silently unusable.
     v_manifest := case f when 'shared' then c.execution_manifest_id when 'stylist' then c.stylist_manifest_id
       else c.enhance_manifest_id end;
-    if v_request is not null and v_manifest is not null
-      and (p_limits->f->'maxRequestMicro') is distinct from (v_current->f->'maxRequestMicro') then
+    if v_request is not null and v_manifest is not null then
       select reservation_micro into v_reservation from private.ai_execution_manifests where id=v_manifest;
       if v_request<v_reservation then
         return jsonb_build_object('code','INVALID_LIMITS','field',f||'.maxRequestMicro','reason','BELOW_RESERVATION');

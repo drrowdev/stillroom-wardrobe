@@ -15,7 +15,7 @@ import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertLocalApi, validateSessionEnvironment } from '../../scripts/backend/local.mjs';
+import { assertLocalApi, privilegedLocalSql, validateSessionEnvironment } from '../../scripts/backend/local.mjs';
 import type { OwnerScope } from '../../src/auth/session';
 import type { AppClient } from '../../src/data/client';
 import type { Database } from '../../src/data/database.types';
@@ -238,11 +238,12 @@ async function world() {
   const proxy = await startProxy(base);
   const children = new Children();
   const parent = await mkdtemp(join(tmpdir(), 'restore-own-local-'));
-  const backup = async (name: string, items: SyntheticItem[], exportId = randomUUID(), extras = true) => {
+  const backup = async (name: string, items: SyntheticItem[], exportId = randomUUID(), extras = true,
+    mutate?: (metadata: Record<string, unknown>) => void) => {
     const folder = join(parent, name);
     await rm(folder, { recursive: true, force: true });
     await mkdir(folder);
-    const parts = await writeSyntheticBackup(folder, { owner: a.scope.ownerId, exportId, items, extras }, PASSPHRASE);
+    const parts = await writeSyntheticBackup(folder, { owner: a.scope.ownerId, exportId, items, extras, mutate }, PASSPHRASE);
     // The IDs the restore gives these items in account A.
     const ids = await Promise.all(items.map((_, n) => restoreId(2, a.scope.ownerId, exportId, 'items', syntheticId(exportId, 1, n))));
     return { folder, exportId, parts, ids };
@@ -320,6 +321,16 @@ test('restore-own: restore, parity with the browser steps, idempotent rerun, con
   try {
     const app = await appJpeg();
     const beforeA = await snapshot(a), beforeB = await snapshot(b);
+    // AD1 (ADR27): a restore can never create admin authority. The operator table is read by the database owner only to
+    // show it is untouched; every authority check is the ordinary session's own admin_status answer.
+    const admins = () => privilegedLocalSql("select coalesce(jsonb_agg(to_jsonb(x) order by owner_id),'[]') from private.app_admins x;");
+    const authority = async () => Promise.all([a, b].map(async account => {
+      const answer = await account.client.rpc('admin_status');
+      check(!answer.error);
+      return canonical(answer.data);
+    }));
+    const adminsBefore = await admins(), authorityBefore = await authority();
+    check(authorityBefore.every(answer => answer === canonical({ code: 'UNAVAILABLE' })) || adminsBefore !== '[]');
     const items: SyntheticItem[] = [
       { title: 'Fictional shirt', photos: [{ bytes: app, width: 2, height: 2 }, progressive(24, 16, [90, 110, 150])],
         provenance: { title: { kind: 'user', revision: 3 }, category: { kind: 'ai_observed', revision: 2 }, colours: { kind: 'ai_estimated', revision: 1 }, seasons: { kind: 'user', revision: 2 } } },
@@ -396,6 +407,8 @@ test('restore-own: restore, parity with the browser steps, idempotent rerun, con
     // The account's own profile, preferences and consent are kept; nothing of B changed.
     check(canonical(after.profiles) === canonical(beforeA.profiles) && canonical(after.style_preferences) === canonical(beforeA.style_preferences));
     check(canonical(await snapshot(b)) === canonical(beforeB));
+    stage = 'restore:admin';
+    check(await admins() === adminsBefore && canonical(await authority()) === canonical(authorityBefore));
 
     stage = 'browser-parity';
     const step = await appSteps(page);
@@ -551,6 +564,23 @@ test('restore-own: restore, parity with the browser steps, idempotent rerun, con
     check((await children.finish(cli(resumed.folder))).code === 0);
     const finished = (await snapshot(a)).item_images.filter(image => [...blocked.ids, ...resumed.ids].includes(String(image.item_id)));
     check(finished.length === 4 && finished.every(image => image.state === 'ready'));
+
+    // Admin data smuggled into a backup (an operator table, profile and top-level flags) is refused or ignored; either
+    // way no authority appears and the operator table is unchanged.
+    stage = 'admin-input';
+    const smuggled = await w.backup('admin-input', [{ title: 'Fictional admin probe', photos: [baseline(8, 8, [12, 34, 56])] }],
+      randomUUID(), false, (metadata) => {
+        const tables = metadata.tables as Record<string, Record<string, unknown>[]>;
+        tables.app_admins = [{ singleton: true, owner_id: a.scope.ownerId, admission_no: 1, admission_generation: randomUUID() }];
+        tables.ai_limit_audit = [{ owner_id: a.scope.ownerId, reason_code: 'RAISE' }];
+        Object.assign(tables.profiles![0]!, { is_admin: true, role: 'admin' });
+        Object.assign(metadata, { admin: true, app_admins: [a.scope.ownerId] });
+      });
+    proxy.reset();
+    const adminInput = await children.finish(cli(smuggled.folder));
+    check((adminInput.code === 0 || adminInput.code === 1) && quiet(adminInput));
+    check(!proxy.state.paths.some(path => /app_admins|ai_limit_audit|admin_set_ai_limits/.test(path)));
+    check(await admins() === adminsBefore && canonical(await authority()) === canonical(authorityBefore));
   } catch (problem) {
     throw new AggregateError([new Error(`restore-own primary failed at ${stage}.${stage.startsWith('restore') ? detail : ''}`)], problem === failure ? 'Local restore-own gate failed.' : 'Local restore-own gate failed (unexpected).', { cause: problem });
   } finally {
