@@ -185,6 +185,49 @@ test('I13: a failed read offers a retry, and offline figures are marked as possi
   await context.setOffline(false);
 });
 
+test('spending: archived and sold prices never count as wardrobe value', async ({ page }) => {
+  // Only EUR price is on a sold item; the one USD price is active. Zero-priced active items still count.
+  await start(page, 'en', api => {
+    const w = wardrobe(api);
+    for (const row of [w.shirt, w.boots]) row.purchase_price = null;
+    w.coat.lifecycle = 'sold';
+    return w;
+  });
+  const spend = card(page, 'stats-spending');
+  await expect(spend.locator('p').first()).toHaveText(text('stats.spendingNoPricesIn', 'en', { currency: 'EUR' }));
+  await expect(spend.locator('.stats-figures')).toHaveCount(0);
+  await expect(spend.locator('.stats-priced')).toHaveText(text('stats.priced_other', 'en', { priced: 1, total: 4 }));
+  // The sold coat keeps its historical cost per wear.
+  await expect(page.getByRole('table', { name: text('stats.costCaption', 'en', { currency: 'EUR' }) }).getByRole('row').nth(1)).toContainText('Wool coat');
+  await page.getByLabel(text('stats.currency')).selectOption('USD');
+  await expect(spend.locator('.stats-figures > div').first()).toHaveText(`${text('stats.value')}${money(80, 'USD')}`);
+});
+
+test('spending: with only inactive prices it shows the no-price state', async ({ page }) => {
+  await start(page, 'en', api => {
+    const w = wardrobe(api);
+    for (const row of [w.shirt, w.boots, w.jeans]) row.purchase_price = null;
+    w.coat.lifecycle = 'archived';
+    return w;
+  });
+  const spend = card(page, 'stats-spending');
+  await expect(spend.locator('p').first()).toHaveText(text('stats.spendingNoPrices'));
+  await expect(spend).not.toContainText(money(0, 'EUR'));
+  await expect(spend.locator('.stats-priced')).toHaveText(text('stats.priced_other', 'en', { priced: 0, total: 4 }));
+});
+
+test('spending: genuinely zero-priced active items show a zero value, not the empty state', async ({ page }) => {
+  await start(page, 'en', api => {
+    const w = wardrobe(api);
+    for (const row of [w.coat, w.shirt, w.boots]) row.purchase_price = 0;
+    w.jeans.purchase_price = null;
+    return w;
+  });
+  const figures = card(page, 'stats-spending').locator('.stats-figures > div');
+  await expect(figures.nth(0)).toHaveText(`${text('stats.value')}${money(0, 'EUR')}`);
+  await expect(figures.nth(1)).toHaveText(`${text('stats.averageCostPerWear')}${money(0, 'EUR')}`);
+});
+
 for (const language of ['fi', 'sv'] as const) {
   test(`I13 in ${language === 'fi' ? 'Finnish' : 'Swedish'} at 320px and 200% text: the nav, the lists and the table fit`, async ({ page }) => {
     await start(page, language);

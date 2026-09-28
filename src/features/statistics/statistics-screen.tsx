@@ -75,7 +75,7 @@ function Spending({ stats, language, t, currency }: { stats: Statistics; languag
   const priced = stats.items.filter(row => row.active && row.price !== null).length;
   return <section className="settings-card stats-card stats-spending" aria-labelledby="stats-spending">
     <h2 id="stats-spending">{t('stats.spending')}</h2>
-    {!currency || !summary ? <p>{t('stats.spendingNoPrices')}</p> : <>
+    {!currency || !summary || summary.count === 0 ? <p>{t(priced === 0 ? 'stats.spendingNoPrices' : 'stats.spendingNoPricesIn', { currency: currency ?? '' })}</p> : <>
       <dl className="stats-figures">
         <div><dt>{t('stats.value')}</dt><dd>{centsText(summary.cents, currency, language)}</dd></div>
         <div><dt>{t('stats.averageCostPerWear')}</dt>

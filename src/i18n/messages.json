@@ -391,6 +391,7 @@
   "stats.priced_other": {"en":"{priced} of {total} items have a price.","fi":"Hinta on lisätty {priced} vaatteelle {total} vaatteesta.","sv":"{priced} av {total} plagg har ett pris."},
   "stats.onlyCurrency": {"en":"Only prices in {currency} are included.","fi":"Mukana ovat vain hinnat valuutassa {currency}.","sv":"Endast priser i {currency} räknas med."},
   "stats.spendingNoPrices": {"en":"Add prices to your items to see what your wardrobe is worth.","fi":"Lisää vaatteille hinnat, niin näet vaatekaappisi arvon.","sv":"Lägg till priser på dina plagg för att se vad garderoben är värd."},
+  "stats.spendingNoPricesIn": {"en":"No items in your wardrobe have a price in {currency}.","fi":"Vaatekaapissasi ei ole vaatteita, joiden hinta on valuutassa {currency}.","sv":"Inga plagg i din garderob har ett pris i {currency}."},
   "stats.byCategory": {"en":"By category","fi":"Luokittain","sv":"Per kategori"},
   "stats.byMonth": {"en":"By purchase month","fi":"Ostokuukausittain","sv":"Per inköpsmånad"},
   "stats.itemCount_one": {"en":"{count} item","fi":"{count} vaate","sv":"{count} plagg"},

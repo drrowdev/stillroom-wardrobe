@@ -150,6 +150,14 @@ describe('spending totals', () => {
     ].sort((a, b) => categories.indexOf(a.key as never) - categories.indexOf(b.key as never)));
     expect(eur.byMonth).toEqual([{ key: '2026-09', cents: 25999n, count: 2 }, { key: '2026-08', cents: 4550n, count: 1 }]);
   });
+  it('never counts archived or sold prices, while their currency stays available for the history table', () => {
+    const inactive = buildStatistics([item(1), item(2, { lifecycle: 'archived', purchasePrice: '99.00' }), item(3, { purchasePrice: '0.00' })], new Map());
+    expect(inactive.currencies).toEqual(['EUR']);
+    expect(spending(inactive, 'EUR', categories)).toMatchObject({ total: 2, priced: 1, cents: 0n, count: 1 });
+    const only = buildStatistics([item(1), item(2, { lifecycle: 'sold', purchasePrice: '99.00' })], new Map());
+    expect(spending(only, 'EUR', categories)).toMatchObject({ total: 1, priced: 0, cents: 0n, count: 0, byCategory: [], byMonth: [] });
+    expect(costTable(only, 'EUR').map(row => row.id)).toEqual([id(2)]);
+  });
   it('counts an invalid purchase date as undated instead of guessing a month', () => {
     const odd = buildStatistics([item(1, { purchasePrice: '10.00', purchaseDate: '2026-02-30' })], new Map());
     expect(spending(odd, 'EUR', categories)).toMatchObject({ byMonth: [], undated: 1, cents: 1000n });
