@@ -277,6 +277,9 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await page.getByRole('button', { name: messages['settings.saveProfile'][language] }).click();
     await expect(page.getByText(messages['settings.profileSaved'][language], { exact: true })).toBeVisible();
     await expect(page.locator('.workspace-identity')).toContainText('Åsa oma stil 🌿');
+    // WebKit can report an internal error when a reload interrupts routed fixture requests (the post-save status reads).
+    // Let them finish first; the saved values are asserted after the reload either way.
+    await page.waitForLoadState('networkidle');
     await page.reload();
     await expect(page.locator('#profile-display_name')).toHaveValue('Åsa oma stil 🌿');
     await expect(page.locator('#profile-timezone')).toHaveValue('Europe/Stockholm');
