@@ -531,11 +531,12 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
       requireEvidence(await provenanceRow(b, vb.p_image.id) === null);
       equal(await client.rpc(b, 'image_provenance_v1', {}), []);
 
-      mark('admission-analysed');
-      // H1: enhanced bytes through the analysed writer the Save path uses (reserve_analyzed_item_save, here unverified)
-      // and its checked completion: the owner preflight, then the service-only complete_analyzed_item_save that
-      // finalize-analyzed-item calls. The evidence expires after the reservation was accepted and completion still
-      // attaches the snapshot; an expired tombstone is refused by this writer too, with no item created.
+      mark('unverified-reservation-binding');
+      // Unverified reservation binding (DB level): enhanced bytes through reserve_analyzed_item_save with p_claim null
+      // and fixture output hashes, then the owner preflight and the privileged complete_analyzed_item_save. The evidence
+      // expires after the reservation was accepted and completion still attaches the snapshot; an expired tombstone is
+      // refused by this writer too, with no item created. The claim-bearing chain on real admitted H2 bytes (provider
+      // double analysis, the app's Save path, the served finalizer) is the edge gate's enhance-analysed-save stage.
       const analysed = async (sha) => {
         const value = saveWith(sh, sha);
         value.p_claim = null;
@@ -668,9 +669,9 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
       await sh.reserve(reuse);
       const copied = await binding(a, reuse.p_image.id);
       requireEvidence(copied.source_kind === 'copy' && copied.source_image_id === v2.p_image.id && copied.origin === 'recorded');
-      // H5 round trip across owners: A's exported entry (image_provenance_v1, the export's only provenance source) is
-      // restored by B through a v4 import onto B's own byte-identical photo; B then exports it as imported, never
-      // recorded, with backup = stored, and A's own row is unchanged.
+      // DB-level provenance transfer across owners: A's entry as image_provenance_v1 reports it is restored by B through
+      // the v4 RPCs onto B's own byte-identical photo, as imported with backup = stored, and A's own row is unchanged.
+      // The client export -> verify -> cross-owner restore of real bytes is the P6d rehearsal's BG2b v4 round trip.
       const exported = await ownProvenance(a, v2.p_image.id);
       equal(exported, { image_id: v2.p_image.id, kind: 'ai_edited', origin: 'recorded', model_id: MODEL, manifest_id: MANIFEST,
         stored_sha256: first.sha, backup_sha256: null });

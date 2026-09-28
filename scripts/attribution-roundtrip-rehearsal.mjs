@@ -4,7 +4,8 @@
 // every entry as imported, in order, with the same values and each photo mapped to the restored copy.
 // Privileged SQL only seeds A's AI controls and stands in for the provider (claim and finish), as the other rehearsals
 // do; everything else runs with normal sessions and the CLIs' own code. Output is fixed text only.
-import { createHash } from 'node:crypto';
+// The BG2b-2 phase that follows also opens the shared enhancement capacity for A and restores it and A's controls after.
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { registerHooks } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -21,6 +22,11 @@ export const ROUNDTRIP_BOUND_MS = 420_000;
 const PASSPHRASE = 'synthetic attribution round trip';
 const MANIFEST = 'azure-eu-terra-devtest-v2';
 const WIDTH = 128, HEIGHT = 96;
+const ENHANCE_MANIFEST = 'azure-global-image25-sunburst-enhance-v1';
+const ENHANCE_MODEL = 'gpt-image-2.5-sunburst';
+const ENHANCE_KEY = 'stillroom-ai-eval/eval-image25-sunburst-20260908/2026-09-08';
+const ENHANCE_USAGE = Object.freeze({ modelObservation: 'not_observed', input: 1000, output: 4000, total: 5000, inputText: 100,
+  inputImage: 900 });
 const ENTRY_KEYS = ['fields', 'image_sha256', 'model_id', 'origin', 'prompt_version', 'source_image_id'];
 
 const literal = (value) => "'" + String(value).replaceAll("'", "''") + "'";
@@ -125,6 +131,8 @@ async function main() {
     const { restoreId } = await import('../src/domain/restore-plan.ts');
     const { runExport } = await import('./export-own.mjs');
     const { runRestoreOwn } = await import('./restore-own.mjs');
+    const { listParts, partSource, restoreReadiness } = await import('./verify-backup.mjs');
+    const { verifyBackup } = await import('../src/domain/export-format.ts');
     const db = async (sql) => JSON.parse(await privilegedLocalSql(sql));
 
     stage = 'stack';
@@ -323,6 +331,145 @@ async function main() {
     }
     const seconds = ((performance.now() - started) / 1000).toFixed(1);
     console.log(`PASS: P6d genuine round trip; recorded history (analyzed Save + analyzed replacement) -> export-own -> restore-own into B -> re-export -> restore into A; items=2 entries=3 photos=3 generations=2 reruns=2; all imported, order/values/photo mappings equal; ${seconds}s`);
+
+    // BG2b-2 v4 round trip: a recorded AI-edited photo leaves A through the real client export, passes the offline
+    // verifier, and arrives in B through the shared restore engine as imported provenance with the same bytes. An edited
+    // photo in Trash keeps the export at version 3 with no provenance key. The enhancement ledger rows are written through
+    // the service functions the Edge handler calls (no provider); every Save, export, restore and read is a normal session.
+    stage = 'bg2b-v4-setup';
+    const capacityRow = `select to_jsonb(k) from private.provider_capacity k where deployment_key=${literal(ENHANCE_KEY)};`;
+    const controlsRow = `select to_jsonb(c) from private.ai_controls c where owner_id=${literal(a.uid)};`;
+    const savedCapacity = await db(capacityRow), savedControls = await db(controlsRow);
+    const enhancementIds = [];
+    let primary = null, failedStage = stage;
+    try {
+      check(savedCapacity.dispatch_enabled === false && savedControls.enhance_activated === false, 'enhance-initial');
+      equal(await client.rpc(a, 'image_provenance_v1', {}), []);
+      equal(await client.rpc(b, 'image_provenance_v1', {}), []);
+      await privilegedLocalSql(`update private.ai_controls set enhance_activated=true,enhance_notice_revision=1,
+        enhance_manifest_id=${literal(ENHANCE_MANIFEST)},enhance_max_request_micro=300000,enhance_monthly_allowance_micro=50000000,
+        enhance_max_requests_per_hour=1000,updated_at=clock_timestamp() where owner_id=${literal(a.uid)};
+        update private.provider_capacity set max_dispatch=100,dispatch_enabled=true,disabled_reason=null,disabled_at=null
+          where deployment_key=${literal(ENHANCE_KEY)};`);
+      check((await client.rpc(a, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 1 }))?.code === 'OK', 'enhance-consent');
+      // Released H2 evidence for these exact bytes, as enhance_finish records it after the provider double answers.
+      const enhancedPhoto = async (colour) => {
+        const bytes = photo(colour), id = randomUUID();
+        enhancementIds.push(id);
+        check((await db(`select public.enhance_claim(${literal(a.uid)},${literal(id)},${literal(ENHANCE_MANIFEST)},
+          ${literal(sha256(Buffer.from(id)))},null::uuid);`)).claimed === true, 'enhance-claim');
+        const done = await db(`select public.enhance_finish(${literal(a.uid)},${literal(id)},'OK',${json(ENHANCE_USAGE)},
+          ${literal(sha256(bytes))},${bytes.length});`);
+        check(done.code === 'OK', 'enhance-finish');
+        return bytes;
+      };
+      const provenanceOf = async (owner) => {
+        const rows = await client.rpc(owner, 'image_provenance_v1', {});
+        check(Array.isArray(rows), 'provenance-read');
+        return rows;
+      };
+      const recordedRow = (imageId, bytes) => ({ image_id: imageId, kind: 'ai_edited', origin: 'recorded', model_id: ENHANCE_MODEL,
+        manifest_id: ENHANCE_MANIFEST, stored_sha256: sha256(bytes), backup_sha256: null });
+      const verified = async (backup) => {
+        step = 'verify-backup';
+        const { metadata } = await verifyBackup(partSource(await listParts(backup.folder)), PASSPHRASE, restoreReadiness().check);
+        check(metadata.export_id === backup.exportId, 'verify-export-id');
+        return metadata;
+      };
+
+      stage = 'bg2b-v3-trash';
+      const trashedBytes = await enhancedPhoto([60, 160, 90]);
+      const trashed = await analyzedSave(4, trashedBytes, ['green']);
+      equal(await provenanceOf(a), [recordedRow(trashed.imageId, trashedBytes)]);
+      const itemRow = await client.request(a.token, `/rest/v1/items?id=eq.${trashed.itemId}&select=version`);
+      check(itemRow.ok && itemRow.data?.length === 1, 'trash-read');
+      const trashResult = await client.request(a.token, '/rest/v1/rpc/set_item_trashed', { method: 'POST',
+        body: { p_item_id: trashed.itemId, p_expected_version: itemRow.data[0].version, p_trashed: true } });
+      check(trashResult.ok, 'trash');
+      const v3 = await verified(await exportOwn('bg2b-v3-trash', a));
+      check(v3.schema_version === 3 && !Object.hasOwn(v3, 'provenance'), 'v3-shape');
+      check(!v3.tables.items.some((item) => item.id === trashed.itemId)
+        && !v3.tables.item_images.some((image) => image.id === trashed.imageId), 'v3-trash-excluded');
+
+      stage = 'bg2b-v4-export';
+      const editedBytes = await enhancedPhoto([210, 180, 60]);
+      const edited = await analyzedSave(5, editedBytes, ['yellow']);
+      const sourceProvenance = await provenanceOf(a);
+      equal(sourceProvenance, [recordedRow(trashed.imageId, trashedBytes), recordedRow(edited.imageId, editedBytes)]
+        .sort((x, y) => (x.image_id < y.image_id ? -1 : 1)));
+      const sourceRow = await client.request(a.token, `/rest/v1/item_images?id=eq.${edited.imageId}&select=state,main_path,main_sha256`);
+      check(sourceRow.ok && sourceRow.data?.length === 1 && sourceRow.data[0].state === 'ready'
+        && sourceRow.data[0].main_sha256 === sha256(editedBytes), 'source-row');
+      const sourcePath = `/storage/v1/object/authenticated/wardrobe/${sourceRow.data[0].main_path}`;
+      const sourceMain = await client.request(a.token, sourcePath);
+      check(sourceMain.ok && Buffer.isBuffer(sourceMain.data) && sha256(sourceMain.data) === sha256(editedBytes), 'source-bytes');
+      const backup = await exportOwn('bg2b-v4', a);
+      const v4 = await verified(backup);
+      check(v4.schema_version === 4, 'v4-version');
+      equal(v4.provenance, [{ imageId: edited.imageId, kind: 'ai_edited', modelId: ENHANCE_MODEL, manifestId: ENHANCE_MANIFEST,
+        backupSha256: sha256(editedBytes) }]);
+      check(v4.tables.item_images.some((image) => image.id === edited.imageId && image.main_sha256 === sha256(editedBytes)), 'v4-image');
+
+      const restoreChecked = async (label) => {
+        const { code, report } = await restoreOwn(label, backup, b);
+        step = 'report';
+        check(code === 0, `exit-${Number.isInteger(code) ? code : 'other'}`);
+        check(report.counts.failed === 0 && report.counts.blocked === 0 && report.counts.deferred === 0
+          && report.counts.unlabelledEnhanced === 0, 'v4-report-counts');
+        return report;
+      };
+      stage = 'bg2b-v4-restore';
+      await restoreChecked('bg2b-v4-A-to-B');
+      const targetImage = await restoreId(4, b.uid, backup.exportId, 'item_images', edited.imageId);
+      const targetItem = await restoreId(4, b.uid, backup.exportId, 'items', edited.itemId);
+      const imported = [{ image_id: targetImage, kind: 'ai_edited', origin: 'imported', model_id: ENHANCE_MODEL,
+        manifest_id: ENHANCE_MANIFEST, stored_sha256: sha256(editedBytes), backup_sha256: sha256(editedBytes) }];
+      step = 'imported-provenance';
+      equal(await provenanceOf(b), imported);
+      step = 'restored-bytes';
+      const restoredRow = await client.request(b.token, `/rest/v1/item_images?id=eq.${targetImage}&select=item_id,state,main_path,main_sha256`);
+      check(restoredRow.ok && restoredRow.data?.length === 1 && restoredRow.data[0].item_id === targetItem
+        && restoredRow.data[0].state === 'ready' && restoredRow.data[0].main_sha256 === sha256(editedBytes), 'restored-row');
+      const restoredMain = await client.request(b.token, `/storage/v1/object/authenticated/wardrobe/${restoredRow.data[0].main_path}`);
+      check(restoredMain.ok && Buffer.isBuffer(restoredMain.data) && Buffer.compare(restoredMain.data, editedBytes) === 0, 'restored-bytes');
+
+      stage = 'bg2b-v4-replay';
+      const again = await restoreChecked('bg2b-v4-A-to-B-again');
+      check(again.counts.restored === 0, 'replay-restored');
+      equal(await provenanceOf(b), imported);
+
+      stage = 'bg2b-v4-source-unchanged';
+      equal(await provenanceOf(a), sourceProvenance);
+      const sourceAfter = await client.request(a.token, sourcePath);
+      check(sourceAfter.ok && Buffer.compare(sourceAfter.data, sourceMain.data) === 0, 'source-bytes-after');
+      check(!(await provenanceOf(a)).some((row) => row.image_id === targetImage), 'no-cross-owner-row');
+    } catch (error) {
+      primary = error;
+    } finally {
+      // Leave the ledger and switches exactly as the later Edge gate expects: this phase's enhancement usage moves out of
+      // the current hour, its slots end, and A's controls and the shared capacity row return to their snapshots.
+      failedStage = stage;
+      stage = primary ? `${failedStage}+bg2b-v4-restore-state` : 'bg2b-v4-restore-state';
+      const ids = enhancementIds.map(literal).join(',') || 'null';
+      const columns = Object.keys(savedControls ?? {}).filter((c) => c !== 'owner_id');
+      check(columns.length > 0 && columns.every((c) => /^[a-z_0-9]+$/.test(c)), 'controls-columns');
+      await privilegedLocalSql(`begin;
+        update private.provider_slots s set held_until=clock_timestamp()-interval '1 second' from private.ai_usage u
+          where u.owner_id=${literal(a.uid)} and u.request_id in (${ids}) and s.slot_id=u.provider_slot_id;
+        update private.ai_usage set created_at=created_at-interval '2 hours',dispatched_at=dispatched_at-interval '2 hours',
+          closed_at=closed_at-interval '2 hours' where owner_id=${literal(a.uid)} and request_id in (${ids});
+        update private.provider_capacity k set window_seconds=v.window_seconds,max_dispatch=v.max_dispatch,
+          dispatch_enabled=v.dispatch_enabled,disabled_reason=v.disabled_reason,disabled_at=v.disabled_at,updated_at=v.updated_at
+          from jsonb_populate_record(null::private.provider_capacity,${json(savedCapacity)}) v where k.deployment_key=v.deployment_key;
+        update private.ai_controls c set ${columns.map((c) => `${c}=v.${c}`).join(',')}
+          from jsonb_populate_record(null::private.ai_controls,${json(savedControls)}) v where c.owner_id=v.owner_id;
+        commit;`);
+      equal(await db(capacityRow), savedCapacity);
+      equal(await db(controlsRow), savedControls);
+    }
+    // A restored state never hides the phase's own failure.
+    if (primary) { stage = failedStage; throw primary; }
+    console.log(`PASS: BG2b v4 round trip; recorded AI-edited photo -> export-own v4 (edited photo in Trash -> v3, no provenance key) -> offline verify -> restore-own into B -> rerun; imported provenance and bytes equal, replay unchanged, A unchanged; ${((performance.now() - started) / 1000).toFixed(1)}s`);
     return 0;
   } catch (error) {
     const code = failureCode(error);

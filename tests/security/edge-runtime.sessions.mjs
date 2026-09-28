@@ -13,6 +13,7 @@ import { imageChangeHarness } from '../integration/image-replacement.sessions.mj
 import { intent, saveHarness } from '../integration/item-save.sessions.mjs';
 import { enhanceOutput, flatBaselineJpeg, READY_FACTS } from '../edge-fixtures/provider-double.mjs';
 import { EDGE_DELEGATIONS } from './edge-delegations.mjs';
+import { registerSourceLoader } from '../../scripts/src-loader.mjs';
 
 const PROVIDER = 'EDGE-RUNTIME / PROVIDER-DOUBLE', STACK = 'EDGE-RUNTIME';
 const results = [], passed = new Set();
@@ -462,6 +463,71 @@ async function main() {
       counted = await count();
       check(PROVIDER, 'enhance-negatives-no-dispatch', counted.served === before.served + 7, counted.served);
 
+      stage = 'enhance-analysed-save';
+      // Review finding 1: the approved chain on real bytes. B's released H2 (okB) is analysed once by the provider double,
+      // then saved through the app's own analysed Save (newAnalyzedSaveAttempt + saveAnalyzedItem) with its non-null
+      // claim: checked reservation, Storage upload and the stack-served finalize-analyzed-item. A closed fixture operation
+      // expires that enhancement evidence after the reservation and before the first upload, so completion runs on the
+      // reservation's snapshot binding alone. Only the enhancement row is backdated; transport and owner checks stay real.
+      {
+        registerSourceLoader();
+        const { createClient } = await import('@supabase/supabase-js');
+        const { beginAiAnalysis, createAiDraft, receiveAiResult } = await import('../../src/domain/ai-draft.ts');
+        const { newAnalyzedSaveAttempt } = await import('../../src/domain/analyzed-save.ts');
+        const { editGarmentField, newGarmentDraft } = await import('../../src/domain/garment-fields.ts');
+        const { saveAnalyzedItem } = await import('../../src/images/upload.ts');
+        const { fitDimensions, JPEG_LIMITS } = await import('../../src/images/jpeg.ts');
+        const h2 = Buffer.from(okB.bytes), h2Sha = hex(h2);
+        const requestId = gateId('B', 30, '7'), draftId = gateId('B', 30, '8');
+        const analysed = await analyze(B.token, requestId, draftId, h2);
+        const result = analysed.data?.result;
+        const context = { ownerId: B.uid, epoch: 1, draftId, generation: 1, requestId, imageSha256: h2Sha };
+        const updated = (t) => { requireEvidence(t.status === 'updated'); return t.state; };
+        const created = createAiDraft(editGarmentField(newGarmentDraft('EUR', 'en'), 'title', 'Enhanced analysed garment', 'en'), context);
+        requireEvidence(created.ok && ready(analysed, requestId, draftId));
+        const state = updated(receiveAiResult(updated(beginAiAnalysis(created.state, context)), context, result, result.createdAtMs));
+        const thumbSize = fitDimensions(1024, 1280, JPEG_LIMITS.thumbSide);
+        const thumb = flatBaselineJpeg(thumbSize.width, thumbSize.height, [200, 120, 140]);
+        const photo = { main: new Blob([h2], { type: 'image/jpeg' }), thumb: new Blob([thumb], { type: 'image/jpeg' }),
+          mainSha256: h2Sha, thumbSha256: hex(thumb), width: 1024, height: 1280 };
+        const scope = { ownerId: B.uid, epoch: 1, signal: AbortSignal.timeout(60_000) };
+        const attempt = newAnalyzedSaveAttempt(state, context, '', photo, scope, result.createdAtMs);
+        let expiring = null;
+        const transport = async (input, init) => {
+          const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          if (expiring === null && url.startsWith(`${LOCAL_API}/storage/v1/object/`)) expiring = op('expire-enhancement');
+          if (expiring !== null) await expiring;
+          return fetch(input, init);
+        };
+        const app = createClient(LOCAL_API, env.SUPABASE_PUBLISHABLE_KEY, {
+          auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+          global: { fetch: transport, headers: { Authorization: 'Bearer '.concat(B.token) } } });
+        const stages = [];
+        let fingerprint = null, saveError = null;
+        try {
+          await saveAnalyzedItem(app, scope, attempt, (s) => stages.push(s), (_, f) => { fingerprint = f; });
+        } catch (error) { saveError = error?.messageKey ?? error?.name ?? 'error'; }
+        const expiredAt = await expiring;
+        const stored = await download(B, `${B.uid}/${attempt.itemId}/${attempt.imageId}/main.jpg`);
+        const savedRow = await client.request(B.token, `/rest/v1/item_images?id=eq.${attempt.imageId}&select=id,item_id,state,main_sha256`);
+        const own = await client.rpc(B, 'image_provenance_v1', {});
+        const peer = await client.rpc(A, 'image_provenance_v1', {});
+        const row = Array.isArray(own) ? own.filter((entry) => entry.image_id === attempt.imageId) : null;
+        check(PROVIDER, 'enhance-analysed-save-real-chain', saveError === null && attempt.claim?.requestId === requestId
+          && result?.imageSha256 === h2Sha && okB.sha === h2Sha && attempt.photo.mainSha256 === h2Sha && stored[1] === 200 && stored[2] === h2Sha
+          && isDeepStrictEqual(stages, ['capture.reserving', 'capture.uploading', 'capture.finishing']) && /^[0-9a-f]{64}$/.test(fingerprint ?? '')
+          && savedRow.ok && isDeepStrictEqual(savedRow.data, [{ id: attempt.imageId, item_id: attempt.itemId, state: 'ready', main_sha256: h2Sha }])
+          && isDeepStrictEqual(row, [{ image_id: attempt.imageId, kind: 'ai_edited', origin: 'recorded', model_id: 'gpt-image-2.5-sunburst',
+            manifest_id: 'azure-global-image25-sunburst-enhance-v1', stored_sha256: h2Sha, backup_sha256: null }]),
+        { saveError, stages, stored: stored[1], analysis: summary(analysed), provenance: row });
+        check(PROVIDER, 'enhance-analysed-save-after-evidence-expiry', expiredAt?.ok === true && saveError === null, { expired: expiredAt?.ok });
+        check(PROVIDER, 'enhance-analysed-save-provenance-owner-only', Array.isArray(peer)
+          && !peer.some((entry) => entry.image_id === attempt.imageId || entry.stored_sha256 === h2Sha), { peer: Array.isArray(peer) ? peer.length : peer });
+        counted = await count();
+        check(PROVIDER, 'enhance-analysed-save-one-analysis', counted.served === before.served + 8
+          && counted.modes.ready === before.modes.ready + 1, counted);
+      }
+
       stage = 'enhance-anomaly';
       const noUsage = await enhance(B.token, id(B, 4), 806);
       check(PROVIDER, 'enhance-missing-usage-suppresses-output', refused(noUsage, 502, 'FAILED'), summary(noUsage));
@@ -474,8 +540,9 @@ async function main() {
       check(PROVIDER, 'enhance-anomaly-no-foreign-data', !JSON.stringify(statusA).includes(B.uid) && statusA?.usage?.enhanceLastHour === 6,
         statusA?.usage);
       counted = await count();
-      check(PROVIDER, 'enhance-double-totals', counted.served === before.served + 8 && counted.rejected === 0 && counted.refused === 0
-        && isDeepStrictEqual(counted.modes, { ...before.modes, 'enhance-ok': 2, 'enhance-metadata': 1, 'enhance-trailing': 1,
+      // Eight enhancement dispatches plus the one analysis of H2 for the real analysed Save.
+      check(PROVIDER, 'enhance-double-totals', counted.served === before.served + 9 && counted.rejected === 0 && counted.refused === 0
+        && isDeepStrictEqual(counted.modes, { ...before.modes, ready: before.modes.ready + 1, 'enhance-ok': 2, 'enhance-metadata': 1, 'enhance-trailing': 1,
           'enhance-second-frame': 1, 'enhance-filtered': 1, 'enhance-rate-limited': 1, 'enhance-no-usage': 1 }), counted);
     }
 
