@@ -236,7 +236,11 @@ function rpcClient(config: TryOnConfig, bearer: string, timers: ReturnType<typeo
         apikey: service ? config.serviceKey : config.publicKey, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const result = await readJson(response, 32768, dbSignal);
+    // An oversized or unreadable RPC reply is FAILED, never TOO_LARGE: TOO_LARGE is only the ingress refusal, and a reply
+    // from dispatch or finish can follow a provider call.
+    const result = await readJson(response, 32768, dbSignal).catch((failure: unknown) => {
+      throw failure instanceof ProtocolError ? new ProtocolError('FAILED') : failure;
+    });
     if (!response.ok || !object(result) || typeof result.code !== 'string') throw new ProtocolError('FAILED');
     return result;
   };
@@ -326,8 +330,9 @@ function runClaimed(work: ClaimedWork): Promise<ClaimedOutcome> {
       }
       return { code: 'OK', output: null, result: { resultId: finished.resultId, expiresAtMs: finished.expiresAtMs } };
     } catch (failure) {
-      // A provider or finish that misses its deadline is left held for provisional expiry; nothing else is retried.
-      return none(server.aborted || timeoutFailure(failure) ? 'TIMEOUT' : failure instanceof ProtocolError ? failure.code : 'FAILED');
+      // A provider or finish that misses its deadline is left held for provisional expiry; nothing else is retried. Every
+      // other failure after the claim is FAILED, so it never reads as a pre-claim refusal.
+      return none(server.aborted || timeoutFailure(failure) ? 'TIMEOUT' : 'FAILED');
     } finally {
       for (const timer of timers) clearTimeout(timer);
     }

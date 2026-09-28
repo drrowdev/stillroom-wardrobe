@@ -356,6 +356,17 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
     }
   });
 
+  it('reports an oversized finish reply after the provider ran as FAILED, never as the ingress TOO_LARGE', async () => {
+    for (const last of [false, true]) {
+      backend({ steps: 2, finish: { code: 'OK', last, accounting, padding: 'x'.repeat(40_000) } });
+      const { transport } = provider(() => Response.json(imageBody()));
+      const response = await createTryOnHandler(config, register, transport)(post(form(last ? 2 : 1)));
+      expect(await response.json()).toEqual({ code: 'FAILED' });
+      expect(transport).toHaveBeenCalledTimes(1);
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('reports a result that was deleted before a replayed last finish, and never recreates it', async () => {
     backend({ steps: 2, finish: { code: 'OK', replayed: true, last: true, accounting, resultId: null, deleted: true, expiresAtMs: null } });
     const { transport } = provider(() => Response.json(imageBody()));

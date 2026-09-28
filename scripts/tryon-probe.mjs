@@ -123,8 +123,9 @@ async function status(run, deps) {
 // INACTIVE, CONSENT_REQUIRED, UNCONFIGURED and UNAVAILABLE also come from the mark's and finish's permission checks (a probe
 // authorisation stopped or expired while the provider ran), and CHAIN_MISMATCH from the mark for a stale chain.
 export const RETRY_BEFORE_CLAIM = Object.freeze(['RATE_LIMIT', 'BUSY']);
+// TOO_LARGE is left out as well: the handler maps an oversized post-claim reply to FAILED, but its body can't prove ingress.
 export const REFUSED_BEFORE_CLAIM = Object.freeze([...RETRY_BEFORE_CLAIM, 'ALLOWANCE', 'RESULTS_FULL', 'NO_GARMENTS',
-  'UNAUTHENTICATED', 'TOO_LARGE', 'UNSUPPORTED_MEDIA']);
+  'UNAUTHENTICATED', 'UNSUPPORTED_MEDIA']);
 const CHAIN_STATES = ['running', 'complete', 'cancelled', 'withdrawn', 'expired', 'stale'];
 // The report carries codes, numbers, lengths and request IDs only: never hashes, result IDs, tokens or image data.
 const reportable = (outcome) => ({ outfit: outcome.outfit, step: outcome.step, requestId: outcome.requestId, status: outcome.status,

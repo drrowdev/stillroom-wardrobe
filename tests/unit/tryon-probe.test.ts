@@ -233,7 +233,7 @@ describe('try-on probe script', () => {
 
   it('never retries a code that may follow a claim, keeps its request ID and stops the chain', async () => {
     for (const code of ['FAILED', 'UNAVAILABLE', 'CONFLICT', 'NOT_FOUND', 'TIMEOUT', 'INVALID_INPUT', 'CONFIG_CHANGED', 'WITHDRAWN', 'UNCONFIGURED',
-      'INACTIVE', 'CONSENT_REQUIRED', 'CHAIN_MISMATCH']) {
+      'INACTIVE', 'CONSENT_REQUIRED', 'CHAIN_MISMATCH', 'TOO_LARGE']) {
       const h = harness({ step: () => json({ code }, 503) });
       const { calls, lines, complete } = await runProbe(env(), h.deps);
       expect(h.steps).toHaveLength(1);
