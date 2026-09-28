@@ -732,7 +732,10 @@ workflow and not Phase 0 or product acceptance.
 
 Pages production configuration contains only public `VITE_SUPABASE_URL`,
 `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_APP_VERSION` and build-only
-`NODE_VERSION=24.19.0`. No administrator secret, Cloudflare Pages
+`NODE_VERSION=24.19.0`. The version shown in Settings is the first 8
+characters of the build commit (`CF_PAGES_COMMIT_SHA`, which Pages sets
+at build time and is not a browser variable), injected by `vite.config.ts`;
+`VITE_APP_VERSION` is only the fallback for builds outside Pages. No administrator secret, Cloudflare Pages
 Functions/bindings, paid hosting
 or automatic deployment workflow. Other sites, DNS and billing are untouched.
 A reachable shell does not prove login, owner setup, Storage/RLS or full Phase 0.
