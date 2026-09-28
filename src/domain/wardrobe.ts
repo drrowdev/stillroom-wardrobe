@@ -38,6 +38,7 @@ export type WardrobeItem = {
   seasons: string[];
   formality: number | null;
   purchasePrice: string | null;
+  purchaseDate: string | null;
   currency: string;
   // Only facts the owner confirmed (and visible coverage observed in a photo); anything else is null.
   weather: ItemWeather;

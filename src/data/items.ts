@@ -59,7 +59,8 @@ export function parseWardrobeRows(items: unknown, images: unknown, ownerId: stri
       || !collection(item.colours, collectionLimits.colours) || !collection(item.seasons, collectionLimits.seasons)
       || !item.seasons.every(code => seasons.some(season => season === code))
       || !(item.formality === null || typeof item.formality === 'number' && Number.isInteger(item.formality) && item.formality >= 0 && item.formality <= 4)
-      || typeof item.currency !== 'string' || !/^[A-Z]{3}$/.test(item.currency)) throw new AppError('error.unavailable');
+      || typeof item.currency !== 'string' || !/^[A-Z]{3}$/.test(item.currency)
+      || !(item.purchase_date === null || typeof item.purchase_date === 'string' && validDateOnly(item.purchase_date))) throw new AppError('error.unavailable');
     if (!whole(item.warmth, 'warmth') || !whole(item.lower_coverage, 'lower_coverage') || !whole(item.min_temp, 'min_temp')
       || !whole(item.max_temp, 'max_temp') || !whole(item.rain_rating, 'rain_rating')
       || !(item.windproof === null || typeof item.windproof === 'boolean')) throw new AppError('error.unavailable');
@@ -75,7 +76,7 @@ export function parseWardrobeRows(items: unknown, images: unknown, ownerId: stri
       imageId: image.id, mainPath: image.mainPath, thumbPath: image.thumbPath, altText: image.altText,
       favourite: item.favourite, availability: available, lifecycle: state, excludeSuggestions: item.exclude_suggestions,
       brand: item.brand, tags: [...item.tags], colours: [...item.colours], seasons: [...item.seasons],
-      formality: item.formality, purchasePrice: price, currency: item.currency,
+      formality: item.formality, purchasePrice: price, purchaseDate: item.purchase_date, currency: item.currency,
       weather: confirmedWeather({ warmth: item.warmth, lower_coverage: item.lower_coverage, min_temp: item.min_temp, max_temp: item.max_temp,
         rain_rating: item.rain_rating, windproof: item.windproof }, provenance),
     }];
@@ -89,7 +90,7 @@ export async function loadWardrobe(client: AppClient, scope: OwnerScope, signal:
   let itemCursor: { createdAt: string; id: string } | null = null;
   for (;;) {
     throwIfAborted(lifetime);
-    let query = client.from('items').select('id,owner_id,title,category,created_at,deleted_at,favourite,availability,lifecycle,exclude_suggestions,brand,tags,colours,seasons,formality,purchase_price,currency,warmth,lower_coverage,min_temp,max_temp,rain_rating,windproof,field_provenance')
+    let query = client.from('items').select('id,owner_id,title,category,created_at,deleted_at,favourite,availability,lifecycle,exclude_suggestions,brand,tags,colours,seasons,formality,purchase_price,purchase_date,currency,warmth,lower_coverage,min_temp,max_temp,rain_rating,windproof,field_provenance')
       .eq('owner_id', scope.ownerId).is('deleted_at', null)
       .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(500);
     if (itemCursor) query = query.or(`created_at.lt.${itemCursor.createdAt},and(created_at.eq.${itemCursor.createdAt},id.lt.${itemCursor.id})`);
