@@ -271,12 +271,20 @@ jobs:
             test-results/bg1-visual/removed-en-desktop.png
             test-results/bg1-visual/working-sv-mobile.png
             test-results/bg1-visual/fallback-fi-mobile.png
-            test-results/bg1-visual/enhancing-en-mobile.png
-            test-results/bg1-visual/enhanced-en-desktop.png
-            test-results/bg1-visual/fallback-sv-mobile.png
-            test-results/bg1-visual/reverted-en-mobile.png
-            test-results/bg1-visual/enhanced-fi-mobile.png
-            test-results/bg1-visual/settings-fi-mobile.png
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Preserve bounded synthetic BG2b visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bg2b-enhance-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/bg2b-visual/enhancing-en-mobile.png
+            test-results/bg2b-visual/enhanced-en-desktop.png
+            test-results/bg2b-visual/fallback-sv-mobile.png
+            test-results/bg2b-visual/reverted-en-mobile.png
+            test-results/bg2b-visual/enhanced-fi-mobile.png
+            test-results/bg2b-visual/settings-fi-mobile.png
           if-no-files-found: error
           retention-days: 1
 

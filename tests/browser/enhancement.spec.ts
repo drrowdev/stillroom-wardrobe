@@ -634,7 +634,7 @@ test.describe('Settings', () => {
 });
 
 // Bounded synthetic captures for the coordinator's visual review, written to ignored buffers only.
-const directory = path.resolve('test-results/bg1-visual');
+const directory = path.resolve('test-results/bg2b-visual');
 async function capture(page: Page, name: string) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const png = await page.screenshot({ fullPage: true, animations: 'disabled', type: 'png', scale: 'css' });
