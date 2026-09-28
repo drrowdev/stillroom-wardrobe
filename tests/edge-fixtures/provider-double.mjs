@@ -185,6 +185,47 @@ export function enhanceResponse(mode) {
   const data = [{ b64_json: enhanceOutput(mode).toString('base64') }];
   return { status: 200, body: mode === 'enhance-no-usage' ? { created: 1, data } : { created: 1, data, usage: ENHANCE_USAGE } };
 }
+// VTO-1b: the try-on images edit double. The same frozen parameters as enhancement, then the fixed prompt for the
+// step's slot and image[] = [person, garment]. The person's pixels select the mode; the output is one fixed photo.
+/** sha256 of each slot's fixed try-on prompt (src/domain/tryon.ts TRYON_PROMPTS). */
+export const TRYON_PROMPT_SHA256 = Object.freeze({
+  one_piece: '165e9af0fc725de675db7c6a276c16a59b6ed0c5e34f68780f7fbb3210136784',
+  top: '54dcbf9096530fd423eb1190845b3723adeb40aa762f3d673bae62bf840f46a2',
+  bottom: 'e81cc7a7e85f3307d5d3826657bf04d587be932dddbce3e7afc60eda8a4c1a22',
+  footwear: '4e2439bf92f0c3c4b3eff6e0520e7cfc020e14dd69c12c3cdab5a58393c68ff3',
+});
+/** A body photo in this colour is refused by the double's content filter. */
+export const TRYON_FILTERED_COLOUR = Object.freeze([20, 20, 20]);
+export const tryonOutput = () => flatBaselineJpeg(1024, 1280, [90, 140, 200]);
+const filteredPerson = createHash('sha256').update(flatBaselineJpeg(1024, 1280, TRYON_FILTERED_COLOUR)).digest('hex');
+/** True when the raw multipart carries the try-on image[] array (enhancement sends a single image). */
+export const isTryOnBody = (body) => body.includes('name="image[]"');
+/** Bounded inspection of one try-on request. Returns the mode and slot, or a content-free reason. */
+export async function tryonVerdict(headers, body) {
+  if (headers['api-key'] !== DUMMY_API_KEY) return { reason: 'api-key' };
+  const type = headers['content-type'];
+  if (typeof type !== 'string' || !/^multipart\/form-data; ?boundary=/.test(type)) return { reason: 'content-type' };
+  let form;
+  try { form = await new Response(body, { headers: { 'content-type': type } }).formData(); } catch { return { reason: 'multipart' }; }
+  const keys = [...form.keys()];
+  if (keys.join(',') !== [...ENHANCE_FIELDS.map(([key]) => key), 'prompt', 'image[]', 'image[]'].join(',')) return { reason: 'tryon-keys' };
+  if (!ENHANCE_FIELDS.every(([key, value]) => form.get(key) === value)) return { reason: 'tryon-parameters' };
+  const prompt = form.get('prompt');
+  const promptSha = typeof prompt === 'string' ? createHash('sha256').update(prompt).digest('hex') : null;
+  const slot = Object.keys(TRYON_PROMPT_SHA256).find((key) => TRYON_PROMPT_SHA256[key] === promptSha);
+  if (slot === undefined) return { reason: 'tryon-prompt' };
+  const [person, garment] = form.getAll('image[]');
+  if (typeof person === 'string' || typeof garment === 'string' || person.type !== 'image/jpeg' || garment.type !== 'image/jpeg'
+    || garment.size < 1) return { reason: 'tryon-image' };
+  const personBytes = new Uint8Array(await person.arrayBuffer());
+  if (jpegWidth(personBytes) !== 1024) return { reason: 'jpeg' };
+  return { mode: createHash('sha256').update(personBytes).digest('hex') === filteredPerson ? 'tryon-filtered' : 'tryon-ok', slot };
+}
+/** The status and JSON body the double returns for a try-on mode. */
+export function tryonResponse(mode) {
+  if (mode === 'tryon-filtered') return { status: 400, body: { error: { code: 'content_policy_violation', message: 'synthetic' } } };
+  return { status: 200, body: { created: 1, data: [{ b64_json: tryonOutput().toString('base64') }], usage: ENHANCE_USAGE } };
+}
 export function completion(mode) {
   const content = mode === 'malformed' ? '{"outcome":"ready","fields":' : JSON.stringify(mode === 'unclear' ? UNCLEAR_FACTS : READY_FACTS);
   return { model: RETURNED_MODEL, usage: USAGE, choices: [{ index: 0, finish_reason: 'stop',
@@ -206,10 +247,11 @@ function main() {
         counts.rejected += 1; res.writeHead(204); res.end(); return;
       }
       const enhance = req.method === 'POST' && req.url === '/images/edits';
+      const raw = Buffer.concat(chunks);
       const verdict = req.method !== 'POST' || (req.url !== '/chat/completions' && !enhance) ? { reason: 'route' }
         : size > 2 * 1024 * 1024 ? { reason: 'size' }
-          : enhance ? await enhanceVerdict(req.headers, Buffer.concat(chunks))
-            : requestVerdict(req.headers, Buffer.concat(chunks).toString('utf8'));
+          : enhance ? await (isTryOnBody(raw) ? tryonVerdict : enhanceVerdict)(req.headers, raw)
+            : requestVerdict(req.headers, raw.toString('utf8'));
       const mode = verdict.mode ?? null;
       if (mode === null) {
         counts.refused += 1;
@@ -224,8 +266,8 @@ function main() {
         res.end(JSON.stringify({ error: { code: 'InternalServerError', message: 'synthetic' } }));
         return;
       }
-      if (mode.startsWith('enhance-')) {
-        const { status, body } = enhanceResponse(mode);
+      if (mode.startsWith('enhance-') || mode.startsWith('tryon-')) {
+        const { status, body } = mode.startsWith('tryon-') ? tryonResponse(mode) : enhanceResponse(mode);
         res.writeHead(status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(body));
         return;

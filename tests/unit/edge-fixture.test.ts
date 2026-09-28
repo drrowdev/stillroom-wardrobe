@@ -19,6 +19,8 @@ import { EDGE_DELEGATIONS, delegatedLine } from '../../tests/security/edge-deleg
 import { AZURE_REVIEW_EXPIRES } from '../../supabase/functions/analyze-clothing/azure-openai';
 import { classifyEnhanceResponse, enhanceForm } from '../../supabase/functions/enhance-photo/azure';
 import { CLEANUP_PROMPT, ENHANCE_DEPLOYMENT, ENHANCE_PARAMETERS, ENHANCE_PROMPT } from '../../src/domain/enhancement';
+import { classifyTryOnResponse, tryOnForm } from '../../supabase/functions/try-on/azure';
+import { TRYON_PARAMETERS, TRYON_PROMPTS, tryOnSlots } from '../../src/domain/tryon';
 import { flatJpeg } from '../fixtures/restore-jpeg-fixtures';
 import { createHash } from 'node:crypto';
 // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
@@ -39,6 +41,23 @@ describe('fixture gateway (rev5 A1)', () => {
     expect(gateway.decide(request('GET', '/auth/v1/admin/users'))).toBe('route');
     expect(gateway.decide(request('POST', '/rest/v1/rpc/ai_begin_request'))).toBe('route');
     expect(gateway.decide(request('GET', '/storage/v1/object/x'))).toBe('route');
+  });
+  it('forwards the garment download only as an exact owner/item/image main photo read', () => {
+    const uuid = (c: string) => `${c.repeat(8)}-${c.repeat(4)}-4${c.repeat(3)}-8${c.repeat(3)}-${c.repeat(12)}`;
+    const [owner, item, image] = [uuid('a'), uuid('b'), uuid('c')];
+    const main = `/storage/v1/object/wardrobe/${owner}/${item}/${image}/main.jpg`;
+    expect(gateway.decide(request('GET', main))).toBe('forward');
+    for (const url of [`/storage/v1/object/wardrobe/${owner}/${item}/${image}/thumb.jpg`,
+      `/storage/v1/object/wardrobe/${owner}/${item}/${image}/x/main.jpg`, `/storage/v1/object/wardrobe/${owner}/${item}/main.jpg`,
+      `/storage/v1/object/other/${owner}/${item}/${image}/main.jpg`, `/storage/v1/object/authenticated/wardrobe/${owner}/${item}/${image}/main.jpg`,
+      `/storage/v1/object/wardrobe/${owner.toUpperCase()}/${item}/${image}/main.jpg`, `${main}x`]) {
+      expect(gateway.decide(request('GET', url))).toBe('route');
+    }
+    for (const method of ['POST', 'PUT', 'DELETE', 'HEAD']) expect(gateway.decide(request(method, main))).toBe('route');
+    expect(gateway.decide(request('GET', `${main}?download`))).toBe('query');
+    // The pattern is for the runtime's upstream only, never the host-side ingress or diagnostics.
+    expect(gateway.decide(request('GET', main), gateway.INGRESS_ROUTES)).toBe('route');
+    expect(gateway.decide(request('GET', main), ['GET /__config'])).toBe('route');
   });
   it('classifies every denied request shape before routing', () => {
     expect(gateway.decide({ method: 'CONNECT', url: 'x.invalid:443', rawHeaders: ['Host', 'x'] })).toBe('connect');
@@ -68,16 +87,18 @@ describe('fixture gateway (rev5 A1)', () => {
     const config = gateway.effectiveConfig('http://10.0.0.2:8000');
     expect(config.upstream).toBe('http://10.0.0.2:8000');
     expect(config.routes).toEqual([...gateway.ALLOWED_ROUTES]);
+    expect(config.patterns).toEqual((gateway.ALLOWED_PATTERNS as RegExp[]).map(String));
+    expect(config.patterns).toHaveLength(1);
     expect(config.diagnostics).toEqual(['GET /__config', 'GET /__forwarded']);
     for (const route of config.diagnostics as string[]) expect(gateway.ALLOWED_ROUTES).not.toContain(route);
     expect(config.ingress).toEqual({ routes: ['POST /functions/v1/analyze-clothing', 'POST /functions/v1/stylist-chat',
-      'POST /functions/v1/enhance-photo'],
+      'POST /functions/v1/enhance-photo', 'POST /functions/v1/try-on'],
       headers: [...gateway.INGRESS_HEADERS], target: 'http://edge-runtime:9000' });
   });
-  it('allowlists exactly the backend calls the analyze, stylist and enhance handlers make', async () => {
+  it('allowlists exactly the backend calls the analyze, stylist, enhance and try-on handlers make', async () => {
     const rpcs: string[] = [];
     for (const file of ['supabase/functions/analyze-clothing/handler.ts', 'supabase/functions/stylist-chat/handler.ts',
-      'supabase/functions/enhance-photo/handler.ts']) {
+      'supabase/functions/enhance-photo/handler.ts', 'supabase/functions/try-on/handler.ts']) {
       const source = await read(file);
       expect(source).toContain('/auth/v1/user');
       rpcs.push(...[...source.matchAll(/rpc\('([a-z_]+)'/g)].map((m) => `POST /rest/v1/rpc/${m[1]}`));
@@ -90,13 +111,25 @@ describe('fixture gateway (rev5 A1)', () => {
     for (const name of ['enhance_expire_due', 'enhance_provider_control', 'enhance_probe_authorise', 'enhance_set_consent']) {
       expect(gateway.decide(request('POST', `/rest/v1/rpc/${name}`))).toBe('route');
     }
+    expect(gateway.decide(request('POST', '/functions/v1/try-on'), gateway.INGRESS_ROUTES)).toBe('forward');
+    for (const name of ['tryon_set_consent', 'tryon_cancel', 'tryon_delete_result', 'tryon_results_v1', 'tryon_result_image_v1',
+      'tryon_probe_authorise', 'tryon_provider_control', 'tryon_discard_transient', 'tryon_purge_health']) {
+      expect(gateway.decide(request('POST', `/rest/v1/rpc/${name}`))).toBe('route');
+    }
+    // The try-on handler's only Storage read is the garment's main photo on the storage object route.
+    const tryOn = await read('supabase/functions/try-on/handler.ts');
+    expect([...tryOn.matchAll(/\/storage\/v1\/[a-z/]+/g)].map((m) => m[0])).toEqual(['/storage/v1/object/wardrobe/']);
   });
-  it('relays only the fixed response headers, including the two the enhance handler exposes', async () => {
+  it('relays only the fixed response headers, including the ones the enhance and try-on handlers expose', async () => {
     const source = await read('supabase/functions/enhance-photo/handler.ts');
     const exposed = [...source.matchAll(/'(X-Stillroom-Enhancement-[A-Za-z0-9-]+)'/g)].map((m) => m[1]!.toLowerCase());
     expect(new Set(exposed)).toEqual(new Set(['x-stillroom-enhancement-sha256', 'x-stillroom-enhancement-usable-until']));
+    const tryOn = await read('supabase/functions/try-on/handler.ts');
+    const tryOnExposed = [...tryOn.matchAll(/'(X-Stillroom-TryOn-[A-Za-z0-9-]+|x-stillroom-tryon-[a-z0-9-]+)'/g)]
+      .map((m) => m[1]!.toLowerCase());
+    expect(new Set(tryOnExposed)).toEqual(new Set(['x-stillroom-tryon-sha256']));
     expect(gateway.RELAYED_RESPONSE_HEADERS).toEqual(['content-type', 'content-length', 'cache-control', 'x-content-type-options',
-      'vary', ...exposed.sort()]);
+      'vary', ...exposed.sort(), 'x-stillroom-tryon-sha256']);
   });
 });
 
@@ -200,6 +233,59 @@ describe('image edit double (BG2b-1)', () => {
     expect(classify('enhance-filtered')).toMatchObject({ code: 'FILTERED', usage: null });
     expect(classify('enhance-rate-limited')).toMatchObject({ code: 'FAILED', usage: null });
     expect(classify('enhance-no-usage')).toMatchObject({ code: 'OK', image: expected, usage: null });
+  });
+});
+
+describe('try-on edit double (VTO-1b)', () => {
+  const person = (colour?: number[]) => flatJpeg({ width: 1024, height: 1280, ...(colour ? { colour } : {}) });
+  const garment = flatJpeg({ width: 16, height: 16 });
+  it('pins the frozen try-on request: the enhancement parameters and one prompt per slot', () => {
+    expect(double.ENHANCE_FIELDS).toEqual(Object.entries(TRYON_PARAMETERS).map(([key, value]) => [key, String(value)]));
+    expect(Object.keys(double.TRYON_PROMPT_SHA256)).toEqual([...tryOnSlots]);
+    for (const slot of tryOnSlots) {
+      expect(double.TRYON_PROMPT_SHA256[slot]).toBe(createHash('sha256').update(TRYON_PROMPTS[slot]).digest('hex'));
+    }
+  });
+  it('accepts only the exact production multipart and selects the mode by the person photo', async () => {
+    for (const slot of tryOnSlots) {
+      const { type, body } = await multipart(tryOnForm(person(), garment, slot));
+      expect(double.isTryOnBody(body)).toBe(true);
+      expect(await double.tryonVerdict(enhanceHeaders(type), body)).toEqual({ mode: 'tryon-ok', slot });
+    }
+    const filtered = await multipart(tryOnForm(person([...double.TRYON_FILTERED_COLOUR]), garment, 'top'));
+    expect(await double.tryonVerdict(enhanceHeaders(filtered.type), filtered.body)).toEqual({ mode: 'tryon-filtered', slot: 'top' });
+    const enhancement = await multipart(enhanceForm(flatJpeg({ width: 800, height: 1000 })));
+    expect(double.isTryOnBody(enhancement.body)).toBe(false);
+    const reason = async (edit: (form: FormData) => void, headers?: Record<string, string>) => {
+      const form = tryOnForm(person(), garment, 'bottom');
+      edit(form);
+      const { type, body } = await multipart(form);
+      return (await double.tryonVerdict(headers ?? enhanceHeaders(type), body)).reason;
+    };
+    expect(await reason(() => {}, { 'api-key': 'real', 'content-type': 'multipart/form-data; boundary=x' })).toBe('api-key');
+    expect(await reason(() => {}, headers)).toBe('content-type');
+    expect(await reason((form) => form.append('user', 'owner'))).toBe('tryon-keys');
+    expect(await reason((form) => form.delete('image[]'))).toBe('tryon-keys');
+    expect(await reason((form) => form.set('size', '1024x1024'))).toBe('tryon-parameters');
+    expect(await reason((form) => form.set('prompt', `${TRYON_PROMPTS.bottom} Change the colour.`))).toBe('tryon-prompt');
+    const png = tryOnForm(person(), garment, 'top');
+    png.delete('image[]');
+    png.append('image[]', new Blob([person()], { type: 'image/jpeg' }), 'person.jpg');
+    png.append('image[]', new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }), 'garment.png');
+    const notJpeg = await multipart(png);
+    expect((await double.tryonVerdict(enhanceHeaders(notJpeg.type), notJpeg.body)).reason).toBe('tryon-image');
+    const narrow = await multipart(tryOnForm(flatJpeg({ width: 800, height: 1000 }), garment, 'top'));
+    expect((await double.tryonVerdict(enhanceHeaders(narrow.type), narrow.body)).reason).toBe('jpeg');
+  });
+  it('returns a picture the production classifier admits and a refusal it reads as filtered', () => {
+    const classify = (mode: string) => {
+      const { status, body } = double.tryonResponse(mode);
+      return classifyTryOnResponse(status, body);
+    };
+    expect(classify('tryon-ok')).toMatchObject({ code: 'OK', image: new Uint8Array(double.tryonOutput()) });
+    expect(classify('tryon-ok').usage).not.toBeNull();
+    expect(classify('tryon-filtered')).toMatchObject({ code: 'FILTERED', image: null, usage: null });
+    expect(double.tryonOutput().equals(double.enhanceOutput('enhance-ok'))).toBe(false);
   });
 });
 

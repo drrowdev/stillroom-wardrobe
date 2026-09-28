@@ -218,9 +218,12 @@ update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.
   stylist_manifest_id='azure-eu-terra-stylist-v1',stylist_max_request_micro=129360,stylist_monthly_allowance_micro=10000000,
   stylist_max_requests_per_hour=50,enhance_activated=true,enhance_notice_revision=2,
   enhance_manifest_id='azure-global-image25-sunburst-cleanup-v1',enhance_max_request_micro=300000,
-  enhance_monthly_allowance_micro=4000000,enhance_max_requests_per_hour=6 where ${where};
--- The shared image capacity: eight dispatches per window for the fixture; teardown restores the exact snapshot.
-update private.provider_capacity set max_dispatch=8,dispatch_enabled=true,disabled_reason=null,disabled_at=null
+  enhance_monthly_allowance_micro=4000000,enhance_max_requests_per_hour=6,tryon_activated=true,tryon_notice_revision=1,
+  tryon_manifest_id='azure-global-image25-sunburst-tryon-v1',tryon_max_request_micro=360000,
+  tryon_monthly_allowance_micro=5000000,tryon_max_requests_per_hour=6 where ${where};
+-- The shared image capacity: sixteen dispatches per window for the fixture (try-on's five, then enhancement's eight);
+-- teardown restores the exact snapshot.
+update private.provider_capacity set max_dispatch=16,dispatch_enabled=true,disabled_reason=null,disabled_at=null
   where deployment_key=${literal(ENHANCE_CAPACITY_KEY)};`;
 const CAPACITY_ROW = `select to_jsonb(k)::text from private.provider_capacity k where deployment_key=${literal(ENHANCE_CAPACITY_KEY)};`;
 const capacityRestore = (row) => `update private.provider_capacity k set window_seconds=v.window_seconds,max_dispatch=v.max_dispatch,
@@ -258,6 +261,9 @@ async function main() {
           from jsonb_populate_record(null::private.ai_controls,${literal(JSON.stringify(row))}::jsonb) v where c.owner_id=v.owner_id;`).join('\n');
         await db(`begin;
           delete from private.item_deletion_operations where ${where} and request_id::text like '${REQUEST_PREFIX}%';
+          delete from private.tryon_results where ${where} and chain_id::text like '${REQUEST_PREFIX}%';
+          delete from private.tryon_chains where ${where} and chain_id::text like '${REQUEST_PREFIX}%';
+          delete from public.outfits where ${where} and id::text like '${REQUEST_PREFIX}%';
           delete from private.ai_save_used_receipts where ${where} and request_id::text like '${REQUEST_PREFIX}%';
           delete from private.ai_usage where ${where} and request_id::text like '${REQUEST_PREFIX}%';
           delete from private.image_enhancements where ${where} and request_id::text like '${REQUEST_PREFIX}%';
@@ -271,7 +277,9 @@ async function main() {
         if (!isDeepStrictEqual(JSON.parse(await db(CAPACITY_ROW)), capacity)) failures.push('capacity-restore');
         const residue = await db(`select (select count(*) from private.ai_save_used_receipts where request_id::text like '${REQUEST_PREFIX}%')
           + (select count(*) from private.ai_usage where request_id::text like '${REQUEST_PREFIX}%')
-          + (select count(*) from private.image_enhancements where request_id::text like '${REQUEST_PREFIX}%');`);
+          + (select count(*) from private.image_enhancements where request_id::text like '${REQUEST_PREFIX}%')
+          + (select count(*) from private.tryon_chains where chain_id::text like '${REQUEST_PREFIX}%')
+          + (select count(*) from private.tryon_results where chain_id::text like '${REQUEST_PREFIX}%');`);
         if (residue !== '0') failures.push('gate-row-cleanup');
         else if (!failures.includes('ai-controls-restore') && !failures.includes('capacity-restore')) {
           say('PASS: EDGE-RUNTIME restore; ai_controls and image capacity equal the pre-activation snapshot and no e3b0 gate rows remain');
@@ -308,6 +316,7 @@ async function main() {
       '-e', 'SUPABASE_ANON_KEY', '-e', 'SUPABASE_SERVICE_ROLE_KEY',
       ...mount('supabase/functions', '/work/supabase/functions'), ...mount('src/images', '/work/src/images'),
       ...mount('src/domain/stylist.ts', '/work/src/domain/stylist.ts'), ...mount('src/domain/enhancement.ts', '/work/src/domain/enhancement.ts'),
+      ...mount('src/domain/tryon.ts', '/work/src/domain/tryon.ts'),
       ...mount('tests/edge-fixtures', '/work/tests/edge-fixtures'),
       '--pull', 'never', '--entrypoint', 'edge-runtime', runtimeReference, 'start', '--main-service', '/work/tests/edge-fixtures/analyze-clothing-double',
       '--port', '9000'], 'fixture-runtime', { secrets: { SUPABASE_ANON_KEY: keys.anon, SUPABASE_SERVICE_ROLE_KEY: keys.service } });
