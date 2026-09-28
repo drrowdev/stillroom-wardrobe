@@ -32,6 +32,7 @@ export const SOURCE_HASHES = Object.freeze({
   stylistExpireSchedule: 'd8e5968e02f52a8f79702ac5e9d49e512180c8af2359dbe2891be230cd853d61',
   photoEnhancement: 'c1d960ee9ccbeab5b92e04f0244535122986bd427023f57036918517f809903e',
   enhanceExpireSchedule: '99a5943b7e580db9e36fdd78bce404cc6e7aba4533b89af8fd0ac8ca1c9d9098',
+  adminLimits: '457da2698f93970c409fb9a48b191f4d80fae977775e23d2169210e029eeb6eb',
 });
 export const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const voidRpcs = new Set(['commit_image', 'retire_image', 'forget_image']);

@@ -82,9 +82,9 @@ function policyOf(snapshot: Snapshot, tableName: string, name: string): Policy {
 describe('I17 isolation catalogue validator', () => {
   it('accepts the reviewed inventory and separates its families', () => {
     expect(catalog.validateCatalog(validSnapshot(), helperMd5)).toEqual([]);
-    expect(catalog.EXPOSED_RPCS).toHaveLength(55);
+    expect(catalog.EXPOSED_RPCS).toHaveLength(58);
     expect(catalog.SERVICE_ONLY_RPCS).toHaveLength(19);
-    expect(catalog.PRIVATE_TABLES).toHaveLength(31);
+    expect(catalog.PRIVATE_TABLES).toHaveLength(33);
     expect(Object.keys(catalog.PUBLIC_TABLES)).toHaveLength(10);
     const kinds = [...(catalog.expectedFunctions() as Map<string, Expected>).values()].map((v) => v.kind);
     expect(kinds.filter((k) => k === 'helper')).toHaveLength(4);
@@ -178,13 +178,15 @@ describe('I17 response validators', () => {
     expect(catalog.scanLeaks('short', ['abc'])).toEqual([]);
   });
 
-  type Requirement = { refs: string[]; tuple?: boolean; alternatives?: boolean; mixed?: boolean; collision?: boolean; ownerOnly?: boolean; runtime?: boolean; unverified?: string };
+  type Requirement = { refs: string[]; tuple?: boolean; alternatives?: boolean; mixed?: boolean; collision?: boolean; ownerOnly?: boolean; adminOnly?: boolean; runtime?: boolean; unverified?: string };
   const requirements = catalog.COVERAGE_REQUIREMENTS as Record<string, Requirement>;
   const fullCoverage = () => {
     const map = new Map<string, Set<string>>();
     for (const f of catalog.EXPOSED_RPCS as { name: string }[]) {
       const r = requirements[f.name]!, tags = new Set(['anon']);
-      if (!r.unverified) {
+      if (r.adminOnly) {
+        for (const d of ['A>B', 'B>A']) tags.add(`${d}:admin-denied`);
+      } else if (!r.unverified) {
         for (const [a, v] of [['A', 'B'], ['B', 'A']]) {
           const d = `${a}>${v}`;
           tags.add(`${a}:control`);
@@ -217,6 +219,19 @@ describe('I17 response validators', () => {
     const fewer = { ...requirements };
     delete fewer.commit_image;
     expect(catalog.validateCoverage(fullCoverage(), fewer)).toContain('coverage requirements differ from the exposed RPCs');
+  });
+
+  it('requires admin-only RPCs to be denied in both directions without an owned control', () => {
+    for (const name of ['admin_status', 'admin_ai_spending', 'admin_set_ai_limits']) expect(requirements[name]).toEqual({ refs: [], adminOnly: true });
+    expect(catalog.validateCoverage(without(fullCoverage(), 'admin_set_ai_limits', 'B>A:admin-denied')))
+      .toContain('admin_set_ai_limits lacks B>A:admin-denied coverage');
+    expect(catalog.validateCoverage(withTag(fullCoverage(), 'admin_ai_spending', 'A:control')))
+      .toContain('admin_ai_spending A>B claims an owned control for an admin-only RPC');
+    expect(catalog.validateCoverage(withTag(fullCoverage(), 'admin_status', 'A>B:owner-only')))
+      .toContain('admin_status has unexpected A>B:owner-only credit');
+    expect(catalog.validateCoverage(withTag(fullCoverage(), 'admin_status', 'A>B:unverified')))
+      .toContain('admin_status A>B is UNVERIFIED but admin denial is always reachable');
+    expect(catalog.validateCoverage(without(fullCoverage(), 'admin_status', 'anon'))).toContain('admin_status lacks anon coverage');
   });
 
   it('rejects a missing successful owned control', () => {

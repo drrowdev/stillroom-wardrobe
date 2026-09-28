@@ -127,6 +127,16 @@ describe('deletion rehearsal guards', () => {
     expect(new Set(tables).size).toBe(tables.length);
   });
 
+  it('includes the AD1 admin row and both audit columns, and anonymises only the audit actor', async () => {
+    const tables = await rehearsal.ownerTables(realFs, ROOT);
+    expect(tables).toContain('private.app_admins');
+    expect(tables).toContain('private.ai_limit_audit');
+    expect(await rehearsal.actorTables(realFs, ROOT)).toEqual(['private.ai_limit_audit']);
+    expect(SOURCE).toContain("(to_jsonb(t)-'actor_owner_id')::text");
+    expect(SOURCE).toContain("if (await adminRows() !== '1:2:1:0:2') throw new Error('SEED:admin');");
+    expect(SOURCE).toContain("if (await adminRows() !== '0:0:0:1:0') throw new Error('RESULT:admin');");
+  });
+
   it('has exactly one process-spawn site and no shell helpers', () => {
     expect(SOURCE.match(/\bspawnImpl\(/g)).toHaveLength(1);
     expect(SOURCE.match(/\bspawn\b/g)).toHaveLength(2);

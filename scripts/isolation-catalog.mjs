@@ -72,6 +72,10 @@ export const EXPOSED_RPCS = Object.freeze([
   fn('image_provenance_digest_v1', '', []),
   fn('enhance_status', '', []),
   fn('enhance_set_consent', 'boolean, integer', ['p_enabled', 'p_notice_revision']),
+  fn('admin_status', '', []),
+  fn('admin_ai_spending', 'integer', ['p_months']),
+  fn('admin_set_ai_limits', 'smallint, text, jsonb, jsonb, text',
+    ['p_admission_no', 'p_account_version', 'p_expected', 'p_limits', 'p_reason_code']),
 ]);
 
 // Public functions reachable only with service credentials (Edge/operator) or only by the database owner (scheduled
@@ -145,6 +149,9 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'enhance_azure_usage(jsonb, private.ai_execution_manifests)', 'enhance_expire(uuid, timestamp with time zone, integer)',
   'enhance_usage(uuid, timestamp with time zone)',
   'enhance_replay(private.ai_usage_evidence, private.ai_usage, public.profiles, private.ai_controls, private.enhancement_probe_authorisations, timestamp with time zone)',
+  'app_admin_binding()', 'ai_limit_audit_guard()', 'admin_authority()', 'admin_account_version(smallint, uuid)',
+  'admin_limits(private.ai_controls)', 'admin_limits_shape(jsonb)', 'admin_month(uuid, text, text)',
+  'admin_account(private.approved_accounts, timestamp with time zone, text[])',
 ]);
 
 // Supabase-provided GraphQL entrypoint; its privileges are provider-managed and recorded, not asserted.
@@ -173,7 +180,7 @@ export const PRIVATE_TABLES = Object.freeze([
   'item_image_used_ids', 'item_deletion_claims', 'image_change_attempts', 'image_change_context',
   'image_change_history', 'item_deletion_operations', 'item_deletion_targets', 'imported_attribution_history',
   'provider_capacity', 'provider_deployments', 'provider_slots', 'image_enhancements', 'enhancement_outputs', 'image_provenance',
-  'image_enhancement_bindings', 'restore_image_markers', 'enhancement_probe_authorisations',
+  'image_enhancement_bindings', 'restore_image_markers', 'enhancement_probe_authorisations', 'app_admins', 'ai_limit_audit',
 ]);
 const OWNER_EXPRESSION = '(private.is_approved() AND (owner_id = ( SELECT auth.uid() AS uid)))';
 export const OWNER_POLICIES = Object.freeze([
@@ -416,7 +423,9 @@ const req = (refs, extra = {}) => Object.freeze({ refs: Object.freeze(refs), ...
  * Per-signature requirements. `refs` are fixture references that must each be substituted on their own (the
  * rest stay the attacker's), `mixed` needs an own+peer array, `collision` a create-ID probe, `ownerOnly` an own
  * call with no reference, `runtime` allows an explicit UNVERIFIED tag when owner-local state blocks the probe,
- * and `unverified` names a state normal sessions cannot reach. Every verified entry needs a successful owned control.
+ * `unverified` names a state normal sessions cannot reach, and `adminOnly` marks an operator-granted admin RPC that
+ * every fixture account must see as UNAVAILABLE (credited as `admin-denied`, with no owned control because neither
+ * fixture is an admin). Every other verified entry needs a successful owned control.
  * With several refs, `tuple` marks references used together (the complete valid peer tuple must also be probed,
  * because a mixed pair names no existing row); `alternatives` marks references that are each a separate argument.
  */
@@ -476,9 +485,12 @@ export const COVERAGE_REQUIREMENTS = Object.freeze({
   image_provenance_digest_v1: req([], { ownerOnly: true }),
   enhance_status: req([], { ownerOnly: true }),
   enhance_set_consent: req([], { ownerOnly: true }),
+  admin_status: req([], { adminOnly: true }),
+  admin_ai_spending: req([], { adminOnly: true }),
+  admin_set_ai_limits: req([], { adminOnly: true }),
 });
 const DIRECTIONS = [['A', 'B'], ['B', 'A']];
-const TAG = /^(?:anon|normal-[AB]|[AB]:control|[AB]>[AB]:(?:owner-only|mixed|collision|unverified|tuple|ref:[A-Za-z]+))$/;
+const TAG = /^(?:anon|normal-[AB]|[AB]:control|[AB]>[AB]:(?:owner-only|admin-denied|mixed|collision|unverified|tuple|ref:[A-Za-z]+))$/;
 /**
  * Coverage credit per direction: the attacker's owned control, every single-reference substitution, mixed arrays,
  * collision probes and anonymous denial. Unreachable states must carry no credit; runtime blocks carry an explicit
@@ -500,6 +512,13 @@ export function validateCoverage(covered, requirements = COVERAGE_REQUIREMENTS) 
       const credit = [...tags].filter((t) => t.startsWith(`${d}:`) && t !== `${d}:unverified`);
       if (r.unverified) {
         if (credit.length || tags.has(`${d}:unverified`)) problems.push(`${name} ${d} claims coverage for an unreachable state`);
+        continue;
+      }
+      if (r.adminOnly) {
+        if (tags.has(`${d}:unverified`)) problems.push(`${name} ${d} is UNVERIFIED but admin denial is always reachable`);
+        if (!tags.has(`${d}:admin-denied`)) problems.push(`${name} lacks ${d}:admin-denied coverage`);
+        for (const tag of credit) if (tag !== `${d}:admin-denied`) problems.push(`${name} has unexpected ${tag} credit`);
+        if (tags.has(`${attacker}:control`)) problems.push(`${name} ${d} claims an owned control for an admin-only RPC`);
         continue;
       }
       if (tags.has(`${d}:unverified`)) {

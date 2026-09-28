@@ -253,13 +253,23 @@ export async function verifyStack({ docker, supabase, id, containers }) {
 // The definition in effect is the latest one in migration order: P6d replaces P6c's with the same signature.
 const MIGRATIONS_DIR = 'supabase/migrations';
 const DEFINITION = /create (?:or replace )?function private\.deletion_owner_rows_absent\(/;
-export async function ownerTables(fs, root) {
+async function absentBody(fs, root) {
   let body = '';
   for (const name of (await fs.readdir(path.join(root, MIGRATIONS_DIR))).filter((entry) => entry.endsWith('.sql')).sort()) {
     const sql = await fs.readFile(path.join(root, MIGRATIONS_DIR, name), 'utf8');
     const start = sql.search(DEFINITION);
     if (start >= 0) body = sql.slice(start, sql.indexOf('$$;', sql.indexOf('as $$', start) + 5));
   }
+  return body;
+}
+/** AD1: tables that also name the deleted account as the actor of another account's row (anonymised, not deleted). */
+export async function actorTables(fs, root) {
+  const tables = [...(await absentBody(fs, root)).matchAll(/from ((?:public|private)\.[a-z_]+) where actor_owner_id=p_owner/g)].map((match) => match[1]);
+  if (new Set(tables).size !== tables.length) throw new Error('TABLES');
+  return tables;
+}
+export async function ownerTables(fs, root) {
+  const body = await absentBody(fs, root);
   const tables = [...body.matchAll(/from ((?:public|private)\.[a-z_]+) where owner_id=p_owner/g)].map((match) => match[1]);
   if (tables.length < 20 || new Set(tables).size !== tables.length) throw new Error('TABLES');
   return tables;
@@ -299,6 +309,7 @@ async function exercise(ctx) {
   const call = createCall(stack.api);
   const service = { bearer: stack.serviceKey, key: stack.serviceKey };
   const tables = await ownerTables(fs, root);
+  const actors = await actorTables(fs, root);
 
   await sql(`insert into private.approved_accounts(admission_no,email) values (1,'${EMAILS.C}'),(2,'${EMAILS.D}');`);
   const accounts = {};
@@ -320,8 +331,10 @@ async function exercise(ctx) {
     throw new Error('BINDING:admission');
   }
 
+  // An actor column is anonymised when that actor's account is deleted, so it is left out of the kept owner's digest.
+  const rowText = (table) => (actors.includes(table) ? "(to_jsonb(t)-'actor_owner_id')::text" : 't::text');
   const digest = (uid) => sql(`select jsonb_build_object(${tables.map((table) =>
-    `'${table}',(select jsonb_build_array(count(*),md5(coalesce(string_agg(t::text,'|' order by t::text),''))) from ${table} t where t.owner_id=${literal(uid)})`).join(',')},
+    `'${table}',(select jsonb_build_array(count(*),md5(coalesce(string_agg(${rowText(table)},'|' order by ${rowText(table)}),''))) from ${table} t where t.owner_id=${literal(uid)})`).join(',')},
     'storage',(select jsonb_build_array(count(*),md5(coalesce(string_agg(o.name||':'||coalesce(o.metadata->>'size','')||':'||coalesce(o.metadata->>'eTag',''),'|' order by o.name),'')))
       from storage.objects o where o.bucket_id='wardrobe' and split_part(o.name,'/',1)=${literal(uid)}::text),
     'admission',(select jsonb_build_array(a.admission_no,a.email,a.enabled,a.user_id,a.generation) from private.approved_accounts a where a.user_id=${literal(uid)}))::text;`);
@@ -364,6 +377,22 @@ async function exercise(ctx) {
   if (await enhancementRows(c) !== '1:1:1:1' || await enhancementRows(d) !== '1:1:1:1' || await heldSlots() !== '2') {
     throw new Error('SEED:enhancement');
   }
+  // AD1: C is the admin, bound to its current admission, with a self-targeted audit row, a row targeting C by D and
+  // a row targeting D by C. C's deletion removes its admin row and both C-targeted rows and anonymises D's row.
+  step = 'fixture-admin';
+  const limits = `'{"shared":{"monthlyAllowanceMicro":"1000000","maxRequestMicro":"100000","maxRequestsPerHour":10}}'::jsonb`;
+  await sql(`insert into private.app_admins(owner_id,admission_no,admission_generation)
+    select user_id,admission_no,generation from private.approved_accounts where user_id=${literal(c)};
+  insert into private.ai_limit_audit(id,created_at,owner_id,target_admission_no,actor_owner_id,old_limits,new_limits,reason_code)
+    values (gen_random_uuid(),now(),${literal(c)},1,${literal(c)},${limits},${limits},'LOWER'),
+      (gen_random_uuid(),now(),${literal(c)},1,${literal(d)},${limits},${limits},null),
+      (gen_random_uuid(),now(),${literal(d)},2,${literal(c)},${limits},${limits},'RAISE');`);
+  const adminRows = () => sql(`select (select count(*) from private.app_admins)
+    ||':'||(select count(*) from private.ai_limit_audit where owner_id=${literal(c)})
+    ||':'||(select count(*) from private.ai_limit_audit where owner_id=${literal(d)} and actor_owner_id=${literal(c)})
+    ||':'||(select count(*) from private.ai_limit_audit where owner_id=${literal(d)} and actor_owner_id is null)
+    ||':'||(select count(*) from private.ai_limit_audit where actor_owner_id=${literal(c)});`);
+  if (await adminRows() !== '1:2:1:0:2') throw new Error('SEED:admin');
   step = 'fixture';
   const before = await digest(d);
   const cBefore = JSON.parse(await digest(c));
@@ -573,6 +602,8 @@ async function exercise(ctx) {
   // C's enhancement rows are gone, D's stay, and neither provider slot was released by the deletion.
   if (await enhancementRows(c) !== '0:0:0:0' || await enhancementRows(d) !== '1:1:1:1') throw new Error('RESULT:enhancement');
   if (await heldSlots() !== '2') throw new Error('RESULT:enhancement-slots');
+  // C's admin row and C-targeted audit rows are gone; D's row stays with its actor anonymised; no row names C.
+  if (await adminRows() !== '0:0:0:1:0') throw new Error('RESULT:admin');
   const purged = await call('/rest/v1/rpc/purge_deletion_receipts', { method: 'POST', ...service, body: {} }, 10_000);
   if (!purged?.response.ok || (await purged.response.text()).trim() !== '0') throw new Error('RESULT:purge');
   const verified = await child('verify');

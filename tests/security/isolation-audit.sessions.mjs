@@ -670,6 +670,19 @@ async function foreignMatrix(attacker, victim) {
   const enhanceConsent = await probeRpc(attacker, victim, 'enhance_set_consent', { p_enabled: null, p_notice_revision: null });
   if (control(attacker, 'enhance_set_consent', matchOutcome({ status: 200, data: { code: 'INVALID_INPUT' } }, enhanceConsent),
     describe(enhanceConsent))) tag('enhance_set_consent', `${d}:owner-only`);
+  // AD1: neither fixture is the operator-designated admin, so every admin RPC is exactly UNAVAILABLE, whichever
+  // admission (own, peer or unknown) the call names; nothing about the target is looked up or disclosed.
+  const adminLimits = { monthlyAllowanceMicro: '1000000', maxRequestMicro: '100000', maxRequestsPerHour: 10 };
+  const adminBody = { shared: adminLimits, stylist: adminLimits, enhancement: adminLimits };
+  const adminCalls = [['admin_status', {}], ['admin_ai_spending', { p_months: 6 }], ['admin_ai_spending', { p_months: 99 }],
+    ...[1, 2, 3].map((no) => ['admin_set_ai_limits', { p_admission_no: no, p_account_version: randomBytes(32).toString('hex'),
+      p_expected: adminBody, p_limits: adminBody, p_reason_code: 'LOWER' }])];
+  const adminOk = new Map();
+  for (const [name, body] of adminCalls) {
+    const denied = expectMatch(`${stage} ${name}`, UNAVAILABLE, await probeRpc(attacker, victim, name, body));
+    adminOk.set(name, (adminOk.get(name) ?? true) && denied);
+  }
+  for (const [name, ok] of adminOk) if (ok) tag(name, `${d}:admin-denied`);
   // The caller's own provenance only: exactly its fixture row, and the digest of that same list.
   const provenance = await probeRpc(attacker, victim, 'image_provenance_v1', {});
   if (need(provenance.ok && isDeepStrictEqual(provenance.data, a.provRows), `${stage}: image_provenance_v1 ${describe(provenance)}`)) {
@@ -1137,6 +1150,8 @@ async function freezeCase(frozen, other) {
       ['stylist_set_consent', { p_enabled: false, p_notice_revision: null }, UNAVAILABLE],
       ['enhance_status', {}, UNAVAILABLE],
       ['enhance_set_consent', { p_enabled: false, p_notice_revision: null }, UNAVAILABLE],
+      ['admin_status', {}, UNAVAILABLE],
+      ['admin_ai_spending', { p_months: 6 }, UNAVAILABLE],
       ['image_provenance_v1', {}, { status: 403, code: '42501' }],
       ['image_provenance_digest_v1', {}, { status: 403, code: '42501' }],
       ['restore_image_provenance', { p_item_id: f.provItem, p_image_id: f.provImage, p_import_id: f.provImport, p_entry: f.provEntry },
