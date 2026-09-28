@@ -17,10 +17,11 @@ const dialog = (page: Page) => page.locator('dialog[open]');
 const zoom = 'html { font-size: 200%; } body { font-size: 32px; }';
 const axe = async (page: Page) => expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
-async function start(page: Page, options: { language?: Language; admin?: boolean; hash?: string } = {}) {
+async function start(page: Page, options: { language?: Language; admin?: boolean; hash?: string; now?: Date } = {}) {
   const language = options.language ?? 'en';
   const api = await mockBackend(page, { initialLanguage: language });
   if (options.admin !== false) api.adminControl.admin = owners.a;
+  if (options.now) api.adminControl.now = options.now;
   await page.goto(options.hash ?? '/#/admin'); await signIn(page);
   await expect(page.locator('.workspace-identity')).toBeVisible();
   return api;
@@ -36,11 +37,39 @@ async function edit(page: Page, number: 1 | 2) {
 }
 async function writes(api: Api, count: number) { await expect.poll(() => api.adminControl.writes.length).toBe(count); }
 
+// December 2026 back to July 2026 includes the longest month names in each language.
+const fixedMonths = {
+  en: ['December 2026', 'November 2026', 'October 2026', 'September 2026', 'August 2026', 'July 2026'],
+  fi: ['joulukuu 2026', 'marraskuu 2026', 'lokakuu 2026', 'syyskuu 2026', 'elokuu 2026', 'heinäkuu 2026'],
+  sv: ['december 2026', 'november 2026', 'oktober 2026', 'september 2026', 'augusti 2026', 'juli 2026'],
+} as const;
+async function expectMonthsFit(page: Page, language: Language) {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await start(page, { language, now: new Date(Date.UTC(2026, 11, 15)) });
+  await openScreen(page);
+  for (const zoomed of [false, true]) {
+    if (zoomed) await page.addStyleTag({ content: zoom });
+    if (zoomed) await expect(page.locator('html')).toHaveCSS('font-size', '32px');
+    const fit = await page.locator('#admin-month').evaluate((select: HTMLSelectElement) => {
+      const style = getComputedStyle(select);
+      // Only without a native appearance is the padding the whole space beside the text.
+      if (style.appearance !== 'none') throw new Error(`appearance ${style.appearance}`);
+      const context = document.createElement('canvas').getContext('2d')!;
+      context.font = style.font;
+      const room = select.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      return { room, labels: [...select.options].map((option) => ({ label: option.text, width: context.measureText(option.text).width })) };
+    });
+    expect(fit.labels.map((entry) => entry.label)).toEqual(fixedMonths[language]);
+    for (const entry of fit.labels) expect(entry.width, `${entry.label} zoomed=${String(zoomed)}`).toBeLessThanOrEqual(fit.room);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+}
+
 test.describe('AD1b admin spending and limits', () => {
   test('anyone who is not the admin sees the note, and the admin screen is not available', async ({ page }) => {
     const api = await start(page, { admin: false, hash: '/#/settings' });
     await expect(page.locator('#settings-title')).toBeVisible();
-    await expect(page.getByText(text('admin.note'), { exact: true })).toBeVisible();
+    await expect(page.locator('.ai-card').getByText(text('admin.note'), { exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: text('admin.title'), exact: true })).toHaveCount(0);
     await page.evaluate(() => { location.hash = '#/admin'; });
     await expect(page.locator('#admin-title')).toBeVisible();
@@ -73,16 +102,16 @@ test.describe('AD1b admin spending and limits', () => {
 
   test('the admin opens exact spending per account and feature', async ({ page }) => {
     const api = await start(page, { hash: '/#/settings' });
-    await page.getByRole('link', { name: text('admin.title'), exact: true }).click();
+    await page.locator('.ai-card').getByRole('link', { name: text('admin.title'), exact: true }).click();
     await openScreen(page);
     await expect(page.locator('#admin-title')).toBeFocused();
-    await expect(page.getByText(text('admin.estimates'), { exact: true })).toBeVisible();
+    await expect(page.getByText('Spending recorded by the app. Some amounts are estimates. Calls made outside the app aren\'t included.', { exact: true })).toBeVisible();
     await expect(row(page, 1, 'admin.tagging').locator('td')).toHaveText(['$1.234567', '$0.30', '$4.097351', '$5.631918', '5']);
     await expect(row(page, 1, 'admin.stylist').locator('td')).toHaveText(['$0.00', '$0.00484', '$0.12936', '$0.1342', '2']);
     await expect(row(page, 1, 'admin.enhancement').locator('td')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00', '0']);
     await expect(row(page, 1, 'admin.total').locator('td')).toHaveText(['$1.234567', '$0.30484', '$4.226711', '$5.766118', '7']);
     await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$5.766118', limit: '$20.00' }));
-    await expect(account(page, 1)).toContainText(text('admin.probe', { amount: '$0.26' }));
+    await expect(account(page, 1)).toContainText('Test allowance $0.26');
     await expect(account(page, 1)).toContainText(text('admin.tryOn'));
     await expect(account(page, 2).locator('.admin-use')).toContainText(text('admin.notSetUp'));
     await expect(account(page, 2)).not.toContainText(text('admin.probe', { amount: '$0.00' }));
@@ -323,6 +352,47 @@ test.describe('AD1b admin spending and limits', () => {
     expect(api.adminControl.spendingReads.filter((read) => read.owner === owners.b)).toEqual([]);
     await page.evaluate(() => { location.hash = '#/settings'; });
     await expect(page.getByText(text('admin.note', 'sv'), { exact: true })).toBeVisible();
+  });
+
+  for (const language of ['en', 'fi', 'sv'] as const) {
+    test(`every ${language} month label fits the select at 320 px, at 100 % and 200 % text size`, async ({ page }) => {
+      await expectMonthsFit(page, language);
+    });
+  }
+
+  test.describe('in forced colours', () => {
+    test.use({ forcedColors: 'active' });
+    test('the month select keeps a visible arrow, a focus ring, keyboard use and the narrow fit', async ({ page }) => {
+      await expectMonthsFit(page, 'fi');
+      expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
+      const select = page.locator('#admin-month');
+      const drawn = await select.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { supported: CSS.supports('forced-color-adjust', 'none'), adjust: style.getPropertyValue('forced-color-adjust'), image: style.backgroundImage, color: style.color };
+      });
+      // Chromium computes the drawn arrow as 'none' in forced colours unless the select opts out; WebKit never forces colours.
+      if (drawn.supported) expect(drawn.adjust).toBe('none');
+      expect(drawn.image).toContain('linear-gradient');
+      // The arrow uses the same system colour as the text.
+      expect(drawn.image).toContain(drawn.color);
+
+      await page.locator('#admin-title').click();
+      let focused = false;
+      for (let step = 0; step < 40 && !focused; step += 1) {
+        await page.keyboard.press('Tab');
+        focused = await select.evaluate((element) => document.activeElement === element);
+      }
+      expect(focused).toBe(true);
+      const ring = await select.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { visible: element.matches(':focus-visible'), style: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+      });
+      expect(ring).toEqual({ visible: true, style: 'solid', width: 3 });
+      const first = await select.inputValue();
+      await page.keyboard.press('ArrowDown');
+      await expect(select).not.toHaveValue(first);
+      await expect(select.locator('option:checked')).toHaveText(fixedMonths.fi[1]);
+    });
   });
 
   test('a failed load can be retried', async ({ page }) => {

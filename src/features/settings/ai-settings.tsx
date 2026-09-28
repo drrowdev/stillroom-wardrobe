@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SessionController, OwnerScope } from '../../auth/session';
 import { AiError, type AiClient } from '../../data/ai';
 import type { ProfileRow } from '../../data/rows';
@@ -8,10 +8,10 @@ import { usdCents } from '../../domain/ai-presentation';
 import type { Language, MessageKey, Translate } from '../../i18n';
 
 type Props = { ai: AiClient; controller: SessionController; scope: OwnerScope; profile: ProfileRow;
-  busy: boolean; unresolved: boolean; sharedLimit?: boolean; online: boolean; language: Language; t: Translate };
+  busy: boolean; unresolved: boolean; sharedLimit?: boolean; online: boolean; language: Language; t: Translate; footer?: ReactNode };
 type Pending = 'on' | 'off' | 'retry' | null;
 // Status is read on load, focus, visibility and reconnect; those reads never write. Only Turn on and Turn off change consent.
-export function AiSettings({ ai, controller, scope, profile, busy, unresolved, sharedLimit = false, online, language, t }: Props) {
+export function AiSettings({ ai, controller, scope, profile, busy, unresolved, sharedLimit = false, online, language, t, footer }: Props) {
   const [status, setStatus] = useState<AiStatus | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<MessageKey | null>(null);
@@ -132,5 +132,6 @@ export function AiSettings({ ai, controller, scope, profile, busy, unresolved, s
         onClick={(event) => { if (card.state === 'unconfirmed') void reconcile(event.currentTarget); else read(true); }}>{t('common.retry')}</button>}
     </div>}
     {error && !repeated && <p role="alert" className="notice notice-error">{t(error)}</p>}
+    {footer}
   </section>;
 }
