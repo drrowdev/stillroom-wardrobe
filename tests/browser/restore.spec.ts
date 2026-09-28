@@ -985,3 +985,82 @@ test.describe('Q6 byte-preserving restore', () => {
     await expect(button(page, 'restore.open')).toBeVisible();
   });
 });
+// BG2b-2 (H5, Q6): a v4 backup carries the AI-edit record of each exported edited photo. A photo stored unchanged keeps
+// its label; one that has to be re-encoded is restored without it, and the result says how many.
+const edited = (image: Row): Row => ({ image_id: image.id, kind: 'ai_edited', origin: 'recorded', model_id: 'fictional-model-1',
+  manifest_id: 'fictional-manifest-1', stored_sha256: image.main_sha256, backup_sha256: null });
+test('BG2b-2 restore: a v4 backup keeps the AI-edit label only on photos stored unchanged, and says how many lost it', async ({ page }) => {
+  const { api, thumb } = await start(page);
+  const kept = seed(api, thumb, 'Fictional linen shirt'), changed = seed(api, thumb, 'Fictional wool trousers');
+  // A progressive photo is outside the app's own profile, so restore re-encodes it (Q6).
+  const main = Buffer.from(flatJpeg({ width: 64, height: 48, mode: 'progressive' }));
+  Object.assign(changed.images[0]!, { width: 64, height: 48, main_sha256: sha(main), main_bytes: main.length });
+  api.files.set(String(changed.images[0]!.main_path), main);
+  api.provenance.push(edited(kept.images[0]!), edited(changed.images[0]!));
+  await settings(page, 'a');
+  const parts = await backup(page);
+  const metadata = (await decryptPart(parts[0]!.buffer.toString('utf8'), passphrase)).manifest as SavedMetadata;
+  expect(metadata.schema_version).toBe(4);
+  expect(metadata.provenance).toEqual([kept.images[0]!, changed.images[0]!].map(image => ({ imageId: image.id, kind: 'ai_edited',
+    modelId: 'fictional-model-1', manifestId: 'fictional-manifest-1', backupSha256: image.main_sha256 }))
+    .sort((a, b) => String(a.imageId) < String(b.imageId) ? -1 : 1));
+  await signOut(page);
+  await settings(page, 'b');
+  const modes: unknown[] = [];
+  page.on('request', request => { if (request.url().endsWith('/rpc/reserve_restored_item_save_v2')) modes.push((request.postDataJSON() as Row).p_mode); });
+  await check(page, parts);
+  const card = restoreCard(page);
+  await expect(card).toContainText(text('restore.reencoded_one', 'en', { count: '1' }), slow);
+  await button(page, 'restore.start').click();
+  await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
+  await expect(card).toContainText(text('restore.unlabelledEnhanced_one', 'en', { count: '1' }));
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  expect(modes.sort()).toEqual(['unlabelled', 'v4']);
+  const restoredKept = own(api.images).find(image => image.main_sha256 === kept.images[0]!.main_sha256)!;
+  // Only the photo stored unchanged gets its record attached.
+  expect(api.restoreControl.provenance).toEqual([restoredKept.id]);
+  expect(own(api.images).some(image => image.main_sha256 === changed.images[0]!.main_sha256)).toBe(false);
+});
+
+test('BG2b-2 backup: an edited photo only in Trash leaves the backup at version 3, with no provenance key', async ({ page }) => {
+  const { api, thumb } = await start(page);
+  seed(api, thumb, 'Fictional linen shirt');
+  const trashed = seed(api, thumb, 'Fictional old coat');
+  Object.assign(trashed.item, { deleted_at: '2026-09-20T00:00:00Z' });
+  api.provenance.push(edited(trashed.images[0]!));
+  await settings(page, 'a');
+  const parts = await backup(page);
+  const metadata = (await decryptPart(parts[0]!.buffer.toString('utf8'), passphrase)).manifest as SavedMetadata;
+  expect(metadata.schema_version).toBe(3);
+  expect(Object.hasOwn(metadata, 'provenance')).toBe(false);
+  expect(metadata.tables.items.map(row => row.title)).toEqual(['Fictional linen shirt']);
+});
+
+test('BG2b-2 restore: after a lost save reply the resumed photo is still reported once as restored without its label, and again on a repeat run', async ({ page }) => {
+  const { api, thumb } = await start(page, { loseFinalizeReplyOnce: true });
+  const changed = seed(api, thumb, 'Fictional wool trousers');
+  const main = Buffer.from(flatJpeg({ width: 64, height: 48, mode: 'progressive' }));
+  Object.assign(changed.images[0]!, { width: 64, height: 48, main_sha256: sha(main), main_bytes: main.length });
+  api.files.set(String(changed.images[0]!.main_path), main);
+  api.provenance.push(edited(changed.images[0]!));
+  await settings(page, 'a');
+  const parts = await backup(page);
+  await signOut(page);
+  await settings(page, 'b');
+  await check(page, parts);
+  const card = restoreCard(page);
+  await button(page, 'restore.start').click();
+  await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
+  await expect(card).toContainText(text('restore.unlabelledEnhanced_one', 'en', { count: '1' }));
+  expect(own(api.images).map(image => image.state)).toEqual(['ready']);
+  expect(api.restoreControl.provenance).toEqual([]);
+  // A repeat run of the same backup adds nothing and reports the photo in the account again.
+  await button(page, 'backup.finish').click();
+  const reservations = api.restoreControl.reservations;
+  await check(page, parts);
+  await expect(card.getByText(text('restore.same', 'en', { n: '1' }))).toBeVisible(slow);
+  await button(page, 'restore.start').click();
+  await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
+  await expect(card).toContainText(text('restore.unlabelledEnhanced_one', 'en', { count: '1' }));
+  expect(api.restoreControl.reservations).toBe(reservations);
+});

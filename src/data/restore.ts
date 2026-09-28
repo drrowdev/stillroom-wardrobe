@@ -52,8 +52,10 @@ export type PhotoOutcome = { sourceImageId: string; planned: Pick<PhotoPlan, 'ma
 // `deferred` counts outfits, rules, feedback and history held back until a failed or blocked item is restored.
 // `attributions` counts items whose tag history from the backup is now here (restored now or by an earlier run of the same
 // backup); `attributionsKept` counts items that already had tag history of their own, which was left as it is.
-// `unlabelledEnhanced` counts photos edited with AI that this run restored without that label, because their bytes
-// couldn't be kept exactly as backed up (Q6).
+// `unlabelledEnhanced` counts this backup's photos edited with AI that are in the account without that label after this
+// run, because their bytes couldn't be kept exactly as backed up (Q6): written now or found in place from an earlier run
+// (for example after a lost reply), each photo once per run. Like `attributions`, running the same backup again reports
+// them again.
 export type RestoreResult = { restored: number; same: number; conflicts: number; trash: number; failed: number; blocked: number; deferred: number;
   outfits: number; outfitConflicts: number; history: number; historyConflicts: number; attributions: number; attributionsKept: number;
   unlabelledEnhanced: number; photos: PhotoOutcome[] };
@@ -523,9 +525,10 @@ async function restoreAll(client: AppClient, scope: OwnerScope, preview: Restore
     let outcome: ItemOutcome = 'failed';
     const done = new Map<number, Pick<PhotoOutcome, 'outcome' | 'stored'>>();
     const report: PhotoReport = (index, kind, stored, mode) => {
-      // A photo written by the first attempt stays written when the second attempt finds it in place.
-      if (done.get(index)?.outcome === 'written') return;
-      if (kind === 'written' && mode === 'unlabelled') result.unlabelledEnhanced++;
+      // A photo written by the first attempt stays written when the second attempt finds it in place; it counts once.
+      const previous = done.get(index);
+      if (previous?.outcome === 'written') return;
+      if (!previous && mode === 'unlabelled') result.unlabelledEnhanced++;
       done.set(index, { outcome: kind, stored });
     };
     reached.add(plan);

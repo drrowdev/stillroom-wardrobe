@@ -595,6 +595,7 @@
   "enhance.fallback": {"en":"The photo couldn't be enhanced, so it's shown as it is.","fi":"Kuvaa ei voitu parantaa, joten se näytetään sellaisenaan.","sv":"Bilden kunde inte förbättras, så den visas som den är."},
   "enhance.allowance": {"en":"Photo enhancement has reached this month's limit.","fi":"Kuvien parannus on saavuttanut tämän kuun rajan.","sv":"Bildförbättringen har nått månadens gräns."},
   "detail.aiEdited": {"en":"Photo edited with AI","fi":"Kuvaa on muokattu tekoälyllä","sv":"Bilden är redigerad med AI"},
+  "detail.aiEditedUnavailable": {"en":"Couldn't check whether this photo was edited with AI.","fi":"Kuvan tekoälymuokkausta ei voitu tarkistaa.","sv":"Det gick inte att kontrollera om bilden är redigerad med AI."},
   "enhanceC.settings": {"en":"Photo enhancement","fi":"Kuvien parannus","sv":"Bildförbättring"},
   "enhanceC.enabled": {"en":"Photo enhancement: On","fi":"Kuvien parannus: päällä","sv":"Bildförbättring: på"},
   "enhanceC.disabled": {"en":"Photo enhancement: Off","fi":"Kuvien parannus: pois päältä","sv":"Bildförbättring: av"},

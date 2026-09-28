@@ -1,12 +1,11 @@
 // BG2b-2: the enhancement stage for one photo form (Add item or Replace photo). It never commits a photo or starts an
 // analysis itself; the form commits the stage result once per preparation. In memory only.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import type { EnhanceLine } from '../../domain/enhance-controls';
 import type { PreparedPhoto } from '../../images/process-jpeg';
-import { enhanceStoreFor } from '../settings/enhance-store';
-import { runEnhancementStage, type StageResult } from './enhancement-stage';
+import type { StageResult } from './enhancement-stage';
 
 export type EnhancementView = {
   /** A request has been sent and its result is awaited: "Enhancing photo…" with Skip. */ working: boolean;
@@ -17,7 +16,6 @@ const idle: EnhancementView = { working: false, enhanced: false, line: 'none' };
 const skipped: StageResult = { kind: 'skipped', line: 'none', requestId: null };
 
 export function useEnhancement(client: AppClient, scope: OwnerScope, onExpired: () => void) {
-  const store = useMemo(() => enhanceStoreFor(client, scope), [client, scope]);
   const [view, setView] = useState<EnhancementView>(idle);
   const token = useRef(0);
   const skipper = useRef<AbortController | null>(null);
@@ -62,12 +60,17 @@ export function useEnhancement(client: AppClient, scope: OwnerScope, onExpired: 
     skipper.current?.abort();
     const skip = new AbortController();
     skipper.current = skip;
-    if (!store || !options.cutOut) return skipped;
+    if (!options.cutOut) return skipped;
     const current = () => token.current === mine && options.current() && !scope.signal.aborted;
     try {
-      const runtime = await import('./enhancement-runtime');
+      // The stage, its store and the imaging runtime load on first use, outside the sign-in shell's initial bundle.
+      const [runtime, stage, stores] = await Promise.all([
+        import('./enhancement-runtime'), import('./enhancement-stage'), import('../settings/enhance-store'),
+      ]);
+      const store = stores.enhanceStoreFor(client, scope);
+      if (!store) return skipped;
       if (!current() || options.signal.aborted) return { kind: 'aborted' };
-      return await runEnhancementStage({ photo, cutOut: options.cutOut, online: options.online, current, signal: options.signal,
+      return await stage.runEnhancementStage({ photo, cutOut: options.cutOut, online: options.online, current, signal: options.signal,
         skip: skip.signal }, { client: store.api, session: store.session, imaging: runtime.browserStageImaging,
         admit: runtime.admitProviderJpeg, compare: runtime.compareEnhancement,
         onDispatch: () => { if (current()) setView((value) => ({ ...value, working: true })); } });
@@ -79,7 +82,7 @@ export function useEnhancement(client: AppClient, scope: OwnerScope, onExpired: 
         if (!scope.signal.aborted) setView((value) => ({ ...value, working: false }));
       }
     }
-  }, [store, scope]);
+  }, [client, scope]);
 
   return {
     view,

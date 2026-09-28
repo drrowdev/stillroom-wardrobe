@@ -259,8 +259,9 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           setAttempt(null);
           analysis.refuseSave();
           enhancement.thaw();
-        } else if (problem instanceof EnhancementExpiredError && receipt.current === null && !attempt) {
-          // Refused before any reservation: the draft is unreserved again and goes back to H1 with one new analysis.
+        } else if (problem instanceof EnhancementExpiredError && saving && receipt.current?.attempt !== saving) {
+          // The admission refuses only a new reservation, so this attempt has none, also on a retry after a lost reply:
+          // it is cleared, the draft is unreserved again and goes back to H1 once, with one new analysis.
           setAttempt(null);
           enhancement.thaw();
           revertEnhancement('generic', true);

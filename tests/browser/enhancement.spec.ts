@@ -71,10 +71,10 @@ const held = (reply: EnhanceReply) => {
   return { reply: wrapped, release: () => release() };
 };
 
-type Start = { language?: Language; setup?: Partial<EnhanceSetup>; consent?: boolean; background?: BackgroundTestHook };
+type Start = { language?: Language; setup?: Partial<EnhanceSetup>; consent?: boolean; background?: BackgroundTestHook; lost?: 'reservation' };
 async function start(page: Page, options: Start = {}) {
   await hook(page, options.background ?? { mask: 'left' });
-  const api = await aiFixture(page, options.language ?? 'en');
+  const api = await aiFixture(page, options.language ?? 'en', true, options.lost);
   api.enhanceControl.setup[owners.a] = { activated: true, ...options.setup };
   api.enhanceControl.consent[owners.a] = options.consent === false ? null : 1;
   return api;
@@ -423,6 +423,102 @@ test('add: evidence that lapses while Save is uploading does not revert, and the
   expect(analyses(api)).toBe(1);
 });
 
+test('add: a lost reservation reply freezes the enhanced photo past its deadline, and Retry completes it after server expiry', async ({ page }) => {
+  engineOnly();
+  test.slow();
+  const api = await start(page, { lost: 'reservation' });
+  // 70 s of evidence less the 60 s margin: about 10 s before an unreserved draft would go back to the cut-out.
+  api.enhanceControl.replies.push(async (bytes) => ({ status: 200, image: await redraw(page, bytes), usableUntilMs: enhanceServerNow({ serverOffsetMs: 0 }) + 70_000 }));
+  await openFlow(page, api, 'add');
+  await choose(page, 'add', await syntheticPhoto(page));
+  await expect(label(page)).toBeVisible({ timeout: 45_000 });
+  await expect.poll(() => analyses(api)).toBe(1);
+  const h2 = await shown(page, 'add');
+  await page.locator('#item-title').fill('Enhanced overshirt');
+  await page.getByRole('button', { name: text('capture.save'), exact: true }).click();
+  const retry = page.getByRole('button', { name: text('common.retry'), exact: true });
+  await expect(retry).toBeVisible();
+  const reservations = () => api.requests.filter((call) => call.path.endsWith('/reserve_analyzed_item_save')).length;
+  expect(reservations()).toBe(1);
+  // The reservation exists on the server, so the local deadline passes without a revert or a new analysis.
+  await page.waitForTimeout(12_000);
+  await expect(label(page)).toBeVisible();
+  await expect(line(page, 'enhance.fallback')).toHaveCount(0);
+  expect(await shown(page, 'add')).toBe(h2);
+  expect(analyses(api)).toBe(1);
+  // The server's evidence has expired too; the replayed reservation is not admitted again, so it still completes.
+  for (const output of api.enhanceControl.outputs) output.usableUntilMs = 0;
+  await retry.click();
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  await expect.poll(() => currentImage(api)?.main_sha256).toBe(h2);
+  expect(reservations()).toBe(2);
+  expect(analyses(api)).toBe(1);
+  expect(sent(api)).toHaveLength(1);
+});
+
+test('add: "Enhancement expired" before any reservation goes back to the cut-out with one new analysis, which is then saved', async ({ page }) => {
+  engineOnly();
+  const api = await start(page);
+  api.enhanceControl.replies.push(enhanced(page));
+  await openFlow(page, api, 'add');
+  await choose(page, 'add', await syntheticPhoto(page));
+  await expect(label(page)).toBeVisible({ timeout: 45_000 });
+  await expect.poll(() => analyses(api)).toBe(1);
+  const h1 = sent(api)[0]!.sha256, items = api.items.length;
+  // The device still holds usable evidence, but the server's has expired: the admission refuses the new photo.
+  for (const output of api.enhanceControl.outputs) output.usableUntilMs = 0;
+  await page.locator('#item-title').fill('Enhanced overshirt');
+  await page.getByRole('button', { name: text('capture.save'), exact: true }).click();
+  await expect(line(page, 'enhance.fallback')).toBeVisible();
+  await expect(label(page)).toHaveCount(0);
+  await expect.poll(() => analyses(api)).toBe(2);
+  expect(api.inputs[1]!.sha256).toBe(h1);
+  expect(await shown(page, 'add')).toBe(h1);
+  expect(api.items).toHaveLength(items);
+  expect(api.images.filter((row) => row.owner_id === owners.a && row.state === 'pending')).toHaveLength(0);
+  await noViolations(page);
+  await saveFlow(page, 'add');
+  await expect.poll(() => currentImage(api)?.main_sha256).toBe(h1);
+  expect(sent(api)).toHaveLength(1);
+  expect(analyses(api)).toBe(2);
+});
+
+test('add: a Save whose request never arrived, retried after the server evidence expired, goes back to the cut-out once', async ({ page }) => {
+  engineOnly();
+  const api = await start(page);
+  api.enhanceControl.replies.push(enhanced(page));
+  await openFlow(page, api, 'add');
+  await choose(page, 'add', await syntheticPhoto(page));
+  await expect(label(page)).toBeVisible({ timeout: 45_000 });
+  await expect.poll(() => analyses(api)).toBe(1);
+  const h1 = sent(api)[0]!.sha256, items = api.items.length;
+  // The first reservation request fails on the way, so its outcome is unknown and the attempt stays frozen for Retry.
+  let dropped = 0;
+  await page.route('**/rest/v1/rpc/reserve_analyzed_item_save', async (route) => {
+    if (route.request().method() === 'POST' && dropped++ === 0) { await route.abort('failed'); return; }
+    await route.fallback();
+  });
+  await page.locator('#item-title').fill('Enhanced overshirt');
+  await page.getByRole('button', { name: text('capture.save'), exact: true }).click();
+  const retry = page.getByRole('button', { name: text('common.retry'), exact: true });
+  await expect(retry).toBeVisible();
+  await expect(label(page)).toBeVisible();
+  for (const output of api.enhanceControl.outputs) output.usableUntilMs = 0;
+  await retry.click();
+  // The definitive refusal shows the attempt was never reserved: it is cleared and H1 comes back with one new analysis.
+  await expect(line(page, 'enhance.fallback')).toBeVisible();
+  await expect(label(page)).toHaveCount(0);
+  await expect(retry).toHaveCount(0);
+  await expect.poll(() => analyses(api)).toBe(2);
+  expect(await shown(page, 'add')).toBe(h1);
+  expect(api.items).toHaveLength(items);
+  await page.waitForTimeout(500);
+  expect(analyses(api)).toBe(2);
+  await saveFlow(page, 'add');
+  await expect.poll(() => currentImage(api)?.main_sha256).toBe(h1);
+  expect(sent(api)).toHaveLength(1);
+});
+
 test('item details show "Photo edited with AI" only for an image with that provenance', async ({ page }) => {
   engineOnly();
   const api = await start(page);
@@ -438,6 +534,44 @@ test('item details show "Photo edited with AI" only for an image with that prove
   await expect(page.locator('#detail-title')).toHaveValue('Plain shirt');
   await page.waitForTimeout(300);
   await expect(page.locator('.detail-edited')).toHaveCount(0);
+});
+
+test('item details: a failed provenance read says so with Retry, and a replaced photo never shows the old label', async ({ page }) => {
+  engineOnly();
+  const api = await start(page, { consent: false });
+  const saved = api.seedSavedItem('a', 'Edited shirt');
+  api.provenance.push({ image_id: saved.image.id, kind: 'ai_edited', origin: 'recorded' });
+  let failing = 1, release = () => {};
+  let hold: Promise<void> | null = null;
+  await page.route('**/rest/v1/rpc/image_provenance_v1', async (route) => {
+    if (failing > 0) { failing--; await route.abort('failed'); return; }
+    if (hold) await hold;
+    await route.fallback();
+  });
+  await page.reload();
+  await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+  await expect(page.locator('#detail-title')).toHaveValue('Edited shirt');
+  const unavailable = page.locator('.detail-edited', { hasText: text('detail.aiEditedUnavailable') });
+  await expect(unavailable).toBeVisible();
+  await expect(label(page)).toHaveCount(0);
+  await noViolations(page);
+  await unavailable.getByRole('button', { name: text('common.retry'), exact: true }).click();
+  await expect(page.locator('.detail-edited')).toHaveText(text('detail.aiEdited'));
+  // The replacement photo has no provenance: while its read is held nothing is shown, and afterwards still nothing.
+  await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
+  await page.getByRole('button', { name: text('imageChange.replace'), exact: true }).click();
+  await expect(page.locator('.image-change .background-note')).toBeVisible();
+  await choose(page, 'replace', await syntheticPhoto(page));
+  await expect.poll(() => analyses(api), { timeout: 45_000 }).toBe(1);
+  hold = new Promise<void>((resolve) => { release = resolve; });
+  await saveFlow(page, 'replace');
+  await expect.poll(() => currentImage(api, String(saved.item.id))?.id).not.toBe(saved.image.id);
+  await page.waitForTimeout(300);
+  await expect(page.locator('.detail-edited')).toHaveCount(0);
+  release();
+  await page.waitForTimeout(500);
+  await expect(page.locator('.detail-edited')).toHaveCount(0);
+  expect(sent(api)).toHaveLength(0);
 });
 
 test.describe('Settings', () => {

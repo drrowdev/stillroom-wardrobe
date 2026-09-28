@@ -624,6 +624,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     requests: [] as { owner: string; requestId: string; sha256: string; bytes: number }[],
     statusReads: 0,
     consentWrites: [] as { owner: string; body: unknown }[],
+    /** Delivered outputs, as the BG2b-1 admission trigger sees them: a new photo with an expired output's hash is refused. */
+    outputs: [] as { owner: string; sha256: string; usableUntilMs: number }[],
   };
   // Backup fixture: attribution histories by item, a hook that runs before each attribution read, and manifest reads.
   const exportControl: { attributions: Map<string, unknown[]>; beforeAttribution: (() => void) | null; manifests: number } = {
@@ -865,10 +867,13 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       try {
         if (reply.image) {
           const setup = { ...enhanceDefaults, ...enhanceControl.setup[owner] };
+          const output = { owner, sha256: createHash('sha256').update(reply.image).digest('hex'),
+            usableUntilMs: reply.usableUntilMs ?? enhanceServerNow(setup) + 86_400_000 };
+          if (reply.status === 200) enhanceControl.outputs.push(output);
           await route.fulfill({ status: reply.status, body: reply.image, headers: { 'content-type': 'image/jpeg',
             'content-length': String(reply.image.length), 'cache-control': 'no-store',
-            'x-stillroom-enhancement-sha256': reply.sha256 ?? createHash('sha256').update(reply.image).digest('hex'),
-            'x-stillroom-enhancement-usable-until': String(reply.usableUntilMs ?? enhanceServerNow(setup) + 86_400_000),
+            'x-stillroom-enhancement-sha256': reply.sha256 ?? output.sha256,
+            'x-stillroom-enhancement-usable-until': String(output.usableUntilMs),
             'access-control-expose-headers': 'x-stillroom-enhancement-sha256, x-stillroom-enhancement-usable-until' } });
         } else await json(reply.body, reply.status);
       } catch { /* The page may have gone away while the reply was held. */ }
@@ -1096,6 +1101,11 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         await json([current]); return;
       }
       if (items.some((row) => row.id === item.id) || images.some((row) => row.id === image.id)) { await conflict(); return; }
+      // BG2b-1 admission: only a NEW image row is checked; an existing reservation replays above without it.
+      const output = enhanceControl.outputs.find((row) => row.owner === owner && row.sha256 === image.main_sha256);
+      if (!restored && output && output.usableUntilMs <= enhanceServerNow({ ...enhanceDefaults, ...enhanceControl.setup[owner] })) {
+        await json({ code: '22023', message: 'Enhancement expired', details: null, hint: null }, 400); return;
+      }
       const now = new Date().toISOString(), prefix = `${owner}/${item.id}/${image.id}`;
       items.push({ ...item, owner_id: owner, version: 1, deleted_at: null, created_at: now, updated_at: now });
       images.push({ ...image, owner_id: owner, item_id: item.id, description_version: 1, state: 'pending', retired_at: null,
