@@ -67,6 +67,7 @@ const browserArtifacts: Record<string, string[]> = {
   'i24-a11y-ui': ['leave-dialog-fi-320-200', 'delete-card-fi-320-200', 'outfit-leave-sv-320-200', 'deletion-resume-sv-320-200']
     .map((name) => `i24-visual/${name}.png`),
   'st1b-stylist-ui': ['chat-en-desktop', 'chat-fi-mobile', 'consent-sv-mobile', 'paused-en-320-200'].map((name) => `st1b-visual/${name}.png`),
+  'ad1-admin-ui': ['spending-en-desktop', 'edit-confirm-fi-mobile', 'spending-sv-320-200', 'settings-note-en-mobile'].map((name) => `ad1-visual/${name}.png`),
   };
 // Written by tests/pwa/visual.spec.ts, so they upload from the PWA job that runs it.
 const pwaArtifacts: Record<string, string[]> = {
@@ -121,7 +122,7 @@ describe('CI workflow browser split', () => {
     expect(projects).toEqual(['chromium', 'mobile', 'webkit-photo']);
     expect(config).toContain("testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', "
       + "'item-details.spec.ts', 'garment-fields.spec.ts', 'ai-photo-first.spec.ts', 'items.spec.ts', 'ux-l1a.spec.ts', "
-      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts', 'enhancement.spec.ts'],");
+      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts', 'enhancement.spec.ts', 'admin.spec.ts'],");
     expect(config).toContain('  failOnFlakyTests: Boolean(process.env.CI),\n');
     expect(config).toContain('  forbidOnly: Boolean(process.env.CI),\n');
     const app = job('app'), webkit = job('webkit-photo');

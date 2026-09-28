@@ -555,6 +555,43 @@ function enhanceStatus(setup: EnhanceSetup, consent: number | null) {
     policy, usage: { enhanceMicro: setup.enhanceMicro, totalMicro: setup.totalMicro, enhanceLastHour: 0, warning: false } };
 }
 
+// AD1b admin fixture: the admin_ai_spending reply for two synthetic accounts, in the shape the AD1a function builds.
+export type AdminLimits = Record<'shared' | 'stylist' | 'enhancement', { monthlyAllowanceMicro: string | null; maxRequestMicro: string | null; maxRequestsPerHour: number | null }>;
+export type AdminWriteReply = { status: number; body?: unknown } | 'lost';
+export const adminStartLimits = (): Record<1 | 2, AdminLimits | null> => ({
+  1: { shared: { monthlyAllowanceMicro: '20000000', maxRequestMicro: '4097351', maxRequestsPerHour: 30 },
+    stylist: { monthlyAllowanceMicro: '5000000', maxRequestMicro: '129360', maxRequestsPerHour: 20 },
+    enhancement: { monthlyAllowanceMicro: '2000000', maxRequestMicro: '150000', maxRequestsPerHour: 10 } },
+  2: { shared: { monthlyAllowanceMicro: '10000000', maxRequestMicro: '4097351', maxRequestsPerHour: 30 },
+    stylist: { monthlyAllowanceMicro: '2000000', maxRequestMicro: '129360', maxRequestsPerHour: 20 },
+    enhancement: { monthlyAllowanceMicro: null, maxRequestMicro: null, maxRequestsPerHour: null } },
+});
+const adminSpend = (confirmed: number, estimated: number, reserved: number, requests: number) => ({ confirmedMicro: String(confirmed),
+  estimatedMicro: String(estimated), reservedMicro: String(reserved), totalMicro: String(confirmed + estimated + reserved), requests });
+export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits | null>, version: Record<1 | 2, number>) {
+  const now = new Date();
+  const months = Array.from({ length: count }, (_, index) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - index, 15)).toISOString().slice(0, 7));
+  const account = (admissionNo: 1 | 2) => {
+    const scale = admissionNo === 1 ? 1 : 0.5;
+    const history = months.map((month, index) => ({ month,
+      analysis: index === 0 ? adminSpend(Math.round(1_234_567 * scale), 300_000, 4_097_351, 5) : adminSpend(Math.round(2_500_000 * scale) + index * 100_000, 0, 0, 7 + index),
+      stylist: index === 0 ? adminSpend(0, 4_840, admissionNo === 1 ? 129_360 : 0, 2) : adminSpend(index * 12_345, 0, 0, index),
+      enhancement: admissionNo === 1 && index === 1 ? adminSpend(120_000, 0, 0, 1) : adminSpend(0, 0, 0, 0),
+      tryOn: { available: false } }));
+    const current = history[0]!;
+    const used = (spend: { totalMicro: string }) => spend.totalMicro;
+    return { admissionNo, enabled: true, accountVersion: (admissionNo === 1 ? 'a' : 'b').repeat(63) + String(version[admissionNo] % 10),
+      features: { analysis: { configured: true, activated: true }, stylist: { configured: true, activated: true },
+        enhancement: { configured: admissionNo === 1, activated: false } },
+      limits: limits[admissionNo], history,
+      current: { period: months[0]!, shared: { usedMicro: String(BigInt(used(current.analysis)) + BigInt(used(current.stylist)) + BigInt(used(current.enhancement))), lastHour: 3 },
+        analysis: { usedMicro: used(current.analysis), lastHour: 2 }, stylist: { usedMicro: used(current.stylist), lastHour: 1 },
+        enhancement: { usedMicro: used(current.enhancement), lastHour: 0 } },
+      openAllocations: { enhancementProbe: admissionNo === 1 ? { count: 1, allocationMicro: '260000', maxCalls: 2 } : { count: 0, allocationMicro: '0', maxCalls: 0 } } };
+  };
+  return { code: 'OK', asOf: now.getTime(), months, accounts: [account(1), account(2)] };
+}
+
 export async function mockBackend(page: Page, options: MockOptions = {}) {
   const profiles: Record<string, JsonRow> = {
     [owners.a]: { owner_id: owners.a, display_name: 'Alex', ui_language: options.initialLanguage ?? null, timezone: 'Europe/Helsinki', currency: 'EUR', version: 1,
@@ -626,6 +663,20 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     consentWrites: [] as { owner: string; body: unknown }[],
     /** Delivered outputs, as the BG2b-1 admission trigger sees them: a new photo with an expired output's hash is refused. */
     outputs: [] as { owner: string; sha256: string; usableUntilMs: number }[],
+  };
+  // AD1b admin: which owner is the app's admin (none by default), each account's limits and a scripted write reply.
+  // Without a script a write behaves like admin_set_ai_limits for the fixture: CONFLICT, UNCHANGED or OK.
+  const adminControl = {
+    missing: false,
+    admin: null as string | null,
+    limits: adminStartLimits(),
+    version: { 1: 1, 2: 1 } as Record<1 | 2, number>,
+    statusFaults: [] as ('fail')[],
+    spendingFaults: [] as ('fail')[],
+    writeReplies: [] as AdminWriteReply[],
+    writes: [] as { owner: string; body: Record<string, unknown> }[],
+    statusReads: 0,
+    spendingReads: [] as { owner: string; months: unknown }[],
   };
   // Backup fixture: attribution histories by item, a hook that runs before each attribution read, and manifest reads.
   const exportControl: { attributions: Map<string, unknown[]>; beforeAttribution: (() => void) | null; manifests: number } = {
@@ -1827,9 +1878,39 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       await route.fulfill({ status: 200, body: bytes, contentType: 'image/jpeg' }); return;
     }
     if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
+    if (url.pathname === '/rest/v1/rpc/admin_status' || url.pathname === '/rest/v1/rpc/admin_ai_spending' || url.pathname === '/rest/v1/rpc/admin_set_ai_limits') {
+      if (adminControl.missing) { await json({ code: 'PGRST202', details: null, hint: null, message: 'Could not find the function' }, 404); return; }
+      const isAdmin = adminControl.admin === owner;
+      if (url.pathname.endsWith('admin_status')) {
+        adminControl.statusReads++;
+        if (adminControl.statusFaults.shift() === 'fail') { await json({ message: 'Service unavailable' }, 503); return; }
+        await json({ code: isAdmin ? 'OK' : 'UNAVAILABLE' }); return;
+      }
+      const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      if (url.pathname.endsWith('admin_ai_spending')) {
+        adminControl.spendingReads.push({ owner, months: body.p_months });
+        if (!isAdmin) { await json({ code: 'UNAVAILABLE' }); return; }
+        if (adminControl.spendingFaults.shift() === 'fail') { await json({ message: 'Service unavailable' }, 503); return; }
+        const count = body.p_months;
+        if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > 12) { await json({ code: 'INVALID_INPUT' }); return; }
+        await json(adminSpending(count, adminControl.limits, adminControl.version)); return;
+      }
+      adminControl.writes.push({ owner, body });
+      if (!isAdmin) { await json({ code: 'UNAVAILABLE' }); return; }
+      const scripted = adminControl.writeReplies.shift();
+      if (scripted === 'lost') { await route.abort('failed'); return; }
+      if (scripted) { await json(scripted.body ?? null, scripted.status); return; }
+      const target = body.p_admission_no === 1 || body.p_admission_no === 2 ? body.p_admission_no : null;
+      const current = target ? adminControl.limits[target] : null;
+      if (!target || !current) { await json({ code: target ? 'UNCONFIGURED' : 'INVALID_INPUT' }); return; }
+      if (JSON.stringify(body.p_expected) !== JSON.stringify(current)) { await json({ code: 'CONFLICT', limits: current }); return; }
+      if (JSON.stringify(body.p_limits) === JSON.stringify(current)) { await json({ code: 'UNCHANGED', limits: current }); return; }
+      adminControl.limits[target] = body.p_limits as AdminLimits;
+      await json({ code: 'OK', limits: body.p_limits, belowUse: false }); return;
+    }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { provenance: provenanceRows, stylistControl, enhanceControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, holdFeedbackReads, outfitControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { provenance: provenanceRows, stylistControl, enhanceControl, adminControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, holdFeedbackReads, outfitControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

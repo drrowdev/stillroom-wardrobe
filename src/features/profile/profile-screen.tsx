@@ -9,6 +9,7 @@ import { LanguageSettings } from '../settings/language-settings';
 import { AiSettings } from '../settings/ai-settings';
 import { StylistSettings } from '../settings/stylist-settings';
 import { EnhanceSettings } from '../settings/enhance-settings';
+import { AdminEntry } from '../admin/admin-entry';
 import { enhanceStoreFor } from '../settings/enhance-store';
 import type { StylistStore } from '../stylist/stylist-store';
 import { useStylist, viewOf } from '../stylist/use-stylist';
@@ -111,6 +112,7 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
         unresolved={unresolved} sharedLimit={stylistShown} language={language} online={online} t={t} />
       <StylistSettings store={stylist} busy={busy || reading} language={language} online={online} t={t} />
       <EnhanceSettings store={enhanceStoreFor(client, scope)} busy={busy || reading} language={language} online={online} t={t} />
+      <AdminEntry client={client} scope={scope} t={t} />
       <AvoidedPairs client={client} scope={scope} images={images} language={language} online={online} t={t} />
       <InstallHint t={t} />
       <BackupSettings client={client} scope={scope} language={language} online={online} t={t} />
