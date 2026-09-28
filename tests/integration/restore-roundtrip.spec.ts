@@ -380,7 +380,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
       if (blocked > 0) { blocked--; await route.abort('failed'); return; }
       await route.fallback();
     };
-    await page.route('**/rest/v1/rpc/reserve_image_change', blockReservation);
+    await page.route('**/rest/v1/rpc/reserve_restored_image_change', blockReservation);
     await button(page, 'restore.start').click();
     await expect(card.getByRole('alert')).toHaveText(text('restore.stopped'), slow);
     // P and everything that refers to it (outfit, rule, vote, worn day) wait for the next run.
@@ -394,7 +394,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     for (const table of ['outfits', 'outfit_items', 'wear_events', 'wear_event_items', 'combination_rules', 'suggestion_feedback'] as const) {
       check(canonical(rowsOf(partial, table)) === canonical(rowsOf(aBefore, table)));
     }
-    await page.unroute('**/rest/v1/rpc/reserve_image_change', blockReservation);
+    await page.unroute('**/rest/v1/rpc/reserve_restored_image_change', blockReservation);
 
     // ---- The same run continued. ----
     stage = 'continued-run';

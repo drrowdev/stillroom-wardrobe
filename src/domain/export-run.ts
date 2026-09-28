@@ -10,11 +10,14 @@ export type PreparedSnapshot = {
   items: number; photos: number;
 };
 // `manifest` returns the raw export_manifest result, `attribution` one saved item's item_attribution_history_v2 and
-// `digest` the attribution_digest of all the owner's tag history.
+// `digest` the attribution_digest of all the owner's tag history; `provenance` and `provenanceDigest` are
+// image_provenance_v1 and image_provenance_digest_v1.
 export type SnapshotSource = {
   manifest: (exportId: string, signal: AbortSignal) => Promise<unknown>;
   attribution: (itemId: string, signal: AbortSignal) => Promise<unknown>;
   digest: (signal: AbortSignal) => Promise<unknown>;
+  provenance: (signal: AbortSignal) => Promise<unknown>;
+  provenanceDigest: (signal: AbortSignal) => Promise<unknown>;
 };
 export type FetchFile = (ref: FileRef) => Promise<Uint8Array>;
 
@@ -22,8 +25,8 @@ async function manifest(source: SnapshotSource, ownerId: string, exportId: strin
   return readRawManifest(await source.manifest(exportId, signal), ownerId, exportId);
 }
 
-async function digest(source: SnapshotSource, signal: AbortSignal): Promise<string> {
-  const value = await source.digest(signal);
+async function digest(source: SnapshotSource, signal: AbortSignal, which: 'digest' | 'provenanceDigest' = 'digest'): Promise<string> {
+  const value = await source[which](signal);
   if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) throw new BackupFormatError('invalid');
   return value;
 }
@@ -31,7 +34,9 @@ async function digest(source: SnapshotSource, signal: AbortSignal): Promise<stri
 // The tag-history digest, one snapshot, the attribution of each saved item, then a second snapshot and digest: if items,
 // photos or any tag history changed in between, the backup is refused rather than mixing two states. Tag history is
 // covered by the digest, never by item versions (restore relies on a version equal to the photo-chain length).
+// Photo provenance is bracketed the same way by its own digest, outside the unchanged export manifest.
 export async function collectSnapshot(source: SnapshotSource, ownerId: string, exportId: string, signal: AbortSignal): Promise<PreparedSnapshot> {
+  const provenanceBefore = await digest(source, signal, 'provenanceDigest');
   const before = await digest(source, signal);
   const raw = await manifest(source, ownerId, exportId, signal);
   const ids = savedItemIds(raw);
@@ -48,7 +53,9 @@ export async function collectSnapshot(source: SnapshotSource, ownerId: string, e
     || await digest(source, signal) !== before) {
     throw new BackupFormatError('changed');
   }
-  const metadata = projectSaved(raw, new Map([...attributions].sort(([a], [b]) => a < b ? -1 : 1)));
+  const provenance = await source.provenance(signal);
+  if (await digest(source, signal, 'provenanceDigest') !== provenanceBefore) throw new BackupFormatError('changed');
+  const metadata = projectSaved(raw, new Map([...attributions].sort(([a], [b]) => a < b ? -1 : 1)), provenance);
   return fromMetadata(metadata, await metadataDigest(metadata));
 }
 

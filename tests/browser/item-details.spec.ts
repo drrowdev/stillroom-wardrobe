@@ -370,7 +370,9 @@ function writes(page: Page) {
   const calls: Array<{ method: string; path: string; query: URLSearchParams; body: Record<string, unknown> }> = [];
   page.on('request', (request) => {
     const url = new URL(request.url());
-    if (url.pathname.startsWith('/rest/') && ['POST', 'PATCH', 'DELETE'].includes(request.method())) {
+    // image_provenance_v1 is a read-only RPC; the detail view re-reads it with the refreshed images.
+    if (url.pathname.startsWith('/rest/') && url.pathname !== '/rest/v1/rpc/image_provenance_v1'
+      && ['POST', 'PATCH', 'DELETE'].includes(request.method())) {
       calls.push({ method: request.method(), path: url.pathname, query: url.searchParams, body: request.postDataJSON() as Record<string, unknown> });
     }
   });
@@ -827,7 +829,8 @@ test('synthetic saved detail visual evidence retains functional assertions in ev
     }
     await page.setViewportSize({ width: capture.width, height: 900 });
     expect(api.profiles[owners.a]?.owner_id === owners.a && api.profiles[owners.a]?.ui_language === capture.language
-      && api.requests.filter((request) => request.path.startsWith('/rest/')).every((request) => request.owner === owners.a && request.ownerFilter === `eq.${owners.a}`)).toBe(true);
+      && api.requests.filter((request) => request.path.startsWith('/rest/')).every((request) => request.owner === owners.a && (request.ownerFilter === `eq.${owners.a}`
+        || request.path === '/rest/v1/rpc/image_provenance_v1' && request.ownerFilter === null))).toBe(true);
     expect(await page.evaluate(({ origin, language, id }) => {
       const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility === 'visible';
       const values = [...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea')]

@@ -55,7 +55,10 @@ export async function restoreId(version: BackupVersion, targetUid: string, expor
 
 // ---- The saved wardrobe, as restore uses it. ----
 export type PhotoFile = { sha256: string; byteLength: number };
-export type RestorePhoto = { sourceId: string; state: 'ready' | 'retired'; altText: string; width: number; height: number; main: PhotoFile; thumb: PhotoFile };
+/** A v4 backup's record that this photo was edited with AI; `backupSha256` is the exported main photo's hash. */
+export type RestoreProvenance = Readonly<{ modelId: string; manifestId: string; backupSha256: string }>;
+export type RestorePhoto = { sourceId: string; state: 'ready' | 'retired'; altText: string; width: number; height: number; main: PhotoFile; thumb: PhotoFile;
+  provenance: RestoreProvenance | null };
 export type RestoreItem = { sourceId: string; row: Row; kinds: Partial<Record<ProvenanceField, ProvenanceKind>>; photos: RestorePhoto[] };
 export type RestoreOutfit = { sourceId: string; title: string; occasion: string; notes: string; favourite: boolean; itemIds: string[] };
 export type RestoreEntry = { sourceId: string; itemId: string | null; title: string; category: string };
@@ -71,6 +74,8 @@ export type RestoreData = {
   rules: Array<{ low: string; high: string }>; feedback: Array<{ itemIds: string[]; vote: number }>;
   // Tag history per backup item ID, in order; only items that have some are present.
   attributions: ReadonlyMap<string, RestoreAttribution[]>; attributionCount: number;
+  // Version 4: AI-edit records keyed by the backup's photo ID; empty for older versions.
+  provenance: ReadonlyMap<string, RestoreProvenance>;
 };
 const aiEstimated: readonly string[] = ['material', 'seasons', 'formality', 'style_tags'];
 const aiObserved: readonly string[] = ['category', 'subcategory', 'colours', 'pattern', 'sleeve_length', 'garment_length',
@@ -92,18 +97,22 @@ export function restoredKinds(row: Row): Partial<Record<ProvenanceField, Provena
 }
 const byRetired = (a: Row, b: Row) => String(a.retired_at) < String(b.retired_at) ? -1 : String(a.retired_at) > String(b.retired_at) ? 1
   : String(a.id) < String(b.id) ? -1 : 1;
-function photoOf(image: Row): RestorePhoto {
+function photoOf(image: Row, provenance: ReadonlyMap<string, RestoreProvenance>): RestorePhoto {
   return { sourceId: String(image.id), state: image.state === 'ready' ? 'ready' : 'retired', altText: String(image.alt_text),
     width: Number(image.width), height: Number(image.height),
     main: { sha256: String(image.main_sha256), byteLength: Number(image.main_bytes) },
-    thumb: { sha256: String(image.thumb_sha256), byteLength: Number(image.thumb_bytes) } };
+    thumb: { sha256: String(image.thumb_sha256), byteLength: Number(image.thumb_bytes) },
+    provenance: provenance.get(String(image.id)) ?? null };
 }
 export function describeSaved(metadata: SavedMetadata, version: BackupVersion): RestoreData {
   const t = metadata.tables;
+  // assertMetadata has checked each entry against its exported photo.
+  const provenance = new Map((metadata.provenance ?? []).map(entry => [entry.imageId,
+    Object.freeze({ modelId: entry.modelId, manifestId: entry.manifestId, backupSha256: entry.backupSha256 })] as const));
   const items = t.items.map((row): RestoreItem => {
     const own = t.item_images.filter(image => image.item_id === row.id);
     // Oldest first: retired photos in the order they were replaced, the current photo last.
-    const photos = [...own.filter(image => image.state === 'retired').sort(byRetired), ...own.filter(image => image.state === 'ready')].map(photoOf);
+    const photos = [...own.filter(image => image.state === 'retired').sort(byRetired), ...own.filter(image => image.state === 'ready')].map(image => photoOf(image, provenance));
     return { sourceId: String(row.id), row, kinds: restoredKinds(row), photos };
   });
   const outfits = t.outfits.map((row): RestoreOutfit => ({ sourceId: String(row.id), title: String(row.title), occasion: String(row.occasion),
@@ -116,7 +125,7 @@ export function describeSaved(metadata: SavedMetadata, version: BackupVersion): 
   return { version, exportId: metadata.export_id, sourceOwner: metadata.owner_id, createdAt: metadata.created_at, items, outfits, events,
     rules: t.combination_rules.map(rule => ({ low: String(rule.item_low), high: String(rule.item_high) })),
     feedback: t.suggestion_feedback.map(entry => ({ itemIds: (entry.item_ids as unknown[]).map(String), vote: Number(entry.vote) })),
-    attributions: attributionsOf(t.item_attributions), attributionCount: t.item_attributions.length };
+    attributions: attributionsOf(t.item_attributions), attributionCount: t.item_attributions.length, provenance };
 }
 // assertMetadata has already checked every entry, the positions (0, 1, ... per item) and each photo's item.
 function attributionsOf(rows: readonly Row[]): Map<string, RestoreAttribution[]> {

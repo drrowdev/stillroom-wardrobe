@@ -762,5 +762,26 @@ the inactive job `stillroom-enhance-expire`) and `enhance_provider_control`.
 Provenance is attached server-side on an image's pending -> ready publication;
 the client never asserts it. `restore_image_provenance` accepts a v4-marked
 image that was published (ready, or retired by a later restored photo) and
-refuses pending images and images retired without publication. Export v3 is unchanged; v4 and its reader are
-BG2b-2.
+refuses pending images and images retired without publication.
+
+BG2b-2 (client, inactive): the browser sends only the cut-out after BG1 removal and
+only when `enhance_status` reports the feature activated, consented and
+available. The enhanced JPEG must pass the shared admission profile, match the
+returned SHA-256 and length and pass the fidelity heuristic; otherwise the cut-out
+is kept. Save and Replace use the existing checked reservation and finalisation
+chain with the enhanced bytes. A backup is v4 only when at least one exported
+image has provenance (projected onto the exported image set, each hash checked
+against `main_sha256`); otherwise it stays byte-identical v3 with no
+`provenance` key. Restore reads v1-v4 and passes a provenance mode per image; an
+enhanced photo is never re-encoded, and one that cannot be preserved is restored
+without the label.
+
+Operator probe (same handler): the verified owner JWT plus
+`X-Stillroom-Probe-Authorisation` (a database-bound authorisation with expiry,
+call and spend limits) and `X-Stillroom-Probe-Token` (the server-only
+`ENHANCE_PROBE_TOKEN`, compared in constant time). It runs only while the owner's
+`enhance_activated` is false, refuses any request with an `Origin`, and with no
+secret configured refuses every probe request before any RPC. After the claim,
+one work promise is registered with `EdgeRuntime.waitUntil` and awaited; without
+a registrar nothing is claimed, and a registration failure settles
+`NOT_DISPATCHED` with no provider call.

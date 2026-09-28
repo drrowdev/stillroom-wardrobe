@@ -35,7 +35,7 @@ export function RestoreSettings({ client, scope, language, online, t }: Props) {
     if (state.kind === 'failed' || state.kind === 'stopped' || state.kind === 'incomplete' || state.kind === 'idle' && state.recheck) alert.current?.focus();
   }, [state]);
   const number = (value: number) => new Intl.NumberFormat(locales[language]).format(value);
-  const plural = (key: 'backup.items' | 'restore.outfits' | 'restore.reencoded' | 'restore.attributionsKept', value: number) => t(
+  const plural = (key: 'backup.items' | 'restore.outfits' | 'restore.reencoded' | 'restore.attributionsKept' | 'restore.unlabelledEnhanced', value: number) => t(
     new Intl.PluralRules(locales[language]).select(value) === 'one' ? `${key}_one` : `${key}_other`, { count: number(value) });
 
   function reset() {
@@ -142,12 +142,14 @@ export function RestoreSettings({ client, scope, language, online, t }: Props) {
         { n: number(state.result.conflicts + state.result.outfitConflicts + state.result.historyConflicts) })}</p>}
       {state.result.trash > 0 && <p>{t('restore.inTrash', { n: number(state.result.trash) })}</p>}
       {state.result.attributionsKept > 0 && <p>{plural('restore.attributionsKept', state.result.attributionsKept)}</p>}
+      {state.result.unlabelledEnhanced > 0 && <p>{plural('restore.unlabelledEnhanced', state.result.unlabelledEnhanced)}</p>}
       <button type="button" className="button button-secondary" onClick={reset}>{t('backup.finish')}</button>
     </div>}
     {state.kind === 'incomplete' && <div className="stack">
       <p ref={alert} tabIndex={-1} role="alert" className="notice notice-error">{t('restore.incomplete')}</p>
       <p>{t('restore.blocked', { n: number(state.result.blocked) })}</p>
       {state.result.attributionsKept > 0 && <p>{plural('restore.attributionsKept', state.result.attributionsKept)}</p>}
+      {state.result.unlabelledEnhanced > 0 && <p>{plural('restore.unlabelledEnhanced', state.result.unlabelledEnhanced)}</p>}
       {state.result.deferred > 0 && <p>{t('restore.notRestored', { n: number(state.result.deferred) })}</p>}
       <button type="button" className="button button-secondary" onClick={reset}>{t('backup.finish')}</button>
     </div>}

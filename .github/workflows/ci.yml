@@ -271,6 +271,12 @@ jobs:
             test-results/bg1-visual/removed-en-desktop.png
             test-results/bg1-visual/working-sv-mobile.png
             test-results/bg1-visual/fallback-fi-mobile.png
+            test-results/bg1-visual/enhancing-en-mobile.png
+            test-results/bg1-visual/enhanced-en-desktop.png
+            test-results/bg1-visual/fallback-sv-mobile.png
+            test-results/bg1-visual/reverted-en-mobile.png
+            test-results/bg1-visual/enhanced-fi-mobile.png
+            test-results/bg1-visual/settings-fi-mobile.png
           if-no-files-found: error
           retention-days: 1
 

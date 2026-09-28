@@ -11,7 +11,7 @@ import { ORIGINAL_EDIT, type PhotoEdit } from '../../images/photo-edit';
 import { LazyBoundary } from '../../app/lazy';
 import { lazyNamed, preloadable } from '../../app/lazy-load';
 import { newSaveAttempt, saveItem, saveAnalyzedItem, type SaveStage } from '../../images/upload';
-import { AnalyzedSaveRefusedError, errorKey, isAborted } from '../../data/errors';
+import { AnalyzedSaveRefusedError, EnhancementExpiredError, errorKey, isAborted } from '../../data/errors';
 import { newAnalyzedSaveAttempt, newUnverifiedSaveAttempt, type AnalyzedSaveAttempt } from '../../domain/analyzed-save';
 import type { AiClient } from '../../data/ai';
 import { useAiDraft } from './use-ai-draft';
@@ -19,6 +19,8 @@ import { AnalysisStatus } from './analysis-status';
 import type { BeforeDiscard } from '../../app/dialog';
 import { BackgroundNote, BackgroundStatus } from './background';
 import { preparingMessage, useBackground } from './use-background';
+import { useEnhancement } from './use-enhancement';
+import { EnhancementStatus } from './enhancement-status';
 
 const loadImaging = preloadable(() => import('../../images/imaging'));
 const CropEditor = lazyNamed(() => import('../../images/crop-editor'), 'CropEditor');
@@ -45,6 +47,10 @@ type Props = {
 export function AddItem({ client, scope, currency, online, t, language, onSaved, onBack, onDirty, ai, onBeforeDiscard }: Props) {
   const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  // A3: the settled H1 while it is being enhanced. Shown, but not committed: the committed photo, the accepted crop and
+  // the settled background stay as they were until this preparation commits.
+  const [provisional, setProvisional] = useState<{ photo: PreparedPhoto; crop: boolean } | null>(null);
+  const [provisionalPreview, setProvisionalPreview] = useState<string | null>(null);
   const [fullPhoto, setFullPhoto] = useState<CropSource | null>(null);
   const [fullPreview, setFullPreview] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -52,6 +58,10 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   const [initialCurrency] = useState(currency);
   const analysis = useAiDraft(ai, currency, language);
   const background = useBackground(scope);
+  const onlineNow = useRef(online);
+  useEffect(() => { onlineNow.current = online; }, [online]);
+  const expiring = useRef<() => void>(() => {});
+  const enhancement = useEnhancement(client, scope, () => expiring.current());
   const { draft, description: altText } = analysis;
   const title = draft.raw.title;
   const [preparing, setPreparing] = useState(false);
@@ -113,6 +123,12 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     return () => URL.revokeObjectURL(url);
   }, [photo]);
   useEffect(() => {
+    if (!provisional) { setProvisionalPreview(null); return; }
+    const url = URL.createObjectURL(provisional.photo.main);
+    setProvisionalPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [provisional]);
+  useEffect(() => {
     if (!fullPhoto) { setFullPreview(null); return; }
     const url = URL.createObjectURL(fullPhoto.main);
     setFullPreview(url);
@@ -133,6 +149,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     setAcceptedEdit(ORIGINAL_EDIT);
     setPhoto(null);
     background.reset();
+    enhancement.clear();
     await prepare(file, ORIGINAL_EDIT, true);
   }
   async function prepare(file: Blob, edit: PhotoEdit, replacing = false): Promise<void> {
@@ -156,10 +173,21 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
         imaging = await loadImaging();
         // The first settled photo is analysed once: removal (or its fallback) finishes before commitPhoto.
         const prepared = await background.prepare(imaging, file, edit, signal, replacing, () => preparation.current === controller);
-        if (!signal.aborted) {
-          setPhoto(prepared.photo);
+        if (signal.aborted) return;
+        const cutOut = prepared.state === 'removed';
+        if (cutOut) setProvisional({ photo: prepared.photo, crop: !replacing });
+        let stage;
+        try {
+          stage = await enhancement.run(prepared.photo, { cutOut, online: onlineNow.current, signal,
+            current: () => preparation.current === controller });
+        } finally { if (cutOut) setProvisional(null); }
+        // An aborted stage (crop cancel, discard, a newer photo, logout) commits nothing and starts no analysis.
+        if (stage.kind !== 'aborted' && !signal.aborted) {
+          const settled = stage.kind === 'enhanced' ? stage.photo : prepared.photo;
+          setPhoto(settled);
           background.settle(prepared.state);
-          void analysis.commitPhoto(prepared.photo);
+          enhancement.commit(stage, prepared.photo);
+          void analysis.commitPhoto(settled);
           if (replacing) setFullPhoto(prepared.crop);
           pendingCrop.current = false;
           setAcceptedEdit(edit);
@@ -192,6 +220,8 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
       focusGarmentField(!photo ? 'choose-photo' : first ? `item-${first}` : 'item-alt');
       return;
     }
+    // An unreserved enhanced draft whose evidence has lapsed goes back to H1 first; Save is pressed again.
+    if (!attempt && enhancement.lapsed()) { expiring.current(); return; }
     submitLatch.current = true;
     setInvalid(false);
     setError(null);
@@ -210,6 +240,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
       if (!current) return;
       saving = current;
       setAttempt(current);
+      enhancement.freeze();
       if (manualTransport.current) await saveItem(client, scope, current, setStage);
       else await saveAnalyzedItem(client, scope, current, setStage, (reserved, fingerprint) => {
         if (reserved === current && !scope.signal.aborted) receipt.current = { attempt: reserved, fingerprint };
@@ -218,6 +249,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
         original.current = null;
         setPhoto(null);
         setFullPhoto(null);
+        enhancement.clear();
         onSaved();
       }
     } catch (problem) {
@@ -226,10 +258,24 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           && problem.itemId === saving.itemId && problem.imageId === saving.imageId && receipt.current === null) {
           setAttempt(null);
           analysis.refuseSave();
+          enhancement.thaw();
+        } else if (problem instanceof EnhancementExpiredError && receipt.current === null && !attempt) {
+          // Refused before any reservation: the draft is unreserved again and goes back to H1 with one new analysis.
+          setAttempt(null);
+          enhancement.thaw();
+          revertEnhancement('generic', true);
         } else setError(errorKey(problem));
       }
     } finally { if (!scope.signal.aborted) { submitLatch.current = false; setStage(null); } }
   }
+  function revertEnhancement(line: 'none' | 'generic' = 'none', afterRefusal = false) {
+    if ((!afterRefusal && (frozen || submitLatch.current)) || preparing || scope.signal.aborted) return;
+    const h1 = enhancement.revert(line);
+    if (!h1) return;
+    setPhoto(h1);
+    void analysis.commitPhoto(h1);
+  }
+  expiring.current = () => revertEnhancement('generic');
   function useOriginalBackground() {
     if (frozen || submitLatch.current || scope.signal.aborted) return;
     // After a finished removal this is a new photo generation, analysed again.
@@ -248,23 +294,26 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
       <div className="page-heading"><div><h1 id="capture-title" tabIndex={-1}>{t('capture.title')}</h1></div></div>
       <form className="capture-layout" onSubmit={(event) => { void submit(event); }} noValidate>
         <div className="photo-panel">
-          {editing && fullPhoto && fullPreview ? <LazyBoundary t={t}
+          {editing && fullPhoto && fullPreview && !provisional ? <LazyBoundary t={t}
             action={<button id="crop-leave" className="button button-quiet" type="button" onClick={cancelEdit}>{t('photo.cancelCrop')}</button>}>
             <CropEditor preview={fullPreview} width={fullPhoto.width} height={fullPhoto.height}
               accepted={acceptedEdit} preparing={preparing} t={t}
               onApply={(edit) => { if (original.current) void prepare(original.current, edit); }}
               onCancel={cancelEdit} /></LazyBoundary>
-          : !editing && <div className={`capture-photo ${preview ? 'has-photo' : ''}`} aria-busy={preparing}>
-            {preview ? <img src={preview} alt={altText || title || t('capture.photo')} /> : preparing ? <div className="photo-prompt"><span className="spinner" /><p role="status">{t(preparingMessage(background.state, background.downloading, 'capture.preparing'))}</p></div> : <div className="photo-prompt"><span className="photo-prompt-icon"><Icon name="photo" /></span><h2>{t('capture.photo')}</h2><p>{t('capture.photoHint')}</p><BackgroundNote t={t} language={language} /></div>}
+          : (!editing || provisional) && <div className={`capture-photo ${(provisionalPreview ?? preview) ? 'has-photo' : ''}`} aria-busy={preparing}>
+            {provisionalPreview ? <img src={provisionalPreview} alt={altText || title || t('capture.photo')} />
+            : preview ? <img src={preview} alt={altText || title || t('capture.photo')} /> : preparing ? <div className="photo-prompt"><span className="spinner" /><p role="status">{t(preparingMessage(background.state, background.downloading, 'capture.preparing'))}</p></div> : <div className="photo-prompt"><span className="photo-prompt-icon"><Icon name="photo" /></span><h2>{t('capture.photo')}</h2><p>{t('capture.photoHint')}</p><BackgroundNote t={t} language={language} /></div>}
           </div>}
           <input ref={library} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1} aria-label={t('capture.library')} disabled={frozen} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
           <input ref={camera} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" tabIndex={-1} aria-label={t('capture.camera')} disabled={frozen} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
           {!editing && <div className="photo-actions"><button id="choose-photo" className="button button-secondary" type="button" disabled={frozen || preparing} onClick={() => library.current?.click()}><Icon name="photo" />{t(photo ? 'capture.replace' : 'capture.library')}</button><button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => camera.current?.click()}><Icon name="camera" />{t('capture.camera')}</button>
             {fullPhoto && fullPreview && <button id="edit-photo" className="button button-secondary" type="button"
               disabled={frozen || preparing} aria-expanded={editing} onClick={() => setEditing(true)}><Icon name="crop" />{t('photo.edit')}</button>}</div>}
-          {!editing && <BackgroundStatus state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
+          {!editing && !provisional && <BackgroundStatus state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
             disabled={frozen || preparing || busy} t={t} onUseOriginal={useOriginalBackground} />}
-          {(editing || preparing) && <p id="photo-pending" tabIndex={-1} role="status" className="notice">{t(preparing ? 'photo.pendingPreparation' : 'photo.pendingCrop')}</p>}
+          {(!editing || provisional) && <EnhancementStatus view={enhancement.view} disabled={frozen || preparing || busy} t={t}
+            onSkip={enhancement.skip} onRevert={() => revertEnhancement()} onCancelCrop={provisional?.crop ? cancelEdit : undefined} />}
+          {(editing || preparing) && !enhancement.view.working && <p id="photo-pending" tabIndex={-1} role="status" className="notice">{t(preparing ? 'photo.pendingPreparation' : 'photo.pendingCrop')}</p>}
           {invalid && !photo && <p className="field-error">{t('common.required')}</p>}
           <details className="copy-details"><summary>{t('photo.cameraHelp')}</summary><p>{t('photo.cameraFallback')}</p></details>
         </div>

@@ -7,7 +7,7 @@ import { AppError, isAborted, requireSuccess, throwIfAborted } from './errors';
 import { BackupFormatError, canonical, sha256Hex, type JpegCheck, type PartSource } from '../domain/export-format';
 import {
   chainState, missingPart, readBackup, restoreId, selectBackupFiles,
-  type ChainImage, type ChainState, type ReadBackup, type RestoreAttribution, type RestoreItem,
+  type ChainImage, type ChainState, type ReadBackup, type RestoreAttribution, type RestoreItem, type RestorePhoto, type RestoreProvenance,
 } from '../domain/restore-plan';
 import { parseFieldProvenance, type FieldProvenance } from '../domain/attribute-provenance';
 import { garmentPayload, parseGarmentValues, type GarmentPayload, type GarmentValues } from '../domain/garment-fields';
@@ -19,7 +19,7 @@ import { checkRestoreJpeg } from '../images/restore-jpeg';
 import { planRestorePhoto, restorePhotoDeps, type PhotoPlan, type RestorePhotoDeps } from '../images/restore-photo';
 import type { PreparedPhoto } from '../images/process-jpeg';
 import { ImageChangeClient } from '../images/replace';
-import { saveItem, type SaveAttempt } from '../images/upload';
+import { saveItem, type RestoreMode, type SaveAttempt } from '../images/upload';
 
 // While reading, before any photo is decoded: the whole structure of every main photo (Q6), and the size of every thumbnail.
 // Thumbnails are never stored from a backup; a new one is always made from the main photo.
@@ -52,9 +52,17 @@ export type PhotoOutcome = { sourceImageId: string; planned: Pick<PhotoPlan, 'ma
 // `deferred` counts outfits, rules, feedback and history held back until a failed or blocked item is restored.
 // `attributions` counts items whose tag history from the backup is now here (restored now or by an earlier run of the same
 // backup); `attributionsKept` counts items that already had tag history of their own, which was left as it is.
+// `unlabelledEnhanced` counts photos edited with AI that this run restored without that label, because their bytes
+// couldn't be kept exactly as backed up (Q6).
 export type RestoreResult = { restored: number; same: number; conflicts: number; trash: number; failed: number; blocked: number; deferred: number;
   outfits: number; outfitConflicts: number; history: number; historyConflicts: number; attributions: number; attributionsKept: number;
-  photos: PhotoOutcome[] };
+  unlabelledEnhanced: number; photos: PhotoOutcome[] };
+
+/** The label mode fixed at Check: kept only when the backed-up bytes are stored unchanged (Q6). */
+export function restoreModeOf(photo: RestorePhoto, plan: Pick<PhotoPlan, 'main' | 'mainSha256'>): RestoreMode {
+  if (!photo.provenance) return 'legacy';
+  return plan.main === 'preserved' && plan.mainSha256 === photo.provenance.backupSha256 ? 'v4' : 'unlabelled';
+}
 
 /** A garment row in the backup that the restore couldn't write. Only its position is kept, never its content or ID. */
 export class RestoreGarmentError extends AppError {
@@ -242,12 +250,13 @@ export async function checkBackup(client: AppClient, scope: OwnerScope, files: r
 
 const conflictError = (error: unknown) => isRecord(error) && error.message === 'Request conflict' && (error.code === 'P0001' || error.code === '22023');
 
-type Photos = { backup: ReadBackup; plans: ReadonlyMap<string, PhotoPlan>; deps: RestorePhotoDeps };
+type Photos = { backup: ReadBackup; plans: ReadonlyMap<string, PhotoPlan>; deps: RestorePhotoDeps; modes: ReadonlyMap<string, RestoreMode> };
 // Before each reservation the photo is read and planned again and must match Check exactly. Any difference or refusal stops
 // the whole restore; only a browser that can't process photos right now is an ordinary retry.
-async function preparePhoto(photos: Photos, sourceImageId: string, width: number, height: number, signal: AbortSignal): Promise<PreparedPhoto> {
-  const planned = photos.plans.get(sourceImageId);
-  if (!planned) throw new RestoreRecheckError();
+async function preparePhoto(photos: Photos, source: RestorePhoto, signal: AbortSignal): Promise<{ photo: PreparedPhoto; mode: RestoreMode }> {
+  const { sourceId: sourceImageId, width, height } = source;
+  const planned = photos.plans.get(sourceImageId), mode = photos.modes.get(sourceImageId);
+  if (!planned || !mode) throw new RestoreRecheckError();
   let bytes: Uint8Array<ArrayBuffer>;
   // Read from the chosen file again, not from what Check kept in memory.
   try { bytes = await photos.backup.read(sourceImageId, 'main', true); }
@@ -257,8 +266,9 @@ async function preparePhoto(photos: Photos, sourceImageId: string, width: number
     const { plan, photo } = await planRestorePhoto(sourceImageId, bytes, width, height, signal, photos.deps);
     // Both files this photo would write, kept or re-encoded, must be the ones Check planned.
     if (plan.sourceSha256 !== planned.sourceSha256 || plan.main !== planned.main || plan.reason !== planned.reason
-      || plan.mainSha256 !== planned.mainSha256 || plan.thumbSha256 !== planned.thumbSha256) throw new RestoreRecheckError();
-    return photo;
+      || plan.mainSha256 !== planned.mainSha256 || plan.thumbSha256 !== planned.thumbSha256
+      || restoreModeOf(source, plan) !== mode) throw new RestoreRecheckError();
+    return { photo, mode };
   } catch (error) {
     throwIfAborted(signal);
     if (isAborted(error) || error instanceof RestoreRecheckError) throw error;
@@ -315,12 +325,36 @@ async function saveStatus(client: AppClient, itemId: string, signal: AbortSignal
   return { itemId: value.itemId, imageId: value.imageId, state: value.state };
 }
 
+type ProvenanceOutcome = 'ok' | 'conflict' | 'failed';
+// Attaches a v4 photo's AI-edit record once it is published; an exact replay is `equal`. `busy` is tried once more.
+async function restoreProvenance(client: AppClient, itemId: string, imageId: string, exportId: string, entry: RestoreProvenance,
+  signal: AbortSignal): Promise<ProvenanceOutcome> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data, error } = await client.rpc('restore_image_provenance', { p_item_id: itemId, p_image_id: imageId, p_import_id: exportId,
+      p_entry: { kind: 'ai_edited', model_id: entry.modelId, manifest_id: entry.manifestId, backup_sha256: entry.backupSha256 } }).abortSignal(signal);
+    throwIfAborted(signal);
+    if (error) return conflictError(error) ? 'conflict' : 'failed';
+    const state = isRecord(data) ? data.state : null;
+    if (state === 'created' || state === 'equal') return 'ok';
+    if (state !== 'busy') return 'failed';
+  }
+  return 'failed';
+}
+
 // Every completed photo is checked before it is skipped: its stored files, and the checked save (photo 0) or the completed
-// replacement request (later photos) that created it, with the item version that request expected.
-async function verifyPrefix(client: AppClient, plan: ItemPlan, images: readonly StoredImage[], completed: number, signal: AbortSignal): Promise<boolean> {
+// replacement request (later photos) that created it, with the item version that request expected. A v4 photo's record
+// is attached again (an exact replay when it is already there).
+async function verifyPrefix(client: AppClient, plan: ItemPlan, images: readonly StoredImage[], completed: number, signal: AbortSignal,
+  photos: Photos, exportId: string): Promise<boolean | 'failed'> {
   for (let index = 0; index <= completed; index++) {
     const image = images.find(entry => entry.id === plan.imageIds[index]);
     if (!image || !await storedMatches(client, image, signal)) return false;
+    const source = plan.source.photos[index]!;
+    if (photos.modes.get(source.sourceId) === 'v4' && source.provenance) {
+      const attached = await restoreProvenance(client, plan.id, image.id, exportId, source.provenance, signal);
+      if (attached === 'conflict') return false;
+      if (attached === 'failed') return 'failed';
+    }
     if (index === 0) {
       const saved = await saveStatus(client, plan.id, signal);
       if (!saved || saved.itemId !== plan.id || saved.imageId !== plan.imageIds[0] || saved.state !== 'completed') return false;
@@ -337,7 +371,7 @@ async function verifyPrefix(client: AppClient, plan: ItemPlan, images: readonly 
 // 'failed' can be retried; 'conflict' and 'trash' are final for this item, and nothing here is changed. 'blocked' is an
 // item whose next photo was reserved with other files than this backup gives now: it is never overwritten or renamed.
 type ItemOutcome = ItemStatus | 'failed' | 'blocked';
-type PhotoReport = (index: number, outcome: 'written' | 'present', stored: { mainSha256: string; thumbSha256: string }) => void;
+type PhotoReport = (index: number, outcome: 'written' | 'present', stored: { mainSha256: string; thumbSha256: string }, mode: RestoreMode) => void;
 async function restoreItem(client: AppClient, scope: OwnerScope, photoSource: Photos, plan: ItemPlan, signal: AbortSignal,
   report: PhotoReport): Promise<ItemOutcome> {
   const photos = plan.source.photos;
@@ -350,22 +384,35 @@ async function restoreItem(client: AppClient, scope: OwnerScope, photoSource: Ph
   const initial = state.status;
   if (state.status === 'conflict' || state.status === 'trash') return state.status;
   let completed = state.chain.kind === 'resume' ? state.chain.completed : state.chain.kind === 'complete' ? photos.length - 1 : -1;
-  if (completed >= 0 && !await verifyPrefix(client, plan, state.images, completed, signal)) return 'conflict';
+  const exportId = photoSource.backup.data.exportId;
+  if (completed >= 0) {
+    const verified = await verifyPrefix(client, plan, state.images, completed, signal, photoSource, exportId);
+    if (verified === 'failed') return 'failed';
+    if (!verified) return 'conflict';
+  }
   for (let index = 0; index <= completed; index++) {
     const image = state.images.find(entry => entry.id === plan.imageIds[index])!;
-    report(index, 'present', { mainSha256: image.mainSha256, thumbSha256: image.thumbSha256 });
+    report(index, 'present', { mainSha256: image.mainSha256, thumbSha256: image.thumbSha256 }, photoSource.modes.get(photos[index]!.sourceId)!);
   }
+  // After a photo is published, a v4 record is attached; the item is retried when that doesn't finish.
+  const attach = async (index: number, mode: RestoreMode): Promise<ProvenanceOutcome> => {
+    const entry = photos[index]!.provenance;
+    return mode === 'v4' && entry ? restoreProvenance(client, plan.id, plan.imageIds[index]!, exportId, entry, signal) : 'ok';
+  };
   if (state.status === 'same') return 'same';
   const restored = restoredFields(plan.source);
   if (completed < 0) {
-    const photo = await preparePhoto(photoSource, photos[0]!.sourceId, photos[0]!.width, photos[0]!.height, signal);
+    const { photo, mode } = await preparePhoto(photoSource, photos[0]!, signal);
     const reserved = state.images.find(image => image.id === plan.imageIds[0]);
     if (reserved && (reserved.state !== 'pending' || !sameReservation(reserved, photo, photos[0]!.altText))) return 'blocked';
     const attempt: SaveAttempt = { itemId: plan.id, imageId: plan.imageIds[0]!, values: restored.values,
       payload: { ...restored.payload, field_provenance: restored.provenance }, altText: photos[0]!.altText, photo,
       ownerId: scope.ownerId, epoch: scope.epoch };
-    await saveItem(client, { ...scope, signal }, attempt, () => undefined, 'reserve_restored_item_save');
-    report(0, 'written', { mainSha256: photo.mainSha256, thumbSha256: photo.thumbSha256 });
+    await saveItem(client, { ...scope, signal }, attempt, () => undefined,
+      { name: 'reserve_restored_item_save_v2', importId: exportId, mode });
+    report(0, 'written', { mainSha256: photo.mainSha256, thumbSha256: photo.thumbSha256 }, mode);
+    const attached = await attach(0, mode);
+    if (attached !== 'ok') return attached === 'conflict' ? 'blocked' : 'failed';
     completed = 0;
   }
   const changes = new ImageChangeClient(client, { ...scope, signal });
@@ -374,7 +421,7 @@ async function restoreItem(client: AppClient, scope: OwnerScope, photoSource: Ph
     state = await read();
     if (state.status === 'trash') return 'trash';
     if (state.status !== 'resume' || state.chain.kind !== 'resume' || state.chain.completed !== index - 1 || !state.row) return 'conflict';
-    const photo = await preparePhoto(photoSource, photos[index]!.sourceId, photos[index]!.width, photos[index]!.height, signal);
+    const { photo, mode } = await preparePhoto(photoSource, photos[index]!, signal);
     const requestId = plan.requestIds[index]!, imageId = plan.imageIds[index]!;
     const current = state.images.find(image => image.id === plan.imageIds[index - 1]);
     if (!current || current.state !== 'ready') return 'conflict';
@@ -391,10 +438,12 @@ async function restoreItem(client: AppClient, scope: OwnerScope, photoSource: Ph
       item: { ...restored.payload, field_provenance: parseFieldProvenance(state.row.field_provenance) as Json } as Record<string, Json>,
       image, claim: null, sourceImageId: null };
     const attempt: ImageChangeAttempt = { ownerId: scope.ownerId, epoch: scope.epoch, intent, photo };
-    const receipt = await changes.save(attempt, () => undefined, () => undefined, signal);
+    const receipt = await changes.saveRestored(attempt, exportId, mode, signal);
     if (receipt.state === 'cancelled') return 'conflict';
     if (receipt.state !== 'completed') return 'failed';
-    report(index, 'written', { mainSha256: photo.mainSha256, thumbSha256: photo.thumbSha256 });
+    report(index, 'written', { mainSha256: photo.mainSha256, thumbSha256: photo.thumbSha256 }, mode);
+    const attached = await attach(index, mode);
+    if (attached !== 'ok') return attached === 'conflict' ? 'blocked' : 'failed';
   }
   return initial === 'new' ? 'new' : 'resume';
 }
@@ -407,7 +456,7 @@ export async function runRestore(client: AppClient, scope: OwnerScope, preview: 
   onProgress: (progress: RestoreProgress) => void): Promise<RestoreResult> {
   if (preview.ownerId !== scope.ownerId || preview.epoch !== scope.epoch) throw new AppError('error.conflict');
   const result: RestoreResult = { restored: 0, same: 0, conflicts: 0, trash: 0, failed: 0, blocked: 0, deferred: 0,
-    outfits: 0, outfitConflicts: 0, history: 0, historyConflicts: 0, attributions: 0, attributionsKept: 0, photos: [] };
+    outfits: 0, outfitConflicts: 0, history: 0, historyConflicts: 0, attributions: 0, attributionsKept: 0, unlabelledEnhanced: 0, photos: [] };
   throwIfAborted(scope.signal);
   const entry = { result };
   lastReport = entry;
@@ -458,7 +507,12 @@ async function restoreAll(client: AppClient, scope: OwnerScope, preview: Restore
   onProgress: (progress: RestoreProgress) => void, result: RestoreResult, reached: Set<ItemPlan>): Promise<RestoreResult> {
   const lifetime = AbortSignal.any([scope.signal, signal]);
   const { backup } = preview, { data } = backup;
-  const photoSource: Photos = { backup, plans: preview.photos, deps: preview.deps };
+  const modes = new Map<string, RestoreMode>();
+  for (const item of data.items) for (const photo of item.photos) {
+    const planned = preview.photos.get(photo.sourceId);
+    if (planned) modes.set(photo.sourceId, restoreModeOf(photo, planned));
+  }
+  const photoSource: Photos = { backup, plans: preview.photos, deps: preview.deps, modes };
   const available = new Map<string, string>();
   // Items that may still be restored by running again, or are blocked. Anything that refers to one waits, so its deterministic
   // ID is only ever written with its final contents; excluded items (different here, in Trash) are left out for good.
@@ -468,9 +522,11 @@ async function restoreAll(client: AppClient, scope: OwnerScope, preview: Restore
   for (const [position, plan] of preview.items.entries()) {
     let outcome: ItemOutcome = 'failed';
     const done = new Map<number, Pick<PhotoOutcome, 'outcome' | 'stored'>>();
-    const report: PhotoReport = (index, kind, stored) => {
+    const report: PhotoReport = (index, kind, stored, mode) => {
       // A photo written by the first attempt stays written when the second attempt finds it in place.
-      if (done.get(index)?.outcome !== 'written') done.set(index, { outcome: kind, stored });
+      if (done.get(index)?.outcome === 'written') return;
+      if (kind === 'written' && mode === 'unlabelled') result.unlabelledEnhanced++;
+      done.set(index, { outcome: kind, stored });
     };
     reached.add(plan);
     for (let attempt = 0; attempt < 2; attempt++) {

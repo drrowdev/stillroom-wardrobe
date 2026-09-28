@@ -68,6 +68,8 @@ describe('owner transport', () => {
     expect(await allowed('/auth/v1/token?grant_type=refresh_token', { method: 'POST' })).toBe(true);
     expect(await allowed('/auth/v1/logout?scope=local', { method: 'POST' })).toBe(true);
     for (const rpc of RESTORE_RPCS) expect(await allowed(`/rest/v1/rpc/${rpc}`, { method: 'POST', body: '{}' })).toBe(true);
+    // BG2b-2: the restore writes only through the import-bound entrypoints; the ordinary and v1 writers are refused.
+    for (const rpc of ['reserve_restored_item_save', 'reserve_image_change', 'reserve_item_save']) expect(await allowed(`/rest/v1/rpc/${rpc}`, { method: 'POST', body: '{}' })).toBe(false);
     expect(await allowed(`/rest/v1/items${itemsQuery}`)).toBe(true);
     expect(await allowed(`/rest/v1/item_images?select=id,item_id&owner_id=eq.${owner}&item_id=in.(${item},${image})`)).toBe(true);
     // The restore's own column lists, which include names with digits such as main_sha256.
@@ -83,7 +85,7 @@ describe('owner transport', () => {
     expect(await allowed(photo('thumb'))).toBe(true);
     const finalize = { action: 'complete', intent: { itemId: item, sourceImageId: null, claim: null } };
     expect(await allowed('/functions/v1/finalize-image-change', { method: 'POST', headers: { authorization: 'Bearer token' }, body: json(finalize) })).toBe(true);
-    expect(seen).toHaveLength(23);
+    expect(seen).toHaveLength(24);
   });
 
   it('refuses every other method, query, path, owner and body', async () => {

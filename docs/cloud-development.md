@@ -608,6 +608,50 @@ approves the bodies and the Edge deploy (rows M8, F4); the probe spend, the
 sub-limit, the consent notice and activation are separate owner gates. Builders
 make no hosted or paid call. See ADR26 in `blueprint/18` and `blueprint/20`.
 
+**BG2b-2 photo enhancement client, W1 and probe branch (source only; inactive).**
+The client (Add and Replace photo, Settings, the "Photo edited with AI" label,
+v4 backups and restore) stays hidden and sends nothing until M8 is applied, F4 is
+deployed and the account is activated and consented. The `enhance-photo`
+source changes need the same separately approved Edge deploy as row F4: after
+the claim, the one work promise that owns dispatch, settlement and cleanup is
+registered with `EdgeRuntime.waitUntil` and awaited; if registration is not
+available the request fails before the claim, and if it throws after the claim
+the row settles `NOT_DISPATCHED` with no provider call. Delivery to a cancelled
+client is suppressed, never the accounting.
+
+The operator probe goes through the same deployed handler. It needs all of: the
+verified owner JWT, `X-Stillroom-Probe-Authorisation` naming an unexpired,
+unstopped `private.enhancement_probe_authorisations` row for that owner,
+deployment and manifest (call and spend limits enforced in the database),
+`X-Stillroom-Probe-Token` equal to the server-only secret `ENHANCE_PROBE_TOKEN`
+(at least 32 random bytes, base64url, compared in constant time), and the
+owner's ordinary enhancement switched off (`enhance_activated=false`). A request
+with an `Origin` header is refused; CORS is not authentication. With no secret
+configured, every probe request is refused before any RPC. Token lifecycle: the
+coordinator generates it privately, sets it as a function secret only for the
+approved probe window, passes it to `scripts/enhancement-probe.mjs` through the
+environment (never a URL, log, bundle or file in the checkout) and deletes the
+secret straight after. The script sends at most 6 paid calls: 5 visual samples
+and 1 disconnect/accounting call (call 6 verifies the hosted disconnect
+behaviour of row F4); it stops at the first non-`OK` result, uses
+`redirect: 'error'`, bounds each response and prints no credential or image.
+
+Read-only ledger check after the probe, keyed by the request IDs the script
+reports (run by the coordinator in the SQL editor; it changes nothing):
+
+```sql
+select u.request_id, u.purpose, u.charge_state, u.reserved_micro, u.accounted_micro,
+       u.dispatched_at is not null as dispatched, e.enhance_code, e.enhance_settlement_origin,
+       e.enhance_probe_id, e.estimated_micro, e.anomaly
+from private.ai_usage u
+join private.ai_usage_evidence e using (owner_id, request_id)
+where u.purpose = 'enhancement' and u.request_id = any($1::uuid[])
+order by u.created_at;
+```
+
+Every row must be settled (none held), and the disconnect call's usage must be
+recorded like the others.
+
 **I23 service worker (source only, not deployed).** The Phase 7 PR-1 draft
 adds `src/service-worker.ts`, the Update/Reload prompt and the Settings install
 hint. The worker precaches only the public shell listed in the generated

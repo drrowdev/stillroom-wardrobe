@@ -35,14 +35,16 @@ export function exportPolicy(request, state) {
   const { method, path, search } = request;
   const storage = exportStorage.exec(path);
   return authRequest(request)
-    || (method === 'POST' && ['/rest/v1/rpc/export_manifest', '/rest/v1/rpc/item_attribution_history_v2', '/rest/v1/rpc/attribution_digest'].includes(path) && !search)
+    || (method === 'POST' && ['/rest/v1/rpc/export_manifest', '/rest/v1/rpc/item_attribution_history_v2', '/rest/v1/rpc/attribution_digest',
+      '/rest/v1/rpc/image_provenance_v1', '/rest/v1/rpc/image_provenance_digest_v1'].includes(path) && !search)
     || (method === 'GET' && storage !== null && storage[1] === state.owner && !search);
 }
 
 // Every RPC the shared restore engine calls (src/data/restore.ts, src/images/upload.ts and src/images/replace.ts).
 // cancel_image_change, image_change_requests and image_recovery_versions are never used by a restore and are refused.
-export const RESTORE_RPCS = Object.freeze(['reserve_restored_item_save', 'finalize_item_save', 'restore_item_save_status',
-  'restore_image_change_status', 'reserve_image_change', 'image_change_status', 'save_outfit', 'restore_history_entry', 'restore_item_attribution']);
+export const RESTORE_RPCS = Object.freeze(['reserve_restored_item_save_v2', 'finalize_item_save', 'restore_item_save_status',
+  'restore_image_change_status', 'reserve_restored_image_change', 'image_change_status', 'save_outfit', 'restore_history_entry', 'restore_item_attribution',
+  'restore_image_provenance']);
 // Every method and non-Storage route the restore may use, written out. The policy below refuses anything else before its
 // own checks; Storage photo paths are the owner-scoped shape `restoreStorage` instead.
 export const RESTORE_ROUTES = Object.freeze(['POST /auth/v1/token', 'POST /auth/v1/logout',

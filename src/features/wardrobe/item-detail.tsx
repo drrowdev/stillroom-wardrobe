@@ -20,6 +20,7 @@ import type { AiClient } from '../../data/ai';
 import { LazyBoundary } from '../../app/lazy';
 import { lazyNamed } from '../../app/lazy-load';
 import { loadWearHistory, type WearSummary } from '../../data/wear-history';
+import { loadEditedImage } from '../../data/provenance';
 import { wearLineText } from '../statistics/wear-text';
 
 const ReplacePhoto = lazyNamed(() => import('./replace-photo'), 'ReplacePhoto');
@@ -137,6 +138,17 @@ function SavedPhoto({ image, images, t }: { image: ImageBaseline; images: Privat
   return <div className="detail-photo">{url ? <img src={url} alt={image.altText} /> :
     <p role="status">{failed ? <><Icon name="photo" />{t('photo.missing')}</> : t('common.loading')}</p>}</div>;
 }
+function EditedLabel({ client, scope, imageId, t }: Pick<Shared, 'client' | 'scope' | 't'> & { imageId: string }) {
+  const [edited, setEdited] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([scope.signal, controller.signal]);
+    setEdited(false);
+    void loadEditedImage(client, imageId, signal).then(value => { if (!signal.aborted) setEdited(value); }, () => undefined);
+    return () => controller.abort();
+  }, [client, scope, imageId]);
+  return edited ? <p className="detail-edited">{t('detail.aiEdited')}</p> : null;
+}
 // The same distinct-day count as Statistics and the wardrobe sorts.
 function WearLine({ client, scope, itemId, online, language, t }: Pick<Shared, 'client' | 'scope' | 'online' | 'language' | 't'> & { itemId: string }) {
   const [wear, setWear] = useState<WearSummary | null>(null);
@@ -218,6 +230,7 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
   return <div className="detail-layout">
     <div className="detail-media">
       <SavedPhoto image={description.base} images={props.images} t={t} />
+      <EditedLabel client={props.client} scope={props.scope} imageId={description.base.id} t={t} />
       <div className="photo-actions">
         <button className="button button-secondary" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('replacement'); }}>{t('imageChange.replace')}</button>
         <button className="text-button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('recovery'); }}>{t('imageChange.recover')}</button>

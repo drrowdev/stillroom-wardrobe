@@ -215,7 +215,7 @@ test('I21 restore: an item that could not be restored is reported, and running t
   await settings(page, 'b');
   // The first item's replacement photo cannot be reserved twice in a row, so this run stops with that item unfinished.
   let blocked = 2;
-  await page.route('**/rest/v1/rpc/reserve_image_change', async route => {
+  await page.route('**/rest/v1/rpc/reserve_restored_image_change', async route => {
     if (blocked > 0) { blocked--; await route.abort('failed'); return; }
     await route.fallback();
   });
@@ -256,7 +256,7 @@ test('I21 restore: a stored photo that cannot be read for now is retried, and no
   await settings(page, 'b');
   // First run: the shirt's replacement cannot be reserved, so the shirt stops after its first photo.
   let blocked = 2;
-  await page.route('**/rest/v1/rpc/reserve_image_change', async route => {
+  await page.route('**/rest/v1/rpc/reserve_restored_image_change', async route => {
     if (blocked > 0) { blocked--; await route.abort('failed'); return; }
     await route.fallback();
   });
@@ -519,7 +519,7 @@ test.describe('bounded P6b visual evidence', () => {
     let release: () => void = () => undefined;
     if (selected.scene === 'restore-progress') {
       const held = new Promise<void>(resolve => { release = resolve; });
-      await page.route('**/rest/v1/rpc/reserve_restored_item_save', async route => { await held; await route.fallback(); });
+      await page.route('**/rest/v1/rpc/reserve_restored_item_save_v2', async route => { await held; await route.fallback(); });
     }
     await check(page, parts, passphrase, language);
     await expect(button(page, 'restore.start', language)).toBeVisible(slow);
@@ -830,7 +830,7 @@ test.describe('Q6 byte-preserving restore', () => {
     await button(page, 'backup.startAgain').click();
     // The same backup without that photo is partly restored, then the one with it is checked again.
     let blocked = 2;
-    await page.route('**/rest/v1/rpc/reserve_restored_item_save', async route => {
+    await page.route('**/rest/v1/rpc/reserve_restored_item_save_v2', async route => {
       if (blocked > 0 && route.request().postData()?.includes('photo 2')) { blocked--; await route.abort('failed'); return; }
       await route.fallback();
     });

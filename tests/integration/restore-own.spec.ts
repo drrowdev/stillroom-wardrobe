@@ -450,7 +450,7 @@ test('restore-own: restore, parity with the browser steps, idempotent rerun, con
       stage = 'cancel';
       const cancelled = await w.backup('cancel', [{ title: 'Fictional cancelled coat', photos: [baseline(8, 8, [10, 200, 10])] }], randomUUID(), false);
       const held = new Promise<void>(resolve => { proxy.state.onHold = resolve; });
-      proxy.reset((_method, path, count) => path === '/rest/v1/rpc/reserve_restored_item_save' && count === 1 ? 'hold' : 'forward');
+      proxy.reset((_method, path, count) => path === '/rest/v1/rpc/reserve_restored_item_save_v2' && count === 1 ? 'hold' : 'forward');
       const running = cli(cancelled.folder);
       await within(120_000, held);
       running.child.kill('SIGINT');
@@ -468,7 +468,7 @@ test('restore-own: restore, parity with the browser steps, idempotent rerun, con
       { title: 'Fictional drift two', photos: [baseline(8, 8, [91, 60, 20])] }], drift.exportId);
     const heldItems = new Promise<void>(resolve => { proxy.state.onHold = resolve; });
     // The first item's reservation is held; the file changes before the second item's photo is read again.
-    proxy.reset((_method, path, count) => path === '/rest/v1/rpc/reserve_restored_item_save' && count === 1 ? 'hold' : 'forward');
+    proxy.reset((_method, path, count) => path === '/rest/v1/rpc/reserve_restored_item_save_v2' && count === 1 ? 'hold' : 'forward');
     const drifting = cli(drift.folder);
     await within(120_000, heldItems);
     await copyFile(join(other1.folder, other1.parts[1]!), join(drift.folder, drift.parts[1]!));
@@ -486,7 +486,7 @@ test('restore-own: restore, parity with the browser steps, idempotent rerun, con
     const gone = await w.backup('gone', [{ title: 'Fictional gone one', photos: [baseline(8, 8, [120, 60, 90])] },
       { title: 'Fictional gone two', photos: [baseline(8, 8, [60, 120, 90])] }]);
     const heldGone = new Promise<void>(resolve => { proxy.state.onHold = resolve; });
-    proxy.reset((_method, path, count) => path === '/rest/v1/rpc/reserve_restored_item_save' && count === 1 ? 'hold' : 'forward');
+    proxy.reset((_method, path, count) => path === '/rest/v1/rpc/reserve_restored_item_save_v2' && count === 1 ? 'hold' : 'forward');
     const deleting = cli(gone.folder);
     await within(120_000, heldGone);
     await rm(join(gone.folder, gone.parts[1]!));
@@ -518,7 +518,7 @@ test('restore-own: restore, parity with the browser steps, idempotent rerun, con
       { title: 'Fictional blocked trousers', photos: [baseline(8, 8, [132, 88, 44])] }]);
     let stopBlocked = () => {};
     const reserved = new Promise<void>(resolve => { stopBlocked = resolve; });
-    proxy.reset((_method, path, count) => path === '/rest/v1/rpc/reserve_restored_item_save' && count === 1 ? 'stop' : 'forward');
+    proxy.reset((_method, path, count) => path === '/rest/v1/rpc/reserve_restored_item_save_v2' && count === 1 ? 'stop' : 'forward');
     proxy.state.stop = () => stopBlocked();
     const reserving = cli(blocked.folder);
     await within(120_000, reserved);
@@ -574,7 +574,7 @@ test('restore-own: interrupted at each write step, then resumed to the same resu
     ];
     const main = await w.backup('resume', items);
     const points: [string, (method: string, path: string, count: number) => boolean][] = [
-      ['after-reserve', (_m, path, count) => path === '/rest/v1/rpc/reserve_restored_item_save' && count === 1],
+      ['after-reserve', (_m, path, count) => path === '/rest/v1/rpc/reserve_restored_item_save_v2' && count === 1],
       // Save uploads the thumbnail first: stop once it is stored, before the main file is sent.
       ['between-uploads', (m, path, count) => m === 'POST' && path.startsWith('/storage/v1/object/wardrobe/') && path.endsWith('/thumb.jpg') && count === 1],
       ['after-completion-before-reply', (_m, path, count) => path === '/rest/v1/rpc/finalize_item_save' && count === 1],

@@ -125,6 +125,7 @@ function summaryLines(result) {
     `Outfits: ${result.outfits} restored, ${result.outfitConflicts} left as they are. History: ${result.history} restored, ${result.historyConflicts} left as they are.`,
     `Tag history: ${result.attributions} items restored and marked as imported.`,
     ...result.attributionsKept > 0 ? [`Tag history for ${result.attributionsKept} ${result.attributionsKept === 1 ? 'item' : 'items'} was already here and wasn't changed from the backup.`] : [],
+    ...result.unlabelledEnhanced > 0 ? [`${result.unlabelledEnhanced} ${result.unlabelledEnhanced === 1 ? 'photo edited with AI was' : 'photos edited with AI were'} restored without that label.`] : [],
     `Photos: ${photos.written} written, ${photos.present} already here, ${photos.skipped} not needed or not reached, ${photos.failed} not finished, ${photos.blocked} blocked.`,
   ];
 }
