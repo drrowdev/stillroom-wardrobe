@@ -49,19 +49,22 @@ export function expectedHeaders(name: BuildName, pathname: string) {
 
 // Every cache entry must be a public file of the given build, byte for byte, with only public headers. With
 // `models`, the background-removal cache may also exist and must hold exactly the verified inventory files.
+// Model entries are measured and hashed in the page: returning their ~19 MB as number arrays took about two minutes.
 export async function expectOnlyShell(page: Page, name: BuildName, privateMarkers: string[] = [], models = false) {
-  const snapshot = await page.evaluate(async () => {
-    const result: Array<{ cache: string; url: string; headers: Array<[string, string]>; bytes: number[] }> = [];
+  const snapshot = await page.evaluate(async (modelCache) => {
+    const result: Array<{ cache: string; url: string; headers: Array<[string, string]>; bytes: number[]; length: number; sha256: string }> = [];
     for (const cache of await caches.keys()) {
       const open = await caches.open(cache);
       for (const request of await open.keys()) {
         const response = await open.match(request);
-        const bytes = [...new Uint8Array(await response!.arrayBuffer())];
-        result.push({ cache, url: request.url, headers: [...response!.headers], bytes });
+        const buffer = await response!.arrayBuffer();
+        const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', buffer))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+        const bytes = cache === modelCache ? [] : [...new Uint8Array(buffer)];
+        result.push({ cache, url: request.url, headers: [...response!.headers], bytes, length: buffer.byteLength, sha256: digest });
       }
     }
     return result;
-  });
+  }, modelCacheName);
   const manifest = readManifest(name);
   for (const file of manifest.files) {
     const text = artifactBytes(name, file.url).toString('latin1');
@@ -73,9 +76,8 @@ export async function expectOnlyShell(page: Page, name: BuildName, privateMarker
     expect(modelEntries.map((entry) => entry.url).sort()).toEqual(modelAssets.map((file) => `${origin}${file.path}`).sort());
     for (const entry of modelEntries) {
       const file = modelAssets.find((asset) => `${origin}${asset.path}` === entry.url)!;
-      const bytes = Buffer.from(entry.bytes);
-      expect(bytes.length, file.path).toBe(file.bytes);
-      expect(createHash('sha256').update(bytes).digest('hex'), file.path).toBe(file.sha256);
+      expect(entry.length, file.path).toBe(file.bytes);
+      expect(entry.sha256, file.path).toBe(file.sha256);
     }
     snapshot.splice(0, snapshot.length, ...snapshot.filter((entry) => entry.cache !== modelCacheName));
   }

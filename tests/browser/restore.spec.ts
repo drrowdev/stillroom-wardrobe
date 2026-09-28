@@ -82,7 +82,8 @@ async function start(page: Page, options: MockOptions = {}, language: Language =
 async function settings(page: Page, account: 'a' | 'b') {
   await signIn(page, account);
   await page.evaluate(() => { location.hash = '#/settings'; });
-  await expect(page.locator('#settings-title')).toBeVisible();
+  // Settings has finished loading once the page has moved focus to its heading; only then do the cards take input.
+  await expect(page.locator('#settings-title')).toBeFocused();
 }
 async function signOut(page: Page, language: Language = 'en') {
   await page.getByRole('button', { name: text('account.menu', language) }).click();
@@ -92,6 +93,8 @@ async function signOut(page: Page, language: Language = 'en') {
 // Makes a real backup through the Backup card and returns its parts as files.
 async function backup(page: Page, language: Language = 'en'): Promise<Part[]> {
   await button(page, 'backup.create', language).click();
+  // Opening the form moves focus to the passphrase. Checked here, so a form that doesn't open fails at once, not at the test limit.
+  await expect(backupCard(page).getByLabel(text('backup.passphrase', language), { exact: true })).toBeFocused();
   await backupCard(page).getByLabel(text('backup.passphrase', language), { exact: true }).fill(passphrase);
   await backupCard(page).getByLabel(text('backup.repeat', language), { exact: true }).fill(passphrase);
   await button(page, 'backup.create', language).click();
