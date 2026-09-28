@@ -342,6 +342,8 @@ test.describe('AD1b admin spending and limits', () => {
         if (zoomed) await expect(page.locator('html')).toHaveCSS('font-size', '32px');
         const fit = await page.locator('#admin-month').evaluate((select: HTMLSelectElement) => {
           const style = getComputedStyle(select);
+          // Only without a native appearance is the padding the whole space beside the text.
+          if (style.appearance !== 'none') throw new Error(`appearance ${style.appearance}`);
           const context = document.createElement('canvas').getContext('2d')!;
           context.font = style.font;
           const room = select.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
