@@ -554,7 +554,7 @@
   "stylist.limitReached": {"en":"A monthly limit was reached. Try again later.","fi":"Kuukausiraja tuli täyteen. Yritä myöhemmin uudelleen.","sv":"En månadsgräns har nåtts. Försök igen senare."},
   "stylist.warning": {"en":"Most of this month's stylist limit is used.","fi":"Suurin osa tämän kuun stylistirajasta on käytetty.","sv":"Det mesta av månadens gräns för stylisten är använt."},
   "stylist.sharedWarning": {"en":"Most of this month's shared limit is used.","fi":"Suurin osa tämän kuun yhteisestä rajasta on käytetty.","sv":"Det mesta av månadens gemensamma gräns är använt."},
-  "stylist.rate": {"en":"Too many requests in the last hour. Try again later.","fi":"Liian monta viestiä viimeisen tunnin aikana. Yritä myöhemmin uudelleen.","sv":"För många meddelanden den senaste timmen. Försök igen senare."},
+  "stylist.rate": {"en":"Too many requests in the last hour. Try again later.","fi":"Liian monta pyyntöä viimeisen tunnin aikana. Yritä myöhemmin uudelleen.","sv":"För många förfrågningar den senaste timmen. Försök igen senare."},
   "stylist.failed": {"en":"Couldn't get a reply. Try again.","fi":"Vastausta ei saatu. Yritä uudelleen.","sv":"Det kom inget svar. Försök igen."},
   "stylist.timeout": {"en":"No reply in time. The message may still be charged.","fi":"Vastaus ei tullut ajoissa. Viestistä voidaan silti veloittaa.","sv":"Svaret kom inte i tid. Meddelandet kan ändå debiteras."},
   "stylist.filtered": {"en":"Couldn't answer that. Try asking another way.","fi":"Tähän ei voitu vastata. Kysy toisella tavalla.","sv":"Det gick inte att svara på det. Försök fråga på ett annat sätt."},
