@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { AppError } from '../../src/data/errors';
 import { buildPart, metadataFile, prepareExport } from '../../src/data/export';
-import { assemblePart, collectSnapshot, fromMetadata } from '../../src/domain/export-run';
+import { assemblePart, collectSnapshot, fromMetadata, sameRows } from '../../src/domain/export-run';
 import { BackupFormatError, decryptPart } from '../../src/domain/export-format';
 import { describePart, parityClient, parityWorld, PARITY_EXPORT, PARITY_OWNER, PARITY_PASSPHRASE, sha256, withEntropy } from '../fixtures/export-parity';
 
@@ -123,5 +123,77 @@ describe('browser export behaviour kept by the refactor', () => {
     const prepared = await collectSnapshot(source, PARITY_OWNER, PARITY_EXPORT, new AbortController().signal);
     await expect(assemblePart(prepared, 1, async () => new Uint8Array(3), PARITY_PASSPHRASE)).rejects.toEqual(new BackupFormatError('changed'));
     await expect(assemblePart(prepared, 5, async () => new Uint8Array(3), PARITY_PASSPHRASE)).rejects.toEqual(new BackupFormatError('invalid'));
+  });
+});
+
+describe('the two manifest reads are compared as row sets', () => {
+  type Tables = { items: Record<string, unknown>[]; item_images: Record<string, unknown>[] };
+  // The first read is the world as it is; `second` rewrites the items and photos of the second read only.
+  const snapshot = (world: ReturnType<typeof parityWorld>, second: (tables: Tables) => Tables, first: (tables: Tables) => Tables = tables => tables) => {
+    let reads = 0;
+    const raw = world.raw as unknown as { tables: Tables };
+    const source = {
+      manifest: async (id: string) => {
+        const change = reads++ === 0 ? first : second;
+        const tables = change({ items: raw.tables.items.map(row => ({ ...row })), item_images: raw.tables.item_images.map(row => ({ ...row })) });
+        return { ...world.raw, export_id: id, tables: { ...raw.tables, ...tables } };
+      },
+      attribution: async (id: string) => world.attributions.get(id), digest: async () => world.digest, ...noProvenance,
+    };
+    return collectSnapshot(source, PARITY_OWNER, PARITY_EXPORT, new AbortController().signal);
+  };
+  const reversed = (tables: Tables): Tables => ({ items: [...tables.items].reverse(), item_images: [...tables.item_images].reverse() });
+
+  it('identical rows in another order are the same snapshot, with the same metadata', async () => {
+    const world = parityWorld(3, 1000, 100);
+    const raw = world.raw as unknown as { tables: Tables };
+    expect(raw.tables.items.length).toBeGreaterThan(1);
+    expect(raw.tables.item_images.length).toBeGreaterThan(1);
+    const steady = await snapshot(world, tables => tables);
+    await expect(snapshot(world, reversed)).resolves.toMatchObject({ manifestSha256: steady.manifestSha256, items: steady.items, photos: steady.photos });
+    await expect(snapshot(world, tables => tables, reversed)).resolves.toMatchObject({ manifestSha256: steady.manifestSha256 });
+    await expect(snapshot(world, ({ items, item_images }) => ({ items: [...items.slice(1), items[0]!], item_images })))
+      .resolves.toMatchObject({ manifestSha256: steady.manifestSha256 });
+  });
+
+  it('a changed field, or a missing or extra item or photo, is still a change in any order', async () => {
+    const world = parityWorld(3, 1000, 100);
+    const changed = new BackupFormatError('changed');
+    const cases: ((tables: Tables) => Tables)[] = [
+      ({ items, item_images }) => ({ items: items.map((row, index) => index === 1 ? { ...row, title: `${String(row.title)} (edited)` } : row), item_images }),
+      ({ items, item_images }) => ({ items, item_images: item_images.map((row, index) => index === 0 ? { ...row, alt_text: 'A different description' } : row) }),
+      ({ items, item_images }) => ({ items: items.slice(1), item_images }),
+      ({ items, item_images }) => ({ items, item_images: item_images.slice(0, -1) }),
+      ({ items, item_images }) => ({ items: [...items, { ...items[0]!, id: crypto.randomUUID() }], item_images }),
+      ({ items, item_images }) => ({ items, item_images: [...item_images, { ...item_images[0]!, id: crypto.randomUUID() }] }),
+    ];
+    for (const change of cases) {
+      await expect(snapshot(world, change)).rejects.toEqual(changed);
+      await expect(snapshot(world, tables => reversed(change(tables)))).rejects.toEqual(changed);
+    }
+  });
+
+  it('a repeated id in either read is refused, even with the same number of rows', async () => {
+    const world = parityWorld(3, 1000, 100);
+    const invalid = new BackupFormatError('invalid');
+    const repeatItem = ({ items, item_images }: Tables): Tables => ({ items: [items[0]!, items[0]!, ...items.slice(2)], item_images });
+    const repeatImage = ({ items, item_images }: Tables): Tables => ({ items, item_images: [...item_images.slice(0, -1), item_images[0]!] });
+    await expect(snapshot(world, repeatItem)).rejects.toEqual(invalid);
+    await expect(snapshot(world, repeatImage)).rejects.toEqual(invalid);
+    await expect(snapshot(world, tables => tables, repeatItem)).rejects.toEqual(invalid);
+    await expect(snapshot(world, tables => tables, repeatImage)).rejects.toEqual(invalid);
+  });
+
+  it('compares whole rows by id', () => {
+    const a = { id: 'a', title: 'Shirt', colours: ['olive', 'navy'] }, b = { id: 'b', title: 'Trousers', colours: [] };
+    expect(sameRows([a, b], [b, a])).toBe(true);
+    expect(sameRows([a, b], [{ colours: ['olive', 'navy'], title: 'Shirt', id: 'a' }, b])).toBe(true);
+    expect(sameRows([a, b], [b, { ...a, colours: ['navy', 'olive'] }])).toBe(false);
+    expect(sameRows([a, b], [a])).toBe(false);
+    expect(sameRows([a], [a, b])).toBe(false);
+    expect(sameRows([], [])).toBe(true);
+    expect(() => sameRows([a, a], [a, b])).toThrow(new BackupFormatError('invalid'));
+    expect(() => sameRows([a, b], [b, b])).toThrow(new BackupFormatError('invalid'));
+    expect(() => sameRows([{ title: 'No id' }], [{ title: 'No id' }])).toThrow(new BackupFormatError('invalid'));
   });
 });

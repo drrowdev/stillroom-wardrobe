@@ -25,6 +25,22 @@ async function manifest(source: SnapshotSource, ownerId: string, exportId: strin
   return readRawManifest(await source.manifest(exportId, signal), ownerId, exportId);
 }
 
+// export_manifest returns its rows in no particular order, so two snapshots are compared as sets keyed by id, each row in
+// full. A missing, extra or changed row is a change; a repeated id is not a valid snapshot.
+function rowsById(rows: readonly Record<string, unknown>[]): Map<string, string> {
+  const byId = new Map<string, string>();
+  for (const row of rows) {
+    const id = row.id;
+    if (typeof id !== 'string' || byId.has(id)) throw new BackupFormatError('invalid');
+    byId.set(id, canonical(row));
+  }
+  return byId;
+}
+export function sameRows(before: readonly Record<string, unknown>[], after: readonly Record<string, unknown>[]): boolean {
+  const a = rowsById(before), b = rowsById(after);
+  return a.size === b.size && [...a].every(([id, row]) => b.get(id) === row);
+}
+
 async function digest(source: SnapshotSource, signal: AbortSignal, which: 'digest' | 'provenanceDigest' = 'digest'): Promise<string> {
   const value = await source[which](signal);
   if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) throw new BackupFormatError('invalid');
@@ -49,7 +65,7 @@ export async function collectSnapshot(source: SnapshotSource, ownerId: string, e
     }
   }));
   const again = await manifest(source, ownerId, exportId, signal);
-  if (canonical(again.tables.items) !== canonical(raw.tables.items) || canonical(again.tables.item_images) !== canonical(raw.tables.item_images)
+  if (!sameRows(raw.tables.items, again.tables.items) || !sameRows(raw.tables.item_images, again.tables.item_images)
     || await digest(source, signal) !== before) {
     throw new BackupFormatError('changed');
   }
