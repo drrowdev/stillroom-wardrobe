@@ -34,13 +34,26 @@ const profileUrl = 'http://127.0.0.1:54321/rest/v1/profiles*';
 // Reloading while routed fixture requests are still open has coincided with "WebKit encountered an internal error"
 // on reload in CI (provisional; playwright#37766 is a similar earlier report). A profile Save sends exactly one PATCH
 // and then one status read. Wait for both to actually finish before reloading: a stuck, failed or repeated request fails.
+// Settings reads the AI, stylist and enhancement status once when it opens, and those reads can still be starting after
+// the fields are visible. openSettings waits until the fixtures have answered a new read of each, so tracking never
+// counts or holds a mount read as the post-save read. A later enhance_status or stylist_status is tracked, and unexpected.
+type StatusFixture = { calls: { route: string }[]; requests: { method: string; path: string }[] };
+const mountReads = (api: StatusFixture) => [api.calls.filter((call) => call.route === '/rest/v1/rpc/ai_status').length,
+  ...['/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status']
+    .map((path) => api.requests.filter((request) => request.method === 'POST' && request.path === path).length)];
+async function openSettings(page: Page, api: StatusFixture, language: Language = 'en') {
+  const before = mountReads(api);
+  await settings(page, language);
+  await expect.poll(() => mountReads(api).map((count, index) => count > before[index]!), { timeout: 10_000 })
+    .toEqual([true, true, true]);
+}
 function trackSaveTraffic(page: Page) {
   const started: string[] = [], finished: string[] = [], failed: string[] = [];
   const open = new Map<PlaywrightRequest, string>();
   const name = (request: PlaywrightRequest) => {
     const { pathname } = new URL(request.url());
     if (request.method() === 'PATCH' && pathname === '/rest/v1/profiles') return 'profile';
-    if (request.method() === 'POST' && /\/rest\/v1\/rpc\/(?:ai_status|stylist_status)$/.test(pathname)) return pathname.split('/').pop()!;
+    if (request.method() === 'POST' && /\/rest\/v1\/rpc\/(?:ai_status|stylist_status|enhance_status)$/.test(pathname)) return pathname.split('/').pop()!;
     return null;
   };
   const onRequest = (request: PlaywrightRequest) => { const key = name(request); if (key) { started.push(key); open.set(request, key); } };
@@ -276,7 +289,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
   });
   test(`settings ${language}: private fields, pickers and persistence; style preferences stay hidden`, async ({ page }) => {
     const api = await aiFixture(page, language);
-    await settings(page, language);
+    await openSettings(page, api, language);
     const consent = page.locator('section[aria-labelledby="ai-consent-title"]');
     // The fixture starts with analysis on: one Turn off, no Turn on, and the notice only inside a closed disclosure.
     await expect(consent.getByRole('heading', { name: messages['aiC.enabled'][language], exact: true })).toBeVisible();
@@ -321,7 +334,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
 }
 test('settings save: the reload waits until the held post-save status read is released', async ({ page }) => {
   const api = await aiFixture(page, 'en');
-  await settings(page, 'en');
+  await openSettings(page, api, 'en');
   let armed = false, held = 0;
   let release!: () => void, arrived!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
