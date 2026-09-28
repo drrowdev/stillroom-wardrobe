@@ -18,7 +18,7 @@ import * as deploy from '../../scripts/check-deploy-artifacts.mjs';
 import { EDGE_DELEGATIONS, delegatedLine } from '../../tests/security/edge-delegations.mjs';
 import { AZURE_REVIEW_EXPIRES } from '../../supabase/functions/analyze-clothing/azure-openai';
 import { classifyEnhanceResponse, enhanceForm } from '../../supabase/functions/enhance-photo/azure';
-import { ENHANCE_DEPLOYMENT, ENHANCE_PARAMETERS, ENHANCE_PROMPT } from '../../src/domain/enhancement';
+import { CLEANUP_PROMPT, ENHANCE_DEPLOYMENT, ENHANCE_PARAMETERS, ENHANCE_PROMPT } from '../../src/domain/enhancement';
 import { flatJpeg } from '../fixtures/restore-jpeg-fixtures';
 import { createHash } from 'node:crypto';
 // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
@@ -157,7 +157,7 @@ describe('image edit double (BG2b-1)', () => {
       colour: [200, 120, 140] }));
     expect(double.ENHANCE_DEPLOYMENT).toBe(ENHANCE_DEPLOYMENT);
     expect(double.ENHANCE_FIELDS).toEqual(Object.entries(ENHANCE_PARAMETERS).map(([key, value]) => [key, String(value)]));
-    expect(double.ENHANCE_PROMPT_SHA256).toBe(createHash('sha256').update(ENHANCE_PROMPT).digest('hex'));
+    expect(double.ENHANCE_PROMPT_SHA256).toBe(createHash('sha256').update(CLEANUP_PROMPT).digest('hex'));
   });
   it('accepts only the exact production multipart and selects the mode by input width', async () => {
     for (const [width, mode] of Object.entries(double.ENHANCE_MODES)) {
@@ -176,10 +176,11 @@ describe('image edit double (BG2b-1)', () => {
     };
     expect(await changed((form) => form.append('user', 'owner'))).toBe('enhance-keys');
     expect(await changed((form) => form.set('quality', 'high'))).toBe('enhance-parameters');
-    expect(await changed((form) => form.set('prompt', `${ENHANCE_PROMPT} Change the colour.`))).toBe('enhance-prompt');
+    expect(await changed((form) => form.set('prompt', `${CLEANUP_PROMPT} Change the colour.`))).toBe('enhance-prompt');
+    expect(await changed((form) => form.set('prompt', ENHANCE_PROMPT))).toBe('enhance-prompt');
     const png = new FormData();
     for (const [key, value] of Object.entries(ENHANCE_PARAMETERS)) png.append(key, String(value));
-    png.append('prompt', ENHANCE_PROMPT);
+    png.append('prompt', CLEANUP_PROMPT);
     png.append('image', new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }), 'garment.png');
     const notJpeg = await multipart(png);
     expect(await reason(enhanceHeaders(notJpeg.type), notJpeg.body)).toBe('enhance-image');

@@ -298,6 +298,7 @@ export function describeStartupOrResetFailure(result, elapsedMs) {
     '20260929090000_photo_enhancement.sql',
     '20260929090100_enhance_expire_schedule.sql',
     '20261001090000_admin_limits.sql',
+    '20261002090000_photo_cleanup_manifest.sql',
   ];
   let lastAnnouncement = -1;
   for (const [index, filename] of migrations.entries()) {

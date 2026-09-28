@@ -16,8 +16,11 @@ export async function prepareImage(file: Blob, signal?: AbortSignal, edit: Photo
   return prepareSource(file, admitter(file, signal), edit, signal, true);
 }
 
-/** The same admission and output checks as `prepareImage`, with the background removed on the device. */
+/**
+ * The same admission and output checks as `prepareImage`, with the background removed on the device. `wantCleanup`
+ * also builds the BG2c clean-up input (H0 and R) when the photo is framed; it is off unless clean-up is available.
+ */
 export async function prepareCutout(file: Blob, signal: AbortSignal | undefined, edit: PhotoEdit, segmenter: Segmenter,
-  wantCrop: boolean): Promise<SegmentedPhoto> {
-  return prepareSegmentedSource(file, admitter(file, signal), edit, signal, segmenter, wantCrop);
+  wantCrop: boolean, wantCleanup = false): Promise<SegmentedPhoto> {
+  return prepareSegmentedSource(file, admitter(file, signal), edit, signal, segmenter, wantCrop, wantCleanup);
 }

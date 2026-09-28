@@ -652,6 +652,49 @@ order by u.created_at;
 Every row must be settled (none held), and the disconnect call's usage must be
 recorded like the others.
 
+**BG2c-1 "clean up photo" backend (source only; inactive; plan rev4, #84
+c5876588292).** Adds `20261002090000_photo_cleanup_manifest.sql`: the manifest
+`azure-global-image25-sunburst-cleanup-v1` (prompt version 2) on the same
+deployment row as enhance-v1, so both share one capacity window and kill switch;
+the constraint `ai_controls_cleanup_notice` (cleanup-v1 needs notice revision 2
+or later, NULL refused); and `create or replace` of `enhance_claim` that differs
+from M8 only in the accepted manifest literal, with its ACL re-issued. It updates
+no row and never copies consent forward. `enhance-photo` now sends the clean-up
+prompt and claims cleanup-v1; a v1 policy gets `UNCONFIGURED` before any call.
+After the controls cutover, held v1 work is still accounted, but
+`enhance_finish`/`enhance_replay` return `UNAVAILABLE` and record no result; a
+settled slot stays counted until `held_until`. The client still sends H1 and
+uses `compareEnhancement` until BG2c-2, so **`enhance-photo` is never deployed
+from a commit with BG2c-1 but without BG2c-2**; routine Pages deploys stay safe.
+
+Rollout order while inactive (plan rev4 §15): hosted apply with read-back
+(rows, `pg_get_functiondef(enhance_claim)`, its ACL, the constraint, the expiry
+cron); then set `enhance_manifest_id = cleanup-v1`, `enhance_notice_revision = 2`
+with `enhance_activated = false` and read it back; the owner deploys
+`enhance-photo` and Pages from the BG2c-2 merge commit, and the coordinator
+checks the Edge status (cleanup-v1, notice 2, inactive) and the Pages build
+identity and inactive behaviour (no review step, zero `enhance-photo` requests),
+never activating to look. The USD 2 probe spend, sub-limit and probe
+authorisation come after that, and activation is a separate owner decision.
+
+Probe on cleanup-v1 (operator only). `scripts/cleanup-probe-harness.mjs`
+(`ALLOW_CLEANUP_HARNESS=1`, clean checkout) builds `vite build --mode
+operator-probe` into the ignored `<repo>/.probe-dist` only (no service worker,
+precache manifest, app page or public files; checked by `checkOperatorTree`),
+serves it on 127.0.0.1 and drives Chromium with every non-loopback request and
+service workers blocked. `prepare <samples> <prepared>` reads `crops.json`
+(5 visual, 1 disconnect) and writes H0, R (81 920 B) and a binding per sample
+plus `samples.json`; `measure <prepared> <calls> <measured>` re-verifies each
+binding against the same commit and model and runs the exact `cleanupCheck`.
+Output folders must be outside the checkout. `scripts/enhancement-probe.mjs`
+then needs `PROBE_SWITCH_ON_AT` (the kill-switch time, ISO UTC) and optionally
+`PROBE_LAST_KEY_USE_AT`; it refuses an unverified or ambiguous binding, paces
+each call at least 33 s after the previous dispatch and 66 s after the response
+of the call two back (and 66 s after switch-on), stops on any non-`OK` result
+including `RATE_LIMIT`, and reports evidence as pending until the visual metrics
+and the disconnect settlement read-back exist. `checkStaticTree` refuses any
+`probe/` path or harness marker, so the harness can't reach a deploy tree.
+
 **I23 service worker (source only, not deployed).** The Phase 7 PR-1 draft
 adds `src/service-worker.ts`, the Update/Reload prompt and the Settings install
 hint. The worker precaches only the public shell listed in the generated

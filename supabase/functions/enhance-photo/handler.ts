@@ -1,5 +1,5 @@
 import {
-  ENHANCE_LIMITS, ENHANCE_MANIFEST, ENHANCE_MODEL, ENHANCE_NOTICE_REVISION, ENHANCE_RESERVATION_MICRO, ENHANCE_REVIEW_EXPIRES,
+  CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_LIMITS, ENHANCE_MODEL, ENHANCE_RESERVATION_MICRO, ENHANCE_REVIEW_EXPIRES,
 } from '../../../src/domain/enhancement.ts';
 import { readJpegHeader } from '../../../src/images/jpeg.ts';
 import { isPhotoInputJpeg } from '../../../src/images/restore-jpeg.ts';
@@ -38,7 +38,8 @@ function serverConfig(config: EnhanceConfig): boolean {
 const microText = (value: unknown) => typeof value === 'string' && /^[1-9][0-9]{0,18}$/.test(value);
 
 /**
- * Photo enhancement (BG2b-1 backend, BG2b-2 lifetime; INACTIVE until the owner's switch). Order: closed ingress (the
+ * Photo clean-up (BG2b-1 backend, BG2b-2 lifetime, BG2c-1 cleanup-v1 manifest, prompt v2 and notice revision 2; INACTIVE
+ * until the owner's switch). A policy still on enhance-v1 is UNCONFIGURED here, before any claim. Order: closed ingress (the
  * photo input profile (isPhotoInputJpeg: one baseline scan, restart markers only in sequence), read with the cap enforced; no RPC on invalid input), the operator probe gate
  * when its headers are present, verified /auth/v1/user, status preflight, service claim for the verified owner only,
  * then the claimed work. H2 bytes are released only after finish returns OK, which has already committed the evidence
@@ -116,7 +117,7 @@ export function createEnhanceHandler(config: EnhanceConfig, registrar: EnhanceRe
         if (!object(policy) || policy.activated !== true) return error('INACTIVE');
         if (!object(consent) || consent.enabled !== true || consent.noticeRevision !== policy.noticeRevision) return error('CONSENT_REQUIRED');
       }
-      if (policy.noticeRevision !== ENHANCE_NOTICE_REVISION || policy.manifestId !== ENHANCE_MANIFEST || policy.modelId !== ENHANCE_MODEL
+      if (policy.noticeRevision !== CLEANUP_NOTICE_REVISION || policy.manifestId !== CLEANUP_MANIFEST || policy.modelId !== ENHANCE_MODEL
         || !microText(policy.maxRequestMicro) || BigInt(policy.maxRequestMicro as string) < BigInt(ENHANCE_RESERVATION_MICRO)
         || Date.now() >= ENHANCE_REVIEW_EXPIRES || !azureConfigured(config.azure)) return error('UNCONFIGURED');
       if (policy.providerAvailable !== true) return error('UNAVAILABLE');
@@ -124,10 +125,10 @@ export function createEnhanceHandler(config: EnhanceConfig, registrar: EnhanceRe
       if (registrar === null) return error('UNCONFIGURED');
 
       // The claim writes a held row, so it runs on the server-owned lifetime, not the browser's.
-      const claim = await rpc('enhance_claim', { p_owner_id: owner, p_request_id: requestId, p_manifest_id: ENHANCE_MANIFEST,
+      const claim = await rpc('enhance_claim', { p_owner_id: owner, p_request_id: requestId, p_manifest_id: CLEANUP_MANIFEST,
         p_input_sha256: inputHash, p_probe_id: probe.id }, true, server);
       if (claim.code !== 'OK' || claim.claimed !== true) return error(closedCode(claim.code));
-      if (!exact(claim, ['code', 'claimed', 'manifestId', 'dispatchBeforeMs', 'requestSeconds']) || claim.manifestId !== ENHANCE_MANIFEST
+      if (!exact(claim, ['code', 'claimed', 'manifestId', 'dispatchBeforeMs', 'requestSeconds']) || claim.manifestId !== CLEANUP_MANIFEST
         || typeof claim.dispatchBeforeMs !== 'number' || !Number.isSafeInteger(claim.dispatchBeforeMs)) throw new ProtocolError('FAILED');
 
       let accept!: (registered: boolean) => void;

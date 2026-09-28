@@ -46,6 +46,26 @@ export const ENHANCE_SETTINGS = Object.freeze({
   automaticRetries: 0, fallback: false,
 });
 
+// BG2c "clean up photo" (#84, plan rev4). The server contract of the enhance-photo function and
+// 20261002090000_photo_cleanup_manifest.sql: the same model, deployment, parameters, limits and reservation as v1, a new
+// prompt and input, and notice revision 2. INACTIVE. BG2c-2 moves the client (consent, readiness and the stage) from
+// the v1 constants above to these, together with the revision-2 notice copy; until then the client treats a cleanup-v1
+// policy as unsupported, so nothing is offered or sent.
+export const CLEANUP_MANIFEST = 'azure-global-image25-sunburst-cleanup-v1';
+export const CLEANUP_PROMPT_VERSION = 2;
+export const CLEANUP_NOTICE_REVISION = 2;
+export const CLEANUP_PROMPT = 'Clean up this photo of a garment for a wardrobe catalogue. Show only the one garment in the middle of the '
+  + 'photo, on a plain, even, light warm off-white background (#F6F3ED). Remove hangers, clips, hooks, other clothes, furniture, '
+  + 'people, hands and everything else that is not part of that garment, and smooth its creases and wrinkles. Keep that garment '
+  + 'itself exactly as it is: the same colours, pattern, print, logos, text, labels, buttons, seams, stitching, pockets, trims, '
+  + 'fabric texture, shape and proportions, and every visible detail. Do not replace it with a different or more generic '
+  + 'garment. Keep it at the same position, size and angle in the frame, and do not change the viewpoint, crop or zoom. Do not '
+  + 'add anything: no people, mannequins, hangers, props, shadows, text or watermarks.';
+export const CLEANUP_SETTINGS = Object.freeze({
+  ...ENHANCE_SETTINGS, profileId: CLEANUP_MANIFEST, purpose: 'inactive-photo-cleanup', promptVersion: CLEANUP_PROMPT_VERSION,
+  noticeRevision: CLEANUP_NOTICE_REVISION, input: 'accepted-crop-original-pixels-in-bg2a-frame-app-reencoded',
+});
+
 export type EnhanceUsage = { input: number | null; output: number | null; total: number | null; inputText: number | null; inputImage: number | null };
 
 const counter = (value: unknown, key: string): number | null => {

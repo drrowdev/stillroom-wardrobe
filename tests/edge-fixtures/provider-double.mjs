@@ -93,8 +93,11 @@ export function stylistCompletion(mode, refs = []) {
 export const ENHANCE_DEPLOYMENT = 'eval-image25-sunburst-20260908';
 export const ENHANCE_FIELDS = Object.freeze([['model', ENHANCE_DEPLOYMENT], ['n', '1'], ['size', '1024x1280'], ['quality', 'medium'],
   ['output_format', 'jpeg'], ['output_compression', '85'], ['background', 'opaque']]);
-/** sha256 of ENHANCE_PROMPT, as pinned in the enhancement manifest's prompt_sha256. */
-export const ENHANCE_PROMPT_SHA256 = '9a102c3c5b614cfa34fc1a0447a4410f9dfaa46ef8f53fb33316e1d15b3f9afe';
+/**
+ * sha256 of the prompt the Edge function sends: CLEANUP_PROMPT since BG2c-1 (the cleanup-v1 manifest's prompt_sha256).
+ * The v1 prompt is refused like any other change.
+ */
+export const ENHANCE_PROMPT_SHA256 = '2c909f6b4c7446df89d45400aff2cffab01f384c4e4eca6e6b60ecea9453bd86';
 export const ENHANCE_MODES = Object.freeze({ 800: 'enhance-ok', 801: 'enhance-metadata', 802: 'enhance-trailing',
   803: 'enhance-second-frame', 804: 'enhance-filtered', 805: 'enhance-rate-limited', 806: 'enhance-no-usage' });
 export const ENHANCE_USAGE = Object.freeze({ input_tokens: 1400, output_tokens: 2000, total_tokens: 3400,

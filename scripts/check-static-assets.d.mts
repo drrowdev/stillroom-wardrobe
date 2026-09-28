@@ -6,3 +6,7 @@ export function readInventory(file?: string): Promise<InventoryFile[]>;
 export function listTree(root: string, prefix?: string): Promise<string[]>;
 export function sha256(bytes: Uint8Array | string): string;
 export function checkStaticTree(dist: string, inventory: readonly InventoryFile[]): Promise<string[]>;
+export const HARNESS_ENTRY: string;
+export const HARNESS_MARKER: string;
+export const OPERATOR_TREE: string;
+export function checkOperatorTree(tree: string, inventory: readonly InventoryFile[]): Promise<string[]>;

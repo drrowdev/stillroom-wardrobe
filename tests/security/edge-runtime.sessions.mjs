@@ -422,7 +422,8 @@ async function main() {
         const status = await enhanceStatus(owner);
         const consented = await client.rpc(owner, 'enhance_set_consent', { p_enabled: true, p_notice_revision: status?.policy?.noticeRevision ?? null });
         check(PROVIDER, `enhance-consent-${owner.label}`, consented?.code === 'OK' && consented.consent?.enabled === true
-          && consented.policy?.manifestId === 'azure-global-image25-sunburst-enhance-v1' && consented.policy?.providerAvailable === true,
+          && consented.policy?.manifestId === 'azure-global-image25-sunburst-cleanup-v1'
+          && consented.policy?.noticeRevision === 2 && consented.policy?.providerAvailable === true,
         { code: consented?.code });
       }
       const before = await count();
@@ -457,9 +458,14 @@ async function main() {
       check(PROVIDER, 'enhance-frozen-same-token', refused(frozenEnhance, 403, 'UNAVAILABLE'), summary(frozenEnhance));
       const revoked = await client.rpc(B, 'enhance_set_consent', { p_enabled: false, p_notice_revision: null });
       const noConsent = await enhance(B.token, id(B, 3), 800);
-      const reconsented = await client.rpc(B, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 1 });
+      // BG2c-1: a revision-1 consent is refused under notice 2 and nothing is copied forward; only revision 2 is accepted.
+      const stale = await client.rpc(B, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 1 });
+      const staleCall = await enhance(B.token, id(B, 3), 800);
+      const reconsented = await client.rpc(B, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 2 });
       check(PROVIDER, 'enhance-consent-required', revoked?.code === 'CONSENT_REQUIRED' && refused(noConsent, 403, 'CONSENT_REQUIRED')
-        && reconsented?.code === 'OK', { revoked: revoked?.code, call: summary(noConsent) });
+        && stale?.code === 'CONFIG_CHANGED' && refused(staleCall, 403, 'CONSENT_REQUIRED')
+        && reconsented?.code === 'OK' && reconsented.consent?.noticeRevision === 2,
+      { revoked: revoked?.code, call: summary(noConsent), stale: stale?.code, staleCall: summary(staleCall) });
       counted = await count();
       check(PROVIDER, 'enhance-negatives-no-dispatch', counted.served === before.served + 7, counted.served);
 
@@ -518,7 +524,7 @@ async function main() {
           && isDeepStrictEqual(stages, ['capture.reserving', 'capture.uploading', 'capture.finishing']) && /^[0-9a-f]{64}$/.test(fingerprint ?? '')
           && savedRow.ok && isDeepStrictEqual(savedRow.data, [{ id: attempt.imageId, item_id: attempt.itemId, state: 'ready', main_sha256: h2Sha }])
           && isDeepStrictEqual(row, [{ image_id: attempt.imageId, kind: 'ai_edited', origin: 'recorded', model_id: 'gpt-image-2.5-sunburst',
-            manifest_id: 'azure-global-image25-sunburst-enhance-v1', stored_sha256: h2Sha, backup_sha256: null }]),
+            manifest_id: 'azure-global-image25-sunburst-cleanup-v1', stored_sha256: h2Sha, backup_sha256: null }]),
         { saveError, stages, stored: stored[1], analysis: summary(analysed), provenance: row });
         check(PROVIDER, 'enhance-analysed-save-after-evidence-expiry', expiredAt?.ok === true && saveError === null, { expired: expiredAt?.ok });
         check(PROVIDER, 'enhance-analysed-save-provenance-owner-only', Array.isArray(peer)

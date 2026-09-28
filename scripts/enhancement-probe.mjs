@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// BG2b-2 operator probe (plan rev2 §7.3, amendment A1). Run only by the coordinator, inside a separately approved probe
-// window, against the approved hosted project with non-personal samples. At most 6 paid calls: 5 visual and 1 disconnect
-// (F4). There are no retries and no 7th call; a failed call still counts. Every refusal happens before any network call.
-// The report is text only: codes, numbers, hashes and IDs. It never contains tokens, JWTs, headers, image bytes or base64.
+// BG2b-2 operator probe (plan rev2 §7.3, amendment A1), on the cleanup-v1 manifest since BG2c-1 (plan rev4 §11). Run only
+// by the coordinator, inside a separately approved probe window, against the approved hosted project with non-personal
+// samples prepared by `scripts/cleanup-probe-harness.mjs`. At most 6 paid calls: 5 visual and 1 disconnect (F4). There are
+// no retries and no 7th call; a failed call, including RATE_LIMIT, still counts and stops the run. Calls are paced against
+// the real slot lifetime (R4). Every refusal happens before any network call. The report is text only: codes, numbers,
+// hashes and IDs. It never contains tokens, JWTs, headers, image bytes or base64.
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
@@ -18,12 +20,21 @@ export const CALL_TIMEOUT_MS = 95_000;
 export const DISCONNECT_AFTER_MS = 5_000;
 export const POLL_EVERY_MS = 10_000;
 export const POLL_FOR_MS = 180_000;
-const MANIFEST = 'azure-global-image25-sunburst-enhance-v1';
+/** R4: a claim holds its slot for claim + 5 s + the 60 s window; 2 slots per window. Pacing keeps a 1 s margin. */
+export const SLOT_MS = 65_000;
+export const SLOT_MARGIN_MS = 1_000;
+export const DISPATCH_SPACING_MS = 33_000;
+export const REFERENCE_BYTES = 256 * 320;
+const MANIFEST = 'azure-global-image25-sunburst-cleanup-v1';
 const MODEL = 'gpt-image-2.5-sunburst';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const HASH = /^[0-9a-f]{64}$/;
 const FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.jpe?g$/;
 const MICRO = /^(0|[1-9][0-9]{0,18})$/;
+const BIN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.bin$/;
+const JSON_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.json$/;
+const COMMIT = /^[0-9a-f]{40}$/;
+const BINDING_KEYS = 'ambiguous,commit,crop,frame,h0,modelSha256,reference,sampleSha256,version';
 
 export class ProbeRefusal extends Error {
   constructor(code) { super(code); this.name = 'ProbeRefusal'; this.code = code; }
@@ -48,21 +59,92 @@ export async function prepareProbe(env, deps) {
   if (!Array.isArray(listing) || listing.length !== PROBE_CALLS) refuse('samples');
   const samples = [];
   for (const [index, entry] of listing.entries()) {
-    if (!record(entry) || Object.keys(entry).sort().join() !== 'file,role,sha256' || !FILE.test(entry.file) || basename(entry.file) !== entry.file
+    if (!record(entry) || Object.keys(entry).sort().join() !== 'binding,file,reference,role,sha256' || !FILE.test(entry.file)
+      || !BIN.test(entry.reference) || !JSON_FILE.test(entry.binding)
+      || [entry.file, entry.reference, entry.binding].some((name) => basename(name) !== name)
       || !HASH.test(entry.sha256) || entry.role !== (index < VISUAL_CALLS ? 'visual' : 'disconnect')) refuse('samples');
     let bytes;
     try { bytes = new Uint8Array(await deps.readFile(join(folder, entry.file))); } catch { refuse('sample'); }
     if (bytes.byteLength < 1 || bytes.byteLength > SAMPLE_BYTES || sha256(bytes) !== entry.sha256) refuse('sample');
+    let size;
     try {
-      const { width, height } = deps.readHeader(bytes);
-      if (Math.max(width, height) > 1600 || deps.accepts(bytes, width, height) !== true) refuse('sample');
+      size = deps.readHeader(bytes);
+      if (Math.max(size.width, size.height) > 1600 || size.width * 5 !== size.height * 4 || deps.accepts(bytes, size.width, size.height) !== true) {
+        refuse('sample');
+      }
     } catch (error) { if (error instanceof ProbeRefusal) throw error; refuse('sample'); }
-    samples.push({ role: entry.role, sha256: entry.sha256, bytes });
+    samples.push({ role: entry.role, sha256: entry.sha256, bytes, binding: await verifyBinding(folder, entry, bytes, size, deps) });
   }
+  // One harness build for the whole run: the same commit and BG1 model in every binding.
+  if (new Set(samples.map((sample) => `${sample.binding.commit}:${sample.binding.modelSha256}`)).size !== 1) refuse('binding');
+  const switchOn = wallTime(env.PROBE_SWITCH_ON_AT, deps);
+  if (switchOn === null) refuse('switchOnTime');
+  const lastUse = env.PROBE_LAST_KEY_USE_AT === undefined ? switchOn : wallTime(env.PROBE_LAST_KEY_USE_AT, deps);
+  if (lastUse === null) refuse('lastKeyUse');
   let existing;
   try { existing = await deps.readdir(output); } catch { refuse('output'); }
   if (existing.length !== 0) refuse('output');
-  return { url: HOSTED_URL, authorisation: env.PROBE_AUTHORISATION_ID, jwt, token, key, samples, output };
+  return { url: HOSTED_URL, authorisation: env.PROBE_AUTHORISATION_ID, jwt, token, key, samples, output,
+    notBefore: Math.max(switchOn, lastUse) + SLOT_MS + SLOT_MARGIN_MS };
+}
+
+/** An ISO time in the past (the operator's record of the kill switch or an earlier use), as epoch ms; null if invalid. */
+function wallTime(value, deps) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(value)) return null;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && time <= deps.now() ? time : null;
+}
+
+/**
+ * The harness `prepare` binding (plan rev4 §11.2): the H0 hashes, size and admission, R's length and hash, and that the
+ * ambiguity rule held. An ambiguous or unverifiable sample is never dispatched.
+ */
+async function verifyBinding(folder, entry, bytes, size, deps) {
+  let binding, reference;
+  try {
+    binding = JSON.parse(await deps.readFile(join(folder, entry.binding), 'utf8'));
+    reference = new Uint8Array(await deps.readFile(join(folder, entry.reference)));
+  } catch { refuse('binding'); }
+  if (!record(binding) || Object.keys(binding).sort().join() !== BINDING_KEYS || binding.version !== 1
+    || !COMMIT.test(binding.commit ?? '') || !HASH.test(binding.modelSha256 ?? '') || !HASH.test(binding.sampleSha256 ?? '')
+    || !record(binding.h0) || !record(binding.reference) || !record(binding.frame) || !record(binding.crop)) refuse('binding');
+  if (binding.ambiguous !== false) refuse('ambiguous');
+  const { h0 } = binding;
+  if (h0.sha256 !== entry.sha256 || h0.bytes !== bytes.byteLength || h0.width !== size.width || h0.height !== size.height) refuse('binding');
+  if (reference.byteLength !== REFERENCE_BYTES || binding.reference.bytes !== REFERENCE_BYTES
+    || binding.reference.sha256 !== sha256(reference) || reference.some((value) => value > 1)) refuse('binding');
+  return { commit: binding.commit, modelSha256: binding.modelSha256 };
+}
+
+/**
+ * R4 slot-window pacing. Call k starts only when at least 33 s have passed since the previous dispatch started AND at
+ * most one of this run's own slots can still be live: the slot of call k-2 ended no later than its observed response
+ * plus 65 s (the claim precedes the reply). The first call waits out the switch-on time and any known earlier use.
+ */
+export function earliestStart(run, starts, observed) {
+  const k = starts.length;
+  return Math.max(run.notBefore, k >= 1 ? starts[k - 1] + DISPATCH_SPACING_MS : -Infinity,
+    k >= 2 ? observed[k - 2] + SLOT_MS + SLOT_MARGIN_MS : -Infinity);
+}
+
+/**
+ * Acceptance is never "passed" here: the paired visual review decides (plan rev4 §11.3). This only says whether the
+ * evidence is complete enough for that review. Visual calls need OK plus the harness metrics; the disconnect call needs
+ * the operator's settlement read-back (a terminal accounted usage row and an ended slot).
+ */
+export function evidenceState(calls, metrics = {}, settlement = null) {
+  const missing = [];
+  if (calls.length !== PROBE_CALLS) missing.push('calls');
+  for (const entry of calls) {
+    if (entry.role === 'visual') {
+      if (entry.code !== 'OK') missing.push(`call-${entry.call}`);
+      else if (!record(metrics[entry.requestId]) || typeof metrics[entry.requestId].reason !== 'string') missing.push(`metrics-${entry.call}`);
+    }
+  }
+  const disconnect = calls.find((entry) => entry.role === 'disconnect');
+  if (disconnect && !(record(settlement) && settlement.requestId === disconnect.requestId && settlement.terminal === true
+    && settlement.accounted === true && settlement.slotEnded === true)) missing.push('disconnect-settlement');
+  return missing.length ? { state: 'pending', missing } : { state: 'ready-for-paired-review', missing };
 }
 
 async function readCapped(response, limit) {
@@ -114,10 +196,9 @@ async function status(run, deps) {
   return { ok: true, usage };
 }
 
-async function call(run, deps, sample, index, disconnect) {
+async function call(run, deps, sample, index, disconnect, started) {
   const requestId = (deps.newId ?? randomUUID)();
   const controller = new AbortController();
-  const started = deps.now();
   const timer = setTimeout(() => controller.abort(), disconnect ? DISCONNECT_AFTER_MS : CALL_TIMEOUT_MS);
   const result = { call: index + 1, role: sample.role, requestId, inputSha256: sample.sha256 };
   try {
@@ -166,14 +247,25 @@ export async function runProbe(env, deps) {
   const run = await prepareProbe(env, deps);
   const lines = [];
   const calls = [];
+  const starts = [], observed = [];
   for (const [index, sample] of run.samples.entries()) {
     if (calls.length >= PROBE_CALLS) break;
+    const wait = earliestStart(run, starts, observed) - deps.now();
+    if (wait > 0) await deps.sleep(wait);
     let pre;
     try { pre = await status(run, deps); } catch { pre = { ok: false, code: 'statusUnreadable' }; }
     if (!pre.ok) { lines.push(`Stopped before call ${index + 1}: ${pre.code}.`); break; }
-    const outcome = await call(run, deps, sample, index, sample.role === 'disconnect');
+    const started = deps.now();
+    if (started < earliestStart(run, starts, observed)) { lines.push(`Stopped before call ${index + 1}: clock.`); break; }
+    starts.push(started);
+    const outcome = await call(run, deps, sample, index, sample.role === 'disconnect', started);
+    observed.push(deps.now());
     calls.push(outcome);
-    lines.push(`Call ${outcome.call} (${outcome.role}): ${JSON.stringify({ ...outcome, stop: undefined })}`);
+    const entry = { ...outcome, stop: undefined, binding: sample.binding };
+    lines.push(`Call ${outcome.call} (${outcome.role}): ${JSON.stringify(entry)}`);
+    try {
+      await deps.writeFile(join(run.output, `call-${index + 1}.json`), `${JSON.stringify(entry, null, 2)}\n`, { flag: 'wx' });
+    } catch { lines.push(`Record for call ${outcome.call} not written.`); }
     if (outcome.stop) { lines.push(`Stopped after call ${outcome.call}: ${outcome.code}.`); break; }
   }
   const last = calls.at(-1);
@@ -187,6 +279,7 @@ export async function runProbe(env, deps) {
   }
   lines.push(`Request IDs: ${calls.map(entry => entry.requestId).join(' ')}`);
   lines.push(`Paid calls sent: ${calls.length} of at most ${PROBE_CALLS}.`);
+  lines.push(`Evidence: ${JSON.stringify(evidenceState(calls))} (metrics come from the harness measure step; the disconnect settlement from the operator read-back).`);
   return { lines, calls };
 }
 
@@ -198,7 +291,7 @@ async function main() {
   const { admitProviderJpeg } = await import('../src/images/provider-jpeg.ts');
   try {
     const { lines } = await runProbe(process.env, {
-      fetch, readFile, readdir, writeFile, mkdir, now: () => performance.now(), sleep: (ms) => new Promise(done => setTimeout(done, ms)),
+      fetch, readFile, readdir, writeFile, mkdir, now: () => Date.now(), sleep: (ms) => new Promise(done => setTimeout(done, ms)),
       readHeader: readJpegHeader, accepts: isPhotoInputJpeg, admit: admitProviderJpeg,
     });
     for (const line of lines) process.stdout.write(`${line}\n`);

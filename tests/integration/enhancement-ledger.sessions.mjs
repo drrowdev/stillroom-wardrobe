@@ -12,7 +12,10 @@ import { imageChangeIntent } from './image-replacement.sessions.mjs';
 import { COLOUR_MANIFEST } from './azure-preservation.sessions.mjs';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
 
-const MANIFEST = 'azure-global-image25-sunburst-enhance-v1';
+// BG2c-1: new claims admit only the clean-up manifest under notice revision 2; enhance-v1 rows are legacy work.
+const MANIFEST = 'azure-global-image25-sunburst-cleanup-v1';
+const V1 = 'azure-global-image25-sunburst-enhance-v1';
+const NOTICE = 2;
 const MODEL = 'gpt-image-2.5-sunburst';
 const KEY = 'stillroom-ai-eval/eval-image25-sunburst-20260908/2026-09-08';
 const STYLIST = 'azure-eu-terra-stylist-v1';
@@ -50,7 +53,7 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
   // Test-only: end every live slot now, so a section starts with free shared capacity.
   const freeSlots = () => sql(`update private.provider_slots set held_until=clock_timestamp()-interval '1 second'
     where deployment_key=${literal(KEY)} and held_until>clock_timestamp();`);
-  const activate = (where) => sql(`update private.ai_controls set enhance_activated=true,enhance_notice_revision=1,
+  const activate = (where) => sql(`update private.ai_controls set enhance_activated=true,enhance_notice_revision=${NOTICE},
     enhance_manifest_id=${literal(MANIFEST)},enhance_max_request_micro=${RESERVED},monthly_allowance_micro=100000000,
     enhance_monthly_allowance_micro=50000000,enhance_max_requests_per_hour=1000,max_requests_per_hour=1000,
     updated_at=clock_timestamp() where ${where};`);
@@ -113,7 +116,7 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
     await activate(`owner_id in (${literal(a.uid)},${literal(b.uid)})`);
     for (const owner of [a, b]) {
       equal(await claim(owner, randomUUID()), { code: 'CONSENT_REQUIRED', claimed: false });
-      const consent = await client.rpc(owner, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 1 });
+      const consent = await client.rpc(owner, 'enhance_set_consent', { p_enabled: true, p_notice_revision: NOTICE });
       requireEvidence(consent?.code === 'OK' && consent.consent?.enabled === true && consent.policy?.manifestId === MANIFEST
         && consent.policy.providerAvailable === false);
     }
@@ -268,8 +271,10 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
     requireEvidence((await client.rpc(a, 'enhance_set_consent', { p_enabled: false, p_notice_revision: null })).consent.enabled === false);
     equal((await finish(a, revoked, 'OK', VALID, { sha: hex(), bytes: 4 })).code, 'CONSENT_REQUIRED');
     requireEvidence((await ledger(a, revoked)).usage.accounted_micro === ESTIMATE && await evidence(a, revoked) === null);
-    equal((await client.rpc(a, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 2 })).code, 'CONFIG_CHANGED');
-    equal((await client.rpc(a, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 1 })).code, 'OK');
+    for (const stale of [1, 3]) {
+      equal((await client.rpc(a, 'enhance_set_consent', { p_enabled: true, p_notice_revision: stale })).code, 'CONFIG_CHANGED');
+    }
+    equal((await client.rpc(a, 'enhance_set_consent', { p_enabled: true, p_notice_revision: NOTICE })).code, 'OK');
     const frozen = randomUUID();
     requireEvidence((await claim(b, frozen)).claimed === true);
     const unfreezeB = () => sql(`update private.approved_accounts set enabled=true where user_id=${literal(b.uid)};`);
@@ -308,6 +313,86 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
     requireEvidence((await claim(loser, next)).claimed === true);
     equal((await finish(loser, next, 'NOT_DISPATCHED', null)).code, 'NOT_DISPATCHED');
     await setMax(100);
+    await freeSlots();
+
+    mark('cleanup-cutover');
+    // BG2c-1 (plan rev4 §7, R2, R6). The notice floor is server-enforced for cleanup-v1 only and rejects NULL; enhance-v1
+    // is never claimable again; held enhance-v1 work still settles. With v1 controls it releases normally (C1); after the
+    // controls cutover it is accounted but its output is suppressed by enhance_finish and its replay (C2). A settlement
+    // never frees the slot.
+    const checkRefused = (statement) => sql(`do $$ declare v text; begin ${statement};
+      raise exception using errcode='P0T99',message='NOT_REFUSED';
+      exception when check_violation then get stacked diagnostics v = constraint_name;
+        if v is distinct from 'ai_controls_cleanup_notice' then raise; end if; end $$;`);
+    const setControls = (owner, set) => sql(`update private.ai_controls set ${set},
+      enhance_consented_at=coalesce(enhance_consented_at,clock_timestamp()),updated_at=clock_timestamp()
+      where owner_id=${literal(owner.uid)};`);
+    // One shared deployment key and capacity row: the same slots and kill switch for both manifests.
+    equal(await one(`select jsonb_agg(d.deployment_key order by d.manifest_id) from private.provider_deployments d
+      where d.manifest_id in (${literal(V1)},${literal(MANIFEST)});`), [KEY, KEY]);
+    const saved = await controls(a);
+    requireEvidence(saved.enhance_manifest_id === MANIFEST && saved.enhance_notice_revision === NOTICE);
+    for (const revision of ['null', '1']) {
+      await checkRefused(`update private.ai_controls set enhance_activated=false,enhance_notice_revision=${revision}
+        where owner_id=${literal(a.uid)}`);
+    }
+    await checkRefused(`update private.ai_controls set enhance_manifest_id=${literal(MANIFEST)},enhance_notice_revision=1
+      where owner_id=${literal(b.uid)}`);
+    equal(await controls(a), saved);
+    // Legacy combinations are unaffected: enhance-v1 with notice 1, and a NULL manifest with a NULL notice.
+    await setControls(b, `enhance_manifest_id=${literal(V1)},enhance_notice_revision=1,enhance_consent_revision=1`);
+    equal(await claim(b, randomUUID(), { manifest: V1 }), { code: 'UNCONFIGURED', claimed: false });
+    equal(await claim(b, randomUUID()), { code: 'CONFIG_CHANGED', claimed: false });
+    equal(await claim(a, randomUUID(), { manifest: V1 }), { code: 'UNCONFIGURED', claimed: false });
+    // Consent never carries forward: a revision-1 consent under notice 2 is CONSENT_REQUIRED.
+    await setControls(b, `enhance_manifest_id=${literal(MANIFEST)},enhance_notice_revision=${NOTICE}`);
+    equal(await claim(b, randomUUID()), { code: 'CONSENT_REQUIRED', claimed: false });
+    // Held enhance-v1 work, written exactly as the M8 claim wrote it (the same columns and values).
+    const heldV1 = async (owner) => {
+      const id = randomUUID(), slot = randomUUID(), input = hex();
+      await sql(`insert into private.provider_slots(slot_id,deployment_key,held_until)
+          values(${literal(slot)},${literal(KEY)},clock_timestamp()+interval '65 seconds');
+        insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,dispatched_at,
+            purpose,provider_slot_id)
+          values(${literal(owner.uid)},${literal(id)},to_char(clock_timestamp() at time zone 'UTC','YYYY-MM'),clock_timestamp(),
+            ${RESERVED},${RESERVED},'held',clock_timestamp(),'enhancement',${literal(slot)});
+        insert into private.ai_usage_evidence(owner_id,request_id,manifest_id,model_observation,enhance_input_sha256,enhance_probe_id)
+          values(${literal(owner.uid)},${literal(id)},${literal(V1)},'not_observed',${literal(input)},null);`);
+      return { id, slot, input };
+    };
+    const slotEnd = (slot) => scalar(`select held_until::text from private.provider_slots where slot_id=${literal(slot)};`);
+    // C1: v1 controls unchanged (notice 1, consent 1): held v1 work settles and releases H2 bound to enhance-v1.
+    await setControls(b, `enhance_manifest_id=${literal(V1)},enhance_notice_revision=1,enhance_consent_revision=1`);
+    const c1 = await heldV1(b), c1End = await slotEnd(c1.slot), c1Out = { sha: hex(), bytes: 4 };
+    const c1Done = await finish(b, c1.id, 'OK', VALID, c1Out);
+    requireEvidence(c1Done.code === 'OK' && Number.isSafeInteger(c1Done.usableUntilMs));
+    const c1Row = await ledger(b, c1.id);
+    requireEvidence(c1Row.usage.accounted_micro === ESTIMATE && c1Row.usage.closed_reason === null
+      && c1Row.evidence.manifest_id === V1 && c1Row.evidence.enhance_settlement_origin === 'observed');
+    const c1Evidence = await evidence(b, c1.id);
+    requireEvidence(c1Evidence?.manifest_id === V1 && c1Evidence.input_sha256 === c1.input && c1Evidence.output_sha256 === c1Out.sha);
+    equal(await slotEnd(c1.slot), c1End);
+    // C2: after the controls cutover (cleanup-v1, notice 2, consent 2) held v1 work is accounted and suppressed.
+    const c2 = await heldV1(b), c2End = await slotEnd(c2.slot);
+    await setControls(b, `enhance_manifest_id=${literal(MANIFEST)},enhance_notice_revision=${NOTICE},enhance_consent_revision=${NOTICE}`);
+    const c2Out = { sha: hex(), bytes: 4 };
+    equal((await finish(b, c2.id, 'OK', VALID, c2Out)).code, 'UNAVAILABLE');
+    const c2Row = await ledger(b, c2.id);
+    requireEvidence(c2Row.usage.accounted_micro === ESTIMATE && c2Row.usage.closed_reason === 'UNAVAILABLE'
+      && c2Row.evidence.enhance_settlement_origin === 'observed' && await evidence(b, c2.id) === null);
+    equal(await slotEnd(c2.slot), c2End);
+    const c2Replay = await finish(b, c2.id, 'OK', VALID, c2Out);
+    requireEvidence(c2Replay.code === 'UNAVAILABLE' && c2Replay.replayed === true && c2Replay.usableUntilMs === null);
+    equal((await finish(b, c2.id, 'OK', VALID, { sha: hex(), bytes: 4 })).code, 'USAGE_CONFLICT');
+    // Both settled slots still count against the shared capacity until held_until.
+    equal(Number(await scalar(`select count(*) from private.provider_slots where slot_id in (${literal(c1.slot)},${literal(c2.slot)})
+      and held_until>clock_timestamp();`)), 2);
+    // The C1 result released before the cutover is suppressed on replay; enhance_status does not decide this.
+    const c1Replay = await finish(b, c1.id, 'OK', VALID, c1Out);
+    requireEvidence(c1Replay.code === 'UNAVAILABLE' && c1Replay.replayed === true && c1Replay.usableUntilMs === null);
+    requireEvidence((await status(b)).policy.manifestId === MANIFEST);
+    await reactivate(b);
+    equal((await client.rpc(b, 'enhance_set_consent', { p_enabled: true, p_notice_revision: NOTICE })).code, 'OK');
     await freeSlots();
 
     mark('mixed-admission');
@@ -445,7 +530,7 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
     requireEvidence(staleRow.usage.closed_reason === 'EXPIRED' && staleRow.usage.accounted_micro === RESERVED
       && staleRow.evidence.enhance_settlement_origin === 'provisional_expiry');
     await reactivate(a);
-    equal((await client.rpc(a, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 1 })).code, 'OK');
+    equal((await client.rpc(a, 'enhance_set_consent', { p_enabled: true, p_notice_revision: NOTICE })).code, 'OK');
     await freeSlots();
 
     const sh = saveHarness(client, a), shB = saveHarness(client, b);
