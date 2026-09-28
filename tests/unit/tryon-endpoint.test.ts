@@ -344,7 +344,7 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
   it('suppresses the picture when finish reports a late, withdrawn, expired or anomalous step', async () => {
     for (const [finished, code] of [['LATE', 'CONFLICT'], ['EXPIRED', 'TIMEOUT'], ['USAGE_ANOMALY', 'FAILED'],
       ['INVALID_USAGE', 'FAILED'], ['CONSENT_REQUIRED', 'CONSENT_REQUIRED'], ['UNAVAILABLE', 'UNAVAILABLE'], ['BUSY', 'FAILED'],
-      ['USAGE_CONFLICT', 'FAILED']] as const) {
+      ['USAGE_CONFLICT', 'FAILED'], ['INACTIVE', 'INACTIVE'], ['UNCONFIGURED', 'UNCONFIGURED']] as const) {
       backend({ finish: { code: finished, accounting: finished === 'BUSY' ? null : accounting } });
       const { transport } = provider(() => Response.json(imageBody()));
       const response = await createTryOnHandler(config, register, transport)(post());

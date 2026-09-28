@@ -120,9 +120,11 @@ async function status(run, deps) {
 // Only these refusals are returned before a claim and nowhere after one, so only they are unpaid. Of those, RATE_LIMIT
 // and BUSY may clear, so they are tried again (the handler maps a post-claim BUSY to FAILED). Every other code, and any
 // transport failure, may follow a claim: it counts, is never retried and its request ID is kept for reconciliation.
+// INACTIVE, CONSENT_REQUIRED, UNCONFIGURED and UNAVAILABLE also come from the mark's and finish's permission checks (a probe
+// authorisation stopped or expired while the provider ran), and CHAIN_MISMATCH from the mark for a stale chain.
 export const RETRY_BEFORE_CLAIM = Object.freeze(['RATE_LIMIT', 'BUSY']);
-export const REFUSED_BEFORE_CLAIM = Object.freeze([...RETRY_BEFORE_CLAIM, 'ALLOWANCE', 'RESULTS_FULL', 'NO_GARMENTS', 'CHAIN_MISMATCH',
-  'INACTIVE', 'CONSENT_REQUIRED', 'UNAUTHENTICATED', 'TOO_LARGE', 'UNSUPPORTED_MEDIA']);
+export const REFUSED_BEFORE_CLAIM = Object.freeze([...RETRY_BEFORE_CLAIM, 'ALLOWANCE', 'RESULTS_FULL', 'NO_GARMENTS',
+  'UNAUTHENTICATED', 'TOO_LARGE', 'UNSUPPORTED_MEDIA']);
 const CHAIN_STATES = ['running', 'complete', 'cancelled', 'withdrawn', 'expired', 'stale'];
 // The report carries codes, numbers, lengths and request IDs only: never hashes, result IDs, tokens or image data.
 const reportable = (outcome) => ({ outfit: outcome.outfit, step: outcome.step, requestId: outcome.requestId, status: outcome.status,

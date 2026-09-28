@@ -232,7 +232,8 @@ describe('try-on probe script', () => {
   });
 
   it('never retries a code that may follow a claim, keeps its request ID and stops the chain', async () => {
-    for (const code of ['FAILED', 'UNAVAILABLE', 'CONFLICT', 'NOT_FOUND', 'TIMEOUT', 'INVALID_INPUT', 'CONFIG_CHANGED', 'WITHDRAWN', 'UNCONFIGURED']) {
+    for (const code of ['FAILED', 'UNAVAILABLE', 'CONFLICT', 'NOT_FOUND', 'TIMEOUT', 'INVALID_INPUT', 'CONFIG_CHANGED', 'WITHDRAWN', 'UNCONFIGURED',
+      'INACTIVE', 'CONSENT_REQUIRED', 'CHAIN_MISMATCH']) {
       const h = harness({ step: () => json({ code }, 503) });
       const { calls, lines, complete } = await runProbe(env(), h.deps);
       expect(h.steps).toHaveLength(1);
@@ -242,6 +243,22 @@ describe('try-on probe script', () => {
       expect(report(lines)).toContain('Paid calls sent: 1 of at most 5.');
       expect(h.fetches.filter((url) => url.endsWith('tryon_cancel'))).toHaveLength(1);
     }
+  });
+
+  it('counts a call whose probe authorisation was stopped or expired while the provider ran', async () => {
+    // tryon_finish records the observed usage, then its probe-permission check answers INACTIVE; the handler passes it on.
+    const h = harness({ step: (call) => call.step === 2 ? json({ code: 'INACTIVE' }, 503) : defaultStep(call) });
+    const { calls, lines, complete } = await runProbe(env(), h.deps);
+    expect(calls.map((c) => c.code)).toEqual(['OK', 'INACTIVE']);
+    expect(h.steps).toHaveLength(2);
+    expect(complete).toBe(false);
+    const text = report(lines);
+    expect(text).toContain('Stopped after P1 step 2: INACTIVE.');
+    expect(text).not.toContain('refused before a claim');
+    expect(text).toContain('Paid calls sent: 2 of at most 5.');
+    expect(text).toContain('Outcome: INCOMPLETE.');
+    expect(text).toContain(h.steps[1]!.requestId);
+    expect(h.fetches.filter((url) => url.endsWith('tryon_cancel'))).toHaveLength(1);
   });
 
   it('stops with call 4 incomplete unless the P3 chain completes on its own', async () => {
