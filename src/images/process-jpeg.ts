@@ -394,15 +394,18 @@ function canvasOf(width: number, height: number): HTMLCanvasElement {
 /**
  * H0 and R (BG2c plan rev4 §4.1). Fill the frame canvas, draw the unmasked working pixels source -> dest, encode within
  * the enhancement byte and side limits, strip metadata, check and hash, then admit with `isPhotoInputJpeg` and require
- * an exact 4:5 size after any encoder downscale. Every failure except an abort returns null, so H1 is kept and the
- * preparation still succeeds. At most two extra canvases are alive: the frame canvas and the encoder's own canvas.
+ * an exact 4:5 size after any encoder downscale. Every failure except an abort, including allocating or sizing either
+ * canvas, returns null, so H1 is kept and the preparation still succeeds. Estimated extra peak (not measured): two
+ * canvases alive together, the frame canvas and the encoder's own canvas, each at most 1280 x 1600 x 4 bytes, about
+ * 8.2 MB each and 16.4 MB in total, plus the encoder's working buffers.
  * Exported for its unit test only; the app reaches it through `prepareSegmentedSource(..., wantCleanup)`.
  */
 export async function cleanupSource(working: HTMLCanvasElement, alpha: Float32Array, size: { width: number; height: number },
   frame: FramePlan, edit: PhotoEdit, signal?: AbortSignal): Promise<CleanupSource | null> {
-  const h0Canvas = canvasOf(frame.canvas.width, frame.canvas.height);
+  let h0Canvas: HTMLCanvasElement | undefined;
   let encoded: EncodedImage | undefined;
   try {
+    h0Canvas = canvasOf(frame.canvas.width, frame.canvas.height);
     const context = fillBackground(h0Canvas);
     context.imageSmoothingQuality = 'high';
     const { source, dest } = frame;
@@ -410,6 +413,7 @@ export async function cleanupSource(working: HTMLCanvasElement, alpha: Float32Ar
     encoded = await encode(h0Canvas, h0Canvas.width, h0Canvas.height, JPEG_LIMITS.mainSide, ENHANCE_LIMITS.imageBytes, 800,
       signal, undefined, true);
     releaseCanvas(h0Canvas);
+    h0Canvas = undefined;
     const { width, height } = encoded.canvas;
     if (width * 5 !== height * 4 || Math.max(width, height) > ENHANCE_LIMITS.imageMaxSide) return null;
     const sha256 = await verifyAndHash(encoded, signal);
@@ -425,8 +429,9 @@ export async function cleanupSource(working: HTMLCanvasElement, alpha: Float32Ar
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
     return null;
   } finally {
-    releaseCanvas(h0Canvas);
-    if (encoded) releaseCanvas(encoded.canvas);
+    // Releasing must not turn a null into a failed preparation either.
+    try { if (h0Canvas) releaseCanvas(h0Canvas); } catch { /* already unusable */ }
+    try { if (encoded) releaseCanvas(encoded.canvas); } catch { /* already unusable */ }
   }
 }
 

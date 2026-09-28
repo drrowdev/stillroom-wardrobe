@@ -11,6 +11,7 @@ export const SLOT_MS: number;
 export const SLOT_MARGIN_MS: number;
 export const DISPATCH_SPACING_MS: number;
 export const REFERENCE_BYTES: number;
+export const REASON_METRICS: Readonly<Record<string, readonly string[]>>;
 export function earliestStart(run: { notBefore: number }, starts: readonly number[], observed: readonly number[]): number;
 export function evidenceState(calls: ReadonlyArray<Record<string, unknown>>, metrics?: Record<string, unknown>, settlement?: unknown):
   { state: 'pending' | 'ready-for-paired-review'; missing: string[] };

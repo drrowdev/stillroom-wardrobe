@@ -53,6 +53,7 @@ export async function prepareProbe(env, deps) {
   if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43,256}$/.test(token)) refuse('probeToken');
   if (typeof key !== 'string' || !/^sb_publishable_[A-Za-z0-9_-]{8,128}$/.test(key)) refuse('publishableKey');
   if (typeof env.PROBE_SAMPLES !== 'string' || typeof env.PROBE_OUTPUT !== 'string') refuse('folders');
+  if (typeof deps.monotonic !== 'function' || typeof deps.now !== 'function') refuse('clock');
   const folder = resolve(env.PROBE_SAMPLES), output = resolve(env.PROBE_OUTPUT);
   let listing;
   try { listing = JSON.parse(await deps.readFile(join(folder, 'samples.json'), 'utf8')); } catch { refuse('samples'); }
@@ -84,8 +85,9 @@ export async function prepareProbe(env, deps) {
   let existing;
   try { existing = await deps.readdir(output); } catch { refuse('output'); }
   if (existing.length !== 0) refuse('output');
+  // Wall time: the only use of the wall clock for pacing. runProbe converts it once to a monotonic deadline.
   return { url: HOSTED_URL, authorisation: env.PROBE_AUTHORISATION_ID, jwt, token, key, samples, output,
-    notBefore: Math.max(switchOn, lastUse) + SLOT_MS + SLOT_MARGIN_MS };
+    notBeforeWall: Math.max(switchOn, lastUse) + SLOT_MS + SLOT_MARGIN_MS };
 }
 
 /** An ISO time in the past (the operator's record of the kill switch or an earlier use), as epoch ms; null if invalid. */
@@ -113,13 +115,14 @@ async function verifyBinding(folder, entry, bytes, size, deps) {
   if (h0.sha256 !== entry.sha256 || h0.bytes !== bytes.byteLength || h0.width !== size.width || h0.height !== size.height) refuse('binding');
   if (reference.byteLength !== REFERENCE_BYTES || binding.reference.bytes !== REFERENCE_BYTES
     || binding.reference.sha256 !== sha256(reference) || reference.some((value) => value > 1)) refuse('binding');
-  return { commit: binding.commit, modelSha256: binding.modelSha256 };
+  return { commit: binding.commit, modelSha256: binding.modelSha256, referenceSha256: binding.reference.sha256 };
 }
 
 /**
- * R4 slot-window pacing. Call k starts only when at least 33 s have passed since the previous dispatch started AND at
- * most one of this run's own slots can still be live: the slot of call k-2 ended no later than its observed response
- * plus 65 s (the claim precedes the reply). The first call waits out the switch-on time and any known earlier use.
+ * R4 slot-window pacing, on the monotonic clock only. Call k starts only when at least 33 s have passed since the
+ * previous dispatch started AND at most one of this run's own slots can still be live: the slot of call k-2 ended no
+ * later than its observed response plus 65 s (the claim precedes the reply). The first call waits out the switch-on
+ * time and any known earlier use, converted once from wall time to a monotonic deadline (`run.notBefore`).
  */
 export function earliestStart(run, starts, observed) {
   const k = starts.length;
@@ -127,10 +130,39 @@ export function earliestStart(run, starts, observed) {
     k >= 2 ? observed[k - 2] + SLOT_MS + SLOT_MARGIN_MS : -Infinity);
 }
 
+// The numeric metrics `cleanupCheck` reports for each verdict (src/images/fidelity.ts). `size` and `nonFinite` carry
+// none that a reviewer can use, so they leave the call's evidence incomplete.
+const BASE_METRICS = ['ringDeltaE', 'ringP95', 'workingBytes'];
+const PLACED_METRICS = [...BASE_METRICS, 'largestShare', 'containment', 'retention', 'centroid.x', 'centroid.y'];
+const SUPPORTED_METRICS = [...PLACED_METRICS, 'support'];
+const MEASURED_METRICS = [...SUPPORTED_METRICS, 'meanDeltaE', 'p95DeltaE', 'ssim', 'windows'];
+export const REASON_METRICS = Object.freeze({
+  background: BASE_METRICS, emptyMask: BASE_METRICS, tinyMask: BASE_METRICS, ambiguousMask: BASE_METRICS, pieces: BASE_METRICS,
+  containment: PLACED_METRICS, retention: PLACED_METRICS, centre: PLACED_METRICS, support: SUPPORTED_METRICS,
+  colour: MEASURED_METRICS, structure: MEASURED_METRICS, accepted: MEASURED_METRICS,
+});
+const metricAt = (metrics, path) => path.split('.').reduce((value, key) => (record(value) ? value[key] : undefined), metrics);
+
+/** One harness `measure` entry, bound to this call's request, input, output, reference and build, with its metrics. */
+function measuredFor(entry, measured) {
+  const binding = entry.binding;
+  if (!record(measured) || !record(binding) || measured.call !== entry.call || measured.commit !== binding.commit
+    || measured.modelSha256 !== binding.modelSha256 || measured.referenceSha256 !== binding.referenceSha256
+    || measured.h0Sha256 !== entry.inputSha256 || !HASH.test(entry.outputSha256 ?? '') || measured.h2Sha256 !== entry.outputSha256) return false;
+  const required = Object.hasOwn(REASON_METRICS, measured.reason) ? REASON_METRICS[measured.reason] : null;
+  return required !== null && record(measured.metrics)
+    && required.every((path) => { const value = metricAt(measured.metrics, path); return typeof value === 'number' && Number.isFinite(value); });
+}
+
 /**
  * Acceptance is never "passed" here: the paired visual review decides (plan rev4 §11.3). This only says whether the
- * evidence is complete enough for that review. Visual calls need OK plus the harness metrics; the disconnect call needs
- * the operator's settlement read-back (a terminal accounted usage row and an ended slot).
+ * evidence is complete enough for that review.
+ * - A visual call needs OK and a harness `measure` entry keyed by its request ID, bound to its input, output,
+ *   reference and build, with every numeric metric its verdict reports.
+ * - The disconnect call (F4) needs an actual DISCONNECTED outcome; a reply received before the disconnect leaves F4
+ *   pending. It also needs the operator's read-back of that request's own usage row, settled from observed usage:
+ *   dispatched, `charge_state` estimated, `enhance_settlement_origin` observed, no anomaly, an accounted amount and the
+ *   settlement digest. A provisional expiry, another request's row or a merely terminal row is not enough.
  */
 export function evidenceState(calls, metrics = {}, settlement = null) {
   const missing = [];
@@ -138,12 +170,17 @@ export function evidenceState(calls, metrics = {}, settlement = null) {
   for (const entry of calls) {
     if (entry.role === 'visual') {
       if (entry.code !== 'OK') missing.push(`call-${entry.call}`);
-      else if (!record(metrics[entry.requestId]) || typeof metrics[entry.requestId].reason !== 'string') missing.push(`metrics-${entry.call}`);
+      else if (!record(metrics) || !measuredFor(entry, metrics[entry.requestId])) missing.push(`metrics-${entry.call}`);
     }
   }
   const disconnect = calls.find((entry) => entry.role === 'disconnect');
-  if (disconnect && !(record(settlement) && settlement.requestId === disconnect.requestId && settlement.terminal === true
-    && settlement.accounted === true && settlement.slotEnded === true)) missing.push('disconnect-settlement');
+  if (disconnect) {
+    if (disconnect.code !== 'DISCONNECTED') missing.push('disconnect-outcome');
+    if (!(record(settlement) && settlement.requestId === disconnect.requestId && settlement.dispatched === true
+      && settlement.chargeState === 'estimated' && settlement.settlementOrigin === 'observed' && settlement.anomaly === false
+      && typeof settlement.accountedMicro === 'string' && MICRO.test(settlement.accountedMicro)
+      && HASH.test(settlement.settlementDigest ?? ''))) missing.push('disconnect-settlement');
+  }
   return missing.length ? { state: 'pending', missing } : { state: 'ready-for-paired-review', missing };
 }
 
@@ -212,17 +249,17 @@ async function call(run, deps, sample, index, disconnect, started) {
       // F4 needs the connection dropped before a reply; a reply this early is recorded, and the call still counts.
       try { await response.body?.cancel(); } catch { /* closed */ }
       result.code = 'RESPONDED_BEFORE_DISCONNECT';
-      return { ...result, latencyMs: Math.round(deps.now() - started), stop: false };
+      return { ...result, latencyMs: Math.round(deps.monotonic() - started), stop: false };
     }
     if (response.status !== 200) {
       const value = await readJson(response);
       result.code = record(value) && typeof value.code === 'string' && /^[A-Z_]{1,32}$/.test(value.code) ? value.code : 'UNREADABLE';
-      return { ...result, latencyMs: Math.round(deps.now() - started), stop: true };
+      return { ...result, latencyMs: Math.round(deps.monotonic() - started), stop: true };
     }
     const headerHash = response.headers.get('x-stillroom-enhancement-sha256');
     const headerLength = Number(response.headers.get('content-length'));
     const body = response.headers.get('content-type') === 'image/jpeg' ? await readCapped(response, OUTPUT_BYTES) : null;
-    result.latencyMs = Math.round(deps.now() - started);
+    result.latencyMs = Math.round(deps.monotonic() - started);
     if (!body) return { ...result, code: 'OUTPUT_REJECTED', stop: true };
     result.outputSha256 = sha256(body); result.outputBytes = body.byteLength;
     if (headerHash !== result.outputSha256 || headerLength !== body.byteLength) return { ...result, code: 'EVIDENCE_MISMATCH', stop: true };
@@ -236,7 +273,7 @@ async function call(run, deps, sample, index, disconnect, started) {
     await deps.writeFile(join(run.output, `call-${index + 1}.jpg`), body, { flag: 'wx' });
     return { ...result, stop: false };
   } catch {
-    result.latencyMs = Math.round(deps.now() - started);
+    result.latencyMs = Math.round(deps.monotonic() - started);
     if (disconnect && controller.signal.aborted) return { ...result, code: 'DISCONNECTED', stop: false };
     return { ...result, code: controller.signal.aborted ? 'CLIENT_TIMEOUT' : 'TRANSPORT', stop: true };
   } finally { clearTimeout(timer); }
@@ -248,20 +285,22 @@ export async function runProbe(env, deps) {
   const lines = [];
   const calls = [];
   const starts = [], observed = [];
+  // The one wall-to-monotonic conversion: after this, a wall-clock jump can neither shorten nor stretch any wait.
+  const pace = { notBefore: deps.monotonic() + Math.max(0, run.notBeforeWall - deps.now()) };
   for (const [index, sample] of run.samples.entries()) {
     if (calls.length >= PROBE_CALLS) break;
-    const wait = earliestStart(run, starts, observed) - deps.now();
+    const wait = earliestStart(pace, starts, observed) - deps.monotonic();
     if (wait > 0) await deps.sleep(wait);
     let pre;
     try { pre = await status(run, deps); } catch { pre = { ok: false, code: 'statusUnreadable' }; }
     if (!pre.ok) { lines.push(`Stopped before call ${index + 1}: ${pre.code}.`); break; }
-    const started = deps.now();
-    if (started < earliestStart(run, starts, observed)) { lines.push(`Stopped before call ${index + 1}: clock.`); break; }
+    const started = deps.monotonic();
+    if (started < earliestStart(pace, starts, observed)) { lines.push(`Stopped before call ${index + 1}: clock.`); break; }
     starts.push(started);
-    const outcome = await call(run, deps, sample, index, sample.role === 'disconnect', started);
-    observed.push(deps.now());
+    const outcome = { ...await call(run, deps, sample, index, sample.role === 'disconnect', started), binding: sample.binding };
+    observed.push(deps.monotonic());
     calls.push(outcome);
-    const entry = { ...outcome, stop: undefined, binding: sample.binding };
+    const entry = { ...outcome, stop: undefined };
     lines.push(`Call ${outcome.call} (${outcome.role}): ${JSON.stringify(entry)}`);
     try {
       await deps.writeFile(join(run.output, `call-${index + 1}.json`), `${JSON.stringify(entry, null, 2)}\n`, { flag: 'wx' });
@@ -291,7 +330,7 @@ async function main() {
   const { admitProviderJpeg } = await import('../src/images/provider-jpeg.ts');
   try {
     const { lines } = await runProbe(process.env, {
-      fetch, readFile, readdir, writeFile, mkdir, now: () => Date.now(), sleep: (ms) => new Promise(done => setTimeout(done, ms)),
+      fetch, readFile, readdir, writeFile, mkdir, now: () => Date.now(), monotonic: () => performance.now(), sleep: (ms) => new Promise(done => setTimeout(done, ms)),
       readHeader: readJpegHeader, accepts: isPhotoInputJpeg, admit: admitProviderJpeg,
     });
     for (const line of lines) process.stdout.write(`${line}\n`);

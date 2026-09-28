@@ -211,7 +211,7 @@ async function measureAll(preparedDir, callsDir, measuredDir) {
       const measured = await page.evaluate(([a, r, b]) => window.__stillroomCleanupHarness.measure(a, r, b), [b64(h0), b64(reference), b64(h2)]);
       const verdict = measured.verdict;
       metrics[call.requestId] = { call: index + 1, reason: verdict.accepted ? 'accepted' : verdict.reason, metrics: verdict.metrics,
-        h0Sha256: measured.h0Sha256, h2Sha256: measured.h2Sha256, referenceSha256: measured.referenceSha256, commit };
+        h0Sha256: measured.h0Sha256, h2Sha256: measured.h2Sha256, referenceSha256: measured.referenceSha256, commit, modelSha256 };
     }
   });
   await writeFile(path.join(out, 'metrics.json'), `${JSON.stringify({ commit, metrics, pending, blocked: run.blocked }, null, 2)}\n`, { flag: 'wx' });

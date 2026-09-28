@@ -642,7 +642,7 @@ reports (run by the coordinator in the SQL editor; it changes nothing):
 ```sql
 select u.request_id, u.purpose, u.charge_state, u.reserved_micro, u.accounted_micro,
        u.dispatched_at is not null as dispatched, e.enhance_code, e.enhance_settlement_origin,
-       e.enhance_probe_id, e.estimated_micro, e.anomaly
+       e.enhance_probe_id, e.estimated_micro, e.anomaly, e.enhance_settlement_digest
 from private.ai_usage u
 join private.ai_usage_evidence e using (owner_id, request_id)
 where u.purpose = 'enhancement' and u.request_id = any($1::uuid[])
@@ -692,7 +692,14 @@ then needs `PROBE_SWITCH_ON_AT` (the kill-switch time, ISO UTC) and optionally
 each call at least 33 s after the previous dispatch and 66 s after the response
 of the call two back (and 66 s after switch-on), stops on any non-`OK` result
 including `RATE_LIMIT`, and reports evidence as pending until the visual metrics
-and the disconnect settlement read-back exist. `checkStaticTree` refuses any
+and the disconnect settlement read-back exist. Wall time is read once, for the
+switch-on and last-use wait; that wait and all spacing then run on the
+monotonic clock. Evidence is complete only when each visual call has a
+`measure` entry bound to its request ID, input, output, reference, commit and
+model with every numeric metric its verdict reports, and the disconnect call
+actually ended `DISCONNECTED` (a reply before the disconnect leaves F4 pending)
+with its own row read back as dispatched, `estimated`, origin `observed`, no
+anomaly, an accounted amount and the settlement digest. `checkStaticTree` refuses any
 `probe/` path or harness marker, so the harness can't reach a deploy tree.
 
 **I23 service worker (source only, not deployed).** The Phase 7 PR-1 draft

@@ -3,7 +3,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { framePlan, REFERENCE_HEIGHT, REFERENCE_WIDTH } from '../../src/images/background/frame';
 import { MASK_SIDE } from '../../src/images/background/mask';
-import { cleanupSource } from '../../src/images/process-jpeg';
+import { cleanupSource, prepareSegmentedSource } from '../../src/images/process-jpeg';
+import { ORIGINAL_EDIT } from '../../src/images/crop';
 import { ENHANCE_LIMITS } from '../../src/domain/enhancement';
 import { fitDimensions } from '../../src/images/jpeg';
 import { flatJpeg } from '../fixtures/restore-jpeg-fixtures';
@@ -91,5 +92,87 @@ describe('cleanupSource (H0 and R)', () => {
     const controller = new AbortController();
     install((canvas) => { controller.abort(); return jpeg(canvas); });
     await expect(cleanupSource(working, alpha, size, plan, edit, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
+
+// The preparation boundary (#120 review): any H0 failure, including allocating or sizing its canvas, keeps H1 and the
+// preparation succeeds; an abort still rejects it. The failure is armed when the BG1 mask canvas is filled, so the next
+// canvas the code allocates or sizes is H0's frame canvas.
+describe('prepareSegmentedSource with clean-up', () => {
+  type Failure = 'none' | 'allocate' | 'size' | 'abort';
+  const controller = { current: new AbortController() };
+  let armed = false;
+  let allocations = 0;
+  function installPreparation(failure: Failure) {
+    armed = false;
+    allocations = 0;
+    controller.current = new AbortController();
+    const context = (shim: { width: number; height: number }) => ({
+      fillRect: () => undefined, setTransform: () => undefined, drawImage: () => undefined,
+      getImageData: (_x: number, _y: number, width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4), width, height }),
+      putImageData: () => { if (failure !== 'none') armed = true; void shim; },
+    });
+    vi.stubGlobal('document', {
+      createElement: () => {
+        allocations += 1;
+        if (armed && failure === 'allocate') { armed = false; throw new RangeError('canvas allocation failed'); }
+        let width = 0, height = 0;
+        const shim = {
+          get width() { return width; },
+          set width(value: number) {
+            if (armed && failure === 'size' && value > 1) { armed = false; throw new RangeError('canvas too large'); }
+            width = value;
+          },
+          get height() { return height; },
+          set height(value: number) { height = value; },
+          getContext: () => context(shim),
+          toBlob: (done: (blob: Blob | null) => void) => {
+            if (armed && failure === 'abort') controller.current.abort();
+            queueMicrotask(() => done(jpeg(shim as unknown as Shim)));
+          },
+        };
+        return shim;
+      },
+    });
+    vi.stubGlobal('createImageBitmap', async () => ({ width: size.width, height: size.height, close: () => undefined }));
+    vi.stubGlobal('ImageData', class { constructor(public data: Uint8ClampedArray, public width: number, public height: number) {} });
+  }
+  const segmenter = { open: async () => ({ run: async () => alpha, close: () => undefined }) };
+  const prepare = (wantCleanup: boolean) => prepareSegmentedSource(
+    new Blob([new Uint8Array(16)], { type: 'image/jpeg' }),
+    async () => ({ blob: new Blob([new Uint8Array(16)], { type: 'image/jpeg' }), width: size.width, height: size.height, orientation: 1 }),
+    ORIGINAL_EDIT, controller.current.signal, segmenter, false, wantCleanup,
+  );
+
+  it('builds H0 alongside H1 when nothing fails', async () => {
+    installPreparation('none');
+    const result = await prepare(true);
+    expect(result.framed).toBe(true);
+    expect(result.cleanup).not.toBeNull();
+    expect(result.photo.mainSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it.each(['allocate', 'size'] as const)('keeps H1 and succeeds when H0 canvas %s fails', async (failure) => {
+    installPreparation(failure);
+    const result = await prepare(true);
+    expect(armed).toBe(false); // The failure really fired.
+    expect(result.cleanup).toBeNull();
+    expect(result.framed).toBe(true);
+    expect(result.photo.main.size).toBeGreaterThan(0);
+    expect(result.photo.mainSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('does not allocate an H0 canvas unless clean-up is asked for', async () => {
+    installPreparation('none');
+    await prepare(false);
+    const without = allocations;
+    installPreparation('none');
+    await prepare(true);
+    expect(allocations).toBe(without + 2);
+  });
+
+  it('still rejects the preparation when it is aborted while H0 is built', async () => {
+    installPreparation('abort');
+    await expect(prepare(true)).rejects.toMatchObject({ name: 'AbortError' });
   });
 });

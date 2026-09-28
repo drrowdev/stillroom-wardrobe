@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { earliestStart, evidenceState, PROBE_CALLS, prepareProbe, ProbeRefusal, REFERENCE_BYTES, runProbe } from '../../scripts/enhancement-probe.mjs';
+import { earliestStart, evidenceState, PROBE_CALLS, prepareProbe, ProbeRefusal, REASON_METRICS, REFERENCE_BYTES, runProbe } from '../../scripts/enhancement-probe.mjs';
 import { HOSTED_URL } from '../../scripts/hosted-smoke.mjs';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -10,6 +10,8 @@ const KEY = 'sb_publishable_syntheticKey123';
 const sampleBytes = (n: number) => new Uint8Array([0xff, 0xd8, n, 0xff, 0xd9]);
 const outputBytes = new Uint8Array(2048).fill(9);
 const T0 = Date.parse('2026-10-05T12:00:00.000Z');
+// The monotonic clock starts somewhere unrelated to wall time, as performance.now() does.
+const MONO0 = 5_000;
 const SWITCH_ON = '2026-10-05T11:58:00.000Z';
 const COMMIT = 'a'.repeat(40);
 const MODEL = 'b'.repeat(64);
@@ -29,7 +31,9 @@ const statusBody = (over: Record<string, unknown> = {}) => JSON.stringify({ code
   enhanceAllowanceMicro: '5000000', totalAllowanceMicro: '20000000' }, usage: { enhanceMicro: '0', totalMicro: '0', enhanceLastHour: 0 }, ...over });
 
 type HarnessOptions = { listing?: unknown; reply?: (call: number) => Response; status?: () => Response; output?: string[];
-  binding?: (index: number) => unknown; reference?: (index: number) => Uint8Array; latencyMs?: (call: number) => number };
+  binding?: (index: number) => unknown; reference?: (index: number) => Uint8Array; latencyMs?: (call: number) => number;
+  /** Wall-clock jumps only: after call N's reply, or during the first sleep. The monotonic clock never jumps. */
+  wallJumpAfterCall?: (call: number) => number; wallJumpInFirstSleep?: number; monotonic?: false };
 function harness(options: HarnessOptions = {}) {
   const files = new Map<string, Uint8Array | string>();
   const listing = options.listing ?? Array.from({ length: 6 }, (_, index) => entry(index));
@@ -39,7 +43,7 @@ function harness(options: HarnessOptions = {}) {
     files.set(`s${index}.bin`, options.reference?.(index) ?? referenceBytes(index));
     files.set(`s${index}.json`, JSON.stringify(options.binding?.(index) ?? bindingFor(index)));
   }
-  let clock = T0;
+  let clock = T0, mono = MONO0, slept = 0;
   const dispatches: number[] = [];
   const fetches: { url: string; init: RequestInit }[] = [];
   const written: string[] = [];
@@ -54,7 +58,9 @@ function harness(options: HarnessOptions = {}) {
     readdir: async () => options.output ?? [],
     writeFile: async (path: string) => { written.push(path); },
     mkdir: async () => undefined,
-    now: () => clock, sleep: async (ms: number) => { clock += ms; },
+    now: () => clock,
+    ...(options.monotonic === false ? {} : { monotonic: () => mono }),
+    sleep: async (ms: number) => { clock += ms + (slept++ === 0 ? options.wallJumpInFirstSleep ?? 0 : 0); mono += ms; },
     newId: () => `22222222-2222-4222-8222-${String(fetches.length).padStart(12, '0')}`,
     readHeader: () => ({ width: 800, height: 1000 }),
     accepts: () => true,
@@ -63,8 +69,10 @@ function harness(options: HarnessOptions = {}) {
       fetches.push({ url, init });
       if (url.endsWith('/rpc/enhance_status')) return options.status?.() ?? new Response(statusBody(), { headers: { 'content-type': 'application/json' } });
       calls++;
-      dispatches.push(clock);
-      clock += options.latencyMs?.(calls) ?? 1_000;
+      dispatches.push(mono);
+      const latency = options.latencyMs?.(calls) ?? 1_000;
+      clock += latency + (options.wallJumpAfterCall?.(calls) ?? 0);
+      mono += latency;
       return options.reply?.(calls) ?? new Response(outputBytes, { headers: { 'content-type': 'image/jpeg', 'content-length': String(outputBytes.byteLength),
         'x-stillroom-enhancement-sha256': hash(outputBytes) } });
     },
@@ -104,6 +112,7 @@ describe('enhancement probe script', () => {
       [{ PROBE_SWITCH_ON_AT: '2026-10-05T12:30:00.000Z' }, {}, 'switchOnTime'],
       [{ PROBE_LAST_KEY_USE_AT: 'yesterday' }, {}, 'lastKeyUse'],
       [{}, { output: ['old.jpg'] }, 'output'],
+      [{}, { monotonic: false }, 'clock'],
     ];
     for (const [over, options, code] of cases) {
       const h = harness(options);
@@ -166,7 +175,7 @@ describe('enhancement probe script', () => {
     const h = harness({ latencyMs: () => 1_000 });
     await runProbe(env(), h.deps);
     const [s1, s2, s3] = h.dispatches as [number, number, number];
-    expect(s1).toBe(T0);
+    expect(s1).toBe(MONO0);
     expect(s2 - s1).toBe(33_000);
     // 33 s after the 2nd dispatch has passed at s1 + 66 s, but call 1's slot may live until r1 + 65 s.
     expect(s3 - s2).toBeGreaterThan(33_000);
@@ -186,10 +195,10 @@ describe('enhancement probe script', () => {
   it('waits out the switch-on time and any known earlier key use before the first call', async () => {
     const recent = harness();
     await runProbe(env({ PROBE_SWITCH_ON_AT: new Date(T0 - 10_000).toISOString() }), recent.deps);
-    expect(recent.dispatches[0]).toBe(T0 - 10_000 + 66_000);
+    expect(recent.dispatches[0]).toBe(MONO0 - 10_000 + 66_000);
     const used = harness();
     await runProbe(env({ PROBE_LAST_KEY_USE_AT: new Date(T0 - 5_000).toISOString() }), used.deps);
-    expect(used.dispatches[0]).toBe(T0 - 5_000 + 66_000);
+    expect(used.dispatches[0]).toBe(MONO0 - 5_000 + 66_000);
     expect(earliestStart({ notBefore: 5 }, [], [])).toBe(5);
   });
 
@@ -204,18 +213,97 @@ describe('enhancement probe script', () => {
     expect(lines.at(-1)).toContain('"state":"pending"');
   });
 
-  it('keeps acceptance pending without visual metrics or the disconnect settlement read-back', () => {
-    const calls = [...Array.from({ length: 5 }, (_, index) => ({ call: index + 1, role: 'visual', code: 'OK', requestId: `r${index}` })),
-      { call: 6, role: 'disconnect', code: 'DISCONNECTED', requestId: 'r5' }];
-    const metrics = Object.fromEntries(calls.slice(0, 5).map(entry => [entry.requestId, { reason: 'accepted' }]));
-    const settled = { requestId: 'r5', terminal: true, accounted: true, slotEnded: true };
-    expect(evidenceState(calls, metrics, settled)).toEqual({ state: 'ready-for-paired-review', missing: [] });
-    expect(evidenceState(calls, {}, settled).missing).toEqual(['metrics-1', 'metrics-2', 'metrics-3', 'metrics-4', 'metrics-5']);
-    expect(evidenceState(calls, metrics, null).missing).toEqual(['disconnect-settlement']);
-    expect(evidenceState(calls, metrics, { ...settled, slotEnded: false }).state).toBe('pending');
-    expect(evidenceState(calls, metrics, { ...settled, requestId: 'other' }).state).toBe('pending');
-    expect(evidenceState(calls.slice(0, 4), metrics, settled).missing).toContain('calls');
-    expect(evidenceState([{ ...calls[0], code: 'FAILED' }, ...calls.slice(1)], metrics, settled).missing).toContain('call-1');
+  it('keeps spacing on the monotonic clock when the wall clock jumps forward or back', async () => {
+    // A 60 s forward jump after call 1 once shrank the real spacing to 1 s; a backward jump would stretch it.
+    for (const jump of [60_000, -60_000, 3_600_000, -3_600_000]) {
+      const h = harness({ wallJumpAfterCall: (call) => call === 1 ? jump : 0 });
+      await runProbe(env(), h.deps);
+      expect(h.dispatches).toHaveLength(6);
+      expect(h.dispatches[1]! - h.dispatches[0]!).toBe(33_000);
+      for (let k = 1; k < h.dispatches.length; k++) expect(h.dispatches[k]! - h.dispatches[k - 1]!).toBeGreaterThanOrEqual(33_000);
+      for (let k = 2; k < h.dispatches.length; k++) expect(h.dispatches[k]!).toBeGreaterThanOrEqual(h.dispatches[k - 2]! + 1_000 + 66_000);
+    }
+  });
+
+  it('converts the switch-on wait once, so a wall jump during it neither shortens nor stretches it', async () => {
+    for (const jump of [60_000, -60_000]) {
+      const h = harness({ wallJumpInFirstSleep: jump });
+      await runProbe(env({ PROBE_SWITCH_ON_AT: new Date(T0 - 10_000).toISOString() }), h.deps);
+      expect(h.dispatches[0]).toBe(MONO0 - 10_000 + 66_000);
+      expect(h.dispatches[1]! - h.dispatches[0]!).toBe(33_000);
+    }
+  });
+
+  describe('evidence for the paired review', () => {
+    const binding = { commit: COMMIT, modelSha256: MODEL, referenceSha256: 'd'.repeat(64) };
+    const input = (index: number) => hash(sampleBytes(index));
+    const output = (index: number) => hash(new Uint8Array([index, 7]));
+    const visual = Array.from({ length: 5 }, (_, index) => ({ call: index + 1, role: 'visual', code: 'OK', requestId: `r${index}`,
+      inputSha256: input(index), outputSha256: output(index), binding }));
+    const disconnect = { call: 6, role: 'disconnect', code: 'DISCONNECTED', requestId: 'r5', inputSha256: input(5), binding };
+    const calls = [...visual, disconnect];
+    const full = { ringDeltaE: 1, ringP95: 2, workingBytes: 3_360_000, largestShare: 0.99, containment: 0.97, retention: 0.95,
+      centroid: { x: 0.01, y: -0.02 }, support: 0.8, meanDeltaE: 3, p95DeltaE: 8, ssim: 0.9, windows: 120 };
+    const measuredFor = (index: number, over: Record<string, unknown> = {}) => ({ call: index + 1, reason: 'accepted', metrics: full,
+      h0Sha256: input(index), h2Sha256: output(index), referenceSha256: binding.referenceSha256, commit: COMMIT, modelSha256: MODEL, ...over });
+    const metrics = Object.fromEntries(visual.map((entry, index) => [entry.requestId, measuredFor(index)]));
+    const settled = { requestId: 'r5', dispatched: true, chargeState: 'estimated', settlementOrigin: 'observed', anomaly: false,
+      accountedMicro: '180000', settlementDigest: 'e'.repeat(64) };
+    const withMetric = (over: Record<string, unknown>) => ({ ...metrics, r2: measuredFor(2, over) });
+
+    it('is ready only with bound numeric metrics, a real disconnect and its observed settlement', () => {
+      expect(evidenceState(calls, metrics, settled)).toEqual({ state: 'ready-for-paired-review', missing: [] });
+      expect(evidenceState(calls, {}, settled).missing).toEqual(['metrics-1', 'metrics-2', 'metrics-3', 'metrics-4', 'metrics-5']);
+      expect(evidenceState(calls.slice(0, 4), metrics, settled).missing).toContain('calls');
+      expect(evidenceState([{ ...calls[0]!, code: 'FAILED' }, ...calls.slice(1)], metrics, settled).missing).toContain('call-1');
+    });
+
+    it('refuses a bare reason or metrics that do not match the verdict', () => {
+      expect(evidenceState(calls, withMetric({ metrics: {} }), settled).missing).toEqual(['metrics-3']);
+      expect(evidenceState(calls, withMetric({ reason: 'accepted', metrics: undefined }), settled).missing).toEqual(['metrics-3']);
+      const noSsim: Record<string, unknown> = { ...full };
+      delete noSsim.ssim;
+      expect(evidenceState(calls, withMetric({ metrics: noSsim }), settled).missing).toEqual(['metrics-3']);
+      expect(evidenceState(calls, withMetric({ metrics: { ...full, centroid: { x: 0 } } }), settled).missing).toEqual(['metrics-3']);
+      expect(evidenceState(calls, withMetric({ metrics: { ...full, ssim: Number.NaN } }), settled).missing).toEqual(['metrics-3']);
+      expect(evidenceState(calls, withMetric({ metrics: { ...full, ssim: '0.9' } }), settled).missing).toEqual(['metrics-3']);
+      // Verdicts with no usable metrics never count, and an unknown reason is refused.
+      for (const reason of ['size', 'nonFinite', 'somethingElse']) {
+        expect(evidenceState(calls, withMetric({ reason }), settled).missing).toEqual(['metrics-3']);
+      }
+      // A rejection needs only the metrics its verdict reports.
+      expect(evidenceState(calls, withMetric({ reason: 'background', metrics: { ringDeltaE: 9, ringP95: 20, workingBytes: 1 } }), settled).state)
+        .toBe('ready-for-paired-review');
+      expect(REASON_METRICS.accepted).toContain('ssim');
+    });
+
+    it('refuses metrics bound to another request, input, output, reference or build', () => {
+      for (const over of [{ call: 4 }, { h0Sha256: 'f'.repeat(64) }, { h2Sha256: 'f'.repeat(64) }, { referenceSha256: 'f'.repeat(64) },
+        { commit: 'f'.repeat(40) }, { modelSha256: 'f'.repeat(64) }]) {
+        expect(evidenceState(calls, withMetric(over), settled).missing).toEqual(['metrics-3']);
+      }
+      // Right numbers filed under a different request ID.
+      expect(evidenceState(calls, { ...metrics, r2: metrics.r3 }, settled).missing).toEqual(['metrics-3']);
+    });
+
+    it('keeps F4 pending when the reply came before the disconnect', () => {
+      const early = [...visual, { ...disconnect, code: 'RESPONDED_BEFORE_DISCONNECT' }];
+      expect(evidenceState(early, metrics, settled)).toEqual({ state: 'pending', missing: ['disconnect-outcome'] });
+      for (const code of ['CLIENT_TIMEOUT', 'TRANSPORT', 'OK']) {
+        expect(evidenceState([...visual, { ...disconnect, code }], metrics, settled).missing).toEqual(['disconnect-outcome']);
+      }
+    });
+
+    it('needs the disconnect request\'s own observed-usage settlement, not expiry or a bare terminal row', () => {
+      expect(evidenceState(calls, metrics, null).missing).toEqual(['disconnect-settlement']);
+      expect(evidenceState(calls, metrics, { requestId: 'r5', terminal: true, accounted: true, slotEnded: true }).missing)
+        .toEqual(['disconnect-settlement']);
+      for (const over of [{ requestId: 'r4' }, { settlementOrigin: 'provisional_expiry' }, { settlementOrigin: 'unmetered' },
+        { settlementOrigin: 'terminal_anomaly' }, { settlementOrigin: 'non_dispatch' }, { chargeState: 'held' }, { dispatched: false },
+        { anomaly: true }, { accountedMicro: 180000 }, { accountedMicro: '-1' }, { settlementDigest: undefined }, { settlementDigest: 'x' }]) {
+        expect(evidenceState(calls, metrics, { ...settled, ...over }).missing).toEqual(['disconnect-settlement']);
+      }
+    });
   });
 
   it('prepares nothing from a samples folder that is not exactly 5 visual and 1 disconnect', async () => {
