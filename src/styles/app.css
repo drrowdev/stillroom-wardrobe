@@ -602,9 +602,10 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
   .stats-table th, .stats-table td { padding: 2px 0; border: 0; }
   .stats-table td::before { content: attr(data-label) ": "; color: var(--secondary); }
 }
-.admin-entry { grid-column: 1 / -1; margin: 0; }
+.admin-entry { margin: 16px 0 0; }
 .admin-months { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; margin: 20px 0 24px; }
-.admin-months .field { min-width: 0; max-width: 260px; margin: 0; }
+.admin-months .field { flex: 1 1 16rem; min-width: 0; max-width: 20rem; margin: 0; }
+@media (max-width: 480px) { .admin-months .field { flex-basis: 100%; max-width: none; } }
 .admin-accounts { display: grid; gap: 24px; }
 .admin-page { overflow-wrap: anywhere; }
 .admin-card h3 { font-size: 1rem; margin: 22px 0 10px; }

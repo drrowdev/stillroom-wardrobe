@@ -109,10 +109,10 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
       </section>
       <WeatherSettings controller={controller} scope={scope} profile={profile} busy={busy || reading} language={language} online={online} t={t} />
       <AiSettings ai={ai} controller={controller} scope={scope} profile={profile} busy={busy || reading}
-        unresolved={unresolved} sharedLimit={stylistShown} language={language} online={online} t={t} />
+        unresolved={unresolved} sharedLimit={stylistShown} language={language} online={online} t={t}
+        footer={<AdminEntry client={client} scope={scope} t={t} />} />
       <StylistSettings store={stylist} busy={busy || reading} language={language} online={online} t={t} />
       <EnhanceSettings store={enhanceStoreFor(client, scope)} busy={busy || reading} language={language} online={online} t={t} />
-      <AdminEntry client={client} scope={scope} t={t} />
       <AvoidedPairs client={client} scope={scope} images={images} language={language} online={online} t={t} />
       <InstallHint t={t} />
       <BackupSettings client={client} scope={scope} language={language} online={online} t={t} />

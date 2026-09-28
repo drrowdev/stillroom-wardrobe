@@ -40,7 +40,7 @@ test.describe('AD1b admin spending and limits', () => {
   test('anyone who is not the admin sees the note, and the admin screen is not available', async ({ page }) => {
     const api = await start(page, { admin: false, hash: '/#/settings' });
     await expect(page.locator('#settings-title')).toBeVisible();
-    await expect(page.getByText(text('admin.note'), { exact: true })).toBeVisible();
+    await expect(page.locator('.ai-card').getByText(text('admin.note'), { exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: text('admin.title'), exact: true })).toHaveCount(0);
     await page.evaluate(() => { location.hash = '#/admin'; });
     await expect(page.locator('#admin-title')).toBeVisible();
@@ -73,16 +73,16 @@ test.describe('AD1b admin spending and limits', () => {
 
   test('the admin opens exact spending per account and feature', async ({ page }) => {
     const api = await start(page, { hash: '/#/settings' });
-    await page.getByRole('link', { name: text('admin.title'), exact: true }).click();
+    await page.locator('.ai-card').getByRole('link', { name: text('admin.title'), exact: true }).click();
     await openScreen(page);
     await expect(page.locator('#admin-title')).toBeFocused();
-    await expect(page.getByText(text('admin.estimates'), { exact: true })).toBeVisible();
+    await expect(page.getByText('Spending recorded by the app. Some amounts are estimates.', { exact: true })).toBeVisible();
     await expect(row(page, 1, 'admin.tagging').locator('td')).toHaveText(['$1.234567', '$0.30', '$4.097351', '$5.631918', '5']);
     await expect(row(page, 1, 'admin.stylist').locator('td')).toHaveText(['$0.00', '$0.00484', '$0.12936', '$0.1342', '2']);
     await expect(row(page, 1, 'admin.enhancement').locator('td')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00', '0']);
     await expect(row(page, 1, 'admin.total').locator('td')).toHaveText(['$1.234567', '$0.30484', '$4.226711', '$5.766118', '7']);
     await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$5.766118', limit: '$20.00' }));
-    await expect(account(page, 1)).toContainText(text('admin.probe', { amount: '$0.26' }));
+    await expect(account(page, 1)).toContainText('Test allowance $0.26');
     await expect(account(page, 1)).toContainText(text('admin.tryOn'));
     await expect(account(page, 2).locator('.admin-use')).toContainText(text('admin.notSetUp'));
     await expect(account(page, 2)).not.toContainText(text('admin.probe', { amount: '$0.00' }));
@@ -324,6 +324,28 @@ test.describe('AD1b admin spending and limits', () => {
     await page.evaluate(() => { location.hash = '#/settings'; });
     await expect(page.getByText(text('admin.note', 'sv'), { exact: true })).toBeVisible();
   });
+
+  for (const language of ['en', 'fi', 'sv'] as const) {
+    test(`the ${language} month label fits the select at 320 px, also at 200 % text size`, async ({ page }) => {
+      await page.setViewportSize({ width: 320, height: 900 });
+      await start(page, { language });
+      await openScreen(page);
+      for (const zoomed of [false, true]) {
+        if (zoomed) await page.addStyleTag({ content: zoom });
+        const fit = await page.locator('#admin-month').evaluate((select: HTMLSelectElement) => {
+          const style = getComputedStyle(select);
+          const context = document.createElement('canvas').getContext('2d')!;
+          context.font = style.font;
+          const label = select.selectedOptions[0]!.text;
+          const room = select.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+          return { label, text: context.measureText(label).width, room };
+        });
+        expect(fit.label).toMatch(/2026/);
+        expect(fit.text, `${fit.label} zoomed=${zoomed}`).toBeLessThanOrEqual(fit.room);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    });
+  }
 
   test('a failed load can be retried', async ({ page }) => {
     const api = await mockBackend(page);
