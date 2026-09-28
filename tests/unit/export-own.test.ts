@@ -64,6 +64,8 @@ function fakeServer(world: ParityWorld): Server {
         return json(200, { ...world.raw, export_id: args.p_export_id });
       }
       if (route === 'POST /rest/v1/rpc/attribution_digest') return json(200, world.digest);
+      if (route === 'POST /rest/v1/rpc/image_provenance_v1') return json(200, world.provenance);
+      if (route === 'POST /rest/v1/rpc/image_provenance_digest_v1') return json(200, 'e'.repeat(64));
       if (route === 'POST /rest/v1/rpc/item_attribution_history_v2') {
         const value = world.attributions.get(JSON.parse(String(init.body)).p_item_id);
         return value === undefined ? json(403, { code: '42501', message: 'not saved' }) : json(200, value);

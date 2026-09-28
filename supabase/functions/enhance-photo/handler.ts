@@ -7,7 +7,7 @@ import { azureConfigured, type AzureConfig, type AzureTransport } from '../analy
 import { UUID, exact, object, ProtocolError, readBounded, readJson, sha256, validAccounting, type JsonObject } from '../analyze-clothing/protocol.ts';
 import { callEnhance, type EnhanceOutcome } from './azure.ts';
 
-export type EnhanceConfig = { supabaseUrl: string; publicKey: string; serviceKey: string; azure: AzureConfig };
+export type EnhanceConfig = { supabaseUrl: string; publicKey: string; serviceKey: string; azure: AzureConfig; probeToken?: string | null };
 export const ENHANCE_RPCS = ['enhance_status', 'enhance_claim', 'enhance_finish'] as const;
 const statusCodes: Record<string, number> = {
   INVALID_INPUT: 400, UNAUTHENTICATED: 401, UNAVAILABLE: 403, CONSENT_REQUIRED: 403, TERMINAL: 409, TOO_LARGE: 413,
@@ -38,31 +38,33 @@ function serverConfig(config: EnhanceConfig): boolean {
 const microText = (value: unknown) => typeof value === 'string' && /^[1-9][0-9]{0,18}$/.test(value);
 
 /**
- * Photo enhancement (BG2b-1, INACTIVE). Order: closed ingress (the app's byte-preservable baseline JPEG, read with
- * the cap enforced; no RPC on invalid input), verified /auth/v1/user, status preflight, service claim for the verified
- * owner only, dispatch deadline, one provider call, strict output admission, finish. H2 bytes are released only after
- * finish returns OK, which has already committed the evidence and tombstone for this output hash and length.
- * From the claim on, the provider call and settlement run on a server-owned lifetime, independent of the browser: a
- * cancelled request still settles its usage, and only the delivery of H2 to the gone client is suppressed.
+ * Photo enhancement (BG2b-1 backend, BG2b-2 lifetime; INACTIVE until the owner's switch). Order: closed ingress (the
+ * app's byte-preservable baseline JPEG, read with the cap enforced; no RPC on invalid input), the operator probe gate
+ * when its headers are present, verified /auth/v1/user, status preflight, service claim for the verified owner only,
+ * then the claimed work. H2 bytes are released only after finish returns OK, which has already committed the evidence
+ * and tombstone for this output hash and length.
+ *
+ * Lifetime (W1): after the claim there is exactly one work promise. It owns its deadlines, buffers and cleanup, and it
+ * dispatches only after the runtime has accepted it as a background task (EdgeRuntime.waitUntil in production, an
+ * explicit registrar in fixtures). No registrar means UNCONFIGURED before any claim; a registrar that throws settles the
+ * claim as not dispatched with no provider call. The handler always awaits the same promise it registered; a cancelled
+ * browser only loses the delivery of H2, never the settlement.
+ *
  * Only the photo is sent; no item fields, titles, notes or identifiers other than the opaque request UUID for accounting,
  * which stays on the server.
  */
-export function createEnhanceHandler(config: EnhanceConfig, azureTransport: AzureTransport = fetch) {
+export function createEnhanceHandler(config: EnhanceConfig, registrar: EnhanceRegistrar | null, azureTransport: AzureTransport = fetch) {
   return async (request: Request): Promise<Response> => {
+    const startedAt = Date.now();
     const origin = request.headers.get('Origin');
     const headers = new Headers({ 'Cache-Control': 'no-store', Vary: 'Origin', 'X-Content-Type-Options': 'nosniff' });
     const reply = (body: JsonObject, status: number) => Response.json(body, { status, headers });
     const error = (code: string) => reply({ code: closedCode(code) }, statusCodes[closedCode(code)]!);
     if (!allowedOrigin(origin, config.supabaseUrl)) return error('UNAVAILABLE');
     if (origin !== null) headers.set('Access-Control-Allow-Origin', origin);
+    // Pre-claim timers only. Nothing the claimed work depends on is cleared by this response's finally.
     const timers: ReturnType<typeof setTimeout>[] = [];
-    const deadline = (ms: number) => {
-      const controller = new AbortController();
-      timers.push(setTimeout(() => controller.abort(new DOMException('Deadline exceeded', 'TimeoutError')), ms));
-      return controller.signal;
-    };
-    const stageSignal = (base: AbortSignal, ms: number) => AbortSignal.any([base, deadline(ms)]);
-    const server = deadline(ENHANCE_LIMITS.requestMs);
+    const server = deadlineSignal(timers, ENHANCE_LIMITS.requestMs);
     const signal = AbortSignal.any([request.signal, server]);
     try {
       const url = new URL(request.url);
@@ -81,6 +83,8 @@ export function createEnhanceHandler(config: EnhanceConfig, azureTransport: Azur
       if (!serverConfig(config)) return error('UNCONFIGURED');
       const requestId = request.headers.get('X-Stillroom-Request-Id') ?? '';
       if (!UUID.test(requestId)) return error('INVALID_INPUT');
+      const probe = await probeGate(request, origin, config.probeToken ?? null);
+      if (probe.refused) return error(probe.refused);
       if (request.headers.get('Content-Type') !== 'image/jpeg' || request.headers.has('Content-Encoding')) return error('UNSUPPORTED_MEDIA');
       const length = request.headers.get('Content-Length');
       if (length !== null && (!/^(0|[1-9][0-9]*)$/.test(length) || Number(length) > ENHANCE_LIMITS.imageBytes)) return error('TOO_LARGE');
@@ -92,7 +96,7 @@ export function createEnhanceHandler(config: EnhanceConfig, azureTransport: Azur
       } catch { return error('INVALID_INPUT'); }
       const inputHash = await sha256(image);
 
-      const authSignal = stageSignal(signal, 5000);
+      const authSignal = AbortSignal.any([signal, deadlineSignal(timers, 5000)]);
       const auth = await fetch(`${config.supabaseUrl}/auth/v1/user`, {
         headers: { Authorization: bearer, apikey: config.publicKey }, redirect: 'error', cache: 'no-store', signal: authSignal,
       });
@@ -100,66 +104,149 @@ export function createEnhanceHandler(config: EnhanceConfig, azureTransport: Azur
       if (!auth.ok || !object(user) || typeof user.id !== 'string' || !UUID.test(user.id)
         || user.role !== 'authenticated' || user.is_anonymous !== false) return error('UNAUTHENTICATED');
       const owner = user.id;
-      const rpc = async (name: (typeof ENHANCE_RPCS)[number], body: JsonObject, service = false,
-        base: AbortSignal = signal): Promise<JsonObject> => {
-        const dbSignal = stageSignal(base, 5000);
-        const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
-          method: 'POST', redirect: 'error', cache: 'no-store', signal: dbSignal,
-          headers: { Authorization: service ? 'Bearer '.concat(config.serviceKey) : bearer,
-            apikey: service ? config.serviceKey : config.publicKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const result = await readJson(response, 32768, dbSignal);
-        if (!response.ok || !object(result) || typeof result.code !== 'string') throw new ProtocolError('FAILED');
-        return result;
-      };
+      const rpc = rpcClient(config, bearer, timers);
 
-      const preflight = await rpc('enhance_status', {});
-      // The claim writes a held row, so it and everything after it run on the server-owned lifetime.
-      if (preflight.code !== 'OK') return error(closedCode(preflight.code));
+      const preflight = await rpc('enhance_status', {}, false, signal);
+      if (preflight.code !== 'OK' && !(probe.id !== null && preflight.code === 'INACTIVE')) return error(closedCode(preflight.code));
       const policy = preflight.policy, consent = preflight.consent;
-      if (!object(policy) || policy.activated !== true) return error('INACTIVE');
-      if (!object(consent) || consent.enabled !== true || consent.noticeRevision !== policy.noticeRevision) return error('CONSENT_REQUIRED');
+      if (probe.id !== null) {
+        // A1: the probe runs only while the owner's ordinary enhancement is switched off, whatever the consent state.
+        if (!object(policy) || policy.activated !== false) return error('INVALID_INPUT');
+      } else {
+        if (!object(policy) || policy.activated !== true) return error('INACTIVE');
+        if (!object(consent) || consent.enabled !== true || consent.noticeRevision !== policy.noticeRevision) return error('CONSENT_REQUIRED');
+      }
       if (policy.noticeRevision !== ENHANCE_NOTICE_REVISION || policy.manifestId !== ENHANCE_MANIFEST || policy.modelId !== ENHANCE_MODEL
         || !microText(policy.maxRequestMicro) || BigInt(policy.maxRequestMicro as string) < BigInt(ENHANCE_RESERVATION_MICRO)
         || Date.now() >= ENHANCE_REVIEW_EXPIRES || !azureConfigured(config.azure)) return error('UNCONFIGURED');
       if (policy.providerAvailable !== true) return error('UNAVAILABLE');
+      // W1: without a way to keep the claimed work alive, nothing is claimed.
+      if (registrar === null) return error('UNCONFIGURED');
 
+      // The claim writes a held row, so it runs on the server-owned lifetime, not the browser's.
       const claim = await rpc('enhance_claim', { p_owner_id: owner, p_request_id: requestId, p_manifest_id: ENHANCE_MANIFEST,
-        p_input_sha256: inputHash, p_probe_id: null }, true, server);
+        p_input_sha256: inputHash, p_probe_id: probe.id }, true, server);
       if (claim.code !== 'OK' || claim.claimed !== true) return error(closedCode(claim.code));
       if (!exact(claim, ['code', 'claimed', 'manifestId', 'dispatchBeforeMs', 'requestSeconds']) || claim.manifestId !== ENHANCE_MANIFEST
         || typeof claim.dispatchBeforeMs !== 'number' || !Number.isSafeInteger(claim.dispatchBeforeMs)) throw new ProtocolError('FAILED');
-      const finish = async (code: EnhanceOutcome['code'] | 'NOT_DISPATCHED', usage: EnhanceOutcome['usage'],
-        output: { sha256: string; bytes: number } | null) => {
-        const result = await rpc('enhance_finish', { p_owner_id: owner, p_request_id: requestId, p_code: code, p_usage: usage,
-          p_output_sha256: output?.sha256 ?? null, p_output_bytes: output?.bytes ?? null }, true, server);
-        if (result.code !== 'BUSY' && !validAccounting(result.accounting)) throw new ProtocolError('FAILED');
-        return result;
-      };
-      if (Date.now() >= claim.dispatchBeforeMs || request.signal.aborted) {
-        await finish('NOT_DISPATCHED', null, null);
-        return error('TIMEOUT');
-      }
-      const outcome = await callEnhance(config.azure, image, stageSignal(server, ENHANCE_LIMITS.providerMs), azureTransport);
-      const output = outcome.code === 'OK' ? { sha256: await sha256(outcome.image), bytes: outcome.image.length } : null;
-      const finished = await finish(outcome.code, outcome.usage, output);
+
+      let accept!: (registered: boolean) => void;
+      const registration = new Promise<boolean>((resolve) => { accept = resolve; });
+      const work = runClaimed({ config, bearer, owner, requestId, image, dispatchBeforeMs: claim.dispatchBeforeMs,
+        remainingMs: ENHANCE_LIMITS.requestMs - (Date.now() - startedAt), browser: request.signal, registration, azureTransport });
+      try { registrar(work); accept(true); } catch { accept(false); }
+      const outcome = await work;
+      // Delivery only: the settlement has already run whether or not the browser is still there.
       if (request.signal.aborted) return error('TIMEOUT');
-      if (finished.code !== 'OK' || outcome.code !== 'OK' || !output) {
-        return error(finished.code === 'OK' ? outcome.code : String(finished.code));
-      }
-      if (typeof finished.usableUntilMs !== 'number' || !Number.isSafeInteger(finished.usableUntilMs)) throw new ProtocolError('FAILED');
+      if (outcome.code !== 'OK' || !outcome.output) return error(outcome.code);
       headers.set('Content-Type', 'image/jpeg');
-      headers.set('Content-Length', String(output.bytes));
-      headers.set('X-Stillroom-Enhancement-Sha256', output.sha256);
-      headers.set('X-Stillroom-Enhancement-Usable-Until', String(finished.usableUntilMs));
+      headers.set('Content-Length', String(outcome.output.bytes.length));
+      headers.set('X-Stillroom-Enhancement-Sha256', outcome.output.sha256);
+      headers.set('X-Stillroom-Enhancement-Usable-Until', String(outcome.output.usableUntilMs));
       if (origin !== null) headers.set('Access-Control-Expose-Headers', exposedHeaders.join(', '));
-      return new Response(outcome.image, { status: 200, headers });
+      return new Response(outcome.output.bytes, { status: 200, headers });
     } catch (failure) {
-      return error(signal.aborted || failure instanceof DOMException && ['TimeoutError', 'AbortError'].includes(failure.name)
-        ? 'TIMEOUT' : failure instanceof ProtocolError ? failure.code : 'FAILED');
+      return error(signal.aborted || timeoutFailure(failure) ? 'TIMEOUT' : failure instanceof ProtocolError ? failure.code : 'FAILED');
     } finally {
       for (const timer of timers) clearTimeout(timer);
     }
   };
+}
+
+export type EnhanceRegistrar = (work: Promise<unknown>) => void;
+export type ClaimedOutcome = { code: string; output: { bytes: Uint8Array<ArrayBuffer>; sha256: string; usableUntilMs: number } | null };
+type ClaimedWork = {
+  config: EnhanceConfig; bearer: string; owner: string; requestId: string; image: Uint8Array<ArrayBuffer>; dispatchBeforeMs: number;
+  remainingMs: number; browser: AbortSignal; registration: Promise<boolean>; azureTransport: AzureTransport;
+};
+/** Test hook: observes the one work promise per claimed request, so tests can prove the registered and awaited references are the same. */
+export const claimedWorkObserver: { current: ((work: Promise<ClaimedOutcome>) => void) | null } = { current: null };
+
+const timeoutFailure = (failure: unknown) => failure instanceof DOMException && ['TimeoutError', 'AbortError'].includes(failure.name);
+function deadlineSignal(timers: ReturnType<typeof setTimeout>[], ms: number): AbortSignal {
+  const controller = new AbortController();
+  timers.push(setTimeout(() => controller.abort(new DOMException('Deadline exceeded', 'TimeoutError')), Math.max(0, ms)));
+  return controller.signal;
+}
+function rpcClient(config: EnhanceConfig, bearer: string, timers: ReturnType<typeof setTimeout>[]) {
+  return async (name: (typeof ENHANCE_RPCS)[number], body: JsonObject, service: boolean, base: AbortSignal): Promise<JsonObject> => {
+    const dbSignal = AbortSignal.any([base, deadlineSignal(timers, 5000)]);
+    const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
+      method: 'POST', redirect: 'error', cache: 'no-store', signal: dbSignal,
+      headers: { Authorization: service ? 'Bearer '.concat(config.serviceKey) : bearer,
+        apikey: service ? config.serviceKey : config.publicKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const result = await readJson(response, 32768, dbSignal);
+    if (!response.ok || !object(result) || typeof result.code !== 'string') throw new ProtocolError('FAILED');
+    return result;
+  };
+}
+
+// The claimed work: its own server lifetime (what is left of the request budget), the provider deadline, the input and
+// output buffers and every timer are owned and released here. It never rejects.
+function runClaimed(work: ClaimedWork): Promise<ClaimedOutcome> {
+  const promise = (async (): Promise<ClaimedOutcome> => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const server = deadlineSignal(timers, work.remainingMs);
+    const rpc = rpcClient(work.config, work.bearer, timers);
+    let image: Uint8Array<ArrayBuffer> | null = work.image;
+    try {
+      const finish = async (code: EnhanceOutcome['code'] | 'NOT_DISPATCHED', usage: EnhanceOutcome['usage'],
+        output: { sha256: string; bytes: number } | null) => {
+        const result = await rpc('enhance_finish', { p_owner_id: work.owner, p_request_id: work.requestId, p_code: code, p_usage: usage,
+          p_output_sha256: output?.sha256 ?? null, p_output_bytes: output?.bytes ?? null }, true, server);
+        if (result.code !== 'BUSY' && !validAccounting(result.accounting)) throw new ProtocolError('FAILED');
+        return result;
+      };
+      // A2: no dispatch until the runtime has accepted this promise. A refused registration spends nothing.
+      if (!await work.registration) {
+        await finish('NOT_DISPATCHED', null, null);
+        return { code: 'UNCONFIGURED', output: null };
+      }
+      if (Date.now() >= work.dispatchBeforeMs || work.browser.aborted) {
+        await finish('NOT_DISPATCHED', null, null);
+        return { code: 'TIMEOUT', output: null };
+      }
+      const outcome = await callEnhance(work.config.azure, image, AbortSignal.any([server, deadlineSignal(timers, ENHANCE_LIMITS.providerMs)]),
+        work.azureTransport);
+      image = null;
+      const output = outcome.code === 'OK' ? { sha256: await sha256(outcome.image), bytes: outcome.image.length } : null;
+      const finished = await finish(outcome.code, outcome.usage, output);
+      if (finished.code !== 'OK' || outcome.code !== 'OK' || !output) {
+        return { code: closedCode(finished.code === 'OK' ? outcome.code : String(finished.code)), output: null };
+      }
+      if (typeof finished.usableUntilMs !== 'number' || !Number.isSafeInteger(finished.usableUntilMs)) throw new ProtocolError('FAILED');
+      return { code: 'OK', output: { bytes: outcome.image, sha256: output.sha256, usableUntilMs: finished.usableUntilMs } };
+    } catch (failure) {
+      // A provider that misses its deadline is left held for provisional expiry; nothing else is retried.
+      return { code: server.aborted || timeoutFailure(failure) ? 'TIMEOUT' : failure instanceof ProtocolError ? failure.code : 'FAILED',
+        output: null };
+    } finally {
+      for (const timer of timers) clearTimeout(timer);
+    }
+  })();
+  claimedWorkObserver.current?.(promise);
+  return promise;
+}
+
+// Operator probe (A1). The shared secret is an additional check on top of the verified owner JWT and the DB-bound
+// authorisation with its expiry, call and spend limits; it is not authentication on its own, and neither is the absence
+// of an Origin header or CORS. Browsers can't send these headers (not allowed in preflight) and any request with an
+// Origin is refused. With no secret configured, the normal state, every probe request is refused before any RPC.
+const PROBE_SECRET = /^[A-Za-z0-9_-]{43,256}$/;
+async function probeGate(request: Request, origin: string | null, secret: string | null): Promise<{ id: string | null; refused: string | null }> {
+  const id = request.headers.get('X-Stillroom-Probe-Authorisation'), token = request.headers.get('X-Stillroom-Probe-Token');
+  if (id === null && token === null) return { id: null, refused: null };
+  if (origin !== null || id === null || token === null || !UUID.test(id)) return { id: null, refused: 'INVALID_INPUT' };
+  if (secret === null || !PROBE_SECRET.test(secret)) return { id: null, refused: 'UNCONFIGURED' };
+  if (!PROBE_SECRET.test(token) || !await sameSecret(token, secret)) return { id: null, refused: 'UNAUTHENTICATED' };
+  return { id, refused: null };
+}
+async function sameSecret(a: string, b: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const [x, y] = await Promise.all([a, b].map(async (value) => new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value)))));
+  let difference = 0;
+  for (let index = 0; index < 32; index++) difference |= x![index]! ^ y![index]!;
+  return difference === 0;
 }

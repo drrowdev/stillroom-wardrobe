@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import type { AiClient } from '../../data/ai';
-import { AnalyzedSaveRefusedError, AppError, errorKey } from '../../data/errors';
+import { AnalyzedSaveRefusedError, AppError, EnhancementExpiredError, errorKey } from '../../data/errors';
 import { DiscardDialog, type BeforeDiscard } from '../../app/dialog';
 import { newImageChangeAttempt, matchImageChangeReceipt, type ImageChangeAttempt, type ImageChangeReceipt, type RecoveryVersion } from '../../domain/image-replacement';
 import type { ItemBaseline, ImageBaseline } from '../../domain/item-details';
@@ -21,6 +21,8 @@ import { AnalysisStatus } from './analysis-status';
 import { ItemForm } from './item-form';
 import { BackgroundNote, BackgroundStatus } from './background';
 import { preparingMessage, useBackground } from './use-background';
+import { useEnhancement } from './use-enhancement';
+import { EnhancementStatus } from './enhancement-status';
 
 type Props = {
   client: AppClient; scope: OwnerScope; ai: AiClient; images: PrivateImages;
@@ -84,13 +86,14 @@ function useChange(props: Props, discardDraft: BeforeDiscard) {
     props.onBeforeDiscard(beforeDiscard);
     return () => props.onBeforeDiscard(null);
   });
-  async function save(create: () => ImageChangeAttempt, refused?: () => void) {
+  async function save(create: () => ImageChangeAttempt, refused?: () => void, events?: { started: () => void; expired: () => void }) {
     if (latch.current || !props.online || !ready || pending.length || props.scope.signal.aborted) return;
     latch.current = true; setBusy(true); setError(null);
     let current = attempt;
     try {
       current ??= create();
       setAttempt(current);
+      events?.started();
       await changes.save(current, setStage, value => { receipt.current = value; }, lifetime.current.signal);
       if (!lifetime.current.signal.aborted && !props.scope.signal.aborted) { confirmed(); props.onClose(); }
     } catch (error) {
@@ -98,6 +101,9 @@ function useChange(props: Props, discardDraft: BeforeDiscard) {
         if (error instanceof AnalyzedSaveRefusedError && current?.intent.claim !== null && receipt.current === null
           && error.itemId === current?.intent.itemId && error.imageId === current.intent.imageId && refused) {
           setAttempt(null); refused();
+        } else if (error instanceof EnhancementExpiredError && receipt.current === null && events) {
+          // Refused before any reservation: unreserved again, back to H1 with one new analysis; Save is pressed again.
+          setAttempt(null); events.expired();
         } else setError(errorKey(error));
       }
     } finally {
@@ -156,6 +162,12 @@ function Replacement(props: Props) {
   const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
   const [full, setFull] = useState<CropSource | null>(null);
   const background = useBackground(props.scope);
+  const onlineNow = useRef(props.online);
+  useEffect(() => { onlineNow.current = props.online; }, [props.online]);
+  const expiring = useRef<() => void>(() => {});
+  const enhancement = useEnhancement(props.client, props.scope, () => expiring.current());
+  // A3: the settled H1 while it is being enhanced, shown without committing photo, crop or background.
+  const [provisional, setProvisional] = useState<{ photo: PreparedPhoto; crop: boolean } | null>(null);
   const [edit, setEdit] = useState<PhotoEdit>(ORIGINAL_EDIT);
   const [editing, setEditing] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -166,7 +178,7 @@ function Replacement(props: Props) {
   const focusEdit = useRef(false);
   const pendingCrop = useRef(false);
   const library = useRef<HTMLInputElement>(null), camera = useRef<HTMLInputElement>(null);
-  const preview = usePreview(photo), fullPreview = usePreview(full);
+  const preview = usePreview(photo), fullPreview = usePreview(full), provisionalPreview = usePreview(provisional?.photo ?? null);
   const { onDirty } = props;
   // Focus returns after the editor has closed and preparation has settled, once the button is rendered and enabled.
   useEffect(() => {
@@ -202,12 +214,22 @@ function Replacement(props: Props) {
         // The stored image and item stay as they are until Save; this only prepares the new photo in memory.
         const prepared = await background.prepare(imaging, source, next, signal, replacing, () => work.current === controller);
         if (signal.aborted) return;
+        const cutOut = prepared.state === 'removed';
+        if (cutOut) setProvisional({ photo: prepared.photo, crop: !replacing });
+        let stage;
+        try {
+          stage = await enhancement.run(prepared.photo, { cutOut, online: onlineNow.current, signal,
+            current: () => work.current === controller });
+        } finally { if (cutOut) setProvisional(null); }
+        if (stage.kind === 'aborted' || signal.aborted) return;
+        const settled = stage.kind === 'enhanced' ? stage.photo : prepared.photo;
         if (!replacing) focusEdit.current = true;
-        setPhoto(prepared.photo); setEdit(next); setEditing(false);
+        setPhoto(settled); setEdit(next); setEditing(false);
         background.settle(prepared.state);
         if (replacing) setFull(prepared.crop);
         pendingCrop.current = false;
-        void analysis.commitPhoto(prepared.photo);
+        enhancement.commit(stage, prepared.photo);
+        void analysis.commitPhoto(settled);
       } catch (error) {
         if (!signal.aborted) { background.settle('none'); pendingCrop.current = false; }
         if (!signal.aborted) setError(error instanceof ImagePreparationError
@@ -219,9 +241,18 @@ function Replacement(props: Props) {
   }
   function choose(file?: File) {
     if (!file || change.frozen || preparing) return;
-    original.current = file; setPhoto(null); setFull(null); setEditing(false); background.reset();
+    original.current = file; setPhoto(null); setFull(null); setEditing(false); background.reset(); enhancement.clear();
     void prepare(file, ORIGINAL_EDIT, true);
   }
+  function revertEnhancement(line: 'none' | 'generic' = 'none', afterRefusal = false) {
+    if ((!afterRefusal && change.frozen) || preparing || props.scope.signal.aborted) return;
+    const h1 = enhancement.revert(line);
+    if (!h1) return;
+    setPhoto(h1);
+    void analysis.commitPhoto(h1);
+  }
+  expiring.current = () => revertEnhancement('generic');
+  function cancelCrop() { work.current?.abort(); setPreparing(false); setEditing(false); focusEdit.current = true; }
   const { t } = props;
   const formBaseline = { ...props.item.values };
   for (const [field, entry] of Object.entries(analysis.state?.derivation ?? {})) {
@@ -234,19 +265,21 @@ function Replacement(props: Props) {
     <form className="capture-layout" noValidate onSubmit={event => {
       event.preventDefault();
       if (!photo || preparing || editing || !change.attempt && !analysis.canSave) return;
+      if (!change.attempt && enhancement.lapsed()) { expiring.current(); return; }
       void change.save(() => {
         if (analysis.implicitManual) analysis.continueManual();
         const view = analysis.snapshot();
         if (!view.manual && !view.state) throw new AppError('error.conflict');
         return newImageChangeAttempt(props.item, props.image, view.draft, view.description, photo, props.scope,
           view.manual ? undefined : view.state!);
-      }, analysis.refuseSave);
+      }, () => { analysis.refuseSave(); enhancement.thaw(); },
+      { started: enhancement.freeze, expired: () => { enhancement.thaw(); revertEnhancement('generic', true); } });
     }}>
       <div className="photo-panel">
-        {editing && full && fullPreview ? <CropEditor preview={fullPreview} width={full.width} height={full.height}
+        {editing && full && fullPreview && !provisional ? <CropEditor preview={fullPreview} width={full.width} height={full.height}
           accepted={edit} preparing={preparing} t={t} onApply={next => { if (original.current) void prepare(original.current, next, false); }}
-          onCancel={() => { work.current?.abort(); setPreparing(false); setEditing(false); focusEdit.current = true; }} />
-          : <div className="capture-photo">{preview ? <img src={preview} alt={analysis.description || props.item.title} /> : <p>{t('capture.photo')}</p>}</div>}
+          onCancel={cancelCrop} />
+          : <div className="capture-photo">{(provisionalPreview ?? preview) ? <img src={(provisionalPreview ?? preview)!} alt={analysis.description || props.item.title} /> : <p>{t('capture.photo')}</p>}</div>}
         <input ref={library} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1}
           aria-label={t('capture.library')} disabled={change.frozen || preparing} onChange={event => { choose(event.target.files?.[0]); event.target.value = ''; }} />
         <input ref={camera} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" tabIndex={-1}
@@ -257,13 +290,15 @@ function Replacement(props: Props) {
           {photo && <button id="image-change-edit" className="button button-secondary" type="button"
             disabled={change.frozen || preparing} onClick={() => setEditing(true)}>{t('photo.edit')}</button>}
         </div>}
-        {!editing && <BackgroundStatus state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
+        {(!editing || provisional) && <EnhancementStatus view={enhancement.view} disabled={change.frozen || preparing} t={t}
+          onSkip={enhancement.skip} onRevert={() => revertEnhancement()} onCancelCrop={provisional?.crop ? cancelCrop : undefined} />}
+        {!editing && !provisional && <BackgroundStatus state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
           disabled={change.frozen || preparing} t={t} onUseOriginal={() => {
             if (change.frozen) return;
             if (background.useOriginal() === 'again' && original.current) void prepare(original.current, edit, false);
           }} />}
         {!photo && !preparing && <BackgroundNote t={t} language={props.language} />}
-        {preparing && <p role="status">{t(preparingMessage(background.state, background.downloading, 'capture.preparing'))}</p>}
+        {preparing && !enhancement.view.working && <p role="status">{t(preparingMessage(background.state, background.downloading, 'capture.preparing'))}</p>}
         {error && <p role="alert" className="notice notice-error">{t(error)}</p>}
       </div>
       <div className="details-panel">

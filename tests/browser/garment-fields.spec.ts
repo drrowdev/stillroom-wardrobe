@@ -10,6 +10,9 @@ import { colours } from '../../src/domain/preferences';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { manualEntry } from './ai-photo-first-support';
 
+// image_provenance_v1 is a read-only RPC; the detail view re-reads it with the refreshed images.
+const readOnlyRpc = (route: string) => route === '/rest/v1/rpc/image_provenance_v1';
+
 async function setup(page: Page, language: Language = 'en', loseFinalizeReplyOnce = false) {
   const api = await mockBackend(page, { initialLanguage: language, loseFinalizeReplyOnce });
   await page.goto('/'); await signIn(page);
@@ -191,7 +194,7 @@ for (const language of ['fi', 'sv'] as const) {
     await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
     await expect(page.locator('#wardrobe-title')).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    expect(api.requests.slice(requestStart).filter((request) => request.path.startsWith('/rest/') && request.method !== 'GET')).toEqual([]);
+    expect(api.requests.slice(requestStart).filter((request) => request.path.startsWith('/rest/') && request.method !== 'GET' && !readOnlyRpc(request.path))).toEqual([]);
     expect(item).toEqual(original);
 
     await link.click(); await expand(page, 'detail');
@@ -209,7 +212,7 @@ for (const language of ['fi', 'sv'] as const) {
     await expect(notice).toBeVisible();
     expect(image.alt_text).toBe('Independent description');
     expect(item).toEqual(original);
-    expect(api.requests.slice(requestStart).filter((request) => request.path.startsWith('/rest/') && request.method !== 'GET')
+    expect(api.requests.slice(requestStart).filter((request) => request.path.startsWith('/rest/') && request.method !== 'GET' && !readOnlyRpc(request.path))
       .map(({ path, method }) => ({ path, method }))).toEqual([{ path: '/rest/v1/rpc/update_image_description', method: 'POST' }]);
     await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
     await expect(page.locator('#wardrobe-title')).toBeVisible();

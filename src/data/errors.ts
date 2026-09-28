@@ -13,6 +13,10 @@ export class AnalyzedSaveRefusedError extends AppError {
     super('aiC.saveRefused'); this.itemId = itemId; this.imageId = imageId; this.name = 'AnalyzedSaveRefusedError';
   }
 }
+/** The server refused an enhanced photo whose evidence has expired, before any reservation existed. */
+export class EnhancementExpiredError extends AppError {
+  constructor() { super('enhance.fallback'); this.name = 'EnhancementExpiredError'; }
+}
 export function errorKey(error: unknown): MessageKey {
   if (error instanceof AppError) return error.messageKey;
   return 'error.unavailable';

@@ -8,7 +8,7 @@ import type { FieldProvenance } from '../domain/attribute-provenance';
 import { validDescription } from '../domain/item-details';
 import { canonicalPrice } from '../i18n/format';
 import type { PreparedPhoto } from './process-jpeg';
-import { AnalyzedSaveRefusedError, AppError, requireSuccess, throwIfAborted } from '../data/errors';
+import { AnalyzedSaveRefusedError, AppError, EnhancementExpiredError, requireSuccess, throwIfAborted } from '../data/errors';
 import type { AnalyzedSaveAttempt } from '../domain/analyzed-save';
 import type { Json } from '../data/database.types';
 
@@ -45,6 +45,7 @@ function requireCheckedSuccess(error: unknown): void {
   if (isRecord(error) && error.code === '22023' && error.details === null && error.hint === null) {
     if (error.message === 'Request conflict') throw new AppError('error.conflict');
     if (error.message === 'Upload incomplete') throw new AppError('error.uploadIncomplete');
+    if (error.message === 'Enhancement expired') throw new EnhancementExpiredError();
   }
   throw new AppError('error.unavailable');
 }
@@ -103,10 +104,14 @@ export async function ensureFile(
   if (hash !== expectedHash) throw new AppError('error.conflict');
 }
 
+/** How a restored photo's AI-edit label is carried: detected as before, preserved from a v4 backup, or left off. */
+export type RestoreMode = 'legacy' | 'v4' | 'unlabelled';
+export type SaveReservation = 'reserve_item_save' | 'reserve_restored_item_save'
+  | { name: 'reserve_restored_item_save_v2'; importId: string; mode: RestoreMode };
 export async function saveItem(
   client: AppClient, scope: OwnerScope, attempt: SaveAttempt, onStage: (stage: SaveStage) => void,
   // A restore keeps the backup's field kinds through its own reservation; the rest of the checked Save is shared.
-  reservation: 'reserve_item_save' | 'reserve_restored_item_save' = 'reserve_item_save',
+  reservation: SaveReservation = 'reserve_item_save',
 ): Promise<void> {
   const checkScope = () => {
     throwIfAborted(scope.signal);
@@ -116,14 +121,16 @@ export async function saveItem(
   const { photo } = attempt;
   onStage('capture.reserving');
   checkScope();
-  const reserved = await client.rpc(reservation, {
+  const args = {
     p_item: { ...attempt.payload, id: attempt.itemId },
     p_image: {
       id: attempt.imageId, main_bytes: photo.main.size, thumb_bytes: photo.thumb.size,
       main_sha256: photo.mainSha256, thumb_sha256: photo.thumbSha256,
       width: photo.width, height: photo.height, alt_text: attempt.altText,
     },
-  }).abortSignal(scope.signal);
+  };
+  const reserved = await (typeof reservation === 'string' ? client.rpc(reservation, args)
+    : client.rpc(reservation.name, { ...args, p_import_id: reservation.importId, p_mode: reservation.mode })).abortSignal(scope.signal);
   checkScope();
   requireCheckedSuccess(reserved.error);
   const { fingerprint, state } = reservationReceipt(reserved.data, attempt);

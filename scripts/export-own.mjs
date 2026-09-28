@@ -193,13 +193,17 @@ function snapshotSource(context) {
       if (error) rpcFailure(context, error, status);
       return data;
     },
-    digest: async (signal) => {
-      const { data, error, status } = await context.client.rpc('attribution_digest').abortSignal(signal);
-      if (signal.aborted) refuse('cancelled');
-      if (error) rpcFailure(context, error, status);
-      return data;
-    },
+    digest: (signal) => ownerRead(context, 'attribution_digest', signal),
+    provenance: (signal) => ownerRead(context, 'image_provenance_v1', signal),
+    provenanceDigest: (signal) => ownerRead(context, 'image_provenance_digest_v1', signal),
   };
+}
+
+async function ownerRead(context, name, signal) {
+  const { data, error, status } = await context.client.rpc(name).abortSignal(signal);
+  if (signal.aborted) refuse('cancelled');
+  if (error) rpcFailure(context, error, status);
+  return data;
 }
 
 function pause(ms, signal) {

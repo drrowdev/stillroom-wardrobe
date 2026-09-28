@@ -35,9 +35,12 @@ export const GATEWAY_MODE_OPTION = 'com.docker.network.bridge.gateway_mode_ipv4'
 export const REQUEST_PREFIX = 'e3b0';
 /** The immutable image deployment identity whose shared capacity the fixture opens and closes again. */
 export const ENHANCE_CAPACITY_KEY = 'stillroom-ai-eval/eval-image25-sunburst-20260908/2026-09-08';
-export const OPERATIONS = Object.freeze(['freeze', 'restore', 'count', 'verify-deleted', 'down', 'fence', 'unfence']);
+export const OPERATIONS = Object.freeze(['freeze', 'restore', 'count', 'verify-deleted', 'down', 'fence', 'unfence',
+  'expire-enhancement']);
 // The one fixture fence request (owner A only); its e3b0 prefix is swept by teardown.
 export const FENCE_REQUEST = 'e3b0af00-0000-4000-8000-000000000001';
+// The one enhancement whose evidence the gate expires (owner B only): gateId('B', 1, '6'), B's first released H2.
+export const EXPIRE_ENHANCEMENT_REQUEST = 'e3b0b600-0000-4000-8000-000000000001';
 
 /** AZURE_REVIEW_EXPIRES blocks the gate: an expired or invalid review date is BLOCKED, never a pass. */
 export function reviewGate(now, expires = AZURE_REVIEW_EXPIRES) {
@@ -437,6 +440,13 @@ async function main() {
           } else if (message.op === 'unfence') {
             ok = await db(`delete from private.item_deletion_operations where owner_id=${literal(ids.A)}
               and request_id=${literal(FENCE_REQUEST)} and item_id=${literal(message.item)} returning 'UNFENCED';`) === 'UNFENCED';
+          } else if (message.op === 'expire-enhancement') {
+            // Fixture-only: move B's fixed evidence row 25 hours back (created_at and usable_until together, as its
+            // check requires), so a pending Save must complete on its reservation's snapshot binding alone.
+            ok = await db(`update private.image_enhancements set created_at=created_at-interval '25 hours',
+              usable_until=usable_until-interval '25 hours' where owner_id=${literal(ids.B)}
+              and request_id=${literal(EXPIRE_ENHANCEMENT_REQUEST)} and usable_until>clock_timestamp()
+              returning case when usable_until<=clock_timestamp() then 'EXPIRED' end;`) === 'EXPIRED';
           } else if (message.op === 'count') {
             const result = await docker(['exec', CONTAINERS.double, 'node', '-e',
               "fetch('http://127.0.0.1:8080/__count').then(r=>r.text()).then(t=>process.stdout.write(t))"]);

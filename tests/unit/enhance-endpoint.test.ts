@@ -8,7 +8,7 @@ import {
 } from '../../src/domain/enhancement';
 import { PROVIDER_JPEG } from '../../src/images/provider-jpeg';
 import { classifyEnhanceResponse, enhanceForm, enhanceUsagePayload } from '../../supabase/functions/enhance-photo/azure';
-import { createEnhanceHandler, ENHANCE_RPCS } from '../../supabase/functions/enhance-photo/handler';
+import { claimedWorkObserver, createEnhanceHandler, ENHANCE_RPCS } from '../../supabase/functions/enhance-photo/handler';
 import { exifSegment, jpegSegment } from '../fixtures/jpeg-helpers';
 import { flatJpeg } from '../fixtures/restore-jpeg-fixtures';
 
@@ -76,7 +76,9 @@ describe('enhancement request contract', () => {
 });
 
 describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  const registered: Promise<unknown>[] = [];
+  const register = (work: Promise<unknown>) => { registered.push(work); };
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); registered.length = 0; claimedWorkObserver.current = null; });
   const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service',
     azure: { apiKey: 'fictional-azure-image' } };
   const status = { code: 'OK', consent: { enabled: true, noticeRevision: 1 }, policy: { activated: true, noticeRevision: 1,
@@ -121,7 +123,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     const { transport } = provider(() => Response.json(imageBody()));
     for (const bytes of [flatJpeg({ width: 800, height: 1000, mode: 'progressive' }), flatJpeg({ width: 1700, height: 1000 }),
       flatJpeg({ width: 800, height: 1000, segments: [exifSegment(1)] }), new Uint8Array(PROVIDER_JPEG.acceptedBytes + 1)]) {
-      const response = await createEnhanceHandler(config, transport)(post(bytes));
+      const response = await createEnhanceHandler(config, register, transport)(post(bytes));
       expect([400, 413]).toContain(response.status);
     }
     expect(calls).toHaveLength(0);
@@ -131,7 +133,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
   it('claims for the verified owner, commits evidence before releasing the admitted bytes', async () => {
     const calls = backend();
     const { transport, sent } = provider(() => Response.json(imageBody()));
-    const response = await createEnhanceHandler(config, transport)(post(INPUT, { Origin: 'http://127.0.0.1:5173' }));
+    const response = await createEnhanceHandler(config, register, transport)(post(INPUT, { Origin: 'http://127.0.0.1:5173' }));
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('image/jpeg');
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -158,7 +160,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
       [{ policy: { ...status.policy, maxRequestMicro: '1000' } }, 'UNCONFIGURED']] as const) {
       const calls = backend({ status: { ...status, ...override } });
       const { transport } = provider(() => Response.json(imageBody()));
-      const response = await createEnhanceHandler(config, transport)(post());
+      const response = await createEnhanceHandler(config, register, transport)(post());
       expect(await response.json()).toEqual({ code });
       expect(calls.some((call) => call.url.endsWith('/rpc/enhance_claim'))).toBe(false);
       expect(transport).not.toHaveBeenCalled();
@@ -170,7 +172,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     for (const code of ['ALLOWANCE', 'RATE_LIMIT', 'UNAVAILABLE', 'BUSY', 'TERMINAL', 'PROBE_LIMIT']) {
       backend({ claim: { code, claimed: false } });
       const { transport } = provider(() => Response.json(imageBody()));
-      const response = await createEnhanceHandler(config, transport)(post());
+      const response = await createEnhanceHandler(config, register, transport)(post());
       expect((await response.json() as { code: string }).code).toBe(code === 'PROBE_LIMIT' ? 'UNAVAILABLE' : code);
       expect(transport).not.toHaveBeenCalled();
       vi.unstubAllGlobals();
@@ -180,7 +182,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
   it('settles as not dispatched after the dispatch deadline', async () => {
     const calls = backend({ claim: { code: 'OK', claimed: true, manifestId: ENHANCE_MANIFEST, dispatchBeforeMs: Date.now() - 1, requestSeconds: 85 } });
     const { transport } = provider(() => Response.json(imageBody()));
-    const response = await createEnhanceHandler(config, transport)(post());
+    const response = await createEnhanceHandler(config, register, transport)(post());
     expect(await response.json()).toEqual({ code: 'TIMEOUT' });
     expect(finishBody(calls)).toMatchObject({ p_code: 'NOT_DISPATCHED', p_usage: null, p_output_sha256: null, p_output_bytes: null });
     expect(transport).not.toHaveBeenCalled();
@@ -190,7 +192,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     for (const bad of [flatJpeg({ width: 1024, height: 1024 }), flatJpeg({ width: 1024, height: 1280, mode: 'progressive' })]) {
       const calls = backend();
       const { transport } = provider(() => Response.json(imageBody(bad)));
-      const response = await createEnhanceHandler(config, transport)(post());
+      const response = await createEnhanceHandler(config, register, transport)(post());
       expect(response.headers.get('Content-Type')).toContain('application/json');
       expect(await response.json()).toEqual({ code: 'OUTPUT_REJECTED' });
       expect(finishBody(calls)).toMatchObject({ p_code: 'OUTPUT_REJECTED', p_output_sha256: null, p_output_bytes: null });
@@ -208,7 +210,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     for (const [respond, code, expectedUsage] of cases) {
       const calls = backend(code === 'OK' ? { finish: { code: 'INVALID_USAGE', accounting } } : { finish: { code, accounting } });
       const { transport } = provider(respond);
-      const response = await createEnhanceHandler(config, transport)(post());
+      const response = await createEnhanceHandler(config, register, transport)(post());
       expect(response.headers.get('Content-Type')).toContain('application/json');
       expect(await response.json()).toEqual({ code: code === 'OK' ? 'FAILED' : code });
       expect(finishBody(calls)).toMatchObject({ p_code: code, p_usage: expectedUsage });
@@ -221,7 +223,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
       ['UNAVAILABLE', 'UNAVAILABLE'], ['USAGE_CONFLICT', 'FAILED'], ['BUSY', 'BUSY']] as const) {
       backend({ finish: { code: finished, accounting } });
       const { transport } = provider(() => Response.json(imageBody()));
-      const response = await createEnhanceHandler(config, transport)(post());
+      const response = await createEnhanceHandler(config, register, transport)(post());
       expect(response.headers.get('Content-Type')).toContain('application/json');
       expect(await response.json()).toEqual({ code });
       vi.unstubAllGlobals();
@@ -242,7 +244,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
       }));
       return Response.json({});
     });
-    const pending = createEnhanceHandler(config, transport)(post());
+    const pending = createEnhanceHandler(config, register, transport)(post());
     await dispatched;
     await vi.advanceTimersByTimeAsync(69_999);
     expect(abortedAt).toBe(0);
@@ -265,7 +267,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
       await Promise.resolve();
       return Response.json(imageBody(OUTPUT, { usage: overrun }));
     });
-    const response = await createEnhanceHandler(config, transport)(new Request(post(), { signal: controller.signal }));
+    const response = await createEnhanceHandler(config, register, transport)(new Request(post(), { signal: controller.signal }));
     expect(providerSignal!.aborted).toBe(false);
     expect(finishBody(calls)).toMatchObject({ p_code: 'OK', p_usage: { output: 10_000, total: 11_400 }, p_output_sha256: sha(OUTPUT) });
     expect(response.headers.get('Content-Type')).toContain('application/json');
@@ -278,7 +280,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     const calls = backend({ finish: { code: 'USAGE_ANOMALY', accounting }, finishGate: gate });
     const controller = new AbortController();
     const { transport } = provider(() => Response.json(imageBody()));
-    const pending = createEnhanceHandler(config, transport)(new Request(post(), { signal: controller.signal }));
+    const pending = createEnhanceHandler(config, register, transport)(new Request(post(), { signal: controller.signal }));
     await vi.waitFor(() => expect(finishBody(calls)).toBeDefined());
     controller.abort();
     open();
@@ -298,7 +300,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
       return response;
     });
     const { transport } = provider(() => Response.json(imageBody()));
-    const response = await createEnhanceHandler(config, transport)(new Request(post(), { signal: controller.signal }));
+    const response = await createEnhanceHandler(config, register, transport)(new Request(post(), { signal: controller.signal }));
     expect(await response.json()).toEqual({ code: 'TIMEOUT' });
     expect(transport).not.toHaveBeenCalled();
     expect(finishBody(calls)).toMatchObject({ p_code: 'NOT_DISPATCHED', p_usage: null });
@@ -306,8 +308,152 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
   it('refuses unknown request headers in preflight and any query string', async () => {
     const options = new Request('http://127.0.0.1:54321/functions/v1/enhance-photo', { method: 'OPTIONS', headers: {
       Origin: 'http://127.0.0.1:5173', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'x-stillroom-draft-id' } });
-    expect((await createEnhanceHandler(config)(options)).status).toBe(400);
+    expect((await createEnhanceHandler(config, register)(options)).status).toBe(400);
     const query = new Request('http://127.0.0.1:54321/functions/v1/enhance-photo?x=1', { method: 'POST' });
-    expect((await createEnhanceHandler(config)(query)).status).toBe(400);
+    expect((await createEnhanceHandler(config, register)(query)).status).toBe(400);
+  });
+  // W1 / A2: one claimed work promise, registered before any dispatch and awaited by the same reference.
+  it('registers exactly the work promise it awaits, once per claimed request, and never before the claim', async () => {
+    const calls = backend();
+    const observed: Promise<unknown>[] = [];
+    claimedWorkObserver.current = (work) => { observed.push(work); };
+    const { transport } = provider(() => Response.json(imageBody()));
+    const response = await createEnhanceHandler(config, register, transport)(post());
+    expect(response.status).toBe(200);
+    expect(observed).toHaveLength(1);
+    expect(registered).toHaveLength(1);
+    expect(Object.is(registered[0], observed[0])).toBe(true);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(calls.filter((call) => call.url.endsWith('/rpc/enhance_finish'))).toHaveLength(1);
+    for (const code of ['ALLOWANCE', 'RATE_LIMIT', 'BUSY']) {
+      vi.unstubAllGlobals();
+      backend({ claim: { code, claimed: false } });
+      await createEnhanceHandler(config, register, transport)(post());
+    }
+    vi.unstubAllGlobals();
+    backend({ status: { ...status, policy: { ...status.policy, activated: false } } });
+    await createEnhanceHandler(config, register, transport)(post());
+    expect(registered).toHaveLength(1);
+    expect(observed).toHaveLength(1);
+  });
+
+  it('claims nothing without a runtime registrar', async () => {
+    const calls = backend();
+    const { transport } = provider(() => Response.json(imageBody()));
+    const response = await createEnhanceHandler(config, null, transport)(post());
+    expect(await response.json()).toEqual({ code: 'UNCONFIGURED' });
+    expect(calls.some((call) => call.url.endsWith('/rpc/enhance_claim'))).toBe(false);
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('settles a claim as not dispatched, with zero provider calls, when registration throws', async () => {
+    const calls = backend();
+    const { transport } = provider(() => Response.json(imageBody()));
+    const refuse = vi.fn(() => { throw new Error('runtime refused'); });
+    const response = await createEnhanceHandler(config, refuse, transport)(post());
+    expect(refuse).toHaveBeenCalledTimes(1);
+    expect(await response.json()).toEqual({ code: 'UNCONFIGURED' });
+    expect(transport).not.toHaveBeenCalled();
+    expect(calls.filter((call) => call.url.endsWith('/rpc/enhance_finish'))).toHaveLength(1);
+    expect(finishBody(calls)).toMatchObject({ p_code: 'NOT_DISPATCHED', p_usage: null });
+  });
+
+  it('keeps the work deadlines after an early disconnect: the provider is aborted at 70 s by the work, not the response', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    backend();
+    const controller = new AbortController();
+    let calledAt = 0, abortedAt = 0;
+    let called!: () => void;
+    const dispatched = new Promise<void>((resolve) => { called = resolve; });
+    const transport = vi.fn(async (_url: string, init: RequestInit) => {
+      calledAt = Date.now();
+      called();
+      await new Promise((_, reject) => init.signal!.addEventListener('abort', () => { abortedAt = Date.now(); reject(init.signal!.reason); }));
+      return Response.json({});
+    });
+    const pending = createEnhanceHandler(config, register, transport)(new Request(post(), { signal: controller.signal }));
+    await dispatched;
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(69_999);
+    expect(abortedAt).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(abortedAt - calledAt).toBe(70_000);
+    expect(await (await pending).json()).toEqual({ code: 'TIMEOUT' });
+    await expect(registered[0]).resolves.toMatchObject({ code: 'TIMEOUT', output: null });
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves the work to FAILED without rejecting when the provider fetch rejects, leaving it held for provisional expiry', async () => {
+    const calls = backend();
+    const transport = vi.fn(async () => { throw new TypeError('network'); });
+    const response = await createEnhanceHandler(config, register, transport)(post());
+    expect(await response.json()).toEqual({ code: 'FAILED' });
+    await expect(registered[0]).resolves.toMatchObject({ code: 'FAILED' });
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(finishBody(calls)).toBeUndefined();
+  });
+
+  // A1: the operator probe path. The secret is extra to the owner JWT and the DB-bound authorisation.
+  describe('operator probe path', () => {
+    const SECRET = 'p'.repeat(43);
+    const PROBE = '33333333-3333-4333-8333-333333333333';
+    const probeConfig = { ...config, probeToken: SECRET };
+    const inactive = { code: 'INACTIVE', consent: { enabled: false, noticeRevision: null }, policy: { ...status.policy, activated: false } };
+    const probeHeaders = { 'X-Stillroom-Probe-Authorisation': PROBE, 'X-Stillroom-Probe-Token': SECRET };
+
+    it('claims with the authorisation only while ordinary enhancement is off, whatever the consent', async () => {
+      for (const consent of [{ enabled: false, noticeRevision: null }, { enabled: true, noticeRevision: 1 }]) {
+        const calls = backend({ status: { ...inactive, consent } });
+        const { transport } = provider(() => Response.json(imageBody()));
+        const response = await createEnhanceHandler(probeConfig, register, transport)(post(INPUT, probeHeaders));
+        expect(response.status).toBe(200);
+        expect(calls.find((call) => call.url.endsWith('/rpc/enhance_claim'))!.body).toMatchObject({ p_owner_id: OWNER, p_probe_id: PROBE });
+        vi.unstubAllGlobals();
+      }
+      const calls = backend();
+      const { transport } = provider(() => Response.json(imageBody()));
+      const response = await createEnhanceHandler(probeConfig, register, transport)(post(INPUT, probeHeaders));
+      expect(await response.json()).toEqual({ code: 'INVALID_INPUT' });
+      expect(calls.some((call) => call.url.endsWith('/rpc/enhance_claim'))).toBe(false);
+      expect(transport).not.toHaveBeenCalled();
+    });
+
+    it('refuses before any network call: Origin, partial headers, no secret configured, wrong or short token', async () => {
+      const cases: Array<[typeof config & { probeToken?: string | null }, Record<string, string>, string]> = [
+        [probeConfig, { ...probeHeaders, Origin: 'http://127.0.0.1:5173' }, 'INVALID_INPUT'],
+        [probeConfig, { 'X-Stillroom-Probe-Token': SECRET }, 'INVALID_INPUT'],
+        [probeConfig, { 'X-Stillroom-Probe-Authorisation': PROBE }, 'INVALID_INPUT'],
+        [probeConfig, { ...probeHeaders, 'X-Stillroom-Probe-Authorisation': 'not-a-uuid' }, 'INVALID_INPUT'],
+        [config, probeHeaders, 'UNCONFIGURED'],
+        [{ ...config, probeToken: 'short' }, probeHeaders, 'UNCONFIGURED'],
+        [probeConfig, { ...probeHeaders, 'X-Stillroom-Probe-Token': 'q'.repeat(43) }, 'UNAUTHENTICATED'],
+        [probeConfig, { ...probeHeaders, 'X-Stillroom-Probe-Token': 'x' }, 'UNAUTHENTICATED'],
+      ];
+      for (const [cfg, extra, code] of cases) {
+        const calls = backend({ status: inactive });
+        const { transport } = provider(() => Response.json(imageBody()));
+        const response = await createEnhanceHandler(cfg, register, transport)(post(INPUT, extra));
+        expect(await response.json()).toEqual({ code });
+        expect(calls).toHaveLength(0);
+        expect(transport).not.toHaveBeenCalled();
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('is not reachable from a browser: preflight refuses the probe headers', async () => {
+      for (const name of ['x-stillroom-probe-authorisation', 'x-stillroom-probe-token']) {
+        const options = new Request('http://127.0.0.1:54321/functions/v1/enhance-photo', { method: 'OPTIONS', headers: {
+          Origin: 'http://127.0.0.1:5173', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': `content-type, ${name}` } });
+        expect((await createEnhanceHandler(probeConfig, register)(options)).status).toBe(400);
+      }
+    });
+
+    it('leaves ordinary requests from the same owner inactive while a probe authorisation exists', async () => {
+      const calls = backend({ status: inactive });
+      const { transport } = provider(() => Response.json(imageBody()));
+      const response = await createEnhanceHandler(probeConfig, register, transport)(post());
+      expect(await response.json()).toEqual({ code: 'INACTIVE' });
+      expect(calls.some((call) => call.url.endsWith('/rpc/enhance_claim'))).toBe(false);
+    });
   });
 });

@@ -20,6 +20,7 @@ import type { AiClient } from '../../data/ai';
 import { LazyBoundary } from '../../app/lazy';
 import { lazyNamed } from '../../app/lazy-load';
 import { loadWearHistory, type WearSummary } from '../../data/wear-history';
+import { loadEditedImage } from '../../data/provenance';
 import { wearLineText } from '../statistics/wear-text';
 
 const ReplacePhoto = lazyNamed(() => import('./replace-photo'), 'ReplacePhoto');
@@ -137,6 +138,25 @@ function SavedPhoto({ image, images, t }: { image: ImageBaseline; images: Privat
   return <div className="detail-photo">{url ? <img src={url} alt={image.altText} /> :
     <p role="status">{failed ? <><Icon name="photo" />{t('photo.missing')}</> : t('common.loading')}</p>}</div>;
 }
+// A result is shown only for the owner scope and image it was read for; anything else is still loading.
+type EditedState = { key: string; value: 'labelled' | 'unlabelled' | 'failed' };
+function EditedLabel({ client, scope, imageId, online, t }: Pick<Shared, 'client' | 'scope' | 'online' | 't'> & { imageId: string }) {
+  const key = `${scope.ownerId}:${scope.epoch}:${imageId}`;
+  const [state, setState] = useState<EditedState | null>(null);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([scope.signal, controller.signal]);
+    void loadEditedImage(client, imageId, signal).then(value => { if (!signal.aborted) setState({ key, value: value ? 'labelled' : 'unlabelled' }); },
+      (problem: unknown) => { if (!signal.aborted && !isAborted(problem)) setState({ key, value: 'failed' }); });
+    return () => controller.abort();
+  }, [client, scope, imageId, key, reload]);
+  const value = state?.key === key ? state.value : 'loading';
+  if (value === 'labelled') return <p className="detail-edited">{t('detail.aiEdited')}</p>;
+  if (value === 'failed') return <p className="detail-edited" role="status">{t('detail.aiEditedUnavailable')} <button type="button"
+    className="text-button" disabled={!online} onClick={() => setReload(count => count + 1)}>{t('common.retry')}</button></p>;
+  return null;
+}
 // The same distinct-day count as Statistics and the wardrobe sorts.
 function WearLine({ client, scope, itemId, online, language, t }: Pick<Shared, 'client' | 'scope' | 'online' | 'language' | 't'> & { itemId: string }) {
   const [wear, setWear] = useState<WearSummary | null>(null);
@@ -218,6 +238,7 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
   return <div className="detail-layout">
     <div className="detail-media">
       <SavedPhoto image={description.base} images={props.images} t={t} />
+      <EditedLabel client={props.client} scope={props.scope} imageId={description.base.id} online={props.online} t={t} />
       <div className="photo-actions">
         <button className="button button-secondary" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('replacement'); }}>{t('imageChange.replace')}</button>
         <button className="text-button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('recovery'); }}>{t('imageChange.recover')}</button>

@@ -59,6 +59,8 @@ const browserArtifacts: Record<string, string[]> = {
     .map((name) => `i12-visual/${name}.png`),
   'i13-statistics-ui': ['overview-en-desktop', 'overview-fi-mobile', 'overview-sv-320-200'].map((name) => `i13-visual/${name}.png`),
   'bg1-background-ui': ['removed-en-desktop', 'working-sv-mobile', 'fallback-fi-mobile'].map((name) => `bg1-visual/${name}.png`),
+  'bg2b-enhance-ui': ['enhancing-en-mobile', 'enhanced-en-desktop', 'fallback-sv-mobile', 'reverted-en-mobile', 'enhanced-fi-mobile',
+    'settings-fi-mobile'].map((name) => `bg2b-visual/${name}.png`),
   'p6a-backup-ui': ['backup-en-desktop', 'backup-parts-fi-mobile'].map((name) => `p6a-visual/${name}.png`),
   'p6b-restore-ui': ['restore-preview-en-desktop', 'restore-progress-sv-mobile', 'restore-reencoded-fi-mobile'].map((name) => `p6b-visual/${name}.png`),
   'p6c-delete-account-ui': ['delete-account-en-desktop', 'delete-account-fi-mobile', 'delete-recovery-sv-desktop', 'delete-recovery-en-mobile'].map((name) => `p6c-visual/${name}.png`),
@@ -119,7 +121,7 @@ describe('CI workflow browser split', () => {
     expect(projects).toEqual(['chromium', 'mobile', 'webkit-photo']);
     expect(config).toContain("testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', "
       + "'item-details.spec.ts', 'garment-fields.spec.ts', 'ai-photo-first.spec.ts', 'items.spec.ts', 'ux-l1a.spec.ts', "
-      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts'],");
+      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts', 'enhancement.spec.ts'],");
     expect(config).toContain('  failOnFlakyTests: Boolean(process.env.CI),\n');
     expect(config).toContain('  forbidOnly: Boolean(process.env.CI),\n');
     const app = job('app'), webkit = job('webkit-photo');

@@ -53,8 +53,16 @@ export const attributionOriginKeys = ['origin', ...attributionEntryKeys] as cons
 export const attributionOrigins = ['recorded', 'imported'] as const;
 export type AttributionOrigin = typeof attributionOrigins[number];
 // New backups are version 3 (history carries its origin). Version 2 is still read, verified and resumed as version 2.
+// Version 4 is version 3 plus a non-empty `provenance` list, written only when an exported photo was edited with AI.
 export const SAVED_VERSION = 3;
-export type SavedVersion = 2 | 3;
+export const PROVENANCE_VERSION = 4;
+export type SavedVersion = 2 | 3 | 4;
+/** One exported photo edited with AI; `backupSha256` is that exported image's main_sha256. */
+export type ProvenanceEntry = { imageId: string; kind: 'ai_edited'; modelId: string; manifestId: string; backupSha256: string };
+const provenanceKeys = ['imageId', 'kind', 'modelId', 'manifestId', 'backupSha256'] as const;
+const provenanceRowKeys = ['image_id', 'kind', 'origin', 'model_id', 'manifest_id', 'stored_sha256', 'backup_sha256'] as const;
+const modelPattern = /^[A-Za-z0-9._:/-]{1,128}$/;
+const manifestPattern = /^[A-Za-z0-9._:-]{1,128}$/;
 const attributionColumnsV2 = ['owner_id', 'item_id', 'position', 'source_image_id', 'source_image_excluded', 'image_sha256', 'model_id',
   'prompt_version', 'fields'] as const;
 // Weather on/off is consent, so it is never exported; the chosen city stays as owner data.
@@ -72,6 +80,7 @@ export const savedColumnsFor = (version: SavedVersion, table: SavedTable): reado
 export type SavedMetadata = {
   format: 'stillroom-saved'; schema_version: SavedVersion; export_id: string; owner_id: string; created_at: string;
   tables: Record<SavedTable, Row[]>;
+  /** Version 4 only. */ provenance?: ProvenanceEntry[];
 };
 export type RawManifest = { export_id: string; owner_id: string; created_at: string; tables: Record<RawTable, Row[]> };
 export type FileRef = { imageId: string; variant: 'main' | 'thumb'; path: string; sha256: string; byteLength: number };
@@ -209,7 +218,7 @@ export function savedItemIds(raw: RawManifest): string[] {
 // Only what was saved leaves the account: no drafts, pending photos, Trash, analysis requests, receipts or consent.
 // Every reference inside the result points at an exported row; history keeps its text when its item is left out.
 // `attributions` holds each saved item's item_attribution_history_v2 entries, in order.
-export function projectSaved(raw: RawManifest, attributions: ReadonlyMap<string, unknown>): SavedMetadata {
+export function projectSaved(raw: RawManifest, attributions: ReadonlyMap<string, unknown>, provenanceRows: unknown = []): SavedMetadata {
   const t = raw.tables, owner = raw.owner_id;
   const items = new Set(savedItemIds(raw));
   if (attributions.size !== items.size || [...attributions.keys()].some(id => !items.has(id))) fail();
@@ -251,17 +260,49 @@ export function projectSaved(raw: RawManifest, attributions: ReadonlyMap<string,
       && entry.item_ids.every(id => items.has(String(id)))),
   };
   for (const table of savedTables) tables[table] = [...tables[table]].sort(byKey(table));
-  const metadata: SavedMetadata = { format: 'stillroom-saved', schema_version: SAVED_VERSION, export_id: raw.export_id, owner_id: owner,
-    created_at: raw.created_at, tables };
+  const provenance = projectProvenance(tables.item_images, provenanceRows);
+  // Without an exported edited photo the metadata is exactly what version 3 always wrote: no provenance key.
+  const metadata: SavedMetadata = provenance.length
+    ? { format: 'stillroom-saved', schema_version: PROVENANCE_VERSION, export_id: raw.export_id, owner_id: owner,
+      created_at: raw.created_at, tables, provenance }
+    : { format: 'stillroom-saved', schema_version: SAVED_VERSION, export_id: raw.export_id, owner_id: owner,
+      created_at: raw.created_at, tables };
   assertMetadata(metadata);
   return metadata;
 }
 
+// image_provenance_v1 rows projected onto the images this backup actually exports (saved items; no Trash, pending or
+// unsaved photos). A row for an exported image must match its stored bytes; anything else means it changed meanwhile.
+export function projectProvenance(images: readonly Row[], rows: unknown): ProvenanceEntry[] {
+  if (!Array.isArray(rows) || rows.length > 100_000) fail();
+  const exported = new Map(images.map(image => [String(image.id), image]));
+  const seen = new Set<string>();
+  const out: ProvenanceEntry[] = [];
+  for (const value of rows as unknown[]) {
+    if (!isObject(value)) fail();
+    const row = value as Row;
+    if (!sameKeys(row, provenanceRowKeys) || !isUuid(row.image_id) || row.kind !== 'ai_edited'
+      || (row.origin !== 'recorded' && row.origin !== 'imported') || typeof row.model_id !== 'string' || !modelPattern.test(row.model_id)
+      || typeof row.manifest_id !== 'string' || !manifestPattern.test(row.manifest_id) || !isHash(row.stored_sha256)
+      || !(row.backup_sha256 === null || isHash(row.backup_sha256))) fail();
+    if (seen.has(String(row.image_id))) fail();
+    seen.add(String(row.image_id));
+    const image = exported.get(String(row.image_id));
+    if (!image) continue;
+    if (image.main_sha256 !== row.stored_sha256) fail('changed');
+    out.push({ imageId: String(row.image_id), kind: 'ai_edited', modelId: String(row.model_id), manifestId: String(row.manifest_id),
+      backupSha256: String(row.stored_sha256) });
+  }
+  return out.sort((a, b) => a.imageId < b.imageId ? -1 : a.imageId > b.imageId ? 1 : 0);
+}
+
 // Structural and referential check of saved metadata (version 2 or 3); used when writing, by the offline verifier and by
 // restore's Check before anything is written.
+const metadataKeys = ['format', 'schema_version', 'export_id', 'owner_id', 'created_at', 'tables'] as const;
 export function assertMetadata(value: unknown): asserts value is SavedMetadata {
-  if (!isObject(value) || !sameKeys(value, ['format', 'schema_version', 'export_id', 'owner_id', 'created_at', 'tables'])
-    || value.format !== 'stillroom-saved' || (value.schema_version !== 2 && value.schema_version !== 3) || !isUuid(value.export_id) || !isUuid(value.owner_id)
+  if (!isObject(value) || !sameKeys(value, value.schema_version === PROVENANCE_VERSION ? [...metadataKeys, 'provenance'] : metadataKeys)
+    || value.format !== 'stillroom-saved' || (value.schema_version !== 2 && value.schema_version !== 3 && value.schema_version !== 4)
+    || !isUuid(value.export_id) || !isUuid(value.owner_id)
     || !isStamp(value.created_at) || !isObject(value.tables) || !sameKeys(value.tables, savedTables)) return fail();
   assertBounded(value.tables);
   const owner = value.owner_id, version = value.schema_version as SavedVersion;
@@ -295,7 +336,7 @@ export function assertMetadata(value: unknown): asserts value is SavedMetadata {
     if (!items.has(String(entry.item_id)) || !isCount(entry.position, 0, 999) || typeof entry.source_image_excluded !== 'boolean'
       || (entry.source_image_id === null) !== entry.source_image_excluded
       || (entry.source_image_id !== null && images.get(String(entry.source_image_id))?.item_id !== entry.item_id)
-      || !validAttribution(entry) || version === 3 && !attributionOrigins.some(origin => origin === entry.origin)) fail();
+      || !validAttribution(entry) || version !== 2 && !attributionOrigins.some(origin => origin === entry.origin)) fail();
     if (entry.item_id !== historyItem) { historyItem = entry.item_id; nextPosition = 0; }
     if (entry.position !== nextPosition++) fail();
   }
@@ -318,6 +359,20 @@ export function assertMetadata(value: unknown): asserts value is SavedMetadata {
   for (const entry of t.suggestion_feedback) {
     if (!Array.isArray(entry.item_ids) || entry.item_ids.length < 1 || entry.item_ids.length > 12
       || !entry.item_ids.every(id => items.has(String(id)))) fail();
+  }
+  if (version === PROVENANCE_VERSION) {
+    const list = (value as Row).provenance;
+    if (!Array.isArray(list) || list.length < 1 || list.length > images.size) fail();
+    let previous = '';
+    for (const value of list as unknown[]) {
+      if (!isObject(value)) fail();
+      const entry = value as Row;
+      if (!sameKeys(entry, provenanceKeys) || !isUuid(entry.imageId) || entry.kind !== 'ai_edited'
+        || typeof entry.modelId !== 'string' || !modelPattern.test(entry.modelId)
+        || typeof entry.manifestId !== 'string' || !manifestPattern.test(entry.manifestId) || !isHash(entry.backupSha256)
+        || String(entry.imageId) <= previous || images.get(String(entry.imageId))?.main_sha256 !== entry.backupSha256) fail();
+      previous = String(entry.imageId);
+    }
   }
 }
 
@@ -385,7 +440,8 @@ export async function decryptPart(text: string, passphrase: string, schemaVersio
   try { part = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(plain)); } catch { return fail(); }
   if (!isObject(part)) return fail();
   const keys = Object.hasOwn(part, 'manifest') ? [...partKeys, 'manifest'] : partKeys;
-  const versionOk = schemaVersion === 'saved' ? part.schemaVersion === 2 || part.schemaVersion === 3 : part.schemaVersion === schemaVersion;
+  const versionOk = schemaVersion === 'saved' ? part.schemaVersion === 2 || part.schemaVersion === 3 || part.schemaVersion === 4
+    : part.schemaVersion === schemaVersion;
   if (!sameKeys(part, keys) || part.format !== 'stillroom-export' || !versionOk || !isUuid(part.exportId)
     || !isCount(part.partCount, 1, BACKUP_LIMITS.parts) || !isCount(part.partIndex, 0, part.partCount - 1) || !isHash(part.manifestSha256)
     || envelope.aad !== aadFor(part.exportId, part.partIndex, part.partCount) || !Array.isArray(part.files)) return fail();

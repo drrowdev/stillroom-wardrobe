@@ -531,6 +531,48 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
       requireEvidence(await provenanceRow(b, vb.p_image.id) === null);
       equal(await client.rpc(b, 'image_provenance_v1', {}), []);
 
+      mark('unverified-reservation-binding');
+      // Unverified reservation binding (DB level): enhanced bytes through reserve_analyzed_item_save with p_claim null
+      // and fixture output hashes, then the owner preflight and the privileged complete_analyzed_item_save. The evidence
+      // expires after the reservation was accepted and completion still attaches the snapshot; an expired tombstone is
+      // refused by this writer too, with no item created. The claim-bearing chain on real admitted H2 bytes (provider
+      // double analysis, the app's Save path, the served finalizer) is the edge gate's enhance-analysed-save stage.
+      const analysed = async (sha) => {
+        const value = saveWith(sh, sha);
+        value.p_claim = null;
+        const result = await sh.call('reserve_analyzed_item_save', value);
+        requireEvidence(result.ok && result.status === 200 && Array.isArray(result.data) && result.data.length === 1
+          && result.data[0].state === 'reserved' && /^[0-9a-f]{64}$/.test(result.data[0].fingerprint));
+        return { value, row: result.data[0] };
+      };
+      const completeAnalysed = async ({ value, row }, state = 'reserved') => {
+        const pre = await sh.call('analyzed_item_save_preflight', sh.finalizeArgs(value, row));
+        requireEvidence(pre.ok && pre.data?.state === state && pre.data.objects);
+        await sql(`select public.complete_analyzed_item_save(${literal(a.uid)},${literal(value.p_item.id)},
+          ${literal(value.p_image.id)},${literal(row.fingerprint)},${json(pre.data.objects)});`);
+        requireEvidence((await sh.read('item_images', value.p_image.id))[0].state === 'ready');
+      };
+      const analysedOutput = await enhanced(a);
+      const analysedSave = await analysed(analysedOutput.sha);
+      equal((await binding(a, analysedSave.value.p_image.id)).request_id, analysedOutput.id);
+      await backdate(a, analysedOutput.id, '25 hours');
+      await sh.upload(analysedSave.value);
+      await completeAnalysed(analysedSave);
+      equal(await provenanceRow(a, analysedSave.value.p_image.id), { ...recorded, image_id: analysedSave.value.p_image.id,
+        request_id: analysedOutput.id, input_sha256: analysedOutput.input, stored_sha256: analysedOutput.sha });
+      requireEvidence(await binding(a, analysedSave.value.p_image.id) === null);
+      equal((await ownProvenance(a, analysedSave.value.p_image.id)).stored_sha256, analysedOutput.sha);
+      // Idempotent: a repeated completion is a no-op and the label stays single.
+      await completeAnalysed(analysedSave, 'completed');
+      equal(Number(await scalar(`select count(*) from private.image_provenance where owner_id=${literal(a.uid)}
+        and image_id=${literal(analysedSave.value.p_image.id)};`)), 1);
+      const analysedStale = await enhanced(a);
+      await backdate(a, analysedStale.id, '25 hours');
+      const analysedRefused = saveWith(sh, analysedStale.sha);
+      analysedRefused.p_claim = null;
+      denied(await sh.call('reserve_analyzed_item_save', analysedRefused), 'Enhancement expired');
+      equal(await sh.read('items', analysedRefused.p_item.id), []);
+
       mark('restore-modes');
       // R3/Q6: each restored image carries one immutable mode. Legacy auto-labels only from A's own tombstone or
       // provenance on equal bytes; v4 labels only through the checked provenance restore with backup = stored; an
@@ -627,8 +669,24 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
       await sh.reserve(reuse);
       const copied = await binding(a, reuse.p_image.id);
       requireEvidence(copied.source_kind === 'copy' && copied.source_image_id === v2.p_image.id && copied.origin === 'recorded');
+      // DB-level provenance transfer across owners: A's entry as image_provenance_v1 reports it is restored by B through
+      // the v4 RPCs onto B's own byte-identical photo, as imported with backup = stored, and A's own row is unchanged.
+      // The client export -> verify -> cross-owner restore of real bytes is the P6d rehearsal's BG2b v4 round trip.
+      const exported = await ownProvenance(a, v2.p_image.id);
+      equal(exported, { image_id: v2.p_image.id, kind: 'ai_edited', origin: 'recorded', model_id: MODEL, manifest_id: MANIFEST,
+        stored_sha256: first.sha, backup_sha256: null });
+      const intoB = await restore(shB, b, exported.stored_sha256, 'v4');
+      const bEntry = { kind: exported.kind, model_id: exported.model_id, manifest_id: exported.manifest_id,
+        backup_sha256: exported.stored_sha256 };
+      const bArgs = { p_item_id: intoB.value.p_item.id, p_image_id: intoB.value.p_image.id, p_import_id: intoB.importId };
+      equal(await client.rpc(b, 'restore_image_provenance', { ...bArgs, p_entry: bEntry }), { state: 'created' });
+      equal(await ownProvenance(b, intoB.value.p_image.id), { image_id: intoB.value.p_image.id, kind: 'ai_edited',
+        origin: 'imported', model_id: MODEL, manifest_id: MANIFEST, stored_sha256: first.sha, backup_sha256: first.sha });
+      equal((await client.rpc(b, 'image_provenance_v1', {})).length, 1);
+      equal(await ownProvenance(a, v2.p_image.id), exported);
       // Status never names another owner and the provenance read is owner-only.
-      requireEvidence((await client.rpc(b, 'image_provenance_v1', {})).length === 0);
+      const aImages = new Set((await client.rpc(a, 'image_provenance_v1', {})).map((row) => row.image_id));
+      requireEvidence((await client.rpc(b, 'image_provenance_v1', {})).every((row) => !aImages.has(row.image_id)));
       requireEvidence(!JSON.stringify(await status(b)).includes(a.uid));
     } finally {
       await sh.cleanup();

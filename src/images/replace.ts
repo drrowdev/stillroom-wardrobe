@@ -1,19 +1,20 @@
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import type { OwnerScope } from '../auth/session';
 import type { AppClient } from '../data/client';
-import { AnalyzedSaveRefusedError, AppError, throwIfAborted } from '../data/errors';
+import { AnalyzedSaveRefusedError, AppError, EnhancementExpiredError, throwIfAborted } from '../data/errors';
 import { matchImageChangeReceipt, parseImageChangeReceipt, parseRecoveryVersions,
   type ImageChangeAttempt, type ImageChangeReceipt, type RecoveryVersion } from '../domain/image-replacement';
 import { isRecord, isUuid } from '../domain/wardrobe';
 import { assertSanitizedJpeg, readJpegHeader } from './jpeg';
 import { abortable, type PreparedPhoto } from './process-jpeg';
-import { ensureFile, type SaveStage } from './upload';
+import { ensureFile, type RestoreMode, type SaveStage } from './upload';
 
 function checked(error: unknown): void {
   if (error === null) return;
   if (isRecord(error) && error.code === '22023' && error.details === null && error.hint === null) {
     if (error.message === 'Request conflict') throw new AppError('error.conflict');
     if (error.message === 'Upload incomplete') throw new AppError('error.uploadIncomplete');
+    if (error.message === 'Enhancement expired') throw new EnhancementExpiredError();
   }
   throw new AppError('error.unavailable');
 }
@@ -146,8 +147,13 @@ export class ImageChangeClient {
     }
     throw new AppError('error.unavailable');
   }
+  /** A restore's later photo, through the restore-only writer that records the import and label mode. */
+  saveRestored(attempt: ImageChangeAttempt, importId: string, mode: RestoreMode, signal?: AbortSignal): Promise<ImageChangeReceipt> {
+    return this.save(attempt, () => undefined, () => undefined, signal, { importId, mode });
+  }
   save(attempt: ImageChangeAttempt, onStage: (stage: SaveStage) => void,
-    onReceipt: (receipt: ImageChangeReceipt) => void, signal?: AbortSignal): Promise<ImageChangeReceipt> {
+    onReceipt: (receipt: ImageChangeReceipt) => void, signal?: AbortSignal,
+    restored?: { importId: string; mode: RestoreMode }): Promise<ImageChangeReceipt> {
     return this.bounded(signal, async scope => {
       if (attempt.ownerId !== scope.ownerId || attempt.epoch !== scope.epoch) throw new AppError('error.conflict');
       const { intent, photo } = attempt;
@@ -160,7 +166,9 @@ export class ImageChangeClient {
         let value: unknown;
         if (intent.sourceImageId) value = await this.finalize(scope, attempt, 'accept-recovery');
         else {
-          const result = await this.client.rpc('reserve_image_change', { p_intent: intent }).abortSignal(scope.signal);
+          const result = await (restored
+            ? this.client.rpc('reserve_restored_image_change', { p_intent: intent, p_import_id: restored.importId, p_mode: restored.mode })
+            : this.client.rpc('reserve_image_change', { p_intent: intent })).abortSignal(scope.signal);
           throwIfAborted(scope.signal); checked(result.error); value = result.data;
         }
         if (intent.claim !== null && isRecord(value) && Object.keys(value).length === 4 && value.state === 'analysis_unavailable'

@@ -74,7 +74,8 @@ function languageInitializationOnly(label: string, actual: Snapshot, expected: S
 }
 // Status and preflight RPCs that only read. ai_status and ai_analysis_status are deliberately absent: both can expire
 // and close old AI requests (private.ai_close). stylist_status is absent too: it expires old stylist requests
-// (private.stylist_expire), so it is locked with ai_status below.
+// (private.stylist_expire), and enhance_status expires old enhancement requests (private.enhance_expire), so both are
+// locked with ai_status below.
 const READ_ONLY_RPCS = new Set(['analyzed_item_save_preflight', 'deletion_status', 'image_change_preflight',
   'image_change_requests', 'image_change_status', 'image_recovery_preflight', 'image_recovery_versions', 'item_attribution_history',
   'item_attribution_history_v2', 'attribution_digest',
@@ -152,10 +153,10 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
   const storageWrites = (from: number) => requests.slice(from).filter(({ method, url }) =>
     method !== 'GET' && method !== 'HEAD' && new URL(url).pathname.startsWith('/storage/v1/object/'));
   const reservations = (from: number) => requests.slice(from).filter(({ url }) => /\/rest\/v1\/rpc\/reserve_/.test(new URL(url).pathname));
-  // ai_status and stylist_status expire and close the owner's old AI requests (private state the snapshots can't see).
+  // ai_status, stylist_status and enhance_status expire and close the owner's old AI requests (private state the snapshots can't see).
   // The app's Settings initialization may call them; they must finish before the restore baseline, and any later call is
   // refused and fails.
-  const STATUS_RPC_PATHS = new Set(['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status']);
+  const STATUS_RPC_PATHS = new Set(['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status']);
   const isAiStatus = (request: import('@playwright/test').Request) =>
     request.method() === 'POST' && STATUS_RPC_PATHS.has(new URL(request.url()).pathname);
   const aiInFlight = new Set<import('@playwright/test').Request>();
@@ -340,7 +341,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     aiLocked = true;
     // Negative control: a query-bearing POST to each status RPC from the page must be refused by the route and counted by both.
     check(lateAiStatus === 0 && postLockAiStatus === 0);
-    for (const name of ['ai_status', 'stylist_status']) {
+    for (const name of ['ai_status', 'stylist_status', 'enhance_status']) {
       aiProbes++;
       const probe = await page.evaluate(async url => {
         try { await fetch(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' }); return 'reached'; } catch { return 'refused'; }
@@ -349,7 +350,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     }
     await expect.poll(() => [lateAiStatus, postLockAiStatus], slow).toEqual([aiProbes, aiProbes]);
     // Every write attempt while signing in and opening Settings, even one later undone: only Auth, the profile's
-    // first-language save, the initialization ai_status and stylist_status, and read-only status RPCs are allowed.
+    // first-language save, the initialization ai_status, stylist_status and enhance_status, and read-only status RPCs are allowed.
     const signInAttempts = requests.slice(signInFrom).filter(({ method }) => !['GET', 'HEAD', 'OPTIONS'].includes(method))
       .map(({ method, url }) => ({ method, path: new URL(url).pathname }))
       .filter(({ method, path }) => !(path.startsWith('/auth/v1/') || method === 'PATCH' && path === '/rest/v1/profiles'
@@ -380,7 +381,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
       if (blocked > 0) { blocked--; await route.abort('failed'); return; }
       await route.fallback();
     };
-    await page.route('**/rest/v1/rpc/reserve_image_change', blockReservation);
+    await page.route('**/rest/v1/rpc/reserve_restored_image_change', blockReservation);
     await button(page, 'restore.start').click();
     await expect(card.getByRole('alert')).toHaveText(text('restore.stopped'), slow);
     // P and everything that refers to it (outfit, rule, vote, worn day) wait for the next run.
@@ -394,7 +395,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     for (const table of ['outfits', 'outfit_items', 'wear_events', 'wear_event_items', 'combination_rules', 'suggestion_feedback'] as const) {
       check(canonical(rowsOf(partial, table)) === canonical(rowsOf(aBefore, table)));
     }
-    await page.unroute('**/rest/v1/rpc/reserve_image_change', blockReservation);
+    await page.unroute('**/rest/v1/rpc/reserve_restored_image_change', blockReservation);
 
     // ---- The same run continued. ----
     stage = 'continued-run';
@@ -515,12 +516,12 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     tripped('Refused function calls', refusedFunctions);
     tripped('Function calls other than finalize-image-change',
       paths(functionCalls(0)).filter(path => path !== '/functions/v1/finalize-image-change'));
-    // ai_status and stylist_status ran only during the Settings initialization, before the baseline (see aiLocked); any
+    // ai_status, stylist_status and enhance_status ran only during the Settings initialization, before the baseline (see aiLocked); any
     // later call was refused.
     if (lateAiStatus !== aiProbes || postLockAiStatus !== aiProbes) {
       throw new Error(`A status RPC called after the restore baseline: ${postLockAiStatus - aiProbes} seen, ${lateAiStatus - aiProbes} refused beyond the probe.`);
     }
-    tripped('Save or AI RPCs', paths(requests).filter(path => /\/rpc\/(reserve_item_save|reserve_analyzed_item_save|ai_|stylist_)/.test(path)
+    tripped('Save or AI RPCs', paths(requests).filter(path => /\/rpc\/(reserve_item_save|reserve_analyzed_item_save|ai_|stylist_|enhance_)/.test(path)
       && !STATUS_RPC_PATHS.has(path)));
     unchanged('B', await snapshot(owner), bBefore);
   } catch (problem) {

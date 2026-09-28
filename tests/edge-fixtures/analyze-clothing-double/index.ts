@@ -29,7 +29,13 @@ const config = {
 };
 const analyze = createHandler(config, transport);
 const stylist = createStylistHandler(config, transport);
-const enhance = createEnhanceHandler(config, transport);
+// W1: an explicit registrar, never inferred from the runtime. It keeps each claimed work promise referenced until it
+// settles, like a background task.
+const background = new Set<Promise<unknown>>();
+const enhance = createEnhanceHandler(config, (work) => {
+  background.add(work);
+  void work.finally(() => background.delete(work));
+}, transport);
 
 const STYLIST_PATHS = ['/stylist-chat', '/functions/v1/stylist-chat'];
 const ENHANCE_PATHS = ['/enhance-photo', '/functions/v1/enhance-photo'];

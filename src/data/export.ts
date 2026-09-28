@@ -29,8 +29,9 @@ async function attribution(client: AppClient, itemId: string, signal: AbortSigna
   return data;
 }
 
-async function digest(client: AppClient, signal: AbortSignal): Promise<unknown> {
-  const { data, error } = await client.rpc('attribution_digest').abortSignal(signal);
+async function digest(client: AppClient, signal: AbortSignal,
+  name: 'attribution_digest' | 'image_provenance_v1' | 'image_provenance_digest_v1' = 'attribution_digest'): Promise<unknown> {
+  const { data, error } = await client.rpc(name).abortSignal(signal);
   throwIfAborted(signal);
   requireSuccess(error);
   return data;
@@ -45,6 +46,8 @@ export async function prepareExport(client: AppClient, scope: OwnerScope, signal
       manifest: (id, abort) => manifest(client, id, abort),
       attribution: (id, abort) => attribution(client, id, abort),
       digest: abort => digest(client, abort),
+      provenance: abort => digest(client, abort, 'image_provenance_v1'),
+      provenanceDigest: abort => digest(client, abort, 'image_provenance_digest_v1'),
     }, scope.ownerId, exportId, lifetime);
   } catch (failure) { return problem(failure); }
 }

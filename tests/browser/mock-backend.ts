@@ -13,6 +13,7 @@ import type { ImageChangeReceipt } from '../../src/domain/image-replacement';
 import type { DeletionOperation } from '../../src/domain/item-lifecycle';
 import { wardrobeTargetDeleteRoute } from '../../src/data/storage-delete';
 import { STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_REVIEW_EXPIRES } from '../../src/domain/stylist';
+import { ENHANCE_MANIFEST, ENHANCE_MODEL, ENHANCE_NOTICE_REVISION, ENHANCE_REVIEW_EXPIRES } from '../../src/domain/enhancement';
 
 export const owners = {
   a: '10000000-0000-4000-8000-000000000001',
@@ -497,6 +498,8 @@ export type MockOptions = {
   aiResults?: Map<string, import('../../src/domain/ai-analysis').AiResult>;
   analysis?: AnalysisHandler;
   observeRawAnalysis?: boolean;
+  /** image_provenance_v1 rows (owner-filtered by image). */
+  provenance?: JsonRow[];
 };
 export function recoveryHash(owner = owners.a, seconds = 3600): string {
   const expires = Math.floor(Date.now() / 1000) + seconds;
@@ -524,6 +527,32 @@ function stylistStatus(setup: StylistSetup, consent: number | null) {
   return { code, period: new Date(now).toISOString().slice(0, 7), serverTimeMs: now,
     consent: { enabled: consent !== null, noticeRevision: consent, consentedAt: consent === null ? null : '2026-10-01T00:00:00Z' },
     policy, usage: { stylistMicro: setup.stylistMicro, totalMicro: setup.totalMicro, stylistLastHour: 0, warning } };
+}
+
+// BG2b-2 photo enhancement: per-owner setup (configured but not activated unless a spec says otherwise), consent,
+// scripted status/consent faults and scripted enhance-photo replies. `serverOffsetMs` skews the fixture server clock.
+export type EnhanceSetup = { configured: boolean; activated: boolean; providerAvailable: boolean; noticeRevision: number; manifestId: string;
+  modelId: string; maxRequestMicro: string; enhanceAllowanceMicro: string; totalAllowanceMicro: string; enhanceMicro: string; totalMicro: string;
+  serverOffsetMs: number };
+export type EnhanceReplyValue = { status: number; body?: unknown; image?: Buffer; usableUntilMs?: number; sha256?: string; hold?: Promise<void> };
+export type EnhanceReply = EnhanceReplyValue
+  | ((bytes: Buffer, owner: string, requestId: string) => EnhanceReplyValue | Promise<EnhanceReplyValue>);
+const enhanceDefaults: EnhanceSetup = { configured: true, activated: false, providerAvailable: true, noticeRevision: ENHANCE_NOTICE_REVISION,
+  manifestId: ENHANCE_MANIFEST, modelId: ENHANCE_MODEL, maxRequestMicro: '300000', enhanceAllowanceMicro: '3000000',
+  totalAllowanceMicro: '20000000', enhanceMicro: '0', totalMicro: '0', serverOffsetMs: 0 };
+// The enhance_status reply as the BG2b-1 function builds it, kept inside the reviewed period.
+export function enhanceServerNow(setup: Pick<EnhanceSetup, 'serverOffsetMs'>) {
+  return Math.min(Date.now(), ENHANCE_REVIEW_EXPIRES - 86_400_000) + setup.serverOffsetMs;
+}
+function enhanceStatus(setup: EnhanceSetup, consent: number | null) {
+  const code = !setup.configured ? 'UNCONFIGURED' : !setup.activated ? 'INACTIVE' : consent !== setup.noticeRevision ? 'CONSENT_REQUIRED' : 'OK';
+  const policy = setup.configured ? { activated: setup.activated, noticeRevision: setup.noticeRevision, manifestId: setup.manifestId,
+    modelId: setup.modelId, maxRequestMicro: setup.maxRequestMicro, enhanceAllowanceMicro: setup.enhanceAllowanceMicro,
+    totalAllowanceMicro: setup.totalAllowanceMicro, maxRequestsPerHour: 10, providerAvailable: setup.providerAvailable } : null;
+  const now = enhanceServerNow(setup);
+  return { code, period: new Date(now).toISOString().slice(0, 7), serverTimeMs: now,
+    consent: { enabled: consent !== null, noticeRevision: consent, consentedAt: consent === null ? null : '2026-10-01T00:00:00Z' },
+    policy, usage: { enhanceMicro: setup.enhanceMicro, totalMicro: setup.totalMicro, enhanceLastHour: 0, warning: false } };
 }
 
 export async function mockBackend(page: Page, options: MockOptions = {}) {
@@ -584,6 +613,20 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     chats: [] as { owner: string; body: unknown }[],
     statusReads: 0,
   };
+  const provenanceRows: JsonRow[] = options.provenance ?? [];
+  const enhanceControl = {
+    missing: false,
+    setup: {} as Record<string, Partial<EnhanceSetup>>,
+    consent: {} as Record<string, number | null>,
+    statusFaults: [] as ('fail' | 'abort')[],
+    consentFaults: [] as ('fail' | 'lost')[],
+    replies: [] as EnhanceReply[],
+    requests: [] as { owner: string; requestId: string; sha256: string; bytes: number }[],
+    statusReads: 0,
+    consentWrites: [] as { owner: string; body: unknown }[],
+    /** Delivered outputs, as the BG2b-1 admission trigger sees them: a new photo with an expired output's hash is refused. */
+    outputs: [] as { owner: string; sha256: string; usableUntilMs: number }[],
+  };
   // Backup fixture: attribution histories by item, a hook that runs before each attribution read, and manifest reads.
   const exportControl: { attributions: Map<string, unknown[]>; beforeAttribution: (() => void) | null; manifests: number } = {
     attributions: new Map(), beforeAttribution: null, manifests: 0 };
@@ -614,7 +657,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   // `attributionImports` holds tag history a restore added, by item: kept apart from recorded history, as on the server.
   // `attributionReplies` are answers restore_item_attribution gives next, in order, before it looks at anything.
   const restoreControl = { reservations: 0, attributionImports: new Map<string, { importId: string; entries: JsonRow[] }>(),
-    attributionReplies: [] as ('busy' | 'kept')[] };
+    attributionReplies: [] as ('busy' | 'kept')[], provenance: [] as string[] };
   const attributionOf = (itemId: string) => [
     ...(restoreControl.attributionImports.get(itemId)?.entries ?? []).map(entry => { const copy: JsonRow = { origin: 'imported', ...entry }; delete copy.position; return copy; }),
     ...(exportControl.attributions.get(itemId) ?? []).map(entry => ({ origin: 'recorded', ...(entry as JsonRow) })),
@@ -790,6 +833,52 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       }
       await json(stylistStatus(setup, stylistControl.consent[owner] ?? null)); return;
     }
+    if (url.pathname === '/rest/v1/rpc/enhance_status' || url.pathname === '/rest/v1/rpc/enhance_set_consent') {
+      if (enhanceControl.missing) { await json({ code: 'PGRST202', details: null, hint: null, message: 'Could not find the function' }, 404); return; }
+      const setup = { ...enhanceDefaults, ...enhanceControl.setup[owner] };
+      if (url.pathname.endsWith('enhance_set_consent')) {
+        const body = request.postDataJSON() as { p_enabled?: unknown; p_notice_revision?: unknown };
+        enhanceControl.consentWrites.push({ owner, body });
+        const fault = enhanceControl.consentFaults.shift();
+        if (fault === 'fail') { await json({ message: 'Service unavailable' }, 503); return; }
+        if (typeof body.p_enabled !== 'boolean') { await json({ code: 'INVALID_INPUT' }); return; }
+        if (!setup.configured) { await json({ code: 'UNCONFIGURED' }); return; }
+        if (body.p_enabled && (!setup.activated || body.p_notice_revision !== setup.noticeRevision)) { await json({ code: 'CONFIG_CHANGED' }); return; }
+        enhanceControl.consent[owner] = body.p_enabled ? setup.noticeRevision : null;
+        if (fault === 'lost') { await route.abort('failed'); return; }
+      } else {
+        enhanceControl.statusReads++;
+        const fault = enhanceControl.statusFaults.shift();
+        if (fault === 'fail') { await json({ message: 'Service unavailable' }, 503); return; }
+        if (fault === 'abort') { await route.abort('failed'); return; }
+      }
+      await json(enhanceStatus(setup, enhanceControl.consent[owner] ?? null)); return;
+    }
+    if (url.pathname === '/functions/v1/enhance-photo') {
+      const bytes = request.postDataBuffer() ?? Buffer.alloc(0);
+      const requestId = request.headers()['x-stillroom-request-id'] ?? '';
+      if (request.headers()['x-stillroom-probe-token'] !== undefined || request.headers()['x-stillroom-probe-authorisation'] !== undefined) {
+        throw new Error('The app sent a probe header.');
+      }
+      enhanceControl.requests.push({ owner, requestId, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length });
+      const next = enhanceControl.replies.shift() ?? { status: 502, body: { code: 'FAILED' } };
+      const reply = typeof next === 'function' ? await next(bytes, owner, requestId) : next;
+      if (reply.hold) await reply.hold;
+      try {
+        if (reply.image) {
+          const setup = { ...enhanceDefaults, ...enhanceControl.setup[owner] };
+          const output = { owner, sha256: createHash('sha256').update(reply.image).digest('hex'),
+            usableUntilMs: reply.usableUntilMs ?? enhanceServerNow(setup) + 86_400_000 };
+          if (reply.status === 200) enhanceControl.outputs.push(output);
+          await route.fulfill({ status: reply.status, body: reply.image, headers: { 'content-type': 'image/jpeg',
+            'content-length': String(reply.image.length), 'cache-control': 'no-store',
+            'x-stillroom-enhancement-sha256': reply.sha256 ?? output.sha256,
+            'x-stillroom-enhancement-usable-until': String(output.usableUntilMs),
+            'access-control-expose-headers': 'x-stillroom-enhancement-sha256, x-stillroom-enhancement-usable-until' } });
+        } else await json(reply.body, reply.status);
+      } catch { /* The page may have gone away while the reply was held. */ }
+      return;
+    }
     if (url.pathname === '/functions/v1/stylist-chat') {
       const body: unknown = request.postDataJSON();
       stylistControl.chats.push({ owner, body });
@@ -830,13 +919,17 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       }
       await json(found?.receipt ?? null); return;
     }
-    if (url.pathname === '/rest/v1/rpc/reserve_image_change' || url.pathname === '/functions/v1/finalize-image-change') {
+    if (url.pathname === '/rest/v1/rpc/reserve_image_change' || url.pathname === '/rest/v1/rpc/reserve_restored_image_change'
+      || url.pathname === '/functions/v1/finalize-image-change') {
       const finalizer = url.pathname.endsWith('/finalize-image-change');
+      const restoredChange = url.pathname.endsWith('/reserve_restored_image_change');
       const body: unknown = request.postDataJSON();
       const fail = (message: 'Invalid input' | 'Request conflict' | 'Upload incomplete') =>
         json(finalizer ? { code: message === 'Request conflict' ? 'CONFLICT' : message === 'Upload incomplete' ? 'UPLOAD_INCOMPLETE' : 'INVALID_INPUT' }
           : { code: '22023', message, details: null, hint: null }, finalizer ? 409 : 400);
-      if (method !== 'POST' || !isRecord(body) || !sameValue(Object.keys(body).sort(), finalizer ? ['action', 'intent'] : ['p_intent'])) { await fail('Invalid input'); return; }
+      if (method !== 'POST' || !isRecord(body) || !sameValue(Object.keys(body).sort(), finalizer ? ['action', 'intent']
+        : restoredChange ? ['p_import_id', 'p_intent', 'p_mode'] : ['p_intent'])
+        || restoredChange && (!isUuid(body.p_import_id) || !['legacy', 'v4', 'unlabelled'].includes(String(body.p_mode)))) { await fail('Invalid input'); return; }
       const intent = finalizer ? body.intent : body.p_intent;
       const action = finalizer ? body.action : 'reserve';
       if (!isRecord(intent) || !sameValue(Object.keys(intent).sort(),
@@ -933,15 +1026,17 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const save = saves.find(value => value.owner === owner && value.itemId === body.p_item_id);
       await json(save ? { itemId: save.itemId, imageId: save.imageId, state: save.state } : null); return;
     }
-    if (['reserve_item_save', 'reserve_analyzed_item_save', 'reserve_restored_item_save'].some(name => url.pathname === `/rest/v1/rpc/${name}`)) {
+    if (['reserve_item_save', 'reserve_analyzed_item_save', 'reserve_restored_item_save', 'reserve_restored_item_save_v2'].some(name => url.pathname === `/rest/v1/rpc/${name}`)) {
       const analyzed = url.pathname.endsWith('/reserve_analyzed_item_save');
-      const restored = url.pathname.endsWith('/reserve_restored_item_save');
+      const restoredV2 = url.pathname.endsWith('/reserve_restored_item_save_v2');
+      const restored = restoredV2 || url.pathname.endsWith('/reserve_restored_item_save');
       if (restored) restoreControl.reservations++;
       const body: unknown = request.postDataJSON();
       const invalid = () => json({ code: '22023', message: 'Invalid input', details: null, hint: null }, 400);
       const conflict = () => json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400);
-      if (method !== 'POST' || !isRecord(body) || Object.keys(body).length !== (analyzed ? 3 : 2)
-        || !isRecord(body.p_item) || !isRecord(body.p_image)) { await invalid(); return; }
+      if (method !== 'POST' || !isRecord(body) || Object.keys(body).length !== (analyzed ? 3 : restoredV2 ? 4 : 2)
+        || !isRecord(body.p_item) || !isRecord(body.p_image)
+        || restoredV2 && (!isUuid(body.p_import_id) || !['legacy', 'v4', 'unlabelled'].includes(String(body.p_mode)))) { await invalid(); return; }
       const item = body.p_item, image = body.p_image;
       if (!sameValue(Object.keys(item).sort(), [...garmentFields, 'id', 'field_provenance'].sort())
         || !sameValue(Object.keys(image).sort(), [...imageKeys].sort()) || !isUuid(item.id) || !isUuid(image.id)) {
@@ -1006,6 +1101,11 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         await json([current]); return;
       }
       if (items.some((row) => row.id === item.id) || images.some((row) => row.id === image.id)) { await conflict(); return; }
+      // BG2b-1 admission: only a NEW image row is checked; an existing reservation replays above without it.
+      const output = enhanceControl.outputs.find((row) => row.owner === owner && row.sha256 === image.main_sha256);
+      if (!restored && output && output.usableUntilMs <= enhanceServerNow({ ...enhanceDefaults, ...enhanceControl.setup[owner] })) {
+        await json({ code: '22023', message: 'Enhancement expired', details: null, hint: null }, 400); return;
+      }
       const now = new Date().toISOString(), prefix = `${owner}/${item.id}/${image.id}`;
       items.push({ ...item, owner_id: owner, version: 1, deleted_at: null, created_at: now, updated_at: now });
       images.push({ ...image, owner_id: owner, item_id: item.id, description_version: 1, state: 'pending', retired_at: null,
@@ -1626,6 +1726,20 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (method !== 'POST' || !item) { await json({ code: '42501', message: 'Not available', details: null, hint: null }, 403); return; }
       await json(attributionOf(String(item.id))); return;
     }
+    if (url.pathname === '/rest/v1/rpc/image_provenance_v1' || url.pathname === '/rest/v1/rpc/image_provenance_digest_v1') {
+      if (method !== 'POST' || !owner) { await json({ code: '42501', message: 'Not available', details: null, hint: null }, 403); return; }
+      const rows = provenanceRows.filter(row => images.some(image => image.owner_id === owner && image.id === row.image_id));
+      await json(url.pathname.endsWith('_digest_v1') ? createHash('sha256').update(JSON.stringify(rows)).digest('hex') : rows); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/restore_image_provenance') {
+      const body = request.postDataJSON() as JsonRow;
+      const image = images.find(row => row.owner_id === owner && row.id === body.p_image_id && row.item_id === body.p_item_id);
+      if (method !== 'POST' || !image || !['ready', 'retired'].includes(String(image.state))) {
+        await json({ code: '22023', message: 'Request conflict', details: null, hint: null }, 400); return;
+      }
+      restoreControl.provenance.push(String(image.id));
+      await json({ state: 'created' }); return;
+    }
     if (url.pathname === '/rest/v1/rpc/attribution_digest') {
       if (method !== 'POST' || !owner) { await json({ code: '42501', message: 'Not available', details: null, hint: null }, 403); return; }
       const mine = items.filter(row => row.owner_id === owner).map(row => String(row.id)).sort();
@@ -1715,7 +1829,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { stylistControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, holdFeedbackReads, outfitControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { provenance: provenanceRows, stylistControl, enhanceControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, holdFeedbackReads, outfitControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),
