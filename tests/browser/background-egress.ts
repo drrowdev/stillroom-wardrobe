@@ -28,10 +28,23 @@ const appAsset = (pathname: string, search: string) =>
 export type Egress = { url: string; origin: string; pathname: string; search: string; method: string; body: boolean; cookie: boolean; authorization: boolean };
 export type Traffic = { segmentation: Egress[]; app: Egress[]; tagging: Egress[]; backend: Egress[]; unexpected: Egress[] };
 
-async function describe(request: Request): Promise<Egress | null> {
+// Raw request headers (which include Cookie) are only needed for the segmentation checks. Chromium reports them only
+// once a response arrives, so awaiting them for every request made read() wait on unrelated requests that never
+// complete while the page is open, such as the browser's own service-worker update check: in CI the test then sat
+// until its limit (runs 36360335271 and 36360189457). Other requests use their provisional headers, and a
+// segmentation request whose raw headers don't arrive in time fails with its path instead of hanging.
+const RAW_HEADERS_MS = 30_000;
+async function describe(request: Request, appOrigin: string): Promise<Egress | null> {
   const url = new URL(request.url());
   if (url.protocol === 'blob:' || url.protocol === 'data:') return null;
-  const headers = await request.allHeaders().catch(() => request.headers());
+  const segmentation = url.origin === appOrigin && inventory.has(url.pathname) && url.search === '';
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const headers = segmentation
+    ? await Promise.race([
+      request.allHeaders(),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`No raw request headers for ${url.pathname} within ${RAW_HEADERS_MS} ms`)), RAW_HEADERS_MS); }),
+    ]).finally(() => clearTimeout(timer))
+    : request.headers();
   return {
     url: url.href, origin: url.origin, pathname: url.pathname, search: url.search, method: request.method(), body: request.postDataBuffer() !== null,
     cookie: (headers.cookie ?? '').includes(PROBE_COOKIE.name), authorization: 'authorization' in headers,
@@ -66,7 +79,11 @@ export function segmentationProblems(traffic: Traffic): string[] {
 export async function observeEgress(context: BrowserContext, appOrigin: string) {
   await context.addCookies([{ ...PROBE_COOKIE, domain: new URL(appOrigin).hostname, path: '/models/' }]);
   const pending: Array<Promise<Egress | null>> = [];
-  context.on('request', (request) => { pending.push(describe(request)); });
+  context.on('request', (request) => {
+    const entry = describe(request, appOrigin);
+    entry.catch(() => undefined);
+    pending.push(entry);
+  });
   return {
     async read(): Promise<Traffic> {
       const entries = (await Promise.all(pending)).filter((entry): entry is Egress => entry !== null);
