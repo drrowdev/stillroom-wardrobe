@@ -192,15 +192,35 @@ test.describe('try-on is offered only when it is on', () => {
     await expect(page.locator('.tryon-page input[type=file]')).toHaveCount(0);
     expect(api.tryonControl.requests).toHaveLength(0);
   });
-  test('Settings: no Turn on while the notice is a draft; Turn off always works, also while paused', async ({ page }) => {
+  test('Settings: Turn on consents to notice revision 1 only when the server policy is on and matches', async ({ page }) => {
     engineOnly();
     const { api } = await start(page, { consent: false, route: 'settings' });
     await expect(page.locator('#tryon-heading')).toHaveText(text('tryonC.disabled'));
-    await expect(page.locator('#tryon-turn-on')).toHaveCount(0);
     const card = page.locator('section[aria-labelledby="tryon-heading"]');
     await card.getByText(text('aiC.details'), { exact: true }).click();
-    await expect(card).toContainText(text('tryonC.noticePhoto'));
+    await expect(card).toContainText(text('tryonC.noticeSent'));
+    await expect(card).toContainText(text('tryonC.noticeResult'));
     await axe(page);
+    await page.locator('#tryon-turn-on').click();
+    await expect(page.locator('#tryon-heading')).toHaveText(text('tryonC.enabled'));
+    expect(api.tryonControl.consentWrites.map((entry) => entry.body)).toEqual([{ p_enabled: true, p_notice_revision: 1 }]);
+    await expect(page.locator('#tryon-turn-on')).toHaveCount(0);
+    for (const setup of [{ activated: false }, { activated: true, noticeRevision: 2 }]) {
+      api.tryonControl.consent[owners.a] = null;
+      api.tryonControl.setup[owners.a] = setup;
+      const reads = api.tryonControl.statusReads;
+      await page.reload();
+      await expect.poll(() => api.tryonControl.statusReads).toBeGreaterThan(reads);
+      // Without a policy this app has the notice for, the card stays hidden: no consent can be given.
+      await expect(page.locator('#tryon-heading')).toHaveCount(0);
+      await expect(page.locator('#tryon-turn-on')).toHaveCount(0);
+    }
+    expect(api.tryonControl.consentWrites).toHaveLength(1);
+  });
+  test('Settings: Turn off always works, also while paused', async ({ page }) => {
+    engineOnly();
+    const { api } = await start(page, { consent: false, route: 'settings' });
+    await expect(page.locator('#tryon-heading')).toHaveText(text('tryonC.disabled'));
     api.tryonControl.consent[owners.a] = 1;
     api.tryonControl.setup[owners.a] = { activated: true, providerAvailable: false };
     await page.reload();
@@ -208,7 +228,8 @@ test.describe('try-on is offered only when it is on', () => {
     await page.locator('#tryon-turn-off').click();
     await expect(page.locator('#tryon-heading')).toHaveText(text('tryonC.disabled'));
     expect(api.tryonControl.consentWrites.map((entry) => entry.body)).toEqual([{ p_enabled: false, p_notice_revision: null }]);
-    await expect(page.locator('#tryon-turn-on')).toHaveCount(0);
+    // Paused is still an activated, matching policy, so it can be turned on again, as for photo clean-up.
+    await expect(page.locator('#tryon-turn-on')).toBeVisible();
   });
 });
 
@@ -519,6 +540,7 @@ test.describe('bounded VTO-2 visual evidence', () => {
         await expect(page.locator('#tryon-heading')).toHaveText(text('tryonC.disabled', language));
         await card.getByText(text('aiC.details', language), { exact: true }).click();
         await expect(card).toContainText(text('tryonC.noticeCharges', language));
+        await expect(page.locator('#tryon-turn-on')).toBeVisible();
         await page.locator('#tryon-heading').scrollIntoViewIfNeeded();
       } else {
         const { api } = await start(page, { language });

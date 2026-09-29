@@ -2,7 +2,7 @@ import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { usdCents } from '../../domain/ai-presentation';
 import type { Language, MessageKey, Translate } from '../../i18n';
 import '../../i18n/tryon';
-import { readTryOnStatus, TRYON_BACKUP_DAYS, TRYON_NOTICE_KEYS, tryOnViewOf, writeTryOnConsent, type TryOnStore } from './tryon-store';
+import { readTryOnStatus, TRYON_NOTICE_KEYS, tryOnViewOf, writeTryOnConsent, type TryOnStore } from './tryon-store';
 
 type Props = { store: TryOnStore | null; busy: boolean; online: boolean; language: Language; t: Translate };
 
@@ -44,7 +44,6 @@ function Card({ store, busy, online, language, t }: Props & { store: TryOnStore 
     : view.kind === 'paused' ? 'tryonC.paused' : 'tryonC.settings';
   const details = view.kind === 'off' || view.kind === 'renew' || view.kind === 'on' || view.kind === 'paused';
   const change = (enabled: boolean, button: HTMLElement) => { pressed.current = button; void writeTryOnConsent(store, enabled); };
-  const backupDays = TRYON_BACKUP_DAYS === null ? '—' : String(TRYON_BACKUP_DAYS);
   return <section className="settings-card ai-card" aria-labelledby="tryon-heading" aria-busy={state.writing}>
     <div role="status" className="ai-state">
       <h2 id="tryon-heading" ref={heading} tabIndex={-1}>{t(title)}</h2>
@@ -58,7 +57,7 @@ function Card({ store, busy, online, language, t }: Props & { store: TryOnStore 
     {(view.kind === 'off' || view.kind === 'renew') && <p>{t('tryonC.offSummary')}</p>}
     {details && <details className="ai-details">
       <summary>{t('aiC.details')}</summary>
-      <div className="ai-notice fine">{TRYON_NOTICE_KEYS.map((key) => <p key={key}>{t(key, { backupDays })}</p>)}</div>
+      <div className="ai-notice fine">{TRYON_NOTICE_KEYS.map((key) => <p key={key}>{t(key)}</p>)}</div>
     </details>}
     {(view.turnOn || view.turnOff || view.kind === 'loadFailed' || view.kind === 'unresolved') && <div className="settings-actions">
       {view.turnOn && <button id="tryon-turn-on" type="button" className="button button-primary" disabled={disabled}
