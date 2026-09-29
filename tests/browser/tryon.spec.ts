@@ -199,7 +199,7 @@ test.describe('try-on is offered only when it is on', () => {
     await expect(page.locator('#tryon-turn-on')).toHaveCount(0);
     const card = page.locator('section[aria-labelledby="tryon-heading"]');
     await card.getByText(text('aiC.details'), { exact: true }).click();
-    await expect(card).toContainText(text('tryonC.noticePhoto'));
+    await expect(card).toContainText(text('tryonC.noticeSent'));
     await axe(page);
     api.tryonControl.consent[owners.a] = 1;
     api.tryonControl.setup[owners.a] = { activated: true, providerAvailable: false };

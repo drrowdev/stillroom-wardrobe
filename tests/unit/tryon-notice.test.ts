@@ -21,34 +21,35 @@ describe('try-on notice (draft, revision 1)', () => {
     expect(TRYON_NOTICE_REVISION).toBe(1);
     for (const key of TRYON_NOTICE_KEYS) for (const language of languages) expect(text(key)[language].trim(), `${key} ${language}`).not.toBe('');
   });
-  it('states what is sent, that Stillroom does not save the photo and what Microsoft may keep', () => {
-    expect(text('tryonC.noticeSent').en).toContain('sent to Microsoft Azure OpenAI as they are');
-    expect(text('tryonC.noticePhoto').en).toContain("Stillroom doesn't save your photo");
-    expect(text('tryonC.noticePhoto').fi).toContain('Stillroom ei tallenna kuvaasi');
-    expect(text('tryonC.noticePhoto').sv).toContain('Stillroom sparar inte din bild');
-    expect(text('tryonC.noticeMicrosoft').en).toContain('Microsoft may keep submitted photos and generated pictures for a limited period');
-    expect(text('tryonC.noticeMicrosoft').en).toContain("doesn't use it to train models");
-    // Processing keeps the rev4 Azure Global statement (the enhancement revision-1 wording). The clean-up notice revision 2
-    // (BG2c-2) shortened its own copy; whether try-on follows is decided with the draft text at G5a.
-    expect(text('tryonC.noticeProcessing').en).toContain('Azure Global deployment');
-    expect(text('tryonC.noticeProcessing').en).toContain('including outside the EU');
-    expect(text('tryonC.noticeProcessing').fi).toContain('myös EU:n ulkopuolella');
-    expect(text('tryonC.noticeProcessing').sv).toContain('även utanför EU');
+  it('has four paragraphs in the order of the clean-up notice', () => {
+    expect(TRYON_NOTICE_KEYS).toEqual(['tryonC.noticeSent', 'tryonC.noticeResult', 'tryonC.noticeProcessing', 'tryonC.noticeCharges']);
   });
-  it('keeps the three separate Result statements, with no cleanup deadline', () => {
+  it('says the photo is sent to Azure and never saved by Stillroom', () => {
+    expect(text('tryonC.noticeSent').en).toContain('sent to Microsoft Azure OpenAI');
+    expect(text('tryonC.noticeSent').en).toContain('Stillroom never saves your photo');
+    expect(text('tryonC.noticeSent').fi).toContain('Stillroom ei koskaan tallenna kuvaasi');
+    expect(text('tryonC.noticeSent').sv).toContain('Stillroom sparar aldrig din bild');
+  });
+  it('says the redraw can change body or garments and only the final picture is kept for 7 days', () => {
     const result = text('tryonC.noticeResult');
-    expect(result.en).toContain('You can see it for 7 days');
-    expect(result.fi).toContain('7 päivän ajan');
+    expect(result.en).toContain('It can change how your body or the garments look');
+    expect(result.en).toContain('Only the final picture is kept');
+    expect(result.en).toContain('"Made with AI"');
+    expect(result.en).toContain('for 7 days');
+    expect(result.fi).toContain('7 päiväksi');
     expect(result.sv).toContain('i 7 dagar');
-    expect(result.en).toContain("it's deleted from the app automatically.");
     for (const language of languages) expect(result[language].match(/\{backupDays\}/g), language).toHaveLength(1);
     for (const language of languages) {
       expect(result[language]).not.toMatch(/within a day|within 24|vuorokauden|dygn/i);
     }
   });
-  it('names the Made with AI label and charges per garment', () => {
-    expect(text('tryonC.noticeLabel').en).toContain("'Made with AI'");
-    expect(text('tryonC.noticeCharges').en).toContain('Each garment counts toward a monthly limit');
+  it('uses the reviewed clean-up processing statement: outside the EU, abuse-check retention, no training', () => {
+    for (const language of languages) expect(text('tryonC.noticeProcessing')[language]).toBe(baseMessages['enhanceC.noticeProcessing'][language]);
+    expect(text('tryonC.noticeProcessing').en).toContain('outside the EU');
+    expect(text('tryonC.noticeProcessing').en).toContain('to check for abuse');
+  });
+  it('charges per garment against the monthly limit', () => {
+    expect(text('tryonC.noticeCharges').en).toContain('Each garment counts toward your monthly AI limit');
   });
 });
 

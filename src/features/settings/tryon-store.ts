@@ -8,10 +8,12 @@ import { readConfiguration, type PublicConfig } from '../../data/config';
 import { TryOnClient, tryOnView, type TryOnRead, type TryOnStatus, type TryOnView } from '../../data/tryon';
 import type { MessageKey } from '../../i18n';
 
-/** The revision-1 notice paragraphs, in order. DRAFT until the owner approves the text at G5a; no hash pin before. */
+/**
+ * The revision-1 notice paragraphs, in order: what is sent, the picture, processing, charges (the shape of the clean-up
+ * notice revision 2). DRAFT until the owner approves the text at G5a; no hash pin before.
+ */
 export const TRYON_NOTICE_KEYS = [
-  'tryonC.noticeSent', 'tryonC.noticeProcessing', 'tryonC.noticePhoto', 'tryonC.noticeMicrosoft', 'tryonC.noticeResult',
-  'tryonC.noticeLabel', 'tryonC.noticeCharges', 'tryonC.noticeOff',
+  'tryonC.noticeSent', 'tryonC.noticeResult', 'tryonC.noticeProcessing', 'tryonC.noticeCharges',
 ] as const satisfies readonly MessageKey[];
 /**
  * Release holds. The notice text is a draft until the owner approves it at G5a (then it gets its hash pin), and the
