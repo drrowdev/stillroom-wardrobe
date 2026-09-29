@@ -92,16 +92,26 @@ Each step is on both phones unless it says otherwise.
    Delete, and the monthly figure in Settings.
    - Before activation: report `NOT ACTIVE`. Try-on acceptance stays **BLOCKED**.
 
-6. **P1: suggestions with 500 items.** Run `npm run bench:engine` from a clean
-   checkout of C (the tool is added in R-6a; until then this step is `NOT DONE`).
-   It uses fictional data only and needs no account.
+6. **P1: suggestions with 500 items.** The tool is added in R-6a; until it
+   ships, report this step as `NOT DONE`. From a clean checkout of C, run:
+
+   ```
+   npm run bench:engine -- --candidate <full-C-SHA>
+   ```
+
+   It refuses a checkout that isn't clean or isn't at C. It uses fictional data
+   only and needs no account. The page runs the suggestions 5 times and shows
+   the slowest-context time of each run.
    - **Android:** the page is served on the laptop's 127.0.0.1; open it on the
      phone through Chrome remote DevTools port forwarding.
-   - **iPhone:** only if you agree to it, `--lan` serves it on one private
-     address for 15 minutes. If you don't, iPhone P1 stays **BLOCKED**.
+   - **iPhone:** only if you agree to it, add `--lan <private-IPv4>`:
+     `npm run bench:engine -- --candidate <full-C-SHA> --lan <private-IPv4>`.
+     It serves the page on that one private address for 15 minutes. If you
+     don't, iPhone P1 stays **BLOCKED**.
+   - **Acceptance: the median of the 5 slowest-context times is < 200 ms.**
    - Report the full SHA the page shows, the phone model, the fixture settings,
-     the five slowest-context times in ms, the median, and PASS/FAIL against
-     200 ms. A result that doesn't show C's SHA doesn't count.
+     the 5 slowest-context times in ms, the median, and PASS/FAIL. A result
+     that doesn't show C's SHA doesn't count.
 
 7. **P3: first load on mobile data.** Close the app, turn Wi-Fi off, and open it
    cold.
