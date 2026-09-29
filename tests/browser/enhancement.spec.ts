@@ -278,10 +278,16 @@ for (const flow of ['add', 'replace'] as const) {
     const h2 = await shown(page, flow);
     expect(h2).not.toBe(h0);
     expect(api.inputs[0]!.sha256).toBe(h2);
-    await expect(revertButton(page)).toHaveAccessibleDescription(text('enhance.revertHelp'));
+    await expect(revertButton(page)).toHaveAccessibleDescription(text('photo.reanalyse'));
+    // Both photo choices share one line, shown once.
+    const useOriginal = page.getByRole('button', { name: text('photo.bgUseOriginal'), exact: true });
+    await expect(useOriginal).toHaveAccessibleDescription(text('photo.reanalyse'));
+    await expect(page.getByText(text('photo.reanalyse'), { exact: true })).toHaveCount(1);
     await noViolations(page);
     await revertButton(page).click();
     await expect.poll(() => analyses(api)).toBe(2);
+    await expect(useOriginal).toHaveAccessibleDescription(text('photo.reanalyse'));
+    await expect(page.getByText(text('photo.reanalyse'), { exact: true })).toHaveCount(1);
     // H1, the cut-out, is analysed and shown: never H0, which was only sent.
     const h1 = api.inputs[1]!.sha256;
     expect([h0, h2]).not.toContain(h1);

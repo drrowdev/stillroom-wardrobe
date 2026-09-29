@@ -19,7 +19,7 @@ import type { SaveStage } from '../../images/upload';
 import { useAiDraft } from './use-ai-draft';
 import { AnalysisStatus } from './analysis-status';
 import { ItemForm } from './item-form';
-import { BackgroundNote, BackgroundStatus } from './background';
+import { BackgroundNote, BackgroundStatus, ReanalyseNote } from './background';
 import { preparingMessage, useBackground, type PreparedWithBackground } from './use-background';
 import { useEnhancement } from './use-enhancement';
 import type { StageResult } from './enhancement-stage';
@@ -351,6 +351,7 @@ function Replacement(props: Props) {
             if (change.frozen) return;
             if (background.useOriginal() === 'again' && original.current) void prepare(original.current, edit, false);
           }} />}
+        <ReanalyseNote t={t} show={((!editing || provisional) && enhancement.view.enhanced) || (!editing && !provisional && background.state === 'removed' && analysis.phase !== 'off' && analysis.phase !== 'none')} />
         {!photo && !preparing && !review && <BackgroundNote t={t} language={props.language} />}
         {preparing && !enhancement.view.working && <p role="status">{t(preparingMessage(background.state, background.downloading, 'capture.preparing'))}</p>}
         {error && <p role="alert" className="notice notice-error">{t(error)}</p>}

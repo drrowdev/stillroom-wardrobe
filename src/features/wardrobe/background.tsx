@@ -8,6 +8,12 @@ export function BackgroundNote({ t, language }: { t: Translate; language: Langua
   return <p className="fine muted background-note">{t('photo.bgLocal', { size: backgroundSize(language) })}</p>;
 }
 
+/** One line under the photo choices ("Use photo without clean-up", "Use original background"), shared by both buttons. */
+export const reanalyseNoteId = 'photo-again';
+export function ReanalyseNote({ show, t }: { show: boolean; t: Translate }) {
+  return show ? <p id={reanalyseNoteId} className="fine muted background-status">{t('photo.reanalyse')}</p> : null;
+}
+
 type StatusProps = {
   state: BackgroundState; analysed: boolean; disabled: boolean; t: Translate;
   onUseOriginal: () => void;
@@ -26,8 +32,7 @@ export function BackgroundStatus({ state, analysed, disabled, t, onUseOriginal }
   if (state === 'removed') {
     return <div className="background-status">
       <button id="background-original" className="button button-quiet" type="button" disabled={disabled} onClick={onUseOriginal}
-        aria-describedby={analysed ? 'background-again' : undefined}>{t('photo.bgUseOriginal')}</button>
-      {analysed && <p id="background-again" className="fine muted">{t('photo.bgReanalyse')}</p>}
+        aria-describedby={analysed ? reanalyseNoteId : undefined}>{t('photo.bgUseOriginal')}</button>
     </div>;
   }
   return null;

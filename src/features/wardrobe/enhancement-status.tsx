@@ -1,4 +1,5 @@
 import type { Translate } from '../../i18n';
+import { reanalyseNoteId } from './background';
 import type { EnhancementView } from './use-enhancement';
 
 type Props = {
@@ -19,8 +20,7 @@ export function EnhancementStatus({ view, disabled, t, onSkip, onRevert, onCance
     return <div className="background-status enhancement-status">
       <p className="fine enhancement-label">{t('enhance.edited')}</p>
       <button id="enhance-revert" className="button button-quiet" type="button" disabled={disabled} onClick={onRevert}
-        aria-describedby="enhance-revert-help">{t('enhance.revert')}</button>
-      <p id="enhance-revert-help" className="fine muted">{t('enhance.revertHelp')}</p>
+        aria-describedby={reanalyseNoteId}>{t('enhance.revert')}</button>
     </div>;
   }
   if (view.line === 'none') return null;
