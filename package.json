@@ -28,6 +28,7 @@
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "check:dependencies": "node scripts/check-dependencies.mjs",
     "check:deploy-artifacts": "node scripts/check-deploy-artifacts.mjs",
+    "bench:engine": "node scripts/engine-bench.mjs",
     "dependencies:record": "node scripts/check-dependencies.mjs --write"
   },
   "dependencies": {

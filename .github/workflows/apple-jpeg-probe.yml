@@ -2,6 +2,8 @@ name: Apple JPEG diagnostic
 
 on:
   pull_request:
+  # Release candidate (R1): dispatched on main at the frozen SHA; see docs/release-checks.md.
+  workflow_dispatch:
 
 permissions:
   contents: read
