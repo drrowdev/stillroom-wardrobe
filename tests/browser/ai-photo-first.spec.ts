@@ -674,6 +674,10 @@ test('status checks stop after the deadline; Try again makes one more check and 
   });
   await addAiPhoto(page, api);
   await expect.poll(() => posts(api).length).toBe(1);
+  // One long runFor can fire the first check, its request timeout and the deadline before the page's async
+  // session read reaches the network. Step the fake clock until the first same-request check is observed.
+  await expect.poll(async () => { await page.clock.runFor(250); return statusChecks(api).length; }, { intervals: [50] })
+    .toBeGreaterThanOrEqual(1);
   await page.clock.runFor(31000);
   await expect(statusRegion(page).getByText(messages['aiC.stillWorking'].en, { exact: true })).toBeVisible();
   const after = statusChecks(api).length;
