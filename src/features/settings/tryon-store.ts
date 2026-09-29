@@ -9,20 +9,12 @@ import { TryOnClient, tryOnView, type TryOnRead, type TryOnStatus, type TryOnVie
 import type { MessageKey } from '../../i18n';
 
 /**
- * The revision-1 notice paragraphs, in order: what is sent, the picture, processing, charges (the shape of the clean-up
- * notice revision 2). DRAFT until the owner approves the text at G5a; no hash pin before.
+ * The owner-approved try-on notice (G5a, #84), revision 1, in order: what is sent, the picture, processing, charges.
+ * Pinned in tests/unit/tryon-notice.test.ts; any change to these strings needs a new revision and a new pin.
  */
 export const TRYON_NOTICE_KEYS = [
   'tryonC.noticeSent', 'tryonC.noticeResult', 'tryonC.noticeProcessing', 'tryonC.noticeCharges',
 ] as const satisfies readonly MessageKey[];
-/**
- * Release holds. The notice text is a draft until the owner approves it at G5a (then it gets its hash pin), and the
- * backup retention in its Result paragraph is unknown until G3. While either is pending, Turn on is never offered, so
- * no consent can be given to unapproved text (fail closed). Both must be settled before release.
- */
-export const TRYON_NOTICE_PENDING: boolean = true;
-export const TRYON_BACKUP_DAYS: number | null = null;
-export const tryOnReleaseHeld = (): boolean => TRYON_NOTICE_PENDING || TRYON_BACKUP_DAYS === null;
 
 export const SESSION_STOP_MS = 600_000;
 export type TryOnState = {
@@ -103,10 +95,9 @@ export function tryOnStoreFor(client: AppClient, scope: OwnerScope, config?: Pub
   } catch { return null; }
 }
 
-export const tryOnViewOf = (store: TryOnStore, state: TryOnState): TryOnView => {
-  const view = tryOnView(state.read, state.unresolved, state.known, store.consentOn);
-  return tryOnReleaseHeld() && view.turnOn ? { ...view, turnOn: false } : view;
-};
+/** Turn on is offered only when the server policy is activated and matches this app's notice revision, manifest and model. */
+export const tryOnViewOf = (store: TryOnStore, state: TryOnState): TryOnView =>
+  tryOnView(state.read, state.unresolved, state.known, store.consentOn);
 
 function apply(store: TryOnStore, read: TryOnRead) {
   const state = store.get();
