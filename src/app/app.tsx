@@ -41,6 +41,7 @@ const Trash = lazyNamed(() => import('../features/settings/trash-screen'), 'Tras
 const OutfitsScreen = lazyNamed(() => import('../features/outfits/outfits-screen'), 'OutfitsScreen');
 const NewOutfit = lazyNamed(() => import('../features/outfits/detail'), 'NewOutfit');
 const OutfitDetail = lazyNamed(() => import('../features/outfits/detail'), 'OutfitDetail');
+const TryOnScreen = lazyNamed(() => import('../features/outfits/try-on/try-on-screen'), 'TryOnScreen');
 const TodayScreen = lazyNamed(() => import('../features/today/today-screen'), 'TodayScreen');
 const CalendarScreen = lazyNamed(() => import('../features/calendar/calendar'), 'CalendarScreen');
 const StatisticsScreen = lazyNamed(() => import('../features/statistics/statistics-screen'), 'StatisticsScreen');
@@ -82,6 +83,7 @@ function Unconfigured({ status }: { status: Configuration['status'] }) {
 }
 type WorkspaceRoute = 'today' | 'stylist' | 'wardrobe' | 'add' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | 'calendar' | 'statistics' | 'admin' | `detail:${string}` | `outfit:${string}`;
 const routeHash = { today: '#/today', stylist: '#/stylist', wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new', calendar: '#/calendar', statistics: '#/statistics', admin: '#/admin' };
+const TRYON_ROUTE = '/try-on';
 function currentRoute(hash = location.hash): WorkspaceRoute {
   return hash === '#/today' ? 'today' : hash === '#/stylist' ? 'stylist' : hash === '#/calendar' ? 'calendar' : hash === '#/statistics' ? 'statistics' : hash === '#/admin' ? 'admin' : hash === '#/items/new' ? 'add' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
     : hash === '#/outfits' ? 'outfits' : hash === '#/outfits/new' ? 'outfit-new'
@@ -234,7 +236,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       : stylistFocus.current ? document.getElementById('stylist-heading') : null;
     if (card) { card.focus(); return; }
     if (route !== 'settings') { weatherFocus.current = false; stylistFocus.current = false; }
-    document.getElementById(routeFocus[route] ?? (route.startsWith('detail:') ? 'item-detail-title' : route.startsWith('outfit:') ? 'outfit-detail-title' : 'wardrobe-title'))?.focus();
+    document.getElementById(routeFocus[route] ?? (route.startsWith('detail:') ? 'item-detail-title' : route.startsWith('outfit:') ? route.endsWith(TRYON_ROUTE) ? 'tryon-title' : 'outfit-detail-title' : 'wardrobe-title'))?.focus();
   }, [route]);
   useEffect(focusRoute, [focusRoute]);
   function trashed(item: LifecycleSnapshot) {
@@ -284,7 +286,10 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           : route === 'outfits' ? <OutfitsScreen client={client} scope={scope} invalidation={outfitsInvalidation} images={images} online={online} language={language} t={t}
             onCreate={() => changeRoute('outfit-new')} onAddItem={() => changeRoute('add')} />
           : route === 'outfit-new' ? <NewOutfit key={outfitSeed ? outfitSeed.itemIds.join('|') : 'blank'} {...outfitProps} initial={outfitSeed ?? undefined} />
-          : route.startsWith('outfit:') ? <OutfitDetail key={route} {...outfitProps} id={outfitRouteId(route.slice(7))} timeZone={profile.timezone}
+          : route.startsWith('outfit:') && route.endsWith(TRYON_ROUTE) ? <TryOnScreen key={route} client={client} scope={scope} id={outfitRouteId(route.slice(7, -TRYON_ROUTE.length))}
+            online={online} language={language} t={t} onBack={() => changeRoute(route.slice(0, -TRYON_ROUTE.length) as WorkspaceRoute)} />
+          : route.startsWith('outfit:') ? <OutfitDetail key={route} {...outfitProps} id={outfitRouteId(route.slice(7))} timeZone={profile.timezone} language={language}
+            onTryOn={() => changeRoute(`${route}${TRYON_ROUTE}` as WorkspaceRoute)}
             onPlan={outfitId => { setCalendarSeed({ outfitId }); changeRoute('calendar'); }} onWorn={invalidateHistory} onWriting={onWriting} />
           : route === 'calendar' ? <CalendarScreen client={client} scope={scope} online={online} language={language} t={t} timeZone={profile.timezone}
             invalidation={outfitsInvalidation} seed={calendarSeed} onSeedUsed={calendarSeedUsed} onChanged={invalidateHistory} onWriting={onWriting} />

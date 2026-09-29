@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { locales, resolveLanguage, type MessageKey, type Translate } from '../i18n';
 import {
-  cropValues, FULL_CROP, HANDLE_FRAME_PX, handleMinimum, moveCrop, normalizeCrop, ORIGINAL_EDIT, parseCropValues, resizeCrop,
-  cropDone, validCrop, type Corner, type Crop, type PhotoEdit,
+  aspectFactor, cropDone, cropValues, FULL_CROP, HANDLE_FRAME_PX, handleMinimum, moveCrop, normalizeCrop, ORIGINAL_EDIT,
+  largestAspectCrop, parseCropValues, resizeAspectCrop, resizeCrop, snapAspectCrop, validCrop, type Corner, type Crop,
+  type CropAspect, type PhotoEdit,
 } from './crop';
 
 const fields: readonly (keyof Crop)[] = ['x', 'y', 'width', 'height'];
@@ -13,9 +14,11 @@ const corners: readonly Corner[] = ['nw', 'ne', 'sw', 'se'];
 const arrows = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
 const MOVABLE = 1 - 1e-9;
 type Values = Record<keyof Crop, string>;
+/** `aspect` fixes the crop to `rw`:`rh` of the oriented image (VTO-2 body photo); without it the editor is unchanged.
+ * `applyUnchanged` applies the proposed edit even when it equals `accepted` (nothing has been prepared from it yet). */
 type Props = {
   preview: string; width: number; height: number; accepted: PhotoEdit; preparing: boolean; t: Translate;
-  onApply: (edit: PhotoEdit) => void; onCancel: () => void;
+  onApply: (edit: PhotoEdit) => void; onCancel: () => void; aspect?: CropAspect; applyUnchanged?: boolean;
   /**
    * Review mode (BG2c, plan rev4 §3.1 R1), only for the pre-upload review of a new photo: Done with a valid crop always
    * accepts, changed or not (`unchanged` says which), and the review hint describes the editor. Without it, an unchanged
@@ -23,8 +26,11 @@ type Props = {
    */
   onAccept?: (edit: PhotoEdit, unchanged: boolean) => void;
 };
+const percent = (fraction: number) => Number.isFinite(fraction) ? (fraction * 100).toFixed(10).replace(/\.?0+$/, '') : '';
+const orientedSize = (width: number, height: number, turns: number): [number, number] =>
+  (((turns % 4) + 4) % 4) % 2 ? [height, width] : [width, height];
 
-export function CropEditor({ preview, width, height, accepted, preparing, t, onApply, onCancel, onAccept }: Props) {
+export function CropEditor({ preview, width, height, accepted, preparing, t, onApply, onCancel, onAccept, aspect, applyUnchanged }: Props) {
   const [turns, setTurns] = useState(accepted.turns);
   const [values, setValues] = useState(() => cropValues(accepted.crop));
   const [frozen, setFrozen] = useState<Values | null>(null);
@@ -62,15 +68,27 @@ export function CropEditor({ preview, width, height, accepted, preparing, t, onA
   }, []);
   useEffect(() => { if (preparing) end(false); }, [preparing, end]);
   useEffect(() => () => { drag.current?.cleanup(); drag.current = null; }, []);
-  const crop = parseCropValues(values);
-  const valid = validCrop(crop);
-  const frame = valid ? normalizeCrop(crop) : FULL_CROP;
-  const movableX = valid && frame.width < MOVABLE, movableY = valid && frame.height < MOVABLE;
-  const handles = valid && frame.width * stageSize.width >= HANDLE_FRAME_PX && frame.height * stageSize.height >= HANDLE_FRAME_PX;
   const quarter = ((turns % 4) + 4) % 4;
   const w = quarter % 2 ? height : width, h = quarter % 2 ? width : height;
+  const factor = aspect ? aspectFactor(w, h, aspect.rw, aspect.rh) : null;
+  const typed = parseCropValues(values);
+  // With a fixed ratio only X, Y and Width are entered and the height is derived; the frame and Apply use the crop
+  // snapped to whole source pixels, which is the rectangle the encoder draws.
+  const crop = factor === null ? typed : { ...typed, height: typed.width * factor };
+  const snapped = aspect && validCrop(crop) ? snapAspectCrop(w, h, crop, aspect.rw, aspect.rh) : null;
+  const valid = validCrop(crop) && (!aspect || snapped !== null);
+  const frame = !valid ? FULL_CROP : snapped ?? normalizeCrop(crop);
+  const movableX = valid && frame.width < MOVABLE, movableY = valid && frame.height < MOVABLE;
+  const handles = valid && frame.width * stageSize.width >= HANDLE_FRAME_PX && frame.height * stageSize.height >= HANDLE_FRAME_PX;
   const number = new Intl.NumberFormat(locales[language], { maximumFractionDigits: 1 });
-  const edit = (next: Crop) => setValues(cropValues(next));
+  const derive = (next: Values, f = factor): Values => f === null ? next
+    : { ...next, height: percent(parseCropValues(next).width * f) };
+  const edit = (next: Crop, f = factor) => setValues(derive(cropValues(next), f));
+  const fresh = (nextTurns: number) => {
+    if (!aspect) { edit(FULL_CROP); return; }
+    const [nw, nh] = orientedSize(width, height, nextTurns);
+    edit(largestAspectCrop(width, height, nextTurns, aspect), aspectFactor(nw, nh, aspect.rw, aspect.rh));
+  };
   const shown = parseCropValues(frozen ?? values);
   const orientation = quarter ? t('photo.orientationTurned', { degrees: number.format(quarter * 90) }) : t('photo.orientationOriginal');
   const begin = (event: ReactPointerEvent<HTMLElement>, mode: 'move' | Corner) => {
@@ -87,7 +105,8 @@ export function CropEditor({ preview, width, height, accepted, preparing, t, onA
     const move = (next: PointerEvent) => {
       if (!mine(next)) return;
       const dx = (next.clientX - startX) / rect.width, dy = (next.clientY - startY) / rect.height;
-      setValues(cropValues(mode === 'move' ? moveCrop(start, dx, dy) : resizeCrop(start, mode, dx, dy, minWidth, minHeight)));
+      setValues(derive(cropValues(mode === 'move' ? moveCrop(start, dx, dy) : factor !== null
+        ? resizeAspectCrop(start, mode, dx, dy, minWidth, minHeight, factor) : resizeCrop(start, mode, dx, dy, minWidth, minHeight))));
     };
     const release = (next: PointerEvent) => { if (mine(next)) end(true); };
     const cancel = (next: PointerEvent) => { if (mine(next)) end(false); };
@@ -148,26 +167,31 @@ export function CropEditor({ preview, width, height, accepted, preparing, t, onA
     <fieldset disabled={preparing}>
       <div className="crop-tools">
         <button id="crop-rotate" className="button button-secondary" type="button" aria-describedby="crop-rotate-hint"
-          onClick={() => { setTurns((quarter + 1) % 4); edit(FULL_CROP); }}>{t('photo.rotate')}</button>
+          onClick={() => { setTurns((quarter + 1) % 4); fresh((quarter + 1) % 4); }}>{t('photo.rotate')}</button>
         <button id="crop-reset" className="button button-quiet" type="button"
-          onClick={() => { setTurns(ORIGINAL_EDIT.turns); edit(FULL_CROP); }}>{t('photo.reset')}</button>
+          onClick={() => { setTurns(ORIGINAL_EDIT.turns); fresh(ORIGINAL_EDIT.turns); }}>{t('photo.reset')}</button>
       </div>
       <details className="crop-exact">
         <summary>{t('photo.cropExact')}</summary>
         <div className="crop-fields">{fields.map((field) => <div className="field" key={field}>
           <label htmlFor={`crop-${field}`}>{t(labels[field])}</label>
           <input id={`crop-${field}`} type="text" inputMode="decimal" value={values[field]} aria-invalid={!valid}
-            aria-describedby="crop-status" onChange={(event) => setValues({ ...values, [field]: event.target.value })} />
+            readOnly={factor !== null && field === 'height'}
+            aria-describedby="crop-status" onChange={(event) => setValues(derive({ ...values, [field]: event.target.value }))} />
         </div>)}</div>
       </details>
     </fieldset>
     <div className="crop-footer">
       <button id="apply-crop" className="button button-primary" type="button" disabled={!valid || preparing}
         onClick={() => {
-          const done = cropDone({ turns, crop }, accepted, valid, !!onAccept);
-          if (done?.kind === 'accept') onAccept?.({ turns, crop }, done.unchanged);
-          else if (done?.kind === 'cancel') onCancel();
-          else if (done?.kind === 'apply') onApply({ turns, crop });
+          // With a fixed ratio Done rechecks it: only a crop that snaps to an exact pixel rectangle is passed on.
+          const applied = !valid ? null : aspect ? snapped : crop;
+          if (!applied) return;
+          const edit = { turns, crop: applied };
+          const outcome = cropDone(edit, accepted, true, !!onAccept);
+          if (outcome?.kind === 'accept') onAccept?.(edit, outcome.unchanged);
+          else if (outcome?.kind === 'cancel' && !applyUnchanged) onCancel();
+          else onApply(edit);
         }}>{t('photo.applyCrop')}</button>
       <button id="crop-cancel" className="button button-quiet" type="button" onClick={onCancel}>{t('photo.cancelCrop')}</button>
     </div>

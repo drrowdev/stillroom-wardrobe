@@ -34,12 +34,12 @@ const profileUrl = 'http://127.0.0.1:54321/rest/v1/profiles*';
 // Reloading while routed fixture requests are still open has coincided with "WebKit encountered an internal error"
 // on reload in CI (provisional; playwright#37766 is a similar earlier report). A profile Save sends exactly one PATCH
 // and then one status read. Wait for both to actually finish before reloading: a stuck, failed or repeated request fails.
-// Settings reads the AI, stylist and enhancement status once when it opens, and those reads can still be starting after
+// Settings reads the AI, stylist, enhancement and try-on status once when it opens, and those reads can still be starting after
 // the fields are visible. The mount barrier is registered before navigating and waits until the browser has finished
 // a new, successful (2xx) read of each, with none still open and none failed, so tracking never counts or holds a mount
-// read as the post-save read. A later enhance_status or stylist_status is tracked, and unexpected. The admin_status
+// read as the post-save read. A later enhance_status, stylist_status or tryon_status is tracked, and unexpected. The admin_status
 // read (AD1b) happens once per mount too.
-const MOUNT_STATUS_PATHS = ['/rest/v1/rpc/admin_status', '/rest/v1/rpc/ai_status', '/rest/v1/rpc/enhance_status', '/rest/v1/rpc/stylist_status'];
+const MOUNT_STATUS_PATHS = ['/rest/v1/rpc/admin_status', '/rest/v1/rpc/ai_status', '/rest/v1/rpc/enhance_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/tryon_status'];
 function mountBarrier(page: Page) {
   const open = new Set<PlaywrightRequest>(), succeeded = new Set<string>(), failed: string[] = [];
   const path = (request: PlaywrightRequest) => {
@@ -77,7 +77,7 @@ function trackSaveTraffic(page: Page) {
   const name = (request: PlaywrightRequest) => {
     const { pathname } = new URL(request.url());
     if (request.method() === 'PATCH' && pathname === '/rest/v1/profiles') return 'profile';
-    if (request.method() === 'POST' && /\/rest\/v1\/rpc\/(?:ai_status|stylist_status|enhance_status)$/.test(pathname)) return pathname.split('/').pop()!;
+    if (request.method() === 'POST' && /\/rest\/v1\/rpc\/(?:ai_status|stylist_status|enhance_status|tryon_status)$/.test(pathname)) return pathname.split('/').pop()!;
     return null;
   };
   const onRequest = (request: PlaywrightRequest) => { const key = name(request); if (key) { started.push(key); open.set(request, key); } };
@@ -721,7 +721,7 @@ test('synthetic settings visual evidence retains functional assertions in every 
       && api.profiles[owners.a]?.ui_language === capture.language
       && api.requests.filter((request) => request.path.startsWith('/rest/'))
         .every((request) => request.owner === owners.a && (request.ownerFilter === `eq.${owners.a}`
-          || ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status', '/rest/v1/rpc/admin_status'].includes(request.path) && request.ownerFilter === null))).toBe(true);
+          || ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status', '/rest/v1/rpc/admin_status', '/rest/v1/rpc/tryon_status'].includes(request.path) && request.ownerFilter === null))).toBe(true);
     expect(await page.evaluate(({ origin, language }) => {
       const visible = (element: Element) => element.getClientRects().length > 0
         && getComputedStyle(element).visibility === 'visible';

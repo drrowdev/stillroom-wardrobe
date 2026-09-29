@@ -2,7 +2,7 @@ import {
   TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_STEPS, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_RESERVATION_MICRO, TRYON_REVIEW_EXPIRES_AT,
   tryOnSlots, type TryOnSlot,
 } from '../../../src/domain/tryon.ts';
-import { admitProviderJpeg } from '../../../src/images/provider-jpeg.ts';
+import { isPhotoInputJpeg } from '../../../src/images/restore-jpeg.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
 import { UUID, exact, object, ProtocolError, readBounded, readJson, sha256, validAccounting, type JsonObject } from '../analyze-clothing/protocol.ts';
 import { callTryOn, type TryOnOutcome } from './azure.ts';
@@ -76,14 +76,16 @@ async function readIngress(request: Request, signal: AbortSignal): Promise<Ingre
   if (manifestId !== TRYON_MANIFEST) return 'CONFIG_CHANGED';
   if (file.type !== 'image/jpeg') return 'UNSUPPORTED_MEDIA';
   if (file.size > TRYON_LIMITS.personBytes) return 'TOO_LARGE';
-  // The body photo (step 1) or the previous step's accepted output: one baseline 1024x1280 frame, metadata removed.
-  // Only the admitted bytes are hashed and sent; nothing about the person is stored.
+  // The body photo (step 1) or the previous step's accepted output: one baseline 1024x1280 frame without metadata, in
+  // the shared photo-input profile, which also admits restart intervals (DRI) as phone encoders write them. The bytes
+  // are checked, not rewritten; only they are hashed and sent, and nothing about the person is stored.
   let person: Uint8Array<ArrayBuffer>;
   try {
-    const admitted = admitProviderJpeg(new Uint8Array(await file.arrayBuffer()));
-    if (admitted.width !== TRYON_LIMITS.personWidth || admitted.height !== TRYON_LIMITS.personHeight
-      || admitted.bytes.length > TRYON_LIMITS.personBytes) return 'INVALID_INPUT';
-    person = admitted.bytes;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const { personWidth: width, personHeight: height, personBytes } = TRYON_LIMITS;
+    if (bytes.length > personBytes
+      || !isPhotoInputJpeg(bytes, width, height, { bytes: personBytes, side: Math.max(width, height) })) return 'INVALID_INPUT';
+    person = bytes;
   } catch { return 'INVALID_INPUT'; }
   return { chainId, step, requestId, outfitId, person };
 }
@@ -91,7 +93,7 @@ async function readIngress(request: Request, signal: AbortSignal): Promise<Ingre
 /**
  * Virtual try-on, one garment step per request (VTO-1, plan rev4 §6.2; INACTIVE until the owner's switch). Order:
  * origin and method, the operator probe gate when its headers are present, closed multipart ingress (the person JPEG is
- * admitted by the strict 1024x1280 profile; no RPC on invalid input), verified /auth/v1/user, status preflight, then the
+ * a 1024x1280 frame in the shared photo-input profile; no RPC on invalid input), verified /auth/v1/user, status preflight, then the
  * service claim for the verified owner only. The claim returns the step's frozen garment; everything after it is the
  * claimed work (W1): the garment download with the user's JWT, the once-only dispatch mark, the provider call and the
  * finish. An intermediate's bytes are released only after finish returned OK for the chain's active attempt; the last

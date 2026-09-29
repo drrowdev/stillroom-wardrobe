@@ -11,6 +11,8 @@ import { StylistSettings } from '../settings/stylist-settings';
 import { EnhanceSettings } from '../settings/enhance-settings';
 import { AdminEntry } from '../admin/admin-entry';
 import { enhanceStoreFor } from '../settings/enhance-store';
+import { TryOnSettings } from '../settings/tryon-settings';
+import { tryOnStoreFor } from '../settings/tryon-store';
 import type { StylistStore } from '../stylist/stylist-store';
 import { useStylist, viewOf } from '../stylist/use-stylist';
 import { WeatherSettings } from '../settings/weather-settings';
@@ -113,6 +115,7 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
         footer={<AdminEntry client={client} scope={scope} t={t} />} />
       <StylistSettings store={stylist} busy={busy || reading} language={language} online={online} t={t} />
       <EnhanceSettings store={enhanceStoreFor(client, scope)} busy={busy || reading} language={language} online={online} t={t} />
+      <TryOnSettings store={tryOnStoreFor(client, scope)} busy={busy || reading} language={language} online={online} t={t} />
       <AvoidedPairs client={client} scope={scope} images={images} language={language} online={online} t={t} />
       <InstallHint t={t} />
       <BackupSettings client={client} scope={scope} language={language} online={online} t={t} />

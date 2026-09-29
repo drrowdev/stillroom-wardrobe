@@ -14,6 +14,7 @@ import type { DeletionOperation } from '../../src/domain/item-lifecycle';
 import { wardrobeTargetDeleteRoute } from '../../src/data/storage-delete';
 import { STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_REVIEW_EXPIRES } from '../../src/domain/stylist';
 import { CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_MODEL, ENHANCE_REVIEW_EXPIRES } from '../../src/domain/enhancement';
+import { selectTryOnSteps, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_REVIEW_EXPIRES_AT, type TryOnCandidate, type TryOnStep } from '../../src/domain/tryon';
 
 export const owners = {
   a: '10000000-0000-4000-8000-000000000001',
@@ -556,6 +557,41 @@ function enhanceStatus(setup: EnhanceSetup, consent: number | null) {
 }
 
 // AD1b admin fixture: the admin_ai_spending reply for two synthetic accounts, in the shape the AD1a function builds.
+// VTO-2 try-on: per-owner setup (configured, not activated unless a spec says otherwise), consent, chains, results and
+// scripted try-on replies. A reply without `code` or `abort` runs the step normally. `commit` with `abort` applies the
+// step on the server and then drops the reply (a lost reply). `hold` waits before answering.
+export type TryOnSetup = { configured: boolean; activated: boolean; providerAvailable: boolean; noticeRevision: number };
+export type TryOnReply = { code?: string; status?: number; abort?: boolean; commit?: boolean; hold?: Promise<void> };
+export type TryOnChain = { id: string; owner: string; outfitId: string; steps: TryOnStep[]; nextStep: number;
+  state: 'running' | 'complete' | 'cancelled' | 'withdrawn' | 'expired' | 'stale'; resultId: string | null; expiresAtMs: number };
+export type TryOnStored = { id: string; owner: string; outfitId: string; itemIds: string[]; image: Buffer; completedAtMs: number; expiresAtMs: number };
+export type TryOnRequest = { owner: string; chainId: string; step: number; requestId: string; outfitId: string | null;
+  bytes: number; width: number | null; height: number | null; soi: boolean };
+const tryOnDefaults: TryOnSetup = { configured: true, activated: false, providerAvailable: true, noticeRevision: TRYON_NOTICE_REVISION };
+export const tryOnServerNow = () => Math.min(Date.now(), Date.parse(TRYON_REVIEW_EXPIRES_AT) - 86_400_000);
+/** The frame size of a baseline or progressive JPEG, read from its first SOF marker. */
+export function jpegSize(bytes: Buffer): { width: number; height: number } | null {
+  let at = 2;
+  while (at + 9 < bytes.length) {
+    if (bytes[at] !== 0xff) return null;
+    const marker = bytes[at + 1]!;
+    if (marker === 0xd8 || marker >= 0xd0 && marker <= 0xd7 || marker === 0x01) { at += 2; continue; }
+    const length = bytes.readUInt16BE(at + 2);
+    if ([0xc0, 0xc1, 0xc2].includes(marker)) return { height: bytes.readUInt16BE(at + 5), width: bytes.readUInt16BE(at + 7) };
+    at += 2 + length;
+  }
+  return null;
+}
+function tryOnStatusReply(setup: TryOnSetup, consent: number | null, results: number) {
+  const code = !setup.configured ? 'UNCONFIGURED' : !setup.activated ? 'INACTIVE' : consent !== setup.noticeRevision ? 'CONSENT_REQUIRED' : 'OK';
+  const policy = setup.configured ? { activated: setup.activated, noticeRevision: setup.noticeRevision, manifestId: TRYON_MANIFEST,
+    modelId: TRYON_MODEL, maxRequestMicro: '360000', tryOnAllowanceMicro: '5000000', totalAllowanceMicro: '20000000',
+    maxRequestsPerHour: 6, maxSteps: 3, maxResults: 20, resultDays: 7, providerAvailable: setup.providerAvailable } : null;
+  const now = tryOnServerNow();
+  return { code, period: new Date(now).toISOString().slice(0, 7), serverTimeMs: now,
+    consent: { enabled: consent !== null, noticeRevision: consent, consentedAt: consent === null ? null : '2026-10-01T00:00:00Z' },
+    policy, results, usage: { tryOnMicro: '0', totalMicro: '0', tryOnLastHour: 0, warning: false } };
+}
 export type AdminLimits = Record<'shared' | 'stylist' | 'enhancement', { monthlyAllowanceMicro: string | null; maxRequestMicro: string | null; maxRequestsPerHour: number | null }>;
 export type AdminWriteReply = { status: number; body?: unknown } | 'lost' | 'appliedLost';
 // Usage recorded outside the current month's history, such as a hold kept from an earlier month.
@@ -666,6 +702,23 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     consentWrites: [] as { owner: string; body: unknown }[],
     /** Delivered outputs, as the BG2b-1 admission trigger sees them: a new photo with an expired output's hash is refused. */
     outputs: [] as { owner: string; sha256: string; usableUntilMs: number }[],
+  };
+  // VTO-2 try-on fixture state (see TryOnReply).
+  const tryonControl = {
+    missing: false,
+    setup: {} as Record<string, Partial<TryOnSetup>>,
+    consent: {} as Record<string, number | null>,
+    replies: [] as TryOnReply[],
+    requests: [] as TryOnRequest[],
+    chains: [] as TryOnChain[],
+    results: [] as TryOnStored[],
+    statusReads: 0,
+    chainReads: 0,
+    cancels: [] as string[],
+    deletes: [] as string[],
+    consentWrites: [] as { owner: string; body: unknown }[],
+    /** The picture each step returns and the final result: a small JPEG. */
+    picture: null as Buffer | null,
   };
   // AD1b admin: which owner is the app's admin (none by default), each account's limits and a scripted write reply.
   // Without a script a write behaves like admin_set_ai_limits for the fixture: CONFLICT, UNCHANGED or OK.
@@ -912,6 +965,106 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         if (fault === 'abort') { await route.abort('failed'); return; }
       }
       await json(enhanceStatus(setup, enhanceControl.consent[owner] ?? null)); return;
+    }
+    if (url.pathname.startsWith('/rest/v1/rpc/tryon_')) {
+      if (tryonControl.missing) { await json({ code: 'PGRST202', details: null, hint: null, message: 'Could not find the function' }, 404); return; }
+      const name = url.pathname.slice('/rest/v1/rpc/'.length);
+      const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      const setup = { ...tryOnDefaults, ...tryonControl.setup[owner] };
+      const now = Date.now();
+      const live = tryonControl.results.filter(row => row.owner === owner && row.expiresAtMs > now);
+      if (name === 'tryon_status' || name === 'tryon_set_consent') {
+        if (name === 'tryon_set_consent') {
+          tryonControl.consentWrites.push({ owner, body });
+          if (typeof body.p_enabled !== 'boolean') { await json({ code: 'INVALID_INPUT' }); return; }
+          if (body.p_enabled && (!setup.activated || body.p_notice_revision !== setup.noticeRevision)) { await json({ code: 'CONFIG_CHANGED' }); return; }
+          tryonControl.consent[owner] = body.p_enabled ? setup.noticeRevision : null;
+          if (!body.p_enabled) for (const chain of tryonControl.chains) if (chain.owner === owner && chain.state === 'running') chain.state = 'withdrawn';
+        } else tryonControl.statusReads++;
+        await json(tryOnStatusReply(setup, tryonControl.consent[owner] ?? null, live.length)); return;
+      }
+      if (name === 'tryon_chain_status' || name === 'tryon_cancel') {
+        const chain = tryonControl.chains.find(row => row.owner === owner && row.id === body.p_chain_id);
+        if (name === 'tryon_chain_status') {
+          tryonControl.chainReads++;
+          await json(chain ? { code: 'OK', state: chain.state, nextStep: chain.nextStep, steps: chain.steps, activeAttempt: false,
+            resultId: chain.resultId, expiresAtMs: chain.expiresAtMs } : { code: 'NOT_FOUND' }); return;
+        }
+        tryonControl.cancels.push(String(body.p_chain_id));
+        if (!chain) { await json({ code: 'NOT_FOUND' }); return; }
+        if (chain.state === 'complete') { await json({ code: 'COMPLETED', resultId: chain.resultId }); return; }
+        if (chain.state === 'running') { chain.state = 'cancelled'; await json({ code: 'CANCELLED' }); return; }
+        await json({ code: chain.state.toUpperCase() }); return;
+      }
+      if (name === 'tryon_results_v1') {
+        await json({ code: 'OK', results: live.map(row => ({ id: row.id, outfitId: row.outfitId, itemIds: row.itemIds, bytes: row.image.length,
+          completedAtMs: row.completedAtMs, expiresAtMs: row.expiresAtMs })) }); return;
+      }
+      const result = live.find(row => row.id === body.p_result_id);
+      if (name === 'tryon_result_image_v1') {
+        await json(result ? { code: 'OK', jpegBase64: result.image.toString('base64'), bytes: result.image.length } : { code: 'NOT_FOUND' }); return;
+      }
+      if (name === 'tryon_delete_result') {
+        tryonControl.deletes.push(String(body.p_result_id));
+        if (result) tryonControl.results.splice(tryonControl.results.indexOf(result), 1);
+        await json({ code: result ? 'OK' : 'NOT_FOUND' }); return;
+      }
+    }
+    if (url.pathname === '/functions/v1/try-on') {
+      const buffer = request.postDataBuffer() ?? Buffer.alloc(0);
+      const form = await new Response(new Uint8Array(buffer), { headers: { 'content-type': request.headers()['content-type'] ?? '' } }).formData().catch(() => null);
+      const person = form?.get('person');
+      const bytes = person && typeof person !== 'string' ? Buffer.from(await person.arrayBuffer()) : Buffer.alloc(0);
+      const size = jpegSize(bytes);
+      const chainId = String(form?.get('chainId') ?? ''), step = Number(form?.get('step')), outfitId = form?.get('outfitId');
+      tryonControl.requests.push({ owner, chainId, step, requestId: String(form?.get('requestId') ?? ''),
+        outfitId: typeof outfitId === 'string' ? outfitId : null, bytes: bytes.length, width: size?.width ?? null, height: size?.height ?? null,
+        soi: bytes[0] === 0xff && bytes[1] === 0xd8 });
+      const reply = tryonControl.replies.shift() ?? {};
+      if (reply.hold) await reply.hold;
+      const setup = { ...tryOnDefaults, ...tryonControl.setup[owner] };
+      const picture = tryonControl.picture ?? fixture;
+      // The server side of a step: claims it, then commits its picture or the result.
+      const run = (): { kind: 'code'; code: string; status: number } | { kind: 'picture' } | { kind: 'result'; row: TryOnStored } => {
+        if (!setup.activated || tryonControl.consent[owner] !== setup.noticeRevision) return { kind: 'code', code: 'CONSENT_REQUIRED', status: 403 };
+        let chain = tryonControl.chains.find(row => row.owner === owner && row.id === chainId);
+        if (!chain && step === 1) {
+          const links = outfitItems.filter(link => link.owner_id === owner && link.outfit_id === outfitId)
+            .sort((a, b) => Number(a.position) - Number(b.position));
+          const candidates: TryOnCandidate[] = links.flatMap(link => {
+            const item = items.find(row => row.owner_id === owner && row.id === link.item_id);
+            if (!item) return [];
+            return [{ itemId: String(item.id), category: item.category as TryOnCandidate['category'], lifecycle: item.lifecycle as TryOnCandidate['lifecycle'],
+              deleted: item.deleted_at !== null, readyImage: images.some(image => image.item_id === item.id && image.state === 'ready' && image.retired_at === null) }];
+          });
+          const steps = selectTryOnSteps(candidates).steps;
+          if (!steps.length) return { kind: 'code', code: 'NO_GARMENTS', status: 422 };
+          chain = { id: chainId, owner, outfitId: String(outfitId), steps, nextStep: 1, state: 'running', resultId: null, expiresAtMs: tryOnServerNow() + 1_800_000 };
+          tryonControl.chains.push(chain);
+        }
+        if (!chain) return { kind: 'code', code: 'NOT_FOUND', status: 404 };
+        if (chain.state === 'withdrawn') return { kind: 'code', code: 'WITHDRAWN', status: 409 };
+        if (chain.state !== 'running' || chain.nextStep !== step) return { kind: 'code', code: 'TERMINAL', status: 409 };
+        chain.nextStep = step + 1;
+        if (step < chain.steps.length) return { kind: 'picture' };
+        const row: TryOnStored = { id: randomUUID(), owner, outfitId: chain.outfitId, itemIds: chain.steps.map(entry => entry.itemId), image: picture,
+          completedAtMs: Date.now(), expiresAtMs: Date.now() + 7 * 86_400_000 };
+        tryonControl.results.push(row);
+        chain.state = 'complete'; chain.resultId = row.id;
+        return { kind: 'result', row };
+      };
+      try {
+        if (reply.code) { await json({ code: reply.code }, reply.status ?? 422); return; }
+        const outcome = reply.abort && !reply.commit ? null : run();
+        if (reply.abort) { await route.abort('failed'); return; }
+        if (!outcome) return;
+        if (outcome.kind === 'code') { await json({ code: outcome.code }, outcome.status); return; }
+        if (outcome.kind === 'result') { await json({ code: 'OK', resultId: outcome.row.id, expiresAtMs: outcome.row.expiresAtMs }); return; }
+        await route.fulfill({ status: 200, body: picture, headers: { 'content-type': 'image/jpeg', 'content-length': String(picture.length),
+          'cache-control': 'no-store', 'x-stillroom-tryon-sha256': createHash('sha256').update(picture).digest('hex'),
+          'access-control-expose-headers': 'x-stillroom-tryon-sha256' } });
+      } catch { /* The page may have gone away while the reply was held. */ }
+      return;
     }
     if (url.pathname === '/functions/v1/enhance-photo') {
       const bytes = request.postDataBuffer() ?? Buffer.alloc(0);
@@ -1922,7 +2075,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { provenance: provenanceRows, stylistControl, enhanceControl, adminControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, holdFeedbackReads, outfitControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { provenance: provenanceRows, stylistControl, enhanceControl, tryonControl, adminControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, holdFeedbackReads, outfitControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

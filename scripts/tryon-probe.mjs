@@ -50,12 +50,12 @@ export async function prepareProbe(env, deps) {
   if (typeof env.PROBE_PERSON !== 'string' || typeof env.PROBE_OUTPUT !== 'string') refuse('folders');
   let person;
   try { person = new Uint8Array(await deps.readFile(resolve(env.PROBE_PERSON))); } catch { refuse('person'); }
-  // The owner prepares the photo; the script only verifies it with the server's byte rules and never re-encodes it.
+  // The owner prepares the photo; the script only verifies it with the server's byte rules (the shared photo-input
+  // profile at 1024x1280, without metadata) and never re-encodes it.
   if (person.byteLength < 1 || person.byteLength > PERSON_BYTES) refuse('person');
-  try {
-    const admitted = deps.admit(person);
-    if (admitted.stripped || admitted.width !== 1024 || admitted.height !== 1280 || sha256(admitted.bytes) !== sha256(person)) refuse('person');
-  } catch (error) { if (error instanceof ProbeRefusal) throw error; refuse('person'); }
+  let usable;
+  try { usable = deps.personInput(person) === true; } catch { usable = false; }
+  if (!usable) refuse('person');
   const output = resolve(env.PROBE_OUTPUT);
   let existing;
   try { existing = await deps.readdir(output); } catch { refuse('output'); }
@@ -331,11 +331,13 @@ async function main() {
   const { registerSourceLoader } = await import('./src-loader.mjs');
   registerSourceLoader();
   const { admitProviderJpeg } = await import('../src/images/provider-jpeg.ts');
+  const { isPhotoInputJpeg } = await import('../src/images/restore-jpeg.ts');
   let result;
   try {
     result = await runProbe(process.env, {
       fetch, readFile, readdir, writeFile, now: () => performance.now(), sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
       admit: admitProviderJpeg,
+      personInput: (bytes) => isPhotoInputJpeg(bytes, 1024, 1280, { bytes: PERSON_BYTES, side: 1280 }),
     });
   } catch (error) {
     if (error instanceof ProbeRefusal) {

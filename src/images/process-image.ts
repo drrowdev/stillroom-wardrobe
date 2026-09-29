@@ -3,7 +3,8 @@ import { ORIGINAL_EDIT, type PhotoEdit } from './crop';
 import { validateImage } from './validate';
 import type { Segmenter } from './background/remover';
 
-function admitter(file: Blob, signal?: AbortSignal): () => Promise<AdmittedSource> {
+/** Source admission for every accepted format (also the VTO-2 body photo). */
+export function admitter(file: Blob, signal?: AbortSignal): () => Promise<AdmittedSource> {
   return async () => {
     const signature = new Uint8Array(await abortable(file.slice(0, 2).arrayBuffer(), signal));
     if (signature[0] === 0xff && signature[1] === 0xd8) return admitJpeg(file, signal);

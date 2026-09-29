@@ -69,6 +69,21 @@ export function cropGeometry(width: number, height: number, orientation = 1, edi
   const y = Math.min(oriented.height - 1, Math.floor(edit.crop.y * oriented.height));
   const right = Math.min(oriented.width, Math.max(x + 1, Math.ceil((edit.crop.x + edit.crop.width) * oriented.width)));
   const bottom = Math.min(oriented.height, Math.max(y + 1, Math.ceil((edit.crop.y + edit.crop.height) * oriented.height)));
+  return geometryOf(oriented, width, height, orientation, edit.turns, x, y, right, bottom);
+}
+
+/** The draw geometry of an exact oriented pixel rectangle (VTO-2 body photo), in the same shape as `cropGeometry`. */
+export function rectGeometry(width: number, height: number, turns: number, rect: PixelRect) {
+  const oriented = orientationTransform(width, height, 1, turns);
+  if (![rect.x, rect.y, rect.width, rect.height].every(Number.isSafeInteger) || rect.x < 0 || rect.y < 0
+    || rect.width < 1 || rect.height < 1 || rect.x + rect.width > oriented.width || rect.y + rect.height > oriented.height) {
+    throw new ImagePreparationError('invalid');
+  }
+  return geometryOf(oriented, width, height, 1, turns, rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
+}
+
+function geometryOf(oriented: { matrix: Matrix }, width: number, height: number, orientation: number, turns: number,
+  x: number, y: number, right: number, bottom: number) {
   const undo = inverse(oriented.matrix);
   const corners = [mapPoint(undo, x, y), mapPoint(undo, right, y), mapPoint(undo, x, bottom), mapPoint(undo, right, bottom)];
   const sx = Math.min(...corners.map(([px]) => px));
@@ -76,7 +91,7 @@ export function cropGeometry(width: number, height: number, orientation = 1, edi
   return {
     matrix: oriented.matrix, x, y, width: right - x, height: bottom - y,
     source: { x: sx, y: sy, width: Math.max(...corners.map(([px]) => px)) - sx, height: Math.max(...corners.map(([, py]) => py)) - sy },
-    identity: orientation === 1 && edit.turns % 4 === 0 && x === 0 && y === 0 && right === width && bottom === height,
+    identity: orientation === 1 && turns % 4 === 0 && x === 0 && y === 0 && right === width && bottom === height,
   };
 }
 
@@ -146,4 +161,67 @@ export function cropDone(edit: PhotoEdit, accepted: PhotoEdit, valid: boolean, r
   const unchanged = sameEdit(edit, accepted);
   if (review) return { kind: 'accept', unchanged };
   return unchanged ? { kind: 'cancel' } : { kind: 'apply' };
+}
+
+/**
+ * VTO-2 fixed-ratio crops. `factor` is the crop-fraction height per unit of crop-fraction width that keeps the pixel
+ * ratio: for a `rw`:`rh` crop of a `width` x `height` (oriented) image it is width * rh / (height * rw).
+ */
+export function aspectFactor(width: number, height: number, rw: number, rh: number): number {
+  if (![width, height, rw, rh].every((value) => Number.isFinite(value) && value > 0)) throw new ImagePreparationError('invalid');
+  return width * rh / (height * rw);
+}
+
+/** A corner drag with the ratio locked: the opposite corner stays put and the frame stays inside the image. */
+export function resizeAspectCrop(crop: Crop, corner: Corner, dx: number, dy: number, minWidth: number, minHeight: number, factor: number): Crop {
+  const start = normalizeCrop(crop);
+  const west = corner === 'nw' || corner === 'sw', north = corner === 'nw' || corner === 'ne';
+  const anchorX = west ? start.x + start.width : start.x, anchorY = north ? start.y + start.height : start.y;
+  const byX = west ? start.width - dx : start.width + dx;
+  const byY = (north ? start.height - dy : start.height + dy) / factor;
+  // The axis moved further decides, so dragging along either edge both grows and shrinks the frame.
+  let width = Math.abs(byX - start.width) >= Math.abs(byY - start.width) ? byX : byY;
+  const most = Math.min(west ? anchorX : 1 - anchorX, (north ? anchorY : 1 - anchorY) / factor);
+  const least = Math.min(most, Math.max(minWidth, minHeight / factor, Number.MIN_VALUE));
+  width = Math.max(least, Math.min(most, width));
+  const height = width * factor;
+  return { x: Math.max(0, west ? anchorX - width : anchorX), y: Math.max(0, north ? anchorY - height : anchorY), width, height };
+}
+
+export type PixelRect = { x: number; y: number; width: number; height: number };
+/**
+ * The exact source-pixel rectangle of a fixed-ratio crop, shared by the crop preview and the encoder: x, y and width
+ * are rounded from the fractions and the height is derived from the width. Null when the stated height is more than one
+ * source pixel away from the derived one or the rectangle leaves the image.
+ */
+export function aspectPixelRect(width: number, height: number, crop: Crop, rw: number, rh: number): PixelRect | null {
+  if (!validCrop(crop) || ![width, height].every((value) => Number.isSafeInteger(value) && value > 0)) return null;
+  const x = Math.round(crop.x * width), y = Math.round(crop.y * height), w = Math.round(crop.width * width);
+  const h = Math.round(w * rh / rw);
+  if (w < 1 || h < 1 || Math.abs(h - crop.height * height) > 1 || x + w > width || y + h > height) return null;
+  return { x, y, width: w, height: h };
+}
+
+/**
+ * Snaps a fixed-ratio crop to whole source pixels (width rounded, height derived, then moved back inside the image), so
+ * the fractions the editor applies map to one exact `aspectPixelRect`. Null when not even one pixel fits.
+ */
+export function snapAspectCrop(width: number, height: number, crop: Crop, rw: number, rh: number): Crop | null {
+  if (!validCrop(crop) || ![width, height].every((value) => Number.isSafeInteger(value) && value > 0)) return null;
+  const start = normalizeCrop(crop);
+  let w = Math.max(1, Math.round(start.width * width));
+  while (w > 1 && (w > width || Math.round(w * rh / rw) > height)) w -= 1;
+  const h = Math.round(w * rh / rw);
+  if (h < 1 || h > height || w > width) return null;
+  const x = Math.min(width - w, Math.max(0, Math.round(start.x * width)));
+  const y = Math.min(height - h, Math.max(0, Math.round(start.y * height)));
+  return { x: x / width, y: y / height, width: w / width, height: h / height };
+}
+
+/** A fixed crop ratio, width to height. */
+export type CropAspect = { rw: number; rh: number };
+/** The largest centred crop of this ratio in the image after `turns` quarter turns, snapped to whole pixels. */
+export function largestAspectCrop(width: number, height: number, turns: number, aspect: CropAspect): Crop {
+  const [w, h] = (((turns % 4) + 4) % 4) % 2 ? [height, width] : [width, height];
+  return snapAspectCrop(w, h, aspectCrop(w, h, aspect.rw / aspect.rh), aspect.rw, aspect.rh) ?? FULL_CROP;
 }
