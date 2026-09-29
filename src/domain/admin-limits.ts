@@ -1,15 +1,16 @@
 // AD1b: the admin spending and limits view (ADR27). Pure parsing, exact micro-USD arithmetic and form checks that
-// mirror admin_set_ai_limits. Amounts stay decimal strings or BigInt throughout; nothing here uses floating point.
+// mirror admin_set_ai_limits_v2 (VTO-2b adds try-on as a fourth feature). Amounts stay decimal strings or BigInt
+// throughout; nothing here uses floating point.
 import { locales, type Language } from '../i18n';
 
-export const LIMIT_FEATURES = ['shared', 'stylist', 'enhancement'] as const;
+export const LIMIT_FEATURES = ['shared', 'stylist', 'enhancement', 'tryOn'] as const;
 export type LimitFeature = (typeof LIMIT_FEATURES)[number];
 export const LIMIT_KEYS = ['monthlyAllowanceMicro', 'maxRequestMicro', 'maxRequestsPerHour'] as const;
 export type LimitKey = (typeof LIMIT_KEYS)[number];
 export type FeatureLimits = { monthlyAllowanceMicro: string | null; maxRequestMicro: string | null; maxRequestsPerHour: number | null };
 export type Limits = Record<LimitFeature, FeatureLimits>;
 export type LimitField = `${LimitFeature}.${LimitKey}`;
-export const SPEND_PURPOSES = ['analysis', 'stylist', 'enhancement'] as const;
+export const SPEND_PURPOSES = ['analysis', 'stylist', 'enhancement', 'tryOn'] as const;
 export type SpendPurpose = (typeof SPEND_PURPOSES)[number];
 export type MonthSpend = { confirmedMicro: string; estimatedMicro: string; reservedMicro: string; totalMicro: string; requests: number };
 export type MonthHistory = { month: string } & Record<SpendPurpose, MonthSpend>;
@@ -19,8 +20,9 @@ export type AdminAccount = {
   features: Record<SpendPurpose, { configured: boolean; activated: boolean }>;
   limits: Limits | null; history: MonthHistory[];
   current: { period: string } & Record<'shared' | SpendPurpose, CurrentUse>;
-  probe: { count: number; allocationMicro: string; maxCalls: number };
+  probe: ProbeAllocation; tryOnProbe: ProbeAllocation;
 };
+export type ProbeAllocation = { count: number; allocationMicro: string; maxCalls: number };
 export type AdminSpending = { asOf: number; months: string[]; accounts: AdminAccount[] };
 
 /** USD 50 in micro-USD: the per-account app limit on the shared monthly allowance. */
@@ -45,10 +47,9 @@ function parseFeatureLimits(value: unknown): FeatureLimits | null {
 }
 export function parseLimits(value: unknown): Limits | null {
   if (!exact(value, LIMIT_FEATURES)) return null;
-  const parsed = LIMIT_FEATURES.map((feature) => parseFeatureLimits(value[feature]));
-  const [shared, stylist, enhancement] = parsed;
-  if (!shared || !stylist || !enhancement) return null;
-  return { shared, stylist, enhancement };
+  const [shared, stylist, enhancement, tryOn] = LIMIT_FEATURES.map((feature) => parseFeatureLimits(value[feature]));
+  if (!shared || !stylist || !enhancement || !tryOn) return null;
+  return { shared, stylist, enhancement, tryOn };
 }
 function parseMonthSpend(value: unknown): MonthSpend | null {
   if (!exact(value, ['confirmedMicro', 'estimatedMicro', 'reservedMicro', 'totalMicro', 'requests'])) return null;
@@ -61,13 +62,17 @@ function parseCurrent(value: unknown): CurrentUse | null {
   return exact(value, ['usedMicro', 'lastHour']) && isMicroText(value.usedMicro) && count(value.lastHour)
     ? { usedMicro: value.usedMicro, lastHour: value.lastHour } : null;
 }
+function parseProbe(value: unknown): ProbeAllocation | null {
+  return exact(value, ['count', 'allocationMicro', 'maxCalls']) && count(value.count) && isMicroText(value.allocationMicro) && count(value.maxCalls)
+    ? { count: value.count, allocationMicro: value.allocationMicro, maxCalls: value.maxCalls } : null;
+}
 function parseAccount(value: unknown, months: readonly string[]): AdminAccount | null {
   if (!exact(value, ['admissionNo', 'enabled', 'accountVersion', 'features', 'limits', 'history', 'current', 'openAllocations'])) return null;
   const { admissionNo, enabled, accountVersion, features, limits, history, current, openAllocations } = value;
   if (admissionNo !== 1 && admissionNo !== 2 || typeof enabled !== 'boolean' || typeof accountVersion !== 'string'
     || !VERSION.test(accountVersion) || !exact(features, SPEND_PURPOSES) || !Array.isArray(history) || history.length !== months.length
     || !exact(current, ['period', 'shared', ...SPEND_PURPOSES]) || typeof current.period !== 'string' || current.period !== months[0]
-    || !exact(openAllocations, ['enhancementProbe']) || !exact(openAllocations.enhancementProbe, ['count', 'allocationMicro', 'maxCalls'])) return null;
+    || !exact(openAllocations, ['enhancementProbe', 'tryOnProbe'])) return null;
   const flags = {} as AdminAccount['features'];
   for (const purpose of SPEND_PURPOSES) {
     const flag = features[purpose];
@@ -78,21 +83,19 @@ function parseAccount(value: unknown, months: readonly string[]): AdminAccount |
   if (limits !== null && !parsedLimits) return null;
   const rows: MonthHistory[] = [];
   for (const [index, entry] of history.entries()) {
-    if (!exact(entry, ['month', 'tryOn', ...SPEND_PURPOSES]) || entry.month !== months[index]
-      || !exact(entry.tryOn, ['available']) || entry.tryOn.available !== false) return null;
-    const analysis = parseMonthSpend(entry.analysis), stylist = parseMonthSpend(entry.stylist), enhancement = parseMonthSpend(entry.enhancement);
-    if (!analysis || !stylist || !enhancement) return null;
-    rows.push({ month: months[index]!, analysis, stylist, enhancement });
+    if (!exact(entry, ['month', ...SPEND_PURPOSES]) || entry.month !== months[index]) return null;
+    const [analysis, stylist, enhancement, tryOn] = SPEND_PURPOSES.map((purpose) => parseMonthSpend(entry[purpose]));
+    if (!analysis || !stylist || !enhancement || !tryOn) return null;
+    rows.push({ month: months[index]!, analysis, stylist, enhancement, tryOn });
   }
-  const shared = parseCurrent(current.shared), analysis = parseCurrent(current.analysis),
-    stylist = parseCurrent(current.stylist), enhancement = parseCurrent(current.enhancement);
-  const probe = openAllocations.enhancementProbe;
-  if (!shared || !analysis || !stylist || !enhancement || !count(probe.count) || !isMicroText(probe.allocationMicro) || !count(probe.maxCalls)) return null;
+  const shared = parseCurrent(current.shared);
+  const [analysis, stylist, enhancement, tryOn] = SPEND_PURPOSES.map((purpose) => parseCurrent(current[purpose]));
+  const probe = parseProbe(openAllocations.enhancementProbe), tryOnProbe = parseProbe(openAllocations.tryOnProbe);
+  if (!shared || !analysis || !stylist || !enhancement || !tryOn || !probe || !tryOnProbe) return null;
   return { admissionNo, enabled, accountVersion, features: flags, limits: parsedLimits, history: rows,
-    current: { period: current.period, shared, analysis, stylist, enhancement },
-    probe: { count: probe.count, allocationMicro: probe.allocationMicro, maxCalls: probe.maxCalls } };
+    current: { period: current.period, shared, analysis, stylist, enhancement, tryOn }, probe, tryOnProbe };
 }
-/** The admin_ai_spending reply, with exactly the keys ADR27 allows; anything else is refused whole. */
+/** The admin_ai_spending_v2 reply, with exactly the keys ADR27 allows; anything else is refused whole. */
 export function parseSpending(value: unknown): AdminSpending | null {
   if (!exact(value, ['code', 'asOf', 'months', 'accounts']) || value.code !== 'OK' || !count(value.asOf)
     || !Array.isArray(value.months) || value.months.length < 1 || value.months.length > 12 || !Array.isArray(value.accounts)
@@ -118,7 +121,7 @@ export type WriteResult = { code: 'OK'; limits: Limits; belowUse: boolean } | { 
   | { code: 'UNAVAILABLE' | 'UNCONFIGURED' | 'INVALID_INPUT' };
 const isField = (value: unknown): value is LimitField => typeof value === 'string'
   && LIMIT_FEATURES.some((feature) => LIMIT_KEYS.some((key) => value === `${feature}.${key}`));
-/** The admin_set_ai_limits reply; null for anything that isn't one of its documented shapes. */
+/** The admin_set_ai_limits_v2 reply; null for anything that isn't one of its documented shapes. */
 export function parseWriteResult(value: unknown): WriteResult | null {
   if (!record(value)) return null;
   if (value.code === 'OK' && exact(value, ['code', 'limits', 'belowUse']) && typeof value.belowUse === 'boolean') {
@@ -144,7 +147,7 @@ export function parseWriteResult(value: unknown): WriteResult | null {
 }
 
 const addMicro = (...values: string[]) => values.reduce((sum, value) => sum + BigInt(value), 0n).toString();
-/** Confirmed plus estimated plus reserved, per feature; the total the view shows, summed over the three features. */
+/** Confirmed plus estimated plus reserved, per feature; the total the view shows, summed over the four features. */
 export function monthTotals(month: MonthHistory): MonthSpend {
   const parts = SPEND_PURPOSES.map((purpose) => month[purpose]);
   return { confirmedMicro: addMicro(...parts.map((part) => part.confirmedMicro)), estimatedMicro: addMicro(...parts.map((part) => part.estimatedMicro)),

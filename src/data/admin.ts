@@ -1,4 +1,4 @@
-// AD1b: the three admin RPCs (ADR27). Each call is bound to the owner scope that made it, so a sign-out or account
+// AD1b: the three admin RPCs (ADR27); spending and limits use the v2 functions, which add try-on (VTO-2b). Each call is bound to the owner scope that made it, so a sign-out or account
 // change drops its reply. Anyone who isn't the app's admin gets the same fixed UNAVAILABLE, shown as "Not available".
 import type { OwnerScope } from '../auth/session';
 import { parseSpending, parseWriteResult, type AdminSpending, type Limits, type WriteResult } from '../domain/admin-limits';
@@ -32,7 +32,7 @@ export type SpendingRead = { kind: 'ok'; spending: AdminSpending } | { kind: 'un
 export async function readAdminSpending(client: AppClient, scope: OwnerScope, months: 6 | 12, signal: AbortSignal): Promise<SpendingRead> {
   const call = lifetime(scope, signal);
   call.check();
-  const { data, error } = await client.rpc('admin_ai_spending', { p_months: months }).abortSignal(call.signal);
+  const { data, error } = await client.rpc('admin_ai_spending_v2', { p_months: months }).abortSignal(call.signal);
   call.check();
   if (error) { if (missing(error)) return { kind: 'unavailable' }; throw new AppError('error.unavailable'); }
   if (unavailable(data)) return { kind: 'unavailable' };
@@ -46,7 +46,7 @@ export type LimitWrite = { admissionNo: 1 | 2; accountVersion: string; expected:
 export async function writeAdminLimits(client: AppClient, scope: OwnerScope, write: LimitWrite, signal: AbortSignal): Promise<WriteResult> {
   const call = lifetime(scope, signal);
   call.check();
-  const { data, error } = await client.rpc('admin_set_ai_limits', {
+  const { data, error } = await client.rpc('admin_set_ai_limits_v2', {
     p_admission_no: write.admissionNo, p_account_version: write.accountVersion, p_expected: write.expected, p_limits: write.limits,
     ...write.reason ? { p_reason_code: write.reason } : {},
   }).abortSignal(call.signal);
