@@ -781,6 +781,7 @@ Platform restore: after any database restore and before access reopens, run
 counts in the restore receipt. It deletes every try-on result, chain and attempt
 (none are in the app's export or restore), never usage or evidence, and settles
 held try-on usage that is already due.
+
 **BG2c-2 "clean up photo" client (source only; inactive; plan rev4).** A newly
 chosen photo whose clean-up would be sent opens the crop editor as a pre-upload
 review before anything is committed, analysed or sent. Done, even with an
