@@ -102,7 +102,8 @@ export function tryOnView(read: TryOnRead, unresolved: boolean, shownBefore: boo
   if (read.kind === 'unknown' || read.kind === 'missing') return hidden;
   if (read.kind === 'failed') return shownBefore ? { kind: 'loadFailed', turnOn: false, turnOff: consentKnownOn } : hidden;
   const status = read.status;
-  const on = status.consent?.enabled === true;
+  // Missing consent info (for example UNAVAILABLE) is unknown, not withdrawn: keep the last known consent and Turn off.
+  const on = status.consent ? status.consent.enabled === true : consentKnownOn;
   const paused: TryOnView = { kind: 'paused', turnOn: false, turnOff: true };
   // Not activated or unavailable: nothing to turn on, but consent given earlier can always be withdrawn.
   if (!status.policy || status.code === 'UNAVAILABLE' || !status.policy.activated) return on ? paused : hidden;
@@ -392,12 +393,14 @@ export class TryOnClient {
           throw error;
         }
       }
-      const value = await this.json(response, wait).catch(() => null);
+      // An unreadable, truncated or unexpected reply proves nothing about the step: it throws, and the caller reconciles.
+      const value = await this.json(response, wait);
       if (response.status === 200 && exactKeys(value, ['code', 'resultId', 'expiresAtMs']) && value.code === 'OK'
         && uuid(value.resultId) && count(value.expiresAtMs)) {
         return { kind: 'result', resultId: value.resultId, expiresAtMs: value.expiresAtMs };
       }
-      return { kind: 'code', code: exactKeys(value, ['code']) ? closed(value.code) : 'FAILED' };
+      if (!exactKeys(value, ['code']) || value.code === 'OK') throw new TryOnError('UNAVAILABLE');
+      return { kind: 'code', code: closed(value.code) };
     });
   }
 }

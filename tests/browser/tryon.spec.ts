@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { translate, type Language, type MessageKey } from '../../src/i18n';
+import '../../src/i18n/tryon';
 import { mockBackend, owners, signIn, type TryOnSetup } from './mock-backend';
 
 // VTO-2a owner try-on against the mocked backend. Every assertion is text: request counts and fields, JPEG frame sizes
@@ -402,6 +403,63 @@ test.describe('Stop and Delete', () => {
     await expect(page.locator('.tryon-saved figcaption')).toContainText('Made with AI');
     await expect(page.getByText(text('tryon.deleted'), { exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.tryon-saved-list img')).toHaveCount(0);
+  });
+  test('with several saved try-ons, deleting or expiring one keeps the others and settles', async ({ page }) => {
+    engineOnly();
+    const errors: string[] = [];
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    page.on('pageerror', error => errors.push(error.message));
+    const api = await mockBackend(page);
+    const clothes = seed(api);
+    api.tryonControl.setup[owners.a] = { activated: true };
+    api.tryonControl.consent[owners.a] = 1;
+    const outfitId = seedOutfit(api, [clothes.top.id], 'Weekend');
+    const stored = (expiresInMs: number, age: number) => {
+      const id = randomUUID();
+      api.tryonControl.results.push({ id, owner: owners.a, outfitId, itemIds: [clothes.top.id], image: api.fixture,
+        completedAtMs: Date.now() - age, expiresAtMs: Date.now() + expiresInMs });
+      return id;
+    };
+    const expiring = stored(15_000, 1000), deleting = stored(3_600_000, 2000), kept = stored(3_600_000, 3000);
+    let reads = 0;
+    page.on('request', request => { if (/\/rpc\/tryon_(results_v1|result_image_v1)$/.test(new URL(request.url()).pathname)) reads += 1; });
+    await page.goto(`/#/outfits/${outfitId}`); await signIn(page);
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(3, { timeout: 10_000 });
+    await page.locator(`#tryon-${deleting}-delete`).click();
+    await page.locator(`#tryon-${deleting}-confirm-confirm`).click();
+    await expect(page.getByText(text('tryon.deleted'), { exact: true })).toBeVisible();
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(2);
+    expect(api.tryonControl.deletes).toEqual([deleting]);
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(1, { timeout: 20_000 });
+    await expect(page.locator(`#tryon-${kept}-delete`)).toBeVisible();
+    await expect(page.locator(`#tryon-${expiring}-delete`)).toHaveCount(0);
+    const settled = reads;
+    await page.waitForTimeout(1500);
+    expect(reads).toBe(settled);
+    await expect(page.getByText(text('tryon.deleted'), { exact: true })).toHaveCount(1);
+    expect(errors).toEqual([]);
+  });
+  test('a failed list of saved try-ons says so and offers Retry', async ({ page }) => {
+    engineOnly();
+    const api = await mockBackend(page);
+    const clothes = seed(api);
+    api.tryonControl.setup[owners.a] = { activated: true };
+    api.tryonControl.consent[owners.a] = 1;
+    const outfitId = seedOutfit(api, [clothes.top.id], 'Weekend');
+    api.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId, itemIds: [clothes.top.id], image: api.fixture,
+      completedAtMs: Date.now() - 1000, expiresAtMs: Date.now() + 3_600_000 });
+    let failing = true;
+    await page.route('**/rest/v1/rpc/tryon_results_v1', async route => {
+      if (failing) { await route.fulfill({ status: 500, contentType: 'application/json', body: '{"message":"fixture"}' }); return; }
+      await route.fallback();
+    });
+    await page.goto(`/#/outfits/${outfitId}`); await signIn(page);
+    await expect(page.locator('.tryon-saved [role=alert]')).toContainText(text('tryon.savedFailed'), { timeout: 10_000 });
+    await axe(page);
+    failing = false;
+    await page.locator('#tryon-saved-retry').click();
+    await expect(page.locator('.tryon-saved-list img')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.tryon-saved [role=alert]')).toHaveCount(0);
   });
 });
 

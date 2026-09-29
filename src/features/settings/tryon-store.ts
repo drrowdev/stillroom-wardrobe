@@ -108,7 +108,8 @@ export const tryOnViewOf = (store: TryOnStore, state: TryOnState): TryOnView => 
 
 function apply(store: TryOnStore, read: TryOnRead) {
   const state = store.get();
-  if (read.kind === 'ready') store.consentOn = read.status.consent?.enabled === true;
+  // A status without consent info (UNAVAILABLE) says nothing about consent: keep the last known answer.
+  if (read.kind === 'ready' && read.status.consent !== null) store.consentOn = read.status.consent.enabled === true;
   const settles = read.kind === 'ready' && read.status.consent !== null;
   store.update({ read, unresolved: state.unresolved && !settles,
     known: state.known || tryOnView(read, false, false, store.consentOn).kind !== 'hidden' });

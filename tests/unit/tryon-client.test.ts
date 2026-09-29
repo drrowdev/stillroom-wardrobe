@@ -7,8 +7,9 @@ import {
 } from '../../src/data/tryon';
 import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, type TryOnStep } from '../../src/domain/tryon';
 import {
-  RECONCILE_EVERY_MS, RECONCILE_FOR_MS, TryOnRun, failureAction, type RunEnvironment, type TryOnApi,
+  RECONCILE_EVERY_MS, RECONCILE_FOR_MS, RUN_LIFETIME_MS, TryOnRun, failureAction, type RunEnvironment, type TryOnApi,
 } from '../../src/features/outfits/use-try-on';
+import { readTryOnStatus, TryOnStore, tryOnViewOf } from '../../src/features/settings/tryon-store';
 
 const SERVER = Date.parse('2026-10-05T12:00:00Z');
 const OUTFIT = '10000000-0000-4000-8000-000000000001';
@@ -57,6 +58,11 @@ describe('closed try-on replies', () => {
     expect(tryOnView({ kind: 'failed' }, false, true, true)).toEqual({ kind: 'loadFailed', turnOn: false, turnOff: true });
     expect(tryOnView(ready(statusRaw()), true, true, true)).toEqual({ kind: 'unresolved', turnOn: false, turnOff: true });
   });
+  it('treats an unavailable status as unknown consent: known-on consent keeps Turn off', () => {
+    const unavailable = { kind: 'ready' as const, status: parseTryOnStatus({ code: 'UNAVAILABLE' })! };
+    expect(tryOnView(unavailable, false, true, true)).toEqual({ kind: 'paused', turnOn: false, turnOff: true });
+    expect(tryOnView(unavailable, false, false, false).kind).toBe('hidden');
+  });
   it('parses chain status, Stop, results and result images strictly', () => {
     const chain = { code: 'OK', state: 'running', nextStep: 2, steps: [{ slot: 'top', itemId: ID(1) }], activeAttempt: false,
       resultId: null, expiresAtMs: SERVER };
@@ -84,6 +90,7 @@ class Harness {
   now = 0;
   isOnline = true;
   onlineCallbacks: (() => void)[] = [];
+  resumeCallbacks: (() => void)[] = [];
   timers: { at: number; callback: () => void; live: boolean }[] = [];
   steps: StepInput[] = [];
   stepReplies: Scripted[] = [];
@@ -99,6 +106,7 @@ class Harness {
   env: RunEnvironment = {
     online: () => this.isOnline,
     whenOnline: (callback) => { this.onlineCallbacks.push(callback); return () => { this.onlineCallbacks = this.onlineCallbacks.filter((entry) => entry !== callback); }; },
+    onResume: (callback) => { this.resumeCallbacks.push(callback); return () => { this.resumeCallbacks = this.resumeCallbacks.filter((entry) => entry !== callback); }; },
     setTimer: (callback, ms) => { const timer = { at: this.now + ms, callback, live: true }; this.timers.push(timer); return () => { timer.live = false; }; },
     now: () => this.now,
     uuid: () => ID(100 + (this.ids += 1)),
@@ -131,8 +139,9 @@ class Harness {
 }
 const flush = async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); };
 const picture = (size: number): StepResponse => ({ kind: 'intermediate', body: new Uint8Array(new ArrayBuffer(size)), sha256: `hash-${size}` });
+const plan: TryOnStep[] = [{ slot: 'top', itemId: ID(1) }, { slot: 'bottom', itemId: ID(2) }, { slot: 'footwear', itemId: ID(3) }];
 const chain = (over: Partial<Extract<ChainStatus, { kind: 'chain' }>>): ChainStatus => ({ kind: 'chain', state: 'running', nextStep: 1,
-  steps: [{ slot: 'top', itemId: ID(1) }], activeAttempt: false, resultId: null, expiresAtMs: 0, ...over });
+  steps: plan, activeAttempt: false, resultId: null, expiresAtMs: 0, ...over });
 
 describe('the try-on run (rev4 §2.3-§3.2)', () => {
   it('sends each step once, chains the previous picture and drops everything at the result', async () => {
@@ -148,24 +157,127 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
     expect(run.holdsPicture()).toBe(false);
     expect(h.recorded).toEqual(['ok', 'ok', 'ok']);
   });
-  it('refuses a picture whose hash does not match, and a result before the last step', async () => {
+  it('settles a picture whose hash does not match, or a result before the last step, from the chain status', async () => {
     const h = new Harness();
     h.stepReplies = [{ kind: 'intermediate', body: new Uint8Array(new ArrayBuffer(20)), sha256: 'other' }];
+    h.chainReplies = [chain({ nextStep: 2 })];
     const run = h.run();
     run.start();
     await flush();
-    expect(run.get()).toEqual({ kind: 'failed', index: 0, failure: 'failed' });
+    // The server went on to step 2, but the picture can't be used: nothing is sent again.
+    expect(h.chainReads).toBe(1);
+    expect(run.get()).toEqual({ kind: 'failed', index: 0, failure: 'lost' });
+    expect(h.steps).toHaveLength(1);
+    expect(run.holdsPicture()).toBe(false);
     const early = new Harness();
     early.stepReplies = [{ kind: 'result', resultId: ID(9), expiresAtMs: 5 }];
+    early.chainReplies = [chain({ nextStep: 1 })];
     const second = early.run();
     second.start();
     await flush();
-    expect(second.get()).toMatchObject({ kind: 'failed', failure: 'failed' });
+    expect(early.chainReads).toBe(1);
+    expect(second.get()).toEqual({ kind: 'failed', index: 0, failure: 'failed' });
+    expect(early.recorded).toEqual(['failed']);
+  });
+  it('an unusable picture from the last step, or a failure after the finish, shows the saved result', async () => {
+    for (const last of [picture(40), { kind: 'code', code: 'FAILED' } as StepResponse, { kind: 'code', code: 'TIMEOUT' } as StepResponse,
+      { kind: 'code', code: 'OUTPUT_REJECTED' } as StepResponse]) {
+      const h = new Harness();
+      h.stepReplies = [picture(20), picture(30), last];
+      h.chainReplies = [chain({ state: 'complete', nextStep: 4, resultId: ID(9) })];
+      const run = h.run();
+      run.start();
+      await flush();
+      expect(h.chainReads).toBe(1);
+      expect(run.get()).toEqual({ kind: 'result', resultId: ID(9), expiresAtMs: null, alreadyFinished: false });
+      expect(h.steps).toHaveLength(3);
+      expect(run.holdsPicture()).toBe(false);
+    }
+  });
+  it('a missing picture hash is checked, not retried: the server decides', async () => {
+    const h = new Harness();
+    h.stepReplies = [picture(20), { kind: 'code', code: 'OUTPUT_REJECTED' }];
+    h.chainReplies = [chain({ nextStep: 3 })];
+    const run = h.run();
+    run.start();
+    await flush();
+    expect(run.get()).toEqual({ kind: 'failed', index: 1, failure: 'lost' });
+    expect(h.steps).toHaveLength(2);
+  });
+  it('a failed step is offered again only when the chain status shows it was not taken', async () => {
+    const h = new Harness();
+    h.stepReplies = [picture(20), { kind: 'code', code: 'FAILED' }];
+    h.chainReplies = [chain({ nextStep: 2 })];
+    const run = h.run();
+    run.start();
+    await flush();
+    expect(h.chainReads).toBe(1);
+    expect(run.get()).toEqual({ kind: 'failed', index: 1, failure: 'failed' });
+    expect(run.holdsPicture()).toBe(true);
+    expect(h.recorded).toEqual(['ok', 'failed']);
+  });
+  it('a chain with a different plan cannot go on', async () => {
+    const h = new Harness();
+    h.stepReplies = [new TryOnError('UNAVAILABLE')];
+    h.chainReplies = [chain({ nextStep: 1, steps: [{ slot: 'top', itemId: ID(7) }] })];
+    const run = h.run();
+    run.start();
+    await flush();
+    expect(run.get()).toEqual({ kind: 'failed', index: 0, failure: 'mismatch' });
+    expect(run.holdsPicture()).toBe(false);
+  });
+  it('holds no picture after the chain lifetime, after a retryable failure or while offline', async () => {
+    const h = new Harness();
+    h.stepReplies = [{ kind: 'code', code: 'BUSY' }];
+    const run = h.run();
+    run.start();
+    await flush();
+    expect(run.get()).toEqual({ kind: 'failed', index: 0, failure: 'busy' });
+    expect(run.holdsPicture()).toBe(true);
+    await h.advance(RUN_LIFETIME_MS + 60_000);
+    expect(run.holdsPicture()).toBe(false);
+    expect(run.get()).toEqual({ kind: 'failed', index: 0, failure: 'unavailable' });
+    run.start();
+    await flush();
+    expect(h.steps).toHaveLength(1);
+    const offline = new Harness();
+    offline.stepReplies = [new TryOnError('UNAVAILABLE')];
+    offline.isOnline = false;
+    const second = offline.run();
+    second.start();
+    await flush();
+    expect(second.get()).toEqual({ kind: 'checking', index: 0, offline: true });
+    // Timers may not have run while the page was hidden: coming back after 31 minutes checks the clock.
+    offline.now += RUN_LIFETIME_MS + 60_000;
+    offline.resumeCallbacks.forEach((callback) => callback());
+    await flush();
+    expect(second.holdsPicture()).toBe(false);
+    expect(second.get()).toEqual({ kind: 'failed', index: 0, failure: 'unavailable' });
+    expect(offline.onlineCallbacks).toHaveLength(0);
+    expect(offline.resumeCallbacks).toHaveLength(0);
+    offline.isOnline = true;
+    await offline.advance(RECONCILE_EVERY_MS);
+    expect(offline.chainReads).toBe(0);
+    expect(offline.steps).toHaveLength(1);
+  });
+  it('an offline check that resumes after the lifetime sends nothing and holds nothing', async () => {
+    const h = new Harness();
+    h.stepReplies = [new TryOnError('UNAVAILABLE')];
+    h.isOnline = false;
+    const run = h.run();
+    run.start();
+    await flush();
+    h.now += RUN_LIFETIME_MS + 60_000;
+    h.isOnline = true;
+    h.onlineCallbacks.splice(0).forEach((callback) => callback());
+    await flush();
+    expect(h.chainReads).toBe(0);
+    expect(run.holdsPicture()).toBe(false);
+    expect(run.get()).toEqual({ kind: 'failed', index: 0, failure: 'unavailable' });
   });
   it('maps each closed code to what the owner can do next', async () => {
     const cases: [string, number, string][] = [['FILTERED', 0, 'filteredPhoto'], ['FILTERED', 1, 'filteredGarment'],
-      ['RATE_LIMIT', 0, 'busy'], ['BUSY', 0, 'busy'], ['ALLOWANCE', 0, 'allowance'], ['FAILED', 0, 'failed'],
-      ['TIMEOUT', 0, 'failed'], ['CHAIN_MISMATCH', 1, 'mismatch'], ['WITHDRAWN', 0, 'turnedOff'],
+      ['RATE_LIMIT', 0, 'busy'], ['BUSY', 0, 'busy'], ['ALLOWANCE', 0, 'allowance'], ['CHAIN_MISMATCH', 1, 'mismatch'], ['WITHDRAWN', 0, 'turnedOff'],
       ['RESULTS_FULL', 2, 'resultsFull'], ['INACTIVE', 0, 'unavailable']];
     for (const [code, index, failure] of cases) {
       const h = new Harness();
@@ -381,10 +493,15 @@ describe('the try-on client transport', () => {
     await expect(client.step(stepInput(2), new AbortController().signal)).resolves.toEqual({ kind: 'code', code: 'FILTERED' });
     fetcher.mockResolvedValueOnce(Response.json({ code: 'SOMETHING_NEW' }));
     await expect(client.step(stepInput(2), new AbortController().signal)).resolves.toEqual({ kind: 'code', code: 'FAILED' });
+    // A truncated or unexpected reply proves nothing: it throws, so the run checks the chain instead.
+    fetcher.mockResolvedValueOnce(new Response('{"code":"OK","resultId":"', { headers: { 'content-type': 'application/json' } }));
+    await expect(client.step(stepInput(3), new AbortController().signal)).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'OK', resultId: 'x' }));
+    await expect(client.step(stepInput(3), new AbortController().signal)).rejects.toMatchObject({ code: 'UNAVAILABLE' });
     await expect(client.step({ ...stepInput(2), outfitId: OUTFIT }, new AbortController().signal)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     await expect(client.step({ ...stepInput(), person: jpegBody(TRYON_LIMITS.personBytes + 1) }, new AbortController().signal))
       .rejects.toMatchObject({ code: 'INVALID_INPUT' });
-    expect(fetcher).toHaveBeenCalledTimes(6);
+    expect(fetcher).toHaveBeenCalledTimes(8);
   });
   it('gives up on a step after the 100-second client deadline', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -398,6 +515,25 @@ describe('the try-on client transport', () => {
     await vi.advanceTimersByTimeAsync(TRYON_LIMITS.clientStepMs - 1);
     await vi.advanceTimersByTimeAsync(1);
     await settled;
+  });
+  it('keeps known consent and Turn off through an unavailable status, and recovers', async () => {
+    const store = new TryOnStore(supabase(), config, { ownerId: owner, epoch: 1, signal: new AbortController().signal });
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetcher);
+    fetcher.mockResolvedValueOnce(Response.json(statusRaw()));
+    await readTryOnStatus(store, 'active');
+    expect(tryOnViewOf(store, store.get())).toMatchObject({ kind: 'on', turnOff: true });
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'UNAVAILABLE' }));
+    await readTryOnStatus(store, 'active');
+    expect(store.consentOn).toBe(true);
+    expect(tryOnViewOf(store, store.get())).toEqual({ kind: 'paused', turnOn: false, turnOff: true });
+    fetcher.mockResolvedValueOnce(Response.json(statusRaw()));
+    await readTryOnStatus(store, 'active');
+    expect(tryOnViewOf(store, store.get())).toMatchObject({ kind: 'on', turnOff: true });
+    fetcher.mockResolvedValueOnce(Response.json(statusRaw({ consent: off, code: 'CONSENT_REQUIRED' })));
+    await readTryOnStatus(store, 'active');
+    expect(store.consentOn).toBe(false);
+    store.dispose();
   });
   it('drops replies once the owner or session changed', async () => {
     const outer = new AbortController();

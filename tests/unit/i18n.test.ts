@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isLanguage, itemCount, languages, messages, resolveLanguage, translate } from '../../src/i18n';
+import '../../src/i18n/tryon';
 import { canonicalPrice, formatDateOnly, formatMoney, parsePrice, priceForDatabase } from '../../src/i18n/format';
 
 describe('owner-isolated language', () => {

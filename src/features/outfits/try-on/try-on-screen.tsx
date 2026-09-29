@@ -5,6 +5,7 @@ import { tryOnReady } from '../../../data/tryon';
 import type { OutfitComponent, OutfitRecord } from '../../../domain/outfits';
 import type { TryOnStep } from '../../../domain/tryon';
 import type { Language, MessageKey, Translate } from '../../../i18n';
+import '../../../i18n/tryon';
 import { BODY_ASPECT, BodyPhotoError, admitBodySource, prepareBodyPhoto, type BodyPhoto, type BodySource } from '../../../images/body-photo';
 import { largestAspectCrop, type PhotoEdit } from '../../../images/crop';
 import { CropEditor } from '../../../images/crop-editor';

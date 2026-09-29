@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { TryOnClient } from '../../../data/tryon';
 import type { Language, Translate } from '../../../i18n';
+import '../../../i18n/tryon';
 import { deletionDate } from '../use-try-on';
 
 /** A modal confirm: the browser traps focus; the caller returns focus to the control that opened it. */
@@ -72,7 +73,10 @@ export function TryOnPicture({ api, result, language, t, online, idPrefix, child
     const timer = setTimeout(() => setPicture({ kind: 'deleted' }), Math.min(remaining, 2_147_483_647));
     return () => clearTimeout(timer);
   }, [expires, gone]);
-  useEffect(() => { if (gone) onDeleted?.(); }, [gone, onDeleted]);
+  // The latest callback, so a parent re-render with a new closure doesn't report the same removal again.
+  const deleted = useRef(onDeleted);
+  deleted.current = onDeleted;
+  useEffect(() => { if (gone) deleted.current?.(); }, [gone]);
   function remove() {
     setConfirming(false); setDeleting(true); setDeleteFailed(false);
     api.deleteResult(result.id).then(() => { setDeleting(false); setPicture({ kind: 'deleted' }); }, () => {

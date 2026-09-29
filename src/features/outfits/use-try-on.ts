@@ -1,11 +1,12 @@
 // VTO-2 try-on run (plan rev4 §2.3-§2.4, §3.2): one chain for one saved outfit, held in memory only. The encoded body
 // photo and the latest intermediate picture live here and are dropped on the result, Close, Stop, a chain end or
-// disposal (navigation, UID change, logout). A step is sent once: after a lost reply the run reconciles through
-// tryon_chain_status and never sends it again by itself. Try again is always the owner's explicit choice.
-import { useEffect, useState, useSyncExternalStore } from 'react';
+// disposal (navigation, UID change, logout), and at the latest when the chain's lifetime ends. A step is sent once:
+// after a lost or ambiguous reply the run reconciles through tryon_chain_status and never sends it again by itself. Try
+// again is always the owner's explicit choice.
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { CancelResult, ChainStatus, StepInput, StepResponse, TryOnClient, TryOnCode, TryOnResult, TryOnStatus } from '../../data/tryon';
 import { sha256Hex, TryOnError } from '../../data/tryon';
-import { selectTryOnSteps, type TryOnCandidate, type TryOnSelection, type TryOnStep } from '../../domain/tryon';
+import { selectTryOnSteps, TRYON_LIMITS, type TryOnCandidate, type TryOnSelection, type TryOnStep } from '../../domain/tryon';
 import type { OutfitComponent, OutfitRecord } from '../../domain/outfits';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 import { readTryOnStatus, type TryOnState, type TryOnStore } from '../settings/tryon-store';
@@ -22,6 +23,8 @@ export type RunEnvironment = {
   /** Calls back once the device is online again; returns a remover. */
   whenOnline(callback: () => void): () => void;
   setTimer(callback: () => void, ms: number): () => void;
+  /** Calls back whenever the page is shown or focused again (timers may not run while it is hidden); returns a remover. */
+  onResume(callback: () => void): () => void;
   now(): number;
   uuid(): string;
   sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string>;
@@ -37,6 +40,17 @@ export function browserEnvironment(): RunEnvironment {
       return () => window.removeEventListener('online', listener);
     },
     setTimer(callback, ms) { const timer = setTimeout(callback, ms); return () => clearTimeout(timer); },
+    onResume(callback) {
+      const visible = () => { if (document.visibilityState === 'visible') callback(); };
+      document.addEventListener('visibilitychange', visible);
+      window.addEventListener('pageshow', callback);
+      window.addEventListener('focus', callback);
+      return () => {
+        document.removeEventListener('visibilitychange', visible);
+        window.removeEventListener('pageshow', callback);
+        window.removeEventListener('focus', callback);
+      };
+    },
     now: () => Date.now(),
     uuid: () => crypto.randomUUID(),
     sha256: sha256Hex,
@@ -62,6 +76,8 @@ export type RunPhase =
 
 export const RECONCILE_EVERY_MS = 10_000;
 export const RECONCILE_FOR_MS = 240_000;
+/** How long a run may hold picture bytes: the chain's lifetime, counted from the first send (the server's starts later). */
+export const RUN_LIFETIME_MS = TRYON_LIMITS.chainMinutes * 60_000;
 
 const failureOf = (code: Exclude<TryOnCode, 'OK'>, index: number): FailureKind => {
   switch (code) {
@@ -75,7 +91,8 @@ const failureOf = (code: Exclude<TryOnCode, 'OK'>, index: number): FailureKind =
     default: return 'unavailable';
   }
 };
-const counted = (code: Exclude<TryOnCode, 'OK'>): 'failed' | 'other' => code === 'FAILED' || code === 'TIMEOUT' ? 'failed' : 'other';
+/** Codes that may come after the server claimed the step: its outcome is decided by the chain status, not the reply. */
+const ambiguous = (code: Exclude<TryOnCode, 'OK'>) => code === 'FAILED' || code === 'TIMEOUT' || code === 'OUTPUT_REJECTED';
 
 export class TryOnRun {
   private phase: RunPhase = { kind: 'ready' };
@@ -87,6 +104,9 @@ export class TryOnRun {
   private person: Uint8Array<ArrayBuffer> | null;
   private inFlight: AbortController | null = null;
   private stopTimers: (() => void)[] = [];
+  /** The run-lifetime timer and resume listener; unlike `stopTimers` they stay across sends. */
+  private lifetime: (() => void)[] = [];
+  private expiresAt: number | null = null;
   private generation = 0;
 
   constructor(private readonly api: TryOnApi, private readonly session: SessionStop, private readonly env: RunEnvironment,
@@ -107,11 +127,37 @@ export class TryOnRun {
   }
   private clearTimers() { for (const stop of this.stopTimers.splice(0)) stop(); }
   private drop() { this.person = null; }
+  private endLifetime() { for (const stop of this.lifetime.splice(0)) stop(); }
+  /** Starts the lifetime at the first send: however the run is left, no picture is held past it. */
+  private armLifetime() {
+    if (this.expiresAt !== null) return;
+    this.expiresAt = this.env.now() + RUN_LIFETIME_MS;
+    this.lifetime.push(this.env.setTimer(() => this.checkLifetime(), RUN_LIFETIME_MS), this.env.onResume(() => this.checkLifetime()));
+  }
+  /** At the end of the lifetime: stops pending work and checks, releases the pictures and sends nothing. */
+  private checkLifetime() {
+    if (this.disposed || this.expiresAt === null || this.env.now() < this.expiresAt) return;
+    this.endLifetime();
+    const phase = this.phase;
+    if (phase.kind !== 'running' && phase.kind !== 'checking' && phase.kind !== 'stopping') {
+      this.drop();
+      // The step can't be sent again once its chain is gone.
+      if (phase.kind === 'failed' && failureAction[phase.failure] === 'retry') this.set({ ...phase, failure: 'unavailable' });
+      return;
+    }
+    this.generation += 1;
+    this.clearTimers();
+    this.inFlight?.abort();
+    this.inFlight = null;
+    this.drop();
+    this.set({ kind: 'failed', index: 'index' in phase ? phase.index : 0, failure: 'unavailable' });
+  }
   private live(generation: number) { return !this.disposed && generation === this.generation && this.api.current(); }
 
   /** Starts the chain, or sends the failed step again after Try again. Nothing is sent while the session stop holds. */
   start(): void {
     const phase = this.phase;
+    this.checkLifetime();
     if (this.disposed || !this.person) return;
     if (phase.kind === 'ready') void this.send(0);
     else if (phase.kind === 'failed' && failureAction[phase.failure] === 'retry') void this.send(phase.index);
@@ -127,6 +173,7 @@ export class TryOnRun {
     const controller = new AbortController();
     this.inFlight = controller;
     this.started = true;
+    this.armLifetime();
     let reply: StepResponse;
     try {
       reply = await this.api.step({ chainId: this.chainId, step: index + 1, requestId: this.env.uuid(), person,
@@ -145,10 +192,14 @@ export class TryOnRun {
     await this.handle(index, reply, generation);
   }
 
+  /**
+   * A reply that doesn't prove its outcome (an unusable picture, the wrong kind for this step, or a failure that may
+   * come after the server claimed the step) is settled from the chain status, never from the reply.
+   */
   private async handle(index: number, reply: StepResponse, generation: number): Promise<void> {
     const last = index === this.steps.length - 1;
     if (reply.kind === 'result') {
-      if (!last) { this.session.recordStep('failed'); this.fail(index, 'failed'); return; }
+      if (!last) { this.reconcile(index, generation); return; }
       this.session.recordStep('ok');
       this.finish(reply.resultId, reply.expiresAtMs, false);
       return;
@@ -156,13 +207,14 @@ export class TryOnRun {
     if (reply.kind === 'intermediate') {
       const hash = await this.env.sha256(reply.body).catch(() => '');
       if (!this.live(generation)) return;
-      if (last || hash !== reply.sha256) { this.session.recordStep('failed'); this.fail(index, 'failed'); return; }
+      if (last || hash !== reply.sha256) { this.reconcile(index, generation); return; }
       this.session.recordStep('ok');
       this.person = reply.body;
       void this.send(index + 1);
       return;
     }
-    this.session.recordStep(counted(reply.code));
+    if (ambiguous(reply.code)) { this.reconcile(index, generation); return; }
+    this.session.recordStep('other');
     this.fail(index, failureOf(reply.code, index));
   }
 
@@ -174,6 +226,7 @@ export class TryOnRun {
   private finish(resultId: string | null, expiresAtMs: number | null, alreadyFinished: boolean) {
     this.drop();
     this.clearTimers();
+    this.endLifetime();
     if (resultId === null) { this.set({ kind: 'failed', index: this.steps.length - 1, failure: 'unavailable' }); return; }
     this.set({ kind: 'result', resultId, expiresAtMs, alreadyFinished });
   }
@@ -182,6 +235,8 @@ export class TryOnRun {
   private reconcile(index: number, generation: number) {
     const deadline = this.env.now() + RECONCILE_FOR_MS;
     const tick = async () => {
+      if (!this.live(generation)) return;
+      this.checkLifetime();
       if (!this.live(generation)) return;
       if (!this.env.online()) {
         this.set({ kind: 'checking', index, offline: true });
@@ -198,7 +253,7 @@ export class TryOnRun {
     };
     void tick();
   }
-  /** True once the chain status decides the step. */
+  /** True once the chain status decides the step. The server's plan is authoritative: a different plan can't go on. */
   private settle(index: number, status: ChainStatus): boolean {
     if (status.kind === 'code') {
       if (status.code === 'UNAVAILABLE') return false;
@@ -207,6 +262,9 @@ export class TryOnRun {
       this.fail(index, 'unavailable');
       return true;
     }
+    const samePlan = status.steps.length === this.steps.length
+      && status.steps.every((step, at) => step.slot === this.steps[at]!.slot && step.itemId === this.steps[at]!.itemId);
+    if (!samePlan && (status.state === 'running' || status.state === 'complete')) { this.fail(index, 'mismatch'); return true; }
     switch (status.state) {
       case 'complete': this.session.recordStep('ok'); this.finish(status.resultId, null, false); return true;
       case 'withdrawn': this.fail(index, 'turnedOff'); return true;
@@ -253,6 +311,7 @@ export class TryOnRun {
     if (this.disposed) return;
     this.generation += 1;
     this.clearTimers();
+    this.endLifetime();
     this.inFlight?.abort();
     this.inFlight = null;
     this.drop();
@@ -291,19 +350,25 @@ export function useTryOnStatus(store: TryOnStore | null): TryOnStatus | null {
   return state?.read.kind === 'ready' ? state.read.status : null;
 }
 
-/** Saved try-ons of one outfit, newest first; each stays until it expires or is deleted. */
-export function useOutfitTryOns(api: TryOnClient | null, outfitId: string, enabled: boolean): TryOnResult[] {
-  const [results, setResults] = useState<TryOnResult[]>([]);
+/** Saved try-ons of one outfit. `missing`: this backend has no try-on; `failed`: the list couldn't be read. */
+export type SavedTryOnsState = { kind: 'idle' | 'loading' | 'missing' | 'failed' } | { kind: 'ready'; results: TryOnResult[] };
+/** Saved try-ons of one outfit, newest first; each stays until it expires or is deleted. `retry` reads the list again. */
+export function useOutfitTryOns(api: TryOnClient | null, outfitId: string, enabled: boolean): { state: SavedTryOnsState; retry: () => void } {
+  const [state, setState] = useState<SavedTryOnsState>({ kind: 'idle' });
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    if (!api || !enabled) { setResults([]); return; }
+    if (!api || !enabled) { setState({ kind: 'idle' }); return; }
     const controller = new AbortController();
+    setState({ kind: 'loading' });
     api.results(controller.signal).then(list => {
-      if (controller.signal.aborted || list === 'missing') return;
+      if (controller.signal.aborted) return;
+      if (list === 'missing') { setState({ kind: 'missing' }); return; }
       const now = Date.now();
-      setResults(list.filter(entry => entry.outfitId === outfitId && entry.expiresAtMs > now)
-        .sort((a, b) => b.completedAtMs - a.completedAtMs));
-    }, () => undefined);
+      setState({ kind: 'ready', results: list.filter(entry => entry.outfitId === outfitId && entry.expiresAtMs > now)
+        .sort((a, b) => b.completedAtMs - a.completedAtMs) });
+    }, () => { if (!controller.signal.aborted) setState({ kind: 'failed' }); });
     return () => controller.abort();
-  }, [api, outfitId, enabled]);
-  return results;
+  }, [api, outfitId, enabled, attempt]);
+  const retry = useCallback(() => setAttempt(value => value + 1), []);
+  return { state, retry };
 }

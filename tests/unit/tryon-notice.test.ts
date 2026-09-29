@@ -4,7 +4,8 @@ import { TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION } from '../../src/do
 import {
   TRYON_BACKUP_DAYS, TRYON_NOTICE_KEYS, TRYON_NOTICE_PENDING, tryOnReleaseHeld, tryOnViewOf, type TryOnState, type TryOnStore,
 } from '../../src/features/settings/tryon-store';
-import messages from '../../src/i18n/messages.json';
+import baseMessages from '../../src/i18n/messages.json';
+import messages from '../../src/i18n/tryon.json';
 
 // The revision-1 notice is a DRAFT until the owner approves it at G5a; its hash pin is added then, not before. These
 // checks keep the facts it must state, and keep Turn on closed while the text or the backup retention is pending.
@@ -12,6 +13,10 @@ const text = (key: (typeof TRYON_NOTICE_KEYS)[number]) => messages[key];
 const languages = ['en', 'fi', 'sv'] as const;
 
 describe('try-on notice (draft, revision 1)', () => {
+  it('stays out of the startup catalog: the try-on messages load with the try-on screens', () => {
+    expect(Object.keys(baseMessages).filter((key) => /^tryonC?\./.test(key))).toEqual([]);
+    expect(Object.keys(messages).every((key) => /^tryonC?\./.test(key))).toBe(true);
+  });
   it('is revision 1 and complete in EN, FI and SV', () => {
     expect(TRYON_NOTICE_REVISION).toBe(1);
     for (const key of TRYON_NOTICE_KEYS) for (const language of languages) expect(text(key)[language].trim(), `${key} ${language}`).not.toBe('');
@@ -23,8 +28,12 @@ describe('try-on notice (draft, revision 1)', () => {
     expect(text('tryonC.noticePhoto').sv).toContain('Stillroom sparar inte din bild');
     expect(text('tryonC.noticeMicrosoft').en).toContain('Microsoft may keep submitted photos and generated pictures for a limited period');
     expect(text('tryonC.noticeMicrosoft').en).toContain("doesn't use it to train models");
-    // Processing reuses the reviewed enhancement Global wording unchanged.
-    for (const language of languages) expect(text('tryonC.noticeProcessing')[language]).toBe(messages['enhanceC.noticeProcessing'][language]);
+    // Processing keeps the rev4 Azure Global statement (the enhancement revision-1 wording). The clean-up notice revision 2
+    // (BG2c-2) shortened its own copy; whether try-on follows is decided with the draft text at G5a.
+    expect(text('tryonC.noticeProcessing').en).toContain('Azure Global deployment');
+    expect(text('tryonC.noticeProcessing').en).toContain('including outside the EU');
+    expect(text('tryonC.noticeProcessing').fi).toContain('myös EU:n ulkopuolella');
+    expect(text('tryonC.noticeProcessing').sv).toContain('även utanför EU');
   });
   it('keeps the three separate Result statements, with no cleanup deadline', () => {
     const result = text('tryonC.noticeResult');

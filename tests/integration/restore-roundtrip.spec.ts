@@ -153,10 +153,12 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
   const storageWrites = (from: number) => requests.slice(from).filter(({ method, url }) =>
     method !== 'GET' && method !== 'HEAD' && new URL(url).pathname.startsWith('/storage/v1/object/'));
   const reservations = (from: number) => requests.slice(from).filter(({ url }) => /\/rest\/v1\/rpc\/reserve_/.test(new URL(url).pathname));
-  // ai_status, stylist_status and enhance_status expire and close the owner's old AI requests (private state the snapshots can't see).
+  // ai_status, stylist_status, enhance_status and tryon_status expire and close the owner's old AI requests and try-on chains
+  // (private state the snapshots can't see), so none of them is a read-only RPC.
   // The app's Settings initialization may call them; they must finish before the restore baseline, and any later call is
   // refused and fails.
-  const STATUS_RPC_PATHS = new Set(['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status']);
+  const STATUS_RPC_PATHS = new Set(['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status',
+    '/rest/v1/rpc/tryon_status']);
   const isAiStatus = (request: import('@playwright/test').Request) =>
     request.method() === 'POST' && STATUS_RPC_PATHS.has(new URL(request.url()).pathname);
   const aiInFlight = new Set<import('@playwright/test').Request>();
@@ -335,13 +337,13 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     await expect(page.locator('#wardrobe-title')).toBeVisible(slow);
     await page.evaluate(() => { location.hash = '#/settings'; });
     await expect(page.locator('#settings-title')).toBeVisible();
-    // Settings initialization: let its status call(s) finish and the network stay quiet, then lock both status RPCs.
+    // Settings initialization: let its status call(s) finish and the network stay quiet, then lock every status RPC.
     await expect.poll(() => aiFinished > 0 && aiInFlight.size === 0, slow).toBe(true);
     await expect.poll(async () => { const seen = aiFinished; await page.waitForTimeout(1000); return aiInFlight.size === 0 && aiFinished === seen; }, slow).toBe(true);
     aiLocked = true;
     // Negative control: a query-bearing POST to each status RPC from the page must be refused by the route and counted by both.
     check(lateAiStatus === 0 && postLockAiStatus === 0);
-    for (const name of ['ai_status', 'stylist_status', 'enhance_status']) {
+    for (const name of ['ai_status', 'stylist_status', 'enhance_status', 'tryon_status']) {
       aiProbes++;
       const probe = await page.evaluate(async url => {
         try { await fetch(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' }); return 'reached'; } catch { return 'refused'; }
@@ -350,7 +352,8 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     }
     await expect.poll(() => [lateAiStatus, postLockAiStatus], slow).toEqual([aiProbes, aiProbes]);
     // Every write attempt while signing in and opening Settings, even one later undone: only Auth, the profile's
-    // first-language save, the initialization ai_status, stylist_status and enhance_status, and read-only status RPCs are allowed.
+    // first-language save, the initialization ai_status, stylist_status, enhance_status and tryon_status, and read-only
+    // status RPCs are allowed.
     const signInAttempts = requests.slice(signInFrom).filter(({ method }) => !['GET', 'HEAD', 'OPTIONS'].includes(method))
       .map(({ method, url }) => ({ method, path: new URL(url).pathname }))
       .filter(({ method, path }) => !(path.startsWith('/auth/v1/') || method === 'PATCH' && path === '/rest/v1/profiles'
@@ -516,7 +519,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     tripped('Refused function calls', refusedFunctions);
     tripped('Function calls other than finalize-image-change',
       paths(functionCalls(0)).filter(path => path !== '/functions/v1/finalize-image-change'));
-    // ai_status, stylist_status and enhance_status ran only during the Settings initialization, before the baseline (see aiLocked); any
+    // ai_status, stylist_status, enhance_status and tryon_status ran only during the Settings initialization, before the baseline (see aiLocked); any
     // later call was refused.
     if (lateAiStatus !== aiProbes || postLockAiStatus !== aiProbes) {
       throw new Error(`A status RPC called after the restore baseline: ${postLockAiStatus - aiProbes} seen, ${lateAiStatus - aiProbes} refused beyond the probe.`);

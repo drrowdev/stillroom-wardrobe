@@ -1,6 +1,7 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { usdCents } from '../../domain/ai-presentation';
 import type { Language, MessageKey, Translate } from '../../i18n';
+import '../../i18n/tryon';
 import { readTryOnStatus, TRYON_BACKUP_DAYS, TRYON_NOTICE_KEYS, tryOnViewOf, writeTryOnConsent, type TryOnStore } from './tryon-store';
 
 type Props = { store: TryOnStore | null; busy: boolean; online: boolean; language: Language; t: Translate };

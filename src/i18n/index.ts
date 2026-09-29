@@ -1,8 +1,19 @@
 import baseMessages from './messages.json' with { type: 'json' };
 import phaseZeroMessages from './phase-zero.json' with { type: 'json' };
+import type tryOnMessages from './tryon.json';
 
-export const messages = { ...baseMessages, ...phaseZeroMessages };
+const startup = { ...baseMessages, ...phaseZeroMessages };
+/** Catalogs loaded with a lazy screen rather than at startup; `registerMessages` adds them when their chunk loads. */
+type LazyCatalogs = typeof tryOnMessages;
+/**
+ * Every message. The try-on catalog (./tryon.json) is not in the startup bundle: the try-on modules import
+ * ./tryon, which registers it before they render. Until then its keys are absent and translate() fails closed.
+ */
+export const messages = startup as typeof startup & LazyCatalogs;
 export type MessageKey = keyof typeof messages;
+export function registerMessages(catalog: Partial<LazyCatalogs>): void {
+  Object.assign(messages, catalog);
+}
 export type Language = 'en' | 'fi' | 'sv';
 export const languages: readonly Language[] = ['en', 'fi', 'sv'];
 export const locales: Record<Language, string> = { en: 'en-GB', fi: 'fi-FI', sv: 'sv-FI' };
