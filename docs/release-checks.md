@@ -125,6 +125,8 @@ value stays reported in the job log.
 | G2 Background removal on iPhone Safari and Android Chrome: tap to usable prepared photo under 10 s, measured separately from the first ~19 MB download; no tab termination | ADR24, R21 | Pending: owner device. |
 | G3 FI/SV wording of the background-removal lines | ADR24 | Pending: native speakers (row O3 in the ledger). |
 
+The owner runs these gates in one ordered session per owner: [owner-release-checklist.md](owner-release-checklist.md).
+
 After each deploy that ships the background-removal binaries, the coordinator's receipt includes the output of `node scripts/check-deployed-assets.mjs https://<deployment-host>`: every inventory file must return 200 with no redirect, exact bytes and SHA-256, `immutable` caching and `nosniff`.
 
 Backups, the restore drill and recovery steps are in [operations.md](operations.md).
