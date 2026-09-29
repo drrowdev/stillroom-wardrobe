@@ -781,6 +781,17 @@ Platform restore: after any database restore and before access reopens, run
 counts in the restore receipt. It deletes every try-on result, chain and attempt
 (none are in the app's export or restore), never usage or evidence, and settles
 held try-on usage that is already due.
+**BG2c-2 "clean up photo" client (source only; inactive; plan rev4).** A newly
+chosen photo whose clean-up would be sent opens the crop editor as a pre-upload
+review before anything is committed, analysed or sent. Done, even with an
+unchanged crop, accepts it and sends H0 (the app-re-encoded crop, never the raw
+file); Cancel commits the cut-out with no clean-up; a crop with two similar
+garment regions sends nothing and asks for one garment. A later edit of an
+accepted photo keeps the normal cancel. The client checks the result with
+`cleanupCheck`; `compareEnhancement` is removed. Consent is notice revision 2
+(`CLEANUP_NOTICE_REVISION`); revision-1 consent reads as off. The notice text is
+a draft until the owner approves it. After this merges, `enhance-photo` and
+Pages may be deployed from the merge commit in the rollout order above.
 
 **I23 service worker (source only, not deployed).** The Phase 7 PR-1 draft
 adds `src/service-worker.ts`, the Update/Reload prompt and the Settings install

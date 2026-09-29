@@ -1,6 +1,6 @@
 // BG2b-2: the owner's photo-enhancement status as the client sees it. Pure parsing and typing only: nothing here
 // authorises a request, and the server's enhance_status/enhance_claim checks stay authoritative.
-import { ENHANCE_MANIFEST, ENHANCE_MODEL, ENHANCE_NOTICE_REVISION, ENHANCE_REVIEW_EXPIRES } from './enhancement';
+import { CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_MODEL, ENHANCE_REVIEW_EXPIRES } from './enhancement';
 
 type JsonObject = Record<string, unknown>;
 const record = (value: unknown): value is JsonObject => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -56,10 +56,13 @@ export function parseEnhanceStatus(value: unknown): EnhanceStatus | null {
     usage: { enhanceMicro: u.enhanceMicro, totalMicro: u.totalMicro, enhanceLastHour: u.enhanceLastHour, warning: u.warning } };
 }
 
-/** The policy this app version has a notice for: the reviewed manifest, model and notice revision, before review expiry. */
+/**
+ * The policy this app version has a notice for: the photo clean-up manifest (BG2c), its model and notice revision 2, before
+ * review expiry. A policy still on enhance-v1 is unsupported, so nothing is offered or sent under it.
+ */
 export function supportedEnhancePolicy(status: EnhanceStatus): boolean {
   const p = status.policy;
-  return p !== null && p.noticeRevision === ENHANCE_NOTICE_REVISION && p.manifestId === ENHANCE_MANIFEST && p.modelId === ENHANCE_MODEL
+  return p !== null && p.noticeRevision === CLEANUP_NOTICE_REVISION && p.manifestId === CLEANUP_MANIFEST && p.modelId === ENHANCE_MODEL
     && status.serverTimeMs !== null && status.serverTimeMs < ENHANCE_REVIEW_EXPIRES;
 }
 const consented = (status: EnhanceStatus) => status.consent?.enabled === true && status.policy !== null
@@ -101,8 +104,11 @@ export function silentUnknown(memory: EnhanceMemory, now: number): boolean {
   return memory.last === 'off' && memory.at !== null && now - memory.at >= 0 && now - memory.at < OFF_MEMORY_MS;
 }
 
-/** What a new photo gets when it isn't sent: nothing, the generic line, or the allowance line. */
-export type EnhanceLine = 'none' | 'generic' | 'allowance';
+/**
+ * What a new photo gets when it isn't sent: nothing, the generic line, the allowance line, or (BG2c) the line asking for a
+ * crop to one garment when clean-up was ready but the crop held separate items of comparable size.
+ */
+export type EnhanceLine = 'none' | 'generic' | 'allowance' | 'ambiguous';
 export function lineWhenNotSent(availability: EnhanceAvailability, memory: EnhanceMemory, now: number): EnhanceLine {
   if (availability === 'off') return 'none';
   if (availability === 'unknown') return silentUnknown(memory, now) ? 'none' : 'generic';

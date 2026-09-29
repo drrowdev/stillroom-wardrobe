@@ -2,7 +2,7 @@
 // profile stay out of the initial chunk. Decodes are closed by the stage right after downsampling.
 import { assertSanitizedJpeg } from '../../images/jpeg';
 import { admitProviderJpeg } from '../../images/provider-jpeg';
-import { compareEnhancement, FIDELITY } from '../../images/fidelity';
+import { cleanupCheck, FIDELITY } from '../../images/fidelity';
 import { thumbnailFromMain } from '../../images/process-jpeg';
 import type { DecodedFrame, StageImaging } from './enhancement-stage';
 
@@ -35,4 +35,4 @@ export const browserStageImaging: StageImaging<Frame> = {
     return { blob: thumb.blob, sha256: thumb.sha256 };
   },
 };
-export { admitProviderJpeg, compareEnhancement };
+export { admitProviderJpeg, cleanupCheck };

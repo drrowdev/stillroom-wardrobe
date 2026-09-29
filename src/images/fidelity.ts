@@ -1,8 +1,6 @@
-// BG2b (M1): heuristic rejection of some large changes between the prepared photo (H1) and its enhanced version (H2).
-// It is NOT a fidelity guarantee: small logos, text, stitching and localised colour changes can pass unnoticed. Both
-// inputs are RGBA pixels of the same 4:5 frame, already resampled by the caller to FIDELITY.width x FIDELITY.height;
-// there is no alignment search. Every doubtful case (empty, tiny or ambiguous mask, low overlap, non-finite metric,
-// no SSIM window) fails closed, so the caller keeps H1.
+// The shared pieces of the BG2c clean-up check (plan rev4 §5): the fixed comparison frame, CIEDE2000 and the sRGB to
+// CIELAB conversion. The BG2b enhance-v1 comparison (`compareEnhancement`) was removed in BG2c-2 once the client moved to
+// `cleanupCheck`. Callers resample every input to FIDELITY.width x FIDELITY.height; there is no alignment search.
 import { labelComponents, MAX_COMPONENTS } from './background/frame';
 
 export const FIDELITY = Object.freeze({
@@ -10,21 +8,9 @@ export const FIDELITY = Object.freeze({
   height: 320,
   /** The BG2a canvas background, #f6f3ed. */
   background: Object.freeze([0xf6, 0xf3, 0xed] as const),
-  /** A pixel is garment when its CIEDE2000 distance from the background is above this. */
-  backgroundDeltaE: 6,
-  minimumMaskFraction: 0.02,
-  minimumIoU: 0.9,
-  maximumMeanDeltaE: 5,
-  maximumP95DeltaE: 15,
-  minimumSsim: 0.6,
   ssimWindow: 8,
   ssimStride: 4,
 });
-
-export type FidelityReason = 'size' | 'emptyMask' | 'tinyMask' | 'ambiguousMask' | 'overlap' | 'colour' | 'structure' | 'nonFinite';
-export type FidelityMetrics = { iou: number; meanDeltaE: number; p95DeltaE: number; ssim: number; windows: number; workingBytes: number };
-export type FidelityVerdict = { accepted: true; metrics: FidelityMetrics }
-  | { accepted: false; reason: FidelityReason; metrics: Partial<FidelityMetrics> };
 
 const LINEAR = (() => {
   const table = new Float32Array(256);
@@ -78,99 +64,6 @@ export function deltaE2000(l1: number, a1: number, b1: number, l2: number, a2: n
   const sc = 1 + 0.045 * cpBar, sh = 1 + 0.015 * cpBar * t;
   const rt = -Math.sin(2 * dTheta * rad) * rc;
   return Math.sqrt((dL / sl) ** 2 + (dC / sc) ** 2 + (dH / sh) ** 2 + rt * (dC / sc) * (dH / sh));
-}
-
-/**
- * Compares H1 and H2. Linear memory only: typed arrays sized from the fixed frame, unreachable once it returns or throws.
- * `workingBytes` reports what this function allocated, for the memory budget.
- */
-export function compareEnhancement(before: Uint8ClampedArray, after: Uint8ClampedArray): FidelityVerdict {
-  const { width, height } = FIDELITY, pixels = width * height;
-  if (before.length !== pixels * 4 || after.length !== pixels * 4) return { accepted: false, reason: 'size', metrics: {} };
-  const labA = new Float32Array(pixels * 3), labB = new Float32Array(pixels * 3);
-  const maskA = new Uint8Array(pixels), maskB = new Uint8Array(pixels);
-  const lumaA = new Float32Array(pixels), lumaB = new Float32Array(pixels);
-  const deltas = new Float32Array(pixels);
-  const workingBytes = labA.byteLength + labB.byteLength + maskA.byteLength + maskB.byteLength
-    + lumaA.byteLength + lumaB.byteLength + deltas.byteLength;
-  const bg = new Float32Array(3);
-  labOf(FIDELITY.background[0], FIDELITY.background[1], FIDELITY.background[2], bg, 0);
-  let areaA = 0, areaB = 0, both = 0, either = 0;
-  let minX: number = width, minY: number = height, maxX = -1, maxY = -1;
-  const edges = [[0, 0, 0, 0], [0, 0, 0, 0]];
-  for (let index = 0; index < pixels; index++) {
-    const p = index * 4, l = index * 3;
-    labOf(before[p]!, before[p + 1]!, before[p + 2]!, labA, l);
-    labOf(after[p]!, after[p + 1]!, after[p + 2]!, labB, l);
-    lumaA[index] = 0.2126 * before[p]! + 0.7152 * before[p + 1]! + 0.0722 * before[p + 2]!;
-    lumaB[index] = 0.2126 * after[p]! + 0.7152 * after[p + 1]! + 0.0722 * after[p + 2]!;
-    const a = deltaE2000(labA[l]!, labA[l + 1]!, labA[l + 2]!, bg[0]!, bg[1]!, bg[2]!) > FIDELITY.backgroundDeltaE ? 1 : 0;
-    const b = deltaE2000(labB[l]!, labB[l + 1]!, labB[l + 2]!, bg[0]!, bg[1]!, bg[2]!) > FIDELITY.backgroundDeltaE ? 1 : 0;
-    maskA[index] = a; maskB[index] = b;
-    areaA += a; areaB += b;
-    const x = index % width, y = (index - x) / width;
-    for (const [mask, edge] of [[a, edges[0]!], [b, edges[1]!]] as const) {
-      if (!mask) continue;
-      if (y === 0) edge[0] = 1;
-      if (y === height - 1) edge[1] = 1;
-      if (x === 0) edge[2] = 1;
-      if (x === width - 1) edge[3] = 1;
-    }
-    if (a && b) {
-      both++;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-    if (a || b) either++;
-  }
-  if (areaA === 0 || areaB === 0) return { accepted: false, reason: 'emptyMask', metrics: { workingBytes } };
-  if (areaA < pixels * FIDELITY.minimumMaskFraction || areaB < pixels * FIDELITY.minimumMaskFraction) {
-    return { accepted: false, reason: 'tinyMask', metrics: { workingBytes } };
-  }
-  if (edges.some(edge => edge.every(Boolean))) return { accepted: false, reason: 'ambiguousMask', metrics: { workingBytes } };
-  const iou = both / either;
-  if (!Number.isFinite(iou)) return { accepted: false, reason: 'nonFinite', metrics: { workingBytes } };
-  if (iou < FIDELITY.minimumIoU) return { accepted: false, reason: 'overlap', metrics: { iou, workingBytes } };
-
-  let count = 0, sum = 0;
-  for (let index = 0; index < pixels; index++) {
-    if (!maskA[index] || !maskB[index]) continue;
-    const l = index * 3;
-    const value = deltaE2000(labA[l]!, labA[l + 1]!, labA[l + 2]!, labB[l]!, labB[l + 1]!, labB[l + 2]!);
-    deltas[count++] = value;
-    sum += value;
-  }
-  const sorted = deltas.subarray(0, count).sort();
-  const meanDeltaE = sum / count, p95DeltaE = sorted[Math.min(count - 1, Math.floor(0.95 * count))]!;
-
-  const size = FIDELITY.ssimWindow, stride = FIDELITY.ssimStride, n = size * size;
-  const c1 = (0.01 * 255) ** 2, c2 = (0.03 * 255) ** 2;
-  let windows = 0, ssimSum = 0;
-  for (let top = minY; top + size - 1 <= maxY; top += stride) {
-    for (let left = minX; left + size - 1 <= maxX; left += stride) {
-      let ma = 0, mb = 0;
-      for (let y = top; y < top + size; y++) for (let x = left; x < left + size; x++) {
-        ma += lumaA[y * width + x]!; mb += lumaB[y * width + x]!;
-      }
-      ma /= n; mb /= n;
-      let va = 0, vb = 0, cov = 0;
-      for (let y = top; y < top + size; y++) for (let x = left; x < left + size; x++) {
-        const da = lumaA[y * width + x]! - ma, db = lumaB[y * width + x]! - mb;
-        va += da * da; vb += db * db; cov += da * db;
-      }
-      va /= n - 1; vb /= n - 1; cov /= n - 1;
-      ssimSum += ((2 * ma * mb + c1) * (2 * cov + c2)) / ((ma * ma + mb * mb + c1) * (va + vb + c2));
-      windows++;
-    }
-  }
-  const ssim = windows ? ssimSum / windows : Number.NaN;
-  const metrics = { iou, meanDeltaE, p95DeltaE, ssim, windows, workingBytes };
-  if (![meanDeltaE, p95DeltaE, ssim].every(Number.isFinite) || windows === 0) return { accepted: false, reason: 'nonFinite', metrics };
-  if (meanDeltaE > FIDELITY.maximumMeanDeltaE || p95DeltaE > FIDELITY.maximumP95DeltaE) return { accepted: false, reason: 'colour', metrics };
-  if (ssim < FIDELITY.minimumSsim) return { accepted: false, reason: 'structure', metrics };
-  return { accepted: true, metrics };
 }
 
 // BG2c (plan rev4 §5): the clean-up check. A GROSS-CHANGE FILTER, not identity or fidelity proof. It can reject a

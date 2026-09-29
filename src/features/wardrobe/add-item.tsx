@@ -18,8 +18,9 @@ import { useAiDraft } from './use-ai-draft';
 import { AnalysisStatus } from './analysis-status';
 import type { BeforeDiscard } from '../../app/dialog';
 import { BackgroundNote, BackgroundStatus } from './background';
-import { preparingMessage, useBackground } from './use-background';
+import { preparingMessage, useBackground, type PreparedWithBackground } from './use-background';
 import { useEnhancement } from './use-enhancement';
+import type { StageResult } from './enhancement-stage';
 import { EnhancementStatus } from './enhancement-status';
 
 const loadImaging = preloadable(() => import('../../images/imaging'));
@@ -30,6 +31,12 @@ const preparationErrors: Record<ImagePreparationError['code'], MessageKey> = {
   invalid: 'photo.invalid',
   unavailable: 'photo.prepareUnavailable',
 };
+/**
+ * BG2c pre-upload review (plan rev4 §3.1): a new photo whose clean-up would be sent, held in memory with its first-pass
+ * H0 and R until the crop is accepted. Nothing is committed, analysed or sent while it is open.
+ */
+type Review = { prepared: PreparedWithBackground; edit: PhotoEdit; controller: AbortController };
+const notSent = { kind: 'skipped', line: 'none', requestId: null } as const;
 function focusGarmentField(id: string): void {
   const input = document.getElementById(id);
   let ancestor = input?.parentElement;
@@ -54,6 +61,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   const [fullPhoto, setFullPhoto] = useState<CropSource | null>(null);
   const [fullPreview, setFullPreview] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [review, setReview] = useState<Review | null>(null);
   const [acceptedEdit, setAcceptedEdit] = useState<PhotoEdit>(ORIGINAL_EDIT);
   const [initialCurrency] = useState(currency);
   const analysis = useAiDraft(ai, currency, language);
@@ -82,7 +90,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   const submitLatch = useRef(false);
   const busy = stage !== null || cancelling;
   const frozen = attempt !== null;
-  const dirty = preparing || photo !== null || Object.keys(draft.intent).length > 0 || Boolean(altText);
+  const dirty = preparing || review !== null || photo !== null || Object.keys(draft.intent).length > 0 || Boolean(altText);
   useEffect(() => { onDirty(dirty, frozen, busy); }, [dirty, frozen, busy, onDirty]);
   useEffect(() => { loadImaging().catch(() => undefined); CropEditor.preload().catch(() => undefined); }, []);
   useEffect(() => {
@@ -112,7 +120,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     }
   }, [editing, preparing]);
   useEffect(() => {
-    const clear = () => { preparation.current?.abort(); original.current = null; };
+    const clear = () => { preparation.current?.abort(); original.current = null; setReview(null); };
     scope.signal.addEventListener('abort', clear, { once: true });
     return () => { clear(); scope.signal.removeEventListener('abort', clear); };
   }, [scope]);
@@ -150,10 +158,16 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     setPhoto(null);
     background.reset();
     enhancement.clear();
-    await prepare(file, ORIGINAL_EDIT, true);
+    await prepare(file, ORIGINAL_EDIT, true, { review: true });
   }
-  async function prepare(file: Blob, edit: PhotoEdit, replacing = false): Promise<void> {
+  /**
+   * `review` opens the pre-upload review when clean-up would be sent (a newly chosen photo only). `accepted` is the
+   * review's first pass, accepted with an unchanged crop: it is sent as it is, without preparing again.
+   */
+  async function prepare(file: Blob, edit: PhotoEdit, replacing = false,
+    how: { review?: boolean; accepted?: PreparedWithBackground } = {}): Promise<void> {
     if (frozen || submitLatch.current || scope.signal.aborted) return;
+    setReview(null);
     // Work that supersedes an unfinished new-photo preparation still owes that photo its crop preview.
     replacing ||= pendingCrop.current;
     pendingCrop.current = replacing;
@@ -172,28 +186,29 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
       try {
         imaging = await loadImaging();
         // The first settled photo is analysed once: removal (or its fallback) finishes before commitPhoto.
-        const prepared = await background.prepare(imaging, file, edit, signal, replacing, () => preparation.current === controller);
+        const prepared = how.accepted
+          ?? await background.prepare(imaging, file, edit, signal, replacing, () => preparation.current === controller);
         if (signal.aborted) return;
         const cutOut = prepared.state === 'removed';
+        const current = () => preparation.current === controller;
+        if (how.review && cutOut) {
+          const check = await enhancement.run(prepared.cleanup, { cutOut, online: onlineNow.current, signal, current, preflight: true });
+          if (check.kind === 'aborted' || signal.aborted) return;
+          if (check.kind === 'available') {
+            setFullPhoto(prepared.crop);
+            setAcceptedEdit(edit);
+            setReview({ prepared, edit, controller });
+            setEditing(true);
+          } else commit(prepared, check, edit, replacing);
+          return;
+        }
         if (cutOut) setProvisional({ photo: prepared.photo, crop: !replacing });
         let stage;
         try {
-          stage = await enhancement.run(prepared.photo, { cutOut, online: onlineNow.current, signal,
-            current: () => preparation.current === controller });
+          stage = await enhancement.run(prepared.cleanup, { cutOut, online: onlineNow.current, signal, current });
         } finally { if (cutOut) setProvisional(null); }
         // An aborted stage (crop cancel, discard, a newer photo, logout) commits nothing and starts no analysis.
-        if (stage.kind !== 'aborted' && !signal.aborted) {
-          const settled = stage.kind === 'enhanced' ? stage.photo : prepared.photo;
-          setPhoto(settled);
-          background.settle(prepared.state);
-          enhancement.commit(stage, prepared.photo);
-          void analysis.commitPhoto(settled);
-          if (replacing) setFullPhoto(prepared.crop);
-          pendingCrop.current = false;
-          setAcceptedEdit(edit);
-          setEditing(false);
-          if (!replacing) focusEditorButton.current = true;
-        }
+        if (stage.kind !== 'aborted' && stage.kind !== 'available' && !signal.aborted) commit(prepared, stage, edit, replacing);
       } catch (problem) {
         if (!signal.aborted && !isAborted(problem)) {
           background.settle('none');
@@ -205,6 +220,42 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     })();
     preparationWork.current = work;
     await work;
+  }
+  function commit(prepared: PreparedWithBackground, stage: Exclude<StageResult, { kind: 'aborted' | 'available' }>, edit: PhotoEdit,
+    replacing: boolean) {
+    const settled = stage.kind === 'enhanced' ? stage.photo : prepared.photo;
+    setPhoto(settled);
+    background.settle(prepared.state);
+    enhancement.commit(stage, prepared.photo);
+    void analysis.commitPhoto(settled);
+    if (replacing) setFullPhoto(prepared.crop);
+    pendingCrop.current = false;
+    setAcceptedEdit(edit);
+    setEditing(false);
+    if (!replacing) focusEditorButton.current = true;
+  }
+  /** Done in the review is the acceptance, also with an unchanged crop; a changed crop is prepared again and sent. */
+  function acceptReview(edit: PhotoEdit, unchanged: boolean) {
+    const current = review;
+    if (!current || preparation.current !== current.controller || !original.current) return;
+    focusEditorButton.current = true;
+    void prepare(original.current, edit, true, unchanged ? { accepted: current.prepared } : {});
+  }
+  /** Cancel editing in the review keeps the new photo without clean-up: no line, one analysis, nothing sent. */
+  function cancelReview() {
+    const current = review;
+    if (!current || preparation.current !== current.controller) return;
+    setReview(null);
+    focusEditorButton.current = true;
+    commit(current.prepared, notSent, current.edit, true);
+  }
+  /** "Use original background" in the review: the original photo is prepared, with nothing sent. */
+  function reviewOriginal() {
+    const current = review;
+    if (!current || preparation.current !== current.controller || !original.current) return;
+    background.keep();
+    focusEditorButton.current = true;
+    void prepare(original.current, current.edit, true);
   }
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -296,11 +347,11 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
       <form className="capture-layout" onSubmit={(event) => { void submit(event); }} noValidate>
         <div className="photo-panel">
           {editing && fullPhoto && fullPreview && !provisional ? <LazyBoundary t={t}
-            action={<button id="crop-leave" className="button button-quiet" type="button" onClick={cancelEdit}>{t('photo.cancelCrop')}</button>}>
+            action={<button id="crop-leave" className="button button-quiet" type="button" onClick={review ? cancelReview : cancelEdit}>{t('photo.cancelCrop')}</button>}>
             <CropEditor preview={fullPreview} width={fullPhoto.width} height={fullPhoto.height}
               accepted={acceptedEdit} preparing={preparing} t={t}
               onApply={(edit) => { if (original.current) void prepare(original.current, edit); }}
-              onCancel={cancelEdit} /></LazyBoundary>
+              onCancel={review ? cancelReview : cancelEdit} onAccept={review ? acceptReview : undefined} /></LazyBoundary>
           : (!editing || provisional) && <div className={`capture-photo ${(provisionalPreview ?? preview) ? 'has-photo' : ''}`} aria-busy={preparing}>
             {provisionalPreview ? <img src={provisionalPreview} alt={altText || title || t('capture.photo')} />
             : preview ? <img src={preview} alt={altText || title || t('capture.photo')} /> : preparing ? <div className="photo-prompt"><span className="spinner" /><p role="status">{t(preparingMessage(background.state, background.downloading, 'capture.preparing'))}</p></div> : <div className="photo-prompt"><span className="photo-prompt-icon"><Icon name="photo" /></span><h2>{t('capture.photo')}</h2><p>{t('capture.photoHint')}</p><BackgroundNote t={t} language={language} /></div>}
@@ -310,6 +361,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           {!editing && <div className="photo-actions"><button id="choose-photo" className="button button-secondary" type="button" disabled={frozen || preparing} onClick={() => library.current?.click()}><Icon name="photo" />{t(photo ? 'capture.replace' : 'capture.library')}</button><button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => camera.current?.click()}><Icon name="camera" />{t('capture.camera')}</button>
             {fullPhoto && fullPreview && <button id="edit-photo" className="button button-secondary" type="button"
               disabled={frozen || preparing} aria-expanded={editing} onClick={() => setEditing(true)}><Icon name="crop" />{t('photo.edit')}</button>}</div>}
+          {review && <BackgroundStatus state="removed" analysed={false} disabled={frozen || preparing || busy} t={t} onUseOriginal={reviewOriginal} />}
           {!editing && !provisional && <BackgroundStatus state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
             disabled={frozen || preparing || busy} t={t} onUseOriginal={useOriginalBackground} />}
           {(!editing || provisional) && <EnhancementStatus view={enhancement.view} disabled={frozen || preparing || busy} t={t}

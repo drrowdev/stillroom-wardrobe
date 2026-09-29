@@ -3,19 +3,22 @@ import type { EnhanceResponse, EnhanceStatusRead } from '../../src/data/enhancem
 import {
   enhanceView, lineWhenNotSent, observeEnhanceStatus, parseEnhanceStatus, type EnhanceStatus,
 } from '../../src/domain/enhance-controls';
-import { ENHANCE_LIMITS, ENHANCE_MANIFEST, ENHANCE_MODEL, ENHANCE_NOTICE_REVISION } from '../../src/domain/enhancement';
+import { CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_LIMITS, ENHANCE_MODEL } from '../../src/domain/enhancement';
+import { REFERENCE_HEIGHT, REFERENCE_WIDTH } from '../../src/images/background/frame';
 import { FIDELITY } from '../../src/images/fidelity';
 import { isPhotoInputJpeg } from '../../src/images/restore-jpeg';
 import { appleLayoutJpeg } from '../fixtures/restore-jpeg-fixtures';
 import {
   EXPIRY_MARGIN_MS, EnhanceSession, anchorFrom, expiryDeadline, runEnhancementStage, type DecodedFrame, type StageDeps,
+  type StageInput,
 } from '../../src/features/wardrobe/enhancement-stage';
+import type { CleanupSource } from '../../src/images/process-jpeg';
 
 const SERVER = Date.parse('2026-10-01T12:00:00Z');
 const raw = (over: Record<string, unknown> = {}, policy: Record<string, unknown> = {}) => ({
   code: 'OK', period: '2026-10', serverTimeMs: SERVER,
-  consent: { enabled: true, noticeRevision: ENHANCE_NOTICE_REVISION, consentedAt: '2026-09-30T00:00:00Z' },
-  policy: { activated: true, noticeRevision: ENHANCE_NOTICE_REVISION, manifestId: ENHANCE_MANIFEST, modelId: ENHANCE_MODEL,
+  consent: { enabled: true, noticeRevision: CLEANUP_NOTICE_REVISION, consentedAt: '2026-09-30T00:00:00Z' },
+  policy: { activated: true, noticeRevision: CLEANUP_NOTICE_REVISION, manifestId: CLEANUP_MANIFEST, modelId: ENHANCE_MODEL,
     maxRequestMicro: '300000', enhanceAllowanceMicro: '5000000', totalAllowanceMicro: '20000000', maxRequestsPerHour: 20,
     providerAvailable: true, ...policy },
   usage: { enhanceMicro: '0', totalMicro: '0', enhanceLastHour: 0, warning: false }, ...over,
@@ -40,6 +43,13 @@ describe('typed availability (M1)', () => {
     expect(observeEnhanceStatus(status({}, { activated: false }), false)).toBe('off');
     expect(observeEnhanceStatus(status({}, { providerAvailable: false }), false)).toBe('paused');
     expect(observeEnhanceStatus(status({}, { modelId: 'other' }), false)).toBe('paused');
+    // BG2c-2: the client supports only the clean-up manifest and notice revision 2; the v1 policy reads as paused.
+    expect(observeEnhanceStatus(status({}, { manifestId: 'azure-global-image25-sunburst-enhance-v1' }), false)).toBe('paused');
+    expect(observeEnhanceStatus(status({ consent: { enabled: true, noticeRevision: 1, consentedAt: '2026-09-30T00:00:00Z' } },
+      { noticeRevision: 1 }), false)).toBe('paused');
+    // A revision-1 consent never counts for the revision-2 policy.
+    expect(observeEnhanceStatus(status({ consent: { enabled: true, noticeRevision: 1, consentedAt: '2026-09-30T00:00:00Z' } }), false))
+      .toBe('off');
     const bare = parseEnhanceStatus({ code: 'UNAVAILABLE' })!;
     expect(observeEnhanceStatus(bare, false)).toBe('off');
     expect(observeEnhanceStatus(bare, true)).toBe('paused');
@@ -115,18 +125,32 @@ describe('server-time anchor (A4)', () => {
 });
 
 type Frame = DecodedFrame & { closed: boolean; id: string };
-const photo = () => Object.freeze({ main: new Blob([new Uint8Array([1])], { type: 'image/jpeg' }), thumb: new Blob([new Uint8Array([2])]),
-  width: 1024, height: 1280, mainSha256: 'a'.repeat(64), thumbSha256: 'b'.repeat(64) });
-function input(over: Partial<Parameters<typeof runEnhancementStage>[0]> = {}) {
-  return { photo: photo(), cutOut: true, online: true, current: () => true, signal: new AbortController().signal,
+/** R with one rectangle, or with a second one of `second` times its area (two garments side by side). */
+function reference(second = 0): Uint8Array {
+  const mask = new Uint8Array(REFERENCE_WIDTH * REFERENCE_HEIGHT);
+  const fill = (left: number, top: number, width: number, height: number) => {
+    for (let y = top; y < top + height; y++) mask.fill(1, y * REFERENCE_WIDTH + left, y * REFERENCE_WIDTH + left + width);
+  };
+  fill(20, 60, 100, 200);
+  if (second) fill(150, 60, 100 * second, 200);
+  return mask;
+}
+const source = (over: Partial<CleanupSource> = {}): CleanupSource => ({ main: new Blob([new Uint8Array([1])], { type: 'image/jpeg' }),
+  width: 1024, height: 1280, sha256: 'a'.repeat(64), reference: reference(),
+  geometry: { edit: { rotation: 0, crop: null } as never, source: {} as never, dest: {} as never, canvas: {} as never }, ...over });
+function input(over: Partial<StageInput> = {}): StageInput {
+  return { source: source(), cutOut: true, online: true, current: () => true, signal: new AbortController().signal,
     skip: new AbortController().signal, ...over };
 }
+const metrics = { ringDeltaE: 1, ringP95: 2, containment: 1, retention: 1, largestShare: 1, centroid: { x: 0, y: 0 }, support: 1,
+  meanDeltaE: 0, p95DeltaE: 0, ssim: 1, windows: 1, workingBytes: 1 };
 function harness(session: EnhanceSession, options: {
   read?: EnhanceStatusRead | Error; sample?: { serverTimeMs: number; t0: number; t1: number } | null;
   response?: (body: Uint8Array<ArrayBuffer>) => EnhanceResponse; accept?: boolean; stripped?: boolean; admitBytes?: Uint8Array<ArrayBuffer>;
 } = {}) {
   const body = new Uint8Array(new ArrayBuffer(64)).fill(7);
-  const calls = { status: 0, enhance: 0, decode: 0, order: [] as string[] };
+  const calls = { status: 0, enhance: 0, decode: 0, order: [] as string[], decoded: [] as Blob[],
+    compared: [] as Parameters<StageDeps['compare']>[] };
   const frames: Frame[] = [];
   const sample = options.sample === undefined ? { serverTimeMs: SERVER, t0: 0, t1: 10 } : options.sample;
   const deps: StageDeps = {
@@ -146,8 +170,9 @@ function harness(session: EnhanceSession, options: {
     imaging: {
       sha256: async () => 'c'.repeat(64),
       validate: () => undefined,
-      decode: async () => {
+      decode: async (blob) => {
         calls.decode++;
+        calls.decoded.push(blob);
         const frame: Frame = { id: `f${calls.decode}`, width: 1024, height: 1280, closed: false,
           close() { frame.closed = true; calls.order.push(`close:${frame.id}`); } };
         calls.order.push(`decode:${frame.id}`);
@@ -158,8 +183,10 @@ function harness(session: EnhanceSession, options: {
       thumbnail: async () => ({ blob: new Blob([new Uint8Array([3])]), sha256: 'd'.repeat(64) }),
     },
     admit: (bytes) => ({ bytes: options.admitBytes ?? (bytes as Uint8Array<ArrayBuffer>), width: 1024, height: 1280, stripped: options.stripped ?? false }),
-    compare: () => options.accept === false ? { accepted: false, reason: 'colour', metrics: {} }
-      : { accepted: true, metrics: { iou: 1, meanDeltaE: 0, p95DeltaE: 0, ssim: 1, windows: 1, workingBytes: 1 } },
+    compare: (...args) => {
+      calls.compared.push(args);
+      return options.accept === false ? { accepted: false, reason: 'colour', metrics: {} } : { accepted: true, metrics };
+    },
     newId: () => '11111111-1111-4111-8111-111111111111',
   };
   return { deps, calls, frames, body };
@@ -182,10 +209,54 @@ describe('the stage core', () => {
     const sent: Blob[] = [];
     const client = deps.client;
     deps.client = { ...client, enhance: (photo, requestId, signal) => { sent.push(photo.main); return client.enhance(photo, requestId, signal); } };
-    const result = await runEnhancementStage(input({ photo: { ...photo(), main: new Blob([bytes], { type: 'image/jpeg' }) } }), deps);
+    const result = await runEnhancementStage(input({ source: source({ main: new Blob([bytes], { type: 'image/jpeg' }) }) }), deps);
     expect(result.kind).toBe('enhanced');
     expect(calls.enhance).toBe(1);
     expect(new Uint8Array(await sent[0]!.arrayBuffer())).toEqual(bytes);
+  });
+  it('sends H0, never H1, and checks H2 against the decoded H0 and R', async () => {
+    const { deps, calls } = harness(new EnhanceSession(() => 100));
+    const sent: Blob[] = [];
+    const client = deps.client;
+    deps.client = { ...client, enhance: (photo, requestId, signal) => { sent.push(photo.main); return client.enhance(photo, requestId, signal); } };
+    const h0 = source();
+    expect(await runEnhancementStage(input({ source: h0 }), deps)).toMatchObject({ kind: 'enhanced', metrics });
+    expect(sent).toEqual([h0.main]);
+    expect(calls.decoded[1]).toBe(h0.main);
+    expect(calls.compared).toHaveLength(1);
+    expect(calls.compared[0]![1]).toBe(h0.reference);
+  });
+  it('the pre-upload check stops at "available" with no request and no request ID', async () => {
+    const ids = vi.fn(() => '11111111-1111-4111-8111-111111111111');
+    const { deps, calls } = harness(new EnhanceSession(() => 100));
+    deps.newId = ids;
+    expect(await runEnhancementStage(input({ preflight: true }), deps)).toEqual({ kind: 'available' });
+    expect(calls.status).toBe(1);
+    expect(calls.enhance).toBe(0);
+    expect(ids).not.toHaveBeenCalled();
+    // Not ready, no source or an ambiguous crop never opens the review.
+    expect(await runEnhancementStage(input({ preflight: true, source: null }), deps)).toMatchObject({ kind: 'skipped', line: 'generic' });
+    const off0 = harness(new EnhanceSession(() => 100), { read: { kind: 'ready', status: off(), sample: null } });
+    expect(await runEnhancementStage(input({ preflight: true }), off0.deps)).toMatchObject({ kind: 'skipped', line: 'none' });
+  });
+  it('an ambiguous crop sends nothing and says why; a small second region does not count', async () => {
+    const { deps, calls } = harness(new EnhanceSession(() => 100));
+    for (const preflight of [false, true]) {
+      expect(await runEnhancementStage(input({ preflight, source: source({ reference: reference(0.5) }) }), deps))
+        .toEqual({ kind: 'skipped', line: 'ambiguous', requestId: null });
+    }
+    expect(await runEnhancementStage(input({ source: source({ reference: new Uint8Array(REFERENCE_WIDTH * REFERENCE_HEIGHT) }) }), deps))
+      .toMatchObject({ kind: 'skipped', line: 'ambiguous' });
+    expect(calls.enhance).toBe(0);
+    expect(await runEnhancementStage(input({ source: source({ reference: reference(0.2) }) }), deps)).toMatchObject({ kind: 'enhanced' });
+    // Only when clean-up would have been sent: off says nothing about the crop.
+    const off0 = harness(new EnhanceSession(() => 100), { read: { kind: 'ready', status: off(), sample: null } });
+    expect(await runEnhancementStage(input({ source: source({ reference: reference(0.5) }) }), off0.deps)).toMatchObject({ line: 'none' });
+  });
+  it('a missing H0 keeps H1 with the generic line when clean-up was ready', async () => {
+    const { deps, calls } = harness(new EnhanceSession(() => 100));
+    expect(await runEnhancementStage(input({ source: null }), deps)).toEqual({ kind: 'skipped', line: 'generic', requestId: null });
+    expect(calls.enhance).toBe(0);
   });
   it('sends nothing for an uncut photo, off, a missing function or a failed read', async () => {
     for (const [over, options, line] of [

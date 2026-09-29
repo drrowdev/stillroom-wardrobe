@@ -285,6 +285,8 @@ jobs:
             test-results/bg2b-visual/reverted-en-mobile.png
             test-results/bg2b-visual/enhanced-fi-mobile.png
             test-results/bg2b-visual/settings-fi-mobile.png
+            test-results/bg2b-visual/review-en-mobile.png
+            test-results/bg2b-visual/ambiguous-fi-mobile.png
           if-no-files-found: error
           retention-days: 1
 

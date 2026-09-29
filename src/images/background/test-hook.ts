@@ -4,7 +4,8 @@ export type BackgroundTestHook = {
   enabled?: boolean;
   limits?: Partial<{ stallMs: number; totalMs: number; waitMs: number; startMs: number; loadMs: number; runMs: number }>;
   /** Replaces the model's answer inside the worker; 'model' (the default) runs the real network. */
-  mask?: 'model' | 'left' | 'centre' | 'constant' | 'nan' | 'shape' | 'empty';
+  /** 'two' is two separate regions of the same size, as for two garments side by side (BG2c ambiguous crop). */
+  mask?: 'model' | 'left' | 'centre' | 'two' | 'constant' | 'nan' | 'shape' | 'empty';
   /** Makes one worker step fail or never answer. */
   fault?: 'load' | 'run' | 'hang-start' | 'hang-load' | 'hang-run';
   /** Extra delay before the worker answers `run`, in milliseconds. */

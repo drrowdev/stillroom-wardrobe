@@ -20,8 +20,9 @@ import { useAiDraft } from './use-ai-draft';
 import { AnalysisStatus } from './analysis-status';
 import { ItemForm } from './item-form';
 import { BackgroundNote, BackgroundStatus } from './background';
-import { preparingMessage, useBackground } from './use-background';
+import { preparingMessage, useBackground, type PreparedWithBackground } from './use-background';
 import { useEnhancement } from './use-enhancement';
+import type { StageResult } from './enhancement-stage';
 import { EnhancementStatus } from './enhancement-status';
 
 type Props = {
@@ -31,6 +32,9 @@ type Props = {
   onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void;
   onBeforeDiscard: (handler: BeforeDiscard | null) => void;
 };
+/** BG2c pre-upload review (plan rev4 §3.1), as in Add item: nothing is committed, analysed or sent while it is open. */
+type Review = { prepared: PreparedWithBackground; next: PhotoEdit; controller: AbortController };
+const notSent = { kind: 'skipped', line: 'none', requestId: null } as const;
 function usePreview(photo: CropSource | null) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -170,6 +174,7 @@ function Replacement(props: Props) {
   const [provisional, setProvisional] = useState<{ photo: PreparedPhoto; crop: boolean } | null>(null);
   const [edit, setEdit] = useState<PhotoEdit>(ORIGINAL_EDIT);
   const [editing, setEditing] = useState(false);
+  const [review, setReview] = useState<Review | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<MessageKey | null>(null);
   const original = useRef<Blob | null>(null);
@@ -188,17 +193,20 @@ function Replacement(props: Props) {
     }
   }, [editing, preparing]);
   useEffect(() => {
-    onDirty(photo !== null || preparing || !!Object.keys(analysis.draft.intent).length || analysis.descriptionEdited,
+    onDirty(photo !== null || review !== null || preparing || !!Object.keys(analysis.draft.intent).length || analysis.descriptionEdited,
       change.attempt !== null, change.busy || preparing);
     return () => onDirty(false, false, false);
-  }, [photo, preparing, analysis.draft.intent, analysis.descriptionEdited, change.attempt, change.busy, onDirty]);
+  }, [photo, review, preparing, analysis.draft.intent, analysis.descriptionEdited, change.attempt, change.busy, onDirty]);
   useEffect(() => {
-    const clear = () => { work.current?.abort(); original.current = null; };
+    const clear = () => { work.current?.abort(); original.current = null; setReview(null); };
     props.scope.signal.addEventListener('abort', clear, { once: true });
     return () => { clear(); props.scope.signal.removeEventListener('abort', clear); };
   }, [props.scope]);
-  async function prepare(source: Blob, next: PhotoEdit, replacing: boolean) {
+  /** `review` and `accepted` as in Add item: the review for a newly chosen photo, and its first pass accepted unchanged. */
+  async function prepare(source: Blob, next: PhotoEdit, replacing: boolean,
+    how: { review?: boolean; accepted?: PreparedWithBackground } = {}) {
     if (change.frozen) return;
+    setReview(null);
     // Work that supersedes an unfinished new-photo preparation still owes that photo its crop preview.
     replacing ||= pendingCrop.current;
     pendingCrop.current = replacing;
@@ -212,24 +220,28 @@ function Replacement(props: Props) {
       if (signal.aborted) return;
       try {
         // The stored image and item stay as they are until Save; this only prepares the new photo in memory.
-        const prepared = await background.prepare(imaging, source, next, signal, replacing, () => work.current === controller);
+        const prepared = how.accepted
+          ?? await background.prepare(imaging, source, next, signal, replacing, () => work.current === controller);
         if (signal.aborted) return;
         const cutOut = prepared.state === 'removed';
+        const current = () => work.current === controller;
+        if (how.review && cutOut) {
+          const check = await enhancement.run(prepared.cleanup, { cutOut, online: onlineNow.current, signal, current, preflight: true });
+          if (check.kind === 'aborted' || signal.aborted) return;
+          if (check.kind === 'available') {
+            setFull(prepared.crop); setEdit(next);
+            setReview({ prepared, next, controller });
+            setEditing(true);
+          } else commit(prepared, check, next, replacing);
+          return;
+        }
         if (cutOut) setProvisional({ photo: prepared.photo, crop: !replacing });
         let stage;
         try {
-          stage = await enhancement.run(prepared.photo, { cutOut, online: onlineNow.current, signal,
-            current: () => work.current === controller });
+          stage = await enhancement.run(prepared.cleanup, { cutOut, online: onlineNow.current, signal, current });
         } finally { if (cutOut) setProvisional(null); }
-        if (stage.kind === 'aborted' || signal.aborted) return;
-        const settled = stage.kind === 'enhanced' ? stage.photo : prepared.photo;
-        if (!replacing) focusEdit.current = true;
-        setPhoto(settled); setEdit(next); setEditing(false);
-        background.settle(prepared.state);
-        if (replacing) setFull(prepared.crop);
-        pendingCrop.current = false;
-        enhancement.commit(stage, prepared.photo);
-        void analysis.commitPhoto(settled);
+        if (stage.kind === 'aborted' || stage.kind === 'available' || signal.aborted) return;
+        commit(prepared, stage, next, replacing);
       } catch (error) {
         if (!signal.aborted) { background.settle('none'); pendingCrop.current = false; }
         if (!signal.aborted) setError(error instanceof ImagePreparationError
@@ -239,10 +251,44 @@ function Replacement(props: Props) {
     })();
     await preparation.current;
   }
+  function commit(prepared: PreparedWithBackground, stage: Exclude<StageResult, { kind: 'aborted' | 'available' }>, next: PhotoEdit,
+    replacing: boolean) {
+    const settled = stage.kind === 'enhanced' ? stage.photo : prepared.photo;
+    if (!replacing) focusEdit.current = true;
+    setPhoto(settled); setEdit(next); setEditing(false);
+    background.settle(prepared.state);
+    if (replacing) setFull(prepared.crop);
+    pendingCrop.current = false;
+    enhancement.commit(stage, prepared.photo);
+    void analysis.commitPhoto(settled);
+  }
   function choose(file?: File) {
     if (!file || change.frozen || preparing) return;
     original.current = file; setPhoto(null); setFull(null); setEditing(false); background.reset(); enhancement.clear();
-    void prepare(file, ORIGINAL_EDIT, true);
+    void prepare(file, ORIGINAL_EDIT, true, { review: true });
+  }
+  /** Done in the review is the acceptance, also with an unchanged crop; a changed crop is prepared again and sent. */
+  function acceptReview(next: PhotoEdit, unchanged: boolean) {
+    const current = review;
+    if (!current || work.current !== current.controller || !original.current) return;
+    focusEdit.current = true;
+    void prepare(original.current, next, true, unchanged ? { accepted: current.prepared } : {});
+  }
+  /** Cancel editing in the review keeps the new photo without clean-up: no line, one analysis, nothing sent. */
+  function cancelReview() {
+    const current = review;
+    if (!current || work.current !== current.controller) return;
+    setReview(null);
+    focusEdit.current = true;
+    commit(current.prepared, notSent, current.next, true);
+  }
+  /** "Use original background" in the review: the original photo is prepared, with nothing sent. */
+  function reviewOriginal() {
+    const current = review;
+    if (!current || work.current !== current.controller || !original.current) return;
+    background.keep();
+    focusEdit.current = true;
+    void prepare(original.current, current.next, true);
   }
   function revertEnhancement(line: 'none' | 'generic' = 'none', afterRefusal = false) {
     if ((!afterRefusal && change.frozen) || preparing || props.scope.signal.aborted) return;
@@ -278,7 +324,7 @@ function Replacement(props: Props) {
       <div className="photo-panel">
         {editing && full && fullPreview && !provisional ? <CropEditor preview={fullPreview} width={full.width} height={full.height}
           accepted={edit} preparing={preparing} t={t} onApply={next => { if (original.current) void prepare(original.current, next, false); }}
-          onCancel={cancelCrop} />
+          onCancel={review ? cancelReview : cancelCrop} onAccept={review ? acceptReview : undefined} />
           : <div className="capture-photo">{(provisionalPreview ?? preview) ? <img src={(provisionalPreview ?? preview)!} alt={analysis.description || props.item.title} /> : <p>{t('capture.photo')}</p>}</div>}
         <input ref={library} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1}
           aria-label={t('capture.library')} disabled={change.frozen || preparing} onChange={event => { choose(event.target.files?.[0]); event.target.value = ''; }} />
@@ -292,12 +338,13 @@ function Replacement(props: Props) {
         </div>}
         {(!editing || provisional) && <EnhancementStatus view={enhancement.view} disabled={change.frozen || preparing} t={t}
           onSkip={enhancement.skip} onRevert={() => revertEnhancement()} onCancelCrop={provisional?.crop ? cancelCrop : undefined} />}
+        {review && <BackgroundStatus state="removed" analysed={false} disabled={change.frozen || preparing} t={t} onUseOriginal={reviewOriginal} />}
         {!editing && !provisional && <BackgroundStatus state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
           disabled={change.frozen || preparing} t={t} onUseOriginal={() => {
             if (change.frozen) return;
             if (background.useOriginal() === 'again' && original.current) void prepare(original.current, edit, false);
           }} />}
-        {!photo && !preparing && <BackgroundNote t={t} language={props.language} />}
+        {!photo && !preparing && !review && <BackgroundNote t={t} language={props.language} />}
         {preparing && !enhancement.view.working && <p role="status">{t(preparingMessage(background.state, background.downloading, 'capture.preparing'))}</p>}
         {error && <p role="alert" className="notice notice-error">{t(error)}</p>}
       </div>

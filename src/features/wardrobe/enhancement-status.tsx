@@ -4,9 +4,9 @@ import type { EnhancementView } from './use-enhancement';
 type Props = {
   view: EnhancementView; disabled: boolean; t: Translate;
   onSkip: () => void; onRevert: () => void;
-  /** Shown while a changed crop is being enhanced: cancelling keeps the previous photo. */ onCancelCrop?: () => void;
+  /** Shown while a changed crop is being cleaned up: cancelling keeps the previous photo. */ onCancelCrop?: () => void;
 };
-// "Skip" and "Use photo without enhancement" are real buttons; "Edited with AI" is visible text.
+// "Skip" and "Use photo without clean-up" are real buttons; "Edited with AI" is visible text.
 export function EnhancementStatus({ view, disabled, t, onSkip, onRevert, onCancelCrop }: Props) {
   if (view.working) {
     return <div className="background-status enhancement-status">
@@ -24,5 +24,5 @@ export function EnhancementStatus({ view, disabled, t, onSkip, onRevert, onCance
     </div>;
   }
   if (view.line === 'none') return null;
-  return <p className="fine muted background-status" role="status">{t(view.line === 'allowance' ? 'enhance.allowance' : 'enhance.fallback')}</p>;
+  return <p className="fine muted background-status" role="status">{t(view.line === 'allowance' ? 'enhance.allowance' : view.line === 'ambiguous' ? 'enhance.ambiguous' : 'enhance.fallback')}</p>;
 }
