@@ -556,7 +556,7 @@ function enhanceStatus(setup: EnhanceSetup, consent: number | null) {
     policy, usage: { enhanceMicro: setup.enhanceMicro, totalMicro: setup.totalMicro, enhanceLastHour: 0, warning: false } };
 }
 
-// AD1b admin fixture: the admin_ai_spending reply for two synthetic accounts, in the shape the AD1a function builds.
+// AD1b admin fixture: the admin_ai_spending_v2 reply for two synthetic accounts, in the shape the VTO-1a function builds.
 // VTO-2 try-on: per-owner setup (configured, not activated unless a spec says otherwise), consent, chains, results and
 // scripted try-on replies. A reply without `code` or `abort` runs the step normally. `commit` with `abort` applies the
 // step on the server and then drops the reply (a lost reply). `hold` waits before answering.
@@ -592,17 +592,19 @@ function tryOnStatusReply(setup: TryOnSetup, consent: number | null, results: nu
     consent: { enabled: consent !== null, noticeRevision: consent, consentedAt: consent === null ? null : '2026-10-01T00:00:00Z' },
     policy, results, usage: { tryOnMicro: '0', totalMicro: '0', tryOnLastHour: 0, warning: false } };
 }
-export type AdminLimits = Record<'shared' | 'stylist' | 'enhancement', { monthlyAllowanceMicro: string | null; maxRequestMicro: string | null; maxRequestsPerHour: number | null }>;
+export type AdminLimits = Record<'shared' | 'stylist' | 'enhancement' | 'tryOn', { monthlyAllowanceMicro: string | null; maxRequestMicro: string | null; maxRequestsPerHour: number | null }>;
 export type AdminWriteReply = { status: number; body?: unknown } | 'lost' | 'appliedLost';
 // Usage recorded outside the current month's history, such as a hold kept from an earlier month.
-export type AdminExtraUsage = Partial<Record<1 | 2, Partial<Record<'stylist' | 'enhancement', number>>>>;
+export type AdminExtraUsage = Partial<Record<1 | 2, Partial<Record<'stylist' | 'enhancement' | 'tryOn', number>>>>;
 export const adminStartLimits = (): Record<1 | 2, AdminLimits | null> => ({
   1: { shared: { monthlyAllowanceMicro: '20000000', maxRequestMicro: '4097351', maxRequestsPerHour: 30 },
     stylist: { monthlyAllowanceMicro: '5000000', maxRequestMicro: '129360', maxRequestsPerHour: 20 },
-    enhancement: { monthlyAllowanceMicro: '2000000', maxRequestMicro: '150000', maxRequestsPerHour: 10 } },
+    enhancement: { monthlyAllowanceMicro: '2000000', maxRequestMicro: '150000', maxRequestsPerHour: 10 },
+    tryOn: { monthlyAllowanceMicro: '8000000', maxRequestMicro: '360000', maxRequestsPerHour: 6 } },
   2: { shared: { monthlyAllowanceMicro: '10000000', maxRequestMicro: '4097351', maxRequestsPerHour: 30 },
     stylist: { monthlyAllowanceMicro: '2000000', maxRequestMicro: '129360', maxRequestsPerHour: 20 },
-    enhancement: { monthlyAllowanceMicro: null, maxRequestMicro: null, maxRequestsPerHour: null } },
+    enhancement: { monthlyAllowanceMicro: null, maxRequestMicro: null, maxRequestsPerHour: null },
+    tryOn: { monthlyAllowanceMicro: null, maxRequestMicro: null, maxRequestsPerHour: null } },
 });
 const adminSpend = (confirmed: number, estimated: number, reserved: number, requests: number) => ({ confirmedMicro: String(confirmed),
   estimatedMicro: String(estimated), reservedMicro: String(reserved), totalMicro: String(confirmed + estimated + reserved), requests });
@@ -614,19 +616,21 @@ export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits |
       analysis: index === 0 ? adminSpend(Math.round(1_234_567 * scale), 300_000, 4_097_351, 5) : adminSpend(Math.round(2_500_000 * scale) + index * 100_000, 0, 0, 7 + index),
       stylist: index === 0 ? adminSpend(0, 4_840, admissionNo === 1 ? 129_360 : 0, 2) : adminSpend(index * 12_345, 0, 0, index),
       enhancement: admissionNo === 1 && index === 1 ? adminSpend(120_000, 0, 0, 1) : adminSpend(0, 0, 0, 0),
-      tryOn: { available: false } }));
+      tryOn: admissionNo === 1 && index === 0 ? adminSpend(240_000, 0, 360_000, 2) : adminSpend(0, 0, 0, 0) }));
     const current = history[0]!;
     const more = extra[admissionNo] ?? {};
-    const used = (spend: { totalMicro: string }, feature?: 'stylist' | 'enhancement') => String(BigInt(spend.totalMicro) + BigInt(feature ? more[feature] ?? 0 : 0));
+    const used = (spend: { totalMicro: string }, feature?: 'stylist' | 'enhancement' | 'tryOn') => String(BigInt(spend.totalMicro) + BigInt(feature ? more[feature] ?? 0 : 0));
     return { admissionNo, enabled: true, accountVersion: (admissionNo === 1 ? 'a' : 'b').repeat(63) + String(version[admissionNo] % 10),
       features: { analysis: { configured: limits[admissionNo] !== null, activated: true },
         stylist: { configured: limits[admissionNo]?.stylist.monthlyAllowanceMicro != null, activated: true },
-        enhancement: { configured: limits[admissionNo]?.enhancement.monthlyAllowanceMicro != null, activated: false } },
+        enhancement: { configured: limits[admissionNo]?.enhancement.monthlyAllowanceMicro != null, activated: false },
+        tryOn: { configured: limits[admissionNo]?.tryOn.monthlyAllowanceMicro != null, activated: false } },
       limits: limits[admissionNo], history,
-      current: { period: months[0]!, shared: { usedMicro: String(BigInt(used(current.analysis)) + BigInt(used(current.stylist, 'stylist')) + BigInt(used(current.enhancement, 'enhancement'))), lastHour: 3 },
+      current: { period: months[0]!, shared: { usedMicro: String(BigInt(used(current.analysis)) + BigInt(used(current.stylist, 'stylist')) + BigInt(used(current.enhancement, 'enhancement')) + BigInt(used(current.tryOn, 'tryOn'))), lastHour: 3 },
         analysis: { usedMicro: used(current.analysis), lastHour: 2 }, stylist: { usedMicro: used(current.stylist, 'stylist'), lastHour: 1 },
-        enhancement: { usedMicro: used(current.enhancement, 'enhancement'), lastHour: 0 } },
-      openAllocations: { enhancementProbe: admissionNo === 1 ? { count: 1, allocationMicro: '260000', maxCalls: 2 } : { count: 0, allocationMicro: '0', maxCalls: 0 } } };
+        enhancement: { usedMicro: used(current.enhancement, 'enhancement'), lastHour: 0 }, tryOn: { usedMicro: used(current.tryOn, 'tryOn'), lastHour: admissionNo === 1 ? 1 : 0 } },
+      openAllocations: { enhancementProbe: admissionNo === 1 ? { count: 1, allocationMicro: '260000', maxCalls: 2 } : { count: 0, allocationMicro: '0', maxCalls: 0 },
+        tryOnProbe: admissionNo === 1 ? { count: 1, allocationMicro: '1800000', maxCalls: 5 } : { count: 0, allocationMicro: '0', maxCalls: 0 } } };
   };
   return { code: 'OK', asOf: now.getTime(), months, accounts: [account(1), account(2)] };
 }
@@ -721,7 +725,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     picture: null as Buffer | null,
   };
   // AD1b admin: which owner is the app's admin (none by default), each account's limits and a scripted write reply.
-  // Without a script a write behaves like admin_set_ai_limits for the fixture: CONFLICT, UNCHANGED or OK.
+  // Without a script a write behaves like admin_set_ai_limits_v2 for the fixture: CONFLICT, UNCHANGED or OK.
   const adminControl = {
     missing: false,
     admin: null as string | null,
@@ -2039,7 +2043,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       await route.fulfill({ status: 200, body: bytes, contentType: 'image/jpeg' }); return;
     }
     if (url.pathname === '/storage/v1/object/wardrobe' && method === 'DELETE') { await json([]); return; }
-    if (url.pathname === '/rest/v1/rpc/admin_status' || url.pathname === '/rest/v1/rpc/admin_ai_spending' || url.pathname === '/rest/v1/rpc/admin_set_ai_limits') {
+    if (url.pathname === '/rest/v1/rpc/admin_status' || url.pathname === '/rest/v1/rpc/admin_ai_spending_v2' || url.pathname === '/rest/v1/rpc/admin_set_ai_limits_v2') {
       if (adminControl.missing) { await json({ code: 'PGRST202', details: null, hint: null, message: 'Could not find the function' }, 404); return; }
       const isAdmin = adminControl.admin === owner;
       if (url.pathname.endsWith('admin_status')) {
@@ -2048,7 +2052,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         await json({ code: isAdmin ? 'OK' : 'UNAVAILABLE' }); return;
       }
       const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
-      if (url.pathname.endsWith('admin_ai_spending')) {
+      if (url.pathname.endsWith('admin_ai_spending_v2')) {
         adminControl.spendingReads.push({ owner, months: body.p_months });
         if (!isAdmin) { await json({ code: 'UNAVAILABLE' }); return; }
         const fault = adminControl.spendingFaults.shift();

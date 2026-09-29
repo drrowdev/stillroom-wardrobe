@@ -109,12 +109,16 @@ test.describe('AD1b admin spending and limits', () => {
     await expect(row(page, 1, 'admin.tagging').locator('td')).toHaveText(['$1.234567', '$0.30', '$4.097351', '$5.631918', '5']);
     await expect(row(page, 1, 'admin.stylist').locator('td')).toHaveText(['$0.00', '$0.00484', '$0.12936', '$0.1342', '2']);
     await expect(row(page, 1, 'admin.enhancement').locator('td')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00', '0']);
-    await expect(row(page, 1, 'admin.total').locator('td')).toHaveText(['$1.234567', '$0.30484', '$4.226711', '$5.766118', '7']);
-    await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$5.766118', limit: '$20.00' }));
-    await expect(account(page, 1)).toContainText('Test allowance $0.26');
-    await expect(account(page, 1)).toContainText(text('admin.tryOn'));
+    await expect(row(page, 1, 'admin.tryOn').locator('td')).toHaveText(['$0.24', '$0.00', '$0.36', '$0.60', '2']);
+    await expect(row(page, 1, 'admin.total').locator('td')).toHaveText(['$1.474567', '$0.30484', '$4.586711', '$6.366118', '9']);
+    await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$6.366118', limit: '$20.00' }));
+    await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$0.60', limit: '$8.00' }));
+    await expect(account(page, 1)).toContainText('Test allowance, Photo clean-up: $0.26');
+    await expect(account(page, 1)).toContainText('Test allowance, Try-on: $1.80');
+    await expect(row(page, 1, 'admin.tryOn', 1).locator('td')).toHaveText(['$8.00', '$0.36', '6']);
+    await expect(row(page, 2, 'admin.tryOn', 1).locator('td')).toHaveText(['–', '–', '–']);
     await expect(account(page, 2).locator('.admin-use')).toContainText(text('admin.notSetUp'));
-    await expect(account(page, 2)).not.toContainText(text('admin.probe', { amount: '$0.00' }));
+    await expect(account(page, 2)).not.toContainText('Test allowance');
     // The shared per-request value is the tagging reservation, and says so at every width.
     await expect(row(page, 1, 'admin.allFeatures', 1).locator('td')).toHaveText(['$20.00', `$4.097351${text('admin.taggingReservation')}`, '30']);
     await expect(row(page, 1, 'admin.allFeatures', 1).getByText(text('admin.taggingReservation'), { exact: true })).toBeVisible();
@@ -128,7 +132,8 @@ test.describe('AD1b admin spending and limits', () => {
     const earlier = await month.locator('option').nth(1).getAttribute('value');
     await month.selectOption(earlier!);
     await expect(row(page, 1, 'admin.tagging').locator('td')).toHaveText(['$2.60', '$0.00', '$0.00', '$2.60', '8']);
-    await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$5.766118', limit: '$20.00' }));
+    await expect(row(page, 1, 'admin.tryOn').locator('td')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00', '0']);
+    await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$6.366118', limit: '$20.00' }));
     await axe(page);
     await button(page, 'admin.moreMonths').click();
     await expect(month.locator('option')).toHaveCount(12);
@@ -163,6 +168,29 @@ test.describe('AD1b admin spending and limits', () => {
       p_limits: { ...initial, stylist: { ...initial.stylist, monthlyAllowanceMicro: '3000000' } }, p_reason_code: 'RAISE' } }]);
     await expect(row(page, 2, 'admin.stylist', 1).locator('td')).toHaveText(['$3.00', '$0.12936', '20']);
     await expect(account(page, 2).locator('form')).toHaveCount(0);
+  });
+
+  test('a try-on limit is edited like the others and sent with all four features', async ({ page }) => {
+    const api = await start(page);
+    await openScreen(page);
+    await edit(page, 1);
+    await expect(field(page, 1, 'tryOn', 'maxRequestMicro')).toHaveValue('0.36');
+    await expect(account(page, 1).getByRole('group', { name: text('admin.tryOn'), exact: true })).toBeVisible();
+    await field(page, 1, 'tryOn', 'monthlyAllowanceMicro').fill('21');
+    await button(account(page, 1), 'admin.review').click();
+    await expect(page.locator('#admin-account-1-tryOn-monthlyAllowanceMicro-error')).toHaveText(text('admin.aboveShared'));
+    await field(page, 1, 'tryOn', 'monthlyAllowanceMicro').fill('6');
+    await field(page, 1, 'tryOn', 'maxRequestsPerHour').fill('4');
+    await button(account(page, 1), 'admin.review').click();
+    await expect(dialog(page).locator('li')).toHaveText([`${text('admin.tryOn')}, ${text('admin.monthly')}: $8.00 → $6.00`,
+      `${text('admin.tryOn')}, ${text('admin.perHour')}: 6 → 4`]);
+    await button(dialog(page), 'admin.confirm').click();
+    await expect(page.getByText(text('admin.saved'), { exact: true })).toBeFocused();
+    const initial = adminStartLimits()[1]!;
+    expect(api.adminControl.writes).toEqual([{ owner: owners.a, body: {
+      p_admission_no: 1, p_account_version: `${'a'.repeat(63)}1`, p_expected: initial,
+      p_limits: { ...initial, tryOn: { monthlyAllowanceMicro: '6000000', maxRequestMicro: '360000', maxRequestsPerHour: 4 } } } }]);
+    await expect(row(page, 1, 'admin.tryOn', 1).locator('td')).toHaveText(['$6.00', '$0.36', '4']);
   });
 
   test('cancelling the confirmation returns to the form and sends nothing', async ({ page }) => {

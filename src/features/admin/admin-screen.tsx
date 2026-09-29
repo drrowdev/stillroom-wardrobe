@@ -13,8 +13,8 @@ import { locales, type Language, type MessageKey, type Translate } from '../../i
 type Props = { client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate; onBack: () => void };
 type Load = { kind: 'checking' } | { kind: 'denied' } | { kind: 'failed' } | { kind: 'ready'; spending: AdminSpending; failed: boolean; read: number };
 
-const purposeKey: Record<SpendPurpose, MessageKey> = { analysis: 'admin.tagging', stylist: 'admin.stylist', enhancement: 'admin.enhancement' };
-const featureKey: Record<LimitFeature, MessageKey> = { shared: 'admin.allFeatures', stylist: 'admin.stylist', enhancement: 'admin.enhancement' };
+const purposeKey: Record<SpendPurpose, MessageKey> = { analysis: 'admin.tagging', stylist: 'admin.stylist', enhancement: 'admin.enhancement', tryOn: 'admin.tryOn' };
+const featureKey: Record<LimitFeature, MessageKey> = { shared: 'admin.allFeatures', stylist: 'admin.stylist', enhancement: 'admin.enhancement', tryOn: 'admin.tryOn' };
 const reasonKey: Record<AdminReason, MessageKey> = { RAISE: 'admin.reasonRaise', LOWER: 'admin.reasonLower', PAUSE: 'admin.reasonPause',
   RESTORE: 'admin.reasonRestore', CORRECTION: 'admin.reasonCorrection' };
 const errorKey: Record<LimitReason, MessageKey> = { FORMAT: 'admin.errFormat', REQUIRED: 'admin.errFormat', NOT_POSITIVE: 'admin.errPositive',
@@ -192,18 +192,18 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
         <SpendRow label={t('admin.total')} spend={monthTotals(history)} language={language} t={t} total />
       </tbody>
     </table>
-    <p className="stats-note">{t('admin.tryOn')}</p>
     <h3>{t('admin.currentUse')}</h3>
     <dl className="admin-use">
       <div><dt>{t('admin.allFeatures')}</dt><dd>{usedOf(account.current.shared.usedMicro, limits?.shared.monthlyAllowanceMicro ?? null)}
         <span className="stats-note">{t('admin.lastHour', { count: whole(account.current.shared.lastHour, language) })}</span></dd></div>
       <div><dt>{t('admin.tagging')}</dt><dd>{formatUsd(account.current.analysis.usedMicro, language)}</dd></div>
-      {(['stylist', 'enhancement'] as const).map((feature) => <div key={feature}><dt>{t(purposeKey[feature])}</dt>
+      {(['stylist', 'enhancement', 'tryOn'] as const).map((feature) => <div key={feature}><dt>{t(purposeKey[feature])}</dt>
         <dd>{usedOf(account.current[feature].usedMicro, account.features[feature].configured ? limits?.[feature].monthlyAllowanceMicro ?? null : null)}
           {!account.features[feature].configured && <span className="stats-note">{t('admin.notSetUp')}</span>}</dd></div>)}
     </dl>
     <p className="stats-note">{t('admin.currentNote')}</p>
-    {account.probe.count > 0 && <p className="stats-note">{t('admin.probe', { amount: formatUsd(account.probe.allocationMicro, language) })}</p>}
+    {account.probe.count > 0 && <p className="stats-note">{t('admin.probe', { feature: t('admin.enhancement'), amount: formatUsd(account.probe.allocationMicro, language) })}</p>}
+    {account.tryOnProbe.count > 0 && <p className="stats-note">{t('admin.probe', { feature: t('admin.tryOn'), amount: formatUsd(account.tryOnProbe.allocationMicro, language) })}</p>}
     <h3>{t('admin.limits')}</h3>
     {!limits ? <p>{t('admin.notSetUp')}</p> : !edit ? <>
       <LimitsTable limits={limits} language={language} t={t} />

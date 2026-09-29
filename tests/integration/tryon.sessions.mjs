@@ -12,8 +12,9 @@ import { requireEvidence } from './preservation.sessions.mjs';
 import { equal } from './ai-analysis.sessions.mjs';
 import { intent, saveHarness } from './item-save.sessions.mjs';
 
-// The deployed admin parser, unchanged. Its extensionless app imports ('../i18n') are resolved to the .ts sources for
-// this test only; Node strips the types.
+// The admin parsers: the frozen AD1b v1 parser that already-installed apps run (tests/fixtures/admin-limits-v1.ts, a
+// verbatim copy) and the app's current v2 parser. The app's extensionless imports ('../i18n') are resolved to the .ts
+// sources for this test only; Node strips the types.
 let hooked = false;
 const adminParser = () => {
   if (!hooked) {
@@ -33,7 +34,9 @@ const adminParser = () => {
       },
     });
   }
-  return import(new URL('../../src/domain/admin-limits.ts', import.meta.url).href);
+  return Promise.all([import(new URL('../fixtures/admin-limits-v1.ts', import.meta.url).href),
+    import(new URL('../../src/domain/admin-limits.ts', import.meta.url).href)])
+    .then(([v1, v2]) => ({ parseSpending: v1.parseSpending, parseSpendingV2: v2.parseSpending }));
 };
 
 const MANIFEST = 'azure-global-image25-sunburst-tryon-v1';
@@ -335,7 +338,8 @@ export async function tryonProbes(snapshot, sql, mark) {
 
     mark('admin-v1');
     // The deployed AD1b screen still parses the v1 spending read with try-on usage present: tryOn stays not available.
-    const { parseSpending } = await adminParser();
+    // The VTO-2b screen parses the v2 read of the same accounts.
+    const { parseSpending, parseSpendingV2 } = await adminParser();
     await sql(`insert into private.app_admins(owner_id,admission_no,admission_generation)
       select user_id,admission_no,generation from private.approved_accounts where user_id=${literal(a.uid)};`);
     try {
@@ -344,6 +348,10 @@ export async function tryonProbes(snapshot, sql, mark) {
       const parsed = parseSpending(raw);
       requireEvidence(parsed !== null && parsed.months.length === 6 && parsed.accounts.length === 2
         && raw.accounts.every((account) => account.history.every((month) => isDeepStrictEqual(month.tryOn, { available: false }))));
+      const parsedV2 = parseSpendingV2(await rpc(a, 'admin_ai_spending_v2', { p_months: 6 }));
+      requireEvidence(parsedV2 !== null && parsedV2.months.length === 6 && parsedV2.accounts.length === 2
+        && parsedV2.accounts.every((account) => (account.limits === null || account.limits.tryOn !== undefined) && account.history.length === 6)
+        && parseSpending(await rpc(a, 'admin_ai_spending_v2', { p_months: 6 })) === null);
     } finally {
       await sql(`delete from private.app_admins where owner_id=${literal(a.uid)};`);
     }
