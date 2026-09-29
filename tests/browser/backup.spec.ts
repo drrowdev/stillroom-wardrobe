@@ -6,6 +6,7 @@ import { translate, type Language, type MessageKey } from '../../src/i18n';
 import { verifyParts, type JpegCheck } from '../../src/domain/export-format';
 import { assertSanitizedJpeg, readJpegHeader } from '../../src/images/jpeg';
 import { mockBackend, signIn } from './mock-backend';
+import { settled, trackRequests } from './settle';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -30,14 +31,19 @@ async function start(page: Page, options: { language?: Language; seed?: (api: Ap
   options.seed?.(api);
   const bodies: string[] = [];
   page.on('request', request => { bodies.push(request.url(), request.postData() ?? ''); });
+  trackRequests(page);
   await page.goto('/#/settings'); await signIn(page);
-  await expect(page.locator('#settings-title')).toBeVisible();
+  // Settings has finished opening once the page has moved focus to its heading.
+  await expect(page.locator('#settings-title')).toBeFocused();
   return { api, bodies };
 }
 async function fill(page: Page, first = passphrase, second = first, language: Language = 'en') {
   const field = card(page).getByLabel(text('backup.passphrase', language), { exact: true });
   if (!await field.isVisible()) {
+    await settled(page, button(page, 'backup.create', language));
     await button(page, 'backup.create', language).click();
+    await expect(card(page).locator('form')).toBeVisible();
+    await expect(field).toBeVisible();
     await expect(field).toBeFocused();
   }
   await card(page).getByLabel(text('backup.passphrase', language), { exact: true }).fill(first);

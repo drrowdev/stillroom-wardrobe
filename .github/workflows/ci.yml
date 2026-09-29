@@ -14,10 +14,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  app:
-    name: App and browser contracts
+  changes:
+    name: Changed files
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 5
+    outputs:
+      heavy: ${{ steps.classify.outputs.heavy }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Run the heavy jobs unless a pull request changes only documentation
+        id: classify
+        run: node scripts/ci-changes.mjs >> "$GITHUB_OUTPUT"
+
+  docs:
+    name: Documentation checks
+    needs: changes
+    if: ${{ needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-fund
+      - name: Set a secret-scan canary
+        run: echo "STILLROOM_SECRET_CANARY=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+      - run: npm run scan:secrets
+      - run: npm run check:dependencies
+      - run: npm run test:unit
+
+  app-checks:
+    name: App static checks
+    needs: changes
+    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -38,6 +76,26 @@ jobs:
       - run: npm run scan:secrets
       - run: npm run check:dependencies
       - run: npm run check:deploy-artifacts
+
+  app-browser:
+    name: App browser contracts (${{ matrix.shard }}/3)
+    needs: changes
+    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-fund
       - run: npx playwright install --with-deps chromium
       - name: Let the pinned Playwright Chromium use its sandbox (Ubuntu AppArmor user-namespace restriction)
         shell: bash -euo pipefail {0}
@@ -46,7 +104,51 @@ jobs:
           printf 'abi <abi/4.0>,\ninclude <tunables/global>\n\nprofile stillroom-playwright-chromium "%s" flags=(unconfined) {\n  userns,\n}\n' "$chrome" | sudo tee /etc/apparmor.d/stillroom-playwright-chromium > /dev/null
           sudo apparmor_parser --replace /etc/apparmor.d/stillroom-playwright-chromium
           node scripts/ci-chromium-sandbox.mjs --verify
-      - run: npm run test:browser -- --project=chromium --project=mobile
+      - run: npm run test:browser -- --project=chromium --project=mobile --shard=${{ matrix.shard }}/3
+      - name: Stage this shard's visual evidence
+        shell: bash -euo pipefail {0}
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          staged="$RUNNER_TEMP/visual"
+          mkdir -p "$staged"
+          for dir in test-results/*-visual; do
+            if [ -d "$dir" ]; then cp -R "$dir" "$staged/"; fi
+          done
+          echo "$SHARD" > "$staged/shard-$SHARD.txt"
+      - name: Hand this shard's visual evidence to the App job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: app-visual-shard-${{ matrix.shard }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/visual/
+          if-no-files-found: error
+          retention-days: 1
+
+  app:
+    name: App and browser contracts
+    needs: [changes, app-checks, app-browser]
+    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require the static checks and every browser shard to pass
+        env:
+          CHECKS: ${{ needs.app-checks.result }}
+          BROWSER: ${{ needs.app-browser.result }}
+        run: |
+          test "$CHECKS" = success
+          test "$BROWSER" = success
+      - name: Collect the visual evidence from every shard
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: app-visual-shard-*-${{ github.event.pull_request.head.sha || github.sha }}
+          path: test-results
+          merge-multiple: true
+      - name: Require the evidence of all three shards
+        run: |
+          test -f test-results/shard-1.txt
+          test -f test-results/shard-2.txt
+          test -f test-results/shard-3.txt
       - name: Preserve bounded synthetic I06 visual evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -368,6 +470,8 @@ jobs:
 
   pwa:
     name: PWA production contracts
+    needs: changes
+    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -404,6 +508,8 @@ jobs:
 
   webkit-photo:
     name: WebKit photo contracts
+    needs: changes
+    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -420,6 +526,8 @@ jobs:
 
   database:
     name: Real local Supabase
+    needs: changes
+    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -497,6 +605,8 @@ jobs:
 
   deletion-rehearsal:
     name: Account deletion rehearsal
+    needs: changes
+    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -539,6 +649,8 @@ jobs:
 
   performance:
     name: Performance budgets
+    needs: changes
+    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

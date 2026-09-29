@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingHttpHeaders, type IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import type { Language } from '../../src/i18n';
+import { retryWebKitInternalReload } from './webkit-reload';
 import { garmentFields, garmentPayload, parseGarmentValues, sameValue } from '../../src/domain/garment-fields';
 import { parseFieldProvenance, provenanceFields } from '../../src/domain/attribute-provenance';
 import { isRecord, isUuid } from '../../src/domain/wardrobe';
@@ -636,6 +637,7 @@ export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits |
 }
 
 export async function mockBackend(page: Page, options: MockOptions = {}) {
+  retryWebKitInternalReload(page);
   const profiles: Record<string, JsonRow> = {
     [owners.a]: { owner_id: owners.a, display_name: 'Alex', ui_language: options.initialLanguage ?? null, timezone: 'Europe/Helsinki', currency: 'EUR', version: 1,
       weather_enabled: false, weather_city: null, latitude: null, longitude: null, ...options.weather?.a },

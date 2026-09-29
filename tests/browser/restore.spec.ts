@@ -9,6 +9,7 @@ import { fitDimensions, JPEG_LIMITS, readJpegHeader } from '../../src/images/jpe
 import { exifSegment, joinBytes, jpegSegment, listJpegMarkers } from '../fixtures/jpeg-helpers';
 import { findMarker, findMarkers, flatJpeg } from '../fixtures/restore-jpeg-fixtures';
 import { mockBackend, owners, signIn, type MockOptions } from './mock-backend';
+import { settled, trackRequests } from './settle';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -75,6 +76,7 @@ async function start(page: Page, options: MockOptions = {}, language: Language =
   const urls: string[] = [];
   // Each entry is `METHOD url`, so a read can be told from a write to the same address.
   page.on('request', request => { urls.push(`${request.method()} ${request.url()}`); });
+  trackRequests(page);
   await page.goto('/#/settings');
   const thumb = await thumbnail(page);
   return { api, urls, thumb };
@@ -92,8 +94,10 @@ async function signOut(page: Page, language: Language = 'en') {
 }
 // Makes a real backup through the Backup card and returns its parts as files.
 async function backup(page: Page, language: Language = 'en'): Promise<Part[]> {
+  await settled(page, button(page, 'backup.create', language));
   await button(page, 'backup.create', language).click();
   // Opening the form moves focus to the passphrase. Checked here, so a form that doesn't open fails at once, not at the test limit.
+  await expect(backupCard(page).locator('form')).toBeVisible();
   await expect(backupCard(page).getByLabel(text('backup.passphrase', language), { exact: true })).toBeFocused();
   await backupCard(page).getByLabel(text('backup.passphrase', language), { exact: true }).fill(passphrase);
   await backupCard(page).getByLabel(text('backup.repeat', language), { exact: true }).fill(passphrase);
