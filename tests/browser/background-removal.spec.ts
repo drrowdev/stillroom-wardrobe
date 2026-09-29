@@ -177,7 +177,7 @@ test('removal settles before the single analysis; the cut-out replaces the backg
 
   const original = page.locator('#background-original');
   await expect(original).toHaveAccessibleName(text('photo.bgUseOriginal'));
-  await expect(original).toHaveAccessibleDescription(text('photo.bgReanalyse'));
+  await expect(original).toHaveAccessibleDescription(text('photo.reanalyse'));
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await original.click();
   await expect.poll(() => analyses(api)).toBe(2);
@@ -455,7 +455,7 @@ for (const flow of ['add', 'replace'] as const) {
     await page.locator('#crop-cancel').click();
     const original = page.locator('#background-original');
     await expect(original).toBeEnabled();
-    await expect(original).toHaveAccessibleDescription(text('photo.bgReanalyse'));
+    await expect(original).toHaveAccessibleDescription(text('photo.reanalyse'));
     near((await sample(page, selectors.photo, [[0.73, 0.5]]))[0], FILL);
     expect(analyses(api)).toBe(1);
     await patch(page, { runDelayMs: 0 });
