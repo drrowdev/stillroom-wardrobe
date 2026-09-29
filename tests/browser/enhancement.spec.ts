@@ -407,6 +407,54 @@ for (const flow of ['add', 'replace'] as const) {
     await expect(page.locator('#crop-width')).toHaveValue('100');
   });
 
+  for (const after of ['Done', 'Cancel', 'Use original'] as const) {
+    test(`${flow}: a failed accepted crop keeps the review open; then ${after} works and a later edit still has the whole photo`, async ({ page }) => {
+      engineOnly();
+      test.slow();
+      const api = await start(page, { background: { mask: 'centre' } });
+      const h0: Buffer[] = [];
+      api.enhanceControl.replies.push(recording(page, h0), recording(page, h0));
+      await openFlow(page, api, flow);
+      await choose(page, flow, await bandPhoto(page));
+      await inReview(page);
+      await setCrop(page, { x: '25', width: '50' });
+      // The accepted crop's preparation fails: the encoder returns nothing.
+      await page.evaluate(() => {
+        const native = HTMLCanvasElement.prototype.toBlob;
+        Object.assign(window, { nativeToBlob: native });
+        HTMLCanvasElement.prototype.toBlob = (callback) => callback(null);
+      });
+      await page.locator('#apply-crop').click();
+      await expect(page.getByRole('alert')).toBeVisible({ timeout: 45_000 });
+      await expect(reviewHint(page)).toBeVisible();
+      await expect(page.locator('#apply-crop')).toBeEnabled();
+      expect(sent(api)).toHaveLength(0);
+      expect(analyses(api)).toBe(0);
+      await page.evaluate(() => { HTMLCanvasElement.prototype.toBlob = (window as unknown as { nativeToBlob: typeof HTMLCanvasElement.prototype.toBlob }).nativeToBlob; });
+      if (after === 'Done') {
+        await page.locator('#apply-crop').click();
+        await expect.poll(() => analyses(api), { timeout: 45_000 }).toBe(1);
+        expect(h0).toHaveLength(1);
+        expect((await bandsOf(page, h0[0]!)).row).toEqual(['B', 'C']);
+      } else {
+        await page.locator(after === 'Cancel' ? '#crop-cancel' : '#background-original').click();
+        await expect.poll(() => analyses(api), { timeout: 45_000 }).toBe(1);
+        await page.waitForTimeout(300);
+        expect(sent(api)).toHaveLength(0);
+      }
+      await expect(page.locator('section.crop-editor')).toHaveCount(0);
+      // A later edit still crops the whole photo from the original file.
+      await page.locator(flows[flow].edit).click();
+      expect((await editorSource(page)).row).toEqual(['A', 'B', 'C', 'D']);
+      await setCrop(page, { x: '50', y: '0', width: '25', height: '100' });
+      await page.locator('#apply-crop').click();
+      await expect.poll(() => analyses(api), { timeout: 45_000 }).toBe(2);
+      await expect(page.locator('section.crop-editor')).toHaveCount(0);
+      if (after !== 'Use original') expect((await bandsOf(page, h0.at(-1)!)).row).toEqual(['C']);
+      else expect(sent(api)).toHaveLength(0);
+    });
+  }
+
   test(`${flow}: Cancel in the review keeps the new photo's cut-out with one analysis and sends nothing`, async ({ page }) => {
     engineOnly();
     const api = await start(page);

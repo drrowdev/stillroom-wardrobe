@@ -214,7 +214,13 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           commit(prepared, stage, edit, replacing, how.fromReview?.prepared.crop ?? null);
         }
       } catch (problem) {
-        if (!signal.aborted && !isAborted(problem)) {
+        if (!signal.aborted && !isAborted(problem) && how.fromReview) {
+          // A failed accepted crop leaves the review open and retryable: the original file, the whole-photo source and
+          // the first pass stay, and the review now belongs to this (current) preparation.
+          pendingCrop.current = false;
+          setReview({ ...how.fromReview, controller });
+          setError(!imaging ? 'chunk.failed' : problem instanceof imaging.ImagePreparationError ? preparationErrors[problem.code] : 'photo.invalid');
+        } else if (!signal.aborted && !isAborted(problem)) {
           background.settle('none');
           pendingCrop.current = false;
           if (replacing) original.current = null;

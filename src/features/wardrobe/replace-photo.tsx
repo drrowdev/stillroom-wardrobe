@@ -246,7 +246,9 @@ function Replacement(props: Props) {
         if (stage.kind === 'aborted' || stage.kind === 'available' || signal.aborted) return;
         commit(prepared, stage, next, replacing, how.fromReview?.prepared.crop ?? null);
       } catch (error) {
-        if (!signal.aborted) { background.settle('none'); pendingCrop.current = false; }
+        // As in Add item: a failed accepted crop leaves the review open and retryable on this preparation.
+        if (!signal.aborted && how.fromReview) { pendingCrop.current = false; setReview({ ...how.fromReview, controller }); }
+        else if (!signal.aborted) { background.settle('none'); pendingCrop.current = false; }
         if (!signal.aborted) setError(error instanceof ImagePreparationError
           ? error.code === 'tooLarge' ? 'photo.prepareTooLarge' : error.code === 'unsupported' ? 'photo.prepareUnsupported'
             : error.code === 'unavailable' ? 'photo.prepareUnavailable' : 'photo.invalid' : 'photo.invalid');
