@@ -8,9 +8,11 @@ import {
   type ImagePreparationStage,
 } from './jpeg';
 import { cropGeometry, ORIGINAL_EDIT, type PhotoEdit } from './crop';
-import { framePlan } from './background/frame';
+import { framePlan, referenceMask, type FramePlan } from './background/frame';
 import { BackgroundRemovalError, MASK_SIDE, maskPixels } from './background/mask';
 import type { Segmenter, SegmentJob } from './background/remover';
+import { isPhotoInputJpeg } from './restore-jpeg';
+import { ENHANCE_LIMITS } from '../domain/enhancement';
 
 export { ImagePreparationError } from './jpeg';
 
@@ -366,14 +368,71 @@ export async function prepareSource(
 
 /** A bounded, oriented and unsegmented JPEG of the whole photo, kept in memory for the crop editor only. */
 export type CropSource = { main: Blob; width: number; height: number };
-/** `framed` is false when the mask box was too small to trust and the unframed cut-out was kept. */
-export type SegmentedPhoto = { photo: PreparedPhoto; crop: CropSource | null; coverage: number; framed: boolean };
+/**
+ * BG2c clean-up input (plan rev4 §4). H0 is the accepted crop's ORIGINAL unmasked pixels drawn into the same BG2a frame
+ * as H1, re-encoded by the app (decoded, oriented, cropped, framed, no metadata; never the raw file) and admitted by
+ * `isPhotoInputJpeg`. `reference` is R, BG1's region on the 256 x 320 frame grid (0|1). Memory only: never stored,
+ * uploaded, cached or exported.
+ */
+export type CleanupSource = {
+  main: Blob; width: number; height: number; sha256: string; reference: Uint8Array;
+  geometry: { edit: PhotoEdit; source: FramePlan['source']; dest: FramePlan['dest']; canvas: FramePlan['canvas'] };
+};
+/**
+ * `framed` is false when the mask box was too small to trust and the unframed cut-out was kept. `cleanup` is null unless
+ * it was asked for and the photo was framed and H0 passed every check; building it never fails the preparation.
+ */
+export type SegmentedPhoto = { photo: PreparedPhoto; crop: CropSource | null; coverage: number; framed: boolean; cleanup: CleanupSource | null };
 
 function canvasOf(width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   return canvas;
+}
+
+/**
+ * H0 and R (BG2c plan rev4 §4.1). Fill the frame canvas, draw the unmasked working pixels source -> dest, encode within
+ * the enhancement byte and side limits, strip metadata, check and hash, then admit with `isPhotoInputJpeg` and require
+ * an exact 4:5 size after any encoder downscale. Every failure except an abort, including allocating or sizing either
+ * canvas, returns null, so H1 is kept and the preparation still succeeds. Estimated extra peak (not measured): two
+ * canvases alive together, the frame canvas and the encoder's own canvas, each at most 1280 x 1600 x 4 bytes, about
+ * 8.2 MB each and 16.4 MB in total, plus the encoder's working buffers.
+ * Exported for its unit test only; the app reaches it through `prepareSegmentedSource(..., wantCleanup)`.
+ */
+export async function cleanupSource(working: HTMLCanvasElement, alpha: Float32Array, size: { width: number; height: number },
+  frame: FramePlan, edit: PhotoEdit, signal?: AbortSignal): Promise<CleanupSource | null> {
+  let h0Canvas: HTMLCanvasElement | undefined;
+  let encoded: EncodedImage | undefined;
+  try {
+    h0Canvas = canvasOf(frame.canvas.width, frame.canvas.height);
+    const context = fillBackground(h0Canvas);
+    context.imageSmoothingQuality = 'high';
+    const { source, dest } = frame;
+    context.drawImage(working, source.x, source.y, source.width, source.height, dest.x, dest.y, dest.width, dest.height);
+    encoded = await encode(h0Canvas, h0Canvas.width, h0Canvas.height, JPEG_LIMITS.mainSide, ENHANCE_LIMITS.imageBytes, 800,
+      signal, undefined, true);
+    releaseCanvas(h0Canvas);
+    h0Canvas = undefined;
+    const { width, height } = encoded.canvas;
+    if (width * 5 !== height * 4 || Math.max(width, height) > ENHANCE_LIMITS.imageMaxSide) return null;
+    const sha256 = await verifyAndHash(encoded, signal);
+    const bytes = new Uint8Array(await abortable(encoded.blob.arrayBuffer(), signal));
+    checkAbort(signal);
+    if (bytes.length > ENHANCE_LIMITS.imageBytes || !isPhotoInputJpeg(bytes, width, height)) return null;
+    const reference = referenceMask(alpha, size.width, size.height, frame);
+    if (!reference) return null;
+    return { main: encoded.blob, width, height, sha256, reference,
+      geometry: { edit, source: { ...source }, dest: { ...dest }, canvas: { ...frame.canvas } } };
+  } catch (error) {
+    checkAbort(signal);
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    return null;
+  } finally {
+    // Releasing must not turn a null into a failed preparation either.
+    try { if (h0Canvas) releaseCanvas(h0Canvas); } catch { /* already unusable */ }
+    try { if (encoded) releaseCanvas(encoded.canvas); } catch { /* already unusable */ }
+  }
 }
 
 /**
@@ -385,7 +444,7 @@ function canvasOf(width: number, height: number): HTMLCanvasElement {
  */
 export async function prepareSegmentedSource(
   file: Blob, admit: () => Promise<AdmittedSource>, edit: PhotoEdit, signal: AbortSignal | undefined,
-  segmenter: Segmenter, wantCrop: boolean,
+  segmenter: Segmenter, wantCrop: boolean, wantCleanup = false,
 ): Promise<SegmentedPhoto> {
   let decoded: DecodedImage | undefined;
   let job: SegmentJob | undefined;
@@ -435,6 +494,12 @@ export async function prepareSegmentedSource(
     const mask = temporary(MASK_SIDE, MASK_SIDE);
     context2d(mask).putImageData(new ImageData(maskPixels(alpha), MASK_SIDE, MASK_SIDE), 0, 0);
     releaseCanvas(small);
+    // Packshot framing (BG2a): the garment's box, centred on a 4:5 canvas. A box too small to trust keeps the
+    // unframed cut-out.
+    const frame = framePlan(alpha, size.width, size.height);
+    // BG2c H0, built while the unmasked working canvas still exists and before the cut-out canvas does.
+    const cleanup = wantCleanup && frame ? await cleanupSource(working, alpha, size, frame, edit, signal) : null;
+    checkAbort(signal);
     // The cut-out keeps the photo's pixels where the mask is set, then sits on the neutral background.
     const cut = temporary(size.width, size.height);
     const cutContext = context2d(cut);
@@ -444,9 +509,6 @@ export async function prepareSegmentedSource(
     cutContext.drawImage(mask, 0, 0, size.width, size.height);
     releaseCanvas(working);
     releaseCanvas(mask);
-    // Packshot framing (BG2a): the garment's box, centred on a 4:5 canvas. A box too small to trust keeps the
-    // unframed cut-out.
-    const frame = framePlan(alpha, size.width, size.height);
     const composite = temporary(frame?.canvas.width ?? size.width, frame?.canvas.height ?? size.height);
     if (frame) {
       const { source, dest } = frame;
@@ -467,6 +529,7 @@ export async function prepareSegmentedSource(
       crop,
       coverage,
       framed: frame !== null,
+      cleanup,
     };
   } catch (error) {
     checkAbort(signal);

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  ENHANCE_DEPLOYMENT, ENHANCE_MANIFEST, ENHANCE_MODEL, ENHANCE_PARAMETERS, ENHANCE_PROMPT, ENHANCE_RESERVATION_MICRO,
+  CLEANUP_MANIFEST, CLEANUP_PROMPT, CLEANUP_SETTINGS, ENHANCE_DEPLOYMENT, ENHANCE_MANIFEST, ENHANCE_MODEL, ENHANCE_PARAMETERS, ENHANCE_PROMPT, ENHANCE_RESERVATION_MICRO,
   ENHANCE_SETTINGS, enhanceEstimateMicro, observeEnhanceUsage,
 } from '../../src/domain/enhancement';
 import { PROVIDER_JPEG } from '../../src/images/provider-jpeg';
@@ -29,6 +29,15 @@ describe('enhancement request contract', () => {
     }
     expect(sql).toContain(`'${ENHANCE_MANIFEST}','${ENHANCE_MODEL}',1,`);
     expect(sql).toContain(`'USD',800,3000,7500,8000,${ENHANCE_RESERVATION_MICRO},512000,1600,4194304,512000,85,'2027-01-01T00:00:00Z'`);
+    // BG2c-1: the cleanup-v1 row pins prompt v2, the unchanged parameters and the cleanup settings, with the same envelope.
+    const cleanup = await readFile(new URL('../../supabase/migrations/20261002090000_photo_cleanup_manifest.sql', import.meta.url), 'utf8');
+    for (const hash of [sha(CLEANUP_PROMPT), sha(JSON.stringify(ENHANCE_PARAMETERS)), sha(JSON.stringify(CLEANUP_SETTINGS))]) {
+      expect(cleanup).toContain(`'${hash}'`);
+    }
+    expect(cleanup).toContain(`'${CLEANUP_MANIFEST}','${ENHANCE_MODEL}',2,`);
+    expect(cleanup).toContain(`'USD',800,3000,7500,8000,${ENHANCE_RESERVATION_MICRO},512000,1600,4194304,512000,85,'2027-01-01T00:00:00Z'`);
+    expect(CLEANUP_SETTINGS).toMatchObject({ profileId: CLEANUP_MANIFEST, purpose: 'inactive-photo-cleanup', promptVersion: 2,
+      noticeRevision: 2, input: 'accepted-crop-original-pixels-in-bg2a-frame-app-reencoded', parameters: ENHANCE_PARAMETERS });
     expect(BigInt(ENHANCE_RESERVATION_MICRO)).toBe((7500n * 800n + 8000n * 3000n + 99n) / 100n);
     expect(ENHANCE_PARAMETERS).toEqual({ model: ENHANCE_DEPLOYMENT, n: 1, size: '1024x1280', quality: 'medium',
       output_format: 'jpeg', output_compression: 85, background: 'opaque' });
@@ -39,7 +48,7 @@ describe('enhancement request contract', () => {
     const form = enhanceForm(INPUT);
     const keys = [...form.keys()];
     expect(keys).toEqual([...Object.keys(ENHANCE_PARAMETERS), 'prompt', 'image']);
-    expect(form.get('prompt')).toBe(ENHANCE_PROMPT);
+    expect(form.get('prompt')).toBe(CLEANUP_PROMPT);
     const file = form.get('image') as File;
     expect(file.type).toBe('image/jpeg');
     expect(new Uint8Array(await file.arrayBuffer())).toEqual(INPUT);
@@ -81,8 +90,8 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); registered.length = 0; claimedWorkObserver.current = null; });
   const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service',
     azure: { apiKey: 'fictional-azure-image' } };
-  const status = { code: 'OK', consent: { enabled: true, noticeRevision: 1 }, policy: { activated: true, noticeRevision: 1,
-    manifestId: ENHANCE_MANIFEST, modelId: ENHANCE_MODEL, maxRequestMicro: ENHANCE_RESERVATION_MICRO, providerAvailable: true } };
+  const status = { code: 'OK', consent: { enabled: true, noticeRevision: 2 }, policy: { activated: true, noticeRevision: 2,
+    manifestId: CLEANUP_MANIFEST, modelId: ENHANCE_MODEL, maxRequestMicro: ENHANCE_RESERVATION_MICRO, providerAvailable: true } };
   const accounting = { basis: 'estimated', amountMicro: '71200', currency: 'USD' };
   type Call = { url: string; body: Record<string, unknown> | null; auth: string | null; at: number };
   let clock = 0;
@@ -95,7 +104,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
       if (url.endsWith('/auth/v1/user')) return Response.json({ id: OWNER, role: 'authenticated', is_anonymous: false });
       if (url.endsWith('/rpc/enhance_status')) return Response.json(options.status ?? status);
       if (url.endsWith('/rpc/enhance_claim')) return Response.json(options.claim ?? { code: 'OK', claimed: true,
-        manifestId: ENHANCE_MANIFEST, dispatchBeforeMs: Date.now() + 5000, requestSeconds: 85 });
+        manifestId: CLEANUP_MANIFEST, dispatchBeforeMs: Date.now() + 5000, requestSeconds: 85 });
       if (url.endsWith('/rpc/enhance_finish')) {
         // Like a real fetch, an aborted signal fails the settlement: this proves which lifetime finish runs on.
         if (options.finishGate) await options.finishGate;
@@ -147,7 +156,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     expect(response.headers.get('X-Stillroom-Enhancement-Usable-Until')).toBe('1900000000000');
     expect(response.headers.get('Access-Control-Expose-Headers')).toContain('x-stillroom-enhancement-sha256');
     expect(calls.map((call) => call.url.split('/').pop())).toEqual(['user', 'enhance_status', 'enhance_claim', 'enhance_finish']);
-    expect(calls[2]!.body).toEqual({ p_owner_id: OWNER, p_request_id: REQUEST, p_manifest_id: ENHANCE_MANIFEST,
+    expect(calls[2]!.body).toEqual({ p_owner_id: OWNER, p_request_id: REQUEST, p_manifest_id: CLEANUP_MANIFEST,
       p_input_sha256: sha(INPUT), p_probe_id: null });
     expect(calls[2]!.auth).toBe('Bearer fictional-service');
     expect(finishBody(calls)).toEqual({ p_owner_id: OWNER, p_request_id: REQUEST, p_code: 'OK',
@@ -174,7 +183,11 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     for (const [override, code] of [[{ policy: { ...status.policy, activated: false } }, 'INACTIVE'],
       [{ consent: { enabled: false, noticeRevision: null } }, 'CONSENT_REQUIRED'],
       [{ policy: { ...status.policy, providerAvailable: false } }, 'UNAVAILABLE'],
-      [{ policy: { ...status.policy, maxRequestMicro: '1000' } }, 'UNCONFIGURED']] as const) {
+      [{ policy: { ...status.policy, maxRequestMicro: '1000' } }, 'UNCONFIGURED'],
+      // BG2c-1: a policy still on enhance-v1 (or its notice revision 1) is not this function's manifest: no claim.
+      [{ consent: { enabled: true, noticeRevision: 1 }, policy: { ...status.policy, manifestId: ENHANCE_MANIFEST, noticeRevision: 1 } }, 'UNCONFIGURED'],
+      [{ consent: { enabled: true, noticeRevision: 1 }, policy: { ...status.policy, noticeRevision: 1 } }, 'UNCONFIGURED'],
+      [{ consent: { enabled: true, noticeRevision: 1 } }, 'CONSENT_REQUIRED']] as const) {
       const calls = backend({ status: { ...status, ...override } });
       const { transport } = provider(() => Response.json(imageBody()));
       const response = await createEnhanceHandler(config, register, transport)(post());
@@ -197,7 +210,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
   });
 
   it('settles as not dispatched after the dispatch deadline', async () => {
-    const calls = backend({ claim: { code: 'OK', claimed: true, manifestId: ENHANCE_MANIFEST, dispatchBeforeMs: Date.now() - 1, requestSeconds: 85 } });
+    const calls = backend({ claim: { code: 'OK', claimed: true, manifestId: CLEANUP_MANIFEST, dispatchBeforeMs: Date.now() - 1, requestSeconds: 85 } });
     const { transport } = provider(() => Response.json(imageBody()));
     const response = await createEnhanceHandler(config, register, transport)(post());
     expect(await response.json()).toEqual({ code: 'TIMEOUT' });

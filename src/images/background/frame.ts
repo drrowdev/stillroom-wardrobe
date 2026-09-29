@@ -60,3 +60,97 @@ export function framePlan(alpha: Float32Array, workingWidth: number, workingHeig
   const dest = { x: Math.floor((canvas.width - width) / 2), y: Math.floor((canvas.height - height) / 2), width, height };
   return { source, canvas, dest };
 }
+
+/** BG2c: the clean-up reference grid (the same as the fidelity grid). */
+export const REFERENCE_WIDTH = 256;
+export const REFERENCE_HEIGHT = 320;
+/** BG2c ambiguity rule: a second separate region at least this share of the largest one's area. */
+export const AMBIGUOUS_SECOND_SHARE = 0.25;
+/** BG2c: labelling gives up (fails closed) above this many components. */
+export const MAX_COMPONENTS = 4096;
+const REFERENCE_SAMPLES = 4;
+
+/**
+ * R (BG2c plan rev4 §4.2): BG1's kept region mapped onto the 256 × 320 grid of the framed 4:5 canvas. Each cell is box
+ * sampled (4 × 4 points) through the plan's dest -> source mapping and the working -> mask scale; a cell is set when the
+ * mean alpha is at least 0.5. Everything outside `dest` is 0. R is BG1's region, not the intended garment: it can
+ * include hangers and neighbours, so the clean-up check only uses it as an upper bound and a loose floor.
+ */
+export function referenceMask(alpha: Float32Array, workingWidth: number, workingHeight: number, plan: FramePlan): Uint8Array | null {
+  if (alpha.length !== MASK_SIDE * MASK_SIDE
+    || ![workingWidth, workingHeight].every((value) => Number.isSafeInteger(value) && value > 0)) return null;
+  const { source, dest, canvas } = plan;
+  if (![source.width, source.height, dest.width, dest.height, canvas.width, canvas.height].every((value) => value > 0)) return null;
+  const out = new Uint8Array(REFERENCE_WIDTH * REFERENCE_HEIGHT);
+  const cellW = canvas.width / REFERENCE_WIDTH, cellH = canvas.height / REFERENCE_HEIGHT;
+  const toMaskX = MASK_SIDE / workingWidth, toMaskY = MASK_SIDE / workingHeight;
+  for (let gy = 0; gy < REFERENCE_HEIGHT; gy += 1) {
+    for (let gx = 0; gx < REFERENCE_WIDTH; gx += 1) {
+      let sum = 0;
+      for (let sy = 0; sy < REFERENCE_SAMPLES; sy += 1) {
+        const fy = (gy + (sy + 0.5) / REFERENCE_SAMPLES) * cellH;
+        if (fy < dest.y || fy >= dest.y + dest.height) continue;
+        const wy = source.y + (fy - dest.y) * source.height / dest.height;
+        const my = Math.min(MASK_SIDE - 1, Math.max(0, Math.floor(wy * toMaskY)));
+        for (let sx = 0; sx < REFERENCE_SAMPLES; sx += 1) {
+          const fx = (gx + (sx + 0.5) / REFERENCE_SAMPLES) * cellW;
+          if (fx < dest.x || fx >= dest.x + dest.width) continue;
+          const wx = source.x + (fx - dest.x) * source.width / dest.width;
+          const mx = Math.min(MASK_SIDE - 1, Math.max(0, Math.floor(wx * toMaskX)));
+          sum += alpha[my * MASK_SIDE + mx]!;
+        }
+      }
+      out[gy * REFERENCE_WIDTH + gx] = sum / (REFERENCE_SAMPLES * REFERENCE_SAMPLES) >= 0.5 ? 1 : 0;
+    }
+  }
+  return out;
+}
+
+export type Components = { count: number; areas: number[]; boxes: { x0: number; y0: number; x1: number; y1: number }[]; overflow: boolean };
+
+/**
+ * 4-connected labelling with an iterative queue (no recursion). `labels` and `queue` are caller-owned buffers of the
+ * mask's length, so repeated checks allocate nothing here. Labels start at 1; 0 is unlabelled. Stops with
+ * `overflow: true` above MAX_COMPONENTS.
+ */
+export function labelComponents(mask: Uint8Array, width: number, height: number, labels: Int32Array, queue: Int32Array): Components {
+  const size = width * height;
+  if (mask.length !== size || labels.length < size || queue.length < size) throw new RangeError('component buffers');
+  labels.fill(0, 0, size);
+  const areas: number[] = [], boxes: Components['boxes'] = [];
+  for (let start = 0; start < size; start += 1) {
+    if (!mask[start] || labels[start]) continue;
+    if (areas.length >= MAX_COMPONENTS) return { count: areas.length, areas, boxes, overflow: true };
+    const label = areas.length + 1;
+    let head = 0, tail = 0, area = 0;
+    let x0 = width, y0 = height, x1 = -1, y1 = -1;
+    labels[start] = label; queue[tail++] = start;
+    while (head < tail) {
+      const at = queue[head++]!;
+      const x = at % width, y = (at - x) / width;
+      area += 1;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (x > 0 && mask[at - 1] && !labels[at - 1]) { labels[at - 1] = label; queue[tail++] = at - 1; }
+      if (x < width - 1 && mask[at + 1] && !labels[at + 1]) { labels[at + 1] = label; queue[tail++] = at + 1; }
+      if (y > 0 && mask[at - width] && !labels[at - width]) { labels[at - width] = label; queue[tail++] = at - width; }
+      if (y < height - 1 && mask[at + width] && !labels[at + width]) { labels[at + width] = label; queue[tail++] = at + width; }
+    }
+    areas.push(area);
+    boxes.push({ x0, y0, x1: x1 + 1, y1: y1 + 1 });
+  }
+  return { count: areas.length, areas, boxes, overflow: false };
+}
+
+/**
+ * The on-device ambiguity rule (§4.3): R is ambiguous when its second-largest separate region is at least 25 % of the
+ * largest's area, for example two garments side by side. Touching or overlapping neighbours merge into one region and
+ * are NOT detected here. An empty R, or one with too many regions, is also treated as ambiguous (not available).
+ */
+export function ambiguousReference(reference: Uint8Array): boolean {
+  const size = REFERENCE_WIDTH * REFERENCE_HEIGHT;
+  if (reference.length !== size) return true;
+  const found = labelComponents(reference, REFERENCE_WIDTH, REFERENCE_HEIGHT, new Int32Array(size), new Int32Array(size));
+  if (found.overflow || found.count === 0) return true;
+  const sorted = [...found.areas].sort((a, b) => b - a);
+  return sorted.length > 1 && sorted[1]! >= AMBIGUOUS_SECOND_SHARE * sorted[0]!;
+}

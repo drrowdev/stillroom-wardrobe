@@ -7,7 +7,7 @@ import { loadEnv, type Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 import { artifactUrl, isExcludedArtifact, isShellArtifact, joinShellUrls, manifestPath, parsePrecacheManifest, workerPath } from './src/pwa/shell-policy.ts';
 import { appVersion } from './src/data/app-version.ts';
-import { checkStaticTree, listTree, readInventory, type InventoryFile } from './scripts/check-static-assets.mjs';
+import { checkOperatorTree, checkStaticTree, HARNESS_ENTRY, listTree, OPERATOR_TREE, readInventory, type InventoryFile } from './scripts/check-static-assets.mjs';
 
 const publicKeys = new Set([
   'VITE_SUPABASE_URL',
@@ -81,7 +81,10 @@ async function runtimeBytes(runtime: InventoryFile): Promise<Buffer> {
 }
 // Background removal assets (ADR24): the locked ORT runtime is emitted at its exact inventory path (the model is
 // in public/), and the finished tree is checked against the inventory and the Pages limits before it can deploy.
+// The operator-probe build (BG2c plan rev4 §11.2a) copies no public/ files, so it emits the model too, and it is
+// checked by its own closed `checkOperatorTree`; the deploy check and its refusals are unchanged.
 function backgroundAssets(mode: string): Plugin {
+  const operator = mode === OPERATOR_MODE;
   let outDir = '';
   let inventory: InventoryFile[] = [];
   return {
@@ -99,9 +102,13 @@ function backgroundAssets(mode: string): Plugin {
     async generateBundle() {
       const runtime = inventory.find((file) => file.role === 'runtime')!;
       this.emitFile({ type: 'asset', fileName: runtime.path.slice(1), source: await runtimeBytes(runtime) });
+      if (operator) {
+        const model = inventory.find((file) => file.role === 'model')!;
+        this.emitFile({ type: 'asset', fileName: model.path.slice(1), source: await runtimeBytes(model) });
+      }
     },
     async closeBundle() {
-      const problems = await checkStaticTree(outDir, inventory);
+      const problems = operator ? await checkOperatorTree(outDir, inventory) : await checkStaticTree(outDir, inventory);
       if (mode !== 'browser-test') {
         for (const file of (await listTree(outDir)).filter((name) => name.endsWith('.js'))) {
           if ((await readFile(path.join(outDir, file), 'utf8')).includes('__stillroomBackground')) problems.push(`test hook in ${file}`);
@@ -125,7 +132,22 @@ function shellWorker(killSwitch: boolean): Plugin {
   };
 }
 
+const OPERATOR_MODE = 'operator-probe';
+
+// The operator-probe build: the harness entry only, into `<repo>/.probe-dist` only. Any other output directory
+// throws before anything is written.
+function operatorProbe(): Plugin {
+  return {
+    name: 'stillroom-operator-probe',
+    apply: 'build',
+    configResolved(config) {
+      if (path.resolve(config.root, config.build.outDir) !== OPERATOR_TREE) throw new Error(`The operator-probe build writes only to ${OPERATOR_TREE}.`);
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
+  const operator = mode === OPERATOR_MODE;
   const environment = loadEnv(mode, process.cwd(), 'VITE_');
   if (Object.keys(environment).some((key) => !publicKeys.has(key))) {
     throw new Error('Only the three documented public build variables are allowed.');
@@ -141,12 +163,12 @@ export default defineConfig(({ mode }) => {
     // The public version label replaces VITE_APP_VERSION at build time. CF_PAGES_COMMIT_SHA is read here only; it is
     // not a browser variable, and only its short hash reaches the bundle.
     define: {
-      __STILLROOM_SHELL_WORKER__: JSON.stringify(!killSwitch),
+      __STILLROOM_SHELL_WORKER__: JSON.stringify(!killSwitch && !operator),
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion({ CF_PAGES_COMMIT_SHA: process.env.CF_PAGES_COMMIT_SHA, VITE_APP_VERSION: environment.VITE_APP_VERSION })),
     },
     plugins: [
       react(),
-      shellWorker(killSwitch),
+      ...(operator ? [operatorProbe()] : [shellWorker(killSwitch)]),
       ortRuntimePath(runtime),
       backgroundAssets(mode),
       {
@@ -182,9 +204,12 @@ export default defineConfig(({ mode }) => {
     worker: { format: 'es', plugins: () => [ortRuntimePath(runtime)] },
     // Pre-bundle the lazily imported runtime so the dev server does not reload the page on first use.
     optimizeDeps: { include: ['onnxruntime-web/wasm'] },
+    ...(operator ? { publicDir: false as const } : {}),
     build: {
       sourcemap: false,
+      ...(operator ? { outDir: OPERATOR_TREE, emptyOutDir: true } : {}),
       rolldownOptions: {
+        ...(operator ? { input: { harness: path.resolve(HARNESS_ENTRY) } } : {}),
         output: {
           codeSplitting: {
             groups: [

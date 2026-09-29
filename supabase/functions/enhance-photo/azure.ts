@@ -1,4 +1,4 @@
-import { ENHANCE_ENDPOINT, ENHANCE_LIMITS, ENHANCE_MODEL, ENHANCE_DEPLOYMENT, ENHANCE_PARAMETERS, ENHANCE_PROMPT,
+import { ENHANCE_ENDPOINT, ENHANCE_LIMITS, ENHANCE_MODEL, ENHANCE_DEPLOYMENT, ENHANCE_PARAMETERS, CLEANUP_PROMPT,
   observeEnhanceUsage } from '../../../src/domain/enhancement.ts';
 import { admitProviderJpeg, decodeProviderBase64 } from '../../../src/images/provider-jpeg.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
@@ -54,7 +54,7 @@ export function classifyEnhanceResponse(status: number, value: JsonObject): Enha
 export function enhanceForm(image: Uint8Array<ArrayBuffer>): FormData {
   const form = new FormData();
   for (const [key, value] of Object.entries(ENHANCE_PARAMETERS)) form.append(key, String(value));
-  form.append('prompt', ENHANCE_PROMPT);
+  form.append('prompt', CLEANUP_PROMPT);
   form.append('image', new Blob([image], { type: 'image/jpeg' }), 'garment.jpg');
   return form;
 }

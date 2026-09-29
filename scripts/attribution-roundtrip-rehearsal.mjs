@@ -22,7 +22,8 @@ export const ROUNDTRIP_BOUND_MS = 420_000;
 const PASSPHRASE = 'synthetic attribution round trip';
 const MANIFEST = 'azure-eu-terra-devtest-v2';
 const WIDTH = 128, HEIGHT = 96;
-const ENHANCE_MANIFEST = 'azure-global-image25-sunburst-enhance-v1';
+// BG2c-1: new claims admit only the clean-up manifest (notice revision 2).
+const ENHANCE_MANIFEST = 'azure-global-image25-sunburst-cleanup-v1';
 const ENHANCE_MODEL = 'gpt-image-2.5-sunburst';
 const ENHANCE_KEY = 'stillroom-ai-eval/eval-image25-sunburst-20260908/2026-09-08';
 const ENHANCE_USAGE = Object.freeze({ modelObservation: 'not_observed', input: 1000, output: 4000, total: 5000, inputText: 100,
@@ -346,12 +347,12 @@ async function main() {
       check(savedCapacity.dispatch_enabled === false && savedControls.enhance_activated === false, 'enhance-initial');
       equal(await client.rpc(a, 'image_provenance_v1', {}), []);
       equal(await client.rpc(b, 'image_provenance_v1', {}), []);
-      await privilegedLocalSql(`update private.ai_controls set enhance_activated=true,enhance_notice_revision=1,
+      await privilegedLocalSql(`update private.ai_controls set enhance_activated=true,enhance_notice_revision=2,
         enhance_manifest_id=${literal(ENHANCE_MANIFEST)},enhance_max_request_micro=300000,enhance_monthly_allowance_micro=50000000,
         enhance_max_requests_per_hour=1000,updated_at=clock_timestamp() where owner_id=${literal(a.uid)};
         update private.provider_capacity set max_dispatch=100,dispatch_enabled=true,disabled_reason=null,disabled_at=null
           where deployment_key=${literal(ENHANCE_KEY)};`);
-      check((await client.rpc(a, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 1 }))?.code === 'OK', 'enhance-consent');
+      check((await client.rpc(a, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 2 }))?.code === 'OK', 'enhance-consent');
       // Released H2 evidence for these exact bytes, as enhance_finish records it after the provider double answers.
       const enhancedPhoto = async (colour) => {
         const bytes = photo(colour), id = randomUUID();

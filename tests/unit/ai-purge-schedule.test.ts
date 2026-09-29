@@ -9,13 +9,14 @@ const JOB = "cron.schedule('stillroom-ai-purge-expired', '*/15 * * * *', 'select
 const statements = (sql: string) => sql.replace(/--[^\n]*/g, '').replace(/'(?:[^']|'')*'/g, "''").toLowerCase();
 
 describe('scheduled AI purge migration', () => {
-  it('is the fourteenth of twenty-four migrations, followed by the ID conflicts, restore, account deletion, tag-history restore, stylist, enhancement and admin-limits migrations', async () => {
+  it('is the fourteenth of twenty-five migrations, followed by the ID conflicts, restore, account deletion, tag-history restore, stylist, enhancement, admin-limits and photo clean-up migrations', async () => {
     const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
-    expect(names).toHaveLength(24);
-    expect(names.slice(-11)).toEqual([NAME, '20260925100000_uniform_id_conflicts.sql', '20260925110000_restore_item_save.sql',
+    expect(names).toHaveLength(25);
+    expect(names.slice(-12)).toEqual([NAME, '20260925100000_uniform_id_conflicts.sql', '20260925110000_restore_item_save.sql',
       '20260925120000_account_deletion.sql', '20260925120100_deletion_receipt_purge_schedule.sql', '20260927090000_restore_attribution.sql',
       '20260928090000_stylist_chat.sql', '20260928090100_stylist_expire_schedule.sql',
-      '20260929090000_photo_enhancement.sql', '20260929090100_enhance_expire_schedule.sql', '20261001090000_admin_limits.sql']);
+      '20260929090000_photo_enhancement.sql', '20260929090100_enhance_expire_schedule.sql', '20261001090000_admin_limits.sql',
+      '20261002090000_photo_cleanup_manifest.sql']);
   });
 
   it('schedules exactly one fixed, bounded, inactive job', async () => {

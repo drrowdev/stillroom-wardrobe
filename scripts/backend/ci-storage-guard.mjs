@@ -12,11 +12,11 @@ const HISTORY = ['20260905000000', '20260906000000', '20260909070000', '20260909
   '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000',
   '20260924100000', '20260924100100', '20260925090000', '20260925100000', '20260925110000',
   '20260925120000', '20260925120100', '20260927090000', '20260928090000', '20260928090100',
-  '20260929090000', '20260929090100', '20261001090000'];
+  '20260929090000', '20260929090100', '20261001090000', '20261002090000'];
 async function historyMode() {
   const output = await readOnlySql(HISTORY_SQL, 1024);
   const versions = JSON.parse(output);
-  if (!Array.isArray(versions) || ![9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24].includes(versions.length)
+  if (!Array.isArray(versions) || ![9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25].includes(versions.length)
     || JSON.stringify(versions) !== JSON.stringify(HISTORY.slice(0, versions.length))) fail(VERIFY_FAILED, 1);
   return versions.length >= 17 ? 'account-deletion' : versions.length >= 11 ? 'image-change' : 'legacy';
 }

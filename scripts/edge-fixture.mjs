@@ -216,8 +216,8 @@ update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.
   max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,result_ttl_seconds=3600,
   execution_manifest_id='azure-eu-terra-devtest-v2',stylist_activated=true,stylist_notice_revision=1,
   stylist_manifest_id='azure-eu-terra-stylist-v1',stylist_max_request_micro=129360,stylist_monthly_allowance_micro=10000000,
-  stylist_max_requests_per_hour=50,enhance_activated=true,enhance_notice_revision=1,
-  enhance_manifest_id='azure-global-image25-sunburst-enhance-v1',enhance_max_request_micro=300000,
+  stylist_max_requests_per_hour=50,enhance_activated=true,enhance_notice_revision=2,
+  enhance_manifest_id='azure-global-image25-sunburst-cleanup-v1',enhance_max_request_micro=300000,
   enhance_monthly_allowance_micro=4000000,enhance_max_requests_per_hour=6 where ${where};
 -- The shared image capacity: eight dispatches per window for the fixture; teardown restores the exact snapshot.
 update private.provider_capacity set max_dispatch=8,dispatch_enabled=true,disabled_reason=null,disabled_at=null
