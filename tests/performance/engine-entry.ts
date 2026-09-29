@@ -26,7 +26,9 @@ function catalog(seed: number, size: number): EngineItem[] {
   }));
 }
 
-const items = catalog(7, 500);
+// Shown by the phone bench (scripts/engine-bench.mjs) with its timings.
+export const fixture = { seed: 7, items: 500 } as const;
+const items = catalog(fixture.seed, fixture.items);
 const contexts: EngineContext[] = [
   ...occasions.flatMap((occasion) => (['spring', 'summer', 'autumn', 'winter'] as const).map((season) => ({ ownerId: owner, occasion, season }))),
   { ownerId: owner, occasion: 'everyday', season: 'winter', setting: 'outdoors', temperatureC: -8, rainProbability: 0.8, windMetresPerSecond: 12 },

@@ -133,6 +133,46 @@ Backups, the restore drill and recovery steps are in [operations.md](operations.
 
 The status of every release gate, with evidence links, is in [release-gates.md](release-gates.md).
 
+## Release candidate (R1)
+
+R1 proves that every required suite passed on one frozen main SHA, C, and that exactly C is what is deployed.
+Only the SHA is recorded; no tag.
+
+1. **Hold.** The coordinator announces the freeze of C and holds merges to main until step 6 is done. A
+   merge during the hold supersedes the candidate runs, the receipt fails, and a new candidate starts.
+   Builders never merge.
+2. **Runs.** CI at C is the main push run of C, or `gh workflow run ci.yml --ref main` during the hold (main
+   is C). The Apple diagnostic is `gh workflow run apple-jpeg-probe.yml --ref main`. A flake during the
+   hold is disclosed and a new run added, or a new candidate is chosen; nothing is fixed inside the hold.
+3. **Receipt.** From a clean checkout of C (no changes and no untracked files):
+
+   ```
+   node scripts/release-candidate-receipt.mjs --sha <C> --ci-run <id> --apple-run <id> [--disclosure "<text>"]
+   ```
+
+   It reads C's own workflow files and checks them against its pinned job lists, reads every run and
+   attempt for C in both workflows (all pages), and re-reads main and both runs just before the verdict.
+   It prints `R1-CI PASS <C>` (exit 0), `R1-CI FAIL <reason>` (1) or `R1-CI BLOCKED <reason>` (2).
+   - Every job of both verdict runs must succeed, except *Documentation checks*, which must be skipped.
+     A skipped Apple job fails.
+   - Any other run or earlier attempt for C that failed, was cancelled or was dispatched again is listed
+     and needs `--disclosure` (one line, linking the K2 or flake note).
+   - A later run for C fails the receipt; a run still in progress, or a history that can't be read in
+     full, is BLOCKED.
+   - `test:a11y` is the `--grep accessibility` subset of the browser jobs; the receipt says so.
+4. **Deploy.** The owner-approved Pages deploy selects commit C explicitly, not the latest main.
+5. **Read-back.** A new D row: `check-deployed-assets.mjs` from a clean checkout of C exits 0, and the entry
+   chunk carries C's 8-character prefix.
+6. **Edge comparison.** For each deployed Edge function,
+   `git diff --quiet <its recorded deploy commit> C -- supabase/functions/<fn> supabase/functions/_shared`
+   must be clean. A difference needs its own approved redeploy (an F row) before R1 closes.
+
+A receipt PASS is not R1 closed. R1 closes with the receipt PASS, the deploy of exactly C with its D row,
+a clean or approved Edge comparison, and the owner's approval. The owner sessions then follow
+[owner-release-checklist.md](owner-release-checklist.md); P1 on the phones uses
+`npm run bench:engine -- --candidate <C>` (add `--lan <private-IPv4>` for the iPhone), which refuses a
+checkout that isn't clean or isn't at C.
+
 ## Edge runtime gate (PR-3b, CI only)
 
 `npm run test:edge` is the last step of the **Real local Supabase** job, after the types check. It uses
