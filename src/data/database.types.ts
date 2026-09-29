@@ -578,7 +578,18 @@ export type Database = {
     }
     Functions: {
       admin_ai_spending: { Args: { p_months?: number }; Returns: Json }
+      admin_ai_spending_v2: { Args: { p_months?: number }; Returns: Json }
       admin_set_ai_limits: {
+        Args: {
+          p_account_version: string
+          p_admission_no: number
+          p_expected: Json
+          p_limits: Json
+          p_reason_code?: string
+        }
+        Returns: Json
+      }
+      admin_set_ai_limits_v2: {
         Args: {
           p_account_version: string
           p_admission_no: number
@@ -992,6 +1003,78 @@ export type Database = {
         Returns: Json
       }
       stylist_status: { Args: never; Returns: Json }
+      tryon_bootstrap: {
+        Args: {
+          p_manifest_id: string
+          p_max_request_micro: number
+          p_max_requests_per_hour: number
+          p_monthly_allowance_micro: number
+          p_notice_revision: number
+          p_owner_id: string
+        }
+        Returns: Json
+      }
+      tryon_cancel: { Args: { p_chain_id: string }; Returns: Json }
+      tryon_chain_status: { Args: { p_chain_id: string }; Returns: Json }
+      tryon_claim: {
+        Args: {
+          p_chain_id: string
+          p_manifest_id: string
+          p_outfit_id: string
+          p_owner_id: string
+          p_person_sha256: string
+          p_probe_id: string
+          p_request_id: string
+          p_step: number
+        }
+        Returns: Json
+      }
+      tryon_delete_result: { Args: { p_result_id: string }; Returns: Json }
+      tryon_discard_transient: { Args: never; Returns: Json }
+      tryon_dispatch: {
+        Args: {
+          p_client_present: boolean
+          p_owner_id: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
+      tryon_expire_due: { Args: { p_limit: number }; Returns: Json }
+      tryon_finish: {
+        Args: {
+          p_client_gone: boolean
+          p_client_live_at_fetch: boolean
+          p_code: string
+          p_fetch_started: boolean
+          p_output: string
+          p_output_bytes: number
+          p_output_sha256: string
+          p_owner_id: string
+          p_request_id: string
+          p_usage: Json
+        }
+        Returns: Json
+      }
+      tryon_probe_authorise: {
+        Args: {
+          p_allocation_micro: number
+          p_approval_ref: string
+          p_expires_at: string
+          p_id: string
+          p_manifest_id: string
+          p_max_calls: number
+          p_owner_id: string
+        }
+        Returns: Json
+      }
+      tryon_purge_health: { Args: never; Returns: Json }
+      tryon_result_image_v1: { Args: { p_result_id: string }; Returns: Json }
+      tryon_results_v1: { Args: never; Returns: Json }
+      tryon_set_consent: {
+        Args: { p_enabled: boolean; p_notice_revision: number }
+        Returns: Json
+      }
+      tryon_status: { Args: never; Returns: Json }
       update_image_description: {
         Args: {
           p_alt_text: string

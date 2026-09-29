@@ -137,6 +137,16 @@ describe('deletion rehearsal guards', () => {
     expect(SOURCE).toContain("if (await adminRows() !== '0:0:0:1:0') throw new Error('RESULT:admin');");
   });
 
+  it('includes the VTO-1 try-on rows and keeps the peer rows and both provider slots', async () => {
+    const tables = await rehearsal.ownerTables(realFs, ROOT);
+    for (const table of ['private.tryon_chains', 'private.tryon_attempts', 'private.tryon_results', 'private.tryon_probe_authorisations']) {
+      expect(tables).toContain(table);
+    }
+    expect(SOURCE).toContain("if (await tryonRows(c) !== '1:2:1:2:1' || await tryonRows(d) !== '1:2:1:2:1' || await heldTryonSlots() !== '2') {");
+    expect(SOURCE).toContain("if (await tryonRows(c) !== '0:0:0:0:0' || await tryonRows(d) !== '1:2:1:2:1') throw new Error('RESULT:tryon');");
+    expect(SOURCE).toContain("if (await heldTryonSlots() !== '2') throw new Error('RESULT:tryon-slots');");
+  });
+
   it('has exactly one process-spawn site and no shell helpers', () => {
     expect(SOURCE.match(/\bspawnImpl\(/g)).toHaveLength(1);
     expect(SOURCE.match(/\bspawn\b/g)).toHaveLength(2);

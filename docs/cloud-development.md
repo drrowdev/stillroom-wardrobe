@@ -702,6 +702,86 @@ with its own row read back as dispatched, `estimated`, origin `observed`, no
 anomaly, an accounted amount and the settlement digest. `checkStaticTree` refuses any
 `probe/` path or harness marker, so the harness can't reach a deploy tree.
 
+**VTO-1 virtual try-on backend (source only; inactive; hosted apply owner-gated).**
+Adds `20261003090000_try_on.sql` and the job
+`20261003090100_tryon_expire_schedule.sql` (`stillroom-tryon-expire`, every 15
+minutes, active on install: it only expires and deletes). They follow AD1 and
+BG2c-1's `20261002090000_photo_cleanup_manifest.sql`, and are applied after it
+when the owner approves the apply (G4). It is
+behaviour-changing and non-additive: try-on rows share `private.ai_usage`
+(`purpose='try_on'`), the enhancement settlement columns, the deployment
+`eval-image25-sunburst-20260908` and its kill switch `enhance_provider_control`,
+so an anomaly in either feature stops both. The admin v1 write now refuses a
+shared total below a configured try-on sub-limit (`CONFLICT`); the admin v2
+RPCs add try-on. VTO-1b adds the sixth Edge Function, `try-on`, reading
+`AI_AZURE_IMAGE_API_KEY` and, only during the probe window, `TRYON_PROBE_TOKEN`
+(the same lifecycle as `ENHANCE_PROBE_TOKEN`). Nothing is set up for an account
+until the bootstrap below, and nothing is activated until G9. See ADR28 in
+`blueprint/18`, `blueprint/08` and `blueprint/20`; the gates are in the VTO
+plan §11. Builders make no hosted or paid call.
+
+Bootstrap receipt (G7b; database owner in the SQL editor; after G7). Read the
+five fields before and after; the call refuses any account already set up with
+different values (`CONFLICT`) and never sets activation or consent:
+
+```sql
+select tryon_manifest_id, tryon_notice_revision, tryon_max_request_micro,
+       tryon_monthly_allowance_micro, tryon_max_requests_per_hour,
+       tryon_activated, tryon_consent_revision
+from private.ai_controls c join private.approved_accounts a on a.user_id = c.owner_id
+where a.admission_no = 1;
+
+select public.tryon_bootstrap(
+  (select user_id from private.approved_accounts where admission_no = 1 and enabled),
+  'azure-global-image25-sunburst-tryon-v1', 1, 360000, 5000000, 6);
+```
+
+Read-only try-on ledger check after the probe (G8), keyed by the request IDs
+the script reports; it changes nothing:
+
+```sql
+select u.request_id, u.charge_state, u.reserved_micro, u.accounted_micro,
+       u.closed_reason, u.dispatched_at is not null as dispatched, e.enhance_code,
+       e.enhance_settlement_origin, e.tryon_probe_id,
+       e.tryon_dispatch_authorised_at is not null as authorised,
+       e.tryon_fetch_started, e.tryon_client_live_at_fetch,
+       e.tryon_client_gone_at_finish, e.tryon_settled_at, e.anomaly
+from private.ai_usage u
+join private.ai_usage_evidence e using (owner_id, request_id)
+where u.purpose = 'try_on' and u.request_id = any($1::uuid[])
+order by u.created_at;
+```
+
+Every row must be settled. Call 4 passes only with `authorised`,
+`tryon_fetch_started`, `tryon_client_live_at_fetch` and
+`tryon_client_gone_at_finish` all true, the settlement origin `observed` and
+`closed_reason` not `EXPIRED` (a finish that arrives after the provisional
+expiry records its usage but keeps `EXPIRED`, which is not a pass); anything
+else leaves acceptance incomplete, with no replacement call.
+
+The five calls fit the five-call authorisation only in this outfit order, because
+a new chain is refused as `PROBE_LIMIT` unless all of its steps fit the calls
+left: P1 (top, bottoms, shoes) for calls 1–3, P3 (one ordinary garment alone)
+for the call-4 disconnect test and P2 (the swimwear or form-fitting garment
+alone) for call 5.
+
+Purge health (G10; in every hosted receipt and at least weekly while try-on is
+activated): `select public.tryon_purge_health();` must return zero counts, and
+`select status, start_time from cron.job_run_details where jobid = (select jobid
+from cron.job where jobname = 'stillroom-tryon-expire') order by start_time desc
+limit 3;` shows recent successful runs. While any result is more than 2 hours
+past expiry or any try-on usage has been held for more than 10 minutes, new
+try-ons are refused. Recovery: run `select public.tryon_expire_due(1000);` as the
+database owner until the health counts are zero; if the job failed, fix it and
+confirm its next run. The block lifts by itself; tell the owner about any
+nonzero count.
+
+Platform restore: after any database restore and before access reopens, run
+`select public.tryon_discard_transient();` as the database owner and record its
+counts in the restore receipt. It deletes every try-on result, chain and attempt
+(none are in the app's export or restore), never usage or evidence, and settles
+held try-on usage that is already due.
+
 **I23 service worker (source only, not deployed).** The Phase 7 PR-1 draft
 adds `src/service-worker.ts`, the Update/Reload prompt and the Settings install
 hint. The worker precaches only the public shell listed in the generated

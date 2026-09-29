@@ -76,6 +76,16 @@ export const EXPOSED_RPCS = Object.freeze([
   fn('admin_ai_spending', 'integer', ['p_months']),
   fn('admin_set_ai_limits', 'smallint, text, jsonb, jsonb, text',
     ['p_admission_no', 'p_account_version', 'p_expected', 'p_limits', 'p_reason_code']),
+  fn('tryon_status', '', []),
+  fn('tryon_set_consent', 'boolean, integer', ['p_enabled', 'p_notice_revision']),
+  fn('tryon_chain_status', 'uuid', ['p_chain_id']),
+  fn('tryon_cancel', 'uuid', ['p_chain_id']),
+  fn('tryon_results_v1', '', []),
+  fn('tryon_result_image_v1', 'uuid', ['p_result_id']),
+  fn('tryon_delete_result', 'uuid', ['p_result_id']),
+  fn('admin_ai_spending_v2', 'integer', ['p_months']),
+  fn('admin_set_ai_limits_v2', 'smallint, text, jsonb, jsonb, text',
+    ['p_admission_no', 'p_account_version', 'p_expected', 'p_limits', 'p_reason_code']),
 ]);
 
 // Public functions reachable only with service credentials (Edge/operator) or only by the database owner (scheduled
@@ -104,6 +114,19 @@ export const SERVICE_ONLY_RPCS = Object.freeze([
   fn('enhance_probe_authorise', 'uuid, uuid, text, integer, bigint, text, timestamp with time zone',
     ['p_id', 'p_owner_id', 'p_manifest_id', 'p_max_calls', 'p_allocation_micro', 'p_approval_ref', 'p_expires_at']),
   fn('enhance_provider_control', 'text, boolean, text', ['p_deployment_key', 'p_enabled', 'p_reason']),
+  fn('tryon_claim', 'uuid, uuid, integer, uuid, text, uuid, text, uuid',
+    ['p_owner_id', 'p_chain_id', 'p_step', 'p_request_id', 'p_manifest_id', 'p_outfit_id', 'p_person_sha256', 'p_probe_id']),
+  fn('tryon_dispatch', 'uuid, uuid, boolean', ['p_owner_id', 'p_request_id', 'p_client_present']),
+  fn('tryon_finish', 'uuid, uuid, text, jsonb, text, integer, bytea, boolean, boolean, boolean',
+    ['p_owner_id', 'p_request_id', 'p_code', 'p_usage', 'p_output_sha256', 'p_output_bytes', 'p_output',
+      'p_fetch_started', 'p_client_live_at_fetch', 'p_client_gone']),
+  fn('tryon_expire_due', 'integer', ['p_limit']),
+  fn('tryon_purge_health', '', []),
+  fn('tryon_probe_authorise', 'uuid, uuid, text, integer, bigint, text, timestamp with time zone',
+    ['p_id', 'p_owner_id', 'p_manifest_id', 'p_max_calls', 'p_allocation_micro', 'p_approval_ref', 'p_expires_at']),
+  fn('tryon_bootstrap', 'uuid, text, integer, bigint, bigint, integer',
+    ['p_owner_id', 'p_manifest_id', 'p_notice_revision', 'p_max_request_micro', 'p_monthly_allowance_micro', 'p_max_requests_per_hour']),
+  fn('tryon_discard_transient', '', []),
 ]);
 
 // Private helpers that RLS/Storage policies evaluate as `authenticated`; their bodies are pinned to migrations.
@@ -152,6 +175,18 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'app_admin_binding()', 'ai_limit_audit_guard()', 'admin_authority()', 'admin_account_version(smallint, uuid)',
   'admin_limits(private.ai_controls)', 'admin_limits_shape(jsonb)', 'admin_month(uuid, text, text)',
   'admin_account(private.approved_accounts, timestamp with time zone, text[])',
+  'tryon_evidence_guard()', 'tryon_allowance_clamp()',
+  'tryon_permission(public.profiles, private.ai_controls, timestamp with time zone)',
+  'tryon_probe_permission(public.profiles, private.ai_controls, private.tryon_probe_authorisations, timestamp with time zone)',
+  'tryon_usage(uuid, timestamp with time zone)', 'tryon_garment_current(uuid, uuid, uuid, text, integer)',
+  'tryon_expire_accounting(uuid, timestamp with time zone, integer)',
+  'tryon_end_chain(uuid, uuid, text, text, timestamp with time zone)',
+  'tryon_expire_owner(uuid, timestamp with time zone, integer)', 'tryon_purge_overdue(timestamp with time zone)',
+  'tryon_select_steps(uuid, uuid)', 'tryon_close_attempt(uuid, uuid, text, timestamp with time zone)',
+  'tryon_replay(private.ai_usage_evidence, private.ai_usage)',
+  'admin_limits_v2(private.ai_controls)', 'admin_limits_shape_fields(jsonb, text[])',
+  'admin_set_limits(smallint, text, jsonb, jsonb, text, boolean)',
+  'admin_account_v2(private.approved_accounts, timestamp with time zone, text[])',
 ]);
 
 // Supabase-provided GraphQL entrypoint; its privileges are provider-managed and recorded, not asserted.
@@ -181,6 +216,7 @@ export const PRIVATE_TABLES = Object.freeze([
   'image_change_history', 'item_deletion_operations', 'item_deletion_targets', 'imported_attribution_history',
   'provider_capacity', 'provider_deployments', 'provider_slots', 'image_enhancements', 'enhancement_outputs', 'image_provenance',
   'image_enhancement_bindings', 'restore_image_markers', 'enhancement_probe_authorisations', 'app_admins', 'ai_limit_audit',
+  'tryon_chains', 'tryon_attempts', 'tryon_results', 'tryon_probe_authorisations',
 ]);
 const OWNER_EXPRESSION = '(private.is_approved() AND (owner_id = ( SELECT auth.uid() AS uid)))';
 export const OWNER_POLICIES = Object.freeze([
@@ -418,6 +454,7 @@ export const INCONCLUSIVE_CODES = Object.freeze(['ALLOWANCE', 'RATE_LIMIT', 'UNC
 export const isInconclusive = (result) => INCONCLUSIVE_CODES.includes(applicationCode(result));
 
 const UNREACHABLE_ANALYZED = 'an analyzed Save needs a completed provider analysis claim, which normal sessions cannot create in this job';
+const UNREACHABLE_TRYON = 'a try-on chain or result needs the service-only claim/finish path; tryon.sessions.mjs checks both directions';
 const req = (refs, extra = {}) => Object.freeze({ refs: Object.freeze(refs), ...extra });
 /**
  * Per-signature requirements. `refs` are fixture references that must each be substituted on their own (the
@@ -488,6 +525,15 @@ export const COVERAGE_REQUIREMENTS = Object.freeze({
   admin_status: req([], { adminOnly: true }),
   admin_ai_spending: req([], { adminOnly: true }),
   admin_set_ai_limits: req([], { adminOnly: true }),
+  tryon_status: req([], { ownerOnly: true }),
+  tryon_set_consent: req([], { ownerOnly: true }),
+  tryon_chain_status: req([], { unverified: UNREACHABLE_TRYON }),
+  tryon_cancel: req([], { unverified: UNREACHABLE_TRYON }),
+  tryon_results_v1: req([], { ownerOnly: true }),
+  tryon_result_image_v1: req([], { unverified: UNREACHABLE_TRYON }),
+  tryon_delete_result: req([], { unverified: UNREACHABLE_TRYON }),
+  admin_ai_spending_v2: req([], { adminOnly: true }),
+  admin_set_ai_limits_v2: req([], { adminOnly: true }),
 });
 const DIRECTIONS = [['A', 'B'], ['B', 'A']];
 const TAG = /^(?:anon|normal-[AB]|[AB]:control|[AB]>[AB]:(?:owner-only|admin-denied|mixed|collision|unverified|tuple|ref:[A-Za-z]+))$/;

@@ -225,7 +225,8 @@ async function main() {
       'extension',(select jsonb_agg(extnamespace::regnamespace::text) from pg_catalog.pg_extension where extname='pg_cron'),
       'jobs',(select coalesce(jsonb_agg(jsonb_build_object('name',jobname,'schedule',schedule,'command',command,
         'username',username,'database',database,'active',active) order by jobid),'[]'::jsonb) from cron.job),
-      'runs',(select count(*) from cron.job_run_details),
+      'runs',(select count(*) from cron.job_run_details d where d.jobid not in
+        (select jobid from cron.job where jobname='stillroom-tryon-expire')),
       'timezone',current_setting('cron.timezone',true),'logRun',current_setting('cron.log_run',true),
       'schemaDenied',(select bool_and(not has_schema_privilege(r,'cron','USAGE') and not has_schema_privilege(r,'cron','CREATE'))
         from unnest(array['anon','authenticated']) r),
@@ -250,8 +251,13 @@ async function main() {
     { name: 'stillroom-stylist-expire', schedule: '*/5 * * * *', command: 'select public.stylist_expire_due(500)',
       username: 'postgres', database: 'postgres', active: false },
     { name: 'stillroom-enhance-expire', schedule: '*/5 * * * *', command: 'select public.enhance_expire_due(500)',
-      username: 'postgres', database: 'postgres', active: false }]);
-    // Inactive and never run: the structural proof that the schedule did not touch the fixtures above.
+      username: 'postgres', database: 'postgres', active: false },
+    // VTO-1 (plan rev4 §5.2): the one job active on install. It touches try-on chains, attempts, results, slots and probe
+    // authorisations, and in the shared private.ai_usage/ai_usage_evidence only rows with purpose='try_on'; these fixtures
+    // create none of them, so its runs are not counted below.
+    { name: 'stillroom-tryon-expire', schedule: '*/15 * * * *', command: 'select public.tryon_expire_due(500)',
+      username: 'postgres', database: 'postgres', active: true }]);
+    // The others inactive and never run: the structural proof that the schedule did not touch the fixtures above.
     requireEvidence(schedule.runs === 0 && schedule.schemaDenied === true && schedule.logRun === 'on');
     requireEvidence(['GMT', 'UTC', 'Etc/UTC'].includes(schedule.timezone));
     requireEvidence(Array.isArray(schedule.functions) && schedule.functions.length > 0);
@@ -261,7 +267,7 @@ async function main() {
     eq(schedule.releaseAdmission, { owner: 'postgres', definer: true, config: ['search_path=""', 'lock_timeout=5s'],
       triggers: [{ name: 'stillroom_release_admission', enabled: 'O' }] });
     eq(schedule.invalid, [{ code: 'INVALID_INPUT' }, { code: 'INVALID_INPUT' }, { code: 'INVALID_INPUT' }]);
-    console.log(`PASS: AI controls S7; AI and deletion-receipt purge jobs inactive with zero runs; cron.timezone=${schedule.timezone} cron.log_run=on; anon/authenticated lack cron USAGE/CREATE`);
+    console.log(`PASS: AI controls S7; AI and deletion-receipt purge jobs inactive with zero runs, try-on expiry active; cron.timezone=${schedule.timezone} cron.log_run=on; anon/authenticated lack cron USAGE/CREATE`);
     // Recorded, not required: PUBLIC EXECUTE is the default; the schema USAGE denial above blocks invocation.
     for (const f of schedule.functions) {
       console.log(`RECORD: cron function oid=${f.oid} ${f.signature} acl=${f.acl} anonExecute=${f.anon} authenticatedExecute=${f.authenticated}`);

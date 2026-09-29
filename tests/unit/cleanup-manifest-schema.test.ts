@@ -28,7 +28,8 @@ describe('photo clean-up manifest migration (BG2c-1)', () => {
     expect(sql.trimEnd().endsWith('commit;')).toBe(true);
     expect(sql).not.toContain('\r');
     const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
-    expect(names.at(-1)).toBe(MAIN);
+    // VTO-1a's try-on migrations follow it.
+    expect(names[names.indexOf('20261003090000_try_on.sql') - 1]).toBe(MAIN);
     expect(names.indexOf(MAIN)).toBeGreaterThan(names.indexOf('20261001090000_admin_limits.sql'));
     expect([...sql.matchAll(/create or replace function ([a-z_.]+)\(/g)].map((match) => match[1])).toEqual(['public.enhance_claim']);
     const code = sql.split('\n').filter((line) => !line.trimStart().startsWith('--')).join('\n');

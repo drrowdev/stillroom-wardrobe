@@ -676,13 +676,27 @@ async function foreignMatrix(attacker, victim) {
   const adminBody = { shared: adminLimits, stylist: adminLimits, enhancement: adminLimits };
   const adminCalls = [['admin_status', {}], ['admin_ai_spending', { p_months: 6 }], ['admin_ai_spending', { p_months: 99 }],
     ...[1, 2, 3].map((no) => ['admin_set_ai_limits', { p_admission_no: no, p_account_version: randomBytes(32).toString('hex'),
-      p_expected: adminBody, p_limits: adminBody, p_reason_code: 'LOWER' }])];
+      p_expected: adminBody, p_limits: adminBody, p_reason_code: 'LOWER' }]),
+    ['admin_ai_spending_v2', { p_months: 6 }], ['admin_ai_spending_v2', { p_months: 99 }],
+    ...[1, 2, 3].map((no) => ['admin_set_ai_limits_v2', { p_admission_no: no, p_account_version: randomBytes(32).toString('hex'),
+      p_expected: { ...adminBody, tryOn: adminLimits }, p_limits: { ...adminBody, tryOn: adminLimits }, p_reason_code: 'LOWER' }])];
   const adminOk = new Map();
   for (const [name, body] of adminCalls) {
     const denied = expectMatch(`${stage} ${name}`, UNAVAILABLE, await probeRpc(attacker, victim, name, body));
     adminOk.set(name, (adminOk.get(name) ?? true) && denied);
   }
   for (const [name, ok] of adminOk) if (ok) tag(name, `${d}:admin-denied`);
+  // VTO-1: try-on status, consent and the result list act only on the caller's own controls and rows.
+  const tryon = await probeRpc(attacker, victim, 'tryon_status', {});
+  if (control(attacker, 'tryon_status', tryon.ok && typeof tryon.data?.code === 'string'
+    && applicationCode(tryon) !== 'UNAVAILABLE', describe(tryon))) tag('tryon_status', `${d}:owner-only`);
+  const tryonConsent = await probeRpc(attacker, victim, 'tryon_set_consent', { p_enabled: null, p_notice_revision: null });
+  if (control(attacker, 'tryon_set_consent', matchOutcome({ status: 200, data: { code: 'INVALID_INPUT' } }, tryonConsent),
+    describe(tryonConsent))) tag('tryon_set_consent', `${d}:owner-only`);
+  const tryonResults = await probeRpc(attacker, victim, 'tryon_results_v1', {});
+  if (control(attacker, 'tryon_results_v1', tryonResults.ok && isDeepStrictEqual(tryonResults.data, { code: 'OK', results: [] }),
+    describe(tryonResults))) tag('tryon_results_v1', `${d}:owner-only`);
+  await tryonReferenceProbes(attacker, victim);
   // The caller's own provenance only: exactly its fixture row, and the digest of that same list.
   const provenance = await probeRpc(attacker, victim, 'image_provenance_v1', {});
   if (need(provenance.ok && isDeepStrictEqual(provenance.data, a.provRows), `${stage}: image_provenance_v1 ${describe(provenance)}`)) {
@@ -692,6 +706,20 @@ async function foreignMatrix(attacker, victim) {
   const provenanceDigest = await probeRpc(attacker, victim, 'image_provenance_digest_v1', {});
   if (need(provenanceDigest.ok && hex64.test(String(provenanceDigest.data)) && provenanceDigest.data === ownProvenanceDigest.data,
     `${stage}: image_provenance_digest_v1 ${describe(provenanceDigest)}`)) tag('image_provenance_digest_v1', `${d}:owner-only`);
+}
+
+/**
+ * A try-on chain or result exists only after the service-only claim/finish path, which this job cannot reach; the
+ * owned and cross-owner cases run in tests/integration/tryon.sessions.mjs. Unknown IDs still read NOT_FOUND here,
+ * with no coverage credit.
+ */
+async function tryonReferenceProbes(attacker, victim) {
+  stage = `matrix-${attacker.label}>${victim.label}-tryon`;
+  const NOT_FOUND = { status: 200, data: { code: 'NOT_FOUND' } };
+  for (const [name, key] of [['tryon_chain_status', 'p_chain_id'], ['tryon_cancel', 'p_chain_id'],
+    ['tryon_result_image_v1', 'p_result_id'], ['tryon_delete_result', 'p_result_id']]) {
+    expectMatch(`${stage} ${name}`, NOT_FOUND, await probeRpc(attacker, victim, name, { [key]: randomUUID() }));
+  }
 }
 
 /** Analyzed Save needs a provider-completed claim; these assertions stay, but carry no coverage credit. */

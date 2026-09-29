@@ -820,3 +820,61 @@ before any input validation, target lookup or lock.
 
 The admin grant and revocation are operator SQL (see the development guide);
 no RPC writes `private.app_admins`.
+
+## VTO-1 try-on contract (ADR28, inactive)
+
+Owner RPCs (authenticated, security definer, empty search path). A foreign or
+unknown outfit, chain or result is `NOT_FOUND` alike.
+
+- `tryon_status()`: `code` (`OK`, `UNAVAILABLE`, `UNCONFIGURED`, `INACTIVE`,
+  `CONSENT_REQUIRED`), `period`, `serverTimeMs`, `consent`, `policy` (null until
+  configured; activation, notice revision, manifest and model, limits as micro
+  strings, `maxSteps` 3, `maxResults` 20, `resultDays` 7, `providerAvailable`),
+  the owner's live `results` count and try-on/total `usage`.
+- `tryon_set_consent(boolean, integer)`: consent needs the current notice
+  revision (`CONFIG_CHANGED` otherwise). Turn off is accepted whenever controls
+  exist and ends every running chain as withdrawn in the same transaction.
+- `tryon_chain_status(uuid)`: `state` (`running`, `complete`, `cancelled`,
+  `withdrawn`, `expired`, `stale`), `nextStep`, the slots and item IDs,
+  `activeAttempt`, `resultId` and `expiresAtMs`.
+- `tryon_cancel(uuid)`: `CANCELLED` for a running chain (its reserved slot is
+  freed, a late finish never publishes); `COMPLETED` with the `resultId` when
+  the last step already committed; otherwise the terminal state.
+- `tryon_results_v1()`, `tryon_result_image_v1(uuid)` (`jpegBase64`, `bytes`)
+  and `tryon_delete_result(uuid)`: ready pictures only, filtered on the exact
+  7-day `expires_at`, whatever the purge has done.
+
+Service-role only (the `try-on` Edge function with the verified owner):
+
+- `tryon_claim(owner, chain, step, request, manifest, outfit, person_sha256,
+  probe)`: step 1 needs the outfit and no body hash; later steps bind the
+  previous output hash. Returns the garment `{path, mainSha256, bytes}`,
+  `dispatchBeforeMs` (claim + 15 s) and the reservation, or a refusal with
+  `claimed:false`: the permission codes, `INVALID_INPUT`, `NOT_FOUND`,
+  `NO_GARMENTS`, `RESULTS_FULL`, `ALLOWANCE`, `PROBE_LIMIT`, `RATE_LIMIT`,
+  `BUSY`, `CONFIG_CHANGED` (another manifest), `CONFLICT` (wrong step or
+  hash), `TERMINAL` (a used request ID or a completed chain), `CHAIN_MISMATCH`
+  (a garment changed; the chain ends as stale) or the chain's `WITHDRAWN`,
+  `CANCELLED` or `EXPIRED` state. Refusals write no usage and hold no slot.
+- `tryon_dispatch(owner, request, client_present)`: `AUTHORISED` sets the
+  durable, once-only dispatch authorisation; `ALREADY_AUTHORISED`, `EXPIRED`,
+  `CLIENT_GONE`, a chain state or a permission code set nothing. Only an
+  `AUTHORISED` reply read in time allows the provider fetch.
+- `tryon_finish(owner, request, code, usage, output_sha256, output_bytes,
+  output, fetch_started, client_live_at_fetch, client_gone)`: idempotent over
+  code, usage and output (`USAGE_CONFLICT` otherwise). An unauthorised request
+  is released (`PRE_DISPATCH`); a `PRE_DISPATCH` claim after authorisation is
+  an anomaly and charged. Publication (`COMPLETE`) only for the chain's active
+  attempt on a running chain with the permission held; otherwise `LATE` or the
+  settlement code (`FAILED`, `FILTERED`, `OUTPUT_REJECTED`, `NOT_DISPATCHED`),
+  with accounting only.
+- `tryon_purge_health()` (overdue counts only) and `tryon_probe_authorise`.
+
+Database owner only, with no grant: `tryon_expire_due` (the job
+`stillroom-tryon-expire`, every 15 minutes), `tryon_bootstrap` (sets null
+try-on settings once; never activation or consent) and
+`tryon_discard_transient` (the platform-restore step). Admin v2:
+`admin_ai_spending_v2(integer)` and `admin_set_ai_limits_v2(smallint, text,
+jsonb, jsonb, text)` add `tryOn` to the AD1a contract with the same rules;
+v1 is unchanged except the `CONFLICT` above. No try-on table is exported or
+restored.
