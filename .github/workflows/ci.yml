@@ -354,6 +354,17 @@ jobs:
             test-results/ad1-visual/settings-note-en-mobile.png
           if-no-files-found: error
           retention-days: 1
+      - name: Preserve bounded synthetic VTO-2 visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vto2-tryon-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/vto2-visual/consent-sv-mobile.png
+            test-results/vto2-visual/progress-fi-mobile.png
+            test-results/vto2-visual/result-en-desktop.png
+            test-results/vto2-visual/failure-fi-320-200.png
+          if-no-files-found: error
+          retention-days: 1
 
   pwa:
     name: PWA production contracts

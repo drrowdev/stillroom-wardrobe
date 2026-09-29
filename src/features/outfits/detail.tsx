@@ -7,9 +7,10 @@ import { createLook, pendingCreate, setLookRemoved, type CreateReply } from '../
 import { todayIn } from '../../domain/local-date';
 import { hasGap, isEmpty, occasionLabel, type OutfitComponent, type OutfitRecord } from '../../domain/outfits';
 import { lookLimits, wearProblems, type LookAttempt, type WearProblem } from '../../domain/wear-events';
-import type { MessageKey, Translate } from '../../i18n';
+import type { Language, MessageKey, Translate } from '../../i18n';
 import type { PrivateImages } from '../../images/private-images';
 import { OutfitEditor } from './editor';
+import { SavedTryOns, TryOnButton } from './try-on/try-on-entry';
 import { ComponentText, OutfitThumb } from './outfits-screen';
 import { useOutfit, usePickerItems, type OutfitView } from './use-outfits';
 
@@ -42,7 +43,8 @@ function EditPane(props: Shared & { view: EditView; removed: boolean; onReload: 
     onSaved={props.onSavedHere} onReload={props.onReload} onGone={props.onBack} />;
 }
 
-export function OutfitDetail(props: Shared & { id: string | null; timeZone: string; onPlan: (id: string) => void; onWorn: () => void; onWriting: (busy: boolean) => void }) {
+export function OutfitDetail(props: Shared & { id: string | null; timeZone: string; language: Language; onPlan: (id: string) => void; onWorn: () => void;
+  onWriting: (busy: boolean) => void; onTryOn: () => void; }) {
   const { client, scope, id, online, invalidation, t, images } = props;
   const view = useOutfit(client, scope, id, online, invalidation);
   const [editing, setEditing] = useState(false);
@@ -74,7 +76,9 @@ export function OutfitDetail(props: Shared & { id: string | null; timeZone: stri
       : <OutfitSummary record={record} view={view.data} images={images} t={t} editDisabled={wearing} onEdit={() => setEditing(true)}>
         <WearActions client={client} scope={scope} record={record} view={view.data} online={online} t={t} timeZone={props.timeZone}
           onPlan={() => props.onPlan(record.id)} onChanged={props.onWorn} onPending={onWearPending} />
+        <TryOnButton client={client} scope={scope} record={record} components={view.data.components} disabled={wearing} t={t} onTryOn={props.onTryOn} />
       </OutfitSummary>}
+    {!editView && record && <SavedTryOns client={client} scope={scope} outfitId={record.id} online={online} language={props.language} t={t} />}
   </section>;
 }
 

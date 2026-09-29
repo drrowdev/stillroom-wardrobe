@@ -634,3 +634,10 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .admin-fieldset legend { padding: 0 4px; font-weight: 550; }
 .admin-fieldset .field { margin: 0; }
 .admin-changes { margin: 12px 0 16px; padding-inline-start: 20px; display: grid; gap: 6px; overflow-wrap: anywhere; }
+/* Try-on (VTO-2): the body photo is 4:5 and every picture scales to the column. */
+.tryon-photo { aspect-ratio: 4 / 5; }
+.tryon-result { margin: 0; min-width: 0; }
+.tryon-result img { display: block; width: 100%; height: auto; max-height: 640px; object-fit: contain; background: var(--surface); border-radius: 12px; }
+.tryon-garments, .tryon-steps, .tryon-saved-list { margin: 0; padding-inline-start: 1.25rem; min-width: 0; overflow-wrap: anywhere; }
+.tryon-page .button, .tryon-page .text-button { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 720px) { .tryon-result img { max-height: 420px; } }

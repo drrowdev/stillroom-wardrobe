@@ -28,6 +28,7 @@ type Options = {
   step?: (call: Step, index: number) => Response | Promise<Response>;
   status?: (index: number) => Response;
   admit?: (bytes: Uint8Array) => unknown;
+  personInput?: (bytes: Uint8Array) => boolean;
   output?: string[];
   readFail?: boolean;
   writeFail?: boolean;
@@ -56,6 +57,7 @@ function harness(options: Options = {}) {
     sleep: async (ms: number) => { options.sleep?.(ms); sleeps.push(ms); clock += ms; },
     newId: () => `22222222-2222-4222-8222-${String(++ids).padStart(12, '0')}`,
     admit: options.admit ?? ((bytes: Uint8Array) => ({ bytes, width: 1024, height: 1280, stripped: false })),
+    personInput: options.personInput ?? (() => true),
     setTimeout: (fn: () => void, ms: number) => { timers.push(ms); if (ms === DISCONNECT_AFTER_MS) queueMicrotask(fn); return 0; },
     clearTimeout: () => undefined,
     fetch: async (url: string, init: RequestInit) => {
@@ -115,9 +117,8 @@ describe('try-on probe script', () => {
       [{ PROBE_OUTFIT_P3: undefined }, {}, 'outfits'],
       [{ PROBE_PERSON: undefined }, {}, 'folders'],
       [{}, { readFail: true }, 'person'],
-      [{}, { admit: (bytes: Uint8Array) => ({ bytes, width: 1024, height: 1280, stripped: true }) }, 'person'],
-      [{}, { admit: (bytes: Uint8Array) => ({ bytes, width: 1024, height: 1024, stripped: false }) }, 'person'],
-      [{}, { admit: () => { throw new Error('bad jpeg'); } }, 'person'],
+      [{}, { personInput: () => false }, 'person'],
+      [{}, { personInput: () => { throw new Error('bad jpeg'); } }, 'person'],
       [{}, { output: ['old.jpg'] }, 'output'],
     ];
     for (const [over, options, code] of cases) {

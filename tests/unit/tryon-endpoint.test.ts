@@ -7,7 +7,7 @@ import {
 import { classifyTryOnResponse, tryOnForm, tryOnUsagePayload } from '../../supabase/functions/try-on/azure';
 import { claimedWorkObserver, createTryOnHandler, TRYON_RPCS } from '../../supabase/functions/try-on/handler';
 import { exifSegment } from '../fixtures/jpeg-helpers';
-import { flatJpeg } from '../fixtures/restore-jpeg-fixtures';
+import { appleLayoutJpeg, flatJpeg, restartMarkers } from '../fixtures/restore-jpeg-fixtures';
 
 const sha = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 const OWNER = '22222222-2222-4222-8222-222222222222';
@@ -158,14 +158,30 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
       p_output: `\\x${Buffer.from(OUTPUT).toString('hex')}` });
   });
 
-  it('strips photo metadata before hashing and sending the person', async () => {
+  it('accepts a person photo with restart intervals, as phone encoders write them, and sends it unchanged', async () => {
     const calls = backend();
     const { transport, sent } = provider(() => Response.json(imageBody()));
-    const tagged = flatJpeg({ width: 1024, height: 1280, segments: [exifSegment(1)] });
-    await createTryOnHandler(config, register, transport)(post(form(2, {}, tagged)));
+    const restarted = appleLayoutJpeg({ width: 1024, height: 1280, restartInterval: 4 });
+    expect(restartMarkers(restarted).length).toBeGreaterThan(0);
+    const response = await createTryOnHandler(config, register, transport)(post(form(2, {}, restarted)));
+    expect(response.status).toBe(200);
     const person = new Uint8Array(await (sent[0]!.getAll('image[]')[0] as File).arrayBuffer());
-    expect(person).toEqual(PERSON);
-    expect(rpcBody(calls, 'tryon_claim')).toMatchObject({ p_person_sha256: sha(PERSON) });
+    expect(person).toEqual(restarted);
+    expect(rpcBody(calls, 'tryon_claim')).toMatchObject({ p_person_sha256: sha(restarted) });
+  });
+
+  it('refuses a person photo that still carries metadata, and restart markers out of order, before any network call', async () => {
+    const calls = backend();
+    const { transport } = provider(() => Response.json(imageBody()));
+    const outOfOrder = appleLayoutJpeg({ width: 1024, height: 1280, restartInterval: 4 });
+    outOfOrder[restartMarkers(outOfOrder)[0]! + 1] = 0xd1;
+    for (const person of [flatJpeg({ width: 1024, height: 1280, segments: [exifSegment(1)] }), outOfOrder]) {
+      const response = await createTryOnHandler(config, register, transport)(post(form(2, {}, person)));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ code: 'INVALID_INPUT' });
+    }
+    expect(calls).toHaveLength(0);
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it('refuses closed ingress before any network call', async () => {

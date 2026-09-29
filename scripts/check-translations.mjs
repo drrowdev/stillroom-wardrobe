@@ -184,7 +184,7 @@ export function checkSource(source, messages, checker = null) {
 export async function checkTranslations(root = process.cwd()) {
   const errors = [];
   const catalogs = [];
-  for (const filename of ['messages.json', 'phase-zero.json']) {
+  for (const filename of ['messages.json', 'phase-zero.json', 'tryon.json']) {
     const parsed = parseCatalog(await readFile(path.join(root, 'src', 'i18n', filename), 'utf8'), filename);
     catalogs.push(parsed.catalog);
     errors.push(...parsed.errors);

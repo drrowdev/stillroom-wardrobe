@@ -25,7 +25,7 @@ export type PreparedPhoto = {
   thumbSha256: string;
 };
 
-type DecodedImage = {
+export type DecodedImage = {
   source: CanvasImageSource;
   width: number;
   height: number;
@@ -35,7 +35,7 @@ type EncodedImage = { blob: Blob; canvas: HTMLCanvasElement };
 const QUALITIES = [0.82, 0.75, 0.68, 0.61, 0.55] as const;
 const MAX_SIZE_ATTEMPTS = 6;
 
-function checkAbort(signal?: AbortSignal): void {
+export function checkAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 }
 
@@ -113,7 +113,7 @@ async function decodeWithImage(blob: Blob, signal?: AbortSignal): Promise<Decode
   }
 }
 
-async function decode(blob: Blob, signal?: AbortSignal, waitForRelease = false): Promise<DecodedImage> {
+export async function decode(blob: Blob, signal?: AbortSignal, waitForRelease = false): Promise<DecodedImage> {
   checkAbort(signal);
   if (typeof createImageBitmap === 'function') {
     try {
@@ -135,7 +135,7 @@ async function decode(blob: Blob, signal?: AbortSignal, waitForRelease = false):
   return decodeWithImage(blob, signal);
 }
 
-function releaseCanvas(canvas: HTMLCanvasElement): void {
+export function releaseCanvas(canvas: HTMLCanvasElement): void {
   canvas.width = 1;
   canvas.height = 1;
 }
@@ -157,7 +157,7 @@ function fillBackground(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
 }
 
 // Fills the neutral background, then draws `source` through the crop geometry scaled to the canvas size.
-function draw(canvas: HTMLCanvasElement, source: CanvasImageSource, geometry?: ReturnType<typeof cropGeometry>): void {
+export function draw(canvas: HTMLCanvasElement, source: CanvasImageSource, geometry?: ReturnType<typeof cropGeometry>): void {
   const context = fillBackground(canvas);
   if (!geometry || geometry.identity) {
     context.drawImage(source, 0, 0, canvas.width, canvas.height);
