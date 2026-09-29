@@ -92,8 +92,7 @@ Each step is on both phones unless it says otherwise.
    Delete, and the monthly figure in Settings.
    - Before activation: report `NOT ACTIVE`. Try-on acceptance stays **BLOCKED**.
 
-6. **P1: suggestions with 500 items.** The tool is added in R-6a; until it
-   ships, report this step as `NOT DONE`. From a clean checkout of C, run:
+6. **P1: suggestions with 500 items.** From a clean checkout of C, run:
 
    ```
    npm run bench:engine -- --candidate <full-C-SHA>
