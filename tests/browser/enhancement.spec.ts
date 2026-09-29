@@ -160,6 +160,64 @@ async function saveFlow(page: Page, flow: Flow) {
 }
 const currentImage = (api: Fixture, itemId?: string) => api.images.filter((row) => row.state === 'ready' && (!itemId || row.item_id === itemId)).at(-1);
 
+// Coordinate-basis evidence (BG2c-2 review): a 640 x 800 photo of four 160 px vertical bands, A to D from left to right.
+// Every check reads decoded pixels and names the bands found, so the sent H0 can be compared with what the editor shows.
+const BANDS = { A: [198, 40, 40], B: [31, 58, 147], C: [46, 125, 50], D: [249, 168, 37] } as const;
+async function bandPhoto(page: Page): Promise<Buffer> {
+  return Buffer.from(await page.evaluate(async (bands) => {
+    const canvas = Object.assign(document.createElement('canvas'), { width: 640, height: 800 });
+    const context = canvas.getContext('2d')!;
+    Object.values(bands).forEach(([r, g, b], index) => { context.fillStyle = `rgb(${r},${g},${b})`; context.fillRect(index * 160, 0, 160, 800); });
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('encode')), 'image/png'));
+    return [...new Uint8Array(await blob.arrayBuffer())];
+  }, BANDS));
+}
+type BandReading = { width: number; height: number; row: string[]; column: string[] };
+/** The bands met along the middle row (left to right) and middle column (top to bottom), each run named once. */
+async function bandsOf(page: Page, bytes: Buffer | number[]): Promise<BandReading> {
+  return page.evaluate(async ([data, bands]) => {
+    const bitmap = await createImageBitmap(new Blob([new Uint8Array(data)]));
+    const canvas = Object.assign(document.createElement('canvas'), { width: bitmap.width, height: bitmap.height });
+    const context = canvas.getContext('2d', { willReadFrequently: true })!;
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const name = (fx: number, fy: number) => {
+      const x = Math.min(canvas.width - 3, Math.max(0, Math.round(fx * canvas.width) - 1));
+      const y = Math.min(canvas.height - 3, Math.max(0, Math.round(fy * canvas.height) - 1));
+      const px = context.getImageData(x, y, 3, 3).data, mean = [0, 0, 0];
+      for (let at = 0; at < px.length; at += 4) for (let c = 0; c < 3; c += 1) mean[c]! += px[at + c]! / 9;
+      const found = Object.entries(bands).find(([, rgb]) => Math.hypot(...rgb.map((value, c) => value - mean[c]!)) < 60);
+      return found?.[0] ?? null;
+    };
+    const walk = (point: (step: number) => [number, number]) => {
+      const names: string[] = [];
+      for (let step = 1; step < 40; step += 1) {
+        const band = name(...point(step / 40));
+        if (band && band !== names.at(-1)) names.push(band);
+      }
+      return names;
+    };
+    return { width: canvas.width, height: canvas.height, row: walk((f) => [f, 0.5]), column: walk((f) => [0.5, f]) };
+  }, [[...bytes], BANDS] as const);
+}
+/** The crop editor's own source image: the whole photo whose coordinates every edit uses. */
+async function editorSource(page: Page): Promise<BandReading> {
+  const bytes = await page.locator('section.crop-editor .crop-stage img').evaluate(async (image: HTMLImageElement) =>
+    [...new Uint8Array(await (await fetch(image.src)).arrayBuffer())]);
+  return bandsOf(page, bytes);
+}
+async function setCrop(page: Page, values: Partial<Record<'x' | 'y' | 'width' | 'height', string>>) {
+  await page.locator('.crop-exact').evaluate((element) => { (element as HTMLDetailsElement).open = true; });
+  for (const field of ['width', 'height', 'x', 'y'] as const) {
+    if (values[field] !== undefined) await page.locator(`#crop-${field}`).fill(values[field]);
+  }
+}
+/** Records each H0 the provider receives, and answers like a faithful clean-up. */
+const recording = (page: Page, into: Buffer[]): EnhanceReply => async (bytes) => {
+  into.push(Buffer.from(bytes));
+  return { status: 200, image: await redraw(page, bytes) };
+};
+
 // Reads every Cache Storage entry and every IndexedDB value in the page and returns the SHA-256 of each binary found.
 const storedDigests = (page: Page) => page.evaluate(async () => {
   const digests: string[] = [];
@@ -254,6 +312,99 @@ for (const flow of ['add', 'replace'] as const) {
     expect(sent(api)).toHaveLength(1);
     expect(await removals(page)).toBe(2);
     expect(api.inputs[0]!.sha256).toBe(await shown(page, flow));
+  });
+
+  test(`${flow}: after a changed crop is accepted in the review, a later edit still crops the whole photo and H0 holds only the region shown`, async ({ page }) => {
+    engineOnly();
+    test.slow();
+    const api = await start(page, { background: { mask: 'centre' } });
+    const h0: Buffer[] = [];
+    api.enhanceControl.replies.push(recording(page, h0), recording(page, h0));
+    await openFlow(page, api, flow);
+    await choose(page, flow, await bandPhoto(page));
+    await inReview(page);
+    expect((await editorSource(page)).row).toEqual(['A', 'B', 'C', 'D']);
+    await setCrop(page, { x: '25', y: '0', width: '50', height: '100' });
+    await page.locator('#apply-crop').click();
+    await expect.poll(() => analyses(api), { timeout: 45_000 }).toBe(1);
+    expect(h0).toHaveLength(1);
+    expect((await bandsOf(page, h0[0]!)).row).toEqual(['B', 'C']);
+    await page.locator(flows[flow].edit).click();
+    await expect(page.locator('section.crop-editor')).toBeVisible();
+    // The editor shows the whole upright photo again, with the accepted crop at the same place on it.
+    const source = await editorSource(page);
+    expect(source.row).toEqual(['A', 'B', 'C', 'D']);
+    expect(source.height).toBeGreaterThan(source.width);
+    await expect(page.locator('#crop-x')).toHaveValue('25');
+    await expect(page.locator('#crop-width')).toHaveValue('50');
+    // The right half of the accepted crop is band C alone; nothing from D, outside it, may be sent.
+    await setCrop(page, { x: '50', width: '25' });
+    await page.locator('#apply-crop').click();
+    await expect.poll(() => analyses(api), { timeout: 45_000 }).toBe(2);
+    expect(h0).toHaveLength(2);
+    const second = await bandsOf(page, h0[1]!);
+    expect(second.row).toEqual(['C']);
+    expect(second.column).toEqual(['C']);
+  });
+
+  test(`${flow}: a rotation accepted in the review is applied once, and a later crop of the rotated photo sends only that region`, async ({ page }) => {
+    engineOnly();
+    test.slow();
+    const api = await start(page, { background: { mask: 'centre' } });
+    const h0: Buffer[] = [];
+    api.enhanceControl.replies.push(recording(page, h0), recording(page, h0));
+    await openFlow(page, api, flow);
+    await choose(page, flow, await bandPhoto(page));
+    await inReview(page);
+    await page.locator('#crop-rotate').click();
+    await page.locator('#apply-crop').click();
+    await expect.poll(() => analyses(api), { timeout: 45_000 }).toBe(1);
+    expect(h0).toHaveLength(1);
+    // A quarter turn lays the bands across: one band per row, all four down the middle.
+    const turned = await bandsOf(page, h0[0]!);
+    expect(turned.row).toHaveLength(1);
+    expect([...turned.column].sort()).toEqual(['A', 'B', 'C', 'D']);
+    await page.locator(flows[flow].edit).click();
+    await expect(page.locator('section.crop-editor')).toBeVisible();
+    // The source is still the upright photo; the editor turns it once for display.
+    const source = await editorSource(page);
+    expect(source.row).toEqual(['A', 'B', 'C', 'D']);
+    expect(source.height).toBeGreaterThan(source.width);
+    // The top half of the turned photo shown in the editor holds its first two bands, and only those are sent.
+    await setCrop(page, { x: '0', y: '0', width: '100', height: '50' });
+    await page.locator('#apply-crop').click();
+    await expect.poll(() => analyses(api), { timeout: 45_000 }).toBe(2);
+    expect(h0).toHaveLength(2);
+    const half = await bandsOf(page, h0[1]!);
+    expect(half.row).toHaveLength(1);
+    expect(half.column).toEqual(turned.column.slice(0, 2));
+  });
+
+  test(`${flow}: Cancel while an accepted changed crop is still being prepared keeps the first pass, with nothing sent`, async ({ page }) => {
+    engineOnly();
+    const api = await start(page, { background: { mask: 'centre' } });
+    api.enhanceControl.replies.push(enhanced(page));
+    await openFlow(page, api, flow);
+    await choose(page, flow, await bandPhoto(page));
+    await inReview(page);
+    await setCrop(page, { x: '25', width: '50' });
+    await page.evaluate(() => { window.__stillroomBackground!.runDelayMs = 60_000; });
+    await page.locator('#apply-crop').click();
+    await expect(page.locator('section.crop-editor')).toHaveAttribute('aria-busy', 'true');
+    await page.locator('#crop-cancel').click();
+    await expect(page.locator('section.crop-editor')).toHaveCount(0);
+    await expect.poll(() => analyses(api)).toBe(1);
+    expect(await shown(page, flow)).toBe(api.inputs[0]!.sha256);
+    const kept = await page.locator(flows[flow].photo).evaluate(async (image: HTMLImageElement) =>
+      [...new Uint8Array(await (await fetch(image.src)).arrayBuffer())]);
+    expect((await bandsOf(page, kept)).row).toEqual(['A', 'B', 'C', 'D']);
+    await expect(label(page)).toHaveCount(0);
+    await page.waitForTimeout(500);
+    expect(sent(api)).toHaveLength(0);
+    expect(analyses(api)).toBe(1);
+    await page.locator(flows[flow].edit).click();
+    expect((await editorSource(page)).row).toEqual(['A', 'B', 'C', 'D']);
+    await expect(page.locator('#crop-width')).toHaveValue('100');
   });
 
   test(`${flow}: Cancel in the review keeps the new photo's cut-out with one analysis and sends nothing`, async ({ page }) => {

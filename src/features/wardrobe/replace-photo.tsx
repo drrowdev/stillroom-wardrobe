@@ -202,11 +202,14 @@ function Replacement(props: Props) {
     props.scope.signal.addEventListener('abort', clear, { once: true });
     return () => { clear(); props.scope.signal.removeEventListener('abort', clear); };
   }, [props.scope]);
-  /** `review` and `accepted` as in Add item: the review for a newly chosen photo, and its first pass accepted unchanged. */
+  /**
+   * `review`, `fromReview` and `accepted` as in Add item: the review for a newly chosen photo, the review being
+   * accepted (its first pass keeps the crop editor's whole-photo source) and that first pass accepted unchanged.
+   */
   async function prepare(source: Blob, next: PhotoEdit, replacing: boolean,
-    how: { review?: boolean; accepted?: PreparedWithBackground } = {}) {
+    how: { review?: boolean; fromReview?: Review; accepted?: PreparedWithBackground } = {}) {
     if (change.frozen) return;
-    setReview(null);
+    if (!how.fromReview) setReview(null);
     // Work that supersedes an unfinished new-photo preparation still owes that photo its crop preview.
     replacing ||= pendingCrop.current;
     pendingCrop.current = replacing;
@@ -220,8 +223,8 @@ function Replacement(props: Props) {
       if (signal.aborted) return;
       try {
         // The stored image and item stay as they are until Save; this only prepares the new photo in memory.
-        const prepared = how.accepted
-          ?? await background.prepare(imaging, source, next, signal, replacing, () => work.current === controller);
+        const prepared = how.accepted ?? await background.prepare(imaging, source, next, signal, replacing && !how.fromReview,
+          () => work.current === controller);
         if (signal.aborted) return;
         const cutOut = prepared.state === 'removed';
         const current = () => work.current === controller;
@@ -232,7 +235,7 @@ function Replacement(props: Props) {
             setFull(prepared.crop); setEdit(next);
             setReview({ prepared, next, controller });
             setEditing(true);
-          } else commit(prepared, check, next, replacing);
+          } else commit(prepared, check, next, replacing, null);
           return;
         }
         if (cutOut) setProvisional({ photo: prepared.photo, crop: !replacing });
@@ -241,7 +244,7 @@ function Replacement(props: Props) {
           stage = await enhancement.run(prepared.cleanup, { cutOut, online: onlineNow.current, signal, current });
         } finally { if (cutOut) setProvisional(null); }
         if (stage.kind === 'aborted' || stage.kind === 'available' || signal.aborted) return;
-        commit(prepared, stage, next, replacing);
+        commit(prepared, stage, next, replacing, how.fromReview?.prepared.crop ?? null);
       } catch (error) {
         if (!signal.aborted) { background.settle('none'); pendingCrop.current = false; }
         if (!signal.aborted) setError(error instanceof ImagePreparationError
@@ -251,13 +254,15 @@ function Replacement(props: Props) {
     })();
     await preparation.current;
   }
+  /** `source` keeps an existing crop-editor source; otherwise a new photo takes this preparation's whole-photo crop. */
   function commit(prepared: PreparedWithBackground, stage: Exclude<StageResult, { kind: 'aborted' | 'available' }>, next: PhotoEdit,
-    replacing: boolean) {
+    replacing: boolean, source: CropSource | null) {
     const settled = stage.kind === 'enhanced' ? stage.photo : prepared.photo;
     if (!replacing) focusEdit.current = true;
+    setReview(null);
     setPhoto(settled); setEdit(next); setEditing(false);
     background.settle(prepared.state);
-    if (replacing) setFull(prepared.crop);
+    if (replacing) setFull(source ?? prepared.crop);
     pendingCrop.current = false;
     enhancement.commit(stage, prepared.photo);
     void analysis.commitPhoto(settled);
@@ -272,15 +277,15 @@ function Replacement(props: Props) {
     const current = review;
     if (!current || work.current !== current.controller || !original.current) return;
     focusEdit.current = true;
-    void prepare(original.current, next, true, unchanged ? { accepted: current.prepared } : {});
+    void prepare(original.current, next, true, { fromReview: current, ...(unchanged ? { accepted: current.prepared } : {}) });
   }
-  /** Cancel editing in the review keeps the new photo without clean-up: no line, one analysis, nothing sent. */
+  /** As in Add item: Cancel in the review, also during an accepted changed crop's preparation, keeps the first pass. */
   function cancelReview() {
     const current = review;
-    if (!current || work.current !== current.controller) return;
-    setReview(null);
+    if (!current) return;
+    if (work.current !== current.controller) { work.current?.abort(); setPreparing(false); }
     focusEdit.current = true;
-    commit(current.prepared, notSent, current.next, true);
+    commit(current.prepared, notSent, current.next, true, null);
   }
   /** "Use original background" in the review: the original photo is prepared, with nothing sent. */
   function reviewOriginal() {
@@ -338,7 +343,7 @@ function Replacement(props: Props) {
         </div>}
         {(!editing || provisional) && <EnhancementStatus view={enhancement.view} disabled={change.frozen || preparing} t={t}
           onSkip={enhancement.skip} onRevert={() => revertEnhancement()} onCancelCrop={provisional?.crop ? cancelCrop : undefined} />}
-        {review && <BackgroundStatus state="removed" analysed={false} disabled={change.frozen || preparing} t={t} onUseOriginal={reviewOriginal} />}
+        {review && editing && !provisional && <BackgroundStatus state="removed" analysed={false} disabled={change.frozen || preparing} t={t} onUseOriginal={reviewOriginal} />}
         {!editing && !provisional && <BackgroundStatus state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
           disabled={change.frozen || preparing} t={t} onUseOriginal={() => {
             if (change.frozen) return;
