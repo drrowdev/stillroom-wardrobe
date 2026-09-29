@@ -571,6 +571,8 @@ for (const flow of ['add', 'replace'] as const) {
     await expect(label(page)).toBeVisible({ timeout: 45_000 });
     await expect.poll(() => analyses(api)).toBe(1);
     const accepted = await shown(page, flow);
+    const note = page.getByText(text('photo.reanalyse'), { exact: true });
+    await expect(note).toHaveCount(1);
     const second = held(enhanced(page));
     api.enhanceControl.replies.push(second.reply);
     await page.locator(flows[flow].edit).click();
@@ -580,9 +582,15 @@ for (const flow of ['add', 'replace'] as const) {
     await expect(cancel).toBeVisible({ timeout: 45_000 });
     await expect(page.getByText(text('enhance.working'), { exact: true })).toBeVisible();
     expect(sent(api)).toHaveLength(2);
+    // While the changed crop is cleaned up, the photo choices are hidden and so is their shared line.
+    await expect(revertButton(page)).toHaveCount(0);
+    await expect(note).toHaveCount(0);
     await cancel.click();
     await expect(page.getByText(text('enhance.working'), { exact: true })).toHaveCount(0);
     await expect(label(page)).toBeVisible();
+    await expect(revertButton(page)).toBeVisible();
+    await expect(note).toHaveCount(1);
+    await expect(revertButton(page)).toHaveAccessibleDescription(text('photo.reanalyse'));
     expect(await shown(page, flow)).toBe(accepted);
     second.release();
     await page.waitForTimeout(1_000);

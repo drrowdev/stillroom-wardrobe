@@ -381,7 +381,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
             disabled={frozen || preparing || busy} t={t} onUseOriginal={useOriginalBackground} />}
           {(!editing || provisional) && <EnhancementStatus view={enhancement.view} disabled={frozen || preparing || busy} t={t}
             onSkip={enhancement.skip} onRevert={() => revertEnhancement()} onCancelCrop={provisional?.crop ? cancelEdit : undefined} />}
-          <ReanalyseNote t={t} show={((!editing || provisional) && enhancement.view.enhanced) || (!editing && !provisional && background.state === 'removed' && analysis.phase !== 'off' && analysis.phase !== 'none')} />
+          <ReanalyseNote t={t} show={((!editing || provisional) && enhancement.view.enhanced && !enhancement.view.working) || (!editing && !provisional && background.state === 'removed' && analysis.phase !== 'off' && analysis.phase !== 'none')} />
           {(editing || preparing) && !enhancement.view.working && <p id="photo-pending" tabIndex={-1} role="status" className="notice">{t(preparing ? 'photo.pendingPreparation' : 'photo.pendingCrop')}</p>}
           {invalid && !photo && <p className="field-error">{t('common.required')}</p>}
           <details className="copy-details"><summary>{t('photo.cameraHelp')}</summary><p>{t('photo.cameraFallback')}</p></details>

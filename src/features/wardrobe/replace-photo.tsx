@@ -351,7 +351,7 @@ function Replacement(props: Props) {
             if (change.frozen) return;
             if (background.useOriginal() === 'again' && original.current) void prepare(original.current, edit, false);
           }} />}
-        <ReanalyseNote t={t} show={((!editing || provisional) && enhancement.view.enhanced) || (!editing && !provisional && background.state === 'removed' && analysis.phase !== 'off' && analysis.phase !== 'none')} />
+        <ReanalyseNote t={t} show={((!editing || provisional) && enhancement.view.enhanced && !enhancement.view.working) || (!editing && !provisional && background.state === 'removed' && analysis.phase !== 'off' && analysis.phase !== 'none')} />
         {!photo && !preparing && !review && <BackgroundNote t={t} language={props.language} />}
         {preparing && !enhancement.view.working && <p role="status">{t(preparingMessage(background.state, background.downloading, 'capture.preparing'))}</p>}
         {error && <p role="alert" className="notice notice-error">{t(error)}</p>}
