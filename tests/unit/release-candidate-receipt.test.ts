@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  APPLE_JOBS, CI_JOBS, REPOSITORY, WORKFLOWS, Blocked, evaluate, exitCode, gather, jobNames, paginate, parseArguments,
+  APPLE_JOBS, CI_JOBS, REPOSITORY, WORKFLOWS, Blocked, checkBinding, evaluate, exitCode, gather, gitIn, jobNames, paginate, parseArguments,
 } from '../../scripts/release-candidate-receipt.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -39,6 +41,8 @@ const run = (key: 'ci' | 'apple', id: number, extra: Partial<Run> = {}): Run => 
 
 interface World {
   head: string; porcelain: string; main: string; mainAgain?: string;
+  // The executing verifier: whether git tracks it, and its bytes at C versus on disk.
+  scriptTracked?: boolean; scriptAtC?: string; scriptOnDisk?: string;
   definitions: { ci: string; apple: string };
   runs: { ci: Run[]; apple: Run[] };
   attempts: Map<number, Attempt[]>;
@@ -115,12 +119,18 @@ function fake(world: World) {
     }
     return { status: 404, body: null };
   };
-  const git = (args: string[]) => {
+  const git = (args: string[], raw = false) => {
+    if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return `${FAKE_TOP}\n`;
     if (args[0] === 'rev-parse') return `${world.head}\n`;
     if (args[0] === 'status') return world.porcelain;
+    if (args[0] === 'ls-files') {
+      if (world.scriptTracked === false) throw new Error('not tracked');
+      return `${SCRIPT}\n`;
+    }
     if (args[0] === 'show') {
       const file = args[1]!.split(':')[1];
       if (!args[1]!.startsWith(`${C}:`)) throw new Error('not C');
+      if (file === SCRIPT) return raw ? Buffer.from(world.scriptAtC ?? SCRIPT_BYTES) : world.scriptAtC ?? SCRIPT_BYTES;
       return file === WORKFLOWS.ci.path ? world.definitions.ci : world.definitions.apple;
     }
     throw new Error(`unexpected git ${args.join(' ')}`);
@@ -128,11 +138,18 @@ function fake(world: World) {
   return { api, git, calls };
 }
 
+const FAKE_TOP = path.resolve('/candidate');
+const SCRIPT = 'scripts/release-candidate-receipt.mjs';
+const SCRIPT_BYTES = 'verifier at C\n';
+const binding = (world: World) => ({ scriptPath: path.join(FAKE_TOP, 'scripts', 'release-candidate-receipt.mjs'),
+  readScript: () => Buffer.from(world.scriptOnDisk ?? SCRIPT_BYTES) });
+
 let clock = 0;
 function verify(world: World, disclosure?: string) {
   const { api, git } = fake(world);
   try {
-    return evaluate(gather({ sha: C, ciRun: CI_RUN, appleRun: APPLE_RUN, disclosure }, { api, git, now: () => new Date(Date.UTC(2026, 9, 1, 10, 0, clock++)).toISOString() }));
+    return evaluate(gather({ sha: C, ciRun: CI_RUN, appleRun: APPLE_RUN, disclosure },
+      { api, git, ...binding(world), now: () => new Date(Date.UTC(2026, 9, 1, 10, 0, clock++)).toISOString() }));
   } catch (error) {
     if (error instanceof Blocked) return { verdict: 'BLOCKED' as const, reasons: [error.message], lines: [] };
     throw error;
@@ -202,13 +219,72 @@ describe('R1 release-candidate receipt: positive cases', () => {
 describe('R1 release-candidate receipt: binding to C', () => {
   it('is BLOCKED on a dirty checkout, an untracked file or HEAD other than C, before any API read', () => {
     for (const change of [(world: World) => { world.porcelain = ' M src/app.tsx\n'; }, (world: World) => { world.porcelain = '?? notes.txt\n'; },
-      (world: World) => { world.head = OTHER; }]) {
+      (world: World) => { world.head = OTHER; }, (world: World) => { world.scriptTracked = false; },
+      (world: World) => { world.scriptOnDisk = 'edited verifier\n'; }, (world: World) => { world.scriptAtC = 'older verifier\n'; }]) {
       const world = baseWorld();
       change(world);
       const { api, git, calls } = fake(world);
-      const outcome = evaluate(gather({ sha: C, ciRun: CI_RUN, appleRun: APPLE_RUN }, { api, git }));
+      const outcome = evaluate(gather({ sha: C, ciRun: CI_RUN, appleRun: APPLE_RUN }, { api, git, ...binding(world) }));
       expectVerdict(outcome, 'BLOCKED', /checkout/);
       expect(calls.size).toBe(0);
+    }
+  });
+
+  it('checks the real repository that contains the verifier, not the caller\'s directory', () => {
+    const sandbox = mkdtempSync(path.join(tmpdir(), 'r1-binding-'));
+    try {
+      const git = (directory: string, ...args: string[]) => execFileSync('git', ['-C', directory, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const init = (name: string) => {
+        const directory = path.join(sandbox, name);
+        mkdirSync(path.join(directory, 'scripts'), { recursive: true });
+        git(directory, 'init', '-q');
+        git(directory, 'config', 'user.email', 'test@example.invalid');
+        git(directory, 'config', 'user.name', 'Test');
+        git(directory, 'config', 'core.autocrlf', 'false');
+        return directory;
+      };
+      const commit = (directory: string) => {
+        git(directory, 'add', '-A');
+        git(directory, 'commit', '-q', '-m', 'c');
+        return git(directory, 'rev-parse', 'HEAD').trim();
+      };
+      const source = path.join(root, 'scripts', 'release-candidate-receipt.mjs');
+      // Candidate repository with the verifier committed; a second repository without it plays C with no verifier.
+      const withVerifier = init('with');
+      copyFileSync(source, path.join(withVerifier, 'scripts', 'release-candidate-receipt.mjs'));
+      const bound = commit(withVerifier);
+      const withoutVerifier = init('without');
+      writeFileSync(path.join(withoutVerifier, 'README.md'), 'no verifier here\n');
+      const unbound = commit(withoutVerifier);
+      const inside = { scriptPath: path.join(withVerifier, 'scripts', 'release-candidate-receipt.mjs'), readScript: () => readFileSync(source) };
+
+      expect(checkBinding({ sha: bound, git: gitIn(withVerifier), ...inside })).toBeNull();
+      // The caller's clean checkout at a C without the verifier does not bind an external executable.
+      const external = { scriptPath: source, readScript: () => readFileSync(source) };
+      expect(checkBinding({ sha: unbound, git: gitIn(path.dirname(source)), ...external })).not.toBeNull();
+      expect(checkBinding({ sha: unbound, git: gitIn(withoutVerifier), ...external })).toMatch(/outside the checkout/);
+      expect(checkBinding({ sha: unbound, git: gitIn(withoutVerifier), scriptPath: path.join(withoutVerifier, 'scripts', 'release-candidate-receipt.mjs'), readScript: () => readFileSync(source) }))
+        .toMatch(/not tracked/);
+      // An edited executable, or a verifier that changed after C, is refused.
+      expect(checkBinding({ sha: bound, git: gitIn(withVerifier), ...inside, readScript: () => Buffer.concat([readFileSync(source), Buffer.from('\n')]) }))
+        .toMatch(/differs from C/);
+      writeFileSync(path.join(withVerifier, 'scripts', 'release-candidate-receipt.mjs'), `${readFileSync(source, 'utf8')}// later\n`);
+      const later = commit(withVerifier);
+      git(withVerifier, 'checkout', '-q', bound);
+      expect(checkBinding({ sha: later, git: gitIn(withVerifier), ...inside })).toMatch(/HEAD is not the candidate/);
+      git(withVerifier, 'checkout', '-q', later);
+      expect(checkBinding({ sha: later, git: gitIn(withVerifier), ...inside })).toMatch(/differs from C/);
+      writeFileSync(path.join(withVerifier, 'notes.txt'), 'untracked\n');
+      expect(checkBinding({ sha: later, git: gitIn(withVerifier), ...inside })).toMatch(/not clean/);
+
+      // Through gather: a refusal happens before any API read.
+      let apiCalls = 0;
+      const outcome = evaluate(gather({ sha: unbound, ciRun: CI_RUN, appleRun: APPLE_RUN },
+        { api: () => { apiCalls += 1; return { status: 500, body: null }; }, git: gitIn(withoutVerifier), ...external }));
+      expectVerdict(outcome, 'BLOCKED', /checkout: the verifier is outside the checkout/);
+      expect(apiCalls).toBe(0);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
     }
   });
 
@@ -345,7 +421,7 @@ describe('R1 release-candidate receipt: history for C', () => {
     const world = baseWorld();
     world.runs.apple[0]!.status = 'in_progress';
     world.runs.apple[0]!.conclusion = null;
-    world.attempts.get(APPLE_RUN)![0]!.run.status = 'in_progress';
+    world.attempts.get(APPLE_RUN)![0]!.run.status = 'in_progress'; world.attempts.get(APPLE_RUN)![0]!.run.conclusion = null;
     expectVerdict(verify(world), 'BLOCKED', /still in progress/);
   });
 
@@ -376,6 +452,44 @@ describe('R1 release-candidate receipt: re-read before the verdict', () => {
       expectVerdict(verify(world), 'FAIL', /changed during verification/);
     });
   }
+
+  it('fails when an earlier successful run gains an in-progress attempt during verification', () => {
+    const world = baseWorld();
+    const earlier = run('ci', CI_RUN - 1, { event: 'push' });
+    addRun(world, 'ci', earlier);
+    world.runsAgain = { ci: [{ ...world.runs.ci[0]! }, { ...earlier, run_attempt: 2, status: 'in_progress', conclusion: null, updated_at: '2026-10-01T10:05:00Z' }] };
+    expectVerdict(verify(world), 'FAIL', /CI history changed during verification/);
+  });
+
+  for (const [label, change] of [
+    ['a different SHA', { head_sha: OTHER }], ['a different workflow', { workflow_id: 1, path: '.github/workflows/other.yml' }],
+    ['a failure conclusion', { conclusion: 'failure' }], ['a different SHA and a failure', { head_sha: OTHER, conclusion: 'failure' }],
+  ] as const) {
+    it(`fails when the final attempt record reports ${label}`, () => {
+      const world = baseWorld();
+      Object.assign(world.attempts.get(CI_RUN)![0]!.run, change);
+      expectVerdict(verify(world), 'FAIL', /attempt 1: attempt (record|state) does not match its run/);
+    });
+  }
+
+  it('fails when an earlier attempt record carries another run\'s identity', () => {
+    const world = baseWorld();
+    world.runs.ci = [];
+    addRun(world, 'ci', run('ci', CI_RUN, { run_attempt: 2 }));
+    world.attempts.get(CI_RUN)![0]!.run.conclusion = 'failure';
+    world.attempts.get(CI_RUN)![0]!.run.head_sha = OTHER;
+    expectVerdict(verify(world, 'rerun of a flake'), 'FAIL', /attempt 1: attempt record does not match its run/);
+  });
+
+  it('reads main again after every other evidence read', () => {
+    const world = baseWorld();
+    const { api, git, calls } = fake(world);
+    const order: string[] = [];
+    const recording = (resource: string) => { order.push(resource.split('?')[0]!); return api(resource); };
+    expectVerdict(evaluate(gather({ sha: C, ciRun: CI_RUN, appleRun: APPLE_RUN }, { api: recording, git, ...binding(world) })), 'PASS');
+    expect(order.at(-1)).toBe(`repos/${REPOSITORY}/git/ref/heads/main`);
+    expect(calls.get(`repos/${REPOSITORY}/git/ref/heads/main`)).toBe(2);
+  });
 
   it('fails when a new run for C appeared', () => {
     const world = baseWorld();

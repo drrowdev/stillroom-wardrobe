@@ -1,6 +1,6 @@
 export type ApiResponse = { status: number; body: unknown };
 export type Api = (resource: string) => ApiResponse;
-export type Git = (args: string[]) => string;
+export type Git = (args: string[], raw?: boolean) => string | Buffer;
 export interface Options { sha: string; ciRun: number; appleRun: number; disclosure?: string }
 export interface Outcome { verdict: 'PASS' | 'FAIL' | 'BLOCKED'; reasons: string[]; lines: string[] }
 export const REPOSITORY: string;
@@ -14,7 +14,10 @@ export const R1_REMINDER: string;
 export class Blocked extends Error {}
 export function jobNames(text: string): string[];
 export function paginate(get: (page: number) => ApiResponse | undefined, key: string, perPage?: number): unknown[];
-export function gather(options: Options, deps: { api: Api; git: Git; now?: () => string }): unknown;
+export interface Binding { git: Git; scriptPath: string; readScript: () => Uint8Array }
+export function checkBinding(input: Binding & { sha: string }): string | null;
+export function gitIn(directory: string): Git;
+export function gather(options: Options, deps: Binding & { api: Api; now?: () => string }): unknown;
 export function evaluate(snapshot: unknown): Outcome;
 export function exitCode(verdict: string): number;
 export function parseArguments(argv: string[]): { options?: Options; error?: string };

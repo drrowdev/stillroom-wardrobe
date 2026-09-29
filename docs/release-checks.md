@@ -163,9 +163,11 @@ Only the SHA is recorded; no tag.
 4. **Deploy.** The owner-approved Pages deploy selects commit C explicitly, not the latest main.
 5. **Read-back.** A new D row: `check-deployed-assets.mjs` from a clean checkout of C exits 0, and the entry
    chunk carries C's 8-character prefix.
-6. **Edge comparison.** For each deployed Edge function,
-   `git diff --quiet <its recorded deploy commit> C -- supabase/functions/<fn> supabase/functions/_shared`
-   must be clean. A difference needs its own approved redeploy (an F row) before R1 closes.
+6. **Edge comparison.** The functions also deploy code they import from `src/images/` and `src/domain/`,
+   and each has a `deno.json`. So compare conservatively, for each deployed Edge function:
+   `git diff --quiet <its recorded deploy commit> C -- supabase/functions src/images src/domain supabase/config.toml`
+   must be clean. Any difference, even in another function's folder, needs its own approved redeploy
+   (an F row) before R1 closes.
 
 A receipt PASS is not R1 closed. R1 closes with the receipt PASS, the deploy of exactly C with its D row,
 a clean or approved Edge comparison, and the owner's approval. The owner sessions then follow

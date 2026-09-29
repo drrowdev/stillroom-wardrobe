@@ -7,6 +7,7 @@
 //
 // Exit codes: 0 = R1-CI PASS, 1 = R1-CI FAIL, 2 = R1-CI BLOCKED (including usage errors).
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -79,12 +80,36 @@ export function paginate(get, key, perPage = PER_PAGE) {
 
 const runSummary = (run) => ({ head_sha: run?.head_sha, run_attempt: run?.run_attempt, status: run?.status, conclusion: run?.conclusion,
   updated_at: run?.updated_at });
+const fingerprint = (run) => ({ id: run?.id, run_attempt: run?.run_attempt, status: run?.status, conclusion: run?.conclusion, updated_at: run?.updated_at });
+
+/**
+ * Binds the executing verifier to C. `git(args, raw)` must run in the repository that contains `scriptPath`; with `raw`
+ * it returns a Buffer. Returns a refusal reason, or null when HEAD is C, the checkout is clean (including untracked files),
+ * and the script is tracked and byte-equal to C's copy.
+ */
+export function checkBinding({ sha, git, scriptPath, readScript }) {
+  try {
+    const top = git(['rev-parse', '--show-toplevel']).trim();
+    const relative = path.relative(path.resolve(top), path.resolve(scriptPath));
+    if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return 'the verifier is outside the checkout';
+    const tracked = relative.split(path.sep).join('/');
+    if (git(['rev-parse', 'HEAD']).trim() !== sha) return 'HEAD is not the candidate';
+    if (git(['status', '--porcelain', '--untracked-files=all']).trim() !== '') return 'not clean';
+    try { git(['ls-files', '--error-unmatch', '--', tracked]); } catch { return 'the verifier is not tracked'; }
+    let blob;
+    try { blob = git(['show', `${sha}:${tracked}`], true); } catch { return 'the verifier is not in C'; }
+    if (!Buffer.from(blob).equals(Buffer.from(readScript()))) return 'the verifier differs from C';
+    return null;
+  } catch {
+    return 'cannot read the verifier\'s git checkout';
+  }
+}
 
 /** Collects everything the verdict needs. `api(path)` returns `{ status, body }`; `git(args)` returns stdout. */
-export function gather({ sha, ciRun, appleRun, disclosure }, { api, git, now = () => new Date().toISOString() }) {
+export function gather({ sha, ciRun, appleRun, disclosure }, { api, git, scriptPath, readScript, now = () => new Date().toISOString() }) {
   const snapshot = { repository: REPOSITORY, sha, disclosure, verdictRunIds: { ci: ciRun, apple: appleRun } };
-  snapshot.checkout = { head: git(['rev-parse', 'HEAD']).trim(), porcelain: git(['status', '--porcelain', '--untracked-files=all']) };
-  if (snapshot.checkout.head !== sha || snapshot.checkout.porcelain.trim() !== '') return snapshot;
+  snapshot.checkout = { refusal: checkBinding({ sha, git, scriptPath, readScript }) };
+  if (snapshot.checkout.refusal !== null) return snapshot;
   const one = (resource) => {
     const response = api(resource);
     if (!response || !(response.status >= 200 && response.status < 300) || !response.body) throw new Blocked(`incomplete response: HTTP ${response?.status ?? 'none'} for ${resource.split('?')[0]}`);
@@ -116,12 +141,14 @@ export function gather({ sha, ciRun, appleRun, disclosure }, { api, git, now = (
       return { run, attempts };
     });
   }
-  // Re-read just before the verdict: main, both verdict runs and both histories must be unchanged.
-  snapshot.reread = { at: now(), mainHead: readMain(), verdictRuns: {}, historyIds: {} };
+  // Re-read just before the verdict: both verdict runs, both histories (id, attempt, state, updated_at) and, last of all,
+  // main must be unchanged.
+  snapshot.reread = { at: now(), verdictRuns: {}, history: {} };
   for (const key of Object.keys(WORKFLOWS)) {
     snapshot.reread.verdictRuns[key] = runSummary(one(`repos/${REPOSITORY}/actions/runs/${snapshot.verdictRunIds[key]}`));
-    snapshot.reread.historyIds[key] = listRuns(key).map((run) => run?.id);
+    snapshot.reread.history[key] = listRuns(key).map(fingerprint);
   }
+  snapshot.reread.mainHead = readMain();
   return snapshot;
 }
 
@@ -149,8 +176,7 @@ export function evaluate(snapshot) {
   };
   if (typeof sha !== 'string' || !SHA.test(sha)) return result('BLOCKED', ['usage: --sha must be a full 40-character lowercase SHA']);
   lines.push(`REPOSITORY ${snapshot.repository}`, `CANDIDATE ${sha}`);
-  if (snapshot.checkout?.head !== sha) return result('BLOCKED', ['checkout: HEAD is not the candidate']);
-  if ((snapshot.checkout?.porcelain ?? '').trim() !== '') return result('BLOCKED', ['checkout: not clean']);
+  if (!snapshot.checkout || snapshot.checkout.refusal !== null) return result('BLOCKED', [`checkout: ${snapshot.checkout?.refusal ?? 'not checked'}`]);
 
   lines.push(`READ ${snapshot.firstRead} and ${snapshot.reread?.at}`, `MAIN ${snapshot.mainHead}`);
   if (snapshot.mainHead !== sha) fail.push('main is not the candidate');
@@ -190,10 +216,22 @@ export function evaluate(snapshot) {
       if ((entry.attempts?.length ?? 0) !== run.run_attempt) fail.push(`${label} history: run ${run.id} attempts incomplete`);
       if (run.status !== 'completed') blocked.push(`${label} run ${run.id} still in progress`);
       if (run.id > id) fail.push(`${label} run ${id} superseded by later run ${run.id}`);
+      if (run.id === id && JSON.stringify(fingerprint(run)) !== JSON.stringify(fingerprint(verdict))) fail.push(`${label} run ${id} changed during verification`);
       for (const { attempt, run: attemptRun, jobs } of entry.attempts ?? []) {
         const final = run.id === id && attempt === run.run_attempt;
         lines.push(`HISTORY ${label} run ${run.id} ${run.event} attempt ${attempt} ${attemptRun?.status}/${attemptRun?.conclusion}${final ? ' (verdict)' : ''}`);
-        if (attemptRun?.run_attempt !== attempt || attemptRun?.id !== run.id) fail.push(`${label} run ${run.id} attempt ${attempt}: malformed attempt record`);
+        // Each attempt must carry its run's full identity; the latest attempt must also carry the run's state.
+        const identity = ['id', 'head_sha', 'workflow_id', 'path', 'event', 'head_branch'];
+        if (!attemptRun || attemptRun.run_attempt !== attempt || identity.some((field) => attemptRun[field] !== run[field])
+          || JSON.stringify(attemptRun.head_repository?.full_name) !== JSON.stringify(run.head_repository?.full_name)
+          || !STATUSES.has(attemptRun.status) || !CONCLUSIONS.has(attemptRun.conclusion)) {
+          fail.push(`${label} run ${run.id} attempt ${attempt}: attempt record does not match its run`);
+        } else if (attempt === run.run_attempt && (attemptRun.status !== run.status || attemptRun.conclusion !== run.conclusion)) {
+          fail.push(`${label} run ${run.id} attempt ${attempt}: attempt state does not match its run`);
+        } else if (attemptRun.status !== 'completed') {
+          blocked.push(`${label} run ${run.id} attempt ${attempt} still in progress`);
+        }
+        if (final && attemptRun?.status === 'completed' && attemptRun?.conclusion !== 'success') fail.push(`${label} run ${id} final attempt is ${attemptRun?.status}/${attemptRun?.conclusion}`);
         const jobIds = new Set();
         const required = new Map();
         for (const job of jobs ?? []) {
@@ -231,8 +269,8 @@ export function evaluate(snapshot) {
     // Re-read before the verdict.
     const again = snapshot.reread?.verdictRuns?.[key];
     if (JSON.stringify(again) !== JSON.stringify(runSummary(verdict))) fail.push(`${label} run ${id} changed during verification`);
-    const againIds = snapshot.reread?.historyIds?.[key];
-    if (JSON.stringify(againIds) !== JSON.stringify(history.map((entry) => entry?.run?.id))) fail.push(`${label} history changed during verification`);
+    const againHistory = snapshot.reread?.history?.[key];
+    if (JSON.stringify(againHistory) !== JSON.stringify(history.map((entry) => fingerprint(entry?.run)))) fail.push(`${label} history changed during verification`);
   }
   if (snapshot.reread?.mainHead !== snapshot.mainHead) fail.push('main changed during verification');
   lines.push(A11Y_LINE);
@@ -282,7 +320,10 @@ function ghApi(resource) {
   }
 }
 
-const gitRead = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+// Git always runs in the repository that contains this script, never in the caller's working directory.
+const scriptPath = fileURLToPath(import.meta.url);
+export const gitIn = (directory) => (args, raw = false) => execFileSync('git', ['-C', directory, ...args],
+  { encoding: raw ? 'buffer' : 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const parsed = parseArguments(process.argv.slice(2));
@@ -292,7 +333,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
   let outcome;
   try {
-    outcome = evaluate(gather(parsed.options, { api: ghApi, git: gitRead }));
+    outcome = evaluate(gather(parsed.options, { api: ghApi, git: gitIn(path.dirname(scriptPath)), scriptPath, readScript: () => readFileSync(scriptPath) }));
   } catch (error) {
     const reason = error instanceof Blocked ? error.message : 'unexpected error while reading';
     outcome = { verdict: 'BLOCKED', lines: [R1_REMINDER, `R1-CI BLOCKED ${reason}`] };
