@@ -58,6 +58,8 @@ export const MIGRATIONS = Object.freeze([
   { name: '20260929090100_enhance_expire_schedule.sql', version: '20260929090100', time: '2026-09-29 09:01:00', bytes: 1974, sha256: SOURCE_HASHES.enhanceExpireSchedule },
   { name: '20261001090000_admin_limits.sql', version: '20261001090000', time: '2026-10-01 09:00:00', bytes: 24463, sha256: SOURCE_HASHES.adminLimits },
   { name: '20261002090000_photo_cleanup_manifest.sql', version: '20261002090000', time: '2026-10-02 09:00:00', bytes: 9393, sha256: SOURCE_HASHES.photoCleanupManifest },
+  { name: '20261003090000_try_on.sql', version: '20261003090000', time: '2026-10-03 09:00:00', bytes: 103694, sha256: SOURCE_HASHES.tryOn },
+  { name: '20261003090100_tryon_expire_schedule.sql', version: '20261003090100', time: '2026-10-03 09:01:00', bytes: 1930, sha256: SOURCE_HASHES.tryOnExpireSchedule },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1309,12 +1311,17 @@ async function main() {
       const { adminLimitsProbes } = await import('../tests/integration/admin-limits.sessions.mjs');
       await adminLimitsProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `AD1-admin-${label}`; });
       colourFinalizer.assertRunning();
+      stage = 'VTO1-tryon-ledger';
+      const { tryonProbes } = await import('../tests/integration/tryon.sessions.mjs');
+      await tryonProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `VTO1-tryon-${label}`; });
+      colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
     console.log('PASS: COL1 populated11/twelve/fifteen; rows, v1 manifest and unchanged bodies preserved at each compare; probes only after fifteen; no provider calls');
     console.log('PASS: P6d tag history; v2 equals legacy for recorded history, recorded history re-imported through the RPC and a second generation imported, concurrent and completion races settle serially; no provider calls');
     console.log('PASS: ST1a stylist ledger; service-only claim/finish, idempotent and conflicting finish, invalid/anomaly/overrun precedence disables only the stylist, scheduled expiry then observed finish, UTC month, sub-limit and shared allowance, shared-limit and freeze races, operator allocation, confirmed-weather and fenced context, export unchanged; no provider calls');
     console.log('PASS: BG2b enhancement ledger; service-only claim/finish/probe, idempotent finish over output hash, anomaly and operator shutdown on the shared switch, expiry then late finish without evidence, consent/freeze overlap, shared A/B slots, mixed tagging/stylist/enhancement admission and clamp, operator probe limits, snapshot bindings attached once on pending->ready, expired-output refusal, legacy/v4/unlabelled restore modes and v1->v2 resume; inactive state restored; no provider calls');
     console.log('PASS: AD1 admin limits; non-admin UNAVAILABLE before any target work, operator grant bound to the current admission, spending disclosure allowlist with confirmed/estimated/reserved months, guarded exact-micro writes with audit, overlap and deletion-safety cases, export unchanged; no provider calls');
+    console.log('PASS: VTO1 try-on ledger; service-only claim/dispatch/finish/probe, owner-only reads and Stop, bootstrap fills only null settings, once-only durable dispatch authorisation, PRE_DISPATCH release and lost-mark charge, cancel/withdrawal never publish, garment recheck ends a stale chain, accounting expiry without chain rows, purge safeguard, 20-result cap, probe permission separate from the ordinary path, outfit deletion, export excludes try-on, restore discard keeps usage; inactive state restored; no provider calls');
     stage = 'COL1-B-twelve-reset';
     requireEvidence((await cli(['db', 'reset', '--local', '--no-seed', '--yes', '--version', COLOUR_VERSION], 10 * 60_000)).code === 0);
     await assertMigrationInventory(); await history('colours'); await verifyCiStorageGuard();

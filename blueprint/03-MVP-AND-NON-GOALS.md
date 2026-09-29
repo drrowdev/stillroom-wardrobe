@@ -32,7 +32,7 @@ implicit waiver of deletion, backup, recovery or security.
 | Persistent private offline wardrobe | Requires encrypted device storage, explicit device trust, eviction and revocation design. Shell-only offline support is intentional. |
 | Any sharing, borrowing, peer discovery or connected accounts | Explicitly excluded by the user’s later instruction. Do not implement or defer as an expected next feature. |
 | AI outfit reranking or conversational stylist | Not selected for the first release. Evaluate only after a later request and evidence that it improves on deterministic matching using the AI-tagged catalog. |
-| Generative try-on / image generation | Significant cost and additional sensitive imagery; no need for the core use case. |
+| Generative image generation other than try-on | Significant cost and additional sensitive imagery; no need for the core use case. Virtual try-on of a saved outfit is no longer a non-goal (owner decision #84 c5873753380, ADR28): VTO-1 adds its inactive backend and VTO-2 its UI, each behind separate owner gates. |
 | Always-on AI chat | Paid and operational complexity; explainable suggestions already address daily choice. |
 | Public feeds/profiles, followers, likes/comments | Incompatible with a private two-member scope. |
 | Marketplace, payments, advertising/subscriptions | No business model or commerce requirement. |

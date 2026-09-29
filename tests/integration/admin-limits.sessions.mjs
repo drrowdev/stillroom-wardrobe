@@ -103,7 +103,8 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
       has_function_privilege('service_role',p.oid,'EXECUTE')))
     from pg_proc p where p.pronamespace='public'::regnamespace and p.proname like 'admin\\_%';`), {
     admin_status: [true, true, false, true, false], admin_ai_spending: [true, true, false, true, false],
-    admin_set_ai_limits: [true, true, false, true, false] });
+    admin_set_ai_limits: [true, true, false, true, false], admin_ai_spending_v2: [true, true, false, true, false],
+    admin_set_ai_limits_v2: [true, true, false, true, false] });
   equal(await one(`select jsonb_object_agg(c.relname,jsonb_build_array(c.relrowsecurity,
       has_table_privilege('anon',c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE'),
       has_table_privilege('authenticated',c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE'),
@@ -121,7 +122,11 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
     const anyLimits = { shared: feature('1000000', '100000', 10), stylist: feature(null, null, null), enhancement: feature(null, null, null) };
     const deniedCalls = (targetNo) => [['admin_status', {}], ['admin_ai_spending', {}], ['admin_ai_spending', { p_months: 0 }],
       ['admin_set_ai_limits', { p_admission_no: targetNo, p_account_version: 'f'.repeat(64), p_expected: anyLimits, p_limits: anyLimits }],
-      ['admin_set_ai_limits', { p_admission_no: targetNo, p_account_version: 'bad', p_expected: {}, p_limits: [], p_reason_code: 'FREE' }]];
+      ['admin_set_ai_limits', { p_admission_no: targetNo, p_account_version: 'bad', p_expected: {}, p_limits: [], p_reason_code: 'FREE' }],
+      ['admin_ai_spending_v2', {}], ['admin_ai_spending_v2', { p_months: 0 }],
+      ['admin_set_ai_limits_v2', { p_admission_no: targetNo, p_account_version: 'f'.repeat(64),
+        p_expected: { ...anyLimits, tryOn: feature(null, null, null) }, p_limits: { ...anyLimits, tryOn: feature(null, null, null) } }],
+      ['admin_set_ai_limits_v2', { p_admission_no: targetNo, p_account_version: 'bad', p_expected: {}, p_limits: [], p_reason_code: 'FREE' }]];
     for (const owner of [a, b]) {
       for (const targetNo of [originalA.no, originalB.no, 3]) {
         for (const [name, body] of deniedCalls(targetNo)) equal(await client.rpc(owner, name, body), UNAVAILABLE);
@@ -366,6 +371,53 @@ export async function adminLimitsProbes(snapshot, sql, mark) {
     equal(await write(b, originalB, paused, baseB, 'RESTORE'), { code: 'OK', limits: baseB, belowUse: false });
     equal(await limitsOf(b), baseB);
     requireEvidence(await audits() === auditBefore + 3);
+
+    mark('tryon-v2');
+    // VTO-1: v2 adds the try-on sub-limit and its spending; v1 output stays exactly as before and cannot lower the
+    // shared total below a configured try-on sub-limit it cannot show.
+    await sql(`update private.ai_controls set tryon_manifest_id='azure-global-image25-sunburst-tryon-v1',tryon_notice_revision=1,
+      tryon_max_request_micro=360000,tryon_monthly_allowance_micro=8000000,tryon_max_requests_per_hour=6,updated_at=clock_timestamp()
+      where owner_id=${literal(b.uid)};`);
+    equal(await limitsOf(b), baseB);
+    const viewV1 = accountOf(await spending(a), originalB.no);
+    requireEvidence(!('tryOn' in viewV1.limits) && viewV1.history.every((entry) => JSON.stringify(entry.tryOn) === '{"available":false}'));
+    for (const months of [0, 13, null]) equal(await client.rpc(a, 'admin_ai_spending_v2', { p_months: months }), { code: 'INVALID_INPUT' });
+    const v2 = await client.rpc(a, 'admin_ai_spending_v2', { p_months: 6 });
+    const v2B = accountOf(v2, originalB.no);
+    const baseV2 = { ...baseB, tryOn: feature('8000000', '360000', 6) };
+    equal(v2B.limits, baseV2);
+    equal(v2B.features.tryOn, { configured: true, activated: false });
+    equal(v2B.current.tryOn, { usedMicro: '0', lastHour: 0 });
+    requireEvidence(v2B.history.length === 6 && v2B.history.every((entry) => entry.tryOn.requests === 0
+      && entry.tryOn.totalMicro === '0'));
+    equal(v2B.openAllocations.tryOnProbe, { count: 0, allocationMicro: '0', maxCalls: 0 });
+    equal([...keysOf(v2)].filter((key) => !ALLOWED_KEYS.has(key) && key !== 'tryOnProbe'), []);
+    const v2Text = JSON.stringify(v2);
+    requireEvidence(!v2Text.includes(a.uid) && !v2Text.includes(b.uid) && !v2Text.includes('@'));
+    const v2Write = (expected, limits, reason = null) => client.rpc(a, 'admin_set_ai_limits_v2', { p_admission_no: originalB.no,
+      p_account_version: version(originalB), p_expected: expected, p_limits: limits, p_reason_code: reason });
+    // v1 lowering the shared total below the try-on sub-limit: refused, nothing written or audited.
+    const underTryOn = { ...baseB, shared: { ...baseB.shared, monthlyAllowanceMicro: '7000000' } };
+    equal(await write(b, originalB, baseB, underTryOn, 'LOWER'), { code: 'CONFLICT', limits: baseB });
+    equal(await limitsOf(b), baseB);
+    requireEvidence(await audits() === auditBefore + 3);
+    // v2 refuses a v1-shaped body, a missing try-on field and a try-on value below its manifest floor or above shared.
+    equal(await v2Write(baseB, baseB), { code: 'INVALID_INPUT' });
+    equal(await v2Write(baseV2, { ...baseV2, tryOn: feature('8000000', '359999', 6) }),
+      invalid('tryOn.maxRequestMicro', 'BELOW_RESERVATION'));
+    equal(await v2Write(baseV2, { ...baseV2, tryOn: feature('20000001', '360000', 6) }),
+      invalid('tryOn.monthlyAllowanceMicro', 'ABOVE_SHARED'));
+    equal(await v2Write(baseV2, { ...baseV2, tryOn: feature(null, '360000', 6) }), invalid('tryOn.monthlyAllowanceMicro', 'REQUIRED'));
+    equal(await v2Write(baseV2, baseV2), { code: 'UNCHANGED', limits: baseV2 });
+    requireEvidence(await audits() === auditBefore + 3);
+    const lowerTryOn = { ...baseV2, tryOn: feature('4000000', '360000', 5) };
+    equal(await v2Write(baseV2, lowerTryOn, 'LOWER'), { code: 'OK', limits: lowerTryOn, belowUse: false });
+    equal(await lastAudit(), { owner_id: b.uid, target_admission_no: originalB.no, actor_owner_id: a.uid, old_limits: baseV2,
+      new_limits: lowerTryOn, reason_code: 'LOWER' });
+    requireEvidence(await audits() === auditBefore + 4);
+    equal(await limitsOf(b), baseB);
+    await sql(`update private.ai_controls set tryon_manifest_id=null,tryon_notice_revision=null,tryon_max_request_micro=null,
+      tryon_monthly_allowance_micro=null,tryon_max_requests_per_hour=null,updated_at=clock_timestamp() where owner_id=${literal(b.uid)};`);
 
     mark('enhancement-clamp');
     // With enhancement configured, lowering the shared limit below it is refused before the clamp trigger could change it.

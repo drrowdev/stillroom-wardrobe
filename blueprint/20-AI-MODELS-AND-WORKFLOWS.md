@@ -12,7 +12,8 @@ Revision **1.4**, 6 September 2026. The workflow remains **photo upload -> autom
 | Weather | Opt-in weather API plus explicit context; no AI weather prediction | No model |
 | Crop, orientation, resizing and metadata removal | Browser pixel processing before upload | No model |
 | Background removal | Automatic on the device after the crop (ADR24); falls back to the original background | A local open model (u2netp) in the browser; no provider and no photo leaves the device |
-| Multi-garment extraction, image generation, virtual try-on and chat | Deferred; none is required to deliver automatic tagging | No model installed or selected for MVP |
+| Multi-garment extraction and other image generation | Deferred; none is required to deliver automatic tagging | No model installed or selected for MVP |
+| Virtual try-on of a saved outfit | ADR28 (owner decision #84 c5873753380): one garment per call, chained top -> bottoms -> shoes, on the existing Global deployment; inactive until its owner gates | `gpt-image-2.5-sunburst` (`azure-global-image25-sunburst-tryon-v1`); see "VTO-1 virtual try-on backend" below |
 | A later conversational stylist or AI outfit reranker | Separate user decision and measured benefit over the rule baseline; the selected text-capable model could be evaluated again then | No first-release endpoint, calls or acceptance requirement |
 
 An image model supplies useful descriptions; it does not establish physical warmth or guarantee attractive outfits. More expensive models cannot recover information that is not visible. Do not add an embedding model, vector database, model-training pipeline or separate stylist model for a 500-item wardrobe.
@@ -266,6 +267,18 @@ ADR26 amendment in `18`; plan rev4. The same route and parameters with a new man
 - **Check.** `cleanupCheck` (`src/images/fidelity.ts`) needs a plain background ring, the result contained in a dilated R, enough of R retained, one centred piece, and masked colour and structure agreement on the supported region. The thresholds are provisional gross-change filters: a similar-colour substitution or retained interior clutter can pass, which the probe's paired visual review must catch.
 - **Cutover.** Claims accept only cleanup-v1; a v1 policy is `UNCONFIGURED`. Once the controls name cleanup-v1, held v1 work is accounted but its result is suppressed by `enhance_finish`/`enhance_replay`.
 - **Probe.** Six calls on cleanup-v1 prepared by the operator harness (`scripts/cleanup-probe-harness.mjs`, loopback only) and sent by `scripts/enhancement-probe.mjs`, paced against the 65 s slot lifetime.
+
+## VTO-1 virtual try-on backend (inactive) - 2 October 2026
+
+ADR28 in `18`; VTO plan rev4 (approved). VTO-1 adds the backend only and activates nothing; the body-photo path, the try-on flow, Settings consent and the admin try-on column are VTO-2.
+
+- **Route.** A new `try-on` Edge function (not a mode on the deployed `enhance-photo`), manifest `azure-global-image25-sunburst-tryon-v1` on the same Global deployment `eval-image25-sunburst-20260908` (`gpt-image-2.5-sunburst`), the images edit API with `image[] = [person, garment]`, one fixed prompt per slot word and the BG2b parameter set (`1024x1280`, `medium`, JPEG 85, `n:1`, opaque). One garment per call, at most three chained steps in the fixed order top (or one-piece) -> bottoms -> shoes, from a saved outfit only; no retry or fallback processor. Processing may happen outside the EU.
+- **Chain.** `tryon_claim` starts a 30-minute chain at step 1, freezes the selected garments and reserves one of at most 20 result slots; each later step binds the previous output hash and rechecks its garment (owner, active, ready image, same bytes, no deletion claim, fence or job) and ends the chain as stale on any change, never substituting. One attempt per step at a time; a failed step keeps the step so Try again uses a new request ID.
+- **Dispatch authorisation.** `tryon_dispatch` sets a durable, once-only authorisation on the accounting evidence before the 15-second cutoff. Only an authorised request may reach Azure; without it the finish releases the reservation (`PRE_DISPATCH`), and with it the request is charged even if no fetch followed. The evidence also records whether the fetch started and whether the client was still connected at that moment and at finish.
+- **Accounting.** USD 0.36 (`360000` micro) per step, estimated at the image-input rate for the whole input envelope; a USD 5 monthly try-on sub-limit and an hourly cap inside the shared allowance, with a precheck for the whole chain at step 1. Settlement follows the BG2b rules (observed, unmetered, terminal anomaly, provisional expiry); a terminal anomaly switches the shared deployment off for enhancement too. Expiry is driven by held usage and its evidence alone, so a cancelled, withdrawn or deleted chain never strands accounting.
+- **Results.** The final JPEG (at most 512,000 bytes) is stored in `private.tryon_results`, readable only by its owner until exactly 7 days after completion, and deleted by `stillroom-tryon-expire` (every 15 minutes). Intermediate outputs are never stored. A step-1 claim is refused while any picture is more than 2 hours past its expiry or any try-on usage has been held more than 10 minutes.
+- **Probe.** Operator-only `tryon_probe_authorise` (at most five calls), valid only while the ordinary path is off; the configuration is set once by the database-owner `tryon_bootstrap` before it.
+- **Open gates.** Hosted apply, the Edge deploy, the Azure-terms check and the final notice, VTO-2, the probe spend and photo consent, the bootstrap receipt, the probe and activation, in the order of the plan's §11.
 
 ## I29 B1 source implementation boundary — 11 September 2026
 
