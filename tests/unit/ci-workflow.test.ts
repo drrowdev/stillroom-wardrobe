@@ -60,7 +60,7 @@ const browserArtifacts: Record<string, string[]> = {
   'i13-statistics-ui': ['overview-en-desktop', 'overview-fi-mobile', 'overview-sv-320-200'].map((name) => `i13-visual/${name}.png`),
   'bg1-background-ui': ['removed-en-desktop', 'working-sv-mobile', 'fallback-fi-mobile'].map((name) => `bg1-visual/${name}.png`),
   'bg2b-enhance-ui': ['enhancing-en-mobile', 'enhanced-en-desktop', 'fallback-sv-mobile', 'reverted-en-mobile', 'enhanced-fi-mobile',
-    'settings-fi-mobile'].map((name) => `bg2b-visual/${name}.png`),
+    'settings-fi-mobile', 'review-en-mobile', 'ambiguous-fi-mobile'].map((name) => `bg2b-visual/${name}.png`),
   'p6a-backup-ui': ['backup-en-desktop', 'backup-parts-fi-mobile'].map((name) => `p6a-visual/${name}.png`),
   'p6b-restore-ui': ['restore-preview-en-desktop', 'restore-progress-sv-mobile', 'restore-reencoded-fi-mobile'].map((name) => `p6b-visual/${name}.png`),
   'p6c-delete-account-ui': ['delete-account-en-desktop', 'delete-account-fi-mobile', 'delete-recovery-sv-desktop', 'delete-recovery-en-mobile'].map((name) => `p6c-visual/${name}.png`),

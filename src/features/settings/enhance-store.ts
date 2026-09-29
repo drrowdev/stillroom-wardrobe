@@ -11,10 +11,9 @@ import {
 import type { MessageKey } from '../../i18n';
 import { EnhanceSession } from '../wardrobe/enhancement-stage';
 
-/** The revision-1 notice paragraphs, in order. Pinned by tests/unit/enhancement-notice.test.ts. */
+/** The revision-2 (clean-up) notice paragraphs, in order. Pinned by tests/unit/enhancement-notice.test.ts. */
 export const ENHANCE_NOTICE_KEYS = [
-  'enhanceC.noticeSent', 'enhanceC.noticeProcessing', 'enhanceC.noticeOnlyPhoto', 'enhanceC.noticeTraining',
-  'enhanceC.noticeLabel', 'enhanceC.noticeCharges',
+  'enhanceC.noticeSent', 'enhanceC.noticeRedraw', 'enhanceC.noticeProcessing', 'enhanceC.noticeCharges',
 ] as const satisfies readonly MessageKey[];
 
 export type EnhanceState = {

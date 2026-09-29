@@ -30,7 +30,9 @@ function synthetic(mask: NonNullable<TestControl['mask']>): { dims: number[]; da
       const dx = (x - side / 2) / (side * 0.3), dy = (y - side / 2) / (side * 0.4);
       data[y * side + x] = mask === 'constant' ? 0.5 : mask === 'nan' && x === 3 ? Number.NaN
         : mask === 'empty' ? (x === 0 && y === 0 ? 1 : 0)
-          : mask === 'left' ? (x < side / 2 ? 1 : 0) : (dx * dx + dy * dy <= 1 ? 1 : 0);
+          : mask === 'left' ? (x < side / 2 ? 1 : 0)
+            : mask === 'two' ? ((x >= side * 0.1 && x < side * 0.4 || x >= side * 0.6 && x < side * 0.9) && y >= side * 0.2 && y < side * 0.8 ? 1 : 0)
+              : (dx * dx + dy * dy <= 1 ? 1 : 0);
     }
   }
   return { dims: [1, 1, side, side], data };

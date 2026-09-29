@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { locales, type Language, type MessageKey } from '../../i18n';
 import type { PhotoEdit } from '../../images/photo-edit';
-import type { CropSource, PreparedPhoto } from '../../images/process-jpeg';
+import type { CleanupSource, CropSource, PreparedPhoto } from '../../images/process-jpeg';
 import { modelAssetBytes } from '../../images/background/model-assets';
 import { removalEnabled } from '../../images/background/test-hook';
 import type * as Imaging from '../../images/imaging';
@@ -14,7 +14,8 @@ import type * as Imaging from '../../images/imaging';
 export type BackgroundState = 'none' | 'working' | 'keeping' | 'removed' | 'original' | 'failed';
 type Settled = { state: BackgroundState; choice: 'remove' | 'keep' };
 type ImagingModule = typeof Imaging;
-export type PreparedWithBackground = { photo: PreparedPhoto; crop: CropSource; state: BackgroundState };
+/** `cleanup` is the BG2c clean-up input (H0 and R): only a framed removal has one, never `original`, `failed` or `none`. */
+export type PreparedWithBackground = { photo: PreparedPhoto; crop: CropSource; state: BackgroundState; cleanup: CleanupSource | null };
 
 export function useBackground(scope: { signal: AbortSignal }) {
   const choice = useRef<'remove' | 'keep'>('remove');
@@ -62,9 +63,9 @@ export function useBackground(scope: { signal: AbortSignal }) {
       setDownloading(imaging.assetStatus(scope) === 'downloading');
       setState('working');
       try {
-        const result = await imaging.prepareCutout(file, inner, edit, segmenter.current.value, wantCrop);
+        const result = await imaging.prepareCutout(file, inner, edit, segmenter.current.value, wantCrop, true);
         testLog(imaging, { outcome: 'removed', coverage: result.coverage, framed: result.framed ? 1 : 0, width: result.photo.width, height: result.photo.height });
-        return { photo: result.photo, crop: result.crop ?? result.photo, state: 'removed' };
+        return { photo: result.photo, crop: result.crop ?? result.photo, state: 'removed', cleanup: result.framed ? result.cleanup : null };
       } catch (error) {
         if (signal.aborted || !(controller.signal.aborted || error instanceof imaging.BackgroundRemovalError)) throw error;
         outcome = controller.signal.aborted ? 'original' : 'failed';
@@ -76,10 +77,12 @@ export function useBackground(scope: { signal: AbortSignal }) {
       }
     }
     const photo = await imaging.prepareImage(file, signal, edit);
-    return { photo, crop: photo, state: outcome };
+    return { photo, crop: photo, state: outcome, cleanup: null };
   }
   return {
     state, downloading, prepare,
+    /** "Use original background" in the pre-upload review: the next preparation keeps the original background. */
+    keep() { choice.current = 'keep'; },
     /** A newly chosen photo starts with automatic removal again. */
     reset() {
       choice.current = 'remove'; settled.current = { state: 'none', choice: 'remove' };

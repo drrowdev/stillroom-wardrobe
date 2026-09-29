@@ -1,5 +1,6 @@
 // BG2b-2: the client enhancement stage, between the settled BG2a photo (H1) and its one analysis. Pure apart from the
 // injected client and imaging: every await is followed by the token, epoch and abort checks, and any failure keeps H1.
+// BG2c (plan rev4 §3-§5): it sends the clean-up input H0, never H1, and checks H2 against H0 and R with `cleanupCheck`.
 // Nothing here authorises a request; the server's status and claim checks stay authoritative.
 import type { EnhanceResponse, EnhanceSample, EnhanceStatusRead } from '../../data/enhancement';
 import {
@@ -7,10 +8,11 @@ import {
   type EnhanceLine, type EnhanceMemory, type EnhanceObserved,
 } from '../../domain/enhance-controls';
 import { ENHANCE_LIMITS } from '../../domain/enhancement';
-import type { FidelityMetrics, FidelityVerdict } from '../../images/fidelity';
+import { ambiguousReference } from '../../images/background/frame';
+import type { CleanupMetrics, CleanupVerdict } from '../../images/fidelity';
 import { FIDELITY } from '../../images/fidelity';
 import type { AdmittedProviderJpeg } from '../../images/provider-jpeg';
-import type { PreparedPhoto } from '../../images/process-jpeg';
+import type { CleanupSource, PreparedPhoto } from '../../images/process-jpeg';
 
 /** Evidence must still have this long left when a Save could start (P3). */
 export const EXPIRY_MARGIN_MS = 60_000;
@@ -79,10 +81,19 @@ export type StageImaging<F extends DecodedFrame = DecodedFrame> = {
 };
 export type StageClient = {
   status(signal?: AbortSignal): Promise<EnhanceStatusRead>;
-  enhance(photo: PreparedPhoto, requestId: string, signal: AbortSignal): Promise<EnhanceResponse>;
+  enhance(photo: Pick<CleanupSource, 'main'>, requestId: string, signal: AbortSignal): Promise<EnhanceResponse>;
 };
 export type StageInput = {
-  photo: PreparedPhoto;
+  /**
+   * The clean-up input (H0 and R) of this preparation, or null when it wasn't built (unframed, H0 failed). H1 stays the
+   * caller's fallback and is never sent.
+   */
+  source: CleanupSource | null;
+  /**
+   * The pre-upload review check (plan rev4 §3.1 step 2): stop with `available` where a request would be sent. Nothing is
+   * sent, and no request ID is made.
+   */
+  preflight?: boolean;
   /** BG1 removed the background of this photo: "Use original background" and the BG1 fallback are never sent. */
   cutOut: boolean;
   online: boolean;
@@ -96,13 +107,14 @@ export type StageInput = {
 export type StageDeps = {
   client: StageClient; session: EnhanceSession; imaging: StageImaging;
   admit: (bytes: Uint8Array) => AdmittedProviderJpeg;
-  compare: (before: Uint8ClampedArray, after: Uint8ClampedArray) => FidelityVerdict;
+  compare: (h0: Uint8ClampedArray, reference: Uint8Array, h2: Uint8ClampedArray) => CleanupVerdict;
   newId?: () => string;
-  /** Called once a request has been sent, so the UI can show "Enhancing photo…" only for a real request. */
+  /** Called once a request has been sent, so the UI can show "Cleaning up photo…" only for a real request. */
   onDispatch?: (requestId: string) => void;
 };
 export type StageResult =
-  | { kind: 'enhanced'; photo: PreparedPhoto; requestId: string; expireAt: number; metrics: FidelityMetrics }
+  | { kind: 'enhanced'; photo: PreparedPhoto; requestId: string; expireAt: number; metrics: CleanupMetrics }
+  | { kind: 'available' }
   | { kind: 'skipped'; line: EnhanceLine; requestId: string | null }
   | { kind: 'aborted' };
 
@@ -116,8 +128,9 @@ const sameBytes = (left: Uint8Array, right: Uint8Array) => {
 };
 
 /**
- * Runs the stage once for H1. `aborted` means the caller commits nothing and starts no analysis; `skipped` and
- * `enhanced` are committed exactly once by the caller. One request ID per run, never reused.
+ * Runs the stage once for a preparation. `aborted` means the caller commits nothing and starts no analysis; `skipped` and
+ * `enhanced` are committed exactly once by the caller. One request ID per run, never reused. With `preflight`, the run
+ * ends with `available` instead of sending, and the caller runs the stage again after the user accepts the crop.
  */
 export async function runEnhancementStage(input: StageInput, deps: StageDeps): Promise<StageResult> {
   const { session } = deps;
@@ -158,11 +171,16 @@ export async function runEnhancementStage(input: StageInput, deps: StageDeps): P
     // Without a usable server-time sample the evidence deadline can't be kept, so nothing is sent.
     const anchor = session.currentAnchor();
     if (!anchor) return outcome('generic');
+    // Clean-up is offered only for one garment (§4.3) with a checked H0; both are known before anything is sent.
+    if (input.source && ambiguousReference(input.source.reference)) return outcome('ambiguous');
+    const source = input.source;
+    if (!source) return outcome('generic');
+    if (input.preflight) return { kind: 'available' };
 
     requestId = (deps.newId ?? (() => crypto.randomUUID()))();
     deps.onDispatch?.(requestId);
     let response: EnhanceResponse;
-    try { response = await after(deps.client.enhance(input.photo, requestId, signal)); }
+    try { response = await after(deps.client.enhance(source, requestId, signal)); }
     catch (error) {
       if (error instanceof Stop) { if (error.result.kind === 'skipped' && error.result.line === 'generic') session.failed(); throw error; }
       session.failed();
@@ -195,12 +213,13 @@ export async function runEnhancementStage(input: StageInput, deps: StageDeps): P
       frame.close(); frames.splice(frames.indexOf(frame), 1);
     }
     {
-      const frame = await after(deps.imaging.decode(input.photo.main, signal).then((value) => { frames.push(value); return value; }));
+      const frame = await after(deps.imaging.decode(source.main, signal).then((value) => { frames.push(value); return value; }));
       before = deps.imaging.downsample(frame);
       frame.close(); frames.splice(frames.indexOf(frame), 1);
     }
-    if (after2.length !== FIDELITY.width * FIDELITY.height * 4 || before.length !== after2.length) reject();
-    const verdict = deps.compare(before, after2);
+    if (after2.length !== FIDELITY.width * FIDELITY.height * 4 || before.length !== after2.length
+      || source.reference.length !== FIDELITY.width * FIDELITY.height) reject();
+    const verdict = deps.compare(before, source.reference, after2);
     check();
     if (!verdict.accepted) return outcome('generic');
     const thumb = await after(deps.imaging.thumbnail(main, ENHANCE_LIMITS.outputWidth, ENHANCE_LIMITS.outputHeight, signal));

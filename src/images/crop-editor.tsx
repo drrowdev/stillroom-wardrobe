@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 import { locales, resolveLanguage, type MessageKey, type Translate } from '../i18n';
 import {
   cropValues, FULL_CROP, HANDLE_FRAME_PX, handleMinimum, moveCrop, normalizeCrop, ORIGINAL_EDIT, parseCropValues, resizeCrop,
-  sameEdit, validCrop, type Corner, type Crop, type PhotoEdit,
+  cropDone, validCrop, type Corner, type Crop, type PhotoEdit,
 } from './crop';
 
 const fields: readonly (keyof Crop)[] = ['x', 'y', 'width', 'height'];
@@ -16,9 +16,15 @@ type Values = Record<keyof Crop, string>;
 type Props = {
   preview: string; width: number; height: number; accepted: PhotoEdit; preparing: boolean; t: Translate;
   onApply: (edit: PhotoEdit) => void; onCancel: () => void;
+  /**
+   * Review mode (BG2c, plan rev4 §3.1 R1), only for the pre-upload review of a new photo: Done with a valid crop always
+   * accepts, changed or not (`unchanged` says which), and the review hint describes the editor. Without it, an unchanged
+   * Done is a cancel.
+   */
+  onAccept?: (edit: PhotoEdit, unchanged: boolean) => void;
 };
 
-export function CropEditor({ preview, width, height, accepted, preparing, t, onApply, onCancel }: Props) {
+export function CropEditor({ preview, width, height, accepted, preparing, t, onApply, onCancel, onAccept }: Props) {
   const [turns, setTurns] = useState(accepted.turns);
   const [values, setValues] = useState(() => cropValues(accepted.crop));
   const [frozen, setFrozen] = useState<Values | null>(null);
@@ -117,8 +123,10 @@ export function CropEditor({ preview, width, height, accepted, preparing, t, onA
     edit(moveCrop(crop, horizontal ? step : 0, horizontal ? 0 : step));
   };
   const touchAction = movableX && movableY ? 'none' : movableX ? 'pan-y' : movableY ? 'pan-x' : 'auto';
-  return <section className="crop-editor" aria-labelledby="crop-editor-title" aria-busy={preparing}>
+  return <section className="crop-editor" aria-labelledby="crop-editor-title" aria-busy={preparing}
+    aria-describedby={onAccept ? 'crop-review-hint' : undefined}>
     <h2 id="crop-editor-title" tabIndex={-1}>{t('photo.edit')}</h2>
+    {onAccept && <p id="crop-review-hint" className="notice">{t('enhance.reviewHint')}</p>}
     <p id="crop-help" className="fine muted">{t('photo.cropHelp')}</p>
     <div ref={stage} className="crop-stage" style={{ aspectRatio: `${w} / ${h}`, width: `min(100%, calc(70vh * ${w} / ${h}))` }}>
       <img src={preview} alt="" style={{
@@ -155,7 +163,12 @@ export function CropEditor({ preview, width, height, accepted, preparing, t, onA
     </fieldset>
     <div className="crop-footer">
       <button id="apply-crop" className="button button-primary" type="button" disabled={!valid || preparing}
-        onClick={() => { if (valid) { if (sameEdit({ turns, crop }, accepted)) onCancel(); else onApply({ turns, crop }); } }}>{t('photo.applyCrop')}</button>
+        onClick={() => {
+          const done = cropDone({ turns, crop }, accepted, valid, !!onAccept);
+          if (done?.kind === 'accept') onAccept?.({ turns, crop }, done.unchanged);
+          else if (done?.kind === 'cancel') onCancel();
+          else if (done?.kind === 'apply') onApply({ turns, crop });
+        }}>{t('photo.applyCrop')}</button>
       <button id="crop-cancel" className="button button-quiet" type="button" onClick={onCancel}>{t('photo.cancelCrop')}</button>
     </div>
   </section>;

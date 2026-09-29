@@ -13,7 +13,7 @@ import type { ImageChangeReceipt } from '../../src/domain/image-replacement';
 import type { DeletionOperation } from '../../src/domain/item-lifecycle';
 import { wardrobeTargetDeleteRoute } from '../../src/data/storage-delete';
 import { STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_REVIEW_EXPIRES } from '../../src/domain/stylist';
-import { ENHANCE_MANIFEST, ENHANCE_MODEL, ENHANCE_NOTICE_REVISION, ENHANCE_REVIEW_EXPIRES } from '../../src/domain/enhancement';
+import { CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_MODEL, ENHANCE_REVIEW_EXPIRES } from '../../src/domain/enhancement';
 
 export const owners = {
   a: '10000000-0000-4000-8000-000000000001',
@@ -529,7 +529,7 @@ function stylistStatus(setup: StylistSetup, consent: number | null) {
     policy, usage: { stylistMicro: setup.stylistMicro, totalMicro: setup.totalMicro, stylistLastHour: 0, warning } };
 }
 
-// BG2b-2 photo enhancement: per-owner setup (configured but not activated unless a spec says otherwise), consent,
+// BG2b-2 photo enhancement (BG2c-2: the clean-up manifest and notice revision 2): per-owner setup (configured but not activated unless a spec says otherwise), consent,
 // scripted status/consent faults and scripted enhance-photo replies. `serverOffsetMs` skews the fixture server clock.
 export type EnhanceSetup = { configured: boolean; activated: boolean; providerAvailable: boolean; noticeRevision: number; manifestId: string;
   modelId: string; maxRequestMicro: string; enhanceAllowanceMicro: string; totalAllowanceMicro: string; enhanceMicro: string; totalMicro: string;
@@ -537,8 +537,8 @@ export type EnhanceSetup = { configured: boolean; activated: boolean; providerAv
 export type EnhanceReplyValue = { status: number; body?: unknown; image?: Buffer; usableUntilMs?: number; sha256?: string; hold?: Promise<void> };
 export type EnhanceReply = EnhanceReplyValue
   | ((bytes: Buffer, owner: string, requestId: string) => EnhanceReplyValue | Promise<EnhanceReplyValue>);
-const enhanceDefaults: EnhanceSetup = { configured: true, activated: false, providerAvailable: true, noticeRevision: ENHANCE_NOTICE_REVISION,
-  manifestId: ENHANCE_MANIFEST, modelId: ENHANCE_MODEL, maxRequestMicro: '300000', enhanceAllowanceMicro: '3000000',
+const enhanceDefaults: EnhanceSetup = { configured: true, activated: false, providerAvailable: true, noticeRevision: CLEANUP_NOTICE_REVISION,
+  manifestId: CLEANUP_MANIFEST, modelId: ENHANCE_MODEL, maxRequestMicro: '300000', enhanceAllowanceMicro: '3000000',
   totalAllowanceMicro: '20000000', enhanceMicro: '0', totalMicro: '0', serverOffsetMs: 0 };
 // The enhance_status reply as the BG2b-1 function builds it, kept inside the reviewed period.
 export function enhanceServerNow(setup: Pick<EnhanceSetup, 'serverOffsetMs'>) {

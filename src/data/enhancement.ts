@@ -3,9 +3,9 @@
 // job, and the server's checks stay authoritative.
 import type { OwnerScope } from '../auth/session';
 import { parseEnhanceStatus, type EnhanceStatus } from '../domain/enhance-controls';
-import { ENHANCE_LIMITS, ENHANCE_NOTICE_REVISION } from '../domain/enhancement';
+import { CLEANUP_NOTICE_REVISION, ENHANCE_LIMITS } from '../domain/enhancement';
 import { isUuid } from '../domain/wardrobe';
-import type { PreparedPhoto } from '../images/process-jpeg';
+import type { CleanupSource } from '../images/process-jpeg';
 import type { AppClient } from './client';
 import { readConfiguration, type PublicConfig } from './config';
 
@@ -138,7 +138,7 @@ export class EnhancementClient {
   }
   /** Turns enhancement on for the current notice, or off. A thrown error means the outcome is unknown. */
   async consent(enabled: boolean, signal?: AbortSignal): Promise<EnhanceConsentResult> {
-    const reply = await this.rpc('enhance_set_consent', { p_enabled: enabled, p_notice_revision: enabled ? ENHANCE_NOTICE_REVISION : null }, signal);
+    const reply = await this.rpc('enhance_set_consent', { p_enabled: enabled, p_notice_revision: enabled ? CLEANUP_NOTICE_REVISION : null }, signal);
     if (reply.status === 200 && record(reply.value) && Object.keys(reply.value).length === 1) {
       const code = refusals.find((entry) => entry === (reply.value as Record<string, unknown>).code);
       if (code) return { kind: 'refused', code };
@@ -151,7 +151,8 @@ export class EnhancementClient {
    * Sends the prepared photo once under `requestId`. The body is read with the 512,000-byte cap; the evidence headers
    * are returned for the caller's admission. A closed JSON code is returned as `code`; anything else is FAILED.
    */
-  async enhance(photo: PreparedPhoto, requestId: string, signal: AbortSignal): Promise<EnhanceResponse> {
+  /** Sends the clean-up input (H0, BG2c): the app-prepared JPEG of the accepted crop, never H1 or the raw file. */
+  async enhance(photo: Pick<CleanupSource, 'main'>, requestId: string, signal: AbortSignal): Promise<EnhanceResponse> {
     if (!isUuid(requestId) || photo.main.type !== 'image/jpeg' || photo.main.size < 1 || photo.main.size > ENHANCE_LIMITS.imageBytes) {
       throw new EnhanceError('INVALID_INPUT');
     }

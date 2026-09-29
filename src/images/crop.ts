@@ -138,3 +138,12 @@ export function aspectCrop(width: number, height: number, ratio: number): Crop {
   const h = Math.min(1, width / (ratio * height));
   return { x: (1 - w) / 2, y: (1 - h) / 2, width: w, height: h };
 }
+
+export type CropDone = { kind: 'accept'; unchanged: boolean } | { kind: 'apply' } | { kind: 'cancel' } | null;
+/** What Done does in the crop editor (BG2c R1): nothing for an invalid crop; in review mode it always accepts; otherwise an unchanged edit cancels. */
+export function cropDone(edit: PhotoEdit, accepted: PhotoEdit, valid: boolean, review: boolean): CropDone {
+  if (!valid) return null;
+  const unchanged = sameEdit(edit, accepted);
+  if (review) return { kind: 'accept', unchanged };
+  return unchanged ? { kind: 'cancel' } : { kind: 'apply' };
+}

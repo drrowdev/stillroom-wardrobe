@@ -4,11 +4,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import type { EnhanceLine } from '../../domain/enhance-controls';
-import type { PreparedPhoto } from '../../images/process-jpeg';
+import type { CleanupSource, PreparedPhoto } from '../../images/process-jpeg';
 import type { StageResult } from './enhancement-stage';
 
 export type EnhancementView = {
-  /** A request has been sent and its result is awaited: "Enhancing photo…" with Skip. */ working: boolean;
+  /** A request has been sent and its result is awaited: "Cleaning up photo…" with Skip. */ working: boolean;
   /** The committed photo is the enhanced one. */ enhanced: boolean;
   line: EnhanceLine;
 };
@@ -19,7 +19,7 @@ export function useEnhancement(client: AppClient, scope: OwnerScope, onExpired: 
   const [view, setView] = useState<EnhancementView>(idle);
   const token = useRef(0);
   const skipper = useRef<AbortController | null>(null);
-  // H1 of the committed enhanced photo, for "Use photo without enhancement" and for expiry.
+  // H1 of the committed enhanced photo, for "Use photo without clean-up" and for expiry.
   const original = useRef<PreparedPhoto | null>(null);
   const expireAt = useRef<number | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -53,9 +53,12 @@ export function useEnhancement(client: AppClient, scope: OwnerScope, onExpired: 
     return () => { scope.signal.removeEventListener('abort', clear); clear(); };
   }, [scope, clear]);
 
-  /** Runs the stage for a settled photo. The caller checks its own token again before committing the result. */
-  const run = useCallback(async (photo: PreparedPhoto, options: { cutOut: boolean; online: boolean; signal: AbortSignal;
-    current: () => boolean }): Promise<StageResult> => {
+  /**
+   * Runs the stage for a settled photo's clean-up input. The caller checks its own token again before committing the
+   * result. With `preflight` it only reads whether clean-up would be sent (the pre-upload review check) and sends nothing.
+   */
+  const run = useCallback(async (source: CleanupSource | null, options: { cutOut: boolean; online: boolean; signal: AbortSignal;
+    current: () => boolean; preflight?: boolean }): Promise<StageResult> => {
     const mine = ++token.current;
     skipper.current?.abort();
     const skip = new AbortController();
@@ -70,9 +73,9 @@ export function useEnhancement(client: AppClient, scope: OwnerScope, onExpired: 
       const store = stores.enhanceStoreFor(client, scope);
       if (!store) return skipped;
       if (!current() || options.signal.aborted) return { kind: 'aborted' };
-      return await stage.runEnhancementStage({ photo, cutOut: options.cutOut, online: options.online, current, signal: options.signal,
-        skip: skip.signal }, { client: store.api, session: store.session, imaging: runtime.browserStageImaging,
-        admit: runtime.admitProviderJpeg, compare: runtime.compareEnhancement,
+      return await stage.runEnhancementStage({ source, preflight: options.preflight, cutOut: options.cutOut, online: options.online,
+        current, signal: options.signal, skip: skip.signal }, { client: store.api, session: store.session,
+        imaging: runtime.browserStageImaging, admit: runtime.admitProviderJpeg, compare: runtime.cleanupCheck,
         onDispatch: () => { if (current()) setView((value) => ({ ...value, working: true })); } });
     } catch {
       return current() ? { kind: 'skipped', line: 'generic', requestId: null } : { kind: 'aborted' };
@@ -90,7 +93,7 @@ export function useEnhancement(client: AppClient, scope: OwnerScope, onExpired: 
     /** Stops waiting for the result and keeps the photo as it is. The request may still finish and is accounted. */
     skip: () => skipper.current?.abort(),
     /** Records what the form committed for a finished (non-aborted) stage. */
-    commit: (result: Exclude<StageResult, { kind: 'aborted' }>, h1: PreparedPhoto) => {
+    commit: (result: Exclude<StageResult, { kind: 'aborted' | 'available' }>, h1: PreparedPhoto) => {
       disarm();
       frozen.current = false;
       if (result.kind === 'enhanced') {
@@ -104,7 +107,7 @@ export function useEnhancement(client: AppClient, scope: OwnerScope, onExpired: 
         setView({ working: false, enhanced: false, line: result.line });
       }
     },
-    /** "Use photo without enhancement" or expiry: H1 back, for one new analysis. Null when there is nothing to revert. */
+    /** "Use photo without clean-up" or expiry: H1 back, for one new analysis. Null when there is nothing to revert. */
     revert: (line: EnhanceLine = 'none'): PreparedPhoto | null => {
       const h1 = original.current;
       if (!h1 || frozen.current) return null;
