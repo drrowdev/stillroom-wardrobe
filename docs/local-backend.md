@@ -755,11 +755,13 @@ The aggregate "App and browser contracts" job keeps its name, requires both
 to succeed, merges the shard artefacts and runs the same named uploads with
 exact file lists, so a capture from any shard is still checked.
 `scripts/ci-changes.mjs` sets `heavy=false` only for a pull request whose merge
-commit changes nothing but `docs/**`, `blueprint/**`, root `*.md`, `AGENTS.md`
-or `.github/copilot-instructions.md`. Such runs replace every heavy job with
-"Documentation checks" (secret scan, dependency records and unit tests,
-including the workflow pins); pushes, manual runs and any failure to classify
-run everything.
+commit changes nothing but `.md`/`.txt` files under `docs/` or `blueprint/`,
+root `*.md`, `AGENTS.md` or `.github/copilot-instructions.md`; code, SQL, JSON
+and fixtures in those folders run everything. Such runs replace every heavy job
+with "Documentation checks" (secret scan, dependency records and unit tests,
+including the workflow pins). The heavy jobs are skipped only when the
+classification job succeeded with an explicit `heavy=false`; pushes, manual runs,
+a failed classification and empty or unexpected output run everything.
 
 Since BG1 (#86) `test:pwa` runs in its own "PWA production contracts" job
 (timeout 20 minutes, no uploads, same pinned setup and Chromium install), because

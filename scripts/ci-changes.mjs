@@ -4,11 +4,14 @@ import { execFileSync } from 'node:child_process';
 import { isMain } from './quality/files.mjs';
 
 const DOCUMENTATION_FILES = new Set(['AGENTS.md', '.github/copilot-instructions.md']);
+// Only prose counts. The documentation folders also hold executable reference code, SQL, JSON records and image
+// fixtures that scripts and tests read, so every other extension there runs everything.
+const DOCUMENTATION_EXTENSIONS = /\.(md|txt)$/;
 
 export function isDocumentation(file) {
   if (typeof file !== 'string' || !file || file.includes('\\') || file.split('/').some((part) => part === '' || part === '.' || part === '..')) return false;
   if (DOCUMENTATION_FILES.has(file)) return true;
-  if (file.startsWith('docs/') || file.startsWith('blueprint/')) return true;
+  if (file.startsWith('docs/') || file.startsWith('blueprint/')) return DOCUMENTATION_EXTENSIONS.test(file);
   return !file.includes('/') && file.endsWith('.md');
 }
 

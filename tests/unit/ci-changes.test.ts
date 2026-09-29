@@ -7,7 +7,17 @@ describe('CI documentation-only classification', () => {
   it('lets a pull request that changes only documentation skip the heavy jobs', () => {
     expect(pr(['docs/cloud-development.md'])).toEqual({ heavy: false, reason: 'documentation only' });
     expect(pr(['docs/phase-5-result.md', 'blueprint/20-AI-MODELS-AND-WORKFLOWS.md', 'README.md', 'AGENTS.md',
-      '.github/copilot-instructions.md', 'blueprint/.github/copilot-instructions.md', 'docs/dependencies.json']).heavy).toBe(false);
+      '.github/copilot-instructions.md', 'blueprint/.github/copilot-instructions.md', 'blueprint/FIRST-COPILOT-PROMPT.txt', 'docs/notes.txt']).heavy).toBe(false);
+  });
+
+  it('runs everything for code, SQL, data, configuration and fixtures inside the documentation folders', () => {
+    for (const other of ['docs/script.mjs', 'docs/dependencies.json', 'docs/model-assets.json', 'docs/config.yml', 'docs/check.py', 'docs/a.ts', 'docs/a.sql',
+      'blueprint/07-DATABASE-AND-RLS.sql', 'blueprint/reference-scripts/export-own.mjs', 'blueprint/reference-scripts/locales.json',
+      'blueprint/validation/check-sql.mjs', 'blueprint/validation/check-package.py', 'blueprint/validation/fixture.jpg', 'blueprint/validation/sql-results.json',
+      'blueprint/.github/workflows/ci.yml', 'docs/a.md.mjs', 'docs/md', 'docs/a.MD.js', 'blueprint/a.txt.sql', 'docs/.md.json', 'README.md.ts']) {
+      expect(isDocumentation(other), other).toBe(false);
+      expect(pr(['docs/a.md', other]), other).toEqual({ heavy: true, reason: 'code or configuration changed' });
+    }
   });
 
   it('runs everything when any other file changes, including Markdown outside the root and the documentation folders', () => {

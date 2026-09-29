@@ -27,8 +27,9 @@ const checkout = '      - uses: actions/checkout@11d5960a326750d5838078e36cf38b8
 const setupNode = '      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\n        with:\n          node-version-file: .node-version\n          cache: npm\n';
 const upload = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02';
 const downloadArtifact = 'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093';
-// Every heavy job waits for the change classification and runs unless a pull request changes only documentation.
-const gate = "    needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n";
+// Every heavy job waits for the change classification and runs unless it succeeded with an explicit heavy=false.
+const heavyIf = "    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false') }}\n";
+const gate = `    needs: changes\n${heavyIf}`;
 const heavyJobs = ['app-checks', 'app-browser', 'pwa', 'webkit-photo', 'database', 'deletion-rehearsal', 'performance'];
 const ungated = (id: string) => {
   const text = job(id);
@@ -323,14 +324,100 @@ describe('CI documentation-only runs', () => {
   it('gates every heavy job on the classification and runs the light documentation job only when they are skipped', () => {
     for (const id of heavyJobs) ungated(id);
     expect(count(workflow, gate)).toBe(heavyJobs.length);
-    expect(job('docs')).toContain("\n    name: Documentation checks\n    needs: changes\n    if: needs.changes.outputs.heavy != 'true'\n");
+    expect(job('docs')).toContain("\n    name: Documentation checks\n    needs: changes\n"
+      + "    if: ${{ needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false' }}\n");
     expect(steps(job('docs'))).toEqual([checkout, setupNode, '      - run: npm ci --no-fund\n',
       '      - name: Set a secret-scan canary\n        run: echo "STILLROOM_SECRET_CANARY=$(openssl rand -hex 24)" >> "$GITHUB_ENV"\n',
       '      - run: npm run scan:secrets\n', '      - run: npm run check:dependencies\n', '      - run: npm run test:unit\n\n']);
     // The App job keeps its name, fails unless the static checks and every shard succeeded, and is skipped only with them.
-    expect(job('app')).toContain("\n    name: App and browser contracts\n    needs: [changes, app-checks, app-browser]\n"
-      + "    if: ${{ !cancelled() && needs.changes.outputs.heavy == 'true' }}\n");
+    expect(job('app')).toContain(`\n    name: App and browser contracts\n    needs: [changes, app-checks, app-browser]\n${heavyIf}`);
     expect(count(workflow, '    needs:')).toBe(heavyJobs.length + 2);
     expect(count(workflow, '    if:')).toBe(heavyJobs.length + 2);
+  });
+});
+// A small evaluator for the GitHub expression subset these conditions use (case-insensitive string comparison, empty
+// strings falsy, and an implicit success() when a condition names no status function), so the pins test outcomes.
+type Run = { result: string; heavy: string | undefined; cancelled: boolean };
+function evaluate(condition: string, run: Run) {
+  const source = /^\$\{\{ (.*) \}\}$/.exec(condition)?.[1] ?? condition;
+  const tokens = source.match(/'[^']*'|&&|\|\||==|!=|!|\(|\)|[A-Za-z_][A-Za-z0-9_.-]*\(\)|[A-Za-z_][A-Za-z0-9_.-]*|\S/g) ?? [];
+  let at = 0;
+  const peek = () => tokens[at];
+  const take = (expected?: string) => {
+    const token = tokens[at++];
+    if (token === undefined || (expected !== undefined && token !== expected)) throw new Error(`Unexpected ${token} in ${source}`);
+    return token;
+  };
+  const contexts: Record<string, string> = {
+    'needs.changes.result': run.result, 'needs.changes.outputs.heavy': run.heavy ?? '',
+  };
+  const statuses: Record<string, boolean> = { 'cancelled()': run.cancelled, 'always()': true,
+    'success()': !run.cancelled && run.result === 'success', 'failure()': run.result === 'failure' };
+  const value = (): string | boolean => {
+    const token = take();
+    if (token === '(') { const inner = or(); take(')'); return inner; }
+    if (token.startsWith("'")) return token.slice(1, -1);
+    const status = Object.hasOwn(statuses, token) ? statuses[token] : undefined;
+    if (status !== undefined) return status;
+    const context = Object.hasOwn(contexts, token) ? contexts[token] : undefined;
+    if (context !== undefined) return context;
+    throw new Error(`Unknown term ${token}`);
+  };
+  const truthy = (item: string | boolean) => item !== '' && item !== false;
+  const compare = (): string | boolean => {
+    const left = value();
+    if (peek() !== '==' && peek() !== '!=') return left;
+    const operator = take();
+    const equal = String(left).toLowerCase() === String(value()).toLowerCase();
+    return operator === '==' ? equal : !equal;
+  };
+  const unary = (): boolean | string => (peek() === '!' ? (take(), !truthy(unary())) : compare());
+  const and = (): boolean | string => { let left = unary(); while (peek() === '&&') { take(); const right = unary(); left = truthy(left) && truthy(right); } return left; };
+  const or = (): boolean | string => { let left = and(); while (peek() === '||') { take(); const right = and(); left = truthy(left) || truthy(right); } return left; };
+  const result = truthy(or());
+  if (at !== tokens.length) throw new Error(`Trailing tokens in ${source}`);
+  return /\b(success|failure|cancelled|always)\(\)/.test(source) ? result : !run.cancelled && run.result === 'success' && result;
+}
+const condition = (id: string) => /\n {4}if: (.+)\n/.exec(job(id))?.[1] ?? '';
+
+describe('CI documentation-only skip fails open', () => {
+  const runs = (id: string, run: Run) => evaluate(condition(id), run);
+  const heavyAndApp = [...heavyJobs, 'app'];
+
+  it('skips the heavy jobs only after a successful classification that said heavy=false', () => {
+    const docsOnly = { result: 'success', heavy: 'false', cancelled: false };
+    for (const id of heavyAndApp) expect(runs(id, docsOnly), id).toBe(false);
+    expect(runs('docs', docsOnly)).toBe(true);
+  });
+
+  it('runs everything, and not the light job, for heavy=true, empty, missing or unexpected output', () => {
+    for (const heavy of ['true', '', undefined, 'maybe', '0', 'no', 'false\nheavy=true', ' false']) {
+      const run = { result: 'success', heavy, cancelled: false };
+      for (const id of heavyAndApp) expect(runs(id, run), `${id} ${String(heavy)}`).toBe(true);
+      expect(runs('docs', run), String(heavy)).toBe(false);
+    }
+  });
+
+  it('runs everything when the classification job failed or was skipped, even if it printed heavy=false first', () => {
+    for (const result of ['failure', 'skipped']) {
+      for (const heavy of ['false', '', undefined]) {
+        const run = { result, heavy, cancelled: false };
+        for (const id of heavyAndApp) expect(runs(id, run), `${id} ${result}`).toBe(true);
+        expect(runs('docs', run), result).toBe(false);
+      }
+    }
+  });
+
+  it('runs nothing further once the workflow is cancelled', () => {
+    for (const heavy of ['true', 'false', '']) {
+      for (const id of [...heavyAndApp, 'docs']) expect(runs(id, { result: 'cancelled', heavy, cancelled: true }), id).toBe(false);
+    }
+  });
+
+  it('evaluates the conditions it was given, not a model of them', () => {
+    expect(() => evaluate("needs.changes.outputs.heavy == 'true' || github.event_name == 'push'", { result: 'success', heavy: '', cancelled: false }))
+      .toThrow('Unknown term github.event_name');
+    expect(evaluate("needs.changes.outputs.heavy != 'true'", { result: 'success', heavy: '', cancelled: false })).toBe(true);
+    expect(evaluate("${{ !cancelled() && needs.changes.outputs.heavy == 'TRUE' }}", { result: 'failure', heavy: 'true', cancelled: false })).toBe(true);
   });
 });
