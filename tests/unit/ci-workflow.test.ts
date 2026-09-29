@@ -26,6 +26,17 @@ const count = (text: string, value: string) => text.split(value).length - 1;
 const checkout = '      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262\n        with:\n          persist-credentials: false\n';
 const setupNode = '      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\n        with:\n          node-version-file: .node-version\n          cache: npm\n';
 const upload = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02';
+const downloadArtifact = 'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093';
+// Every heavy job waits for the change classification and runs unless a pull request changes only documentation.
+const gate = "    needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n";
+const heavyJobs = ['app-checks', 'app-browser', 'pwa', 'webkit-photo', 'database', 'deletion-rehearsal', 'performance'];
+const ungated = (id: string) => {
+  const text = job(id);
+  expect(count(text, gate), id).toBe(1);
+  expect(text, id).toMatch(/^ {2}[a-z-]+:\n {4}name: .+\n {4}needs: changes\n {4}if: /);
+  return text.replace(gate, '');
+};
+const shard = '${{ matrix.shard }}';
 const headSuffix = '-${{ github.event.pull_request.head.sha || github.sha }}';
 const browserArtifacts: Record<string, string[]> = {
   'i06-profile-ui': ['i06-visual/profile-en-desktop.png', 'i06-visual/profile-fi-mobile.png'],
@@ -90,11 +101,13 @@ const sandboxStep = [
 ].join('\n');
 
 describe('CI Chromium sandbox profile', () => {
-  it('loads the profile for the pinned binary right after the Chromium install in the App and database jobs only', () => {
+  it('loads the profile for the pinned binary right after the Chromium install in the App browser and database jobs only', () => {
     const install = '      - run: npx playwright install --with-deps chromium\n';
     expect(workflow.split(sandboxStep).length - 1).toBe(2);
-    for (const name of ['app', 'database']) expect(job(name).split(install + sandboxStep).length - 1).toBe(1);
-    for (const name of ['pwa', 'webkit-photo', 'deletion-rehearsal', 'performance']) expect(job(name)).not.toContain('ci-chromium-sandbox');
+    for (const name of ['app-browser', 'database']) expect(job(name).split(install + sandboxStep).length - 1).toBe(1);
+    for (const name of ['changes', 'docs', 'app-checks', 'app', 'pwa', 'webkit-photo', 'deletion-rehearsal', 'performance']) {
+      expect(job(name)).not.toContain('ci-chromium-sandbox');
+    }
     for (const forbidden of ['--no-sandbox', 'apparmor_restrict_unprivileged_userns', 'sysctl', '|| true', 'continue-on-error', '*']) {
       expect(sandboxStep.includes(forbidden)).toBe(false);
     }
@@ -103,22 +116,26 @@ describe('CI Chromium sandbox profile', () => {
 });
 
 describe('CI workflow browser split', () => {
-  it('declares exactly the App, PWA, WebKit photo, database, deletion rehearsal and performance jobs with fixed names and timeouts', () => {
-    expect([...jobs.keys()]).toEqual(['app', 'pwa', 'webkit-photo', 'database', 'deletion-rehearsal', 'performance']);
+  it('declares exactly the classification, documentation, App, PWA, WebKit photo, database, deletion rehearsal and performance jobs with fixed names and timeouts', () => {
+    expect([...jobs.keys()]).toEqual(['changes', 'docs', 'app-checks', 'app-browser', 'app', 'pwa', 'webkit-photo', 'database', 'deletion-rehearsal', 'performance']);
     const names = [...jobs.values()].map((text) => /\n {4}name: (.+)\n/.exec(text)?.[1]);
-    expect(names).toEqual(['App and browser contracts', 'PWA production contracts', 'WebKit photo contracts', 'Real local Supabase', 'Account deletion rehearsal',
-      'Performance budgets']);
+    expect(names).toEqual(['Changed files', 'Documentation checks', 'App static checks', `App browser contracts (${shard}/3)`, 'App and browser contracts',
+      'PWA production contracts', 'WebKit photo contracts', 'Real local Supabase', 'Account deletion rehearsal', 'Performance budgets']);
     expect(new Set(names).size).toBe(names.length);
-    expect(job('app')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 40\n    steps:\n');
+    expect(job('changes')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n');
+    expect(job('docs')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 15\n    steps:\n');
+    expect(job('app-checks')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 25\n    steps:\n');
+    expect(job('app-browser')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 40\n    strategy:\n');
+    expect(job('app')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n    steps:\n');
     expect(job('pwa')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    steps:\n');
     expect(job('webkit-photo')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n    steps:\n');
     expect(job('database')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n');
     expect(job('deletion-rehearsal')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 25\n');
     expect(job('performance')).toContain('\n    runs-on: ubuntu-latest\n    timeout-minutes: 15\n    steps:\n');
-    expect(count(workflow, 'timeout-minutes:')).toBe(6);
+    expect(count(workflow, 'timeout-minutes:')).toBe(10);
   });
 
-  it('selects every Playwright project exactly once across the two browser jobs', () => {
+  it('selects every Playwright project exactly once across the two browser jobs, with the App projects in three shards', () => {
     const projects = [...config.matchAll(/\{ name: '([^']+)'|\n {6}name: '([^']+)'/g)].map((match) => match[1] ?? match[2]);
     expect(projects).toEqual(['chromium', 'mobile', 'webkit-photo']);
     expect(config).toContain("testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', "
@@ -126,12 +143,15 @@ describe('CI workflow browser split', () => {
       + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts', 'enhancement.spec.ts', 'admin.spec.ts', 'tryon.spec.ts'],");
     expect(config).toContain('  failOnFlakyTests: Boolean(process.env.CI),\n');
     expect(config).toContain('  forbidOnly: Boolean(process.env.CI),\n');
-    const app = job('app'), webkit = job('webkit-photo');
+    const app = job('app-browser'), webkit = job('webkit-photo');
     expect(count(workflow, 'npm run test:browser')).toBe(2);
     expect(count(workflow, 'npx playwright install')).toBe(5);
+    expect(app).toContain('    strategy:\n      fail-fast: false\n      matrix:\n        shard: [1, 2, 3]\n    steps:\n');
     expect(app).toContain('      - run: npx playwright install --with-deps chromium\n' + sandboxStep
-      + '      - run: npm run test:browser -- --project=chromium --project=mobile\n'
-      + '      - name: Preserve bounded synthetic I06 visual evidence\n');
+      + `      - run: npm run test:browser -- --project=chromium --project=mobile --shard=${shard}/3\n`
+      + "      - name: Stage this shard's visual evidence\n");
+    expect(count(workflow, '--shard=')).toBe(1);
+    for (const id of ['app-checks', 'app']) expect(job(id)).not.toContain('playwright');
     expect(app).not.toContain('test:pwa');
     expect(count(workflow, 'npm run test:pwa')).toBe(1);
     // images.spec.ts launches Chromium to generate WebP fixtures when WebKit's canvas cannot encode them.
@@ -142,11 +162,11 @@ describe('CI workflow browser split', () => {
   });
 
   it('runs the production shell suite once, in its own minimal PWA job and Playwright config that fails when nothing ran', () => {
-    expect(steps(job('pwa')).filter((step) => !step.includes(upload))).toEqual([
+    expect(steps(ungated('pwa')).filter((step) => !step.includes(upload))).toEqual([
       checkout, setupNode, '      - run: npm ci --no-fund\n', '      - run: npx playwright install --with-deps chromium\n',
       '      - run: npm run test:pwa\n',
     ]);
-    for (const forbidden of ['secrets.', 'env:', 'if:', 'permissions:']) expect(job('pwa')).not.toContain(forbidden);
+    for (const forbidden of ['secrets.', 'env:', 'if:', 'permissions:']) expect(ungated('pwa')).not.toContain(forbidden);
     const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     expect(pkg.scripts['test:pwa']).toBe('playwright test --config playwright.pwa.config.ts');
     expect(pwaConfig).toContain("  testDir: './tests/pwa',\n");
@@ -163,14 +183,14 @@ describe('CI workflow browser split', () => {
     const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     expect(pkg.scripts['test:performance']).toBe('playwright test --config playwright.performance.config.ts');
     expect(pkg.scripts['check:bundle']).toBe('node scripts/check-bundle-budget.mjs dist');
-    expect(job('app')).toContain('      - run: npm run build\n      - run: npm run check:bundle\n');
+    expect(job('app-checks')).toContain('      - run: npm run build\n      - run: npm run check:bundle\n');
     expect(count(workflow, 'npm run check:bundle')).toBe(1);
     expect(steps(job('performance'))).toEqual([
       checkout, setupNode, '      - run: npm ci --no-fund\n', '      - run: npx playwright install --with-deps chromium\n',
       '      - run: npm run test:performance\n\n',
     ]);
     expect(count(workflow, 'npm run test:performance')).toBe(1);
-    for (const forbidden of ['upload-artifact', 'secrets.', 'env:', 'if:']) expect(job('performance')).not.toContain(forbidden);
+    for (const forbidden of ['upload-artifact', 'secrets.', 'env:', 'if:']) expect(ungated('performance')).not.toContain(forbidden);
     expect(performanceConfig).toContain("  testDir: './tests/performance',\n");
     expect(performanceConfig).toContain("  outputDir: './test-results/performance-output',\n");
     expect(performanceConfig).toContain('  fullyParallel: false,\n');
@@ -184,7 +204,7 @@ describe('CI workflow browser split', () => {
     expect(pwaConfig).not.toContain('tests/performance');
   });
 
-  it('runs the Edge runtime gate last in the database job and the deploy-artifact check in the App job', () => {
+  it('runs the Edge runtime gate last in the database job and the deploy-artifact check in the App static checks', () => {
     const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
     expect(pkg.scripts['test:edge']).toBe('node scripts/run-local-tests.mjs edge');
     expect(pkg.scripts['check:deploy-artifacts']).toBe('node scripts/check-deploy-artifacts.mjs');
@@ -194,12 +214,12 @@ describe('CI workflow browser split', () => {
       + '          npm run db:reset\n          node scripts/attribution-roundtrip-rehearsal.mjs\n');
     expect(count(workflow, 'attribution-roundtrip-rehearsal.mjs')).toBe(1);
     expect(count(workflow, 'npm run test:edge')).toBe(1);
-    expect(job('app')).toContain('      - run: npm run check:dependencies\n      - run: npm run check:deploy-artifacts\n');
+    expect(job('app-checks')).toContain('      - run: npm run check:dependencies\n      - run: npm run check:deploy-artifacts\n');
     expect(count(workflow, 'npm run check:deploy-artifacts')).toBe(1);
   });
 
   it('keeps the WebKit job minimal: pinned setup, no uploads, secrets, env or suppression', () => {
-    const webkit = job('webkit-photo');
+    const webkit = ungated('webkit-photo');
     expect(steps(webkit)).toEqual([
       checkout, setupNode, '      - run: npm ci --no-fund\n', '      - run: npx playwright install --with-deps chromium webkit\n',
       '      - run: npm run test:browser -- --project=webkit-photo\n\n',
@@ -207,7 +227,7 @@ describe('CI workflow browser split', () => {
     for (const forbidden of ['upload-artifact', 'secrets.', 'env:', 'CI:', 'if:']) expect(webkit).not.toContain(forbidden);
   });
 
-  it('uploads each browser artifact exactly once, from the job whose suite writes it, success-only and exact-head named', () => {
+  it('uploads each browser artifact exactly once, from the App job after all shards or the job whose suite writes it, success-only and exact-head named', () => {
     const uploaded = (id: string, expected: Record<string, string[]>) => steps(job(id)).filter((step) => step.includes(upload)).map((step) => {
       const name = /\n {10}name: ([a-z0-9-]+)-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}\n/.exec(step)?.[1];
       expect(name, step).toBeDefined();
@@ -221,10 +241,31 @@ describe('CI workflow browser split', () => {
     const app = uploaded('app', browserArtifacts), pwa = uploaded('pwa', pwaArtifacts);
     expect(app).toEqual(Object.keys(browserArtifacts));
     expect(pwa).toEqual(Object.keys(pwaArtifacts));
+    // The App job publishes the named captures only after every shard passed and all three shards' evidence has been merged.
+    const collect = [
+      '      - name: Require the static checks and every browser shard to pass\n        env:\n'
+        + '          CHECKS: ${{ needs.app-checks.result }}\n          BROWSER: ${{ needs.app-browser.result }}\n'
+        + '        run: |\n          test "$CHECKS" = success\n          test "$BROWSER" = success\n',
+      `      - name: Collect the visual evidence from every shard\n        uses: ${downloadArtifact}\n        with:\n`
+        + `          pattern: app-visual-shard-*${headSuffix}\n          path: test-results\n          merge-multiple: true\n`,
+      '      - name: Require the evidence of all three shards\n        run: |\n'
+        + '          test -f test-results/shard-1.txt\n          test -f test-results/shard-2.txt\n          test -f test-results/shard-3.txt\n',
+    ];
+    expect(steps(job('app')).slice(0, 3)).toEqual(collect);
+    expect(steps(job('app')).slice(3).every((step) => step.includes(upload))).toBe(true);
+    expect(steps(job('app-browser')).slice(-2)).toEqual([
+      "      - name: Stage this shard's visual evidence\n        shell: bash -euo pipefail {0}\n        env:\n          SHARD: ${{ matrix.shard }}\n"
+        + '        run: |\n          staged="$RUNNER_TEMP/visual"\n          mkdir -p "$staged"\n          for dir in test-results/*-visual; do\n'
+        + '            if [ -d "$dir" ]; then cp -R "$dir" "$staged/"; fi\n          done\n          echo "$SHARD" > "$staged/shard-$SHARD.txt"\n',
+      `      - name: Hand this shard's visual evidence to the App job\n        uses: ${upload}\n        with:\n`
+        + `          name: app-visual-shard-${shard}${headSuffix}\n          path: \${{ runner.temp }}/visual/\n`
+        + '          if-no-files-found: error\n          retention-days: 1\n\n',
+    ]);
     // The PWA uploads come after the suite that writes them.
     expect(steps(job('pwa')).findIndex((step) => step.includes(upload))).toBe(steps(job('pwa')).indexOf('      - run: npm run test:pwa\n') + 1);
     for (const name of [...app, ...pwa]) expect(count(workflow, `name: ${name}${headSuffix}\n`)).toBe(1);
-    expect(count(workflow, upload)).toBe(app.length + pwa.length + 1);
+    expect(count(workflow, upload)).toBe(app.length + pwa.length + 2);
+    expect(count(workflow, downloadArtifact)).toBe(1);
     expect(count(job('database'), upload)).toBe(1);
     expect(job('database')).toContain('          name: database-types\n          path: src/data/database.types.ts\n'
       + '          if-no-files-found: error\n          retention-days: 1\n');
@@ -254,8 +295,9 @@ describe('CI workflow browser split', () => {
       'actions/checkout@11d5960a326750d5838078e36cf38b85af677262',
       'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020',
       upload,
+      downloadArtifact,
     ]));
-    for (const id of ['app', 'pwa', 'webkit-photo', 'deletion-rehearsal', 'performance']) {
+    for (const id of ['docs', 'app-checks', 'app-browser', 'pwa', 'webkit-photo', 'database', 'deletion-rehearsal', 'performance']) {
       expect(job(id).split(checkout).length - 1).toBe(1);
       expect(job(id).split(setupNode).length - 1).toBe(1);
     }
@@ -263,5 +305,32 @@ describe('CI workflow browser split', () => {
       'CI: ', 'CI=']) {
       expect(workflow).not.toContain(forbidden);
     }
+  });
+});
+
+describe('CI documentation-only runs', () => {
+  it('classifies the changes first, from the pull request merge commit, with no credentials, setup or secrets', () => {
+    expect(steps(job('changes'))).toEqual([
+      '      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262\n        with:\n          persist-credentials: false\n          fetch-depth: 2\n',
+      '      - name: Run the heavy jobs unless a pull request changes only documentation\n        id: classify\n'
+        + '        run: node scripts/ci-changes.mjs >> "$GITHUB_OUTPUT"\n\n',
+    ]);
+    expect(job('changes')).toContain('\n    outputs:\n      heavy: ${{ steps.classify.outputs.heavy }}\n    steps:\n');
+    for (const forbidden of ['needs:', 'if:', 'secrets.', 'env:', 'permissions:']) expect(job('changes')).not.toContain(forbidden);
+    expect(workflow).toContain('\non:\n  push:\n    branches: [main]\n  pull_request:\n  workflow_dispatch:\n');
+  });
+
+  it('gates every heavy job on the classification and runs the light documentation job only when they are skipped', () => {
+    for (const id of heavyJobs) ungated(id);
+    expect(count(workflow, gate)).toBe(heavyJobs.length);
+    expect(job('docs')).toContain("\n    name: Documentation checks\n    needs: changes\n    if: needs.changes.outputs.heavy != 'true'\n");
+    expect(steps(job('docs'))).toEqual([checkout, setupNode, '      - run: npm ci --no-fund\n',
+      '      - name: Set a secret-scan canary\n        run: echo "STILLROOM_SECRET_CANARY=$(openssl rand -hex 24)" >> "$GITHUB_ENV"\n',
+      '      - run: npm run scan:secrets\n', '      - run: npm run check:dependencies\n', '      - run: npm run test:unit\n\n']);
+    // The App job keeps its name, fails unless the static checks and every shard succeeded, and is skipped only with them.
+    expect(job('app')).toContain("\n    name: App and browser contracts\n    needs: [changes, app-checks, app-browser]\n"
+      + "    if: ${{ !cancelled() && needs.changes.outputs.heavy == 'true' }}\n");
+    expect(count(workflow, '    needs:')).toBe(heavyJobs.length + 2);
+    expect(count(workflow, '    if:')).toBe(heavyJobs.length + 2);
   });
 });

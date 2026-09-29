@@ -747,6 +747,20 @@ Playwright project is not selected by exactly one job or an upload moves. The
 timeouts are estimates from the ~19.6-minute single job; measured durations
 must stay within 60 % of each timeout.
 
+Since the CI-speed packet the chromium and mobile run is sharded. "App static
+checks" runs lint, types, translations, unit tests, build and the artefact gates;
+three "App browser contracts (i/3)" jobs each run `--shard=i/3` with the same
+retries and `failOnFlakyTests`, and upload their captures with a shard marker.
+The aggregate "App and browser contracts" job keeps its name, requires both
+to succeed, merges the shard artefacts and runs the same named uploads with
+exact file lists, so a capture from any shard is still checked.
+`scripts/ci-changes.mjs` sets `heavy=false` only for a pull request whose merge
+commit changes nothing but `docs/**`, `blueprint/**`, root `*.md`, `AGENTS.md`
+or `.github/copilot-instructions.md`. Such runs replace every heavy job with
+"Documentation checks" (secret scan, dependency records and unit tests,
+including the workflow pins); pushes, manual runs and any failure to classify
+run everything.
+
 Since BG1 (#86) `test:pwa` runs in its own "PWA production contracts" job
 (timeout 20 minutes, no uploads, same pinned setup and Chromium install), because
 the App job reached 29m17s of its 30 minutes before `test:pwa` started. Its
