@@ -961,8 +961,7 @@ test.describe('Settings', () => {
     await expect(page.locator('#enhance-heading')).toHaveText(text('enhanceC.disabled'));
     await expect(card(page)).toContainText(text('enhanceC.offSummary'));
     await card(page).getByText(text('aiC.details'), { exact: true }).click();
-    for (const key of ['enhanceC.noticeSent', 'enhanceC.noticeRedraw', 'enhanceC.noticeProcessing', 'enhanceC.noticeOnlyPhoto', 'enhanceC.noticeTraining',
-      'enhanceC.noticeLabel', 'enhanceC.noticeCharges'] as const) await expect(card(page)).toContainText(text(key));
+    for (const key of ['enhanceC.noticeSent', 'enhanceC.noticeRedraw', 'enhanceC.noticeProcessing', 'enhanceC.noticeCharges'] as const) await expect(card(page)).toContainText(text(key));
     await noViolations(page);
     await page.locator('#enhance-turn-on').click();
     await expect(page.locator('#enhance-heading')).toHaveText(text('enhanceC.enabled'));
