@@ -11,7 +11,7 @@ import { analysisHash } from '../integration/ai-analysis.sessions.mjs';
 import { analyzedIntent, analyzedHarness } from '../integration/analyzed-save.sessions.mjs';
 import { imageChangeHarness } from '../integration/image-replacement.sessions.mjs';
 import { intent, saveHarness } from '../integration/item-save.sessions.mjs';
-import { enhanceOutput, flatBaselineJpeg, READY_FACTS } from '../edge-fixtures/provider-double.mjs';
+import { enhanceOutput, flatBaselineJpeg, READY_FACTS, TRYON_FILTERED_COLOUR, tryonOutput } from '../edge-fixtures/provider-double.mjs';
 import { EDGE_DELEGATIONS } from './edge-delegations.mjs';
 import { registerSourceLoader } from '../../scripts/src-loader.mjs';
 
@@ -395,9 +395,167 @@ async function main() {
       await h.deleteItem(seeded.value);
     }
 
+    stage = 'tryon';
+    // VTO-1b: the production try-on handler with the images edit double, on ordinary A/B sessions, before enhancement
+    // (whose final anomaly closes the shared image capacity). A three-step chain for A and a one-step chain for B, then
+    // foreign-ID, no-dispatch negatives and one filtered step. The body photo goes only to the double.
+    {
+      const MANIFEST = 'azure-global-image25-sunburst-tryon-v1';
+      const hex = (bytes) => createHash('sha256').update(bytes).digest('hex');
+      const id = (owner, n) => gateId(owner.label, n, '9');
+      const person = (height = 1280, colour = undefined) => flatBaselineJpeg(1024, height, colour);
+      const fields = (chainId, step, requestId, outfitId = null, manifestId = MANIFEST) => [['chainId', chainId], ['step', String(step)],
+        ['requestId', requestId], ['manifestId', manifestId], ...(outfitId === null ? [] : [['outfitId', outfitId]])];
+      const tryOn = async (token, entries, photo) => {
+        const form = new FormData();
+        for (const [key, value] of entries) form.append(key, value);
+        form.append('person', new Blob([photo], { type: 'image/jpeg' }), 'person.jpg');
+        // The gateway refuses chunked bodies, so the multipart is encoded first and sent with its length.
+        const encoded = new Request('http://multipart.invalid/', { method: 'POST', body: form });
+        const body = Buffer.from(await encoded.arrayBuffer());
+        const response = await fetch(`${ingress}/functions/v1/try-on`, {
+          method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(90_000),
+          headers: { ...(token === null ? {} : { Authorization: 'Bearer '.concat(token) }), apikey: env.SUPABASE_PUBLISHABLE_KEY,
+            'Content-Type': encoded.headers.get('content-type') }, body });
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const jpeg = response.headers.get('content-type') === 'image/jpeg';
+        let data = null;
+        if (!jpeg) { try { data = JSON.parse(new TextDecoder().decode(bytes)); } catch { /* compared as null */ } }
+        return { status: response.status, data, jpeg, bytes, noStore: response.headers.get('cache-control') === 'no-store',
+          sha: response.headers.get('x-stillroom-tryon-sha256') };
+      };
+      const expected = tryonOutput();
+      const released = (r) => r.status === 200 && r.jpeg && r.noStore && Buffer.from(r.bytes).equals(expected) && r.sha === hex(expected);
+      const refused = (r, status, code) => r.status === status && !r.jpeg && isDeepStrictEqual(r.data, { code }) && r.bytes.length < 256;
+      const completed = (r) => r.status === 200 && !r.jpeg && r.noStore && r.data?.code === 'OK' && typeof r.data.resultId === 'string'
+        && Number.isSafeInteger(r.data.expiresAtMs);
+      const tryonStatus = (owner) => client.rpc(owner, 'tryon_status', {});
+      for (const owner of [A, B]) {
+        const status = await tryonStatus(owner);
+        const consented = await client.rpc(owner, 'tryon_set_consent', { p_enabled: true, p_notice_revision: status?.policy?.noticeRevision ?? null });
+        check(PROVIDER, `tryon-consent-${owner.label}`, consented?.code === 'OK' && consented.consent?.enabled === true
+          && consented.policy?.activated === true && consented.policy?.manifestId === MANIFEST && consented.policy?.providerAvailable === true,
+        { code: consented?.code });
+      }
+      const wardrobe = async (owner, categories) => {
+        const saves = saveHarness(client, owner), itemIds = [];
+        for (const category of categories) {
+          const value = saves.track(intent());
+          value.p_item.category = category;
+          const row = await saves.reserve(value);
+          await saves.upload(value);
+          await saves.finalize(value, row);
+          itemIds.push(value.p_item.id);
+        }
+        const outfitId = id(owner, 50);
+        const version = await client.rpc(owner, 'save_outfit', { p_id: outfitId, p_title: 'Fictional try-on outfit', p_occasion: 'everyday',
+          p_notes: '', p_favourite: false, p_item_ids: itemIds, p_expected_version: null });
+        requireEvidence(Number(version) === 1);
+        return { saves, outfitId };
+      };
+      const wardrobeA = await wardrobe(A, ['top', 'bottom', 'footwear']), wardrobeB = await wardrobe(B, ['top']);
+      const outfitA = wardrobeA.outfitId, outfitB = wardrobeB.outfitId;
+      const hourly = async (owner) => (await tryonStatus(owner))?.usage?.tryOnLastHour;
+      const before = await count();
+
+      stage = 'tryon-owned';
+      const chainA = id(A, 30), chainB = id(B, 30);
+      const s1 = await tryOn(A.token, fields(chainA, 1, id(A, 1), outfitA), person());
+      check(PROVIDER, 'tryon-step-1-released', released(s1), summary(s1));
+      const s2 = await tryOn(A.token, fields(chainA, 2, id(A, 2)), Buffer.from(s1.bytes));
+      check(PROVIDER, 'tryon-step-2-released', released(s2), summary(s2));
+      const s3 = await tryOn(A.token, fields(chainA, 3, id(A, 3)), Buffer.from(s2.bytes));
+      check(PROVIDER, 'tryon-chain-complete-A', completed(s3), summary(s3));
+      const resultA = s3.data?.resultId ?? null;
+      const listedA = await client.rpc(A, 'tryon_results_v1', {});
+      const imageA = await client.rpc(A, 'tryon_result_image_v1', { p_result_id: resultA });
+      const chainStatusA = await client.rpc(A, 'tryon_chain_status', { p_chain_id: chainA });
+      check(PROVIDER, 'tryon-result-owned', listedA?.code === 'OK' && Array.isArray(listedA.results)
+        && isDeepStrictEqual(listedA.results.filter((r) => r.id === resultA).map((r) => [r.outfitId, r.itemIds.length, r.bytes]),
+          [[outfitA, 3, expected.length]]) && imageA?.code === 'OK' && Buffer.from(imageA.jpegBase64 ?? '', 'base64').equals(expected)
+        && chainStatusA?.state === 'complete' && chainStatusA.resultId === resultA, { list: listedA?.code, image: imageA?.code });
+      const sB = await tryOn(B.token, fields(chainB, 1, id(B, 1), outfitB), person());
+      check(PROVIDER, 'tryon-chain-complete-B', completed(sB), summary(sB));
+      const resultB = sB.data?.resultId ?? null;
+      let counted = await count();
+      check(PROVIDER, 'tryon-dispatch-count', counted.served === before.served + 4 && counted.refused === 0 && counted.rejected === 0
+        && counted.modes['tryon-ok'] === 4, counted);
+
+      stage = 'tryon-foreign';
+      // A foreign outfit, chain or result is answered exactly like a missing one, and A's state is untouched.
+      const stateA = async () => ({ results: await client.rpc(A, 'tryon_results_v1', {}),
+        chain: await client.rpc(A, 'tryon_chain_status', { p_chain_id: chainA }), hour: await hourly(A) });
+      const aBefore = await stateA();
+      const foreignOutfit = await tryOn(B.token, fields(id(B, 31), 1, id(B, 2), outfitA), person());
+      const missingOutfit = await tryOn(B.token, fields(id(B, 32), 1, id(B, 3), randomUUID()), person());
+      check(PROVIDER, 'tryon-foreign-outfit-as-missing', refused(foreignOutfit, 404, 'NOT_FOUND') && refused(missingOutfit, 404, 'NOT_FOUND'),
+        { foreign: summary(foreignOutfit), missing: summary(missingOutfit) });
+      for (const [name, key, value] of [['tryon_result_image_v1', 'p_result_id', resultA], ['tryon_delete_result', 'p_result_id', resultA],
+        ['tryon_cancel', 'p_chain_id', chainA], ['tryon_chain_status', 'p_chain_id', chainA]]) {
+        const foreign = await client.rpc(B, name, { [key]: value }), missing = await client.rpc(B, name, { [key]: randomUUID() });
+        check(PROVIDER, `tryon-foreign-${name}`, foreign?.code === 'NOT_FOUND' && isDeepStrictEqual(foreign, missing), { foreign, missing });
+      }
+      const listedB = await client.rpc(B, 'tryon_results_v1', {});
+      check(PROVIDER, 'tryon-foreign-A-unchanged', isDeepStrictEqual(await stateA(), aBefore) && aBefore.results?.code === 'OK'
+        && listedB?.code === 'OK' && listedB.results.every((r) => r.id !== resultA) && listedB.results.some((r) => r.id === resultB),
+      { B: listedB?.code });
+
+      stage = 'tryon-negatives';
+      const hourA = await hourly(A), hourB = await hourly(B);
+      check(PROVIDER, 'tryon-usage-own-rows-only', hourA === 3 && hourB === 1, { hourA, hourB });
+      const anonymous = await tryOn(null, fields(id(A, 31), 1, id(A, 4), outfitA), person());
+      const manifest = await tryOn(A.token, fields(id(A, 32), 1, id(A, 5), outfitA, 'azure-global-image25-sunburst-enhance-v1'), person());
+      const square = await tryOn(A.token, fields(id(A, 33), 1, id(A, 6), outfitA), person(1024));
+      const replay = await tryOn(A.token, fields(chainA, 1, id(A, 1), outfitA), person());
+      check(PROVIDER, 'tryon-anonymous', anonymous.status === 401 && !anonymous.jpeg, summary(anonymous));
+      check(PROVIDER, 'tryon-other-manifest', refused(manifest, 503, 'CONFIG_CHANGED'), summary(manifest));
+      check(PROVIDER, 'tryon-person-not-4-5', refused(square, 400, 'INVALID_INPUT'), summary(square));
+      check(PROVIDER, 'tryon-replay-terminal', refused(replay, 409, 'TERMINAL'), summary(replay));
+      const frozenTryOn = await frozenCall(A, () => tryOn(A.token, fields(id(A, 34), 1, id(A, 7), outfitA), person()))();
+      check(PROVIDER, 'tryon-frozen-same-token', refused(frozenTryOn, 403, 'UNAVAILABLE'), summary(frozenTryOn));
+      const revoked = await client.rpc(B, 'tryon_set_consent', { p_enabled: false, p_notice_revision: null });
+      const noConsent = await tryOn(B.token, fields(id(B, 33), 1, id(B, 4), outfitB), person());
+      const reconsented = await client.rpc(B, 'tryon_set_consent', { p_enabled: true, p_notice_revision: 1 });
+      check(PROVIDER, 'tryon-consent-required', revoked?.code === 'CONSENT_REQUIRED' && refused(noConsent, 403, 'CONSENT_REQUIRED')
+        && reconsented?.code === 'OK', { revoked: revoked?.code, call: summary(noConsent) });
+      counted = await count();
+      check(PROVIDER, 'tryon-negatives-no-dispatch', counted.served === before.served + 4 && await hourly(A) === 3 && await hourly(B) === 1,
+        counted.served);
+
+      stage = 'tryon-filtered';
+      // A content-filter refusal is an ordinary outcome: 422, no picture and no result; Stop then frees the slot.
+      const chainF = id(A, 35);
+      const filtered = await tryOn(A.token, fields(chainF, 1, id(A, 8), outfitA), person(1280, TRYON_FILTERED_COLOUR));
+      check(PROVIDER, 'tryon-filtered', refused(filtered, 422, 'FILTERED'), summary(filtered));
+      const stopped = await client.rpc(A, 'tryon_cancel', { p_chain_id: chainF });
+      const afterFilter = await client.rpc(A, 'tryon_results_v1', {});
+      check(PROVIDER, 'tryon-filtered-no-result', isDeepStrictEqual(stopped, { code: 'CANCELLED' }) && afterFilter?.code === 'OK'
+        && isDeepStrictEqual(afterFilter.results.map((r) => r.id), aBefore.results.results.map((r) => r.id)), { stopped });
+      // Four of A's six per hour are used; a new three-step chain is refused before any claim.
+      const limited = await tryOn(A.token, fields(id(A, 36), 1, id(A, 9), outfitA), person());
+      check(PROVIDER, 'tryon-hourly-rate-limit', refused(limited, 429, 'RATE_LIMIT'), summary(limited));
+      counted = await count();
+      check(PROVIDER, 'tryon-double-totals', counted.served === before.served + 5 && counted.refused === 0 && counted.rejected === 0
+        && isDeepStrictEqual(counted.modes, { ...before.modes, 'tryon-ok': 4, 'tryon-filtered': 1 }), counted);
+
+      stage = 'tryon-cleanup';
+      const deletedA = await client.rpc(A, 'tryon_delete_result', { p_result_id: resultA });
+      const goneA = await client.rpc(A, 'tryon_result_image_v1', { p_result_id: resultA });
+      check(PROVIDER, 'tryon-delete-own-result', isDeepStrictEqual(deletedA, { code: 'OK' }) && goneA?.code === 'NOT_FOUND', { deletedA, goneA });
+      for (const [owner, outfitId] of [[A, outfitA], [B, outfitB]]) {
+        requireEvidence((await client.request(owner.token, `/rest/v1/outfits?owner_id=eq.${owner.uid}&id=eq.${outfitId}`, { method: 'DELETE' })).ok);
+      }
+      const chainGone = await client.rpc(A, 'tryon_chain_status', { p_chain_id: chainA });
+      const resultGone = await client.rpc(B, 'tryon_result_image_v1', { p_result_id: resultB });
+      check(PROVIDER, 'tryon-outfit-delete-removes-chain-and-result', chainGone?.code === 'NOT_FOUND' && resultGone?.code === 'NOT_FOUND',
+        { chain: chainGone?.code, result: resultGone?.code });
+      await wardrobeA.saves.cleanup();
+      await wardrobeB.saves.cleanup();
+    }
+
     stage = 'enhance';
     // BG2b-1: the production enhance-photo handler with the images edit double, on ordinary A/B sessions. The fixture
-    // opens eight shared dispatches and six per owner per hour. A's six dispatches cover success, stripping and every
+    // opens sixteen shared dispatches (try-on used five) and six per owner per hour. A's six dispatches cover success, stripping and every
     // rejection, then A is rate-limited; B's missing-usage anomaly turns the shared switch off for both owners.
     {
       const enhance = async (token, requestId, width) => {

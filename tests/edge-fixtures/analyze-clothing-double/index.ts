@@ -1,5 +1,5 @@
 // CI-only PR-3b fixture entrypoint (EDGE-RUNTIME / PROVIDER-DOUBLE). Excluded from every deployment by
-// scripts/check-deploy-artifacts.mjs. It runs the production analyze-clothing, stylist-chat and enhance-photo handlers unchanged,
+// scripts/check-deploy-artifacts.mjs. It runs the production analyze-clothing, stylist-chat, enhance-photo and try-on handlers unchanged,
 // selected by the exact function path, with their injected transport accepting only the exact pinned Azure request
 // and forwarding it to the internal provider double.
 import { createHandler } from '../../../supabase/functions/analyze-clothing/handler.ts';
@@ -8,16 +8,19 @@ import { createStylistHandler } from '../../../supabase/functions/stylist-chat/h
 import { STYLIST_ENDPOINT } from '../../../src/domain/stylist.ts';
 import { createEnhanceHandler } from '../../../supabase/functions/enhance-photo/handler.ts';
 import { ENHANCE_ENDPOINT } from '../../../src/domain/enhancement.ts';
+import { createTryOnHandler } from '../../../supabase/functions/try-on/handler.ts';
+import { TRYON_ENDPOINT } from '../../../src/domain/tryon.ts';
 
 const DOUBLE = 'http://provider-double:8080';
 const DUMMY_API_KEY = 'local-dummy-not-a-credential';
 
 async function transport(input: string, init: RequestInit): Promise<Response> {
-  if (![AZURE_ENDPOINT, STYLIST_ENDPOINT, ENHANCE_ENDPOINT].includes(input) || init.method !== 'POST' || init.redirect !== 'error') {
+  if (![AZURE_ENDPOINT, STYLIST_ENDPOINT, ENHANCE_ENDPOINT, TRYON_ENDPOINT].includes(input) || init.method !== 'POST' || init.redirect !== 'error') {
     await fetch(`${DOUBLE}/rejected`, { method: 'POST', body: '{}' }).then((r) => r.body?.cancel(), () => undefined);
     throw new Error('EDGE fixture transport refused a non-pinned provider request');
   }
-  return fetch(`${DOUBLE}${input === ENHANCE_ENDPOINT ? '/images/edits' : '/chat/completions'}`, { method: 'POST', redirect: 'error', cache: 'no-store',
+  const images = input === ENHANCE_ENDPOINT || input === TRYON_ENDPOINT;
+  return fetch(`${DOUBLE}${images ? '/images/edits' : '/chat/completions'}`, { method: 'POST', redirect: 'error', cache: 'no-store',
     headers: init.headers, body: init.body, signal: init.signal });
 }
 
@@ -36,10 +39,17 @@ const enhance = createEnhanceHandler(config, (work) => {
   background.add(work);
   void work.finally(() => background.delete(work));
 }, transport);
+// Try-on: the same explicit registrar. No probe secret in the fixture, so every probe request is refused.
+const tryOn = createTryOnHandler({ ...config, probeToken: null }, (work) => {
+  background.add(work);
+  void work.finally(() => background.delete(work));
+}, transport);
 
 const STYLIST_PATHS = ['/stylist-chat', '/functions/v1/stylist-chat'];
 const ENHANCE_PATHS = ['/enhance-photo', '/functions/v1/enhance-photo'];
+const TRYON_PATHS = ['/try-on', '/functions/v1/try-on'];
 Deno.serve((request) => {
   const path = new URL(request.url).pathname;
-  return STYLIST_PATHS.includes(path) ? stylist(request) : ENHANCE_PATHS.includes(path) ? enhance(request) : analyze(request);
+  return STYLIST_PATHS.includes(path) ? stylist(request) : ENHANCE_PATHS.includes(path) ? enhance(request)
+    : TRYON_PATHS.includes(path) ? tryOn(request) : analyze(request);
 });

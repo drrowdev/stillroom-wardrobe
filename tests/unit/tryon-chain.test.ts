@@ -4,15 +4,19 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import {
   TRYON_DEPLOYMENT, TRYON_MANIFEST, TRYON_MAX_STEPS, TRYON_MODEL, TRYON_PARAMETERS, TRYON_PROMPTS, TRYON_RESERVATION_MICRO,
-  TRYON_SETTINGS, selectTryOnSteps, tryOnEstimateMicro, tryOnPrompt, type TryOnCandidate,
+  TRYON_SETTINGS, selectTryOnSteps, tryOnCategories, tryOnEstimateMicro, tryOnPrompt, type TryOnCandidate,
 } from '../../src/domain/tryon';
 import { ENHANCE_PARAMETERS } from '../../src/domain/enhancement';
+import { categories } from '../../src/domain/wardrobe';
 
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
 const item = (itemId: string, category: TryOnCandidate['category'], extra: Partial<TryOnCandidate> = {}): TryOnCandidate =>
   ({ itemId, category, lifecycle: 'active', deleted: false, readyImage: true, ...extra });
 
 describe('try-on garment chain', () => {
+  it('keeps its import-free category list equal to the wardrobe categories', () => {
+    expect([...tryOnCategories]).toEqual([...categories]);
+  });
   it('orders top, bottom, then shoes regardless of the saved order', () => {
     const selection = selectTryOnSteps([item('s', 'footwear'), item('b', 'bottom'), item('t', 'top')]);
     expect(selection.steps).toEqual([{ slot: 'top', itemId: 't' }, { slot: 'bottom', itemId: 'b' },
