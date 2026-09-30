@@ -48,7 +48,16 @@ describe('production gates at their exact boundaries (§5.2)', () => {
   });
 
   it('ratio gates: the exact threshold and its nearest neighbours', () => {
-    for (const [gate, T] of [[CLEANUP_RULES.added, 0.07], [CLEANUP_RULES.removed, 0.07], [CLEANUP_RULES.change, 0.2],
+    // BG2c-3b (#84): `added` is 0.25 on the identity pass; aligned, 0.21 at s >= 1 (s = 1.00 included) and 0.07 below.
+    for (const [identity, s, T] of [[true, 1, 0.25], [true, 0.85, 0.25], [false, 1, 0.21], [false, 1.15, 0.21], [false, 0.99, 0.07], [false, 0.85, 0.07]] as const) {
+      expect(CLEANUP_RULES.added(T, identity, s)).toBe(true);
+      expect(CLEANUP_RULES.added(NEXT_DOWN(T), identity, s)).toBe(false);
+      expect(CLEANUP_RULES.added(NEXT_UP(T), identity, s)).toBe(true);
+    }
+    expect(CLEANUP_RULES.added(0.1, false, 100 / 100)).toBe(false);
+    expect(CLEANUP_RULES.added(0.1, false, 99 / 100)).toBe(true);
+    expect(CLEANUP_RULES.added(0.22, true, 1)).toBe(false);
+    for (const [gate, T] of [[CLEANUP_RULES.removed, 0.07], [CLEANUP_RULES.change, 0.2],
       [CLEANUP_RULES.patternLoss, 0.25]] as const) {
       expect(gate(T)).toBe(true);
       expect(gate(NEXT_DOWN(T))).toBe(false);

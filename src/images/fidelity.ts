@@ -95,6 +95,8 @@ export type CleanupMetrics = {
   meanDeltaE?: number; p95DeltaE?: number; ssim?: number; windows?: number;
   // rev8b §1.1: which pass decided, and the identity pass's reason when the aligned pass ran.
   path?: 'identity' | 'aligned'; identityReason?: CleanupReason;
+  /** BG2c-3b: the identity pass's gate values (zero slack), reported next to `identityReason` when the aligned pass decided. */
+  identityAdded?: number; identityRemoved?: number;
   // §3.3 alignment and area gates.
   scale?: number; tx?: number; ty?: number; ncc?: number; alignmentFlat?: boolean; added?: number; addedIdentity?: number;
   invalid?: number; alignedCentroid?: { x: number; y: number }; retention?: number; resultArea?: number; removed?: number;
@@ -227,7 +229,8 @@ function hueRange(low: number, high: number): number {
  * "qualifies", "defined", "occupied", "lost" or "falls back" for the others.
  */
 export const CLEANUP_RULES = Object.freeze({
-  added: (share: number) => share >= CLEANUP_V2.added.maximum,
+  added: (share: number, identity: boolean, scale: number) => share >= (identity ? CLEANUP_V2.added.identityMaximum
+    : scale >= 1 ? CLEANUP_V2.added.alignedMaximum : CLEANUP_V2.added.maximum),
   retention: (retained: number, areaR: number, pixels: number) => areaR === 0 || retained < CLEANUP_V2.retention.minimum * areaR
     || retained < CLEANUP_V2.minimumMaskFraction * pixels,
   support: (support: number, resultArea: number, pixels: number) => support < CLEANUP_V2.minimumMaskFraction * pixels
@@ -881,7 +884,7 @@ export async function cleanupCheck(h0: Uint8ClampedArray, reference: Uint8Array,
       else if (bad()) reason = name;
     };
     const rule = CLEANUP_RULES;
-    judge('added', [added], () => rule.added(added));
+    judge('added', [added], () => rule.added(added, identity, s));
     judge('centre', [alignedCentroid.x, alignedCentroid.y], () => alignedCentroid.x < low || alignedCentroid.x >= high
       || alignedCentroid.y < low || alignedCentroid.y >= high);
     judge('retention', [retention], () => rule.retention(retained, areaR, pixels));
@@ -965,6 +968,10 @@ export async function cleanupCheck(h0: Uint8ClampedArray, reference: Uint8Array,
     transform = refined ?? coarse;
   }
   const aligned = await evaluate(transform, alignmentFlat, false);
-  if (atIdentity) aligned.metrics.identityReason = (atIdentity as { reason: CleanupReason }).reason;
+  if (atIdentity) {
+    aligned.metrics.identityReason = (atIdentity as { reason: CleanupReason }).reason;
+    aligned.metrics.identityAdded = atIdentity.metrics.added;
+    aligned.metrics.identityRemoved = atIdentity.metrics.removed;
+  }
   return aligned;
 }

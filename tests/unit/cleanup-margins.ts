@@ -30,13 +30,16 @@ export const modeDistance = { pass: (g: number) => g <= 0.9 * V.colourMode.maxim
 export const modeShare = { pass: (w: number) => w >= 1.1 * V.colourMode.share, fail: (w: number) => w <= 0.9 * V.colourMode.share };
 
 const minimumSupport = Math.ceil(V.minimumMaskFraction * N);
+/** BG2c-3b: the `added` limit of the path the metrics came from (identity 0.25; aligned 0.21 at s >= 1, else 0.07). */
+export const addedLimit = (m: CleanupMetrics) => (m.path === 'identity' ? V.added.identityMaximum
+  : m.scale! >= 1 ? V.added.alignedMaximum : V.added.maximum);
 const cs = V.colourShift;
 
 /** The gates an Accept fixture must clear with margin; returns the names of those it doesn't. */
 export function passViolations(m: CleanupMetrics): string[] {
   const out: string[] = [];
   const need = (name: string, ok: boolean) => { if (!ok) out.push(name); };
-  need('added', upper.pass(m.added!, V.added.maximum));
+  need('added', upper.pass(m.added!, addedLimit(m)));
   need('retention', lower.pass(m.retention!, V.retention.minimum));
   need('supportCount', lowerCount.pass(m.support!, minimumSupport));
   need('supportShare', lower.pass(m.support! / m.resultArea!, V.support.minimumShare));
@@ -54,7 +57,7 @@ export function passViolations(m: CleanupMetrics): string[] {
 /** Whether the named gate's metric lies beyond its fail band. */
 export function beyondFail(m: CleanupMetrics, gate: CleanupReason): boolean {
   switch (gate) {
-    case 'added': return upper.fail(m.added!, V.added.maximum);
+    case 'added': return upper.fail(m.added!, addedLimit(m));
     case 'removed': return upper.fail(m.removed!, V.removed.maximum);
     case 'change': return upper.fail(m.changeShare!, V.change.maximum);
     case 'patternLoss': return upper.fail(m.patternLoss!, V.patternLoss.maximum);
