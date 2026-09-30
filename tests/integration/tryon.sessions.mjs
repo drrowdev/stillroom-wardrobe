@@ -159,12 +159,21 @@ export async function tryonProbes(snapshot, sql, mark) {
       'slots',(select count(*) from private.provider_slots where deployment_key=${literal(KEY)} and held_until>clock_timestamp()));`);
   // A privileged transaction that runs `statement`, then sleeps `seconds` holding its locks (admin-limits pattern). The
   // marker identifies it in pg_stat_activity; each case uses its own duration, under the functions' 2 s lock_timeout.
+  // It returns a NON-thenable handle once the holder sleeps: awaiting the handle must not wait for the commit, or every
+  // competitor would start after the lock is gone. `open()` proves the holder is still sleeping when a case checks it,
+  // and `done` is awaited only at the intended release point.
   const holdTx = async (statement, seconds, end = 'commit') => {
     const marker = `pg_sleep(${seconds})`;
-    const held = sql(`begin; ${statement}; select 'HELD'; select ${marker}; ${end}; select 'DONE';`);
+    let settled = false;
+    const done = sql(`begin; ${statement}; select 'HELD'; select ${marker}; ${end}; select 'DONE';`)
+      .finally(() => { settled = true; });
+    done.catch(() => {});
     for (const until = Date.now() + 5000; ;) {
+      requireEvidence(!settled);
       if (await scalar(`select count(*) from pg_stat_activity where wait_event='PgSleep'
-        and query like ${literal(`%${marker}%`)} and pid<>pg_backend_pid();`) === '1') return held;
+        and query like ${literal(`%${marker}%`)} and pid<>pg_backend_pid();`) === '1') {
+        return { done, marker, open: () => !settled };
+      }
       requireEvidence(Date.now() < until);
       await delay(25);
     }
@@ -814,9 +823,12 @@ export async function tryonProbes(snapshot, sql, mark) {
     await freeSlots();
     const stopping = await holdTx(asOwner(a, `select 'R:'||public.tryon_cancel(${literal(raceA)})::text`), 1.501);
     const slotsA = (await chainRows(a, raceA, [raceA1])).slots;
+    requireEvidence(stopping.open());
     equal(await claim(a, raceA, 1, raceA1, { outfit: single, hold: true }), { code: 'BUSY', claimed: false });
+    // The BUSY reply must have come while the Stop was still uncommitted.
+    requireEvidence(stopping.open());
     equal(await chainRows(a, raceA, [raceA1]), { usage: 0, evidence: 0, chains: 0, attempts: 0, results: 0, slots: slotsA });
-    equal(heldReply(await stopping), { code: 'CANCELLED' });
+    equal(heldReply(await stopping.done), { code: 'CANCELLED' });
     await created(a, raceA);
     equal(await claim(a, raceA, 1, raceA2, { outfit: single, hold: true }), { code: 'CANCELLED', claimed: false });
     equal(await chainRows(a, raceA, [raceA1, raceA2]), { usage: 0, evidence: 0, chains: 0, attempts: 0, results: 0, slots: slotsA });
@@ -831,7 +843,8 @@ export async function tryonProbes(snapshot, sql, mark) {
     const claiming = await holdTx(`select 'R:'||${claimCall(a, raceB, 1, raceB1, { outfit: single })}::text`, 1.502);
     const stopB = stop(a, raceB);
     await cancelsWaiting(1);
-    const claimedB = heldReply(await claiming);
+    requireEvidence(claiming.open());
+    const claimedB = heldReply(await claiming.done);
     requireEvidence(claimedB.code === 'OK' && claimedB.claimed === true);
     equal(await stopB, { code: 'CANCELLED' });
     equal(await markers(a, raceB), 0);
@@ -851,7 +864,8 @@ export async function tryonProbes(snapshot, sql, mark) {
     const dispatching = await holdTx(`select 'R:'||public.tryon_dispatch(${literal(a.uid)},${literal(raceZ1)},true)::text`, 1.503);
     const stopZ = stop(a, raceZ);
     await cancelsWaiting(1);
-    equal(heldReply(await dispatching).code, 'AUTHORISED');
+    requireEvidence(dispatching.open());
+    equal(heldReply(await dispatching.done).code, 'AUTHORISED');
     equal(await stopZ, { code: 'CANCELLED' });
     equal(await markers(a, raceZ), 0);
     equal(await finish(a, raceZ1, 'OK', { out: output('stop-race'), send: true, gone: true }),
@@ -872,7 +886,8 @@ export async function tryonProbes(snapshot, sql, mark) {
     const finishing = await holdTx(`select 'R:'||${finishCall(a, raceC1, 'OK', { out: outC, send: true })}::text`, 1.504);
     const stopC = stop(a, raceC);
     await cancelsWaiting(1);
-    const doneC = heldReply(await finishing);
+    requireEvidence(finishing.open());
+    const doneC = heldReply(await finishing.done);
     requireEvidence(doneC.code === 'OK' && doneC.last === true && typeof doneC.resultId === 'string');
     equal(await stopC, { code: 'COMPLETED', resultId: doneC.resultId });
     equal(await markers(a, raceC), 0);
@@ -902,7 +917,8 @@ export async function tryonProbes(snapshot, sql, mark) {
     const locking = await holdTx(`select 1 from public.profiles where owner_id=${literal(a.uid)} for update`, 1.505, 'rollback');
     const contenders = [stop(a, capP), stop(a, capQ)];
     await cancelsWaiting(2);
-    await locking;
+    requireEvidence(locking.open());
+    await locking.done;
     const replies = await Promise.all(contenders);
     equal(replies.map((r) => r.code).sort(), ['CANCELLED', 'UNAVAILABLE']);
     const winner = replies[0].code === 'CANCELLED' ? capP : capQ, loser = winner === capP ? capQ : capP;
