@@ -749,8 +749,10 @@ export type Database = {
           p_output_bytes: number
           p_output_sha256: string
           p_owner_id: string
+          p_refusal_kind?: string
           p_request_id: string
           p_usage: Json
+          p_usage_absent?: boolean
         }
         Returns: Json
       }
@@ -1050,8 +1052,10 @@ export type Database = {
           p_output_bytes: number
           p_output_sha256: string
           p_owner_id: string
+          p_refusal_kind?: string
           p_request_id: string
           p_usage: Json
+          p_usage_absent?: boolean
         }
         Returns: Json
       }

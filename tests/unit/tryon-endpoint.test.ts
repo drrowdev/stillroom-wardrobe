@@ -6,6 +6,7 @@ import {
 } from '../../src/domain/tryon';
 import { classifyTryOnResponse, tryOnForm, tryOnUsagePayload } from '../../supabase/functions/try-on/azure';
 import { claimedWorkObserver, createTryOnHandler, TRYON_RPCS } from '../../supabase/functions/try-on/handler';
+import refusalCases from '../edge-fixtures/provider-refusal-cases.json';
 import { exifSegment } from '../fixtures/jpeg-helpers';
 import { appleLayoutJpeg, flatJpeg, restartMarkers } from '../fixtures/restore-jpeg-fixtures';
 
@@ -52,6 +53,8 @@ describe('try-on request contract', () => {
     expect(classifyTryOnResponse(200, imageBody())).toMatchObject({ code: 'OK', usage: payload });
     expect(classifyTryOnResponse(400, { error: { code: 'content_policy_violation' }, usage })).toMatchObject({ code: 'FILTERED', usage: payload });
     expect(classifyTryOnResponse(400, { error: { code: 'x', inner_error: { code: 'ResponsibleAIPolicyViolation' } } }).code).toBe('FILTERED');
+    // FILT1: Azure's documented image-API code is contentFilter (FAILED before).
+    expect(classifyTryOnResponse(400, { error: { code: 'contentFilter', message: 'x' } })).toMatchObject({ code: 'FILTERED', refusal: 'unknown_filter' });
     expect(classifyTryOnResponse(500, { error: { code: 'server_error' } })).toMatchObject({ code: 'FAILED', usage: null });
     for (const bad of [flatJpeg({ width: 1024, height: 1024 }), flatJpeg({ width: 1024, height: 1280, mode: 'progressive' })]) {
       expect(classifyTryOnResponse(200, imageBody(bad))).toMatchObject({ code: 'OUTPUT_REJECTED', image: null });
@@ -138,7 +141,7 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
     expect(rpcBody(calls, 'tryon_dispatch')).toEqual({ p_owner_id: OWNER, p_request_id: REQUEST, p_client_present: true });
     expect(rpcBody(calls, 'tryon_finish')).toEqual({ p_owner_id: OWNER, p_request_id: REQUEST, p_code: 'OK', p_usage: payload,
       p_output_sha256: sha(OUTPUT), p_output_bytes: OUTPUT.length, p_output: null, p_fetch_started: true, p_client_live_at_fetch: true,
-      p_client_gone: false });
+      p_client_gone: false, p_refusal_kind: null, p_usage_absent: null });
     expect(sent).toHaveLength(1);
     const images = sent[0]!.getAll('image[]') as File[];
     expect(new Uint8Array(await images[0]!.arrayBuffer())).toEqual(PERSON);
@@ -239,7 +242,7 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
     expect(names(calls)).toEqual(['user', 'tryon_status', 'tryon_claim', 'tryon_finish']);
     expect(rpcBody(calls, 'tryon_finish')).toEqual({ p_owner_id: OWNER, p_request_id: REQUEST, p_code: 'PRE_DISPATCH', p_usage: null,
       p_output_sha256: null, p_output_bytes: null, p_output: null, p_fetch_started: false, p_client_live_at_fetch: null,
-      p_client_gone: false });
+      p_client_gone: false, p_refusal_kind: null, p_usage_absent: null });
     expect(transport).not.toHaveBeenCalled();
   });
 
@@ -353,6 +356,22 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
       expect(await response.json()).toEqual({ code });
       expect(rpcBody(calls, 'tryon_finish')).toMatchObject({ p_code: code, p_usage: expectedUsage, p_output_sha256: null,
         p_output: null, p_fetch_started: true, p_client_live_at_fetch: true });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('sends each shared refusal case to tryon_finish with exactly its fixture arguments (FILT1)', async () => {
+    const swap = (value: unknown): unknown => value === '$USAGE' ? usage : value === '$MODEL' ? TRYON_MODEL
+      : Array.isArray(value) ? value.map(swap)
+        : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, swap(v)])) : value;
+    for (const row of refusalCases.cases) {
+      const calls = backend({ finish: { code: row.code, accounting } });
+      const { transport } = provider(() => Response.json(swap(row.body), { status: row.status }));
+      const response = await createTryOnHandler(config, register, transport)(post());
+      expect([response.status, await response.json()], row.id).toEqual([row.code === 'FILTERED' ? 422 : 502, { code: row.code }]);
+      expect(rpcBody(calls, 'tryon_finish'), row.id).toEqual({ p_owner_id: OWNER, p_request_id: REQUEST, ...row.finishArgs,
+        p_usage: row.finishArgs.p_usage === null ? null : payload, p_output_sha256: null, p_output_bytes: null, p_output: null,
+        p_fetch_started: true, p_client_live_at_fetch: true, p_client_gone: false });
       vi.unstubAllGlobals();
     }
   });

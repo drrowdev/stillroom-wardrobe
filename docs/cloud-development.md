@@ -642,7 +642,8 @@ reports (run by the coordinator in the SQL editor; it changes nothing):
 ```sql
 select u.request_id, u.purpose, u.charge_state, u.reserved_micro, u.accounted_micro,
        u.dispatched_at is not null as dispatched, e.enhance_code, e.enhance_settlement_origin,
-       e.enhance_probe_id, e.estimated_micro, e.anomaly, e.enhance_settlement_digest
+       e.enhance_probe_id, e.estimated_micro, e.anomaly, e.enhance_settlement_digest,
+       e.provider_refusal, e.usage_absent
 from private.ai_usage u
 join private.ai_usage_evidence e using (owner_id, request_id)
 where u.purpose = 'enhancement' and u.request_id = any($1::uuid[])
@@ -745,7 +746,8 @@ select u.request_id, u.charge_state, u.reserved_micro, u.accounted_micro,
        e.enhance_settlement_origin, e.tryon_probe_id,
        e.tryon_dispatch_authorised_at is not null as authorised,
        e.tryon_fetch_started, e.tryon_client_live_at_fetch,
-       e.tryon_client_gone_at_finish, e.tryon_settled_at, e.anomaly
+       e.tryon_client_gone_at_finish, e.tryon_settled_at, e.anomaly,
+       e.provider_refusal, e.usage_absent
 from private.ai_usage u
 join private.ai_usage_evidence e using (owner_id, request_id)
 where u.purpose = 'try_on' and u.request_id = any($1::uuid[])
@@ -837,6 +839,24 @@ Platform restore: after any database restore and before access reopens, run
 counts in the restore receipt. It deletes every try-on result, chain and attempt
 (none are in the app's export or restore), never usage or evidence, and settles
 held try-on usage that is already due.
+
+**FILT1 provider refusal kind (source only; hosted apply owner-gated as ledger 29).**
+Adds `20261005090000_provider_refusal.sql` after ledger 28, in one transaction:
+two nullable evidence columns (`provider_refusal`, `usage_absent`), the
+`filtered_unmetered` origin and its constraints, both replays, and
+`enhance_finish`/`tryon_finish` replaced with two optional trailing arguments
+(dropped with `RESTRICT`; service role only). The Edge adapters record a bounded
+refusal kind (`rai_input`, `rai_output`, `unknown_filter`, `unverified_filter`;
+no provider text). A proven refusal with genuinely absent usage is charged the
+full reservation, as Azure bills it, with no anomaly; malformed or partial usage
+and every other case keep today's settlement. Existing rows and digests are
+unchanged. Order, each by its responsible actor: G1 owner approves ledger 29;
+G2 apply it; G3 `notify pgrst, 'reload schema'` and confirm both finish
+functions answer an old-shaped call; G4 deploy `try-on`, then `enhance-photo`,
+from the merge commit (no Pages deploy); G5 read back a filtered request with
+the ledger queries above. Reconcile the `filtered_unmetered` charges against
+Azure Cost Management for the same period; the app records the reservation, not
+the invoice.
 
 **BG2c-2 "clean up photo" client (source only; inactive; plan rev4).** A newly
 chosen photo whose clean-up would be sent opens the crop editor as a pre-upload

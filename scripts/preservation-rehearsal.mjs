@@ -8,7 +8,7 @@ import {
   ROOT, assertNoServiceSecrets, assertProjectConfig, requireDocker, requireLocalContainer,
   cli, runCommand, normalSessionEnvironment, readCredentialCache, validateSessionEnvironment, privilegedLocalSql,
   DB_CONTAINER, commandEnvironment, jwtClaims, reportError, startAnalysisServer,
-  probeStep, resetProbe, probeFailureDetail,
+  probeStep, resetProbe, probeFailureDetail, localStatus,
 } from './backend/local.mjs';
 import { PUBLICATION_BODY_MD5, assertCiDatabaseMutationAllowed, verifyCiStorageGuard } from './backend/ci-storage-guard.mjs';
 import { isMain } from './quality/files.mjs';
@@ -25,12 +25,13 @@ const AZURE_TARGET_VERSION = '20260921193000';
 const HOSTED_SOURCE_VERSION = '20260910070000';
 const IMAGE_CHANGE_VERSION = '20260922020000';
 const COLOUR_VERSION = '20260924100000';
+const TRYON_STOP_VERSION = '20261004090000';
 // Exact applied prefix per labelled stage; 'target' is the full source inventory.
 const STAGE_VERSIONS = Object.freeze({ base: '20260905000000', 'hosted-source': HOSTED_SOURCE_VERSION,
   'prior-main': PRIOR_MAIN_VERSION, 'azure-target': AZURE_TARGET_VERSION, 'image-change': IMAGE_CHANGE_VERSION,
-  colours: COLOUR_VERSION, target: null });
+  colours: COLOUR_VERSION, 'tryon-stop': TRYON_STOP_VERSION, target: null });
 const STAGE_UPGRADES = Object.freeze({ 'azure-target': ['base', 'prior-main'], 'image-change': ['azure-target', 'hosted-source'],
-  colours: ['image-change'], target: ['colours'] });
+  colours: ['image-change'], 'tryon-stop': ['colours'], target: ['colours', 'tryon-stop'] });
 
 export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
@@ -61,6 +62,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261003090000_try_on.sql', version: '20261003090000', time: '2026-10-03 09:00:00', bytes: 103694, sha256: SOURCE_HASHES.tryOn },
   { name: '20261003090100_tryon_expire_schedule.sql', version: '20261003090100', time: '2026-10-03 09:01:00', bytes: 1930, sha256: SOURCE_HASHES.tryOnExpireSchedule },
   { name: '20261004090000_tryon_stop_before_claim.sql', version: '20261004090000', time: '2026-10-04 09:00:00', bytes: 21601, sha256: SOURCE_HASHES.tryOnStopBeforeClaim },
+  { name: '20261005090000_provider_refusal.sql', version: '20261005090000', time: '2026-10-05 09:00:00', bytes: 38858, sha256: SOURCE_HASHES.providerRefusal },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1287,10 +1289,19 @@ async function main() {
       await history('colours'); await verifyCiStorageGuard();
       stage = 'COL1-A3-twelve-compare';
       await verifyColourStage(colourSnapshot, privilegedLocalSql, 'colours');
-      stage = 'COL1-A4-twelve-to-fifteen';
-      await migrateToStage(run, 'colours', 'target');
+      stage = 'COL1-A4-twelve-to-tryon-stop';
+      await migrateToStage(run, 'colours', 'tryon-stop');
+      requireEvidence(await sameDatabaseIdentity() === colourContainer);
+      await history('tryon-stop'); await verifyCiStorageGuard();
+      stage = 'FILT1-upgrade-seed';
+      const { refusalUpgradeSeed, refusalUpgradeVerify } = await import('../tests/integration/tryon.sessions.mjs');
+      const refusalSeed = await refusalUpgradeSeed(colourSnapshot, privilegedLocalSql);
+      stage = 'FILT1-tryon-stop-to-target';
+      await migrateToStage(run, 'tryon-stop', 'target');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
       await history('target'); await verifyCiStorageGuard();
+      stage = 'FILT1-upgrade-verify';
+      await refusalUpgradeVerify(refusalSeed, privilegedLocalSql);
       stage = 'COL1-A5-fifteen-compare';
       await verifyColourStage(colourSnapshot, privilegedLocalSql, 'target');
       stage = 'COL1-A6-fifteen-probes';
@@ -1306,7 +1317,9 @@ async function main() {
       colourFinalizer.assertRunning();
       stage = 'BG2b-enhancement-ledger';
       const { enhancementLedgerProbes } = await import('../tests/integration/enhancement-ledger.sessions.mjs');
-      await enhancementLedgerProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BG2b-enhancement-${label}`; });
+      // FILT1: the old-Edge compatibility checks call the local PostgREST RPC with the disposable stack's service key.
+      const localService = await localStatus();
+      await enhancementLedgerProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BG2b-enhancement-${label}`; }, localService);
       colourFinalizer.assertRunning();
       stage = 'AD1-admin-limits';
       const { adminLimitsProbes } = await import('../tests/integration/admin-limits.sessions.mjs');
@@ -1314,9 +1327,10 @@ async function main() {
       colourFinalizer.assertRunning();
       stage = 'VTO1-tryon-ledger';
       const { tryonProbes } = await import('../tests/integration/tryon.sessions.mjs');
-      await tryonProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `VTO1-tryon-${label}`; });
+      await tryonProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `VTO1-tryon-${label}`; }, localService);
       colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
+    console.log('PASS: FILT1 upgrade; try-on and enhancement rows settled by the old finishes keep their digest, origin, anomaly and amount after the provider_refusal migration, the new columns are null, replays with the refusal arguments omitted or null match and write nothing; seeded rows removed before the compare; no provider calls');
     console.log('PASS: COL1 populated11/twelve/fifteen; rows, v1 manifest and unchanged bodies preserved at each compare; probes only after fifteen; no provider calls');
     console.log('PASS: P6d tag history; v2 equals legacy for recorded history, recorded history re-imported through the RPC and a second generation imported, concurrent and completion races settle serially; no provider calls');
     console.log('PASS: ST1a stylist ledger; service-only claim/finish, idempotent and conflicting finish, invalid/anomaly/overrun precedence disables only the stylist, scheduled expiry then observed finish, UTC month, sub-limit and shared allowance, shared-limit and freeze races, operator allocation, confirmed-weather and fenced context, export unchanged; no provider calls');

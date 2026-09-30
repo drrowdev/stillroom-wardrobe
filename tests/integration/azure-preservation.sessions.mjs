@@ -446,8 +446,10 @@ export const TRYON_ADDED_COLUMNS = Object.freeze({
   ai_usage_evidence: Object.freeze(['tryon_dispatch_before', 'tryon_dispatch_authorised_at', 'tryon_probe_id',
     'tryon_fetch_started', 'tryon_client_live_at_fetch', 'tryon_client_gone_at_finish', 'tryon_settled_at']),
 });
+// FILT1 adds two nullable evidence columns; pre-existing rows keep them null (asserted at the target).
+export const FILT1_ADDED_COLUMNS = Object.freeze({ ai_usage_evidence: Object.freeze(['provider_refusal', 'usage_absent']) });
 const addedColumns = (table) => [...(STYLIST_ADDED_COLUMNS[table] ?? []), ...(ENHANCEMENT_ADDED_COLUMNS[table] ?? []),
-  ...(TRYON_ADDED_COLUMNS[table] ?? [])];
+  ...(TRYON_ADDED_COLUMNS[table] ?? []), ...(FILT1_ADDED_COLUMNS[table] ?? [])];
 const strip = (table) => (addedColumns(table).length ? ` - array[${addedColumns(table).map(literal).join(',')}]` : '');
 const digest = (relation, order) => `(select jsonb_build_object('n',count(*),'md5',
   md5(coalesce(string_agg((to_jsonb(t)${strip(relation.split('.')[1])})::text,E'\n' order by ${order}),''))) from ${relation} t)`;
@@ -678,6 +680,7 @@ export async function verifyColourStage(snapshot, sql, stage) {
     equal(JSON.parse(await sql(`select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(CLEANUP_MANIFEST_ROW.id)};`)),
       CLEANUP_MANIFEST_ROW);
     equal(JSON.parse(await sql(tryonDefaultsSql)), { controls: 0, usage: 0, evidence: 0 });
+    equal((await sql(`select count(*) from private.ai_usage_evidence where num_nonnulls(provider_refusal,usage_absent)>0;`)).trim(), '0');
     equal(JSON.parse(await sql(`select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(TRYON_MANIFEST_ROW.id)};`)),
       TRYON_MANIFEST_ROW);
   }

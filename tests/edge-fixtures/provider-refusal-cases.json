@@ -1,0 +1,1836 @@
+{
+  "description": "FILT1 shared provider-refusal cases (plan rev3 §7). Synthetic images-API replies {status, body} with the expected adapter outcome, the exact finish arguments and the settlement. $USAGE is the feature's valid raw usage, $PAYLOAD its normalised payload and $MODEL its recognised model; each suite substitutes its own.",
+  "cases": [
+    {
+      "id": "rai-input",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system."
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "rai_input",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "rai_input",
+        "p_usage_absent": true
+      },
+      "origin": "filtered_unmetered",
+      "anomaly": false
+    },
+    {
+      "id": "rai-output",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system.",
+          "content_filter_results": {
+            "sexual": {
+              "filtered": true,
+              "severity": "high"
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "rai_output",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "rai_output",
+        "p_usage_absent": true
+      },
+      "origin": "filtered_unmetered",
+      "anomaly": false
+    },
+    {
+      "id": "content-policy-violation",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic"
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unknown_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unknown_filter",
+        "p_usage_absent": true
+      },
+      "origin": "filtered_unmetered",
+      "anomaly": false
+    },
+    {
+      "id": "content-filter",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter",
+          "message": "synthetic"
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unknown_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unknown_filter",
+        "p_usage_absent": true
+      },
+      "origin": "filtered_unmetered",
+      "anomaly": false
+    },
+    {
+      "id": "content-filter-other-message",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "synthetic"
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unknown_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unknown_filter",
+        "p_usage_absent": true
+      },
+      "origin": "filtered_unmetered",
+      "anomaly": false
+    },
+    {
+      "id": "near-miss-case",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "your task failed as a result of our safety system."
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unknown_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unknown_filter",
+        "p_usage_absent": true
+      },
+      "origin": "filtered_unmetered",
+      "anomaly": false
+    },
+    {
+      "id": "near-miss-space",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system. "
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unknown_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unknown_filter",
+        "p_usage_absent": true
+      },
+      "origin": "filtered_unmetered",
+      "anomaly": false
+    },
+    {
+      "id": "recognised-model",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system."
+        },
+        "model": "$MODEL"
+      },
+      "code": "FILTERED",
+      "refusal": "rai_input",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "rai_input",
+        "p_usage_absent": true
+      },
+      "origin": "filtered_unmetered",
+      "anomaly": false
+    },
+    {
+      "id": "negative-counter",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system."
+        },
+        "usage": {
+          "input_tokens": -1,
+          "output_tokens": 0,
+          "total_tokens": -1,
+          "input_tokens_details": {
+            "text_tokens": 0,
+            "image_tokens": -1
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "rai_input",
+      "metering": "faulty",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "rai_input",
+        "p_usage_absent": false
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "usage-null",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system."
+        },
+        "usage": null
+      },
+      "code": "FILTERED",
+      "refusal": "rai_input",
+      "metering": "faulty",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "rai_input",
+        "p_usage_absent": false
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "incomplete-over-envelope",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system."
+        },
+        "usage": {
+          "output_tokens": 12000
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "rai_output",
+      "metering": "faulty",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "rai_output",
+        "p_usage_absent": false
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "unrecognised-model",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system."
+        },
+        "model": "unrecognised-model"
+      },
+      "code": "FILTERED",
+      "refusal": "rai_input",
+      "metering": "faulty",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "rai_input",
+        "p_usage_absent": false
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "missing-detail",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system."
+        },
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 0,
+          "total_tokens": 10
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "rai_input",
+      "metering": "faulty",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "rai_input",
+        "p_usage_absent": false
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "stray-counter",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system."
+        },
+        "input_tokens": 10
+      },
+      "code": "FILTERED",
+      "refusal": "rai_input",
+      "metering": "faulty",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "rai_input",
+        "p_usage_absent": false
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "moderation-blocked",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "moderation_blocked",
+          "message": "synthetic"
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "responsible-ai-outer",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "ResponsibleAIPolicyViolation",
+          "message": "synthetic"
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "inner-only",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "BadRequest",
+          "message": "synthetic",
+          "innererror": {
+            "code": "ResponsibleAIPolicyViolation"
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "inner-only-underscore",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "invalid_request_error",
+          "inner_error": {
+            "code": "content_filter"
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "content-filter-403",
+      "status": 403,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system."
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "content-policy-500",
+      "status": 500,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic"
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "filter-system-error",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter_error",
+          "message": "synthetic"
+        }
+      },
+      "code": "FAILED",
+      "refusal": null,
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FAILED",
+        "p_usage": null,
+        "p_refusal_kind": null,
+        "p_usage_absent": null
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "generic-400",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "InvalidPayload",
+          "message": "Your task failed as a result of our safety system."
+        }
+      },
+      "code": "FAILED",
+      "refusal": null,
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FAILED",
+        "p_usage": null,
+        "p_refusal_kind": null,
+        "p_usage_absent": null
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "message-only",
+      "status": 400,
+      "body": {
+        "error": {
+          "message": "Your task failed as a result of our safety system."
+        }
+      },
+      "code": "FAILED",
+      "refusal": null,
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FAILED",
+        "p_usage": null,
+        "p_refusal_kind": null,
+        "p_usage_absent": null
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "rate-limited",
+      "status": 429,
+      "body": {
+        "error": {
+          "code": "rate_limit_exceeded",
+          "message": "synthetic"
+        }
+      },
+      "code": "FAILED",
+      "refusal": null,
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FAILED",
+        "p_usage": null,
+        "p_refusal_kind": null,
+        "p_usage_absent": null
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "ok-status-filter-code",
+      "status": 200,
+      "body": {
+        "error": {
+          "code": "content_filter"
+        }
+      },
+      "code": "FAILED",
+      "refusal": null,
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FAILED",
+        "p_usage": null,
+        "p_refusal_kind": null,
+        "p_usage_absent": null
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "observed-usage",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic"
+        },
+        "usage": "$USAGE"
+      },
+      "code": "FILTERED",
+      "refusal": "unknown_filter",
+      "metering": "observed",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": "$PAYLOAD",
+        "p_refusal_kind": "unknown_filter",
+        "p_usage_absent": null
+      },
+      "origin": "observed",
+      "anomaly": false
+    },
+    {
+      "id": "guard-contentFilter-input-innererror.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "innererror": {
+            "code": "content_filter_error"
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-input-inner_error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "inner_error": {
+            "code": "content_filter_error"
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-input-content_filter_results.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "content_filter_results": {
+            "error": {
+              "code": "content_filter_error"
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-input-content_filter_result.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "content_filter_result": {
+            "error": {
+              "code": "content_filter_error"
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-input-content_filter_results.sexual.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "content_filter_results": {
+            "sexual": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-input-innererror.content_filter_results.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "innererror": {
+            "content_filter_results": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-input-innererror.content_filter_result.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "innererror": {
+            "content_filter_result": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-input-innererror.content_filter_results.sexual.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "innererror": {
+            "content_filter_results": {
+              "sexual": {
+                "error": {
+                  "code": "content_filter_error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-input-inner_error.content_filter_results.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "inner_error": {
+            "content_filter_results": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-input-inner_error.content_filter_result.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "inner_error": {
+            "content_filter_result": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-input-inner_error.content_filter_results.sexual.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "inner_error": {
+            "content_filter_results": {
+              "sexual": {
+                "error": {
+                  "code": "content_filter_error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-output-innererror.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system.",
+          "innererror": {
+            "code": "content_filter_error"
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-output-inner_error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system.",
+          "inner_error": {
+            "code": "content_filter_error"
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-output-content_filter_results.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system.",
+          "content_filter_results": {
+            "error": {
+              "code": "content_filter_error"
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-output-content_filter_result.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system.",
+          "content_filter_result": {
+            "error": {
+              "code": "content_filter_error"
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-output-content_filter_results.sexual.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system.",
+          "content_filter_results": {
+            "sexual": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-output-innererror.content_filter_results.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system.",
+          "innererror": {
+            "content_filter_results": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-output-innererror.content_filter_result.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system.",
+          "innererror": {
+            "content_filter_result": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-output-innererror.content_filter_results.sexual.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system.",
+          "innererror": {
+            "content_filter_results": {
+              "sexual": {
+                "error": {
+                  "code": "content_filter_error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-output-inner_error.content_filter_results.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system.",
+          "inner_error": {
+            "content_filter_results": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-output-inner_error.content_filter_result.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system.",
+          "inner_error": {
+            "content_filter_result": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-contentFilter-output-inner_error.content_filter_results.sexual.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Generated image was filtered as a result of our safety system.",
+          "inner_error": {
+            "content_filter_results": {
+              "sexual": {
+                "error": {
+                  "code": "content_filter_error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_policy_violation-innererror.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic",
+          "innererror": {
+            "code": "content_filter_error"
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_policy_violation-inner_error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic",
+          "inner_error": {
+            "code": "content_filter_error"
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_policy_violation-content_filter_results.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic",
+          "content_filter_results": {
+            "error": {
+              "code": "content_filter_error"
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_policy_violation-content_filter_result.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic",
+          "content_filter_result": {
+            "error": {
+              "code": "content_filter_error"
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_policy_violation-content_filter_results.sexual.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic",
+          "content_filter_results": {
+            "sexual": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_policy_violation-innererror.content_filter_results.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic",
+          "innererror": {
+            "content_filter_results": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_policy_violation-innererror.content_filter_result.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic",
+          "innererror": {
+            "content_filter_result": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_policy_violation-innererror.content_filter_results.sexual.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic",
+          "innererror": {
+            "content_filter_results": {
+              "sexual": {
+                "error": {
+                  "code": "content_filter_error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_policy_violation-inner_error.content_filter_results.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic",
+          "inner_error": {
+            "content_filter_results": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_policy_violation-inner_error.content_filter_result.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic",
+          "inner_error": {
+            "content_filter_result": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_policy_violation-inner_error.content_filter_results.sexual.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_policy_violation",
+          "message": "synthetic",
+          "inner_error": {
+            "content_filter_results": {
+              "sexual": {
+                "error": {
+                  "code": "content_filter_error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_filter-innererror.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter",
+          "message": "synthetic",
+          "innererror": {
+            "code": "content_filter_error"
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_filter-inner_error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter",
+          "message": "synthetic",
+          "inner_error": {
+            "code": "content_filter_error"
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_filter-content_filter_results.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter",
+          "message": "synthetic",
+          "content_filter_results": {
+            "error": {
+              "code": "content_filter_error"
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_filter-content_filter_result.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter",
+          "message": "synthetic",
+          "content_filter_result": {
+            "error": {
+              "code": "content_filter_error"
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_filter-content_filter_results.sexual.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter",
+          "message": "synthetic",
+          "content_filter_results": {
+            "sexual": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_filter-innererror.content_filter_results.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter",
+          "message": "synthetic",
+          "innererror": {
+            "content_filter_results": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_filter-innererror.content_filter_result.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter",
+          "message": "synthetic",
+          "innererror": {
+            "content_filter_result": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_filter-innererror.content_filter_results.sexual.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter",
+          "message": "synthetic",
+          "innererror": {
+            "content_filter_results": {
+              "sexual": {
+                "error": {
+                  "code": "content_filter_error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_filter-inner_error.content_filter_results.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter",
+          "message": "synthetic",
+          "inner_error": {
+            "content_filter_results": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_filter-inner_error.content_filter_result.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter",
+          "message": "synthetic",
+          "inner_error": {
+            "content_filter_result": {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-content_filter-inner_error.content_filter_results.sexual.error.code",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "content_filter",
+          "message": "synthetic",
+          "inner_error": {
+            "content_filter_results": {
+              "sexual": {
+                "error": {
+                  "code": "content_filter_error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "unverified_filter",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "unverified_filter",
+        "p_usage_absent": true
+      },
+      "origin": "unmetered",
+      "anomaly": true
+    },
+    {
+      "id": "guard-control-leaf",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "content_filter_results": {
+            "error": {
+              "code": "content_filter_errors"
+            }
+          }
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "rai_input",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "rai_input",
+        "p_usage_absent": true
+      },
+      "origin": "filtered_unmetered",
+      "anomaly": false
+    },
+    {
+      "id": "guard-control-array",
+      "status": 400,
+      "body": {
+        "error": {
+          "code": "contentFilter",
+          "message": "Your task failed as a result of our safety system.",
+          "content_filter_results": [
+            {
+              "error": {
+                "code": "content_filter_error"
+              }
+            }
+          ]
+        }
+      },
+      "code": "FILTERED",
+      "refusal": "rai_input",
+      "metering": "absent",
+      "finishArgs": {
+        "p_code": "FILTERED",
+        "p_usage": null,
+        "p_refusal_kind": "rai_input",
+        "p_usage_absent": true
+      },
+      "origin": "filtered_unmetered",
+      "anomaly": false
+    }
+  ]
+}

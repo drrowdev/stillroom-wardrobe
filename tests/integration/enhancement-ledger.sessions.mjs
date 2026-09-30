@@ -10,6 +10,7 @@ import { equal, analysisHash } from './ai-analysis.sessions.mjs';
 import { intent, saveHarness, denied, bytes } from './item-save.sessions.mjs';
 import { imageChangeIntent } from './image-replacement.sessions.mjs';
 import { COLOUR_MANIFEST } from './azure-preservation.sessions.mjs';
+import { refusalRows, serviceRpcOf, awaitHttpReadiness, legacyDigestHolds } from './tryon.sessions.mjs';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
 
 // BG2c-1: new claims admit only the clean-up manifest under notice revision 2; enhance-v1 rows are legacy work.
@@ -31,7 +32,7 @@ const VALID = Object.freeze({ modelObservation: 'not_observed', input: 1000, out
   inputImage: 900 });
 const ESTIMATE = 128000;
 
-export async function enhancementLedgerProbes(snapshot, sql, mark) {
+export async function enhancementLedgerProbes(snapshot, sql, mark, service) {
   const { client, owners: [a, b] } = snapshot;
   const one = async (text) => JSON.parse(await sql(text));
   const scalar = async (text) => (await sql(text)).trim();
@@ -532,6 +533,116 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
     await reactivate(a);
     equal((await client.rpc(a, 'enhance_set_consent', { p_enabled: true, p_notice_revision: NOTICE })).code, 'OK');
     await freeSlots();
+
+    mark('refusal');
+    {
+    // FILT1 (a)-(g) for photo clean-up. Only a proven refusal with genuinely absent metering is filtered_unmetered.
+    const refusalFinish = (owner, id, code, usage, kind, absent) => one(`select public.enhance_finish(${literal(owner.uid)},
+      ${literal(id)},${literal(code)},${usage === null ? 'null::jsonb' : json(usage)},null::text,null::integer,
+      ${orNull(kind, 'text')},${absent === null ? 'null::boolean' : String(absent)});`);
+    const fresh = async (probeId = null) => {
+      await freeSlots();
+      const id = randomUUID();
+      requireEvidence((await claim(a, id, { probe: probeId })).claimed === true);
+      return id;
+    };
+    let qualifying = null;
+    for (const row of refusalRows(VALID)) {
+      const { p_code: code, p_usage: usage, p_refusal_kind: kind, p_usage_absent: absent } = row.args;
+      const id = await fresh();
+      equal((await refusalFinish(a, id, code, usage, kind, absent)).code, code);
+      const { usage: u, evidence: e } = await ledger(a, id);
+      if (!(u.charge_state === 'estimated' && u.closed_reason === 'FAILED' && e.enhance_settlement_origin === row.origin
+        && e.anomaly === row.anomaly && e.enhance_code === code && e.provider_refusal === kind && e.usage_absent === absent
+        && u.accounted_micro === (usage === null ? RESERVED : e.estimated_micro) && await evidence(a, id) === null)) {
+        throw new Error(`FILT1 enhancement row ${row.id}: ${JSON.stringify({ u, e })}`);
+      }
+      requireEvidence((await capacity()).dispatch_enabled === true && (await controls(a)).enhance_activated === true);
+      if (row.origin === 'filtered_unmetered' && qualifying === null) qualifying = { id, kind, absent };
+    }
+    requireEvidence(qualifying !== null);
+    const keptRefusal = await ledger(a, qualifying.id);
+    equal((await refusalFinish(a, qualifying.id, 'FILTERED', null, qualifying.kind, true)).code, 'FILTERED');
+    equal((await refusalFinish(a, qualifying.id, 'FILTERED', null, qualifying.kind === 'rai_input' ? 'rai_output' : 'rai_input',
+      true)).code, 'USAGE_CONFLICT');
+    equal((await refusalFinish(a, qualifying.id, 'FILTERED', null, qualifying.kind, false)).code, 'USAGE_CONFLICT');
+    equal((await finish(a, qualifying.id, 'FILTERED', null)).code, 'USAGE_CONFLICT');
+    equal(await ledger(a, qualifying.id), keptRefusal);
+    const pendingRefusal = await fresh();
+    const heldRefusal = await ledger(a, pendingRefusal);
+    for (const [code, usage, kind, absent] of [['FILTERED', null, 'model_moderation', true], ['FAILED', null, 'rai_input', null],
+      ['FAILED', null, null, true], ['FILTERED', VALID, 'rai_input', true], ['FILTERED', null, null, true]]) {
+      equal((await refusalFinish(a, pendingRefusal, code, usage, kind, absent)).code, 'INVALID_INPUT');
+    }
+    equal(await ledger(a, pendingRefusal), heldRefusal);
+    equal((await refusalFinish(a, pendingRefusal, 'FILTERED', null, null, null)).code, 'FILTERED');
+    const oldShape = await ledger(a, pendingRefusal);
+    requireEvidence(oldShape.evidence.enhance_settlement_origin === 'unmetered' && oldShape.evidence.anomaly === true);
+    const namedRefusal = await fresh();
+    equal((await one(`select public.enhance_finish(p_owner_id=>${literal(a.uid)},p_request_id=>${literal(namedRefusal)},
+      p_code=>'FILTERED',p_usage=>null,p_output_sha256=>null,p_output_bytes=>null);`)).code, 'FILTERED');
+    const namedRow = await ledger(a, namedRefusal);
+    requireEvidence(namedRow.evidence.enhance_settlement_origin === 'unmetered' && namedRow.evidence.anomaly === true
+      && namedRow.evidence.provider_refusal === null && namedRow.evidence.usage_absent === null);
+    const unavailable = await sql(`begin; set local role service_role; select 'R:'||public.enhance_finish(
+      p_owner_id=>${literal(randomUUID())},p_request_id=>${literal(randomUUID())},p_code=>'FILTERED',p_usage=>null,
+      p_output_sha256=>null,p_output_bytes=>null)::text; commit;`);
+    equal(JSON.parse(unavailable.split('\n').map((line) => line.trim()).find((line) => line.startsWith('R:')).slice(2)),
+      { code: 'UNAVAILABLE', accounting: null });
+    // (g, HTTP) An old Edge reaches the finish through PostgREST: readiness, then legacy settlement, replay and the
+    // unchanged digest with the new arguments omitted and explicitly null; a new Edge's qualifying refusal as well.
+    const serviceRpc = serviceRpcOf(service);
+    const legacyBody = (owner, id, extra = {}) => ({ p_owner_id: owner, p_request_id: id, p_code: 'FILTERED', p_usage: null,
+      p_output_sha256: null, p_output_bytes: null, ...extra });
+    await awaitHttpReadiness(serviceRpc, sql, 'enhance_finish', (owner, id) => legacyBody(owner, id));
+    const nulls = { p_refusal_kind: null, p_usage_absent: null };
+    for (const [first, second, extra] of [[{}, nulls, {}], [nulls, {}, {}], [{}, nulls, { p_code: 'FAILED', p_usage: VALID }]]) {
+      const id = await fresh();
+      const settledHttp = await serviceRpc('enhance_finish', legacyBody(a.uid, id, { ...extra, ...first }));
+      requireEvidence(settledHttp.status === 200 && settledHttp.data?.code === (extra.p_code ?? 'FILTERED'));
+      const row = await ledger(a, id);
+      requireEvidence(extra.p_usage ? row.evidence.enhance_settlement_origin === 'observed' && row.evidence.anomaly === false
+        : row.evidence.enhance_settlement_origin === 'unmetered' && row.evidence.anomaly === true && row.usage.accounted_micro === RESERVED);
+      requireEvidence(await legacyDigestHolds(sql, a, id) && await evidence(a, id) === null);
+      const replayed = await serviceRpc('enhance_finish', legacyBody(a.uid, id, { ...extra, ...second }));
+      requireEvidence(replayed.status === 200 && replayed.data?.code === (extra.p_code ?? 'FILTERED') && replayed.data.replayed === true);
+      equal(await ledger(a, id), row);
+    }
+    const viaHttp = await fresh();
+    const newShape = await serviceRpc('enhance_finish', legacyBody(a.uid, viaHttp, { p_refusal_kind: 'rai_input', p_usage_absent: true }));
+    requireEvidence(newShape.status === 200 && newShape.data?.code === 'FILTERED');
+    const viaHttpRow = await ledger(a, viaHttp);
+    requireEvidence(viaHttpRow.evidence.enhance_settlement_origin === 'filtered_unmetered' && viaHttpRow.evidence.anomaly === false);
+    requireEvidence((await capacity()).dispatch_enabled === true && (await controls(a)).enhance_activated === true);
+    // (f) The table constraints refuse contradictory rows written directly.
+    for (const assignment of [`provider_refusal='rai_input'`, `provider_refusal='model_moderation'`, 'usage_absent=true',
+      `enhance_settlement_origin='filtered_unmetered'`]) {
+      const target = assignment.startsWith('enhance_settlement_origin') ? namedRefusal : obs;
+      await sql(`do $$ begin
+        update private.ai_usage_evidence set ${assignment} where owner_id=${literal(a.uid)} and request_id=${literal(target)};
+        raise exception 'FILT1 constraint not enforced: %', ${literal(assignment)};
+      exception when check_violation then null; end $$;`);
+    }
+    equal(await ledger(a, namedRefusal), namedRow);
+    // (e) A probe still stops on a qualifying refusal; the switch and the ordinary settings stay.
+    await sql(`update private.ai_controls set enhance_activated=false where owner_id=${literal(a.uid)};`);
+    requireEvidence((await client.rpc(a, 'enhance_set_consent', { p_enabled: false, p_notice_revision: null })).consent.enabled === false);
+    const refusalProbe = randomUUID();
+    equal((await authorise(refusalProbe, 1, RESERVED, `ledger-refusal-${refusalProbe}`, expires)).code, 'OK');
+    const probed = await fresh(refusalProbe);
+    const controlsBefore = await controls(a);
+    equal((await refusalFinish(a, probed, 'FILTERED', null, 'rai_input', true)).code, 'FILTERED');
+    equal((await ledger(a, probed)).evidence.enhance_settlement_origin, 'filtered_unmetered');
+    equal(await one(`select jsonb_build_object('reason',stopped_reason) from private.enhancement_probe_authorisations
+      where id=${literal(refusalProbe)};`), { reason: 'MISSING_USAGE' });
+    equal(await controls(a), controlsBefore);
+    requireEvidence((await capacity()).dispatch_enabled === true);
+    await reactivate(a);
+    equal((await client.rpc(a, 'enhance_set_consent', { p_enabled: true, p_notice_revision: NOTICE })).code, 'OK');
+    const ordinary = await fresh();
+    equal((await finish(a, ordinary, 'NOT_DISPATCHED', null)).code, 'NOT_DISPATCHED');
+    await freeSlots();
+    }
 
     const sh = saveHarness(client, a), shB = saveHarness(client, b);
     try {

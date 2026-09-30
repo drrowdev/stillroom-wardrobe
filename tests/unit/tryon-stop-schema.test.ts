@@ -61,15 +61,18 @@ const REPLACED: [string, string, [string, string][]][] = [
 ];
 
 describe('try-on Stop before claim migration (VTO-3a)', () => {
-  it('is one LF transaction, the last migration, with no drop', async () => {
+  it('is one LF transaction, directly after the try-on expiry schedule, with no drop', async () => {
     const sql = await read(MAIN);
     expect(sql.startsWith('-- VTO-3a')).toBe(true);
     expect(sql).toContain('\nbegin;\n');
     expect(sql.trimEnd().endsWith('commit;')).toBe(true);
     expect(sql).not.toContain('\r');
+    // Predecessor-relative (FILT1 rev3 B2): later migrations follow without changing this file's neighbours.
     const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
-    expect(names.at(-1)).toBe(MAIN);
-    expect(names.at(-2)).toBe('20261003090100_tryon_expire_schedule.sql');
+    const i = names.indexOf(MAIN);
+    expect(i).toBeGreaterThan(0);
+    expect(names[i - 1]).toBe('20261003090100_tryon_expire_schedule.sql');
+    expect(names[i + 1]).toBe('20261005090000_provider_refusal.sql');
     expect(sql).not.toMatch(/\bdrop\b/i);
     expect(sql).not.toMatch(/\bgrant\b/i);
     expect(sql).not.toMatch(/\bexport_manifest\b/);
