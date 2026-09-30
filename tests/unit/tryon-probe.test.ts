@@ -38,6 +38,7 @@ type Options = {
   deleteResult?: () => Response;
   sleep?: (ms: number) => void;
   wallNow?: number;
+  statusLatency?: number;
 };
 
 function harness(options: Options = {}) {
@@ -56,7 +57,7 @@ function harness(options: Options = {}) {
       written.push({ path, bytes, flag: opts?.flag });
     },
     now: () => clock,
-    wallNow: () => options.wallNow ?? Date.UTC(2026, 9, 1, 9),
+    wallNow: () => (options.wallNow ?? Date.UTC(2026, 9, 1, 9)) + clock,
     sleep: async (ms: number) => { options.sleep?.(ms); sleeps.push(ms); clock += ms; },
     newId: () => `22222222-2222-4222-8222-${String(++ids).padStart(12, '0')}`,
     admit: options.admit ?? ((bytes: Uint8Array) => ({ bytes, width: 1024, height: 1280, stripped: false })),
@@ -65,10 +66,13 @@ function harness(options: Options = {}) {
     clearTimeout: () => undefined,
     fetch: async (url: string, init: RequestInit) => {
       fetches.push(url.replace(HOSTED_URL, ''));
-      if (url.endsWith('/rpc/tryon_status')) return options.status?.(statuses++) ?? json(statusBody());
+      if (url.endsWith('/rpc/tryon_status')) {
+        clock += options.statusLatency ?? 0;
+        return options.status?.(statuses++) ?? json(statusBody());
+      }
       if (url.endsWith('/rpc/tryon_cancel')) return options.cancel?.(cancels++) ?? json({ code: 'CANCELLED' });
       if (url.endsWith('/rpc/tryon_chain_status')) {
-        return options.chainStatus?.(chainStatuses++) ?? json({ code: 'OK', state: 'complete', activeAttempt: false, resultId: RESULT });
+        return options.chainStatus?.(chainStatuses++) ?? json({ code: 'OK', state: 'running', nextStep: 2, activeAttempt: false, resultId: null });
       }
       if (url.endsWith('/rpc/tryon_result_image_v1')) {
         return options.resultImage?.() ?? json({ code: 'OK', jpegBase64: Buffer.from(finalImage).toString('base64'), bytes: finalImage.byteLength });
@@ -277,6 +281,8 @@ describe('try-on probe script', () => {
       [() => json({ code: 'NOT_FOUND' }), 'STATUS_UNREADABLE'],
       [() => new Response('x', { status: 500 }), 'STATUS_UNREADABLE'],
       [() => json({ code: 'OK', state: 'running', activeAttempt: true, resultId: null }), 'SETTLE_TIMEOUT'],
+      // A complete chain with an active attempt is not settled either.
+      [() => json({ code: 'OK', state: 'complete', activeAttempt: true, resultId: RESULT }), 'SETTLE_TIMEOUT'],
     ];
     for (const [chainStatus, code] of cases) {
       const h = harness({ chainStatus });
@@ -311,7 +317,8 @@ describe('try-on probe script', () => {
   });
 
   it('settles a completed P3 only after its picture is deleted, and sends P2 after that', async () => {
-    const h = harness({ cancel: (index) => index === 1 ? json({ code: 'COMPLETED', resultId: RESULT }) : json({ code: 'CANCELLED' }) });
+    const h = harness({ chainStatus: () => json({ code: 'OK', state: 'complete', activeAttempt: false, resultId: RESULT }),
+      cancel: (index) => index === 1 ? json({ code: 'COMPLETED', resultId: RESULT }) : json({ code: 'CANCELLED' }) });
     const { calls, lines, complete } = await runProbe(env(), h.deps);
     expect(complete).toBe(true);
     expect(calls.map((c) => c.code)).toEqual(['OK', 'OK', 'OK', 'DISCONNECTED', 'FILTERED']);
@@ -329,6 +336,13 @@ describe('try-on probe script', () => {
       { cancel: (index) => index === 1 ? json({ code: 'COMPLETED', resultId: RESULT }) : json({ code: 'CANCELLED' }),
         deleteResult: () => json({ code: 'NOT_FOUND' }) },
       { cancel: (index) => index === 1 ? json({ code: 'COMPLETED', resultId: null }) : json({ code: 'CANCELLED' }) },
+      // A completed P3 needs COMPLETED with the observed result and its deletion: a bare CANCELLED is not enough.
+      { chainStatus: () => json({ code: 'OK', state: 'complete', activeAttempt: false, resultId: RESULT }) },
+      { chainStatus: () => json({ code: 'OK', state: 'complete', activeAttempt: false, resultId: RESULT }), cancel: (index) => index === 1 ? json({ code: 'COMPLETED', resultId: '44444444-4444-4444-8444-444444444445' }) : json({ code: 'CANCELLED' }) },
+      { chainStatus: () => json({ code: 'OK', state: 'complete', activeAttempt: false, resultId: RESULT }), cancel: (index) => index === 1 ? json({ code: 'COMPLETED', resultId: RESULT }) : json({ code: 'CANCELLED' }),
+        deleteResult: () => json({ code: 'NOT_FOUND' }) },
+      // A chain seen waiting for its next step must answer CANCELLED, not COMPLETED.
+      { cancel: (index) => index === 1 ? json({ code: 'COMPLETED', resultId: RESULT }) : json({ code: 'CANCELLED' }) },
     ];
     for (const options of cases) {
       const h = harness(options);
@@ -482,6 +496,59 @@ describe('try-on probe script', () => {
       expect(calls.map((c) => c.code)).toEqual(['FILTERED']);
       expectStartsSpaced(h.starts);
       expect(report(lines)).toContain('Paid calls sent: 1 of at most 1.');
+    });
+
+    it('treats a malformed OK or an intermediate picture as incomplete, cleans up and sends nothing more', async () => {
+      const intermediate = () => new Response(stepImage(1), { headers: { 'content-type': 'image/jpeg', 'x-stillroom-tryon-sha256': hash(stepImage(1)) } });
+      for (const step of [() => json({ code: 'OK' }), () => json({ code: 'OK', resultId: 'not-a-uuid' }), intermediate]) {
+        const h = harness({ step });
+        const { calls, lines, complete } = await runProbe(p2Env(), h.deps);
+        expect(complete).toBe(false);
+        expect(h.steps).toHaveLength(1);
+        expect(calls).toHaveLength(1);
+        expect(h.written).toHaveLength(0);
+        expect(h.fetches.filter((url) => url.endsWith('tryon_cancel')).length).toBeGreaterThanOrEqual(1);
+        expect(h.fetches).not.toContain('/rest/v1/rpc/tryon_delete_result');
+        const text = report(lines);
+        expect(text).toContain('P2 filter challenge: OK_NOT_FINAL (recorded).');
+        expect(text).toContain('Paid calls sent: 1 of at most 1.');
+        expect(text).toContain('Outcome: INCOMPLETE.');
+      }
+    });
+
+    it('is incomplete when a final P2 result is not the one completed or is not deleted', async () => {
+      const final = () => json({ code: 'OK', resultId: RESULT, expiresAtMs: 1 });
+      for (const options of [
+        { step: final },
+        { step: final, cancel: () => json({ code: 'COMPLETED', resultId: '44444444-4444-4444-8444-444444444445' }) },
+        { step: final, cancel: () => json({ code: 'COMPLETED', resultId: RESULT }), deleteResult: () => json({ code: 'NOT_FOUND' }) },
+      ] as Options[]) {
+        const h = harness(options);
+        const { lines, complete } = await runProbe(p2Env(), h.deps);
+        expect(complete).toBe(false);
+        expect(h.steps).toHaveLength(1);
+        expect(report(lines)).toContain('Stopped after P2: P2_TIDY_UNCONFIRMED.');
+      }
+    });
+
+    it('sends nothing once the Helsinki date passes 7 October, even mid-retry or during the preflight', async () => {
+      // A RATE_LIMIT at 23:59:30; the retry waits 65 s, which ends after midnight, so it is never sent.
+      const retry = harness({ wallNow: HELSINKI_MIDNIGHT - 30_000, step: () => json({ code: 'RATE_LIMIT' }, 429) });
+      const late = await runProbe(p2Env(), retry.deps);
+      expect(retry.steps).toHaveLength(1);
+      expect(late.calls).toHaveLength(0);
+      expect(late.complete).toBe(false);
+      expect(report(late.lines)).toContain('Stopped before P2 step 1: deadline_passed.');
+      expect(report(late.lines)).toContain('Paid calls sent: 0 of at most 1.');
+      // Cleanup still runs after the deadline.
+      expect(retry.fetches.filter((url) => url.endsWith('tryon_cancel'))).toHaveLength(1);
+      // Accepted at 23:59:59.5, but the preflight takes 1 s: nothing is sent.
+      const slow = harness({ wallNow: HELSINKI_MIDNIGHT - 500, statusLatency: 1000 });
+      const slowRun = await runProbe(p2Env(), slow.deps);
+      expect(slow.steps).toHaveLength(0);
+      expect(slowRun.complete).toBe(false);
+      expect(report(slowRun.lines)).toContain('Stopped before P2 step 1: deadline_passed.');
+      expect(slow.fetches).toContain('/rest/v1/rpc/tryon_status');
     });
 
     it('is incomplete when the P2 stop is not confirmed', async () => {

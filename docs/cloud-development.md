@@ -768,13 +768,14 @@ alone) for call 5.
 Probe corrections (VTO-3b, plan rev3 approved on #84). #117/#119 chose a
 **single-item P3**; the 2-item P3 used on 30 September was a setup deviation, not
 the plan (G8 c5906603780). The script treats P3 as settled only when the
-owner's own `tryon_chain_status` reads `OK` with no active attempt and either
-`running` with `nextStep` 2 (the one step was accepted and the chain waits) or
-`complete` with a result ID. A failure, an unreadable status, a timeout or an
-unchanged step leaves call 4 incomplete. Before P2 it must confirm the P3 chain
-stopped (`CANCELLED`) or, for a completed chain, that its picture was deleted
-(`OK`); otherwise it stops with `P3_TIDY_UNCONFIRMED`. It never sends P3's next
-step.
+owner's own `tryon_chain_status` reads `OK` with no active attempt (for both
+states) and either `running` with `nextStep` 2 (the one step was accepted and
+the chain waits) or `complete` with a result ID. A failure, an unreadable
+status, a timeout or an unchanged step leaves call 4 incomplete. Before P2 it
+must confirm the state it saw: a waiting chain must answer `CANCELLED`; a
+completed chain must answer `COMPLETED` with the same result ID, and that
+picture's deletion must answer `OK`. Anything else stops with
+`P3_TIDY_UNCONFIRMED`. It never sends P3's next step.
 
 P2-only continuation (the missing filter challenge): run the script with
 `PROBE_ONLY=P2`, `PROBE_OUTFIT_P2`, `PROBE_PERSON` and
@@ -782,9 +783,14 @@ P2-only continuation (the missing filter challenge): run the script with
 no fallback to the full probe), `PROBE_OUTFIT_P1`, `PROBE_OUTFIT_P3` or
 `PROBE_OUTPUT`, and any date other than the approved G7 deadline, which it
 checks as a real calendar date in Europe/Helsinki; after 7 October (Helsinki
-time) it refuses to run. It sends one step, at most one paid call; only an
-unpaid `RATE_LIMIT` or `BUSY` refused before a claim is tried again. It
-confirms the stop (or the picture's deletion) and prints `Delete by:
+time) it refuses to run, and it checks the date again after each pacing wait
+and after each status preflight, so no request is sent once 7 October has
+ended (cleanup still runs). It sends one step, at most one paid call; only an
+unpaid `RATE_LIMIT` or `BUSY` refused before a claim is tried again. Success is
+`FILTERED`, or a final result (`last`, with a valid result ID) that the stop
+reports as `COMPLETED` with the same ID and whose deletion answers `OK`. A
+malformed `OK` or an intermediate picture is recorded as `OK_NOT_FINAL`,
+cleaned up and left incomplete; no further step is sent. It prints `Delete by:
 2026-10-07 (Europe/Helsinki)`. Coordinator and owner steps:
 
 1. Keep the first authorisation (`7ec41277…`) stopped. As the database owner,

@@ -224,18 +224,19 @@ async function tidy(run, deps, chain, lines) {
   } catch { lines.push(`${chain.label} chain: tidy failed; try-on cleanup removes it.`); }
 }
 
-// The confirmed tidy before the next outfit: a running chain must answer CANCELLED; a completed one COMPLETED, and its
-// picture must then be deleted (OK). Any other reply leaves it unconfirmed. Never throws.
-async function confirmTidy(run, deps, chain, lines) {
+// The confirmed tidy before the next outfit, checked against the state already observed: a chain seen running must
+// answer CANCELLED; a chain seen complete with a result must answer COMPLETED with that same result, which must then be
+// deleted (OK). Any other reply leaves it unconfirmed. Never throws.
+async function confirmTidy(run, deps, chain, lines, expected) {
   let cancelled, removed = null;
   try { cancelled = await rpc(run, deps, 'tryon_cancel', { p_chain_id: chain.id }); } catch { cancelled = null; }
   const stop = typeof cancelled?.code === 'string' && CODE.test(cancelled.code) ? cancelled.code : 'UNREADABLE';
-  let confirmed = stop === 'CANCELLED';
+  let confirmed = expected.state === 'running' && stop === 'CANCELLED';
   if (stop === 'COMPLETED' && typeof cancelled.resultId === 'string' && UUID.test(cancelled.resultId)) {
     let reply;
     try { reply = await rpc(run, deps, 'tryon_delete_result', { p_result_id: cancelled.resultId }); } catch { reply = null; }
     removed = typeof reply?.code === 'string' && CODE.test(reply.code) ? reply.code : 'UNREADABLE';
-    confirmed = removed === 'OK';
+    confirmed = expected.state === 'complete' && cancelled.resultId === expected.resultId && removed === 'OK';
   }
   lines.push(`${chain.label} chain: ${JSON.stringify({ stop, resultDeleted: removed })}`);
   return confirmed;
@@ -260,13 +261,15 @@ export async function runProbe(env, deps) {
     entry.tidied = true;
     await tidy(run, deps, entry, lines);
   };
-  const confirmChain = async (entry) => {
-    const confirmed = await confirmTidy(run, deps, entry, lines);
+  const confirmChain = async (entry, expected) => {
+    const confirmed = await confirmTidy(run, deps, entry, lines, expected);
     if (confirmed) entry.tidied = true;
     return confirmed;
   };
   // Every attempt, including a retried unpaid refusal, starts at least 65 s after the previous attempt actually started,
-  // with a fresh status preflight immediately before it.
+  // with a fresh status preflight immediately before it. A P2-only run also rechecks the Helsinki deadline after the
+  // pacing wait and again after the preflight, so nothing is sent once 7 October has ended; cleanup still runs.
+  const pastDeadline = () => run.only === 'P2' && helsinkiDate((deps.wallNow ?? Date.now)()) > APPROVED_DELETE_BY;
   const send = async (plan) => {
     const first = deps.now();
     for (;;) {
@@ -274,9 +277,11 @@ export async function runProbe(env, deps) {
         const wait = DISPATCH_SPACING_MS - (deps.now() - lastStart);
         if (wait > 0) await deps.sleep(wait);
       }
+      if (pastDeadline()) { lines.push(`Stopped before ${plan.outfit} step ${plan.step}: deadline_passed.`); return null; }
       let pre;
       try { pre = await status(run, deps); } catch { pre = { ok: false, code: 'statusUnreadable' }; }
       if (!pre.ok) { lines.push(`Stopped before ${plan.outfit} step ${plan.step}: ${pre.code}.`); return null; }
+      if (pastDeadline()) { lines.push(`Stopped before ${plan.outfit} step ${plan.step}: deadline_passed.`); return null; }
       lastStart = deps.now();
       const outcome = await step(run, deps, plan);
       sent.push(outcome);
@@ -296,10 +301,14 @@ export async function runProbe(env, deps) {
         const p2 = chain('P2');
         const outcome = await send({ outfit: 'P2', outfitId: run.outfits.P2, chainId: p2.id, step: 1, person: run.person, disconnect: false });
         if (outcome) {
-          const evidence = outcome.code === 'OK' || outcome.code === 'FILTERED';
-          lines.push(`P2 filter challenge: ${evidence ? outcome.code : `${outcome.code} (recorded)`}.`);
+          // Evidence is FILTERED, or a validated final result (last, with a result ID) whose picture is then deleted.
+          // A malformed OK or an intermediate picture stays incomplete; it is only cleaned up, and no further step is sent.
+          const final = outcome.code === 'OK' && outcome.last === true && typeof outcome.resultId === 'string' && UUID.test(outcome.resultId);
+          const evidence = final || outcome.code === 'FILTERED';
+          const label = final ? 'OK' : outcome.code === 'OK' ? 'OK_NOT_FINAL' : outcome.code;
+          lines.push(`P2 filter challenge: ${evidence ? label : `${label} (recorded)`}.`);
           stage = 'P2 tidy';
-          const confirmed = await confirmChain(p2);
+          const confirmed = await confirmChain(p2, final ? { state: 'complete', resultId: outcome.resultId } : { state: 'running' });
           if (evidence && !confirmed) lines.push('Stopped after P2: P2_TIDY_UNCONFIRMED.');
           complete = evidence && confirmed;
         }
@@ -347,7 +356,7 @@ export async function runProbe(env, deps) {
         const outcome = await send({ outfit: 'P3', outfitId: run.outfits.P3, chainId: p3.id, step: 1, person: run.person, disconnect: true });
         if (outcome && (outcome.code === 'DISCONNECTED' || outcome.code === 'OK')) {
           if (outcome.code === 'OK') lines.push('P3 responded before the disconnect: call 4 acceptance is incomplete.');
-          let settled = 'SETTLE_TIMEOUT';
+          let settled = 'SETTLE_TIMEOUT', observed = null;
           for (let waited = 0; waited <= SETTLE_FOR_MS; waited += SETTLE_POLL_MS) {
             if (waited > 0) await deps.sleep(SETTLE_POLL_MS);
             let seen;
@@ -358,16 +367,22 @@ export async function runProbe(env, deps) {
             lines.push(`P3 chain after ${waited / 1000} s: ${JSON.stringify(state && active !== null
               ? { state, activeAttempt: active, nextStep: next } : { code: 'statusUnreadable' })}`);
             if (state === null || active === null) { settled = 'STATUS_UNREADABLE'; break; }
-            if (state === 'running' && active) continue;
-            if (state === 'running') settled = next === 2 ? 'ACCEPTED' : 'P3_STEP_NOT_ACCEPTED';
-            else if (state === 'complete') settled = typeof seen.resultId === 'string' && UUID.test(seen.resultId) ? 'COMPLETE' : 'P3_COMPLETE';
-            else settled = `P3_${state.toUpperCase()}`;
+            // An active attempt is never settled, whatever the state says.
+            if ((state === 'running' || state === 'complete') && active) continue;
+            if (state === 'running') {
+              settled = next === 2 ? 'ACCEPTED' : 'P3_STEP_NOT_ACCEPTED';
+              if (settled === 'ACCEPTED') observed = { state: 'running' };
+            } else if (state === 'complete') {
+              const valid = typeof seen.resultId === 'string' && UUID.test(seen.resultId);
+              settled = valid ? 'COMPLETE' : 'P3_COMPLETE';
+              if (valid) observed = { state: 'complete', resultId: seen.resultId };
+            } else settled = `P3_${state.toUpperCase()}`;
             break;
           }
-          if (settled === 'ACCEPTED' || settled === 'COMPLETE') {
+          if (observed) {
             lines.push(`P3 settled: ${settled}.`);
             stage = 'P3 tidy';
-            if (await confirmChain(p3)) p3Done = true;
+            if (await confirmChain(p3, observed)) p3Done = true;
             else lines.push('Stopped after P3: P3_TIDY_UNCONFIRMED; call 4 acceptance is incomplete.');
           } else lines.push(`Stopped after P3: ${settled}; call 4 acceptance is incomplete.`);
         } else if (outcome) {
