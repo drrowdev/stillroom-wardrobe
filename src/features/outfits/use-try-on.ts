@@ -57,11 +57,14 @@ export function browserEnvironment(): RunEnvironment {
   };
 }
 
-export type FailureKind = 'filteredPhoto' | 'filteredGarment' | 'busy' | 'allowance' | 'failed' | 'lost' | 'mismatch'
+export type FailureKind = 'filtered' | 'busy' | 'allowance' | 'failed' | 'lost' | 'mismatch'
   | 'turnedOff' | 'resultsFull' | 'unavailable';
-/** What each failure offers first; Close is always offered as well. */
+/**
+ * What each failure offers first; Close is always offered as well. A block can't be attributed to the photo, a garment
+ * or the output, and resending the same step would likely be blocked again, so a block offers another photo, not a retry.
+ */
 export const failureAction: Readonly<Record<FailureKind, 'retry' | 'photo' | 'restart' | null>> = Object.freeze({
-  filteredPhoto: 'photo', filteredGarment: 'retry', busy: 'retry', allowance: null, failed: 'retry', lost: 'restart',
+  filtered: 'photo', busy: 'retry', allowance: null, failed: 'retry', lost: 'restart',
   mismatch: 'restart', turnedOff: null, resultsFull: null, unavailable: null,
 });
 
@@ -79,9 +82,9 @@ export const RECONCILE_FOR_MS = 240_000;
 /** How long a run may hold picture bytes: the chain's lifetime, counted from the first send (the server's starts later). */
 export const RUN_LIFETIME_MS = TRYON_LIMITS.chainMinutes * 60_000;
 
-const failureOf = (code: Exclude<TryOnCode, 'OK'>, index: number): FailureKind => {
+const failureOf = (code: Exclude<TryOnCode, 'OK'>): FailureKind => {
   switch (code) {
-    case 'FILTERED': return index === 0 ? 'filteredPhoto' : 'filteredGarment';
+    case 'FILTERED': return 'filtered';
     case 'RATE_LIMIT': case 'BUSY': return 'busy';
     case 'ALLOWANCE': return 'allowance';
     case 'FAILED': case 'TIMEOUT': case 'OUTPUT_REJECTED': return 'failed';
@@ -215,7 +218,7 @@ export class TryOnRun {
     }
     if (ambiguous(reply.code)) { this.reconcile(index, generation); return; }
     this.session.recordStep('other');
-    this.fail(index, failureOf(reply.code, index));
+    this.fail(index, failureOf(reply.code));
   }
 
   private fail(index: number, failure: FailureKind) {

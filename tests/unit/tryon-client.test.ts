@@ -276,7 +276,7 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
     expect(run.get()).toEqual({ kind: 'failed', index: 0, failure: 'unavailable' });
   });
   it('maps each closed code to what the owner can do next', async () => {
-    const cases: [string, number, string][] = [['FILTERED', 0, 'filteredPhoto'], ['FILTERED', 1, 'filteredGarment'],
+    const cases: [string, number, string][] = [['FILTERED', 0, 'filtered'], ['FILTERED', 1, 'filtered'],
       ['RATE_LIMIT', 0, 'busy'], ['BUSY', 0, 'busy'], ['ALLOWANCE', 0, 'allowance'], ['CHAIN_MISMATCH', 1, 'mismatch'], ['WITHDRAWN', 0, 'turnedOff'],
       ['RESULTS_FULL', 2, 'resultsFull'], ['INACTIVE', 0, 'unavailable']];
     for (const [code, index, failure] of cases) {
