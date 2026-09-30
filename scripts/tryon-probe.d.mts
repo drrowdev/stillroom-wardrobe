@@ -9,6 +9,10 @@ export const DISPATCH_SPACING_MS: number;
 export const REFUSED_FOR_MS: number;
 export const SETTLE_POLL_MS: number;
 export const SETTLE_FOR_MS: number;
+export const P2_ONLY_CALLS: number;
+export const APPROVED_DELETE_BY: string;
+export const DELETE_BY_ZONE: string;
+export function helsinkiDate(ms: number): string;
 export const RETRY_BEFORE_CLAIM: readonly string[];
 export const REFUSED_BEFORE_CLAIM: readonly string[];
 export class ProbeRefusal extends Error { constructor(code: string); readonly code: string; }
