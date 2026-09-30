@@ -239,6 +239,14 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
     document.getElementById(routeFocus[route] ?? (route.startsWith('detail:') ? 'item-detail-title' : route.startsWith('outfit:') ? route.endsWith(TRYON_ROUTE) ? 'tryon-title' : 'outfit-detail-title' : 'wardrobe-title'))?.focus();
   }, [route]);
   useEffect(focusRoute, [focusRoute]);
+  // The lazy route's ready effect can run after its content is already usable. By then the user may have focused a
+  // control in it (and started typing), so that late run leaves their focus alone. Focus on body, main or nothing still
+  // moves to the route's heading or card, as on first mount and route changes.
+  const focusRouteWhenReady = useCallback(() => {
+    const active = document.activeElement, main = document.getElementById('main');
+    if (active instanceof HTMLElement && main && active !== main && main.contains(active)) return;
+    focusRoute();
+  }, [focusRoute]);
   function trashed(item: LifecycleSnapshot) {
     dirty.current = { dirty: false, incomplete: false, busy: false };
     browse.remove(item.id);
@@ -274,7 +282,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           onRestored={() => { setUndo(null); void refresh(); invalidateOutfits(); }} />}
         {notice && route === 'wardrobe' && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('item.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setNotice(false)}><Icon name="close" /></button></div>}
         {outfitNotice && route === `outfit:${outfitNotice}` && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('outfits.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setOutfitNotice(null)}><Icon name="close" /></button></div>}
-        <LazyBoundary key={route} t={t} onReady={focusRoute}>{route === 'add'
+        <LazyBoundary key={route} t={t} onReady={focusRouteWhenReady}>{route === 'add'
           ? <AddItem client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} />
           : route === 'settings' ? <ProfileScreen client={client} ai={ai} stylist={stylist} images={images} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} version={config.version} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} onSignOut={onSignOut} />
           : route === 'trash' ? <Trash lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
