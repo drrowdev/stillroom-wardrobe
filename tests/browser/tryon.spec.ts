@@ -234,13 +234,15 @@ test.describe('try-on is offered only when it is on', () => {
 });
 
 test.describe('try-on failures', () => {
-  test('a refused photo at step 1 offers another photo and makes no result', async ({ page }) => {
+  test('a block at step 1 offers another photo and makes no result', async ({ page }) => {
     const { api } = await start(page);
     api.tryonControl.replies.push({ code: 'FILTERED', status: 422 });
     await openTryOn(page);
     await preparePhoto(page);
     await page.locator('#tryon-start').click();
-    await expect(failureTitle(page)).toHaveText(text('tryon.failure.filteredPhoto'));
+    await expect(failureTitle(page)).toHaveText(text('tryon.failure.filtered'));
+    await expect(button(page, 'common.retry')).toHaveCount(0);
+    await expect(button(page, 'common.close')).toBeVisible();
     await expect(failureTitle(page)).toBeFocused();
     await axe(page);
     expect(api.tryonControl.results).toHaveLength(0);
@@ -249,13 +251,27 @@ test.describe('try-on failures', () => {
     await expect(page.locator('#tryon-start')).toHaveCount(0);
     expect(api.tryonControl.requests).toHaveLength(1);
   });
-  test('a refused garment at step 2: Try again sends exactly one more request', async ({ page }) => {
+  test('a block at step 2 shows the same message and offers another photo, not Try again', async ({ page }) => {
     const { api } = await start(page);
-    api.tryonControl.replies.push({}, { code: 'FILTERED', status: 422 }, { code: 'BUSY', status: 503 });
+    api.tryonControl.replies.push({}, { code: 'FILTERED', status: 422 });
     await openTryOn(page);
     await preparePhoto(page);
     await page.locator('#tryon-start').click();
-    await expect(failureTitle(page)).toHaveText(text('tryon.failure.filteredGarment'));
+    await expect(failureTitle(page)).toHaveText(text('tryon.failure.filtered'));
+    await expect(failureTitle(page)).toBeFocused();
+    await expect(button(page, 'common.retry')).toHaveCount(0);
+    expect(api.tryonControl.results).toHaveLength(0);
+    await button(page, 'tryon.changePhoto').click();
+    await expect(page.locator('#tryon-choose')).toBeFocused();
+    expect(api.tryonControl.requests.map((entry) => entry.step)).toEqual([1, 2]);
+  });
+  test('busy at step 2: Try again sends exactly one more request', async ({ page }) => {
+    const { api } = await start(page);
+    api.tryonControl.replies.push({}, { code: 'BUSY', status: 503 }, { code: 'BUSY', status: 503 });
+    await openTryOn(page);
+    await preparePhoto(page);
+    await page.locator('#tryon-start').click();
+    await expect(failureTitle(page)).toHaveText(text('tryon.failure.busy'));
     expect(api.tryonControl.results).toHaveLength(0);
     await button(page, 'common.retry').click();
     await expect(failureTitle(page)).toHaveText(text('tryon.failure.busy'));
@@ -584,7 +600,7 @@ test.describe('bounded VTO-2 visual evidence', () => {
         if (selected.scene === 'progress') {
           await expect(status(page)).toHaveText(text('tryon.progress', language, { step: 2, total: 3, slot: text('tryon.slot.bottom', language) }));
         } else if (selected.scene === 'failure') {
-          await expect(failureTitle(page)).toHaveText(text('tryon.failure.filteredGarment', language));
+          await expect(failureTitle(page)).toHaveText(text('tryon.failure.filtered', language));
         } else {
           await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
           await expect(page.locator('.tryon-result img')).toHaveJSProperty('complete', true);
