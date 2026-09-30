@@ -716,7 +716,7 @@ test('discarding a prepared draft creates no library records', async ({ page }) 
   await page.locator('#item-title').fill('Unsaved');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('button', { name: 'Continue editing' }).click();
+  await page.getByRole('button', { name: 'Keep editing' }).click();
   await expect(page.locator('#item-title')).toHaveValue('Unsaved');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.getByRole('button', { name: 'Discard changes' }).click();

@@ -32,7 +32,7 @@ text through the CSSOM instead of weakening the policy.
 
 | Surface | States checked | Where |
 | --- | --- | --- |
-| Settings, including the install hint | page; leave dialog with focus on Continue editing | accessibility.spec |
+| Settings, including the install hint | page; leave dialog with focus on Keep editing | accessibility.spec |
 | Install hint (production) | card at 320 px/200%, platform-specific text, hidden when installed | pwa/visual.spec |
 | Update banner (production) | banner at 320 px/200%; Reload ≥44 px, reached by Tab, visible focus | pwa/visual.spec |
 | Backup | passphrase form, focus on the passphrase field | accessibility.spec; backup.spec |

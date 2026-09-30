@@ -261,9 +261,9 @@ describe('full creation snapshot and metadata reconciliation (mocked SDK)', () =
   }
   it('explains intentional blank photo descriptions in all languages without a title fallback', () => {
     expect(messages['capture.descriptionHelp']).toEqual({
-      en: 'Describe the photo for screen readers, or leave it blank to save without a description.',
-      fi: 'Kuvaile kuvaa ruudunlukijaa varten tai jätä tyhjäksi, jolloin kuva tallentuu ilman kuvausta.',
-      sv: 'Beskriv fotot för skärmläsare, eller lämna tomt för att spara utan beskrivning.',
+      en: 'Optional. Screen readers read this description aloud.',
+      fi: 'Valinnainen. Ruudunlukija lukee tämän kuvauksen ääneen.',
+      sv: 'Valfritt. Skärmläsare läser upp beskrivningen.',
     });
     for (const caption of ['', '   ']) {
       const attempt = newSaveAttempt(draft(), caption, photo(), scope());
