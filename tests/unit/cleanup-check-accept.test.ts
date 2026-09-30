@@ -239,10 +239,10 @@ describe('Limits are asserted as accepted, so the gaps stay visible (§4.3)', ()
   }, 30_000);
 });
 
-// BG2c-3b (#84, 30 September 2026): the identity pass allows `added` up to 0.25; the aligned pass keeps 0.07. e is the
-// added or removed area as a share of the 136×180 body (24,480 px), reported separately from the gate statistic
-// `added` (the share of the result mask M2 outside R at identity, zero slack). Each is asserted as passing at identity.
-describe('L17 (OWNER-ACCEPTED ESCAPE, #84 BG2c-3b, not a positive): additions up to 1/3 of the body pass at identity', () => {
+// BG2c-3b (#84, 30 September 2026): `added` fails at 0.25 on the identity pass and at 0.21 on the aligned pass. e is
+// the added or removed area as a share of the 136×180 body (24,480 px), reported separately from the gate statistic
+// `added` (the share of the result mask M2 outside R at identity, zero slack, or outside dilate(R, 6) after alignment).
+describe('L17 (OWNER-ACCEPTED ESCAPE, #84 BG2c-3b, not a positive): additions pass at identity or after alignment', () => {
   const BODY = G.width * G.height;
   const plus = (boxes: Box[]): Paint => (x, y) => boxes.some((b) => inBox(b, x, y)) ? navy : null;
   const shifted = (paint: Paint, dx: number, dy: number): Paint => (x, y) => paint(x - dx, y - dy);
@@ -260,6 +260,15 @@ describe('L17 (OWNER-ACCEPTED ESCAPE, #84 BG2c-3b, not a positive): additions up
     expect(verdict.metrics.added).toBeCloseTo(added, 3);
   }, 30_000);
 
+  it('X7 (was Block) the 30×100 addition (e = 12.3 % of the body) with a ×1.1 pose: identity 0.266 fails, aligned 0.089 passes', async () => {
+    const verdict = await checkScenes(solid(G, navy), posed(plus([G, sleeve]), 1.1));
+    expect(verdict.accepted).toBe(true);
+    expect(verdict.metrics).toMatchObject({ path: 'aligned', identityReason: 'added' });
+    expect(verdict.metrics.identityAdded).toBeCloseTo(0.2655, 4);
+    expect(verdict.metrics.added).toBeCloseTo(0.0891, 4);
+    expect(verdict.metrics.scale).toBeCloseTo(0.91, 2);
+  }, 30_000);
+
   it('F3 (was a disclosed false reject) a 136×20 part BG1 missed, shown in H2 (e = 11.1 % of the body)', async () => {
     const missed: Box = { left: G.left, top: G.top + G.height, width: G.width, height: 20 };
     const verdict = await checkScenes(plus([G, missed]), plus([G, missed]));
@@ -269,7 +278,7 @@ describe('L17 (OWNER-ACCEPTED ESCAPE, #84 BG2c-3b, not a positive): additions up
   }, 30_000);
 });
 
-describe('L18 (OWNER-ACCEPTED ESCAPE, #84 BG2c-3b, not a positive): a side strip removed, recentred and enlarged', () => {
+describe('L18 (OWNER-ACCEPTED ESCAPE, #84 BG2c-3b, not a positive): a strip removed and recentred, masked by rescale', () => {
   const BODY = G.width * G.height;
   const strip = (w: number): Box => ({ left: G.left + G.width - w, top: G.top, width: w, height: G.height });
   const cut = (w: number): Paint => (x, y) => inG(x, y) && !inBox(strip(w), x, y) ? navy : null;
@@ -282,6 +291,23 @@ describe('L18 (OWNER-ACCEPTED ESCAPE, #84 BG2c-3b, not a positive): a side strip
     expect(verdict.metrics.path).toBe('identity');
     expect(verdict.metrics.added).toBeCloseTo(added, 4);
     expect(verdict.metrics.removed).toBeCloseTo(removed, 4);
+  }, 30_000);
+
+  // The rev8b recentred removals (were Block): identity fails `removed`; the aligned pass scales up by 1.14-1.15, so
+  // `removed` is 0 and aligned `added` 0.081-0.100 is under 0.21. [label, removed box, dx, dy, identity removed, aligned added]
+  const bottom = (h: number): Box => ({ left: G.left, top: G.top + G.height - h, width: G.width, height: h });
+  const plain = [
+    ['side strip 18×180', strip(18), 9, 0, 0.1525, 0.1],
+    ['side strip 22×180', strip(22), 11, 0, 0.1930, 0.1],
+    ['bottom strip 136×26', bottom(26), 0, 13, 0.1688, 0.0809],
+    ['bottom strip 136×30', bottom(30), 0, 15, 0.2, 0.0882],
+  ] as const;
+  it.each(plain.map(([label, box, dx, dy, identityRemoved, added]) => [`${label} removed (e = ${(100 * box.width * box.height / BODY).toFixed(1)} % of the body), recentred`, box, dx, dy, identityRemoved, added] as const))('%s', async (_label, box, dx, dy, identityRemoved, added) => {
+    const verdict = await checkScenes(solid(G, navy), shifted((x, y) => inG(x, y) && !inBox(box, x, y) ? navy : null, dx, dy));
+    expect(verdict.accepted).toBe(true);
+    expect(verdict.metrics).toMatchObject({ path: 'aligned', identityReason: 'removed', removed: 0 });
+    expect(verdict.metrics.identityRemoved).toBeCloseTo(identityRemoved, 4);
+    expect(verdict.metrics.added).toBeCloseTo(added, 4);
   }, 30_000);
 });
 
@@ -296,7 +322,9 @@ describe('§4.3a disclosed boundary cases (printed, never asserted)', () => {
     for (const base of [40, 60, 85]) await report(`creases d30 w9 p12 L${base} +11`, creased(G, grey(base), 30, 9, 12), solid(G, grey(base + 11)));
     await report('A4 highlights +11', highlights(40, 65), solid(G, grey(51)));
     const bottom: Box = { left: G.left, top: G.top + G.height, width: G.width, height: 60 };
-    await report('BG2c-3b 136×60 attached below (e = 33.3 %, identity added exactly 0.25)', solid(G, navy), (x, y) => inG(x, y) || inBox(bottom, x, y) ? navy : null);
+    await report('BG2c-3b 136×60 attached below (e = 33.3 %, identity added exactly 0.25, aligned 0.225)', solid(G, navy), (x, y) => inG(x, y) || inBox(bottom, x, y) ? navy : null);
+    const side: Box = { left: G.left + G.width, top: G.top + 5, width: 50, height: 170 };
+    await report('BG2c-3b 50×170 attached on the right (e = 34.7 %, identity 0.258, aligned 0.227)', solid(G, navy), (x, y) => inG(x, y) || inBox(side, x, y) ? navy : null);
     for (const base of [60, 85]) {
       for (const [size, every] of [[9, 12], [5, 24], [15, 24]] as const) {
         await report(`${size === 5 ? 'build finding' : 'L15 (safe false reject, falls back to the original)'}: creases d45 w${size} p${every} L${base} (step 45.01 > tolerance 45)`, creased(G, grey(base), 45, size, every), solid(G, grey(base)));
@@ -304,6 +332,6 @@ describe('§4.3a disclosed boundary cases (printed, never asserted)', () => {
     }
     console.info(`§4.3a boundary cases (not asserted):\n${lines.join('\n')}`);
     if (process.env.CLEANUP_REPORT) appendFileSync(process.env.CLEANUP_REPORT, `${lines.join('\n')}\n`);
-    expect(lines).toHaveLength(14);
+    expect(lines).toHaveLength(15);
   }, 120_000);
 });

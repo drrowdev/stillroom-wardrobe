@@ -136,14 +136,14 @@ function generate(): { accepts: Case[]; blocks: Case[] } {
 
 const { accepts, blocks } = generate();
 
-// Findings from the single post-freeze run, asserted as computed, not retuned: a creased H0 with a same-colour side
-// part removed misaligns (s 1.14, t (10, 14)) and blocks through `added` (0.10) before `removed` is reached. The
-// verdict (Block, fall back to the original) is the intended one; the named reason differs.
-const FINDINGS: Record<number, readonly CleanupReason[]> = { 4: ['added'], 16: ['added'], 34: ['added'] };
-blocks.forEach((c, index) => { if (FINDINGS[index]) c.reasons = FINDINGS[index]; });
+// rev8b findings from the single post-freeze run: a creased H0 with a same-colour side part removed misaligns (s 1.14,
+// t (10, 14)) and blocked only through aligned `added` (0.10). Since BG2c-3b (aligned `added` 0.21) blocks 4, 16 and
+// 34 pass: the owner-accepted escape L18 (a removal masked by rescale), asserted as passing, NOT positives.
+const L18 = new Set([4, 16, 34]);
 // BG2c-3b (#84): every held-out addition (e 15.6-20.6 % of the body, identity `added` about 0.13-0.17) now passes at
 // identity under the 0.25 limit. They are the owner-accepted escape L17, asserted as passing, NOT positives.
 const L17 = new Set([3, 9, 15, 21, 27, 33, 39, 45, 51, 57]);
+const ESCAPES = new Set([...L17, ...L18]);
 
 describe('held-out set (§4.5), frozen seed', () => {
   it('has the frozen size', () => {
@@ -156,7 +156,7 @@ describe('held-out set (§4.5), frozen seed', () => {
     expectAccepted(await checkScenes(c.h0, c.h2, undefined, c.seed));
   }, 30_000);
 
-  it.each(blocks.filter((_c, index) => !L17.has(index)).map((c) => [c.label, c] as const))('%s', async (_label, c) => {
+  it.each(blocks.filter((_c, index) => !ESCAPES.has(index)).map((c) => [c.label, c] as const))('%s', async (_label, c) => {
     expectBlocked(await checkScenes(c.h0, c.h2, undefined, c.seed), c.reasons!);
   }, 30_000);
 
@@ -166,5 +166,15 @@ describe('held-out set (§4.5), frozen seed', () => {
     expect(verdict.accepted).toBe(true);
     expect(verdict.metrics.path).toBe('identity');
     expect(verdict.metrics.added).toBeLessThan(CLEANUP_V2.added.identityMaximum);
+  }, 30_000);
+
+  it.each(blocks.filter((_c, index) => L18.has(index)).map((c) => [`L18 (owner-accepted escape) ${c.label}`, c] as const))('%s', async (_label, c) => {
+    expect(c.reasons).toEqual(['removed']);
+    const verdict = await checkScenes(c.h0, c.h2, undefined, c.seed);
+    expect(verdict.accepted).toBe(true);
+    expect(verdict.metrics).toMatchObject({ path: 'aligned', identityReason: 'removed' });
+    expect(verdict.metrics.removed).toBeLessThan(CLEANUP_V2.removed.maximum);
+    expect(verdict.metrics.added).toBeLessThan(CLEANUP_V2.added.maximum);
+    console.info(`${c.label}: identity removed ${verdict.metrics.identityRemoved}, aligned added ${verdict.metrics.added} removed ${verdict.metrics.removed} s ${verdict.metrics.scale}`);
   }, 30_000);
 });

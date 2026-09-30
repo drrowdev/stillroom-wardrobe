@@ -3,6 +3,7 @@
 // negatives) is in cleanup-check.test.ts; the chromatic Block cases X2, X3, red X9/X15 and chromatic X16 are in
 // cleanup-check-colour.test.ts.
 import { describe, expect, it } from 'vitest';
+import { CLEANUP_V2 } from '../../src/images/cleanup-calibration';
 import {
   bandAt, checkScenes, creased, criticStripe, expectBlocked, fromRgb, GARMENT, greenTealCheck, grey, inBox, lch, maskOf, noisy,
   posed, relit, solid, within, type Box, type Lab, type Paint,
@@ -34,13 +35,8 @@ describe('Block fixtures fail with margin (§4.2)', () => {
     expectBlocked(await checkScenes(solid(G, navy), print), ['colourShift', 'change']);
   }, 60_000);
 
-  // X6 and X8 pass since BG2c-3b (identity `added` 0.25) and are asserted as the owner-accepted escape L17 in
-  // cleanup-check-accept.test.ts. X7 still fails: its identity pass fails a gate, and the aligned pass keeps 0.07.
-  it('X7 the addition plus a genuine ×1.1 pose change fails added', async () => {
-    const add: Box = { left: G.left + G.width, top: 110, width: 30, height: 100 };
-    expectBlocked(await checkScenes(solid(G, navy), posed(plus([G, add], () => navy), 1.1)), ['added']);
-  }, 30_000);
-
+  // X6, X7 and X8 pass since BG2c-3b (`added` 0.25 at identity, 0.21 aligned) and are asserted as the owner-accepted
+  // escape L17 in cleanup-check-accept.test.ts.
 
   describe('X9 a same-colour sleeve (12 %) removed fails removed', () => {
     const sleeve: Box = { left: G.left + G.width - 30, top: G.top, width: 30, height: 100 };
@@ -146,18 +142,13 @@ describe('Block fixtures fail with margin (§4.2)', () => {
 // rev8b: recentred parts. The result is shifted so its bounding box is centred again, as a clean-up that removes or adds
 // a part would frame it. Areas are reported as a share of the 136×180 body (24,480 px), separately from the gate
 // statistics, whose denominators are the gate's own (§5.2). Each must fail BOTH the identity and the aligned path.
-// BG2c-3b: the recentred sleeve addition passes at identity (L17), and a recentred removal that is also enlarged by
-// ×1.10-1.15 passes at identity (L18); both are owner-accepted escapes asserted in cleanup-check-accept.test.ts.
-describe('rev8b recentred removals fail both paths with margin', () => {
+// BG2c-3b: the recentred sleeve addition (L17) and the recentred strip removals, plain or also enlarged (L18), pass;
+// they are owner-accepted escapes asserted in cleanup-check-accept.test.ts. A sleeve removed in place still fails.
+describe('rev8b sleeve removals fail both paths with margin', () => {
   const BODY = G.width * G.height;
-  const shifted = (paint: Paint, dx: number, dy: number): Paint => (x, y) => paint(x - dx, y - dy);
   const part = (label: string, box: Box) => `${label} ${box.width}×${box.height} (${(100 * box.width * box.height / BODY).toFixed(1)} % of the 24,480 px body)`;
-  const strip = (w: number): Box => ({ left: G.left + G.width - w, top: G.top, width: w, height: G.height });
-  const bottom = (h: number): Box => ({ left: G.left, top: G.top + G.height - h, width: G.width, height: h });
   const sleeve = (w: number): Box => ({ left: G.left + G.width - w, top: G.top, width: w, height: 100 });
   const cases: [string, Paint, Paint][] = [
-    ...[18, 22].map((w): [string, Paint, Paint] => [part('side strip removed', strip(w)), solid(G, navy), shifted(minus(G, strip(w), navy), w / 2, 0)]),
-    ...[26, 30].map((h): [string, Paint, Paint] => [part('bottom strip removed', bottom(h)), solid(G, navy), shifted(minus(G, bottom(h), navy), 0, h / 2)]),
     [part('sleeve removed', sleeve(30)), solid(G, navy), minus(G, sleeve(30), navy)],
   ];
   it.each(cases)('%s', async (_label, h0, h2) => {
@@ -174,14 +165,15 @@ describe('rev8b recentred removals fail both paths with margin', () => {
 
 // BG2c-3b (#84): gross additions. e is the added area as a share of the 136×180 body (24,480 px); the gate statistic
 // is the share of the result mask M2 outside R (identity, zero slack: e/(1+e) for a part attached outside R) or outside
-// dilate(R, 6) after alignment. Each fails the identity pass (0.25) and the aligned pass (0.07), which decides beyond
-// its 0.077 fail band. An attached part of 33.3 % gives identity exactly 0.25 and is printed in §4.3a, not asserted.
+// dilate(R, 6) after alignment. Each fails the identity pass (0.25) beyond its 0.275 fail band and the aligned pass
+// (0.21), which decides beyond its 0.231 fail band. Attached parts of 33.3 % and 34.7 % block inside the aligned band
+// (0.225, 0.227) and are printed in §4.3a, not asserted.
 describe('BG2c-3b gross additions fail both paths with margin', () => {
   const BODY = G.width * G.height;
   const right = (w: number, h: number, top = G.top): Box => ({ left: G.left + G.width, top, width: w, height: h });
   const cases: [string, Box[]][] = [
-    ['an attached second garment 50×170 on the right', [right(50, 170, G.top + 5)]],
     ['an attached second garment 56×180 on the right', [right(56, 180)]],
+    ['30×180 on the right and 136×50 below', [right(30, 180), { left: G.left, top: G.top + G.height, width: G.width, height: 50 }]],
     ['56×180 on the right and 136×40 below', [right(56, 180), { left: G.left, top: G.top + G.height, width: G.width, height: 40 }]],
     ['50×180 on each side', [right(50, 180), { left: G.left - 50, top: G.top, width: 50, height: 180 }]],
   ];
@@ -192,7 +184,31 @@ describe('BG2c-3b gross additions fail both paths with margin', () => {
     const verdict = await checkScenes(solid(G, navy), plus([G, ...parts], () => navy));
     expectBlocked(verdict, ['added']);
     expect(verdict.metrics.identityReason).toBe('added');
+    expect(verdict.metrics.identityAdded).toBeGreaterThanOrEqual(1.1 * CLEANUP_V2.added.identityMaximum);
   }, 30_000);
+});
+
+// BG2c-3b OPEN FINDING (not owner-accepted, printed only): parts added around the garment on two or more sides can be
+// absorbed by an aligned scale-down (s 0.85-0.95), which brings aligned `added` under 0.21 while identity fails.
+describe('BG2c-3b open finding: additions masked by an aligned scale-down (printed, never asserted)', () => {
+  it('prints the cases', async () => {
+    const BODY = G.width * G.height, lines: string[] = [];
+    const R = (w: number, h: number): Box => ({ left: G.left + G.width, top: G.top, width: w, height: h });
+    const L = (w: number, h: number): Box => ({ left: G.left - w, top: G.top, width: w, height: h });
+    const D = (h: number): Box => ({ left: G.left, top: G.top + G.height, width: G.width, height: h });
+    const U = (h: number): Box => ({ left: G.left, top: G.top - h, width: G.width, height: h });
+    const cases: [string, Box[]][] = [
+      ['R50×180 + D20', [R(50, 180), D(20)]], ['R56×180 + D20', [R(56, 180), D(20)]], ['R50×180 + D10', [R(50, 180), D(10)]],
+      ['L20 + R20 ×180 + D20', [L(20, 180), R(20, 180), D(20)]], ['U20 + D20 + L15 + R15', [U(20), D(20), L(15, 180), R(15, 180)]],
+    ];
+    for (const [label, parts] of cases) {
+      const v = await checkScenes(solid(G, navy), plus([G, ...parts], () => navy));
+      const e = parts.reduce((sum, b) => sum + b.width * b.height, 0) / BODY, m = v.metrics;
+      lines.push(`${label} (e = ${(100 * e).toFixed(1)} % of the body): ${v.accepted ? 'pass' : `fail ${(v as { reason: string }).reason}`} path ${m.path} identity added ${m.identityAdded?.toFixed(3)} aligned added ${m.added?.toFixed(3)} s ${m.scale}`);
+    }
+    console.info(`BG2c-3b open finding (not asserted):\n${lines.join('\n')}`);
+    expect(lines).toHaveLength(5);
+  }, 120_000);
 });
 
 describe('Disclosed false rejects are asserted as failing (§4.4)', () => {
