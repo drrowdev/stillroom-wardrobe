@@ -122,11 +122,19 @@ async function start(page: Page, options: { language?: Language; weather?: Row; 
   options.seed?.(api, weather);
   await page.goto(`/#/${options.route ?? 'today'}`); await signIn(page);
   await expect(page.locator('.workspace-identity')).toBeVisible();
+  if (options.route === 'settings') await settingsFocused(page);
   return { api, weather };
 }
+// Settings becomes visible before the lazy boundary's ready effect moves focus to the route's heading (or the card
+// Today asked for). Typing before that lands can lose the text in WebKit: fill focuses the field, the effect takes focus,
+// then the text is inserted nowhere, so Search stays disabled. Wait for the route focus before touching the form.
+async function settingsFocused(page: Page) {
+  await expect(page.locator('#settings-title, #weather-heading, #stylist-heading').and(page.locator(':focus'))).toHaveCount(1);
+}
 async function goTo(page: Page, route: 'today' | 'settings') {
-  await page.evaluate(target => { location.hash = `#/${target}`; }, route);
+  const changed = await page.evaluate(target => { const before = location.hash; location.hash = `#/${target}`; return before !== location.hash; }, route);
   await expect(page.locator(route === 'today' ? '#today-title' : '#settings-title')).toBeVisible();
+  if (route === 'settings' && changed) await settingsFocused(page);
 }
 async function signOut(page: Page, language: Language) {
   await page.getByRole('button', { name: text('account.menu', language) }).click();
