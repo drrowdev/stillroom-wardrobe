@@ -93,6 +93,8 @@ export type CleanupMetrics = {
   // Unaligned (rev4) diagnostics, reported only.
   largestShare?: number; centroid?: { x: number; y: number }; containment?: number; unalignedRetention?: number;
   meanDeltaE?: number; p95DeltaE?: number; ssim?: number; windows?: number;
+  // rev8b §1.1: which pass decided, and the identity pass's reason when the aligned pass ran.
+  path?: 'identity' | 'aligned'; identityReason?: CleanupReason;
   // §3.3 alignment and area gates.
   scale?: number; tx?: number; ty?: number; ncc?: number; alignmentFlat?: boolean; added?: number; addedIdentity?: number;
   invalid?: number; alignedCentroid?: { x: number; y: number }; retention?: number; resultArea?: number; removed?: number;
@@ -114,6 +116,8 @@ export type CleanupOptions = {
   now?: () => number;
   /** Gives the event loop a turn; defaults to `cleanupYield()`. */
   yieldNow?: () => Promise<void>;
+  /** Unit tests only: skip the identity pass and return the aligned pass (rev8b §1.2, the either-path margin rule). */
+  alignedOnly?: boolean;
 };
 
 type YieldScope = { scheduler?: { yield?: () => Promise<void> }; MessageChannel?: typeof MessageChannel };
@@ -250,6 +254,8 @@ export const CLEANUP_RULES = Object.freeze({
  * already resampled by the caller to FIDELITY.width x FIDELITY.height (RGBA for the photos, 0|1 for R). Fixed typed
  * buffers only, allocated once per call and unreachable when it returns or throws; `workingBytes` reports them (§3.8).
  * Cooperative (§3.7): it checks `signal` every 1,024 units of work and yields when 8 ms have passed.
+ * Identity first (rev8b §1.1): every gate runs at T = identity with no slack in `added` and `removed`; if all pass, the
+ * result is accepted with no transform search. Otherwise the rev8 aligned pass runs and its verdict is final.
  */
 export async function cleanupCheck(h0: Uint8ClampedArray, reference: Uint8Array, h2: Uint8ClampedArray,
   options: CleanupOptions = {}): Promise<CleanupVerdict> {
@@ -529,6 +535,368 @@ export async function cleanupCheck(h0: Uint8ClampedArray, reference: Uint8Array,
   };
   const al = V.alignment;
   const scaleFrom = Math.round(al.minimumScale * 100), scaleTo = Math.round(al.maximumScale * 100);
+  // rev8b §1.1: every gate after alignment, for one transform. `identity` evaluates T = identity with no slack in
+  // `added` and `removed`; otherwise the rev8 transform and dilation 6. The stages above are shared by both passes.
+  const placed = metrics;
+  const evaluate = async (transform: Candidate, alignmentFlat: boolean | undefined, identity: boolean): Promise<CleanupVerdict> => {
+    const { s, tx, ty } = transform;
+    const metrics: CleanupMetrics = { ...placed, path: identity ? 'identity' : 'aligned' };
+    const fail = (reason: CleanupReason): CleanupVerdict => ({ accepted: false, reason, metrics });
+    Object.assign(metrics, { scale: s, tx, ty, ncc: transform.ncc, alignmentFlat });
+    hist0.fill(0); hist2.fill(0); palette.fill(0);
+
+    // §3.3 added: the share of M2 (counted in H2 pixels) that T maps out of the frame or outside dilate(R, 6); on the
+    // identity pass, outside R itself (rev8b: no slack).
+    let outside = 0, outsideIdentity = 0;
+    for (let y = 0; y < height; y++) {
+      const Y = Math.floor(cy + s * (y + 0.5 - cy) + ty);
+      for (let x = 0; x < width; x++) {
+        const index = y * width + x;
+        if (!m2[index]) continue;
+        if (!r6[index]) outsideIdentity++;
+        const X = Math.floor(cx + s * (x + 0.5 - cx) + tx);
+        if (X < 0 || X >= width || Y < 0 || Y >= height || !(identity ? reference : r6)[Y * width + X]) outside++;
+      }
+    }
+    const added = outside / areaM2;
+    metrics.added = added;
+    metrics.addedIdentity = outsideIdentity / areaM2;
+
+    // §3.1 The warp: H2' samples H2 at T^-1(q) bilinearly in linear RGB, straight to Float32 Lab (labB is overwritten; the
+    // caller's RGBA is the source). m2w: bit 0 foreground, 2 invalid (out of frame), 4 clipped (>= linear 254).
+    const clip = LINEAR[V.fit.resultClip]!;
+    const linear = (index: number, channel: number) => LINEAR[h2[index * 4 + channel]!]!;
+    let invalid = 0, areaM2w = 0;
+    for (let y = 0; y < height; y++) {
+      const py = cy + (y + 0.5 - ty - cy) / s;
+      for (let x = 0; x < width; x++) {
+        const index = y * width + x, l = index * 3;
+        const px = cx + (x + 0.5 - tx - cx) / s;
+        if (px < 0.5 || px > width - 0.5 || py < 0.5 || py > height - 0.5) {
+          m2w[index] = 2; labB[l] = 0; labB[l + 1] = 0; labB[l + 2] = 0; invalid++;
+          continue;
+        }
+        const fx0 = px - 0.5, fy0 = py - 0.5;
+        const x0 = Math.min(width - 1, Math.floor(fx0)), y0 = Math.min(height - 1, Math.floor(fy0));
+        const x1 = Math.min(width - 1, x0 + 1), y1 = Math.min(height - 1, y0 + 1);
+        const fx = fx0 - x0, fy = fy0 - y0;
+        const i00 = y0 * width + x0, i01 = y0 * width + x1, i10 = y1 * width + x0, i11 = y1 * width + x1;
+        const mix = (channel: number) => (1 - fy) * ((1 - fx) * linear(i00, channel) + fx * linear(i01, channel))
+          + fy * ((1 - fx) * linear(i10, channel) + fx * linear(i11, channel));
+        const lr = mix(0), lg = mix(1), lb = mix(2);
+        labFromLinear(lr, lg, lb, labB, l);
+        const fg = deltaE2000(labB[l]!, labB[l + 1]!, labB[l + 2]!, b[0]!, b[1]!, b[2]!) > V.garmentDeltaE ? 1 : 0;
+        m2w[index] = fg | (lr >= clip || lg >= clip || lb >= clip ? 4 : 0);
+        areaM2w += fg;
+      }
+      await pace(width * 4);
+    }
+    metrics.invalid = invalid;
+    metrics.resultArea = areaM2w;
+
+    // §3.3 centre (aligned): the centroid of T(M2)'s largest component.
+    for (let index = 0; index < pixels; index++) kept[index] = m2w[index]! & 1;
+    let alignedCentroid = { x: Number.NaN, y: Number.NaN };
+    if (areaM2w > 0) {
+      const alignedParts = labelComponents(kept, width, height, labels, queue);
+      if (!alignedParts.overflow && alignedParts.count > 0) {
+        let top = 0;
+        for (let index = 1; index < alignedParts.count; index++) if (alignedParts.areas[index]! > alignedParts.areas[top]!) top = index;
+        let ax = 0, ay = 0;
+        for (let index = 0; index < pixels; index++) {
+          if (labels[index] !== top + 1) continue;
+          const x = index % width;
+          ax += x; ay += (index - x) / width;
+        }
+        alignedCentroid = { x: (ax / alignedParts.areas[top]! + 0.5) / width, y: (ay / alignedParts.areas[top]! + 0.5) / height };
+      }
+    }
+    metrics.alignedCentroid = alignedCentroid;
+    await pace(pixels);
+
+    // §3.3 retention, then §3.4 K' = M2' ∩ erode(R, 2) ∩ erode(M2', 1), minus invalid pixels.
+    let retained = 0;
+    for (let index = 0; index < pixels; index++) if (m2w[index]! & 1 && reference[index]) retained++;
+    const retention = areaR ? retained / areaR : 0;
+    metrics.retention = retention;
+    morph(m2w, erodedM2, kept, width, height, V.support.resultErosion, true);
+    morph(m2w, dm2w, kept, width, height, rm.dilation, false);
+    let support = 0;
+    for (let index = 0; index < pixels; index++) {
+      const on = m2w[index]! & 1 & erodedR[index]! & erodedM2[index]!;
+      kept[index] = on;
+      support += on;
+    }
+    metrics.support = support;
+    await pace(pixels);
+
+    // §3.4 The global lighting envelope, on K' pixels unclipped in both images.
+    const fit = V.fit;
+    const unclipped0 = (index: number) => {
+      const p = index * 4;
+      for (let channel = 0; channel < 3; channel++) {
+        const value = h0[p + channel]!;
+        if (value < fit.lowChannel || value > fit.highChannel) return false;
+      }
+      return true;
+    };
+    let fitted = 0;
+    for (let index = 0; index < pixels; index++) {
+      if (!kept[index] || m2w[index]! & 4 || !unclipped0(index)) continue;
+      const l2 = labB[index * 3]!;
+      scratch[fitted++] = l2 - Math.min(hi0[index]!, Math.max(lo0[index]!, l2));
+    }
+    metrics.fitted = fitted;
+    const deltaL = fitted ? median(scratch, fitted) : Number.NaN;
+    let chromaCount = 0, sa0 = 0, sb0 = 0, n0 = 0, sa2 = 0, sb2 = 0, n2 = 0;
+    for (let index = 0; index < pixels; index++) {
+      if (!kept[index] || m2w[index]! & 4 || !unclipped0(index)) continue;
+      const l = index * 3;
+      const c2 = Math.hypot(labB[l + 1]!, labB[l + 2]!), c0 = Math.hypot(labA[l + 1]!, labA[l + 2]!);
+      const top = hiC0[index]!, bottom = loC0[index]!;
+      if (Math.max(c2, top) >= fit.chromaFloor) scratch[chromaCount++] = c2 > top ? c2 / top : c2 < bottom ? c2 / Math.max(bottom, 1) : 1;
+      if (c2 >= fit.hueChroma) { sa2 += labB[l + 1]!; sb2 += labB[l + 2]!; n2++; }
+      if (c0 >= fit.hueChroma) { sa0 += labA[l + 1]!; sb0 += labA[l + 2]!; n0++; }
+    }
+    const fallbackC = CLEANUP_RULES.fallback(chromaCount);
+    const fallbackTheta = CLEANUP_RULES.fallback(n0) || CLEANUP_RULES.fallback(n2);
+    const chroma = fallbackC ? 1 : median(scratch, chromaCount);
+    let hue = 0;
+    if (!fallbackTheta) {
+      hue = (Math.atan2(sb2, sa2) - Math.atan2(sb0, sa0)) / RAD;
+      while (hue <= -180) hue += 360;
+      while (hue > 180) hue -= 360;
+    }
+    Object.assign(metrics, { deltaL, chroma, hue, fallbackC, fallbackTheta });
+    await pace(pixels);
+
+    // §3.4a colourMode: H2''s garment median must sit within 12 L* of a substantial H0 level or H0's own median.
+    const cm = V.colourMode;
+    let modeDistance = Number.NaN;
+    if (support > 0) {
+      const binOf = (value: number) => Math.min(cm.bins - 1, Math.floor(10 * Math.min(100, Math.max(0, value))));
+      for (let index = 0; index < pixels; index++) {
+        if (!kept[index]) continue;
+        hist0[binOf(labA[index * 3]!)]!++;
+        hist2[binOf(labB[index * 3]!)]!++;
+      }
+      const halfWindow = Math.round(cm.window / cm.binWidth), stepBins = Math.round(cm.levelStep / cm.binWidth);
+      const windowOf = (k: number) => [Math.max(0, stepBins * k - halfWindow), Math.min(cm.bins - 1, stepBins * k + halfWindow - 1)] as const;
+      for (let k = 0; k < cm.levels; k++) {
+        const [from, to] = windowOf(k);
+        let total = 0;
+        for (let bin = from; bin <= to; bin++) total += hist0[bin]!;
+        levels[k] = total;
+      }
+      const m2Median = lowerMedian(hist2, 0, cm.bins - 1, cm.binWidth);
+      const median0 = lowerMedian(hist0, 0, cm.bins - 1, cm.binWidth);
+      const modes: CleanupMode[] = [];
+      for (let k = 0; k < cm.levels; k++) {
+        const here = levels[k]!, before = k > 0 ? levels[k - 1]! : -1, after = k + 1 < cm.levels ? levels[k + 1]! : -1;
+        if (here < before || here < after || !CLEANUP_RULES.modeQualifies(here, support)) continue;
+        const [from, to] = windowOf(k);
+        modes.push({ level: lowerMedian(hist0, from, to, cm.binWidth), share: here / support, chosen: false });
+      }
+      modeDistance = Math.abs(m2Median - median0);
+      let chosen = -1;
+      for (const [index, mode] of modes.entries()) {
+        const distance = Math.abs(m2Median - mode.level);
+        if (distance < modeDistance) { modeDistance = distance; chosen = index; }
+      }
+      if (chosen >= 0) modes[chosen]!.chosen = true;
+      let modeShare = 0;
+      for (const mode of modes) if (Math.abs(m2Median - mode.level) <= cm.maximum && mode.share > modeShare) modeShare = mode.share;
+      Object.assign(metrics, { modeDistance, resultMedian: m2Median, median0, medianChosen: chosen < 0, modeShare, modes });
+    }
+
+    // §3.3 removed: R pixels far from M2' (outside dilate(M2', 6); on the identity pass, outside M2' itself) whose raw H0
+    // colour is a garment colour of K' (raw H0 Lab on both sides).
+    let removedCount = 0, paletteBins = 0;
+    if (support > 0) {
+      const abBins = rm.abBins, lBins = rm.lightnessBins;
+      const lBin = (value: number) => Math.min(lBins - 1, Math.max(0, Math.floor(value / rm.lightnessStep)));
+      const abBin = (value: number) => Math.min(abBins - 1, Math.max(0, Math.floor((value + 128) / rm.abStep)));
+      const at = (bl: number, ba: number, bb: number) => (bl * abBins + ba) * abBins + bb;
+      for (let index = 0; index < pixels; index++) {
+        if (!kept[index]) continue;
+        const l = index * 3;
+        palette[at(lBin(labA[l]!), abBin(labA[l + 1]!), abBin(labA[l + 2]!))]!++;
+      }
+      // The 3x3x3 neighbourhood sum as three separable passes, clamped at the edges.
+      const sizes = [lBins, abBins, abBins], strides = [abBins * abBins, abBins, 1];
+      for (let axis = 0; axis < 3; axis++) {
+        const length = sizes[axis]!, stride = strides[axis]!;
+        for (let start = 0; start < palette.length; start++) {
+          if (Math.floor(start / stride) % length !== 0) continue;
+          for (let k = 0; k < length; k++) lineA[k] = palette[start + k * stride]!;
+          for (let k = 0; k < length; k++) {
+            palette[start + k * stride] = lineA[k]! + (k > 0 ? lineA[k - 1]! : 0) + (k + 1 < length ? lineA[k + 1]! : 0);
+          }
+        }
+      }
+      const garment = rm.paletteShare * support;
+      for (let bin = 0; bin < palette.length; bin++) if (palette[bin]! >= garment) paletteBins++;
+      const coloured = (from: number, to: number, a: number, bValue: number) => {
+        const ba = abBin(a), bb = abBin(bValue);
+        for (let bl = from; bl <= to; bl++) if (palette[at(bl, ba, bb)]! >= garment) return true;
+        return false;
+      };
+      for (let index = 0; index < pixels; index++) {
+        if (!reference[index] || (identity ? m2w[index]! & 1 : dm2w[index])) continue;
+        const l = index * 3, L = labA[l]!, a = labA[l + 1]!, bValue = labA[l + 2]!;
+        const from = lBin(lo0[index]!), to = lBin(hi0[index]!);
+        let hit = coloured(from, to, a, bValue);
+        if (!hit && L >= rm.scaleMinimumLightness) {
+          const scale = hi0[index]! / L;
+          if (scale <= rm.maximumScale) hit = coloured(from, to, a * scale, bValue * scale);
+        }
+        if (hit) removedCount++;
+      }
+    }
+    const removed = areaM2w ? removedCount / areaM2w : Number.NaN;
+    Object.assign(metrics, { removed, paletteBins });
+    await pace(pixels);
+
+    // §3.5 change: r(p), the smallest shading-tolerant distance from H2'(p) to the corrected H0 in p's 3x3 neighbourhood.
+    const ch = V.change;
+    let changeShare = Number.NaN;
+    if (support > 0) {
+      const shiftL = Number.isFinite(deltaL) ? deltaL : 0;
+      const cosT = Math.cos(hue * RAD) * chroma, sinT = Math.sin(hue * RAD) * chroma;
+      let exceeded = 0, residuals = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const index = y * width + x;
+          if (!kept[index]) continue;
+          const l = index * 3, L2 = labB[l]!, a2 = labB[l + 1]!, b2 = labB[l + 2]!;
+          let best = Infinity;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+            const q = ny * width + nx;
+            if (!erodedR[q]) continue;
+            const lq = q * 3, L1 = labA[lq]! + shiftL, a0 = labA[lq + 1]!, b0 = labA[lq + 2]!;
+            const a1 = a0 * cosT - b0 * sinT, b1 = a0 * sinT + b0 * cosT;
+            const distance = Math.abs(L1 - L2) <= ch.shadingTolerance
+              ? ciede2000(L1, a1, b1, L2, a2, b2, 1, ch.chromaWeight, true)
+              : ciede2000(L1, a1, b1, L2, a2, b2, ch.lightnessWeight, 1, false);
+            if (distance < best) best = distance;
+          }
+          scratch[residuals++] = best;
+          if (best >= ch.residual) exceeded++;
+        }
+        await pace(width * 9);
+      }
+      changeShare = exceeded / support;
+      const sorted = scratch.subarray(0, residuals).sort();
+      metrics.residualP50 = percentile(sorted, residuals, 0.5);
+      metrics.residualP95 = percentile(sorted, residuals, 0.95);
+    }
+    metrics.changeShare = changeShare;
+
+    // §3.5a patternLoss: local hue variety over K' (C* >= 12) that H0 shows and H2' has lost.
+    const pl = V.patternLoss;
+    let patternLoss = Number.NaN;
+    if (support > 0) {
+      const pr = pl.radius, none = 255;
+      const hueBins = 360 / pl.hueBin;
+      // The 17x17 window count of K' pixels whose hue bin (in scratch) is `bin`, or any bin when `bin` < 0.
+      const windowSum = async (bin: number, dst: Uint16Array) => {
+        for (let y = 0; y < height; y++) {
+          const row = y * width;
+          let running = 0;
+          for (let x = 0; x < width + pr; x++) {
+            if (x < width) {
+              const v = scratch[row + x]!;
+              if (bin < 0 ? v !== none : v === bin) running++;
+            }
+            const drop = x - 2 * pr - 1;
+            if (drop >= 0) {
+              const v = scratch[row + drop]!;
+              if (bin < 0 ? v !== none : v === bin) running--;
+            }
+            if (x >= pr) dst[row + x - pr] = running;
+          }
+        }
+        for (let x = 0; x < width; x++) {
+          for (let y = 0; y < height; y++) lineB[y] = dst[y * width + x]!;
+          let running = 0;
+          for (let y = 0; y < height + pr; y++) {
+            if (y < height) running += lineB[y]!;
+            if (y - 2 * pr - 1 >= 0) running -= lineB[y - 2 * pr - 1]!;
+            if (y >= pr) dst[(y - pr) * width + x] = running;
+          }
+        }
+        await pace(pixels * 2);
+      };
+      // One image's per-pixel hue range into `ranges` (0xffff when undefined), from the Lab buffer `lab`. A bin with no
+      // qualifying K' pixel anywhere can't be occupied in any window, so it is skipped.
+      const rangesOf = async (lab: Float32Array, ranges: Uint16Array | null) => {
+        let present = 0, presentHigh = 0;
+        for (let index = 0; index < pixels; index++) {
+          const l = index * 3, a = lab[l + 1]!, bValue = lab[l + 2]!;
+          if (!kept[index] || Math.hypot(a, bValue) < pl.chroma) { scratch[index] = none; continue; }
+          const degrees = (Math.atan2(bValue, a) / RAD + 360) % 360;
+          const bin = Math.floor(degrees / pl.hueBin) % hueBins;
+          scratch[index] = bin;
+          if (bin < 32) present |= 1 << bin; else presentHigh |= 1 << (bin - 32);
+        }
+        await windowSum(-1, windowCount);
+        maskLow.fill(0); maskHigh.fill(0);
+        for (let bin = 0; bin < hueBins; bin++) {
+          if (!(bin < 32 ? (present >>> bin) & 1 : (presentHigh >>> (bin - 32)) & 1)) continue;
+          await windowSum(bin, binCount);
+          const word = bin < 32 ? maskLow : maskHigh, bit = 1 << (bin % 32);
+          for (let index = 0; index < pixels; index++) {
+            if (!kept[index]) continue;
+            const n = windowCount[index]!;
+            if (CLEANUP_RULES.occupied(binCount[index]!, n)) word[index] = word[index]! | bit;
+          }
+        }
+        let lost = 0, from = 0, undefinedCount = 0;
+        for (let index = 0; index < pixels; index++) {
+          if (!kept[index]) continue;
+          const range = CLEANUP_RULES.patternDefined(windowCount[index]!) ? hueRange(maskLow[index]!, maskHigh[index]!) : -1;
+          if (ranges) { ranges[index] = range < 0 ? 0xffff : range; if (range >= pl.lostFrom) from++; continue; }
+          if (range < 0) { undefinedCount++; continue; }
+          const before = range0[index]!;
+          if (before !== 0xffff && CLEANUP_RULES.lost(before, range)) lost++;
+        }
+        return { lost, from, undefinedCount };
+      };
+      const first = await rangesOf(labA, range0);
+      const second = await rangesOf(labB, null);
+      patternLoss = second.lost / support;
+      metrics.patternShare0 = first.from / support;
+      metrics.patternUndefined2 = second.undefinedCount / support;
+    }
+    metrics.patternLoss = patternLoss;
+    pacer.check();
+
+    // §3.6 The first failure in the fixed order is the reason; every metric above is reported.
+    let reason: CleanupReason | null = null;
+    const judge = (name: CleanupReason, values: readonly number[], bad: () => boolean) => {
+      if (reason) return;
+      if (!values.every(Number.isFinite)) reason = 'nonFinite';
+      else if (bad()) reason = name;
+    };
+    const rule = CLEANUP_RULES;
+    judge('added', [added], () => rule.added(added));
+    judge('centre', [alignedCentroid.x, alignedCentroid.y], () => alignedCentroid.x < low || alignedCentroid.x >= high
+      || alignedCentroid.y < low || alignedCentroid.y >= high);
+    judge('retention', [retention], () => rule.retention(retained, areaR, pixels));
+    judge('support', [support], () => rule.support(support, areaM2w, pixels));
+    judge('clipped', [fitted], () => rule.clipped(fitted));
+    judge('colourShift', [deltaL, chroma, hue], () => rule.colourShift(deltaL, chroma, hue));
+    judge('colourMode', [modeDistance], () => rule.colourMode(modeDistance));
+    judge('removed', [removed], () => rule.removed(removed));
+    judge('change', [changeShare], () => rule.change(changeShare));
+    judge('patternLoss', [patternLoss], () => rule.patternLoss(patternLoss));
+    return reason ? fail(reason) : { accepted: true, metrics };
+  };
+  const atIdentity = options.alignedOnly ? null : await evaluate({ ncc: Number.NaN, s: 1, tx: 0, ty: 0 }, undefined, true);
+  if (atIdentity?.accepted) return atIdentity;
+
   // The region cells (then pixels) as an ordered list in `queue`, free after the bands; per candidate, the sampled
   // column and row depend only on x and y, so they are tabulated in lineA and lineB (-1 when out of frame).
   let cells = 0;
@@ -596,353 +964,7 @@ export async function cleanupCheck(h0: Uint8ClampedArray, reference: Uint8Array,
     }
     transform = refined ?? coarse;
   }
-  const { s, tx, ty } = transform;
-  Object.assign(metrics, { scale: s, tx, ty, ncc: transform.ncc, alignmentFlat });
-
-  // §3.3 added: the share of M2 (counted in H2 pixels) that T maps out of the frame or outside dilate(R, 6).
-  let outside = 0, outsideIdentity = 0;
-  for (let y = 0; y < height; y++) {
-    const Y = Math.floor(cy + s * (y + 0.5 - cy) + ty);
-    for (let x = 0; x < width; x++) {
-      const index = y * width + x;
-      if (!m2[index]) continue;
-      if (!r6[index]) outsideIdentity++;
-      const X = Math.floor(cx + s * (x + 0.5 - cx) + tx);
-      if (X < 0 || X >= width || Y < 0 || Y >= height || !r6[Y * width + X]) outside++;
-    }
-  }
-  const added = outside / areaM2;
-  metrics.added = added;
-  metrics.addedIdentity = outsideIdentity / areaM2;
-
-  // §3.1 The warp: H2' samples H2 at T^-1(q) bilinearly in linear RGB, straight to Float32 Lab (labB is overwritten; the
-  // caller's RGBA is the source). m2w: bit 0 foreground, 2 invalid (out of frame), 4 clipped (>= linear 254).
-  const clip = LINEAR[V.fit.resultClip]!;
-  const linear = (index: number, channel: number) => LINEAR[h2[index * 4 + channel]!]!;
-  let invalid = 0, areaM2w = 0;
-  for (let y = 0; y < height; y++) {
-    const py = cy + (y + 0.5 - ty - cy) / s;
-    for (let x = 0; x < width; x++) {
-      const index = y * width + x, l = index * 3;
-      const px = cx + (x + 0.5 - tx - cx) / s;
-      if (px < 0.5 || px > width - 0.5 || py < 0.5 || py > height - 0.5) {
-        m2w[index] = 2; labB[l] = 0; labB[l + 1] = 0; labB[l + 2] = 0; invalid++;
-        continue;
-      }
-      const fx0 = px - 0.5, fy0 = py - 0.5;
-      const x0 = Math.min(width - 1, Math.floor(fx0)), y0 = Math.min(height - 1, Math.floor(fy0));
-      const x1 = Math.min(width - 1, x0 + 1), y1 = Math.min(height - 1, y0 + 1);
-      const fx = fx0 - x0, fy = fy0 - y0;
-      const i00 = y0 * width + x0, i01 = y0 * width + x1, i10 = y1 * width + x0, i11 = y1 * width + x1;
-      const mix = (channel: number) => (1 - fy) * ((1 - fx) * linear(i00, channel) + fx * linear(i01, channel))
-        + fy * ((1 - fx) * linear(i10, channel) + fx * linear(i11, channel));
-      const lr = mix(0), lg = mix(1), lb = mix(2);
-      labFromLinear(lr, lg, lb, labB, l);
-      const fg = deltaE2000(labB[l]!, labB[l + 1]!, labB[l + 2]!, b[0]!, b[1]!, b[2]!) > V.garmentDeltaE ? 1 : 0;
-      m2w[index] = fg | (lr >= clip || lg >= clip || lb >= clip ? 4 : 0);
-      areaM2w += fg;
-    }
-    await pace(width * 4);
-  }
-  metrics.invalid = invalid;
-  metrics.resultArea = areaM2w;
-
-  // §3.3 centre (aligned): the centroid of T(M2)'s largest component.
-  for (let index = 0; index < pixels; index++) kept[index] = m2w[index]! & 1;
-  let alignedCentroid = { x: Number.NaN, y: Number.NaN };
-  if (areaM2w > 0) {
-    const alignedParts = labelComponents(kept, width, height, labels, queue);
-    if (!alignedParts.overflow && alignedParts.count > 0) {
-      let top = 0;
-      for (let index = 1; index < alignedParts.count; index++) if (alignedParts.areas[index]! > alignedParts.areas[top]!) top = index;
-      let ax = 0, ay = 0;
-      for (let index = 0; index < pixels; index++) {
-        if (labels[index] !== top + 1) continue;
-        const x = index % width;
-        ax += x; ay += (index - x) / width;
-      }
-      alignedCentroid = { x: (ax / alignedParts.areas[top]! + 0.5) / width, y: (ay / alignedParts.areas[top]! + 0.5) / height };
-    }
-  }
-  metrics.alignedCentroid = alignedCentroid;
-  await pace(pixels);
-
-  // §3.3 retention, then §3.4 K' = M2' ∩ erode(R, 2) ∩ erode(M2', 1), minus invalid pixels.
-  let retained = 0;
-  for (let index = 0; index < pixels; index++) if (m2w[index]! & 1 && reference[index]) retained++;
-  const retention = areaR ? retained / areaR : 0;
-  metrics.retention = retention;
-  morph(m2w, erodedM2, kept, width, height, V.support.resultErosion, true);
-  morph(m2w, dm2w, kept, width, height, rm.dilation, false);
-  let support = 0;
-  for (let index = 0; index < pixels; index++) {
-    const on = m2w[index]! & 1 & erodedR[index]! & erodedM2[index]!;
-    kept[index] = on;
-    support += on;
-  }
-  metrics.support = support;
-  await pace(pixels);
-
-  // §3.4 The global lighting envelope, on K' pixels unclipped in both images.
-  const fit = V.fit;
-  const unclipped0 = (index: number) => {
-    const p = index * 4;
-    for (let channel = 0; channel < 3; channel++) {
-      const value = h0[p + channel]!;
-      if (value < fit.lowChannel || value > fit.highChannel) return false;
-    }
-    return true;
-  };
-  let fitted = 0;
-  for (let index = 0; index < pixels; index++) {
-    if (!kept[index] || m2w[index]! & 4 || !unclipped0(index)) continue;
-    const l2 = labB[index * 3]!;
-    scratch[fitted++] = l2 - Math.min(hi0[index]!, Math.max(lo0[index]!, l2));
-  }
-  metrics.fitted = fitted;
-  const deltaL = fitted ? median(scratch, fitted) : Number.NaN;
-  let chromaCount = 0, sa0 = 0, sb0 = 0, n0 = 0, sa2 = 0, sb2 = 0, n2 = 0;
-  for (let index = 0; index < pixels; index++) {
-    if (!kept[index] || m2w[index]! & 4 || !unclipped0(index)) continue;
-    const l = index * 3;
-    const c2 = Math.hypot(labB[l + 1]!, labB[l + 2]!), c0 = Math.hypot(labA[l + 1]!, labA[l + 2]!);
-    const top = hiC0[index]!, bottom = loC0[index]!;
-    if (Math.max(c2, top) >= fit.chromaFloor) scratch[chromaCount++] = c2 > top ? c2 / top : c2 < bottom ? c2 / Math.max(bottom, 1) : 1;
-    if (c2 >= fit.hueChroma) { sa2 += labB[l + 1]!; sb2 += labB[l + 2]!; n2++; }
-    if (c0 >= fit.hueChroma) { sa0 += labA[l + 1]!; sb0 += labA[l + 2]!; n0++; }
-  }
-  const fallbackC = CLEANUP_RULES.fallback(chromaCount);
-  const fallbackTheta = CLEANUP_RULES.fallback(n0) || CLEANUP_RULES.fallback(n2);
-  const chroma = fallbackC ? 1 : median(scratch, chromaCount);
-  let hue = 0;
-  if (!fallbackTheta) {
-    hue = (Math.atan2(sb2, sa2) - Math.atan2(sb0, sa0)) / RAD;
-    while (hue <= -180) hue += 360;
-    while (hue > 180) hue -= 360;
-  }
-  Object.assign(metrics, { deltaL, chroma, hue, fallbackC, fallbackTheta });
-  await pace(pixels);
-
-  // §3.4a colourMode: H2''s garment median must sit within 12 L* of a substantial H0 level or H0's own median.
-  const cm = V.colourMode;
-  let modeDistance = Number.NaN;
-  if (support > 0) {
-    const binOf = (value: number) => Math.min(cm.bins - 1, Math.floor(10 * Math.min(100, Math.max(0, value))));
-    for (let index = 0; index < pixels; index++) {
-      if (!kept[index]) continue;
-      hist0[binOf(labA[index * 3]!)]!++;
-      hist2[binOf(labB[index * 3]!)]!++;
-    }
-    const halfWindow = Math.round(cm.window / cm.binWidth), stepBins = Math.round(cm.levelStep / cm.binWidth);
-    const windowOf = (k: number) => [Math.max(0, stepBins * k - halfWindow), Math.min(cm.bins - 1, stepBins * k + halfWindow - 1)] as const;
-    for (let k = 0; k < cm.levels; k++) {
-      const [from, to] = windowOf(k);
-      let total = 0;
-      for (let bin = from; bin <= to; bin++) total += hist0[bin]!;
-      levels[k] = total;
-    }
-    const m2Median = lowerMedian(hist2, 0, cm.bins - 1, cm.binWidth);
-    const median0 = lowerMedian(hist0, 0, cm.bins - 1, cm.binWidth);
-    const modes: CleanupMode[] = [];
-    for (let k = 0; k < cm.levels; k++) {
-      const here = levels[k]!, before = k > 0 ? levels[k - 1]! : -1, after = k + 1 < cm.levels ? levels[k + 1]! : -1;
-      if (here < before || here < after || !CLEANUP_RULES.modeQualifies(here, support)) continue;
-      const [from, to] = windowOf(k);
-      modes.push({ level: lowerMedian(hist0, from, to, cm.binWidth), share: here / support, chosen: false });
-    }
-    modeDistance = Math.abs(m2Median - median0);
-    let chosen = -1;
-    for (const [index, mode] of modes.entries()) {
-      const distance = Math.abs(m2Median - mode.level);
-      if (distance < modeDistance) { modeDistance = distance; chosen = index; }
-    }
-    if (chosen >= 0) modes[chosen]!.chosen = true;
-    let modeShare = 0;
-    for (const mode of modes) if (Math.abs(m2Median - mode.level) <= cm.maximum && mode.share > modeShare) modeShare = mode.share;
-    Object.assign(metrics, { modeDistance, resultMedian: m2Median, median0, medianChosen: chosen < 0, modeShare, modes });
-  }
-
-  // §3.3 removed: R pixels far from M2' whose raw H0 colour is a garment colour of K' (raw H0 Lab on both sides).
-  let removedCount = 0, paletteBins = 0;
-  if (support > 0) {
-    const abBins = rm.abBins, lBins = rm.lightnessBins;
-    const lBin = (value: number) => Math.min(lBins - 1, Math.max(0, Math.floor(value / rm.lightnessStep)));
-    const abBin = (value: number) => Math.min(abBins - 1, Math.max(0, Math.floor((value + 128) / rm.abStep)));
-    const at = (bl: number, ba: number, bb: number) => (bl * abBins + ba) * abBins + bb;
-    for (let index = 0; index < pixels; index++) {
-      if (!kept[index]) continue;
-      const l = index * 3;
-      palette[at(lBin(labA[l]!), abBin(labA[l + 1]!), abBin(labA[l + 2]!))]!++;
-    }
-    // The 3x3x3 neighbourhood sum as three separable passes, clamped at the edges.
-    const sizes = [lBins, abBins, abBins], strides = [abBins * abBins, abBins, 1];
-    for (let axis = 0; axis < 3; axis++) {
-      const length = sizes[axis]!, stride = strides[axis]!;
-      for (let start = 0; start < palette.length; start++) {
-        if (Math.floor(start / stride) % length !== 0) continue;
-        for (let k = 0; k < length; k++) lineA[k] = palette[start + k * stride]!;
-        for (let k = 0; k < length; k++) {
-          palette[start + k * stride] = lineA[k]! + (k > 0 ? lineA[k - 1]! : 0) + (k + 1 < length ? lineA[k + 1]! : 0);
-        }
-      }
-    }
-    const garment = rm.paletteShare * support;
-    for (let bin = 0; bin < palette.length; bin++) if (palette[bin]! >= garment) paletteBins++;
-    const coloured = (from: number, to: number, a: number, bValue: number) => {
-      const ba = abBin(a), bb = abBin(bValue);
-      for (let bl = from; bl <= to; bl++) if (palette[at(bl, ba, bb)]! >= garment) return true;
-      return false;
-    };
-    for (let index = 0; index < pixels; index++) {
-      if (!reference[index] || dm2w[index]) continue;
-      const l = index * 3, L = labA[l]!, a = labA[l + 1]!, bValue = labA[l + 2]!;
-      const from = lBin(lo0[index]!), to = lBin(hi0[index]!);
-      let hit = coloured(from, to, a, bValue);
-      if (!hit && L >= rm.scaleMinimumLightness) {
-        const scale = hi0[index]! / L;
-        if (scale <= rm.maximumScale) hit = coloured(from, to, a * scale, bValue * scale);
-      }
-      if (hit) removedCount++;
-    }
-  }
-  const removed = areaM2w ? removedCount / areaM2w : Number.NaN;
-  Object.assign(metrics, { removed, paletteBins });
-  await pace(pixels);
-
-  // §3.5 change: r(p), the smallest shading-tolerant distance from H2'(p) to the corrected H0 in p's 3x3 neighbourhood.
-  const ch = V.change;
-  let changeShare = Number.NaN;
-  if (support > 0) {
-    const shiftL = Number.isFinite(deltaL) ? deltaL : 0;
-    const cosT = Math.cos(hue * RAD) * chroma, sinT = Math.sin(hue * RAD) * chroma;
-    let exceeded = 0, residuals = 0;
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const index = y * width + x;
-        if (!kept[index]) continue;
-        const l = index * 3, L2 = labB[l]!, a2 = labB[l + 1]!, b2 = labB[l + 2]!;
-        let best = Infinity;
-        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx, ny = y + dy;
-          if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-          const q = ny * width + nx;
-          if (!erodedR[q]) continue;
-          const lq = q * 3, L1 = labA[lq]! + shiftL, a0 = labA[lq + 1]!, b0 = labA[lq + 2]!;
-          const a1 = a0 * cosT - b0 * sinT, b1 = a0 * sinT + b0 * cosT;
-          const distance = Math.abs(L1 - L2) <= ch.shadingTolerance
-            ? ciede2000(L1, a1, b1, L2, a2, b2, 1, ch.chromaWeight, true)
-            : ciede2000(L1, a1, b1, L2, a2, b2, ch.lightnessWeight, 1, false);
-          if (distance < best) best = distance;
-        }
-        scratch[residuals++] = best;
-        if (best >= ch.residual) exceeded++;
-      }
-      await pace(width * 9);
-    }
-    changeShare = exceeded / support;
-    const sorted = scratch.subarray(0, residuals).sort();
-    metrics.residualP50 = percentile(sorted, residuals, 0.5);
-    metrics.residualP95 = percentile(sorted, residuals, 0.95);
-  }
-  metrics.changeShare = changeShare;
-
-  // §3.5a patternLoss: local hue variety over K' (C* >= 12) that H0 shows and H2' has lost.
-  const pl = V.patternLoss;
-  let patternLoss = Number.NaN;
-  if (support > 0) {
-    const pr = pl.radius, none = 255;
-    const hueBins = 360 / pl.hueBin;
-    // The 17x17 window count of K' pixels whose hue bin (in scratch) is `bin`, or any bin when `bin` < 0.
-    const windowSum = async (bin: number, dst: Uint16Array) => {
-      for (let y = 0; y < height; y++) {
-        const row = y * width;
-        let running = 0;
-        for (let x = 0; x < width + pr; x++) {
-          if (x < width) {
-            const v = scratch[row + x]!;
-            if (bin < 0 ? v !== none : v === bin) running++;
-          }
-          const drop = x - 2 * pr - 1;
-          if (drop >= 0) {
-            const v = scratch[row + drop]!;
-            if (bin < 0 ? v !== none : v === bin) running--;
-          }
-          if (x >= pr) dst[row + x - pr] = running;
-        }
-      }
-      for (let x = 0; x < width; x++) {
-        for (let y = 0; y < height; y++) lineB[y] = dst[y * width + x]!;
-        let running = 0;
-        for (let y = 0; y < height + pr; y++) {
-          if (y < height) running += lineB[y]!;
-          if (y - 2 * pr - 1 >= 0) running -= lineB[y - 2 * pr - 1]!;
-          if (y >= pr) dst[(y - pr) * width + x] = running;
-        }
-      }
-      await pace(pixels * 2);
-    };
-    // One image's per-pixel hue range into `ranges` (0xffff when undefined), from the Lab buffer `lab`. A bin with no
-    // qualifying K' pixel anywhere can't be occupied in any window, so it is skipped.
-    const rangesOf = async (lab: Float32Array, ranges: Uint16Array | null) => {
-      let present = 0, presentHigh = 0;
-      for (let index = 0; index < pixels; index++) {
-        const l = index * 3, a = lab[l + 1]!, bValue = lab[l + 2]!;
-        if (!kept[index] || Math.hypot(a, bValue) < pl.chroma) { scratch[index] = none; continue; }
-        const degrees = (Math.atan2(bValue, a) / RAD + 360) % 360;
-        const bin = Math.floor(degrees / pl.hueBin) % hueBins;
-        scratch[index] = bin;
-        if (bin < 32) present |= 1 << bin; else presentHigh |= 1 << (bin - 32);
-      }
-      await windowSum(-1, windowCount);
-      maskLow.fill(0); maskHigh.fill(0);
-      for (let bin = 0; bin < hueBins; bin++) {
-        if (!(bin < 32 ? (present >>> bin) & 1 : (presentHigh >>> (bin - 32)) & 1)) continue;
-        await windowSum(bin, binCount);
-        const word = bin < 32 ? maskLow : maskHigh, bit = 1 << (bin % 32);
-        for (let index = 0; index < pixels; index++) {
-          if (!kept[index]) continue;
-          const n = windowCount[index]!;
-          if (CLEANUP_RULES.occupied(binCount[index]!, n)) word[index] = word[index]! | bit;
-        }
-      }
-      let lost = 0, from = 0, undefinedCount = 0;
-      for (let index = 0; index < pixels; index++) {
-        if (!kept[index]) continue;
-        const range = CLEANUP_RULES.patternDefined(windowCount[index]!) ? hueRange(maskLow[index]!, maskHigh[index]!) : -1;
-        if (ranges) { ranges[index] = range < 0 ? 0xffff : range; if (range >= pl.lostFrom) from++; continue; }
-        if (range < 0) { undefinedCount++; continue; }
-        const before = range0[index]!;
-        if (before !== 0xffff && CLEANUP_RULES.lost(before, range)) lost++;
-      }
-      return { lost, from, undefinedCount };
-    };
-    const first = await rangesOf(labA, range0);
-    const second = await rangesOf(labB, null);
-    patternLoss = second.lost / support;
-    metrics.patternShare0 = first.from / support;
-    metrics.patternUndefined2 = second.undefinedCount / support;
-  }
-  metrics.patternLoss = patternLoss;
-  pacer.check();
-
-  // §3.6 The first failure in the fixed order is the reason; every metric above is reported.
-  let reason: CleanupReason | null = null;
-  const judge = (name: CleanupReason, values: readonly number[], bad: () => boolean) => {
-    if (reason) return;
-    if (!values.every(Number.isFinite)) reason = 'nonFinite';
-    else if (bad()) reason = name;
-  };
-  const rule = CLEANUP_RULES;
-  judge('added', [added], () => rule.added(added));
-  judge('centre', [alignedCentroid.x, alignedCentroid.y], () => alignedCentroid.x < low || alignedCentroid.x >= high
-    || alignedCentroid.y < low || alignedCentroid.y >= high);
-  judge('retention', [retention], () => rule.retention(retained, areaR, pixels));
-  judge('support', [support], () => rule.support(support, areaM2w, pixels));
-  judge('clipped', [fitted], () => rule.clipped(fitted));
-  judge('colourShift', [deltaL, chroma, hue], () => rule.colourShift(deltaL, chroma, hue));
-  judge('colourMode', [modeDistance], () => rule.colourMode(modeDistance));
-  judge('removed', [removed], () => rule.removed(removed));
-  judge('change', [changeShare], () => rule.change(changeShare));
-  judge('patternLoss', [patternLoss], () => rule.patternLoss(patternLoss));
-  return reason ? fail(reason) : { accepted: true, metrics };
+  const aligned = await evaluate(transform, alignmentFlat, false);
+  if (atIdentity) aligned.metrics.identityReason = (atIdentity as { reason: CleanupReason }).reason;
+  return aligned;
 }

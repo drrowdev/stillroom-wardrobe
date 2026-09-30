@@ -1,5 +1,5 @@
 // BG2c-3 (plan rev8 §4.1, §4.3, §4.3a): Accept fixtures must pass with every gate inside its §5.2 pass band. Limits
-// (L1-L14) are asserted as accepted so the gaps stay visible; L13 and L14 are the owner-accepted escapes of #84 option A
+// (L1-L16) are asserted as accepted so the gaps stay visible; L13, L14 and L16 are owner-accepted escapes of #84 (option A; L16 on rev8b)
 // (30 September 2026), NOT positives. §4.3a boundary cases are printed, never asserted. The chroma and hue Accept
 // fixtures (A2, A3, A15) are in cleanup-check-colour.test.ts.
 import { appendFileSync } from 'node:fs';
@@ -78,6 +78,16 @@ describe('Accept fixtures pass with margin (§4.1)', () => {
 
   it('A7 a clean background from a differently textured H0 background', async () => {
     expectAccepted(await checkScenes(solid(G, navy), solid(G, navy), undefined, 99));
+  }, 30_000);
+
+  it('A8 rev8b: navy 124² kept from a clutter R of 216×280 passes at identity (disclosed: retention inside the margin band)', async () => {
+    // Retention 0.254 clears the 0.2 gate but not the 0.28 pass margin; the aligned pass still fails (the rev8 A8
+    // alignment defect), so this is asserted as accepted at identity, not as a with-margin Accept.
+    const big: Box = { left: 20, top: 20, width: 216, height: 280 }, kept = centred(124, 124);
+    const verdict = await checkScenes(solid(kept, navy), solid(kept, navy), maskOf((x, y) => inBox(big, x, y)));
+    expect(verdict.accepted).toBe(true);
+    expect(verdict.metrics.path).toBe('identity');
+    expect(verdict.metrics.retention).toBeCloseTo(0.254, 3);
   }, 30_000);
 
   it('A8 clutter removed: the existing hangers-and-neighbour fixture, and a different-coloured asymmetric neighbour', async () => {
@@ -212,6 +222,21 @@ describe('Limits are asserted as accepted, so the gaps stay visible (§4.3)', ()
     expect(verdict.accepted).toBe(true);
     expect(verdict.metrics.patternLoss).toBeLessThan(0.25);
   }, 30_000);
+
+  it('L16 (OWNER-ACCEPTED ESCAPE, #84 ~10:15, not a positive): a 24×100 sleeve added and the result recentred by 12 px', async () => {
+    // Added area 2,400 px = 9.8 % of the 136×180 body (24,480 px). That is not a gate statistic: `added` counts T(M2)
+    // outside dilate(R, 6) as a share of M2, at identity (with R undilated, zero slack) and after alignment.
+    const sleeve: Box = { left: G.left + G.width - 12, top: 110, width: 24, height: 100 };
+    const body: Box = { ...G, left: G.left - 12 };
+    const verdict = await checkScenes(solid(G, navy), (x, y) => inBox(body, x, y) || inBox(sleeve, x, y) ? navy : null);
+    const area = sleeve.width * sleeve.height / (G.width * G.height);
+    console.info(`L16: added area ${(100 * area).toFixed(1)} % of the body; path ${verdict.metrics.path}, identity ${verdict.metrics.identityReason}, aligned added ${verdict.metrics.added}`);
+    expect(area).toBeCloseTo(0.098, 3);
+    expect(verdict.accepted).toBe(true);
+    expect(verdict.metrics.path).toBe('aligned');
+    expect(verdict.metrics.identityReason).toBe('added');
+    expect(verdict.metrics.added).toBeCloseTo(0.066964, 5);
+  }, 30_000);
 });
 
 describe('§4.3a disclosed boundary cases (printed, never asserted)', () => {
@@ -226,16 +251,11 @@ describe('§4.3a disclosed boundary cases (printed, never asserted)', () => {
     await report('A4 highlights +11', highlights(40, 65), solid(G, grey(51)));
     for (const base of [60, 85]) {
       for (const [size, every] of [[9, 12], [5, 24], [15, 24]] as const) {
-        await report(`build finding: creases d45 w${size} p${every} L${base} (step 45.01 > tolerance 45)`, creased(G, grey(base), 45, size, every), solid(G, grey(base)));
+        await report(`${size === 5 ? 'build finding' : 'L15 (safe false reject, falls back to the original)'}: creases d45 w${size} p${every} L${base} (step 45.01 > tolerance 45)`, creased(G, grey(base), 45, size, every), solid(G, grey(base)));
       }
     }
-    // Build finding: R four times the garment with lighter clutter around it (retention 25.4 %). The band midpoint on
-    // erode(R, 2) smears the garment edge into ridges 8 px either side, so alignment snaps to the inner one.
-    const big: Box = { left: 20, top: 20, width: 216, height: 280 }, kept = centred(124, 124);
-    const wide = await checkScenes(solid(kept, navy), solid(kept, navy), maskOf((x, y) => inBox(big, x, y)));
-    lines.push(`build finding: navy 124² in a clutter R of 216×280: ${wide.accepted ? 'pass' : `fail ${(wide as { reason: string }).reason}`} s ${wide.metrics.scale} retention ${wide.metrics.retention?.toFixed(3)}`);
     console.info(`§4.3a boundary cases (not asserted):\n${lines.join('\n')}`);
     if (process.env.CLEANUP_REPORT) appendFileSync(process.env.CLEANUP_REPORT, `${lines.join('\n')}\n`);
-    expect(lines).toHaveLength(14);
+    expect(lines).toHaveLength(13);
   }, 120_000);
 });

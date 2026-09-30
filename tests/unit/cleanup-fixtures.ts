@@ -138,18 +138,36 @@ export function creased(box: Box, base: Lab, depth: number, size: number, every:
 
 /** Runs the check on painted scenes with no yielding (the verdict doesn't depend on yielding; see the determinism test). */
 export async function checkScenes(h0: Paint, h2: Paint, reference: Uint8Array = GARMENT_MASK, seed = 1) {
-  return cleanupCheck(h0Of(h0, seed), reference, h2Of(h2), { yieldNow: async () => undefined, now: () => 0 });
+  const input = h0Of(h0, seed), result = h2Of(h2), options = { yieldNow: async () => undefined, now: () => 0 };
+  const verdict = await cleanupCheck(input, reference, result, options);
+  // rev8b §1.2: when the identity pass decided, the aligned (rev8) pass is kept too, for the either-path margin rule.
+  if (verdict.metrics.path === 'identity') alignedOf.set(verdict, await cleanupCheck(input, reference, result, { ...options, alignedOnly: true }));
+  return verdict;
 }
+const alignedOf = new WeakMap<CleanupVerdict, CleanupVerdict>();
 export const GARMENT_MASK = maskOf((x, y) => inBox(GARMENT, x, y));
 const describeMetrics = (v: CleanupVerdict) => JSON.stringify({ ...v.metrics, modes: undefined });
-/** An Accept fixture: passes, with every gate inside its §5.2 pass band. */
+/**
+ * An Accept fixture: passes, and at least one pass (identity or aligned) has every gate inside its §5.2 pass band
+ * (rev8b §1.2, the either-path margin rule).
+ */
 export function expectAccepted(v: CleanupVerdict): void {
   expect(v.accepted, describeMetrics(v)).toBe(true);
-  expect(passViolations(v.metrics), describeMetrics(v)).toEqual([]);
+  if (passViolations(v.metrics).length === 0) return;
+  const aligned = alignedOf.get(v);
+  expect(aligned?.accepted, describeMetrics(v)).toBe(true);
+  expect(passViolations(aligned!.metrics), describeMetrics(aligned!)).toEqual([]);
 }
-/** A Block fixture: fails for one of `reasons`, with one of them beyond its §5.2 fail band. */
+/**
+ * A Block fixture: fails for one of `reasons`, with one of them beyond its §5.2 fail band. A verdict that got past the
+ * shared stages failed BOTH passes: the identity pass (its reason is kept) and the aligned pass that decided.
+ */
 export function expectBlocked(v: CleanupVerdict, reasons: readonly CleanupReason[]): void {
   expect(v.accepted, describeMetrics(v)).toBe(false);
+  if (v.metrics.path !== undefined) {
+    expect(v.metrics.path, describeMetrics(v)).toBe('aligned');
+    expect(v.metrics.identityReason, describeMetrics(v)).toBeDefined();
+  }
   expect(reasons, describeMetrics(v)).toContain((v as { reason: CleanupReason }).reason);
   expect(reasons.some((reason) => beyondFail(v.metrics, reason)), describeMetrics(v)).toBe(true);
 }

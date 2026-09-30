@@ -152,6 +152,35 @@ describe('Block fixtures fail with margin (§4.2)', () => {
   }, 60_000);
 });
 
+// rev8b: recentred parts. The result is shifted so its bounding box is centred again, as a clean-up that removes or adds
+// a part would frame it. Areas are reported as a share of the 136×180 body (24,480 px), separately from the gate
+// statistics, whose denominators are the gate's own (§5.2). Each must fail BOTH the identity and the aligned path.
+describe('rev8b recentred removals and additions fail both paths with margin', () => {
+  const BODY = G.width * G.height;
+  const shifted = (paint: Paint, dx: number, dy: number): Paint => (x, y) => paint(x - dx, y - dy);
+  const part = (label: string, box: Box) => `${label} ${box.width}×${box.height} (${(100 * box.width * box.height / BODY).toFixed(1)} % of the 24,480 px body)`;
+  const strip = (w: number): Box => ({ left: G.left + G.width - w, top: G.top, width: w, height: G.height });
+  const bottom = (h: number): Box => ({ left: G.left, top: G.top + G.height - h, width: G.width, height: h });
+  const sleeve = (w: number): Box => ({ left: G.left + G.width - w, top: G.top, width: w, height: 100 });
+  const cases: [string, Paint, Paint][] = [
+    ...[18, 22].map((w): [string, Paint, Paint] => [part('side strip removed', strip(w)), solid(G, navy), shifted(minus(G, strip(w), navy), w / 2, 0)]),
+    ...[26, 30].map((h): [string, Paint, Paint] => [part('bottom strip removed', bottom(h)), solid(G, navy), shifted(minus(G, bottom(h), navy), 0, h / 2)]),
+    [part('sleeve removed', sleeve(30)), solid(G, navy), minus(G, sleeve(30), navy)],
+    [part('sleeve added', { left: 0, top: 0, width: 30, height: 100 }), solid(G, navy),
+      shifted(plus([G, { left: G.left + G.width, top: 110, width: 30, height: 100 }], () => navy), -15, 0)],
+  ];
+  it.each(cases)('%s', async (_label, h0, h2) => {
+    expectBlocked(await checkScenes(h0, h2), ['added', 'removed']);
+  }, 30_000);
+  it(`disclosed boundary: ${part('sleeve removed', sleeve(24))} fails both paths, aligned removed 0.0766 inside the 0.077 fail band`, async () => {
+    const verdict = await checkScenes(solid(G, navy), minus(G, sleeve(24), navy));
+    expect(verdict.accepted).toBe(false);
+    expect((verdict as { reason: string }).reason).toBe('removed');
+    expect(verdict.metrics).toMatchObject({ path: 'aligned', identityReason: 'removed' });
+    expect(verdict.metrics.removed).toBeCloseTo(0.0766, 4);
+  }, 30_000);
+});
+
 describe('Disclosed false rejects are asserted as failing (§4.4)', () => {
   const failsFor = async (h0: Paint, h2: Paint, reasons: string[], reference?: Uint8Array) => {
     const verdict = await checkScenes(h0, h2, reference);

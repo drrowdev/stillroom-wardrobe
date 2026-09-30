@@ -107,7 +107,10 @@ export type StageInput = {
 export type StageDeps = {
   client: StageClient; session: EnhanceSession; imaging: StageImaging;
   admit: (bytes: Uint8Array) => AdmittedProviderJpeg;
-  /** The cooperative clean-up check (BG2c-3 §3.7); the stage's combined signal aborts it. */
+  /**
+   * The clean-up check (BG2c-3), run in a module worker (rev8b §2); the stage's combined signal aborts it. It may
+   * transfer (detach) h0 and h2, which the stage never reads again; the reference is copied.
+   */
   compare: (h0: Uint8ClampedArray, reference: Uint8Array, h2: Uint8ClampedArray, options: { signal: AbortSignal }) => Promise<CleanupVerdict>;
   newId?: () => string;
   /** Called once a request has been sent, so the UI can show "Cleaning up photo…" only for a real request. */
