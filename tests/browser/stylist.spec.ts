@@ -9,6 +9,9 @@ type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
 const text = (key: MessageKey, language: Language = 'en', parameters?: Record<string, string | number>) => translate(language, key, parameters);
 const card = (page: Page) => page.locator('section[aria-labelledby="stylist-heading"]');
+// UI1: the row's switch shows the server state; an unchecked switch opens the consent sheet, whose Turn on writes.
+const toggle = (page: Page, on: boolean) => card(page).locator(`[role="switch"][aria-checked="${on}"]`);
+const sheet = (page: Page) => page.locator('dialog[aria-labelledby="stylist-sheet-title"]');
 const message = (page: Page) => page.locator('#stylist-message');
 const sendButton = (page: Page, language: Language = 'en') => page.getByRole('button', { name: text('stylist.send', language), exact: true });
 const ideas = (page: Page) => page.locator('.stylist-ideas .today-card');
@@ -99,29 +102,33 @@ test.describe('ST1b stylist', () => {
     await expect(page.getByText(text('stylist.off'), { exact: true })).toBeVisible();
     await page.getByRole('button', { name: text('aiC.turnOn'), exact: true }).click();
     await expect(page.locator('#stylist-heading')).toBeFocused();
-    await expect(page.locator('#stylist-heading')).toHaveText(text('stylistC.disabled'));
-    await expect(card(page)).toContainText(text('stylistC.offSummary', 'en', { stylistLimit: '$5', limit: '$17.94' }));
-    await card(page).getByText(text('aiC.details'), { exact: true }).click();
+    await expect(page.locator('#stylist-heading')).toHaveText(text('stylistC.settings'));
+    await expect(toggle(page, false)).toBeVisible();
+    await expect(card(page)).toContainText(text('aiF.upTo', 'en', { limit: '$5' }));
+    await card(page).getByText(text('aiF.about'), { exact: true }).click();
     for (const key of ['stylistC.fields', 'stylistC.azureNotice', 'stylistC.trainingNotice', 'stylistC.retention', 'stylistC.chargeNotice',
       'stylistC.usageNotice', 'stylistC.optOut'] as const) await expect(card(page)).toContainText(text(key));
     const bodies: unknown[] = [];
     page.on('request', (request) => { if (new URL(request.url()).pathname === '/rest/v1/rpc/stylist_set_consent') bodies.push(request.postDataJSON()); });
-    await card(page).getByRole('button', { name: text('aiC.enable'), exact: true }).click();
-    await expect(page.locator('#stylist-heading')).toHaveText(text('stylistC.enabled'));
-    await expect(page.locator('#stylist-heading')).toBeFocused();
-    await expect(card(page)).toContainText(text('stylistC.usage', 'en', { used: '$0.00', limit: '$5' }));
-    await expect(card(page)).toContainText(text('stylistC.sharedUsage', 'en', { used: '$0.00', limit: '$17.94' }));
-    await expect(page.getByText(text('aiC.sharedLimit'), { exact: true })).toHaveCount(0);
+    await toggle(page, false).click();
+    await expect(sheet(page)).toContainText(text('stylistC.offSummary', 'en', { stylistLimit: '$5', limit: '$17.94' }));
+    expect(bodies).toEqual([]);
+    await sheet(page).getByRole('button', { name: text('aiC.enable'), exact: true }).click();
+    await expect(toggle(page, true)).toBeVisible();
+    await expect(sheet(page)).toHaveCount(0);
+    await expect(toggle(page, true)).toBeFocused();
+    await expect(card(page)).toContainText(text('aiC.usage', 'en', { used: '$0.00', limit: '$5' }));
     expect(bodies).toEqual([{ p_enabled: true, p_notice_revision: 1 }]);
     expect(api.stylistControl.consent[owners.a]).toBe(1);
-    await card(page).getByRole('button', { name: text('aiC.disable'), exact: true }).click();
-    await expect(page.locator('#stylist-heading')).toHaveText(text('stylistC.disabled'));
+    await toggle(page, true).click();
+    await expect(toggle(page, false)).toBeVisible();
     expect(bodies.at(-1)).toEqual({ p_enabled: false, p_notice_revision: null });
     // The server's notice moved on between the read and the write.
     await page.route('http://127.0.0.1:54321/rest/v1/rpc/stylist_set_consent', (route) => route.fulfill({ json: { code: 'CONFIG_CHANGED' } }), { times: 1 });
-    await card(page).getByRole('button', { name: text('aiC.enable'), exact: true }).click();
+    await toggle(page, false).click();
+    await sheet(page).getByRole('button', { name: text('aiC.enable'), exact: true }).click();
     await expect(card(page).getByRole('alert')).toHaveText(text('stylistC.changed'));
-    await expect(page.locator('#stylist-heading')).toHaveText(text('stylistC.disabled'));
+    await expect(toggle(page, false)).toBeVisible();
   });
 
   test('keeps Turn off when this app version cannot use the stylist, and settles a lost reply by reading again (M2)', async ({ page }) => {
@@ -131,7 +138,7 @@ test.describe('ST1b stylist', () => {
     await expect(card(page).getByRole('button', { name: text('aiC.enable'), exact: true })).toHaveCount(0);
     api.stylistControl.consentFaults.push('lost');
     api.stylistControl.statusFaults.push('fail');
-    await card(page).getByRole('button', { name: text('aiC.disable'), exact: true }).click();
+    await toggle(page, true).click();
     await expect(card(page)).toContainText(text('stylist.unresolved'));
     await card(page).getByRole('button', { name: text('common.retry'), exact: true }).click();
     // Consent is off now; without a notice this version can show, the card stays with no way to turn it on.
@@ -283,8 +290,8 @@ test.describe('ST1b stylist', () => {
     await ask(page, 'Before turning off');
     await expect(ideas(page)).toHaveCount(2);
     await page.evaluate(() => { location.hash = '#/settings'; });
-    await card(page).getByRole('button', { name: text('aiC.disable'), exact: true }).click();
-    await expect(page.locator('#stylist-heading')).toHaveText(text('stylistC.disabled'));
+    await toggle(page, true).click();
+    await expect(toggle(page, false)).toBeVisible();
     await page.evaluate(() => { location.hash = '#/stylist'; });
     await expect(page.getByText(text('stylist.off'), { exact: true })).toBeVisible();
     await expect(message(page)).toHaveCount(0);
@@ -313,8 +320,8 @@ test.describe('ST1b stylist', () => {
     await message(page).fill('Draft before turning off');
     await expect(clearButton).toBeVisible();
     await page.evaluate(() => { location.hash = '#/settings'; });
-    await card(page).getByRole('button', { name: text('aiC.disable'), exact: true }).click();
-    await expect(page.locator('#stylist-heading')).toHaveText(text('stylistC.disabled'));
+    await toggle(page, true).click();
+    await expect(toggle(page, false)).toBeVisible();
     await page.evaluate(() => { location.hash = '#/stylist'; });
     await expect(page.getByText(text('stylist.off'), { exact: true })).toBeVisible();
     await expect(message(page)).toHaveCount(0);
@@ -395,7 +402,7 @@ test.describe('ST1b stylist', () => {
     }
     await page.evaluate(() => { location.hash = '#/settings'; });
     await expect(page.locator('#stylist-heading')).toBeVisible();
-    await card(page).getByText(text('aiC.details'), { exact: true }).click();
+    await card(page).getByText(text('aiF.about'), { exact: true }).click();
     await noOverflow(page, 320);
     await axe(page);
   });
@@ -429,8 +436,8 @@ test.describe('bounded ST1b visual evidence', () => {
         await page.evaluate(() => scrollTo(0, 0));
       } else if (selected.scene === 'consent') {
         await start(page, { language, setup: {}, hash: '/#/settings' });
-        await expect(page.locator('#stylist-heading')).toHaveText(text('stylistC.disabled', language));
-        await card(page).getByText(text('aiC.details', language), { exact: true }).click();
+        await expect(toggle(page, false)).toBeVisible();
+        await card(page).getByText(text('aiF.about', language), { exact: true }).click();
         await expect(card(page)).toContainText(text('stylistC.optOut', language));
       } else {
         await start(page, { language, setup: { activated: false }, consent: true });

@@ -115,7 +115,7 @@ test('signing out during a profile save drops the queued route', async ({ page }
   const held = await heldSave(page, 'Signed-out rename');
   await nav(page, 'nav.outfits').click();
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
-  await page.getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(page.locator('#login-title')).toBeVisible();
   await held().fallback();
   await signIn(page);

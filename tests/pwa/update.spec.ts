@@ -82,7 +82,7 @@ test('the controlling version serves every navigation, also offline, without ask
     await expect(page.locator('.workspace-main')).toBeVisible();
     await expect(page.getByText(messages['chunk.failed'].en)).toHaveCount(0);
   }
-  await expect(page.locator('#profile-heading, #trash-title, .workspace-main h1').first()).toBeVisible();
+  await expect(page.locator('#settings-profile-heading, #trash-title, .workspace-main h1').first()).toBeVisible();
   await page.reload();
   expect(await loadedScripts(page)).toEqual(entryScripts('a'));
   await context.setOffline(false);

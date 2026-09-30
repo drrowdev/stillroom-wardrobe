@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppClient } from '../../data/client';
 import type { OwnerScope, SessionController, SessionState } from '../../auth/session';
 import type { ProfileRow } from '../../data/rows';
@@ -6,15 +6,9 @@ import { profileFields, sameProfileFields, type ProfileFields } from '../../doma
 import { errorKey, isAborted } from '../../data/errors';
 import type { Language, MessageKey, Translate } from '../../i18n';
 import { LanguageSettings } from '../settings/language-settings';
-import { AiSettings } from '../settings/ai-settings';
-import { StylistSettings } from '../settings/stylist-settings';
-import { EnhanceSettings } from '../settings/enhance-settings';
-import { AdminEntry } from '../admin/admin-entry';
-import { enhanceStoreFor } from '../settings/enhance-store';
-import { TryOnSettings } from '../settings/tryon-settings';
-import { tryOnStoreFor } from '../settings/tryon-store';
+import { AiFeatures } from '../settings/ai-features';
+import { SettingsNav, type SettingsSection } from '../settings/settings-nav';
 import type { StylistStore } from '../stylist/stylist-store';
-import { useStylist, viewOf } from '../stylist/use-stylist';
 import { WeatherSettings } from '../settings/weather-settings';
 import { BackupSettings } from '../settings/backup-settings';
 import { RestoreSettings } from '../settings/restore-settings';
@@ -26,17 +20,30 @@ import type { AiClient } from '../../data/ai';
 import { currencyOptions, timeZoneOptions } from './profile-options';
 
 // Style preferences stay stored but are not shown until suggestions use them (ADR20).
-type Props = { client: AppClient; ai: AiClient; stylist: StylistStore; images: PrivateImages; unresolved: boolean; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; language: Language; online: boolean; t: Translate; version: string; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void; onBack: () => void };
+type Props = { client: AppClient; ai: AiClient; stylist: StylistStore; images: PrivateImages; unresolved: boolean; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; language: Language; online: boolean; t: Translate; version: string; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void; onBack: () => void; onSignOut: () => void };
 const fieldLabels = { display_name: 'profile.displayName', timezone: 'profile.timezone', currency: 'profile.currency' } as const;
 const fieldErrors = { display_name: 'settings.invalidName', timezone: 'settings.invalidTimezone', currency: 'settings.invalidCurrency' } as const;
-export function ProfileScreen({ client, ai, stylist, images, unresolved, controller, scope, profile, change, busy, language, online, t, version, onDirty, onBack }: Props) {
+const [profileSection, aiSection, wardrobeSection, dataSection, accountSection] = [
+  { id: 'settings-profile', label: 'settings.sectionProfile' },
+  { id: 'settings-ai', label: 'settings.sectionAi' },
+  { id: 'settings-wardrobe', label: 'settings.sectionWardrobe' },
+  { id: 'settings-data', label: 'settings.sectionData' },
+  { id: 'settings-account', label: 'settings.sectionAccount' },
+] as const satisfies readonly SettingsSection[];
+const sections: readonly SettingsSection[] = [profileSection, aiSection, wardrobeSection, dataSection, accountSection];
+function Section({ of: { id, label }, t, children }: { of: SettingsSection; t: Translate; children: ReactNode }) {
+  return <section id={id} className="settings-section" aria-labelledby={`${id}-heading`}>
+    <h2 id={`${id}-heading`} tabIndex={-1}>{t(label)}</h2>
+    {children}
+  </section>;
+}
+export function ProfileScreen({ client, ai, stylist, images, unresolved, controller, scope, profile, change, busy, language, online, t, version, onDirty, onBack, onSignOut }: Props) {
   const [base, setBase] = useState(profile);
   const [seen, setSeen] = useState(profile);
   const [fields, setFields] = useState<ProfileFields>(() => profileFields(profile));
   const [error, setError] = useState<MessageKey | null>(null);
   const [saved, setSaved] = useState(false);
   const [reading, setReading] = useState(false);
-  const stylistShown = viewOf(useStylist(stylist)).card;
   const summary = useRef<HTMLDivElement>(null);
   useEffect(() => { if (error) summary.current?.focus(); }, [error]);
   const timezones = useMemo(() => timeZoneOptions(language, [base.timezone, fields.timezone]), [language, base.timezone, fields.timezone]);
@@ -82,45 +89,66 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
   return <div className="settings-page">
     <button className="text-button" onClick={onBack}>{t('common.back')}</button>
     <header className="settings-heading"><h1 id="settings-title" tabIndex={-1}>{t('nav.settings')}</h1></header>
-    <div className="settings-grid">
-      <section className="settings-card" aria-labelledby="profile-heading">
-        <h2 id="profile-heading">{t('profile.title')}</h2><p className="muted fine">{t('settings.profileHint')}</p>
-        <form noValidate onSubmit={(event) => { event.preventDefault(); void save(); }} className="stack">
-          {(['display_name', 'timezone', 'currency'] as const).map((field) => {
-            const options = field === 'timezone' ? timezones : field === 'currency' ? currencies : null;
-            const common = { id: `profile-${field}`, value: fields[field], disabled: busy || reading,
-              'aria-invalid': error === fieldErrors[field] || field === 'timezone' && error === 'settings.serverTimezone',
-              onChange: (event: { target: { value: string } }) => { setFields({ ...fields, [field]: event.target.value }); setSaved(false); } };
-            return <div className="field" key={field}>
-              <label htmlFor={`profile-${field}`}>{t(fieldLabels[field])}</label>
-              {options ? <select {...common} style={{ contain: 'paint' }}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
-                : <input {...common} autoComplete={field === 'display_name' ? 'nickname' : 'off'} />}
-            </div>;
-          })}
-          {shownError && <div ref={summary} tabIndex={-1} role="alert" className="notice notice-error"><p>{t(shownError)}</p>{error === 'error.conflict' && <div className="settings-actions">
-            <button type="button" className="text-button" disabled={!online || busy || reading} onClick={() => { void reload(false); }}>{t('settings.reload')}</button>
-            <button type="button" className="text-button" disabled={!online || busy || reading} onClick={() => { void reload(true); }}>{t('settings.keepEdits')}</button>
-          </div>}</div>}
-          <button className="button button-primary" disabled={!online || busy || reading || !dirty}>{t(busy ? 'common.saving' : 'settings.saveProfile')}</button>
-          {saved && <p className="settings-success" role="status">{t('settings.profileSaved')}</p>}
-        </form>
-      </section>
-      <section className="settings-card" aria-labelledby="settings-language-heading"><h2 id="settings-language-heading">{t('language.label')}</h2>
-        <LanguageSettings controller={controller} scope={scope} profile={profile} language={language} busy={busy || reading} online={online} t={t} />
-        <p className="privacy-note">{t('profile.privacy')}</p>
-      </section>
-      <WeatherSettings controller={controller} scope={scope} profile={profile} busy={busy || reading} language={language} online={online} t={t} />
-      <AiSettings ai={ai} controller={controller} scope={scope} profile={profile} busy={busy || reading}
-        unresolved={unresolved} sharedLimit={stylistShown} language={language} online={online} t={t}
-        footer={<AdminEntry client={client} scope={scope} t={t} />} />
-      <StylistSettings store={stylist} busy={busy || reading} language={language} online={online} t={t} />
-      <EnhanceSettings store={enhanceStoreFor(client, scope)} busy={busy || reading} language={language} online={online} t={t} />
-      <TryOnSettings store={tryOnStoreFor(client, scope)} busy={busy || reading} language={language} online={online} t={t} />
-      <AvoidedPairs client={client} scope={scope} images={images} language={language} online={online} t={t} />
-      <InstallHint t={t} />
-      <BackupSettings client={client} scope={scope} language={language} online={online} t={t} />
-      <RestoreSettings client={client} scope={scope} language={language} online={online} t={t} />
-      <DeleteAccountSettings client={client} controller={controller} scope={scope} online={online} t={t} />
+    <div className="settings-layout">
+      <SettingsNav sections={sections} t={t} />
+      <div className="settings-sections">
+        <Section of={profileSection} t={t}>
+          <div className="settings-group-card">
+            <div className="settings-card profile-card">
+              <form noValidate onSubmit={(event) => { event.preventDefault(); void save(); }} className="stack">
+                {(['display_name', 'timezone', 'currency'] as const).map((field) => {
+                  const options = field === 'timezone' ? timezones : field === 'currency' ? currencies : null;
+                  const common = { id: `profile-${field}`, value: fields[field], disabled: busy || reading,
+                    'aria-invalid': error === fieldErrors[field] || field === 'timezone' && error === 'settings.serverTimezone',
+                    onChange: (event: { target: { value: string } }) => { setFields({ ...fields, [field]: event.target.value }); setSaved(false); } };
+                  return <div className="field" key={field}>
+                    <label htmlFor={`profile-${field}`}>{t(fieldLabels[field])}</label>
+                    {options ? <select {...common} style={{ contain: 'paint' }}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+                      : <input {...common} autoComplete={field === 'display_name' ? 'nickname' : 'off'} />}
+                  </div>;
+                })}
+                <p className="muted fine">{t('settings.profileHint')}</p>
+                {shownError && <div ref={summary} tabIndex={-1} role="alert" className="notice notice-error"><p>{t(shownError)}</p>{error === 'error.conflict' && <div className="settings-actions">
+                  <button type="button" className="text-button" disabled={!online || busy || reading} onClick={() => { void reload(false); }}>{t('settings.reload')}</button>
+                  <button type="button" className="text-button" disabled={!online || busy || reading} onClick={() => { void reload(true); }}>{t('settings.keepEdits')}</button>
+                </div>}</div>}
+                <div className="settings-save"><button className="button button-primary" disabled={!online || busy || reading || !dirty}>{t(busy ? 'common.saving' : 'settings.saveProfile')}</button></div>
+                {saved && <p className="settings-success" role="status">{t('settings.profileSaved')}</p>}
+              </form>
+            </div>
+            <div className="settings-card" aria-labelledby="settings-language-heading" role="group">
+              <h3 id="settings-language-heading">{t('language.label')}</h3>
+              <LanguageSettings controller={controller} scope={scope} profile={profile} language={language} busy={busy || reading} online={online} t={t} />
+              <p className="privacy-note">{t('profile.privacy')}</p>
+            </div>
+          </div>
+        </Section>
+        <Section of={aiSection} t={t}>
+          <AiFeatures client={client} ai={ai} controller={controller} scope={scope} profile={profile} stylist={stylist}
+            busy={busy || reading} unresolved={unresolved} language={language} online={online} t={t} />
+        </Section>
+        <Section of={wardrobeSection} t={t}>
+          <div className="settings-group-card">
+            <WeatherSettings controller={controller} scope={scope} profile={profile} busy={busy || reading} language={language} online={online} t={t} />
+            <AvoidedPairs client={client} scope={scope} images={images} language={language} online={online} t={t} />
+          </div>
+        </Section>
+        <Section of={dataSection} t={t}>
+          <div className="settings-group-card">
+            <BackupSettings client={client} scope={scope} language={language} online={online} t={t} />
+            <RestoreSettings client={client} scope={scope} language={language} online={online} t={t} />
+          </div>
+        </Section>
+        <Section of={accountSection} t={t}>
+          <div className="settings-group-card">
+            <InstallHint t={t} />
+            <div className="settings-card account-sign-out">
+              <button type="button" className="button button-secondary" onClick={onSignOut}>{t('auth.signOut')}</button>
+            </div>
+            <DeleteAccountSettings client={client} controller={controller} scope={scope} online={online} t={t} />
+          </div>
+        </Section>
+      </div>
     </div>
     <p className="fine muted app-version">{t('settings.version', { version })}</p>
   </div>;

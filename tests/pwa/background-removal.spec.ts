@@ -66,7 +66,7 @@ async function openAdd(page: Page) {
 }
 async function signOut(page: Page) {
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
-  await page.getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   const discard = page.getByRole('button', { name: messages['common.discard'].en, exact: true });
   if (await discard.isVisible().catch(() => false)) await discard.click();
   await expect(page.locator('#email')).toBeVisible();

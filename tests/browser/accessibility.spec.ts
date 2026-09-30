@@ -28,9 +28,10 @@ async function layout(page: Page, scope: string): Promise<Check> {
       return element;
     };
     const name = (element: Element) => `${element.tagName.toLowerCase()} "${(element.textContent ?? '').trim().slice(0, 30)}"`;
-    // Text that does not fit its own box, or that reaches past the viewport, is clipped or overlaps.
+    // Text that does not fit its own box, or that reaches past the viewport, is clipped or overlaps. The Settings section
+    // menu is a horizontally scrolling row on narrow screens; settings-layout.spec checks every entry can be scrolled to.
     const clipped = [...root.querySelectorAll('button, label, a, summary, legend, h1, h2, h3, p, li, dt, dd, [role=alert], [role=status]')]
-      .filter((element) => shown(element) && getComputedStyle(element).display !== 'inline')
+      .filter((element) => shown(element) && getComputedStyle(element).display !== 'inline' && !element.closest('.settings-nav ul'))
       .filter((element) => element.scrollWidth > element.clientWidth + 1 || element.getBoundingClientRect().right > innerWidth + 1)
       .map(name);
     const small = [...root.querySelectorAll('button, a[href], input:not([type=hidden]), select, textarea, summary, [role=button]')]

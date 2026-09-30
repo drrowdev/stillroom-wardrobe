@@ -40,14 +40,14 @@ test('logout, another owner and a recovery link leave Cache Storage unchanged', 
   await signIn(page);
   await expect(page.locator('.workspace-identity')).toContainText('Alex');
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
-  await page.getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await signIn(page, 'b');
   await expect(page.locator('.account-button')).toContainText('Robin');
   await expect(page.getByText('Alex', { exact: true })).toHaveCount(0);
   await expectOnlyShell(page, 'a', privateMarkers);
   await page.getByRole('button', { name: messages['account.menu'].sv }).click();
-  await page.getByRole('button', { name: messages['auth.signOut'].sv, exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].sv, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   // A fresh document load, so the recovery capture sees the synthetic tokens in the fragment.
   await page.goto('about:blank');
@@ -70,7 +70,7 @@ test('sign-out in one controlled tab signs out the other', async ({ page, contex
   await signIn(second);
   await expect(second.locator('.workspace-identity')).toContainText('Alex');
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
-  await page.getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(second.locator('#email')).toBeVisible();
   await expect(second.getByText('Alex', { exact: true })).toHaveCount(0);
   await expectOnlyShell(second, 'a', privateMarkers);
@@ -99,7 +99,7 @@ test('a private response that arrives after logout is neither shown nor stored',
   await expect(page.locator('.workspace-identity')).toContainText('Alex');
   await expect.poll(() => held).toBe(true);
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
-  await page.getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   release();
   await answered;

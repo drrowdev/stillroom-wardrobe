@@ -69,7 +69,7 @@ for (const logoutStatus of [204, 403]) {
       await expect(page.locator('html')).toHaveAttribute('lang', language);
       await expect(page.locator('.workspace-identity')).toContainText(account === 'a' ? 'Alex' : 'Robin');
       await page.getByRole('button', { name: translate(language, 'account.menu') }).click();
-      await page.getByRole('button', { name: translate(language, 'auth.signOut'), exact: true }).click();
+      await page.locator('.account-popover').getByRole('button', { name: translate(language, 'auth.signOut'), exact: true }).click();
       await expect(page.locator('#login-title')).toBeVisible();
       await expect(page.locator('html')).toHaveAttribute('lang', 'en');
       await expect(page.getByText(notice, { exact: true })).toHaveCount(0);

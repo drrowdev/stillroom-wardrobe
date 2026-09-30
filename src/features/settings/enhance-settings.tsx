@@ -1,6 +1,9 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { usdCents } from '../../domain/ai-presentation';
-import type { Language, MessageKey, Translate } from '../../i18n';
+import type { Language, Translate } from '../../i18n';
+import { featureSwitch } from './ai-features-model';
+import { ConsentSheet, FeatureRow } from './feature-row';
+import { useConsentSheet } from './use-consent-sheet';
 import { ENHANCE_NOTICE_KEYS, enhanceViewOf, readEnhanceStatus, writeEnhanceConsent, type EnhanceStore } from './enhance-store';
 
 type Props = { store: EnhanceStore | null; busy: boolean; online: boolean; language: Language; t: Translate };
@@ -28,6 +31,7 @@ function Card({ store, busy, online, language, t }: Props & { store: EnhanceStor
     };
   }, [store]);
   const heading = useRef<HTMLHeadingElement>(null);
+  const switchButton = useRef<HTMLButtonElement>(null);
   const pressed = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const button = pressed.current;
@@ -36,39 +40,38 @@ function Card({ store, busy, online, language, t }: Props & { store: EnhanceStor
     if (!button.isConnected && !store.scope.signal.aborted) heading.current?.focus();
   });
   const view = enhanceViewOf(store, state);
+  const sheet = useConsentSheet(view.turnOn, state.writing);
   if (view.kind === 'hidden') return null;
   const status = state.read.kind === 'ready' ? state.read.status : null;
   const policy = status?.policy ?? null;
   const disabled = !online || busy || state.writing;
-  const title: MessageKey = view.kind === 'on' ? 'enhanceC.enabled' : view.kind === 'off' || view.kind === 'renew' ? 'enhanceC.disabled'
-    : view.kind === 'paused' ? 'enhanceC.paused' : 'enhanceC.settings';
   const details = view.kind === 'off' || view.kind === 'renew' || view.kind === 'on' || view.kind === 'paused';
-  const change = (enabled: boolean, button: HTMLElement) => { pressed.current = button; void writeEnhanceConsent(store, enabled); };
-  return <section className="settings-card ai-card" aria-labelledby="enhance-heading" aria-busy={state.writing}>
-    <div role="status" className="ai-state">
-      <h2 id="enhance-heading" ref={heading} tabIndex={-1}>{t(title)}</h2>
-      {view.kind === 'loadFailed' && <p>{t('enhanceC.loadFailed')}</p>}
-      {view.kind === 'unresolved' && <p>{t('stylist.unresolved')}</p>}
-      {view.kind === 'paused' && <p>{t('enhanceC.pausedText')}</p>}
-      {view.kind === 'renew' && <p>{t('enhanceC.changed')}</p>}
-      {view.kind === 'on' && status?.usage && policy && <p className="ai-usage">{t('enhanceC.usage', {
-        used: usdCents(status.usage.enhanceMicro, language, 'used'), limit: usdCents(policy.enhanceAllowanceMicro, language, 'limit') })}</p>}
-    </div>
-    {(view.kind === 'off' || view.kind === 'renew') && <p>{t('enhanceC.offSummary')}</p>}
-    {details && <details className="ai-details">
-      <summary>{t('aiC.details')}</summary>
-      <div className="ai-notice fine">{ENHANCE_NOTICE_KEYS.map((key) => <p key={key}>{t(key)}</p>)}</div>
-    </details>}
-    {(view.turnOn || view.turnOff || view.kind === 'loadFailed' || view.kind === 'unresolved') && <div className="settings-actions">
-      {view.turnOn && <button id="enhance-turn-on" type="button" className="button button-primary" disabled={disabled}
-        onClick={(event) => change(true, event.currentTarget)}>{t(state.writing ? 'common.saving' : 'aiC.enable')}</button>}
-      {view.turnOff && <button id="enhance-turn-off" type="button" className={view.turnOn ? 'text-button' : 'button button-secondary'} disabled={disabled}
-        onClick={(event) => change(false, event.currentTarget)}>{t(state.writing ? 'common.saving' : 'aiC.disable')}</button>}
+  const control = featureSwitch(view.turnOn, view.turnOff);
+  const change = (enabled: boolean, button: HTMLElement | null) => { pressed.current = button; return writeEnhanceConsent(store, enabled); };
+  const allowance = policy?.enhanceAllowanceMicro ?? null;
+  const value = view.kind === 'on' && status?.usage && allowance ? t('aiC.usage', { used: usdCents(status.usage.enhanceMicro, language, 'used'), limit: usdCents(allowance, language, 'limit') })
+    : (view.kind === 'off' || view.kind === 'renew') && allowance ? t('aiF.upTo', { limit: usdCents(allowance, language, 'limit') }) : null;
+  const noticeList = <div className="ai-notice fine">{ENHANCE_NOTICE_KEYS.map((key) => <p key={key}>{t(key)}</p>)}</div>;
+  const line = view.kind === 'loadFailed' ? 'enhanceC.loadFailed' : view.kind === 'unresolved' ? 'stylist.unresolved'
+    : view.kind === 'paused' ? 'enhanceC.pausedText' : view.kind === 'renew' ? 'enhanceC.changed' : null;
+  return <FeatureRow id="enhance-heading" headingRef={heading} switchRef={switchButton} title={t('enhanceC.settings')} description={t('enhanceC.offSummary')}
+    value={value} busy={state.writing} control={control} switchDisabled={disabled}
+    onSwitch={() => { if (control.checked) void change(false, switchButton.current); else sheet.show(); }}
+    status={<>
+      {line && <p>{t(line)}</p>}
+      {state.writing && <p>{t('common.saving')}</p>}
+    </>}
+    actions={(view.turnOn && view.turnOff || view.kind === 'loadFailed' || view.kind === 'unresolved') && <div className="settings-actions">
+      {view.turnOn && view.turnOff && <button id="enhance-turn-off" type="button" className="text-button" disabled={disabled}
+        onClick={(event) => { void change(false, event.currentTarget); }}>{t(state.writing ? 'common.saving' : 'aiC.disable')}</button>}
       {(view.kind === 'loadFailed' || view.kind === 'unresolved') && <button type="button" className="button button-secondary"
         disabled={!online || busy || state.reading || state.writing}
         onClick={(event) => { pressed.current = event.currentTarget; void readEnhanceStatus(store, 'active'); }}>{t('common.retry')}</button>}
     </div>}
-    {state.settingsError && !(state.settingsError === 'enhanceC.changed' && view.kind === 'renew')
+    error={state.settingsError && !(state.settingsError === 'enhanceC.changed' && view.kind === 'renew')
       && <p role="alert" className="notice notice-error">{t(state.settingsError)}</p>}
-  </section>;
+    notice={details ? noticeList : null}
+    sheet={sheet.open ? <ConsentSheet id="enhance" title={t('enhanceC.turnOnTitle')} notice={noticeList} writing={state.writing}
+      disabled={disabled} t={t} onCancel={sheet.close} onConfirm={() => { void change(true, switchButton.current).finally(sheet.close); }} /> : null}
+    t={t} />;
 }

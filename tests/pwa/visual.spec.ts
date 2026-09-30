@@ -36,7 +36,7 @@ const installCard = (page: Page) => page.locator('section[aria-labelledby="insta
 async function openSettings(page: Page, language: Language) {
   await signedIn(page, language);
   await page.evaluate(() => { location.hash = '#/settings'; });
-  await expect(page.locator('#profile-heading')).toBeVisible();
+  await expect(page.locator('#settings-profile-heading')).toBeVisible();
 }
 async function installHint(page: Page, language: Language, platform: 'ios' | 'other', file: string) {
   await openSettings(page, language);

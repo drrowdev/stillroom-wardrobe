@@ -416,7 +416,7 @@ test('I07 cancel, reset, language and owner cleanup retain only accepted drafts'
   await expect(page.locator('#crop-width')).toHaveValue('50');
   await expect(page.locator('#item-title')).toHaveValue('Oma synthetic text');
   await expect(page.locator('#apply-crop')).toHaveText(messages['photo.applyCrop'].fi);
-  await page.getByRole('button', { name: messages['auth.signOut'].fi, exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].fi, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await signIn(page, 'b');
   await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
@@ -563,7 +563,7 @@ test('I07 logout prevents a held preparation publishing into another owner', asy
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'late.png', mimeType: 'image/png', buffer: Buffer.from(bytes) });
   await expect.poll(() => page.evaluate(() => (window as ProbeWindow).i07Decode.opened)).toBe(1);
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
-  await page.getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await page.evaluate(() => (window as ProbeWindow).i07Decode.release());
   await expect.poll(() => page.evaluate(() => (window as ProbeWindow).i07Decode.closed)).toBe(1);

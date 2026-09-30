@@ -87,7 +87,7 @@ export function BackupSettings({ client, scope, language, online, t }: Props) {
   const busy = state.kind === 'preparing' || working !== null;
   const complete = state.kind === 'ready' && state.done.size === state.prepared.partCount;
   return <section className="settings-card backup-card" aria-labelledby="backup-heading">
-    <h2 id="backup-heading">{t('backup.title')}</h2>
+    <h3 id="backup-heading">{t('backup.title')}</h3>
     <p className="muted fine">{t('backup.intro')}</p>
     <p className="muted fine">{t('backup.excluded')}</p>
     {(state.kind === 'idle' || state.kind === 'preparing') && <>

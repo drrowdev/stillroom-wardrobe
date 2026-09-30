@@ -129,7 +129,7 @@ test('I26 release journey: the owner\'s ten steps on fictional data', async ({ p
 
   await test.step('9. sign out; nothing private is shown when the app is opened again', async () => {
     await page.getByRole('button', { name: text('account.menu') }).click();
-    await page.getByRole('button', { name: text('auth.signOut'), exact: true }).click();
+    await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
     await expect(page.locator('#email')).toBeVisible();
     const leaks = async () => page.evaluate(values => {
       const stored = JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage });

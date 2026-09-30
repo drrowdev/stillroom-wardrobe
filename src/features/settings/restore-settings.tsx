@@ -86,7 +86,7 @@ export function RestoreSettings({ client, scope, language, online, t }: Props) {
   const busy = state.kind === 'checking' || state.kind === 'restoring';
   const ready = files.length > 0 && passphrase.length > 0;
   return <section className="settings-card restore-card" aria-labelledby="restore-heading">
-    <h2 id="restore-heading">{t('restore.title')}</h2>
+    <h3 id="restore-heading">{t('restore.title')}</h3>
     <p className="muted fine">{t('restore.intro')}</p>
     {state.kind === 'idle' && !open && <button type="button" className="button button-secondary" disabled={!online}
       onClick={() => { setOpen(true); }}>{t('restore.open')}</button>}

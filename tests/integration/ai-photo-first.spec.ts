@@ -140,10 +140,13 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         progress('CONSENT', ownerIndex);
         await page.getByRole('button', { name: messages['account.menu'][language] }).click();
         await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
-        await page.getByRole('button', { name: messages['aiC.disable'][language], exact: true }).click();
-        await page.getByRole('heading', { name: messages['aiC.disabled'][language], exact: true }).waitFor();
-        await page.getByRole('button', { name: messages['aiC.enable'][language], exact: true }).click();
-        await page.getByRole('heading', { name: messages['aiC.enabled'][language], exact: true }).waitFor();
+        // UI1: the analysis row's switch shows the server state; turning on goes through the consent sheet's Turn on.
+        const analysisSwitch = (on: boolean) => page.locator(`section[aria-labelledby="ai-consent-title"] [role="switch"][aria-checked="${on}"]`);
+        await analysisSwitch(true).click();
+        await analysisSwitch(false).waitFor();
+        await analysisSwitch(false).click();
+        await page.locator('dialog[aria-labelledby="ai-consent-sheet-title"]').getByRole('button', { name: messages['aiC.enable'][language], exact: true }).click();
+        await analysisSwitch(true).waitFor();
         const afterConsent = await client.from('profiles').select('owner_id,display_name,ui_language,timezone,currency,version').eq('owner_id', ownerId).single();
         check(!afterConsent.error);
         check(JSON.stringify(parseProfile(afterConsent.data, ownerId)) === JSON.stringify({ ...profile, version: profile.version + 2 }));

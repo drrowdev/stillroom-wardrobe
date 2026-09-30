@@ -467,6 +467,17 @@ jobs:
             test-results/vto2-visual/failure-fi-320-200.png
           if-no-files-found: error
           retention-days: 1
+      - name: Preserve bounded synthetic UI1 Settings visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ui1-settings-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/ui1-visual/settings-en-desktop.png
+            test-results/ui1-visual/settings-fi-mobile.png
+            test-results/ui1-visual/settings-sv-320-200.png
+            test-results/ui1-visual/consent-cleanup-en-mobile.png
+          if-no-files-found: error
+          retention-days: 1
 
   pwa:
     name: PWA production contracts

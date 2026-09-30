@@ -680,7 +680,7 @@ test('discard and owner logout clear the invalid-photo alert and ignore late pho
   await input.setInputFiles({ name: 'invalid.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
   await expect(page.getByRole('alert')).toHaveText(messages['photo.invalid'].en);
   await page.getByRole('button', { name: 'Account menu' }).click();
-  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
   await signIn(page, 'b');
@@ -691,7 +691,7 @@ test('discard and owner logout clear the invalid-photo alert and ignore late pho
   await input.setInputFiles({ name: 'late.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
   await expect.poll(() => page.evaluate(() => (window as PhotoReadProbe).photoReadStarted)).toBe(true);
   await page.getByRole('button', { name: messages['account.menu'].sv }).click();
-  await page.getByRole('button', { name: messages['auth.signOut'].sv, exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].sv, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await page.evaluate(() => (window as PhotoReadProbe).releasePhotoRead?.());
   await expect(page.locator('.capture-photo img')).toHaveCount(0);
@@ -790,7 +790,7 @@ test('logout clears private state before another owner signs in', async ({ page 
   await signIn(page);
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
   await page.getByRole('button', { name: messages['account.menu'].fi }).click();
-  await page.getByRole('button', { name: messages['auth.signOut'].fi }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].fi }).click();
   await expect(page.locator('#email')).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.getByText('Alex', { exact: true })).toHaveCount(0);
@@ -835,7 +835,7 @@ test('sign-out is broadcast across tabs without sending account data', async ({ 
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   await expect(second.locator('#wardrobe-title')).toBeVisible();
   await page.getByRole('button', { name: 'Account menu' }).click();
-  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(second.locator('#email')).toBeVisible();
   await expect(second.getByText('Alex', { exact: true })).toHaveCount(0);
   await second.close();
@@ -856,7 +856,7 @@ async function holdAuthRoute(page: Page, path: string, grant?: string) {
 }
 async function signOutFromMenu(page: Page) {
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
-  await page.getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
 }
 type LateRefresh = Window & { lateRefresh?: Promise<'error' | 'ok'>; firstClient?: unknown };
 
@@ -1158,7 +1158,7 @@ for (const firstOwner of ['a', 'b'] as const) {
       }
       const logoutTab = tabs[firstOwner], language = content[firstOwner].language;
       await logoutTab.getByRole('button', { name: messages['account.menu'][language] }).click();
-      await logoutTab.getByRole('button', { name: messages['auth.signOut'][language], exact: true }).click();
+      await logoutTab.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'][language], exact: true }).click();
       for (const tab of Object.values(tabs)) await expect(tab.locator('#email')).toBeVisible();
       for (const pending of held) {
         pending.observed = await tabs[pending.owner].evaluate(() => {

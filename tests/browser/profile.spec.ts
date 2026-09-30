@@ -27,6 +27,12 @@ async function setup(page: Page, language: Language = 'en') {
   return api;
 }
 const consentCard = (page: Page) => page.locator('section[aria-labelledby="ai-consent-title"]');
+// UI1: the analysis row's switch shows the server state; an unchecked switch opens the consent sheet, whose Turn on writes.
+const aiSwitch = (page: Page, on?: boolean) => consentCard(page).locator(on === undefined ? '[role="switch"]' : `[role="switch"][aria-checked="${on}"]`);
+async function turnOnAi(page: Page, language: Language = 'en') {
+  await aiSwitch(page, false).click();
+  await page.locator('dialog[aria-labelledby="ai-consent-sheet-title"]').getByRole('button', { name: messages['aiC.enable'][language], exact: true }).click();
+}
 // The removed aiC.reviewNotice copy, kept here only to prove it no longer appears.
 const removedReviewNotice: Record<Language, string> = { en: 'Review every suggested detail before saving.',
   fi: 'Tarkista kaikki ehdotetut tiedot ennen tallennusta.', sv: 'Granska alla föreslagna uppgifter innan du sparar.' };
@@ -109,12 +115,12 @@ test('AI consent shares profile/language mutex and rebases only its own exact pl
   await expect(saveProfile, 'the edit reached React (Save enables only when the form is dirty)').toBeEnabled();
   let held: Route | undefined;
   await page.route('**/rest/v1/rpc/ai_set_consent', (route) => { held = route; });
-  await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
+  await turnOnAi(page);
   await expect.poll(() => Boolean(held)).toBe(true);
   await expect(page.getByRole('button', { name: 'Suomi', exact: true })).toBeDisabled();
   await expect(page.locator('#profile-display_name')).toBeDisabled();
   await held!.fallback();
-  await expect(page.getByRole('heading', { name: messages['aiC.enabled'].en, exact: true })).toBeVisible();
+  await expect(aiSwitch(page, true)).toBeVisible();
   expect(await sameInput(), 'the profile editor was not remounted during the consent save').toBe(true);
   await expect(name).toHaveValue('Preserved unsaved name');
   await saveProfile.click();
@@ -139,7 +145,7 @@ for (const failure of ['lost-ack', 'stale-profile'] as const) {
         else await route.fallback();
       });
     }
-    await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
+    await turnOnAi(page);
     await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
     await expect(consentCard(page).getByRole('button', { name: messages['aiC.enable'].en, exact: true })).toHaveCount(0);
     await expect(consentCard(page).getByRole('button', { name: messages['aiC.disable'].en, exact: true })).toHaveCount(0);
@@ -147,7 +153,7 @@ for (const failure of ['lost-ack', 'stale-profile'] as const) {
     let writes = 0;
     page.on('request', (request) => { if (request.url().endsWith('/ai_set_consent')) writes++; });
     await consentCard(page).getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
-    await expect(page.getByRole('heading', { name: messages['aiC.enabled'].en, exact: true })).toBeVisible();
+    await expect(aiSwitch(page, true)).toBeVisible();
     expect(writes).toBe(0);
     await expect(page.locator('#profile-display_name')).toHaveValue('My unsaved name');
     await page.getByRole('button', { name: messages['settings.saveProfile'].en, exact: true }).click();
@@ -159,7 +165,7 @@ for (const action of ['save', 'reconcile'] as const) {
   test(`AI consent ${action} allows a measured aggregate above five seconds with bounded individual reads`, async ({ page }) => {
     const api = await aiFixture(page, 'en', false);
     await settings(page);
-    await expect(page.getByText(messages['aiC.disabled'].en, { exact: true })).toBeVisible();
+    await expect(aiSwitch(page, false)).toBeVisible();
     await page.locator('#profile-display_name').fill('My slow-operation edits');
     let writes = 0;
     const countWrite = (request: PlaywrightRequest) => { if (request.url().endsWith('/ai_set_consent')) writes++; };
@@ -168,7 +174,7 @@ for (const action of ['save', 'reconcile'] as const) {
         api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
         await route.abort('failed');
       });
-      await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
+      await turnOnAi(page);
       await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
     }
     const timings = new Map<PlaywrightRequest, { path: string; start: number; elapsed?: number; status?: number }>();
@@ -195,8 +201,9 @@ for (const action of ['save', 'reconcile'] as const) {
     page.on('request', countWrite);
     try {
       const writesBefore = writes, started = performance.now();
-      await consentCard(page).getByRole('button', { name: messages[action === 'save' ? 'aiC.enable' : 'common.retry'].en, exact: true }).click();
-      await expect(page.getByRole('heading', { name: messages['aiC.enabled'].en, exact: true })).toBeVisible({ timeout: 12000 });
+      if (action === 'save') await aiSwitch(page, false).click();
+    await consentCard(page).getByRole('button', { name: messages[action === 'save' ? 'aiC.enable' : 'common.retry'].en, exact: true }).click();
+      await expect(aiSwitch(page, true)).toBeVisible({ timeout: 12000 });
       expect(performance.now() - started).toBeGreaterThan(5000);
       expect(performance.now() - started).toBeLessThan(20000);
       expect(timings.size).toBe(action === 'save' ? 4 : 2);
@@ -235,7 +242,7 @@ for (const action of ['save', 'reconcile'] as const) {
   test(`AI consent ${action} releases the mutex at the profile call deadline and rejects its late result`, async ({ page }) => {
     const api = await aiFixture(page, 'en', false);
     await settings(page);
-    await expect(page.getByText(messages['aiC.disabled'].en, { exact: true })).toBeVisible();
+    await expect(aiSwitch(page, false)).toBeVisible();
     let writes = 0;
     page.on('request', (request) => { if (request.url().endsWith('/ai_set_consent')) writes++; });
     if (action === 'reconcile') {
@@ -243,7 +250,7 @@ for (const action of ['save', 'reconcile'] as const) {
         api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
         await route.abort('failed');
       });
-      await page.getByRole('button', { name: messages['aiC.enable'].en, exact: true }).click();
+      await turnOnAi(page);
       await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
     }
     await page.route(profileUrl, async (route) => {
@@ -273,6 +280,7 @@ for (const action of ['save', 'reconcile'] as const) {
       };
     });
     const writesBefore = writes;
+    if (action === 'save') await aiSwitch(page, false).click();
     await consentCard(page).getByRole('button', { name: messages[action === 'save' ? 'aiC.enable' : 'common.retry'].en, exact: true }).click();
     await expect.poll(() => page.evaluate(() => Boolean((window as AiProfileWindow).aiProfileWait))).toBe(true);
     await expect(page.locator('#profile-display_name')).toBeDisabled();
@@ -290,7 +298,7 @@ for (const action of ['save', 'reconcile'] as const) {
     await expect(page.locator('#profile-display_name')).toHaveValue('Alex');
     await expect(page.locator('.workspace-identity')).not.toContainText('Late unconfirmed profile');
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-    await expect(page.getByText(messages['aiC.enabled'].en, { exact: true })).toHaveCount(0);
+    await expect(aiSwitch(page, true)).toHaveCount(0);
     await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
     await expect(consentCard(page).getByRole('button', { name: messages['aiC.enable'].en, exact: true })).toHaveCount(0);
     await expect(consentCard(page).getByRole('button', { name: messages['aiC.disable'].en, exact: true })).toHaveCount(0);
@@ -315,10 +323,11 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     const api = await aiFixture(page, language);
     await openSettings(page, language);
     const consent = page.locator('section[aria-labelledby="ai-consent-title"]');
-    // The fixture starts with analysis on: one Turn off, no Turn on, and the notice only inside a closed disclosure.
-    await expect(consent.getByRole('heading', { name: messages['aiC.enabled'][language], exact: true })).toBeVisible();
+    // The fixture starts with analysis on: one checked switch, no Turn on or Turn off button, and the notice only inside a closed disclosure.
+    await expect(consent.locator('[role="switch"][aria-checked="true"]')).toBeVisible();
+    await expect(consent.getByRole('switch')).toHaveCount(1);
     await expect(consent.getByRole('button', { name: messages['aiC.enable'][language], exact: true })).toHaveCount(0);
-    await expect(consent.getByRole('button', { name: messages['aiC.disable'][language], exact: true })).toHaveCount(1);
+    await expect(consent.getByRole('button', { name: messages['aiC.disable'][language], exact: true })).toHaveCount(0);
     await expect(consent.getByRole('checkbox')).toHaveCount(0);
     await expect(consent.locator('details')).toHaveCount(1);
     expect(await consent.locator('details').evaluate((element) => (element as HTMLDetailsElement).open)).toBe(false);
@@ -651,7 +660,7 @@ test('logout drops dirty settings; lower-version owner and late replies cannot m
   await expect.poll(() => Boolean(held)).toBe(true);
   await page.locator('#profile-display_name').fill('Never show to Robin');
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
-  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await signIn(page, 'b');
   await expect(page.locator('.workspace-identity')).toContainText('Robin');
@@ -685,9 +694,11 @@ test('settings accessibility: 320px, keyboard, long text and 200% text', async (
     return context.measureText(select.selectedOptions[0]!.text).width <= available;
   }), 'Selected time zone label fits the closed select at 320px').toBe(true);
   await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 2rem; }' });
+  // UI1: on a phone the section menu is a horizontally scrolling row, so its tabs may extend past the edge by design.
+  expect(await page.locator('.settings-nav ul').evaluate((row) => getComputedStyle(row).overflowX)).toBe('auto');
   expect(await page.evaluate(() => ({
     viewport: innerWidth, width: document.documentElement.scrollWidth,
-    overflowing: [...document.querySelectorAll('body *')].filter((element) => element.getBoundingClientRect().right > 320
+    overflowing: [...document.querySelectorAll('body *')].filter((element) => !element.closest('.settings-nav ul')).filter((element) => element.getBoundingClientRect().right > 320
       || getComputedStyle(element).overflowX === 'visible' && [...element.childNodes].some((node) => {
         if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) return false;
         const range = document.createRange(); range.selectNodeContents(node);
