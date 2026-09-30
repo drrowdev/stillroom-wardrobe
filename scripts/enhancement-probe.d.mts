@@ -12,9 +12,13 @@ export const SLOT_MARGIN_MS: number;
 export const DISPATCH_SPACING_MS: number;
 export const REFERENCE_BYTES: number;
 export const REASON_METRICS: Readonly<Record<string, readonly string[]>>;
+export const V2_REASON_METRICS: Readonly<Record<string, readonly string[]>>;
 export function earliestStart(run: { notBefore: number }, starts: readonly number[], observed: readonly number[]): number;
-export function evidenceState(calls: ReadonlyArray<Record<string, unknown>>, metrics?: Record<string, unknown>, settlement?: unknown):
+export function evidenceState(calls: ReadonlyArray<Record<string, unknown>>, metrics?: Record<string, unknown>, settlement?: unknown,
+  verify?: (entry: Record<string, unknown>, measured: unknown) => boolean):
   { state: 'pending' | 'ready-for-paired-review'; missing: string[] };
+export function metricsEvidence(calls: ReadonlyArray<Record<string, unknown>>, file: unknown, settlement: unknown,
+  build: { commit: string; configSha256: string }): { state: 'pending' | 'ready-for-paired-review'; missing: string[] };
 export class ProbeRefusal extends Error { constructor(code: string); readonly code: string; }
 export function prepareProbe(env: Record<string, string | undefined>, deps: Record<string, unknown>): Promise<Record<string, unknown>>;
 export function runProbe(env: Record<string, string | undefined>, deps: Record<string, unknown>): Promise<{ lines: string[]; calls: Array<{ code: string } & Record<string, unknown>> }>;

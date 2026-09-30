@@ -7,6 +7,7 @@ import { browserStageImaging } from '../features/wardrobe/enhancement-runtime';
 import { ambiguousReference, REFERENCE_HEIGHT, REFERENCE_WIDTH } from '../images/background/frame';
 import { modelAssets } from '../images/background/model-assets';
 import { backgroundSegmenter } from '../images/background/remover';
+import { CLEANUP_CHECK_VERSION, CLEANUP_V2_SHA256 } from '../images/cleanup-calibration';
 import { cleanupCheck, type CleanupVerdict } from '../images/fidelity';
 import type { PhotoEdit } from '../images/photo-edit';
 import { prepareCutout } from '../images/process-image';
@@ -21,7 +22,11 @@ export type HarnessPrepared = {
     frame: { source: unknown; dest: unknown; canvas: unknown };
   };
 };
-export type HarnessMeasured = { h0Sha256: string; h2Sha256: string; referenceSha256: string; verdict: CleanupVerdict };
+export type HarnessMeasured = {
+  h0Sha256: string; h2Sha256: string; referenceSha256: string; verdict: CleanupVerdict;
+  /** BG2c-3 §6.3: the check version and the frozen record's hash, for versioned remeasure evidence. */
+  checkVersion: number; configSha256: string;
+};
 export type CleanupHarness = {
   verifyAssets: () => Promise<HarnessAsset[]>;
   prepare: (input: string, type: string, edit: PhotoEdit) => Promise<HarnessPrepared>;
@@ -81,7 +86,10 @@ window.__stillroomCleanupHarness = {
     const h0 = fromBase64(h0Text), reference = fromBase64(referenceText), h2 = fromBase64(h2Text);
     if (reference.byteLength !== REFERENCE_WIDTH * REFERENCE_HEIGHT) throw new Error('reference size');
     const signal = new AbortController().signal;
-    const verdict = cleanupCheck(await pixels(h0, signal), reference, await pixels(h2, signal));
-    return { h0Sha256: await digest(h0), h2Sha256: await digest(h2), referenceSha256: await digest(reference), verdict };
+    const verdict = await cleanupCheck(await pixels(h0, signal), reference, await pixels(h2, signal), { signal });
+    return {
+      h0Sha256: await digest(h0), h2Sha256: await digest(h2), referenceSha256: await digest(reference), verdict,
+      checkVersion: CLEANUP_CHECK_VERSION, configSha256: CLEANUP_V2_SHA256,
+    };
   },
 };

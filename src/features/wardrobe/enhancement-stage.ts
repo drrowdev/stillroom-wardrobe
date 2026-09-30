@@ -107,7 +107,8 @@ export type StageInput = {
 export type StageDeps = {
   client: StageClient; session: EnhanceSession; imaging: StageImaging;
   admit: (bytes: Uint8Array) => AdmittedProviderJpeg;
-  compare: (h0: Uint8ClampedArray, reference: Uint8Array, h2: Uint8ClampedArray) => CleanupVerdict;
+  /** The cooperative clean-up check (BG2c-3 §3.7); the stage's combined signal aborts it. */
+  compare: (h0: Uint8ClampedArray, reference: Uint8Array, h2: Uint8ClampedArray, options: { signal: AbortSignal }) => Promise<CleanupVerdict>;
   newId?: () => string;
   /** Called once a request has been sent, so the UI can show "Cleaning up photo…" only for a real request. */
   onDispatch?: (requestId: string) => void;
@@ -219,8 +220,7 @@ export async function runEnhancementStage(input: StageInput, deps: StageDeps): P
     }
     if (after2.length !== FIDELITY.width * FIDELITY.height * 4 || before.length !== after2.length
       || source.reference.length !== FIDELITY.width * FIDELITY.height) reject();
-    const verdict = deps.compare(before, source.reference, after2);
-    check();
+    const verdict = await after(deps.compare(before, source.reference, after2, { signal }));
     if (!verdict.accepted) return outcome('generic');
     const thumb = await after(deps.imaging.thumbnail(main, ENHANCE_LIMITS.outputWidth, ENHANCE_LIMITS.outputHeight, signal));
     if (session.now() >= expireAt) return outcome('generic');

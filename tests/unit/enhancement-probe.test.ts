@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { earliestStart, evidenceState, PROBE_CALLS, prepareProbe, ProbeRefusal, REASON_METRICS, REFERENCE_BYTES, runProbe } from '../../scripts/enhancement-probe.mjs';
+import {
+  earliestStart, evidenceState, metricsEvidence, PROBE_CALLS, prepareProbe, ProbeRefusal, REASON_METRICS, REFERENCE_BYTES, runProbe, V2_REASON_METRICS,
+} from '../../scripts/enhancement-probe.mjs';
 import { HOSTED_URL } from '../../scripts/hosted-smoke.mjs';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -284,6 +286,57 @@ describe('enhancement probe script', () => {
       }
       // Right numbers filed under a different request ID.
       expect(evidenceState(calls, { ...metrics, r2: metrics.r3 }, settled).missing).toEqual(['metrics-3']);
+    });
+
+    describe('versioned metrics files (BG2c-3 §6.3)', () => {
+      const CONFIG = 'c'.repeat(64), BUILD = { commit: 'b'.repeat(40), configSha256: CONFIG };
+      const v2Metrics = { checkVersion: 2, ringDeltaE: 1, ringP95: 2, workingBytes: 5_839_972, largestShare: 1, containment: 0.9,
+        unalignedRetention: 0.9, centroid: { x: 0.5, y: 0.5 }, scale: 1, tx: 0, ty: 0, added: 0.01, retention: 0.9, support: 20_000,
+        fitted: 20_000, deltaL: 1, chroma: 1, hue: 0, modeDistance: 1, removed: 0, changeShare: 0.01, patternLoss: 0 };
+      const v2Entry = (index: number, over: Record<string, unknown> = {}) => ({ call: index + 1, reason: 'accepted', metrics: v2Metrics,
+        h0Sha256: input(index), h2Sha256: output(index), referenceSha256: binding.referenceSha256, priorReason: 'containment', ...over });
+      const v2File = (over: Record<string, unknown> = {}) => ({ schema: 2, preparedCommit: COMMIT, measuredCommit: BUILD.commit, checkVersion: 2,
+        configSha256: CONFIG, modelSha256: MODEL, metrics: Object.fromEntries(visual.map((entry, index) => [entry.requestId, v2Entry(index)])),
+        blocked: [], ...over });
+      const legacy = (over: Record<string, unknown> = {}) => ({ commit: COMMIT, metrics, pending: [], blocked: [], ...over });
+      const refused = { state: 'pending', missing: ['metrics-contract'] };
+
+      it('accepts legacy v1 only under its original rule and reason names', () => {
+        expect(metricsEvidence(calls, legacy(), settled, BUILD)).toEqual({ state: 'ready-for-paired-review', missing: [] });
+        expect(metricsEvidence(calls, legacy({ commit: 'f'.repeat(40) }), settled, BUILD)).toEqual(refused);
+        expect(metricsEvidence(calls, { ...legacy(), extra: 1 }, settled, BUILD)).toEqual(refused);
+        expect(metricsEvidence(calls, legacy({ metrics: withMetric({ commit: 'f'.repeat(40) }) }), settled, BUILD).missing).toEqual(['metrics-3']);
+        // A v2 reason name in a v1 file is not a v1 verdict.
+        expect(metricsEvidence(calls, legacy({ metrics: withMetric({ reason: 'colourMode' }) }), settled, BUILD).missing).toEqual(['metrics-3']);
+      });
+
+      it('accepts schema 2 only at the evaluated revision, check version and config', () => {
+        expect(metricsEvidence(calls, v2File(), settled, BUILD)).toEqual({ state: 'ready-for-paired-review', missing: [] });
+        for (const over of [{ measuredCommit: COMMIT }, { measuredCommit: 'f'.repeat(40) }, { configSha256: 'f'.repeat(64) }, { checkVersion: 1 },
+          { preparedCommit: 'f'.repeat(40) }, { modelSha256: 'f'.repeat(64) }, { blocked: ['https://example.test'] }, { schema: 3 }, { extra: 1 }]) {
+          expect(metricsEvidence(calls, v2File(over), settled, BUILD), JSON.stringify(over)).toEqual(refused);
+        }
+        expect(metricsEvidence(calls, v2File(), settled, { ...BUILD, configSha256: 'f'.repeat(64) })).toEqual(refused);
+        expect(metricsEvidence(calls, v2File(), settled, { ...BUILD, commit: 'f'.repeat(40) })).toEqual(refused);
+        // The contract refusal keeps the other gaps visible.
+        expect(metricsEvidence(calls, v2File({ checkVersion: 1 }), null, BUILD).missing).toEqual(['metrics-contract', 'disconnect-settlement']);
+      });
+
+      it('binds each schema-2 entry to its call, hashes and v2 reason metrics', () => {
+        const withV2 = (over: Record<string, unknown>) => v2File({ metrics: { ...v2File().metrics as Record<string, unknown>, r2: v2Entry(2, over) } });
+        for (const over of [{ call: 4 }, { h0Sha256: 'f'.repeat(64) }, { h2Sha256: 'f'.repeat(64) }, { referenceSha256: 'f'.repeat(64) },
+          { reason: 'colour' }, { reason: 'nonFinite' }, { priorReason: 'colourMode' }, { priorReason: undefined }, { commit: COMMIT },
+          { metrics: { ...v2Metrics, checkVersion: 1 } }, { metrics: { ...v2Metrics, patternLoss: Number.NaN } }]) {
+          expect(metricsEvidence(calls, withV2(over), settled, BUILD).missing, JSON.stringify(over)).toEqual(['metrics-3']);
+        }
+        // An early rejection needs only the metrics its stage reports.
+        expect(metricsEvidence(calls, withV2({ reason: 'background', metrics: { checkVersion: 2, ringDeltaE: 9, ringP95: 20, workingBytes: 1 } }), settled, BUILD).state)
+          .toBe('ready-for-paired-review');
+        expect(metricsEvidence(calls, withV2({ reason: 'added', metrics: { checkVersion: 2, ringDeltaE: 9, ringP95: 20, workingBytes: 1 } }), settled, BUILD).missing)
+          .toEqual(['metrics-3']);
+        expect(V2_REASON_METRICS.accepted).toContain('patternLoss');
+        expect(Object.keys(V2_REASON_METRICS)).not.toContain('colour');
+      });
     });
 
     it('keeps F4 pending when the reply came before the disconnect', () => {
