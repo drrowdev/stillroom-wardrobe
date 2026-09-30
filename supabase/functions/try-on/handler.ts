@@ -2,6 +2,7 @@ import {
   TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_STEPS, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_RESERVATION_MICRO, TRYON_REVIEW_EXPIRES_AT,
   tryOnSlots, type TryOnSlot,
 } from '../../../src/domain/tryon.ts';
+import { refusalFinishArgs } from '../../../src/domain/provider-refusal.ts';
 import { isPhotoInputJpeg } from '../../../src/images/restore-jpeg.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
 import { UUID, exact, object, ProtocolError, readBounded, readJson, sha256, validAccounting, type JsonObject } from '../analyze-clothing/protocol.ts';
@@ -278,11 +279,12 @@ function runClaimed(work: ClaimedWork): Promise<ClaimedOutcome> {
     const none = (code: string): ClaimedOutcome => ({ code, output: null, result: null });
     try {
       const finish = async (code: TryOnOutcome['code'] | 'PRE_DISPATCH', usage: TryOnOutcome['usage'],
-        output: { sha256: string; bytes: Uint8Array<ArrayBuffer> } | null, fetch: { started: boolean; clientLive: boolean | null }) => {
+        output: { sha256: string; bytes: Uint8Array<ArrayBuffer> } | null, fetch: { started: boolean; clientLive: boolean | null },
+        refusal: ReturnType<typeof refusalFinishArgs> = { p_refusal_kind: null, p_usage_absent: null }) => {
         const result = await rpc('tryon_finish', { p_owner_id: work.owner, p_request_id: work.requestId, p_code: code, p_usage: usage,
           p_output_sha256: output?.sha256 ?? null, p_output_bytes: output?.bytes.length ?? null,
           p_output: output && work.last ? `\\x${hex(output.bytes)}` : null, p_fetch_started: fetch.started,
-          p_client_live_at_fetch: fetch.clientLive, p_client_gone: work.browser.aborted }, true, server);
+          p_client_live_at_fetch: fetch.clientLive, p_client_gone: work.browser.aborted, ...refusal }, true, server);
         if (result.code !== 'BUSY' && !validAccounting(result.accounting)) throw new ProtocolError('FAILED');
         return result;
       };
@@ -320,7 +322,7 @@ function runClaimed(work: ClaimedWork): Promise<ClaimedOutcome> {
         AbortSignal.any([server, deadlineSignal(timers, TRYON_LIMITS.providerMs)]), work.azureTransport);
       const outcome = await call;
       const output = outcome.code === 'OK' ? { sha256: await sha256(outcome.image), bytes: outcome.image } : null;
-      const finished = await finish(outcome.code, outcome.usage, output, { started: true, clientLive });
+      const finished = await finish(outcome.code, outcome.usage, output, { started: true, clientLive }, refusalFinishArgs(outcome));
       if (finished.code !== 'OK' || outcome.code !== 'OK' || !output) {
         return none(closedCode(finished.code === 'OK' ? outcome.code : String(finished.code), finishCodes));
       }

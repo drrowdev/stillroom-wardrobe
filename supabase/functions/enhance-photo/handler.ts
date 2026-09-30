@@ -2,6 +2,7 @@ import {
   CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_LIMITS, ENHANCE_MODEL, ENHANCE_RESERVATION_MICRO, ENHANCE_REVIEW_EXPIRES,
 } from '../../../src/domain/enhancement.ts';
 import { readJpegHeader } from '../../../src/images/jpeg.ts';
+import { refusalFinishArgs } from '../../../src/domain/provider-refusal.ts';
 import { isPhotoInputJpeg } from '../../../src/images/restore-jpeg.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
 import { UUID, exact, object, ProtocolError, readBounded, readJson, sha256, validAccounting, type JsonObject } from '../analyze-clothing/protocol.ts';
@@ -194,9 +195,10 @@ function runClaimed(work: ClaimedWork): Promise<ClaimedOutcome> {
     let image: Uint8Array<ArrayBuffer> | null = work.image;
     try {
       const finish = async (code: EnhanceOutcome['code'] | 'NOT_DISPATCHED', usage: EnhanceOutcome['usage'],
-        output: { sha256: string; bytes: number } | null) => {
+        output: { sha256: string; bytes: number } | null,
+        refusal: ReturnType<typeof refusalFinishArgs> = { p_refusal_kind: null, p_usage_absent: null }) => {
         const result = await rpc('enhance_finish', { p_owner_id: work.owner, p_request_id: work.requestId, p_code: code, p_usage: usage,
-          p_output_sha256: output?.sha256 ?? null, p_output_bytes: output?.bytes ?? null }, true, server);
+          p_output_sha256: output?.sha256 ?? null, p_output_bytes: output?.bytes ?? null, ...refusal }, true, server);
         if (result.code !== 'BUSY' && !validAccounting(result.accounting)) throw new ProtocolError('FAILED');
         return result;
       };
@@ -213,7 +215,7 @@ function runClaimed(work: ClaimedWork): Promise<ClaimedOutcome> {
         work.azureTransport);
       image = null;
       const output = outcome.code === 'OK' ? { sha256: await sha256(outcome.image), bytes: outcome.image.length } : null;
-      const finished = await finish(outcome.code, outcome.usage, output);
+      const finished = await finish(outcome.code, outcome.usage, output, refusalFinishArgs(outcome));
       if (finished.code !== 'OK' || outcome.code !== 'OK' || !output) {
         return { code: closedCode(finished.code === 'OK' ? outcome.code : String(finished.code)), output: null };
       }

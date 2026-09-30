@@ -749,6 +749,15 @@ and length. Once a request is claimed, the provider call and `enhance_finish`
 run on the server's own lifetime: a browser that cancels gets no bytes, but
 the usage is still settled.
 
+FILT1: `enhance_finish` and `tryon_finish` take two optional trailing
+arguments, `p_refusal_kind` (`rai_input`, `rai_output`, `unknown_filter`,
+`unverified_filter`) and `p_usage_absent`, allowed only with `FILTERED`. A
+proven refusal (the first three kinds) with genuinely absent usage settles as
+`filtered_unmetered`: the full reservation is charged, with no anomaly, and
+the switch and activation stay on; a probe authorisation still stops with
+`MISSING_USAGE`. Anything else keeps the existing settlement. Omitted or null
+arguments behave exactly as before, and existing digests are unchanged.
+
 Authenticated RPCs: `enhance_status()`, `enhance_set_consent(boolean,integer)`,
 `image_provenance_v1()`, `image_provenance_digest_v1()`,
 `restore_image_provenance(uuid,uuid,uuid,jsonb)`,
@@ -871,8 +880,9 @@ Service-role only (the `try-on` Edge function with the verified owner):
   `CLIENT_GONE`, a chain state or a permission code set nothing. Only an
   `AUTHORISED` reply read in time allows the provider fetch.
 - `tryon_finish(owner, request, code, usage, output_sha256, output_bytes,
-  output, fetch_started, client_live_at_fetch, client_gone)`: idempotent over
-  code, usage and output (`USAGE_CONFLICT` otherwise). An unauthorised request
+  output, fetch_started, client_live_at_fetch, client_gone, refusal_kind = null,
+  usage_absent = null)`: idempotent over code, usage, output and the refusal
+  arguments (`USAGE_CONFLICT` otherwise). An unauthorised request
   is released (`PRE_DISPATCH`); a `PRE_DISPATCH` claim after authorisation is
   an anomaly and charged. Publication (`COMPLETE`) only for the chain's active
   attempt on a running chain with the permission held; otherwise `LATE` or the

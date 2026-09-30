@@ -223,7 +223,11 @@ export async function tryonVerdict(headers, body) {
 }
 /** The status and JSON body the double returns for a try-on mode. */
 export function tryonResponse(mode) {
-  if (mode === 'tryon-filtered') return { status: 400, body: { error: { code: 'content_policy_violation', message: 'synthetic' } } };
+  // FILT1: Microsoft's documented images-API output refusal (code contentFilter, the fixed message), with no usage.
+  if (mode === 'tryon-filtered') {
+    return { status: 400, body: { error: { code: 'contentFilter',
+      message: 'Generated image was filtered as a result of our safety system.' } } };
+  }
   return { status: 200, body: { created: 1, data: [{ b64_json: tryonOutput().toString('base64') }], usage: ENHANCE_USAGE } };
 }
 export function completion(mode) {

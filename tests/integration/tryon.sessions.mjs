@@ -8,6 +8,7 @@
 // VTO-3a stop markers are durable rows: this probe tracks each one it creates and removes exactly those in finally,
 // then checks that no marker is left for any chain ID it used.
 import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { isDeepStrictEqual } from 'node:util';
 import { requireEvidence } from './preservation.sessions.mjs';
@@ -56,6 +57,19 @@ const output = (label) => {
   const bytes = Buffer.from(`synthetic try-on output ${label} ${randomUUID()}`);
   return { bytes, sha: createHash('sha256').update(bytes).digest('hex') };
 };
+// FILT1: the shared adapter fixture's distinct finish arguments, with the feature's normalised payload substituted. Every
+// fixture row's arguments are one of these; the settlement depends only on the arguments.
+export const refusalRows = (payload) => {
+  const { cases } = JSON.parse(readFileSync(new URL('../edge-fixtures/provider-refusal-cases.json', import.meta.url), 'utf8'));
+  const rows = new Map();
+  for (const row of cases) {
+    const args = { ...row.finishArgs, p_usage: row.finishArgs.p_usage === '$PAYLOAD' ? payload : row.finishArgs.p_usage };
+    const key = JSON.stringify([args, row.origin, row.anomaly]);
+    if (!rows.has(key)) rows.set(key, { id: row.id, args, origin: row.origin, anomaly: row.anomaly });
+  }
+  requireEvidence(rows.size >= 6 && [...rows.values()].some((row) => row.origin === 'filtered_unmetered'));
+  return [...rows.values()];
+};
 
 export async function tryonProbes(snapshot, sql, mark) {
   const { client, owners: [a, b] } = snapshot;
@@ -73,11 +87,14 @@ export async function tryonProbes(snapshot, sql, mark) {
     return one(`select ${claimCall(owner, chain, step, id, { outfit, person, probe })};`);
   };
   const dispatch = (owner, id, present = true) => one(`select public.tryon_dispatch(${literal(owner.uid)},${literal(id)},${present});`);
-  const finishCall = (owner, id, code, { usage = VALID, out = null, send = false, fetched = true, live = true, gone = false } = {}) =>
+  // `refusal` (FILT1) appends the two new positional arguments; omitted, the call has the old ten-argument shape.
+  const finishCall = (owner, id, code, { usage = VALID, out = null, send = false, fetched = true, live = true, gone = false,
+    refusal } = {}) =>
     `public.tryon_finish(${literal(owner.uid)},${literal(id)},${literal(code)},${usage === null ? 'null::jsonb' : json(usage)},
       ${orNull(out?.sha ?? null, 'text')},${out === null ? 'null::integer' : out.bytes.length},
       ${send ? `decode(${literal(out.bytes.toString('hex'))},'hex')` : 'null::bytea'},${fetched},
-      ${fetched ? String(live) : 'null::boolean'},${gone})`;
+      ${fetched ? String(live) : 'null::boolean'},${gone}${refusal === undefined ? ''
+    : `,${orNull(refusal.kind, 'text')},${refusal.absent === null ? 'null::boolean' : String(refusal.absent)}`})`;
   const finish = (owner, id, code, options = {}) => one(`select ${finishCall(owner, id, code, options)};`);
   const ledger = (owner, id) => one(`select coalesce((select jsonb_build_object('state',u.charge_state,'accounted',u.accounted_micro::text,
       'closed',u.closed_reason,'origin',e.enhance_settlement_origin,'code',e.enhance_code,'anomaly',e.anomaly,
@@ -749,6 +766,95 @@ export async function tryonProbes(snapshot, sql, mark) {
     await sql(`update private.ai_controls set tryon_activated=true where owner_id=${literal(a.uid)};`);
     await freeSlots();
 
+    mark('refusal');
+    {
+    // FILT1 (a)-(g). Each one-step chain is settled through the new arguments; only a proven refusal with genuinely
+    // absent metering is filtered_unmetered (full reservation, no anomaly). The rest keep today's settlement.
+    const settledRow = (owner, id) => one(`select jsonb_build_object('usage',to_jsonb(u),'evidence',to_jsonb(e))
+      from private.ai_usage u join private.ai_usage_evidence e using (owner_id,request_id)
+      where u.owner_id=${literal(owner.uid)} and u.request_id=${literal(id)};`);
+    const refusalOf = (owner, id) => one(`select jsonb_build_object('refusal',provider_refusal,'absent',usage_absent,
+      'estimated',estimated_micro::text) from private.ai_usage_evidence where owner_id=${literal(owner.uid)} and request_id=${literal(id)};`);
+    const dispatched = async (owner, probe = null) => {
+      await stopRunning(owner);
+      const id = randomUUID();
+      equal((await claim(owner, randomUUID(), 1, id, { outfit: single, probe })).code, 'OK');
+      equal((await dispatch(owner, id)).code, 'AUTHORISED');
+      return id;
+    };
+    const argsOf = (row) => ({ usage: row.args.p_usage, refusal: { kind: row.args.p_refusal_kind, absent: row.args.p_usage_absent } });
+    let qualifying = null;
+    for (const row of refusalRows(VALID)) {
+      const id = await dispatched(a);
+      equal((await finish(a, id, row.args.p_code, argsOf(row))).code, row.args.p_code);
+      const settled = await ledger(a, id), stored = await refusalOf(a, id);
+      if (!(settled.state === 'estimated' && settled.closed === 'FAILED' && settled.origin === row.origin
+        && settled.anomaly === row.anomaly && settled.code === row.args.p_code
+        && stored.refusal === row.args.p_refusal_kind && stored.absent === row.args.p_usage_absent)) {
+        throw new Error(`FILT1 try-on row ${row.id}: ${JSON.stringify({ settled, stored })}`);
+      }
+      equal(settled.accounted, row.args.p_usage === null ? String(RESERVED) : stored.estimated);
+      // (b) The switch and this account's activation stay on after every fixture row.
+      requireEvidence((await capacity()).dispatch_enabled === true && (await controls(a)).tryon_activated === true);
+      if (row.origin === 'filtered_unmetered' && qualifying === null) qualifying = { id, row };
+    }
+    requireEvidence(qualifying !== null);
+    // (c) Replays: the same arguments replay FILTERED; another kind, another usage_absent or the old shape conflict.
+    const kept = await settledRow(a, qualifying.id);
+    const base = argsOf(qualifying.row);
+    equal((await finish(a, qualifying.id, 'FILTERED', base)).code, 'FILTERED');
+    for (const changed of [{ ...base, refusal: { ...base.refusal, kind: base.refusal.kind === 'rai_input' ? 'rai_output' : 'rai_input' } },
+      { ...base, refusal: { ...base.refusal, absent: false } }, { usage: null }]) {
+      equal((await finish(a, qualifying.id, 'FILTERED', changed)).code, 'USAGE_CONFLICT');
+    }
+    equal(await settledRow(a, qualifying.id), kept);
+    // (d) Contradictory arguments are refused before any write.
+    const pending = await dispatched(a);
+    const held = await settledRow(a, pending);
+    for (const [code, options] of [
+      ['FILTERED', { usage: null, refusal: { kind: 'model_moderation', absent: true } }],
+      ['FAILED', { usage: null, refusal: { kind: 'rai_input', absent: null } }],
+      ['FAILED', { usage: null, refusal: { kind: null, absent: true } }],
+      ['FILTERED', { usage: VALID, refusal: { kind: 'rai_input', absent: true } }],
+      ['FILTERED', { usage: null, refusal: { kind: null, absent: true } }]]) {
+      equal((await finish(a, pending, code, options)).code, 'INVALID_INPUT');
+    }
+    equal(await settledRow(a, pending), held);
+    // (g) The old positional shape and explicit nulls settle as today: unmetered, flagged, switch on.
+    equal((await finish(a, pending, 'FILTERED', { usage: null, refusal: { kind: null, absent: null } })).code, 'FILTERED');
+    requireEvidence((await ledger(a, pending)).origin === 'unmetered' && (await ledger(a, pending)).anomaly === true);
+    const named = await dispatched(a);
+    equal((await one(`select public.tryon_finish(p_owner_id=>${literal(a.uid)},p_request_id=>${literal(named)},p_code=>'FILTERED',
+      p_usage=>null,p_output_sha256=>null,p_output_bytes=>null,p_output=>null,p_fetch_started=>true,p_client_live_at_fetch=>true,
+      p_client_gone=>false);`)).code, 'FILTERED');
+    equal(await refusalOf(a, named), { refusal: null, absent: null, estimated: null });
+    requireEvidence((await ledger(a, named)).origin === 'unmetered' && (await ledger(a, named)).anomaly === true);
+    equal(heldReply(await sql(`begin; set local role service_role; select 'R:'||public.tryon_finish(p_owner_id=>${literal(randomUUID())},
+      p_request_id=>${literal(randomUUID())},p_code=>'FILTERED',p_usage=>null,p_output_sha256=>null,p_output_bytes=>null,
+      p_output=>null,p_fetch_started=>true,p_client_live_at_fetch=>true,p_client_gone=>false)::text; commit;`)),
+    { code: 'UNAVAILABLE', accounting: null });
+    requireEvidence((await capacity()).dispatch_enabled === true && (await controls(a)).tryon_activated === true);
+    // (e) A probe still stops on a qualifying refusal (missing usage); the switch and the ordinary settings stay.
+    await setControls(a, 'tryon_activated=false');
+    const refusalProbe = randomUUID();
+    equal((await one(`select public.tryon_probe_authorise(${literal(refusalProbe)},${literal(a.uid)},${literal(MANIFEST)},1,
+      ${RESERVED},'filt1-refusal',clock_timestamp()+interval '1 day');`)).code, 'OK');
+    const probed = await dispatched(a, refusalProbe);
+    const controlsBefore = await controls(a);
+    equal((await finish(a, probed, 'FILTERED', base)).code, 'FILTERED');
+    equal((await ledger(a, probed)).origin, 'filtered_unmetered');
+    equal(await one(`select jsonb_build_object('stopped',stopped_at is not null,'reason',stopped_reason)
+      from private.tryon_probe_authorisations where id=${literal(refusalProbe)};`), { stopped: true, reason: 'MISSING_USAGE' });
+    equal(await controls(a), controlsBefore);
+    requireEvidence((await capacity()).dispatch_enabled === true);
+    await setControls(a, 'tryon_activated=true');
+    const after = randomUUID();
+    equal((await claim(a, randomUUID(), 1, after, { outfit: single })).code, 'OK');
+    equal((await release(a, after)).code, 'PRE_DISPATCH');
+    await stopRunning(a);
+    await freeSlots();
+    }
+
     mark('outfit-delete');
     // An outfit deletion removes its chains and pictures; held usage still settles through the expiry.
     const c8 = randomUUID(), d1 = randomUUID();
@@ -1007,4 +1113,128 @@ export async function tryonProbes(snapshot, sql, mark) {
     commit;`);
   await expireDue();
   equal(await health(), { code: 'OK', overdueResults: 0, overdueChains: 0, heldUsage: 0, safeguard: false });
+}
+
+// FILT1 upgrade regression, run by the CI-only preservation owner. At 'tryon-stop' (28 applied) held rows are written
+// exactly as the claims write them and settled through the OLD positional finishes. After the provider_refusal
+// migration every stored settlement is unchanged, the new columns are null, and a replay through the new functions with
+// the refusal arguments omitted or explicitly null returns the pre-migration replay without writes. The seeded rows are
+// removed before the read-only colour comparison. No provider calls.
+const ENHANCE_MANIFEST = 'azure-global-image25-sunburst-cleanup-v1';
+const ENHANCE_VALID = Object.freeze({ modelObservation: 'not_observed', input: 1000, output: 4000, total: 5000, inputText: 100,
+  inputImage: 900 });
+const upgradeRows = (owner, ids) => `select jsonb_object_agg(u.request_id,jsonb_build_object('usage',to_jsonb(u),
+    'evidence',to_jsonb(e)-'provider_refusal'-'usage_absent','added',jsonb_build_array(to_jsonb(e)->'provider_refusal',
+    to_jsonb(e)->'usage_absent')))
+  from private.ai_usage u join private.ai_usage_evidence e using (owner_id,request_id)
+  where u.owner_id=${literal(owner.uid)} and u.request_id in (${ids.map(literal).join(',')});`;
+const upgradeTryonFinish = (owner, id, code, usage, sha, extra) => `public.tryon_finish(${literal(owner.uid)},${literal(id)},
+  ${literal(code)},${usage === null ? 'null::jsonb' : json(usage)},${orNull(sha, 'text')},${sha === null ? 'null::integer' : 4},
+  null::bytea,true,true,false${extra})`;
+const upgradeEnhanceFinish = (owner, id, code, usage, sha, extra) => `public.enhance_finish(${literal(owner.uid)},${literal(id)},
+  ${literal(code)},${usage === null ? 'null::jsonb' : json(usage)},${orNull(sha, 'text')},${sha === null ? 'null::integer' : 4}${extra})`;
+const upgradeFinish = (row, extra = '') => (row.feature === 'try_on' ? upgradeTryonFinish : upgradeEnhanceFinish)(
+  row.owner, row.id, row.code, row.usage, row.sha, extra);
+
+export async function refusalUpgradeSeed(snapshot, sql) {
+  const owner = snapshot.owners[0];
+  const one = async (text) => JSON.parse(await sql(text));
+  const hex = () => createHash('sha256').update(randomUUID()).digest('hex');
+  equal(await one(`select jsonb_build_array(to_regprocedure('public.tryon_finish(uuid,uuid,text,jsonb,text,integer,bytea,boolean,boolean,boolean)') is not null,
+    to_regprocedure('public.enhance_finish(uuid,uuid,text,jsonb,text,integer)') is not null,
+    exists(select 1 from pg_attribute where attrelid='private.ai_usage_evidence'::regclass and attname='provider_refusal'));`),
+  [true, true, false]);
+  const baseline = await one(`select jsonb_build_object('capacity',(select to_jsonb(k) from private.provider_capacity k
+      where deployment_key=${literal(KEY)}),'controls',(select to_jsonb(c) from private.ai_controls c where owner_id=${literal(owner.uid)}),
+    'usage',(select count(*) from private.ai_usage where owner_id=${literal(owner.uid)} and purpose in ('try_on','enhancement')));`);
+  const outfit = randomUUID(), slots = [], rows = [];
+  await sql(`insert into public.outfits(id,owner_id,title) values(${literal(outfit)},${literal(owner.uid)},'FILT1 upgrade');`);
+  const slot = () => { const id = randomUUID(); slots.push(id); return id; };
+  for (const [code, usage, steps] of [['FILTERED', null, 1], ['OK', VALID, 2], ['FAILED', null, 1]]) {
+    const id = randomUUID(), chain = randomUUID(), s = slot();
+    await sql(`begin;
+      insert into private.tryon_chains(owner_id,chain_id,outfit_id,steps,state,next_step,result_id,created_at,expires_at)
+        values(${literal(owner.uid)},${literal(chain)},${literal(outfit)},(select jsonb_agg(jsonb_build_object('n',n))
+          from generate_series(1,${steps}) n),'running',1,gen_random_uuid(),now(),now()+interval '30 minutes');
+      insert into private.tryon_attempts(owner_id,request_id,chain_id,step,state,dispatch_before,created_at)
+        values(${literal(owner.uid)},${literal(id)},${literal(chain)},1,'dispatched',now()+interval '15 seconds',now());
+      update private.tryon_chains set active_request_id=${literal(id)} where owner_id=${literal(owner.uid)} and chain_id=${literal(chain)};
+      insert into private.provider_slots(slot_id,deployment_key,held_until) values(${literal(s)},${literal(KEY)},clock_timestamp()+interval '80 seconds');
+      insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,dispatched_at,
+          purpose,provider_slot_id,tryon_chain_id,tryon_step)
+        values(${literal(owner.uid)},${literal(id)},to_char(clock_timestamp() at time zone 'UTC','YYYY-MM'),clock_timestamp(),
+          ${RESERVED},${RESERVED},'held',clock_timestamp(),'try_on',${literal(s)},${literal(chain)},1);
+      insert into private.ai_usage_evidence(owner_id,request_id,manifest_id,model_observation,tryon_dispatch_before,tryon_probe_id)
+        values(${literal(owner.uid)},${literal(id)},${literal(MANIFEST)},'not_observed',now()+interval '15 seconds',null);
+      update private.ai_usage_evidence set tryon_dispatch_authorised_at=clock_timestamp()
+        where owner_id=${literal(owner.uid)} and request_id=${literal(id)};
+      commit;`);
+    rows.push({ feature: 'try_on', owner, id, code, usage, sha: code === 'OK' ? hex() : null });
+  }
+  for (const [code, usage] of [['FILTERED', null], ['OK', ENHANCE_VALID]]) {
+    const id = randomUUID(), s = slot();
+    await sql(`insert into private.provider_slots(slot_id,deployment_key,held_until)
+        values(${literal(s)},${literal(KEY)},clock_timestamp()+interval '65 seconds');
+      insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,dispatched_at,
+          purpose,provider_slot_id)
+        values(${literal(owner.uid)},${literal(id)},to_char(clock_timestamp() at time zone 'UTC','YYYY-MM'),clock_timestamp(),
+          300000,300000,'held',clock_timestamp(),'enhancement',${literal(s)});
+      insert into private.ai_usage_evidence(owner_id,request_id,manifest_id,model_observation,enhance_input_sha256,enhance_probe_id)
+        values(${literal(owner.uid)},${literal(id)},${literal(ENHANCE_MANIFEST)},'not_observed',${literal(hex())},null);`);
+    rows.push({ feature: 'enhancement', owner, id, code, usage, sha: code === 'OK' ? hex() : null });
+  }
+  for (const row of rows) {
+    row.settled = await one(`select ${upgradeFinish(row)};`);
+    requireEvidence(typeof row.settled?.code === 'string' && row.settled.replayed !== true);
+    row.replay = await one(`select ${upgradeFinish(row)};`);
+    requireEvidence(row.replay.replayed === true && row.replay.code !== 'USAGE_CONFLICT');
+  }
+  const stored = await one(upgradeRows(owner, rows.map((row) => row.id)));
+  const origins = rows.map((row) => [stored[row.id].evidence.enhance_settlement_origin, stored[row.id].evidence.anomaly]);
+  equal(origins, [['unmetered', true], ['observed', false], ['unmetered', true], ['unmetered', true], ['observed', false]]);
+  for (const row of rows) requireEvidence(/^[0-9a-f]{64}$/.test(stored[row.id].evidence.enhance_settlement_digest));
+  await sql(`update private.provider_slots set held_until=clock_timestamp()-interval '1 second'
+    where slot_id in (${slots.map(literal).join(',')});`);
+  return { owner, outfit, slots, rows, stored, baseline };
+}
+
+export async function refusalUpgradeVerify(seed, sql) {
+  const { owner, outfit, slots, rows, stored, baseline } = seed;
+  const one = async (text) => JSON.parse(await sql(text));
+  const ids = rows.map((row) => row.id);
+  // The new signatures keep the definer properties and the service-only grant; the old ones are gone.
+  equal(await one(`select jsonb_object_agg(p.proname,jsonb_build_array(pg_get_function_identity_arguments(p.oid),p.prosecdef,
+      p.proconfig @> array['search_path=""','lock_timeout=2s'],has_function_privilege('anon',p.oid,'EXECUTE'),
+      has_function_privilege('authenticated',p.oid,'EXECUTE'),has_function_privilege('service_role',p.oid,'EXECUTE')))
+    from pg_proc p where p.pronamespace='public'::regnamespace and p.proname in ('tryon_finish','enhance_finish');`), {
+    tryon_finish: ['p_owner_id uuid, p_request_id uuid, p_code text, p_usage jsonb, p_output_sha256 text, p_output_bytes integer, '
+      + 'p_output bytea, p_fetch_started boolean, p_client_live_at_fetch boolean, p_client_gone boolean, p_refusal_kind text, '
+      + 'p_usage_absent boolean', true, true, false, false, true],
+    enhance_finish: ['p_owner_id uuid, p_request_id uuid, p_code text, p_usage jsonb, p_output_sha256 text, p_output_bytes integer, '
+      + 'p_refusal_kind text, p_usage_absent boolean', true, true, false, false, true] });
+  const after = await one(upgradeRows(owner, ids));
+  for (const id of ids) {
+    equal(after[id].usage, stored[id].usage);
+    equal(after[id].evidence, stored[id].evidence);
+    equal(after[id].added, [null, null]);
+  }
+  for (const row of rows) {
+    equal(await one(`select ${upgradeFinish(row)};`), row.replay);
+    equal(await one(`select ${upgradeFinish(row, ',null::text,null::boolean')};`), row.replay);
+  }
+  equal(await one(upgradeRows(owner, ids)), after);
+  // Remove exactly the seeded rows; the owner's controls and the shared capacity are as before the seed.
+  await sql(`begin;
+    delete from private.ai_usage_evidence where owner_id=${literal(owner.uid)} and request_id in (${ids.map(literal).join(',')});
+    delete from private.ai_usage where owner_id=${literal(owner.uid)} and request_id in (${ids.map(literal).join(',')});
+    delete from private.provider_slots where slot_id in (${slots.map(literal).join(',')});
+    delete from public.outfits where owner_id=${literal(owner.uid)} and id=${literal(outfit)};
+    commit;`);
+  equal(await one(`select jsonb_build_object('capacity',(select to_jsonb(k) from private.provider_capacity k
+      where deployment_key=${literal(KEY)}),'controls',(select to_jsonb(c) from private.ai_controls c where owner_id=${literal(owner.uid)}),
+    'usage',(select count(*) from private.ai_usage where owner_id=${literal(owner.uid)} and purpose in ('try_on','enhancement')));`),
+  baseline);
+  equal(await one(`select jsonb_build_array((select count(*) from private.tryon_chains where owner_id=${literal(owner.uid)}
+    and outfit_id=${literal(outfit)}),(select count(*) from private.tryon_attempts where owner_id=${literal(owner.uid)}
+    and request_id in (${ids.map(literal).join(',')})));`), [0, 0]);
 }

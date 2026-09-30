@@ -230,7 +230,7 @@ describe('image edit double (BG2b-1)', () => {
     expect(double.enhanceOutput('enhance-metadata').length).toBeGreaterThan(expected.length);
     expect(classify('enhance-trailing')).toMatchObject({ code: 'OUTPUT_REJECTED', image: null });
     expect(classify('enhance-second-frame')).toMatchObject({ code: 'OUTPUT_REJECTED', image: null });
-    expect(classify('enhance-filtered')).toMatchObject({ code: 'FILTERED', usage: null });
+    expect(classify('enhance-filtered')).toMatchObject({ code: 'FILTERED', usage: null, refusal: 'unknown_filter', metering: 'absent' });
     expect(classify('enhance-rate-limited')).toMatchObject({ code: 'FAILED', usage: null });
     expect(classify('enhance-no-usage')).toMatchObject({ code: 'OK', image: expected, usage: null });
   });
@@ -284,7 +284,7 @@ describe('try-on edit double (VTO-1b)', () => {
     };
     expect(classify('tryon-ok')).toMatchObject({ code: 'OK', image: new Uint8Array(double.tryonOutput()) });
     expect(classify('tryon-ok').usage).not.toBeNull();
-    expect(classify('tryon-filtered')).toMatchObject({ code: 'FILTERED', image: null, usage: null });
+    expect(classify('tryon-filtered')).toMatchObject({ code: 'FILTERED', image: null, usage: null, refusal: 'rai_output', metering: 'absent' });
     expect(double.tryonOutput().equals(double.enhanceOutput('enhance-ok'))).toBe(false);
   });
 });

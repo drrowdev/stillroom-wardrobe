@@ -31,14 +31,15 @@ const OWNER_ONLY = ['tryon_expire_due(integer)', 'tryon_bootstrap(uuid,text,inte
   'tryon_discard_transient()'];
 
 describe('try-on migration (VTO-1)', () => {
-  it('is one LF transaction after AD1, followed by its schedule and then only the VTO-3a Stop migration', async () => {
+  it('is one LF transaction after AD1, followed by its schedule and then the VTO-3a Stop migration', async () => {
     const sql = await read(MAIN);
     expect(sql.startsWith('-- VTO-1')).toBe(true);
     expect(sql).toContain('\nbegin;\n');
     expect(sql.trimEnd().endsWith('commit;')).toBe(true);
     expect(sql).not.toContain('\r');
     const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
-    expect(names.slice(-4)).toEqual(['20261002090000_photo_cleanup_manifest.sql', MAIN, SCHEDULE,
+    const at = names.indexOf(MAIN);
+    expect(names.slice(at - 1, at + 3)).toEqual(['20261002090000_photo_cleanup_manifest.sql', MAIN, SCHEDULE,
       '20261004090000_tryon_stop_before_claim.sql']);
     const replaced = [...sql.matchAll(/create or replace function ([a-z_.]+)\(/g)].map((match) => match[1]);
     expect(replaced).toEqual(['public.admin_set_ai_limits', 'private.deletion_owner_rows_absent']);

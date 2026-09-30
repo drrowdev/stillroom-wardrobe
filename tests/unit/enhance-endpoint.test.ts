@@ -9,6 +9,7 @@ import {
 import { PROVIDER_JPEG } from '../../src/images/provider-jpeg';
 import { classifyEnhanceResponse, enhanceForm, enhanceUsagePayload } from '../../supabase/functions/enhance-photo/azure';
 import { claimedWorkObserver, createEnhanceHandler, ENHANCE_RPCS } from '../../supabase/functions/enhance-photo/handler';
+import refusalCases from '../edge-fixtures/provider-refusal-cases.json';
 import { exifSegment, jpegSegment } from '../fixtures/jpeg-helpers';
 import { appleLayoutJpeg, flatJpeg, restartMarkers } from '../fixtures/restore-jpeg-fixtures';
 
@@ -73,6 +74,8 @@ describe('enhancement request contract', () => {
     expect(stripped.image).toEqual(OUTPUT);
     expect(classifyEnhanceResponse(400, { error: { code: 'content_policy_violation' }, usage }).code).toBe('FILTERED');
     expect(classifyEnhanceResponse(400, { error: { code: 'x', innererror: { code: 'ResponsibleAIPolicyViolation' } } }).code).toBe('FILTERED');
+    // FILT1: Azure's documented image-API code is contentFilter (FAILED before).
+    expect(classifyEnhanceResponse(400, { error: { code: 'contentFilter', message: 'x' } })).toMatchObject({ code: 'FILTERED', refusal: 'unknown_filter' });
     expect(classifyEnhanceResponse(429, { error: { code: 'rate_limit' } })).toMatchObject({ code: 'FAILED', usage: null });
     expect(classifyEnhanceResponse(200, { data: [] }).code).toBe('FAILED');
     expect(classifyEnhanceResponse(200, { data: [{ url: 'https://example.invalid/x' }] }).code).toBe('FAILED');
@@ -161,7 +164,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     expect(calls[2]!.auth).toBe('Bearer fictional-service');
     expect(finishBody(calls)).toEqual({ p_owner_id: OWNER, p_request_id: REQUEST, p_code: 'OK',
       p_usage: { modelObservation: 'not_observed', input: 1400, output: 2000, total: 3400, inputText: 150, inputImage: 1250 },
-      p_output_sha256: sha(OUTPUT), p_output_bytes: OUTPUT.length });
+      p_output_sha256: sha(OUTPUT), p_output_bytes: OUTPUT.length, p_refusal_kind: null, p_usage_absent: null });
     expect(sent).toHaveLength(1);
     expect([...sent[0]!.keys()]).toEqual([...Object.keys(ENHANCE_PARAMETERS), 'prompt', 'image']);
     expect(JSON.stringify([...sent[0]!.entries()].filter(([, v]) => typeof v === 'string'))).not.toContain(OWNER);
@@ -226,6 +229,22 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
       expect(response.headers.get('Content-Type')).toContain('application/json');
       expect(await response.json()).toEqual({ code: 'OUTPUT_REJECTED' });
       expect(finishBody(calls)).toMatchObject({ p_code: 'OUTPUT_REJECTED', p_output_sha256: null, p_output_bytes: null });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('sends each shared refusal case to enhance_finish with exactly its fixture arguments (FILT1)', async () => {
+    const swap = (value: unknown): unknown => value === '$USAGE' ? usage : value === '$MODEL' ? ENHANCE_MODEL
+      : Array.isArray(value) ? value.map(swap)
+        : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, swap(v)])) : value;
+    const payload = { modelObservation: 'not_observed', input: 1400, output: 2000, total: 3400, inputText: 150, inputImage: 1250 };
+    for (const row of refusalCases.cases) {
+      const calls = backend({ finish: { code: row.code, accounting } });
+      const { transport } = provider(() => Response.json(swap(row.body), { status: row.status }));
+      const response = await createEnhanceHandler(config, register, transport)(post());
+      expect([response.status, await response.json()], row.id).toEqual([row.code === 'FILTERED' ? 422 : 502, { code: row.code }]);
+      expect(finishBody(calls), row.id).toEqual({ p_owner_id: OWNER, p_request_id: REQUEST, ...row.finishArgs,
+        p_usage: row.finishArgs.p_usage === null ? null : payload, p_output_sha256: null, p_output_bytes: null });
       vi.unstubAllGlobals();
     }
   });
