@@ -2,7 +2,7 @@
 // `CLEANUP_V2_SHA256` pins the SHA-256 of its canonical JSON. The fixture generator ranges, labels and the held-out
 // seed are frozen here with it. Changing any value after the remeasure of the 5 probe results is more calibration, not
 // validation (§5.3): it needs a new record revision, a delta critique and every Block case still failing with margin.
-// BG2c-3b (#84, 30 September 2026) is such a revision: `added` 0.25 (identity) and 0.21 (aligned) were chosen after the
+// BG2c-3b (#84, 30 September 2026) is such a revision: `added` 0.25 (identity) and 0.21 (aligned, s >= 1) were chosen after the
 // remeasure so that calls 3 and 5 pass, so the 5 real results are now calibration, not validation. checkVersion stays 2 (the
 // algorithm and metrics are unchanged); `CLEANUP_V2_SHA256` binds the new thresholds.
 export const CLEANUP_CHECK_VERSION = 2;
@@ -33,9 +33,10 @@ export const CLEANUP_V2 = deepFreeze({
     minimumScale: 0.85, maximumScale: 1.15, coarseScaleStep: 0.05, translation: 40, coarseStep: 4, block: 4,
     refineTranslation: 2, refineScale: 0.02, refineScaleStep: 0.01, regionDilation: 6, flatDenominator: 1e-9,
   },
-  // BG2c-3b (#84): the identity pass allows 0.25 (zero slack: an attached part of up to 1/3 of the body area); the
-  // aligned pass allows 0.21 (outside dilate(R, 6)).
-  added: { maximum: 0.21, identityMaximum: 0.25 },
+  // BG2c-3b (#84): the identity pass fails at 0.25 (zero slack: M2 outside R). The aligned pass (M2 outside dilate(R, 6))
+  // fails at 0.21 when the chosen scale s >= 1 (s = 1.00 included) and at the rev8 0.07 when s < 1, so a scale-down can't
+  // absorb parts added on several sides. s is the exact searched value (an integer percentage / 100).
+  added: { maximum: 0.07, alignedMaximum: 0.21, identityMaximum: 0.25 },
   retention: { minimum: 0.2 },
   removed: {
     maximum: 0.07, dilation: 6, lightnessStep: 8, lightnessBins: 13, abStep: 8, abBins: 32, paletteShare: 0.1,
@@ -71,7 +72,7 @@ export function canonicalJson(value: unknown): string {
 }
 
 /** SHA-256 of `canonicalJson(CLEANUP_V2)`, the `configSha256` in schema-2 remeasure evidence (§6.3). Pinned by a unit test. */
-export const CLEANUP_V2_SHA256 = '7be02383561fc718f1fccf1ce60db9286fb77dab9fd57ab5ddfe5d5e20d05649';
+export const CLEANUP_V2_SHA256 = '3a51b58f6b311231c9376e4dd2535ca63ef46c9fe6a50dd46ed7c0d3bb2e1475';
 
 // §4 and §4.5: the synthetic fixture generator. Accept parameters come from the §1 Accept class, Block parameters are
 // one gross change at >= 1.25x its boundary. The held-out set draws Accept values from the inner 80 % of each range.

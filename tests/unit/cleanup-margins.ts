@@ -30,8 +30,9 @@ export const modeDistance = { pass: (g: number) => g <= 0.9 * V.colourMode.maxim
 export const modeShare = { pass: (w: number) => w >= 1.1 * V.colourMode.share, fail: (w: number) => w <= 0.9 * V.colourMode.share };
 
 const minimumSupport = Math.ceil(V.minimumMaskFraction * N);
-/** BG2c-3b: the `added` limit of the path the metrics came from (identity 0.25, aligned 0.07). */
-export const addedLimit = (m: CleanupMetrics) => (m.path === 'identity' ? V.added.identityMaximum : V.added.maximum);
+/** BG2c-3b: the `added` limit of the path the metrics came from (identity 0.25; aligned 0.21 at s >= 1, else 0.07). */
+export const addedLimit = (m: CleanupMetrics) => (m.path === 'identity' ? V.added.identityMaximum
+  : m.scale! >= 1 ? V.added.alignedMaximum : V.added.maximum);
 const cs = V.colourShift;
 
 /** The gates an Accept fixture must clear with margin; returns the names of those it doesn't. */

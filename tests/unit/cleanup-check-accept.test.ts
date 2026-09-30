@@ -1,9 +1,10 @@
 // BG2c-3 (plan rev8 §4.1, §4.3, §4.3a): Accept fixtures must pass with every gate inside its §5.2 pass band. Limits
-// (L1-L18) are asserted as accepted so the gaps stay visible; L13, L14, L16, L17 and L18 are owner-accepted escapes of
-// #84 (option A; L16 on rev8b; L17 and L18 on BG2c-3b) (30 September 2026), NOT positives. §4.3a boundary cases are printed, never asserted. The chroma and hue Accept
+// (L1-L19) are asserted as accepted so the gaps stay visible; L13, L14, L16, L17, L18 and L19 are owner-accepted escapes
+// of #84 (option A; L16 on rev8b; L17-L19 on BG2c-3b) (30 September 2026), NOT positives. §4.3a boundary cases are printed, never asserted. The chroma and hue Accept
 // fixtures (A2, A3, A15) are in cleanup-check-colour.test.ts.
 import { appendFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { CLEANUP_V2 } from '../../src/images/cleanup-calibration';
 import {
   bandAt, checkScenes, creased, criticStripe, expectAccepted, fromRgb, GARMENT, greenTealCheck, grey, inBox, lch, maskOf, noisy,
   posed, relit, solid, within, type Box, type Lab, type Paint,
@@ -239,7 +240,8 @@ describe('Limits are asserted as accepted, so the gaps stay visible (§4.3)', ()
   }, 30_000);
 });
 
-// BG2c-3b (#84, 30 September 2026): `added` fails at 0.25 on the identity pass and at 0.21 on the aligned pass. e is
+// BG2c-3b (#84, 30 September 2026): `added` fails at 0.25 on the identity pass; aligned, at 0.21 when s >= 1 and at 0.07
+// when s < 1. e is
 // the added or removed area as a share of the 136×180 body (24,480 px), reported separately from the gate statistic
 // `added` (the share of the result mask M2 outside R at identity, zero slack, or outside dilate(R, 6) after alignment).
 describe('L17 (OWNER-ACCEPTED ESCAPE, #84 BG2c-3b, not a positive): additions pass at identity or after alignment', () => {
@@ -258,15 +260,6 @@ describe('L17 (OWNER-ACCEPTED ESCAPE, #84 BG2c-3b, not a positive): additions pa
     expectAccepted(verdict);
     expect(verdict.metrics.path).toBe('identity');
     expect(verdict.metrics.added).toBeCloseTo(added, 3);
-  }, 30_000);
-
-  it('X7 (was Block) the 30×100 addition (e = 12.3 % of the body) with a ×1.1 pose: identity 0.266 fails, aligned 0.089 passes', async () => {
-    const verdict = await checkScenes(solid(G, navy), posed(plus([G, sleeve]), 1.1));
-    expect(verdict.accepted).toBe(true);
-    expect(verdict.metrics).toMatchObject({ path: 'aligned', identityReason: 'added' });
-    expect(verdict.metrics.identityAdded).toBeCloseTo(0.2655, 4);
-    expect(verdict.metrics.added).toBeCloseTo(0.0891, 4);
-    expect(verdict.metrics.scale).toBeCloseTo(0.91, 2);
   }, 30_000);
 
   it('F3 (was a disclosed false reject) a 136×20 part BG1 missed, shown in H2 (e = 11.1 % of the body)', async () => {
@@ -306,8 +299,25 @@ describe('L18 (OWNER-ACCEPTED ESCAPE, #84 BG2c-3b, not a positive): a strip remo
     const verdict = await checkScenes(solid(G, navy), shifted((x, y) => inG(x, y) && !inBox(box, x, y) ? navy : null, dx, dy));
     expect(verdict.accepted).toBe(true);
     expect(verdict.metrics).toMatchObject({ path: 'aligned', identityReason: 'removed', removed: 0 });
+    expect(verdict.metrics.scale).toBeGreaterThanOrEqual(1);
     expect(verdict.metrics.identityRemoved).toBeCloseTo(identityRemoved, 4);
     expect(verdict.metrics.added).toBeCloseTo(added, 4);
+  }, 30_000);
+});
+
+describe('L19 (OWNER-ACCEPTED ESCAPE, #84 BG2c-3b, not a positive): a uniformly larger silhouette passes as a zoom', () => {
+  it('U20 + D20 + L15 + R15 around the body (e = 44.3 % of the body): identity 0.307 fails, aligned s 0.85 passes at 0.004', async () => {
+    const parts: Box[] = [
+      { left: G.left, top: G.top - 20, width: G.width, height: 20 },
+      { left: G.left, top: G.top + G.height, width: G.width, height: 20 },
+      { left: G.left - 15, top: G.top, width: 15, height: G.height },
+      { left: G.left + G.width, top: G.top, width: 15, height: G.height },
+    ];
+    const verdict = await checkScenes(solid(G, navy), (x, y) => [G, ...parts].some((b) => inBox(b, x, y)) ? navy : null);
+    expect(verdict.accepted).toBe(true);
+    expect(verdict.metrics).toMatchObject({ path: 'aligned', identityReason: 'added', scale: 0.85 });
+    expect(verdict.metrics.identityAdded).toBeCloseTo(0.3069, 4);
+    expect(verdict.metrics.added).toBeLessThan(CLEANUP_V2.added.maximum);
   }, 30_000);
 });
 

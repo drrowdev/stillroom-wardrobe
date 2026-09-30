@@ -174,7 +174,8 @@ describe('held-out set (§4.5), frozen seed', () => {
     expect(verdict.accepted).toBe(true);
     expect(verdict.metrics).toMatchObject({ path: 'aligned', identityReason: 'removed' });
     expect(verdict.metrics.removed).toBeLessThan(CLEANUP_V2.removed.maximum);
-    expect(verdict.metrics.added).toBeLessThan(CLEANUP_V2.added.maximum);
+    expect(verdict.metrics.scale).toBeGreaterThanOrEqual(1);
+    expect(verdict.metrics.added).toBeLessThan(CLEANUP_V2.added.alignedMaximum);
     console.info(`${c.label}: identity removed ${verdict.metrics.identityRemoved}, aligned added ${verdict.metrics.added} removed ${verdict.metrics.removed} s ${verdict.metrics.scale}`);
   }, 30_000);
 });
