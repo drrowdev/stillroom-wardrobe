@@ -18,13 +18,17 @@ export default defineConfig({
     video: 'off',
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'mobile', use: { ...devices['iPhone 13'], defaultBrowserType: 'chromium' } },
+    { name: 'chromium', testIgnore: 'cleanup-timing.spec.ts', use: { ...devices['Desktop Chrome'] } },
+    { name: 'mobile', testIgnore: 'cleanup-timing.spec.ts', use: { ...devices['iPhone 13'], defaultBrowserType: 'chromium' } },
     {
       name: 'webkit-photo',
       testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', 'item-details.spec.ts', 'garment-fields.spec.ts', 'ai-photo-first.spec.ts', 'items.spec.ts', 'ux-l1a.spec.ts', 'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts', 'enhancement.spec.ts', 'admin.spec.ts', 'tryon.spec.ts'],
       use: { ...devices['Desktop Safari'] },
     },
+    // BG2c-3 timing budgets: selected only by the Performance budgets job, in its own invocation with --workers=1, after
+    // the performance suite, so no functional test competes for the CPU. Serial and never retried.
+    { name: 'cleanup-timing', testMatch: 'cleanup-timing.spec.ts', fullyParallel: false, retries: 0, use: { ...devices['Desktop Chrome'] } },
+    { name: 'cleanup-timing-webkit', testMatch: 'cleanup-timing.spec.ts', fullyParallel: false, retries: 0, use: { ...devices['Desktop Safari'] } },
   ],
   webServer: {
     command: `npm run dev -- --mode browser-test --port ${port} --strictPort`,

@@ -662,5 +662,6 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --no-fund
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:performance
+      - run: npm run test:browser -- --project=cleanup-timing --project=cleanup-timing-webkit --workers=1

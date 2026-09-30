@@ -1,175 +1,210 @@
-// BG2c (plan rev4 §5): the clean-up check on synthetic 256x320 frames. It is a gross-change filter: the "accepted"
-// cases for kept interior clutter and a similar-colour substitution are the documented blind spots, asserted as such so
-// the limitation stays visible. No case here is activation evidence.
-import { describe, expect, it } from 'vitest';
-import { CLEANUP, cleanupCheck, FIDELITY, morph } from '../../src/images/fidelity';
+// BG2c-3 (plan rev8 §3, §5.1, §5.2): cleanupCheck v2 structure. The frozen record and its hash, the working-buffer
+// total, the production gates at their exact boundaries, cooperative scheduling and abort, the unchanged rev4 stage
+// negatives (X14) and the square morphology. The §4 fixture sets live in cleanup-check-*.test.ts.
+import { createHash } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
+import { canonicalJson, CLEANUP_CHECK_VERSION, CLEANUP_V2, CLEANUP_V2_SHA256 } from '../../src/images/cleanup-calibration';
+import { CLEANUP_RULES, cleanupCheck, cleanupYield, FIDELITY, morph } from '../../src/images/fidelity';
+import {
+  checkScenes, GARMENT, GARMENT_MASK, grey, h0Of, h2Of, inBox, lch, maskOf, N, solid, W, H, within, type Box,
+} from './cleanup-fixtures';
 
-type Rgb = readonly [number, number, number];
-type Box = { left: number; top: number; right: number; bottom: number };
-const { width: W, height: H } = FIDELITY;
-const N = W * H;
-const BG: Rgb = [0xf6, 0xf3, 0xed];
-const NAVY: Rgb = [30, 45, 90];
-const RED: Rgb = [150, 40, 40];
-const inBox = (b: Box, x: number, y: number) => x >= b.left && x < b.right && y >= b.top && y < b.bottom;
-function frame(paint: (x: number, y: number) => Rgb | null): Uint8ClampedArray {
-  const pixels = new Uint8ClampedArray(N * 4);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const colour = paint(x, y) ?? BG, at = (y * W + x) * 4;
-    pixels[at] = colour[0]; pixels[at + 1] = colour[1]; pixels[at + 2] = colour[2]; pixels[at + 3] = 255;
-  }
-  return pixels;
-}
-function mask(on: (x: number, y: number) => boolean): Uint8Array {
-  const out = new Uint8Array(N);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) out[y * W + x] = on(x, y) ? 1 : 0;
-  return out;
-}
-const GARMENT: Box = { left: 53, top: 60, right: 203, bottom: 260 };
-// A little texture, so SSIM windows carry structure.
-const textured = (colour: Rgb) => (x: number, y: number): Rgb => ((x >> 2) + (y >> 2)) % 2 ? colour : [colour[0] + 12, colour[1] + 12, colour[2] + 12];
-const garment = (b: Box = GARMENT, colour: Rgb = NAVY) => (x: number, y: number) => inBox(b, x, y) ? textured(colour)(x, y) : null;
-const R = mask((x, y) => inBox(GARMENT, x, y));
-const H0 = frame(garment());
-const verdict = (h2: Uint8ClampedArray, h0 = H0, r = R) => cleanupCheck(h0, r, h2);
+const navy = lch(30, 30, 270);
+const G = GARMENT;
+const NEXT_UP = (x: number) => x + Math.max(Number.EPSILON * Math.abs(x), Number.MIN_VALUE) * 2;
+const NEXT_DOWN = (x: number) => x - Math.max(Number.EPSILON * Math.abs(x), Number.MIN_VALUE) * 2;
 
-describe('clean-up check: accepts and reports', () => {
-  it('accepts an unchanged garment with fixed buffers and every metric', () => {
-    const result = verdict(H0.slice());
-    expect(result.accepted).toBe(true);
-    expect(result.metrics).toMatchObject({ ringDeltaE: 0, ringP95: 0, containment: 1, retention: 1, largestShare: 1,
-      meanDeltaE: 0, p95DeltaE: 0 });
-    expect(result.metrics.ssim).toBeCloseTo(1, 6);
-    // Two Lab Float32Array(3N), five Uint8Array(N), a Float32Array(N), two Int32Array(N): 41 B per pixel, about 3.36 MB.
-    expect(result.metrics.workingBytes).toBe(N * (12 + 12 + 5 + 4 + 4 + 4));
-    expect(result.metrics.workingBytes).toBeLessThan(3.4e6);
+describe('the frozen calibration record', () => {
+  it('pins CLEANUP_V2 by the SHA-256 of its canonical JSON, and is deeply frozen', () => {
+    expect(CLEANUP_CHECK_VERSION).toBe(2);
+    expect(createHash('sha256').update(canonicalJson(CLEANUP_V2)).digest('hex')).toBe(CLEANUP_V2_SHA256);
+    expect(Object.isFrozen(CLEANUP_V2)).toBe(true);
+    expect(Object.isFrozen(CLEANUP_V2.patternLoss)).toBe(true);
+    expect(canonicalJson({ b: [1, { d: 2, c: 3 }], a: 'x' })).toBe('{"a":"x","b":[1,{"c":3,"d":2}]}');
   });
 
-  it('excludes background-dominated and edge windows from SSIM', () => {
-    const result = verdict(H0.slice());
-    const all = Math.floor((W - 8) / 4 + 1) * Math.floor((H - 8) / 4 + 1);
-    expect(result.metrics.windows).toBeGreaterThanOrEqual(CLEANUP.minimumWindows);
-    expect(result.metrics.windows).toBeLessThan(all);
-    // K is the eroded interior, so the admitted windows lie inside the garment box.
-    expect(result.metrics.windows).toBeLessThanOrEqual(Math.floor((150 - 8) / 4 + 1) * Math.floor((200 - 8) / 4 + 1));
-  });
-
-  it('accepts removed hangers and a removed large neighbour that were inside R', () => {
-    const neighbour: Box = { left: 203, top: 80, right: 250, bottom: 240 };
-    const hanger: Box = { left: 120, top: 30, right: 136, bottom: 60 };
-    const wide = mask((x, y) => inBox(GARMENT, x, y) || inBox(neighbour, x, y) || inBox(hanger, x, y));
-    const cluttered = frame((x, y) => inBox(neighbour, x, y) ? RED : inBox(hanger, x, y) ? [90, 90, 90] : garment()(x, y));
-    const result = verdict(H0.slice(), cluttered, wide);
-    expect(result).toMatchObject({ accepted: true });
-    expect(result.metrics.retention).toBeLessThan(1);
-  });
-
-  it('documented blind spot: clutter kept inside R is accepted', () => {
-    const hanger: Box = { left: 120, top: 70, right: 136, bottom: 90 };
-    const kept = frame((x, y) => inBox(hanger, x, y) ? [90, 90, 90] : garment()(x, y));
-    expect(verdict(kept, kept)).toMatchObject({ accepted: true });
-  });
-
-  it('documented blind spot: a similar-colour substitute in the same place is accepted', () => {
-    // A differently shaped garment (a notch cut into the shoulder) in the same colours passes: not identity proof.
-    const notch: Box = { left: 53, top: 60, right: 90, bottom: 90 };
-    const substitute = frame((x, y) => inBox(notch, x, y) ? null : garment()(x, y));
-    expect(verdict(substitute)).toMatchObject({ accepted: true });
-  });
-
-  it('accepts a target that keeps at least 20 % of a larger R, and rejects one that keeps less', () => {
-    const big: Box = { left: 20, top: 20, right: 236, bottom: 300 };
-    const wide = mask((x, y) => inBox(big, x, y));
-    const rArea = 216 * 280;
-    const keeps = (side: number): Box => ({ left: 128 - side / 2, top: 160 - side / 2, right: 128 + side / 2, bottom: 160 + side / 2 });
-    const kept = keeps(124); // 15,376 px, 25 % of R
-    const accepted = verdict(frame(garment(kept)), frame(garment(big)), wide);
-    expect(accepted).toMatchObject({ accepted: true });
-    expect(accepted.metrics.retention).toBeCloseTo(124 * 124 / rArea, 6);
-    expect(accepted.metrics.retention).toBeLessThan(0.5);
-    const lost = verdict(frame(garment(keeps(100))), frame(garment(big)), wide);
-    expect(lost).toMatchObject({ accepted: false, reason: 'retention' });
-  });
-
-  it('accepts a garment with a hole', () => {
-    const hole: Box = { left: 110, top: 130, right: 146, bottom: 170 };
-    const holed = frame((x, y) => inBox(hole, x, y) ? null : garment()(x, y));
-    expect(verdict(holed, holed)).toMatchObject({ accepted: true });
-  });
+  it('reports version 2 and the §3.8 working-buffer total of 5,839,972 B (71.29 N)', async () => {
+    const verdict = await checkScenes(solid(G, navy), solid(G, navy));
+    expect(verdict.accepted).toBe(true);
+    expect(verdict.metrics.checkVersion).toBe(2);
+    expect(verdict.metrics.workingBytes).toBe(5_839_972);
+    expect(FIDELITY.width * FIDELITY.height).toBe(81_920);
+  }, 30_000);
 });
 
-describe('clean-up check: every reason fails closed', () => {
-  it('size', () => {
-    expect(cleanupCheck(new Uint8ClampedArray(4), R, H0)).toMatchObject({ accepted: false, reason: 'size' });
-    expect(cleanupCheck(H0, new Uint8Array(N - 1), H0)).toMatchObject({ accepted: false, reason: 'size' });
+describe('production gates at their exact boundaries (§5.2)', () => {
+  const k = CLEANUP_V2.fit.minimumPixels, minSupport = Math.ceil(CLEANUP_V2.minimumMaskFraction * N);
+
+  it('count gates: n = k - 1 fails and n = k passes', () => {
+    expect(CLEANUP_RULES.clipped(k - 1)).toBe(true);
+    expect(CLEANUP_RULES.clipped(k)).toBe(false);
+    expect(minSupport).toBe(1_639);
+    expect(CLEANUP_RULES.support(minSupport - 1, 0, N)).toBe(true);
+    expect(CLEANUP_RULES.support(minSupport, 0, N)).toBe(false);
+    // The retention floor of 2 % of N is a count gate too.
+    expect(CLEANUP_RULES.retention(minSupport - 1, minSupport, N)).toBe(true);
+    expect(CLEANUP_RULES.retention(minSupport, minSupport, N)).toBe(false);
+    expect(CLEANUP_RULES.retention(0, 0, N)).toBe(true);
   });
 
-  it('background: a non-plain or wrong-colour perimeter', () => {
-    const noisy = frame((x, y) => (x < 6 || y < 6 || x >= W - 6 || y >= H - 6) && (x + y) % 3 === 0 ? [120, 110, 100] : garment()(x, y));
-    expect(verdict(noisy)).toMatchObject({ accepted: false, reason: 'background' });
-    const grey = frame((x, y) => garment()(x, y) ?? [200, 200, 200]);
-    expect(verdict(grey)).toMatchObject({ accepted: false, reason: 'background' });
+  it('ratio gates: the exact threshold and its nearest neighbours', () => {
+    for (const [gate, T] of [[CLEANUP_RULES.added, 0.07], [CLEANUP_RULES.removed, 0.07], [CLEANUP_RULES.change, 0.2],
+      [CLEANUP_RULES.patternLoss, 0.25]] as const) {
+      expect(gate(T)).toBe(true);
+      expect(gate(NEXT_DOWN(T))).toBe(false);
+      expect(gate(NEXT_UP(T))).toBe(true);
+    }
+    // Retention: at least 0.20 of |R|; the share of M2' in support: at least 0.25.
+    expect(CLEANUP_RULES.retention(20_000, 100_000, N)).toBe(false);
+    expect(CLEANUP_RULES.retention(19_999, 100_000, N)).toBe(true);
+    expect(CLEANUP_RULES.support(2_500, 10_000, N)).toBe(false);
+    expect(CLEANUP_RULES.support(2_499, 10_000, N)).toBe(true);
   });
 
-  it('emptyMask, tinyMask, and a cream garment that the mask cannot see', () => {
-    expect(verdict(frame(() => null))).toMatchObject({ accepted: false, reason: 'emptyMask' });
-    expect(verdict(frame(garment({ left: 120, top: 150, right: 140, bottom: 170 })))).toMatchObject({ accepted: false, reason: 'tinyMask' });
-    const cream = frame((x, y) => inBox(GARMENT, x, y) ? [242, 238, 228] : null);
-    expect(verdict(cream, cream).accepted).toBe(false);
+  it('colourShift: ±12 L*, c in [0.8, 1.25] and ±8° are inclusive bounds', () => {
+    expect(CLEANUP_RULES.colourShift(12, 1, 0)).toBe(false);
+    expect(CLEANUP_RULES.colourShift(-12, 1, 0)).toBe(false);
+    expect(CLEANUP_RULES.colourShift(NEXT_UP(12), 1, 0)).toBe(true);
+    expect(CLEANUP_RULES.colourShift(0, 0.8, 0)).toBe(false);
+    expect(CLEANUP_RULES.colourShift(0, NEXT_DOWN(0.8), 0)).toBe(true);
+    expect(CLEANUP_RULES.colourShift(0, 1.25, 0)).toBe(false);
+    expect(CLEANUP_RULES.colourShift(0, NEXT_UP(1.25), 0)).toBe(true);
+    expect(CLEANUP_RULES.colourShift(0, 1, -8)).toBe(false);
+    expect(CLEANUP_RULES.colourShift(0, 1, NEXT_UP(8))).toBe(true);
   });
 
-  it('ambiguousMask: the result touches all four edges', () => {
-    const cross = frame((x, y) => (x >= 124 && x < 132) || (y >= 156 && y < 164) ? NAVY : garment()(x, y));
-    expect(verdict(cross)).toMatchObject({ accepted: false, reason: 'ambiguousMask' });
+  it('colourMode: G = 12 passes and above fails; W = 0.22 qualifies and just below does not', () => {
+    expect(CLEANUP_RULES.colourMode(12)).toBe(false);
+    expect(CLEANUP_RULES.colourMode(NEXT_UP(12))).toBe(true);
+    expect(CLEANUP_RULES.modeQualifies(2_200, 10_000)).toBe(true);
+    expect(CLEANUP_RULES.modeQualifies(2_199, 10_000)).toBe(false);
   });
 
-  it('pieces: a result split in two, and more components than the cap', () => {
-    const left: Box = { left: 40, top: 60, right: 120, bottom: 260 }, right: Box = { left: 136, top: 60, right: 216, bottom: 260 };
-    const wide = mask((x, y) => x >= 36 && x < 220 && y >= 56 && y < 264);
-    const split = frame((x, y) => garment(left)(x, y) ?? garment(right)(x, y));
-    expect(verdict(split, frame(garment({ left: 40, top: 60, right: 216, bottom: 260 })), wide))
-      .toMatchObject({ accepted: false, reason: 'pieces' });
-    const dots = frame((x, y) => x >= 10 && x < 246 && y >= 10 && y < 310 && x % 2 === 0 && y % 2 === 0 ? NAVY : null);
-    expect(verdict(dots, dots, mask(() => true))).toMatchObject({ accepted: false, reason: 'pieces' });
+  it('estimator fallback: below 500 qualifying pixels the neutral value is used, never a rejection', () => {
+    expect(CLEANUP_RULES.fallback(499)).toBe(true);
+    expect(CLEANUP_RULES.fallback(500)).toBe(false);
   });
 
-  it('containment: a zoom or shift draws content outside BG1 region', () => {
-    const shifted = frame(garment({ left: 83, top: 60, right: 233, bottom: 260 }));
-    expect(verdict(shifted)).toMatchObject({ accepted: false, reason: 'containment' });
-    const zoomed = frame(garment({ left: 33, top: 35, right: 223, bottom: 285 }));
-    expect(verdict(zoomed)).toMatchObject({ accepted: false, reason: 'containment' });
+  it('patternLoss: the defined, occupied and lost boundaries', () => {
+    expect(CLEANUP_RULES.patternDefined(31)).toBe(false);
+    expect(CLEANUP_RULES.patternDefined(32)).toBe(true);
+    // max(3, ceil(0.05 n)): 3 for n up to 60, then ceil(0.05 n).
+    expect(CLEANUP_RULES.occupied(3, 32)).toBe(true);
+    expect(CLEANUP_RULES.occupied(2, 32)).toBe(false);
+    expect(CLEANUP_RULES.occupied(15, 289)).toBe(true);
+    expect(CLEANUP_RULES.occupied(14, 289)).toBe(false);
+    expect(CLEANUP_RULES.lost(30, 10)).toBe(true);
+    expect(CLEANUP_RULES.lost(20, 10)).toBe(false);
+    expect(CLEANUP_RULES.lost(30, 20)).toBe(false);
   });
 
-  it('centre: the kept garment is off centre', () => {
-    const offBox: Box = { left: 12, top: 60, right: 90, bottom: 260 };
-    const wide = mask((x, y) => inBox(offBox, x, y) || inBox(GARMENT, x, y));
-    const off = frame(garment(offBox));
-    const result = verdict(off, frame((x, y) => garment(offBox)(x, y) ?? garment()(x, y)), wide);
-    expect(result).toMatchObject({ accepted: false, reason: 'centre' });
-    expect(result.metrics.centroid!.x).toBeLessThan(0.25);
+  it('a neutral garment falls back to c = 1 and θ = 0 and still fails a gross lightness change', async () => {
+    const verdict = await checkScenes(solid(G, grey(40)), solid(G, grey(60)));
+    expect(verdict.metrics).toMatchObject({ fallbackC: true, fallbackTheta: true, chroma: 1, hue: 0 });
+    expect(verdict).toMatchObject({ accepted: false, reason: 'colourShift' });
+  }, 30_000);
+
+  it('colourMode keeps an unchanged 45/10/45 multitone at G = 0 through H0\'s own median', async () => {
+    const tones = within((x, y) => inBox(G, x, y), (_x, y) => { const u = (y - G.top) / G.height; return grey(u < 0.45 ? 30 : u < 0.55 ? 50 : 70); });
+    const verdict = await checkScenes(tones, tones);
+    expect(verdict.accepted).toBe(true);
+    expect(verdict.metrics.modeDistance).toBe(0);
+    expect(verdict.metrics.medianChosen).toBe(true);
+    expect(verdict.metrics.modes!.length).toBeGreaterThanOrEqual(2);
+  }, 30_000);
+});
+
+describe('cooperative scheduling and abort (§3.7)', () => {
+  const h0 = h0Of(within((x, y) => inBox(G, x, y), (x) => (x >> 3) % 2 ? lch(40, 30, 30) : lch(60, 30, 200)));
+  const h2 = h2Of(solid(G, lch(50, 30, 120)));
+
+  it('the verdict and every metric are identical whether it always yields, never yields, or uses either primitive', async () => {
+    const never = await cleanupCheck(h0, GARMENT_MASK, h2, { now: () => 0, yieldNow: async () => undefined });
+    let clock = 0, yields = 0;
+    const always = await cleanupCheck(h0, GARMENT_MASK, h2, { now: () => (clock += 100), yieldNow: async () => { yields++; } });
+    expect(yields).toBeGreaterThan(100);
+    expect(always).toEqual(never);
+    const channel = cleanupYield({ MessageChannel });
+    expect(channel.kind).toBe('channel');
+    expect(await cleanupCheck(h0, GARMENT_MASK, h2, { now: () => (clock += 100), yieldNow: channel.run })).toEqual(never);
+    const scheduler = cleanupYield({ scheduler: { yield: () => Promise.resolve() }, MessageChannel });
+    expect(scheduler.kind).toBe('scheduler');
+    expect(await cleanupCheck(h0, GARMENT_MASK, h2, { now: () => (clock += 100), yieldNow: scheduler.run })).toEqual(never);
+    expect(never.accepted).toBe(false);
+    expect(never.metrics.patternLoss).toBeGreaterThan(0.5);
+  }, 60_000);
+
+  it('picks scheduler.yield, else a MessageChannel, and never uses setTimeout', async () => {
+    expect(() => cleanupYield({})).toThrow('no yield primitive');
+    expect(cleanupYield({ scheduler: {}, MessageChannel }).kind).toBe('channel');
+    const timeout = vi.spyOn(globalThis, 'setTimeout');
+    try {
+      let clock = 0;
+      await cleanupCheck(h0, GARMENT_MASK, h2, { now: () => (clock += 100), yieldNow: cleanupYield({ MessageChannel }).run });
+      expect(timeout).not.toHaveBeenCalled();
+    } finally {
+      timeout.mockRestore();
+    }
+  }, 30_000);
+
+  it('rejects with the signal\'s reason when aborted before or during the check', async () => {
+    const before = new AbortController();
+    before.abort(new Error('skipped'));
+    await expect(cleanupCheck(h0, GARMENT_MASK, h2, { signal: before.signal })).rejects.toThrow('skipped');
+    const during = new AbortController();
+    let clock = 0, yields = 0;
+    const run = cleanupCheck(h0, GARMENT_MASK, h2, {
+      signal: during.signal, now: () => (clock += 100),
+      yieldNow: async () => { if (++yields === 20) during.abort(new Error('timed out')); },
+    });
+    await expect(run).rejects.toThrow('timed out');
+    expect(yields).toBe(20);
+  }, 30_000);
+});
+
+describe('rev4 stage negatives (X14), unchanged in v2', () => {
+  const box = (left: number, top: number, width: number, height: number): Box => ({ left, top, width, height });
+  it('size', async () => {
+    const h0 = h0Of(solid(G, navy));
+    await expect(cleanupCheck(new Uint8ClampedArray(4), GARMENT_MASK, h0)).resolves.toMatchObject({ accepted: false, reason: 'size' });
+    await expect(cleanupCheck(h0, new Uint8Array(N - 1), h0)).resolves.toMatchObject({ accepted: false, reason: 'size' });
   });
 
-  it('support: narrow straps leave no interior to compare', () => {
-    const strap = (x: number, y: number) => (y >= 60 && y < 62 && x >= 53 && x < 203) || (y >= 60 && y < 260 && x >= 53 && x < 203 && x % 12 < 2);
-    const straps = frame((x, y) => strap(x, y) ? NAVY : null);
-    expect(verdict(straps, straps, mask(strap))).toMatchObject({ accepted: false, reason: 'support' });
-  });
+  it('background: a non-plain or wrong-colour perimeter', async () => {
+    const ragged = (x: number, y: number) => (x < 6 || y < 6 || x >= W - 6 || y >= H - 6) && (x + y) % 3 === 0 ? grey(45) : inBox(G, x, y) ? navy : null;
+    expect(await checkScenes(solid(G, navy), ragged)).toMatchObject({ accepted: false, reason: 'background' });
+    expect(await checkScenes(solid(G, navy), (x, y) => inBox(G, x, y) ? navy : grey(80))).toMatchObject({ accepted: false, reason: 'background' });
+  }, 30_000);
 
-  it('colour: a hue shift over the supported interior', () => {
-    expect(verdict(frame(garment(GARMENT, [90, 30, 45])))).toMatchObject({ accepted: false, reason: 'colour' });
-  });
+  it('emptyMask and tinyMask', async () => {
+    expect(await checkScenes(solid(G, navy), () => null)).toMatchObject({ accepted: false, reason: 'emptyMask' });
+    expect(await checkScenes(solid(G, navy), solid(box(120, 150, 20, 20), navy))).toMatchObject({ accepted: false, reason: 'tinyMask' });
+  }, 30_000);
 
-  it('structure: an inverted fine pattern with a small colour difference', () => {
-    const A: Rgb = [50, 50, 50], B: Rgb = [62, 62, 62];
-    const check = (invert: boolean) => frame((x, y) => inBox(GARMENT, x, y) ? ((x + y) % 2 === (invert ? 1 : 0) ? A : B) : null);
-    const result = verdict(check(true), check(false));
-    expect(result).toMatchObject({ accepted: false, reason: 'structure' });
-    expect(result.metrics.meanDeltaE).toBeLessThanOrEqual(CLEANUP.maximumMeanDeltaE);
-  });
+  it('ambiguousMask: the result touches all four edges', async () => {
+    const cross = (x: number, y: number) => (x >= 124 && x < 132) || (y >= 156 && y < 164) || inBox(G, x, y) ? navy : null;
+    expect(await checkScenes(solid(G, navy), cross)).toMatchObject({ accepted: false, reason: 'ambiguousMask' });
+  }, 30_000);
 
-  it('nonFinite is a defensive guard: byte inputs cannot produce NaN, and none of the cases above reports it', () => {
-    for (const h2 of [H0, frame(() => null), frame(() => [0, 0, 0])]) expect((verdict(h2) as { reason?: string }).reason).not.toBe('nonFinite');
-  });
+  it('pieces: a result split in two', async () => {
+    const left = box(40, 60, 80, 200), right = box(136, 60, 80, 200), whole = box(40, 60, 176, 200);
+    const split = (x: number, y: number) => inBox(left, x, y) || inBox(right, x, y) ? navy : null;
+    const reference = maskOf((x, y) => inBox(whole, x, y));
+    expect(await checkScenes(solid(whole, navy), split, reference)).toMatchObject({ accepted: false, reason: 'pieces' });
+  }, 30_000);
+
+  it('centre: the kept garment is off centre', async () => {
+    const off = box(12, 60, 78, 200);
+    const reference = maskOf((x, y) => inBox(off, x, y) || inBox(G, x, y));
+    const verdict = await checkScenes((x, y) => inBox(off, x, y) || inBox(G, x, y) ? navy : null, solid(off, navy), reference);
+    expect(verdict).toMatchObject({ accepted: false, reason: 'centre' });
+  }, 30_000);
+
+  it('nonFinite is a defensive guard that byte inputs never reach', async () => {
+    for (const result of [solid(G, navy), () => null, solid(G, grey(0))]) {
+      expect(((await checkScenes(solid(G, navy), result)) as { reason?: string }).reason).not.toBe('nonFinite');
+    }
+  }, 30_000);
 });
 
 describe('square morphology at the frame border', () => {
@@ -185,5 +220,11 @@ describe('square morphology at the frame border', () => {
     for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
       expect(out[y * size + x], `${x},${y}`).toBe(x >= 2 && x < size - 2 && y >= 2 && y < size - 2 ? 1 : 0);
     }
+  });
+  it('reads bit 0 only, so flag bits above it are ignored', () => {
+    const src = new Uint8Array(size * size).fill(4);
+    src[27] = 5;
+    morph(src, out, tmp, size, size, 0, false);
+    expect([...out].reduce((sum, value) => sum + value, 0)).toBe(1);
   });
 });

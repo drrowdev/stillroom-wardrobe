@@ -149,9 +149,58 @@ function measuredFor(entry, measured) {
   if (!record(measured) || !record(binding) || measured.call !== entry.call || measured.commit !== binding.commit
     || measured.modelSha256 !== binding.modelSha256 || measured.referenceSha256 !== binding.referenceSha256
     || measured.h0Sha256 !== entry.inputSha256 || !HASH.test(entry.outputSha256 ?? '') || measured.h2Sha256 !== entry.outputSha256) return false;
-  const required = Object.hasOwn(REASON_METRICS, measured.reason) ? REASON_METRICS[measured.reason] : null;
+  return hasMetrics(REASON_METRICS, measured);
+}
+function hasMetrics(reasons, measured) {
+  const required = Object.hasOwn(reasons, measured.reason) ? reasons[measured.reason] : null;
   return required !== null && record(measured.metrics)
     && required.every((path) => { const value = metricAt(measured.metrics, path); return typeof value === 'number' && Number.isFinite(value); });
+}
+
+// BG2c-3 (plan rev8 §6.3): the schema-2 remeasure contract, with the v2 check's own reason names and metrics.
+// Stages before alignment stop early; every later gate reports the full set.
+const V2_BASE = ['checkVersion', 'ringDeltaE', 'ringP95', 'workingBytes'];
+const V2_PLACED = [...V2_BASE, 'largestShare', 'containment', 'unalignedRetention', 'centroid.x', 'centroid.y'];
+const V2_ALIGNED = [...V2_PLACED, 'scale', 'tx', 'ty', 'added', 'retention', 'support', 'fitted'];
+const V2_FULL = [...V2_ALIGNED, 'deltaL', 'chroma', 'hue', 'modeDistance', 'removed', 'changeShare', 'patternLoss'];
+export const V2_REASON_METRICS = Object.freeze({
+  background: V2_BASE, emptyMask: V2_BASE, tinyMask: V2_BASE, ambiguousMask: V2_BASE, pieces: V2_BASE,
+  centre: V2_PLACED, added: V2_ALIGNED, retention: V2_ALIGNED, support: V2_ALIGNED, clipped: V2_ALIGNED,
+  colourShift: V2_FULL, colourMode: V2_FULL, removed: V2_FULL, change: V2_FULL, patternLoss: V2_FULL, accepted: V2_FULL,
+});
+const V2_KEYS = 'blocked,checkVersion,configSha256,measuredCommit,metrics,modelSha256,preparedCommit,schema';
+const V2_ENTRY_KEYS = 'call,h0Sha256,h2Sha256,metrics,priorReason,reason,referenceSha256';
+const LEGACY_KEYS = 'blocked,commit,metrics,pending';
+
+/**
+ * Evidence from a whole `metrics.json` file, by contract (§6.3). A legacy v1 file (no `schema` key) counts only under
+ * its original rule: measured at the prepared commit, with v1 reason names. A schema-2 remeasure counts only when it
+ * was measured at exactly the revision being evaluated (`build.commit`), by check version 2 with this build's
+ * `configSha256`, from the bindings' prepared commit and model, with every hash matching. Anything else is refused as
+ * `metrics-contract` and leaves every visual call's metrics missing.
+ */
+export function metricsEvidence(calls, file, settlement, build) {
+  const visual = calls.filter((entry) => entry.role === 'visual');
+  const contract = () => {
+    const missing = evidenceState(calls, {}, settlement).missing.filter((item) => !item.startsWith('metrics-'));
+    return { state: 'pending', missing: ['metrics-contract', ...missing] };
+  };
+  if (!record(file)) return contract();
+  if (!Object.hasOwn(file, 'schema')) {
+    if (Object.keys(file).sort().join() !== LEGACY_KEYS || !visual.every((entry) => record(entry.binding) && entry.binding.commit === file.commit)) return contract();
+    return evidenceState(calls, file.metrics, settlement);
+  }
+  if (file.schema !== 2 || Object.keys(file).sort().join() !== V2_KEYS || !record(build) || !COMMIT.test(build.commit ?? '')
+    || file.measuredCommit !== build.commit || file.checkVersion !== 2 || !HASH.test(build.configSha256 ?? '')
+    || file.configSha256 !== build.configSha256 || !Array.isArray(file.blocked) || file.blocked.length !== 0 || !record(file.metrics)
+    || !visual.every((entry) => record(entry.binding) && entry.binding.commit === file.preparedCommit && entry.binding.modelSha256 === file.modelSha256)) {
+    return contract();
+  }
+  const v2For = (entry, measured) => record(measured) && Object.keys(measured).sort().join() === V2_ENTRY_KEYS && measured.call === entry.call
+    && measured.h0Sha256 === entry.inputSha256 && HASH.test(entry.outputSha256 ?? '') && measured.h2Sha256 === entry.outputSha256
+    && measured.referenceSha256 === entry.binding.referenceSha256 && typeof measured.priorReason === 'string'
+    && Object.hasOwn(REASON_METRICS, measured.priorReason) && measured.metrics?.checkVersion === 2 && hasMetrics(V2_REASON_METRICS, measured);
+  return evidenceState(calls, file.metrics, settlement, v2For);
 }
 
 /**
@@ -164,13 +213,13 @@ function measuredFor(entry, measured) {
  *   dispatched, `charge_state` estimated, `enhance_settlement_origin` observed, no anomaly, an accounted amount and the
  *   settlement digest. A provisional expiry, another request's row or a merely terminal row is not enough.
  */
-export function evidenceState(calls, metrics = {}, settlement = null) {
+export function evidenceState(calls, metrics = {}, settlement = null, verify = measuredFor) {
   const missing = [];
   if (calls.length !== PROBE_CALLS) missing.push('calls');
   for (const entry of calls) {
     if (entry.role === 'visual') {
       if (entry.code !== 'OK') missing.push(`call-${entry.call}`);
-      else if (!record(metrics) || !measuredFor(entry, metrics[entry.requestId])) missing.push(`metrics-${entry.call}`);
+      else if (!record(metrics) || !Object.hasOwn(metrics, entry.requestId) || !verify(entry, metrics[entry.requestId])) missing.push(`metrics-${entry.call}`);
     }
   }
   const disconnect = calls.find((entry) => entry.role === 'disconnect');

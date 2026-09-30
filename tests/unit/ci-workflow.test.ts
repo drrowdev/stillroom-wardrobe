@@ -138,14 +138,20 @@ describe('CI workflow browser split', () => {
 
   it('selects every Playwright project exactly once across the two browser jobs, with the App projects in three shards', () => {
     const projects = [...config.matchAll(/\{ name: '([^']+)'|\n {6}name: '([^']+)'/g)].map((match) => match[1] ?? match[2]);
-    expect(projects).toEqual(['chromium', 'mobile', 'webkit-photo']);
+    expect(projects).toEqual(['chromium', 'mobile', 'webkit-photo', 'cleanup-timing', 'cleanup-timing-webkit']);
     expect(config).toContain("testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', "
       + "'item-details.spec.ts', 'garment-fields.spec.ts', 'ai-photo-first.spec.ts', 'items.spec.ts', 'ux-l1a.spec.ts', "
       + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts', 'enhancement.spec.ts', 'admin.spec.ts', 'tryon.spec.ts'],");
     expect(config).toContain('  failOnFlakyTests: Boolean(process.env.CI),\n');
     expect(config).toContain('  forbidOnly: Boolean(process.env.CI),\n');
     const app = job('app-browser'), webkit = job('webkit-photo');
-    expect(count(workflow, 'npm run test:browser')).toBe(2);
+    expect(count(workflow, 'npm run test:browser')).toBe(3);
+    // BG2c-3: the clean-up timing budgets run isolated, serial and unretried, after the performance suite in its job.
+    expect(config).toContain("    { name: 'chromium', testIgnore: 'cleanup-timing.spec.ts',");
+    expect(config).toContain("    { name: 'mobile', testIgnore: 'cleanup-timing.spec.ts',");
+    for (const name of ['cleanup-timing', 'cleanup-timing-webkit']) {
+      expect(config).toContain(`    { name: '${name}', testMatch: 'cleanup-timing.spec.ts', fullyParallel: false, retries: 0, use: `);
+    }
     expect(count(workflow, 'npx playwright install')).toBe(5);
     expect(app).toContain('    strategy:\n      fail-fast: false\n      matrix:\n        shard: [1, 2, 3]\n    steps:\n');
     expect(app).toContain('      - run: npx playwright install --with-deps chromium\n' + sandboxStep
@@ -187,8 +193,9 @@ describe('CI workflow browser split', () => {
     expect(job('app-checks')).toContain('      - run: npm run build\n      - run: npm run check:bundle\n');
     expect(count(workflow, 'npm run check:bundle')).toBe(1);
     expect(steps(job('performance'))).toEqual([
-      checkout, setupNode, '      - run: npm ci --no-fund\n', '      - run: npx playwright install --with-deps chromium\n',
-      '      - run: npm run test:performance\n\n',
+      checkout, setupNode, '      - run: npm ci --no-fund\n', '      - run: npx playwright install --with-deps chromium webkit\n',
+      '      - run: npm run test:performance\n',
+      '      - run: npm run test:browser -- --project=cleanup-timing --project=cleanup-timing-webkit --workers=1\n\n',
     ]);
     expect(count(workflow, 'npm run test:performance')).toBe(1);
     for (const forbidden of ['upload-artifact', 'secrets.', 'env:', 'if:']) expect(ungated('performance')).not.toContain(forbidden);

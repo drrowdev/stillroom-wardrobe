@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -7,7 +7,8 @@ import {
   checkOperatorTree, checkStaticTree, HARNESS_ENTRY, HARNESS_MARKER, OPERATOR_TREE, sha256, type InventoryFile,
 } from '../../scripts/check-static-assets.mjs';
 import {
-  bindingFor, checkFolders, HarnessRefusal, loopbackOnly, parseCrops, REFERENCE_BYTES, repository, sourceCommit, verifyPrepared,
+  bindingFor, CALL_FILES, checkFolders, HarnessRefusal, loopbackOnly, MEASURED_FILES, parseCrops, planRemeasure, PREPARED_FILES, REFERENCE_BYTES,
+  remeasureRecord, repository, sourceCommit, verifyPrepared, writeRemeasure, type RemeasureIo, type RemeasurePlan,
 } from '../../scripts/cleanup-probe-harness.mjs';
 
 // BG2c operator harness (plan rev4 §11.2, §11.2a): the deploy check refuses it, its own check passes only its fixed
@@ -160,5 +161,175 @@ describe('harness driver checks', () => {
     for (const other of [{ commit: 'd'.repeat(40) }, { modelSha256: 'd'.repeat(64) }, { h0: new Uint8Array([1]) }, { reference: new Uint8Array(REFERENCE_BYTES) }]) {
       expect(() => verifyPrepared(binding, { commit: input.commit, modelSha256: input.modelSha256, h0, reference, ...other })).toThrow(refusal('binding'));
     }
+  });
+});
+
+describe('remeasure (BG2c-3 §6): a synthetic copy of the probe layout', () => {
+  const COMMIT = 'a'.repeat(40), MODEL = 'b'.repeat(64), CONFIG = 'c'.repeat(64), MEASURED = 'e'.repeat(40);
+  const refusal = (code: string) => new HarnessRefusal(code);
+  const bytes = (seed: number, length: number) => Buffer.from(Array.from({ length }, (_, index) => (seed * 31 + index * 7) & 0xff));
+  const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
+  type Layout = Record<string, Buffer | string>;
+  function layout(): Layout {
+    const files: Layout = { 'samples/raw-1.jpg': bytes(99, 40), 'NOTE.txt': 'note', 'review.html': '<!doctype html>' };
+    const listing = [], metrics: Record<string, unknown> = {};
+    for (let index = 0; index < 6; index++) {
+      const name = `s${index + 1}`, h0 = Buffer.concat([Buffer.from([0xff, 0xd8]), bytes(index, 30), Buffer.from([0xff, 0xd9])]);
+      const reference = Buffer.from(Array.from({ length: REFERENCE_BYTES }, (_, at) => (at + index) % 3 === 0 ? 1 : 0));
+      const binding = { version: 1, commit: COMMIT, modelSha256: MODEL, sampleSha256: 'd'.repeat(64), crop: {}, frame: {},
+        h0: { sha256: sha256(h0), bytes: h0.length, width: 1280, height: 1600 }, reference: { sha256: sha256(reference), bytes: REFERENCE_BYTES }, ambiguous: false };
+      files[`prepared/${name}.jpg`] = h0; files[`prepared/${name}.bin`] = reference; files[`prepared/${name}.json`] = json(binding);
+      listing.push({ file: `${name}.jpg`, sha256: sha256(h0), reference: `${name}.bin`, binding: `${name}.json`, role: index < 5 ? 'visual' : 'disconnect' });
+      const call = { call: index + 1, role: index < 5 ? 'visual' : 'disconnect', requestId: `request-${index + 1}`, inputSha256: sha256(h0),
+        code: index < 5 ? 'OK' : 'DISCONNECTED', binding: { commit: COMMIT, modelSha256: MODEL, referenceSha256: sha256(reference) } };
+      if (index < 5) {
+        const h2 = Buffer.concat([Buffer.from([0xff, 0xd8]), bytes(index + 50, 30), Buffer.from([0xff, 0xd9])]);
+        files[`calls/call-${index + 1}.jpg`] = h2;
+        files[`calls/call-${index + 1}.json`] = json({ ...call, outputSha256: sha256(h2) });
+        metrics[call.requestId] = { call: index + 1, reason: index < 2 ? 'colour' : 'containment', metrics: { ringDeltaE: 1 },
+          h0Sha256: sha256(h0), h2Sha256: sha256(h2), referenceSha256: sha256(reference), commit: COMMIT, modelSha256: MODEL };
+      } else files[`calls/call-${index + 1}.json`] = json(call);
+    }
+    files['prepared/samples.json'] = json(listing);
+    files['prepared/prepare-report.json'] = json({ commit: COMMIT, report: listing.map((_, index) => ({ sample: index + 1, code: 'READY', h0Bytes: 34 })), blocked: [], registrations: 0 });
+    files['measured/metrics.json'] = json({ commit: COMMIT, metrics, pending: [], blocked: [] });
+    return files;
+  }
+  const probe = async (files: Layout = layout()) => {
+    const root = await temporary(files);
+    return { root, out: path.join(root, 'remeasured') };
+  };
+  async function snapshot(root: string): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    for (const entry of await readdir(root, { recursive: true, withFileTypes: true })) {
+      if (entry.isFile()) { const file = path.join(entry.parentPath, entry.name); out[path.relative(root, file)] = sha256(await readFile(file)); }
+    }
+    return out;
+  }
+  const spyIo = (reads: string[]) => ({ realpath, lstat, readdir, mkdir, writeFile,
+    readFile: (file: string, options: { flag: 'r' }) => { reads.push(file); return readFile(file, options); } }) as unknown as RemeasureIo;
+  const results = (plan: RemeasurePlan, over: Record<string, unknown> = {}) => plan.entries.map((entry, index) => ({
+    h0Sha256: entry.h0Sha256, h2Sha256: entry.h2Sha256, referenceSha256: entry.referenceSha256, checkVersion: 2, configSha256: CONFIG,
+    verdict: index === 0 ? { accepted: true, metrics: { checkVersion: 2 } } : { accepted: false, reason: 'colourMode', metrics: { checkVersion: 2 } }, ...over }));
+  const build = (plan: RemeasurePlan, over: Record<string, unknown> = {}) =>
+    ({ measuredCommit: MEASURED, modelSha256: MODEL, configSha256: CONFIG, results: results(plan), blocked: [], ...over });
+
+  it('selects exactly the 5 visual entries, never opens s6 or call-6, writes one schema-2 file and leaves the tree unchanged', async () => {
+    const { root, out } = await probe();
+    const before = await snapshot(root);
+    const reads: string[] = [];
+    const plan = await planRemeasure(root, out, spyIo(reads));
+    expect(plan.entries.map((entry) => [entry.call, entry.requestId, entry.priorReason])).toEqual([
+      [1, 'request-1', 'colour'], [2, 'request-2', 'colour'], [3, 'request-3', 'containment'], [4, 'request-4', 'containment'], [5, 'request-5', 'containment']]);
+    const value = remeasureRecord(plan, build(plan));
+    await writeRemeasure(plan, value, spyIo(reads));
+    expect(reads.filter((file) => /[\\/](s6\.|call-6\.)/.test(file))).toEqual([]);
+    expect(reads.some((file) => /[\\/]samples[\\/]|NOTE\.txt|review\.html/.test(file))).toBe(false);
+    const written = JSON.parse(await readFile(path.join(out, 'metrics.json'), 'utf8'));
+    expect(Object.keys(written).sort()).toEqual(['blocked', 'checkVersion', 'configSha256', 'measuredCommit', 'metrics', 'modelSha256', 'preparedCommit', 'schema']);
+    expect(written).toMatchObject({ schema: 2, preparedCommit: COMMIT, measuredCommit: MEASURED, checkVersion: 2, configSha256: CONFIG, modelSha256: MODEL, blocked: [] });
+    expect(written.metrics['request-2']).toEqual({ call: 2, reason: 'colourMode', metrics: { checkVersion: 2 }, h0Sha256: plan.entries[1]!.h0Sha256,
+      h2Sha256: plan.entries[1]!.h2Sha256, referenceSha256: plan.entries[1]!.referenceSha256, priorReason: 'colour' });
+    const after = await snapshot(root);
+    delete after[path.join('remeasured', 'metrics.json')];
+    expect(after).toEqual(before);
+    // The output is written once, with wx: a second write refuses.
+    await expect(writeRemeasure(plan, value)).rejects.toThrow(refusal('output'));
+  });
+
+  it.each([
+    ['a missing file', (files: Layout) => { delete files['prepared/s3.bin']; }],
+    ['an extra file', (files: Layout) => { files['calls/call-7.json'] = '{}'; }],
+    ['a renamed file', (files: Layout) => { files['calls/call-6.jsn'] = files['calls/call-6.json']!; delete files['calls/call-6.json']; }],
+    ['an extra measured file', (files: Layout) => { files['measured/metrics.old'] = '{}'; }],
+    ['a nested folder', (files: Layout) => { files['prepared/s1.bin.d/x'] = 'x'; delete files['prepared/s1.bin']; }],
+  ])('refuses %s in the known inventory', async (_name, change) => {
+    const files = layout(); change(files);
+    const { root, out } = await probe(files);
+    await expect(planRemeasure(root, out)).rejects.toThrow(refusal('inventory'));
+  });
+
+  it('refuses a symlinked folder or file', async () => {
+    const { root, out } = await probe();
+    const elsewhere = await temporary({ 'x.txt': 'x' });
+    await rm(path.join(root, 'measured'), { recursive: true });
+    await symlink(elsewhere, path.join(root, 'measured'), 'junction');
+    await expect(planRemeasure(root, out)).rejects.toThrow(refusal('inventory'));
+    // A symlinked file, observed through the injected listing (file symlinks need privileges on Windows).
+    const fresh = await probe();
+    const io = { realpath, lstat, mkdir, writeFile, readFile,
+      readdir: async (folder: string, options: { withFileTypes: true }) => (await readdir(folder, options)).map((entry) =>
+        entry.name === 's2.jpg' ? Object.assign(Object.create(entry), { isSymbolicLink: () => true, isFile: () => false, name: entry.name }) : entry) } as unknown as RemeasureIo;
+    await expect(planRemeasure(fresh.root, fresh.out, io)).rejects.toThrow(refusal('inventory'));
+  });
+
+  it('refuses a role change in samples.json or a call record', async () => {
+    for (const change of [(files: Layout) => { files['prepared/samples.json'] = String(files['prepared/samples.json']).replace('"role": "visual"', '"role": "disconnect"'); },
+      (files: Layout) => { files['calls/call-2.json'] = String(files['calls/call-2.json']).replace('"role": "visual"', '"role": "disconnect"'); }]) {
+      const files = layout(); change(files);
+      const { root, out } = await probe(files);
+      await expect(planRemeasure(root, out)).rejects.toBeInstanceOf(HarnessRefusal);
+    }
+  });
+
+  it('refuses an output folder that exists, is nested in the probe folders or contains them', async () => {
+    const { root } = await probe();
+    for (const [out, code] of [[path.join(root, 'prepared', 'new'), 'output'], [path.join(root, 'samples', 'new'), 'output'], [root, 'output'],
+      [path.join(root, 'measured'), 'output'], [path.join(repository, 'remeasured'), 'folder']] as const) {
+      await expect(planRemeasure(root, out)).rejects.toThrow(refusal(code));
+    }
+    await mkdir(path.join(root, 'existing'));
+    await expect(planRemeasure(root, path.join(root, 'existing'))).rejects.toThrow(refusal('output'));
+    await writeFile(path.join(root, 'existing', 'x'), 'x');
+    await expect(planRemeasure(root, path.join(root, 'existing'))).rejects.toThrow(refusal('output'));
+  });
+
+  it.each([
+    ['H0', 'h0', (files: Layout) => { files['prepared/s2.jpg'] = Buffer.concat([files['prepared/s2.jpg'] as Buffer, Buffer.from([0])]); }],
+    ['R', 'reference', (files: Layout) => { const r = Buffer.from(files['prepared/s3.bin'] as Buffer); r[0] = r[0] ? 0 : 1; files['prepared/s3.bin'] = r; }],
+    ['H2', 'h2', (files: Layout) => { files['calls/call-4.jpg'] = Buffer.concat([files['calls/call-4.jpg'] as Buffer, Buffer.from([0])]); }],
+    ['the request ID', 'requestId', (files: Layout) => { files['calls/call-5.json'] = String(files['calls/call-5.json']).replace('request-5', 'request-9'); }],
+    ['the model', 'model', (files: Layout) => { files['prepared/s4.json'] = String(files['prepared/s4.json']).replace(MODEL, 'f'.repeat(64)); }],
+    ['the legacy entry\'s model', 'model', (files: Layout) => { files['measured/metrics.json'] = String(files['measured/metrics.json']).replace(`"modelSha256": "${MODEL}"`, `"modelSha256": "${'f'.repeat(64)}"`); }],
+  ])('refuses a hash mismatch for %s', async (_name, code, change) => {
+    const files = layout(); change(files);
+    const { root, out } = await probe(files);
+    await expect(planRemeasure(root, out)).rejects.toThrow(refusal(code));
+  });
+
+  it('accepts the legacy v1 metrics only under their original rule', async () => {
+    for (const change of [(files: Layout) => { files['measured/metrics.json'] = String(files['measured/metrics.json']).replace(`"commit": "${COMMIT}",\n  "metrics"`, `"commit": "${'f'.repeat(40)}",\n  "metrics"`); },
+      (files: Layout) => { files['measured/metrics.json'] = String(files['measured/metrics.json']).replace('"pending"', '"schema": 1, "pending"'); }]) {
+      const files = layout(); change(files);
+      const { root, out } = await probe(files);
+      await expect(planRemeasure(root, out)).rejects.toThrow(refusal('legacy'));
+    }
+  });
+
+  it('refuses results from another model, config, version or input, and legacy metrics changed during the run', async () => {
+    const { root, out } = await probe();
+    const plan = await planRemeasure(root, out);
+    expect(() => remeasureRecord(plan, build(plan, { modelSha256: 'f'.repeat(64) }))).toThrow(refusal('model'));
+    expect(() => remeasureRecord(plan, build(plan, { measuredCommit: 'main' }))).toThrow(refusal('build'));
+    for (const over of [{ configSha256: 'f'.repeat(64) }, { checkVersion: 1 }, { h2Sha256: 'f'.repeat(64) }]) {
+      expect(() => remeasureRecord(plan, build(plan, { results: results(plan, over) }))).toThrow(refusal('results'));
+    }
+    expect(() => remeasureRecord(plan, build(plan, { results: results(plan).slice(1) }))).toThrow(refusal('results'));
+    await writeFile(plan.metricsFile, 'changed');
+    await expect(writeRemeasure(plan, remeasureRecord(plan, build(plan)))).rejects.toThrow(refusal('changed'));
+    await expect(readdir(out)).rejects.toThrow();
+  });
+
+  it('keeps measure strict: a binding from another commit is refused', () => {
+    const h0 = new Uint8Array([1]), reference = new Uint8Array(REFERENCE_BYTES);
+    const binding = { version: 1, commit: COMMIT, modelSha256: MODEL, h0: { sha256: sha256(h0), bytes: 1 }, reference: { sha256: sha256(reference) } };
+    expect(() => verifyPrepared(binding, { commit: MEASURED, modelSha256: MODEL, h0, reference })).toThrow(refusal('binding'));
+  });
+
+  it('lists the known inventory exactly', () => {
+    expect(PREPARED_FILES).toHaveLength(20);
+    expect(CALL_FILES).toEqual(['call-1.jpg', 'call-1.json', 'call-2.jpg', 'call-2.json', 'call-3.jpg', 'call-3.json', 'call-4.jpg', 'call-4.json',
+      'call-5.jpg', 'call-5.json', 'call-6.json']);
+    expect(MEASURED_FILES).toEqual(['metrics.json']);
   });
 });

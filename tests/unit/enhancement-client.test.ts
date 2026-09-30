@@ -142,8 +142,9 @@ function input(over: Partial<StageInput> = {}): StageInput {
   return { source: source(), cutOut: true, online: true, current: () => true, signal: new AbortController().signal,
     skip: new AbortController().signal, ...over };
 }
-const metrics = { ringDeltaE: 1, ringP95: 2, containment: 1, retention: 1, largestShare: 1, centroid: { x: 0, y: 0 }, support: 1,
-  meanDeltaE: 0, p95DeltaE: 0, ssim: 1, windows: 1, workingBytes: 1 };
+const metrics = { checkVersion: 2, workingBytes: 1, ringDeltaE: 1, ringP95: 2, largestShare: 1, centroid: { x: 0.5, y: 0.5 },
+  scale: 1, tx: 0, ty: 0, added: 0, retention: 1, support: 1, deltaL: 0, chroma: 1, hue: 0, modeDistance: 0, removed: 0,
+  changeShare: 0, patternLoss: 0 };
 function harness(session: EnhanceSession, options: {
   read?: EnhanceStatusRead | Error; sample?: { serverTimeMs: number; t0: number; t1: number } | null;
   response?: (body: Uint8Array<ArrayBuffer>) => EnhanceResponse; accept?: boolean; stripped?: boolean; admitBytes?: Uint8Array<ArrayBuffer>;
@@ -183,9 +184,10 @@ function harness(session: EnhanceSession, options: {
       thumbnail: async () => ({ blob: new Blob([new Uint8Array([3])]), sha256: 'd'.repeat(64) }),
     },
     admit: (bytes) => ({ bytes: options.admitBytes ?? (bytes as Uint8Array<ArrayBuffer>), width: 1024, height: 1280, stripped: options.stripped ?? false }),
-    compare: (...args) => {
+    compare: async (...args) => {
       calls.compared.push(args);
-      return options.accept === false ? { accepted: false, reason: 'colour', metrics: {} } : { accepted: true, metrics };
+      return options.accept === false ? { accepted: false, reason: 'colourShift', metrics: { checkVersion: 2, workingBytes: 1 } }
+        : { accepted: true, metrics };
     },
     newId: () => '11111111-1111-4111-8111-111111111111',
   };
@@ -309,5 +311,43 @@ describe('the stage core', () => {
     const { deps } = harness(new EnhanceSession(() => 100));
     deps.client.enhance = async () => { skip.abort(); return { kind: 'code', code: 'FAILED' }; };
     expect(await runEnhancementStage(input({ skip: skip.signal }), deps)).toMatchObject({ kind: 'skipped', line: 'none' });
+  });
+  // BG2c-3 §3.7: the check is awaited with the stage's combined signal, so Skip, the timeout and a discard reach it.
+  const waitingCheck = (onStart: () => void): StageDeps['compare'] => (_h0, _reference, _h2, { signal }) => new Promise((_, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError')), { once: true });
+    onStart();
+  });
+  it('passes the stage signal to the check and awaits it', async () => {
+    const { deps, calls } = harness(new EnhanceSession(() => 100));
+    expect(await runEnhancementStage(input(), deps)).toMatchObject({ kind: 'enhanced' });
+    expect(calls.compared[0]![3].signal).toBeInstanceOf(AbortSignal);
+    expect(calls.compared[0]![3].signal.aborted).toBe(false);
+  });
+  it('Skip during the check keeps H1 with no line', async () => {
+    const skip = new AbortController();
+    const { deps } = harness(new EnhanceSession(() => 100));
+    deps.compare = waitingCheck(() => skip.abort());
+    expect(await runEnhancementStage(input({ skip: skip.signal }), deps)).toMatchObject({ kind: 'skipped', line: 'none' });
+  });
+  it('a discard during the check commits nothing', async () => {
+    const discard = new AbortController();
+    const { deps } = harness(new EnhanceSession(() => 100));
+    deps.compare = waitingCheck(() => discard.abort());
+    expect(await runEnhancementStage(input({ signal: discard.signal }), deps)).toEqual({ kind: 'aborted' });
+  });
+  it('the stage timeout interrupts the check with the generic line', async () => {
+    vi.useFakeTimers();
+    try {
+      const { deps } = harness(new EnhanceSession(() => 100));
+      let started!: () => void;
+      const running = new Promise<void>((resolve) => { started = resolve; });
+      deps.compare = waitingCheck(() => started());
+      const result = runEnhancementStage(input(), deps);
+      await running;
+      await vi.advanceTimersByTimeAsync(ENHANCE_LIMITS.clientStageMs);
+      expect(await result).toMatchObject({ kind: 'skipped', line: 'generic' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
