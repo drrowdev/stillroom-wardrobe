@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { DISCONNECT_AFTER_MS, DISPATCH_SPACING_MS, PROBE_CALLS, ProbeRefusal, runProbe } from '../../scripts/tryon-probe.mjs';
+import { APPROVED_DELETE_BY, DISCONNECT_AFTER_MS, DISPATCH_SPACING_MS, PROBE_CALLS, ProbeRefusal, helsinkiDate, runProbe } from '../../scripts/tryon-probe.mjs';
 import { HOSTED_URL } from '../../scripts/hosted-smoke.mjs';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -34,8 +34,10 @@ type Options = {
   writeFail?: boolean;
   chainStatus?: (index: number) => Response;
   resultImage?: () => Response;
-  cancel?: () => Response;
+  cancel?: (index: number) => Response;
+  deleteResult?: () => Response;
   sleep?: (ms: number) => void;
+  wallNow?: number;
 };
 
 function harness(options: Options = {}) {
@@ -45,7 +47,7 @@ function harness(options: Options = {}) {
   const sleeps: number[] = [];
   const timers: number[] = [];
   const starts: number[] = [];
-  let clock = 0, ids = 0, statuses = 0, chainStatuses = 0;
+  let clock = 0, ids = 0, statuses = 0, chainStatuses = 0, cancels = 0;
   const deps = {
     readFile: async () => { if (options.readFail) throw new Error('missing'); return person; },
     readdir: async () => options.output ?? [],
@@ -54,6 +56,7 @@ function harness(options: Options = {}) {
       written.push({ path, bytes, flag: opts?.flag });
     },
     now: () => clock,
+    wallNow: () => options.wallNow ?? Date.UTC(2026, 9, 1, 9),
     sleep: async (ms: number) => { options.sleep?.(ms); sleeps.push(ms); clock += ms; },
     newId: () => `22222222-2222-4222-8222-${String(++ids).padStart(12, '0')}`,
     admit: options.admit ?? ((bytes: Uint8Array) => ({ bytes, width: 1024, height: 1280, stripped: false })),
@@ -63,14 +66,14 @@ function harness(options: Options = {}) {
     fetch: async (url: string, init: RequestInit) => {
       fetches.push(url.replace(HOSTED_URL, ''));
       if (url.endsWith('/rpc/tryon_status')) return options.status?.(statuses++) ?? json(statusBody());
-      if (url.endsWith('/rpc/tryon_cancel')) return options.cancel?.() ?? json({ code: 'CANCELLED' });
+      if (url.endsWith('/rpc/tryon_cancel')) return options.cancel?.(cancels++) ?? json({ code: 'CANCELLED' });
       if (url.endsWith('/rpc/tryon_chain_status')) {
         return options.chainStatus?.(chainStatuses++) ?? json({ code: 'OK', state: 'complete', activeAttempt: false, resultId: RESULT });
       }
       if (url.endsWith('/rpc/tryon_result_image_v1')) {
         return options.resultImage?.() ?? json({ code: 'OK', jpegBase64: Buffer.from(finalImage).toString('base64'), bytes: finalImage.byteLength });
       }
-      if (url.endsWith('/rpc/tryon_delete_result')) return json({ code: 'DELETED' });
+      if (url.endsWith('/rpc/tryon_delete_result')) return options.deleteResult?.() ?? json({ code: 'OK' });
       if (!url.endsWith('/functions/v1/try-on')) throw new Error(`unexpected ${url}`);
       starts.push(clock);
       const form = init.body as FormData;
@@ -264,9 +267,14 @@ describe('try-on probe script', () => {
 
   it('stops with call 4 incomplete unless the P3 chain completes on its own', async () => {
     const cases: [(index: number) => Response, string][] = [
-      [() => json({ code: 'OK', state: 'running', activeAttempt: false, resultId: null }), 'P3_NO_ACTIVE_ATTEMPT'],
+      [() => json({ code: 'OK', state: 'running', nextStep: 1, activeAttempt: false, resultId: null }), 'P3_STEP_NOT_ACCEPTED'],
+      [() => json({ code: 'OK', state: 'running', activeAttempt: false, resultId: null }), 'P3_STEP_NOT_ACCEPTED'],
+      [() => json({ code: 'OK', state: 'running', nextStep: 3, activeAttempt: false, resultId: null }), 'P3_STEP_NOT_ACCEPTED'],
       [() => json({ code: 'OK', state: 'expired', activeAttempt: false, resultId: null }), 'P3_EXPIRED'],
+      [() => json({ code: 'OK', state: 'cancelled', nextStep: 2, activeAttempt: false, resultId: null }), 'P3_CANCELLED'],
       [() => json({ code: 'OK', state: 'complete', activeAttempt: false, resultId: null }), 'P3_COMPLETE'],
+      [() => json({ code: 'OK', state: 'complete', activeAttempt: false, resultId: 'not-a-uuid' }), 'P3_COMPLETE'],
+      [() => json({ code: 'NOT_FOUND' }), 'STATUS_UNREADABLE'],
       [() => new Response('x', { status: 500 }), 'STATUS_UNREADABLE'],
       [() => json({ code: 'OK', state: 'running', activeAttempt: true, resultId: null }), 'SETTLE_TIMEOUT'],
     ];
@@ -279,6 +287,56 @@ describe('try-on probe script', () => {
       expect(report(lines)).toContain(`Stopped after P3: ${code}; call 4 acceptance is incomplete.`);
       expect(report(lines)).toContain('Outcome: INCOMPLETE.');
       expect(h.fetches.filter((url) => url.endsWith('tryon_cancel'))).toHaveLength(2);
+      expect(h.steps.filter((s) => s.outfitId === OUTFITS.P3 || s.chainId === h.steps[3]?.chainId).map((s) => [s.outfitId, s.step]))
+        .toEqual([[OUTFITS.P3, 1]]);
+    }
+  });
+
+  it('settles P3 when the single step is accepted and the chain waits, then confirms the stop before P2', async () => {
+    const h = harness({ chainStatus: (index) => json(index === 0
+      ? { code: 'OK', state: 'running', nextStep: 1, activeAttempt: true, resultId: null }
+      : { code: 'OK', state: 'running', nextStep: 2, activeAttempt: false, resultId: null }) });
+    const { calls, lines, complete } = await runProbe(env(), h.deps);
+    expect(complete).toBe(true);
+    expect(calls.map((c) => c.code)).toEqual(['OK', 'OK', 'OK', 'DISCONNECTED', 'FILTERED']);
+    // Exactly one P3 step request; the P3 chain's next step is never sent.
+    const p3Chain = h.steps[3]!.chainId;
+    expect(h.steps.filter((s) => s.chainId === p3Chain).map((s) => [s.outfitId, s.step])).toEqual([[OUTFITS.P3, 1]]);
+    const text = report(lines);
+    expect(text).toContain('P3 settled: ACCEPTED.');
+    expect(text).toContain('P3 chain: {"stop":"CANCELLED","resultDeleted":null}');
+    // The confirmed stop comes before the P2 request.
+    const lastStatus = h.fetches.lastIndexOf('/rest/v1/rpc/tryon_chain_status');
+    expect(h.fetches.slice(lastStatus, h.fetches.lastIndexOf('/functions/v1/try-on'))).toContain('/rest/v1/rpc/tryon_cancel');
+  });
+
+  it('settles a completed P3 only after its picture is deleted, and sends P2 after that', async () => {
+    const h = harness({ cancel: (index) => index === 1 ? json({ code: 'COMPLETED', resultId: RESULT }) : json({ code: 'CANCELLED' }) });
+    const { calls, lines, complete } = await runProbe(env(), h.deps);
+    expect(complete).toBe(true);
+    expect(calls.map((c) => c.code)).toEqual(['OK', 'OK', 'OK', 'DISCONNECTED', 'FILTERED']);
+    expect(report(lines)).toContain('P3 settled: COMPLETE.');
+    expect(report(lines)).toContain('P3 chain: {"stop":"COMPLETED","resultDeleted":"OK"}');
+    const deleteAt = h.fetches.indexOf('/rest/v1/rpc/tryon_delete_result');
+    expect(deleteAt).toBeGreaterThan(-1);
+    expect(deleteAt).toBeLessThan(h.fetches.lastIndexOf('/functions/v1/try-on'));
+  });
+
+  it('never sends P2 when the P3 stop or deletion is not confirmed', async () => {
+    const cases: Options[] = [
+      { cancel: (index) => index === 1 ? json({ code: 'RUNNING' }) : json({ code: 'CANCELLED' }) },
+      { cancel: (index) => index === 1 ? new Response('x', { status: 500 }) : json({ code: 'CANCELLED' }) },
+      { cancel: (index) => index === 1 ? json({ code: 'COMPLETED', resultId: RESULT }) : json({ code: 'CANCELLED' }),
+        deleteResult: () => json({ code: 'NOT_FOUND' }) },
+      { cancel: (index) => index === 1 ? json({ code: 'COMPLETED', resultId: null }) : json({ code: 'CANCELLED' }) },
+    ];
+    for (const options of cases) {
+      const h = harness(options);
+      const { calls, lines, complete } = await runProbe(env(), h.deps);
+      expect(complete).toBe(false);
+      expect(calls.map((c) => c.code)).toEqual(['OK', 'OK', 'OK', 'DISCONNECTED']);
+      expect(h.steps.some((s) => s.outfitId === OUTFITS.P2)).toBe(false);
+      expect(report(lines)).toContain('Stopped after P3: P3_TIDY_UNCONFIRMED; call 4 acceptance is incomplete.');
     }
   });
 
@@ -322,5 +380,116 @@ describe('try-on probe script', () => {
     expect(calls.map((c) => c.code)).toEqual(['OK', 'OK', 'OK', 'FAILED']);
     expect(h.steps.some((s) => s.outfitId === OUTFITS.P2)).toBe(false);
     expect(lines.join('\n')).toContain('Stopped after P3: FAILED.');
+  });
+
+  describe('PROBE_ONLY=P2', () => {
+    const p2Env = (over: Record<string, string | undefined> = {}) => env({ PROBE_ONLY: 'P2', PROBE_OUTFIT_P1: undefined,
+      PROBE_OUTFIT_P3: undefined, PROBE_OUTPUT: undefined, PROBE_DELETE_BY: '2026-10-07', ...over });
+    // 2026-10-07 21:00 UTC is already 2026-10-08 00:00 in Helsinki (UTC+3 in October).
+    const HELSINKI_MIDNIGHT = Date.UTC(2026, 9, 7, 21, 0, 0);
+
+    it('refuses an unknown mode and every bad P2 input with zero network calls', async () => {
+      const cases: [Record<string, string | undefined>, Options, string][] = [
+        [{ PROBE_ONLY: '' }, {}, 'only'],
+        [{ PROBE_ONLY: 'p2' }, {}, 'only'],
+        [{ PROBE_ONLY: 'P3' }, {}, 'only'],
+        [{ PROBE_ONLY: 'P1,P2' }, {}, 'only'],
+        [{ PROBE_OUTFIT_P2: undefined }, {}, 'outfits'],
+        [{ PROBE_OUTFIT_P2: 'nope' }, {}, 'outfits'],
+        [{ PROBE_OUTFIT_P1: OUTFITS.P1 }, {}, 'outfits'],
+        [{ PROBE_OUTFIT_P3: OUTFITS.P3 }, {}, 'outfits'],
+        [{ PROBE_OUTFIT_P3: '' }, {}, 'outfits'],
+        [{ PROBE_OUTPUT: '/out' }, {}, 'output'],
+        [{ PROBE_PERSON: undefined }, {}, 'folders'],
+        [{ PROBE_DELETE_BY: undefined }, {}, 'delete_by'],
+        [{ PROBE_DELETE_BY: '2026-10-7' }, {}, 'delete_by'],
+        [{ PROBE_DELETE_BY: '2026-02-30' }, {}, 'delete_by'],
+        [{ PROBE_DELETE_BY: '07.10.2026' }, {}, 'delete_by'],
+        [{ PROBE_DELETE_BY: '2026-10-06' }, {}, 'delete_by'],
+        [{ PROBE_DELETE_BY: '2026-10-08' }, {}, 'delete_by'],
+        [{ PROBE_DELETE_BY: '2026-10-07T00:00' }, {}, 'delete_by'],
+        [{}, { wallNow: HELSINKI_MIDNIGHT }, 'deadline_passed'],
+        [{}, { wallNow: Date.UTC(2026, 11, 1) }, 'deadline_passed'],
+        [{}, { readFail: true }, 'person'],
+      ];
+      for (const [over, options, code] of cases) {
+        const h = harness(options);
+        await expect(runProbe(p2Env(over), h.deps)).rejects.toEqual(new ProbeRefusal(code));
+        expect(h.fetches).toHaveLength(0);
+      }
+    });
+
+    it('uses the Helsinki calendar date for the deadline', async () => {
+      expect(APPROVED_DELETE_BY).toBe('2026-10-07');
+      expect(helsinkiDate(HELSINKI_MIDNIGHT - 1)).toBe('2026-10-07');
+      expect(helsinkiDate(HELSINKI_MIDNIGHT)).toBe('2026-10-08');
+      const lastMinute = harness({ wallNow: HELSINKI_MIDNIGHT - 60_000 });
+      const { complete } = await runProbe(p2Env(), lastMinute.deps);
+      expect(complete).toBe(true);
+      expect(lastMinute.steps).toHaveLength(1);
+    });
+
+    it('sends exactly one P2 step, never P1 or P3, and confirms the stop', async () => {
+      for (const [step, cancel, code] of [
+        [() => json({ code: 'FILTERED' }, 422), () => json({ code: 'CANCELLED' }), 'FILTERED'],
+        [() => json({ code: 'OK', resultId: RESULT, expiresAtMs: 1 }), () => json({ code: 'COMPLETED', resultId: RESULT }), 'OK'],
+      ] as const) {
+        const h = harness({ step, cancel });
+        const { calls, lines, complete } = await runProbe(p2Env(), h.deps);
+        expect(complete).toBe(true);
+        expect(calls.map((c) => c.code)).toEqual([code]);
+        expect(h.steps.map((s) => [s.outfitId, s.step])).toEqual([[OUTFITS.P2, 1]]);
+        expect(h.steps[0]!.personSha).toBe(hash(person));
+        expect(h.fetches.filter((url) => url.endsWith('/try-on'))).toHaveLength(1);
+        expect(h.fetches).not.toContain('/rest/v1/rpc/tryon_chain_status');
+        expect(h.fetches).not.toContain('/rest/v1/rpc/tryon_result_image_v1');
+        expect(h.written).toHaveLength(0);
+        expect(h.timers).not.toContain(DISCONNECT_AFTER_MS);
+        const text = report(lines);
+        expect(text).toContain(`P2 filter challenge: ${code}.`);
+        expect(text).toContain('Paid calls sent: 1 of at most 1.');
+        expect(text).toContain('Outcome: COMPLETE.');
+        expect(text).toContain('Delete by: 2026-10-07 (Europe/Helsinki)');
+        expect(text).toContain(h.steps[0]!.requestId);
+        expect(text).not.toContain(RESULT);
+        expect(text).not.toMatch(/[0-9a-f]{64}|base64/);
+        for (const secret of [JWT, TOKEN, KEY]) expect(text).not.toContain(secret);
+        expect(h.fetches.filter((url) => url.endsWith('tryon_delete_result'))).toHaveLength(code === 'OK' ? 1 : 0);
+      }
+    });
+
+    it('never sends a second claimed request after a paid failure', async () => {
+      for (const failure of [() => json({ code: 'FAILED' }, 502), () => json({ code: 'TIMEOUT' }, 504),
+        () => { throw new TypeError('fetch failed'); }, () => json({ code: 'CONFLICT' }, 409)]) {
+        const h = harness({ step: failure });
+        const { calls, lines, complete } = await runProbe(p2Env(), h.deps);
+        expect(complete).toBe(false);
+        expect(h.steps).toHaveLength(1);
+        expect(calls).toHaveLength(1);
+        expect(report(lines)).toContain('Paid calls sent: 1 of at most 1.');
+        expect(report(lines)).toContain('Outcome: INCOMPLETE.');
+        expect(report(lines)).toContain(h.steps[0]!.requestId);
+      }
+    });
+
+    it('retries only an unpaid pre-claim refusal, and still claims at most once', async () => {
+      let refusals = 0;
+      const h = harness({ step: () => refusals++ < 2 ? json({ code: 'RATE_LIMIT' }, 429) : json({ code: 'FILTERED' }, 422) });
+      const { calls, lines, complete } = await runProbe(p2Env(), h.deps);
+      expect(complete).toBe(true);
+      expect(h.steps).toHaveLength(3);
+      expect(h.steps.every((s) => s.outfitId === OUTFITS.P2 && s.step === 1)).toBe(true);
+      expect(calls.map((c) => c.code)).toEqual(['FILTERED']);
+      expectStartsSpaced(h.starts);
+      expect(report(lines)).toContain('Paid calls sent: 1 of at most 1.');
+    });
+
+    it('is incomplete when the P2 stop is not confirmed', async () => {
+      const h = harness({ step: () => json({ code: 'FILTERED' }, 422), cancel: () => json({ code: 'RUNNING' }) });
+      const { lines, complete } = await runProbe(p2Env(), h.deps);
+      expect(complete).toBe(false);
+      expect(report(lines)).toContain('Stopped after P2: P2_TIDY_UNCONFIRMED.');
+      expect(h.steps).toHaveLength(1);
+    });
   });
 });

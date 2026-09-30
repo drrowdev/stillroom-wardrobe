@@ -765,6 +765,41 @@ left: P1 (top, bottoms, shoes) for calls 1–3, P3 (one ordinary garment alone)
 for the call-4 disconnect test and P2 (the swimwear or form-fitting garment
 alone) for call 5.
 
+Probe corrections (VTO-3b, plan rev3 approved on #84). #117/#119 chose a
+**single-item P3**; the 2-item P3 used on 30 September was a setup deviation, not
+the plan (G8 c5906603780). The script treats P3 as settled only when the
+owner's own `tryon_chain_status` reads `OK` with no active attempt and either
+`running` with `nextStep` 2 (the one step was accepted and the chain waits) or
+`complete` with a result ID. A failure, an unreadable status, a timeout or an
+unchanged step leaves call 4 incomplete. Before P2 it must confirm the P3 chain
+stopped (`CANCELLED`) or, for a completed chain, that its picture was deleted
+(`OK`); otherwise it stops with `P3_TIDY_UNCONFIRMED`. It never sends P3's next
+step.
+
+P2-only continuation (the missing filter challenge): run the script with
+`PROBE_ONLY=P2`, `PROBE_OUTFIT_P2`, `PROBE_PERSON` and
+`PROBE_DELETE_BY=2026-10-07`. It refuses any other `PROBE_ONLY` value (there is
+no fallback to the full probe), `PROBE_OUTFIT_P1`, `PROBE_OUTFIT_P3` or
+`PROBE_OUTPUT`, and any date other than the approved G7 deadline, which it
+checks as a real calendar date in Europe/Helsinki; after 7 October (Helsinki
+time) it refuses to run. It sends one step, at most one paid call; only an
+unpaid `RATE_LIMIT` or `BUSY` refused before a claim is tried again. It
+confirms the stop (or the picture's deletion) and prints `Delete by:
+2026-10-07 (Europe/Helsinki)`. Coordinator and owner steps:
+
+1. Keep the first authorisation (`7ec41277…`) stopped. As the database owner,
+   create a new one for the one missing call:
+   `select public.tryon_probe_authorise('<new id>', <owner>,
+   'azure-global-image25-sunburst-tryon-v1', 1, 360000, '#84/tryon-probe-2',
+   now() + interval '1 day');`. 360,000 micro-USD is a full reservation; with
+   the 134,104 already used the probe stays within 494,104 of the 1,800,000 G7
+   allocation.
+2. Record the switch state, turn it on, set `TRYON_PROBE_TOKEN`, run the
+   script, turn the switch back only if it is unchanged, stop the authorisation
+   and unset the token.
+3. Run the ledger check above for the one request ID and post the receipt on
+   #84. The 7 October deletion deadline is unchanged.
+
 Purge health (G10; in every hosted receipt and at least weekly while try-on is
 activated): `select public.tryon_purge_health();` must return zero counts, and
 `select status, start_time from cron.job_run_details where jobid = (select jobid
