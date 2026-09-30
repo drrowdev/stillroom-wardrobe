@@ -5,6 +5,7 @@ import { mkdir } from 'node:fs/promises';
 import { languages, messages, translate, type Language, type MessageKey } from '../../src/i18n';
 import { aiFixture, editItem, manualEntry } from './ai-photo-first-support';
 import { mockBackend, owners, recoveryHash, signIn } from './mock-backend';
+import { dismissKeyboard, expectIdentity, openAccountMenu, shellNav } from './shell-support';
 
 // I24: dialogs, editors and the P6c/service-worker surfaces in every language, at 320px and with 200% text.
 const text = (language: Language, key: MessageKey, parameters?: Record<string, string | number>) => translate(language, key, parameters);
@@ -213,10 +214,14 @@ async function start(page: Page, language: Language, hash = '#/') {
   const errors: string[] = [];
   page.on('pageerror', (error) => { errors.push(error.message); });
   await page.goto('/' + hash); await signIn(page);
-  await expect(page.locator('.workspace-identity')).toContainText('Alex');
+  await expectIdentity(page, 'Alex');
   return { api, saved, errors };
 }
-const nav = (page: Page, language: Language, key: MessageKey) => page.locator('.workspace-nav, nav').first().getByRole('link', { name: text(language, key), exact: true });
+// On a phone the tab bar is hidden while a field has focus, so the keyboard is dismissed first, as a user would.
+const nav = async (page: Page, language: Language, key: MessageKey) => {
+  await dismissKeyboard(page);
+  return shellNav(page).getByRole('link', { name: text(language, key), exact: true });
+};
 
 for (const language of languages) {
   test.describe(`I24 ${language}`, () => {
@@ -228,7 +233,7 @@ for (const language of languages) {
       await expect(hint.locator('p')).toHaveText([text(language, info.project.name === 'mobile' ? 'install.ios' : 'install.android')]);
       await audit(page, language, '.workspace-main');
       await page.locator('#profile-display_name').fill('Unsaved name');
-      await nav(page, language, 'nav.wardrobe').click();
+      await (await nav(page, language, 'nav.wardrobe')).click();
       const dialog = page.locator('dialog[aria-labelledby="discard-title"]');
       await expect(dialog).toContainText(text(language, 'settings.discardBody'));
       await expect(button(dialog, language, 'common.continueEditing')).toBeFocused();
@@ -273,7 +278,7 @@ for (const language of languages) {
       await expect(page.locator('#detail-title')).toBeVisible();
       await audit(page, language, '.workspace-main');
       await page.locator('#detail-title').fill('Unsaved title');
-      await nav(page, language, 'nav.outfits').click();
+      await (await nav(page, language, 'nav.outfits')).click();
       const dialog = page.locator('dialog[aria-labelledby="discard-title"]');
       await expect(dialog).toContainText(text(language, 'detail.discardPage'));
       await audit(page, language, 'dialog[open]');
@@ -290,7 +295,7 @@ for (const language of languages) {
       await manualEntry(page);
       await page.locator('#item-title').fill('Unsaved draft title');
       await audit(page, language, '.workspace-main');
-      await nav(page, language, 'nav.wardrobe').click();
+      await (await nav(page, language, 'nav.wardrobe')).click();
       const dialog = page.locator('dialog[aria-labelledby="discard-title"]');
       await expect(dialog).toContainText(text(language, 'capture.discardBody'));
       await audit(page, language, 'dialog[open]');
@@ -306,7 +311,7 @@ for (const language of languages) {
       await button(page, language, 'item.trash').click();
       await expect(button(page, language, 'common.undo')).toBeVisible();
       await audit(page, language, '.workspace-main');
-      await page.getByRole('button', { name: text(language, 'account.menu') }).click();
+      await openAccountMenu(page, language);
       await page.locator('.account-popover').getByRole('link', { name: text(language, 'nav.trash'), exact: true }).click();
       await expect(page.locator('#trash-title')).toBeVisible();
       await audit(page, language, '.workspace-main');
@@ -326,7 +331,7 @@ for (const language of languages) {
       await expect(page.getByRole('button', { name: text(language, 'a11y.moveUp', { name: 'Fictional linen shirt' }), exact: true })).toBeFocused();
       await expect(page.locator('.outfit-slot').first()).toContainText('Fictional wool trousers');
       await audit(page, language, '.workspace-main');
-      await nav(page, language, 'nav.wardrobe').click();
+      await (await nav(page, language, 'nav.wardrobe')).click();
       const dialog = page.locator('dialog[aria-labelledby="outfit-leave-title"]');
       await expect(dialog).toContainText(text(language, 'outfits.discardBody'));
       await audit(page, language, 'dialog[open]');
@@ -369,7 +374,7 @@ for (const language of languages) {
 
     test('signing out returns focus to the sign-in heading, which passes the same checks', async ({ page }) => {
       await start(page, language);
-      await page.getByRole('button', { name: text(language, 'account.menu') }).click();
+      await openAccountMenu(page, language);
       await page.locator('.account-popover').getByRole('button', { name: text(language, 'auth.signOut'), exact: true }).click();
       await expect(page.locator('#login-title')).toBeFocused();
       await page.getByRole('button', { name: text(language, `language.${language}`), exact: true }).click();

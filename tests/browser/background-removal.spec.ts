@@ -8,6 +8,7 @@ import { modelAssetBytes, modelAssets } from '../../src/images/background/model-
 import { aiFixture, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { observeEgress, segmentationProblems } from './background-egress';
 import { mockBackend, signIn } from './mock-backend';
+import { openAccountMenu } from './shell-support';
 
 // Automatic on-device background removal (ADR24, BG1). Every assertion is text: outcomes, counts, request paths
 // and sampled pixel values read in the page. No image is looked at by the test author or the model.
@@ -292,14 +293,14 @@ for (const late of ['success', 'failure'] as const) {
         await page.getByRole('button', { name: text('common.discard'), exact: true }).click();
         await expect(page.locator('#wardrobe-title')).toBeVisible();
       } else if (exit === 'sign-out') {
-        await page.getByRole('button', { name: text('account.menu') }).click();
+        await openAccountMenu(page, 'en');
         await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
         const discard = page.getByRole('button', { name: text('common.discard'), exact: true });
         if (await discard.isVisible().catch(() => false)) await discard.click();
         await expect(page.locator('#email')).toBeVisible();
       } else {
         // Another tab signs out; this tab follows the broadcast while removal is still running.
-        await second!.getByRole('button', { name: text('account.menu') }).click();
+        await openAccountMenu(second!, 'en');
         await second!.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
         await expect(page.locator('#email')).toBeVisible();
       }
@@ -341,7 +342,7 @@ test('a failed download is not repeated for the next photo, and a new sign-in ma
   expect(await requests.segmentation()).toHaveLength(afterFirst);
   // Signing out clears the in-memory failure; the next signed-in owner gets one new attempt.
   refuse = false;
-  await page.getByRole('button', { name: text('account.menu') }).click();
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
   const discard = page.getByRole('button', { name: text('common.discard'), exact: true });
   if (await discard.isVisible().catch(() => false)) await discard.click();

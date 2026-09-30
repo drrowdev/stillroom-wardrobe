@@ -1,0 +1,480 @@
+import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
+import { lstat, mkdir, open } from 'node:fs/promises';
+import path from 'node:path';
+import { languages, translate, type Language, type MessageKey } from '../../src/i18n';
+import { manualEntry } from './ai-photo-first-support';
+import { mockBackend, owners, signIn } from './mock-backend';
+import { accountMenu, accountTrigger, expectIdentity, expectSignedIn, openAccountMenu, shellNav } from './shell-support';
+
+const text = (key: MessageKey, language: Language = 'en') => translate(language, key);
+const zoom = 'html { font-size: 200%; } body { font-size: 32px; }';
+const noViolations = async (page: Page) => expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+const tabBar = (page: Page) => page.locator('nav.tab-bar');
+const topNav = (page: Page) => page.locator('nav.top-nav');
+const leaveDialog = (page: Page) => page.locator('dialog[aria-labelledby="discard-title"]');
+// Headless WebKit, like Safari by default, moves Tab through form controls but not links, so the steps that Tab onto a
+// link run in the Chromium projects.
+const tabsToLinks = () => test.info().project.name !== 'webkit-photo';
+const barHeight = (page: Page) => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--tab-bar-height').trim());
+
+async function start(page: Page, options: { language?: Language; width?: number; height?: number; hash?: string; admin?: boolean; items?: number } = {}) {
+  const language = options.language ?? 'en';
+  await page.setViewportSize({ width: options.width ?? 390, height: options.height ?? 844 });
+  const api = await mockBackend(page, { initialLanguage: language });
+  if (options.admin) api.adminControl.admin = owners.a;
+  for (let index = 0; index < (options.items ?? 0); index++) api.seedSavedItem('a', `Synthetic garment ${index + 1}`);
+  await page.goto(`/${options.hash ?? '#/wardrobe'}`); await signIn(page);
+  await expectSignedIn(page);
+  await expect(page.locator('html')).toHaveAttribute('lang', language);
+  return api;
+}
+async function openSettings(page: Page, language: Language = 'en') {
+  const menu = await openAccountMenu(page, language);
+  await menu.getByRole('link', { name: text('nav.settings', language), exact: true }).click();
+  await expect(page.locator('#settings-title')).toBeFocused();
+  await expect(page.locator('#profile-display_name')).toBeVisible();
+}
+const tabLabels = (page: Page) => tabBar(page).locator('li').evaluateAll(items => items.map(item => item.textContent?.trim() ?? ''));
+
+test.describe('UX1 phone shell', () => {
+  for (const language of languages) {
+    test(`390px ${language}: tab bar, compact header and no identity strip or footer`, async ({ page }) => {
+      await start(page, { language, items: 3 });
+      await expect(tabBar(page)).toBeVisible();
+      await expect(topNav(page)).toBeHidden();
+      expect(await tabLabels(page)).toEqual(['nav.today', 'nav.wardrobe', 'nav.outfits', 'nav.calendar', 'nav.more'].map(key => text(key as MessageKey, language)));
+      await expect(shellNav(page).getByRole('link', { name: text('nav.wardrobe', language), exact: true })).toHaveAttribute('aria-current', 'page');
+      // The desktop top nav stays in the DOM but is hidden, so it is out of the accessibility tree.
+      await expect(page.locator('[aria-current="page"]:visible')).toHaveCount(1);
+      await expect(page.getByRole('link', { name: text('nav.wardrobe', language), exact: true })).toHaveCount(1);
+      await expect(page.locator('.account-button, .workspace-identity, .site-footer, footer')).toHaveCount(0);
+      await expect(page.getByRole('navigation', { name: text('nav.wardrobe', language), exact: true })).toHaveCount(1);
+      const layout = await page.evaluate(() => {
+        const bar = document.querySelector('.tab-bar')!.getBoundingClientRect();
+        const header = document.querySelector('.workspace-header')!.getBoundingClientRect();
+        const heading = document.querySelector('h1')!.getBoundingClientRect();
+        return { header: header.height, heading: heading.top, bar: { top: bar.top, bottom: bar.bottom, left: bar.left, right: bar.right }, overflow: document.documentElement.scrollWidth > innerWidth };
+      });
+      expect(layout.header).toBeLessThanOrEqual(56);
+      expect(layout.heading).toBeLessThan(140);
+      expect(layout.bar.bottom).toBeLessThanOrEqual(844 + 0.5);
+      expect(layout.bar.left >= 0 && layout.bar.right <= 390 + 0.5).toBe(true);
+      expect(layout.overflow).toBe(false);
+      expect(parseFloat(await barHeight(page))).toBeCloseTo(await tabBar(page).evaluate(bar => bar.getBoundingClientRect().height), 0);
+      await noViolations(page);
+    });
+  }
+
+  test('the tab bar replaces the top nav at 650px and gives way to it at 651px', async ({ page }) => {
+    await start(page, { width: 650 });
+    await expect(tabBar(page)).toBeVisible();
+    await expect(topNav(page)).toBeHidden();
+    await expect(page.getByRole('navigation', { name: text('nav.wardrobe'), exact: true })).toHaveCount(1);
+    await page.setViewportSize({ width: 651, height: 844 });
+    await expect(tabBar(page)).toBeHidden();
+    await expect(topNav(page)).toBeVisible();
+    await expect(page.getByRole('navigation', { name: text('nav.wardrobe'), exact: true })).toHaveCount(1);
+    await expect.poll(() => barHeight(page)).toBe('0px');
+    await expect(page.locator('.account-button')).toBeVisible();
+  });
+
+  test('More is a plain disclosure: contents, Escape, outside tap and focus leaving close it', async ({ page }) => {
+    await start(page);
+    const more = accountTrigger(page);
+    await expect(more).toHaveAccessibleName(text('nav.more'));
+    await expect(more).toHaveAttribute('aria-expanded', 'false');
+    const menu = await openAccountMenu(page, 'en');
+    await expect(page.locator('[role="menu"], [role="menuitem"]')).toHaveCount(0);
+    await expect(menu.locator('.menu-identity')).toHaveText('Alex');
+    expect(await menu.locator(':scope > a, :scope > button').evaluateAll(nodes => nodes.map(node => node.textContent?.trim())))
+      .toEqual([text('nav.statistics'), text('nav.settings'), text('nav.trash'), text('auth.signOut')]);
+    await expect(menu.getByRole('button', { name: 'Suomi', exact: true })).toBeVisible();
+    await expect(menu.locator('a[href="#/admin"]')).toHaveCount(0);
+    await noViolations(page);
+    // Escape returns focus to More.
+    await menu.getByRole('link', { name: text('nav.settings'), exact: true }).focus();
+    await page.keyboard.press('Escape');
+    await expect(accountMenu(page)).toHaveCount(0);
+    await expect(more).toBeFocused();
+    await expect(more).toHaveAttribute('aria-expanded', 'false');
+    // Shift+Tab from the first link back past More closes it without trapping focus.
+    await openAccountMenu(page);
+    await accountMenu(page).getByRole('link', { name: text('nav.statistics'), exact: true }).focus();
+    await page.keyboard.press('Shift+Tab');
+    await expect(more).toBeFocused();
+    await expect(accountMenu(page)).toBeVisible();
+    await page.keyboard.press('Shift+Tab');
+    await expect(accountMenu(page)).toHaveCount(0);
+    if (tabsToLinks()) await expect(shellNav(page).getByRole('link', { name: text('nav.calendar'), exact: true })).toBeFocused();
+    // Tab past the last control closes it.
+    await openAccountMenu(page);
+    await accountMenu(page).getByRole('button', { name: text('auth.signOut'), exact: true }).focus();
+    await page.keyboard.press('Tab');
+    await expect(accountMenu(page)).toHaveCount(0);
+    expect(await page.evaluate(() => document.activeElement?.closest('.account-region') === null || document.activeElement?.id === 'account-trigger')).toBe(true);
+    // A tap elsewhere closes it.
+    await openAccountMenu(page);
+    await page.locator('#wardrobe-title').click();
+    await expect(accountMenu(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/#\/wardrobe$/);
+  });
+
+  test('menu links reach their routes with the heading focused, and More shows the current menu page', async ({ page }) => {
+    await start(page);
+    for (const [key, heading] of [['nav.statistics', 'statistics-title'], ['nav.settings', 'settings-title'], ['nav.trash', 'trash-title']] as const) {
+      const menu = await openAccountMenu(page, 'en');
+      await menu.getByRole('link', { name: text(key), exact: true }).click();
+      await expect(page.locator(`#${heading}`)).toBeFocused();
+      await expect(accountMenu(page)).toHaveCount(0);
+      await expect(accountTrigger(page)).toHaveClass(/tab-more-current/);
+      await expect(tabBar(page).locator('[aria-current="page"]')).toHaveCount(0);
+      await openAccountMenu(page);
+      await expect(accountMenu(page).getByRole('link', { name: text(key), exact: true })).toHaveAttribute('aria-current', 'page');
+      await accountTrigger(page).click();
+    }
+    await shellNav(page).getByRole('link', { name: text('nav.today'), exact: true }).click();
+    await expect(page.locator('#today-title')).toBeFocused();
+    await expect(accountTrigger(page)).not.toHaveClass(/tab-more-current/);
+  });
+
+  test('crossing the breakpoint moves focus from a vanished menu to the visible trigger, but never after a route commit', async ({ page }) => {
+    await start(page);
+    // Phone panel link → desktop account button.
+    await openAccountMenu(page);
+    await accountMenu(page).getByRole('link', { name: text('nav.trash'), exact: true }).focus();
+    await page.setViewportSize({ width: 1280, height: 844 });
+    await expect(page.locator('.account-button')).toBeFocused();
+    await expect(accountMenu(page)).toHaveCount(0);
+    // Desktop panel link → More.
+    await openAccountMenu(page);
+    await accountMenu(page).getByRole('link', { name: text('nav.settings'), exact: true }).focus();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(accountTrigger(page)).toBeFocused();
+    await expect(accountTrigger(page)).toHaveAccessibleName(text('nav.more'));
+    await expect(accountMenu(page)).toHaveCount(0);
+    // Trigger only.
+    await page.setViewportSize({ width: 1280, height: 844 });
+    await expect(page.locator('.account-button')).toBeFocused();
+    // A committed route keeps its heading focus.
+    const menu = await openAccountMenu(page);
+    await menu.getByRole('link', { name: text('nav.settings'), exact: true }).click();
+    await expect(page.locator('#settings-title')).toBeFocused();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(tabBar(page)).toBeVisible();
+    await expect(page.locator('#settings-title')).toBeFocused();
+  });
+
+  for (const width of [390, 1280]) {
+    test(`${width}px: a dirty Add item draft keeps its values when leaving through the menu is cancelled`, async ({ page }) => {
+      const api = await start(page, { width });
+      await page.getByRole('button', { name: text('wardrobe.add'), exact: true }).first().click();
+      await page.locator('input[type="file"]').first().setInputFiles({ name: 'shirt.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
+      await expect(page.locator('.capture-photo img')).toBeVisible();
+      await manualEntry(page);
+      await page.locator('#item-title').fill('Unsaved shell draft');
+      const items = api.items.length, files = api.files.size;
+      const menu = await openAccountMenu(page);
+      await menu.getByRole('link', { name: text('nav.settings'), exact: true }).click();
+      await expect(leaveDialog(page)).toBeVisible();
+      await leaveDialog(page).getByRole('button', { name: text('common.continueEditing'), exact: true }).click();
+      await expect(leaveDialog(page)).toHaveCount(0);
+      await expect(accountTrigger(page)).toBeFocused();
+      expect(new URL(page.url()).hash).toBe('#/items/new');
+      await expect(page.locator('#item-title')).toHaveValue('Unsaved shell draft');
+      expect(api.items).toHaveLength(items); expect(api.files.size).toBe(files);
+      await (await openAccountMenu(page)).getByRole('link', { name: text('nav.settings'), exact: true }).click();
+      await leaveDialog(page).getByRole('button', { name: text('common.discard'), exact: true }).click();
+      await expect(page.locator('#settings-title')).toBeFocused();
+      expect(api.items).toHaveLength(items); expect(api.files.size).toBe(files);
+    });
+  }
+
+  test('a menu route chosen during a profile save opens once the save finishes', async ({ page }) => {
+    const api = await start(page);
+    await openSettings(page);
+    let held: import('@playwright/test').Route | undefined; let writes = 0;
+    await page.route('http://127.0.0.1:54321/rest/v1/profiles*', async (route) => {
+      if (route.request().method() === 'PATCH') { writes++; if (!held) { held = route; return; } }
+      await route.fallback();
+    });
+    await page.locator('#profile-display_name').fill('Queued shell rename');
+    await page.getByRole('button', { name: text('settings.saveProfile'), exact: true }).click();
+    await expect.poll(() => Boolean(held)).toBe(true);
+    await (await openAccountMenu(page)).getByRole('link', { name: text('nav.trash'), exact: true }).click();
+    await expect(page.locator('#settings-title')).toBeVisible();
+    expect(new URL(page.url()).hash).toBe('#/settings');
+    await held!.fallback();
+    await expect(page.locator('#trash-title')).toBeFocused();
+    expect(new URL(page.url()).hash).toBe('#/trash');
+    await expect(leaveDialog(page)).toHaveCount(0);
+    expect(api.profiles[owners.a]!.display_name).toBe('Queued shell rename');
+    expect(writes).toBe(1);
+  });
+
+  for (const admin of [true, false]) for (const width of [390, 1280]) {
+    test(`${admin ? 'admin' : 'non-admin'} ${width}px: the shell menu has no admin link and reads no admin status`, async ({ page }) => {
+      const reads: string[] = [];
+      page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/rpc/admin_status')) reads.push(request.url()); });
+      await start(page, { width, admin });
+      await expect(page.locator('#wardrobe-title')).toBeVisible();
+      for (let round = 0; round < 3; round++) {
+        const menu = await openAccountMenu(page);
+        await expect(menu.locator('a[href="#/admin"]')).toHaveCount(0);
+        await accountTrigger(page).click();
+        await expect(accountMenu(page)).toHaveCount(0);
+      }
+      await page.waitForTimeout(250);
+      expect(reads).toEqual([]);
+      await openSettings(page);
+      const link = page.getByRole('link', { name: text('admin.title'), exact: true });
+      if (admin) await expect(link).toBeVisible(); else await expect(link).toHaveCount(0);
+    });
+  }
+
+  test('typing hides the tab bar; leaving the field brings it back and it works without :has()', async ({ page }) => {
+    await start(page, { items: 2 });
+    const search = page.locator('#wardrobe-search');
+    await search.focus();
+    await expect(tabBar(page)).toBeHidden();
+    // The hidden bar keeps its space and its measured scroll padding, so the page does not jump.
+    await expect.poll(async () => parseFloat(await barHeight(page))).toBeGreaterThan(40);
+    // Leaving by keyboard, past any other text fields and selects (which count as typing too).
+    const typing = () => page.evaluate(() => document.activeElement?.matches('input:not([type=checkbox],[type=radio]), select, textarea') ?? false);
+    for (let step = 0; step < 6 && await typing(); step++) await page.keyboard.press('Tab');
+    await expect(search).not.toBeFocused();
+    expect(await typing()).toBe(false);
+    await expect(tabBar(page)).toBeVisible();
+    await expect.poll(async () => parseFloat(await barHeight(page))).toBeGreaterThan(40);
+    // Leaving by tapping the page, then a normal tap on a tab.
+    await search.focus();
+    await page.keyboard.press('Escape');
+    await expect(tabBar(page)).toBeHidden();
+    await page.locator('#wardrobe-title').click();
+    await expect(tabBar(page)).toBeVisible();
+    await shellNav(page).getByRole('link', { name: text('nav.outfits'), exact: true }).click();
+    await expect(page.locator('#outfits-title')).toBeFocused();
+    // A checkbox is not typing.
+    await shellNav(page).getByRole('link', { name: text('nav.wardrobe'), exact: true }).click();
+    await page.locator('.wardrobe-filters summary').click();
+    await page.locator('.wardrobe-filters input[type="checkbox"]').first().focus();
+    await expect(tabBar(page)).toBeVisible();
+    // A browser without :has() keeps the bar; focus still lands clear of it and every tab works.
+    await page.addStyleTag({ content: '@media (max-width: 650px) { .workspace .tab-bar { visibility: visible !important; } }' });
+    await search.focus();
+    await expect(tabBar(page)).toBeVisible();
+    await expect.poll(async () => parseFloat(await barHeight(page))).toBeGreaterThan(40);
+    await walkFocus(page, 'forward', 400);
+    await shellNav(page).getByRole('link', { name: text('nav.calendar'), exact: true }).click();
+    await expect(page.locator('#calendar-title')).toBeFocused();
+  });
+
+  test('forced colours: the current tab is marked by its border, not only colour', async ({ page }) => {
+    await start(page);
+    await page.emulateMedia({ forcedColors: 'active' });
+    const borders = await tabBar(page).locator('.tab-item').evaluateAll(items => items.map(item => ({
+      current: item.getAttribute('aria-current') === 'page', color: getComputedStyle(item).borderTopColor, width: getComputedStyle(item).borderTopWidth,
+    })));
+    const current = borders.find(border => border.current)!, other = borders.find(border => !border.current)!;
+    expect(parseFloat(current.width)).toBeGreaterThanOrEqual(3);
+    expect(current.color).not.toBe(other.color);
+    await openAccountMenu(page);
+    expect(await accountMenu(page).evaluate(panel => getComputedStyle(panel).outlineStyle)).not.toBe('none');
+    await noViolations(page);
+  });
+
+  test('safe-area insets: viewport-fit=cover and inset rules on the bar, header, workspace and skip link', async ({ page }) => {
+    await start(page);
+    await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /viewport-fit=cover/);
+    const rules = await page.evaluate(() => [...document.styleSheets].flatMap(sheet => { try { return [...sheet.cssRules].map(rule => rule.cssText); } catch { return []; } }).join('\n'));
+    for (const pattern of [/\.tab-bar[^{]*\{[^}]*safe-area-inset-bottom/, /\.workspace-header[^{]*\{[^}]*safe-area-inset-top/,
+      /\.workspace \{[^}]*safe-area-inset-left/, /\.skip-link \{[^}]*safe-area-inset-top/, /scroll-padding-bottom: var\(--tab-bar-height/]) {
+      expect(rules).toMatch(pattern);
+    }
+  });
+
+  for (const width of [390, 1280]) {
+    test(`${width}px: the skip link is the first stop, in view above the bar, and opens main`, async ({ page }) => {
+      test.skip(!tabsToLinks(), 'Tab does not reach links in WebKit; the Chromium projects cover the skip link.');
+      await start(page, { width });
+      // Sequential navigation starts from the top of the document, as on a fresh load (not from the focused heading).
+      await page.evaluate(() => { document.body.tabIndex = -1; document.body.focus(); document.body.removeAttribute('tabindex'); });
+      await page.keyboard.press('Tab');
+      const skip = page.locator('.skip-link');
+      await expect(skip).toBeFocused();
+      expect(await skip.evaluate(link => {
+        const box = link.getBoundingClientRect(), hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return box.top >= 0 && box.left >= 0 && box.right <= innerWidth && box.bottom <= innerHeight && (hit === link || link.contains(hit));
+      })).toBe(true);
+      await page.keyboard.press('Enter');
+      await expect(page.locator('#main')).toBeFocused();
+    });
+  }
+});
+
+test.describe('UX1 desktop shell', () => {
+  test('1280px: five top links, no tab bar, and the account menu', async ({ page }) => {
+    await start(page, { width: 1280 });
+    await expect(tabBar(page)).toBeHidden();
+    expect(await topNav(page).locator('a').evaluateAll(links => links.map(link => link.textContent?.trim())))
+      .toEqual(['nav.today', 'nav.wardrobe', 'nav.outfits', 'nav.calendar', 'nav.statistics'].map(key => text(key as MessageKey)));
+    await expectIdentity(page, 'Alex');
+    const menu = await openAccountMenu(page, 'en');
+    await expect(menu.locator('.menu-identity')).toHaveCount(0);
+    expect(await menu.locator(':scope > a, :scope > button').evaluateAll(nodes => nodes.map(node => node.textContent?.trim())))
+      .toEqual([text('nav.settings'), text('nav.trash'), text('auth.signOut')]);
+    await noViolations(page);
+    await menu.getByRole('link', { name: text('nav.settings'), exact: true }).focus();
+    await page.keyboard.press('Escape');
+    await expect(accountMenu(page)).toHaveCount(0);
+    await expect(page.locator('.account-button')).toBeFocused();
+    await openAccountMenu(page);
+    await accountMenu(page).getByRole('button', { name: text('auth.signOut'), exact: true }).focus();
+    await page.keyboard.press('Tab');
+    await expect(accountMenu(page)).toHaveCount(0);
+  });
+});
+
+test.describe('UX1 large text', () => {
+  for (const language of ['fi', 'sv'] as const) {
+    test(`320px with 200% text ${language}: whole tab labels, reflowed bar and unobscured focus`, async ({ page }) => {
+      await start(page, { language, width: 320, height: 800, items: 4 });
+      const base = await tabBar(page).locator('.tab-label').first().evaluate(label => parseFloat(getComputedStyle(label).fontSize));
+      await page.addStyleTag({ content: zoom });
+      await expect(tabBar(page)).toHaveAttribute('data-reflow', '');
+      const labels = await tabBar(page).evaluate(bar => {
+        const words = (element: Element) => {
+          const node = [...element.childNodes].find(child => child.nodeType === Node.TEXT_NODE)!;
+          const value = node.textContent ?? '', result: boolean[] = [];
+          let offset = 0;
+          for (const word of value.split(' ')) {
+            const range = document.createRange(); range.setStart(node, offset); range.setEnd(node, offset + word.length);
+            result.push(new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size <= 1);
+            offset += word.length + 1;
+          }
+          return result.every(Boolean);
+        };
+        return [...bar.querySelectorAll('.tab-label')].map(label => ({ whole: words(label), size: parseFloat(getComputedStyle(label).fontSize),
+          inside: label.closest('li')!.getBoundingClientRect().left >= 0 && label.closest('li')!.getBoundingClientRect().right <= innerWidth + 0.5 }));
+      });
+      expect(labels).toHaveLength(5);
+      for (const label of labels) expect(label.whole && label.inside && label.size >= base * 1.9).toBe(true);
+      await expect.poll(async () => Math.abs(parseFloat(await barHeight(page)) - await tabBar(page).evaluate(bar => bar.getBoundingClientRect().height))).toBeLessThanOrEqual(1);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await noViolations(page);
+      await openAccountMenu(page, language);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await noViolations(page);
+      await accountTrigger(page).click();
+      await walkFocus(page, 'forward', 160);
+      await walkFocus(page, 'backward', 160);
+      await openSettings(page, language);
+      await walkFocus(page, 'forward', 220);
+    });
+  }
+
+  test('390px with 100% text in English keeps one row of five tabs', async ({ page }) => {
+    await start(page);
+    await expect(tabBar(page)).not.toHaveAttribute('data-reflow', '');
+    const tops = await tabBar(page).locator('li').evaluateAll(items => items.map(item => Math.round(item.getBoundingClientRect().top)));
+    expect(new Set(tops).size).toBe(1);
+  });
+});
+
+/**
+ * Tabs through the page and checks every focused control outside the bar sits fully above it, and that a hit test at its
+ * centre and corners reaches the control rather than the bar.
+ */
+async function walkFocus(page: Page, direction: 'forward' | 'backward', limit: number) {
+  await page.evaluate(() => { (document.activeElement as HTMLElement | null)?.blur(); });
+  const seen = new Set<string>();
+  for (let step = 0; step < limit; step++) {
+    await page.keyboard.press(direction === 'forward' ? 'Tab' : 'Shift+Tab');
+    // The shell moves a control the browser left under the bar one frame after focus, so measure after two frames.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const state = await page.evaluate(() => {
+      const element = document.activeElement;
+      if (!element || element === document.body) return { key: 'body', ok: true, detail: '' };
+      const key = element.id || element.outerHTML.slice(0, 80);
+      const bar = document.querySelector('.tab-bar')!;
+      const barBox = bar.getBoundingClientRect(), shown = getComputedStyle(bar).display !== 'none' && getComputedStyle(bar).visibility !== 'hidden';
+      if (!shown || bar.contains(element) || element.closest('dialog')) return { key, ok: true, detail: '' };
+      const box = element.getBoundingClientRect();
+      if (box.width < 4 || box.height < 4) return { key, ok: true, detail: '' };
+      const limitBottom = Math.min(innerHeight, barBox.top);
+      const fits = box.height <= limitBottom ? box.top >= -0.5 && box.bottom <= limitBottom + 0.5 : box.top >= -0.5 && box.top < limitBottom;
+      const points = [[box.left + box.width / 2, box.top + Math.min(box.height, limitBottom - box.top) / 2], [box.left + 2, box.top + 2], [box.right - 2, box.top + 2]];
+      if (box.height <= limitBottom) points.push([box.left + 2, box.bottom - 2], [box.right - 2, box.bottom - 2]);
+      const clear = points.filter(([x, y]) => x! >= 0 && x! < innerWidth && y! >= 0 && y! < innerHeight).every(([x, y]) => {
+        const hit = document.elementFromPoint(x!, y!);
+        return !hit || !bar.contains(hit);
+      });
+      return { key, ok: fits && clear, detail: `${key} top ${box.top} bottom ${box.bottom} bar ${barBox.top} fits ${fits} clear ${clear}` };
+    });
+    expect(state.ok, state.detail).toBe(true);
+    if (state.key !== 'body' && seen.has(state.key) && step > 3) return;
+    seen.add(state.key);
+  }
+}
+
+test.describe('bounded UX1 visual evidence', () => {
+  test.describe.configure({ retries: 0 });
+  const scenes = [
+    { name: 'shell-en-mobile', language: 'en', width: 390, height: 844, large: false, scene: 'wardrobe' },
+    { name: 'shell-fi-mobile', language: 'fi', width: 390, height: 844, large: false, scene: 'more' },
+    { name: 'shell-sv-320-200', language: 'sv', width: 320, height: 800, large: true, scene: 'today' },
+    { name: 'shell-en-desktop', language: 'en', width: 1280, height: 800, large: false, scene: 'desktop-menu' },
+    { name: 'dialog-fi-320-200', language: 'fi', width: 320, height: 800, large: true, scene: 'dialog' },
+  ] as const;
+  for (const scene of scenes) {
+    test(`${scene.name} retains functional assertions in every project`, async ({ page }, testInfo: TestInfo) => {
+      const language: Language = scene.language;
+      const write = testInfo.project.name === 'chromium';
+      const directory = path.resolve('test-results/ux1-visual');
+      if (write) {
+        await mkdir(directory, { recursive: true });
+        const info = await lstat(directory); expect(info.isDirectory() && !info.isSymbolicLink()).toBe(true);
+      }
+      const hash = scene.scene === 'more' || scene.scene === 'today' ? '#/today' : '#/wardrobe';
+      await start(page, { language, width: scene.width, height: scene.height, hash, items: 4 });
+      if (scene.large) await page.addStyleTag({ content: zoom });
+      if (scene.scene === 'wardrobe') {
+        await expect(page.locator('.item-card').first()).toBeVisible();
+        await expect(tabBar(page)).toBeVisible();
+      } else if (scene.scene === 'more') {
+        await expect(page.locator('#today-title')).toBeVisible();
+        await expect((await openAccountMenu(page, language)).locator('.menu-identity')).toHaveText('Alex');
+      } else if (scene.scene === 'today') {
+        await expect(page.locator('#today-title')).toBeVisible();
+        await expect(tabBar(page)).toHaveAttribute('data-reflow', '');
+      } else if (scene.scene === 'desktop-menu') {
+        await expect(topNav(page)).toBeVisible();
+        await expectIdentity(page, 'Alex');
+        await openAccountMenu(page, language);
+      } else {
+        await openSettings(page, language);
+        await page.locator('#profile-display_name').fill('Unsaved rename');
+        await (await openAccountMenu(page, language)).getByRole('link', { name: text('nav.trash', language), exact: true }).click();
+        await expect(leaveDialog(page)).toBeVisible();
+        await expect(leaveDialog(page).locator('h2')).toBeVisible();
+      }
+      expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
+      await noViolations(page);
+      expect(await page.evaluate(({ expectedLanguage, width }) => {
+        const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
+        const fields = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea')]
+          .filter((field) => field.getClientRects().length).map((field) => field.value).join('\n');
+        return location.hostname === '127.0.0.1' && document.documentElement.lang === expectedLanguage && innerWidth === width
+          && document.documentElement.scrollWidth <= innerWidth && !document.querySelector('input[type=password],#email,#password')
+          && !privatePattern.test(document.body.innerText) && !privatePattern.test(fields);
+      }, { expectedLanguage: language, width: scene.width })).toBe(true);
+      if (!write) return;
+      const png = await page.screenshot({ fullPage: false, animations: 'disabled', type: 'png', scale: 'css' });
+      expect(png.byteLength > 0 && png.byteLength <= 1048576).toBe(true);
+      expect(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && png.readUInt32BE(16) === scene.width).toBe(true);
+      const file = await open(path.join(directory, `${scene.name}.png`), 'wx');
+      try { await file.writeFile(png); } finally { await file.close(); }
+    });
+  }
+});
+

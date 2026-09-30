@@ -5,6 +5,7 @@ import path from 'node:path';
 import { languages, messages, type Language, type MessageKey } from '../../src/i18n';
 import { aiFixture, addAiPhoto, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { mockBackend, signIn, type MockOptions } from './mock-backend';
+import { expectIdentity } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof aiFixture>>;
 const text = (key: MessageKey, language: Language = 'en') => messages[key][language];
@@ -220,13 +221,14 @@ test.describe('bounded L1a visual evidence', () => {
       const capture = async (name: 'add-ready' | 'add-failed' | 'more-details' | 'saved-item') => {
         expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
         expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+        await expectIdentity(page, 'Alex');
         expect(await page.evaluate(({ expectedLanguage, width }) => {
           const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
           const fields = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea')]
             .filter((field) => field.getClientRects().length).map((field) => field.value).join('\n');
           return location.hostname === '127.0.0.1' && document.documentElement.lang === expectedLanguage && innerWidth === width
             && document.documentElement.scrollWidth <= innerWidth && !document.querySelector('input[type=password],#email,#password')
-            && document.querySelector('.workspace-identity')?.textContent?.includes('Alex') === true
+            && document.querySelector('#account-trigger') !== null
             && !privatePattern.test(document.body.innerText) && !privatePattern.test(fields);
         }, { expectedLanguage: language, width: selected.width })).toBe(true);
         if (!write) return;

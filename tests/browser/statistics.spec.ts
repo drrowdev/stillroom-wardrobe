@@ -5,6 +5,7 @@ import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { locales, translate, type Language, type MessageKey } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
+import { accountTrigger, closeAccountMenu, expectSignedIn, isNarrow, openAccountMenu, shellNav } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -15,7 +16,7 @@ const shortDate = (iso: string, language: Language = 'en') => new Intl.DateTimeF
   .format(new Date(`${iso}T12:00:00Z`));
 const card = (page: Page, id: string) => page.locator(`section[aria-labelledby="${id}"]`);
 const navLink = (page: Page, language: Language, key: MessageKey) =>
-  page.locator('.workspace-header nav').getByRole('link', { name: text(key, language), exact: true });
+  shellNav(page).getByRole('link', { name: text(key, language), exact: true });
 
 function seedLook(api: Api, date: string, items: Row[], state: 'planned' | 'worn' = 'worn', account: 'a' | 'b' = 'a', deleted = false) {
   const id = randomUUID(), owner = owners[account], at = '2026-09-10T08:00:00Z';
@@ -47,16 +48,17 @@ async function start<T>(page: Page, language: Language = 'en', seed: (api: Api) 
   // Routes added after the mock backend take precedence over it.
   if (after) await after();
   await page.goto(`/${hash}`); await signIn(page, 'a');
-  await expect(page.locator('.workspace-identity')).toBeVisible();
+  await expectSignedIn(page);
   return { api, seeded };
 }
 async function navFits(page: Page, language: Language) {
   expect(await page.evaluate(() => {
-    const nav = document.querySelector('.workspace-header nav')!, header = nav.parentElement!;
+    const nav = [...document.querySelectorAll('.top-nav, .tab-bar')].find(element => getComputedStyle(element).display !== 'none')!, header = nav.parentElement!;
     return nav.scrollWidth <= nav.clientWidth && document.documentElement.scrollWidth <= innerWidth
       && nav.getBoundingClientRect().right <= header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight) + 0.5;
   })).toBe(true);
-  for (const key of ['nav.today', 'nav.wardrobe', 'nav.outfits', 'nav.calendar', 'nav.statistics'] as const) {
+  const keys = isNarrow(page) ? ['nav.today', 'nav.wardrobe', 'nav.outfits', 'nav.calendar'] as const : ['nav.today', 'nav.wardrobe', 'nav.outfits', 'nav.calendar', 'nav.statistics'] as const;
+  for (const key of keys) {
     const box = await navLink(page, language, key).boundingBox();
     expect(box !== null && box.x >= 0 && box.x + box.width <= innerWidthOf(page) && box.height >= 44).toBe(true);
   }
@@ -113,7 +115,12 @@ test('spending: without prices it says how many items have one, and shows no amo
 test('I13: distinct-day counts, the lists and cost per wear kept in each currency', async ({ page }) => {
   await start(page);
   await expect(page.locator('#statistics-title')).toBeFocused();
-  await expect(navLink(page, 'en', 'nav.statistics')).toHaveAttribute('aria-current', 'page');
+  if (isNarrow(page)) {
+    // On a phone Statistics is in More, which marks it as the current page.
+    await expect(accountTrigger(page)).toHaveClass(/tab-more-current/);
+    await expect((await openAccountMenu(page, 'en')).getByRole('link', { name: text('nav.statistics'), exact: true })).toHaveAttribute('aria-current', 'page');
+    await closeAccountMenu(page);
+  } else await expect(navLink(page, 'en', 'nav.statistics')).toHaveAttribute('aria-current', 'page');
   const most = card(page, 'stats-most').locator('li');
   await expect(most).toHaveCount(4);
   await expect(most.nth(0)).toHaveText(`Wool coat${text('stats.wears_other', 'en', { count: 3 })} · ${text('stats.lastWornOn', 'en', { date: shortDate('2026-09-15') })}`);
@@ -250,9 +257,11 @@ for (const language of ['fi', 'sv', 'en'] as const) {
   test(`I13: the five-link header fits with the longest display name between the phone and desktop layouts (${language})`, async ({ page }) => {
     expect([...longName].length).toBe(60);
     await start(page, language, api => { api.profiles[owners.a]!.display_name = longName; return wardrobe(api); });
+    // The name is in the header only in the desktop layout; the widths below are all desktop.
+    await page.setViewportSize({ width: 1280, height: 800 });
     for (const hash of ['#/statistics', '#/wardrobe']) {
       await page.goto(`/${hash}`);
-      await expect(page.locator('.workspace-identity')).toBeVisible();
+      await expectSignedIn(page);
       await expect(page.locator('.account-button span[title]')).toHaveAttribute('title', longName);
       for (const width of [651, 720, 800, 900, 901, 925, 950, 1000, 1100, 1280]) {
         await page.setViewportSize({ width, height: 800 });

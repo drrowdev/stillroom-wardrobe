@@ -5,13 +5,14 @@ import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { languages, translate, type Language, type MessageKey } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
+import { closeAccountMenu, dismissKeyboard, expectIdentity, expectSignedIn, isNarrow, openAccountMenu, settleShell, shellNav } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
 const text = (key: MessageKey, language: Language = 'en', parameters?: Record<string, string | number>) => translate(language, key, parameters);
 const button = (page: Page, key: MessageKey, language: Language = 'en') => page.getByRole('button', { name: text(key, language), exact: true });
 const navLink = (page: Page, key: 'nav.wardrobe' | 'nav.outfits', language: Language = 'en') =>
-  page.locator('.workspace-header nav').getByRole('link', { name: text(key, language), exact: true });
+  shellNav(page).getByRole('link', { name: text(key, language), exact: true });
 const leaveDialog = (page: Page) => page.locator('dialog[aria-labelledby="outfit-leave-title"]');
 const form = (page: Page) => page.locator('form.outfit-editor');
 
@@ -47,7 +48,7 @@ async function start(page: Page, language: Language = 'en', seed?: (api: Api, cl
   const clothes = seedClothes(api);
   seed?.(api, clothes);
   await page.goto(`/${hash}`); await signIn(page);
-  await expect(page.locator('.workspace-identity')).toBeVisible();
+  await expectSignedIn(page);
   return { api, clothes };
 }
 async function openOutfits(page: Page, language: Language = 'en') {
@@ -614,9 +615,9 @@ test.describe('I11 outfits follow garment changes (F3)', () => {
     await openOutfits(page);
     await expect.poll(() => held).toBe(1);
     expect(requested).toEqual([owners.a]);
-    await button(page, 'account.menu').click(); await button(page, 'auth.signOut').click();
+    await openAccountMenu(page, 'en'); await button(page, 'auth.signOut').click();
     await signIn(page, 'b');
-    await expect(page.locator('.workspace-identity')).toBeVisible();
+    await expectSignedIn(page);
     await navLink(page, 'nav.outfits').click();
     await expect(page.locator('.outfit-card')).toContainText('Robin outfit');
     release();
@@ -675,24 +676,25 @@ test.describe('I11 header follows the committed route', () => {
     await expect(navLink(page, 'nav.wardrobe')).toHaveAttribute('aria-current', 'page');
     await openOutfits(page);
     await expect(navLink(page, 'nav.outfits')).toHaveAttribute('aria-current', 'page');
-    await expect(navLink(page, 'nav.outfits')).toHaveClass(/active-nav/);
+    // The desktop link also carries the highlighted style class; tab items are styled from aria-current.
+    if (!isNarrow(page)) await expect(navLink(page, 'nav.outfits')).toHaveClass(/active-nav/);
     await expect(navLink(page, 'nav.wardrobe')).not.toHaveAttribute('aria-current', 'page');
     await page.locator(`a[href="#/outfits/${id}"]`).click();
     await expect(page.locator('#outfit-detail-title')).toHaveText('Weekend');
     await navLink(page, 'nav.wardrobe').click();
     await expect(page.locator('#wardrobe-title')).toBeFocused();
     await expect(navLink(page, 'nav.wardrobe')).toHaveAttribute('aria-current', 'page');
-    await expect(navLink(page, 'nav.wardrobe')).toHaveClass(/active-nav/);
+    if (!isNarrow(page)) await expect(navLink(page, 'nav.wardrobe')).toHaveClass(/active-nav/);
     await page.goBack();
     await expect(page.locator('#outfit-detail-title')).toHaveText('Weekend');
     await expect(navLink(page, 'nav.outfits')).toHaveAttribute('aria-current', 'page');
     await page.goForward();
     await expect(page.locator('#wardrobe-title')).toBeVisible();
     await expect(navLink(page, 'nav.wardrobe')).toHaveAttribute('aria-current', 'page');
-    await page.getByRole('button', { name: text('account.menu'), exact: true }).click();
+    await openAccountMenu(page, 'en');
     await page.locator('.account-popover').getByRole('link', { name: text('nav.settings'), exact: true }).click();
     await expect(page.locator('#settings-title')).toBeVisible();
-    await expect(page.locator('.workspace-header nav [aria-current]')).toHaveCount(0);
+    await expect(shellNav(page).locator('[aria-current]')).toHaveCount(0);
   });
   test('a direct load of an outfit page shows Outfits as current', async ({ page }) => {
     let id = '';
@@ -706,6 +708,7 @@ test.describe('I11 header follows the committed route', () => {
     await start(page);
     await newOutfit(page);
     await page.locator('#outfit-name').fill('Draft');
+    await dismissKeyboard(page);
     await navLink(page, 'nav.wardrobe').click();
     await expect(leaveDialog(page)).toContainText(text('outfits.discardBody'));
     await leaveDialog(page).getByRole('button', { name: text('common.continueEditing'), exact: true }).click();
@@ -809,6 +812,7 @@ test('I11 outfits accessibility: list, editor with errors, detail and the leave 
   await button(page, 'outfits.saveOutfit').click();
   await expect(page.locator('#outfit-name-error')).toBeVisible(); await axe();
   await page.locator('#outfit-name').fill('Draft');
+  await dismissKeyboard(page);
   await navLink(page, 'nav.wardrobe').click();
   await expect(leaveDialog(page)).toBeVisible(); await axe();
 });
@@ -834,6 +838,7 @@ test('I11 outfits accessibility: keyboard, 320px and 200% text, with the header 
   for (const zoom of [false, true]) {
     if (zoom) {
       await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' });
+      await settleShell(page);
       expect(await textSizes()).toEqual(normal.map(size => size * 2));
     }
     for (const [hash, title] of screens) {
@@ -841,16 +846,18 @@ test('I11 outfits accessibility: keyboard, 320px and 200% text, with the header 
       await expect(page.locator(`#${title}`)).toBeVisible();
       // Font-independent: the nav row stays inside the header's content box, so wider fonts cannot push it past 320px.
       expect(await page.evaluate(() => {
-        const nav = document.querySelector('.workspace-header nav')!, header = nav.parentElement!;
+        const nav = [...document.querySelectorAll('.top-nav, .tab-bar')].find(element => getComputedStyle(element).display !== 'none')!, header = nav.parentElement!;
         return nav.scrollWidth <= nav.clientWidth
           && nav.getBoundingClientRect().right <= header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight) + 0.5;
       })).toBe(true);
       for (const key of ['nav.wardrobe', 'nav.outfits'] as const) {
         const link = navLink(page, key);
+        await dismissKeyboard(page);
         await link.focus();
         await expect(link).toBeFocused();
         const box = await link.boundingBox();
-        expect(box !== null && box.x >= 0 && box.x + box.width <= 320 && box.height >= 44).toBe(true);
+        // WebKit can place a reflowed tab's edge one 1/64 px layout unit past the viewport; allow sub-pixel rounding.
+        expect(box !== null && box.x >= 0 && box.x + box.width <= 320.5 && box.height >= 44).toBe(true);
       }
       expect(await fits()).toBe(true);
     }
@@ -902,9 +909,10 @@ test('I11 list collages fill the card for one to four items, and the editor favo
   }
   for (const [language, width] of [['en', 1280], ['en', 320], ['fi', 320]] as const) {
     if (language === 'fi') {
-      await page.getByRole('button', { name: text('account.menu', 'en') }).click();
+      await openAccountMenu(page, 'en');
       await page.getByRole('button', { name: 'Suomi', exact: true }).click();
       await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
+      await closeAccountMenu(page);
     }
     await page.setViewportSize({ width, height: 900 });
     await page.evaluate(() => { location.hash = '#/outfits/new'; });
@@ -953,7 +961,7 @@ test.describe('bounded I11 visual evidence', () => {
       }
       const capture = async (name: 'list' | 'editor' | 'detail') => {
         expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
-        await expect(page.locator('.workspace-identity')).toContainText('Alex');
+        await expectIdentity(page, 'Alex');
         expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
         expect(await page.evaluate(({ expectedLanguage, width }) => {
           const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;

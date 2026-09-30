@@ -6,6 +6,7 @@ import path from 'node:path';
 import { translate, type Language, type MessageKey } from '../../src/i18n';
 import '../../src/i18n/tryon';
 import { mockBackend, owners, signIn, type TryOnSetup } from './mock-backend';
+import { expectSignedIn } from './shell-support';
 
 // VTO-2a owner try-on against the mocked backend. Every assertion is text: request counts and fields, JPEG frame sizes
 // read from the sent bytes, visible copy, focus and axe results. The person photo is a flat synthetic figure drawn in the
@@ -65,7 +66,7 @@ async function start(page: Page, options: Start = {}) {
     : seedOutfit(api, [clothes.coat.id, clothes.top.id, clothes.trousers.id, clothes.shoes.id], 'Weekend');
   const hash = options.route === 'settings' ? '#/settings' : options.route === 'try-on' ? `#/outfits/${outfitId}/try-on` : `#/outfits/${outfitId}`;
   await page.goto(`/${hash}`); await signIn(page);
-  await expect(page.locator('.workspace-identity')).toBeVisible();
+  await expectSignedIn(page);
   return { api, clothes, outfitId };
 }
 async function syntheticPerson(page: Page): Promise<Buffer> {

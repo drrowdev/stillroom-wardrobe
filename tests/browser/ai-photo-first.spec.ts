@@ -8,6 +8,7 @@ import { connect } from 'node:net';
 import { messages, type Language } from '../../src/i18n';
 import { aiFixture, addAiPhoto, openPhotoMenu } from './ai-photo-first-support';
 import { analysisPath, mockBackend, owners, signIn, type RawAnalysisObservation } from './mock-backend';
+import { openAccountMenu } from './shell-support';
 
 type AiFixture = Awaited<ReturnType<typeof aiFixture>>;
 // A ready draft shows no status line: the filled fields and their "Suggested" markers are the signal.
@@ -637,7 +638,7 @@ test('language change never regenerates draft title, description, tags or analys
   await filled(page);
   await page.locator('details.optional-details summary').click();
   const title = await page.locator('#item-title').inputValue(), description = await page.locator('#item-alt').inputValue();
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.getByRole('button', { name: 'Suomi', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
   await expect(page.locator('#item-title')).toHaveValue(title);
@@ -770,7 +771,7 @@ test('owner change clears an in-flight draft and ignores its late completion', a
   await addAiPhoto(page, api);
   await expect.poll(() => reached).toBe(true);
   await page.locator('#item-title').fill('Old owner private draft');
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await signIn(page, 'b');
@@ -1008,7 +1009,7 @@ test('an accepted analysis whose response is lost keeps checking the same reques
 for (const language of ['en', 'fi', 'sv'] as const) {
   test(`provider-correct notices and accessibility ${language}: a changed policy needs Turn on again`, async ({ page }) => {
     const api = await aiFixture(page, language, false);
-    await page.getByRole('button', { name: messages['account.menu'][language] }).click();
+    await openAccountMenu(page, language);
     await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
     const consent = page.locator('section[aria-labelledby="ai-consent-title"]');
     await expect(consent.locator('[role="switch"][aria-checked="false"]')).toBeVisible();
@@ -1188,7 +1189,7 @@ test.describe('bounded C visual evidence', () => {
         const file = await open(path.join(directory, `${name}-${selected.suffix}.png`), 'wx');
         try { await file.writeFile(png); } finally { await file.close(); }
       };
-      await page.getByRole('button', { name: messages['account.menu'][language] }).click();
+      await openAccountMenu(page, language);
       await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
       await expect(page.locator('section[aria-labelledby="ai-consent-title"] [role="switch"][aria-checked="true"]')).toBeVisible();
       await capture('consent');

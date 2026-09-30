@@ -4,6 +4,7 @@ import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { translate, type Language, type MessageKey } from '../../src/i18n';
 import { mockBackend, signIn } from './mock-backend';
+import { expectIdentity, expectNoIdentity } from './shell-support';
 
 type Reply = { status: number; json: Record<string, unknown> };
 const text = (key: MessageKey, language: Language = 'en', parameters?: Record<string, string>) => translate(language, key, parameters);
@@ -154,7 +155,7 @@ const recovery = (page: Page) => page.locator('section[aria-labelledby="deletion
 test('I22 a frozen account signs in to the recovery screen, retries and finishes', async ({ page }) => {
   const { bodies, auth } = await start(page, [{ status: 503, json: { state: 'retry' } }, { status: 200, json: { state: 'complete' } }], 'en', 'retry');
   await expect(page.locator('#settings-title')).toHaveCount(0);
-  await expect(page.locator('.workspace-identity')).toHaveCount(0);
+  await expectNoIdentity(page);
   const finish = recovery(page).getByRole('button', { name: text('delete.finish'), exact: true });
   await expect(finish).toBeDisabled();
   const field = recovery(page).getByLabel(text('delete.password'), { exact: true });
@@ -249,8 +250,8 @@ test.describe('bounded P6c visual evidence', () => {
     }
     if (!recovering) await card(page).scrollIntoViewIfNeeded();
     expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
-    if (recovering) await expect(page.locator('.workspace-identity')).toHaveCount(0);
-    else await expect(page.locator('.workspace-identity')).toContainText('Alex');
+    if (recovering) await expectNoIdentity(page);
+    else await expectIdentity(page, 'Alex');
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     expect(await page.evaluate(({ expectedLanguage, width }) => {
       const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;

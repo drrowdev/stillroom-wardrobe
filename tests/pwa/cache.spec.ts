@@ -3,6 +3,7 @@ import { messages, translate } from '../../src/i18n';
 import { mockBackend, owners, recoveryHash, signIn } from '../browser/mock-backend';
 import { readManifest } from './builds';
 import { cacheName, controlled, expectOnlyShell, serve, type DistServer } from './helpers';
+import { expectIdentity, openAccountMenu } from '../browser/shell-support';
 
 let server: DistServer;
 test.beforeEach(async () => { server = await serve('a'); });
@@ -20,7 +21,7 @@ test('installs and controls the page with only public shell files, and private t
   await page.reload();
   expect(await page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
   await signIn(page);
-  await expect(page.locator('.workspace-identity')).toContainText('Alex');
+  await expectIdentity(page, 'Alex');
   // The saved photo arrives as an authenticated download and is shown from a Blob URL.
   await expect(page.locator('.item-photo img').first()).toHaveAttribute('src', /^blob:/);
   const privateRequests = backend.requests.filter((entry) => /^\/(?:rest|storage|auth)\/v1\//.test(entry.path));
@@ -38,15 +39,15 @@ test('logout, another owner and a recovery link leave Cache Storage unchanged', 
   await page.goto(server.url);
   await controlled(page);
   await signIn(page);
-  await expect(page.locator('.workspace-identity')).toContainText('Alex');
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await expectIdentity(page, 'Alex');
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await signIn(page, 'b');
   await expect(page.locator('.account-button')).toContainText('Robin');
   await expect(page.getByText('Alex', { exact: true })).toHaveCount(0);
   await expectOnlyShell(page, 'a', privateMarkers);
-  await page.getByRole('button', { name: messages['account.menu'].sv }).click();
+  await openAccountMenu(page, 'sv');
   await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].sv, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   // A fresh document load, so the recovery capture sees the synthetic tokens in the fragment.
@@ -68,8 +69,8 @@ test('sign-out in one controlled tab signs out the other', async ({ page, contex
   expect(await second.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
   await signIn(page);
   await signIn(second);
-  await expect(second.locator('.workspace-identity')).toContainText('Alex');
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await expectIdentity(second, 'Alex');
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(second.locator('#email')).toBeVisible();
   await expect(second.getByText('Alex', { exact: true })).toHaveCount(0);
@@ -96,9 +97,9 @@ test('a private response that arrives after logout is neither shown nor stored',
     finished();
   });
   await signIn(page);
-  await expect(page.locator('.workspace-identity')).toContainText('Alex');
+  await expectIdentity(page, 'Alex');
   await expect.poll(() => held).toBe(true);
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   release();
@@ -148,7 +149,7 @@ test('an authenticated Edge call and cross-origin signed Storage URLs pass throu
   await page.goto(server.url);
   await controlled(page);
   await signIn(page);
-  await expect(page.locator('.workspace-identity')).toContainText('Alex');
+  await expectIdentity(page, 'Alex');
   const token = await accessToken(page);
   expect(token).not.toBe('');
   const result = await page.evaluate(async ({ backend, token, owner }) => {
@@ -195,7 +196,7 @@ test('a direct switch from owner A to owner B, without logout, clears A and stor
     return session.access_token as string;
   }, backendUrl);
   expect(tokenB).not.toBe(tokenA);
-  await expect(page.locator('.workspace-identity')).toContainText('Robin');
+  await expectIdentity(page, 'Robin');
   await expect(page.getByText(privateTitle)).toHaveCount(0);
   await expect(page.getByText('Alex', { exact: true })).toHaveCount(0);
   expect(backend.requests.some((entry) => entry.owner === owners.b)).toBe(true);

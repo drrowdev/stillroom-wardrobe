@@ -9,6 +9,7 @@ import { moreFields, visibleFields } from '../../src/domain/item-details';
 import { colours } from '../../src/domain/preferences';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { editItem, manualEntry } from './ai-photo-first-support';
+import { closeAccountMenu, expectIdentity, openAccountMenu } from './shell-support';
 
 // image_provenance_v1 is a read-only RPC; the detail view re-reads it with the refreshed images.
 const readOnlyRpc = (route: string) => route === '/rest/v1/rpc/image_provenance_v1';
@@ -485,17 +486,17 @@ test('price entry locale and raw incomplete text survive language changes', asyn
   await photo(page, await setup(page));
   await expand(page, 'item');
   await page.locator('#item-purchase_price').fill('1,234.50');
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.getByRole('button', { name: 'Suomi', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
-  await page.getByRole('button', { name: messages['account.menu'].fi }).click();
+  await closeAccountMenu(page);
   await expect(page.locator('#item-purchase_price')).toHaveValue('1,234.50');
   await expect(page.locator('#item-purchase_price')).toHaveAttribute('aria-invalid', 'false');
   await page.locator('#item-purchase_price').fill('0,10');
-  await page.getByRole('button', { name: messages['account.menu'].fi }).click();
+  await openAccountMenu(page, 'fi');
   await page.getByRole('button', { name: 'English', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await closeAccountMenu(page);
   await expect(page.locator('#item-purchase_price')).toHaveValue('0,10');
   await expect(page.locator('#item-purchase_price')).toHaveAttribute('aria-invalid', 'false');
   await page.locator('#item-purchase_price').fill('1.');
@@ -601,10 +602,10 @@ test('complete creation form accessibility and bounded synthetic visual evidence
   ] as const;
   for (const capture of captures) {
     if (capture.language === 'fi') {
-      await page.getByRole('button', { name: messages['account.menu'].en }).click();
+      await openAccountMenu(page, 'en');
       await page.getByRole('button', { name: 'Suomi', exact: true }).click();
       await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
-      await page.getByRole('button', { name: messages['account.menu'].fi }).click();
+      await closeAccountMenu(page);
     }
     await page.setViewportSize({ width: capture.width, height: 900 });
     expect(api.items.length === 0 && api.images.length === 0 && api.files.size === 0
@@ -615,6 +616,7 @@ test('complete creation form accessibility and bounded synthetic visual evidence
     expect(api.statusProofs()).toEqual(api.requests.filter((request) => request.path === '/rest/v1/rpc/ai_status')
       .map(() => ({ owner: owners.a, issuedBearer: true, emptyObject: true })));
     expect(api.statusProofs().length).toBeGreaterThan(0);
+    await expectIdentity(page, 'Alex');
     expect(await page.evaluate(({ origin, language }) => {
       const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility === 'visible';
       const values = [...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea')]
@@ -622,7 +624,7 @@ test('complete creation form accessibility and bounded synthetic visual evidence
       const credentialLike = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
       return location.origin === origin && location.hostname === '127.0.0.1' && location.hash === '#/items/new'
         && document.documentElement.lang === language && Boolean(document.querySelector('#capture-title'))
-        && document.querySelector('.workspace-identity')?.textContent?.includes('Alex') === true
+        && document.querySelector('#account-trigger') !== null
         && document.querySelector<HTMLInputElement>('#item-title')?.value === 'Å manual overshirt 🌿'
         && document.querySelector<HTMLSelectElement>('#item-category')?.value === 'layer'
         && !document.querySelector('input[type="password"], #email, #password')

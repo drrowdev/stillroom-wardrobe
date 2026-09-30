@@ -22,7 +22,7 @@ import { newUndo, type LifecycleSnapshot, type UndoItem } from '../domain/item-l
 import type { ProfileRow } from '../data/rows';
 import { PasswordRecovery, RecoveryRequest } from '../auth/password-recovery';
 import { DeletionRecovery } from '../auth/deletion-recovery';
-import { leaveDialogFor, navFamilyFor, outfitRouteId, type NavFamily } from '../domain/outfits';
+import { leaveDialogFor, navFamilyFor, outfitRouteId } from '../domain/outfits';
 import { OutfitLeaveDialog } from '../features/outfits/leave-dialog';
 import { LazyBoundary } from './lazy';
 import { UpdatePrompt } from '../pwa/update-prompt';
@@ -31,6 +31,8 @@ import { WeatherStore, weatherKey } from '../features/today/use-weather';
 import { StylistStore } from '../features/stylist/stylist-store';
 import { weatherConfig } from '../domain/weather';
 import { fitHeader } from './header-fit';
+import { menuPageFor, useNarrow } from './shell-layout';
+import { AccountMenu, TabBar, TopNav } from './shell-nav';
 import {
   clearRecoveryNotice, leaveRecovery, markNormalAuthStarted, normalAuthStarted,
   recoverySnapshot, subscribeRecovery, type RecoveryCallback,
@@ -71,7 +73,6 @@ function EntryLayout({ children, language, onLanguage, t }: { children: ReactNod
         <div className="intro"><WardrobeIllustration /></div>
         {children}
       </main>
-      <footer className="site-footer"><span>Stillroom Wardrobe</span></footer>
     </div>
   );
 }
@@ -94,7 +95,7 @@ function hashForRoute(route: WorkspaceRoute) {
   return route.startsWith('detail:') ? route.slice(7) : route.startsWith('outfit:') ? `#/outfits/${route.slice(7)}` : routeHash[route as keyof typeof routeHash];
 }
 const routeFocus: Partial<Record<WorkspaceRoute, string>> = { today: 'today-title', stylist: 'stylist-title', add: 'capture-title', settings: 'settings-title', trash: 'trash-title', outfits: 'outfits-title', 'outfit-new': 'outfit-editor-title', calendar: 'calendar-title', statistics: 'statistics-title', admin: 'admin-title' };
-function OwnedWardrobe({ client, config, controller, scope, profile, change, busy, unresolved, t, language, online, onRouteCommitted, onSignOut }: { client: AppClient; config: PublicConfig; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; unresolved: boolean; t: Translate; language: Language; online: boolean; onRouteCommitted: (family: NavFamily) => void; onSignOut: () => void }) {
+function OwnedWardrobe({ client, config, controller, scope, profile, change, busy, unresolved, t, language, online, onRouteCommitted, onSignOut }: { client: AppClient; config: PublicConfig; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; unresolved: boolean; t: Translate; language: Language; online: boolean; onRouteCommitted: (route: string) => void; onSignOut: () => void }) {
   const [route, setRoute] = useState<WorkspaceRoute>(() => currentRoute());
   const [outfitUnresolved, setOutfitUnresolved] = useState(false);
   const [outfitsInvalidation, setOutfitsInvalidation] = useState(0);
@@ -103,7 +104,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   const [calendarSeed, setCalendarSeed] = useState<{ outfitId: string } | null>(null);
   const invalidateOutfits = useCallback(() => setOutfitsInvalidation(value => value + 1), []);
   useEffect(() => {
-    onRouteCommitted(navFamilyFor(route));
+    onRouteCommitted(route);
     setOutfitNotice(current => current !== null && route !== `outfit:${current}` ? null : current);
     if (route !== 'outfit-new') setOutfitSeed(null);
     if (route !== 'calendar') setCalendarSeed(null);
@@ -275,7 +276,6 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   };
   return (
     <>
-      <aside className="workspace-identity" aria-label={t('account.identity')}><span className="identity-dot" />{profile.display_name}</aside>
       <main id="main" className="workspace-main" tabIndex={-1}>
         {!online && <div className="notice notice-offline" role="status">{t('common.offline')} {t('common.stale')}</div>}
         {undo && <UndoNotice key={`${undo.item.id}:${undo.item.version}`} undo={undo} visible={route === 'wardrobe'} routeSignal={routeSignal} lifecycle={lifecycle} scope={scope} online={online} t={t} images={images}
@@ -324,7 +324,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
         ? async () => beforeDiscard.current ? beforeDiscard.current() : route === 'add' ? 'unresolved' : 'cancelled' : undefined}
         title={t(route === 'settings' || route.startsWith('detail:') ? 'common.unsaved' : 'capture.discard')} t={t} onCancel={() => {
         setDiscard(null);
-        if (route.startsWith('detail:')) requestAnimationFrame(() => { if (discardFocus.current?.isConnected) discardFocus.current.focus(); });
+        requestAnimationFrame(() => { if (discardFocus.current?.isConnected) discardFocus.current.focus(); });
       }} onConfirm={() => {
         dirty.current = { dirty: false, incomplete: false, busy: false }; setDiscard(null);
         if (discard.position !== undefined) history.go(discard.position - navigation.current.position);
@@ -345,7 +345,8 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   const [menu, setMenu] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
   const [requestPassword, setRequestPassword] = useState(false);
-  const [navFamily, setNavFamily] = useState<NavFamily>('wardrobe');
+  const [route, setRoute] = useState('wardrobe');
+  const narrow = useNarrow();
   const refusal = callback.kind === 'none' ? null
     : callback.kind === 'link' ? { kind: 'conflict' as const, notice: undefined }
       : { kind: callback.kind, notice: callback.notice };
@@ -369,6 +370,24 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   useEffect(() => {
     if (state.phase === 'signed-out' && !requestPassword && callback.kind === 'none') document.getElementById('login-title')?.focus();
   }, [state.phase, requestPassword, callback.kind]);
+  // The account menu closes on every route commit and account change.
+  const epoch = state.scope?.epoch;
+  useEffect(() => { setMenu(false); }, [route, epoch]);
+  // Crossing the phone breakpoint swaps the menu's trigger. Focus that was in the old trigger or panel, now gone, moves
+  // to the new trigger; focus a route commit placed elsewhere since then is left alone.
+  const focusInMenu = useRef(false);
+  useEffect(() => {
+    const track = (event: FocusEvent) => { focusInMenu.current = event.target instanceof Element && event.target.closest('.account-region') !== null; };
+    document.addEventListener('focusin', track);
+    return () => document.removeEventListener('focusin', track);
+  }, []);
+  const firstNarrow = useRef(true);
+  useEffect(() => {
+    if (firstNarrow.current) { firstNarrow.current = false; return; }
+    setMenu(false);
+    const active = document.activeElement;
+    if (focusInMenu.current && (active === null || active === document.body || !active.isConnected)) document.getElementById('account-trigger')?.focus();
+  }, [narrow]);
   const signOut = async () => {
     clearRecoveryNotice();
     setMenu(false);
@@ -387,21 +406,19 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
             : (signOutError || state.notice) && <p className="notice notice-error" role="alert">{t(state.notice ?? 'auth.localSignOut')}</p>}<Login controller={controller} online={online} t={t} onAuthActivity={clearRecoveryNotice} onRecovery={() => { clearRecoveryNotice(); setRequestPassword(true); }} /></div>}
     </EntryLayout>;
   }
+  const navFamily = navFamilyFor(route);
+  const accountMenu = <AccountMenu narrow={narrow} open={menu} onOpen={setMenu} page={menuPageFor(route)} name={state.profile.display_name}
+    initial={state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)} t={t} onSignOut={() => { void signOut(); }}
+    language={<LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} />} />;
   return (
     <div className="workspace">
       {refusal && <aside className="notice" role="alert"><p>{t(refusal.notice ?? (refusal.kind === 'conflict' ? 'recovery.conflict' : 'recovery.invalid'))}</p><button type="button" className="text-button" onClick={() => leaveRecovery()}>{t('common.close')}</button></aside>}
       <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); document.getElementById('main')?.focus(); }}>{t('common.skipContent')}</a>
-      <header className="workspace-header" ref={fitHeader}><Brand /><nav aria-label={t('nav.wardrobe')}>
-        <a className={`nav-link${navFamily === 'today' ? ' active-nav' : ''}`} aria-current={navFamily === 'today' ? 'page' : undefined} href="#/today"><Icon name="today" />{t('nav.today')}</a>
-        <a className={`nav-link${navFamily === 'wardrobe' ? ' active-nav' : ''}`} aria-current={navFamily === 'wardrobe' ? 'page' : undefined} href="#/wardrobe"><Icon name="wardrobe" />{t('nav.wardrobe')}</a>
-        <a className={`nav-link${navFamily === 'outfits' ? ' active-nav' : ''}`} aria-current={navFamily === 'outfits' ? 'page' : undefined} href="#/outfits"><Icon name="outfits" />{t('nav.outfits')}</a>
-        <a className={`nav-link${navFamily === 'calendar' ? ' active-nav' : ''}`} aria-current={navFamily === 'calendar' ? 'page' : undefined} href="#/calendar"><Icon name="calendar" />{t('nav.calendar')}</a>
-        <a className={`nav-link${navFamily === 'statistics' ? ' active-nav' : ''}`} aria-current={navFamily === 'statistics' ? 'page' : undefined} href="#/statistics"><Icon name="statistics" />{t('nav.statistics')}</a>
-      </nav><div className="account-controls"><button type="button" className="account-button" aria-expanded={menu} aria-label={t('account.menu')} onClick={() => setMenu(!menu)}><span className="avatar">{state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)}</span><span title={state.profile.display_name}>{state.profile.display_name}</span><Icon name="chevron" /></button>{menu && <div className="account-popover"><a className="text-button" href="#/settings" onClick={() => setMenu(false)}>{t('nav.settings')}</a><a className="text-button" href="#/trash" onClick={() => setMenu(false)}>{t('nav.trash')}</a><LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} /><button className="text-button" type="button" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div>}</div></header>
+      <header className="workspace-header" ref={fitHeader}><Brand /><TopNav family={navFamily} t={t} />{!narrow && accountMenu}</header>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online || state.profileSaving} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}
       <UpdatePrompt t={t} />
-      <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={state.language} online={online} t={t} onRouteCommitted={setNavFamily} onSignOut={() => { void signOut(); }} />
-      <footer className="site-footer"><span>Stillroom Wardrobe</span></footer>
+      <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={state.language} online={online} t={t} onRouteCommitted={setRoute} onSignOut={() => { void signOut(); }} />
+      <TabBar family={navFamily} more={narrow ? accountMenu : null} t={t} />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { mockBackend, owners, signIn, type MockOptions } from './mock-backend';
 import { editItem } from './ai-photo-first-support';
+import { closeAccountMenu, openAccountMenu } from './shell-support';
 
 const button = (page: Page, key: keyof typeof messages, language: Language = 'en') =>
   page.getByRole('button', { name: messages[key][language], exact: true });
@@ -17,7 +18,7 @@ async function setup(page: Page, language: Language = 'en', options: MockOptions
   return { api, ...saved, peer };
 }
 async function trashPage(page: Page, language: Language = 'en') {
-  await button(page, 'account.menu', language).click();
+  await openAccountMenu(page, language);
   const link = page.locator('.account-popover').getByRole('link', { name: messages['nav.trash'][language], exact: true });
   await expect(link).toHaveCount(1);
   await link.click();
@@ -111,11 +112,11 @@ function checkRetry(page: Page, retry: number) {
 test('account-menu Trash navigation remains unique alongside the Undo notice link', async ({ page }) => {
   const { item } = await setup(page);
   await move(page, item.id);
-  await button(page, 'account.menu').click();
+  await openAccountMenu(page, 'en');
   await expect(page.getByRole('link', { name: messages['nav.trash'].en, exact: true })).toHaveCount(2);
   await expect(page.locator('.lifecycle-undo').getByRole('link', { name: messages['nav.trash'].en, exact: true })).toBeVisible();
   await expect(page.locator('.account-popover').getByRole('link', { name: messages['nav.trash'].en, exact: true })).toBeVisible();
-  await button(page, 'account.menu').click();
+  await closeAccountMenu(page);
   await trashPage(page);
   await expect(page.locator('.trash-list li')).toHaveCount(1);
 });
@@ -349,7 +350,7 @@ test('standalone list states and initially offline Trash preserve pages across r
   await expect(page.locator('.trash-list li')).toHaveCount(40);
   const peerTrash = api.seedSavedItem('b', 'Robin trash');
   peerTrash.item.deleted_at = new Date().toISOString();
-  await button(page, 'account.menu').click(); await button(page, 'auth.signOut').click();
+  await openAccountMenu(page, 'en'); await button(page, 'auth.signOut').click();
   await signIn(page, 'b');
   await expect(page.locator('#trash-title')).toBeVisible();
   await expect(page.locator('.trash-list h2')).toHaveText(['Robin trash']);
@@ -365,9 +366,9 @@ test('bounded synthetic Trash and named-delete captures with functional/a11y ass
   ] as const;
   for (const capture of captures) {
     if (capture.language === 'fi') {
-      await button(page, 'account.menu').click(); await page.getByRole('button', { name: 'Suomi', exact: true }).click();
+      await openAccountMenu(page, 'en'); await page.getByRole('button', { name: 'Suomi', exact: true }).click();
       await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
-      await button(page, 'account.menu', 'fi').click();
+      await closeAccountMenu(page);
     }
     await page.setViewportSize({ width: capture.width, height: 900 });
     await expect(page.locator('.trash-list li')).toHaveCount(1);

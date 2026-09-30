@@ -4,6 +4,7 @@ import { lstat, mkdir, open, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { mockBackend, owners, recoveryHash, signIn } from './mock-backend';
 import { translate, type Language } from '../../src/i18n';
+import { expectIdentity, openAccountMenu } from './shell-support';
 
 const password = 'fictional recovery password only';
 async function confirm(page: Page, language: Language = 'en') {
@@ -67,8 +68,8 @@ for (const logoutStatus of [204, 403]) {
       await expect(page.locator('#wardrobe-title')).toBeVisible();
       const language = account === 'a' ? 'fi' : 'sv';
       await expect(page.locator('html')).toHaveAttribute('lang', language);
-      await expect(page.locator('.workspace-identity')).toContainText(account === 'a' ? 'Alex' : 'Robin');
-      await page.getByRole('button', { name: translate(language, 'account.menu') }).click();
+      await expectIdentity(page, account === 'a' ? 'Alex' : 'Robin');
+      await openAccountMenu(page, language);
       await page.locator('.account-popover').getByRole('button', { name: translate(language, 'auth.signOut'), exact: true }).click();
       await expect(page.locator('#login-title')).toBeVisible();
       await expect(page.locator('html')).toHaveAttribute('lang', 'en');

@@ -6,6 +6,7 @@ import { languages, messages, type Language } from '../../src/i18n';
 import { mockBackend, signIn } from '../browser/mock-backend';
 import { builds } from './builds';
 import { controlled, serve, updateAndSettle, type DistServer } from './helpers';
+import { expectIdentity } from '../browser/shell-support';
 
 // Bounded synthetic captures for the coordinator's visual review; this session never opens them.
 const directory = path.join('test-results', 'i23-visual');
@@ -18,7 +19,7 @@ async function signedIn(page: Page, language: Language) {
   await page.goto(server.url);
   await controlled(page);
   await signIn(page);
-  await expect(page.locator('.workspace-identity')).toContainText('Alex');
+  await expectIdentity(page, 'Alex');
 }
 async function updatePrompt(page: Page, language: Language, file: string) {
   await signedIn(page, language);

@@ -10,6 +10,7 @@ import { exifSegment, joinBytes, jpegSegment, listJpegMarkers } from '../fixture
 import { findMarker, findMarkers, flatJpeg } from '../fixtures/restore-jpeg-fixtures';
 import { mockBackend, owners, signIn, type MockOptions } from './mock-backend';
 import { settled, trackRequests } from './settle';
+import { openAccountMenu } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -88,7 +89,7 @@ async function settings(page: Page, account: 'a' | 'b') {
   await expect(page.locator('#settings-title')).toBeFocused();
 }
 async function signOut(page: Page, language: Language = 'en') {
-  await page.getByRole('button', { name: text('account.menu', language) }).click();
+  await openAccountMenu(page, language);
   await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut', language), exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
 }

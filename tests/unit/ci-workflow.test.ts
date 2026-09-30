@@ -82,6 +82,7 @@ const browserArtifacts: Record<string, string[]> = {
   'ad1-admin-ui': ['spending-en-desktop', 'edit-confirm-fi-mobile', 'spending-sv-320-200', 'settings-note-en-mobile'].map((name) => `ad1-visual/${name}.png`),
   'vto2-tryon-ui': ['consent-sv-mobile', 'progress-fi-mobile', 'result-en-desktop', 'failure-fi-320-200'].map((name) => `vto2-visual/${name}.png`),
   'ui1-settings-ui': ['settings-en-desktop', 'settings-fi-mobile', 'settings-sv-320-200', 'consent-cleanup-en-mobile'].map((name) => `ui1-visual/${name}.png`),
+  'ux1-shell-ui': ['shell-en-mobile', 'shell-fi-mobile', 'shell-sv-320-200', 'shell-en-desktop', 'dialog-fi-320-200'].map((name) => `ux1-visual/${name}.png`),
   };
 // Written by tests/pwa/visual.spec.ts, so they upload from the PWA job that runs it.
 const pwaArtifacts: Record<string, string[]> = {
@@ -142,7 +143,7 @@ describe('CI workflow browser split', () => {
     expect(projects).toEqual(['chromium', 'mobile', 'webkit-photo', 'cleanup-timing', 'cleanup-timing-webkit']);
     expect(config).toContain("testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', "
       + "'item-details.spec.ts', 'garment-fields.spec.ts', 'ai-photo-first.spec.ts', 'items.spec.ts', 'ux-l1a.spec.ts', "
-      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts', 'enhancement.spec.ts', 'admin.spec.ts', 'tryon.spec.ts', 'settings-layout.spec.ts'],");
+      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts', 'enhancement.spec.ts', 'admin.spec.ts', 'tryon.spec.ts', 'settings-layout.spec.ts', 'shell-layout.spec.ts'],");
     expect(config).toContain('  failOnFlakyTests: Boolean(process.env.CI),\n');
     expect(config).toContain('  forbidOnly: Boolean(process.env.CI),\n');
     const app = job('app-browser'), webkit = job('webkit-photo');

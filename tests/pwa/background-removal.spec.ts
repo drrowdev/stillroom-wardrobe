@@ -9,6 +9,7 @@ import { observeEgress, segmentationProblems, type Traffic } from '../browser/ba
 import { signIn } from '../browser/mock-backend';
 import { builds } from './builds';
 import { controlled, expectOnlyShell, serve, type DistServer } from './helpers';
+import { openAccountMenu } from '../browser/shell-support';
 
 // Background removal in the production build (ADR24, BG1): the real emitted model and runtime, the generated
 // headers, the service worker and Cache Storage. Assertions are text: request paths, byte counts, digests and
@@ -65,7 +66,7 @@ async function openAdd(page: Page) {
   await expect(page.locator('.background-note')).toBeVisible();
 }
 async function signOut(page: Page) {
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   const discard = page.getByRole('button', { name: messages['common.discard'].en, exact: true });
   if (await discard.isVisible().catch(() => false)) await discard.click();

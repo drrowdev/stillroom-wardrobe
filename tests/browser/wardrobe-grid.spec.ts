@@ -6,6 +6,7 @@ import path from 'node:path';
 import { messages, itemCount, type Language } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { ordinal } from '../../src/features/wardrobe/search';
+import { closeAccountMenu, openAccountMenu } from './shell-support';
 
 type Backend = Awaited<ReturnType<typeof mockBackend>>;
 const button = (page: Page, key: keyof typeof messages, language: Language = 'en') =>
@@ -221,15 +222,15 @@ test('malformed refresh, offline search, language reset and logout never substit
   api.seedSavedItem('b', 'Peer only');
   await open(page, api);
   await button(page, 'wardrobe.more').click(); await expect(page.locator('.item-card')).toHaveCount(80);
-  await button(page, 'account.menu').click(); await page.getByRole('button', { name: 'Suomi', exact: true }).click();
+  await openAccountMenu(page, 'en'); await page.getByRole('button', { name: 'Suomi', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
-  await button(page, 'account.menu', 'fi').click();
+  await closeAccountMenu(page);
   await expect(page.locator('.item-card')).toHaveCount(40);
-  await button(page, 'account.menu', 'fi').click(); await page.getByRole('button', { name: 'English', exact: true }).click();
-  await expect(page.locator('html')).toHaveAttribute('lang', 'en'); await button(page, 'account.menu').click();
+  await openAccountMenu(page, 'fi'); await page.getByRole('button', { name: 'English', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en'); await closeAccountMenu(page);
   await expect(page.locator('.item-card')).toHaveCount(40);
-  await button(page, 'account.menu').click(); await page.getByRole('button', { name: 'Suomi', exact: true }).click();
-  await expect(page.locator('html')).toHaveAttribute('lang', 'fi'); await button(page, 'account.menu', 'fi').click();
+  await openAccountMenu(page, 'en'); await page.getByRole('button', { name: 'Suomi', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'fi'); await closeAccountMenu(page);
   await page.route('**/rest/v1/items?*', route => route.fulfill({ json: [{ malformed: true }] }));
   await button(page, 'wardrobe.refresh', 'fi').click();
   await expect(page.getByRole('alert')).toBeVisible();
@@ -246,7 +247,7 @@ test('malformed refresh, offline search, language reset and logout never substit
     Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => true });
     window.dispatchEvent(new Event('online'));
   });
-  await button(page, 'account.menu', 'fi').click(); await button(page, 'auth.signOut', 'fi').click();
+  await openAccountMenu(page, 'fi'); await button(page, 'auth.signOut', 'fi').click();
   await expect(page.locator('#email')).toBeVisible();
   await signIn(page, 'b');
   await expect(page.locator('.item-caption h2')).toHaveText(['Peer only']);
@@ -282,7 +283,7 @@ test('late metadata and old-owner history cannot replace the current snapshot', 
     });
     await page.locator('#wardrobe-sort').selectOption('leastWorn');
     await expect.poll(() => enteredHistory).toBe(true);
-    await button(page, 'account.menu').click(); await button(page, 'auth.signOut').click();
+    await openAccountMenu(page, 'en'); await button(page, 'auth.signOut').click();
     await expect(page.locator('#email')).toBeVisible(); await signIn(page, 'b');
     await expect(page.locator('.item-caption h2')).toHaveText(['Peer only']);
     releaseHistory!();
@@ -354,7 +355,7 @@ test('logout revokes admitted URLs and rejects a late previous-owner photo', asy
     await expect(image).toBeVisible();
     const oldUrl = await image.getAttribute('src'); expect(oldUrl).toMatch(/^blob:/);
     await expect.poll(() => entered).toBe(true);
-    await button(page, 'account.menu').click(); await button(page, 'auth.signOut').click();
+    await openAccountMenu(page, 'en'); await button(page, 'auth.signOut').click();
     await expect(page.locator('#email')).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('data-i09-revoked', oldUrl!);
     await signIn(page, 'b');
@@ -388,8 +389,8 @@ test('layout boundaries, translated filters, 200% text and exactly two bounded s
     { language: 'fi', width: 320, height: 1200, project: 'mobile', file: 'wardrobe-filters-fi-mobile.png' },
   ] as const) {
     if (capture.language === 'fi') {
-      await button(page, 'account.menu').click(); await page.getByRole('button', { name: 'Suomi', exact: true }).click();
-      await expect(page.locator('html')).toHaveAttribute('lang', 'fi'); await button(page, 'account.menu', 'fi').click();
+      await openAccountMenu(page, 'en'); await page.getByRole('button', { name: 'Suomi', exact: true }).click();
+      await expect(page.locator('html')).toHaveAttribute('lang', 'fi'); await closeAccountMenu(page);
       await page.locator('.wardrobe-filters summary').click();
     }
     await page.setViewportSize({ width: capture.width, height: capture.height });
