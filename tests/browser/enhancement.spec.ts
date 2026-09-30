@@ -5,7 +5,7 @@ import path from 'node:path';
 import { CLEANUP_NOTICE_REVISION } from '../../src/domain/enhancement';
 import { messages, type Language } from '../../src/i18n';
 import type { BackgroundTestHook } from '../../src/images/background/test-hook';
-import { aiFixture } from './ai-photo-first-support';
+import { aiFixture, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { enhanceServerNow, owners, type EnhanceReply, type EnhanceReplyValue, type EnhanceSetup } from './mock-backend';
 
 // BG2b-2 photo enhancement in both photo flows, against the mocked backend; since BG2c-2 the "clean up photo" step:
@@ -104,8 +104,11 @@ async function openFlow(page: Page, api: Fixture, flow: Flow, language: Language
   const saved = api.seedSavedItem();
   await page.reload();
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
   await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
+  await page.locator('#detail-cancel-edit').click();
+  await openPhotoMenu(page);
   await page.getByRole('button', { name: text('imageChange.replace', language), exact: true }).click();
   await expect(page.locator('.image-change .background-note')).toBeVisible();
   return saved;
@@ -154,7 +157,7 @@ async function saveFlow(page: Page, flow: Flow) {
     await expect(page.locator('#wardrobe-title')).toBeVisible();
   } else {
     await page.locator('.image-change').getByRole('button', { name: text('imageChange.save'), exact: true }).click();
-    await expect(page.locator('#detail-title')).toBeVisible();
+    await expect(page.locator('#detail-edit')).toBeVisible();
     await expect(page.locator('.image-change')).toHaveCount(0);
   }
 }
@@ -271,6 +274,8 @@ for (const flow of ['add', 'replace'] as const) {
     await noViolations(page);
     await page.locator('#apply-crop').click();
     await expect(label(page)).toBeVisible({ timeout: 45_000 });
+    // UX2: "Edited with AI" stays next to the photo, outside Photo options.
+    expect(await label(page).evaluate((element) => element.closest('#photo-menu-panel') === null)).toBe(true);
     await expect(reviewHint(page)).toHaveCount(0);
     await expect.poll(() => analyses(api)).toBe(1);
     expect(sent(api)).toHaveLength(1);
@@ -278,6 +283,7 @@ for (const flow of ['add', 'replace'] as const) {
     const h2 = await shown(page, flow);
     expect(h2).not.toBe(h0);
     expect(api.inputs[0]!.sha256).toBe(h2);
+    await openPhotoMenu(page);
     await expect(revertButton(page)).toHaveAccessibleDescription(text('photo.reanalyse'));
     // Both photo choices share one line, shown once.
     const useOriginal = page.getByRole('button', { name: text('photo.bgUseOriginal'), exact: true });
@@ -286,6 +292,7 @@ for (const flow of ['add', 'replace'] as const) {
     await noViolations(page);
     await revertButton(page).click();
     await expect.poll(() => analyses(api)).toBe(2);
+    await openPhotoMenu(page);
     await expect(useOriginal).toHaveAccessibleDescription(text('photo.reanalyse'));
     await expect(page.getByText(text('photo.reanalyse'), { exact: true })).toHaveCount(1);
     // H1, the cut-out, is analysed and shown: never H0, which was only sent.
@@ -335,7 +342,7 @@ for (const flow of ['add', 'replace'] as const) {
     await expect.poll(() => analyses(api), { timeout: 45_000 }).toBe(1);
     expect(h0).toHaveLength(1);
     expect((await bandsOf(page, h0[0]!)).row).toEqual(['B', 'C']);
-    await page.locator(flows[flow].edit).click();
+    await openPhotoMenu(page); await page.locator(flows[flow].edit).click();
     await expect(page.locator('section.crop-editor')).toBeVisible();
     // The editor shows the whole upright photo again, with the accepted crop at the same place on it.
     const source = await editorSource(page);
@@ -370,7 +377,7 @@ for (const flow of ['add', 'replace'] as const) {
     const turned = await bandsOf(page, h0[0]!);
     expect(turned.row).toHaveLength(1);
     expect([...turned.column].sort()).toEqual(['A', 'B', 'C', 'D']);
-    await page.locator(flows[flow].edit).click();
+    await openPhotoMenu(page); await page.locator(flows[flow].edit).click();
     await expect(page.locator('section.crop-editor')).toBeVisible();
     // The source is still the upright photo; the editor turns it once for display.
     const source = await editorSource(page);
@@ -408,7 +415,7 @@ for (const flow of ['add', 'replace'] as const) {
     await page.waitForTimeout(500);
     expect(sent(api)).toHaveLength(0);
     expect(analyses(api)).toBe(1);
-    await page.locator(flows[flow].edit).click();
+    await openPhotoMenu(page); await page.locator(flows[flow].edit).click();
     expect((await editorSource(page)).row).toEqual(['A', 'B', 'C', 'D']);
     await expect(page.locator('#crop-width')).toHaveValue('100');
   });
@@ -443,6 +450,10 @@ for (const flow of ['add', 'replace'] as const) {
         expect(h0).toHaveLength(1);
         expect((await bandsOf(page, h0[0]!)).row).toEqual(['B', 'C']);
       } else {
+        if (after === 'Use original') {
+          await expect(page.locator('#background-original')).toBeVisible();
+          expect(await page.locator('#background-original').evaluate((element) => element.closest('#photo-menu-panel') === null)).toBe(true);
+        }
         await page.locator(after === 'Cancel' ? '#crop-cancel' : '#background-original').click();
         await expect.poll(() => analyses(api), { timeout: 45_000 }).toBe(1);
         await page.waitForTimeout(300);
@@ -450,7 +461,7 @@ for (const flow of ['add', 'replace'] as const) {
       }
       await expect(page.locator('section.crop-editor')).toHaveCount(0);
       // A later edit still crops the whole photo from the original file.
-      await page.locator(flows[flow].edit).click();
+      await openPhotoMenu(page); await page.locator(flows[flow].edit).click();
       expect((await editorSource(page)).row).toEqual(['A', 'B', 'C', 'D']);
       await setCrop(page, { x: '50', y: '0', width: '25', height: '100' });
       await page.locator('#apply-crop').click();
@@ -488,7 +499,14 @@ for (const flow of ['add', 'replace'] as const) {
     await openFlow(page, api, flow);
     await choose(page, flow, await syntheticPhoto(page));
     await inReview(page);
-    await page.locator('#background-original').click();
+    // UX2: in the review, "Use original background" stays inline (not under Photo options) and works from the keyboard.
+    const original = page.locator('#background-original');
+    await expect(original).toBeVisible();
+    expect(await original.evaluate((element) => element.closest('#photo-menu-panel') === null)).toBe(true);
+    await page.locator('#crop-cancel').focus();
+    for (let step = 0; step < 20 && !await original.evaluate((element) => element === document.activeElement); step++) await page.keyboard.press('Tab');
+    await expect(original).toBeFocused();
+    await page.keyboard.press('Enter');
     await expect(reviewHint(page)).toHaveCount(0);
     await expect.poll(() => analyses(api), { timeout: 45_000 }).toBe(1);
     await page.waitForTimeout(500);
@@ -523,7 +541,7 @@ for (const flow of ['add', 'replace'] as const) {
     await expect.poll(() => analyses(api)).toBe(1);
     const accepted = await shown(page, flow), reads = api.enhanceControl.statusReads;
     for (const button of ['#crop-cancel', '#apply-crop']) {
-      await page.locator(flows[flow].edit).click();
+      await openPhotoMenu(page); await page.locator(flows[flow].edit).click();
       await expect(page.locator('section.crop-editor')).toBeVisible();
       // A later edit is not a review: no hint, and Done with an unchanged crop is a cancel.
       await expect(reviewHint(page)).toHaveCount(0);
@@ -575,7 +593,7 @@ for (const flow of ['add', 'replace'] as const) {
     await expect(note).toHaveCount(1);
     const second = held(enhanced(page));
     api.enhanceControl.replies.push(second.reply);
-    await page.locator(flows[flow].edit).click();
+    await openPhotoMenu(page); await page.locator(flows[flow].edit).click();
     await page.locator('#crop-rotate').click();
     await page.locator('#apply-crop').click();
     const cancel = page.locator('#enhance-cancel-crop');
@@ -584,10 +602,12 @@ for (const flow of ['add', 'replace'] as const) {
     expect(sent(api)).toHaveLength(2);
     // While the changed crop is cleaned up, the photo choices are hidden and so is their shared line.
     await expect(revertButton(page)).toHaveCount(0);
+    await expect(page.locator('#enhance-revert')).toHaveCount(0);
     await expect(note).toHaveCount(0);
     await cancel.click();
     await expect(page.getByText(text('enhance.working'), { exact: true })).toHaveCount(0);
     await expect(label(page)).toBeVisible();
+    await openPhotoMenu(page);
     await expect(revertButton(page)).toBeVisible();
     await expect(note).toHaveCount(1);
     await expect(revertButton(page)).toHaveAccessibleDescription(text('photo.reanalyse'));
@@ -652,6 +672,7 @@ for (const [name, reply, key] of fallbacks) {
     expect(await shown(page, 'add')).toBe(api.inputs[0]!.sha256);
     await expect(label(page)).toHaveCount(0);
     await expect(revertButton(page)).toHaveCount(0);
+    await expect(page.locator('#enhance-revert')).toHaveCount(0);
   });
 }
 test('replace: a failed enhancement keeps the cut-out and says so', async ({ page }) => {
@@ -905,11 +926,13 @@ test('item details show "Photo edited with AI" only for an image with that prove
   api.provenance.push({ image_id: edited.image.id, kind: 'ai_edited', origin: 'recorded' });
   await page.reload();
   await page.locator(`a[href="#/items/${edited.item.id}"]`).click();
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue('Edited shirt');
   await expect(page.locator('.detail-edited')).toHaveText(text('detail.aiEdited'));
   await noViolations(page);
   await page.goto('/#/');
   await page.locator(`a[href="#/items/${plain.item.id}"]`).click();
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue('Plain shirt');
   await page.waitForTimeout(300);
   await expect(page.locator('.detail-edited')).toHaveCount(0);
@@ -929,6 +952,7 @@ test('item details: a failed provenance read says so with Retry, and a replaced 
   });
   await page.reload();
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue('Edited shirt');
   const unavailable = page.locator('.detail-edited', { hasText: text('detail.aiEditedUnavailable') });
   await expect(unavailable).toBeVisible();
@@ -938,6 +962,8 @@ test('item details: a failed provenance read says so with Retry, and a replaced 
   await expect(page.locator('.detail-edited')).toHaveText(text('detail.aiEdited'));
   // The replacement photo has no provenance: while its read is held nothing is shown, and afterwards still nothing.
   await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
+  await page.locator('#detail-cancel-edit').click();
+  await openPhotoMenu(page);
   await page.getByRole('button', { name: text('imageChange.replace'), exact: true }).click();
   await expect(page.locator('.image-change .background-note')).toBeVisible();
   await choose(page, 'replace', await syntheticPhoto(page));
@@ -1056,6 +1082,7 @@ for (const selected of scenes) {
       await expect.poll(() => analyses(api)).toBe(1);
     }
     if (selected.scene === 'reverted') {
+      await openPhotoMenu(page);
       await revertButton(page, selected.language).click();
       await expect.poll(() => analyses(api)).toBe(2);
       await expect(label(page, selected.language)).toHaveCount(0);

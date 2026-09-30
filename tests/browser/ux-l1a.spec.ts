@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { languages, messages, type Language, type MessageKey } from '../../src/i18n';
-import { aiFixture, addAiPhoto } from './ai-photo-first-support';
+import { aiFixture, addAiPhoto, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { mockBackend, signIn, type MockOptions } from './mock-backend';
 
 type Api = Awaited<ReturnType<typeof aiFixture>>;
@@ -34,7 +34,9 @@ async function openSaved(page: Page, api: Api, warmth?: number) {
   await page.reload();
   await expect(page.locator('.item-card')).toHaveCount(1);
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
-  await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
+  // UX2: a saved item opens as a view card; tests that change fields press Edit first.
+  await expect(page.locator('#item-detail-title')).toHaveText(saved.item.title);
+  await expect(page.locator('#detail-edit')).toBeEnabled();
   return saved;
 }
 function recordPatches(page: Page) {
@@ -102,6 +104,7 @@ test('L1a warmth keeps a stored 4, sends no warmth key when untouched and 2 for 
   const api = await aiFixture(page);
   const patches = recordPatches(page);
   const { item } = await openSaved(page, api, 4);
+  await editItem(page);
   await page.locator('details.optional-details > summary').click();
   await expect(page.locator('#detail-warmth')).toHaveValue('4');
   await expect(page.locator('#detail-warmth option:checked')).toHaveText(text('warmth.warm'));
@@ -112,6 +115,8 @@ test('L1a warmth keeps a stored 4, sends no warmth key when untouched and 2 for 
   expect(sent(patches[0]!.body)).toEqual(['title']);
   expect(patches[0]!.url.searchParams.get('version')).toBe('eq.1');
   expect(item.warmth).toBe(4);
+  await editItem(page);
+  await page.locator('details.optional-details > summary').click();
   await page.locator('#detail-warmth').selectOption({ label: text('warmth.medium') });
   await button(page, 'detail.saveChanges').click();
   await expect.poll(() => patches.length).toBe(2);
@@ -128,6 +133,8 @@ test('L1a saved item has no availability control; stored availability survives e
   (saved.item as Record<string, unknown>).availability = 'laundry';
   await page.reload();
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+  await auditCopy(page);
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
   const { item } = saved;
   await auditCopy(page);
@@ -189,6 +196,8 @@ test('L1a accessibility: add and saved item at 1280, 320 and 200% text; keyboard
   const patches = recordPatches(page);
   await openSaved(page, api);
   await axe();
+  await editItem(page);
+  await axe();
   await page.locator('#detail-title').fill('');
   await button(page, 'detail.saveChanges').click();
   await expect(page.locator('#detail-title')).toBeFocused();
@@ -228,10 +237,22 @@ test.describe('bounded L1a visual evidence', () => {
         const file = await open(path.join(directory, `${name}-${selected.suffix}.png`), 'wx');
         try { await file.writeFile(png); } finally { await file.close(); }
       };
+      // UX2 (plan §9): add-ready is step 1 before a photo; add-failed is step 1 after a failed camera photo, with the
+      // camera help; more-details is step 2 with More details open; saved-item is the view card.
+      await button(page, 'wardrobe.add', language).first().click();
+      await expect(page.locator('#choose-photo')).toBeVisible();
+      await expect(page.locator('#item-title')).toHaveCount(0);
+      await expect(page.locator('.copy-details')).toHaveCount(0);
+      await capture('add-ready');
+      await page.locator('input[type=file][capture]').setInputFiles({ name: 'camera.jpg', mimeType: 'image/jpeg', buffer: api.fixture.subarray(0, -2) });
+      await expect(page.locator('.photo-panel [role=alert]')).toBeVisible();
+      await expect(page.locator('.copy-details > summary')).toHaveText(text('photo.cameraHelp', language));
+      await expect(page.locator('#item-title')).toHaveCount(0);
+      await capture('add-failed');
+      await leaveAdd(page, language);
       await addAiPhoto(page, api, language);
       await expect(page.locator('#item-category')).not.toHaveValue('');
       await expect(page.locator('#analysis-status')).toHaveCount(0);
-      await capture('add-ready');
       await page.locator('details.optional-details > summary').click();
       await expect(page.locator('#item-warmth')).toBeVisible();
       await capture('more-details');
@@ -239,10 +260,11 @@ test.describe('bounded L1a visual evidence', () => {
       api.mode('failed');
       await addAiPhoto(page, api, language);
       await expect(page.locator('#analysis-status')).toContainText(text('aiC.fillFailed', language));
-      await capture('add-failed');
       await leaveAdd(page, language);
       expect(api.items).toHaveLength(0);
       await openSaved(page, api);
+      await expect(page.locator('.item-facts .item-fact')).not.toHaveCount(0);
+      await expect(page.locator('.detail-page form, .detail-page input, .detail-page select, .detail-page textarea')).toHaveCount(0);
       await capture('saved-item');
     });
   }
@@ -254,7 +276,8 @@ test.describe('UX L1c saved item layout', () => {
     const saved = api.seedSavedItem();
     await page.goto('/'); await signIn(page);
     await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
-    await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
+    // UX2: the item opens as a view card; tests of the form press Edit first.
+    await expect(page.locator('#item-detail-title')).toHaveText(saved.item.title);
     await expect(page.locator('.detail-photo img')).toBeVisible();
     return { api, ...saved };
   }
@@ -289,29 +312,50 @@ test.describe('UX L1c saved item layout', () => {
     }).then(() => release);
   }
 
+  // UX2: the item opens as a view card (photo, Photo options, facts and Edit, then the quiet action row); the form card
+  // appears after Edit, without the photo actions. The old single-mode pins are split into these two shapes.
+  const shape = (page: Page) => page.evaluate(() => {
+    const names = (selector: string) => [...document.querySelector(selector)!.children].map((child) => child.className);
+    const box = (element: Element | null) => element!.getBoundingClientRect();
+    const row = document.querySelector('.detail-item-actions')!;
+    const archive = box(row.querySelector('.detail-archive button')), trash = box(row.querySelector('.lifecycle-actions button'));
+    const photo = box(document.querySelector('.detail-photo')), media = box(document.querySelector('.detail-media'));
+    const groupElement = document.querySelector('.detail-media .photo-actions'), group = groupElement && box(groupElement);
+    const card = box(document.querySelector('.item-view, .detail-name'));
+    return {
+      layout: names('.detail-layout'), media: names('.detail-media'), sections: names('.detail-sections'), row: names('.detail-item-actions'),
+      actions: [...document.querySelectorAll('.detail-page .photo-actions')].map((element) => [...element.querySelectorAll('button')].map((button) => button.textContent)),
+      underPhoto: group ? group.top - photo.bottom >= 0 && group.top - photo.bottom <= 24 : null,
+      inColumn: group ? group.left >= media.left - 0.5 && group.right <= media.right + 0.5 : null,
+      oneRow: Math.abs(archive.top - trash.top) <= 1, afterCard: box(row).top >= card.bottom,
+    };
+  });
+
   test('L1c accessibility at 1280: photo actions under the photo, one form card and one quiet action row', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openDetail(page);
-    const shape = await page.evaluate(() => {
-      const names = (selector: string) => [...document.querySelector(selector)!.children].map((child) => child.className);
-      const box = (element: Element | null) => element!.getBoundingClientRect();
-      const row = document.querySelector('.detail-item-actions')!;
-      const archive = box(row.querySelector('.detail-archive button')), trash = box(row.querySelector('.lifecycle-actions button'));
-      const photo = box(document.querySelector('.detail-photo')), group = box(document.querySelector('.detail-media .photo-actions'));
-      const media = box(document.querySelector('.detail-media')), card = box(document.querySelector('.detail-name'));
-      return {
-        layout: names('.detail-layout'), media: names('.detail-media'), sections: names('.detail-sections'), row: names('.detail-item-actions'),
-        actions: [...document.querySelectorAll('.detail-page .photo-actions')].map((element) => [...element.querySelectorAll('button')].map((button) => button.textContent)),
-        underPhoto: group.top - photo.bottom >= 0 && group.top - photo.bottom <= 24,
-        inColumn: group.left >= media.left - 0.5 && group.right <= media.right + 0.5,
-        oneRow: Math.abs(archive.top - trash.top) <= 1, afterCard: box(row).top >= card.bottom,
-      };
-    });
-    expect(shape).toEqual({
-      layout: ['detail-media', 'detail-sections'], media: ['detail-photo', 'photo-actions', 'detail-wear'],
-      sections: ['lifecycle-edit-lock', 'detail-item-actions'], row: ['detail-archive', 'settings-card lifecycle-actions'],
-      actions: [[text('imageChange.replace'), text('imageChange.recover')]],
+    expect(await shape(page)).toEqual({
+      layout: ['detail-media', 'detail-sections'], media: ['detail-photo', 'photo-actions photo-menu', 'detail-wear'],
+      sections: ['item-view', 'item-recovery', 'detail-item-actions'], row: ['detail-archive', 'settings-card lifecycle-actions'],
+      actions: [[text('capture.photoOptions'), text('imageChange.replace'), text('imageChange.recover')]],
       underPhoto: true, inColumn: true, oneRow: true, afterCard: true,
+    });
+    expect(await boxedContainers(page)).toEqual([]);
+    await expect(page.locator('.detail-page form')).toHaveCount(0);
+    expect(await flatTrash(page)).toBe(true);
+    await axe(page);
+    // Keyboard open, so Escape is pressed inside the disclosure (WebKit does not focus a clicked button).
+    await page.locator('#photo-menu').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#photo-menu-panel')).toBeVisible();
+    await axe(page);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#photo-menu')).toBeFocused();
+    await editItem(page);
+    expect(await shape(page)).toEqual({
+      layout: ['detail-media', 'detail-sections'], media: ['detail-photo', 'detail-wear'],
+      sections: ['lifecycle-edit-lock', 'item-recovery', 'detail-item-actions'], row: ['detail-archive', 'settings-card lifecycle-actions'],
+      actions: [], underPhoto: null, inColumn: null, oneRow: true, afterCard: true,
     });
     expect(await boxedContainers(page)).toEqual(['settings-card detail-name']);
     expect(await page.locator('.detail-name form').count()).toBe(1);
@@ -325,22 +369,27 @@ test.describe('UX L1c saved item layout', () => {
   test('L1c form: Save ends the form, even spacing and the status right under Save', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openDetail(page);
+    await editItem(page);
     const form = page.locator('.detail-name form');
+    // UX2: the form ends with its action row, Save first and Cancel after it.
     expect(await form.evaluate((element) => {
-      const last = [...element.querySelectorAll('button')].at(-1);
+      const actions = element.lastElementChild!, buttons = [...actions.querySelectorAll('button')];
       const seasons = element.querySelector('#detail-seasons')!.getBoundingClientRect();
       const more = element.querySelector('details.optional-details')!.getBoundingClientRect();
-      const save = element.querySelector(':scope > button.button-primary')!.getBoundingClientRect();
-      return { last: last?.parentElement === element && last.classList.contains('button-primary'), gaps: [more.top - seasons.bottom, save.top - more.bottom] };
+      return { last: actions.classList.contains('item-edit-actions') && buttons[0]!.classList.contains('button-primary')
+        && buttons.at(-1)!.id === 'detail-cancel-edit' && buttons.length === 2,
+      gaps: [more.top - seasons.bottom, actions.getBoundingClientRect().top - more.bottom] };
     })).toEqual({ last: true, gaps: [20, 20] });
     await page.locator('#detail-title').fill('Edited overshirt');
     await button(page, 'detail.saveChanges').click();
     const status = page.getByText(text('detail.saved'), { exact: true });
     await expect(status).toBeVisible();
+    // Save returns to the view card; the status sits right under it, with focus on Edit.
+    await expect(page.locator('#detail-edit')).toBeFocused();
     const distance = await status.evaluate((element) => {
-      const save = element.previousElementSibling;
-      return save instanceof HTMLButtonElement && save.classList.contains('button-primary')
-        ? element.getBoundingClientRect().top - save.getBoundingClientRect().bottom : null;
+      const edit = document.querySelector('#detail-edit');
+      return element.parentElement?.classList.contains('item-recovery') && element.parentElement.previousElementSibling?.matches('section.item-view') && edit
+        ? element.getBoundingClientRect().top - edit.getBoundingClientRect().bottom : null;
     });
     expect(distance).not.toBeNull();
     expect(distance!).toBeGreaterThanOrEqual(0);
@@ -369,7 +418,10 @@ test.describe('UX L1c saved item layout', () => {
         expect(await page.evaluate(() => {
           const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
           const media = box('.detail-media'), sections = box('.detail-sections'), photo = box('.detail-photo');
-          const group = box('.detail-media .photo-actions'), card = box('.detail-name'), row = box('.detail-item-actions');
+          // UX2: in view mode Photo options sits under the photo; in edit mode there is no photo action group.
+          const groupElement = document.querySelector('.detail-media .photo-actions');
+          const group = groupElement ? groupElement.getBoundingClientRect() : { top: photo.bottom, bottom: photo.bottom };
+          const card = box('.item-view, .detail-name'), row = box('.detail-item-actions');
           const overlaps = (selector: string) => {
             const boxes = [...document.querySelectorAll(selector)].filter((element) => element.getClientRects().length).map((element) => element.getBoundingClientRect());
             return boxes.some((a, index) => boxes.slice(index + 1).some((b) => a.right > b.left + 0.5 && b.right > a.left + 0.5 && a.bottom > b.top + 0.5 && b.bottom > a.top + 0.5));
@@ -383,7 +435,7 @@ test.describe('UX L1c saved item layout', () => {
           return { column: Math.abs(media.left - sections.left) < 1,
             order: photo.bottom <= group.top + 0.5 && group.bottom <= card.top + 0.5 && card.bottom <= row.top + 0.5,
             fits: document.documentElement.scrollWidth <= innerWidth,
-            overlap: overlaps('.detail-media .photo-actions button') || overlaps('.detail-item-actions button'), small };
+            overlap: overlaps('.detail-media .photo-actions button') || overlaps('.detail-item-actions button') || overlaps('.item-edit-actions button'), small };
         })).toEqual({ column: true, order: true, fits: true, overlap: false, small: [] });
       };
       const reachable = async () => {
@@ -393,6 +445,14 @@ test.describe('UX L1c saved item layout', () => {
         await expect(archive).toBeEnabled();
         await expect(trash).toBeEnabled();
       };
+      const viewReachable = async () => {
+        const edit = page.locator('#detail-edit'), archive = button(page, 'detail.archive', language), trash = button(page, 'item.trash', language);
+        for (const control of [page.locator('#photo-menu'), edit, archive, trash]) { await control.scrollIntoViewIfNeeded(); await expect(control).toBeInViewport(); await expect(control).toBeEnabled(); }
+      };
+      for (const width of [320, 430]) await check(width);
+      await viewReachable();
+      await axe(page);
+      await editItem(page);
       for (const open of [false, true]) {
         await setMore(page, open);
         for (const width of [320, 430]) await check(width);
@@ -404,7 +464,7 @@ test.describe('UX L1c saved item layout', () => {
         const size = (element: Element) => parseFloat(getComputedStyle(element).fontSize);
         const one = (selector: string) => size(document.querySelector(selector)!);
         return { body: one('body'), title: one('#detail-title') >= 32, category: one('#detail-category') >= 32, colour: one('#detail-colours-add') >= 32,
-          save: one('.detail-name form > button.button-primary') >= 28,
+          save: one('.detail-name form .item-edit-actions > button.button-primary') >= 28,
           row: [...document.querySelectorAll('.detail-item-actions button')].every((element) => size(element) >= 28) };
       })).toEqual({ body: 32, title: true, category: true, colour: true, save: true, row: true });
       for (const open of [false, true]) {
@@ -413,6 +473,13 @@ test.describe('UX L1c saved item layout', () => {
         await reachable();
         await axe(page);
       }
+      await page.locator('#detail-cancel-edit').click();
+      await expect(page.locator('#detail-edit')).toBeFocused();
+      expect(await page.evaluate(() => [...document.querySelectorAll('.item-view dt, .item-view dd, #detail-edit')]
+        .every((element) => parseFloat(getComputedStyle(element).fontSize) >= 28))).toBe(true);
+      await check(320);
+      await viewReachable();
+      await axe(page);
       await resize.evaluate((element) => (element as Element).remove());
     });
   }
@@ -420,22 +487,32 @@ test.describe('UX L1c saved item layout', () => {
   test('L1c clean and dirty states: disabled controls and keyboard order', async ({ page }) => {
     await openDetail(page);
     const save = button(page, 'detail.saveChanges'), archive = button(page, 'detail.archive'), trash = button(page, 'item.trash');
-    const others = [button(page, 'imageChange.replace'), button(page, 'imageChange.recover'), archive, trash];
+    // UX2: Replace photo and Previous photos sit under Photo options on the view card and are not rendered in edit mode.
+    await openPhotoMenu(page);
+    for (const control of [button(page, 'imageChange.replace'), button(page, 'imageChange.recover'), archive, trash]) await expect(control).toBeEnabled();
+    await page.keyboard.press('Escape');
+    await page.locator('#detail-edit').focus();
+    await page.keyboard.press('Tab'); await expect(archive).toBeFocused();
+    await page.keyboard.press('Tab'); await expect(trash).toBeFocused();
+    await editItem(page);
     const summary = page.locator('details.optional-details > summary');
     await expect(save).toBeDisabled();
-    for (const control of others) await expect(control).toBeEnabled();
+    await expect(page.locator('#photo-menu')).toHaveCount(0);
+    for (const control of [archive, trash]) await expect(control).toBeEnabled();
     await summary.focus();
+    await page.keyboard.press('Tab'); await expect(page.locator('#detail-cancel-edit')).toBeFocused();
     await page.keyboard.press('Tab'); await expect(archive).toBeFocused();
     await page.keyboard.press('Tab'); await expect(trash).toBeFocused();
     await page.locator('#detail-title').fill('Edited overshirt');
     await expect(save).toBeEnabled();
-    for (const control of others) await expect(control).toBeDisabled();
+    for (const control of [archive, trash]) await expect(control).toBeDisabled();
     await summary.focus();
     await page.keyboard.press('Tab'); await expect(save).toBeFocused();
   });
 
   test('L1c Enter in Name saves once and shows the status under Save', async ({ page }) => {
     await openDetail(page);
+    await editItem(page);
     const patches = recordPatches(page);
     await page.locator('#detail-title').fill('Keyboard overshirt');
     await page.locator('#detail-title').press('Enter');
@@ -443,24 +520,29 @@ test.describe('UX L1c saved item layout', () => {
     await expect(status).toBeVisible();
     expect(patches).toHaveLength(1);
     expect(sent(patches[0]!.body)).toEqual(['title']);
-    expect(await status.evaluate((element) => element.previousElementSibling?.matches('button.button-primary') === true
-      && !document.activeElement?.closest('.detail-item-actions, .photo-actions'))).toBe(true);
+    // UX2: Save returns to the view card with the status right under it and focus on Edit.
+    expect(await status.evaluate((element) => element.parentElement?.previousElementSibling?.matches('section.item-view') === true
+      && document.activeElement?.id === 'detail-edit')).toBe(true);
   });
 
   test('L1c a held save disables the photo and item actions and sends nothing twice', async ({ page }) => {
     await openDetail(page);
+    await editItem(page);
     const patches = recordPatches(page);
     const release = await hold(page, /\/rest\/v1\/items(?:\?|$)/, 'PATCH');
-    const others = [button(page, 'imageChange.replace'), button(page, 'imageChange.recover'), button(page, 'detail.archive'), button(page, 'item.trash')];
+    const others = [button(page, 'detail.archive'), button(page, 'item.trash')];
     await page.locator('#detail-title').fill('Held overshirt');
     await button(page, 'detail.saveChanges').click();
     await expect(button(page, 'common.saving')).toBeDisabled();
+    await expect(page.locator('#detail-cancel-edit')).toBeDisabled();
+    await expect(page.locator('#photo-menu')).toHaveCount(0);
     for (const control of others) await expect(control).toBeDisabled();
-    await page.locator('.detail-name form > button.button-primary').evaluate((element) => { (element as HTMLButtonElement).click(); });
+    await page.locator('.detail-name form .item-edit-actions > button.button-primary').evaluate((element) => { (element as HTMLButtonElement).click(); });
     expect(patches).toHaveLength(1);
     release();
     await expect(page.getByText(text('detail.saved'), { exact: true })).toBeVisible();
-    for (const control of others) await expect(control).toBeEnabled();
+    await openPhotoMenu(page);
+    for (const control of [button(page, 'imageChange.replace'), button(page, 'imageChange.recover'), ...others]) await expect(control).toBeEnabled();
     expect(patches).toHaveLength(1);
   });
 
@@ -471,6 +553,7 @@ test.describe('UX L1c saved item layout', () => {
     const archive = button(page, 'detail.archive');
     await button(page, 'item.trash').click();
     await expect(archive).toBeDisabled();
+    await expect(page.locator('#detail-edit')).toBeDisabled();
     await archive.evaluate((element) => { (element as HTMLButtonElement).click(); });
     expect(patches).toHaveLength(0);
     release();
@@ -488,7 +571,8 @@ test.describe('UX L1c saved item layout', () => {
     const check = section.getByRole('button', { name: text('lifecycle.check'), exact: true });
     await expect(check).toBeEnabled();
     await expect(button(page, 'detail.archive')).toBeDisabled();
-    await expect(page.locator('#detail-title')).toBeDisabled();
+    // UX2: the view card's Edit stays locked while the result is unknown.
+    await expect(page.locator('#detail-edit')).toBeDisabled();
     expect(await flatTrash(page)).toBe(true);
     expect(await alertOwnLine(page)).toBe(true);
     expect(patches).toHaveLength(0);
@@ -522,10 +606,321 @@ test.describe('UX L1c saved item layout', () => {
     await expect(row.locator('.detail-archive')).toContainText(text('detail.archived'));
     await expect(row.getByRole('button', { name: text('detail.unarchive'), exact: true })).toBeEnabled();
     await expect(row.locator('section.lifecycle-actions')).toHaveCount(1);
-    expect(await boxedContainers(page)).toEqual(['settings-card detail-name']);
+    // UX2: the view card has no boxed container; the form card appears after Edit.
+    expect(await boxedContainers(page)).toEqual([]);
     await axe(page);
     await row.getByRole('button', { name: text('detail.unarchive'), exact: true }).click();
     await expect(row.getByRole('button', { name: text('detail.archive'), exact: true })).toBeEnabled();
     expect(patches.map((patch) => patch.body.lifecycle)).toEqual(['archived', 'active']);
   });
+});
+
+// UX2 plan §8: the two-step add flow, the photo options and the item view card. Text assertions only.
+test.describe('UX2 add item steps and the item view card', () => {
+  const axe = async (page: Page) => expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  const good = (api: Api) => ({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
+  const broken = (api: Api) => ({ name: 'broken.jpg', mimeType: 'image/jpeg', buffer: api.fixture.subarray(0, -2) });
+  const libraryInput = (page: Page) => page.locator('.photo-panel input[type=file]:not([capture])');
+  const cameraInput = (page: Page) => page.locator('.photo-panel input[type=file][capture]');
+  const analyses = (api: Api) => api.calls.filter((call) => call.route.endsWith('/analyze-clothing')).length;
+  const libraryWrites = (api: Api) => api.items.length + api.images.length + api.files.size + api.uploadWire.posts
+    + api.requests.filter((call) => /(?:reserve_(?:analyzed_|restored_)?item_save(?:_v2)?|reserve_image_change|finalize_item_save|\/finalize-[\w-]+|commit_image)$/.test(call.path)).length;
+  const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+  async function openAdd(page: Page, language: Language = 'en') {
+    await button(page, 'wardrobe.add', language).first().click();
+    await expect(page.locator('#choose-photo')).toBeVisible();
+  }
+  async function stepTwo(page: Page, api: Api) {
+    // As a user does: Choose photo, then the file; focus then moves to the basics.
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.locator('#choose-photo').click()]);
+    await chooser.setFiles(good(api));
+    await expect(page.locator('.capture-photo img')).toBeVisible();
+    await expect(page.locator('#capture-basics')).toBeFocused();
+    await expect(page.locator('#item-category')).not.toHaveValue('');
+  }
+
+  test('UX2 step 1 has one primary Choose photo and Take photo, no fields; camera help only after a camera failure or dismissal', async ({ page }) => {
+    const api = await aiFixture(page);
+    await openAdd(page);
+    const group = page.locator('.photo-panel .photo-actions');
+    await expect(group.locator('button')).toHaveText([text('capture.library'), text('capture.camera')]);
+    await expect(group.locator('.button-primary')).toHaveCount(1);
+    await expect(page.locator('#choose-photo')).toHaveClass(/button-primary/);
+    await expect(page.locator('.details-panel, #item-title, #photo-menu, details.optional-details')).toHaveCount(0);
+    await expect(page.locator('.copy-details')).toHaveCount(0);
+    await axe(page);
+    // Choose photo opens the photo library, not the camera.
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.locator('#choose-photo').click()]);
+    expect(await chooser.element().getAttribute('capture')).toBeNull();
+    // A library photo that fails shows the error but not the camera help.
+    await chooser.setFiles(broken(api));
+    await expect(page.locator('.photo-panel [role=alert]')).toBeVisible();
+    await expect(page.locator('.copy-details')).toHaveCount(0);
+    await expect(page.locator('#item-title')).toHaveCount(0);
+    // A camera photo that fails shows it.
+    await cameraInput(page).setInputFiles(broken(api));
+    await expect(page.locator('.copy-details > summary')).toHaveText(text('photo.cameraHelp'));
+    await leaveAdd(page);
+    // A dismissed camera shows it too.
+    await openAdd(page);
+    await expect(page.locator('.copy-details')).toHaveCount(0);
+    await cameraInput(page).dispatchEvent('cancel');
+    await expect(page.locator('.copy-details > summary')).toHaveText(text('photo.cameraHelp'));
+    await axe(page);
+    expect(analyses(api)).toBe(0);
+    expect(libraryWrites(api)).toBe(0);
+  });
+
+  test('UX2 step 2 opens on the basics, AI-filled, with More details collapsed; nothing is saved before Save', async ({ page }) => {
+    const api = await aiFixture(page);
+    await openAdd(page);
+    await stepTwo(page, api);
+    for (const id of ['#item-title', '#item-category', '#item-colours', '#item-seasons']) await expect(page.locator(id).first()).toBeVisible();
+    await expect(page.locator('#item-title')).not.toHaveValue('');
+    const details = page.locator('details.optional-details');
+    expect(await details.evaluate((element) => (element as HTMLDetailsElement).open)).toBe(false);
+    await expect(details.locator('#item-alt')).toHaveCount(1);
+    await expect(page.locator('#item-alt')).toBeHidden();
+    // Before Save: exactly one analysis, and no reservation, item, image, Storage upload or publication.
+    await page.waitForTimeout(300);
+    expect(analyses(api)).toBe(1);
+    expect(libraryWrites(api)).toBe(0);
+    await page.locator('#item-title').fill('Blue overshirt');
+    expect(libraryWrites(api)).toBe(0);
+    await page.locator('.save-actions .button-primary').click();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    expect(api.items).toHaveLength(1);
+    expect(api.items[0]!.title).toBe('Blue overshirt');
+    expect(api.images).toHaveLength(1);
+    expect(api.requests.filter((call) => /reserve_(?:analyzed_)?item_save$/.test(call.path))).toHaveLength(1);
+    expect(analyses(api)).toBe(1);
+  });
+
+  test('UX2 Photo options: keyboard, Escape back to the toggle, frozen while saving; a new photo keeps typed values', async ({ page }) => {
+    const api = await aiFixture(page);
+    await openAdd(page);
+    await stepTwo(page, api);
+    const toggle = page.locator('#photo-menu'), panel = page.locator('#photo-menu-panel');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(panel).toBeHidden();
+    await toggle.focus();
+    await page.keyboard.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(panel.getByRole('button')).toHaveText([text('capture.replace'), text('capture.camera'), text('photo.edit')]);
+    await page.keyboard.press('Tab');
+    await expect(panel.getByRole('button').first()).toBeFocused();
+    await axe(page);
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+    await expect(toggle).toBeFocused();
+    await page.locator('#item-title').fill('Kept title');
+    await openPhotoMenu(page);
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), panel.getByRole('button', { name: text('capture.replace'), exact: true }).click()]);
+    expect(await chooser.element().getAttribute('capture')).toBeNull();
+    await chooser.setFiles(good(api));
+    await expect.poll(() => analyses(api)).toBe(2);
+    await expect(page.locator('#item-title')).toHaveValue('Kept title');
+    await expect(toggle).toBeFocused();
+    expect(libraryWrites(api)).toBe(0);
+    // While the save runs, Photo options is disabled.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    await page.route(/\/rest\/v1\/rpc\/reserve_(?:analyzed_)?item_save$/, async (route) => { await gate; await route.fallback(); });
+    await page.locator('.save-actions .button-primary').click();
+    await expect(toggle).toBeDisabled();
+    release();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    expect(api.items).toHaveLength(1);
+  });
+
+  test('UX2 a failed replacement in step 2 keeps the details and offers Choose photo again', async ({ page }) => {
+    const api = await aiFixture(page);
+    await openAdd(page);
+    await stepTwo(page, api);
+    await page.locator('#item-title').fill('Typed title');
+    await libraryInput(page).setInputFiles(broken(api));
+    await expect(page.locator('.photo-panel [role=alert]')).toBeVisible();
+    await expect(page.locator('#item-title')).toHaveValue('Typed title');
+    await expect(page.locator('#photo-menu')).toHaveCount(0);
+    await expect(page.locator('#choose-photo')).toBeVisible();
+    await expect(page.locator('.photo-panel .photo-actions').getByRole('button', { name: text('capture.camera'), exact: true })).toBeVisible();
+    // Save with no photo points to Choose photo and sends nothing.
+    await page.locator('#item-title').press('Enter');
+    await expect(page.locator('#choose-photo')).toBeFocused();
+    expect(libraryWrites(api)).toBe(0);
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.locator('#choose-photo').click()]);
+    await chooser.setFiles(good(api));
+    await expect(page.locator('.capture-photo img')).toBeVisible();
+    await expect(page.locator('#photo-menu')).toBeFocused();
+    await expect(page.locator('#item-title')).toHaveValue('Typed title');
+    expect(libraryWrites(api)).toBe(0);
+  });
+
+  test('UX2 leaving a changed step 2 asks first; Keep editing keeps the values and Discard saves nothing', async ({ page }) => {
+    const api = await aiFixture(page);
+    await openAdd(page);
+    await stepTwo(page, api);
+    await page.locator('#item-title').fill('Unsaved title');
+    await page.locator('.save-actions .button-quiet').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: text('common.continueEditing'), exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator('#item-title')).toHaveValue('Unsaved title');
+    await page.locator('.save-actions .button-quiet').click();
+    await dialog.getByRole('button', { name: text('common.discard'), exact: true }).click();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    expect(libraryWrites(api)).toBe(0);
+  });
+
+  test('UX2 item view card: no form controls; Edit, Cancel, a dirty Cancel and Save move focus as planned', async ({ page }) => {
+    const api = await aiFixture(page);
+    const patches = recordPatches(page);
+    await openSaved(page, api);
+    await expect(page.locator('.detail-page form, .detail-page input, .detail-page select, .detail-page textarea')).toHaveCount(0);
+    await expect(page.locator('.item-facts .item-fact')).not.toHaveCount(0);
+    await page.locator('#photo-menu').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#photo-menu-panel').getByRole('button')).toHaveText([text('imageChange.replace'), text('imageChange.recover')]);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#photo-menu')).toBeFocused();
+    await editItem(page);
+    await page.locator('#detail-cancel-edit').click();
+    await expect(page.locator('#detail-edit')).toBeFocused();
+    await editItem(page);
+    await page.locator('#detail-title').fill('Changed title');
+    await page.locator('#detail-cancel-edit').click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: text('common.continueEditing'), exact: true }).click();
+    await expect(page.locator('#detail-title')).toHaveValue('Changed title');
+    await page.locator('#detail-cancel-edit').click();
+    await dialog.getByRole('button', { name: text('common.discard'), exact: true }).click();
+    await expect(page.locator('#detail-edit')).toBeFocused();
+    expect(patches).toHaveLength(0);
+    await editItem(page);
+    await expect(page.locator('#detail-title')).not.toHaveValue('Changed title');
+    await page.locator('#detail-title').fill('Saved title');
+    await button(page, 'detail.saveChanges').click();
+    await expect(page.locator('.item-recovery')).toContainText(text('detail.saved'));
+    await expect(page.locator('#detail-edit')).toBeFocused();
+    await expect(page.locator('#item-detail-title')).toHaveText('Saved title');
+    expect(patches).toHaveLength(1);
+  });
+
+  test('UX2 an unknown save result stays in edit with Cancel disabled and offers Check', async ({ page }) => {
+    const api = await aiFixture(page);
+    await openSaved(page, api);
+    await editItem(page);
+    let patches = 0;
+    await page.route('**/rest/v1/items?*', async (route) => {
+      if (route.request().method() !== 'PATCH') { await route.fallback(); return; }
+      patches++;
+      await route.abort('failed');
+    });
+    await page.locator('#detail-title').fill('Lost title');
+    await button(page, 'detail.saveChanges').click();
+    await expect(page.locator('.item-recovery').getByRole('button', { name: text('detail.check'), exact: true })).toBeVisible();
+    await expect(page.locator('#detail-cancel-edit')).toBeDisabled();
+    await expect(page.locator('#detail-edit')).toHaveCount(0);
+    expect(patches).toBe(1);
+  });
+
+  test('UX2 a lost Archive reply keeps Check and Reload on the view card, locks Edit and sends once', async ({ page }) => {
+    const api = await aiFixture(page);
+    const { item } = await openSaved(page, api);
+    let archives = 0;
+    await page.route('**/rest/v1/items?*', async (route) => {
+      if (route.request().method() !== 'PATCH') { await route.fallback(); return; }
+      archives++;
+      // The write reaches the backend; only the reply is lost.
+      const body = route.request().postDataJSON() as { lifecycle: string };
+      Object.assign(item, { lifecycle: body.lifecycle, version: Number(item.version) + 1 });
+      await route.abort('failed');
+    });
+    await button(page, 'detail.archive').click();
+    const recovery = page.locator('.item-recovery');
+    await expect(recovery.getByRole('alert')).toBeVisible();
+    const check = recovery.getByRole('button', { name: text('detail.check'), exact: true });
+    await expect(check).toBeVisible();
+    await expect(recovery.getByRole('button', { name: text('detail.reload'), exact: true })).toBeVisible();
+    await expect(page.locator('section.item-view')).toBeVisible();
+    await expect(page.locator('#detail-edit')).toBeDisabled();
+    // Leaving asks first while the result is unknown.
+    await page.locator('.detail-page > button.text-button').first().click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: text('common.continueEditing'), exact: true }).click();
+    await expect(check).toBeVisible();
+    await check.click();
+    await expect(button(page, 'detail.unarchive')).toBeVisible();
+    await expect(page.locator('#detail-edit')).toBeEnabled();
+    expect(archives).toBe(1);
+    expect(item.lifecycle).toBe('archived');
+  });
+
+  test('UX2 the trash section stays mounted across Edit and Cancel; a lost trash reply locks the form', async ({ page }) => {
+    const { api } = await (async () => {
+      const api = await mockBackend(page, { lifecycleLoss: 'change' });
+      const saved = api.seedSavedItem();
+      await page.goto('/'); await signIn(page);
+      await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+      await expect(page.locator('#detail-edit')).toBeEnabled();
+      return { api };
+    })();
+    const trashCalls = () => api.requests.filter((request) => request.path.endsWith('/set_item_trashed')).length;
+    const section = await page.locator('.detail-item-actions > section.lifecycle-actions').elementHandle();
+    await editItem(page);
+    await page.locator('#detail-cancel-edit').click();
+    await expect(page.locator('#detail-edit')).toBeFocused();
+    expect(await section!.evaluate((element) => element.isConnected)).toBe(true);
+    await editItem(page);
+    await button(page, 'item.trash').click();
+    await expect(page.locator('.detail-item-actions > section.lifecycle-actions').getByRole('alert')).toHaveText(text('lifecycle.unconfirmed'));
+    expect(await section!.evaluate((element) => element.isConnected)).toBe(true);
+    await expect(page.locator('#detail-cancel-edit')).toBeDisabled();
+    await expect(page.locator('#detail-title')).toBeDisabled();
+    expect(trashCalls()).toBe(1);
+    await page.locator('.detail-item-actions > section.lifecycle-actions').getByRole('button', { name: text('lifecycle.check'), exact: true }).click();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    expect(trashCalls()).toBe(1);
+  });
+
+  for (const language of ['fi', 'sv'] as const) {
+    test(`UX2 ${language}: step 1, step 2, Photo options, crop, view and edit fit 320px and 200% text with no axe violations`, async ({ page }) => {
+      test.slow();
+      const api = await aiFixture(page, language);
+      const check = async () => {
+        for (const width of [320, 1280]) {
+          await page.setViewportSize({ width, height: 900 });
+          expect(await fits(page), `${language} ${width}`).toBe(true);
+        }
+        await page.setViewportSize({ width: 320, height: 900 });
+        await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+        expect(await fits(page), `${language} 200%`).toBe(true);
+        await axe(page);
+        await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
+        await page.setViewportSize({ width: 1280, height: 900 });
+      };
+      await openAdd(page, language);
+      await check();
+      await stepTwo(page, api);
+      await check();
+      await openPhotoMenu(page);
+      await check();
+      await page.locator('#edit-photo').click();
+      await expect(page.locator('section.crop-editor')).toBeVisible();
+      expect(await page.locator('details.crop-exact').evaluate((element) => (element as HTMLDetailsElement).open)).toBe(false);
+      await check();
+      await page.locator('#crop-cancel').click();
+      await expect(page.locator('#photo-menu')).toBeFocused();
+      await leaveAdd(page, language);
+      const saved = api.seedSavedItem();
+      await page.reload();
+      await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+      await expect(page.locator('#detail-edit')).toBeEnabled();
+      await check();
+      await editItem(page);
+      await check();
+    });
+  }
 });

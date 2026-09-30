@@ -8,7 +8,7 @@ import { provenanceFields } from '../../src/domain/attribute-provenance';
 import { moreFields, visibleFields } from '../../src/domain/item-details';
 import { colours } from '../../src/domain/preferences';
 import { mockBackend, owners, signIn } from './mock-backend';
-import { manualEntry } from './ai-photo-first-support';
+import { editItem, manualEntry } from './ai-photo-first-support';
 
 // image_provenance_v1 is a read-only RPC; the detail view re-reads it with the refreshed images.
 const readOnlyRpc = (route: string) => route === '/rest/v1/rpc/image_provenance_v1';
@@ -20,6 +20,8 @@ async function setup(page: Page, language: Language = 'en', loseFinalizeReplyOnc
   return api;
 }
 async function expand(page: Page, prefix: 'item' | 'detail') {
+  // UX2: a saved item opens as a view card; its form appears after Edit.
+  if (prefix === 'detail') await editItem(page);
   await expect(page.locator(`#${prefix}-title`)).toBeVisible();
   const selector = prefix === 'item' ? '.capture-page details' : '.detail-name details';
   await page.locator(selector).evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
@@ -96,6 +98,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await expect(link).toHaveAccessibleName(`Fictional shirt ${messages['category.top'][language]}`);
     await link.click();
     await expect(page.locator('.detail-photo img')).toHaveAttribute('alt', '');
+    await editItem(page);
     await expect(page.locator('#detail-description')).toHaveValue('');
     expect(await page.locator('.detail-page').evaluate((element) =>
       [...element.querySelectorAll('[aria-describedby]')].every((control) =>
@@ -149,6 +152,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await page.locator('#detail-category').selectOption('top');
     await page.getByRole('button', { name: messages['detail.saveChanges'][language], exact: true }).click();
     await expect(page.getByText(messages['detail.saved'][language], { exact: true })).toBeVisible();
+    await editItem(page);
     await expect(page.locator('#detail-description')).toHaveValue('Sibling draft');
     expect(image.alt_text).toBe('Sibling draft');
     expect(item).toMatchObject({ title: 'Corrected name', category: 'top', colours: [], seasons: [], tags: [], notes: '',
@@ -157,6 +161,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(Object.keys(item.field_provenance as object).sort()).toEqual([...shownProvenance].sort());
     for (const field of shownProvenance) expect((item.field_provenance as Record<string, unknown>)[field]).toEqual({ kind: 'user', revision: 2 });
     await page.reload();
+    await editItem(page);
     await expect(page.locator('#detail-title')).toHaveValue('Corrected name');
     await expect(page.locator('#detail-description')).toHaveValue('Sibling draft');
     expect(foreign).toEqual(originalForeign);
@@ -186,7 +191,7 @@ for (const language of ['fi', 'sv'] as const) {
     }
     await expect(notice).toBeVisible();
     await expect(notice).toHaveAttribute('role', 'status');
-    await expect(page.locator('.detail-name [role="alert"]')).toHaveCount(0);
+    await expect(page.locator('.detail-sections [role="alert"]')).toHaveCount(0);
     await expect(page.getByRole('button', { name: messages['detail.saveChanges'][language], exact: true })).toBeDisabled();
     await page.locator('.detail-name form').evaluate((form) => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     await expect(page.locator('#detail-purchase_price')).toHaveValue('12,50');
@@ -208,6 +213,7 @@ for (const language of ['fi', 'sv'] as const) {
     await expect(notice).toBeVisible();
     await page.getByRole('button', { name: messages['detail.saveChanges'][language], exact: true }).click();
     await expect(page.getByText(messages['detail.saved'][language], { exact: true })).toBeVisible();
+    await editItem(page);
     await expect(page.locator('#detail-purchase_price')).toHaveValue('12,50');
     await expect(notice).toBeVisible();
     expect(image.alt_text).toBe('Independent description');
@@ -334,9 +340,10 @@ test('invalid saved input, manual confirmations and explicit empty clears remain
             disabled: input.disabled };
         };
         const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility === 'visible';
-        const section = document.querySelector('.detail-name');
+        // UX2: Save sits in the form's action row; alerts, Check and Reload sit in the recovery region beside the form.
+        const section = document.querySelector('.detail-name') ? document.querySelector('.detail-sections') : null;
         const main = document.querySelector('.workspace-main');
-        const saves = document.querySelectorAll('.detail-name form > button.button-primary');
+        const saves = document.querySelectorAll('.detail-name form > .item-edit-actions > button.button-primary');
         const firstSave = saves.length === 1 ? saves[0] : null;
         const save = firstSave instanceof HTMLButtonElement ? firstSave : null;
         if (!section || !main || !save) captureError = true;
@@ -475,7 +482,7 @@ test('unknown defaults, invalid raw input and manual empty clears remain distinc
   expect(api.images[0]!.alt_text).toBe('🌿'.repeat(100));
 });
 test('price entry locale and raw incomplete text survive language changes', async ({ page }) => {
-  await setup(page);
+  await photo(page, await setup(page));
   await expand(page, 'item');
   await page.locator('#item-purchase_price').fill('1,234.50');
   await page.getByRole('button', { name: messages['account.menu'].en }).click();

@@ -550,12 +550,16 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
     await page.goto('/');
     await signIn(page);
     await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'][language], exact: true }).click();
+    const input = page.locator('input[type="file"]').first();
+    // UX2: the details appear once a photo is chosen; the invalid choices below replace it in step 2.
+    await expect(page.locator('#item-title')).toHaveCount(0);
+    await input.setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
+    await expect(page.locator('.capture-photo img')).toBeVisible();
     await page.locator('#item-title').fill('Manual synthetic title');
     await page.locator('#item-category').selectOption('top');
     await page.locator('details.optional-details summary').click();
     await page.locator('#item-alt').fill('Manual synthetic description');
     await page.locator('#item-alt').fill('');
-    const input = page.locator('input[type="file"]').first();
     const noDetails = async () => {
       await expect(page.locator('#preparation-details')).toHaveCount(0);
       await expect(page.locator('[aria-controls="preparation-details"]')).toHaveCount(0);
@@ -595,8 +599,10 @@ for (const language of ['en', 'fi', 'sv'] satisfies Language[]) {
     await page.getByRole('button', { name: messages['common.discard'][language], exact: true }).click();
     await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'][language], exact: true }).click();
     await expect(page.getByRole('alert')).toHaveCount(0);
-    await expect(page.locator('#item-title')).toHaveValue('');
+    await expect(page.locator('#item-title')).toHaveCount(0);
     await expect(page.locator('.capture-photo img')).toHaveCount(0);
+    await input.setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
+    await expect(page.locator('#item-title')).toHaveValue('');
   });
 }
 
@@ -624,10 +630,14 @@ test('late selection cannot overwrite a replacement or manual edits and clears n
   await page.goto('/');
   await signIn(page);
   await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
+  const input = page.locator('input[type="file"]').first();
+  // UX2: the details appear once a first photo is chosen; the held read below replaces it in step 2.
+  await input.setInputFiles({ name: 'first.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
+  await expect(page.locator('#item-title')).toBeVisible();
+  await expect.poll(() => backend.requests.filter((request) => request.path === '/rest/v1/rpc/ai_status').length).toBe(1);
   const before = backend.requests.length;
   const proofsBefore = backend.statusProofs().length;
   await holdNextPhotoRead(page);
-  const input = page.locator('input[type="file"]').first();
   await input.setInputFiles({ name: 'old.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
   await expect.poll(() => page.evaluate(() => (window as PhotoReadProbe).photoReadStarted)).toBe(true);
   await expect(page.getByRole('button', { name: messages['capture.save'].en, exact: true })).toBeDisabled();
@@ -670,9 +680,12 @@ test('discard and owner logout clear the invalid-photo alert and ignore late pho
   await signIn(page);
   await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
   const input = page.locator('input[type="file"]').first();
+  // UX2: the details appear once a photo is chosen; the invalid choice then replaces it in step 2.
+  await input.setInputFiles({ name: 'first.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
+  await page.locator('#item-title').fill('Unsaved synthetic');
   await input.setInputFiles({ name: 'invalid.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
   await expect(page.getByRole('alert')).toHaveText(messages['photo.invalid'].en);
-  await page.locator('#item-title').fill('Unsaved synthetic');
+  await expect(page.locator('#item-title')).toHaveValue('Unsaved synthetic');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.getByRole('button', { name: 'Discard changes' }).click();
   await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
@@ -685,7 +698,7 @@ test('discard and owner logout clear the invalid-photo alert and ignore late pho
   await expect(page.getByRole('alert')).toHaveCount(0);
   await signIn(page, 'b');
   await expect(page.locator('#capture-title')).toHaveText(messages['capture.title'].sv);
-  await expect(page.locator('#item-title')).toHaveValue('');
+  await expect(page.locator('#item-title')).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
   await holdNextPhotoRead(page);
   await input.setInputFiles({ name: 'late.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
@@ -802,10 +815,11 @@ test('logout clears private state before another owner signs in', async ({ page 
 });
 
 test('offline save is disabled without losing draft text', async ({ page, context }) => {
-  await mockBackend(page, { initialLanguage: 'en' });
+  const backend = await mockBackend(page, { initialLanguage: 'en' });
   await page.goto('/');
   await signIn(page);
   await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
+  await page.locator('input[type="file"]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
   await page.locator('#item-title').fill('Still here');
   await context.setOffline(true);
   await expect(page.getByRole('button', { name: messages['capture.save'].en, exact: true })).toBeDisabled();
@@ -1319,7 +1333,9 @@ test('concise empty wardrobe and bounded synthetic evidence', async ({ page }, t
     await page.setViewportSize({ width, height: 900 });
     await expect(page.locator('.empty-copy h2')).toHaveText(messages['wardrobe.empty'][language]);
     await expect(page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'][language], exact: true })).toBeVisible();
-    await expect(page.locator('.empty-copy > p:not(.privacy-note), .page-heading .eyebrow, .page-heading .muted')).toHaveCount(0);
+    await expect(page.locator('.empty-copy > p:not(.privacy-note):not(.empty-hint), .page-heading .eyebrow, .page-heading .muted')).toHaveCount(0);
+    await expect(page.locator('.empty-copy > p.empty-hint')).toHaveText(messages['wardrobe.emptyHint'][language]);
+    await expect(page.getByRole('button', { name: messages['wardrobe.add'][language], exact: true })).toHaveCount(1);
     await expect(page.getByText(messages['wardrobe.privateNote'][language], { exact: true })).toBeVisible();
     expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
     expect(api.profiles[owners.b]).toEqual(foreign);

@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { translate, type Language } from '../../src/i18n';
 import { mockBackend, signIn } from './mock-backend';
-import { aiFixture, addAiPhoto } from './ai-photo-first-support';
+import { aiFixture, addAiPhoto, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { codePreloaded } from './lazy-support';
 import { preloadDelayMs } from '../../src/app/lazy-load';
 
@@ -58,7 +58,10 @@ test.describe('lazy routes', () => {
   test('photo replacement loads from item detail', async ({ page }) => {
     const { saved } = await start(page);
     await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+    await editItem(page);
     await expect(page.locator('#detail-title')).toHaveValue(saved.item.title as string);
+    await page.locator('#detail-cancel-edit').click();
+    await openPhotoMenu(page);
     await page.getByRole('button', { name: translate('en', 'imageChange.replace'), exact: true }).click();
     await expectRoute(page, '#image-change-title');
   });
@@ -104,6 +107,7 @@ test.describe('lazy routes', () => {
       await page.locator('#item-title').fill('Kept title');
       const photo = await page.locator('.capture-photo img').getAttribute('src');
       const category = await page.locator('#item-category').inputValue();
+      await openPhotoMenu(page);
       await page.locator('#edit-photo').click();
       await expect(page.locator(mode === 'failed' ? '.chunk-error[role=alert]' : '.chunk-loading [role=status]')).toBeVisible();
       await expect(page.locator('#crop-rectangle')).toHaveCount(0);
@@ -112,12 +116,13 @@ test.describe('lazy routes', () => {
       await expect(page.locator('.capture-photo img')).toHaveAttribute('src', photo!);
       await expect(page.locator('#item-title')).toHaveValue('Kept title');
       await expect(page.locator('#item-category')).toHaveValue(category);
-      await expect(page.locator('#edit-photo')).toBeFocused();
+      await expect(page.locator('#photo-menu')).toBeFocused();
       await expect(page.locator('#photo-pending')).toHaveCount(0);
       await expect(page.locator('.save-actions button[type=submit]')).toBeEnabled();
       for (const release of held.splice(0)) await release();
       if (mode === 'loading') {
-        await page.locator('#edit-photo').click();
+        await openPhotoMenu(page);
+      await page.locator('#edit-photo').click();
         await expect(page.locator('#crop-rectangle')).toBeVisible();
       }
     });

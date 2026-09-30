@@ -247,6 +247,8 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         check(!foreign.error && foreign.data.length === 0 && foreignHistory.error?.code === '42501');
         await page.reload();
         await page.locator(`a[href="#/items/${item.id}"]`).click();
+        // UX2: the saved item opens as a view card; the form appears after Edit.
+        await page.locator('#detail-edit').click();
         await page.locator('#detail-title').waitFor();
         check(await page.locator('#detail-title').inputValue() === item.title && posts === 1);
         const finalProfile = await client.from('profiles').select('owner_id,display_name,ui_language,timezone,currency,version').eq('owner_id', ownerId).single();

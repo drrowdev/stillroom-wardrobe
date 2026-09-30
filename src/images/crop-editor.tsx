@@ -171,15 +171,6 @@ export function CropEditor({ preview, width, height, accepted, preparing, t, onA
         <button id="crop-reset" className="button button-quiet" type="button"
           onClick={() => { setTurns(ORIGINAL_EDIT.turns); fresh(ORIGINAL_EDIT.turns); }}>{t('photo.reset')}</button>
       </div>
-      <details className="crop-exact">
-        <summary>{t('photo.cropExact')}</summary>
-        <div className="crop-fields">{fields.map((field) => <div className="field" key={field}>
-          <label htmlFor={`crop-${field}`}>{t(labels[field])}</label>
-          <input id={`crop-${field}`} type="text" inputMode="decimal" value={values[field]} aria-invalid={!valid}
-            readOnly={factor !== null && field === 'height'}
-            aria-describedby="crop-status" onChange={(event) => setValues(derive({ ...values, [field]: event.target.value }))} />
-        </div>)}</div>
-      </details>
     </fieldset>
     <div className="crop-footer">
       <button id="apply-crop" className="button button-primary" type="button" disabled={!valid || preparing}
@@ -195,5 +186,16 @@ export function CropEditor({ preview, width, height, accepted, preparing, t, onA
         }}>{t('photo.applyCrop')}</button>
       <button id="crop-cancel" className="button button-quiet" type="button" onClick={onCancel}>{t('photo.cancelCrop')}</button>
     </div>
+    <fieldset disabled={preparing}>
+      <details className="crop-exact crop-exact-after">
+        <summary>{t('photo.cropExact')}</summary>
+        <div className="crop-fields">{fields.map((field) => <div className="field" key={field}>
+          <label htmlFor={`crop-${field}`}>{t(labels[field])}</label>
+          <input id={`crop-${field}`} type="text" inputMode="decimal" value={values[field]} aria-invalid={!valid}
+            readOnly={factor !== null && field === 'height'}
+            aria-describedby="crop-status" onChange={(event) => setValues(derive({ ...values, [field]: event.target.value }))} />
+        </div>)}</div>
+      </details>
+    </fieldset>
   </section>;
 }

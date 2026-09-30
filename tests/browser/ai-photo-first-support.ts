@@ -109,3 +109,15 @@ export async function addAiPhoto(page: Page, fixture: Awaited<ReturnType<typeof 
   await page.locator('input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: fixture.fixture });
   await expect(page.locator('.capture-photo img')).toBeVisible();
 }
+/** UX2: change, crop and background actions sit behind the Photo options toggle once a photo is chosen. */
+export async function openPhotoMenu(page: Page) {
+  const toggle = page.locator('#photo-menu');
+  await expect(toggle).toBeVisible();
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+  await expect(page.locator('#photo-menu-panel')).toBeVisible();
+}
+/** UX2: a saved item opens as a view card; the form appears after Edit. */
+export async function editItem(page: Page) {
+  await page.locator('#detail-edit').click();
+  await expect(page.locator('#detail-title')).toBeFocused();
+}

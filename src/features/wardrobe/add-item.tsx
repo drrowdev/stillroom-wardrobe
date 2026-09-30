@@ -22,6 +22,7 @@ import { preparingMessage, useBackground, type PreparedWithBackground } from './
 import { useEnhancement } from './use-enhancement';
 import type { StageResult } from './enhancement-stage';
 import { EnhancementStatus } from './enhancement-status';
+import { PhotoChoice, PhotoMenu, photoMenuId } from './photo-actions';
 
 const loadImaging = preloadable(() => import('../../images/imaging'));
 const CropEditor = lazyNamed(() => import('../../images/crop-editor'), 'CropEditor');
@@ -31,6 +32,7 @@ const preparationErrors: Record<ImagePreparationError['code'], MessageKey> = {
   invalid: 'photo.invalid',
   unavailable: 'photo.prepareUnavailable',
 };
+const photoErrors = new Set<MessageKey>([...Object.values(preparationErrors), 'chunk.failed']);
 /**
  * BG2c pre-upload review (plan rev4 §3.1): a new photo whose clean-up would be sent, held in memory with its first-pass
  * H0 and R until the crop is accepted. Nothing is committed, analysed or sent while it is open.
@@ -51,6 +53,9 @@ type Props = {
   onSaved: () => void; onBack: () => void; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void;
   ai: AiClient; onBeforeDiscard: (handler: BeforeDiscard | null) => void;
 };
+function CameraHelp({ t }: { t: Translate }) {
+  return <details className="copy-details"><summary>{t('photo.cameraHelp')}</summary><p>{t('photo.cameraFallback')}</p></details>;
+}
 export function AddItem({ client, scope, currency, online, t, language, onSaved, onBack, onDirty, ai, onBeforeDiscard }: Props) {
   const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -86,7 +91,14 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   const pendingCrop = useRef(false);
   const preparationWork = useRef<Promise<void>>(Promise.resolve());
   const original = useRef<Blob | null>(null);
-  const focusEditorButton = useRef(false);
+  // Where focus goes once a committed photo or a closed crop editor is on screen: the details after the first photo,
+  // then "Photo options".
+  const focusTarget = useRef<'capture-basics' | typeof photoMenuId | null>(null);
+  // The details appear once the first photo is ready and are never hidden again while the page is open.
+  const [advanced, setAdvanced] = useState(false);
+  const advancedNow = useRef(false);
+  const [cameraTrouble, setCameraTrouble] = useState(false);
+  const lastSource = useRef<'library' | 'camera' | null>(null);
   const submitLatch = useRef(false);
   const busy = stage !== null || cancelling;
   const frozen = attempt !== null;
@@ -114,11 +126,24 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     return () => onBeforeDiscard(null);
   }, [analysis, ai, attempt, onBeforeDiscard, scope]);
   useEffect(() => {
-    if (focusEditorButton.current && !editing && !preparing) {
-      focusEditorButton.current = false;
-      document.getElementById('edit-photo')?.focus();
-    }
-  }, [editing, preparing]);
+    if (!focusTarget.current || editing || preparing) return;
+    const target = focusTarget.current;
+    focusTarget.current = null;
+    // Never pull focus away from a field the user has moved to while the photo was being prepared.
+    const active = document.activeElement;
+    if (active && !active.closest('.photo-panel') && active.matches('input, select, textarea, button, summary, a[href], [contenteditable="true"]')) return;
+    document.getElementById(target)?.focus();
+  }, [editing, preparing, advanced, photo]);
+  useEffect(() => {
+    if (error && photoErrors.has(error) && lastSource.current === 'camera') setCameraTrouble(true);
+  }, [error]);
+  useEffect(() => {
+    // A dismissed camera (also a dark or denied one) offers the camera help; older browsers only report failures.
+    const input = camera.current;
+    const dismissed = () => setCameraTrouble(true);
+    input?.addEventListener('cancel', dismissed);
+    return () => input?.removeEventListener('cancel', dismissed);
+  }, []);
   useEffect(() => {
     const clear = () => { preparation.current?.abort(); original.current = null; setReview(null); };
     scope.signal.addEventListener('abort', clear, { once: true });
@@ -244,13 +269,16 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     pendingCrop.current = false;
     setAcceptedEdit(edit);
     setEditing(false);
-    if (!replacing) focusEditorButton.current = true;
+    focusTarget.current = advancedNow.current ? photoMenuId : 'capture-basics';
+    advancedNow.current = true;
+    setAdvanced(true);
+    setCameraTrouble(false);
   }
   /** Done in the review is the acceptance, also with an unchanged crop; a changed crop is prepared again and sent. */
   function acceptReview(edit: PhotoEdit, unchanged: boolean) {
     const current = review;
     if (!current || preparation.current !== current.controller || !original.current) return;
-    focusEditorButton.current = true;
+    focusTarget.current = photoMenuId;
     void prepare(original.current, edit, true, { fromReview: current, ...(unchanged ? { accepted: current.prepared } : {}) });
   }
   /**
@@ -261,7 +289,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     const current = review;
     if (!current) return;
     if (preparation.current !== current.controller) { preparation.current?.abort(); setPreparing(false); }
-    focusEditorButton.current = true;
+    focusTarget.current = photoMenuId;
     commit(current.prepared, notSent, current.edit, true, null);
   }
   /** "Use original background" in the review: the original photo is prepared, with nothing sent. */
@@ -269,7 +297,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     const current = review;
     if (!current || preparation.current !== current.controller || !original.current) return;
     background.keep();
-    focusEditorButton.current = true;
+    focusTarget.current = photoMenuId;
     void prepare(original.current, current.edit, true);
   }
   async function submit(event: FormEvent): Promise<void> {
@@ -353,13 +381,13 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     setPreparing(false);
     setEditing(false);
     setError(null);
-    focusEditorButton.current = true;
+    focusTarget.current = photoMenuId;
   }
   return (
     <section className="capture-page" aria-labelledby="capture-title">
       <button className="text-button back-button" type="button" onClick={onBack} disabled={busy}><Icon name="arrow" />{t('wardrobe.back')}</button>
       <div className="page-heading"><div><h1 id="capture-title" tabIndex={-1}>{t('capture.title')}</h1></div></div>
-      <form className="capture-layout" onSubmit={(event) => { void submit(event); }} noValidate>
+      <form className={`capture-layout${advanced ? '' : ' capture-step-photo'}`} onSubmit={(event) => { void submit(event); }} noValidate>
         <div className="photo-panel">
           {editing && fullPhoto && fullPreview && !provisional ? <LazyBoundary t={t}
             action={<button id="crop-leave" className="button button-quiet" type="button" onClick={review ? cancelReview : cancelEdit}>{t('photo.cancelCrop')}</button>}>
@@ -371,23 +399,36 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
             {provisionalPreview ? <img src={provisionalPreview} alt={altText || title || t('capture.photo')} />
             : preview ? <img src={preview} alt={altText || title || t('capture.photo')} /> : preparing ? <div className="photo-prompt"><span className="spinner" /><p role="status">{t(preparingMessage(background.state, background.downloading, 'capture.preparing'))}</p></div> : <div className="photo-prompt"><span className="photo-prompt-icon"><Icon name="photo" /></span><h2>{t('capture.photo')}</h2><p>{t('capture.photoHint')}</p><BackgroundNote t={t} language={language} /></div>}
           </div>}
-          <input ref={library} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1} aria-label={t('capture.library')} disabled={frozen} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
-          <input ref={camera} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" tabIndex={-1} aria-label={t('capture.camera')} disabled={frozen} onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
-          {!editing && <div className="photo-actions"><button id="choose-photo" className="button button-secondary" type="button" disabled={frozen || preparing} onClick={() => library.current?.click()}><Icon name="photo" />{t(photo ? 'capture.replace' : 'capture.library')}</button><button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => camera.current?.click()}><Icon name="camera" />{t('capture.camera')}</button>
-            {fullPhoto && fullPreview && <button id="edit-photo" className="button button-secondary" type="button"
-              disabled={frozen || preparing} aria-expanded={editing} onClick={() => setEditing(true)}><Icon name="crop" />{t('photo.edit')}</button>}</div>}
-          {review && editing && !provisional && <BackgroundStatus state="removed" analysed={false} disabled={frozen || preparing || busy} t={t} onUseOriginal={reviewOriginal} />}
+          <input ref={library} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1} aria-label={t('capture.library')} disabled={frozen} onChange={(event) => { lastSource.current = 'library'; void choose(event.target.files?.[0]); event.target.value = ''; }} />
+          <input ref={camera} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" tabIndex={-1} aria-label={t('capture.camera')} disabled={frozen} onChange={(event) => { lastSource.current = 'camera'; void choose(event.target.files?.[0]); event.target.value = ''; }} />
+          {/* Before a photo, and after a replacement fails, the two choices stay outside any disclosure. */}
+          {!photo && !review && !editing && <PhotoChoice t={t} disabled={frozen || preparing} chooseId="choose-photo"
+            onLibrary={() => library.current?.click()} onCamera={() => camera.current?.click()} />}
+          {photo && !editing && <PhotoMenu t={t} disabled={frozen || preparing}>
+            <button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => library.current?.click()}><Icon name="photo" />{t('capture.replace')}</button>
+            <button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => camera.current?.click()}><Icon name="camera" />{t('capture.camera')}</button>
+            {fullPhoto && fullPreview && <button id="edit-photo" className="button button-quiet" type="button"
+              disabled={frozen || preparing} aria-expanded={editing} onClick={() => setEditing(true)}><Icon name="crop" />{t('photo.edit')}</button>}
+            {!provisional && <BackgroundStatus placement="menu" state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
+              disabled={frozen || preparing || busy} t={t} onUseOriginal={useOriginalBackground} />}
+            <EnhancementStatus placement="menu" view={enhancement.view} disabled={frozen || preparing || busy} t={t}
+              onSkip={enhancement.skip} onRevert={() => revertEnhancement()} />
+            <ReanalyseNote t={t} show={(enhancement.view.enhanced && !enhancement.view.working) || (!provisional && background.state === 'removed' && analysis.phase !== 'off' && analysis.phase !== 'none')} />
+            {cameraTrouble && <CameraHelp t={t} />}
+          </PhotoMenu>}
+          {review && editing && !provisional && <BackgroundStatus state="removed" review analysed={false} disabled={frozen || preparing || busy} t={t} onUseOriginal={reviewOriginal} />}
           {!editing && !provisional && <BackgroundStatus state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
             disabled={frozen || preparing || busy} t={t} onUseOriginal={useOriginalBackground} />}
           {(!editing || provisional) && <EnhancementStatus view={enhancement.view} disabled={frozen || preparing || busy} t={t}
             onSkip={enhancement.skip} onRevert={() => revertEnhancement()} onCancelCrop={provisional?.crop ? cancelEdit : undefined} />}
-          <ReanalyseNote t={t} show={((!editing || provisional) && enhancement.view.enhanced && !enhancement.view.working) || (!editing && !provisional && background.state === 'removed' && analysis.phase !== 'off' && analysis.phase !== 'none')} />
           {(editing || preparing) && !enhancement.view.working && <p id="photo-pending" tabIndex={-1} role="status" className="notice">{t(preparing ? 'photo.pendingPreparation' : 'photo.pendingCrop')}</p>}
           {invalid && !photo && <p className="field-error">{t('common.required')}</p>}
-          <details className="copy-details"><summary>{t('photo.cameraHelp')}</summary><p>{t('photo.cameraFallback')}</p></details>
+          {error && (!advanced || !photo) && <div className="notice notice-error" role="alert"><p>{t(error)}</p></div>}
+          {cameraTrouble && !photo && <CameraHelp t={t} />}
+          {!advanced && <button className="text-button capture-step-cancel" type="button" onClick={onBack} disabled={busy}>{t('common.cancel')}</button>}
         </div>
-        <div className="details-panel">
-          <div className="details-heading"><h2>{t('capture.detailsTitle')}</h2></div>
+        {advanced && <div className="details-panel">
+          <div className="details-heading"><h2 id="capture-basics" tabIndex={-1}>{t('capture.detailsTitle')}</h2></div>
           {photo && !frozen && <AnalysisStatus phase={analysis.phase} checking={analysis.checking} t={t}
             disabled={!online || busy || preparing || editing}
             onRetry={() => { if (!submitLatch.current) void analysis.commitPhoto(photo); }}
@@ -402,11 +443,11 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
               {validDescription(altText) === null && <p id="alt-error" role="alert" className="notice notice-error">{t('detail.invalidDescription')}</p>}
             </div>
           </ItemForm>
-          {error && <div className="notice notice-error" role="alert"><p>{t(error)}</p>{attempt && <p>{t('capture.retryNote')}</p>}</div>}
+          {error && advanced && photo && <div className="notice notice-error" role="alert"><p>{t(error)}</p>{attempt && <p>{t('capture.retryNote')}</p>}</div>}
           {frozen && !busy && <p className="fine muted">{t('capture.frozen')}</p>}
           <div className="save-actions"><button className="button button-primary button-wide" type="submit" disabled={!online || busy || preparing || editing || !attempt && !analysis.canSave}>{busy ? <span className="spinner" /> : <Icon name="check" />}{t(stage ?? (attempt ? 'common.retry' : 'capture.save'))}</button><button className="button button-quiet" type="button" onClick={onBack} disabled={busy}>{t('common.cancel')}</button></div>
           {stage && <p className="sr-only" role="status">{t(stage)}</p>}
-        </div>
+        </div>}
       </form>
     </section>
   );

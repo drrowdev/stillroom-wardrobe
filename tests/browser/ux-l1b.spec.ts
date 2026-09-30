@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { languages, locales, messages, translate, type Language, type MessageKey } from '../../src/i18n';
-import { aiFixture, addAiPhoto } from './ai-photo-first-support';
+import { aiFixture, addAiPhoto, editItem, openPhotoMenu } from './ai-photo-first-support';
 
 type Api = Awaited<ReturnType<typeof aiFixture>>;
 type Values = { x: number; y: number; width: number; height: number };
@@ -55,6 +55,7 @@ async function ready(page: Page, language: Language = 'en', size?: { width: numb
   return api;
 }
 async function openEditor(page: Page) {
+  await openPhotoMenu(page);
   await page.locator('#edit-photo').click();
   await expect(page.locator('#crop-rectangle')).toBeVisible();
   await page.locator('.crop-stage').scrollIntoViewIfNeeded();
@@ -459,9 +460,10 @@ test('UX L1b T8 keyboard order, arrow moves, the disclosure and invalid values',
     await page.locator('#crop-editor-title').focus();
     for (const id of expected) { await page.keyboard.press('Tab'); expect(await focused()).toBe(id); }
   };
-  await order(['crop-rectangle', 'crop-rotate', 'crop-reset', 'summary', 'apply-crop', 'crop-cancel']);
+  // UX2: Exact crop values is an advanced disclosure after the Done and Cancel row.
+  await order(['crop-rectangle', 'crop-rotate', 'crop-reset', 'apply-crop', 'crop-cancel', 'summary']);
   await openExact(page);
-  await order(['crop-rectangle', 'crop-rotate', 'crop-reset', 'summary', 'crop-x', 'crop-y', 'crop-width', 'crop-height', 'apply-crop', 'crop-cancel']);
+  await order(['crop-rectangle', 'crop-rotate', 'crop-reset', 'apply-crop', 'crop-cancel', 'summary', 'crop-x', 'crop-y', 'crop-width', 'crop-height']);
   await setExact(page, { width: '50', height: '100', x: '0', y: '0' });
   await page.locator('#crop-rectangle').focus();
   await page.keyboard.press('ArrowRight');
@@ -483,12 +485,12 @@ test('UX L1b T8 keyboard order, arrow moves, the disclosure and invalid values',
   await summary.click();
   await expect(page.locator('#crop-status')).toBeVisible();
   await page.locator('#crop-cancel').click();
-  await expect(page.locator('#edit-photo')).toBeFocused();
+  await expect(page.locator('#photo-menu')).toBeFocused();
   await expect(page.locator('.capture-photo img')).toHaveAttribute('src', src!);
   await openEditor(page);
   await setExact(page, { width: '60' });
   await page.locator('#apply-crop').click();
-  await expect(page.locator('#edit-photo')).toBeFocused();
+  await expect(page.locator('#photo-menu')).toBeFocused();
 });
 
 for (const language of languages) {
@@ -541,7 +543,7 @@ test('UX L1b T10 editing sends nothing; an unchanged Done sends nothing; a chang
   await page.locator('#crop-reset').click();
   await setExact(page, { width: '70' });
   await page.locator('#crop-cancel').click();
-  await expect(page.locator('#edit-photo')).toBeFocused();
+  await expect(page.locator('#photo-menu')).toBeFocused();
   expect(requests).toEqual([]);
   expect(analyses(api)).toBe(1);
   await openEditor(page);
@@ -571,7 +573,7 @@ test('UX L1b T11 with AI off a changed Done prepares a new photo and makes no an
   await openEditor(page);
   await setExact(page, { width: '50' });
   await page.locator('#apply-crop').click();
-  await expect(page.locator('#edit-photo')).toBeFocused();
+  await expect(page.locator('#photo-menu')).toBeFocused();
   await expect.poll(() => previewSha256(page)).not.toBe(before);
   expect(analyses(api)).toBe(0);
   await page.locator('#item-title').fill('Manual photo');
@@ -585,48 +587,68 @@ test('UX L1b T12 Replace shows the editor in place of the photo actions and retu
   const { item, image } = api.seedSavedItem();
   await page.reload();
   await page.locator(`a[href="#/items/${item.id}"]`).click();
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue(item.title);
   await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
+  await page.locator('#detail-cancel-edit').click();
   const before = structuredClone(item), oldImage = structuredClone(image);
+  await openPhotoMenu(page);
   await page.getByRole('button', { name: text('imageChange.replace'), exact: true }).click();
   await expect(page.locator('.image-change .photo-actions').getByRole('button', { name: text('capture.library'), exact: true })).toBeEnabled();
   await page.locator('.image-change input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
   await expect.poll(() => api.inputs.length).toBe(1);
   await expect(page.locator('#image-change-edit')).toBeEnabled();
+  await openPhotoMenu(page);
   await page.locator('#image-change-edit').click();
   await expect(page.locator('.image-change .photo-actions')).toHaveCount(0);
   expect(await page.locator('.image-change .photo-panel').evaluate((panel) => panel.firstElementChild?.classList.contains('crop-editor'))).toBe(true);
   await page.locator('#crop-cancel').click();
-  await expect(page.locator('#image-change-edit')).toBeFocused();
+  await expect(page.locator('#photo-menu')).toBeFocused();
+  await openPhotoMenu(page);
   await page.locator('#image-change-edit').click();
   await page.locator('#crop-rotate').click();
   await page.locator('#apply-crop').click();
   await expect.poll(() => api.inputs.length).toBe(2);
-  await expect(page.locator('#image-change-edit')).toBeFocused();
+  await expect(page.locator('#photo-menu')).toBeFocused();
   expect(api.requests.some((call) => call.path.endsWith('/reserve_image_change'))).toBe(false);
   expect(item).toEqual(before); expect(image).toEqual(oldImage);
 });
 
 test('UX L1b T13 the Add photo actions are one tidy group', async ({ page }) => {
-  await ready(page);
+  // UX2: before a photo the group is one primary Choose photo plus Take photo; after it, one Photo options toggle whose
+  // panel holds Change photo, Take photo and Crop. Both layouts stay in one row at 1280 and never overlap at 320.
+  const api = await aiFixture(page);
+  await page.getByRole('button', { name: text('wardrobe.add'), exact: true }).first().click();
+  const layout = (selector: string) => page.locator(selector).evaluate((element) => ({
+    boxes: [...element.querySelectorAll('button')].filter((child) => child.getClientRects().length).map((child) => child.getBoundingClientRect().toJSON() as DOMRect),
+    fits: document.documentElement.scrollWidth <= innerWidth,
+  }));
+  const tidy = async (selector: string, row: boolean) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    let current = await layout(selector);
+    if (row) expect(new Set(current.boxes.map((box) => Math.round(box.top))).size).toBe(1);
+    expect(current.fits).toBe(true);
+    await page.setViewportSize({ width: 320, height: 800 });
+    current = await layout(selector);
+    expect(current.fits).toBe(true);
+    for (const [index, a] of current.boxes.entries()) for (const b of current.boxes.slice(index + 1)) {
+      expect(a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5).toBe(true);
+    }
+  };
   const group = page.locator('.photo-actions');
   await expect(group).toHaveCount(1);
   expect(await group.evaluate((element) => [...element.children].map((child) => child.id || child.textContent?.trim())))
-    .toEqual(['choose-photo', text('capture.camera'), 'edit-photo']);
-  const layout = () => group.evaluate((element) => ({
-    boxes: [...element.children].map((child) => child.getBoundingClientRect().toJSON() as DOMRect),
-    fits: document.documentElement.scrollWidth <= innerWidth,
-  }));
-  await page.setViewportSize({ width: 1280, height: 900 });
-  let current = await layout();
-  expect(new Set(current.boxes.map((box) => Math.round(box.top))).size).toBe(1);
-  expect(current.fits).toBe(true);
-  await page.setViewportSize({ width: 320, height: 800 });
-  current = await layout();
-  expect(current.fits).toBe(true);
-  for (const [index, a] of current.boxes.entries()) for (const b of current.boxes.slice(index + 1)) {
-    expect(a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5).toBe(true);
-  }
+    .toEqual(['choose-photo', text('capture.camera')]);
+  await expect(group.locator('.button-primary')).toHaveCount(1);
+  await tidy('.photo-actions', true);
+  await page.locator('input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
+  await expect(page.locator('#item-category')).not.toHaveValue('');
+  await expect(group).toHaveCount(1);
+  expect(await group.evaluate((element) => [...element.children].map((child) => child.id))).toEqual(['photo-menu', 'photo-menu-panel']);
+  await openPhotoMenu(page);
+  expect(await page.locator('#photo-menu-panel').evaluate((panel) => [...panel.querySelectorAll('button')].map((button) => button.id || button.textContent?.trim())))
+    .toEqual([text('capture.replace'), text('capture.camera'), 'edit-photo']);
+  await tidy('#photo-menu-panel', false);
   await page.locator('#edit-photo').click();
   await expect(page.locator('.photo-actions')).toHaveCount(0);
   expect(await page.locator('.photo-panel').evaluate((panel) => panel.firstElementChild?.classList.contains('crop-editor'))).toBe(true);
@@ -699,7 +721,10 @@ test.describe('bounded UX L1b visual evidence', () => {
         const file = await open(path.join(directory, `${name}-${selected.suffix}.png`), 'wx');
         try { await file.writeFile(png); } finally { await file.close(); }
       };
+      // UX2 (plan §9): photo-actions is step 2 with Photo options open.
       await expect(page.locator('.photo-actions')).toHaveCount(1);
+      await openPhotoMenu(page);
+      await expect(page.locator('#photo-menu')).toHaveAttribute('aria-expanded', 'true');
       await capture('photo-actions');
       await openEditor(page);
       await setExact(page, { width: '70', height: '70', x: '15', y: '15' });
@@ -710,7 +735,7 @@ test.describe('bounded UX L1b visual evidence', () => {
       await openExact(page);
       await capture('crop-exact');
       await page.locator('#crop-cancel').click();
-      await expect(page.locator('#edit-photo')).toBeFocused();
+      await expect(page.locator('#photo-menu')).toBeFocused();
     });
   }
 });

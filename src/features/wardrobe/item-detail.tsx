@@ -22,6 +22,8 @@ import { lazyNamed } from '../../app/lazy-load';
 import { loadWearHistory, type WearSummary } from '../../data/wear-history';
 import { loadEditedImage } from '../../data/provenance';
 import { wearLineText } from '../statistics/wear-text';
+import { PhotoMenu } from './photo-actions';
+import { itemFacts } from './item-facts';
 
 const ReplacePhoto = lazyNamed(() => import('./replace-photo'), 'ReplacePhoto');
 
@@ -187,6 +189,16 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
     props.detail.image, descriptionDraft, prepareDescriptionAttempt, saveImageDescription, readImage, confirmsDescription, props.detail.item.id, props, descriptionChecked);
   const [lifecycleState, setLifecycleState] = useState({ busy: false, pending: false });
   const [mode, setMode] = useState<'replacement' | 'recovery' | null>(null);
+  // View first: the facts card, with Edit revealing the form. Only this block switches; the section hooks, the recovery
+  // messages and the Archive/Trash row stay mounted in both modes.
+  const [editing, setEditing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const focusAfter = useRef<'detail-edit' | 'detail-title' | null>(null);
+  useEffect(() => {
+    const id = focusAfter.current;
+    focusAfter.current = null;
+    if (id) document.getElementById(id)?.focus();
+  }, [editing]);
   const [photoState, setPhotoState] = useState({ dirty: false, incomplete: false, busy: false });
   const [saving, setSaving] = useState(false);
   const saveLatch = useRef(false);
@@ -224,6 +236,8 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
         return;
       }
       setOutcome('saved');
+      focusAfter.current = 'detail-edit';
+      setEditing(false);
     } finally { saveLatch.current = false; setSaving(false); }
   }
   async function quick(field: 'lifecycle', value: string) {
@@ -232,21 +246,42 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
     try { if (await item.run('save', editGarmentField(item.draft, field, value, props.language)) === 'confirmed') setOutcome('saved'); }
     finally { saveLatch.current = false; }
   }
+  function startEdit() {
+    if (sectionsBusy || item.attempt !== null || description.attempt !== null || lifecycleState.busy || lifecycleState.pending) return;
+    setOutcome(null);
+    focusAfter.current = 'detail-title';
+    setEditing(true);
+  }
+  // Back to the card with both drafts reset to their saved values; nothing is sent.
+  function leaveEdit() {
+    item.setDraft(itemDraft(item.base));
+    description.setDraft(descriptionDraft(description.base));
+    setOutcome(null);
+    focusAfter.current = 'detail-edit';
+    setEditing(false);
+  }
+  function cancelEdit() {
+    if (sectionsBusy || item.attempt !== null || description.attempt !== null) return;
+    if (item.dirty || description.dirty) setCancelling(true);
+    else leaveEdit();
+  }
   if (mode) return <LazyBoundary t={t}><ReplacePhoto {...props} item={item.base} image={description.base} mode={mode} onDirty={onPhotoState}
     onClose={() => { setMode(null); props.onReload(); }} /></LazyBoundary>;
   const lifecycle = item.draft.raw.lifecycle;
+  const unresolved = item.attempt !== null || description.attempt !== null;
+  const facts = itemFacts(item.base.values, props.language, t);
   return <div className="detail-layout">
     <div className="detail-media">
       <SavedPhoto image={description.base} images={props.images} t={t} />
       <EditedLabel client={props.client} scope={props.scope} imageId={description.base.id} online={props.online} t={t} />
-      <div className="photo-actions">
-        <button className="button button-secondary" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('replacement'); }}>{t('imageChange.replace')}</button>
-        <button className="text-button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('recovery'); }}>{t('imageChange.recover')}</button>
-      </div>
+      {!editing && <PhotoMenu t={t} disabled={blocked || !props.online}>
+        <button className="button button-quiet" type="button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('replacement'); }}>{t('imageChange.replace')}</button>
+        <button className="button button-quiet" type="button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('recovery'); }}>{t('imageChange.recover')}</button>
+      </PhotoMenu>}
       <WearLine client={props.client} scope={props.scope} itemId={props.detail.item.id} online={props.online} language={props.language} t={t} />
     </div>
     <div className="detail-sections">
-      <fieldset className="lifecycle-edit-lock" disabled={lifecycleState.busy || lifecycleState.pending}>
+      {editing ? <fieldset className="lifecycle-edit-lock" disabled={lifecycleState.busy || lifecycleState.pending}>
         <section className="settings-card detail-name" aria-label={t('capture.detailsTitle')}>
           <form ref={form} className="stack" onSubmit={(event) => { event.preventDefault(); void saveAll(); }}>
             <ItemForm draft={item.draft} onChange={(next) => { item.setDraft(next); setOutcome(null); }} baseline={item.base.values} provenance={item.base.provenance}
@@ -258,15 +293,30 @@ function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecyc
                 {invalidDescription && <p id="detail-description-error" role="alert" className="notice notice-error">{t('detail.invalidDescription')}</p>}
               </div>
             </ItemForm>
-            {item.controls}
-            {outcome === 'partial' && <p role="alert" className="notice notice-error">{t('detail.descriptionFailed')}</p>}
-            {description.controls}
-            <button className="button button-primary" disabled={!canSave}>{t(sectionsBusy ? 'common.saving' : 'detail.saveChanges')}</button>
-            {formattingOnly && <p role="status" className="notice">{t('detail.noChanges')}</p>}
-            {outcome === 'saved' && !sectionsDirty && <p role="status" className="settings-success">{t('detail.saved')}</p>}
+            <div className="item-edit-actions">
+              <button className="button button-primary" disabled={!canSave}>{t(sectionsBusy ? 'common.saving' : 'detail.saveChanges')}</button>
+              <button id="detail-cancel-edit" className="text-button" type="button" disabled={sectionsBusy || unresolved} onClick={cancelEdit}>{t('common.cancel')}</button>
+            </div>
           </form>
         </section>
       </fieldset>
+      : <section className="item-view" aria-label={t('capture.detailsTitle')}>
+        <dl className="item-facts">{facts.map(fact => <div key={fact.field} className="item-fact"><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>
+        <button id="detail-edit" className="button button-primary" type="button" disabled={sectionsBusy || unresolved || lifecycleState.busy || lifecycleState.pending}
+          onClick={startEdit}>{t('common.edit')}</button>
+      </section>}
+      {/* Always mounted in both modes: an unresolved save, Archive or check keeps its message, Check and Reload here. */}
+      <div className="item-recovery">
+        {item.controls}
+        {outcome === 'partial' && <p role="alert" className="notice notice-error">{t('detail.descriptionFailed')}</p>}
+        {description.controls}
+        {editing && formattingOnly && <p role="status" className="notice">{t('detail.noChanges')}</p>}
+        {outcome === 'saved' && !sectionsDirty && <p role="status" className="settings-success">{t('detail.saved')}</p>}
+      </div>
+      {cancelling && <DiscardDialog title={t('common.unsaved')} t={t} onCancel={() => {
+        setCancelling(false);
+        requestAnimationFrame(() => document.getElementById('detail-cancel-edit')?.focus());
+      }} onConfirm={() => { setCancelling(false); leaveEdit(); }}><p>{t('detail.discardEdit')}</p></DiscardDialog>}
       <div className="detail-item-actions">
         <div className="detail-archive">
           {lifecycle === 'active'

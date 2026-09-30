@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { languages, messages, translate, type Language, type MessageKey } from '../../src/i18n';
-import { aiFixture, manualEntry } from './ai-photo-first-support';
+import { aiFixture, editItem, manualEntry } from './ai-photo-first-support';
 import { mockBackend, owners, recoveryHash, signIn } from './mock-backend';
 
 // I24: dialogs, editors and the P6c/service-worker surfaces in every language, at 320px and with 200% text.
@@ -269,6 +269,7 @@ for (const language of languages) {
     test('item detail editing and its leave dialog', async ({ page }) => {
       const { saved } = await start(page, language);
       await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+      await editItem(page);
       await expect(page.locator('#detail-title')).toBeVisible();
       await audit(page, language, '.workspace-main');
       await page.locator('#detail-title').fill('Unsaved title');

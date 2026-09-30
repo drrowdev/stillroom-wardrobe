@@ -591,7 +591,7 @@ test('known server time zone rejection keeps the picked value', async ({ page })
   await expect(page.locator('#profile-timezone')).toHaveAttribute('aria-invalid', 'true');
 });
 test('dirty settings Back and Forward use one guard without losing history', async ({ page }) => {
-  await setup(page);
+  const api = await setup(page);
   await page.locator('#profile-display_name').fill('Unsaved settings');
   await page.evaluate(() => history.back());
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -605,6 +605,8 @@ test('dirty settings Back and Forward use one guard without losing history', asy
   await expect(page.locator('#profile-display_name')).toHaveValue('Alex');
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await page.getByRole('button', { name: 'Add item', exact: true }).first().click();
+  // UX2: the details appear once a photo is chosen.
+  await page.locator('input[type="file"]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
   await page.locator('#item-title').fill('Unsaved garment');
   await page.evaluate(() => { location.hash = '#/settings'; });
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -612,8 +614,10 @@ test('dirty settings Back and Forward use one guard without losing history', asy
   await expect(page.locator('#item-title')).toHaveValue('Unsaved garment');
 });
 test('language change preserves unsaved garment draft and owner epoch', async ({ page }) => {
-  await mockBackend(page, { initialLanguage: 'en' }); await page.goto('/'); await signIn(page);
+  const api = await mockBackend(page, { initialLanguage: 'en' }); await page.goto('/'); await signIn(page);
   await page.getByRole('button', { name: 'Add item', exact: true }).first().click();
+  // UX2: the details appear once a photo is chosen.
+  await page.locator('input[type="file"]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
   await page.locator('#item-title').fill('My private garment');
   await page.locator('#item-category').selectOption('top');
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
