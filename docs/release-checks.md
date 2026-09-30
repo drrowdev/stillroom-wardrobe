@@ -30,6 +30,9 @@ The budgets change only in a reviewed PR that says why. They are never recalibra
   budgets"), one worker, no retries, serial tests, and a reporter that fails the run if
   `performance.spec.ts` executed nothing. It is separate from the dev-server and `pwa-prod` configs so
   nothing else competes for the CPU.
+- The same job then runs the BG2c-3 clean-up timing budgets (`cleanup-timing.spec.ts`, the `cleanup-timing`
+  and `cleanup-timing-webkit` projects) in a separate `--workers=1` invocation: serial, no retries, and
+  excluded from the parallel functional projects.
 - Global setup makes one production build with the fictional fixture backend
   (`node_modules/.cache/stillroom-performance/app`) and a separate IIFE bundle of the recommendation
   engine with a seeded 500-item catalogue (`tests/performance/engine-entry.ts`).

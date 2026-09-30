@@ -7,7 +7,8 @@ import { expect, test, type Page } from '@playwright/test';
 // CDP CPU throttling does not reach dedicated workers, so they are extrapolated as 4 x unthrottled (2.7-4.4 s). On
 // WebKit only completion and abort are asserted: headless WebKit's MessageChannel ticks at about 33 Hz even on an idle
 // page, so it can't measure main-thread gaps. The first check warms the worker module up in the dev server and is
-// reported, not asserted. The fixture is generated in the page; no image leaves it. Real-device timing is pending (O13).
+// reported, not asserted. It runs only in the isolated cleanup-timing projects (one worker, serial, no retries). The
+// fixture is generated in the page; no image leaves it. Real-device timing is pending (O13).
 const TOTAL_MS = 1500;
 const GAP_MS = 50;
 const RUNS = 3;
@@ -104,7 +105,7 @@ test.describe('clean-up check timing in the worker (rev8b §2)', () => {
   test.beforeEach(async ({ page }) => { await page.goto('/'); });
 
   test('Chromium unthrottled: total and main-thread gaps', async ({ page, browserName }) => {
-    test.skip(browserName !== 'chromium' || test.info().project.name !== 'chromium', 'Main-thread gaps are measured on Chromium only.');
+    test.skip(browserName !== 'chromium', 'Main-thread gaps are measured on Chromium only.');
     const timing = await measure(page, RUNS);
     report('chromium x1', timing);
     expectCompleted(timing);
@@ -113,7 +114,7 @@ test.describe('clean-up check timing in the worker (rev8b §2)', () => {
   });
 
   test('Chromium x4 throttled: main-thread gaps (totals are extrapolated, not asserted)', async ({ page, browserName }) => {
-    test.skip(browserName !== 'chromium' || test.info().project.name !== 'chromium', 'CDP CPU throttling is Chromium-only.');
+    test.skip(browserName !== 'chromium', 'CDP CPU throttling is Chromium-only.');
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
     const timing = await measure(page, RUNS);
