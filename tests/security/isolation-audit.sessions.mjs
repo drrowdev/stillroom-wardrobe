@@ -711,15 +711,20 @@ async function foreignMatrix(attacker, victim) {
 /**
  * A try-on chain or result exists only after the service-only claim/finish path, which this job cannot reach; the
  * owned and cross-owner cases run in tests/integration/tryon.sessions.mjs. Unknown IDs still read NOT_FOUND here,
- * with no coverage credit.
+ * with no coverage credit, except Stop: since VTO-3a it records the caller's own marker for an unknown chain and replies
+ * CANCELLED, the same as for a foreign one. Each direction leaves that one marker, owned by the attacking fictional
+ * owner. This job has no privileged SQL by design, so it does not remove them and does not claim a clean teardown for
+ * them: the database reset before the edge gate (ci.yml) removes them in CI, and the one-day purge does locally.
  */
 async function tryonReferenceProbes(attacker, victim) {
   stage = `matrix-${attacker.label}>${victim.label}-tryon`;
   const NOT_FOUND = { status: 200, data: { code: 'NOT_FOUND' } };
-  for (const [name, key] of [['tryon_chain_status', 'p_chain_id'], ['tryon_cancel', 'p_chain_id'],
-    ['tryon_result_image_v1', 'p_result_id'], ['tryon_delete_result', 'p_result_id']]) {
+  for (const [name, key] of [['tryon_chain_status', 'p_chain_id'], ['tryon_result_image_v1', 'p_result_id'],
+    ['tryon_delete_result', 'p_result_id']]) {
     expectMatch(`${stage} ${name}`, NOT_FOUND, await probeRpc(attacker, victim, name, { [key]: randomUUID() }));
   }
+  expectMatch(`${stage} tryon_cancel`, { status: 200, data: { code: 'CANCELLED' } },
+    await probeRpc(attacker, victim, 'tryon_cancel', { p_chain_id: randomUUID() }));
 }
 
 /** Analyzed Save needs a provider-completed claim; these assertions stay, but carry no coverage credit. */

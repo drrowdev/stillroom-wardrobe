@@ -216,7 +216,7 @@ export const PRIVATE_TABLES = Object.freeze([
   'image_change_history', 'item_deletion_operations', 'item_deletion_targets', 'imported_attribution_history',
   'provider_capacity', 'provider_deployments', 'provider_slots', 'image_enhancements', 'enhancement_outputs', 'image_provenance',
   'image_enhancement_bindings', 'restore_image_markers', 'enhancement_probe_authorisations', 'app_admins', 'ai_limit_audit',
-  'tryon_chains', 'tryon_attempts', 'tryon_results', 'tryon_probe_authorisations',
+  'tryon_chains', 'tryon_attempts', 'tryon_results', 'tryon_probe_authorisations', 'tryon_chain_stops',
 ]);
 const OWNER_EXPRESSION = '(private.is_approved() AND (owner_id = ( SELECT auth.uid() AS uid)))';
 export const OWNER_POLICIES = Object.freeze([
@@ -454,7 +454,8 @@ export const INCONCLUSIVE_CODES = Object.freeze(['ALLOWANCE', 'RATE_LIMIT', 'UNC
 export const isInconclusive = (result) => INCONCLUSIVE_CODES.includes(applicationCode(result));
 
 const UNREACHABLE_ANALYZED = 'an analyzed Save needs a completed provider analysis claim, which normal sessions cannot create in this job';
-const UNREACHABLE_TRYON = 'a try-on chain or result needs the service-only claim/finish path; tryon.sessions.mjs checks both directions';
+const UNREACHABLE_TRYON = 'a try-on chain or result needs the service-only claim/finish path; tryon.sessions.mjs checks both directions'
+  + ' (tryon_cancel replies CANCELLED alike for a missing or foreign chain id: it records only the caller\'s own Stop marker)';
 const req = (refs, extra = {}) => Object.freeze({ refs: Object.freeze(refs), ...extra });
 /**
  * Per-signature requirements. `refs` are fixture references that must each be substituted on their own (the

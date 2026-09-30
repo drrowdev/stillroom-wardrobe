@@ -482,7 +482,8 @@ async function main() {
         && counted.modes['tryon-ok'] === 4, counted);
 
       stage = 'tryon-foreign';
-      // A foreign outfit, chain or result is answered exactly like a missing one, and A's state is untouched.
+      // A foreign outfit, chain or result is answered exactly like a missing one, and A's state is untouched. Stop replies
+      // CANCELLED for both (VTO-3a): it records only B's own marker, which the fixture teardown removes by its gate prefix.
       const stateA = async () => ({ results: await client.rpc(A, 'tryon_results_v1', {}),
         chain: await client.rpc(A, 'tryon_chain_status', { p_chain_id: chainA }), hour: await hourly(A) });
       const aBefore = await stateA();
@@ -490,10 +491,13 @@ async function main() {
       const missingOutfit = await tryOn(B.token, fields(id(B, 32), 1, id(B, 3), randomUUID()), person());
       check(PROVIDER, 'tryon-foreign-outfit-as-missing', refused(foreignOutfit, 404, 'NOT_FOUND') && refused(missingOutfit, 404, 'NOT_FOUND'),
         { foreign: summary(foreignOutfit), missing: summary(missingOutfit) });
-      for (const [name, key, value] of [['tryon_result_image_v1', 'p_result_id', resultA], ['tryon_delete_result', 'p_result_id', resultA],
-        ['tryon_cancel', 'p_chain_id', chainA], ['tryon_chain_status', 'p_chain_id', chainA]]) {
-        const foreign = await client.rpc(B, name, { [key]: value }), missing = await client.rpc(B, name, { [key]: randomUUID() });
-        check(PROVIDER, `tryon-foreign-${name}`, foreign?.code === 'NOT_FOUND' && isDeepStrictEqual(foreign, missing), { foreign, missing });
+      for (const [name, key, value, missingId, code] of [
+        ['tryon_result_image_v1', 'p_result_id', resultA, randomUUID(), 'NOT_FOUND'],
+        ['tryon_delete_result', 'p_result_id', resultA, randomUUID(), 'NOT_FOUND'],
+        ['tryon_cancel', 'p_chain_id', chainA, id(B, 40), 'CANCELLED'],
+        ['tryon_chain_status', 'p_chain_id', chainA, randomUUID(), 'NOT_FOUND']]) {
+        const foreign = await client.rpc(B, name, { [key]: value }), missing = await client.rpc(B, name, { [key]: missingId });
+        check(PROVIDER, `tryon-foreign-${name}`, foreign?.code === code && isDeepStrictEqual(foreign, missing), { foreign, missing });
       }
       const listedB = await client.rpc(B, 'tryon_results_v1', {});
       check(PROVIDER, 'tryon-foreign-A-unchanged', isDeepStrictEqual(await stateA(), aBefore) && aBefore.results?.code === 'OK'

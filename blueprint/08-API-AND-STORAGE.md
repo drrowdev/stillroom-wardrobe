@@ -824,7 +824,9 @@ no RPC writes `private.app_admins`.
 ## VTO-1 try-on contract (ADR28, inactive)
 
 Owner RPCs (authenticated, security definer, empty search path). A foreign or
-unknown outfit, chain or result is `NOT_FOUND` alike.
+unknown outfit, chain or result is `NOT_FOUND` alike, except `tryon_cancel`
+(below), which answers a foreign or unknown chain as it answers one that does
+not exist yet.
 
 - `tryon_status()`: `code` (`OK`, `UNAVAILABLE`, `UNCONFIGURED`, `INACTIVE`,
   `CONSENT_REQUIRED`), `period`, `serverTimeMs`, `consent`, `policy` (null until
@@ -839,7 +841,13 @@ unknown outfit, chain or result is `NOT_FOUND` alike.
   `activeAttempt`, `resultId` and `expiresAtMs`.
 - `tryon_cancel(uuid)`: `CANCELLED` for a running chain (its reserved slot is
   freed, a late finish never publishes); `COMPLETED` with the `resultId` when
-  the last step already committed; otherwise the terminal state.
+  the last step already committed; otherwise the terminal state. VTO-3a
+  (migration `20261004090000`): when the owner has no chain with that ID yet,
+  it records a private stop marker (owner, chain ID) and answers `CANCELLED`,
+  so a request already on its way cannot claim that chain later. A repeat stop
+  of the same ID reuses its marker. At most 60 new markers per owner per hour:
+  beyond that it answers `UNAVAILABLE` and the client does not report stopped.
+  Stopping an existing chain or re-stopping a marked ID is never capped.
 - `tryon_results_v1()`, `tryon_result_image_v1(uuid)` (`jpegBase64`, `bytes`)
   and `tryon_delete_result(uuid)`: ready pictures only, filtered on the exact
   7-day `expires_at`, whatever the purge has done.
@@ -855,7 +863,9 @@ Service-role only (the `try-on` Edge function with the verified owner):
   `BUSY`, `CONFIG_CHANGED` (another manifest), `CONFLICT` (wrong step or
   hash), `TERMINAL` (a used request ID or a completed chain), `CHAIN_MISMATCH`
   (a garment changed; the chain ends as stale) or the chain's `WITHDRAWN`,
-  `CANCELLED` or `EXPIRED` state. Refusals write no usage and hold no slot.
+  `CANCELLED` or `EXPIRED` state. A step-1 claim of a chain ID with the
+  owner's stop marker is `CANCELLED` with `claimed:false` and creates no chain.
+  Refusals write no usage and hold no slot.
 - `tryon_dispatch(owner, request, client_present)`: `AUTHORISED` sets the
   durable, once-only dispatch authorisation; `ALREADY_AUTHORISED`, `EXPIRED`,
   `CLIENT_GONE`, a chain state or a permission code set nothing. Only an
@@ -871,10 +881,13 @@ Service-role only (the `try-on` Edge function with the verified owner):
 - `tryon_purge_health()` (overdue counts only) and `tryon_probe_authorise`.
 
 Database owner only, with no grant: `tryon_expire_due` (the job
-`stillroom-tryon-expire`, every 15 minutes), `tryon_bootstrap` (sets null
+`stillroom-tryon-expire`, every 15 minutes; it also deletes stop markers older
+than one day and reports `stopsPurged`), `tryon_bootstrap` (sets null
 try-on settings once; never activation or consent) and
-`tryon_discard_transient` (the platform-restore step). Admin v2:
+`tryon_discard_transient` (the platform-restore step; it also deletes the stop
+markers and reports `stopsDeleted`). Account deletion removes the owner's
+markers, and `deletion_owner_rows_absent` checks them. Admin v2:
 `admin_ai_spending_v2(integer)` and `admin_set_ai_limits_v2(smallint, text,
 jsonb, jsonb, text)` add `tryOn` to the AD1a contract with the same rules;
-v1 is unchanged except the `CONFLICT` above. No try-on table is exported or
-restored.
+v1 is unchanged except the `CONFLICT` above. No try-on table or stop marker is
+exported or restored.

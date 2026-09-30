@@ -295,7 +295,8 @@ export class TryOnRun {
     const reply: CancelResult | null = await this.api.cancel(this.chainId).catch(() => null);
     if (!this.live(generation)) return;
     if (reply?.code === 'COMPLETED') { this.finish(reply.resultId, null, true); return; }
-    if (reply?.code === 'CANCELLED' || reply?.code === 'NOT_FOUND' || reply?.code === 'EXPIRED') { this.set({ kind: 'stopped' }); return; }
+    // NOT_FOUND is not a stop: without the server's marker, a step already on its way could still finish.
+    if (reply?.code === 'CANCELLED' || reply?.code === 'EXPIRED') { this.set({ kind: 'stopped' }); return; }
     this.set({ kind: 'failed', index, failure: reply?.code === 'WITHDRAWN' ? 'turnedOff' : 'unavailable' });
   }
 

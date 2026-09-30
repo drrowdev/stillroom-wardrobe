@@ -369,6 +369,38 @@ test.describe('Stop and Delete', () => {
     expect(api.tryonControl.requests).toHaveLength(2);
     expect(api.tryonControl.results).toHaveLength(0);
   });
+  test('Stop before the first step is claimed stays stopped when the held request arrives later', async ({ page }) => {
+    const { api, outfitId } = await start(page);
+    const held = gate();
+    api.tryonControl.replies.push({ hold: held.hold });
+    await openTryOn(page);
+    await preparePhoto(page);
+    await page.locator('#tryon-start').click();
+    await expect.poll(() => api.tryonControl.requests.length).toBe(1);
+    const chainId = api.tryonControl.requests[0]!.chainId;
+    // The server has not seen the chain yet: Stop records a stop for it and replies CANCELLED.
+    await page.locator('#tryon-stop').click();
+    await page.locator('#tryon-stop-confirm-confirm').click();
+    await expect(page.getByText(text('tryon.stopped'), { exact: true })).toBeVisible();
+    expect(api.tryonControl.cancels).toEqual([chainId]);
+    expect(api.tryonControl.stops).toEqual([{ owner: owners.a, chainId }]);
+    await axe(page);
+    // The held request now reaches the server and is refused at its claim: no chain, no result, and the page stays stopped.
+    held.release();
+    await expect.poll(() => api.tryonControl.stopRefusals).toBe(1);
+    await page.waitForTimeout(200);
+    expect(api.tryonControl.chains).toHaveLength(0);
+    await expect(page.getByText(text('tryon.stopped'), { exact: true })).toBeVisible();
+    await expect(page.locator('.tryon-result img')).toHaveCount(0);
+    expect(api.tryonControl.requests).toHaveLength(1);
+    expect(api.tryonControl.results).toHaveLength(0);
+    // Reopened, the outfit lists no saved try-on.
+    await page.goto(`/#/outfits/${outfitId}`);
+    await expect(page.locator('#outfit-detail-title')).toBeVisible();
+    await page.waitForTimeout(300);
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(0);
+    expect(api.tryonControl.results).toHaveLength(0);
+  });
   test('Stop after the last step finished shows the result', async ({ page }) => {
     engineOnly();
     const { api } = await start(page);

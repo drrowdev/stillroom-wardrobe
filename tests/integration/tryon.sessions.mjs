@@ -5,6 +5,8 @@
 // handler, cron and the operator call them. Every owner read, cancel, delete and isolation assertion uses the ordinary
 // A/B sessions. The shared switch, capacity and controls are opened only inside this probe and restored in finally.
 // Timing cases move the durable evidence back with the guard trigger briefly disabled (test-only). No provider calls.
+// VTO-3a stop markers are durable rows: this probe tracks each one it creates and removes exactly those in finally,
+// then checks that no marker is left for any chain ID it used.
 import { createHash, randomUUID } from 'node:crypto';
 import { registerHooks } from 'node:module';
 import { isDeepStrictEqual } from 'node:util';
@@ -45,6 +47,7 @@ const RESERVED = 360000;
 const literal = (value) => "'" + String(value).replaceAll("'", "''") + "'";
 const json = (value) => `${literal(JSON.stringify(value))}::jsonb`;
 const orNull = (value, cast) => (value === null ? `null::${cast}` : `${literal(value)}::${cast}`);
+const delay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 // ceil((9000*800 + 6000*3000)/100) = 252000 micro-USD under the try-on manifest prices.
 const VALID = Object.freeze({ modelObservation: 'expected_snapshot', input: 9000, output: 6000, total: 15000, inputText: 200,
   inputImage: 8800 });
@@ -62,18 +65,20 @@ export async function tryonProbes(snapshot, sql, mark) {
     where deployment_key=${literal(KEY)} and held_until>clock_timestamp();`);
   // The shared capacity stays at its default 2 per 60 s: a claim first frees earlier test slots, unless the case is
   // about the slots themselves or about a code decided before the slot check ({ hold: true }).
+  const claimCall = (owner, chain, step, id, { outfit = null, person = null, probe = null } = {}) => `public.tryon_claim(
+    ${literal(owner.uid)},${literal(chain)},${step},${literal(id)},${literal(MANIFEST)},${orNull(outfit, 'uuid')},
+    ${orNull(person, 'text')},${orNull(probe, 'uuid')})`;
   const claim = async (owner, chain, step, id, { outfit = null, person = null, probe = null, hold = false } = {}) => {
     if (!hold) await freeSlots();
-    return one(`select public.tryon_claim(
-    ${literal(owner.uid)},${literal(chain)},${step},${literal(id)},${literal(MANIFEST)},${orNull(outfit, 'uuid')},
-    ${orNull(person, 'text')},${orNull(probe, 'uuid')});`);
+    return one(`select ${claimCall(owner, chain, step, id, { outfit, person, probe })};`);
   };
   const dispatch = (owner, id, present = true) => one(`select public.tryon_dispatch(${literal(owner.uid)},${literal(id)},${present});`);
-  const finish = (owner, id, code, { usage = VALID, out = null, send = false, fetched = true, live = true, gone = false } = {}) =>
-    one(`select public.tryon_finish(${literal(owner.uid)},${literal(id)},${literal(code)},${usage === null ? 'null::jsonb' : json(usage)},
+  const finishCall = (owner, id, code, { usage = VALID, out = null, send = false, fetched = true, live = true, gone = false } = {}) =>
+    `public.tryon_finish(${literal(owner.uid)},${literal(id)},${literal(code)},${usage === null ? 'null::jsonb' : json(usage)},
       ${orNull(out?.sha ?? null, 'text')},${out === null ? 'null::integer' : out.bytes.length},
       ${send ? `decode(${literal(out.bytes.toString('hex'))},'hex')` : 'null::bytea'},${fetched},
-      ${fetched ? String(live) : 'null::boolean'},${gone});`);
+      ${fetched ? String(live) : 'null::boolean'},${gone})`;
+  const finish = (owner, id, code, options = {}) => one(`select ${finishCall(owner, id, code, options)};`);
   const ledger = (owner, id) => one(`select coalesce((select jsonb_build_object('state',u.charge_state,'accounted',u.accounted_micro::text,
       'closed',u.closed_reason,'origin',e.enhance_settlement_origin,'code',e.enhance_code,'anomaly',e.anomaly,
       'authorised',e.tryon_dispatch_authorised_at is not null,'fetch',e.tryon_fetch_started,'live',e.tryon_client_live_at_fetch,
@@ -127,6 +132,55 @@ export async function tryonProbes(snapshot, sql, mark) {
     for (const id of running) equal(await rpc(owner, 'tryon_cancel', { p_chain_id: id }), { code: 'CANCELLED' });
   };
   const rpc = (owner, name, body) => client.rpc(owner, name, body);
+
+  // VTO-3a stop markers. `expected` holds the owner:chain keys of markers this probe really created and that still
+  // exist; a key is added only after the row is read back and removed only after its purge or discard is verified.
+  // `used` is every chain ID this probe cancelled or seeded, for the residue check in finally.
+  const expected = new Set(), used = new Set();
+  const markerKey = (owner, chain) => `${owner.uid}:${chain}`;
+  const markers = (owner, chain = null) => scalar(`select count(*) from private.tryon_chain_stops where owner_id=${literal(owner.uid)}
+    ${chain === null ? '' : `and chain_id=${literal(chain)}`};`).then(Number);
+  const recentMarkers = (owner) => scalar(`select count(*) from private.tryon_chain_stops where owner_id=${literal(owner.uid)}
+    and created_at>clock_timestamp()-interval '1 hour';`).then(Number);
+  const stop = (owner, chain) => { used.add(chain); return rpc(owner, 'tryon_cancel', { p_chain_id: chain }); };
+  const created = async (owner, chain) => {
+    equal(await markers(owner, chain), 1);
+    expected.add(markerKey(owner, chain));
+  };
+  // Everything a claim could have written for one chain and its request IDs, plus the live shared slots.
+  const chainRows = (owner, chain, ids) => one(`select jsonb_build_object(
+      'usage',(select count(*) from private.ai_usage where owner_id=${literal(owner.uid)}
+        and (tryon_chain_id=${literal(chain)} or request_id in (${ids.map(literal).join(',')}))),
+      'evidence',(select count(*) from private.ai_usage_evidence where owner_id=${literal(owner.uid)}
+        and request_id in (${ids.map(literal).join(',')})),
+      'chains',(select count(*) from private.tryon_chains where owner_id=${literal(owner.uid)} and chain_id=${literal(chain)}),
+      'attempts',(select count(*) from private.tryon_attempts where owner_id=${literal(owner.uid)} and chain_id=${literal(chain)}),
+      'results',(select count(*) from private.tryon_results where owner_id=${literal(owner.uid)} and chain_id=${literal(chain)}),
+      'slots',(select count(*) from private.provider_slots where deployment_key=${literal(KEY)} and held_until>clock_timestamp()));`);
+  // A privileged transaction that runs `statement`, then sleeps `seconds` holding its locks (admin-limits pattern). The
+  // marker identifies it in pg_stat_activity; each case uses its own duration, under the functions' 2 s lock_timeout.
+  const holdTx = async (statement, seconds, end = 'commit') => {
+    const marker = `pg_sleep(${seconds})`;
+    const held = sql(`begin; ${statement}; select 'HELD'; select ${marker}; ${end}; select 'DONE';`);
+    for (const until = Date.now() + 5000; ;) {
+      if (await scalar(`select count(*) from pg_stat_activity where wait_event='PgSleep'
+        and query like ${literal(`%${marker}%`)} and pid<>pg_backend_pid();`) === '1') return held;
+      requireEvidence(Date.now() < until);
+      await delay(25);
+    }
+  };
+  const heldReply = (out) => JSON.parse(out.split('\n').map((line) => line.trim()).find((line) => line.startsWith('R:')).slice(2));
+  // The competing Stop must be seen waiting on a lock while the holder sleeps; otherwise the case fails.
+  const cancelsWaiting = async (count) => {
+    for (const until = Date.now() + 1200; ;) {
+      if (Number(await scalar(`select count(*) from pg_stat_activity where wait_event_type='Lock'
+        and query like '%tryon_cancel%' and pid<>pg_backend_pid();`)) === count) return;
+      requireEvidence(Date.now() < until);
+      await delay(10);
+    }
+  };
+  const asOwner = (owner, text) => `set local role authenticated;
+    select set_config('request.jwt.claims',${literal(JSON.stringify({ sub: owner.uid, role: 'authenticated' }))},true); ${text}`;
 
   mark('structure');
   equal(await one(`select jsonb_object_agg(p.proname,jsonb_build_array(p.prosecdef and p.proconfig @> array['search_path=""'],
@@ -188,6 +242,7 @@ export async function tryonProbes(snapshot, sql, mark) {
 
   const sh = saveHarness(client, a), shB = saveHarness(client, b);
   const outfits = [];
+  let passed = false, markerError = null;
   try {
     mark('bootstrap');
     // Status before bootstrap: unconfigured, no policy. Bootstrap fills only null fields, never activation or consent.
@@ -301,8 +356,8 @@ export async function tryonProbes(snapshot, sql, mark) {
     equal(await rpc(a, 'tryon_cancel', { p_chain_id: chain }), { code: 'COMPLETED', resultId: final.done.resultId });
 
     mark('isolation');
-    // B cannot see, read, cancel or delete A's chain or result; foreign equals unknown.
-    for (const [name, body] of [['tryon_chain_status', { p_chain_id: chain }], ['tryon_cancel', { p_chain_id: chain }],
+    // B cannot see, read or delete A's chain or result; foreign equals unknown.
+    for (const [name, body] of [['tryon_chain_status', { p_chain_id: chain }],
       ['tryon_result_image_v1', { p_result_id: final.done.resultId }], ['tryon_delete_result', { p_result_id: final.done.resultId }]]) {
       equal(await rpc(b, name, body), { code: 'NOT_FOUND' });
       const unknown = Object.fromEntries(Object.keys(body).map((key) => [key, randomUUID()]));
@@ -314,6 +369,15 @@ export async function tryonProbes(snapshot, sql, mark) {
     equal(await claim(b, chain, 1, randomUUID(), { outfit }), { code: 'NOT_FOUND', claimed: false });
     equal((await claim(b, chain, 2, randomUUID(), { person })).code, 'INVALID_INPUT');
     equal((await rows(b)).usage, 0);
+    // VTO-3a: Stop of a chain B does not have records a stop under B's own ID only, so the reply is CANCELLED whether
+    // or not A has that chain; it says nothing about A's chain, which keeps its result.
+    for (const target of [chain, randomUUID()]) {
+      equal(await stop(b, target), { code: 'CANCELLED' });
+      await created(b, target);
+    }
+    equal(await markers(a, chain), 0);
+    requireEvidence((await rpc(a, 'tryon_chain_status', { p_chain_id: chain })).state === 'complete'
+      && (await rpc(a, 'tryon_result_image_v1', { p_result_id: final.done.resultId })).code === 'OK');
     // Deleting the result is the owner's; a replay of the final finish never resurrects it.
     equal(await rpc(a, 'tryon_delete_result', { p_result_id: final.done.resultId }), { code: 'OK' });
     equal(await rpc(a, 'tryon_result_image_v1', { p_result_id: final.done.resultId }), { code: 'NOT_FOUND' });
@@ -321,7 +385,7 @@ export async function tryonProbes(snapshot, sql, mark) {
     const chainB = randomUUID();
     const doneB = await runStep(b, chainB, 1, { outfit: outfitB, last: true });
     const usageA = await rows(a);
-    for (const [name, body] of [['tryon_chain_status', { p_chain_id: chainB }], ['tryon_cancel', { p_chain_id: chainB }],
+    for (const [name, body] of [['tryon_chain_status', { p_chain_id: chainB }],
       ['tryon_result_image_v1', { p_result_id: doneB.done.resultId }], ['tryon_delete_result', { p_result_id: doneB.done.resultId }]]) {
       equal(await rpc(a, name, body), { code: 'NOT_FOUND' });
     }
@@ -331,6 +395,11 @@ export async function tryonProbes(snapshot, sql, mark) {
     equal(await dispatch(a, doneB.id), { code: 'INVALID_INPUT' });
     equal((await finish(a, doneB.id, 'OK', { out: doneB.out, send: true })).code, 'INVALID_INPUT');
     equal(await rows(a), { ...usageA, slots: 0 });
+    // A's Stop of B's chain is CANCELLED and only records A's own stop; B's chain and result are unchanged.
+    equal(await stop(a, chainB), { code: 'CANCELLED' });
+    await created(a, chainB);
+    equal(await markers(b, chainB), 0);
+    equal((await rpc(b, 'tryon_chain_status', { p_chain_id: chainB })).state, 'complete');
     const listedB = await rpc(b, 'tryon_results_v1', {});
     requireEvidence(listedB.results.length === 1 && listedB.results[0].id === doneB.done.resultId);
     equal(await rpc(b, 'tryon_delete_result', { p_result_id: doneB.done.resultId }), { code: 'OK' });
@@ -684,21 +753,208 @@ export async function tryonProbes(snapshot, sql, mark) {
     await expireDue();
     equal((await ledger(a, d1)).state, 'estimated');
 
+    mark('stop-before-claim');
+    // VTO-3a: Stop before the first step has claimed. The stop is recorded, so the claim that arrives later is refused
+    // before any usage, evidence, chain, attempt, result or slot, and the chain never becomes visible.
+    await freeSlots();
+    const usageOf = (owner) => one(`select to_jsonb(s) from private.tryon_usage(${literal(owner.uid)},clock_timestamp()) s;`);
+    const early = randomUUID(), earlyId = randomUUID();
+    const spentBefore = await usageOf(a), listedBefore = await rpc(a, 'tryon_results_v1', {});
+    equal(await stop(a, early), { code: 'CANCELLED' });
+    await created(a, early);
+    const markersA = await markers(a);
+    equal(await stop(a, early), { code: 'CANCELLED' });
+    equal(await markers(a), markersA);
+    const slotsBefore = (await chainRows(a, early, [earlyId])).slots;
+    equal(await claim(a, early, 1, earlyId, { outfit: single, hold: true }), { code: 'CANCELLED', claimed: false });
+    equal(await chainRows(a, early, [earlyId]), { usage: 0, evidence: 0, chains: 0, attempts: 0, results: 0, slots: slotsBefore });
+    equal(await rpc(a, 'tryon_chain_status', { p_chain_id: early }), { code: 'NOT_FOUND' });
+    equal(await usageOf(a), spentBefore);
+    equal(await rpc(a, 'tryon_results_v1', {}), listedBefore);
+
+    mark('stop-isolation');
+    // B's stop of a chain ID A has not claimed yet does not stop A: A can still claim it.
+    const sharedStop = randomUUID(), sharedStopId = randomUUID();
+    equal(await stop(b, sharedStop), { code: 'CANCELLED' });
+    await created(b, sharedStop);
+    equal((await claim(a, sharedStop, 1, sharedStopId, { outfit: single })).code, 'OK');
+    // B's stop of A's running chain leaves it running.
+    const runningA = randomUUID(), runningId = randomUUID();
+    equal((await claim(a, runningA, 1, runningId, { outfit: single })).code, 'OK');
+    equal(await stop(b, runningA), { code: 'CANCELLED' });
+    await created(b, runningA);
+    equal((await rpc(a, 'tryon_chain_status', { p_chain_id: runningA })).state, 'running');
+    // A's own Stop of an existing chain ends it and records no stop.
+    for (const [target, id] of [[sharedStop, sharedStopId], [runningA, runningId]]) {
+      equal((await release(a, id)).code, 'PRE_DISPATCH');
+      equal(await stop(a, target), { code: 'CANCELLED' });
+      equal(await markers(a, target), 0);
+    }
+    await freeSlots();
+
+    mark('stop-retention');
+    // The purge removes a stop older than one day and keeps a newer one.
+    const oldStop = randomUUID(), newStop = randomUUID();
+    for (const target of [oldStop, newStop]) {
+      equal(await stop(a, target), { code: 'CANCELLED' });
+      await created(a, target);
+    }
+    await sql(`update private.tryon_chain_stops set created_at=created_at-interval '25 hours'
+      where owner_id=${literal(a.uid)} and chain_id=${literal(oldStop)};`);
+    requireEvidence((await expireDue()).stopsPurged >= 1);
+    equal(await markers(a, oldStop), 0);
+    expected.delete(markerKey(a, oldStop));
+    equal(await markers(a, newStop), 1);
+
+    mark('stop-race-a');
+    // (a) Stop holds the owner's profile lock with its stop not yet committed: the claim's NOWAIT lock refuses BUSY and
+    // writes nothing. After the commit, the claim is CANCELLED.
+    const raceA = randomUUID(), raceA1 = randomUUID(), raceA2 = randomUUID();
+    used.add(raceA);
+    await freeSlots();
+    const stopping = await holdTx(asOwner(a, `select 'R:'||public.tryon_cancel(${literal(raceA)})::text`), 1.501);
+    const slotsA = (await chainRows(a, raceA, [raceA1])).slots;
+    equal(await claim(a, raceA, 1, raceA1, { outfit: single, hold: true }), { code: 'BUSY', claimed: false });
+    equal(await chainRows(a, raceA, [raceA1]), { usage: 0, evidence: 0, chains: 0, attempts: 0, results: 0, slots: slotsA });
+    equal(heldReply(await stopping), { code: 'CANCELLED' });
+    await created(a, raceA);
+    equal(await claim(a, raceA, 1, raceA2, { outfit: single, hold: true }), { code: 'CANCELLED', claimed: false });
+    equal(await chainRows(a, raceA, [raceA1, raceA2]), { usage: 0, evidence: 0, chains: 0, attempts: 0, results: 0, slots: slotsA });
+    equal(await rpc(a, 'tryon_chain_status', { p_chain_id: raceA }), { code: 'NOT_FOUND' });
+
+    mark('stop-race-b1');
+    // (b1) The claim passes the stop check first and holds the lock; Stop waits, then cancels the visible chain, so the
+    // dispatch is refused and the Edge's PRE_DISPATCH releases the reservation. Nothing is published.
+    const raceB = randomUUID(), raceB1 = randomUUID();
+    used.add(raceB);
+    await freeSlots();
+    const claiming = await holdTx(`select 'R:'||${claimCall(a, raceB, 1, raceB1, { outfit: single })}::text`, 1.502);
+    const stopB = stop(a, raceB);
+    await cancelsWaiting(1);
+    const claimedB = heldReply(await claiming);
+    requireEvidence(claimedB.code === 'OK' && claimedB.claimed === true);
+    equal(await stopB, { code: 'CANCELLED' });
+    equal(await markers(a, raceB), 0);
+    equal((await rpc(a, 'tryon_chain_status', { p_chain_id: raceB })).state, 'cancelled');
+    equal(await dispatch(a, raceB1), { code: 'CANCELLED' });
+    equal(await release(a, raceB1), { code: 'PRE_DISPATCH', accounting: { basis: 'held', currency: 'USD', amountMicro: '0' } });
+    equal(Number(await scalar(`select count(*) from private.tryon_results where owner_id=${literal(a.uid)}
+      and chain_id=${literal(raceB)};`)), 0);
+
+    mark('stop-race-b2');
+    // (b2) The dispatch wins and holds the lock; Stop waits, then cancels. The finish settles accounting only: LATE,
+    // no picture, and the saved list is unchanged.
+    const raceZ = randomUUID(), raceZ1 = randomUUID();
+    used.add(raceZ);
+    equal((await claim(a, raceZ, 1, raceZ1, { outfit: single })).code, 'OK');
+    const listedZ = await rpc(a, 'tryon_results_v1', {});
+    const dispatching = await holdTx(`select 'R:'||public.tryon_dispatch(${literal(a.uid)},${literal(raceZ1)},true)::text`, 1.503);
+    const stopZ = stop(a, raceZ);
+    await cancelsWaiting(1);
+    equal(heldReply(await dispatching).code, 'AUTHORISED');
+    equal(await stopZ, { code: 'CANCELLED' });
+    equal(await markers(a, raceZ), 0);
+    equal(await finish(a, raceZ1, 'OK', { out: output('stop-race'), send: true, gone: true }),
+      { code: 'LATE', accounting: { basis: 'estimated', currency: 'USD', amountMicro: ESTIMATE } });
+    equal((await ledger(a, raceZ1)).state, 'estimated');
+    equal(Number(await scalar(`select count(*) from private.tryon_results where owner_id=${literal(a.uid)}
+      and chain_id=${literal(raceZ)} and state='ready';`)), 0);
+    equal(await rpc(a, 'tryon_results_v1', {}), listedZ);
+    await freeSlots();
+
+    mark('stop-race-c');
+    // (c) The last finish wins and holds the lock; Stop waits, then reports the finished picture and records no stop.
+    const raceC = randomUUID(), raceC1 = randomUUID();
+    used.add(raceC);
+    equal((await claim(a, raceC, 1, raceC1, { outfit: single })).code, 'OK');
+    equal((await dispatch(a, raceC1)).code, 'AUTHORISED');
+    const outC = output('stop-race-c');
+    const finishing = await holdTx(`select 'R:'||${finishCall(a, raceC1, 'OK', { out: outC, send: true })}::text`, 1.504);
+    const stopC = stop(a, raceC);
+    await cancelsWaiting(1);
+    const doneC = heldReply(await finishing);
+    requireEvidence(doneC.code === 'OK' && doneC.last === true && typeof doneC.resultId === 'string');
+    equal(await stopC, { code: 'COMPLETED', resultId: doneC.resultId });
+    equal(await markers(a, raceC), 0);
+    requireEvidence((await rpc(a, 'tryon_results_v1', {})).results.some((r) => r.id === doneC.resultId));
+    const imageC = await rpc(a, 'tryon_result_image_v1', { p_result_id: doneC.resultId });
+    requireEvidence(imageC.code === 'OK' && Buffer.from(imageC.jpegBase64, 'base64').equals(outC.bytes));
+    equal(await rpc(a, 'tryon_delete_result', { p_result_id: doneC.resultId }), { code: 'OK' });
+    await freeSlots();
+
+    mark('stop-cap');
+    // (d) 60 new stops an hour per owner. With 59, two concurrent Stops of distinct missing chains wait on the owner's
+    // lock; exactly one is recorded and the other is UNAVAILABLE. At the cap, a repeat Stop and a Stop of a running
+    // chain still work, and a new one writes nothing.
+    const capR = randomUUID(), capR1 = randomUUID();
+    used.add(capR);
+    equal((await claim(a, capR, 1, capR1, { outfit: single })).code, 'OK');
+    const seeded = Array.from({ length: 59 - await recentMarkers(a) }, () => randomUUID());
+    requireEvidence(seeded.length > 0);
+    for (const id of seeded) used.add(id);
+    await sql(`insert into private.tryon_chain_stops(owner_id,chain_id,created_at)
+      select ${literal(a.uid)},id::uuid,clock_timestamp()-interval '1 minute' from unnest(array[${seeded.map(literal).join(',')}]) id;`);
+    equal(Number(await scalar(`select count(*) from private.tryon_chain_stops where owner_id=${literal(a.uid)}
+      and chain_id in (${seeded.map(literal).join(',')});`)), seeded.length);
+    for (const id of seeded) expected.add(markerKey(a, id));
+    equal(await recentMarkers(a), 59);
+    const capP = randomUUID(), capQ = randomUUID();
+    const locking = await holdTx(`select 1 from public.profiles where owner_id=${literal(a.uid)} for update`, 1.505, 'rollback');
+    const contenders = [stop(a, capP), stop(a, capQ)];
+    await cancelsWaiting(2);
+    await locking;
+    const replies = await Promise.all(contenders);
+    equal(replies.map((r) => r.code).sort(), ['CANCELLED', 'UNAVAILABLE']);
+    const winner = replies[0].code === 'CANCELLED' ? capP : capQ, loser = winner === capP ? capQ : capP;
+    await created(a, winner);
+    equal(await markers(a, loser), 0);
+    equal(await recentMarkers(a), 60);
+    const over = randomUUID();
+    equal(await stop(a, over), { code: 'UNAVAILABLE' });
+    equal(await markers(a, over), 0);
+    equal(await stop(a, winner), { code: 'CANCELLED' });
+    equal(await stop(a, capR), { code: 'CANCELLED' });
+    equal((await rpc(a, 'tryon_chain_status', { p_chain_id: capR })).state, 'cancelled');
+    equal(await markers(a, capR), 0);
+    equal(await recentMarkers(a), 60);
+    equal((await release(a, capR1)).code, 'PRE_DISPATCH');
+    await freeSlots();
+
     mark('export');
-    // Try-on rows are neither exported nor restorable: the owner export names no try-on table.
+    // Try-on rows are neither exported nor restorable: the owner export names no try-on table, and none of the owner's
+    // stops appears anywhere in it.
     const exported = await rpc(a, 'export_manifest', { p_export_id: randomUUID() });
     requireEvidence(exported && typeof exported.tables === 'object'
       && Object.keys(exported.tables).every((table) => !table.startsWith('tryon')));
+    const stoppedA = [...expected].filter((key) => key.startsWith(`${a.uid}:`)).map((key) => key.slice(a.uid.length + 1));
+    const exportedText = JSON.stringify(exported);
+    requireEvidence(stoppedA.length > 0 && stoppedA.every((id) => !exportedText.includes(id)));
 
     mark('discard');
     // §5.3: the restore step deletes every transient row and never touches usage or evidence.
     const usageBefore = await scalar(`select count(*) from private.ai_usage where purpose='try_on';`);
     const discarded = await one('select public.tryon_discard_transient();');
-    requireEvidence(discarded.code === 'OK');
+    requireEvidence(discarded.code === 'OK' && discarded.stopsDeleted === expected.size);
     equal(await one(`select jsonb_build_array((select count(*) from private.tryon_chains),(select count(*) from private.tryon_results),
-      (select count(*) from private.tryon_attempts));`), [0, 0, 0]);
+      (select count(*) from private.tryon_attempts),(select count(*) from private.tryon_chain_stops));`), [0, 0, 0, 0]);
+    expected.clear();
     equal(await scalar(`select count(*) from private.ai_usage where purpose='try_on';`), usageBefore);
+    passed = true;
   } finally {
+    // Remove exactly the stops this probe created and still expects, then check none is left for any ID it used.
+    // A failure here is reported only when the probe itself passed, so it never hides the first failure.
+    try {
+      if (expected.size > 0) {
+        const keys = [...expected].map((key) => key.split(':'));
+        const removed = Number(await scalar(`with d as (delete from private.tryon_chain_stops where (owner_id,chain_id) in
+          (${keys.map(([owner, id]) => `(${literal(owner)}::uuid,${literal(id)}::uuid)`).join(',')}) returning 1) select count(*) from d;`));
+        requireEvidence(removed === expected.size);
+      }
+      if (used.size > 0) {
+        equal(Number(await scalar(`select count(*) from private.tryon_chain_stops where owner_id in (${literal(a.uid)},${literal(b.uid)})
+          and chain_id in (${[...used].map(literal).join(',')});`)), 0);
+      }
+    } catch (error) { if (passed) markerError = error; }
     for (const [owner, id] of outfits) {
       await sql(`delete from public.outfit_items where owner_id=${literal(owner.uid)} and outfit_id=${literal(id)};
         delete from public.outfits where owner_id=${literal(owner.uid)} and id=${literal(id)};`);
@@ -718,6 +974,10 @@ export async function tryonProbes(snapshot, sql, mark) {
         tryon_manifest_id=null,tryon_notice_revision=null,tryon_max_request_micro=null,tryon_monthly_allowance_micro=null,
         tryon_max_requests_per_hour=null,monthly_allowance_micro=${before.b.monthly_allowance_micro},
         max_requests_per_hour=${before.b.max_requests_per_hour},updated_at=clock_timestamp() where owner_id=${literal(b.uid)};`);
+  }
+  if (markerError) {
+    mark('stop-cleanup');
+    throw markerError;
   }
   const restored = await capacity();
   requireEvidence(restored.dispatch_enabled === false && restored.disabled_reason === 'INITIAL' && restored.max_dispatch === 2);

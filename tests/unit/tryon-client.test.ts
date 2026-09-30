@@ -389,6 +389,36 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
     await second.stop();
     expect(second.get()).toEqual({ kind: 'result', resultId: ID(9), expiresAtMs: null, alreadyFinished: true });
   });
+  it('Stop without the server\'s CANCELLED or EXPIRED is never shown as stopped', async () => {
+    for (const reply of [{ code: 'NOT_FOUND' }, { code: 'UNAVAILABLE' }, { code: 'STALE' }, null] as (CancelResult | null)[]) {
+      const h = new Harness();
+      h.stepReplies = ['hold'];
+      if (reply) h.cancelReply = reply;
+      else h.api.cancel = () => Promise.reject(new Error('offline'));
+      const run = h.run();
+      run.start();
+      await flush();
+      await run.stop();
+      expect(run.get(), String(reply?.code)).toEqual({ kind: 'failed', index: 0, failure: 'unavailable' });
+      // A step reply that arrives after Stop changes nothing.
+      h.held[0]!.resolve({ kind: 'result', resultId: ID(9), expiresAtMs: 5 });
+      await flush();
+      expect(run.get(), String(reply?.code)).toEqual({ kind: 'failed', index: 0, failure: 'unavailable' });
+    }
+    for (const code of ['CANCELLED', 'EXPIRED'] as const) {
+      const h = new Harness();
+      h.stepReplies = ['hold'];
+      h.cancelReply = { code };
+      const run = h.run();
+      run.start();
+      await flush();
+      await run.stop();
+      h.held[0]!.resolve({ kind: 'result', resultId: ID(9), expiresAtMs: 5 });
+      await flush();
+      expect(run.get(), code).toEqual({ kind: 'stopped' });
+      expect(h.steps).toHaveLength(1);
+    }
+  });
   it('Stop before anything was sent sends nothing', async () => {
     const h = new Harness();
     const run = h.run();

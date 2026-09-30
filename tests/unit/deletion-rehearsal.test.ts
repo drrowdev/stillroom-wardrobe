@@ -137,13 +137,16 @@ describe('deletion rehearsal guards', () => {
     expect(SOURCE).toContain("if (await adminRows() !== '0:0:0:1:0') throw new Error('RESULT:admin');");
   });
 
-  it('includes the VTO-1 try-on rows and keeps the peer rows and both provider slots', async () => {
+  it('includes the VTO-1 try-on rows and the VTO-3a Stop markers, and keeps the peer rows and both provider slots', async () => {
     const tables = await rehearsal.ownerTables(realFs, ROOT);
-    for (const table of ['private.tryon_chains', 'private.tryon_attempts', 'private.tryon_results', 'private.tryon_probe_authorisations']) {
+    for (const table of ['private.tryon_chains', 'private.tryon_attempts', 'private.tryon_results', 'private.tryon_probe_authorisations',
+      'private.tryon_chain_stops']) {
       expect(tables).toContain(table);
     }
-    expect(SOURCE).toContain("if (await tryonRows(c) !== '1:2:1:2:1' || await tryonRows(d) !== '1:2:1:2:1' || await heldTryonSlots() !== '2') {");
-    expect(SOURCE).toContain("if (await tryonRows(c) !== '0:0:0:0:0' || await tryonRows(d) !== '1:2:1:2:1') throw new Error('RESULT:tryon');");
+    expect(SOURCE).toContain("if (await tryonRows(c) !== '1:2:1:2:1:1' || await tryonRows(d) !== '1:2:1:2:1:1' || await heldTryonSlots() !== '2') {");
+    expect(SOURCE).toContain("if (await tryonRows(c) !== '0:0:0:0:0:0' || await tryonRows(d) !== '1:2:1:2:1:1') throw new Error('RESULT:tryon');");
+    expect(SOURCE).toContain("if (await stopRows(d) !== dStops) throw new Error('RESULT:tryon-stops');");
+    expect(SOURCE).toContain('insert into private.tryon_chain_stops(owner_id,chain_id,created_at) values (${literal(uid)},gen_random_uuid(),now());');
     expect(SOURCE).toContain("if (await heldTryonSlots() !== '2') throw new Error('RESULT:tryon-slots');");
   });
 
