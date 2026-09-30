@@ -142,7 +142,11 @@ describe('FILT1 provider refusal migration (source pins)', () => {
     expect(drop).toBeLessThan(post);
     expect(sql).toContain("raise exception 'FILT1 postcondition: an old finish signature remains'");
     expect(sql).toContain("raise exception 'FILT1 postcondition: a constraint is not validated'");
-    expect(count(sql, "<>array['lock_timeout=2s','search_path=\"\"']")).toBe(2);
+    // Null-safe: a function with no settings (null proconfig) must fail the check, not pass it as unknown.
+    expect(count(sql, "unnest(p.proconfig) x) is distinct from array['lock_timeout=2s','search_path=\"\"']")).toBe(2);
+    expect(count(sql, 'p.prolang is distinct from (select oid')).toBe(2);
+    expect(count(sql, 'or p.proowner is distinct from (select proowner')).toBe(2);
+    expect(sql).not.toMatch(/proconfig\) x\)<>|prolang<>|proowner<>/);
     expect(count(sql, "and x.grantee not in (p.proowner,'service_role'::regrole)")).toBe(2);
     expect(count(sql, "'public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid)'::regprocedure")).toBe(2);
   });

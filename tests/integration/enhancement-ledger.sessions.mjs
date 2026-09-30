@@ -10,7 +10,7 @@ import { equal, analysisHash } from './ai-analysis.sessions.mjs';
 import { intent, saveHarness, denied, bytes } from './item-save.sessions.mjs';
 import { imageChangeIntent } from './image-replacement.sessions.mjs';
 import { COLOUR_MANIFEST } from './azure-preservation.sessions.mjs';
-import { refusalRows } from './tryon.sessions.mjs';
+import { refusalRows, serviceRpcOf, awaitHttpReadiness, legacyDigestHolds } from './tryon.sessions.mjs';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
 
 // BG2c-1: new claims admit only the clean-up manifest under notice revision 2; enhance-v1 rows are legacy work.
@@ -32,7 +32,7 @@ const VALID = Object.freeze({ modelObservation: 'not_observed', input: 1000, out
   inputImage: 900 });
 const ESTIMATE = 128000;
 
-export async function enhancementLedgerProbes(snapshot, sql, mark) {
+export async function enhancementLedgerProbes(snapshot, sql, mark, service) {
   const { client, owners: [a, b] } = snapshot;
   const one = async (text) => JSON.parse(await sql(text));
   const scalar = async (text) => (await sql(text)).trim();
@@ -589,6 +589,31 @@ export async function enhancementLedgerProbes(snapshot, sql, mark) {
       p_output_sha256=>null,p_output_bytes=>null)::text; commit;`);
     equal(JSON.parse(unavailable.split('\n').map((line) => line.trim()).find((line) => line.startsWith('R:')).slice(2)),
       { code: 'UNAVAILABLE', accounting: null });
+    // (g, HTTP) An old Edge reaches the finish through PostgREST: readiness, then legacy settlement, replay and the
+    // unchanged digest with the new arguments omitted and explicitly null; a new Edge's qualifying refusal as well.
+    const serviceRpc = serviceRpcOf(service);
+    const legacyBody = (owner, id, extra = {}) => ({ p_owner_id: owner, p_request_id: id, p_code: 'FILTERED', p_usage: null,
+      p_output_sha256: null, p_output_bytes: null, ...extra });
+    await awaitHttpReadiness(serviceRpc, sql, 'enhance_finish', (owner, id) => legacyBody(owner, id));
+    const nulls = { p_refusal_kind: null, p_usage_absent: null };
+    for (const [first, second, extra] of [[{}, nulls, {}], [nulls, {}, {}], [{}, nulls, { p_code: 'FAILED', p_usage: VALID }]]) {
+      const id = await fresh();
+      const settledHttp = await serviceRpc('enhance_finish', legacyBody(a.uid, id, { ...extra, ...first }));
+      requireEvidence(settledHttp.status === 200 && settledHttp.data?.code === (extra.p_code ?? 'FILTERED'));
+      const row = await ledger(a, id);
+      requireEvidence(extra.p_usage ? row.evidence.enhance_settlement_origin === 'observed' && row.evidence.anomaly === false
+        : row.evidence.enhance_settlement_origin === 'unmetered' && row.evidence.anomaly === true && row.usage.accounted_micro === RESERVED);
+      requireEvidence(await legacyDigestHolds(sql, a, id) && await evidence(a, id) === null);
+      const replayed = await serviceRpc('enhance_finish', legacyBody(a.uid, id, { ...extra, ...second }));
+      requireEvidence(replayed.status === 200 && replayed.data?.code === (extra.p_code ?? 'FILTERED') && replayed.data.replayed === true);
+      equal(await ledger(a, id), row);
+    }
+    const viaHttp = await fresh();
+    const newShape = await serviceRpc('enhance_finish', legacyBody(a.uid, viaHttp, { p_refusal_kind: 'rai_input', p_usage_absent: true }));
+    requireEvidence(newShape.status === 200 && newShape.data?.code === 'FILTERED');
+    const viaHttpRow = await ledger(a, viaHttp);
+    requireEvidence(viaHttpRow.evidence.enhance_settlement_origin === 'filtered_unmetered' && viaHttpRow.evidence.anomaly === false);
+    requireEvidence((await capacity()).dispatch_enabled === true && (await controls(a)).enhance_activated === true);
     // (f) The table constraints refuse contradictory rows written directly.
     for (const assignment of [`provider_refusal='rai_input'`, `provider_refusal='model_moderation'`, 'usage_absent=true',
       `enhance_settlement_origin='filtered_unmetered'`]) {

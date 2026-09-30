@@ -8,7 +8,7 @@ import {
   ROOT, assertNoServiceSecrets, assertProjectConfig, requireDocker, requireLocalContainer,
   cli, runCommand, normalSessionEnvironment, readCredentialCache, validateSessionEnvironment, privilegedLocalSql,
   DB_CONTAINER, commandEnvironment, jwtClaims, reportError, startAnalysisServer,
-  probeStep, resetProbe, probeFailureDetail,
+  probeStep, resetProbe, probeFailureDetail, localStatus,
 } from './backend/local.mjs';
 import { PUBLICATION_BODY_MD5, assertCiDatabaseMutationAllowed, verifyCiStorageGuard } from './backend/ci-storage-guard.mjs';
 import { isMain } from './quality/files.mjs';
@@ -62,7 +62,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261003090000_try_on.sql', version: '20261003090000', time: '2026-10-03 09:00:00', bytes: 103694, sha256: SOURCE_HASHES.tryOn },
   { name: '20261003090100_tryon_expire_schedule.sql', version: '20261003090100', time: '2026-10-03 09:01:00', bytes: 1930, sha256: SOURCE_HASHES.tryOnExpireSchedule },
   { name: '20261004090000_tryon_stop_before_claim.sql', version: '20261004090000', time: '2026-10-04 09:00:00', bytes: 21601, sha256: SOURCE_HASHES.tryOnStopBeforeClaim },
-  { name: '20261005090000_provider_refusal.sql', version: '20261005090000', time: '2026-10-05 09:00:00', bytes: 38762, sha256: SOURCE_HASHES.providerRefusal },
+  { name: '20261005090000_provider_refusal.sql', version: '20261005090000', time: '2026-10-05 09:00:00', bytes: 38858, sha256: SOURCE_HASHES.providerRefusal },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1317,7 +1317,9 @@ async function main() {
       colourFinalizer.assertRunning();
       stage = 'BG2b-enhancement-ledger';
       const { enhancementLedgerProbes } = await import('../tests/integration/enhancement-ledger.sessions.mjs');
-      await enhancementLedgerProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BG2b-enhancement-${label}`; });
+      // FILT1: the old-Edge compatibility checks call the local PostgREST RPC with the disposable stack's service key.
+      const localService = await localStatus();
+      await enhancementLedgerProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BG2b-enhancement-${label}`; }, localService);
       colourFinalizer.assertRunning();
       stage = 'AD1-admin-limits';
       const { adminLimitsProbes } = await import('../tests/integration/admin-limits.sessions.mjs');
@@ -1325,7 +1327,7 @@ async function main() {
       colourFinalizer.assertRunning();
       stage = 'VTO1-tryon-ledger';
       const { tryonProbes } = await import('../tests/integration/tryon.sessions.mjs');
-      await tryonProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `VTO1-tryon-${label}`; });
+      await tryonProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `VTO1-tryon-${label}`; }, localService);
       colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
     console.log('PASS: FILT1 upgrade; try-on and enhancement rows settled by the old finishes keep their digest, origin, anomaly and amount after the provider_refusal migration, the new columns are null, replays with the refusal arguments omitted or null match and write nothing; seeded rows removed before the compare; no provider calls');

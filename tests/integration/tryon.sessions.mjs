@@ -70,8 +70,43 @@ export const refusalRows = (payload) => {
   requireEvidence(rows.size >= 6 && [...rows.values()].some((row) => row.origin === 'filtered_unmetered'));
   return [...rows.values()];
 };
+// FILT1 old-Edge compatibility over the Edge's own transport: the local PostgREST RPC with the disposable stack's service
+// key (localStatus, port 54321 only; never hosted). The key is sent only as headers and never printed; bodies are bounded.
+export const serviceRpcOf = ({ url, serviceKey }) => async (name, body) => {
+  requireEvidence(typeof url === 'string' && new URL(url).port === '54321' && typeof serviceKey === 'string' && serviceKey.length > 0);
+  const response = await fetch(`${url}/rest/v1/rpc/${name}`, {
+    method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15_000),
+    headers: { apikey: serviceKey, Authorization: 'Bearer '.concat(serviceKey), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  requireEvidence(text.length <= 65536);
+  let data;
+  try { data = JSON.parse(text); } catch { data = null; }
+  return { status: response.status, data };
+};
+// The readiness shape: a random owner and request answer UNAVAILABLE with no accounting, over HTTP, both with the new
+// arguments omitted and explicitly null. The schema cache is reloaded first and polled until PostgREST resolves both.
+export const awaitHttpReadiness = async (serviceRpc, sql, name, legacy) => {
+  await sql(`notify pgrst, 'reload schema';`);
+  for (const until = Date.now() + 20_000; ;) {
+    const shapes = [];
+    for (const extra of [{}, { p_refusal_kind: null, p_usage_absent: null }]) {
+      shapes.push(await serviceRpc(name, { ...legacy(randomUUID(), randomUUID()), ...extra }));
+    }
+    if (shapes.every((reply) => reply.status === 200 && isDeepStrictEqual(reply.data, { code: 'UNAVAILABLE', accounting: null }))) return;
+    requireEvidence(Date.now() < until);
+    await delay(250);
+  }
+};
+// The stored digest is exactly the pre-FILT1 formula over the stored code and usage (no refusal keys), and the new
+// columns are null: an old-shaped call settles and digests as before.
+export const legacyDigestHolds = async (sql, owner, id) => (await sql(`select (e.enhance_settlement_digest=encode(sha256(convert_to(
+    jsonb_build_object('code',e.enhance_code,'usage',e.normalized_usage,'outputSha256',null::text,'outputBytes',null::integer)::text,
+    'UTF8')),'hex') and e.provider_refusal is null and e.usage_absent is null)::text
+  from private.ai_usage_evidence e where e.owner_id=${literal(owner.uid)} and e.request_id=${literal(id)};`)).trim() === 'true';
 
-export async function tryonProbes(snapshot, sql, mark) {
+export async function tryonProbes(snapshot, sql, mark, service) {
   const { client, owners: [a, b] } = snapshot;
   const one = async (text) => JSON.parse(await sql(text));
   const scalar = async (text) => (await sql(text)).trim();
@@ -834,6 +869,31 @@ export async function tryonProbes(snapshot, sql, mark) {
       p_output=>null,p_fetch_started=>true,p_client_live_at_fetch=>true,p_client_gone=>false)::text; commit;`)),
     { code: 'UNAVAILABLE', accounting: null });
     requireEvidence((await capacity()).dispatch_enabled === true && (await controls(a)).tryon_activated === true);
+    // (g, HTTP) An old Edge reaches the finish through PostgREST: readiness, then legacy settlement, replay and the
+    // unchanged digest with the new arguments omitted and explicitly null; a new Edge's qualifying refusal as well.
+    const serviceRpc = serviceRpcOf(service);
+    const legacyBody = (owner, id, extra = {}) => ({ p_owner_id: owner, p_request_id: id, p_code: 'FILTERED', p_usage: null,
+      p_output_sha256: null, p_output_bytes: null, p_output: null, p_fetch_started: true, p_client_live_at_fetch: true,
+      p_client_gone: false, ...extra });
+    await awaitHttpReadiness(serviceRpc, sql, 'tryon_finish', (owner, id) => legacyBody(owner, id));
+    const nulls = { p_refusal_kind: null, p_usage_absent: null };
+    for (const [first, second, extra] of [[{}, nulls, {}], [nulls, {}, {}], [{}, nulls, { p_code: 'FAILED', p_usage: VALID }]]) {
+      const id = await dispatched(a);
+      const settledHttp = await serviceRpc('tryon_finish', legacyBody(a.uid, id, { ...extra, ...first }));
+      requireEvidence(settledHttp.status === 200 && settledHttp.data?.code === (extra.p_code ?? 'FILTERED'));
+      const row = await settledRow(a, id), shown = await ledger(a, id);
+      requireEvidence(extra.p_usage ? shown.origin === 'observed' && shown.anomaly === false
+        : shown.origin === 'unmetered' && shown.anomaly === true && shown.accounted === String(RESERVED));
+      requireEvidence(await legacyDigestHolds(sql, a, id));
+      const replayed = await serviceRpc('tryon_finish', legacyBody(a.uid, id, { ...extra, ...second }));
+      requireEvidence(replayed.status === 200 && replayed.data?.code === (extra.p_code ?? 'FILTERED') && replayed.data.replayed === true);
+      equal(await settledRow(a, id), row);
+    }
+    const viaHttp = await dispatched(a);
+    const newShape = await serviceRpc('tryon_finish', legacyBody(a.uid, viaHttp, { p_refusal_kind: 'rai_input', p_usage_absent: true }));
+    requireEvidence(newShape.status === 200 && newShape.data?.code === 'FILTERED');
+    requireEvidence((await ledger(a, viaHttp)).origin === 'filtered_unmetered' && (await ledger(a, viaHttp)).anomaly === false);
+    requireEvidence((await capacity()).dispatch_enabled === true && (await controls(a)).tryon_activated === true);
     // (e) A probe still stops on a qualifying refusal (missing usage); the switch and the ordinary settings stay.
     await setControls(a, 'tryon_activated=false');
     const refusalProbe = randomUUID();
@@ -1136,6 +1196,50 @@ const upgradeEnhanceFinish = (owner, id, code, usage, sha, extra) => `public.enh
 const upgradeFinish = (row, extra = '') => (row.feature === 'try_on' ? upgradeTryonFinish : upgradeEnhanceFinish)(
   row.owner, row.id, row.code, row.usage, row.sha, extra);
 
+// FILT1 negative upgrade: with a finish function's settings missing (null proconfig) or incomplete, the migration's own
+// transaction body aborts at its precondition. Each attempt runs in a subtransaction that is always rolled back (an
+// unexpected success raises a sentinel inside it), and the catalogue is then proven identical: nothing replaced, no
+// column or constraint added.
+const OLD_TRYON_FINISH = 'public.tryon_finish(uuid,uuid,text,jsonb,text,integer,bytea,boolean,boolean,boolean)';
+const OLD_ENHANCE_FINISH = 'public.enhance_finish(uuid,uuid,text,jsonb,text,integer)';
+export async function refusalPreconditionAbort(sql) {
+  const text = readFileSync(new URL('../../supabase/migrations/20261005090000_provider_refusal.sql', import.meta.url), 'utf8')
+    .replaceAll('\r\n', '\n');
+  const start = text.indexOf('\nbegin;\n'), end = text.lastIndexOf('\ncommit;');
+  requireEvidence(start > 0 && end > start && text.indexOf('\nbegin;\n', start + 1) === -1
+    && text.slice(end).trim() === 'commit;' && !text.includes('$filt1_abort$'));
+  const body = text.slice(start + '\nbegin;\n'.length, end);
+  const catalogue = async () => JSON.parse(await sql(`select jsonb_build_object(
+    'functions',(select jsonb_agg(jsonb_build_array(p.oid::regprocedure::text,p.oid,p.proconfig,md5(pg_get_functiondef(p.oid)))
+      order by p.oid) from pg_catalog.pg_proc p where p.pronamespace='public'::regnamespace
+      and p.proname in ('tryon_finish','enhance_finish','tryon_replay','enhance_replay')),
+    'replays',(select jsonb_agg(md5(pg_get_functiondef(p.oid)) order by p.oid) from pg_catalog.pg_proc p
+      where p.pronamespace='private'::regnamespace and p.proname in ('tryon_replay','enhance_replay')),
+    'columns',(select count(*) from pg_catalog.pg_attribute where attrelid='private.ai_usage_evidence'::regclass
+      and attname in ('provider_refusal','usage_absent') and not attisdropped),
+    'constraints',(select jsonb_agg(jsonb_build_array(conname,md5(pg_get_constraintdef(oid))) order by conname)
+      from pg_catalog.pg_constraint where conrelid='private.ai_usage_evidence'::regclass));`));
+  const before = await catalogue();
+  requireEvidence(before.columns === 0 && before.functions.length === 2);
+  for (const [target, change] of [[OLD_TRYON_FINISH, 'reset all'], [OLD_ENHANCE_FINISH, 'reset all'],
+    [OLD_TRYON_FINISH, 'reset lock_timeout']]) {
+    const reply = await sql(`do $filt1_abort$ declare v text; begin
+      begin
+        alter function ${target} ${change};
+        execute ${literal(body)};
+        raise exception 'FILT1_NEGATIVE_APPLIED';
+      exception when raise_exception then v := sqlerrm; end;
+      perform set_config('filt1.abort',v,false);
+    end $filt1_abort$; select 'R:'||current_setting('filt1.abort');`);
+    const message = reply.split('\n').map((line) => line.trim()).find((line) => line.startsWith('R:'))?.slice(2) ?? '';
+    const name = target.slice('public.'.length, target.indexOf('('));
+    if (!(message.startsWith('FILT1 precondition: ') && message.includes(`${name}(`) && message.endsWith('properties not as expected'))) {
+      throw new Error(`FILT1 negative upgrade (${name}, ${change}) did not abort at the precondition`);
+    }
+    equal(await catalogue(), before);
+  }
+}
+
 export async function refusalUpgradeSeed(snapshot, sql) {
   const owner = snapshot.owners[0];
   const one = async (text) => JSON.parse(await sql(text));
@@ -1144,6 +1248,7 @@ export async function refusalUpgradeSeed(snapshot, sql) {
     to_regprocedure('public.enhance_finish(uuid,uuid,text,jsonb,text,integer)') is not null,
     exists(select 1 from pg_attribute where attrelid='private.ai_usage_evidence'::regclass and attname='provider_refusal'));`),
   [true, true, false]);
+  await refusalPreconditionAbort(sql);
   const baseline = await one(`select jsonb_build_object('capacity',(select to_jsonb(k) from private.provider_capacity k
       where deployment_key=${literal(KEY)}),'controls',(select to_jsonb(c) from private.ai_controls c where owner_id=${literal(owner.uid)}),
     'usage',(select count(*) from private.ai_usage where owner_id=${literal(owner.uid)} and purpose in ('try_on','enhancement')));`);

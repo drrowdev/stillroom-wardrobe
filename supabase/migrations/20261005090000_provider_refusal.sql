@@ -16,9 +16,9 @@ declare f regprocedure; p pg_catalog.pg_proc;
 begin
   foreach f in array array['public.tryon_finish(uuid,uuid,text,jsonb,text,integer,bytea,boolean,boolean,boolean)','public.enhance_finish(uuid,uuid,text,jsonb,text,integer)']::regprocedure[] loop
     select * into p from pg_catalog.pg_proc where oid=f;
-    if not p.prosecdef or p.prolang<>(select oid from pg_catalog.pg_language where lanname='plpgsql')
-      or (select array_agg(x order by x) from unnest(p.proconfig) x)<>array['lock_timeout=2s','search_path=""']
-      or p.proowner<>(select proowner from pg_catalog.pg_proc where oid='public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid)'::regprocedure)
+    if not p.prosecdef or p.prolang is distinct from (select oid from pg_catalog.pg_language where lanname='plpgsql')
+      or (select array_agg(x order by x) from unnest(p.proconfig) x) is distinct from array['lock_timeout=2s','search_path=""']
+      or p.proowner is distinct from (select proowner from pg_catalog.pg_proc where oid='public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid)'::regprocedure)
       or p.proacl is null or not has_function_privilege('service_role',f,'EXECUTE')
       or exists(select 1 from aclexplode(p.proacl) x where x.privilege_type='EXECUTE'
         and x.grantee not in (p.proowner,'service_role'::regrole)) then
@@ -505,9 +505,9 @@ declare f regprocedure; p pg_catalog.pg_proc;
 begin
   foreach f in array array['public.tryon_finish(uuid,uuid,text,jsonb,text,integer,bytea,boolean,boolean,boolean,text,boolean)','public.enhance_finish(uuid,uuid,text,jsonb,text,integer,text,boolean)']::regprocedure[] loop
     select * into p from pg_catalog.pg_proc where oid=f;
-    if not p.prosecdef or p.prolang<>(select oid from pg_catalog.pg_language where lanname='plpgsql')
-      or (select array_agg(x order by x) from unnest(p.proconfig) x)<>array['lock_timeout=2s','search_path=""']
-      or p.proowner<>(select proowner from pg_catalog.pg_proc where oid='public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid)'::regprocedure)
+    if not p.prosecdef or p.prolang is distinct from (select oid from pg_catalog.pg_language where lanname='plpgsql')
+      or (select array_agg(x order by x) from unnest(p.proconfig) x) is distinct from array['lock_timeout=2s','search_path=""']
+      or p.proowner is distinct from (select proowner from pg_catalog.pg_proc where oid='public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid)'::regprocedure)
       or p.proacl is null or not has_function_privilege('service_role',f,'EXECUTE')
       or exists(select 1 from aclexplode(p.proacl) x where x.privilege_type='EXECUTE'
         and x.grantee not in (p.proowner,'service_role'::regrole)) then
