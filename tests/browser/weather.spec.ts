@@ -125,9 +125,8 @@ async function start(page: Page, options: { language?: Language; weather?: Row; 
   if (options.route === 'settings') await settingsFocused(page);
   return { api, weather };
 }
-// Settings becomes visible before the lazy boundary's ready effect moves focus to the route's heading (or the card
-// Today asked for). Typing before that lands can lose the text in WebKit: fill focuses the field, the effect takes focus,
-// then the text is inserted nowhere, so Search stays disabled. Wait for the route focus before touching the form.
+// Settings becomes visible before the lazy boundary's ready effect runs. That effect no longer takes focus from a control
+// in the page (FOCUS1), but the waits stay: they pin the route focus itself and keep typing after it.
 async function settingsFocused(page: Page) {
   await expect(page.locator('#settings-title, #weather-heading, #stylist-heading').and(page.locator(':focus'))).toHaveCount(1);
 }
@@ -150,6 +149,74 @@ async function search(page: Page, query: string, language: Language = 'en') {
   await page.locator('#weather-city').fill(query);
   await button(page, 'common.search', language).click();
 }
+
+// Delays the lazy route's ready effect: once the city field is inserted, React's scheduler messages (which run the
+// commit's passive effects) are held until released. The clock skip makes the scheduler yield instead of running them
+// in the same task. A keystroke's own render still flushes them first, as it would on a slow device.
+async function holdReadyAfterCityField(page: Page) {
+  await page.addInitScript(() => {
+    const state = { armed: false, held: false, queue: [] as (() => void)[] };
+    (window as unknown as { readyHold: typeof state }).readyHold = state;
+    const now = performance.now.bind(performance);
+    let skew = 0;
+    performance.now = () => now() + skew;
+    const descriptor = Object.getOwnPropertyDescriptor(MessagePort.prototype, 'onmessage')!;
+    Object.defineProperty(MessagePort.prototype, 'onmessage', {
+      ...descriptor,
+      set(this: MessagePort, handler: ((event: MessageEvent) => void) | null) {
+        descriptor.set!.call(this, handler && ((event: MessageEvent) => {
+          if (state.held) state.queue.push(() => handler.call(this, event)); else handler.call(this, event);
+        }));
+      },
+    });
+    const prototype = Node.prototype as unknown as Record<'appendChild' | 'insertBefore', (this: Node, ...args: unknown[]) => unknown>;
+    for (const name of ['appendChild', 'insertBefore'] as const) {
+      const original = prototype[name];
+      prototype[name] = function (this: Node, ...args: unknown[]) {
+        const result = original.apply(this, args);
+        const node = args[0];
+        if (state.armed && !state.held && this.isConnected && node instanceof Element
+          && (node.id === 'weather-city' || node.querySelector('#weather-city'))) { state.held = true; skew += 50; }
+        return result;
+      };
+    }
+  });
+}
+
+test('FOCUS1 a late route-ready effect keeps the focus and every keystroke typed before it', async ({ page }) => {
+  await holdReadyAfterCityField(page);
+  // Settings arrives late, as on a slow connection: its chunk is held, so it shows through the Suspense retry.
+  let releaseChunk = () => {};
+  const chunkHeld = new Promise<void>(resolve => {
+    void page.route(/\/profile-screen[.-][^/]*$/, async route => { resolve(); await new Promise<void>(go => { releaseChunk = go; }); await route.continue(); });
+  });
+  const { weather } = await start(page, { seed: api => basics(api) });
+  await expect(cards(page).first()).toBeVisible();
+  await page.evaluate(() => {
+    (window as unknown as { readyHold: { armed: boolean } }).readyHold.armed = true;
+    location.hash = '#/settings';
+  });
+  await chunkHeld;
+  await expect(page.locator('.chunk-loading')).toBeVisible();
+  releaseChunk();
+  const field = page.locator('#weather-city');
+  await expect(field).toBeVisible();
+  // The hold engaged and the ready effect hasn't run: nothing in Settings has focus yet.
+  expect(await page.evaluate(() => (window as unknown as { readyHold: { held: boolean } }).readyHold.held)).toBe(true);
+  await expect(page.locator('#settings-title')).not.toBeFocused();
+  await field.focus();
+  await page.keyboard.type('Oulu');
+  await page.evaluate(() => {
+    const hold = (window as unknown as { readyHold: { held: boolean; queue: (() => void)[] } }).readyHold;
+    hold.held = false;
+    hold.queue.splice(0).forEach(run => run());
+  });
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue('Oulu');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('radio', { name: 'Oulu, North Ostrobothnia, Finland' })).toBeChecked();
+  expect(weather.searches().map(url => url.searchParams.get('name'))).toEqual(['Oulu']);
+});
 
 test('I16 sends nothing until Search, then only the typed city; Use this city turns forecasts on and Turn off stops them', async ({ page }) => {
   const { api, weather } = await start(page, { route: 'settings', seed: api => basics(api) });
