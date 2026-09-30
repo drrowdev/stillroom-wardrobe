@@ -227,7 +227,7 @@ function hueRange(low: number, high: number): number {
  * "qualifies", "defined", "occupied", "lost" or "falls back" for the others.
  */
 export const CLEANUP_RULES = Object.freeze({
-  added: (share: number) => share >= CLEANUP_V2.added.maximum,
+  added: (share: number, identity: boolean) => share >= (identity ? CLEANUP_V2.added.identityMaximum : CLEANUP_V2.added.maximum),
   retention: (retained: number, areaR: number, pixels: number) => areaR === 0 || retained < CLEANUP_V2.retention.minimum * areaR
     || retained < CLEANUP_V2.minimumMaskFraction * pixels,
   support: (support: number, resultArea: number, pixels: number) => support < CLEANUP_V2.minimumMaskFraction * pixels
@@ -881,7 +881,7 @@ export async function cleanupCheck(h0: Uint8ClampedArray, reference: Uint8Array,
       else if (bad()) reason = name;
     };
     const rule = CLEANUP_RULES;
-    judge('added', [added], () => rule.added(added));
+    judge('added', [added], () => rule.added(added, identity));
     judge('centre', [alignedCentroid.x, alignedCentroid.y], () => alignedCentroid.x < low || alignedCentroid.x >= high
       || alignedCentroid.y < low || alignedCentroid.y >= high);
     judge('retention', [retention], () => rule.retention(retained, areaR, pixels));

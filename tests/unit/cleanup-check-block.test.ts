@@ -1,5 +1,5 @@
 // BG2c-3 (plan rev8 §4.2, §4.4): Block fixtures must fail for the named reason with that gate beyond its §5.2 fail band.
-// Disclosed false rejects (F1-F3, and L11, the retired positive) are asserted as failing. X14 (the rev4 stage
+// Disclosed false rejects (F1, F2, and L11, the retired positive) are asserted as failing; F3 passes since BG2c-3b. X14 (the rev4 stage
 // negatives) is in cleanup-check.test.ts; the chromatic Block cases X2, X3, red X9/X15 and chromatic X16 are in
 // cleanup-check-colour.test.ts.
 import { describe, expect, it } from 'vitest';
@@ -34,22 +34,13 @@ describe('Block fixtures fail with margin (§4.2)', () => {
     expectBlocked(await checkScenes(solid(G, navy), print), ['colourShift', 'change']);
   }, 60_000);
 
-  it('X6 the critic\'s 30×100 addition at identity fails added', async () => {
-    const add: Box = { left: G.left + G.width, top: 110, width: 30, height: 100 };
-    const verdict = await checkScenes(solid(G, navy), plus([G, add], () => navy));
-    expectBlocked(verdict, ['added']);
-    expect(verdict.metrics).toMatchObject({ scale: 1, tx: 0, ty: 0 });
-  }, 30_000);
-
+  // X6 and X8 pass since BG2c-3b (identity `added` 0.25) and are asserted as the owner-accepted escape L17 in
+  // cleanup-check-accept.test.ts. X7 still fails: its identity pass fails a gate, and the aligned pass keeps 0.07.
   it('X7 the addition plus a genuine ×1.1 pose change fails added', async () => {
     const add: Box = { left: G.left + G.width, top: 110, width: 30, height: 100 };
     expectBlocked(await checkScenes(solid(G, navy), posed(plus([G, add], () => navy), 1.1)), ['added']);
   }, 30_000);
 
-  it('X8 a hood (12 %) added outside R fails added', async () => {
-    const hood: Box = { left: G.left + 43, top: G.top - 60, width: 50, height: 60 };
-    expectBlocked(await checkScenes(solid(G, navy), plus([G, hood], () => navy)), ['added']);
-  }, 30_000);
 
   describe('X9 a same-colour sleeve (12 %) removed fails removed', () => {
     const sleeve: Box = { left: G.left + G.width - 30, top: G.top, width: 30, height: 100 };
@@ -155,7 +146,9 @@ describe('Block fixtures fail with margin (§4.2)', () => {
 // rev8b: recentred parts. The result is shifted so its bounding box is centred again, as a clean-up that removes or adds
 // a part would frame it. Areas are reported as a share of the 136×180 body (24,480 px), separately from the gate
 // statistics, whose denominators are the gate's own (§5.2). Each must fail BOTH the identity and the aligned path.
-describe('rev8b recentred removals and additions fail both paths with margin', () => {
+// BG2c-3b: the recentred sleeve addition passes at identity (L17), and a recentred removal that is also enlarged by
+// ×1.10-1.15 passes at identity (L18); both are owner-accepted escapes asserted in cleanup-check-accept.test.ts.
+describe('rev8b recentred removals fail both paths with margin', () => {
   const BODY = G.width * G.height;
   const shifted = (paint: Paint, dx: number, dy: number): Paint => (x, y) => paint(x - dx, y - dy);
   const part = (label: string, box: Box) => `${label} ${box.width}×${box.height} (${(100 * box.width * box.height / BODY).toFixed(1)} % of the 24,480 px body)`;
@@ -166,8 +159,6 @@ describe('rev8b recentred removals and additions fail both paths with margin', (
     ...[18, 22].map((w): [string, Paint, Paint] => [part('side strip removed', strip(w)), solid(G, navy), shifted(minus(G, strip(w), navy), w / 2, 0)]),
     ...[26, 30].map((h): [string, Paint, Paint] => [part('bottom strip removed', bottom(h)), solid(G, navy), shifted(minus(G, bottom(h), navy), 0, h / 2)]),
     [part('sleeve removed', sleeve(30)), solid(G, navy), minus(G, sleeve(30), navy)],
-    [part('sleeve added', { left: 0, top: 0, width: 30, height: 100 }), solid(G, navy),
-      shifted(plus([G, { left: G.left + G.width, top: 110, width: 30, height: 100 }], () => navy), -15, 0)],
   ];
   it.each(cases)('%s', async (_label, h0, h2) => {
     expectBlocked(await checkScenes(h0, h2), ['added', 'removed']);
@@ -178,6 +169,29 @@ describe('rev8b recentred removals and additions fail both paths with margin', (
     expect((verdict as { reason: string }).reason).toBe('removed');
     expect(verdict.metrics).toMatchObject({ path: 'aligned', identityReason: 'removed' });
     expect(verdict.metrics.removed).toBeCloseTo(0.0766, 4);
+  }, 30_000);
+});
+
+// BG2c-3b (#84): gross additions. e is the added area as a share of the 136×180 body (24,480 px); the gate statistic
+// is the share of the result mask M2 outside R (identity, zero slack: e/(1+e) for a part attached outside R) or outside
+// dilate(R, 6) after alignment. Each fails the identity pass (0.25) and the aligned pass (0.07), which decides beyond
+// its 0.077 fail band. An attached part of 33.3 % gives identity exactly 0.25 and is printed in §4.3a, not asserted.
+describe('BG2c-3b gross additions fail both paths with margin', () => {
+  const BODY = G.width * G.height;
+  const right = (w: number, h: number, top = G.top): Box => ({ left: G.left + G.width, top, width: w, height: h });
+  const cases: [string, Box[]][] = [
+    ['an attached second garment 50×170 on the right', [right(50, 170, G.top + 5)]],
+    ['an attached second garment 56×180 on the right', [right(56, 180)]],
+    ['56×180 on the right and 136×40 below', [right(56, 180), { left: G.left, top: G.top + G.height, width: G.width, height: 40 }]],
+    ['50×180 on each side', [right(50, 180), { left: G.left - 50, top: G.top, width: 50, height: 180 }]],
+  ];
+  it.each(cases.map(([label, parts]) => {
+    const e = parts.reduce((sum, b) => sum + b.width * b.height, 0) / BODY;
+    return [`${label}: e = ${(100 * e).toFixed(1)} % of the body, identity added ${(e / (1 + e)).toFixed(3)}`, parts] as const;
+  }))('%s', async (_label, parts) => {
+    const verdict = await checkScenes(solid(G, navy), plus([G, ...parts], () => navy));
+    expectBlocked(verdict, ['added']);
+    expect(verdict.metrics.identityReason).toBe('added');
   }, 30_000);
 });
 
@@ -196,11 +210,6 @@ describe('Disclosed false rejects are asserted as failing (§4.4)', () => {
 
   it('F2 a 60 px re-centre, beyond the 40 px bound (the garment reaches the ring, so it fails background)', async () => {
     await failsFor(solid(G, navy), posed(solid(G, navy), 1, 60, 0), ['background', 'added', 'centre']);
-  }, 30_000);
-
-  it('F3 a part BG1 missed, shown in H2, over 7 %', async () => {
-    const missed: Box = { left: G.left, top: G.top + G.height, width: G.width, height: 20 };
-    await failsFor(plus([G, missed], () => navy), plus([G, missed], () => navy), ['added']);
   }, 30_000);
 
   it('L11 the retired positive: d45 w15 p16 crease removal at L60 (colourMode) and L85 (disclosed: added)', async () => {

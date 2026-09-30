@@ -3,7 +3,7 @@
 // gross change at >= 1.25x its boundary plus 0-2 Accept parameters that can't cancel it. A failure here is a finding
 // to report, never a reason to retune the record.
 import { describe, expect, it } from 'vitest';
-import { CLEANUP_GENERATOR } from '../../src/images/cleanup-calibration';
+import { CLEANUP_GENERATOR, CLEANUP_V2 } from '../../src/images/cleanup-calibration';
 import {
   bandAt, checkScenes, creased, expectAccepted, expectBlocked, GARMENT, inBox, lch, mulberry32, noisy, posed, relit, within,
   type Box, type Lab, type Paint,
@@ -110,7 +110,7 @@ function generate(): { accepts: Case[]; blocks: Case[] } {
         const share = round(draw(block.addedShare)), height = Math.round(share * G.height) + 6;
         const strip: Box = { left: G.left, top: G.top + G.height, width: G.width, height };
         h2 = within((x, y) => inG(x, y) || inBox(strip, x, y), () => scene.base);
-        change = `added ${share}`; reasons = ['added'];
+        change = `added ${share} (e = ${(100 * height / G.height).toFixed(1)} % of the body)`; reasons = ['added'];
         break;
       }
       case 'removed': {
@@ -141,6 +141,9 @@ const { accepts, blocks } = generate();
 // verdict (Block, fall back to the original) is the intended one; the named reason differs.
 const FINDINGS: Record<number, readonly CleanupReason[]> = { 4: ['added'], 16: ['added'], 34: ['added'] };
 blocks.forEach((c, index) => { if (FINDINGS[index]) c.reasons = FINDINGS[index]; });
+// BG2c-3b (#84): every held-out addition (e 15.6-20.6 % of the body, identity `added` about 0.13-0.17) now passes at
+// identity under the 0.25 limit. They are the owner-accepted escape L17, asserted as passing, NOT positives.
+const L17 = new Set([3, 9, 15, 21, 27, 33, 39, 45, 51, 57]);
 
 describe('held-out set (§4.5), frozen seed', () => {
   it('has the frozen size', () => {
@@ -153,7 +156,15 @@ describe('held-out set (§4.5), frozen seed', () => {
     expectAccepted(await checkScenes(c.h0, c.h2, undefined, c.seed));
   }, 30_000);
 
-  it.each(blocks.map((c) => [c.label, c] as const))('%s', async (_label, c) => {
+  it.each(blocks.filter((_c, index) => !L17.has(index)).map((c) => [c.label, c] as const))('%s', async (_label, c) => {
     expectBlocked(await checkScenes(c.h0, c.h2, undefined, c.seed), c.reasons!);
+  }, 30_000);
+
+  it.each(blocks.filter((_c, index) => L17.has(index)).map((c) => [`L17 (owner-accepted escape) ${c.label}`, c] as const))('%s', async (_label, c) => {
+    expect(c.reasons).toEqual(['added']);
+    const verdict = await checkScenes(c.h0, c.h2, undefined, c.seed);
+    expect(verdict.accepted).toBe(true);
+    expect(verdict.metrics.path).toBe('identity');
+    expect(verdict.metrics.added).toBeLessThan(CLEANUP_V2.added.identityMaximum);
   }, 30_000);
 });
