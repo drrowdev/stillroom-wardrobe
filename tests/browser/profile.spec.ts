@@ -596,7 +596,7 @@ test('dirty settings Back and Forward use one guard without losing history', asy
   await page.evaluate(() => history.back());
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page).toHaveURL(/#\/settings$/);
-  await page.getByRole('button', { name: 'Continue editing', exact: true }).click();
+  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
   await expect(page.locator('#profile-display_name')).toHaveValue('Unsaved settings');
   await page.evaluate(() => history.back());
   await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
@@ -608,7 +608,7 @@ test('dirty settings Back and Forward use one guard without losing history', asy
   await page.locator('#item-title').fill('Unsaved garment');
   await page.evaluate(() => { location.hash = '#/settings'; });
   await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('button', { name: 'Continue editing', exact: true }).click();
+  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
   await expect(page.locator('#item-title')).toHaveValue('Unsaved garment');
 });
 test('language change preserves unsaved garment draft and owner epoch', async ({ page }) => {
@@ -630,7 +630,7 @@ test('reload and same-route history entries cannot bypass the dirty settings gua
   await page.locator('#profile-display_name').fill('Retain after reload');
   await page.evaluate(() => history.back());
   await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('button', { name: 'Continue editing', exact: true }).click();
+  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
   await expect(page.locator('#profile-display_name')).toHaveValue('Retain after reload');
   await page.evaluate(() => {
     history.pushState({ ...history.state, wardrobePosition: Number(history.state.wardrobePosition) + 1 }, '', '#/settings');
@@ -638,10 +638,10 @@ test('reload and same-route history entries cannot bypass the dirty settings gua
     history.go(-2);
   });
   await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('button', { name: 'Continue editing', exact: true }).click();
+  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
   await page.evaluate(() => { location.hash = '#/settings?unused'; });
   await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('button', { name: 'Continue editing', exact: true }).click();
+  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('button', { name: 'Discard changes', exact: true }).click();

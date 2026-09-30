@@ -82,6 +82,15 @@ Only secondary setup instructions, camera workarounds, the crop editor's exact v
 Removing helper text also removes its accessible-description reference, never
 the field's label, validation or genuine constraint.
 
+UX3 update, 30 September 2026 (owner-approved UX review, packet 3): routine
+screens (add item, wardrobe, today, outfits, try-on, chat and their errors)
+describe plain outcomes, without provider, model, reservation, estimate or
+administrator wording. Consent notices and their settings-card disclosures stay
+verbatim and appear only in the consent step and on the settings card. The
+operator is "app owner" ("sovelluksen omistaja", "appens ägare"). Where a request
+may already have been billed, keep one short clause such as "It may still count
+toward your AI limit." (FI passive: "… voidaan silti laskea mukaan tekoälyrajaasi.").
+
 New or moved small copy is at least 14 px, with 44 px controls and normal-text
 contrast of at least 4.5:1. Check 320 px and 200% text without clipping. Preserve
 the brand and illustration; hide the textless entry illustration container on
