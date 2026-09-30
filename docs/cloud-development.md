@@ -817,6 +817,21 @@ database owner until the health counts are zero; if the job failed, fix it and
 confirm its next run. The block lifts by itself; tell the owner about any
 nonzero count.
 
+**VTO-3a Stop before claim (source only; hosted apply owner-gated as ledger 28).**
+Adds `20261004090000_tryon_stop_before_claim.sql`, applied after the VTO-1 pair
+(ledger 26 and 27). Stop now works before the server has seen the chain: when
+the owner has no chain with that ID, `tryon_cancel` records a private stop
+marker in `private.tryon_chain_stops` and answers `CANCELLED`, and a later
+step-1 `tryon_claim` of that ID is refused as `CANCELLED` with no chain, usage,
+evidence or result. At most 60 new markers per owner per hour (`UNAVAILABLE`
+beyond that; the client then does not report stopped). `tryon_expire_due`
+deletes markers after one day (`stopsPurged`), `tryon_discard_transient` deletes
+them all (`stopsDeleted`), account deletion removes them and they are never
+exported. Not additive: cancel of a missing or foreign chain answers
+`CANCELLED` instead of `NOT_FOUND`, so the client's Stop is deployed with it.
+Try-on activation (G9) stays held until this is applied, deployed and its gates
+pass (release-gates row M12).
+
 Platform restore: after any database restore and before access reopens, run
 `select public.tryon_discard_transient();` as the database owner and record its
 counts in the restore receipt. It deletes every try-on result, chain and attempt

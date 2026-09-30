@@ -84,7 +84,7 @@ describe('I17 isolation catalogue validator', () => {
     expect(catalog.validateCatalog(validSnapshot(), helperMd5)).toEqual([]);
     expect(catalog.EXPOSED_RPCS).toHaveLength(67);
     expect(catalog.SERVICE_ONLY_RPCS).toHaveLength(27);
-    expect(catalog.PRIVATE_TABLES).toHaveLength(37);
+    expect(catalog.PRIVATE_TABLES).toHaveLength(38);
     expect(Object.keys(catalog.PUBLIC_TABLES)).toHaveLength(10);
     const kinds = [...(catalog.expectedFunctions() as Map<string, Expected>).values()].map((v) => v.kind);
     expect(kinds.filter((k) => k === 'helper')).toHaveLength(4);

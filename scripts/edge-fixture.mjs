@@ -263,6 +263,7 @@ async function main() {
           delete from private.item_deletion_operations where ${where} and request_id::text like '${REQUEST_PREFIX}%';
           delete from private.tryon_results where ${where} and chain_id::text like '${REQUEST_PREFIX}%';
           delete from private.tryon_chains where ${where} and chain_id::text like '${REQUEST_PREFIX}%';
+          delete from private.tryon_chain_stops where ${where} and chain_id::text like '${REQUEST_PREFIX}%';
           delete from public.outfits where ${where} and id::text like '${REQUEST_PREFIX}%';
           delete from private.ai_save_used_receipts where ${where} and request_id::text like '${REQUEST_PREFIX}%';
           delete from private.ai_usage where ${where} and request_id::text like '${REQUEST_PREFIX}%';

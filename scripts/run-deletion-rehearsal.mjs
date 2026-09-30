@@ -395,7 +395,7 @@ async function exercise(ctx) {
   if (await adminRows() !== '1:2:1:0:2') throw new Error('SEED:admin');
   // VTO-1: both owners hold a held try-on step on its own provider slot with evidence, a running chain with its
   // attempt as its active request, a reserved result slot, a completed chain with its ready picture and a
-  // try-on probe authorisation. C's go with the account; D's stay.
+  // try-on probe authorisation, plus (VTO-3a) one Stop marker. C's go with the account; D's stay.
   step = 'fixture-tryon';
   const tryonManifest = "'azure-global-image25-sunburst-tryon-v1'";
   for (const [label, uid] of [['C', c], ['D', d]]) {
@@ -423,18 +423,23 @@ async function exercise(ctx) {
   insert into private.ai_usage_evidence(owner_id,request_id,manifest_id,model_observation,tryon_dispatch_before)
     values (${literal(uid)},${literal(request)},${tryonManifest},'not_observed',now()+interval '15 seconds');
   insert into private.tryon_probe_authorisations(id,owner_id,deployment_key,manifest_id,max_calls,allocation_micro,approval_ref,expires_at,created_at)
-    values (gen_random_uuid(),${literal(uid)},${deployment},${tryonManifest},5,1800000,'rehearsal-tryon-${label}',now()+interval '1 day',now());`);
+    values (gen_random_uuid(),${literal(uid)},${deployment},${tryonManifest},5,1800000,'rehearsal-tryon-${label}',now()+interval '1 day',now());
+  insert into private.tryon_chain_stops(owner_id,chain_id,created_at) values (${literal(uid)},gen_random_uuid(),now());`);
   }
   const tryonRows = (uid) => sql(`select (select count(*) from private.ai_usage where owner_id=${literal(uid)} and purpose='try_on')
     ||':'||(select count(*) from private.tryon_chains where owner_id=${literal(uid)})
     ||':'||(select count(*) from private.tryon_attempts where owner_id=${literal(uid)})
     ||':'||(select count(*) from private.tryon_results where owner_id=${literal(uid)})
-    ||':'||(select count(*) from private.tryon_probe_authorisations where owner_id=${literal(uid)});`);
+    ||':'||(select count(*) from private.tryon_probe_authorisations where owner_id=${literal(uid)})
+    ||':'||(select count(*) from private.tryon_chain_stops where owner_id=${literal(uid)});`);
+  const stopRows = (uid) => sql(`select coalesce(string_agg(t::text,'|' order by t::text),'') from private.tryon_chain_stops t
+    where t.owner_id=${literal(uid)};`);
   const heldTryonSlots = () => sql(`select count(*) from private.provider_slots
     where slot_id in (${literal(slots.tryonC)},${literal(slots.tryonD)}) and held_until>now()+interval '30 minutes';`);
-  if (await tryonRows(c) !== '1:2:1:2:1' || await tryonRows(d) !== '1:2:1:2:1' || await heldTryonSlots() !== '2') {
+  if (await tryonRows(c) !== '1:2:1:2:1:1' || await tryonRows(d) !== '1:2:1:2:1:1' || await heldTryonSlots() !== '2') {
     throw new Error('SEED:tryon');
   }
+  const dStops = await stopRows(d);
   step = 'fixture';
   const before = await digest(d);
   const cBefore = JSON.parse(await digest(c));
@@ -647,7 +652,8 @@ async function exercise(ctx) {
   // C's admin row and C-targeted audit rows are gone; D's row stays with its actor anonymised; no row names C.
   if (await adminRows() !== '0:0:0:1:0') throw new Error('RESULT:admin');
   // C's try-on rows are gone, D's stay, and neither provider slot was released by the deletion.
-  if (await tryonRows(c) !== '0:0:0:0:0' || await tryonRows(d) !== '1:2:1:2:1') throw new Error('RESULT:tryon');
+  if (await tryonRows(c) !== '0:0:0:0:0:0' || await tryonRows(d) !== '1:2:1:2:1:1') throw new Error('RESULT:tryon');
+  if (await stopRows(d) !== dStops) throw new Error('RESULT:tryon-stops');
   if (await heldTryonSlots() !== '2') throw new Error('RESULT:tryon-slots');
   const purged = await call('/rest/v1/rpc/purge_deletion_receipts', { method: 'POST', ...service, body: {} }, 10_000);
   if (!purged?.response.ok || (await purged.response.text()).trim() !== '0') throw new Error('RESULT:purge');

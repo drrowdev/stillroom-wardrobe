@@ -721,6 +721,9 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     statusReads: 0,
     chainReads: 0,
     cancels: [] as string[],
+    /** VTO-3a stops recorded by Stop before the chain existed; a later first-step claim of that chain is refused. */
+    stops: [] as { owner: string; chainId: string }[],
+    stopRefusals: 0,
     deletes: [] as string[],
     consentWrites: [] as { owner: string; body: unknown }[],
     /** The picture each step returns and the final result: a small JPEG. */
@@ -997,7 +1000,16 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
             resultId: chain.resultId, expiresAtMs: chain.expiresAtMs } : { code: 'NOT_FOUND' }); return;
         }
         tryonControl.cancels.push(String(body.p_chain_id));
-        if (!chain) { await json({ code: 'NOT_FOUND' }); return; }
+        if (!chain) {
+          const chainId = typeof body.p_chain_id === 'string' ? body.p_chain_id : null;
+          if (chainId === null) { await json({ code: 'NOT_FOUND' }); return; }
+          const own = tryonControl.stops.filter(row => row.owner === owner);
+          if (!own.some(row => row.chainId === chainId)) {
+            if (own.length >= 60) { await json({ code: 'UNAVAILABLE' }); return; }
+            tryonControl.stops.push({ owner, chainId });
+          }
+          await json({ code: 'CANCELLED' }); return;
+        }
         if (chain.state === 'complete') { await json({ code: 'COMPLETED', resultId: chain.resultId }); return; }
         if (chain.state === 'running') { chain.state = 'cancelled'; await json({ code: 'CANCELLED' }); return; }
         await json({ code: chain.state.toUpperCase() }); return;
@@ -1034,6 +1046,10 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const run = (): { kind: 'code'; code: string; status: number } | { kind: 'picture' } | { kind: 'result'; row: TryOnStored } => {
         if (!setup.activated || tryonControl.consent[owner] !== setup.noticeRevision) return { kind: 'code', code: 'CONSENT_REQUIRED', status: 403 };
         let chain = tryonControl.chains.find(row => row.owner === owner && row.id === chainId);
+        if (!chain && step === 1 && tryonControl.stops.some(row => row.owner === owner && row.chainId === chainId)) {
+          tryonControl.stopRefusals++;
+          return { kind: 'code', code: 'CANCELLED', status: 409 };
+        }
         if (!chain && step === 1) {
           const links = outfitItems.filter(link => link.owner_id === owner && link.outfit_id === outfitId)
             .sort((a, b) => Number(a.position) - Number(b.position));

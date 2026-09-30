@@ -60,6 +60,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261002090000_photo_cleanup_manifest.sql', version: '20261002090000', time: '2026-10-02 09:00:00', bytes: 9393, sha256: SOURCE_HASHES.photoCleanupManifest },
   { name: '20261003090000_try_on.sql', version: '20261003090000', time: '2026-10-03 09:00:00', bytes: 103694, sha256: SOURCE_HASHES.tryOn },
   { name: '20261003090100_tryon_expire_schedule.sql', version: '20261003090100', time: '2026-10-03 09:01:00', bytes: 1930, sha256: SOURCE_HASHES.tryOnExpireSchedule },
+  { name: '20261004090000_tryon_stop_before_claim.sql', version: '20261004090000', time: '2026-10-04 09:00:00', bytes: 21601, sha256: SOURCE_HASHES.tryOnStopBeforeClaim },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
