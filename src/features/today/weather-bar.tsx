@@ -46,7 +46,7 @@ export function WeatherBar({ weather, language, timeZone, online, locked, t, onT
     close();
   }
   const ready = view.status === 'ready' ? forecastParts(view.forecast, view.fetchedAt, view.city, timeZone, language, t) : null;
-  const info = indoors ? <p className="weather-line">{t('weather.indoorsLine')}</p>
+  const info = indoors ? null
     : manual !== null ? <div className="weather-line weather-row">
       <p id="weather-manual" className="weather-manual">{t('weather.manualLine', { temperature: temperature(manual, language) })}</p>
       <button type="button" className="text-button" aria-describedby="weather-manual" disabled={locked} onClick={() => setOverride(null)}>{t('weather.clearManual')}</button>

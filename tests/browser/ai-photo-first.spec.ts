@@ -771,7 +771,7 @@ test('owner change clears an in-flight draft and ignores its late completion', a
   await expect.poll(() => reached).toBe(true);
   await page.locator('#item-title').fill('Old owner private draft');
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
-  await page.getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await signIn(page, 'b');
   await expect(page.locator('#capture-title')).toBeVisible();
@@ -1010,7 +1010,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await page.getByRole('button', { name: messages['account.menu'][language] }).click();
     await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
     const consent = page.locator('section[aria-labelledby="ai-consent-title"]');
-    await expect(consent.getByRole('heading', { name: messages['aiC.disabled'][language], exact: true })).toBeVisible();
+    await expect(consent.locator('[role="switch"][aria-checked="false"]')).toBeVisible();
     await expect(consent.getByText(messages['aiC.azureNotice'][language], { exact: true })).toBeHidden();
     await consent.locator('summary').click();
     await expect(consent.getByText(messages['aiC.azureNotice'][language], { exact: true })).toBeVisible();
@@ -1019,9 +1019,10 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await expect(consent.getByRole('checkbox')).toHaveCount(0);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     api.policy({ maxRequestMicro: '4097352' });
-    await consent.getByRole('button', { name: messages['aiC.enable'][language], exact: true }).click();
+    await consent.getByRole('switch').click();
+    await consent.locator('dialog[aria-labelledby="ai-consent-sheet-title"]').getByRole('button', { name: messages['aiC.enable'][language], exact: true }).click();
     await expect(consent.getByRole('alert')).toHaveText(messages['aiC.changed'][language]);
-    await expect(consent.getByRole('heading', { name: messages['aiC.disabled'][language], exact: true })).toBeVisible();
+    await expect(consent.locator('[role="switch"][aria-checked="false"]')).toBeVisible();
     api.policy({ noticeRevision: 1, modelId: 'gemini-3.8-flash', executionManifestId: 'google-eu-3.8-v1' });
     await expect(async () => {
       await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -1188,7 +1189,7 @@ test.describe('bounded C visual evidence', () => {
       };
       await page.getByRole('button', { name: messages['account.menu'][language] }).click();
       await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
-      await expect(page.getByRole('heading', { name: messages['aiC.enabled'][language], exact: true })).toBeVisible();
+      await expect(page.locator('section[aria-labelledby="ai-consent-title"] [role="switch"][aria-checked="true"]')).toBeVisible();
       await capture('consent');
       await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
       await addAiPhoto(page, api, language);

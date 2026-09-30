@@ -263,7 +263,6 @@
   "weather.invalidTemperature": {"en":"Enter a whole number from −40 to 50.","fi":"Anna kokonaisluku väliltä −40…50.","sv":"Ange ett heltal från −40 till 50."},
   "weather.manualLine": {"en":"{temperature}, entered by you","fi":"{temperature}, itse annettu","sv":"{temperature}, angiven av dig"},
   "weather.clearManual": {"en":"Clear","fi":"Tyhjennä","sv":"Rensa"},
-  "weather.indoorsLine": {"en":"Weather isn't used indoors.","fi":"Säätä ei huomioida sisällä.","sv":"Vädret används inte inomhus."},
   "weather.noForecast": {"en":"No forecast.","fi":"Ei sääennustetta.","sv":"Ingen prognos."},
   "weather.turnOn": {"en":"Turn on weather","fi":"Ota sää käyttöön","sv":"Slå på vädret"},
   "weather.place": {"en":"Where you'll be","fi":"Missä olet","sv":"Var du är"},

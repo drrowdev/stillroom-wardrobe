@@ -1,8 +1,6 @@
 {
   "tryonC.settings": {"en":"Try-on","fi":"Sovitus","sv":"Provning"},
-  "tryonC.enabled": {"en":"Try-on: On","fi":"Sovitus: päällä","sv":"Provning: på"},
-  "tryonC.disabled": {"en":"Try-on: Off","fi":"Sovitus: pois päältä","sv":"Provning: av"},
-  "tryonC.paused": {"en":"Try-on: Paused","fi":"Sovitus: keskeytetty","sv":"Provning: pausad"},
+  "tryonC.turnOnTitle": {"en":"Turn on try-on?","fi":"Otetaanko sovitus käyttöön?","sv":"Slå på provning?"},
   "tryonC.pausedText": {"en":"Try-on isn't available right now. Your saved try-ons are still here.","fi":"Sovitus ei ole juuri nyt käytettävissä. Tallennetut sovituksesi ovat tallessa.","sv":"Provning är inte tillgänglig just nu. Dina sparade provningar finns kvar."},
   "tryonC.loadFailed": {"en":"Couldn't load try-on.","fi":"Sovituksen tilaa ei voitu ladata.","sv":"Det gick inte att läsa in provningen."},
   "tryonC.changed": {"en":"Try-on details have changed. Turn it on again to keep using it.","fi":"Sovituksen tiedot ovat muuttuneet. Ota se uudelleen käyttöön, jos haluat jatkaa.","sv":"Uppgifterna om provning har ändrats. Slå på den igen för att fortsätta använda den."},

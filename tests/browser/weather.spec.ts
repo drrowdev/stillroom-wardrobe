@@ -130,7 +130,7 @@ async function goTo(page: Page, route: 'today' | 'settings') {
 }
 async function signOut(page: Page, language: Language) {
   await page.getByRole('button', { name: text('account.menu', language) }).click();
-  await page.getByRole('button', { name: text('auth.signOut', language), exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut', language), exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
 }
 const celsius = (page: Page, value: number, language: Language = 'en') => page.evaluate(({ value, locale }) =>
@@ -385,7 +385,8 @@ test('I16 Indoors turns every weather rule off, including the temperature', asyn
   await place(page, 'setting.indoors').click();
   await expect(place(page, 'setting.indoors')).toHaveAttribute('aria-pressed', 'true');
   await expect(place(page, 'setting.outdoors')).toHaveAttribute('aria-pressed', 'false');
-  await expect(bar(page)).toContainText(text('weather.indoorsLine'));
+  // UI1 removed the indoors line; the pressed Indoors toggle is the only indication.
+  await expect(bar(page)).not.toContainText('Weather isn\'t used indoors.');
   await expect(bar(page)).not.toContainText(await lowLine(page, 0));
   await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
   await expect(cards(page).first()).not.toContainText(text('today.addCoat'));
@@ -403,7 +404,7 @@ test('Indoors also replaces a manual temperature, and has no temperature actions
   await button(page, 'weather.useTemperature').click();
   await expect(bar(page)).toContainText(text('weather.manualLine', 'en', { temperature: await celsius(page, 3) }));
   await place(page, 'setting.indoors').click();
-  await expect(bar(page)).toContainText(text('weather.indoorsLine'));
+  await expect(place(page, 'setting.indoors')).toHaveAttribute('aria-pressed', 'true');
   await expect(bar(page)).not.toContainText(text('weather.noForecast'));
   await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
   await expect(button(page, 'weather.clearManual')).toHaveCount(0);
@@ -602,7 +603,7 @@ test('I16 accessibility: axe, keyboard, 320px and 200% text for the weather card
   await axe();
   await place(page, 'setting.indoors').focus();
   await page.keyboard.press('Enter');
-  await expect(bar(page)).toContainText(text('weather.indoorsLine'));
+  await expect(place(page, 'setting.indoors')).toHaveAttribute('aria-pressed', 'true');
   await axe();
   await page.keyboard.press('Shift+Tab');
   await expect(place(page, 'setting.outdoors')).toBeFocused();
@@ -643,7 +644,7 @@ test('I16 accessibility: axe, keyboard, 320px and 200% text for the weather card
       }
       await place(page, 'setting.indoors').focus();
       await page.keyboard.press('Enter');
-      await expect(bar(page)).toContainText(text('weather.indoorsLine'));
+      await expect(place(page, 'setting.indoors')).toHaveAttribute('aria-pressed', 'true');
       await place(page, 'setting.outdoors').click();
     }
     await axe();
@@ -695,7 +696,7 @@ test.describe('bounded I16 visual evidence', () => {
       await start(page, { language, weather: oulu, seed: api => basics(api) });
       await expect(bar(page)).toContainText(await lowLine(page, 0, language));
       await place(page, 'setting.indoors', language).click();
-      await expect(bar(page)).toContainText(text('weather.indoorsLine', language));
+      await expect(place(page, 'setting.indoors', language)).toHaveAttribute('aria-pressed', 'true');
       await expect(cards(page).first()).toBeVisible();
     } else {
       await start(page, { language, weather: oulu, seed: (api, service) => { basics(api); service.status.forecast = 503; } });
@@ -708,7 +709,9 @@ test.describe('bounded I16 visual evidence', () => {
       expect(await place(page, 'setting.outdoors', language).evaluate(element => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(27);
     }
     await expect(page.locator('.workspace-identity')).toContainText('Alex');
-    if (selected.scene.startsWith('today')) {
+    if (selected.scene === 'today-indoors') await expect(bar(page).locator('.weather-line')).toHaveCount(0);
+    // Indoors shows no weather line since UI1, so only the other Today scenes have one to place the choice against.
+    else if (selected.scene.startsWith('today')) {
       // The place choice leads on narrow screens and sits to the right on wide ones.
       const [group, line] = await Promise.all([bar(page).locator('.weather-place').boundingBox(), bar(page).locator('.weather-line').first().boundingBox()]);
       expect(group && line && (selected.width < 651 ? group.y + group.height <= line.y : group.x >= line.x + line.width)).toBe(true);

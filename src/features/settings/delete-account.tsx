@@ -59,7 +59,7 @@ export function DeleteAccountSettings({ client, controller, scope, online, t }: 
 
   const ready = online && !working && password.length > 0 && understood && phraseMatches && problem !== 'delete.contact';
   return <section className="settings-card delete-card" aria-labelledby="delete-heading">
-    <h2 id="delete-heading">{t('delete.title')}</h2>
+    <h3 id="delete-heading">{t('delete.title')}</h3>
     <p>{t('delete.body')}</p>
     <p className="muted fine">{t('delete.limits')}</p>
     <div className="stack delete-actions">

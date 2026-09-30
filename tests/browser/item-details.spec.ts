@@ -714,7 +714,7 @@ test('pending writes are single-flight and block navigation, but logout clears t
   await expect(page).toHaveURL(new RegExp(`#/items/${item.id}$`));
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('button', { name: messages['account.menu'].en }).click();
-  await page.getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await signIn(page, 'b');
   await expect(page.locator('.workspace-identity')).toContainText('Robin');

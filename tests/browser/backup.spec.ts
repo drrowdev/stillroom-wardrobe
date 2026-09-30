@@ -145,7 +145,7 @@ test('I18 backup: signing out drops the prepared backup and the passphrase', asy
   await button(page, 'backup.create').click();
   await expect(card(page).locator('.backup-parts li')).toHaveCount(2);
   await page.getByRole('button', { name: text('account.menu') }).click();
-  await page.getByRole('button', { name: text('auth.signOut'), exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await signIn(page, 'b');
   await page.evaluate(() => { location.hash = '#/settings'; });

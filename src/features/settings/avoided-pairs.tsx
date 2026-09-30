@@ -56,7 +56,7 @@ export function AvoidedPairs({ client, scope, images, language, online, t }: Pro
   const names = (row: Row) => new Intl.ListFormat(locales[language], { type: 'conjunction' })
     .format(row.items.map(item => item.title));
   return <section className="settings-card" aria-labelledby="avoided-pairs-heading">
-    <h2 id="avoided-pairs-heading" ref={heading} tabIndex={-1}>{t('pairs.title')}</h2>
+    <h3 id="avoided-pairs-heading" ref={heading} tabIndex={-1}>{t('pairs.title')}</h3>
     {loadFailed ? <div className="notice notice-error" role="alert"><span>{t('pairs.loadFailed')}</span>
       <button type="button" className="text-button" disabled={!online} onClick={() => setAttempt(value => value + 1)}>{t('common.retry')}</button></div>
       : !rows ? <p role="status">{t('common.loading')}</p>

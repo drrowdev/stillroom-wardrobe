@@ -287,14 +287,14 @@ for (const late of ['success', 'failure'] as const) {
         await expect(page.locator('#wardrobe-title')).toBeVisible();
       } else if (exit === 'sign-out') {
         await page.getByRole('button', { name: text('account.menu') }).click();
-        await page.getByRole('button', { name: text('auth.signOut'), exact: true }).click();
+        await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
         const discard = page.getByRole('button', { name: text('common.discard'), exact: true });
         if (await discard.isVisible().catch(() => false)) await discard.click();
         await expect(page.locator('#email')).toBeVisible();
       } else {
         // Another tab signs out; this tab follows the broadcast while removal is still running.
         await second!.getByRole('button', { name: text('account.menu') }).click();
-        await second!.getByRole('button', { name: text('auth.signOut'), exact: true }).click();
+        await second!.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
         await expect(page.locator('#email')).toBeVisible();
       }
       await page.waitForTimeout(3_000);
@@ -336,7 +336,7 @@ test('a failed download is not repeated for the next photo, and a new sign-in ma
   // Signing out clears the in-memory failure; the next signed-in owner gets one new attempt.
   refuse = false;
   await page.getByRole('button', { name: text('account.menu') }).click();
-  await page.getByRole('button', { name: text('auth.signOut'), exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
   const discard = page.getByRole('button', { name: text('common.discard'), exact: true });
   if (await discard.isVisible().catch(() => false)) await discard.click();
   // A different owner signs in (the fixture issues one token per owner). That owner has not consented to

@@ -89,7 +89,7 @@ async function settings(page: Page, account: 'a' | 'b') {
 }
 async function signOut(page: Page, language: Language = 'en') {
   await page.getByRole('button', { name: text('account.menu', language) }).click();
-  await page.getByRole('button', { name: text('auth.signOut', language), exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut', language), exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
 }
 // Makes a real backup through the Backup card and returns its parts as files.

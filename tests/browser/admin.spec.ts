@@ -69,7 +69,7 @@ test.describe('AD1b admin spending and limits', () => {
   test('anyone who is not the admin sees the note, and the admin screen is not available', async ({ page }) => {
     const api = await start(page, { admin: false, hash: '/#/settings' });
     await expect(page.locator('#settings-title')).toBeVisible();
-    await expect(page.locator('.ai-card').getByText(text('admin.note'), { exact: true })).toBeVisible();
+    await expect(page.locator('.ai-features').getByText(text('admin.note'), { exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: text('admin.title'), exact: true })).toHaveCount(0);
     await page.evaluate(() => { location.hash = '#/admin'; });
     await expect(page.locator('#admin-title')).toBeVisible();
@@ -102,7 +102,7 @@ test.describe('AD1b admin spending and limits', () => {
 
   test('the admin opens exact spending per account and feature', async ({ page }) => {
     const api = await start(page, { hash: '/#/settings' });
-    await page.locator('.ai-card').getByRole('link', { name: text('admin.title'), exact: true }).click();
+    await page.locator('.ai-features').getByRole('link', { name: text('admin.title'), exact: true }).click();
     await openScreen(page);
     await expect(page.locator('#admin-title')).toBeFocused();
     await expect(page.getByText('Spending recorded by the app. Some amounts are estimates. Calls made outside the app aren\'t included.', { exact: true })).toBeVisible();
@@ -367,7 +367,7 @@ test.describe('AD1b admin spending and limits', () => {
     await openScreen(page);
     await edit(page, 1);
     await page.getByRole('button', { name: text('account.menu') }).click();
-    await page.getByRole('button', { name: text('auth.signOut'), exact: true }).click();
+    await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
     const discard = page.getByRole('button', { name: text('common.discard'), exact: true });
     if (await discard.isVisible().catch(() => false)) await discard.click();
     await expect(page.locator('#email')).toBeVisible();

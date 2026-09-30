@@ -12,8 +12,16 @@ type StatusPatch = { code?: string; consent?: { enabled?: boolean; noticeRevisio
   fail?: number; hold?: Promise<void> };
 const text = (key: MessageKey, language: Language = 'en') => messages[key][language];
 const card = (page: Page) => page.locator('section[aria-labelledby="ai-consent-title"]');
-const heading = (page: Page, key: MessageKey, language: Language = 'en') => card(page).getByRole('heading', { name: text(key, language), exact: true });
 const cardButton = (page: Page, key: MessageKey, language: Language = 'en') => card(page).getByRole('button', { name: text(key, language), exact: true });
+// UI1: the row's switch shows the server state; an unchecked switch opens the consent sheet, whose Turn on writes.
+const toggle = (page: Page) => card(page).getByRole('switch');
+const state = (page: Page, on: boolean) => card(page).locator(`[role="switch"][aria-checked="${on}"]`);
+const sheet = (page: Page) => page.locator('dialog[aria-labelledby="ai-consent-sheet-title"]');
+async function turnOn(page: Page, language: Language = 'en') {
+  await toggle(page).click();
+  await sheet(page).getByRole('button', { name: text('aiC.enable', language), exact: true }).click();
+}
+const spent = (page: Page) => page.locator('.ai-spend-figure');
 const allowance = '20000000';
 function money(language: Language, cents: number, limit = false) {
   const whole = limit && cents % 100 === 0;
@@ -24,7 +32,9 @@ async function start(page: Page, language: Language = 'en', enabled = false) {
   const api = await aiFixture(page, language, enabled);
   api.policy({ monthlyAllowanceMicro: allowance });
   let patch: StatusPatch | null = null;
-  // A later route takes precedence; without a patch the fixture's own status reply is used unchanged.
+  // A later route takes precedence; without a patch the fixture's own status reply is used unchanged. A patched reply is
+  // dated a minute ahead: the mock's other feature statuses keep their own fixed allowance, and the shared spending summary
+  // shows the newest reply, so this keeps it on the analysis figures these tests change, as one real backend policy would.
   await page.route(/\/rest\/v1\/rpc\/ai_status$/, async (route) => {
     const current = patch, request = route.request();
     if (request.method() === 'OPTIONS' || !current) { await route.fallback(); return; }
@@ -35,7 +45,7 @@ async function start(page: Page, language: Language = 'en', enabled = false) {
     const revision = current.consent && 'noticeRevision' in current.consent ? current.consent.noticeRevision : enabledNow ? 2 : null;
     await route.fulfill({ json: {
       code: current.code ?? (enabledNow && revision === 2 ? 'OK' : 'CONSENT_REQUIRED'),
-      period: new Date().toISOString().slice(0, 7), serverTimeMs: current.serverTimeMs ?? Date.now(),
+      period: new Date().toISOString().slice(0, 7), serverTimeMs: current.serverTimeMs ?? Date.now() + 60000,
       consent: { enabled: enabledNow, noticeRevision: revision, consentedAt: enabledNow ? '2026-09-12T00:00:00Z' : null,
         profileVersion: String(api.profiles[owners.a]!.version) },
       policy: { activated: true, noticeRevision: 2, modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 1,
@@ -76,16 +86,18 @@ async function reread(page: Page, ready: () => Promise<void>) {
 }
 const offSummary = (language: Language, limit = money(language, 2000, true)) => translate(language, 'aiC.offSummary', { limit });
 const usage = (language: Language, used: number, limit = money(language, 2000, true)) =>
-  translate(language, 'aiC.usage', { used: money(language, used), limit });
+  translate(language, 'aiF.spent', { used: money(language, used), limit });
 const technical = [/gpt-/i, /micro-?usd/i, /\d{5,}/, /revision/i, /Accounted/i, /\bUSD\b/];
 
 for (const language of languages) {
-  test(`L2a off ${language}: one Turn on, short summary, closed details and no technical copy`, async ({ page }) => {
+  test(`L2a off ${language}: one unchecked switch, short description, closed details and no technical copy`, async ({ page }) => {
     const { traffic } = await start(page, language);
     await openSettings(page, language);
-    await expect(heading(page, 'aiC.disabled', language)).toBeVisible();
-    await expect(card(page).getByText(offSummary(language), { exact: true })).toBeVisible();
-    await expect(cardButton(page, 'aiC.enable', language)).toHaveCount(1);
+    await expect(state(page, false)).toBeVisible();
+    await expect(toggle(page)).toHaveCount(1);
+    await expect(card(page).getByText(text('aiC.description', language), { exact: true })).toBeVisible();
+    await expect(card(page).getByText(offSummary(language), { exact: true })).toHaveCount(0);
+    await expect(card(page).getByRole('button', { name: text('aiC.enable', language), exact: true })).toHaveCount(0);
     await expect(cardButton(page, 'aiC.disable', language)).toHaveCount(0);
     await expect(card(page).getByRole('checkbox')).toHaveCount(0);
     await expect(card(page).locator('details')).toHaveCount(1);
@@ -95,40 +107,51 @@ for (const language of languages) {
     expect(traffic.consent()).toHaveLength(0);
   });
 }
-test('L2a Turn on is the consent: one write at the current notice, then On with usage and only Turn off', async ({ page }) => {
+test('L2a the sheet\'s Turn on is the consent: nothing before it, one write at the current notice, then a checked switch', async ({ page }) => {
   const { api, traffic } = await start(page);
   await openSettings(page);
   const version = Number(api.profiles[owners.a]!.version);
-  await cardButton(page, 'aiC.enable').click();
-  await expect(heading(page, 'aiC.enabled')).toBeVisible();
-  await expect(heading(page, 'aiC.enabled')).toBeFocused();
-  await expect(card(page).getByText(usage('en', 0), { exact: true })).toBeVisible();
-  await expect(cardButton(page, 'aiC.enable')).toHaveCount(0);
-  await expect(cardButton(page, 'aiC.disable')).toHaveCount(1);
+  await toggle(page).click();
+  await expect(sheet(page)).toBeVisible();
+  await expect(sheet(page).getByText(offSummary('en'), { exact: true })).toBeVisible();
+  await expect(sheet(page).getByText(text('aiC.azureNotice'), { exact: true })).toBeVisible();
+  await expect(state(page, false)).toHaveCount(1);
+  expect(traffic.consent()).toHaveLength(0);
+  await sheet(page).getByRole('button', { name: text('aiC.enable'), exact: true }).click();
+  await expect(state(page, true)).toBeVisible();
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(state(page, true)).toBeFocused();
+  await expect(spent(page)).toHaveText(translate('en', 'aiF.spent', { used: money('en', 0), limit: money('en', 2000, true) }));
+  await expect(cardButton(page, 'aiC.disable')).toHaveCount(0);
   expect(traffic.consent().map((entry) => entry.body)).toEqual([{ p_enabled: true, p_notice_revision: 2, p_expected_version: version }]);
   expect(api.profiles[owners.a]!.version).toBe(version + 1);
 });
 test('L2a rapid double activation of Turn on sends one consent write', async ({ page }) => {
   const { traffic } = await start(page);
   await openSettings(page);
-  await cardButton(page, 'aiC.enable').dblclick();
-  await expect(heading(page, 'aiC.enabled')).toBeVisible();
+  await toggle(page).click();
+  await sheet(page).getByRole('button', { name: text('aiC.enable'), exact: true }).dblclick();
+  await expect(state(page, true)).toBeVisible();
   expect(traffic.consent()).toHaveLength(1);
-  await cardButton(page, 'aiC.disable').click();
-  await expect(heading(page, 'aiC.disabled')).toBeFocused();
-  await expect(cardButton(page, 'aiC.enable')).toBeEnabled();
-  await cardButton(page, 'aiC.enable').focus();
+  await toggle(page).click();
+  await expect(state(page, false)).toBeVisible();
+  await expect(toggle(page)).toBeEnabled();
+  // WebKit does not focus a button on a mouse click; the keyboard steps start from the switch, as a keyboard user would.
+  await toggle(page).focus();
+  await page.keyboard.press('Enter');
+  await expect(sheet(page).getByRole('button', { name: text('common.cancel'), exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
   await page.keyboard.press('Enter');
   await page.keyboard.press('Enter');
-  await expect(heading(page, 'aiC.enabled')).toBeVisible();
+  await expect(state(page, true)).toBeVisible();
   expect(traffic.consent().filter((entry) => (entry.body as { p_enabled: boolean }).p_enabled)).toHaveLength(2);
   expect(traffic.consent()).toHaveLength(3);
 });
-test('L2a On has no Turn on; focus, visibility and reconnect never write', async ({ page, context }) => {
+test('L2a On has a checked switch; focus, visibility and reconnect never write', async ({ page, context }) => {
   const { traffic } = await start(page, 'en', true);
   await openSettings(page);
-  await expect(heading(page, 'aiC.enabled')).toBeVisible();
-  await expect(cardButton(page, 'aiC.enable')).toHaveCount(0);
+  await expect(state(page, true)).toBeVisible();
+  await expect(sheet(page)).toHaveCount(0);
   const input = page.locator('#profile-display_name');
   await input.focus();
   const before = traffic.status();
@@ -140,7 +163,7 @@ test('L2a On has no Turn on; focus, visibility and reconnect never write', async
   await context.setOffline(true);
   await context.setOffline(false);
   await expect.poll(() => traffic.status() - before).toBeGreaterThanOrEqual(2);
-  await expect(heading(page, 'aiC.enabled')).toBeVisible();
+  await expect(state(page, true)).toBeVisible();
   await expect(input).toBeFocused();
   expect(traffic.consent()).toHaveLength(0);
   expect(traffic.writes()).toBe(0);
@@ -149,14 +172,17 @@ test('L2a On has no Turn on; focus, visibility and reconnect never write', async
 test('L2a usage rounds up to cents, the limit follows the configured allowance, and the warning shows', async ({ page }) => {
   const { api, setStatus } = await start(page, 'en', true);
   await openSettings(page);
-  await expect(card(page).getByText(usage('en', 0), { exact: true })).toBeVisible();
+  await expect(spent(page)).toHaveText(usage('en', 0));
   setStatus({ usage: { accountedMicro: '7000' } });
-  await reread(page, () => expect(card(page).getByText(usage('en', 1), { exact: true })).toBeVisible({ timeout: 1000 }));
-  setStatus({ usage: { accountedMicro: '10001', warning: true } });
-  await reread(page, () => expect(card(page).getByText(usage('en', 2), { exact: true })).toBeVisible({ timeout: 1000 }));
-  await expect(card(page).getByText(text('aiC.warning'), { exact: true })).toBeVisible();
+  await reread(page, () => expect(spent(page)).toHaveText(usage('en', 1), { timeout: 1000 }));
+  setStatus({ usage: { accountedMicro: '10001' } });
+  await reread(page, () => expect(spent(page)).toHaveText(usage('en', 2), { timeout: 1000 }));
+  await expect(page.locator('.ai-spend').getByText(text('aiC.warning'), { exact: true })).toHaveCount(0);
+  setStatus({ usage: { accountedMicro: '16000000' } });
+  await reread(page, () => expect(spent(page)).toHaveText(usage('en', 1600), { timeout: 1000 }));
+  await expect(page.locator('.ai-spend').getByText(text('aiC.warning'), { exact: true })).toBeVisible();
   setStatus({ policy: { monthlyAllowanceMicro: '20015000' } });
-  await reread(page, () => expect(card(page).getByText(usage('en', 0, money('en', 2001)), { exact: true })).toBeVisible({ timeout: 1000 }));
+  await reread(page, () => expect(spent(page)).toHaveText(usage('en', 0, money('en', 2001)), { timeout: 1000 }));
   expect(api.calls.filter((call) => call.route.endsWith('/ai_set_consent'))).toHaveLength(0);
 });
 test('L2a overlapping automatic reads keep one request in flight and never write', async ({ page }) => {
@@ -171,7 +197,7 @@ test('L2a overlapping automatic reads keep one request in flight and never write
   expect(traffic.status() - before).toBe(1);
   setStatus(null);
   release();
-  await expect(heading(page, 'aiC.disabled')).toBeVisible();
+  await expect(state(page, false)).toBeVisible();
   expect(traffic.consent()).toHaveLength(0);
   expect(traffic.writes()).toBe(0);
 });
@@ -183,7 +209,7 @@ test('L2a a status reply that arrives after sign-out is discarded', async ({ pag
   await openSettings(page);
   await expect.poll(() => traffic.status() - before).toBeGreaterThanOrEqual(1);
   await page.getByRole('button', { name: text('account.menu') }).click();
-  await page.getByRole('button', { name: text('auth.signOut'), exact: true }).click();
+  await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   release();
   await page.waitForTimeout(300);
@@ -193,30 +219,35 @@ test('L2a a status reply that arrives after sign-out is discarded', async ({ pag
 test('L2a a policy change after the card was shown needs Turn on again', async ({ page }) => {
   const { api, traffic } = await start(page);
   await openSettings(page);
-  await expect(card(page).getByText(offSummary('en'), { exact: true })).toBeVisible();
+  await expect(state(page, false)).toBeVisible();
   api.policy({ monthlyAllowanceMicro: '30000000' });
-  await cardButton(page, 'aiC.enable').click();
+  await toggle(page).click();
+  await expect(sheet(page).getByText(offSummary('en'), { exact: true })).toBeVisible();
+  await sheet(page).getByRole('button', { name: text('aiC.enable'), exact: true }).click();
   await expect(card(page).getByRole('alert')).toHaveText(text('aiC.changed'));
-  await expect(card(page).getByText(offSummary('en', money('en', 3000, true)), { exact: true })).toBeVisible();
+  await expect(sheet(page)).toHaveCount(0);
   expect(traffic.consent()).toHaveLength(0);
-  await cardButton(page, 'aiC.enable').click();
-  await expect(heading(page, 'aiC.enabled')).toBeVisible();
+  await toggle(page).click();
+  await expect(sheet(page).getByText(offSummary('en', money('en', 3000, true)), { exact: true })).toBeVisible();
+  await sheet(page).getByRole('button', { name: text('aiC.enable'), exact: true }).click();
+  await expect(state(page, true)).toBeVisible();
   expect(traffic.consent()).toHaveLength(1);
-  await cardButton(page, 'aiC.disable').click();
-  await expect(heading(page, 'aiC.disabled')).toBeVisible();
+  await toggle(page).click();
+  await expect(state(page, false)).toBeVisible();
   api.policy({ noticeRevision: 3 });
-  await cardButton(page, 'aiC.enable').click();
+  await turnOn(page);
   await expect(card(page).getByText(text('aiC.inactive'), { exact: true })).toBeVisible();
-  await expect(cardButton(page, 'aiC.enable')).toHaveCount(0);
+  await expect(toggle(page)).toHaveCount(0);
   expect(traffic.consent()).toHaveLength(2);
 });
 test('L2a an allowance change while On keeps it on with the new limit and no write', async ({ page }) => {
-  const { api, traffic } = await start(page, 'en', true);
+  const { api, traffic, setStatus } = await start(page, 'en', true);
   await openSettings(page);
-  await expect(heading(page, 'aiC.enabled')).toBeVisible();
+  await expect(state(page, true)).toBeVisible();
   api.policy({ monthlyAllowanceMicro: '30000000' });
-  await reread(page, () => expect(card(page).getByText(usage('en', 0, money('en', 3000, true)), { exact: true })).toBeVisible({ timeout: 1000 }));
-  await expect(heading(page, 'aiC.enabled')).toBeVisible();
+  setStatus({ policy: { monthlyAllowanceMicro: '30000000' } });
+  await reread(page, () => expect(spent(page)).toHaveText(usage('en', 0, money('en', 3000, true)), { timeout: 1000 }));
+  await expect(state(page, true)).toBeVisible();
   expect(traffic.consent()).toHaveLength(0);
 });
 test('L2a consent to an older notice shows Off with Turn on and Turn off, and writes only on Turn on', async ({ page }) => {
@@ -225,15 +256,15 @@ test('L2a consent to an older notice shows Off with Turn on and Turn off, and wr
   await page.route('**/rest/v1/rpc/ai_set_consent', async (route) => { setStatus(null); await route.fallback(); });
   api.consent.set(owners.a, false);
   await openSettings(page);
-  await expect(heading(page, 'aiC.disabled')).toBeVisible();
+  await expect(state(page, false)).toBeVisible();
   await expect(card(page).getByRole('status').getByText(text('aiC.changed'), { exact: true })).toBeVisible();
-  await expect(cardButton(page, 'aiC.enable')).toHaveClass(/button-primary/);
+  await expect(toggle(page)).toHaveCount(1);
   await expect(cardButton(page, 'aiC.disable')).toBeVisible();
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await page.waitForTimeout(200);
   expect(traffic.consent()).toHaveLength(0);
-  await cardButton(page, 'aiC.enable').click();
-  await expect(heading(page, 'aiC.enabled')).toBeVisible();
+  await turnOn(page);
+  await expect(state(page, true)).toBeVisible();
   expect(traffic.consent().map((entry) => (entry.body as { p_notice_revision: number }).p_notice_revision)).toEqual([2]);
 });
 test('L2a unavailable states show one line and only Turn off for stored consent', async ({ page }) => {
@@ -241,28 +272,27 @@ test('L2a unavailable states show one line and only Turn off for stored consent'
   const unavailable = async () => {
     await expect(card(page).getByText(text('aiC.inactive'), { exact: true })).toBeVisible({ timeout: 1000 });
     await expect(card(page).locator('details')).toHaveCount(0);
-    await expect(card(page).getByText(offSummary('en'), { exact: true })).toHaveCount(0);
-    await expect(cardButton(page, 'aiC.enable')).toHaveCount(0);
+    await expect(state(page, false)).toHaveCount(0);
   };
   setStatus({ code: 'UNCONFIGURED', consent: { enabled: false } });
   await openSettings(page);
   await unavailable();
-  await expect(cardButton(page, 'aiC.disable')).toHaveCount(0);
+  await expect(toggle(page)).toHaveCount(0);
   for (const patch of [{ code: 'INACTIVE' }, { code: 'UNAVAILABLE' }, { policy: { modelId: 'unrecognized-model' } },
     { policy: { noticeRevision: 1, modelId: 'gemini-3.8-flash', executionManifestId: 'google-eu-3.8-v1' } },
     { serverTimeMs: azureAiReviewExpires }, { consent: { enabled: true, noticeRevision: 1 }, policy: { modelId: 'unrecognized-model' } }] as StatusPatch[]) {
     setStatus(patch);
     await reread(page, unavailable);
-    await expect(cardButton(page, 'aiC.disable')).toHaveCount(1);
+    await expect(state(page, true)).toHaveCount(1);
   }
   setStatus({ code: 'INACTIVE' });
   await reread(page, unavailable);
   expect(traffic.consent()).toHaveLength(0);
-  await cardButton(page, 'aiC.disable').click();
-  // Turn off re-reads status before it writes, and its label reads Saving meanwhile, so wait for the write to settle.
+  await toggle(page).click();
+  // Turn off re-reads status before it writes, and the row reads Saving meanwhile, so wait for the write to settle.
   await expect.poll(() => traffic.consent().map((entry) => entry.body)).toMatchObject([{ p_enabled: false, p_notice_revision: null }]);
-  await expect(cardButton(page, 'common.saving')).toHaveCount(0);
-  await expect(cardButton(page, 'aiC.disable')).toHaveCount(0);
+  await expect(card(page)).toHaveAttribute('aria-busy', 'false');
+  await expect(toggle(page)).toHaveCount(0);
   await unavailable();
   expect(traffic.consent().map((entry) => entry.body)).toMatchObject([{ p_enabled: false, p_notice_revision: null }]);
 });
@@ -271,21 +301,21 @@ test('L2a a failed status load offers Try again, which only reads', async ({ pag
   setStatus({ fail: 503 });
   await openSettings(page);
   await expect(card(page).getByText(text('aiC.loadFailed'), { exact: true })).toBeVisible();
-  await expect(cardButton(page, 'aiC.enable')).toHaveCount(0);
+  await expect(toggle(page)).toHaveCount(0);
   setStatus(null);
   const before = traffic.status();
   await cardButton(page, 'common.retry').click();
-  await expect(heading(page, 'aiC.disabled')).toBeVisible();
+  await expect(state(page, false)).toBeVisible();
   expect(traffic.status() - before).toBe(1);
   expect(traffic.consent()).toHaveLength(0);
   expect(traffic.writes()).toBe(0);
 });
 for (const language of languages) {
-  test(`L2a Full details ${language} show the recorded notice by keyboard before Turn on`, async ({ page }) => {
+  test(`L2a How it works ${language} shows the recorded notice by keyboard before Turn on`, async ({ page }) => {
     const { traffic } = await start(page, language);
     await openSettings(page, language);
     const summary = card(page).locator('summary');
-    await expect(summary).toHaveText(text('aiC.details', language));
+    await expect(summary).toHaveText(text('aiF.about', language));
     await expect(card(page).getByText(text('aiC.azureNotice', language), { exact: true })).toBeHidden();
     await summary.focus();
     await page.keyboard.press('Enter');
@@ -293,8 +323,8 @@ for (const language of languages) {
       'aiC.optOutNotice', 'aiC.usageNotice'] as const) {
       await expect(card(page).getByText(text(key, language), { exact: true })).toBeVisible();
     }
-    await cardButton(page, 'aiC.enable', language).click();
-    await expect(heading(page, 'aiC.enabled', language)).toBeVisible();
+    await turnOn(page, language);
+    await expect(state(page, true)).toBeVisible();
     expect(traffic.consent()).toHaveLength(1);
   });
 }
@@ -308,16 +338,16 @@ for (const trigger of ['focus', 'visibilitychange', 'online'] as const) {
       api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
       await route.abort('failed');
     });
-    await cardButton(page, 'aiC.enable').click();
+    await turnOn(page);
     await expect(card(page).getByText(text('aiC.reconcile'), { exact: true })).toBeVisible();
-    await expect(cardButton(page, 'aiC.enable')).toHaveCount(0);
+    await expect(toggle(page)).toHaveCount(0);
     await expect(cardButton(page, 'aiC.disable')).toHaveCount(0);
     const consentWrites = traffic.consent().length;
     await expect(async () => {
       await page.evaluate((name) => {
         if (name === 'visibilitychange') document.dispatchEvent(new Event(name)); else window.dispatchEvent(new Event(name));
       }, trigger);
-      await expect(heading(page, 'aiC.enabled')).toBeVisible({ timeout: 1000 });
+      await expect(state(page, true)).toBeVisible({ timeout: 1000 });
     }).toPass({ timeout: 10000 });
     await expect(card(page).getByText(text('aiC.reconcile'), { exact: true })).toHaveCount(0);
     await expect(card(page).getByRole('alert')).toHaveCount(0);
@@ -337,16 +367,16 @@ test('L2a a real offline and online transition resolves an unconfirmed Turn on o
     api.consent.set(owners.a, true); api.profiles[owners.a]!.version = 2;
     await route.abort('failed');
   });
-  await cardButton(page, 'aiC.enable').click();
+  await turnOn(page);
   await expect(card(page).getByText(text('aiC.reconcile'), { exact: true })).toBeVisible();
   await expect(card(page).getByRole('alert')).toHaveCount(0);
   const consentWrites = traffic.consent().length;
   await page.waitForTimeout(300);
-  await expect(heading(page, 'aiC.enabled')).toHaveCount(0);
+  await expect(state(page, true)).toHaveCount(0);
   await context.setOffline(true);
   await expect.poll(() => page.evaluate(() => navigator.onLine)).toBe(false);
   await context.setOffline(false);
-  await expect(heading(page, 'aiC.enabled')).toBeVisible({ timeout: 10000 });
+  await expect(state(page, true)).toBeVisible({ timeout: 10000 });
   await expect(card(page).getByText(text('aiC.reconcile'), { exact: true })).toHaveCount(0);
   await expect(card(page).getByRole('alert')).toHaveCount(0);
   expect(traffic.consent()).toHaveLength(consentWrites);
@@ -364,11 +394,11 @@ for (const [language, width, zoom] of [['en', 1280, false], ['fi', 320, false], 
         const section = document.querySelector('section[aria-labelledby="ai-consent-title"]')!;
         const buttons = [...section.querySelectorAll<HTMLElement>('button, summary')].filter((element) => element.getClientRects().length);
         return document.documentElement.scrollWidth <= innerWidth && buttons.every((element) => element.getBoundingClientRect().height >= 44)
-          && section.querySelector('[role="status"] h2') !== null;
+          && section.querySelector('h3') !== null;
       })).toBe(true);
     };
     await openSettings(fresh, language);
-    await expect(heading(fresh, 'aiC.disabled', language)).toBeVisible();
+    await expect(state(fresh, false)).toBeVisible();
     await check();
     await card(fresh).locator('summary').focus();
     await fresh.keyboard.press('Enter');
@@ -381,17 +411,17 @@ for (const [language, width, zoom] of [['en', 1280, false], ['fi', 320, false], 
     await reread(fresh, () => expect(card(fresh).getByText(text('aiC.inactive', language), { exact: true })).toBeVisible({ timeout: 1000 }));
     await check();
     setStatus(null);
-    await reread(fresh, () => expect(heading(fresh, 'aiC.disabled', language)).toBeVisible({ timeout: 1000 }));
+    await reread(fresh, () => expect(state(fresh, false)).toBeVisible({ timeout: 1000 }));
     await fresh.route('**/rest/v1/rpc/ai_set_consent', async (route) => {
       api.consent.set(owners.a, true); api.profiles[owners.a]!.version = Number(api.profiles[owners.a]!.version) + 1;
       await route.abort('failed');
     });
-    await cardButton(fresh, 'aiC.enable', language).click();
+    await turnOn(fresh, language);
     await expect(card(fresh).getByText(text('aiC.reconcile', language), { exact: true })).toBeVisible();
     await check();
     await fresh.unroute('**/rest/v1/rpc/ai_set_consent');
     await cardButton(fresh, 'common.retry', language).click();
-    await expect(heading(fresh, 'aiC.enabled', language)).toBeVisible();
+    await expect(state(fresh, true)).toBeVisible();
     await check();
     setStatus({ fail: 503 });
     await fresh.reload();
@@ -475,15 +505,15 @@ test.describe('bounded L2a visual evidence', () => {
         try { await file.writeFile(png); } finally { await file.close(); }
       };
       await openSettings(page, language);
-      await expect(heading(page, 'aiC.disabled', language)).toBeVisible();
+      await expect(state(page, false)).toBeVisible();
       await card(page).scrollIntoViewIfNeeded();
       await capture('settings-off');
       await card(page).locator('summary').click();
       await expect(card(page).getByText(text('aiC.azureNotice', language), { exact: true })).toBeVisible();
       await capture('settings-details');
-      await cardButton(page, 'aiC.enable', language).click();
-      await expect(heading(page, 'aiC.enabled', language)).toBeVisible();
-      await expect(card(page).getByText(usage(language, 0), { exact: true })).toBeVisible();
+      await turnOn(page, language);
+      await expect(state(page, true)).toBeVisible();
+      await expect(spent(page)).toHaveText(usage(language, 0));
       await capture('settings-on');
       setStatus({ code: 'UNCONFIGURED', consent: { enabled: false } });
       await reread(page, () => expect(card(page).getByText(text('aiC.inactive', language), { exact: true })).toBeVisible({ timeout: 1000 }));

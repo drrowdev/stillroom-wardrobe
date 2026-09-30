@@ -554,7 +554,7 @@ for (const flow of ['add', 'replace'] as const) {
     expect(analyses(api)).toBe(1);
     expect(sent(api)).toHaveLength(1);
     await page.getByRole('button', { name: text('account.menu') }).click();
-    await page.getByRole('button', { name: text('auth.signOut'), exact: true }).click();
+    await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
     await expect(page.locator('#email')).toBeVisible();
     const digests = await storedDigests(page);
     expect(digests).not.toContain(h2);
@@ -955,6 +955,9 @@ test('item details: a failed provenance read says so with Retry, and a replaced 
 
 test.describe('Settings', () => {
   const card = (page: Page) => page.locator('section[aria-labelledby=enhance-heading]');
+  // UI1: the row's switch shows the server state; an unchecked switch opens the consent sheet, whose Turn on writes.
+  const toggle = (page: Page, on: boolean) => card(page).locator(`[role="switch"][aria-checked="${on}"]`);
+  const sheet = (page: Page) => page.locator('dialog[aria-labelledby="enhance-sheet-title"]');
   async function settings(page: Page, options: Start, language: Language = 'en') {
     const api = await start(page, { ...options, language });
     await page.goto('/#/settings');
@@ -967,47 +970,52 @@ test.describe('Settings', () => {
     await settings(page, { consent: false, setup: { activated: false } });
     await page.waitForTimeout(300);
     await expect(page.locator('#enhance-heading')).toHaveCount(0);
-    await expect(page.locator('#enhance-turn-on')).toHaveCount(0);
+    await expect(page.locator('[role="switch"][aria-labelledby="enhance-heading"]')).toHaveCount(0);
   });
   test('can be turned on with the full notice and turned off again', async ({ page }) => {
     engineOnly();
     const api = await settings(page, { consent: false });
-    await expect(page.locator('#enhance-heading')).toHaveText(text('enhanceC.disabled'));
+    await expect(page.locator('#enhance-heading')).toHaveText(text('enhanceC.settings'));
+    await expect(toggle(page, false)).toBeVisible();
     await expect(card(page)).toContainText(text('enhanceC.offSummary'));
-    await card(page).getByText(text('aiC.details'), { exact: true }).click();
+    await card(page).getByText(text('aiF.about'), { exact: true }).click();
     for (const key of ['enhanceC.noticeSent', 'enhanceC.noticeRedraw', 'enhanceC.noticeProcessing', 'enhanceC.noticeCharges'] as const) await expect(card(page)).toContainText(text(key));
     await noViolations(page);
-    await page.locator('#enhance-turn-on').click();
-    await expect(page.locator('#enhance-heading')).toHaveText(text('enhanceC.enabled'));
+    await toggle(page, false).click();
+    for (const key of ['enhanceC.noticeSent', 'enhanceC.noticeRedraw', 'enhanceC.noticeProcessing', 'enhanceC.noticeCharges'] as const) await expect(sheet(page)).toContainText(text(key));
+    expect(api.enhanceControl.consentWrites).toEqual([]);
+    await noViolations(page);
+    await sheet(page).getByRole('button', { name: text('aiC.enable'), exact: true }).click();
+    await expect(toggle(page, true)).toBeVisible();
     expect(api.enhanceControl.consentWrites.map((entry) => entry.body)).toEqual([{ p_enabled: true, p_notice_revision: CLEANUP_NOTICE_REVISION }]);
-    await expect(page.locator('#enhance-turn-on')).toHaveCount(0);
-    await page.locator('#enhance-turn-off').click();
-    await expect(page.locator('#enhance-heading')).toHaveText(text('enhanceC.disabled'));
+    await expect(sheet(page)).toHaveCount(0);
+    await toggle(page, true).click();
+    await expect(toggle(page, false)).toBeVisible();
     expect(api.enhanceControl.consentWrites.at(-1)!.body).toEqual({ p_enabled: false, p_notice_revision: null });
   });
   for (const [name, setup] of [['paused', { providerAvailable: false }], ['no longer activated', { activated: false }]] as const) {
     test(`keeps Turn off available while ${name}`, async ({ page }) => {
       engineOnly();
       await settings(page, { setup });
-      await expect(page.locator('#enhance-heading')).toHaveText(text('enhanceC.paused'));
       await expect(card(page)).toContainText(text('enhanceC.pausedText'));
-      await expect(page.locator('#enhance-turn-off')).toBeEnabled();
-      await expect(page.locator('#enhance-turn-on')).toHaveCount(0);
+      await expect(toggle(page, true)).toBeEnabled();
+      await expect(card(page).getByRole('switch')).toHaveCount(1);
+      await expect(card(page).getByRole('button', { name: text('aiC.enable'), exact: true })).toHaveCount(0);
       await noViolations(page);
     });
   }
   test('an uncertain write is shown as checking until a read settles it', async ({ page }) => {
     engineOnly();
     const api = await settings(page, {});
-    await expect(page.locator('#enhance-heading')).toHaveText(text('enhanceC.enabled'));
+    await expect(toggle(page, true)).toBeVisible();
     api.enhanceControl.consentFaults.push('lost');
     api.enhanceControl.statusFaults.push('fail');
-    await page.locator('#enhance-turn-off').click();
+    await toggle(page, true).click();
     await expect(card(page)).toContainText(text('stylist.unresolved'));
-    await expect(page.locator('#enhance-turn-on')).toHaveCount(0);
+    await expect(card(page).getByRole('switch', { checked: false })).toHaveCount(0);
     await noViolations(page);
     await card(page).getByRole('button', { name: text('common.retry'), exact: true }).click();
-    await expect(page.locator('#enhance-heading')).toHaveText(text('enhanceC.disabled'));
+    await expect(toggle(page, false)).toBeVisible();
   });
 });
 
@@ -1084,8 +1092,8 @@ test('capture: settings (fi-mobile)', async ({ page }) => {
   test.skip(test.info().project.name !== 'mobile', 'One project per capture.');
   const api = await start(page, { language: 'fi', consent: false });
   await page.goto('/#/settings');
-  await expect(page.locator('#enhance-heading')).toHaveText(text('enhanceC.disabled', 'fi'));
-  await page.locator('section[aria-labelledby=enhance-heading]').getByText(text('aiC.details', 'fi'), { exact: true }).click();
+  await expect(page.locator('section[aria-labelledby=enhance-heading] [role="switch"][aria-checked="false"]')).toBeVisible();
+  await page.locator('section[aria-labelledby=enhance-heading]').getByText(text('aiF.about', 'fi'), { exact: true }).click();
   await page.locator('#enhance-heading').scrollIntoViewIfNeeded();
   expect(api.enhanceControl.requests).toHaveLength(0);
   await noViolations(page);
