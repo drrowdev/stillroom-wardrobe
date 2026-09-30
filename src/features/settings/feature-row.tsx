@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react';
 import type { Translate } from '../../i18n';
 import type { FeatureSwitch } from './ai-features-model';
 
@@ -34,6 +34,8 @@ type RowProps = {
 /**
  * One feature row: title, one-line description, this month's figure, the switch, the state lines and the notice under
  * "How it works and privacy". When the sheet closes, focus returns to the switch, or to the title if the switch is gone.
+ * If a passive read removes the whole row while it held focus, focus moves to its section's heading, which stays mounted;
+ * nothing is focused when the section has gone too (sign-out, another screen) or focus has already moved elsewhere.
  * A busy switch is aria-disabled rather than disabled, so it keeps focus while its write runs.
  */
 export function FeatureRow({ id, headingRef, switchRef, title, description, value, busy, control, switchDisabled, onSwitch, status, actions, error, notice, sheet, t }: RowProps) {
@@ -46,8 +48,21 @@ export function FeatureRow({ id, headingRef, switchRef, title, description, valu
     }
     wasOpen.current = sheetOpen;
   }, [sheetOpen, switchRef, headingRef]);
+  const rowRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    const fallback = row?.closest('.settings-section')?.querySelector<HTMLElement>('h2') ?? null;
+    return () => {
+      if (!fallback || !(wasOpen.current || row?.contains(document.activeElement))) return;
+      // Runs after the removal commits, when a modal sheet no longer makes the fallback inert.
+      window.setTimeout(() => {
+        const active = document.activeElement;
+        if (fallback.isConnected && (active === null || active === document.body)) fallback.focus();
+      }, 0);
+    };
+  }, []);
   const described = [`${id}-description`, ...(value ? [`${id}-value`] : [])].join(' ');
-  return <section className="settings-card feature-row" aria-labelledby={id} aria-busy={busy}>
+  return <section ref={rowRef} className="settings-card feature-row" aria-labelledby={id} aria-busy={busy}>
     <div className="feature-main">
       <div className="feature-text">
         <h3 id={id} ref={headingRef} tabIndex={-1}>{title}</h3>

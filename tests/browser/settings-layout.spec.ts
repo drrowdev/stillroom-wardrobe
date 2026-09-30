@@ -224,6 +224,8 @@ test.describe('UI1 row states', () => {
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await expect.poll(() => api.enhanceControl.statusReads).toBeGreaterThan(reads);
     await expect(sheet(page, 'enhance')).toHaveCount(0);
+    await expect(row(page, 'enhance')).toHaveCount(0);
+    await expect(page.locator('#settings-ai-heading')).toBeFocused();
     expect(consentWrites('enhance')).toEqual([]);
   });
 });

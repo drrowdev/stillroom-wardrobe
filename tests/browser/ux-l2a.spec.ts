@@ -6,6 +6,7 @@ import { languages, locales, messages, translate, type Language, type MessageKey
 import { azureAiReviewExpires } from '../../src/domain/ai-controls';
 import { aiFixture } from './ai-photo-first-support';
 import { owners } from './mock-backend';
+import { utcPeriod } from '../../src/features/settings/ai-features-model';
 
 type StatusPatch = { code?: string; consent?: { enabled?: boolean; noticeRevision?: number | null };
   policy?: Record<string, unknown>; usage?: { accountedMicro?: string; warning?: boolean }; serverTimeMs?: number;
@@ -28,6 +29,19 @@ function money(language: Language, cents: number, limit = false) {
   return new Intl.NumberFormat(locales[language], { style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol',
     minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(cents / 100);
 }
+/** A patched reply's time and period, both from one timestamp: an explicit time, or a minute after `now`. */
+function statusStamp(now: number, serverTimeMs?: number) {
+  const at = serverTimeMs ?? now + 60000;
+  return { serverTimeMs: at, period: new Date(at).toISOString().slice(0, 7) };
+}
+test('L2a a patched reply\'s period matches its time across a month boundary', () => {
+  const lastMinute = Date.UTC(2026, 8, 30, 23, 59, 30);
+  for (const stamp of [statusStamp(lastMinute), statusStamp(lastMinute, lastMinute), statusStamp(Date.UTC(2026, 9, 1, 0, 0, 5), lastMinute)]) {
+    expect(stamp.period).toBe(utcPeriod(stamp.serverTimeMs));
+  }
+  expect(statusStamp(lastMinute)).toEqual({ serverTimeMs: lastMinute + 60000, period: '2026-10' });
+  expect(statusStamp(Date.UTC(2026, 9, 1, 0, 0, 5), lastMinute).period).toBe('2026-09');
+});
 async function start(page: Page, language: Language = 'en', enabled = false) {
   const api = await aiFixture(page, language, enabled);
   api.policy({ monthlyAllowanceMicro: allowance });
@@ -45,7 +59,7 @@ async function start(page: Page, language: Language = 'en', enabled = false) {
     const revision = current.consent && 'noticeRevision' in current.consent ? current.consent.noticeRevision : enabledNow ? 2 : null;
     await route.fulfill({ json: {
       code: current.code ?? (enabledNow && revision === 2 ? 'OK' : 'CONSENT_REQUIRED'),
-      period: new Date().toISOString().slice(0, 7), serverTimeMs: current.serverTimeMs ?? Date.now() + 60000,
+      ...statusStamp(Date.now(), current.serverTimeMs),
       consent: { enabled: enabledNow, noticeRevision: revision, consentedAt: enabledNow ? '2026-09-12T00:00:00Z' : null,
         profileVersion: String(api.profiles[owners.a]!.version) },
       policy: { activated: true, noticeRevision: 2, modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 1,
