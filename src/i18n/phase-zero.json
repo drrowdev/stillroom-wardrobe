@@ -81,6 +81,7 @@
   "wardrobe.back": { "en": "Back to wardrobe", "fi": "Takaisin vaatekaappiin", "sv": "Tillbaka till garderoben" },
   "account.menu": { "en": "Account menu", "fi": "Tilivalikko", "sv": "Kontomeny" },
   "nav.more": { "en": "More", "fi": "Lisää", "sv": "Mer" },
+  "shell.failed": { "en": "The menu couldn't load.", "fi": "Valikkoa ei voitu ladata.", "sv": "Menyn kunde inte läsas in." },
   "account.signingOut": { "en": "Signing out…", "fi": "Kirjaudutaan ulos…", "sv": "Loggar ut…" },
   "account.locked": { "en": "Your wardrobe could not be opened. Reconnect and try again, or sign out.", "fi": "Vaatekaappia ei voitu avata. Tarkista yhteys ja yritä uudelleen tai kirjaudu ulos.", "sv": "Garderoben kunde inte öppnas. Kontrollera anslutningen och försök igen, eller logga ut." },
   "account.languageRetry": { "en": "Your language choice has not been saved yet.", "fi": "Kielivalintaasi ei ole vielä tallennettu.", "sv": "Ditt språkval har ännu inte sparats." },

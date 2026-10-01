@@ -30,6 +30,7 @@ import { lazyNamed, preloadChunks } from './lazy-load';
 import { WeatherStore, weatherKey } from '../features/today/use-weather';
 import { StylistStore } from '../features/stylist/stylist-store';
 import { weatherConfig } from '../domain/weather';
+import { ShellBoundary, ShellFallback } from './shell-fallback';
 import { menuPageFor, useNarrow } from './shell-layout';
 import {
   clearRecoveryNotice, leaveRecovery, markNormalAuthStarted, normalAuthStarted,
@@ -48,7 +49,6 @@ const StatisticsScreen = lazyNamed(() => import('../features/statistics/statisti
 const StylistScreen = lazyNamed(() => import('../features/stylist/stylist-screen'), 'StylistScreen');
 const AdminScreen = lazyNamed(() => import('../features/admin/admin-screen'), 'AdminScreen');
 // The signed-in navigation loads with the workspace, so the sign-in page does not download it.
-const WorkspaceHeader = lazyNamed(() => import('./shell-nav'), 'WorkspaceHeader');
 const TopNav = lazyNamed(() => import('./shell-nav'), 'TopNav');
 const TabBar = lazyNamed(() => import('./shell-nav'), 'TabBar');
 const AccountMenu = lazyNamed(() => import('./shell-nav'), 'AccountMenu');
@@ -410,6 +410,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
     </EntryLayout>;
   }
   const navFamily = navFamilyFor(route);
+  const shellFallback = (failed: boolean) => <ShellFallback family={navFamily} page={menuPageFor(route)} failed={failed} t={t} onSignOut={() => { void signOut(); }} />;
   const accountMenu = <AccountMenu narrow={narrow} open={menu} onOpen={setMenu} page={menuPageFor(route)} name={state.profile.display_name}
     initial={state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)} t={t} onSignOut={() => { void signOut(); }}
     language={<LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} />} />;
@@ -417,14 +418,17 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
     <div className="workspace">
       {refusal && <aside className="notice" role="alert"><p>{t(refusal.notice ?? (refusal.kind === 'conflict' ? 'recovery.conflict' : 'recovery.invalid'))}</p><button type="button" className="text-button" onClick={() => leaveRecovery()}>{t('common.close')}</button></aside>}
       <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); document.getElementById('main')?.focus(); }}>{t('common.skipContent')}</a>
-      {/* Until the navigation code is here the header shows the brand; the full header then mounts and fits itself. */}
-      <Suspense fallback={<header className="workspace-header"><Brand /></header>}>
-        <WorkspaceHeader><Brand /><TopNav family={navFamily} t={t} />{!narrow && accountMenu}</WorkspaceHeader>
-      </Suspense>
+      <header className="workspace-header">
+        <Brand />
+        {/* The links and account menu load in their own chunk; until then, or if that fails, plain links and Sign out. */}
+        <ShellBoundary fallback={shellFallback(true)}>
+          <Suspense fallback={shellFallback(false)}><TopNav family={navFamily} t={t} />{!narrow && accountMenu}</Suspense>
+        </ShellBoundary>
+      </header>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online || state.profileSaving} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}
       <UpdatePrompt t={t} />
       <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={state.language} online={online} t={t} onRouteCommitted={setRoute} onSignOut={() => { void signOut(); }} />
-      <Suspense fallback={null}><TabBar family={navFamily} more={narrow ? accountMenu : null} t={t} /></Suspense>
+      <ShellBoundary fallback={null}><Suspense fallback={null}><TabBar family={navFamily} more={narrow ? accountMenu : null} t={t} /></Suspense></ShellBoundary>
     </div>
   );
 }

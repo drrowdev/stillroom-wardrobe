@@ -389,6 +389,80 @@ test.describe('UX1 desktop shell', () => {
   });
 });
 
+test.describe('UX1 navigation chunk held or failing', () => {
+  // The header's links, the tab bar and the account menu load in their own module (shell-nav.tsx); hold its request.
+  async function held(page: Page, width: number) {
+    await page.setViewportSize({ width, height: 844 });
+    const api = await mockBackend(page);
+    api.seedSavedItem('a', 'Synthetic garment 1');
+    let release!: (outcome: 'load' | 'fail') => void;
+    const outcome = new Promise<'load' | 'fail'>(resolve => { release = resolve; });
+    await page.route(url => url.pathname === '/src/app/shell-nav.tsx', async route => {
+      if (await outcome === 'fail') await route.abort('failed'); else await route.fallback();
+    });
+    await page.goto('/#/wardrobe'); await signIn(page);
+    const fallback = page.locator('.shell-fallback');
+    await expect(fallback).toBeVisible();
+    await expect(accountTrigger(page)).toHaveCount(0);
+    await expect(tabBar(page)).toHaveCount(0);
+    // While loading: the banner, one named navigation with plain links and Sign out, and an interactive main.
+    await expect(page.getByRole('banner')).toHaveCount(1);
+    await expect(page.getByRole('navigation', { name: text('nav.wardrobe'), exact: true })).toHaveCount(1);
+    expect(await fallback.locator('a').evaluateAll(links => links.map(link => link.textContent?.trim())))
+      .toEqual(['nav.today', 'nav.wardrobe', 'nav.outfits', 'nav.calendar', 'nav.statistics', 'nav.settings'].map(key => text(key as MessageKey)));
+    await expect(fallback.getByRole('link', { name: text('nav.wardrobe'), exact: true })).toHaveAttribute('aria-current', 'page');
+    await expect(fallback.getByRole('button', { name: text('auth.signOut'), exact: true })).toBeVisible();
+    await expect(page.locator('main#main')).toBeVisible();
+    await noViolations(page);
+    // Something typed, and focus on a fallback link, when the module arrives or fails.
+    await page.locator('#wardrobe-search').fill('navy');
+    const brand = await page.locator('.workspace-header .brand').elementHandle();
+    await fallback.getByRole('link', { name: text('nav.outfits'), exact: true }).focus();
+    return { release, fallback, brand: brand! };
+  }
+
+  for (const width of [390, 1280]) {
+    test(`${width}px: a held module shows plain links, then hands focus to the same link in the loaded navigation`, async ({ page }) => {
+      const { release, fallback, brand } = await held(page, width);
+      release('load');
+      await expectSignedIn(page);
+      await expect(fallback).toHaveCount(0);
+      await expect(shellNav(page).getByRole('link', { name: text('nav.outfits'), exact: true })).toBeFocused();
+      await expect(page.locator('#wardrobe-search')).toHaveValue('navy');
+      // The brand link is never replaced.
+      expect(await brand.evaluate(element => element.isConnected)).toBe(true);
+      await expect(page.getByRole('navigation', { name: text('nav.wardrobe'), exact: true })).toHaveCount(1);
+      await expect(page).toHaveURL(/#\/wardrobe$/);
+      await expectIdentity(page, 'Alex');
+    });
+
+    test(`${width}px: a failed module keeps the workspace and what was typed, with plain links, Sign out and Reload`, async ({ page }) => {
+      const errors: string[] = [];
+      page.on('pageerror', error => { errors.push(error.message); });
+      const { release, brand } = await held(page, width);
+      release('fail');
+      const failed = page.locator('.shell-failed');
+      await expect(failed).toHaveText(`${text('shell.failed')} ${text('chunk.reload')}`);
+      await expect(failed).toHaveAttribute('role', 'alert');
+      await expect(failed.getByRole('button', { name: text('chunk.reload'), exact: true })).toBeVisible();
+      await expect(page.locator('.fatal-error')).toHaveCount(0);
+      await expect(page.locator('#wardrobe-search')).toHaveValue('navy');
+      await expect(page.locator('.shell-fallback').getByRole('link', { name: text('nav.outfits'), exact: true })).toBeFocused();
+      expect(await brand.evaluate(element => element.isConnected)).toBe(true);
+      await expect(page.getByRole('banner')).toHaveCount(1);
+      await expect(page.getByRole('navigation', { name: text('nav.wardrobe'), exact: true })).toHaveCount(1);
+      await expect(tabBar(page)).toHaveCount(0);
+      await noViolations(page);
+      expect(errors).toEqual([]);
+      // The plain links still navigate, and Sign out still works.
+      await page.locator('.shell-fallback').getByRole('link', { name: text('nav.calendar'), exact: true }).click();
+      await expect(page.locator('#calendar-title')).toBeFocused();
+      await page.locator('.shell-fallback').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
+      await expect(page.locator('#email')).toBeVisible();
+    });
+  }
+});
+
 test.describe('UX1 large text', () => {
   for (const language of ['fi', 'sv'] as const) {
     test(`320px with 200% text ${language}: whole tab labels, reflowed bar and unobscured focus`, async ({ page }) => {

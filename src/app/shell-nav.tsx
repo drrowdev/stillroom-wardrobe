@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import type { NavFamily } from '../domain/outfits';
 import type { Translate } from '../i18n';
 import { fitHeader } from './header-fit';
 import { Icon } from './icon';
+import { restoreShellFocus } from './shell-focus';
 import type { MenuPage } from './shell-layout';
 import { fitTabBar } from './tab-fit';
 import '../styles/shell.css';
@@ -14,16 +15,17 @@ const tabs = [
   { family: 'calendar', href: '#/calendar', icon: 'calendar', label: 'nav.calendar' },
 ] as const;
 
-/** The signed-in header; on one row when the brand, nav and account menu fit, otherwise the nav takes its own row. */
-export function WorkspaceHeader({ children }: { children: ReactNode }) {
-  return <header className="workspace-header" ref={fitHeader}>{children}</header>;
-}
-
-/** Desktop: the five destinations in the header. */
+/**
+ * Desktop: the five destinations in the header. It also keeps the header on one row when the brand, nav and account
+ * menu fit, otherwise the nav takes its own row.
+ */
 export function TopNav({ family, t }: { family: NavFamily; t: Translate }) {
+  const nav = useRef<HTMLElement>(null);
+  useLayoutEffect(restoreShellFocus, []);
+  useEffect(() => fitHeader(nav.current?.parentElement ?? null), []);
   const link = (target: NavFamily, href: string) =>
     ({ className: `nav-link${family === target ? ' active-nav' : ''}`, 'aria-current': family === target ? 'page' as const : undefined, href });
-  return <nav className="top-nav" aria-label={t('nav.wardrobe')}>
+  return <nav ref={nav} className="top-nav" aria-label={t('nav.wardrobe')}>
     {tabs.map(tab => <a key={tab.href} {...link(tab.family, tab.href)}><Icon name={tab.icon} />{t(tab.label)}</a>)}
     <a {...link('statistics', '#/statistics')}><Icon name="statistics" />{t('nav.statistics')}</a>
   </nav>;
@@ -32,6 +34,7 @@ export function TopNav({ family, t }: { family: NavFamily; t: Translate }) {
 /** Phone: four destinations and More, after the page content in reading order. */
 export function TabBar({ family, more, t }: { family: NavFamily; more: ReactNode; t: Translate }) {
   const bar = useCallback((element: HTMLElement | null) => fitTabBar(element), []);
+  useLayoutEffect(restoreShellFocus, []);
   return <nav className="tab-bar" aria-label={t('nav.wardrobe')} ref={bar}>
     <ul>
       {tabs.map(tab => <li key={tab.href}>

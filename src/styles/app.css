@@ -188,6 +188,12 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 html { scroll-padding-top: env(safe-area-inset-top, 0px); scroll-padding-bottom: var(--tab-bar-height, 0px); }
 .workspace { min-height: 100svh; display: flex; flex-direction: column; padding-inline: env(safe-area-inset-left, 0px) env(safe-area-inset-right, 0px); }
 .workspace-header { background: var(--surface); padding: 19px max(32px, calc((100vw - 1120px) / 2)); display: flex; align-items: center; gap: 55px; border-bottom: 1px solid var(--border); }
+/* Plain links shown until the navigation chunk arrives, or if it fails (shell-fallback.tsx). */
+.shell-fallback { display: flex; flex-wrap: wrap; align-items: center; gap: 0 20px; min-width: 0; }
+.shell-fallback ul { display: flex; flex-wrap: wrap; gap: 0 16px; margin: 0; padding: 0; list-style: none; }
+.shell-fallback a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; }
+.shell-fallback a[aria-current="page"] { font-weight: 650; }
+.shell-failed { flex-basis: 100%; margin: 0; }
 /* header-fit.ts sets data-stacked when the brand, the links and the account menu don't fit on one row. */
 .workspace-header { flex-wrap: wrap; row-gap: 8px; }
 .workspace-main { width: min(1120px, calc(100% - 64px)); margin: 35px auto 65px; flex: 1; }
