@@ -7,8 +7,8 @@ import { verifyParts, type JpegCheck } from '../../src/domain/export-format';
 import { assertSanitizedJpeg, readJpegHeader } from '../../src/images/jpeg';
 import { mockBackend, signIn } from './mock-backend';
 import { settled, trackRequests } from './settle';
-import { expectIdentity, openAccountMenu } from './shell-support';
-import { closeDataTask, dataRow, expectExitsHeld, openDataTask, settingsFromWardrobe } from './data-task-support';
+import { expectIdentity, openAccountMenu, signOutThroughMenu } from './shell-support';
+import { closeDataTask, dataRow, heldExits, openDataTask, settingsBack, settingsFromWardrobe, tryExitWhileHeld } from './data-task-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -201,38 +201,128 @@ test('UX5 backup: an unsubmitted passphrase is dropped on leaving the view', asy
   await expect(button(page, 'backup.create')).toBeVisible();
 });
 
-test('UX5 backup: while a backup is prepared, every way out of Settings waits and is then followed', async ({ page }) => {
-  const { api } = await start(page, { seed: api => { add(api, 'Fictional linen shirt'); } });
+// Opens the backup view from Settings reached through Wardrobe, so that every way out has an in-app page to go to.
+async function fromWardrobe(page: Page) {
   await closeDataTask(page, 'backup');
   await settingsFromWardrobe(page);
   await openDataTask(page, 'backup');
-  let held: Route | undefined;
-  await page.route('**/rest/v1/rpc/export_manifest*', async route => { if (!held) held = route; else await route.fallback(); });
-  await fill(page);
-  await button(page, 'backup.create').click();
-  await expect.poll(() => Boolean(held)).toBe(true);
-  await expect(card(page).getByRole('status')).toHaveText(text('backup.preparing'));
-  await expectExitsHeld(page, 'backup', () => held!.fallback());
-  await expect.poll(() => api.exportControl.manifests).toBeGreaterThan(0);
-});
+}
+const manifestCalls = (page: Page) => {
+  const calls = { count: 0, held: undefined as Route | undefined };
+  return page.route('**/rest/v1/rpc/export_manifest*', async route => {
+    calls.count++;
+    if (!calls.held) calls.held = route; else await route.fallback();
+  }).then(() => calls);
+};
+const photoReads = (page: Page, mode: 'hold' | 'lose') => {
+  const reads = { urls: [] as string[], held: undefined as Route | undefined };
+  return page.route(/\/storage\/v1\/object\//, async route => {
+    reads.urls.push(route.request().url().split('/').pop()!);
+    if (reads.held) { await route.fallback(); return; }
+    reads.held = route;
+    if (mode === 'lose') await route.abort('connectionreset');
+  }).then(() => reads);
+};
 
-test('UX5 backup: while a part is built, every way out of Settings waits and is then followed', async ({ page }) => {
-  await start(page, { seed: api => { add(api, 'Fictional linen shirt'); } });
-  await closeDataTask(page, 'backup');
-  await settingsFromWardrobe(page);
-  await openDataTask(page, 'backup');
+for (const exit of heldExits) {
+  test(`UX5 backup: while a backup is prepared, ${exit} waits and is then followed`, async ({ page }) => {
+    const { api } = await start(page, { seed: api => { add(api, 'Fictional linen shirt'); } });
+    await fromWardrobe(page);
+    const calls = await manifestCalls(page);
+    await fill(page);
+    await button(page, 'backup.create').click();
+    await expect.poll(() => Boolean(calls.held)).toBe(true);
+    await expect(card(page).getByRole('status')).toHaveText(text('backup.preparing'));
+    const followed = await tryExitWhileHeld(page, 'backup', exit);
+    expect(calls.count).toBe(1);
+    await calls.held!.fallback();
+    await followed();
+    // Preparing reads the manifest twice (the snapshot and its check); the held first read was not sent again.
+    expect([calls.count, api.exportControl.manifests]).toEqual([2, 2]);
+  });
+
+  test(`UX5 backup: while a part is built, ${exit} waits and is then followed`, async ({ page }) => {
+    await start(page, { seed: api => { add(api, 'Fictional linen shirt'); } });
+    await fromWardrobe(page);
+    await fill(page);
+    await button(page, 'backup.create').click();
+    await expect(card(page).locator('.backup-parts li')).toHaveCount(2);
+    const reads = await photoReads(page, 'hold');
+    await button(page, 'backup.part', 'en', { n: 2, total: 2 }).click();
+    await expect.poll(() => Boolean(reads.held)).toBe(true);
+    const followed = await tryExitWhileHeld(page, 'backup', exit);
+    expect(reads.urls).toHaveLength(1);
+    await reads.held!.fallback();
+    await followed();
+    // The part's photo and thumbnail, each read once.
+    expect([...reads.urls].sort()).toEqual(['main.jpg', 'thumb.jpg']);
+  });
+}
+
+test('UX5 backup: a lost photo reply while a part is built shows Start again, keeps it across views and sends nothing again', async ({ page }) => {
+  const { api } = await start(page, { seed: api => { add(api, 'Fictional linen shirt'); } });
   await fill(page);
   await button(page, 'backup.create').click();
   await expect(card(page).locator('.backup-parts li')).toHaveCount(2);
-  let held: Route | undefined;
-  const photos: string[] = [];
-  await page.route(/\/storage\/v1\/object\//, async route => { photos.push(route.request().url()); if (!held) held = route; else await route.fallback(); });
+  const manifests = api.exportControl.manifests;
+  const reads = await photoReads(page, 'lose');
   await button(page, 'backup.part', 'en', { n: 2, total: 2 }).click();
-  await expect.poll(() => Boolean(held)).toBe(true);
-  await expectExitsHeld(page, 'backup', () => held!.fallback());
-  // The part's photo and thumbnail, each read once.
-  expect(photos.map(url => url.split('/').pop()).sort()).toEqual(['main.jpg', 'thumb.jpg']);
+  const alert = card(page).getByRole('alert');
+  await expect(alert).toBeVisible();
+  await expect(alert).toBeFocused();
+  const sent = reads.urls.length;
+  await expect(button(page, 'backup.startAgain')).toBeEnabled();
+  await expect(settingsBack(page)).toBeEnabled();
+  await expect(card(page).locator('input[type=password]')).toHaveCount(0);
+  await closeDataTask(page, 'backup');
+  await openDataTask(page, 'backup');
+  await expect(alert).toHaveText(await alert.textContent() ?? '');
+  await expect(button(page, 'backup.startAgain')).toBeVisible();
+  await page.waitForTimeout(300);
+  expect([reads.urls.length, api.exportControl.manifests]).toEqual([sent, manifests]);
+  await button(page, 'backup.startAgain').click();
+  await expect(button(page, 'backup.create')).toBeVisible();
+  expect([reads.urls.length, api.exportControl.manifests]).toEqual([sent, manifests]);
 });
+
+for (const held of ['manifest', 'part'] as const) {
+  test(`UX5 backup: signing out while the ${held} request is held cancels it; the next account starts clean`, async ({ page }) => {
+    const { api } = await start(page, { seed: api => { add(api, 'Fictional linen shirt'); add(api, 'Robin coat', 'b'); } });
+    let release: () => Promise<void>;
+    let count: () => number;
+    if (held === 'manifest') {
+      const calls = await manifestCalls(page);
+      await fill(page);
+      await button(page, 'backup.create').click();
+      await expect.poll(() => Boolean(calls.held)).toBe(true);
+      release = () => calls.held!.fallback(); count = () => calls.count;
+    } else {
+      await fill(page);
+      await button(page, 'backup.create').click();
+      await expect(card(page).locator('.backup-parts li')).toHaveCount(2);
+      const reads = await photoReads(page, 'hold');
+      await button(page, 'backup.part', 'en', { n: 2, total: 2 }).click();
+      await expect.poll(() => Boolean(reads.held)).toBe(true);
+      release = () => reads.held!.fallback().catch(() => undefined); count = () => reads.urls.length;
+    }
+    await signOutThroughMenu(page);
+    await expect(page.locator('#email')).toBeVisible();
+    await release();
+    await page.waitForTimeout(300);
+    const sent = count();
+    const manifests = api.exportControl.manifests;
+    await signIn(page, 'b');
+    await page.evaluate(() => { location.hash = '#/settings'; });
+    await expect(page.locator('#settings-title')).toBeVisible();
+    await expect(card(page)).toHaveCount(0);
+    await openDataTask(page, 'backup');
+    await expect(card(page).locator('.backup-parts, [role=alert]')).toHaveCount(0);
+    await expect(button(page, 'backup.create', 'sv')).toBeEnabled();
+    await expect(card(page).locator('input[type=password]')).toHaveCount(0);
+    await expect(settingsBack(page)).toBeEnabled();
+    expect([count(), api.exportControl.manifests]).toEqual([sent, manifests]);
+  });
+}
 
 test('I18 accessibility: axe, 320px and 200% text for the backup card', async ({ page }) => {
   await start(page, { seed: api => { add(api, 'Fictional linen shirt'); } });

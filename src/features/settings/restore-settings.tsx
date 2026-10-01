@@ -86,12 +86,14 @@ export function RestoreSettings({ client, scope, language, online, t, active, on
   const busy = state.kind === 'checking' || state.kind === 'restoring';
   useEffect(() => { onBusy(busy); }, [busy, onBusy]);
   useEffect(() => () => onBusy(false), [onBusy]);
-  // Leaving the view drops the chosen files and passphrase of a restore that hasn't started. A checked or stopped
-  // restore stays, so its result or Try again is still there on return.
+  // Leaving the view always drops the chosen files and passphrase. A checked or stopped restore keeps its prepared
+  // preview (which holds what the run needs) and a failure keeps its message, so Restore or Try again is still there on
+  // return; a recheck asks for the files and passphrase again.
   useEffect(() => {
-    if (active || state.kind !== 'idle') return;
-    setFiles([]); setPassphrase(''); if (!state.recheck) setOpen(false);
-  }, [active, state]);
+    if (active || busy) return;
+    setFiles([]); setPassphrase('');
+    if (state.kind === 'idle' && !state.recheck) setOpen(false);
+  }, [active, busy, state]);
   const ready = files.length > 0 && passphrase.length > 0;
   if (!active) return null;
   return <section className="settings-card restore-card" aria-labelledby="restore-heading">

@@ -4,8 +4,8 @@ import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { translate, type Language, type MessageKey } from '../../src/i18n';
 import { mockBackend, signIn } from './mock-backend';
-import { expectIdentity, expectNoIdentity } from './shell-support';
-import { closeDataTask, dataRow, expectExitsHeld, openDataTask, settingsBack, settingsFromWardrobe, taskHeading } from './data-task-support';
+import { expectIdentity, expectNoIdentity, signOutThroughMenu } from './shell-support';
+import { closeDataTask, dataRow, heldExits, openDataTask, settingsBack, settingsFromWardrobe, taskHeading, tryExitWhileHeld } from './data-task-support';
 
 type Reply = { status: number; json: Record<string, unknown> };
 const text = (key: MessageKey, language: Language = 'en', parameters?: Record<string, string>) => translate(language, key, parameters);
@@ -219,24 +219,59 @@ test('UX5 make a backup first opens the backup view and clears the deletion form
   await expect(phraseField(page)).toHaveValue('');
 });
 
-test('UX5 while a deletion runs, every way out of Settings waits; a lost reply keeps its message in the view', async ({ page }) => {
-  const { bodies } = await start(page, []);
-  await settingsFromWardrobe(page);
-  await openForm(page);
-  let held: Route | undefined;
-  await page.route(functionUrl, async route => { if (!held && route.request().method() === 'POST') { held = route; } else await route.fallback(); });
+async function holdDeletion(page: Page) {
+  const held = { route: undefined as Route | undefined, sent: 0 };
+  await page.route(functionUrl, async route => {
+    if (route.request().method() !== 'POST') { await route.fallback(); return; }
+    held.sent++;
+    if (!held.route) held.route = route; else await route.fallback();
+  });
   await fill(page);
   await button(page, 'delete.button').click();
-  await expect.poll(() => Boolean(held)).toBe(true);
+  await expect.poll(() => Boolean(held.route)).toBe(true);
   await expect(card(page).getByRole('status')).toHaveText(text('delete.working'));
-  await expect(button(page, 'delete.backupFirst')).toBeDisabled();
-  await expectExitsHeld(page, 'delete', () => held!.abort('connectionreset'));
-  // Leaving once the reply was lost is allowed; nothing was sent again, and returning shows a cleared form.
-  expect(bodies).toEqual([]);
-  await page.goForward();
-  await expect(page.locator('#settings-title')).toBeVisible();
+  return held;
+}
+
+for (const exit of heldExits) {
+  test(`UX5 while a deletion runs, ${exit} waits; after a lost reply it is followed with nothing sent again`, async ({ page }) => {
+    const { bodies } = await start(page, []);
+    await settingsFromWardrobe(page);
+    await openForm(page);
+    const held = await holdDeletion(page);
+    await expect(button(page, 'delete.backupFirst')).toBeDisabled();
+    const followed = await tryExitWhileHeld(page, 'delete', exit);
+    expect(held.sent).toBe(1);
+    await held.route!.abort('connectionreset');
+    await followed();
+    expect([held.sent, bodies.length]).toEqual([1, 0]);
+    // Returning shows a cleared form.
+    await page.evaluate(() => { location.hash = '#/settings'; });
+    await expect(page.locator('#settings-title')).toBeVisible();
+    await openForm(page);
+    await expect(card(page).getByLabel(text('delete.password'), { exact: true })).toHaveValue('');
+    expect(held.sent).toBe(1);
+  });
+}
+
+test('UX5 signing out while a deletion runs cancels the wait; the next account starts with an empty form', async ({ page }) => {
+  await start(page, []);
   await openForm(page);
-  await expect(card(page).getByLabel(text('delete.password'), { exact: true })).toHaveValue('');
+  const held = await holdDeletion(page);
+  await signOutThroughMenu(page);
+  await expect(page.locator('#email')).toBeVisible();
+  await expect(page.locator('#delete-password, #delete-phrase')).toHaveCount(0);
+  await held.route!.abort('connectionreset').catch(() => undefined);
+  await signIn(page, 'b');
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await expect(page.locator('#settings-title')).toBeVisible();
+  await expect(card(page)).toHaveCount(0);
+  await dataRow(page, 'delete').click();
+  await expect(card(page).locator('[role=alert], [role=status]:not(:empty)')).toHaveCount(0);
+  await expect(page.locator('#delete-password')).toHaveValue('');
+  await expect(page.locator('#delete-phrase')).toHaveValue('');
+  await expect(settingsBack(page)).toBeEnabled();
+  expect(held.sent).toBe(1);
 });
 
 test('UX5 a lost deletion reply keeps its message and the form in the view, with nothing sent again', async ({ page }) => {
