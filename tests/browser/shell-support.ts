@@ -40,12 +40,17 @@ export async function openAccountMenu(page: Page, language?: Language): Promise<
   return accountMenu(page);
 }
 
-/** Closes the account menu or More if it is still open (a tap elsewhere may already have closed it). */
+/**
+ * Closes the account menu or More if it is still open. A tap elsewhere, or a route moving focus, may close it at the
+ * same moment as the click, which would then reopen it, so check again until it stays closed.
+ */
 export async function closeAccountMenu(page: Page) {
   const trigger = accountTrigger(page);
-  if (await trigger.getAttribute('aria-expanded') === 'true') await trigger.click();
-  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
-  await expect(accountMenu(page)).toHaveCount(0);
+  await expect(async () => {
+    if (await trigger.getAttribute('aria-expanded') === 'true') await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false', { timeout: 500 });
+    await expect(accountMenu(page)).toHaveCount(0, { timeout: 100 });
+  }).toPass({ timeout: 10_000 });
 }
 
 export async function signOutThroughMenu(page: Page, language: Language = 'en') {
@@ -59,6 +64,7 @@ export async function signOutThroughMenu(page: Page, language: Language = 'en') 
  */
 export async function expectIdentity(page: Page, name: string) {
   if (!isNarrow(page)) {
+    await expect(page.locator('.account-name')).toBeVisible();
     await expect(page.locator('.account-name')).toHaveText(name);
     return;
   }
@@ -76,6 +82,7 @@ export async function expectIdentity(page: Page, name: string) {
     await page.waitForTimeout(250);
     await expect(accountTrigger(page)).toHaveAttribute('aria-expanded', 'true', { timeout: 100 });
   }).toPass({ timeout: 10_000 });
+  await expect(accountMenu(page).locator('.menu-identity')).toBeVisible();
   await expect(accountMenu(page).locator('.menu-identity')).toHaveText(name);
   await closeAccountMenu(page);
   await previous.evaluate((element) => {

@@ -15,25 +15,30 @@ export function fitTabBar(bar: HTMLElement | null): (() => void) | undefined {
       if (labels.some(label => label.scrollWidth > label.clientWidth + 0.5)) bar.dataset.reflow = '';
     }
     root.style.setProperty('--tab-bar-height', `${shown ? bar.getBoundingClientRect().height : 0}px`);
+    if (shown) clear();
   };
-  // WebKit ignores scroll-padding when it scrolls a newly focused control into view, so a control can land under the
-  // bar. After the browser's own scroll, move the page just enough to bring it clear.
+  // Keeps the focused control clear of the bar. WebKit ignores scroll-padding when it scrolls a newly focused control
+  // into view, the bar comes back a moment after a text field loses focus, and a reflow can make it taller; after each,
+  // move the page just enough to bring the control above the bar.
   let focusFrame = 0;
-  const reveal = (event: FocusEvent) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement) || bar.contains(target) || target.closest('dialog')) return;
-    cancelAnimationFrame(focusFrame);
-    focusFrame = requestAnimationFrame(() => {
-      const style = getComputedStyle(bar);
-      if (style.display === 'none' || style.visibility === 'hidden' || document.activeElement !== target) return;
-      const top = bar.getBoundingClientRect().top, box = target.getBoundingClientRect();
-      if (box.bottom > top && box.height < top) window.scrollBy(0, Math.ceil(box.bottom - top) + 8);
-    });
+  const clear = () => {
+    const target = document.activeElement;
+    if (!(target instanceof HTMLElement) || target === document.body || bar.contains(target) || target.closest('dialog')) return;
+    const style = getComputedStyle(bar);
+    if (style.display === 'none' || style.visibility === 'hidden') return;
+    const top = bar.getBoundingClientRect().top, box = target.getBoundingClientRect();
+    if (box.bottom > top && box.height < top) window.scrollBy(0, Math.ceil(box.bottom - top) + 8);
   };
+  const reveal = () => { cancelAnimationFrame(focusFrame); focusFrame = requestAnimationFrame(clear); };
   document.addEventListener('focusin', reveal);
+  // The delayed visibility transition ends when the bar is back on screen.
+  bar.addEventListener('transitionend', reveal);
   check();
   if (typeof ResizeObserver !== 'function') {
-    return () => { cancelAnimationFrame(focusFrame); document.removeEventListener('focusin', reveal); root.style.setProperty('--tab-bar-height', '0px'); };
+    return () => {
+      cancelAnimationFrame(focusFrame); document.removeEventListener('focusin', reveal); bar.removeEventListener('transitionend', reveal);
+      root.style.setProperty('--tab-bar-height', '0px');
+    };
   }
   let frame = 0;
   // Deferred to the next frame so a layout change caused by the check itself never loops the observer.
@@ -42,6 +47,7 @@ export function fitTabBar(bar: HTMLElement | null): (() => void) | undefined {
   for (const label of bar.querySelectorAll('.tab-label')) observer.observe(label);
   return () => {
     cancelAnimationFrame(frame); cancelAnimationFrame(focusFrame); observer.disconnect(); document.removeEventListener('focusin', reveal);
+    bar.removeEventListener('transitionend', reveal);
     root.style.setProperty('--tab-bar-height', '0px');
   };
 }

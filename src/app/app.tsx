@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { readConfiguration, type Configuration, type PublicConfig } from '../data/config';
 import { makeClient, retireClient, revokeSession } from '../data/client';
 import { SessionController, type OwnerScope, type SessionState } from '../auth/session';
@@ -30,9 +30,7 @@ import { lazyNamed, preloadChunks } from './lazy-load';
 import { WeatherStore, weatherKey } from '../features/today/use-weather';
 import { StylistStore } from '../features/stylist/stylist-store';
 import { weatherConfig } from '../domain/weather';
-import { fitHeader } from './header-fit';
 import { menuPageFor, useNarrow } from './shell-layout';
-import { AccountMenu, TabBar, TopNav } from './shell-nav';
 import {
   clearRecoveryNotice, leaveRecovery, markNormalAuthStarted, normalAuthStarted,
   recoverySnapshot, subscribeRecovery, type RecoveryCallback,
@@ -49,6 +47,11 @@ const CalendarScreen = lazyNamed(() => import('../features/calendar/calendar'), 
 const StatisticsScreen = lazyNamed(() => import('../features/statistics/statistics-screen'), 'StatisticsScreen');
 const StylistScreen = lazyNamed(() => import('../features/stylist/stylist-screen'), 'StylistScreen');
 const AdminScreen = lazyNamed(() => import('../features/admin/admin-screen'), 'AdminScreen');
+// The signed-in navigation loads with the workspace, so the sign-in page does not download it.
+const WorkspaceHeader = lazyNamed(() => import('./shell-nav'), 'WorkspaceHeader');
+const TopNav = lazyNamed(() => import('./shell-nav'), 'TopNav');
+const TabBar = lazyNamed(() => import('./shell-nav'), 'TabBar');
+const AccountMenu = lazyNamed(() => import('./shell-nav'), 'AccountMenu');
 const configuration = readConfiguration(import.meta.env);
 const browserLanguages = navigator.languages;
 function Brand() {
@@ -414,11 +417,14 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
     <div className="workspace">
       {refusal && <aside className="notice" role="alert"><p>{t(refusal.notice ?? (refusal.kind === 'conflict' ? 'recovery.conflict' : 'recovery.invalid'))}</p><button type="button" className="text-button" onClick={() => leaveRecovery()}>{t('common.close')}</button></aside>}
       <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); document.getElementById('main')?.focus(); }}>{t('common.skipContent')}</a>
-      <header className="workspace-header" ref={fitHeader}><Brand /><TopNav family={navFamily} t={t} />{!narrow && accountMenu}</header>
+      {/* Until the navigation code is here the header shows the brand; the full header then mounts and fits itself. */}
+      <Suspense fallback={<header className="workspace-header"><Brand /></header>}>
+        <WorkspaceHeader><Brand /><TopNav family={navFamily} t={t} />{!narrow && accountMenu}</WorkspaceHeader>
+      </Suspense>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online || state.profileSaving} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}
       <UpdatePrompt t={t} />
       <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={state.language} online={online} t={t} onRouteCommitted={setRoute} onSignOut={() => { void signOut(); }} />
-      <TabBar family={navFamily} more={narrow ? accountMenu : null} t={t} />
+      <Suspense fallback={null}><TabBar family={navFamily} more={narrow ? accountMenu : null} t={t} /></Suspense>
     </div>
   );
 }

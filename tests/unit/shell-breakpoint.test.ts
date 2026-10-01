@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { NARROW_MAX_WIDTH, menuPageFor } from '../../src/app/shell-layout';
 
-const css = readFileSync('src/styles/app.css', 'utf8').replace(/\r\n/g, '\n');
+// The shell's own rules live in shell.css, loaded with the lazy shell chunk; both sheets are checked together.
+const css = ['src/styles/app.css', 'src/styles/shell.css'].map(file => readFileSync(file, 'utf8').replace(/\r\n/g, '\n')).join('\n');
 
 // Returns the body of every media block whose query is exactly `query`, including nested ones.
 function mediaBlocks(query: string): string[] {

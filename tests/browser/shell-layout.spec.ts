@@ -269,6 +269,34 @@ test.describe('UX1 phone shell', () => {
     await expect(page.locator('#calendar-title')).toBeFocused();
   });
 
+  test('a control tapped under the hidden bar is moved clear when the bar comes back', async ({ page }) => {
+    await start(page, { items: 12 });
+    await page.locator('#wardrobe-search').focus();
+    await expect(tabBar(page)).toBeHidden();
+    // With the keyboard up, scroll a garment link that starts below the first screen into the strip the bar will take
+    // back, then tap it.
+    await page.evaluate(() => {
+      const link = [...document.querySelectorAll<HTMLElement>('main a[href]')].find(element => element.getBoundingClientRect().top + scrollY > innerHeight);
+      link!.dataset.reshowTarget = '';
+    });
+    const target = page.locator('[data-reshow-target]');
+    const barTop = await tabBar(page).evaluate(bar => bar.getBoundingClientRect().top);
+    await target.evaluate(element => window.scrollBy(0, element.getBoundingClientRect().bottom - (innerHeight - 4)));
+    expect(await target.evaluate(element => element.getBoundingClientRect().bottom)).toBeGreaterThan(barTop);
+    // Focus moves the way a tap does, without scrolling the already visible control.
+    await target.evaluate(element => (element as HTMLElement).focus({ preventScroll: true }));
+    await expect(target).toBeFocused();
+    // The bar returns after a 0.3 s delay; measure after it is back.
+    await page.waitForTimeout(450);
+    await expect(tabBar(page)).toBeVisible();
+    await expect.poll(() => target.evaluate(element => {
+      const bar = document.querySelector('.tab-bar')!.getBoundingClientRect(), box = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return box.top >= 0 && box.bottom <= bar.top + 0.5 && (hit === element || element.contains(hit!));
+    })).toBe(true);
+    await expect(target).toBeFocused();
+  });
+
   test('forced colours: the current tab is marked by its border, not only colour', async ({ page }) => {
     await start(page);
     await page.emulateMedia({ forcedColors: 'active' });
@@ -283,26 +311,52 @@ test.describe('UX1 phone shell', () => {
     await noViolations(page);
   });
 
-  test('safe-area insets: viewport-fit=cover and inset rules on the bar, header, workspace and skip link', async ({ page }) => {
-    await start(page);
+  test('safe-area insets: with a notch and home bar the header, skip link, sign-in page and bar stay clear', async ({ page }) => {
+    test.skip(test.info().project.name === 'webkit-photo', 'Inset emulation uses the Chromium DevTools protocol.');
+    const inset = { top: 47, bottom: 34, left: 0, right: 0 };
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setSafeAreaInsetsOverride' as never, { insets: inset } as never);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockBackend(page);
+    await page.goto('/#/wardrobe');
     await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /viewport-fit=cover/);
-    const rules = await page.evaluate(() => [...document.styleSheets].flatMap(sheet => { try { return [...sheet.cssRules].map(rule => rule.cssText); } catch { return []; } }).join('\n'));
-    for (const pattern of [/\.tab-bar[^{]*\{[^}]*safe-area-inset-bottom/, /\.workspace-header[^{]*\{[^}]*safe-area-inset-top/,
-      /\.workspace \{[^}]*safe-area-inset-left/, /\.skip-link \{[^}]*safe-area-inset-top/, /scroll-padding-bottom: var\(--tab-bar-height/]) {
-      expect(rules).toMatch(pattern);
-    }
+    // Sign-in page: the header starts below the notch.
+    const entry = page.locator('.entry-header');
+    await expect(entry).toBeVisible();
+    expect(await entry.evaluate(header => header.getBoundingClientRect().top)).toBeGreaterThanOrEqual(inset.top);
+    await signIn(page);
+    await expectSignedIn(page);
+    const layout = await page.evaluate(() => ({
+      brand: document.querySelector('.workspace-header')!.firstElementChild!.getBoundingClientRect().top,
+      skip: document.querySelector('.skip-link')!.getBoundingClientRect().bottom,
+      tabs: Math.max(...[...document.querySelectorAll('.tab-bar .tab-item')].map(item => item.getBoundingClientRect().bottom)),
+    }));
+    expect(layout.brand).toBeGreaterThanOrEqual(inset.top);
+    // The unfocused skip link is entirely off screen, not peeking out below the notch.
+    expect(layout.skip).toBeLessThanOrEqual(0);
+    expect(layout.tabs).toBeLessThanOrEqual(844 - inset.bottom + 0.5);
+    const skip = page.locator('.skip-link');
+    await skip.focus();
+    await expect.poll(() => skip.evaluate(link => {
+      const box = link.getBoundingClientRect(), hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return box.top >= 47 && box.bottom <= innerHeight && (hit === link || link.contains(hit));
+    })).toBe(true);
   });
 
   for (const width of [390, 1280]) {
     test(`${width}px: the skip link is the first stop, in view above the bar, and opens main`, async ({ page }) => {
-      test.skip(!tabsToLinks(), 'Tab does not reach links in WebKit; the Chromium projects cover the skip link.');
       await start(page, { width });
-      // Sequential navigation starts from the top of the document, as on a fresh load (not from the focused heading).
-      await page.evaluate(() => { document.body.tabIndex = -1; document.body.focus(); document.body.removeAttribute('tabindex'); });
-      await page.keyboard.press('Tab');
       const skip = page.locator('.skip-link');
+      if (tabsToLinks()) {
+        // Sequential navigation starts from the top of the document, as on a fresh load (not from the focused heading).
+        await page.evaluate(() => { document.body.tabIndex = -1; document.body.focus(); document.body.removeAttribute('tabindex'); });
+        await page.keyboard.press('Tab');
+      } else {
+        // Tab does not reach links in WebKit, so focus the link directly; everything after that is the same.
+        await skip.focus();
+      }
       await expect(skip).toBeFocused();
-      expect(await skip.evaluate(link => {
+      await expect.poll(() => skip.evaluate(link => {
         const box = link.getBoundingClientRect(), hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
         return box.top >= 0 && box.left >= 0 && box.right <= innerWidth && box.bottom <= innerHeight && (hit === link || link.contains(hit));
       })).toBe(true);
@@ -382,39 +436,54 @@ test.describe('UX1 large text', () => {
 });
 
 /**
- * Tabs through the page and checks every focused control outside the bar sits fully above it, and that a hit test at its
- * centre and corners reaches the control rather than the bar.
+ * Tabs once round the whole page and checks that every focused control outside the bar sits fully above it and that a
+ * hit test at its centre and edges reaches that control. The walk must come back to its first stop within the limit.
  */
 async function walkFocus(page: Page, direction: 'forward' | 'backward', limit: number) {
   await page.evaluate(() => { (document.activeElement as HTMLElement | null)?.blur(); });
-  const seen = new Set<string>();
+  let first = '', typing = false;
   for (let step = 0; step < limit; step++) {
     await page.keyboard.press(direction === 'forward' ? 'Tab' : 'Shift+Tab');
+    // Leaving a text field brings the bar back after a 0.3 s delay; measure once it is back.
+    if (typing) await page.waitForTimeout(450);
     // The shell moves a control the browser left under the bar one frame after focus, so measure after two frames.
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const state = await page.evaluate(() => {
       const element = document.activeElement;
-      if (!element || element === document.body) return { key: 'body', ok: true, detail: '' };
-      const key = element.id || element.outerHTML.slice(0, 80);
+      if (!element || element === document.body) return { key: 'body', ok: true, typing: false, detail: '' };
+      const ids = ((window as unknown as { walkIds?: WeakMap<Element, string> }).walkIds ??= new WeakMap());
+      if (!ids.has(element)) ids.set(element, `walk-${performance.now()}-${Math.random()}`);
+      const key = ids.get(element)!, name = `${element.tagName} ${element.id || element.getAttribute('name') || element.textContent?.trim().slice(0, 40)}`;
+      const typing = element.matches('input:not([type=checkbox],[type=radio]), select, textarea');
       const bar = document.querySelector('.tab-bar')!;
       const barBox = bar.getBoundingClientRect(), shown = getComputedStyle(bar).display !== 'none' && getComputedStyle(bar).visibility !== 'hidden';
-      if (!shown || bar.contains(element) || element.closest('dialog')) return { key, ok: true, detail: '' };
+      if (!shown || bar.contains(element) || element.closest('dialog')) return { key, ok: true, typing, detail: '' };
       const box = element.getBoundingClientRect();
-      if (box.width < 4 || box.height < 4) return { key, ok: true, detail: '' };
+      if (box.width < 4 || box.height < 4) return { key, ok: true, typing, detail: '' };
       const limitBottom = Math.min(innerHeight, barBox.top);
       const fits = box.height <= limitBottom ? box.top >= -0.5 && box.bottom <= limitBottom + 0.5 : box.top >= -0.5 && box.top < limitBottom;
-      const points = [[box.left + box.width / 2, box.top + Math.min(box.height, limitBottom - box.top) / 2], [box.left + 2, box.top + 2], [box.right - 2, box.top + 2]];
-      if (box.height <= limitBottom) points.push([box.left + 2, box.bottom - 2], [box.right - 2, box.bottom - 2]);
-      const clear = points.filter(([x, y]) => x! >= 0 && x! < innerWidth && y! >= 0 && y! < innerHeight).every(([x, y]) => {
+      // The centre and the middle of each visible edge, 2 px in; hit testing follows rounded corners, so not the corners.
+      const middle = box.top + Math.min(box.height, limitBottom - box.top) / 2, centre = box.left + box.width / 2;
+      const points = [[centre, middle], [centre, box.top + 2], [box.left + 2, middle], [box.right - 2, middle]];
+      if (box.height <= limitBottom) points.push([centre, box.bottom - 2]);
+      // A link that wraps over lines is a set of boxes, not their bounding rectangle: test the centre of each line.
+      const lines = [...element.getClientRects()];
+      if (lines.length > 1) points.splice(0, points.length, ...lines.map(line => [line.left + line.width / 2, line.top + line.height / 2]));
+      const inView = points.filter(([x, y]) => x! >= 0 && x! < innerWidth && y! >= 0 && y! < innerHeight);
+      const misses = inView.filter(([x, y]) => {
         const hit = document.elementFromPoint(x!, y!);
-        return !hit || !bar.contains(hit);
-      });
-      return { key, ok: fits && clear, detail: `${key} top ${box.top} bottom ${box.bottom} bar ${barBox.top} fits ${fits} clear ${clear}` };
+        return !hit || (hit !== element && !element.contains(hit));
+      }).map(([x, y]) => `${Math.round(x!)},${Math.round(y!)}→${document.elementFromPoint(x!, y!)?.outerHTML.slice(0, 60) ?? 'null'}`);
+      const clear = inView.length > 0 && misses.length === 0;
+      return { key, ok: fits && clear, typing, detail: `${name} top ${box.top} bottom ${box.bottom} bar ${barBox.top} fits ${fits} misses ${misses.join(' | ')}` };
     });
     expect(state.ok, state.detail).toBe(true);
-    if (state.key !== 'body' && seen.has(state.key) && step > 3) return;
-    seen.add(state.key);
+    typing = state.typing;
+    if (state.key === 'body') continue;
+    if (!first) first = state.key;
+    else if (state.key === first) return;
   }
+  throw new Error(`walkFocus ${direction} did not come back to its first stop within ${limit} steps`);
 }
 
 test.describe('bounded UX1 visual evidence', () => {

@@ -1,0 +1,69 @@
+/* UX1 signed-in navigation: the header links, the account menu, the phone tab bar and More. Loaded with the signed-in
+   navigation (shell-nav.tsx), after app.css, so the sign-in page does not download it. */
+@media (forced-colors: active) {
+  .account-popover { outline: 1px solid transparent; }
+  .tab-bar { border-top: 1px solid CanvasText; }
+  /* The forced palette would repaint every tab's top border alike; keep the system colours but choose them here. */
+  .tab-item { forced-color-adjust: none; color: LinkText; background: Canvas; border-top-color: Canvas; }
+  button.tab-item { color: ButtonText; }
+  .tab-item:focus-visible { outline-color: Highlight; }
+  .tab-item[aria-current="page"], .tab-item.tab-more-current { border-top-color: Highlight; }
+}
+.workspace .account-popover { width: min(300px, calc(100vw - 32px)); }
+.workspace .account-button > span:not(.avatar) { overflow-wrap: anywhere; min-width: 0; }
+.workspace-header nav { align-self: stretch; display: flex; align-items: center; gap: 28px; }
+.nav-link { color: var(--secondary); text-decoration: none; display: flex; gap: 9px; align-items: center; min-height: 44px; font-size: .875rem; font-weight: 550; }
+.active-nav { color: var(--primary); text-decoration: none; display: flex; gap: 9px; align-items: center; min-height: 44px; font-size: .875rem; font-weight: 550; }
+.account-controls { margin-left: auto; position: relative; min-width: 0; }
+.workspace-header:not([data-stacked]) .nav-link, .workspace-header:not([data-stacked]) .active-nav { white-space: nowrap; }
+.workspace-header[data-stacked] nav { order: 3; flex-basis: 100%; flex-wrap: wrap; min-width: 0; }
+.account-button { max-width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 0 0 8px; color: var(--ink); background: transparent; border: 0; font-size: .875rem; }
+.account-button > span:not(.avatar) { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar { width: 34px; height: 34px; background: #E8EBDD; color: var(--primary); display: grid; place-items: center; border-radius: 50%; font-weight: 550; flex: 0 0 auto; }
+.account-button .icon { width: 16px; }
+.account-popover { position: absolute; z-index: 5; right: 0; top: calc(100% + 10px); min-width: 160px; padding: 8px 20px; border-radius: 10px; background: white; box-shadow: 0 8px 28px #24332E24; }
+.account-popover > .text-button { display: flex; align-items: center; width: 100%; min-height: 44px; }
+.account-popover > .text-button[aria-current="page"] { font-weight: 650; }
+.menu-identity { margin: 4px 0 4px; padding-bottom: 8px; border-bottom: 1px solid var(--border); color: var(--secondary); font-size: .875rem; overflow-wrap: anywhere; }
+.tab-bar { display: none; }
+@media (max-width: 650px) {
+  .workspace-header .top-nav { display: none; }
+  /* The tab bar: the page's last child, stuck to the bottom of the viewport above the home indicator. */
+  .tab-bar { display: block; position: sticky; bottom: 0; z-index: 20; background: var(--surface); box-shadow: 0 -1px 0 var(--border);
+    padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    transition: visibility 0s linear 0.3s; }
+  .tab-bar > ul { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
+  .tab-bar li { min-width: 0; display: flex; }
+  .tab-item { flex: 1; min-width: 0; min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    padding: 6px 2px; color: var(--secondary); background: transparent; border: 0; border-top: 3px solid transparent; font: inherit; font-size: .75rem;
+    font-weight: 550; line-height: 1.2; text-align: center; text-decoration: none; cursor: pointer; }
+  .tab-item[aria-current="page"], .tab-item.tab-more-current { color: var(--primary); border-top-color: var(--primary); }
+  .tab-item .icon { width: 20px; height: 20px; flex: 0 0 auto; }
+  /* Whole words only: a word wider than its column switches the bar to the reflow layout instead of splitting it. */
+  .tab-label { display: block; max-width: 100%; min-width: 0; overflow-wrap: normal; word-break: normal; hyphens: manual; }
+  .tab-bar[data-reflow] > ul { display: flex; flex-wrap: wrap; }
+  .tab-bar[data-reflow] li { flex: 1 1 auto; min-width: max-content; }
+  .tab-bar[data-reflow] .tab-item { flex-direction: row; gap: 6px; min-height: 44px; padding-inline: 10px; }
+  .account-region.in-tab-bar { position: static; display: flex; flex: 1; min-width: 0; }
+  .in-tab-bar .account-popover { position: absolute; top: auto; right: 8px; left: 8px; bottom: calc(100% + 8px); min-width: 0;
+    max-height: calc(100dvh - var(--tab-bar-height, 0px) - 16px - env(safe-area-inset-top, 0px)); overflow-y: auto; overscroll-behavior: contain; }
+}
+@media (max-width: 359px) {
+  .account-button { gap: 7px; }
+  .account-button > span:not(.avatar) { max-width: 72px; }
+}
+/* Before tab-fit.ts has measured, a very narrow bar starts in the reflow layout rather than splitting words. */
+@media (max-width: 379px) {
+  .tab-bar:not([data-measured]) > ul { display: flex; flex-wrap: wrap; }
+  .tab-bar:not([data-measured]) li { flex: 1 1 auto; min-width: max-content; }
+  .tab-bar:not([data-measured]) .tab-item { flex-direction: row; gap: 6px; min-height: 44px; padding-inline: 10px; }
+}
+/* While the on-screen keyboard is up for a text field, the bar steps aside instead of riding above the keyboard. It keeps
+   its space, so nothing moves, and comes back a moment after the field loses focus, so the tap that left the field
+   lands where it was aimed rather than on a tab that appeared under it.
+   Browsers without :has() keep it in place; content still scrolls clear of it through the bottom scroll padding. */
+@supports selector(:has(*)) {
+  @media (max-width: 650px) {
+    .workspace:has(:is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="color"]), textarea, select, [contenteditable="true"]):focus):not(:has(.tab-bar :focus)) .tab-bar { visibility: hidden; transition: none; }
+  }
+}

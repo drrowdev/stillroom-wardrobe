@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import type { NavFamily } from '../domain/outfits';
 import type { Translate } from '../i18n';
+import { fitHeader } from './header-fit';
 import { Icon } from './icon';
 import type { MenuPage } from './shell-layout';
 import { fitTabBar } from './tab-fit';
+import '../styles/shell.css';
 
 const tabs = [
   { family: 'today', href: '#/today', icon: 'today', label: 'nav.today' },
@@ -11,6 +13,11 @@ const tabs = [
   { family: 'outfits', href: '#/outfits', icon: 'outfits', label: 'nav.outfits' },
   { family: 'calendar', href: '#/calendar', icon: 'calendar', label: 'nav.calendar' },
 ] as const;
+
+/** The signed-in header; on one row when the brand, nav and account menu fit, otherwise the nav takes its own row. */
+export function WorkspaceHeader({ children }: { children: ReactNode }) {
+  return <header className="workspace-header" ref={fitHeader}>{children}</header>;
+}
 
 /** Desktop: the five destinations in the header. */
 export function TopNav({ family, t }: { family: NavFamily; t: Translate }) {
