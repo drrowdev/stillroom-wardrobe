@@ -529,12 +529,16 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  webkit-photo:
-    name: WebKit photo contracts
+  webkit-browser:
+    name: WebKit photo contracts (${{ matrix.shard }}/2)
     needs: changes
     if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -545,7 +549,20 @@ jobs:
           cache: npm
       - run: npm ci --no-fund
       - run: npx playwright install --with-deps chromium webkit
-      - run: npm run test:browser -- --project=webkit-photo
+        timeout-minutes: 10
+      - run: npm run test:browser -- --project=webkit-photo --shard=${{ matrix.shard }}/2
+
+  webkit-photo:
+    name: WebKit photo contracts
+    needs: [changes, webkit-browser]
+    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every WebKit shard to pass
+        env:
+          WEBKIT: ${{ needs.webkit-browser.result }}
+        run: test "$WEBKIT" = success
 
   database:
     name: Real local Supabase
@@ -686,5 +703,6 @@ jobs:
           cache: npm
       - run: npm ci --no-fund
       - run: npx playwright install --with-deps chromium webkit
+        timeout-minutes: 10
       - run: npm run test:performance
       - run: npm run test:browser -- --project=cleanup-timing --project=cleanup-timing-webkit --workers=1

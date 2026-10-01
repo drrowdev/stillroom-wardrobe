@@ -18,8 +18,8 @@ export const WORKFLOWS = {
 };
 // Pinned job inventories, in workflow-file order. A workflow edit that changes these must update the verifier too.
 export const CI_JOBS = ['Changed files', 'Documentation checks', 'App static checks', 'App browser contracts (1/3)', 'App browser contracts (2/3)',
-  'App browser contracts (3/3)', 'App and browser contracts', 'PWA production contracts', 'WebKit photo contracts', 'Real local Supabase',
-  'Account deletion rehearsal', 'Performance budgets'];
+  'App browser contracts (3/3)', 'App and browser contracts', 'PWA production contracts', 'WebKit photo contracts (1/2)',
+  'WebKit photo contracts (2/2)', 'WebKit photo contracts', 'Real local Supabase', 'Account deletion rehearsal', 'Performance budgets'];
 export const APPLE_JOBS = ['Generated JPEG on native Apple WebKit'];
 export const EXPECTED_SKIPPED = { ci: ['Documentation checks'], apple: [] };
 export const PINNED = { ci: CI_JOBS, apple: APPLE_JOBS };
@@ -31,7 +31,7 @@ const EVENTS = new Set(['push', 'workflow_dispatch']);
 const PER_PAGE = 100;
 const MAX_PAGES = 100;
 export const A11Y_LINE = 'A11Y test:a11y is the `--grep accessibility` subset of the browser specs run by App browser contracts (1/3)-(3/3) '
-  + 'and WebKit photo contracts; it has no separate job.';
+  + 'and WebKit photo contracts (1/2)-(2/2); it has no separate job.';
 export const R1_REMINDER = 'NOTE R1 also needs the Pages deploy of exactly C, its read-back D row, the Edge-source comparison and owner approval.';
 
 export class Blocked extends Error {}
