@@ -138,7 +138,8 @@ test('I12 future days cannot be marked worn, a stale undo is a conflict, and ano
   await expect(page.getByText('Robin look')).toHaveCount(0);
 
   await day(page, '2026-09-20').click();
-  await expect(cards(page).first().getByRole('button', { name: text('calendar.markWorn') })).toBeDisabled();
+  // A future plan offers no Mark as worn, only the hint that it can be marked on the day.
+  await expect(cards(page).first().getByRole('button', { name: text('calendar.markWorn') })).toHaveCount(0);
   await expect(cards(page).first()).toContainText(text('calendar.futureWorn'));
   await button(page, 'calendar.planLook').click();
   await expect(page.locator('#plan-date')).toHaveValue('2026-09-20');
@@ -148,6 +149,7 @@ test('I12 future days cannot be marked worn, a stale undo is a conflict, and ano
   await expect(button(page, 'calendar.planLook')).toBeFocused();
 
   await day(page, '2026-09-15').click();
+  await expect(cards(page).first().getByRole('button', { name: text('calendar.markWorn') })).toHaveClass(/button-primary/);
   await cards(page).first().getByRole('button', { name: text('calendar.markWorn') }).click();
   const undo = page.locator('.calendar-notice').getByRole('button', { name: text('common.undo') });
   await expect(undo).toBeFocused();
@@ -171,6 +173,22 @@ test('I12 future days cannot be marked worn, a stale undo is a conflict, and ano
   expect(api.wearEvents.filter(row => row.owner_id === owners.a && row.local_date === today)).toHaveLength(0);
   expect(event(api, future)).toMatchObject({ state: 'planned', version: 1 });
 });
+
+for (const language of ['en', 'fi', 'sv'] as const) {
+  test(`the Plan dialog names the chosen day in ${language}, whatever the browser's own locale`, async ({ page }) => {
+    await start(page, language);
+    await expect(page.locator('.calendar-toolbar-compact')).toBeVisible();
+    await button(page, 'calendar.planLook', language).click();
+    const field = page.locator('#plan-date');
+    await expect(field).toHaveValue(today);
+    await expect(field).toHaveAttribute('lang', locales[language]);
+    expect((await field.getAttribute('aria-describedby'))?.split(' ')).toContain('plan-date-day');
+    await expect(page.locator('#plan-date-day')).toHaveText(heading(today, language));
+    await field.fill('2026-09-20');
+    await expect(page.locator('#plan-date-day')).toHaveText(heading('2026-09-20', language));
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  });
+}
 
 test('I12 an outfit can be worn today or planned for a date, and a lost reply is confirmed by a reread', async ({ page }) => {
   let outfitId = '';

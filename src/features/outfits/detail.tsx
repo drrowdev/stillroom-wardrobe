@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import '../../styles/outfit-flow.css';
 import { Icon } from '../../app/icon';
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
@@ -66,7 +67,8 @@ export function OutfitDetail(props: Shared & { id: string | null; timeZone: stri
   const unavailable = id === null || view.data !== null && record === null;
   return <section className="detail-page outfit-page" aria-labelledby="outfit-detail-title">
     <button type="button" className="text-button" onClick={(event) => { event.currentTarget.focus(); props.onBack(); }}>{t('outfits.back')}</button>
-    <header className="settings-heading"><h1 id="outfit-detail-title" tabIndex={-1}>{(editView?.record ?? record)?.title ?? t('nav.outfits')}</h1></header>
+    <header className="settings-heading outfit-detail-heading"><h1 id="outfit-detail-title" tabIndex={-1}>{(editView?.record ?? record)?.title ?? t('nav.outfits')}</h1>
+      {!editView && !unavailable && record && view.data && <button type="button" className="text-button" disabled={wearing} onClick={() => setEditing(true)}>{t('outfits.edit')}</button>}</header>
     {editView ? <EditPane key={editKey} {...props} view={editView} removed={unavailable} onSavedHere={savedHere}
         onReload={() => { setEditKey(value => value + 1); view.reload(); }} />
       : unavailable ? <div className="notice notice-error" role="alert"><span>{t('outfits.unavailable')}</span></div>
@@ -159,7 +161,8 @@ function OutfitSummary({ record, view, images, t, editDisabled, onEdit, children
   const occasion = occasionLabel(record);
   const notes = record.notes.trim();
   return <div className="outfit-view stack">
-    {hasGap(record) && <p className="notice">{t('outfits.itemsDeleted')}</p>}
+    {hasGap(record) && <div className="notice"><span>{t('outfits.itemsDeleted')}</span>
+      <button type="button" className="text-button" disabled={editDisabled} onClick={onEdit}>{t('outfits.edit')}</button></div>}
     {isEmpty(record) ? <p>{t('outfits.noItemsLeft')}</p>
       : <ul className="outfit-composition" aria-label={t('outfits.composition', { name: record.title })}>
         {record.links.map(link => {
@@ -174,6 +177,6 @@ function OutfitSummary({ record, view, images, t, editDisabled, onEdit, children
       {notes && <><dt>{t('item.notes')}</dt><dd className="outfit-notes">{record.notes}</dd></>}
       {record.favourite && <><dt className="sr-only">{t('item.favourite')}</dt><dd><Icon name="check" />{t('item.favourite')}</dd></>}
     </dl>}
-    <div className="outfit-actions"><button type="button" className="button button-secondary" disabled={editDisabled} onClick={onEdit}>{t('outfits.edit')}</button>{children}</div>
+    <div className="outfit-actions">{children}</div>
   </div>;
 }

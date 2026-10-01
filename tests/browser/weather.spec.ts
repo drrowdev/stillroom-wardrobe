@@ -253,6 +253,10 @@ test('I16 sends nothing until Search, then only the typed city; Use this city tu
   await expect(bar(page)).not.toContainText('Finland');
   await expect(bar(page)).not.toContainText('Europe/Helsinki');
   await expect(bar(page)).toContainText(await lowLine(page, 0));
+  // Each forecast detail is its own short chip, the low first.
+  const chips = bar(page).locator('ul.weather-chips > li.weather-chip');
+  await expect(chips.first()).toHaveText(await lowLine(page, 0));
+  expect(await chips.count()).toBeGreaterThanOrEqual(2);
   await expect(bar(page).getByRole('link', { name: 'Open-Meteo.com' })).toHaveAttribute('href', 'https://open-meteo.com/');
   await expect(bar(page).locator('.weather-footer')).toContainText(text('weather.credit'));
   await footerFits(page);

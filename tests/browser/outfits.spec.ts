@@ -192,7 +192,11 @@ test('I11 edits an outfit from its page with the version it was loaded at', asyn
   expect(log.bodies).toHaveLength(1);
   expect(log.bodies[0]).toMatchObject({ p_id: id, p_expected_version: 1, p_title: 'Long weekend', p_item_ids: [clothes.trousers.id, clothes.shoes.id] });
   expect(api.outfits[0]).toMatchObject({ version: 2, title: 'Long weekend' });
-  await expect(button(page, 'outfits.edit')).toBeVisible();
+  // Edit sits with the heading; Wear today is the one primary action.
+  await expect(page.locator('.outfit-detail-heading').getByRole('button', { name: text('outfits.edit'), exact: true })).toBeVisible();
+  await expect(page.locator('.outfit-actions .button-primary')).toHaveCount(1);
+  await expect(page.locator('.outfit-actions .button-primary')).toHaveText(text('calendar.wearToday'));
+  await expect(page.locator('.outfit-actions').getByRole('button', { name: text('outfits.edit'), exact: true })).toHaveCount(0);
 });
 
 test('I11 keeps trashed and archived items in place and reports deleted ones without guessing', async ({ page }) => {
@@ -216,6 +220,12 @@ test('I11 keeps trashed and archived items in place and reports deleted ones wit
   await page.locator(`a[href="#/outfits/${empty}"]`).click();
   await expect(page.getByText(text('outfits.noItemsLeft'), { exact: true })).toBeVisible();
   await expect(button(page, 'outfits.edit')).toBeVisible();
+  // The deleted-items notice offers its own Edit, which opens the editor.
+  await button(page, 'outfits.back').click();
+  await page.locator(`a[href="#/outfits/${id}"]`).click();
+  const notice = page.locator('.notice').filter({ hasText: text('outfits.itemsDeleted') });
+  await notice.getByRole('button', { name: text('outfits.edit'), exact: true }).click();
+  await expect(page.locator('#outfit-name')).toBeVisible();
 });
 
 test('I11 shows only the signed-in owner\'s outfits and treats another owner\'s outfit as unavailable', async ({ page }) => {

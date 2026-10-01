@@ -14,15 +14,35 @@ const button = (page: Page, key: MessageKey, language: Language = 'en') => page.
 const navLink = (page: Page, key: 'nav.today' | 'nav.wardrobe' | 'nav.outfits', language: Language = 'en') =>
   shellNav(page).getByRole('link', { name: text(key, language), exact: true });
 const cards = (page: Page) => page.locator('.today-card');
+// Today features one idea at a time.
+const featured = (page: Page) => page.locator('.today-card.today-featured');
+const ideaTitle = (page: Page) => page.locator('#today-featured-title');
+const moreOptions = (page: Page) => page.locator('#today-more-options');
+const menuPanel = (page: Page) => page.locator('#today-more-options-panel');
+const menuButton = (page: Page, key: MessageKey, language: Language = 'en') => menuPanel(page).getByRole('button', { name: text(key, language), exact: true });
+async function openMenu(page: Page) {
+  if (await moreOptions(page).getAttribute('aria-expanded') !== 'true') await moreOptions(page).click();
+  await expect(menuPanel(page)).toBeVisible();
+}
+async function fromMenu(page: Page, key: MessageKey, language: Language = 'en') {
+  await openMenu(page);
+  await menuButton(page, key, language).click();
+}
 // Read names only once the card's pieces have rendered, so a capture is never an empty list.
 async function names(card: Locator) {
   await expect(card.locator('.outfit-component-name')).not.toHaveCount(0);
   return card.locator('.outfit-component-name').allTextContents();
 }
+const joined = (card: Locator) => card.evaluate(node => [...node.querySelectorAll('.outfit-component-name')].map(name => name.textContent ?? '').join(' + '));
 async function allNames(page: Page) {
-  await expect(page.locator('.today-card .outfit-component-name')).not.toHaveCount(0);
-  return page.locator('.today-card').evaluateAll(list => list.map(card =>
-    [...card.querySelectorAll('.outfit-component-name')].map(node => node.textContent ?? '').join(' + ')));
+  await expect(featured(page).locator('.outfit-component-name')).not.toHaveCount(0);
+  return [await joined(featured(page))];
+}
+// Show another, then wait until a different idea (or the end of the ideas) is showing.
+async function showAnother(page: Page, language: Language = 'en') {
+  const before = await ideaTitle(page).textContent();
+  await button(page, 'today.more', language).click();
+  await expect(ideaTitle(page).filter({ hasNotText: before ?? '' }).or(page.locator('#today-no-more, #today-gone'))).toBeVisible();
 }
 const missing = (language: Language, categories: MessageKey[]) =>
   text('today.missing', language, { categories: new Intl.ListFormat(locales[language], { type: 'conjunction' }).format(categories.map(key => text(key, language))) });
@@ -60,66 +80,111 @@ function traffic(page: Page) {
   });
   return paths;
 }
-async function pageThrough(page: Page) {
+// Shows every idea with Show another until the ideas run out. Collapsed cards (hidden or avoided) are passed over.
+async function pageThrough(page: Page, visit?: (card: Locator) => Promise<void>) {
   const seen: string[] = [];
-  for (let round = 0; round < 20; round++) {
-    if (await page.getByText(text('today.noMore'), { exact: true }).isVisible()) break;
-    await expect(cards(page).first()).toBeVisible();
-    seen.push(...await allNames(page));
-    await button(page, 'today.more').click();
+  for (let round = 0; round < 40; round++) {
+    await expect(ideaTitle(page).or(page.locator('#today-no-more'))).toBeVisible();
+    if (await page.locator('#today-no-more').isVisible()) break;
+    const card = featured(page);
+    if (!await card.evaluate(node => node.classList.contains('today-card-hidden'))) {
+      await expect(card.locator('.outfit-component-name')).not.toHaveCount(0);
+      seen.push(await joined(card));
+      await visit?.(card);
+    }
+    await showAnother(page);
   }
   return seen;
 }
+// Leaving Today and coming back starts again from the first idea.
+async function startAgain(page: Page) {
+  await navLink(page, 'nav.wardrobe').click();
+  await navLink(page, 'nav.today').click();
+  await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 1 }));
+}
 
-test('I15 shows up to three ideas with reasons, pages through every idea and starts over', async ({ page }) => {
+test('I15 features one idea with reasons, shows every idea in turn and starts over', async ({ page }) => {
   const paths = traffic(page);
   await start(page);
   await expect(page.locator('#today-title')).toBeFocused();
   await expect(navLink(page, 'nav.today')).toHaveAttribute('aria-current', 'page');
-  await expect(cards(page)).toHaveCount(3);
-  for (const card of await cards(page).all()) {
-    await card.scrollIntoViewIfNeeded();
-    await expect(card.locator('.today-pieces li')).toHaveCount(3);
-    await expect(card.locator('.today-pieces img')).toHaveCount(3);
-    await expect(card.locator('.today-reasons li').first()).toBeVisible();
-  }
+  await expect(cards(page)).toHaveCount(1);
+  await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 1 }));
+  const card = featured(page);
+  await expect(card.locator('.today-pieces li')).toHaveCount(3);
+  await expect(card.locator('.today-pieces img')).toHaveCount(3);
+  await expect(card.locator('.today-reasons li').first()).toBeVisible();
+  await expect(card.locator('.button-primary')).toHaveText(text('calendar.wearToday'));
   const first = await allNames(page);
+  await showAnother(page);
+  await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 2 }));
+  await expect(ideaTitle(page)).toBeFocused();
+  await startAgain(page);
   const seen = await pageThrough(page);
   expect(seen).toHaveLength(3 * 2 * 2);
   expect(new Set(seen).size).toBe(12);
+  await expect(page.locator('#today-no-more')).toBeFocused();
   await expect(button(page, 'today.more')).toHaveCount(0);
   await button(page, 'today.startOver').click();
-  await expect(cards(page)).toHaveCount(3);
+  await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 1 }));
+  await expect(ideaTitle(page)).toBeFocused();
   expect(await allNames(page)).toEqual(first);
   expect(paths.filter(entry => /wear_event|\/functions\/|analy/i.test(entry))).toEqual([]);
 });
 
-test('I15 Like persists, Not for me hides the outfit for good and Undo brings it back', async ({ page }) => {
+test('I15 Show another walks three ideas a page, then the next page, never one twice', async ({ page }) => {
   const { api } = await start(page);
-  const liked = await names(cards(page).nth(0));
-  const likeButton = cards(page).nth(0).getByRole('button', { name: text('today.like'), exact: true });
+  const shown: string[] = [];
+  for (let index = 0; index < 6; index++) {
+    await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: index + 1 }));
+    shown.push((await allNames(page))[0]!);
+    await showAnother(page);
+  }
+  expect(new Set(shown).size).toBe(6);
+  await startAgain(page);
+  expect((await pageThrough(page)).slice(0, 6)).toEqual(shown);
+  expect(api.suggestionFeedback).toHaveLength(0);
+});
+
+test('I15 Like persists, Don\'t suggest this outfit hides it for good and Undo brings it back', async ({ page }) => {
+  const { api } = await start(page);
+  const liked = await names(featured(page));
+  const likeButton = featured(page).getByRole('button', { name: text('today.like'), exact: true });
   await likeButton.click();
   await expect(likeButton).toHaveAttribute('aria-pressed', 'true');
   expect(api.suggestionFeedback.map(row => row.vote)).toEqual([1]);
-  expect(await names(cards(page).nth(0))).toEqual(liked);
+  expect(await names(featured(page))).toEqual(liked);
 
-  const hiddenNames = await names(cards(page).nth(1));
-  await cards(page).nth(1).getByRole('button', { name: text('today.notForMe'), exact: true }).click();
-  await expect(cards(page).nth(1)).toContainText(text('today.hidden'));
+  await showAnother(page);
+  const hiddenNames = await names(featured(page));
+  const bodies: Row[] = [];
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === '/rest/v1/suggestion_feedback' && request.method() === 'POST') bodies.push(request.postDataJSON() as Row);
+  });
+  await fromMenu(page, 'today.notForMe');
+  await expect(featured(page)).toContainText(text('today.hidden'));
+  await expect(featured(page).getByRole('button', { name: text('common.undo'), exact: true })).toBeFocused();
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]).toMatchObject({ vote: -1, item_ids: [...idsOf(api, hiddenNames)].sort() });
   expect(api.suggestionFeedback.map(row => row.vote).sort()).toEqual([-1, 1]);
-  await cards(page).nth(1).getByRole('button', { name: text('common.undo'), exact: true }).click();
-  await expect(cards(page).nth(1).locator('.outfit-component-name')).toHaveText(hiddenNames);
+  await featured(page).getByRole('button', { name: text('common.undo'), exact: true }).click();
+  await expect(featured(page).locator('.outfit-component-name')).toHaveText(hiddenNames);
+  await expect(moreOptions(page)).toBeFocused();
   expect(api.suggestionFeedback.map(row => row.vote)).toEqual([1]);
-  await cards(page).nth(1).getByRole('button', { name: text('today.notForMe'), exact: true }).click();
-  await expect(cards(page).nth(1)).toContainText(text('today.hidden'));
+  await fromMenu(page, 'today.notForMe');
+  await expect(featured(page)).toContainText(text('today.hidden'));
+  // A hidden idea keeps Show another.
+  await expect(button(page, 'today.more')).toBeEnabled();
 
-  await navLink(page, 'nav.wardrobe').click();
-  await navLink(page, 'nav.today').click();
-  await expect(cards(page)).toHaveCount(3);
-  const likedCard = cards(page).filter({ has: page.getByRole('button', { name: text('today.like'), exact: true, pressed: true }) });
-  await expect(likedCard).toHaveCount(1);
-  expect(await names(likedCard)).toEqual(liked);
-  const everything = await pageThrough(page);
+  await startAgain(page);
+  let likedSeen = 0;
+  const everything = await pageThrough(page, async card => {
+    if (await card.getByRole('button', { name: text('today.like'), exact: true }).getAttribute('aria-pressed') === 'true') {
+      likedSeen++;
+      expect(await names(card)).toEqual(liked);
+    }
+  });
+  expect(likedSeen).toBe(1);
   expect(everything).not.toContain(hiddenNames.join(' + '));
   expect(everything).toHaveLength(11);
 });
@@ -131,9 +196,10 @@ test('I15 a choice whose reply is lost is checked against what was stored', asyn
     const url = new URL(request.url());
     if (url.pathname === '/rest/v1/suggestion_feedback' && url.searchParams.has('signature') && request.method() === 'GET') checks.push(url.search);
   });
-  const hidden = cards(page).nth(1);
+  await showAnother(page);
+  const hidden = featured(page);
   api.feedbackControl.faults.push({ method: 'POST', commit: true, fail: 503 });
-  await hidden.getByRole('button', { name: text('today.notForMe'), exact: true }).click();
+  await fromMenu(page, 'today.notForMe');
   await expect(hidden).toContainText(text('today.hidden'));
   await expect(page.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
   expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
@@ -141,12 +207,12 @@ test('I15 a choice whose reply is lost is checked against what was stored', asyn
 
   api.feedbackControl.faults.push({ method: 'DELETE', commit: true, fail: 'abort' });
   await hidden.getByRole('button', { name: text('common.undo'), exact: true }).click();
-  await expect(hidden.getByRole('button', { name: text('today.notForMe'), exact: true })).toBeVisible();
+  await expect(hidden.getByRole('button', { name: text('today.like'), exact: true })).toBeVisible();
   await expect(page.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
   expect(api.suggestionFeedback).toHaveLength(0);
   expect(checks).toHaveLength(2);
 
-  const like = cards(page).nth(0).getByRole('button', { name: text('today.like'), exact: true });
+  const like = featured(page).getByRole('button', { name: text('today.like'), exact: true });
   api.feedbackControl.faults.push({ method: 'POST', commit: false, fail: 503 });
   await like.click();
   await expect(page.getByText(text('today.voteFailed'), { exact: true })).toBeVisible();
@@ -162,24 +228,26 @@ test('I15 a choice whose reply is lost is checked against what was stored', asyn
   await expect(page.getByText(text('today.voteFailed'), { exact: true })).toBeVisible();
   await expect(like).toHaveAttribute('aria-pressed', 'true');
   await expect(like).toBeDisabled();
+  await expect(moreOptions(page)).toBeDisabled();
   expect(api.suggestionFeedback).toHaveLength(1);
-  await cards(page).nth(0).getByRole('button', { name: text('common.retry'), exact: true }).click();
+  await featured(page).getByRole('button', { name: text('common.retry'), exact: true }).click();
   await expect(like).toHaveAttribute('aria-pressed', 'false');
   await expect(page.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
   expect(api.suggestionFeedback).toHaveLength(0);
 });
 
-test('I15 a stored Not for me whose reply and check both fail is settled by Try again', async ({ page }) => {
+test('I15 a stored Don\'t suggest whose reply and check both fail is settled by Try again', async ({ page }) => {
   const { api } = await start(page);
-  const card = cards(page).nth(1);
+  await showAnother(page);
+  const card = featured(page);
   const hiddenNames = await names(card);
   api.feedbackControl.faults.push({ method: 'POST', commit: true, fail: 503 }, { method: 'READ', commit: false, fail: 500 });
-  await card.getByRole('button', { name: text('today.notForMe'), exact: true }).click();
+  await fromMenu(page, 'today.notForMe');
   await expect(card.getByText(text('today.voteFailed'), { exact: true })).toBeVisible();
   expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
-  for (const other of [cards(page).nth(0), cards(page).nth(2), card]) {
-    for (const key of ['today.like', 'today.notForMe'] as const) await expect(other.getByRole('button', { name: text(key), exact: true })).toBeDisabled();
-  }
+  await expect(card.getByRole('button', { name: text('today.like'), exact: true })).toBeDisabled();
+  await expect(moreOptions(page)).toBeDisabled();
+  await expect(button(page, 'today.more')).toBeDisabled();
   await expect(page.getByRole('button', { name: text('common.retry'), exact: true })).toHaveCount(1);
   await card.getByRole('button', { name: text('common.retry'), exact: true }).click();
   await expect(card).toContainText(text('today.hidden'));
@@ -192,9 +260,11 @@ test('I15 a stored Not for me whose reply and check both fail is settled by Try 
 
 test('I15 an unsettled choice keeps its card and Try again through a reconnect refresh', async ({ page }) => {
   const { api } = await start(page);
-  const card = cards(page).nth(1);
+  await showAnother(page);
+  const card = featured(page);
+  const title = await ideaTitle(page).textContent();
   api.feedbackControl.faults.push({ method: 'POST', commit: true, fail: 503 }, { method: 'READ', commit: false, fail: 500 });
-  await card.getByRole('button', { name: text('today.notForMe'), exact: true }).click();
+  await fromMenu(page, 'today.notForMe');
   await expect(card.getByRole('button', { name: text('common.retry'), exact: true })).toBeVisible();
   const reads = () => api.requests.filter(entry => entry.path === '/rest/v1/suggestion_feedback' && entry.method === 'GET').length;
   const before = reads();
@@ -203,7 +273,8 @@ test('I15 an unsettled choice keeps its card and Try again through a reconnect r
   await page.context().setOffline(false);
   await expect.poll(reads).toBeGreaterThan(before);
   await page.waitForTimeout(500);
-  await expect(cards(page)).toHaveCount(3);
+  await expect(cards(page)).toHaveCount(1);
+  await expect(ideaTitle(page)).toHaveText(title!);
   const retry = card.getByRole('button', { name: text('common.retry'), exact: true });
   await expect(retry).toBeEnabled();
   await retry.click();
@@ -215,7 +286,8 @@ test('I15 an unsettled choice keeps its card and Try again through a reconnect r
 
 test('I15 paging and context stay put while a choice is written, so its Try again is kept', async ({ page }) => {
   const { api } = await start(page);
-  const card = cards(page).nth(1);
+  await showAnother(page);
+  const card = featured(page);
   const shown = await names(card);
   let release = () => {};
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -224,7 +296,7 @@ test('I15 paging and context stay put while a choice is written, so its Try agai
     await route.fallback();
   });
   api.feedbackControl.faults.push({ method: 'POST', commit: true, fail: 503 }, { method: 'READ', commit: false, fail: 500 });
-  await card.getByRole('button', { name: text('today.notForMe'), exact: true }).click();
+  await fromMenu(page, 'today.notForMe');
   const more = page.getByRole('button', { name: text('today.more'), exact: true });
   await expect(more).toBeDisabled();
   const pickers = page.locator('.today-context select');
@@ -242,29 +314,86 @@ test('I15 paging and context stay put while a choice is written, so its Try agai
   expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
 });
 
-test('I15 an older refresh never brings back a card hidden while it was loading', async ({ page }) => {
+test('I15 an older refresh never brings back an idea hidden while it was loading', async ({ page }) => {
   const { api } = await start(page);
-  const hiddenNames = await names(cards(page).nth(1));
+  await showAnother(page);
+  const hiddenNames = await names(featured(page));
   const gate = api.holdFeedbackReads();
   await page.context().setOffline(true);
   await expect(page.locator('.notice-offline')).toBeVisible();
   await page.context().setOffline(false);
   await expect.poll(() => gate.held()).toBeGreaterThan(0);
-  await cards(page).nth(1).getByRole('button', { name: text('today.notForMe'), exact: true }).click();
-  await expect(cards(page).nth(1)).toContainText(text('today.hidden'));
+  await fromMenu(page, 'today.notForMe');
+  await expect(featured(page)).toContainText(text('today.hidden'));
   gate.release();
   await expect.poll(() => api.requests.filter(entry => entry.path === '/rest/v1/suggestion_feedback' && entry.method === 'GET').length).toBeGreaterThan(1);
   await page.waitForTimeout(500);
-  await expect(cards(page).nth(1)).toContainText(text('today.hidden'));
-  await cards(page).nth(1).getByRole('button', { name: text('common.undo'), exact: true }).click();
-  await expect(cards(page).nth(1).locator('.outfit-component-name')).toHaveText(hiddenNames);
-  await cards(page).nth(1).getByRole('button', { name: text('today.notForMe'), exact: true }).click();
-  await expect(cards(page).nth(1)).toContainText(text('today.hidden'));
-  await navLink(page, 'nav.wardrobe').click();
-  await navLink(page, 'nav.today').click();
-  await expect(cards(page)).toHaveCount(3);
+  await expect(featured(page)).toContainText(text('today.hidden'));
+  await featured(page).getByRole('button', { name: text('common.undo'), exact: true }).click();
+  await expect(featured(page).locator('.outfit-component-name')).toHaveText(hiddenNames);
+  await fromMenu(page, 'today.notForMe');
+  await expect(featured(page)).toContainText(text('today.hidden'));
+  await startAgain(page);
   expect(await pageThrough(page)).not.toContain(hiddenNames.join(' + '));
   expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
+});
+
+test('I15 a refresh keeps the idea showing when earlier ideas drop out, and moves on only when it goes', async ({ page }) => {
+  const { api } = await start(page);
+  const first = await names(featured(page));
+  await showAnother(page);
+  const second = await names(featured(page));
+  await showAnother(page);
+  const third = await names(featured(page));
+  const title = await ideaTitle(page).textContent();
+  const itemReads = () => api.requests.filter(entry => entry.path === '/rest/v1/items' && entry.method === 'GET').length;
+  const refresh = async () => {
+    const before = itemReads();
+    await page.context().setOffline(true);
+    await expect(page.locator('.notice-offline')).toBeVisible();
+    await page.context().setOffline(false);
+    await expect.poll(itemReads).toBeGreaterThan(before);
+    await page.waitForTimeout(300);
+  };
+  const shown = [first, second, third].map(idea => idea.join(' + '));
+  // Whatever a refresh does, the idea number stays and Today shows the same idea, one not shown yet, or a short status.
+  const settled = async () => {
+    await expect(ideaTitle(page).or(page.locator('#today-gone'))).toBeVisible();
+    if (!await ideaTitle(page).isVisible()) {
+      await expect(page.locator('#today-gone')).toHaveText(text('today.ideaGone'));
+      await expect(button(page, 'today.more')).toBeEnabled();
+      return null;
+    }
+    await expect(ideaTitle(page)).toHaveText(title!);
+    return joined(featured(page));
+  };
+  // A refresh that changes the clothes but not the ideas keeps the idea showing.
+  const renamed = first.find(name => !second.includes(name) && !third.includes(name))!;
+  Object.assign(api.items.find(row => row.title === renamed)!, { title: `${renamed} 2`, version: 2 });
+  await refresh();
+  await expect(ideaTitle(page)).toHaveText(title!);
+  await expect(featured(page).locator('.outfit-component-name')).toHaveText(third);
+
+  // A piece only the first idea has goes to the laundry. The page is ranked again: the idea showing stays if it is still
+  // on the page, and is otherwise replaced by one not shown yet. Ideas already shown never come back.
+  Object.assign(api.items.find(row => row.title === `${renamed} 2`)!, { availability: 'laundry' });
+  await refresh();
+  const afterFirst = await settled();
+  if (afterFirst !== null && afterFirst !== shown[2]) expect(shown).not.toContain(afterFirst);
+
+  // A piece of the idea showing goes: it is replaced in the same way.
+  const current = afterFirst?.split(' + ') ?? third;
+  const leaving = current.find(name => !first.includes(name) && !second.includes(name)) ?? current[0]!;
+  Object.assign(api.items.find(row => row.title === leaving)!, { availability: 'laundry' });
+  await refresh();
+  const afterCurrent = await settled();
+  if (afterCurrent !== null) {
+    expect(afterCurrent).not.toContain(leaving);
+    expect(shown).not.toContain(afterCurrent);
+  }
+  await showAnother(page);
+  const later = await pageThrough(page);
+  for (const idea of later) expect(idea.includes(renamed) || idea.includes(leaving) || shown.includes(idea)).toBe(false);
 });
 
 test('I15 a held read for one account never shows after signing in as another', async ({ page }) => {
@@ -313,6 +442,7 @@ test('I15 shows a partial start that leads to Add item', async ({ page }) => {
   await expect(cards(page).locator('.outfit-component-name')).toHaveText(['Only shirt']);
   await expect(page.getByText(missing('en', ['categoryOne.bottom', 'categoryOne.footwear']), { exact: true })).toBeVisible();
   await expect(button(page, 'today.save')).toHaveCount(0);
+  await expect(button(page, 'calendar.wearToday')).toHaveCount(0);
   await button(page, 'wardrobe.add').click();
   await expect(page.locator('#capture-title')).toBeFocused();
 });
@@ -328,10 +458,10 @@ test('I15 with no clothes shows a short empty state with Add item', async ({ pag
 test('I15 Save as outfit opens a filled-in editor and saves once through save_outfit', async ({ page }) => {
   const { api } = await start(page);
   await page.getByRole('combobox', { name: text('outfits.occasion'), exact: true }).selectOption('smart');
-  await expect(cards(page).first()).toBeVisible();
-  const chosen = await names(cards(page).nth(0));
+  await expect(featured(page)).toBeVisible();
+  const chosen = await names(featured(page));
   const ids = chosen.map(name => String(api.items.find(row => row.title === name)!.id));
-  await cards(page).nth(0).getByRole('button', { name: text('today.save'), exact: true }).click();
+  await featured(page).getByRole('button', { name: text('today.save'), exact: true }).click();
   await expect(page.locator('#outfit-editor-title')).toBeFocused();
   await expect(page.locator('.outfit-slot .outfit-component-name')).toHaveText(chosen);
   await navLink(page, 'nav.today').click();
@@ -355,38 +485,70 @@ test('I15 Save as outfit opens a filled-in editor and saves once through save_ou
   expect(api.outfits).toHaveLength(1);
 });
 
-test('I15 offline keeps ideas visible but disables saving and choices; a language change keeps the same ideas', async ({ page }) => {
+test('I15 offline keeps the idea visible but disables wearing, saving and choices; a language change keeps the same idea', async ({ page }) => {
   const paths = traffic(page);
   await start(page);
-  await expect(cards(page)).toHaveCount(3);
+  await expect(cards(page)).toHaveCount(1);
   const before = await allNames(page);
   await page.context().setOffline(true);
   await expect(page.locator('.notice-offline')).toBeVisible();
-  for (const key of ['today.save', 'today.like', 'today.notForMe'] as const) await expect(cards(page).nth(0).getByRole('button', { name: text(key), exact: true })).toBeDisabled();
+  for (const key of ['calendar.wearToday', 'today.save', 'today.like'] as const) await expect(featured(page).getByRole('button', { name: text(key), exact: true })).toBeDisabled();
+  await expect(moreOptions(page)).toBeDisabled();
   const writes = paths.length;
   await page.context().setOffline(false);
   await openAccountMenu(page, 'en');
   await page.getByRole('button', { name: 'Suomi', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
   await expect(page.locator('#today-title')).toHaveText(text('today.title', 'fi'));
-  await expect(cards(page)).toHaveCount(3);
+  await expect(cards(page)).toHaveCount(1);
   expect(await allNames(page)).toEqual(before);
   await expect(button(page, 'today.more', 'fi')).toBeVisible();
   expect(paths.slice(0, writes).filter(entry => entry.startsWith('POST /rest/v1/suggestion') || entry.startsWith('DELETE'))).toEqual([]);
   expect(paths.filter(entry => /wear_event|\/functions\/|analy/i.test(entry))).toEqual([]);
 });
 
-test('I15 accessibility: axe on every state, keyboard, 320px and 200% text with three nav links', async ({ page }) => {
+test('I15 More options opens and closes with the keyboard and returns focus to its button', async ({ page }) => {
+  await start(page);
+  const toggle = moreOptions(page);
+  await expect(toggle).toHaveAccessibleName(text('common.moreOptions'));
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(menuPanel(page)).toBeHidden();
+  await toggle.focus();
+  await page.keyboard.press('Enter');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Tab');
+  await expect(menuButton(page, 'today.notForMe')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(menuButton(page, 'today.dontPair')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menuPanel(page)).toBeHidden();
+  await expect(toggle).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(menuPanel(page)).toBeVisible();
+  await page.keyboard.press('Space');
+  await expect(menuPanel(page)).toBeHidden();
+  // Focus in the context row stays there while the ideas change.
+  const occasion = page.getByRole('combobox', { name: text('outfits.occasion'), exact: true });
+  await occasion.focus();
+  await occasion.selectOption('smart');
+  await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 1 }));
+  await page.waitForTimeout(300);
+  await expect(occasion).toBeFocused();
+});
+
+test('I15 accessibility: axe on every state, keyboard, 320px and 200% text with the menu open', async ({ page }) => {
   await start(page);
   const axe = async () => expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await axe();
-  await cards(page).nth(1).getByRole('button', { name: text('today.notForMe'), exact: true }).click();
-  await expect(cards(page).nth(1)).toContainText(text('today.hidden'));
+  await fromMenu(page, 'today.notForMe');
+  await expect(featured(page)).toContainText(text('today.hidden'));
   await axe();
+  await featured(page).getByRole('button', { name: text('common.undo'), exact: true }).click();
+  await expect(moreOptions(page)).toBeFocused();
   await page.setViewportSize({ width: 320, height: 900 });
   for (const zoom of [false, true]) {
     if (zoom) { await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' }); await settleShell(page); }
-    await expect(cards(page).first()).toBeVisible();
+    await expect(featured(page)).toBeVisible();
     expect(await page.evaluate(() => {
       const nav = [...document.querySelectorAll('.top-nav, .tab-bar')].find(element => getComputedStyle(element).display !== 'none')!, header = nav.parentElement!;
       return document.documentElement.scrollWidth <= innerWidth && nav.scrollWidth <= nav.clientWidth
@@ -401,12 +563,203 @@ test('I15 accessibility: axe on every state, keyboard, 320px and 200% text with 
       // WebKit can place a reflowed tab's edge one 1/64 px layout unit past the viewport; allow sub-pixel rounding.
       expect(box !== null && box.x >= 0 && box.x + box.width <= 320.5 && box.height >= 44).toBe(true);
     }
-    const save = cards(page).nth(0).getByRole('button', { name: text('today.save'), exact: true });
-    await save.focus();
+    await featured(page).getByRole('button', { name: text('calendar.wearToday'), exact: true }).focus();
     await page.keyboard.press('Tab');
-    await expect(cards(page).nth(0).getByRole('button', { name: text('today.like'), exact: true })).toBeFocused();
+    await expect(button(page, 'today.more')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(featured(page).getByRole('button', { name: text('today.save'), exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(featured(page).getByRole('button', { name: text('today.like'), exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(moreOptions(page)).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(menuPanel(page)).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    for (const control of await featured(page).locator('button').all()) {
+      if (!await control.isVisible()) continue;
+      const box = await control.boundingBox();
+      expect(box !== null && box.x >= 0 && box.x + box.width <= 320 && box.height >= 44).toBe(true);
+    }
     await axe();
+    await page.keyboard.press('Escape');
+    await expect(moreOptions(page)).toBeFocused();
   }
+});
+
+// Records save_wear_event bodies and can hold their replies; reads of a look by its ID can be failed.
+async function wearRoutes(page: Page) {
+  const held: Array<() => Promise<void>> = [];
+  const bodies: Row[] = [];
+  const state = { hold: false, failReads: false, reads: 0 };
+  await page.route(url => url.pathname === '/rest/v1/rpc/save_wear_event', route => {
+    bodies.push(route.request().postDataJSON() as Row);
+    if (!state.hold) return route.fallback();
+    return new Promise<void>(resolve => { held.push(() => route.fallback().then(resolve)); });
+  });
+  await page.route(url => url.pathname === '/rest/v1/wear_events' && (url.searchParams.get('id') ?? '').startsWith('eq.'), route => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    state.reads++;
+    return state.failReads ? route.abort() : route.fallback();
+  });
+  return { held, bodies, state };
+}
+const wearPanel = (page: Page) => page.locator('#today-wear-panel');
+const wearButton = (page: Page) => featured(page).getByRole('button', { name: text('calendar.wearToday'), exact: true });
+const idsOf = (api: Api, titles: string[]) => titles.map(title => String(api.items.find(row => row.title === title)!.id));
+
+test('I15 Wear today marks the idea as worn once, with Undo', async ({ page }) => {
+  const { api } = await start(page);
+  const wear = await wearRoutes(page);
+  const pieces = await names(featured(page));
+  await wearButton(page).click();
+  await expect(wearPanel(page)).toContainText(text('calendar.markedWornDone'));
+  await expect(wearPanel(page)).toContainText(pieces[0]!);
+  const undo = wearPanel(page).getByRole('button', { name: text('common.undo'), exact: true });
+  await expect(undo).toBeFocused();
+  expect(wear.bodies).toHaveLength(1);
+  expect(wear.bodies[0]).toMatchObject({ p_item_ids: idsOf(api, pieces), p_state: 'worn', p_outfit_id: null, p_label: text('calendar.defaultLook') });
+  expect(api.wearEvents.filter(row => row.owner_id === owners.a && row.deleted_at === null)).toHaveLength(1);
+  await undo.click();
+  await expect(wearPanel(page)).toContainText(text('calendar.undone'));
+  expect(api.wearEvents.filter(row => row.owner_id === owners.a && row.deleted_at === null)).toHaveLength(0);
+  await wearPanel(page).getByRole('button', { name: text('common.close'), exact: true }).click();
+  await expect(wearPanel(page)).toHaveCount(0);
+  await wearButton(page).click();
+  await expect(wearPanel(page)).toContainText(text('calendar.markedWornDone'));
+  expect(wear.bodies).toHaveLength(2);
+  expect(wear.bodies[1]!.p_id).not.toBe(wear.bodies[0]!.p_id);
+});
+
+test('I15 an unknown Wear today stays with its own idea: no other idea can write until it is settled', async ({ page }) => {
+  const { api } = await start(page);
+  const wear = await wearRoutes(page);
+  const ideaA = await names(featured(page));
+  // The look is not stored and its reread fails, so the outcome is unknown.
+  api.wearControl.next = { mode: 'lost' };
+  wear.state.failReads = true;
+  await wearButton(page).click();
+  const retry = wearPanel(page).getByRole('button', { name: text('common.retry'), exact: true });
+  await expect(retry).toBeVisible({ timeout: 15_000 });
+  await expect(wearPanel(page)).toContainText(ideaA[0]!);
+  const attempt = wear.bodies[0]!;
+  expect(attempt.p_item_ids).toEqual(idsOf(api, ideaA));
+
+  for (const change of ['another', 'page', 'occasion', 'weather'] as const) {
+    if (change === 'another') await showAnother(page);
+    if (change === 'page') { await showAnother(page); await showAnother(page); }
+    if (change === 'occasion') await page.getByRole('combobox', { name: text('outfits.occasion'), exact: true }).selectOption('smart');
+    if (change === 'weather') await page.getByRole('button', { name: text('setting.indoors'), exact: true }).click();
+    await expect(featured(page)).toBeVisible();
+    await expect(wearButton(page)).toBeDisabled();
+    await expect(wearButton(page)).toHaveAttribute('aria-describedby', 'today-wear-panel');
+    await expect(wearPanel(page)).toContainText(ideaA[0]!);
+    await expect(retry).toBeVisible();
+  }
+  expect(wear.bodies).toHaveLength(1);
+
+  wear.state.failReads = false;
+  await retry.click();
+  await expect(wearPanel(page)).toContainText(text('calendar.markedWornDone'));
+  expect(wear.bodies).toHaveLength(2);
+  expect(wear.bodies[1]).toMatchObject({ p_id: attempt.p_id, p_item_ids: attempt.p_item_ids });
+  const stored = api.wearEvents.filter(row => row.owner_id === owners.a);
+  expect(stored).toHaveLength(1);
+  expect(stored[0]!.id).toBe(attempt.p_id);
+  await expect(wearButton(page)).toBeEnabled();
+});
+
+test('I15 coming back to Today reads an unconfirmed Wear today back before the idea showing can write', async ({ page }) => {
+  const { api } = await start(page);
+  const wear = await wearRoutes(page);
+  await showAnother(page);
+  const ideaA = await names(featured(page));
+  api.wearControl.next = { mode: 'lost' };
+  wear.state.failReads = true;
+  await wearButton(page).click();
+  await expect(wearPanel(page).getByRole('button', { name: text('common.retry'), exact: true })).toBeVisible({ timeout: 15_000 });
+  const attempt = wear.bodies[0]!;
+  wear.state.reads = 0;
+  await startAgain(page);
+  // The first idea shows, but the kept look is read back by its own ID first, and nothing is sent.
+  await expect.poll(() => wear.state.reads).toBeGreaterThan(0);
+  await expect(wearPanel(page).getByRole('button', { name: text('common.retry'), exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(wearPanel(page)).toContainText(ideaA[0]!);
+  await expect(wearButton(page)).toBeDisabled();
+  expect(wear.bodies).toHaveLength(1);
+  // Reads work again: the look was not stored, so Try again sends that same look.
+  wear.state.failReads = false;
+  await wearPanel(page).getByRole('button', { name: text('common.retry'), exact: true }).click();
+  await expect(wearPanel(page)).toContainText(text('calendar.markedWornDone'));
+  expect(wear.bodies[1]).toMatchObject({ p_id: attempt.p_id, p_item_ids: attempt.p_item_ids });
+  await wearPanel(page).getByRole('button', { name: text('common.close'), exact: true }).click();
+  const ideaOne = await names(featured(page));
+  await wearButton(page).click();
+  await expect(wearPanel(page)).toContainText(text('calendar.markedWornDone'));
+  expect(wear.bodies).toHaveLength(3);
+  expect(wear.bodies[2]!.p_id).not.toBe(attempt.p_id);
+  expect(wear.bodies[2]!.p_item_ids).toEqual(idsOf(api, ideaOne));
+});
+
+test('I15 a Wear today stored but changed since offers no Undo', async ({ page }) => {
+  const { api } = await start(page);
+  const wear = await wearRoutes(page);
+  // Stored, but the reply and the check are lost.
+  api.wearControl.next = { mode: 'committedLost' };
+  wear.state.failReads = true;
+  await wearButton(page).click();
+  const retry = wearPanel(page).getByRole('button', { name: text('common.retry'), exact: true });
+  await expect(retry).toBeVisible({ timeout: 15_000 });
+  const stored = api.wearEvents.filter(row => row.owner_id === owners.a);
+  expect(stored).toHaveLength(1);
+  // Changed on another device before it is checked again.
+  Object.assign(stored[0]!, { label: 'Changed elsewhere', version: Number(stored[0]!.version) + 1 });
+  wear.state.failReads = false;
+  await retry.click();
+  await expect(wearPanel(page)).toContainText(text('calendar.alreadySaved'));
+  await expect(wearPanel(page).getByRole('button', { name: text('common.undo'), exact: true })).toHaveCount(0);
+  expect(wear.bodies).toHaveLength(1);
+  await expect(wearButton(page)).toBeEnabled();
+});
+
+test('I15 a Wear today being written holds navigation, survives a refresh and is not shown to another account', async ({ page }) => {
+  const { api } = await start(page);
+  const wear = await wearRoutes(page);
+  wear.state.hold = true;
+  const title = await ideaTitle(page).textContent();
+  const pieces = await names(featured(page));
+  await wearButton(page).click();
+  await expect.poll(() => wear.held.length).toBe(1);
+  await expect(button(page, 'today.more')).toBeDisabled();
+  await page.context().setOffline(true);
+  await expect(page.locator('.notice-offline')).toBeVisible();
+  await page.context().setOffline(false);
+  await expect(page.locator('.notice-offline')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  await expect(ideaTitle(page)).toHaveText(title!);
+  await expect(featured(page).locator('.outfit-component-name')).toHaveText(pieces);
+  await navLink(page, 'nav.wardrobe').click();
+  await expect(page.locator('#today-title')).toBeVisible();
+  expect(wear.bodies).toHaveLength(1);
+  wear.state.hold = false;
+  await wear.held.shift()!();
+  await expect(page.locator('#today-title')).toHaveCount(0);
+  expect(wear.bodies).toHaveLength(1);
+  expect(api.wearEvents.filter(row => row.owner_id === owners.a)).toHaveLength(1);
+
+  // An unknown Wear today belongs to its own owner session.
+  await navLink(page, 'nav.today').click();
+  await expect(ideaTitle(page)).toBeVisible();
+  api.wearControl.next = { mode: 'lost' };
+  wear.state.failReads = true;
+  await showAnother(page);
+  await wearButton(page).click();
+  await expect(wearPanel(page).getByRole('button', { name: text('common.retry'), exact: true })).toBeVisible({ timeout: 15_000 });
+  await openAccountMenu(page, 'en'); await button(page, 'auth.signOut').click();
+  await signIn(page, 'b');
+  await expectSignedIn(page);
+  await expect(page.locator('#today-title')).toBeVisible();
+  await expect(cards(page).locator('.outfit-component-name')).toHaveText(['Robin private']);
+  await expect(wearPanel(page)).toHaveCount(0);
 });
 
 // Two-piece ideas: each dress with each pair of shoes.
@@ -419,42 +772,41 @@ const pairOf = (api: Api, first: string, second: string) => {
   return { item_low: ids[0], item_high: ids[1] };
 };
 const rulesOf = (api: Api) => api.combinationRules.map(row => ({ owner_id: row.owner_id, item_low: row.item_low, item_high: row.item_high }));
-const dontPair = (card: Locator, language: Language = 'en') => card.getByRole('button', { name: text('today.dontPair', language), exact: true });
 const together = (idea: string, first: string, second: string) => idea.includes(first) && idea.includes(second);
 
 test('Don\'t pair these avoids a two-piece idea at once, and Undo brings it back', async ({ page }) => {
   const { api } = await start(page, 'en', api => { seedDresses(api); }, { clothes: false });
-  await expect(cards(page)).toHaveCount(3);
+  await expect(cards(page)).toHaveCount(1);
   const card = cards(page).nth(0);
   const pieces = await names(card);
   expect(pieces).toHaveLength(2);
-  await dontPair(card).click();
+  await fromMenu(page, 'today.dontPair');
   await expect(card.getByRole('status')).toHaveText(text('today.pairHidden'));
   await expect(card.locator('.outfit-component-name')).toHaveText(pieces);
   await expect(card.getByRole('button', { name: text('common.undo'), exact: true })).toBeFocused();
   await expect(card.getByRole('button', { name: text('today.save'), exact: true })).toHaveCount(0);
   expect(rulesOf(api)).toEqual([{ owner_id: owners.a, ...pairOf(api, pieces[0]!, pieces[1]!) }]);
   await card.getByRole('button', { name: text('common.undo'), exact: true }).click();
-  await expect(dontPair(card)).toBeFocused();
+  await expect(moreOptions(page)).toBeFocused();
   expect(await names(card)).toEqual(pieces);
   expect(api.combinationRules).toHaveLength(0);
 });
 
 test('Don\'t pair these asks which two, hides other ideas with them now and keeps them apart afterwards', async ({ page }) => {
   const { api } = await start(page);
-  await expect(cards(page)).toHaveCount(3);
+  await expect(cards(page)).toHaveCount(1);
   const card = cards(page).nth(0);
   const pieces = await names(card);
   expect(pieces).toHaveLength(3);
-  await dontPair(card).click();
+  await fromMenu(page, 'today.dontPair');
   const chooser = card.getByRole('group', { name: text('today.pickPair'), exact: true });
   await expect(chooser.locator('legend')).toBeFocused();
   await chooser.getByRole('button', { name: text('common.cancel'), exact: true }).click();
   await expect(chooser).toHaveCount(0);
-  await expect(dontPair(card)).toBeFocused();
+  await expect(moreOptions(page)).toBeFocused();
   expect(api.combinationRules).toHaveLength(0);
 
-  await dontPair(card).click();
+  await fromMenu(page, 'today.dontPair');
   const confirm = chooser.getByRole('button', { name: text('today.pairConfirm'), exact: true });
   const boxes = chooser.getByRole('checkbox');
   await expect(boxes).toHaveCount(3);
@@ -467,20 +819,14 @@ test('Don\'t pair these asks which two, hides other ideas with them now and keep
   await expect(confirm).toBeDisabled();
   await boxes.nth(1).uncheck();
   const [first, second] = [pieces[0]!, pieces[2]!];
-  // Another idea on this page holds the same two pieces before the choice.
-  expect((await allNames(page)).filter(idea => together(idea, first, second)).length).toBeGreaterThanOrEqual(1);
   await confirm.click();
   await expect(card.getByRole('status')).toHaveText(text('today.pairHidden'));
   await expect(card.locator('.outfit-component-name')).toHaveText([first, second]);
   expect(rulesOf(api)).toEqual([{ owner_id: owners.a, ...pairOf(api, first, second) }]);
-  const rest = await cards(page).evaluateAll(list => list.filter(node => !node.querySelector('[role=status]'))
-    .map(node => [...node.querySelectorAll('.outfit-component-name')].map(name => name.textContent ?? '').join(' + ')));
-  for (const idea of rest) expect(together(idea, first, second)).toBe(false);
-
-  await button(page, 'today.more').click();
+  // The rest of this page and every later idea keep the two apart at once.
+  await showAnother(page);
   for (const idea of await pageThrough(page)) expect(together(idea, first, second)).toBe(false);
-  await navLink(page, 'nav.wardrobe').click();
-  await navLink(page, 'nav.today').click();
+  await startAgain(page);
   const all = await pageThrough(page);
   expect(all.length).toBeGreaterThan(0);
   for (const idea of all) expect(together(idea, first, second)).toBe(false);
@@ -491,7 +837,7 @@ test('Don\'t pair these checks a lost reply against what was stored and settles 
   const card = cards(page).nth(0);
   const pieces = await names(card);
   api.pairControl.faults.push({ method: 'POST', commit: true, fail: 503 });
-  await dontPair(card).click();
+  await fromMenu(page, 'today.dontPair');
   await expect(card.getByRole('status')).toHaveText(text('today.pairHidden'));
   await expect(page.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
   expect(api.combinationRules).toHaveLength(1);
@@ -500,7 +846,6 @@ test('Don\'t pair these checks a lost reply against what was stored and settles 
   await card.getByRole('button', { name: text('common.undo'), exact: true }).click();
   await expect(page.getByText(text('today.voteFailed'), { exact: true })).toBeVisible();
   await expect(card.getByRole('button', { name: text('common.undo'), exact: true })).toBeDisabled();
-  await expect(cards(page).nth(1).getByRole('button', { name: text('today.like'), exact: true })).toBeDisabled();
   await expect(button(page, 'today.more')).toBeDisabled();
   expect(api.combinationRules).toHaveLength(1);
   await card.getByRole('button', { name: text('common.retry'), exact: true }).click();
@@ -509,15 +854,15 @@ test('Don\'t pair these checks a lost reply against what was stored and settles 
   expect(api.combinationRules).toHaveLength(0);
 
   api.pairControl.faults.push({ method: 'POST', commit: false, fail: 503 });
-  await dontPair(card).click();
+  await fromMenu(page, 'today.dontPair');
   await expect(page.getByText(text('today.voteFailed'), { exact: true })).toBeVisible();
-  await expect(dontPair(card)).toBeEnabled();
+  await expect(moreOptions(page)).toBeEnabled();
   expect(api.combinationRules).toHaveLength(0);
 });
 
 test('Don\'t pair these settles a stored choice whose reply and check were lost when Today refreshes after a reconnect', async ({ page }) => {
   const { api } = await start(page, 'en', api => { seedDresses(api); }, { clothes: false });
-  await expect(cards(page)).toHaveCount(3);
+  await expect(cards(page)).toHaveCount(1);
   const card = cards(page).nth(0);
   const pieces = await names(card);
   const reads = () => api.requests.filter(entry => entry.path === '/rest/v1/combination_rules' && entry.method === 'GET').length;
@@ -530,17 +875,18 @@ test('Don\'t pair these settles a stored choice whose reply and check were lost 
   };
   // The pair is stored, but neither its reply nor the check that follows arrives.
   api.pairControl.faults.push({ method: 'POST', commit: true, fail: 503 }, { method: 'READ', commit: false, fail: 500 });
-  await dontPair(card).click();
+  await fromMenu(page, 'today.dontPair');
   await expect(card.getByRole('button', { name: text('common.retry'), exact: true })).toBeVisible();
   await expect(button(page, 'today.more')).toBeDisabled();
   expect(api.combinationRules).toHaveLength(1);
+  await expect(card.getByRole('button', { name: text('common.retry'), exact: true })).toBeFocused();
   await reconnect();
   await expect(card.getByRole('status')).toHaveText(text('today.pairHidden'));
+  await expect(card.getByRole('button', { name: text('common.undo'), exact: true })).toBeFocused();
   await expect(card.locator('.outfit-component-name')).toHaveText(pieces);
   await expect(card.getByRole('button', { name: text('today.save'), exact: true })).toHaveCount(0);
   await expect(card.getByRole('button', { name: text('common.retry'), exact: true })).toHaveCount(0);
   await expect(card.getByRole('button', { name: text('common.undo'), exact: true })).toBeEnabled();
-  await expect(cards(page).nth(1).getByRole('button', { name: text('today.like'), exact: true })).toBeEnabled();
   await expect(button(page, 'today.more')).toBeEnabled();
   await expect(page.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
 
@@ -550,7 +896,9 @@ test('Don\'t pair these settles a stored choice whose reply and check were lost 
   await expect(card.getByRole('button', { name: text('common.retry'), exact: true })).toBeVisible();
   expect(api.combinationRules).toHaveLength(0);
   await reconnect();
-  await expect(dontPair(card)).toBeEnabled();
+  await expect(moreOptions(page)).toBeEnabled();
+  // Settled with the pair allowed again: focus rests on More options.
+  await expect(moreOptions(page)).toBeFocused();
   expect(await names(card)).toEqual(pieces);
   await expect(card.getByRole('status')).toHaveCount(0);
   await expect(button(page, 'today.more')).toBeEnabled();
@@ -575,12 +923,12 @@ async function holdPairCheck(page: Page) {
 
 test('Don\'t pair these keeps an unsettled card with only Try again when a refresh overlaps its check, in either order', async ({ page }) => {
   const { api } = await start(page, 'en', api => { seedDresses(api); }, { clothes: false });
-  await expect(cards(page)).toHaveCount(3);
+  await expect(cards(page)).toHaveCount(1);
   const card = cards(page).nth(0);
   const pieces = await names(card);
   const feedbackReads = () => api.requests.filter(entry => entry.path === '/rest/v1/suggestion_feedback' && entry.method === 'GET').length;
   const settlingCard = async () => {
-    await expect(cards(page)).toHaveCount(3);
+    await expect(cards(page)).toHaveCount(1);
     await expect(card.locator('.outfit-component-name')).toHaveText(pieces);
     await expect(card.getByRole('button', { name: text('common.retry'), exact: true })).toBeEnabled();
     for (const key of ['today.save', 'today.like', 'today.notForMe', 'today.dontPair', 'common.undo'] as const) {
@@ -592,7 +940,7 @@ test('Don\'t pair these keeps an unsettled card with only Try again when a refre
   // 1. A refresh starts after the pair is stored and before its check fails, and finishes after it.
   const check = await holdPairCheck(page);
   api.pairControl.faults.push({ method: 'POST', commit: true, fail: 503 }, { method: 'READ', commit: false, fail: 500 });
-  await dontPair(card).click();
+  await fromMenu(page, 'today.dontPair');
   await expect.poll(check.held).toBe(1);
   const gate = api.holdFeedbackReads();
   await page.context().setOffline(true);
@@ -611,14 +959,14 @@ test('Don\'t pair these keeps an unsettled card with only Try again when a refre
   await expect(card.getByRole('button', { name: text('common.undo'), exact: true })).toBeEnabled();
   await expect(button(page, 'today.more')).toBeEnabled();
   await card.getByRole('button', { name: text('common.undo'), exact: true }).click();
-  await expect(dontPair(card)).toBeEnabled();
+  await expect(moreOptions(page)).toBeEnabled();
   expect(api.combinationRules).toHaveLength(0);
   await check.off();
 
   // 2. A refresh starts and finishes while the check is still held; the check fails afterwards.
   const later = await holdPairCheck(page);
   api.pairControl.faults.push({ method: 'POST', commit: true, fail: 503 }, { method: 'READ', commit: false, fail: 500 });
-  await dontPair(card).click();
+  await fromMenu(page, 'today.dontPair');
   await expect.poll(later.held).toBe(1);
   const before = feedbackReads();
   await page.context().setOffline(true);
@@ -627,7 +975,7 @@ test('Don\'t pair these keeps an unsettled card with only Try again when a refre
   await expect.poll(feedbackReads).toBeGreaterThan(before);
   await page.waitForTimeout(500);
   // Still being checked: the card stays, and nothing on it can be saved.
-  await expect(cards(page)).toHaveCount(3);
+  await expect(cards(page)).toHaveCount(1);
   await expect(card.getByRole('button', { name: text('today.save'), exact: true })).toBeDisabled();
   later.release();
   await settlingCard();
@@ -646,10 +994,10 @@ test('Don\'t pair these keeps an unsettled card with only Try again when a refre
 test('Don\'t pair these is unavailable offline and sends nothing', async ({ page }) => {
   const paths = traffic(page);
   await start(page);
-  await expect(cards(page)).toHaveCount(3);
+  await expect(cards(page)).toHaveCount(1);
   await page.context().setOffline(true);
   await expect(page.locator('.notice-offline')).toBeVisible();
-  await expect(dontPair(cards(page).nth(0))).toBeDisabled();
+  await expect(moreOptions(page)).toBeDisabled();
   await page.context().setOffline(false);
   expect(paths.filter(entry => entry.includes('combination_rules') && !entry.startsWith('GET'))).toEqual([]);
 });
@@ -661,7 +1009,11 @@ test('Don\'t pair these accessibility: axe on the chooser and the hidden card, k
   for (const zoom of [false, true]) {
     if (zoom) await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' });
     const card = cards(page).nth(0);
-    await dontPair(card).focus();
+    await moreOptions(page).focus();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    await expect(menuButton(page, 'today.dontPair')).toBeFocused();
     await page.keyboard.press('Enter');
     const chooser = card.getByRole('group', { name: text('today.pickPair'), exact: true });
     await expect(chooser.locator('legend')).toBeFocused();
@@ -681,7 +1033,7 @@ test('Don\'t pair these accessibility: axe on the chooser and the hidden card, k
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await axe();
     await card.getByRole('button', { name: text('common.undo'), exact: true }).press('Enter');
-    await expect(dontPair(card)).toBeFocused();
+    await expect(moreOptions(page)).toBeFocused();
   }
 });
 
@@ -787,14 +1139,18 @@ test.describe('bounded I15 visual evidence', () => {
       await page.setViewportSize({ width: selected.width, height: 900 });
       if (scene === 'ideas') {
         const { api } = await start(page, language);
-        const like = cards(page).nth(0).getByRole('button', { name: text('today.like', language), exact: true });
+        const like = featured(page).getByRole('button', { name: text('today.like', language), exact: true });
         await like.click();
         await expect(like).toHaveAttribute('aria-pressed', 'true');
         expect(api.suggestionFeedback).toHaveLength(1);
-        await expect(cards(page)).toHaveCount(3);
-        // Photos load as they scroll into view; bring the last idea in before the full-page capture.
-        await cards(page).nth(2).scrollIntoViewIfNeeded();
-        await expect(page.locator('.today-card img')).toHaveCount(9);
+        await expect(cards(page)).toHaveCount(1);
+        // Photos load as they scroll into view; bring the last piece in before the full-page capture.
+        await featured(page).locator('.today-pieces li').last().scrollIntoViewIfNeeded();
+        await expect(page.locator('.today-card img')).toHaveCount(3);
+        if (selected.suffix === 'en-desktop') {
+          await openMenu(page);
+          await expect(menuButton(page, 'today.dontPair', language)).toBeVisible();
+        }
         await page.evaluate(() => scrollTo(0, 0));
       } else {
         await start(page, language, api => { add(api, 'Only shirt', { colours: ['white'] }); }, { clothes: false });
@@ -845,7 +1201,7 @@ test.describe('bounded Don\'t pair visual evidence', () => {
         // Photos load as they scroll into view.
         await card.locator('.today-pieces li').last().scrollIntoViewIfNeeded();
         await expect(card.locator('img')).toHaveCount(3);
-        await dontPair(card, language).click();
+        await fromMenu(page, 'today.dontPair', language);
         const chooser = card.getByRole('group', { name: text('today.pickPair', language), exact: true });
         await chooser.getByRole('checkbox').nth(0).check();
         if (selected.scene === 'pair-hidden') {

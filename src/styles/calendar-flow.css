@@ -1,0 +1,5 @@
+/* Calendar: a compact toolbar, small primary Mark as worn and the plan dialog's date line. Loaded with the Calendar route only. */
+.calendar-page .calendar-toolbar-compact { gap: 8px 16px; margin-bottom: 16px; }
+.calendar-page .calendar-toolbar-compact .calendar-views button { min-height: 44px; padding: 6px 12px; }
+.calendar-page .look-actions .button-small { min-height: 44px; padding: 8px 14px; font-size: .875rem; }
+.plan-date-day { margin: 4px 0 0; }

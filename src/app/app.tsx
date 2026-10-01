@@ -305,7 +305,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           : route === 'admin' ? <AdminScreen client={client} scope={scope} online={online} language={language} t={t} onBack={() => changeRoute('settings')} />
           : route === 'today' ? <TodayScreen client={client} scope={scope} images={images} online={online} language={language} t={t}
             timeZone={profile.timezone} invalidation={outfitsInvalidation} weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')} onTurnOnWeather={() => { stylistFocus.current = false; weatherFocus.current = true; }}
-            stylist={stylist} onStylist={() => changeRoute('stylist')}
+            stylist={stylist} onStylist={() => changeRoute('stylist')} onWorn={invalidateHistory} onWriting={onWriting}
             onSave={(itemIds, occasion) => { setOutfitSeed({ itemIds, occasion }); changeRoute('outfit-new'); }} />
           : route === 'stylist' ? <StylistScreen store={stylist} images={images} online={online} t={t} timeZone={profile.timezone}
             weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')}

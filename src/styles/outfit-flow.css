@@ -1,0 +1,11 @@
+/* Outfits: list density, detail heading with Edit, and a compact "In this outfit" list. Loaded with the outfit routes only. */
+.outfit-detail-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; max-width: none; }
+.outfit-detail-heading h1 { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
+.outfit-view .notice .text-button { margin-inline-start: auto; }
+.outfits-page .outfit-card .item-caption { padding: 10px 2px; }
+.outfit-editor .outfit-slot { grid-template-columns: 64px minmax(0, 1fr) auto; gap: 10px; padding: 6px 8px; }
+.outfit-editor .outfit-slot .outfit-thumb { width: 64px; }
+@media (max-width: 650px) {
+  .outfit-editor .outfit-slot { grid-template-columns: 48px minmax(0, 1fr); }
+  .outfit-editor .outfit-slot .outfit-thumb { width: 48px; }
+}

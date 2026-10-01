@@ -91,6 +91,16 @@ operator is "app owner" ("sovelluksen omistaja", "appens ägare"). Where a reque
 may already have been billed, keep one short clause such as "It may still count
 toward your AI limit." (FI passive: "… voidaan silti laskea mukaan tekoälyrajaasi.").
 
+UX4 update, 1 October 2026 (owner-approved UX review, packet 4): Today, weather,
+outfit and calendar copy is short and action-led. Reasons and weather details are
+chips without full stops ("For the season", "Low 4 °C", "Rain 40%"). Show another /
+Näytä toinen / Visa en annan steps through ideas; the More options (…) menu holds
+Don't suggest this outfit / Älä ehdota tätä asua / Föreslå inte den här outfiten and
+Don't suggest these together / Älä ehdota näitä yhdessä / Föreslå inte de här
+tillsammans. The calendar action is Plan / Suunnittele / Planera, and the Plan
+dialog names the chosen day with the app language's own date format, never the
+browser's.
+
 New or moved small copy is at least 14 px, with 44 px controls and normal-text
 contrast of at least 4.5:1. Check 320 px and 200% text without clipping. Preserve
 the brand and illustration; hide the textless entry illustration container on
