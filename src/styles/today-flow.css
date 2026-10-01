@@ -1,0 +1,29 @@
+/* Today: one featured idea, compact weather chips and a "…" menu. Loaded with the Today route only. */
+.today-page .today-context { flex-direction: column; gap: 12px; }
+.today-page .today-context .weather-bar { margin: 0; }
+.today-page .today-selects { display: flex; flex-wrap: wrap; gap: 12px 16px; }
+.today-page .today-ideas { grid-template-columns: minmax(0, 1fr); max-width: 640px; }
+.today-page .today-featured { gap: 14px; padding: 20px; }
+.today-page .today-featured .today-pieces { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 14px; }
+.today-idea-title { margin: 0; font-size: 1.125rem; }
+.today-idea-title:focus { outline-offset: 4px; }
+.today-page .today-reasons { flex-direction: row; flex-wrap: wrap; gap: 6px 14px; }
+.today-quiet { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.today-like[aria-pressed="true"] { color: var(--primary); font-weight: 600; }
+.today-menu { position: relative; display: inline-flex; flex-direction: column; align-items: flex-start; }
+.today-menu-toggle { min-width: 44px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 1.25rem; line-height: 1; }
+.today-menu-toggle[aria-expanded="true"] { border-color: var(--primary); }
+.today-menu-panel { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.today-menu-panel[hidden] { display: none; }
+.today-wear { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; max-width: 640px; margin: 0 0 16px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow-wrap: anywhere; }
+.today-wear p { margin: 0; }
+.today-wear-look { flex: 1 1 100%; }
+.today-wear .notice { flex: 1 1 100%; margin: 0; }
+.today-wear-actions { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.weather-chips { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; padding: 0; }
+.weather-chip { display: inline-flex; align-items: center; min-height: 28px; padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--well); font-size: .875rem; }
+.weather-line p.weather-chip { margin: 0; }
+@media (max-width: 650px) {
+  .today-page .today-featured { padding: 16px; }
+  .today-page .today-featured .today-pieces { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+}

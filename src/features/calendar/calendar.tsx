@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import '../../styles/calendar-flow.css';
 import { Icon } from '../../app/icon';
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
@@ -12,6 +13,7 @@ import {
 import { canMarkWorn, stateAttempt, validateLook, wearProblems, type Look, type LookAttempt, type LookErrors, type WearProblem, type WearReply } from '../../domain/wear-events';
 import type { WardrobeItem } from '../../domain/wardrobe';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
+import { validDateOnly } from '../../i18n/format';
 
 type Props = {
   client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate; timeZone: string;
@@ -162,7 +164,7 @@ export function CalendarScreen({ client, scope, online, language, t, timeZone, i
       <button type="button" className="button button-primary" disabled={!online} onClick={(event) => openPlan(monthOf(selected) === month ? selected : today, event.currentTarget)}>
         <Icon name="plus" />{t('calendar.planLook')}</button>
     </div>
-    <div className="calendar-toolbar">
+    <div className="calendar-toolbar calendar-toolbar-compact">
       <div className="weather-place calendar-views" role="group" aria-label={t('calendar.view')}>
         {(['month', 'agenda'] as const).map(value => <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)}>
           {t(value === 'month' ? 'calendar.month' : 'calendar.agenda')}</button>)}
@@ -227,8 +229,8 @@ function LookCard({ look, today, online, pending, t, onWorn, onRemove }: {
     <ul className="look-pieces">{look.pieces.map(piece => <li key={piece.id}>
       {piece.itemId ? <a href={`#/items/${piece.itemId}`}>{piece.title}</a> : <span>{piece.title}</span>}</li>)}</ul>
     <div className="look-actions">
-      {look.state === 'planned' && <button type="button" className="button button-secondary" aria-describedby={heading}
-        disabled={!online || pending || !canMarkWorn(look, today)} onClick={onWorn}>{t('calendar.markWorn')}</button>}
+      {look.state === 'planned' && canMarkWorn(look, today) && <button type="button" className="button button-primary button-small" aria-describedby={heading}
+        disabled={!online || pending} onClick={onWorn}>{t('calendar.markWorn')}</button>}
       <button type="button" className="text-button" aria-describedby={heading} disabled={!online || pending} onClick={onRemove}>{t('calendar.remove')}</button>
     </div>
     {look.state === 'planned' && future && <p className="muted look-hint">{t('calendar.futureWorn')}</p>}
@@ -351,8 +353,9 @@ function PlanDialog({ client, scope, t, locale, online, timeZone, today, initial
     </div> : <form className="stack" noValidate onSubmit={(event) => { event.preventDefault(); save(); }}>
       <fieldset className="plan-fields" disabled={busy}>
         <div className="field"><label htmlFor="plan-date">{t('calendar.date')}</label>
-          <input id="plan-date" type="date" required value={date} aria-invalid={errors.date ? true : undefined}
-            aria-describedby={errors.date ? 'plan-date-error' : undefined} onChange={(event) => { setDate(event.target.value); if (event.target.value > today) setWorn(false); }} />
+          <input id="plan-date" type="date" required value={date} lang={locale} aria-invalid={errors.date ? true : undefined}
+            aria-describedby={[validDateOnly(date) && 'plan-date-day', errors.date && 'plan-date-error'].filter(Boolean).join(' ') || undefined} onChange={(event) => { setDate(event.target.value); if (event.target.value > today) setWorn(false); }} />
+          {validDateOnly(date) && <p id="plan-date-day" className="muted plan-date-day">{dayHeading(t, locale, date)}</p>}
           {errors.date && <p id="plan-date-error" className="field-error" role="alert">{t(errors.date)}</p>}
         </div>
         {sources.error && <div className="notice notice-error" role="alert"><span>{t('calendar.loadFailed')}</span>

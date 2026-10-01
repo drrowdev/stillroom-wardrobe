@@ -1,3 +1,4 @@
+import '../../styles/outfit-flow.css';
 import { Icon } from '../../app/icon';
 import { componentLabel, componentMeta, occasionLabel, type OutfitComponent } from '../../domain/outfits';
 import { itemCount, type Language, type Translate } from '../../i18n';

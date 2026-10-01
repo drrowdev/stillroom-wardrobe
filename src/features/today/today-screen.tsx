@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import '../../styles/today-flow.css';
 import { Icon } from '../../app/icon';
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
@@ -13,6 +14,10 @@ import { pickerComponent } from '../outfits/use-outfits';
 import { defaultSeason, useSuggestions, type Pending } from './use-suggestions';
 import { useWeather, type WeatherStore } from './use-weather';
 import { WeatherBar } from './weather-bar';
+import { featuredStart, next, reconcile, transitionToken, weatherRunId } from './featured';
+import { MoreMenu } from './more-menu';
+import { useWearToday, wearPanelId } from './use-wear-today';
+import { WearPanel } from './wear-today';
 import type { StylistStore } from '../stylist/stylist-store';
 import { useStylist, useStylistStatus, viewOf } from '../stylist/use-stylist';
 
@@ -30,9 +35,12 @@ type Props = {
   client: AppClient; scope: OwnerScope; images: PrivateImages; online: boolean; language: Language; t: Translate;
   timeZone: string; invalidation: number; weather: WeatherConfig; weatherStore: WeatherStore;
   onSave: (itemIds: string[], occasion: Occasion) => void; onAddItem: () => void; onTurnOnWeather: () => void;
-  stylist: StylistStore; onStylist: () => void;
+  stylist: StylistStore; onStylist: () => void; onWorn: () => void; onWriting: (busy: boolean) => void;
 };
-export function TodayScreen({ client, scope, images, online, language, t, timeZone, invalidation, weather, weatherStore, onSave, onAddItem, onTurnOnWeather, stylist, onStylist }: Props) {
+const titleId = 'today-featured-title';
+const focusById = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.focus());
+
+export function TodayScreen({ client, scope, images, online, language, t, timeZone, invalidation, weather, weatherStore, onSave, onAddItem, onTurnOnWeather, stylist, onStylist, onWorn, onWriting }: Props) {
   useStylistStatus(stylist);
   const stylistEntry = viewOf(useStylist(stylist)).entry;
   const [occasion, setOccasion] = useState<Occasion>('everyday');
@@ -40,53 +48,109 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
   const forecast = useWeather(weatherStore, weather, online);
   const context = useMemo(() => weatherContext(forecast.forecast, forecast.override), [forecast.forecast, forecast.override]);
   const ideas = useSuggestions(client, scope, online, invalidation, occasion, season, context);
+  const wear = useWearToday({ client, scope, timeZone, t, onWorn, onWriting });
   const byId = useMemo(() => new Map((ideas.data?.items ?? []).map(item => [item.id, item])), [ideas.data]);
   const result = ideas.result;
   const list = (categories: readonly Category[]) => new Intl.ListFormat(locales[language], { type: 'conjunction' }).format(categories.map(category => t(categoryKeys[category])));
+  // Weather counts as changed when useSuggestions applies it: not while a choice is unsettled.
+  const weatherId = weatherRunId(context);
+  const [appliedWeather, setAppliedWeather] = useState(weatherId);
+  if (!ideas.settling && appliedWeather !== weatherId) setAppliedWeather(weatherId);
+  const [page, setPage] = useState(0);
+  const token = transitionToken(page, occasion, season, appliedWeather);
+  const [stored, setFeatured] = useState(() => featuredStart(token));
+  // A new occasion, season or weather reaches useSuggestions after this render, so the first idea is pinned only after it.
+  if (stored.token !== token) setFeatured(featuredStart(token, 1, false));
+  const featured = stored.token === token ? stored : featuredStart(token, 1, false);
+  useEffect(() => { if (!featured.armed) setFeatured(value => value.armed ? value : { ...value, armed: true }); }, [featured.armed]);
+  const keys = useMemo(() => result?.status === 'ideas' ? ideas.ideas.map(suggestion => suggestion.key) : [], [result, ideas.ideas]);
+  const reconciled = reconcile(keys, featured);
+  if (reconciled.state !== featured && stored.token === token) setFeatured(reconciled.state);
+  const shown = reconciled.shown;
+  // Where keyboard focus goes after Show another or Start over has rendered.
+  const focusAfter = useRef(false);
+  const busy = ideas.settling || wear.state.kind === 'inFlight';
+  const browseLocked = ideas.settling || wear.state.kind === 'inFlight';
+  function another() {
+    if (browseLocked) return;
+    focusAfter.current = true;
+    const following = next(keys, featured);
+    if (following !== 'page') { setFeatured(following); return; }
+    ideas.more();
+    setPage(page + 1);
+    setFeatured(featuredStart(transitionToken(page + 1, occasion, season, appliedWeather), featured.number + 1));
+  }
+  function startOver() {
+    if (browseLocked) return;
+    focusAfter.current = true;
+    ideas.startOver();
+    setPage(page + 1);
+    setFeatured(featuredStart(transitionToken(page + 1, occasion, season, appliedWeather)));
+  }
+  const status = result?.status;
+  const shownKey = shown.kind === 'idea' ? shown.key : null;
+  useEffect(() => {
+    if (!focusAfter.current || !status) return;
+    focusAfter.current = false;
+    focusById(document.getElementById(titleId) ? titleId : status === 'none' ? 'today-no-more' : 'today-gone');
+  }, [shownKey, shown.kind, status, page]);
+  // An idea that disappears in a refresh takes focus with it only when focus was on it.
+  useEffect(() => {
+    if (shown.kind === 'gone' && status === 'ideas' && document.activeElement === document.body) focusById('today-gone');
+  }, [shown.kind, status]);
+  const suggestion = shownKey ? ideas.ideas.find(entry => entry.key === shownKey) ?? null : null;
+  const moreButton = <button type="button" className="button button-secondary" disabled={browseLocked} onClick={another}><Icon name="refresh" />{t('today.more')}</button>;
   return <section className="today-page" aria-labelledby="today-title">
     <div className="page-heading"><div><h1 id="today-title" tabIndex={-1}>{t('today.title')}</h1></div></div>
     <div className="today-context">
-      <label className="field"><span>{t('outfits.occasion')}</span>
-        <select value={occasion} disabled={ideas.settling} onChange={event => { if (!ideas.settling && isOccasion(event.target.value)) setOccasion(event.target.value); }}>
-          {occasions.map(code => <option key={code} value={code}>{t(occasionKeys[code])}</option>)}
-        </select></label>
-      <label className="field"><span>{t('item.season')}</span>
-        <select value={season} disabled={ideas.settling} onChange={event => { if (!ideas.settling && isSeason(event.target.value)) setSeason(event.target.value); }}>
-          {seasonCodes.map(code => <option key={code} value={code}>{t(seasonKeys[code])}</option>)}
-        </select></label>
+      <WeatherBar weather={forecast} language={language} timeZone={timeZone} online={online} locked={busy} t={t} onTurnOnWeather={onTurnOnWeather} />
+      <div className="today-selects">
+        <label className="field"><span>{t('outfits.occasion')}</span>
+          <select value={occasion} disabled={busy} onChange={event => { if (!busy && isOccasion(event.target.value)) setOccasion(event.target.value); }}>
+            {occasions.map(code => <option key={code} value={code}>{t(occasionKeys[code])}</option>)}
+          </select></label>
+        <label className="field"><span>{t('item.season')}</span>
+          <select value={season} disabled={busy} onChange={event => { if (!busy && isSeason(event.target.value)) setSeason(event.target.value); }}>
+            {seasonCodes.map(code => <option key={code} value={code}>{t(seasonKeys[code])}</option>)}
+          </select></label>
+      </div>
     </div>
-    <WeatherBar weather={forecast} language={language} timeZone={timeZone} online={online} locked={ideas.settling} t={t} onTurnOnWeather={onTurnOnWeather} />
+    <WearPanel wear={wear} byId={byId} language={language} online={online} t={t} />
     {ideas.error && <div className="notice notice-error" role="alert"><span>{t('today.loadFailed')}</span><button type="button" className="text-button" disabled={!online} onClick={ideas.reload}>{t('common.retry')}</button></div>}
     {!result ? !ideas.error && <div className="today-ideas" aria-busy="true"><p role="status" className="sr-only">{t('common.loading')}</p>
-      {Array.from({ length: 3 }, (_, index) => <div key={index} className="loading-card"><div className="loading-photo skeleton" /><div className="loading-line skeleton" /></div>)}</div>
+      <div className="loading-card"><div className="loading-photo skeleton" /><div className="loading-line skeleton" /></div></div>
       : result.status === 'empty' ? <div className="today-empty">
         <p>{t(ideas.hasClothes ? 'today.none' : 'today.empty')}</p>
         <button type="button" className="button button-primary" onClick={onAddItem}><Icon name="plus" />{t('wardrobe.add')}</button>
       </div>
       : result.status === 'partial' ? <div className="today-ideas">
-        {result.suggestions.map(suggestion => <article key={suggestion.key} className="today-card" aria-labelledby={`idea-${suggestion.key}`}>
-          <h2 id={`idea-${suggestion.key}`} className="sr-only">{t('today.idea', { number: 1 })}</h2>
-          <Pieces ids={suggestion.itemIds} byId={byId} images={images} t={t} />
-          <p className="today-missing">{t('today.missing', { categories: list(suggestion.missingSlots) })}</p>
-          {notes(suggestion).map(key => <p key={key} className="today-missing">{t(key)}</p>)}
+        {result.suggestions.map(partial => <article key={partial.key} className="today-card today-featured" aria-labelledby={`idea-${partial.key}`}>
+          <h2 id={`idea-${partial.key}`} className="sr-only">{t('today.idea', { number: 1 })}</h2>
+          <Pieces ids={partial.itemIds} byId={byId} images={images} t={t} />
+          <p className="today-missing">{t('today.missing', { categories: list(partial.missingSlots) })}</p>
+          {notes(partial).map(key => <p key={key} className="today-missing">{t(key)}</p>)}
           <div className="today-actions"><button type="button" className="button button-primary" onClick={onAddItem}><Icon name="plus" />{t('wardrobe.add')}</button></div>
         </article>)}
       </div>
       : result.status === 'none' ? <div className="today-empty">
-        <p>{t(ideas.paged ? 'today.noMore' : 'today.none')}</p>
+        <p id="today-no-more" tabIndex={-1}>{t(ideas.paged ? 'today.noMore' : 'today.none')}</p>
         {result.missingDetails.includes('formality') && <p className="muted">{t('today.missingFormality')}</p>}
-        {ideas.paged && <button type="button" className="button button-secondary" disabled={ideas.settling} onClick={ideas.startOver}>{t('today.startOver')}</button>}
+        {ideas.paged && <button type="button" className="button button-secondary" disabled={browseLocked} onClick={startOver}>{t('today.startOver')}</button>}
       </div>
       : <>
         {result.missingDetails.includes('formality') && <p className="muted today-hint">{t('today.missingFormality')}</p>}
         <div className="today-ideas">
-          {ideas.ideas.map((suggestion, index) => <Idea key={suggestion.key} suggestion={suggestion} number={index + 1} byId={byId} images={images} t={t} list={list}
-            online={online} vote={ideas.votes.get(suggestion.key) ?? null} pending={ideas.pending} failed={ideas.failed === suggestion.key} unresolved={ideas.unresolved === suggestion.key} locked={ideas.unresolved !== null} onRetry={ideas.retry}
+          {suggestion && shown.kind === 'idea' ? <Idea key={suggestion.key} suggestion={suggestion} number={shown.number} byId={byId} images={images} t={t} list={list}
+            online={online} vote={ideas.votes.get(suggestion.key) ?? null} pending={ideas.pending} failed={ideas.failed === suggestion.key} unresolved={ideas.unresolved === suggestion.key} locked={ideas.unresolved !== null || wear.state.kind === 'inFlight'} onRetry={ideas.retry}
             onSave={() => onSave(suggestion.itemIds, occasion)} onLike={() => ideas.like(suggestion.key)}
             onHide={() => ideas.hide(suggestion.key)} onUndo={() => ideas.undo(suggestion.key)}
-            avoided={ideas.avoided(suggestion.key)} unsettled={ideas.unsettledPair(suggestion.key)} onAvoid={(first, second) => ideas.avoid(suggestion.key, first, second)} onAllow={() => ideas.allow(suggestion.key)} />)}
+            avoided={ideas.avoided(suggestion.key)} unsettled={ideas.unsettledPair(suggestion.key)} onAvoid={(first, second) => ideas.avoid(suggestion.key, first, second)} onAllow={() => ideas.allow(suggestion.key)}
+            wearBlocked={wear.blocked} onWear={() => wear.wear(suggestion.itemIds, byId)} more={moreButton} />
+            : <div className="today-empty">
+              <p id="today-gone" tabIndex={-1} role="status">{t('today.ideaGone')}</p>
+              {moreButton}
+            </div>}
         </div>
-        <div className="today-more"><button type="button" className="button button-secondary" disabled={ideas.settling} onClick={ideas.more}><Icon name="refresh" />{t('today.more')}</button></div>
       </>}
     {stylistEntry && <div className="today-more"><button type="button" className="button button-secondary" onClick={onStylist}>{t('stylist.open')}</button></div>}
   </section>;
@@ -109,38 +173,51 @@ type IdeaProps = {
   vote: 1 | -1 | null; pending: Pending | null; failed: boolean; unresolved: boolean; locked: boolean;
   onSave: () => void; onLike: () => void; onHide: () => void; onUndo: () => void; onRetry: () => void;
   avoided: string | null; unsettled: string | null; onAvoid: (first: string, second: string) => void; onAllow: () => void;
+  wearBlocked: boolean; onWear: () => void; more: ReactNode;
 };
 function Idea({ suggestion, number, byId, images, t, list, online, vote, pending, failed, unresolved, locked, onSave, onLike, onHide, onUndo, onRetry,
-  avoided, unsettled, onAvoid, onAllow }: IdeaProps) {
-  const title = `idea-${number}-title`;
+  avoided, unsettled, onAvoid, onAllow, wearBlocked, onWear, more }: IdeaProps) {
+  const [menu, setMenu] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const legend = useRef<HTMLLegendElement>(null);
-  const opener = useRef<HTMLButtonElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
   const undoPair = useRef<HTMLButtonElement>(null);
-  const wasChoosing = useRef(false);
-  const wasAvoided = useRef(avoided);
+  const undoHide = useRef<HTMLButtonElement>(null);
   const retry = useRef<HTMLButtonElement>(null);
   const card = useRef<HTMLElement>(null);
+  const wasAvoided = useRef(avoided);
   const wasUnsettled = useRef(unsettled);
+  const wasHidden = useRef(vote === -1);
+  // Focus moves with the card only when it is on the card, or was lost when a button on it went away.
+  // Some browsers leave focus on a removed button, or on <main> after a click on a button.
+  const here = () => {
+    const active = document.activeElement;
+    return active === null || active === document.body || !active.isConnected || active.matches('main') || card.current?.contains(active) === true;
+  };
+  // The More options toggle is the card's resting place once a choice made from its menu is undone or settled.
+  const returnFocus = () => requestAnimationFrame(() => { if (here()) toggle.current?.focus(); });
+  useEffect(() => { if (choosing) legend.current?.focus(); }, [choosing]);
   useEffect(() => {
-    if (choosing) legend.current?.focus();
-    else if (wasChoosing.current) opener.current?.focus();
-    wasChoosing.current = choosing;
-  }, [choosing]);
-  // Keyboard focus follows the card as it collapses to its Undo and back.
-  useEffect(() => {
-    if (avoided && !wasAvoided.current) undoPair.current?.focus();
-    else if (!avoided && wasAvoided.current) opener.current?.focus();
+    if (avoided && !wasAvoided.current) { if (here()) undoPair.current?.focus(); }
+    else if (!avoided && wasAvoided.current) returnFocus();
     wasAvoided.current = avoided;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- here and returnFocus only read refs
   }, [avoided]);
   // An uncertain pair choice turns the card into its Try again, and back once it is settled, without taking focus from elsewhere.
   useEffect(() => {
-    const here = document.activeElement === document.body || card.current?.contains(document.activeElement) === true;
-    if (here && unsettled && !wasUnsettled.current && !avoided) retry.current?.focus();
-    else if (here && !unsettled && wasUnsettled.current && !avoided) opener.current?.focus();
+    if (unsettled && !wasUnsettled.current && !avoided) { if (here()) retry.current?.focus(); }
+    else if (!unsettled && wasUnsettled.current && !avoided) returnFocus();
     wasUnsettled.current = unsettled;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- here and returnFocus only read refs
   }, [unsettled, avoided]);
+  const hidden = vote === -1;
+  useEffect(() => {
+    if (hidden && !wasHidden.current) { if (here()) undoHide.current?.focus(); }
+    else if (!hidden && wasHidden.current) returnFocus();
+    wasHidden.current = hidden;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- here and returnFocus only read refs
+  }, [hidden]);
   const pieces = suggestion.itemIds.filter(id => byId.has(id));
   // Until an uncertain choice is settled, only its Try again is offered on the page.
   const busy = pending !== null || locked;
@@ -148,41 +225,57 @@ function Idea({ suggestion, number, byId, images, t, list, online, vote, pending
     ? <div className="notice notice-error" role="alert"><span>{t('today.voteFailed')}</span><button ref={retry} type="button" className="text-button" disabled={!online || pending !== null} onClick={onRetry}>{t('common.retry')}</button></div>
     : failed && <p className="notice notice-error" role="alert">{t('today.voteFailed')}</p>;
   const mine = pending?.key === suggestion.key;
-  if (avoided) return <article ref={card} className="today-card today-card-hidden" aria-labelledby={title}>
-    <h2 id={title} className="sr-only">{t('today.idea', { number })}</h2>
+  const heading = <h2 id={titleId} className="today-idea-title" tabIndex={-1}>{t('today.idea', { number })}</h2>;
+  if (avoided) return <article ref={card} className="today-card today-featured today-card-hidden" aria-labelledby={titleId}>
+    {heading}
     <Pieces ids={suggestion.itemIds.filter(id => avoided.split('|').includes(id))} byId={byId} images={images} t={t} />
     <p role="status">{t('today.pairHidden')}</p>
     {problem}
-    <button ref={undoPair} type="button" className="text-button" disabled={!online || busy} aria-busy={mine || undefined} onClick={onAllow}>{t('common.undo')}</button>
+    <div className="today-actions">
+      <button ref={undoPair} type="button" className="text-button" disabled={!online || busy} aria-busy={mine || undefined} onClick={onAllow}>{t('common.undo')}</button>
+      {more}
+    </div>
   </article>;
   // Until it is settled the pair may already be avoided, so the card offers nothing but its Try again.
-  if (unsettled) return <article ref={card} className="today-card today-card-hidden" aria-labelledby={title}>
-    <h2 id={title} className="sr-only">{t('today.idea', { number })}</h2>
+  if (unsettled) return <article ref={card} className="today-card today-featured today-card-hidden" aria-labelledby={titleId}>
+    {heading}
     <Pieces ids={suggestion.itemIds.filter(id => unsettled.split('|').includes(id))} byId={byId} images={images} t={t} />
     {problem}
+    <div className="today-actions">{more}</div>
   </article>;
-  if (vote === -1) return <article className="today-card today-card-hidden" aria-labelledby={title}>
-    <h2 id={title} className="sr-only">{t('today.idea', { number })}</h2>
+  if (hidden) return <article ref={card} className="today-card today-featured today-card-hidden" aria-labelledby={titleId}>
+    {heading}
     <p role="status">{t('today.hidden')}</p>
     {problem}
-    <button type="button" className="text-button" disabled={!online || busy} aria-busy={mine || undefined} onClick={onUndo}>{t('common.undo')}</button>
+    <div className="today-actions">
+      <button ref={undoHide} type="button" className="text-button" disabled={!online || busy} aria-busy={mine || undefined} onClick={onUndo}>{t('common.undo')}</button>
+      {more}
+    </div>
   </article>;
   // Saving waits while a pair on this card is being written.
   const pairing = mine && (pending.kind === 'avoid' || pending.kind === 'allow');
-  return <article ref={card} className="today-card" aria-labelledby={title}>
-    <h2 id={title} className="sr-only">{t('today.idea', { number })}</h2>
+  const wearDisabled = !online || pairing || wearBlocked || locked;
+  return <article ref={card} className="today-card today-featured" aria-labelledby={titleId}>
+    {heading}
     <Pieces ids={suggestion.itemIds} byId={byId} images={images} t={t} />
     {suggestion.reasons.length > 0 && <ul className="today-reasons">{suggestion.reasons.map(reason => <li key={reason.key}><Icon name="check" />{t(reasonKeys[reason.key])}</li>)}</ul>}
     {notes(suggestion).map(key => <p key={key} className="today-missing">{t(key)}</p>)}
     {!suggestion.weatherNeeds && suggestion.missingSlots.length > 0 && <p className="today-missing">{t('today.missing', { categories: list(suggestion.missingSlots) })}</p>}
     {problem}
     <div className="today-actions">
-      <button type="button" className="button button-primary" disabled={!online || pairing} onClick={onSave}>{t('today.save')}</button>
-      <button type="button" className="button button-secondary" aria-pressed={vote === 1} disabled={!online || busy} aria-busy={mine && pending.kind === 'like' || undefined} onClick={onLike}>{t('today.like')}</button>
-      <button type="button" className="button button-quiet" disabled={!online || busy} aria-busy={mine && pending.kind === 'hide' || undefined} onClick={onHide}>{t('today.notForMe')}</button>
-      {pieces.length >= 2 && !choosing && <button ref={opener} type="button" className="button button-quiet" disabled={!online || busy}
-        aria-busy={mine && pending.kind === 'avoid' || undefined}
-        onClick={() => { if (pieces.length === 2) onAvoid(pieces[0]!, pieces[1]!); else { setPicked([]); setChoosing(true); } }}>{t('today.dontPair')}</button>}
+      <button type="button" className="button button-primary" disabled={wearDisabled} aria-describedby={wearBlocked ? wearPanelId : undefined} onClick={onWear}>{t('calendar.wearToday')}</button>
+      {more}
+    </div>
+    <div className="today-quiet">
+      <button type="button" className="text-button" disabled={!online || pairing} onClick={onSave}>{t('today.save')}</button>
+      <button type="button" className="text-button today-like" aria-pressed={vote === 1} disabled={!online || busy} aria-busy={mine && pending.kind === 'like' || undefined} onClick={onLike}>{t('today.like')}</button>
+      <MoreMenu label={t('common.moreOptions')} open={menu && !choosing} disabled={!online || busy} toggle={toggle} onOpen={setMenu}>
+        <button type="button" className="text-button" disabled={!online || busy} aria-busy={mine && pending.kind === 'hide' || undefined}
+          onClick={() => { setMenu(false); onHide(); }}>{t('today.notForMe')}</button>
+        {pieces.length >= 2 && <button type="button" className="text-button" disabled={!online || busy || choosing}
+          aria-busy={mine && pending.kind === 'avoid' || undefined}
+          onClick={() => { setMenu(false); if (pieces.length === 2) onAvoid(pieces[0]!, pieces[1]!); else { setPicked([]); setChoosing(true); } }}>{t('today.dontPair')}</button>}
+      </MoreMenu>
     </div>
     {choosing && <fieldset className="today-pair">
       <legend ref={legend} tabIndex={-1}>{t('today.pickPair')}</legend>
@@ -197,7 +290,7 @@ function Idea({ suggestion, number, byId, images, t, list, online, vote, pending
       <div className="today-actions">
         <button type="button" className="button button-primary" disabled={!online || busy || picked.length !== 2}
           onClick={() => { const [first, second] = picked; setChoosing(false); onAvoid(first!, second!); }}>{t('today.pairConfirm')}</button>
-        <button type="button" className="button button-quiet" onClick={() => setChoosing(false)}>{t('common.cancel')}</button>
+        <button type="button" className="button button-quiet" onClick={() => { setChoosing(false); returnFocus(); }}>{t('common.cancel')}</button>
       </div>
     </fieldset>}
   </article>;

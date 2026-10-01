@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { validManualTemperature, type Forecast } from '../../domain/weather';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 import type { useWeather } from './use-weather';
+import { temperature, weatherChips } from './weather-chips';
 import { forecastZoneSuffix } from './weather-zone';
 
 type Weather = ReturnType<typeof useWeather>;
@@ -14,18 +15,12 @@ function forecastParts(forecast: Forecast, fetchedAt: number, city: string, prof
   const locale = locales[language];
   const [year, month, day] = forecast.date.split('-').map(Number) as [number, number, number];
   const date = new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(Date.UTC(year, month - 1, day));
-  const details: string[] = [];
-  if (forecast.minTemperature !== null) details.push(t('weather.low', { temperature: temperature(forecast.minTemperature, language) }));
-  if (forecast.maxRain !== null) details.push(t('weather.rain', { chance: new Intl.NumberFormat(locale, { style: 'percent' }).format(forecast.maxRain / 100) }));
-  if (forecast.maxWind !== null) details.push(t('weather.wind', { speed: new Intl.NumberFormat(locale, { style: 'unit', unit: 'meter-per-second', maximumFractionDigits: 0 }).format(forecast.maxWind) }));
   const updated = t('weather.updated', { time: zoned(forecast.timeZone, { hour: '2-digit', minute: '2-digit' }, locale).format(fetchedAt) });
   // The saved city is "place, country"; Today names the place only.
   const place = city.split(', ')[0] || city;
   const zone = forecastZoneSuffix(forecast.timeZone, profileZone, fetchedAt, locale);
-  return { heading: zone ? t('weather.forecastForZone', { city: place, date, zone }) : t('weather.forecastFor', { city: place, date }), details, updated };
+  return { heading: zone ? t('weather.forecastForZone', { city: place, date, zone }) : t('weather.forecastFor', { city: place, date }), details: weatherChips(forecast, language, t), updated };
 }
-const temperature = (value: number, language: Language) =>
-  new Intl.NumberFormat(locales[language], { style: 'unit', unit: 'celsius', maximumFractionDigits: 0 }).format(value);
 
 // Outdoors uses the forecast, or a temperature the owner enters when there is none. Indoors turns weather off for today.
 export function WeatherBar({ weather, language, timeZone, online, locked, t, onTurnOnWeather }: Props) {
@@ -48,20 +43,22 @@ export function WeatherBar({ weather, language, timeZone, online, locked, t, onT
   const ready = view.status === 'ready' ? forecastParts(view.forecast, view.fetchedAt, view.city, timeZone, language, t) : null;
   const info = indoors ? null
     : manual !== null ? <div className="weather-line weather-row">
-      <p id="weather-manual" className="weather-manual">{t('weather.manualLine', { temperature: temperature(manual, language) })}</p>
+      <p id="weather-manual" className="weather-chip weather-manual">{t('weather.manualLine', { temperature: temperature(manual, language) })}</p>
       <button type="button" className="text-button" aria-describedby="weather-manual" disabled={locked} onClick={() => setOverride(null)}>{t('weather.clearManual')}</button>
     </div>
       : ready ? <div className="weather-line">
         <p className="weather-heading">{ready.heading}</p>
-        {ready.details.length > 0 && <p>{ready.details.join(' · ')}</p>}
+        {ready.details.length > 0 && <ul className="weather-chips">{ready.details.map(chip => <li key={chip} className="weather-chip">{chip}</li>)}</ul>}
         <p className="muted fine weather-footer"><span>{ready.updated}</span><span className="weather-credit">{t('weather.credit')} <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">{t('weather.creditLink')}</a></span></p>
       </div>
         : !status ? <p className="weather-line" role="status">{t('weather.loading')}</p>
           : <div className="weather-line">
-            <div className="weather-row"><p role="status">{t(status)}</p>
+            <div className="weather-row"><p role="status" className="weather-chip">{t(status)}</p>
               {view.status === 'failed' && <button type="button" className="text-button" disabled={!weather.canRetry || !online} onClick={weather.retry}>{t('common.retry')}</button>}
+              {!entering && view.status === 'off' && <a href="#/settings" className="text-button" onClick={onTurnOnWeather}>{t('weather.turnOn')}</a>}
+              {!entering && <button type="button" className="text-button" disabled={locked} onClick={() => setEntering(true)}>{t('weather.enterTemperature')}</button>}
             </div>
-            {entering ? <form className="weather-manual-form" noValidate onSubmit={event => { event.preventDefault(); submit(); }}>
+            {entering && <form className="weather-manual-form" noValidate onSubmit={event => { event.preventDefault(); submit(); }}>
               <div className="field"><label htmlFor="weather-temperature">{t('weather.temperatureLabel')}</label>
                 <input id="weather-temperature" type="text" inputMode="text" autoComplete="off" maxLength={4} value={value} disabled={locked} autoFocus
                   aria-invalid={invalid || undefined} aria-describedby={invalid ? 'weather-temperature-error' : undefined}
@@ -71,11 +68,7 @@ export function WeatherBar({ weather, language, timeZone, online, locked, t, onT
                 <button type="submit" className="button button-secondary" disabled={locked}>{t('weather.useTemperature')}</button>
                 <button type="button" className="text-button" onClick={close}>{t('common.cancel')}</button>
               </div>
-            </form>
-              : <div className="weather-actions">
-                {view.status === 'off' && <a href="#/settings" className="text-button" onClick={onTurnOnWeather}>{t('weather.turnOn')}</a>}
-                <button type="button" className="text-button" disabled={locked} onClick={() => setEntering(true)}>{t('weather.enterTemperature')}</button>
-              </div>}
+            </form>}
           </div>;
   return <section className="weather-bar" aria-labelledby="weather-bar-title">
     <h2 id="weather-bar-title" className="sr-only">{t('weather.title')}</h2>
