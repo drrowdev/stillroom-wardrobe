@@ -5,7 +5,7 @@ import { mkdir, open, readdir, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
-import { aiFixture } from './ai-photo-first-support';
+import { aiFixture, editItem, openPhotoMenu } from './ai-photo-first-support';
 
 async function imageChangeSetup(page: Page, language: Language = 'en', loss?: 'reservation' | 'finalizer') {
   const api = await aiFixture(page, language, true, undefined, false, loss);
@@ -16,12 +16,22 @@ async function imageChangeSetup(page: Page, language: Language = 'en', loss?: 'r
   await page.reload();
   await expect(page.locator('.item-card')).toHaveCount(1);
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
   await openMore(page);
   return { api, ...saved, foreign };
 }
+// UX2: Replace photo and Previous photos sit under Photo options on the view card; a clean edit form is left first.
+async function photoAction(page: Page, key: 'imageChange.replace' | 'imageChange.recover', language: Language = 'en') {
+  if (await page.locator('#detail-cancel-edit').isVisible()) {
+    await page.locator('#detail-cancel-edit').click();
+    await expect(page.locator('#detail-edit')).toBeFocused();
+  }
+  await openPhotoMenu(page);
+  return page.getByRole('button', { name: messages[key][language], exact: true });
+}
 async function replacementPhoto(page: Page, api: Awaited<ReturnType<typeof aiFixture>>, language: Language = 'en') {
-  await page.getByRole('button', { name: messages['imageChange.replace'][language], exact: true }).click();
+  await (await photoAction(page, 'imageChange.replace', language)).click();
   await expect(page.locator('.image-change input[type=file]').first()).toBeEnabled();
   const analyses = api.inputs.length;
   await page.locator('.image-change input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
@@ -31,7 +41,7 @@ async function replacementPhoto(page: Page, api: Awaited<ReturnType<typeof aiFix
 }
 async function saveReplacement(page: Page, language: Language = 'en') {
   await page.getByRole('button', { name: messages['imageChange.save'][language], exact: true }).click();
-  await expect(page.locator('#detail-title')).toBeVisible();
+  await expect(page.locator('#detail-edit')).toBeVisible();
 }
 async function captureImageChange(page: Page, info: TestInfo, language: Language, file: string, width: number, height: number) {
   await page.setViewportSize({ width, height });
@@ -51,8 +61,9 @@ test('I10b replacement protects saved fields and clears, explicit Save atomicall
   const { api, item, image, foreign } = await imageChangeSetup(page);
   const before = structuredClone(item), oldImage = structuredClone(image), peer = structuredClone(foreign);
   await page.locator('#detail-description').fill('Unsaved sibling');
-  await expect(page.getByRole('button', { name: messages['imageChange.replace'].en, exact: true })).toBeDisabled();
-  await expect(page.getByRole('button', { name: messages['imageChange.recover'].en, exact: true })).toBeDisabled();
+  await expect(page.locator('#photo-menu')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: messages['imageChange.replace'].en, exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: messages['imageChange.recover'].en, exact: true })).toHaveCount(0);
   await page.locator('#detail-description').fill(oldImage.alt_text);
   await replacementPhoto(page, api);
   await expect(page.locator('#item-title')).toHaveValue(before.title);
@@ -87,6 +98,7 @@ for (const loss of ['reservation', 'finalizer'] as const) {
     const before = structuredClone(api.imageChanges[0]!.receipt);
     const uploads = api.uploadWire.posts, analyses = api.inputs.length;
     await page.getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
+    await editItem(page);
     await expect(page.locator('#detail-title')).toHaveValue(item.title);
     expect(api.imageChanges).toHaveLength(1); expect(api.imageChanges[0]!.receipt.requestId).toBe(before.requestId);
     expect(api.imageChanges[0]!.receipt.imageId).toBe(before.imageId); expect(api.imageChanges[0]!.receipt.state).toBe('completed');
@@ -103,7 +115,7 @@ test('I10b recovery copies verified bytes to a new identity, leaves fields untou
   const sourceBytes = api.files.get(String(source.main_path))!;
   await replacementPhoto(page, api, 'fi'); await saveReplacement(page, 'fi');
   const before = structuredClone(item), calls = api.calls.length, analyses = api.inputs.length;
-  await page.getByRole('button', { name: messages['imageChange.recover'].fi, exact: true }).click();
+  await (await photoAction(page, 'imageChange.recover', 'fi')).click();
   await page.getByRole('button', { name: messages['imageChange.loadVersions'].fi, exact: true }).click();
   await expect(page.locator('.recovery-versions button')).toHaveCount(2);
   const ordinal = api.images.filter(row => row.item_id === item.id && row.state === 'retired')
@@ -115,6 +127,7 @@ test('I10b recovery copies verified bytes to a new identity, leaves fields untou
   await page.addStyleTag({ content: 'html { font-size: 200%; }' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole('button', { name: messages['imageChange.saveRecovery'].fi, exact: true }).click();
+  await editItem(page);
   await expect(page.locator('#detail-description')).toHaveValue('Palautettu kuva');
   expect(item).toEqual({ ...before, version: before.version + 1, updated_at: item.updated_at });
   const restored = api.images.find(row => row.item_id === item.id && row.state === 'ready')!;
@@ -130,6 +143,7 @@ test('I10b draft cancellation publishes nothing and saved user clears survive an
   await replacementPhoto(page, api);
   await page.getByRole('button', { name: messages['common.cancel'].en, exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: messages['common.discard'].en, exact: true }).click();
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue(before.title);
   expect(item).toEqual(before); expect(image).toEqual(oldImage); expect(api.images).toHaveLength(2);
   expect(api.imageChanges).toHaveLength(0);
@@ -143,8 +157,9 @@ test('I10b consecutive replacements reload the current saved caption before anot
     await page.locator('.image-change .optional-details > summary').click();
     await page.locator('#image-change-caption').fill(caption);
     await saveReplacement(page);
+    await editItem(page);
     await expect(page.locator('#detail-description')).toHaveValue(caption);
-    await expect(page.getByRole('button', { name: messages['imageChange.recover'].en, exact: true })).toBeEnabled();
+    await expect(await photoAction(page, 'imageChange.recover')).toBeEnabled();
   }
   expect(item.version).toBe(initialVersion + 2);
   expect(api.imageChanges).toHaveLength(2);
@@ -191,7 +206,7 @@ async function pendingReplacement(page: Page) {
   const { api } = setup;
   api.mode('pending');
   const status = await holdReplaceStatus(page, api);
-  await page.getByRole('button', { name: messages['imageChange.replace'].en, exact: true }).click();
+  await (await photoAction(page, 'imageChange.replace')).click();
   await expect(page.locator('.image-change input[type=file]').first()).toBeEnabled();
   await page.locator('.image-change input[type=file]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
   await expect.poll(() => replacePosts(api).length).toBe(1);
@@ -247,7 +262,7 @@ test('UX L1b replacement editing, Cancel editing and an unchanged Done keep the 
   const baseline = counts();
   expect(baseline).toMatchObject({ posts: 1, discards: 0, writes: 0 });
   const src = await page.locator('.image-change .capture-photo img').getAttribute('src');
-  await page.locator('#image-change-edit').click();
+  await openPhotoMenu(page); await page.locator('#image-change-edit').click();
   await page.locator('.crop-stage').scrollIntoViewIfNeeded();
   const stage = (await page.locator('.crop-stage').boundingBox())!;
   await replaceDrag(page, '.crop-handle[data-corner="se"]', -stage.width * 0.3, -stage.height * 0.3);
@@ -260,11 +275,11 @@ test('UX L1b replacement editing, Cancel editing and an unchanged Done keep the 
   await page.locator('details.crop-exact > summary').click();
   await page.locator('#crop-width').fill('80');
   await page.locator('#crop-cancel').click();
-  await focusedAfterFrame(page, '#image-change-edit');
+  await focusedAfterFrame(page, '#photo-menu');
   expect(counts()).toEqual(baseline);
-  await page.locator('#image-change-edit').click();
+  await openPhotoMenu(page); await page.locator('#image-change-edit').click();
   await page.locator('#apply-crop').click();
-  await focusedAfterFrame(page, '#image-change-edit');
+  await focusedAfterFrame(page, '#photo-menu');
   await expect(page.locator('.image-change .capture-photo img')).toHaveAttribute('src', src!);
   expect(counts()).toEqual(baseline);
   for (const check of replaceChecks(api)) expect(check.body).toEqual({ p_request_id: r1 });
@@ -281,11 +296,11 @@ test('UX L1b a changed replacement Done starts one new generation and ignores th
   await replacePollStep(page, api, r1);
   await expect.poll(() => status.reached()).toBe(true);
   const counts = { discards: replaceDiscards(api).length, admissions: replaceAdmissions(api).length };
-  await page.locator('#image-change-edit').click();
+  await openPhotoMenu(page); await page.locator('#image-change-edit').click();
   await shrinkReplacement(page);
   await page.locator('#apply-crop').click();
   await expect.poll(() => replacePosts(api).length).toBe(2);
-  await focusedAfterFrame(page, '#image-change-edit');
+  await focusedAfterFrame(page, '#photo-menu');
   expect(replaceDiscards(api)).toHaveLength(counts.discards + 1);
   expect(replaceDiscards(api).at(-1)!.body).toMatchObject({ p_request_id: r1 });
   expect(replaceAdmissions(api)).toHaveLength(counts.admissions + 2);
@@ -313,7 +328,7 @@ test('UX L1b replacement Save is refused while editing; a later implicit Save ke
   const stillWorking = page.locator('#analysis-status').getByText(messages['aiC.stillWorking'].en, { exact: true });
   await page.clock.runFor(31000);
   await expect(stillWorking).toBeVisible();
-  await page.locator('#image-change-edit').click();
+  await openPhotoMenu(page); await page.locator('#image-change-edit').click();
   await expect(save).toBeDisabled();
   await page.locator('.image-change form.capture-layout').evaluate((form: HTMLFormElement) => form.requestSubmit());
   expect(replaceDiscards(api)).toHaveLength(0);
@@ -322,7 +337,7 @@ test('UX L1b replacement Save is refused while editing; a later implicit Save ke
   await shrinkReplacement(page);
   await page.locator('#apply-crop').click();
   await expect.poll(() => replacePosts(api).length).toBe(2);
-  await focusedAfterFrame(page, '#image-change-edit');
+  await focusedAfterFrame(page, '#photo-menu');
   const r2 = replaceRequestId(api, 1);
   await page.clock.runFor(31000);
   await expect(stillWorking).toBeVisible();
@@ -333,7 +348,7 @@ test('UX L1b replacement Save is refused while editing; a later implicit Save ke
   const checks = replaceChecks(api).length;
   await save.click();
   status.release();
-  await expect(page.locator('#detail-title')).toBeVisible();
+  await expect(page.locator('#detail-edit')).toBeVisible();
   await page.clock.runFor(35000);
   expect(replacePosts(api)).toHaveLength(2);
   expect(replaceChecks(api).length).toBeLessThanOrEqual(checks + 1);
@@ -353,7 +368,8 @@ const itemUrl = 'http://127.0.0.1:54321/rest/v1/items*';
 const descriptionUrl = 'http://127.0.0.1:54321/rest/v1/rpc/update_image_description';
 const save = (page: Page, language: Language = 'en') => page.getByRole('button', { name: messages['detail.saveChanges'][language], exact: true });
 async function openMore(page: Page) {
-  await expect(page.locator('#detail-title')).toBeVisible();
+  await expect(page.locator('#detail-title').or(page.locator('#detail-edit'))).toBeVisible();
+  if (await page.locator('#detail-edit').isVisible()) await editItem(page);
   await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
 }
 async function setup(page: Page, language: Language = 'en') {
@@ -362,6 +378,7 @@ async function setup(page: Page, language: Language = 'en') {
   const foreign = api.seedSavedItem('b', 'Robin private');
   await page.goto('/'); await signIn(page);
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
   await openMore(page);
   return { api, ...saved, foreign };
@@ -393,6 +410,8 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await save(page, language).click();
     await expect(page.getByText(messages['detail.saved'][language], { exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { level: 1, name: 'Å overshirt 🌿', exact: true })).toBeVisible();
+    await expect(page.locator('#detail-edit')).toBeFocused();
+    await editItem(page);
     await expect(page.locator('#detail-description')).toHaveValue('Oma kuvaus / egen beskrivning');
     await expect(page).toHaveURL(new RegExp(`#/items/${item.id}$`));
     expect(item).toEqual({ ...oldItem, title: 'Å overshirt 🌿', category: 'layer', version: 2, updated_at: item.updated_at,
@@ -420,6 +439,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await expect(page.locator('.item-card')).toHaveCount(1);
     await expect(page.locator('.item-card h2')).toHaveText('Å overshirt 🌿');
     await page.locator(`a[href="#/items/${item.id}"]`).click();
+    await editItem(page);
     await expect(page.locator('#detail-description')).toHaveValue('');
     expect(foreign).toEqual(oldForeign);
     expect([...api.files].map(([key, value]) => [key, createHash('sha256').update(value).digest('hex')])).toEqual(oldFiles);
@@ -479,6 +499,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(item.title).toBe('🍂'.repeat(100));
     expect(image.alt_text).toBe('🍂'.repeat(240));
     expect(calls).toHaveLength(2);
+    await editItem(page);
     await expect(save(page, language)).toBeDisabled();
 
     await title.fill('');
@@ -552,6 +573,7 @@ test('dirty Back navigation and hash changes require explicit discard and preser
   await page.evaluate((id) => { location.hash = `#/items/${id}`; }, second.item.id);
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('button', { name: messages['common.discard'].en, exact: true }).click();
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue('Second item');
   expect(item.title).toBe('Olive overshirt');
 });
@@ -561,7 +583,7 @@ test('conflict retains frozen draft and section reload never discards the siblin
   await page.locator('#detail-description').fill('Sibling description');
   Object.assign(item, { title: 'Another saved name', version: 2 });
   await save(page).click();
-  await expect(page.locator('.detail-name [role="alert"]')).toBeFocused();
+  await expect(page.locator('.item-recovery [role="alert"]')).toBeFocused();
   await expect(page.locator('#detail-title')).toHaveValue('My attempt');
   await expect(save(page)).toBeDisabled();
   await expect(page.getByRole('button', { name: messages['detail.check'].en })).toHaveCount(0);
@@ -676,6 +698,7 @@ test('missing image bytes show the existing treatment without disabling saved te
   await page.goto('/'); await signIn(page);
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
   await expect(page.getByText(messages['photo.missing'].en, { exact: true })).toBeVisible();
+  await editItem(page);
   await page.locator('#detail-title').fill('Text correction');
   await save(page).click();
   await expect(page.getByText(messages['detail.saved'].en, { exact: true })).toBeVisible();
@@ -693,6 +716,7 @@ test('late item reads cannot populate a different item editor', async ({ page })
   await page.locator(`a[href="#/items/${item.id}"]`).click();
   await expect.poll(() => Boolean(held)).toBe(true);
   await page.evaluate((id) => { location.hash = '#/items/' + id; }, second.item.id);
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue('Second item');
   await held!.fulfill({ json: item }).catch(() => {});
   await expect(page.locator('#detail-title')).toHaveValue('Second item');
@@ -719,6 +743,7 @@ test('pending writes are single-flight and block navigation, but logout clears t
   await signIn(page, 'b');
   await expect(page.locator('.workspace-identity')).toContainText('Robin');
   await page.evaluate((id) => { location.hash = '#/items/' + id; }, foreign.item.id);
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue('Robin private');
   await held!.fulfill({ json: { ...item, title: 'Never show to Robin', version: 2 } }).catch(() => {});
   await expect(page.locator('#detail-title')).toHaveValue('Robin private');
@@ -792,6 +817,7 @@ for (const pending of ['read', 'description write'] as const) {
     })).toBe(true);
     await expect(page.locator('.workspace-identity')).toContainText('Robin');
     await page.evaluate((id) => { location.hash = '#/items/' + id; }, foreign.item.id);
+    await editItem(page);
     await expect(page.locator('#detail-title')).toHaveValue('Robin private');
     await held!.fulfill({ json: pending === 'read' ? item :
       [{ id: image.id, owner_id: owners.a, item_id: item.id, alt_text: 'Never show to next owner', description_version: 2 }] }).catch(() => {});

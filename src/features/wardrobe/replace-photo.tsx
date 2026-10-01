@@ -24,6 +24,7 @@ import { preparingMessage, useBackground, type PreparedWithBackground } from './
 import { useEnhancement } from './use-enhancement';
 import type { StageResult } from './enhancement-stage';
 import { EnhancementStatus } from './enhancement-status';
+import { PhotoChoice, PhotoMenu, photoMenuId } from './photo-actions';
 
 type Props = {
   client: AppClient; scope: OwnerScope; ai: AiClient; images: PrivateImages;
@@ -189,7 +190,9 @@ function Replacement(props: Props) {
   useEffect(() => {
     if (focusEdit.current && !editing && !preparing) {
       focusEdit.current = false;
-      document.getElementById('image-change-edit')?.focus();
+      // Never pull focus away from a field the user has moved to while the photo was being prepared.
+      const active = document.activeElement;
+      if (!active || active.closest('.photo-panel') || !active.matches('input, select, textarea, button, summary, a[href], [contenteditable="true"]')) document.getElementById(photoMenuId)?.focus();
     }
   }, [editing, preparing]);
   useEffect(() => {
@@ -260,7 +263,7 @@ function Replacement(props: Props) {
   function commit(prepared: PreparedWithBackground, stage: Exclude<StageResult, { kind: 'aborted' | 'available' }>, next: PhotoEdit,
     replacing: boolean, source: CropSource | null) {
     const settled = stage.kind === 'enhanced' ? stage.photo : prepared.photo;
-    if (!replacing) focusEdit.current = true;
+    focusEdit.current = true;
     setReview(null);
     setPhoto(settled); setEdit(next); setEditing(false);
     background.settle(prepared.state);
@@ -305,6 +308,10 @@ function Replacement(props: Props) {
     void analysis.commitPhoto(h1);
   }
   expiring.current = () => revertEnhancement('generic');
+  function useOriginalBackground() {
+    if (change.frozen) return;
+    if (background.useOriginal() === 'again' && original.current) void prepare(original.current, edit, false);
+  }
   function cancelCrop() { work.current?.abort(); setPreparing(false); setEditing(false); focusEdit.current = true; }
   const { t } = props;
   const formBaseline = { ...props.item.values };
@@ -337,21 +344,24 @@ function Replacement(props: Props) {
           aria-label={t('capture.library')} disabled={change.frozen || preparing} onChange={event => { choose(event.target.files?.[0]); event.target.value = ''; }} />
         <input ref={camera} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" tabIndex={-1}
           aria-label={t('capture.camera')} disabled={change.frozen || preparing} onChange={event => { choose(event.target.files?.[0]); event.target.value = ''; }} />
-        {!editing && <div className="photo-actions">
-          <button className="button button-secondary" type="button" disabled={change.frozen || preparing} onClick={() => library.current?.click()}>{t('capture.library')}</button>
+        {!photo && !review && !editing && <PhotoChoice t={t} disabled={change.frozen || preparing}
+          onLibrary={() => library.current?.click()} onCamera={() => camera.current?.click()} />}
+        {photo && !editing && <PhotoMenu t={t} disabled={change.frozen || preparing}>
+          <button className="button button-quiet" type="button" disabled={change.frozen || preparing} onClick={() => library.current?.click()}>{t('capture.replace')}</button>
           <button className="button button-quiet" type="button" disabled={change.frozen || preparing} onClick={() => camera.current?.click()}>{t('capture.camera')}</button>
-          {photo && <button id="image-change-edit" className="button button-secondary" type="button"
-            disabled={change.frozen || preparing} onClick={() => setEditing(true)}>{t('photo.edit')}</button>}
-        </div>}
+          <button id="image-change-edit" className="button button-quiet" type="button"
+            disabled={change.frozen || preparing} onClick={() => setEditing(true)}>{t('photo.edit')}</button>
+          {!provisional && <BackgroundStatus placement="menu" state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
+            disabled={change.frozen || preparing} t={t} onUseOriginal={useOriginalBackground} />}
+          <EnhancementStatus placement="menu" view={enhancement.view} disabled={change.frozen || preparing} t={t}
+            onSkip={enhancement.skip} onRevert={() => revertEnhancement()} />
+          <ReanalyseNote t={t} show={(enhancement.view.enhanced && !enhancement.view.working) || (!provisional && background.state === 'removed' && analysis.phase !== 'off' && analysis.phase !== 'none')} />
+        </PhotoMenu>}
         {(!editing || provisional) && <EnhancementStatus view={enhancement.view} disabled={change.frozen || preparing} t={t}
           onSkip={enhancement.skip} onRevert={() => revertEnhancement()} onCancelCrop={provisional?.crop ? cancelCrop : undefined} />}
-        {review && editing && !provisional && <BackgroundStatus state="removed" analysed={false} disabled={change.frozen || preparing} t={t} onUseOriginal={reviewOriginal} />}
+        {review && editing && !provisional && <BackgroundStatus state="removed" review analysed={false} disabled={change.frozen || preparing} t={t} onUseOriginal={reviewOriginal} />}
         {!editing && !provisional && <BackgroundStatus state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
-          disabled={change.frozen || preparing} t={t} onUseOriginal={() => {
-            if (change.frozen) return;
-            if (background.useOriginal() === 'again' && original.current) void prepare(original.current, edit, false);
-          }} />}
-        <ReanalyseNote t={t} show={((!editing || provisional) && enhancement.view.enhanced && !enhancement.view.working) || (!editing && !provisional && background.state === 'removed' && analysis.phase !== 'off' && analysis.phase !== 'none')} />
+          disabled={change.frozen || preparing} t={t} onUseOriginal={useOriginalBackground} />}
         {!photo && !preparing && !review && <BackgroundNote t={t} language={props.language} />}
         {preparing && !enhancement.view.working && <p role="status">{t(preparingMessage(background.state, background.downloading, 'capture.preparing'))}</p>}
         {error && <p role="alert" className="notice notice-error">{t(error)}</p>}

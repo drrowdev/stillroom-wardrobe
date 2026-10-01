@@ -1,0 +1,19 @@
+/* UX2 Add item and photo options. New class names only: app.css loads after this file and wins on equal selectors. */
+
+/* Step 1: the photo on its own, centred. */
+.capture-layout.capture-step-photo { grid-template-columns: minmax(0, 560px); justify-content: center; }
+.capture-step-cancel { display: block; min-height: 44px; margin: 12px auto 0; }
+
+/* Photo options: one toggle, then plain buttons in DOM order. */
+.photo-menu { flex-direction: column; align-items: center; }
+.photo-menu-panel { display: grid; gap: 8px; width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.photo-menu-panel[hidden] { display: none; }
+.photo-menu-panel .button { justify-content: flex-start; width: 100%; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
+.photo-menu-panel .background-status, .photo-menu-panel .copy-details { margin: 0; }
+.photo-menu-panel .copy-details summary { min-height: 44px; }
+
+@media (max-width: 650px) {
+  .capture-layout:not(.capture-step-photo) .capture-photo.has-photo { max-height: 40vh; }
+}
+
+.crop-exact.crop-exact-after { margin-top: 12px; margin-bottom: 0; }

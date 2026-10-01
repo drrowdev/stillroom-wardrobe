@@ -5,7 +5,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { locales, messages, type Language } from '../../src/i18n';
 import type { BackgroundTestHook } from '../../src/images/background/test-hook';
 import { modelAssetBytes, modelAssets } from '../../src/images/background/model-assets';
-import { aiFixture } from './ai-photo-first-support';
+import { aiFixture, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { observeEgress, segmentationProblems } from './background-egress';
 import { mockBackend, signIn } from './mock-backend';
 
@@ -176,6 +176,7 @@ test('removal settles before the single analysis; the cut-out replaces the backg
   expect(api.inputs[0]!.sha256).toBe(shown);
 
   const original = page.locator('#background-original');
+  await openPhotoMenu(page);
   await expect(original).toHaveAccessibleName(text('photo.bgUseOriginal'));
   await expect(original).toHaveAccessibleDescription(text('photo.reanalyse'));
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
@@ -245,9 +246,14 @@ for (const [name, value, reason] of failures) {
 
 test('"Use original background" works while removal runs, and a late result is never published or analysed', async ({ page }) => {
   engineOnly();
-  await hook(page, { mask: 'left', runDelayMs: 2_500 });
+  await hook(page, { mask: 'left' });
   const api = await aiFixture(page);
   await openAdd(page);
+  // UX2: the fields appear with the first photo, so the removal under test runs for a second photo chosen from them.
+  await choose(page, await syntheticPhoto(page));
+  await settled(page, 1);
+  await expect.poll(() => analyses(api)).toBe(1);
+  await patch(page, { runDelayMs: 2_500 });
   await choose(page, await syntheticPhoto(page));
   const original = page.locator('#background-original');
   await expect(original).toBeEnabled({ timeout: 15_000 });
@@ -255,12 +261,12 @@ test('"Use original background" works while removal runs, and a late result is n
   await expect(page.locator('#choose-photo')).toBeDisabled();
   await page.locator('#item-title').fill('Typed during removal');
   await original.click();
-  await settled(page, 1);
-  expect((await log(page))[0]).toEqual({ outcome: 'original', reason: 'cancelled' });
-  await expect.poll(() => analyses(api)).toBe(1);
+  await settled(page, 2);
+  expect((await log(page))[1]).toEqual({ outcome: 'original', reason: 'cancelled' });
+  await expect.poll(() => analyses(api)).toBe(2);
   await page.waitForTimeout(3_000);
-  expect(analyses(api)).toBe(1);
-  expect(await log(page)).toHaveLength(1);
+  expect(analyses(api)).toBe(2);
+  expect(await log(page)).toHaveLength(2);
   const [right] = await sample(page, '.capture-photo img', [[0.73, 0.5]]);
   near(right, RED);
   await expect(page.locator('#item-title')).toHaveValue('Typed during removal');
@@ -426,8 +432,11 @@ async function openFlow(page: Page, api: Fixture, flow: keyof typeof flows) {
   const before = { item: structuredClone(saved.item), image: structuredClone(saved.image), images: api.images.length };
   await page.reload();
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
   await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
+  await page.locator('#detail-cancel-edit').click();
+  await openPhotoMenu(page);
   await page.getByRole('button', { name: text('imageChange.replace'), exact: true }).click();
   await expect(page.locator('.image-change .background-note')).toBeVisible();
   return () => {
@@ -447,6 +456,7 @@ for (const flow of ['add', 'replace'] as const) {
     await settled(page, 1);
     await expect.poll(() => analyses(api)).toBe(1);
     await patch(page, { runDelayMs: 60_000 });
+    await openPhotoMenu(page);
     await page.locator(selectors.edit).click();
     await page.locator('#crop-rotate').click();
     await page.locator('#apply-crop').click();
@@ -454,6 +464,7 @@ for (const flow of ['add', 'replace'] as const) {
     await page.waitForTimeout(500);
     await page.locator('#crop-cancel').click();
     const original = page.locator('#background-original');
+    await openPhotoMenu(page);
     await expect(original).toBeEnabled();
     await expect(original).toHaveAccessibleDescription(text('photo.reanalyse'));
     near((await sample(page, selectors.photo, [[0.73, 0.5]]))[0], FILL);
@@ -484,6 +495,7 @@ for (const flow of ['add', 'replace'] as const) {
     await page.waitForTimeout(1_000);
     expect(analyses(api)).toBe(1);
     near((await sample(page, selectors.photo, [[0.73, 0.5]]))[0], RED);
+    await openPhotoMenu(page);
     await page.locator(selectors.edit).click();
     await expect(page.locator('.crop-stage img')).toBeVisible();
     near((await sample(page, '.crop-stage img', [[0.73, 0.5]]))[0], RED);
@@ -507,6 +519,7 @@ test('the cut-out is centred on a 4:5 canvas with 8 % padding; the original back
   expect(framed.top).toBeLessThan(0.095);
   expect(framed.left).toBeGreaterThan(0.08);
   await expect.poll(() => analyses(api)).toBe(1);
+  await openPhotoMenu(page);
   await page.locator('#background-original').click();
   await expect.poll(() => analyses(api)).toBe(2);
   await expect(page.locator('#background-original')).toHaveCount(0);
@@ -525,6 +538,7 @@ test('Add item: crop editing uses the unsegmented photo, and re-preparing remove
   await choose(page, await syntheticPhoto(page));
   await settled(page, 1);
   near((await sample(page, '.capture-photo img', [[0.73, 0.5]]))[0], FILL);
+  await openPhotoMenu(page);
   await page.locator('#edit-photo').click();
   // The red block the mask removed is still there to crop around.
   near((await sample(page, '.crop-stage img', [[0.73, 0.5]]))[0], RED);
@@ -534,6 +548,7 @@ test('Add item: crop editing uses the unsegmented photo, and re-preparing remove
   // Rotated to 800 × 640, the kept left half (403 × 640) is framed again on a 4:5 canvas.
   expect((await log(page))[1]).toMatchObject({ outcome: 'removed', framed: 1, width: 612, height: 765 });
   await expect.poll(() => analyses(api)).toBe(2);
+  await openPhotoMenu(page);
   await page.locator('#edit-photo').click();
   near((await sample(page, '.crop-stage img', [[0.73, 0.5]]))[0], RED);
 });
@@ -546,8 +561,11 @@ test('Replace photo: the saved item is unchanged until Save, crop editing uses t
   const item = structuredClone(saved.item), image = structuredClone(saved.image), images = api.images.length;
   await page.reload();
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+  await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
   await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
+  await page.locator('#detail-cancel-edit').click();
+  await openPhotoMenu(page);
   await page.getByRole('button', { name: text('imageChange.replace'), exact: true }).click();
   await expect(page.locator('.image-change .background-note')).toBeVisible();
   await choose(page, await syntheticPhoto(page), '.image-change');
@@ -555,6 +573,7 @@ test('Replace photo: the saved item is unchanged until Save, crop editing uses t
   expect((await log(page))[0]).toMatchObject({ outcome: 'removed' });
   await expect.poll(() => analyses(api)).toBe(1);
   near((await sample(page, '.image-change .capture-photo img', [[0.73, 0.5]]))[0], FILL);
+  await openPhotoMenu(page);
   await page.locator('#image-change-edit').click();
   near((await sample(page, '.crop-stage img', [[0.73, 0.5]]))[0], RED);
   await page.locator('#crop-rotate').click();
@@ -567,7 +586,7 @@ test('Replace photo: the saved item is unchanged until Save, crop editing uses t
   await page.locator('.image-change').getByRole('button', { name: text('common.cancel'), exact: true }).click();
   const discard = page.getByRole('button', { name: text('common.discard'), exact: true });
   if (await discard.isVisible().catch(() => false)) await discard.click();
-  await expect(page.locator('#detail-title')).toBeVisible();
+  await expect(page.locator('#detail-edit')).toBeVisible();
   expect(saved.item).toEqual(item);
   expect(saved.image).toEqual(image);
   expect(api.images).toHaveLength(images);
@@ -591,7 +610,7 @@ for (const selected of scenes) {
     if (selected.scene === 'working') await expect(page.locator('#background-original')).toBeEnabled({ timeout: 15_000 });
     else await settled(page, 1);
     if (selected.scene === 'fallback') await expect(page.locator('.background-status[role=status]')).toHaveText(text('photo.bgFailed', selected.language));
-    if (selected.scene === 'removed') await expect(page.locator('#background-original')).toBeVisible();
+    if (selected.scene === 'removed') { await openPhotoMenu(page); await expect(page.locator('#background-original')).toBeVisible(); }
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const png = await page.screenshot({ fullPage: true, animations: 'disabled', type: 'png', scale: 'css' });

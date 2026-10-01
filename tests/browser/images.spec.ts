@@ -6,7 +6,7 @@ import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { CORNER_COLOURS, ORIENTATION_CORNERS } from '../fixtures/jpeg-helpers';
 import { mockBackend, owners, signIn } from './mock-backend';
-import { manualEntry } from './ai-photo-first-support';
+import { manualEntry, openPhotoMenu } from './ai-photo-first-support';
 
 type Format = 'png' | 'webp' | 'jpeg';
 
@@ -250,17 +250,17 @@ for (const size of [{ width: 3200, height: 1214 }, { width: 1600, height: 530 }]
     const previewSize = await page.locator('.capture-photo img').evaluate((image: HTMLImageElement) =>
       ({ width: image.naturalWidth, height: image.naturalHeight }));
     expect(previewSize).toEqual({ width: 1600, height: size.height === 1214 ? 607 : 530 });
-    await page.locator('#edit-photo').click();
+    await openPhotoMenu(page); await page.locator('#edit-photo').click();
     await page.locator('#crop-reset').click();
     await openExact(page);
     await expect(page.locator('#crop-x')).toHaveValue('0');
     await expect(page.locator('#crop-y')).toHaveValue('0');
     await expect(page.locator('#apply-crop')).toBeEnabled();
     await page.locator('#apply-crop').click();
-    await expect(page.locator('#edit-photo')).toBeFocused();
+    await expect(page.locator('#photo-menu')).toBeFocused();
     await expect(page.locator('button[type="submit"]')).toBeEnabled();
     for (const field of ['width', 'height']) {
-      await page.locator('#edit-photo').click();
+      await openPhotoMenu(page); await page.locator('#edit-photo').click();
       await openExact(page);
       await page.locator(`#crop-${field}`).fill('99.99999999999999');
       await page.locator('#crop-rectangle').focus();
@@ -271,10 +271,10 @@ for (const size of [{ width: 3200, height: 1214 }, { width: 1600, height: 530 }]
         await expect(page.locator('#apply-crop')).toBeEnabled();
       }
       await page.locator('#apply-crop').click();
-      await expect(page.locator('#edit-photo')).toBeFocused();
+      await expect(page.locator('#photo-menu')).toBeFocused();
       await expect(page.locator('button[type="submit"]')).toBeEnabled();
     }
-    await page.locator('#edit-photo').click();
+    await openPhotoMenu(page); await page.locator('#edit-photo').click();
     await page.getByRole('button', { name: messages['photo.rotate'].en, exact: true }).click();
     await page.locator('.crop-stage').scrollIntoViewIfNeeded();
     const stage = (await page.locator('.crop-stage').boundingBox())!;
@@ -287,7 +287,7 @@ for (const size of [{ width: 3200, height: 1214 }, { width: 1600, height: 530 }]
     expect(crop[2]! < 1 && crop[3]! < 1).toBe(true);
     await expect(page.locator('#apply-crop')).toBeEnabled();
     await page.locator('#apply-crop').click();
-    await expect(page.locator('#edit-photo')).toBeFocused();
+    await expect(page.locator('#photo-menu')).toBeFocused();
     await expect(page.locator('button[type="submit"]')).toBeEnabled();
   });
 }
@@ -295,7 +295,7 @@ for (const size of [{ width: 3200, height: 1214 }, { width: 1600, height: 530 }]
 test('I07 rotate, pointer crop and Done keep the expected asymmetric pixels', async ({ page }) => {
   await setup(page, 'en', false, { width: 240, height: 160 });
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.locator('#edit-photo').click();
+  await openPhotoMenu(page); await page.locator('#edit-photo').click();
   await page.locator('#crop-rotate').click();
   await expect(page.locator('.crop-stage')).toHaveCSS('aspect-ratio', '160 / 240');
   await page.locator('.crop-stage').scrollIntoViewIfNeeded();
@@ -311,7 +311,7 @@ test('I07 rotate, pointer crop and Done keep the expected asymmetric pixels', as
   expect(await page.locator('.crop-fields input').evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value)))
     .toEqual(['50', '0', '50', '100']);
   await page.locator('#apply-crop').click();
-  await expect(page.locator('#edit-photo')).toBeFocused();
+  await expect(page.locator('#photo-menu')).toBeFocused();
   const result = await page.locator('.capture-photo img').evaluate(async (element: HTMLImageElement, colours) => {
     const helperPath = '/tests/fixtures/jpeg-helpers.ts';
     const { summarizeJpeg } = await import(helperPath) as typeof import('../fixtures/jpeg-helpers');
@@ -354,7 +354,7 @@ test('I07 accepted crop alone enters immutable Save and retry', async ({ page })
   const api = await setup(page, 'en', true);
   await page.locator('#item-title').fill('Synthetic cropped garment');
   await page.locator('#item-category').selectOption('top');
-  await page.locator('#edit-photo').click();
+  await openPhotoMenu(page); await page.locator('#edit-photo').click();
   await openExact(page);
   await page.locator('#crop-width').fill('50');
   await page.locator('#crop-rectangle').focus();
@@ -364,7 +364,7 @@ test('I07 accepted crop alone enters immutable Save and retry', async ({ page })
   await page.locator('#apply-crop').click();
   await expect(page.locator('.crop-editor')).toHaveCount(0);
   await expect(page.locator('button[type="submit"]')).toBeEnabled();
-  await expect(page.locator('#edit-photo')).toBeFocused();
+  await expect(page.locator('#photo-menu')).toBeFocused();
   const accepted = await page.locator('.capture-photo img').evaluate(async (element: HTMLImageElement) => {
     const blob = await (await fetch(element.src)).blob();
     const hash = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
@@ -389,7 +389,7 @@ test('I07 cancel, reset, language and owner cleanup retain only accepted drafts'
   const api = await setup(page);
   const initial = await page.locator('.capture-photo img').getAttribute('src');
   await page.locator('#item-title').fill('Oma synthetic text');
-  await page.locator('#edit-photo').click();
+  await openPhotoMenu(page); await page.locator('#edit-photo').click();
   await expect(page.locator('.photo-panel img')).toHaveCount(1);
   await expect(page.locator('.capture-photo, #edit-photo')).toHaveCount(0);
   await openExact(page);
@@ -399,8 +399,8 @@ test('I07 cancel, reset, language and owner cleanup retain only accepted drafts'
   await expect(page.locator('#crop-editor-title')).toBeFocused();
   await page.locator('#crop-cancel').click();
   await expect(page.locator('.capture-photo img')).toHaveAttribute('src', initial!);
-  await expect(page.locator('#edit-photo')).toBeFocused();
-  await page.locator('#edit-photo').click();
+  await expect(page.locator('#photo-menu')).toBeFocused();
+  await openPhotoMenu(page); await page.locator('#edit-photo').click();
   await openExact(page);
   await page.locator('#crop-width').fill('50');
   await page.locator('#crop-rotate').click();
@@ -421,14 +421,14 @@ test('I07 cancel, reset, language and owner cleanup retain only accepted drafts'
   await signIn(page, 'b');
   await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
   await expect(page.locator('#capture-title')).toBeVisible();
-  await expect(page.locator('#item-title')).toHaveValue('');
+  await expect(page.locator('#item-title')).toHaveCount(0);
   await expect(page.locator('#edit-photo')).toHaveCount(0);
   expect(api.items.length === 0 && api.images.length === 0 && api.files.size === 0).toBe(true);
 });
 
 test('I07 crop accessibility supports three languages, keyboard, narrow and enlarged text', async ({ page }) => {
   await setup(page);
-  await page.locator('#edit-photo').click();
+  await openPhotoMenu(page); await page.locator('#edit-photo').click();
   await openExact(page);
   for (const language of ['en', 'fi', 'sv'] as const) {
     if (language !== 'en') {
@@ -578,7 +578,7 @@ test('I07 synthetic crop visual evidence retains functional assertions in every 
   const api = await setup(page);
   await page.locator('#item-title').fill('Synthetic green garment');
   await page.locator('#item-category').selectOption('top');
-  await page.locator('#edit-photo').click();
+  await openPhotoMenu(page); await page.locator('#edit-photo').click();
   await openExact(page);
   await page.locator('#crop-width').fill('80');
   const origin = new URL(testInfo.project.use.baseURL!).origin;
@@ -600,7 +600,8 @@ test('I07 synthetic crop visual evidence retains functional assertions in every 
     expect(await page.locator('.crop-fields .field').evaluateAll((fields) => {
       const boxes = fields.map((field) => field.getBoundingClientRect());
       const apply = document.querySelector('#apply-crop')!.getBoundingClientRect();
-      return apply.top >= boxes[3]!.bottom + 12 && (innerWidth === 1280
+      // UX2: the exact values sit in their own disclosure below the crop actions.
+      return boxes[0]!.top >= apply.bottom + 12 && (innerWidth === 1280
         ? boxes[0]!.top === boxes[1]!.top && boxes[2]!.top === boxes[3]!.top && boxes[2]!.top > boxes[0]!.bottom
         : boxes.every((box, index) => !index || box.top > boxes[index - 1]!.bottom));
     }), 'Coherent crop grid and action spacing').toBe(true);

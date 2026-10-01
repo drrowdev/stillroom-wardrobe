@@ -5,6 +5,7 @@ import { mkdir, lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { mockBackend, owners, signIn, type MockOptions } from './mock-backend';
+import { editItem } from './ai-photo-first-support';
 
 const button = (page: Page, key: keyof typeof messages, language: Language = 'en') =>
   page.getByRole('button', { name: messages[key][language], exact: true });
@@ -123,10 +124,12 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     const { api, item, image, peer } = await setup(page, language);
     const original = structuredClone(item), other = structuredClone(peer);
     await page.locator(`a[href="#/items/${item.id}"]`).click();
+    await editItem(page);
     await page.locator('#detail-title').fill('Edited saved shirt');
     await expect(button(page, 'item.trash', language)).toBeDisabled();
     await button(page, 'detail.saveChanges', language).click();
     await expect(button(page, 'item.trash', language)).toBeEnabled();
+    await editItem(page);
     await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
     await page.locator('#detail-description').fill('Unsaved image description');
     await expect(button(page, 'item.trash', language)).toBeDisabled();
@@ -168,7 +171,8 @@ test('lost Trash reply checks exact saved result without sending the change agai
   await page.locator(`a[href="#/items/${item.id}"]`).click();
   await button(page, 'item.trash').click();
   await expect(page.getByRole('alert')).toHaveText(messages['lifecycle.unconfirmed'].en);
-  await expect(page.locator('#detail-title')).toBeDisabled();
+  // UX2: the item opens as a view card; its Edit stays locked while the Trash result is unknown.
+  await expect(page.locator('#detail-edit')).toBeDisabled();
   expect(api.requests.filter(request => request.path.endsWith('/set_item_trashed'))).toHaveLength(1);
   await button(page, 'lifecycle.check').click();
   await expect(page.locator('#wardrobe-title')).toBeVisible();

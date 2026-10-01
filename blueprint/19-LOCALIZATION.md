@@ -78,7 +78,7 @@ there and are reachable before Turn on. The visible summary states the automatic
 sending to Microsoft's Azure OpenAI in the EU, no training, that analysis costs
 money, and that the monthly allowance is not a bill cap. The disclosure is never
 forced open and the app doesn't claim it was read.
-Only secondary setup instructions, camera workarounds, the crop editor's exact values and the photo analysis Full details use disclosure controls.
+Only secondary setup instructions, camera workarounds, the crop editor's exact values, the photo options (UX2) and the photo analysis Full details use disclosure controls.
 Removing helper text also removes its accessible-description reference, never
 the field's label, validation or genuine constraint.
 

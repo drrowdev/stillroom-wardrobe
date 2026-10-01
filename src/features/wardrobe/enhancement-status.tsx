@@ -6,9 +6,15 @@ type Props = {
   view: EnhancementView; disabled: boolean; t: Translate;
   onSkip: () => void; onRevert: () => void;
   /** Shown while a changed crop is being cleaned up: cancelling keeps the previous photo. */ onCancelCrop?: () => void;
-};
+    /** `inline` shows the progress, "Edited with AI" and the lines; `menu` (Photo options) only "Use photo without clean-up". */
+    placement?: 'inline' | 'menu';
+  };
 // "Skip" and "Use photo without clean-up" are real buttons; "Edited with AI" is visible text.
-export function EnhancementStatus({ view, disabled, t, onSkip, onRevert, onCancelCrop }: Props) {
+export function EnhancementStatus({ view, disabled, t, onSkip, onRevert, onCancelCrop, placement = 'inline' }: Props) {
+  if (placement === 'menu') {
+    return view.enhanced && !view.working ? <button id="enhance-revert" className="button button-quiet" type="button" disabled={disabled}
+      onClick={onRevert} aria-describedby={reanalyseNoteId}>{t('enhance.revert')}</button> : null;
+  }
   if (view.working) {
     return <div className="background-status enhancement-status">
       <p role="status" className="fine">{t('enhance.working')}</p>
@@ -19,8 +25,6 @@ export function EnhancementStatus({ view, disabled, t, onSkip, onRevert, onCance
   if (view.enhanced) {
     return <div className="background-status enhancement-status">
       <p className="fine enhancement-label">{t('enhance.edited')}</p>
-      <button id="enhance-revert" className="button button-quiet" type="button" disabled={disabled} onClick={onRevert}
-        aria-describedby={reanalyseNoteId}>{t('enhance.revert')}</button>
     </div>;
   }
   if (view.line === 'none') return null;

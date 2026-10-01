@@ -4,7 +4,7 @@ import { mkdir, open, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { languages, locales, messages, translate, type Language, type MessageKey } from '../../src/i18n';
 import { azureAiReviewExpires } from '../../src/domain/ai-controls';
-import { aiFixture } from './ai-photo-first-support';
+import { aiFixture, editItem } from './ai-photo-first-support';
 import { owners } from './mock-backend';
 import { utcPeriod } from '../../src/features/settings/ai-features-model';
 
@@ -456,6 +456,7 @@ for (const availability of ['laundry', 'repair', 'lent'] as const) {
     (saved.item as Record<string, unknown>).availability = availability;
     await page.reload();
     await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+    await editItem(page);
     await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
     await expect(page.locator('.detail-availability')).toHaveCount(0);
     await expect(page.getByRole('radio', { name: text(`availability.${availability}`), exact: true })).toHaveCount(0);
