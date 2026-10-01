@@ -490,6 +490,19 @@ jobs:
             test-results/ux1-visual/dialog-fi-320-200.png
           if-no-files-found: error
           retention-days: 1
+      - name: Preserve bounded synthetic UX6 wardrobe visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ux6-wardrobe-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/ux6-visual/wardrobe-en-mobile.png
+            test-results/ux6-visual/chips-fi-mobile.png
+            test-results/ux6-visual/filter-sheet-fi-mobile.png
+            test-results/ux6-visual/filter-sheet-sv-320-200.png
+            test-results/ux6-visual/filter-sheet-en-desktop.png
+            test-results/ux6-visual/sign-in-sv-320-200.png
+          if-no-files-found: error
+          retention-days: 1
 
   pwa:
     name: PWA production contracts

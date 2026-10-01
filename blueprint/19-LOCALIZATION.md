@@ -109,6 +109,16 @@ Details / Tiedot / Detaljer. Statistics uses Worn / Käytetty / Använt and a si
 note naming the currencies when prices differ. In Trash the row action is Restore /
 Palauta / Återställ.
 
+UX6 update, 1 October 2026 (owner-approved UX review, remaining findings): the
+wardrobe Filters button shows the active count, Filters (2) / Suodattimet (2) /
+Filter (2); the sheet ends with Clear filters and Show N items / Näytä N vaatetta /
+Visa N plagg, using the language's plural rules. Each active-filter chip is named
+Remove … / Poista … / Ta bort …, and values that need their group read "Dress code:
+3". Refresh is an icon named Refresh wardrobe / Päivitä vaatekaappi / Uppdatera
+garderoben. The update prompt reads Update available / Päivitys saatavilla /
+Uppdatering tillgänglig with the action Update / Päivitä / Uppdatera. English
+user copy says "item", not "garment" (FI vaate, SV plagg are unchanged).
+
 New or moved small copy is at least 14 px, with 44 px controls and normal-text
 contrast of at least 4.5:1. Check 320 px and 200% text without clipping. Preserve
 the brand and illustration; hide the textless entry illustration container on

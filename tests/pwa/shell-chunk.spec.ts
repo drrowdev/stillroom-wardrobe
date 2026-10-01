@@ -94,3 +94,62 @@ for (const width of [390, 1280]) {
     await expect(page.locator('#email')).toBeVisible();
   });
 }
+
+// UX6 in the production build: the Filters sheet's frame (named dialog, focusable heading, Close and safe geometry) is
+// part of the start page; its options and their stylesheet load on demand. Hold or fail each part separately.
+const isSheetPart = (kind: 'js' | 'css') => (url: URL) => new RegExp(`^/assets/filter-sheet-[\\w-]+\\.${kind}$`).test(url.pathname);
+for (const kind of ['js', 'css'] as const) {
+  for (const result of ['load', 'fail'] as const) {
+    for (const width of [390, 1280]) {
+      test(`${width}px: the Filters sheet with its ${kind === 'js' ? 'script' : 'stylesheet'} held, then ${result === 'load' ? 'arriving' : 'failing'}`, async ({ page }) => {
+        const errors: string[] = [];
+        page.on('pageerror', error => { errors.push(error.message); });
+        await page.setViewportSize({ width, height: 844 });
+        const api = await mockBackend(page, { initialLanguage: 'en' });
+        for (let index = 0; index < 3; index++) api.seedSavedItem('a', `Synthetic garment ${index + 1}`);
+        let release!: (outcome: 'load' | 'fail') => void;
+        const outcome = new Promise<'load' | 'fail'>(resolve => { release = resolve; });
+        await page.route(isSheetPart(kind), async route => {
+          if (await outcome === 'fail') await route.abort('failed'); else await route.fallback();
+        });
+        await page.goto(server.url);
+        await signIn(page);
+        await expectSignedIn(page);
+        await expect(page.locator('.item-card')).toHaveCount(3);
+        await page.locator('#wardrobe-search').fill('Synthetic');
+        await page.locator('#wardrobe-sort').selectOption('name');
+        const filters = page.locator('.wardrobe-filter-button'), sheet = page.locator('dialog.filter-sheet');
+        await filters.click();
+        await expect(page.getByRole('dialog', { name: text('common.filters'), exact: true })).toBeVisible();
+        await expect(page.locator('#filter-sheet-title')).toBeFocused();
+        const close = sheet.getByRole('button', { name: text('common.close'), exact: true });
+        await expect(close).toBeVisible();
+        await expect(sheet.locator('.chunk-loading')).toBeVisible();
+        await expect(sheet.locator('.wardrobe-facet-grid')).toHaveCount(0);
+        const fits = await sheet.evaluate(dialog => {
+          const box = dialog.getBoundingClientRect();
+          return box.left >= -0.5 && box.right <= innerWidth + 0.5 && box.top >= -0.5 && box.bottom <= innerHeight + 0.5 && box.width >= 280;
+        });
+        expect(fits).toBe(true);
+        release(result);
+        if (result === 'load') {
+          await expect(sheet.locator('.wardrobe-facet-grid')).toBeVisible();
+          await sheet.locator('input[name="category"][value="top"]').check();
+          await sheet.getByRole('button', { name: messages['wardrobe.showItems_other'].en.replace('{count}', '3'), exact: true }).click();
+          await expect(page.locator('.filter-chip')).toHaveCount(1);
+        } else {
+          await expect(sheet.getByRole('alert')).toContainText(text('chunk.failed'));
+          await expect(page.locator('.fatal-error')).toHaveCount(0);
+          await close.click();
+          await expect(page.locator('.filter-chip')).toHaveCount(0);
+        }
+        await expect(sheet).toHaveCount(0);
+        await expect(filters).toBeFocused();
+        await expect(page.locator('#wardrobe-search')).toHaveValue('Synthetic');
+        await expect(page.locator('#wardrobe-sort')).toHaveValue('name');
+        await expect(page.locator('.item-card')).toHaveCount(3);
+        expect(errors).toEqual([]);
+      });
+    }
+  }
+}
