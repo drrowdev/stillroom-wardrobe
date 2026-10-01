@@ -1,5 +1,7 @@
 /* UX1 signed-in navigation: the header links, the account menu, the phone tab bar and More. Loaded with the signed-in
    navigation (shell-nav.tsx), after app.css, so the sign-in page does not download it. */
+/* Read by loadShell() in shell-fallback.tsx: the navigation shows only once this stylesheet has applied. */
+:root { --shell-loaded: 1; }
 @media (forced-colors: active) {
   .account-popover { outline: 1px solid transparent; }
   .tab-bar { border-top: 1px solid CanvasText; }

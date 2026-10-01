@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import type { NavFamily } from '../domain/outfits';
 import type { Translate } from '../i18n';
 import { fitHeader } from './header-fit';
 import { Icon } from './icon';
-import { restoreShellFocus } from './shell-focus';
 import type { MenuPage } from './shell-layout';
 import { fitTabBar } from './tab-fit';
 import '../styles/shell.css';
@@ -21,7 +20,6 @@ const tabs = [
  */
 export function TopNav({ family, t }: { family: NavFamily; t: Translate }) {
   const nav = useRef<HTMLElement>(null);
-  useLayoutEffect(restoreShellFocus, []);
   useEffect(() => fitHeader(nav.current?.parentElement ?? null), []);
   const link = (target: NavFamily, href: string) =>
     ({ className: `nav-link${family === target ? ' active-nav' : ''}`, 'aria-current': family === target ? 'page' as const : undefined, href });
@@ -34,7 +32,6 @@ export function TopNav({ family, t }: { family: NavFamily; t: Translate }) {
 /** Phone: four destinations and More, after the page content in reading order. */
 export function TabBar({ family, more, t }: { family: NavFamily; more: ReactNode; t: Translate }) {
   const bar = useCallback((element: HTMLElement | null) => fitTabBar(element), []);
-  useLayoutEffect(restoreShellFocus, []);
   return <nav className="tab-bar" aria-label={t('nav.wardrobe')} ref={bar}>
     <ul>
       {tabs.map(tab => <li key={tab.href}>

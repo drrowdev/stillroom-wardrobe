@@ -1,4 +1,4 @@
-import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { readConfiguration, type Configuration, type PublicConfig } from '../data/config';
 import { makeClient, retireClient, revokeSession } from '../data/client';
 import { SessionController, type OwnerScope, type SessionState } from '../auth/session';
@@ -31,6 +31,7 @@ import { WeatherStore, weatherKey } from '../features/today/use-weather';
 import { StylistStore } from '../features/stylist/stylist-store';
 import { weatherConfig } from '../domain/weather';
 import { ShellBoundary, ShellFallback } from './shell-fallback';
+import { restoreShellFocus, useShell } from './shell-focus';
 import { menuPageFor, useNarrow } from './shell-layout';
 import {
   clearRecoveryNotice, leaveRecovery, markNormalAuthStarted, normalAuthStarted,
@@ -48,10 +49,6 @@ const CalendarScreen = lazyNamed(() => import('../features/calendar/calendar'), 
 const StatisticsScreen = lazyNamed(() => import('../features/statistics/statistics-screen'), 'StatisticsScreen');
 const StylistScreen = lazyNamed(() => import('../features/stylist/stylist-screen'), 'StylistScreen');
 const AdminScreen = lazyNamed(() => import('../features/admin/admin-screen'), 'AdminScreen');
-// The signed-in navigation loads with the workspace, so the sign-in page does not download it.
-const TopNav = lazyNamed(() => import('./shell-nav'), 'TopNav');
-const TabBar = lazyNamed(() => import('./shell-nav'), 'TabBar');
-const AccountMenu = lazyNamed(() => import('./shell-nav'), 'AccountMenu');
 const configuration = readConfiguration(import.meta.env);
 const browserLanguages = navigator.languages;
 function Brand() {
@@ -350,6 +347,11 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   const [requestPassword, setRequestPassword] = useState(false);
   const [route, setRoute] = useState('wardrobe');
   const narrow = useNarrow();
+  const shell = useShell();
+  // The header links and the tab bar arrive in the same commit; a focused fallback link hands focus to its counterpart.
+  // Called from here, not from shell-nav.tsx, so that chunk imports nothing from the entry chunk and keeps its file name
+  // across releases that do not change it (an open tab can still fetch it after a deploy).
+  useLayoutEffect(() => { if (shell.status === 'ready') restoreShellFocus(); }, [shell.status]);
   const refusal = callback.kind === 'none' ? null
     : callback.kind === 'link' ? { kind: 'conflict' as const, notice: undefined }
       : { kind: callback.kind, notice: callback.notice };
@@ -411,7 +413,8 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   }
   const navFamily = navFamilyFor(route);
   const shellFallback = (failed: boolean) => <ShellFallback family={navFamily} page={menuPageFor(route)} failed={failed} t={t} onSignOut={() => { void signOut(); }} />;
-  const accountMenu = <AccountMenu narrow={narrow} open={menu} onOpen={setMenu} page={menuPageFor(route)} name={state.profile.display_name}
+  const nav = shell.module;
+  const accountMenu = nav && <nav.AccountMenu narrow={narrow} open={menu} onOpen={setMenu} page={menuPageFor(route)} name={state.profile.display_name}
     initial={state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)} t={t} onSignOut={() => { void signOut(); }}
     language={<LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} />} />;
   return (
@@ -422,13 +425,13 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
         <Brand />
         {/* The links and account menu load in their own chunk; until then, or if that fails, plain links and Sign out. */}
         <ShellBoundary fallback={shellFallback(true)}>
-          <Suspense fallback={shellFallback(false)}><TopNav family={navFamily} t={t} />{!narrow && accountMenu}</Suspense>
+          {nav ? <><nav.TopNav family={navFamily} t={t} />{!narrow && accountMenu}</> : shellFallback(shell.status === 'failed')}
         </ShellBoundary>
       </header>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online || state.profileSaving} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}
       <UpdatePrompt t={t} />
       <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={state.language} online={online} t={t} onRouteCommitted={setRoute} onSignOut={() => { void signOut(); }} />
-      <ShellBoundary fallback={null}><Suspense fallback={null}><TabBar family={navFamily} more={narrow ? accountMenu : null} t={t} /></Suspense></ShellBoundary>
+      {nav && <ShellBoundary fallback={null}><nav.TabBar family={navFamily} more={narrow ? accountMenu : null} t={t} /></ShellBoundary>}
     </div>
   );
 }

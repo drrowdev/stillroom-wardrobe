@@ -1,7 +1,7 @@
 import { Component, useLayoutEffect, useRef, type ReactNode } from 'react';
 import type { NavFamily } from '../domain/outfits';
 import type { Translate } from '../i18n';
-import { leaveShellFocus, restoreShellFocus } from './shell-focus';
+import { failShell, leaveShellFocus, loadShell, restoreShellFocus } from './shell-focus';
 import type { MenuPage } from './shell-layout';
 
 // The header's links and the account menu load in their own chunk (shell-nav.tsx). Until they arrive, or if they fail
@@ -18,6 +18,7 @@ const links = [
 export function ShellFallback({ family, page, failed, t, onSignOut }: { family: NavFamily; page: MenuPage; failed: boolean; t: Translate; onSignOut: () => void }) {
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
+    loadShell();
     restoreShellFocus();
     const element = root.current;
     // Runs before the links leave the page, so it can still see which one has focus.
@@ -38,9 +39,10 @@ export function ShellFallback({ family, page, failed, t, onSignOut }: { family: 
   </div>;
 }
 
-/** Keeps a failed navigation download inside the header (or the tab bar's place) instead of replacing the workspace. */
+/** Keeps a navigation error inside the header (or the tab bar's place) instead of replacing the workspace, and switches both to the failed state. */
 export class ShellBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch() { failShell(); }
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
