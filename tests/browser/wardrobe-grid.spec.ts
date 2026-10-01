@@ -551,4 +551,81 @@ test.describe('UX6 active-filter chips and the result-count announcement', () =>
     await page.waitForTimeout(900);
     expect(heard).toEqual([itemCount('en', 1)]);
   });
+
+  // Records every time an announcer says something: text written into a mounted announcer and an announcer mounted
+  // with text already in it (a replay), even when the words are the same as the last ones.
+  async function listen(page: Page) {
+    const heard: string[] = [];
+    await page.exposeFunction('heard', (value: string) => { heard.push(value); });
+    await page.evaluate(() => {
+      const say = (window as unknown as { heard: (value: string) => void }).heard;
+      new MutationObserver(records => {
+        const spoken = new Set<Element>();
+        for (const record of records) {
+          const target = record.target instanceof Element ? record.target : record.target.parentElement;
+          const inside = target?.closest('[data-count-announcer]');
+          if (inside) spoken.add(inside);
+          for (const node of record.addedNodes) {
+            if (!(node instanceof Element)) continue;
+            if (node.matches('[data-count-announcer]')) spoken.add(node);
+            node.querySelectorAll('[data-count-announcer]').forEach(found => spoken.add(found));
+          }
+        }
+        for (const node of spoken) if (node.isConnected && node.textContent) say(node.textContent);
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
+    return heard;
+  }
+  const pageAnnouncer = (page: Page) => page.locator('main [data-count-announcer]:not(dialog [data-count-announcer])');
+  const sheetAnnouncer = (page: Page) => filterSheet(page).locator('[data-count-announcer]');
+
+  test('a finished announcement on the page is not said again when the sheet opens and closes', async ({ page }) => {
+    await seeded(page);
+    await page.locator('#wardrobe-search').fill('Linen');
+    await expect(pageAnnouncer(page)).toHaveText(itemCount('en', 1));
+    const heard = await listen(page);
+    for (let round = 0; round < 2; round++) {
+      await openFilters(page);
+      await expect(sheetAnnouncer(page)).toHaveText('');
+      await closeFilters(page);
+      await expect(pageAnnouncer(page)).toHaveText('');
+    }
+    await page.waitForTimeout(900);
+    await expect(pageAnnouncer(page)).toHaveText('');
+    expect(heard).toEqual([]);
+  });
+
+  test('a finished announcement in the sheet is not said again on the page or when the sheet reopens', async ({ page }) => {
+    await seeded(page);
+    const heard = await listen(page);
+    await openFilters(page);
+    await page.locator('input[name="category"][value="footwear"]').check();
+    await expect(sheetAnnouncer(page)).toHaveText(itemCount('en', 1));
+    for (let round = 0; round < 2; round++) {
+      await closeFilters(page);
+      await expect(pageAnnouncer(page)).toHaveText('');
+      await openFilters(page);
+      await expect(sheetAnnouncer(page)).toHaveText('');
+    }
+    await page.waitForTimeout(900);
+    await expect(sheetAnnouncer(page)).toHaveText('');
+    expect(heard).toEqual([itemCount('en', 1)]);
+  });
+
+  test('a count still waiting when the sheet closes and reopens is said once, with the latest count', async ({ page }) => {
+    await seeded(page);
+    const heard = await listen(page);
+    await openFilters(page);
+    await page.locator('input[name="colour"][value="olive"]').check();
+    await page.locator('input[name="category"][value="footwear"]').check();
+    await closeFilters(page);
+    await openFilters(page);
+    // Usually still waiting here, so it is said in the reopened sheet; either way it is said exactly once.
+    await page.waitForTimeout(900);
+    expect(heard).toEqual([itemCount('en', 1)]);
+    await closeFilters(page);
+    await expect(pageAnnouncer(page)).toHaveText('');
+    await page.waitForTimeout(900);
+    expect(heard).toEqual([itemCount('en', 1)]);
+  });
 });

@@ -23,19 +23,22 @@ export class CountAnnouncer {
 }
 
 type Placement = 'page' | 'sheet';
-// Returns the count to show in the one announcer mounted at `placement`, or null. A message belongs to the announcer
-// that was mounted when it was made, so a newly mounted announcer (the sheet opening or closing) starts empty and an
-// announcement is never repeated by the move.
+// Returns the count to show in the one announcer mounted at `placement`, or null. Each mount (the sheet opening or
+// closing, or a language change) starts a new generation, and a message belongs to the generation it was made in, so
+// a newly mounted announcer always starts empty: a finished announcement is never replayed by remounting. A pending
+// announcement, still debounced and deduplicated, is spoken once by whichever announcer is mounted when it is due.
 export function useCountAnnouncement(count: number | null, placement: Placement, language: Language): number | null {
-  const [message, setMessage] = useState<{ count: number; placement: Placement; language: Language } | null>(null);
-  const context = useRef({ placement, language });
+  const [mount, setMount] = useState({ placement, language, generation: 0 });
+  if (mount.placement !== placement || mount.language !== language) setMount({ placement, language, generation: mount.generation + 1 });
+  const [message, setMessage] = useState<{ count: number; generation: number } | null>(null);
+  const generation = useRef(mount.generation);
   const announcer = useRef<CountAnnouncer | null>(null);
-  useEffect(() => { context.current = { placement, language }; }, [placement, language]);
+  useEffect(() => { generation.current = mount.generation; }, [mount.generation]);
   useEffect(() => {
-    const instance = new CountAnnouncer(value => setMessage({ count: value, ...context.current }));
+    const instance = new CountAnnouncer(value => setMessage({ count: value, generation: generation.current }));
     announcer.current = instance;
     return () => { instance.dispose(); announcer.current = null; };
   }, []);
   useEffect(() => { if (count !== null) announcer.current?.update(count); }, [count]);
-  return message && message.placement === placement && message.language === language ? message.count : null;
+  return message && message.generation === mount.generation ? message.count : null;
 }
