@@ -5,7 +5,7 @@ import path from 'node:path';
 import { languages, translate, type Language, type MessageKey } from '../../src/i18n';
 import { manualEntry } from './ai-photo-first-support';
 import { mockBackend, owners, signIn } from './mock-backend';
-import { accountMenu, accountTrigger, expectIdentity, expectSignedIn, openAccountMenu, shellNav } from './shell-support';
+import { accountMenu, accountTrigger, expectIdentity, expectSignedIn, openAccountMenu, settleShell, shellNav } from './shell-support';
 
 const text = (key: MessageKey, language: Language = 'en') => translate(language, key);
 const zoom = 'html { font-size: 200%; } body { font-size: 32px; }';
@@ -311,37 +311,54 @@ test.describe('UX1 phone shell', () => {
     await noViolations(page);
   });
 
-  test('safe-area insets: with a notch and home bar the header, skip link, sign-in page and bar stay clear', async ({ page }) => {
-    test.skip(test.info().project.name === 'webkit-photo', 'Inset emulation uses the Chromium DevTools protocol.');
-    const inset = { top: 47, bottom: 34, left: 0, right: 0 };
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send('Emulation.setSafeAreaInsetsOverride' as never, { insets: inset } as never);
-    await page.setViewportSize({ width: 390, height: 844 });
-    await mockBackend(page);
-    await page.goto('/#/wardrobe');
-    await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /viewport-fit=cover/);
-    // Sign-in page: the header starts below the notch.
-    const entry = page.locator('.entry-header');
-    await expect(entry).toBeVisible();
-    expect(await entry.evaluate(header => header.getBoundingClientRect().top)).toBeGreaterThanOrEqual(inset.top);
-    await signIn(page);
-    await expectSignedIn(page);
-    const layout = await page.evaluate(() => ({
-      brand: document.querySelector('.workspace-header')!.firstElementChild!.getBoundingClientRect().top,
-      skip: document.querySelector('.skip-link')!.getBoundingClientRect().bottom,
-      tabs: Math.max(...[...document.querySelectorAll('.tab-bar .tab-item')].map(item => item.getBoundingClientRect().bottom)),
-    }));
-    expect(layout.brand).toBeGreaterThanOrEqual(inset.top);
-    // The unfocused skip link is entirely off screen, not peeking out below the notch.
-    expect(layout.skip).toBeLessThanOrEqual(0);
-    expect(layout.tabs).toBeLessThanOrEqual(844 - inset.bottom + 0.5);
-    const skip = page.locator('.skip-link');
-    await skip.focus();
-    await expect.poll(() => skip.evaluate(link => {
-      const box = link.getBoundingClientRect(), hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
-      return box.top >= 47 && box.bottom <= innerHeight && (hit === link || link.contains(hit));
-    })).toBe(true);
-  });
+  // A notched phone (390 × 844) and the owner's iPhone 17 with its Dynamic Island (about 402 × 874, insets 62 / 34).
+  for (const device of [
+    { name: 'notch', width: 390, height: 844, inset: { top: 47, bottom: 34, left: 0, right: 0 } },
+    { name: 'iPhone 17', width: 402, height: 874, inset: { top: 62, bottom: 34, left: 0, right: 0 } },
+  ]) {
+    test(`safe-area insets, ${device.name} ${device.width}×${device.height}: the header, skip link, sign-in page and bar stay clear`, async ({ page }) => {
+      test.skip(test.info().project.name === 'webkit-photo', 'Inset emulation uses the Chromium DevTools protocol.');
+      const { inset, width, height } = device;
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Emulation.setSafeAreaInsetsOverride' as never, { insets: inset } as never);
+      await page.setViewportSize({ width, height });
+      await mockBackend(page);
+      await page.goto('/#/wardrobe');
+      await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /viewport-fit=cover/);
+      const fits = () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+      // Sign-in page: the header starts below the notch.
+      const entry = page.locator('.entry-header');
+      await expect(entry).toBeVisible();
+      expect(await entry.evaluate(header => header.getBoundingClientRect().top)).toBeGreaterThanOrEqual(inset.top);
+      expect(await fits()).toBe(true);
+      await signIn(page);
+      await expectSignedIn(page);
+      await settleShell(page);
+      const layout = await page.evaluate(() => ({
+        header: document.querySelector('.workspace-header')!.getBoundingClientRect().top,
+        brand: document.querySelector('.workspace-header')!.firstElementChild!.getBoundingClientRect().top,
+        skip: document.querySelector('.skip-link')!.getBoundingClientRect().bottom,
+        tabs: [...document.querySelectorAll('.tab-bar .tab-item')].map(item => item.getBoundingClientRect()).map(box => ({ top: box.top, bottom: box.bottom })),
+      }));
+      expect(layout.header).toBeGreaterThanOrEqual(0);
+      expect(layout.brand).toBeGreaterThanOrEqual(inset.top);
+      // The unfocused skip link is entirely off screen, not peeking out below the notch.
+      expect(layout.skip).toBeLessThanOrEqual(0);
+      expect(layout.tabs).toHaveLength(5);
+      for (const tab of layout.tabs) {
+        expect(tab.bottom).toBeLessThanOrEqual(height - inset.bottom + 0.5);
+        expect(tab.top).toBeGreaterThanOrEqual(inset.top);
+      }
+      expect(await fits()).toBe(true);
+      const skip = page.locator('.skip-link');
+      await skip.focus();
+      await expect.poll(() => skip.evaluate((link, top) => {
+        const box = link.getBoundingClientRect(), hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return box.top >= top && box.bottom <= innerHeight && (hit === link || link.contains(hit));
+      }, inset.top)).toBe(true);
+      expect(await fits()).toBe(true);
+    });
+  }
 
   for (const width of [390, 1280]) {
     test(`${width}px: the skip link is the first stop, in view above the bar, and opens main`, async ({ page }) => {
