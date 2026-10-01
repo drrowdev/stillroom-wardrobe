@@ -170,6 +170,14 @@ describe('R1 release-candidate receipt: pinned inventories', () => {
     expect(jobNames(appleText)).toEqual(APPLE_JOBS);
   });
 
+  it('expands each matrix job from its own matrix, so both the App and WebKit shards are pinned', () => {
+    const text = 'name: x\njobs:\n  a:\n    name: A (${{ matrix.shard }}/3)\n    strategy:\n      matrix:\n        shard: [1, 2, 3]\n    steps:\n'
+      + '  b:\n    name: B\n  c:\n    name: C (${{ matrix.shard }}/2)\n    strategy:\n      matrix:\n        shard: [1, 2]\n    steps:\n';
+    expect(jobNames(text)).toEqual(['A (1/3)', 'A (2/3)', 'A (3/3)', 'B', 'C (1/2)', 'C (2/2)']);
+    expect(CI_JOBS.filter((name) => name.startsWith('WebKit photo contracts'))).toEqual(['WebKit photo contracts (1/2)', 'WebKit photo contracts (2/2)',
+      'WebKit photo contracts']);
+  });
+
   it('keeps the Apple diagnostic dispatchable on main for R1, with its public-repository guard', () => {
     const on = appleText.replaceAll('\r\n', '\n').split('\npermissions:')[0]!;
     expect(on).toMatch(/\n {2}pull_request:\n/);
@@ -392,6 +400,10 @@ describe('R1 release-candidate receipt: required jobs', () => {
     ['a required job skipped', CI_RUN, (job) => (job.name === 'WebKit photo contracts' ? { ...job, conclusion: 'skipped' } : job), /WebKit photo contracts is completed\/skipped/],
     ['a required job cancelled', CI_RUN, (job) => (job.name === 'App browser contracts (2/3)' ? { ...job, conclusion: 'cancelled' } : job), /\(2\/3\) is completed\/cancelled/],
     ['a required job missing', CI_RUN, (job) => (job.name === 'Account deletion rehearsal' ? null : job), /required job missing: Account deletion rehearsal/],
+    ['a WebKit shard missing while its aggregator succeeded', CI_RUN, (job) => (job.name === 'WebKit photo contracts (2/2)' ? null : job),
+      /required job missing: WebKit photo contracts \(2\/2\)/],
+    ['a WebKit shard cancelled at its time limit', CI_RUN, (job) => (job.name === 'WebKit photo contracts (1/2)' ? { ...job, conclusion: 'cancelled' } : job),
+      /WebKit photo contracts \(1\/2\) is completed\/cancelled/],
     ['Documentation checks not skipped', CI_RUN, (job) => (job.name === 'Documentation checks' ? { ...job, conclusion: 'success' } : job), /Documentation checks is completed\/success, expected skipped/],
     ['an unexpected job', CI_RUN, (job) => (job.name === 'Changed files' ? [job, { ...job, id: job.id + 100_000, name: 'Surprise' }] : job), /unexpected job Surprise/],
     ['the Apple job skipped', APPLE_RUN, (job) => ({ ...job, conclusion: 'skipped' }), /Generated JPEG on native Apple WebKit is completed\/skipped/],

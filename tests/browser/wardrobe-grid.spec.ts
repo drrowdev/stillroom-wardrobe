@@ -302,25 +302,56 @@ test('viewport admission bounds mounted photos and frozen global concurrency, in
   const api = await mockBackend(page, { initialLanguage: 'en' });
   for (let n = 0; n < 100; n++) api.seedSavedItem('a', `Own ${n}`);
   let active = 0, peak = 0, started = 0;
+  const paths: string[] = [];
   let release: (() => void) | undefined;
   const held = new Promise<void>(resolve => { release = resolve; });
   await page.route('**/storage/v1/object/wardrobe/**/thumb.jpg', async route => {
+    paths.push(new URL(route.request().url()).pathname);
     started++; active++; peak = Math.max(peak, active);
     await held; active--; await route.fallback();
   });
+  // A region is settled when every photo the observer can admit there (the observed .item-photo within the viewport
+  // plus its 200 px root margin) has resolved, nothing is in flight and the requested paths stayed the same across two
+  // polls. A path requested twice is a duplicate download and never settles.
+  const settle = async (region: string) => {
+    let last = '';
+    await expect.poll(async () => {
+      const unresolved = await page.evaluate(async () => {
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return [...document.querySelectorAll('.item-photo')].filter(photo => {
+          const box = photo.getBoundingClientRect();
+          return box.bottom > -200 && box.top < innerHeight + 200 && !photo.querySelector('img, .photo-unavailable');
+        }).length;
+      });
+      const now = paths.join('\n'), stable = now === last;
+      last = now;
+      return { unresolved, active, duplicates: paths.length - new Set(paths).size, counted: started === paths.length, stable };
+    }, { message: `${region} photos settle` }).toEqual({ unresolved: 0, active: 0, duplicates: 0, counted: true, stable: true });
+  };
+  // Instant jumps, so no photo between the regions is crossed on the way.
+  const jump = (index: number) => page.locator('.item-card').nth(index)
+    .evaluate(card => card.scrollIntoView({ block: 'center', behavior: 'instant' }));
   await open(page, api);
   await expect(page.locator('.item-card')).toHaveCount(40);
   await expect.poll(() => started).toBeGreaterThan(0);
   expect(started).toBeLessThanOrEqual(4);
   release!();
   await expect(page.locator('.item-photo img').first()).toBeVisible();
+  await settle('initial');
   expect(peak).toBeLessThanOrEqual(4);
   expect(started).toBeLessThan(40);
-  await page.locator('.item-card').nth(39).scrollIntoViewIfNeeded();
+  const top = await page.evaluate(() => scrollY);
+  await jump(39);
   await expect(page.locator('.item-card').nth(39).locator('img')).toBeVisible();
+  await settle('destination');
+  expect(peak).toBeLessThanOrEqual(4);
   expect(started).toBeLessThanOrEqual(40);
-  const previous = started;
-  await page.locator('.item-card').first().scrollIntoViewIfNeeded();
+  const previous = started, admitted = [...paths];
+  // Back to exactly the initial region: every photo there was admitted already, so nothing may be requested again.
+  await page.evaluate(y => scrollTo({ top: y, behavior: 'instant' }), top);
+  await expect(page.locator('.item-photo img').first()).toBeInViewport();
+  await settle('return');
+  expect(paths).toEqual(admitted);
   expect(started).toBe(previous);
   await page.unroute('**/storage/v1/object/wardrobe/**/thumb.jpg');
   await page.route('**/storage/v1/object/wardrobe/**/thumb.jpg', route => route.fulfill({ status: 404, json: {} }));

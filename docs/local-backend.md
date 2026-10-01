@@ -739,8 +739,8 @@ uploads skip after a flaky failure; absent visual review stays pending.
 Since CI2 the browser run is split across two jobs with the same config:
 "App and browser contracts" runs `--project=chromium --project=mobile` (timeout
 30 minutes) and keeps all 12 visual uploads, because only those projects write
-captures; "WebKit photo contracts" runs `--project=webkit-photo` (timeout 20
-minutes) and uploads nothing. Each invocation applies `failOnFlakyTests`
+captures; "WebKit photo contracts" runs `--project=webkit-photo` and uploads
+nothing. Each invocation applies `failOnFlakyTests`
 independently. A WebKit failure no longer skips the App job's uploads, but it
 still fails its own required gate. `tests/unit/ci-workflow.test.ts` fails if a
 Playwright project is not selected by exactly one job or an upload moves. The
@@ -754,6 +754,17 @@ retries and `failOnFlakyTests`, and upload their captures with a shard marker.
 The aggregate "App and browser contracts" job keeps its name, requires both
 to succeed, merges the shard artefacts and runs the same named uploads with
 exact file lists, so a capture from any shard is still checked.
+
+Since CI1 the WebKit photo contracts are sharded the same way: two "WebKit photo
+contracts (i/2)" jobs (timeout 30 minutes) each run
+`--project=webkit-photo --shard=i/2`, and the "WebKit photo contracts" job keeps
+its name as the gate that fails unless both shards succeeded. The single job had
+reached 1,450–1,725 s of tests against its 30-minute limit. In the WebKit shards
+and Performance budgets, `npx playwright install --with-deps chromium webkit` has
+a 10-minute step timeout: the slow installs were apt downloading about 125 MB
+from the Ubuntu mirror at about 120 kB/s, so a stall now fails early in a named
+step. There is no apt or browser cache, because APT accepts a cached archive
+with the expected name and size without rehashing it.
 `scripts/ci-changes.mjs` sets `heavy=false` only for a pull request whose merge
 commit changes nothing but `.md`/`.txt` files under `docs/` or `blueprint/`,
 root `*.md`, `AGENTS.md` or `.github/copilot-instructions.md`; code, SQL, JSON
