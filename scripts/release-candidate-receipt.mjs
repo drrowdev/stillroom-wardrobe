@@ -95,7 +95,9 @@ export function checkBinding({ sha, git, scriptPath, readScript }) {
     const tracked = relative.split(path.sep).join('/');
     if (git(['rev-parse', 'HEAD']).trim() !== sha) return 'HEAD is not the candidate';
     if (git(['status', '--porcelain', '--untracked-files=all']).trim() !== '') return 'not clean';
-    try { git(['ls-files', '--error-unmatch', '--', tracked]); } catch { return 'the verifier is not tracked'; }
+    // `git` may run in a subdirectory of the checkout, so the pathspec is anchored at the top; `show C:path` is already
+    // top-relative, and `status` and `rev-parse` cover the whole checkout.
+    try { git(['ls-files', '--error-unmatch', '--', `:(top)${tracked}`]); } catch { return 'the verifier is not tracked'; }
     let blob;
     try { blob = git(['show', `${sha}:${tracked}`], true); } catch { return 'the verifier is not in C'; }
     if (!Buffer.from(blob).equals(Buffer.from(readScript()))) return 'the verifier differs from C';
@@ -324,6 +326,8 @@ function ghApi(resource) {
 const scriptPath = fileURLToPath(import.meta.url);
 export const gitIn = (directory) => (args, raw = false) => execFileSync('git', ['-C', directory, ...args],
   { encoding: raw ? 'buffer' : 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+/** The git runner the command line uses: the directory that contains the verifier, e.g. `scripts/`. */
+export const verifierGit = (verifier) => gitIn(path.dirname(verifier));
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const parsed = parseArguments(process.argv.slice(2));
@@ -333,7 +337,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
   let outcome;
   try {
-    outcome = evaluate(gather(parsed.options, { api: ghApi, git: gitIn(path.dirname(scriptPath)), scriptPath, readScript: () => readFileSync(scriptPath) }));
+    outcome = evaluate(gather(parsed.options, { api: ghApi, git: verifierGit(scriptPath), scriptPath, readScript: () => readFileSync(scriptPath) }));
   } catch (error) {
     const reason = error instanceof Blocked ? error.message : 'unexpected error while reading';
     outcome = { verdict: 'BLOCKED', lines: [R1_REMINDER, `R1-CI BLOCKED ${reason}`] };

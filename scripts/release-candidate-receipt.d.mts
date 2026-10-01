@@ -17,6 +17,7 @@ export function paginate(get: (page: number) => ApiResponse | undefined, key: st
 export interface Binding { git: Git; scriptPath: string; readScript: () => Uint8Array }
 export function checkBinding(input: Binding & { sha: string }): string | null;
 export function gitIn(directory: string): Git;
+export function verifierGit(verifier: string): Git;
 export function gather(options: Options, deps: Binding & { api: Api; now?: () => string }): unknown;
 export function evaluate(snapshot: unknown): Outcome;
 export function exitCode(verdict: string): number;
