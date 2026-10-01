@@ -180,6 +180,15 @@ export function formatUsd(micro: string, language: Language): string {
     .format(`${value / 1_000_000n}.${String(value % 1_000_000n).padStart(6, '0')}` as `${number}`);
 }
 
+/** Display only: rounds an exact micro-dollar amount half-up to whole cents. The exact value stays with formatUsd. */
+export function formatUsdCents(micro: string, language: Language): string {
+  if (!isMicroText(micro)) throw new Error('Invalid amount.');
+  const cents = (BigInt(micro) + 5_000n) / 10_000n;
+  return new Intl.NumberFormat(locales[language], { style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol',
+    minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    .format(`${cents / 100n}.${String(cents % 100n).padStart(2, '0')}` as `${number}`);
+}
+
 export type FieldErrors = Partial<Record<LimitField, LimitReason>>;
 export type LimitDraft = Record<LimitFeature, Record<LimitKey, string>>;
 /** The form text for each configured value; unconfigured values stay empty and are never sent as anything but null. */

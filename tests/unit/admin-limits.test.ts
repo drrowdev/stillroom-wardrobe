@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  checkLimits, draftOf, formatUsd, inputToMicro, limitChanges, limitsFromDraft, microToInput, monthTotals, parseSpending, parseWriteResult,
+  checkLimits, draftOf, formatUsd, formatUsdCents, inputToMicro, limitChanges, limitsFromDraft, microToInput, monthTotals, parseSpending, parseWriteResult,
   sameLimits, type Limits,
 } from '../../src/domain/admin-limits';
 import { readAdminSpending, readAdminStatus, writeAdminLimits } from '../../src/data/admin';
@@ -141,6 +141,22 @@ describe('exact micro-USD', () => {
     expect(formatUsd('999999999999', 'en')).toBe('$999,999.999999');
     expect(formatUsd('4097351', 'fi').replace(/\s/g, ' ')).toBe('4,097351 $');
     expect(() => formatUsd('1.5', 'en')).toThrow();
+  });
+
+  it('rounds to cents half-up for display only, from the exact micro amount', () => {
+    expect(formatUsdCents('1779407', 'en')).toBe('$1.78');
+    expect(formatUsdCents('1785000', 'en')).toBe('$1.79');
+    expect(formatUsdCents('1784999', 'en')).toBe('$1.78');
+    expect(formatUsdCents('5000', 'en')).toBe('$0.01');
+    expect(formatUsdCents('4999', 'en')).toBe('$0.00');
+    expect(formatUsdCents('0', 'en')).toBe('$0.00');
+    expect(formatUsdCents('20000000', 'en')).toBe('$20.00');
+    expect(formatUsdCents('999999995000', 'en')).toBe('$1,000,000.00');
+    expect(formatUsdCents('1785000', 'fi').replace(/\s/g, ' ')).toBe('1,79 $');
+    expect(formatUsdCents('1785000', 'sv').replace(/\s/g, ' ')).toBe('1,79 $');
+    // The exact value is untouched.
+    expect(formatUsd('1785000', 'en')).toBe('$1.785');
+    expect(() => formatUsdCents('1.5', 'en')).toThrow();
   });
 });
 

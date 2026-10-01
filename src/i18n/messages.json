@@ -629,7 +629,7 @@
   "admin.used": {"en":"Used","fi":"Käytetty","sv":"Använt"},
   "admin.pending": {"en":"Pending","fi":"Odottaa","sv":"Väntande"},
   "admin.feature": {"en":"Feature","fi":"Toiminto","sv":"Funktion"},
-  "admin.tagging": {"en":"Tagging","fi":"Tunnisteet","sv":"Taggning"},
+  "admin.tagging": {"en":"Photo analysis","fi":"Kuva-analyysi","sv":"Fotoanalys"},
   "admin.stylist": {"en":"Stylist","fi":"Stylisti","sv":"Stylist"},
   "admin.enhancement": {"en":"Photo clean-up","fi":"Kuvien siistiminen","sv":"Uppsnyggning av bilder"},
   "admin.total": {"en":"Total","fi":"Yhteensä","sv":"Totalt"},

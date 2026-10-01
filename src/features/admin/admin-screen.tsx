@@ -4,7 +4,7 @@ import { ADMIN_REASONS, readAdminSpending, readAdminStatus, writeAdminLimits, ty
 import type { AppClient } from '../../data/client';
 import { isAborted } from '../../data/errors';
 import {
-  LIMIT_FEATURES, SPEND_PURPOSES, draftOf, formatUsd, limitChanges, limitsFromDraft, monthTotals, sameLimits,
+  LIMIT_FEATURES, SPEND_PURPOSES, draftOf, formatUsd, formatUsdCents, limitChanges, limitsFromDraft, monthTotals, sameLimits,
   type AdminAccount, type AdminSpending, type FieldErrors, type LimitChange, type LimitDraft, type LimitFeature, type LimitField,
   type LimitKey, type LimitReason, type Limits, type MonthSpend, type SpendPurpose,
 } from '../../domain/admin-limits';
@@ -131,8 +131,8 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
   const limits = account.limits;
   const canEdit = account.enabled && limits !== null;
   const reconcile = () => setAwaitRead(onReload());
-  const usedOf = (used: string, limit: string | null) => <>{limit === null ? formatUsd(used, language)
-    : t('admin.usedOf', { used: formatUsd(used, language), limit: formatUsd(limit, language) })}<UsageBar used={used} limit={limit} /></>;
+  const usedOf = (used: string, limit: string | null) => <>{limit === null ? formatUsdCents(used, language)
+    : t('admin.usedOf', { used: formatUsdCents(used, language), limit: formatUsdCents(limit, language) })}<UsageBar used={used} limit={limit} /></>;
   const split = monthSplit(monthTotals(history));
   const open = () => {
     if (!limits || reconciling || saving) return;
@@ -187,15 +187,15 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
     {!account.enabled && <p className="muted">{t('admin.accountOff')}</p>}
     <h3>{t('admin.spendIn', { month: monthName(month, language) })}</h3>
     <dl className="admin-summary">
-      <div><dt>{t('admin.used')}</dt><dd>{formatUsd(split.usedMicro, language)}</dd></div>
-      <div><dt>{t('admin.pending')}</dt><dd>{formatUsd(split.pendingMicro, language)}</dd></div>
+      <div><dt>{t('admin.used')}</dt><dd>{formatUsdCents(split.usedMicro, language)}</dd></div>
+      <div><dt>{t('admin.pending')}</dt><dd>{formatUsdCents(split.pendingMicro, language)}</dd></div>
       <div><dt>{t('admin.requests')}</dt><dd>{whole(split.requests, language)}</dd></div>
     </dl>
     <h3>{t('admin.currentUse')}</h3>
     <dl className="admin-use">
       <div><dt>{t('admin.allFeatures')}</dt><dd>{usedOf(account.current.shared.usedMicro, limits?.shared.monthlyAllowanceMicro ?? null)}
         <span className="stats-note">{t('admin.lastHour', { count: whole(account.current.shared.lastHour, language) })}</span></dd></div>
-      <div><dt>{t('admin.tagging')}</dt><dd>{formatUsd(account.current.analysis.usedMicro, language)}</dd></div>
+      <div><dt>{t('admin.tagging')}</dt><dd>{formatUsdCents(account.current.analysis.usedMicro, language)}</dd></div>
       {(['stylist', 'enhancement', 'tryOn'] as const).map((feature) => <div key={feature}><dt>{t(purposeKey[feature])}</dt>
         <dd>{usedOf(account.current[feature].usedMicro, account.features[feature].configured ? limits?.[feature].monthlyAllowanceMicro ?? null : null)}
           {!account.features[feature].configured && <span className="stats-note">{t('admin.notSetUp')}</span>}</dd></div>)}
