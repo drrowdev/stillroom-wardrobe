@@ -163,6 +163,8 @@ Only the SHA is recorded; no tag.
    - A later run for C fails the receipt; a run still in progress, or a history that can't be read in
      full, is BLOCKED.
    - `test:a11y` is the `--grep accessibility` subset of the browser jobs; the receipt says so.
+   - Since CI1 (#154), WebKit photo contracts runs as two shard jobs, "(1/2)" and "(2/2)", plus the
+     "WebKit photo contracts" aggregator job. `CI_JOBS` pins all three (14 CI jobs), and each must succeed.
 4. **Deploy.** The owner-approved Pages deploy selects commit C explicitly, not the latest main.
 5. **Read-back.** A new D row: `check-deployed-assets.mjs` from a clean checkout of C exits 0, and the entry
    chunk carries C's 8-character prefix.
