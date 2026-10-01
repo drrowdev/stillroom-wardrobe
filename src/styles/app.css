@@ -44,6 +44,8 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .intro { padding: 18px 0; }
 .wardrobe-illustration { width: 100%; max-width: 440px; height: auto; display: block; }
 .intro .wardrobe-illustration { margin: -8px 0 0 -15px; max-width: 420px; }
+.entry-column { min-width: 0; display: grid; gap: 16px; }
+.entry-language { display: flex; justify-content: center; min-width: 0; }
 .entry-card { border: 1px solid var(--border); background: var(--surface); border-radius: 16px; padding: 36px; box-shadow: 0 8px 30px #24332E03; width: 100%; min-width: 0; overflow-wrap: anywhere; }
 .entry-card h1 { font-size: 1.5rem; margin-bottom: 10px; }
 .entry-card > .muted { font-size: .9375rem; }
@@ -144,6 +146,9 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
   .ai-spend-bar span { background: CanvasText; }
   .settings-nav-item[aria-current="location"] { border-color: Highlight; }
   .update-notice { outline: 1px solid transparent; }
+  dialog.filter-sheet { border: 1px solid CanvasText; }
+  button.wardrobe-refresh { color: ButtonText; border: 1px solid ButtonText; }
+  button.wardrobe-refresh:disabled { color: GrayText; border-color: GrayText; }
 }
 .entry-page { padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px); }
 @media (max-width: 760px) {
@@ -207,9 +212,24 @@ html { scroll-padding-top: env(safe-area-inset-top, 0px); scroll-padding-bottom:
 .empty-copy .button { margin: 8px 0 24px; }
 .privacy-note { color: var(--secondary); font-size: .875rem; display: flex; align-items: flex-start; gap: 7px; margin: 12px 0 0; }
 .privacy-note .icon { width: 15px; height: 15px; margin-top: 2px; }
-.collection-bar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-top: -14px; margin-bottom: 14px; color: var(--secondary); font-size: .875rem; border-bottom: 1px solid var(--border); padding-bottom: 9px; }
-.collection-bar .text-button { font-size: .875rem; }
-.collection-bar .icon { width: 16px; height: 16px; }
+.collection-bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; color: var(--secondary); font-size: .875rem; }
+.collection-bar .button { min-height: 44px; padding: 8px 16px; }
+.wardrobe-sort { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.wardrobe-tools .wardrobe-sort select { width: auto; max-width: 100%; }
+.wardrobe-result-count { margin-inline-start: auto; }
+.wardrobe-refresh { color: var(--primary); }
+.wardrobe-refresh .icon { width: 20px; height: 20px; }
+.wardrobe-refresh:disabled { color: var(--secondary); cursor: not-allowed; }
+/* The Filters sheet's own frame is part of the start page, so it is named, closable and laid out safely even while
+   (or if) its contents and their detailed styles fail to load. */
+.filter-sheet { position: fixed; inset: 0 0 0 auto; margin: 0; padding: 0; width: min(420px, 100%); max-width: 100%; height: 100dvh; max-height: 100dvh; border: 0; background: var(--surface); color: var(--ink); overflow: hidden; overscroll-behavior: contain; box-shadow: 0 16px 80px #24332E26; }
+.filter-sheet::backdrop { background: #24332E60; }
+.filter-sheet-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) 0; }
+.filter-sheet-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 10px 10px 20px; border-bottom: 1px solid var(--border); }
+.filter-sheet-header h2 { font-size: 1.25rem; margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.filter-sheet-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 20px 0; overflow-wrap: anywhere; }
+.filter-sheet :is(label, button) { min-height: 44px; }
+.filter-sheet .chunk-loading, .filter-sheet .chunk-error { padding-bottom: 16px; }
 .item-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px 22px; }
 .item-card { min-width: 0; }
 .item-detail-link { display: block; color: inherit; text-decoration: none; border-radius: 16px; }
@@ -264,17 +284,10 @@ html { scroll-padding-top: env(safe-area-inset-top, 0px); scroll-padding-bottom:
 .item-caption h2 { font-size: .9375rem; font-weight: 550; margin-bottom: 3px; overflow-wrap: anywhere; letter-spacing: -.01em; }
 .item-caption > span { color: var(--secondary); font-size: .875rem; }
 .photo-unavailable { font-size: .875rem; color: var(--secondary); display: flex; flex-direction: column; gap: 10px; align-items: center; text-align: center; padding: 12px; }
-.wardrobe-tools { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
-.wardrobe-tools > label { flex: 1 1 220px; min-width: 0; display: grid; gap: 6px; font-size: .875rem; }
+.wardrobe-tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 16px; min-width: 0; }
+.wardrobe-tools > label { min-width: 0; display: grid; gap: 6px; font-size: .875rem; }
 .wardrobe-tools input, .wardrobe-tools select { width: 100%; min-width: 0; min-height: 44px; border: 1px solid var(--input-border); background: var(--surface); color: var(--ink); padding: 8px; }
-.wardrobe-filters { margin-bottom: 24px; min-width: 0; }
-.wardrobe-filters summary { min-height: 44px; padding-block: 10px; cursor: pointer; }
-.wardrobe-facet-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 16px; margin-top: 12px; }
-.wardrobe-facet-grid fieldset { min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--input-border); border-radius: 8px; }
-.wardrobe-facet-grid legend { max-width: 100%; padding-inline: 4px; font-weight: 550; }
-.wardrobe-choice { display: flex; align-items: center; gap: 8px; min-height: 44px; min-width: 0; font-size: .875rem; cursor: pointer; }
-.wardrobe-choice input { flex: 0 0 20px; width: 20px; height: 20px; margin: 0; accent-color: var(--primary); }
-.wardrobe-choice span, .wardrobe-page label, .wardrobe-page legend, .wardrobe-page button, .wardrobe-price-heading { overflow-wrap: anywhere; }
+.wardrobe-page label, .wardrobe-page legend, .wardrobe-page button, .wardrobe-price-heading { overflow-wrap: anywhere; }
 .wardrobe-page button { white-space: normal; max-width: 100%; min-height: 44px; }
 .wardrobe-group + .wardrobe-group { margin-top: 24px; }
 .wardrobe-price { margin: 8px 0 0; font-size: .875rem; }
@@ -336,7 +349,14 @@ html { scroll-padding-top: env(safe-area-inset-top, 0px); scroll-padding-bottom:
 @keyframes breathe { 50% { opacity: .55; } }
 @media (min-width: 1250px) { .item-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 @media (min-width: 600px) and (max-width: 899px) { .item-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 18px; } }
-@media (max-width: 599px) { .item-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; } }
+@media (max-width: 599px) {
+  .item-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 10px; }
+  .item-photo, .loading-photo { border-radius: 10px; }
+  .item-caption { padding: 8px 2px 4px; }
+  .item-caption h2 { margin-bottom: 2px; }
+  .item-status { gap: 0; }
+  .item-status span + span::before { content: "\00B7"; content: "\00B7" / ""; margin-inline: 6px; }
+}
 @media (max-width: 900px) {
   .entry-header { padding: 22px 28px; }
   .entry-main { padding: 24px 28px 40px; gap: 40px; }
@@ -346,6 +366,8 @@ html { scroll-padding-top: env(safe-area-inset-top, 0px); scroll-padding-bottom:
   .empty-copy { padding-right: 28px; }
 }
 @media (max-width: 650px) {
+  .filter-sheet { inset: auto 0 0; width: 100%; height: auto; max-height: 85dvh; border-radius: 16px 16px 0 0; }
+  .filter-sheet-panel { max-height: 85dvh; padding-top: 0; }
   .entry-header { padding: 18px 20px; gap: 10px; flex-wrap: wrap; }
   .language-selector button { padding-inline: 10px; }
   .entry-main { grid-template-columns: 1fr; gap: 26px; padding: 16px 20px 30px; max-width: 510px; margin: 0 auto auto; }

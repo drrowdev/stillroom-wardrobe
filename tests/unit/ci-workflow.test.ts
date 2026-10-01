@@ -85,6 +85,7 @@ const browserArtifacts: Record<string, string[]> = {
   'vto2-tryon-ui': ['consent-sv-mobile', 'progress-fi-mobile', 'result-en-desktop', 'failure-fi-320-200'].map((name) => `vto2-visual/${name}.png`),
   'ui1-settings-ui': ['settings-en-desktop', 'settings-fi-mobile', 'settings-sv-320-200', 'consent-cleanup-en-mobile'].map((name) => `ui1-visual/${name}.png`),
   'ux1-shell-ui': ['shell-en-mobile', 'shell-fi-mobile', 'shell-sv-320-200', 'shell-en-desktop', 'dialog-fi-320-200'].map((name) => `ux1-visual/${name}.png`),
+  'ux6-wardrobe-ui': ['wardrobe-en-mobile', 'chips-fi-mobile', 'filter-sheet-fi-mobile', 'filter-sheet-sv-320-200', 'filter-sheet-en-desktop', 'sign-in-sv-320-200'].map((name) => `ux6-visual/${name}.png`),
   };
 // Written by tests/pwa/visual.spec.ts, so they upload from the PWA job that runs it.
 const pwaArtifacts: Record<string, string[]> = {

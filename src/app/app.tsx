@@ -67,11 +67,14 @@ function useOnline() {
 function EntryLayout({ children, language, onLanguage, t }: { children: ReactNode; language: Language; onLanguage: (language: Language) => void; t: Translate }) {
   return (
     <div className="entry-page">
-      <header className="entry-header"><Brand /><LanguageSelector language={language} onChange={onLanguage} t={t} /></header>
+      <header className="entry-header"><Brand /></header>
       <UpdatePrompt t={t} />
       <main id="main" className="entry-main">
         <div className="intro"><WardrobeIllustration /></div>
-        {children}
+        <div className="entry-column">
+          {children}
+          <div className="entry-language"><LanguageSelector language={language} onChange={onLanguage} t={t} /></div>
+        </div>
       </main>
     </div>
   );

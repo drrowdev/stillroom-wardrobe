@@ -3,10 +3,11 @@ import AxeBuilder from '@axe-core/playwright';
 import { randomUUID } from 'node:crypto';
 import { mkdir, lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { messages, itemCount, type Language } from '../../src/i18n';
+import { messages, itemCount, translate, type Language } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { ordinal } from '../../src/features/wardrobe/search';
 import { closeAccountMenu, openAccountMenu } from './shell-support';
+import { closeFilters, filterSheet, openFilters } from './wardrobe-support';
 
 type Backend = Awaited<ReturnType<typeof mockBackend>>;
 const button = (page: Page, key: keyof typeof messages, language: Language = 'en') =>
@@ -100,12 +101,15 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await open(page, api);
     await page.locator('#wardrobe-search').fill('äÄ nordic soft');
     await expect(page.locator('.item-card')).toHaveCount(1);
-    await page.locator('.wardrobe-filters summary').focus(); await page.keyboard.press('Enter');
+    await openFilters(page, 'keyboard');
     for (const [name, value] of [['category', 'top'], ['colour', 'olive'], ['season', 'winter'], ['formality', '0'], ['availability', 'laundry'], ['lifecycle', 'archived'], ['favourite', 'yes']]) {
       await page.locator(`input[name="${name}"][value="${value}"]`).check();
     }
     await expect(page.locator('.item-card')).toHaveCount(1);
     await page.locator('input[name="favourite"][value="no"]').check();
+    await expect(page.locator('.item-card')).toHaveCount(0);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await closeFilters(page);
     await expect(page.locator('.item-card')).toHaveCount(0);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await button(page, 'wardrobe.clearSearchFilters', language).click();
@@ -422,7 +426,7 @@ test('layout boundaries, translated filters, 200% text and exactly two bounded s
     if (capture.language === 'fi') {
       await openAccountMenu(page, 'en'); await page.getByRole('button', { name: 'Suomi', exact: true }).click();
       await expect(page.locator('html')).toHaveAttribute('lang', 'fi'); await closeAccountMenu(page);
-      await page.locator('.wardrobe-filters summary').click();
+      await openFilters(page);
     }
     await page.setViewportSize({ width: capture.width, height: capture.height });
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -444,12 +448,12 @@ test('layout boundaries, translated filters, 200% text and exactly two bounded s
       expect(stat.isFile() && stat.size > 24 && stat.size <= 1024 * 1024).toBe(true);
     }
   }
-  expect(await page.locator('.item-caption > span, .wardrobe-price, .wardrobe-choice, .wardrobe-tools > label, .collection-bar').evaluateAll(labels =>
+  expect(await page.locator('.item-caption > span, .wardrobe-price, .wardrobe-choice, .wardrobe-tools > label, .collection-bar label, .collection-bar').evaluateAll(labels =>
     labels.length > 0 && labels.every(label => Number.parseFloat(getComputedStyle(label).fontSize) >= 14))).toBe(true);
   const measureText = () => page.evaluate(() => ({
     root: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
     body: Number.parseFloat(getComputedStyle(document.body).fontSize),
-    labels: [...document.querySelectorAll('.item-caption > span, .wardrobe-price, .wardrobe-choice, .wardrobe-tools > label, .collection-bar')]
+    labels: [...document.querySelectorAll('.item-caption > span, .wardrobe-price, .wardrobe-choice, .wardrobe-tools > label, .collection-bar label, .collection-bar')]
       .map(label => Number.parseFloat(getComputedStyle(label).fontSize)),
   }));
   const before = await measureText();
@@ -467,4 +471,84 @@ test('layout boundaries, translated filters, 200% text and exactly two bounded s
   expect(widths.scroll).toBeLessThanOrEqual(widths.client);
   expect(await page.locator('.wardrobe-choice').evaluateAll(labels => labels.every(label => label.getBoundingClientRect().height >= 44))).toBe(true);
   expect(await page.locator('.item-caption > span').evaluateAll(labels => labels.every(label => Number.parseFloat(getComputedStyle(label).fontSize) >= 14))).toBe(true);
+});
+
+test.describe('UX6 active-filter chips and the result-count announcement', () => {
+  async function seeded(page: Page) {
+    const api = await mockBackend(page, { initialLanguage: 'en' });
+    const linen = api.seedSavedItem('a', 'Linen'), wool = api.seedSavedItem('a', 'Wool'), boots = api.seedSavedItem('a', 'Boots');
+    Object.assign(linen.item, { colours: ['olive'], seasons: ['summer'] });
+    Object.assign(wool.item, { colours: ['navy'], seasons: ['winter'] });
+    Object.assign(boots.item, { category: 'footwear', colours: ['olive'], seasons: ['winter'] });
+    await open(page, api);
+    return api;
+  }
+  const titles = (page: Page) => page.locator('.item-caption h2');
+  const shown = async (page: Page) => (await titles(page).allTextContents()).sort();
+  const chip = (page: Page, label: string) => page.getByRole('button', { name: translate('en', 'wardrobe.removeFilter', { filter: label }), exact: true });
+
+  test('removing a chip is unticking its box, and focus moves to the next chip, the previous one, then Filters', async ({ page }) => {
+    await seeded(page);
+    await openFilters(page);
+    for (const [name, value] of [['category', 'top'], ['colour', 'olive'], ['season', 'winter'], ['season', 'summer']]) await page.locator(`input[name="${name}"][value="${value}"]`).check();
+    await closeFilters(page);
+    await expect(titles(page)).toHaveText(['Linen']);
+    const labels = [messages['category.top'].en, messages['colour.olive'].en, messages['season.summer'].en, messages['season.winter'].en];
+    await expect(page.locator('.filter-chip > span:first-child')).toHaveText(labels);
+    await expect(page.getByRole('list', { name: messages['wardrobe.activeFilters'].en, exact: true })).toBeVisible();
+    await chip(page, messages['colour.olive'].en).click();
+    await expect(chip(page, messages['season.summer'].en)).toBeFocused();
+    await expect.poll(() => shown(page)).toEqual(['Linen', 'Wool']);
+    // The same facets, set from the sheet, give the same list.
+    await openFilters(page);
+    await expect(page.locator('input[name="colour"]:checked')).toHaveCount(0);
+    await expect(page.locator('input[type="checkbox"]:checked')).toHaveCount(3);
+    await closeFilters(page);
+    await chip(page, messages['season.winter'].en).click();
+    await expect(chip(page, messages['season.summer'].en)).toBeFocused();
+    await chip(page, messages['season.summer'].en).click();
+    await expect(chip(page, messages['category.top'].en)).toBeFocused();
+    await chip(page, messages['category.top'].en).click();
+    await expect(page.locator('.wardrobe-filter-button')).toBeFocused();
+    await expect(page.locator('.filter-chip')).toHaveCount(0);
+    await expect(page.locator('.wardrobe-filter-button')).toHaveText(messages['common.filters'].en);
+    await expect(titles(page)).toHaveCount(3);
+  });
+
+  test('one announcer: it waits for changes to stop, skips an unchanged count and is not repeated when the sheet opens or closes', async ({ page }) => {
+    await seeded(page);
+    const announcer = page.locator('[data-count-announcer]');
+    await expect(announcer).toHaveCount(1);
+    await expect(announcer).toHaveText('');
+    await expect(page.locator('main [role="status"]:not(.chunk-loading)')).toHaveCount(1);
+    const search = page.locator('#wardrobe-search');
+    await search.pressSequentially('Linxx', { delay: 40 });
+    await expect(page.locator('.wardrobe-result-count')).toHaveText(itemCount('en', 0));
+    await expect(announcer).toHaveText(itemCount('en', 0));
+    // Back to where it was last heard, then away and back again: nothing new is said.
+    await search.fill('Lin'); await search.fill('Linxx');
+    await page.waitForTimeout(900);
+    await expect(announcer).toHaveText(itemCount('en', 0));
+    await search.fill('');
+    await expect(announcer).toHaveText(itemCount('en', 3));
+    // A change just before the sheet opens is announced once, inside the sheet.
+    const heard: string[] = [];
+    await page.exposeFunction('heard', (value: string) => { heard.push(value); });
+    await page.evaluate(() => {
+      let last = document.querySelector('[data-count-announcer]')?.textContent ?? '';
+      new MutationObserver(() => {
+        const said = document.querySelector('[data-count-announcer]')?.textContent ?? '';
+        if (said && said !== last) (window as unknown as { heard: (value: string) => void }).heard(said);
+        last = said;
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
+    await search.fill('Wool');
+    await openFilters(page);
+    await expect(announcer).toHaveCount(1);
+    await expect(filterSheet(page).locator('[data-count-announcer]')).toHaveText(itemCount('en', 1));
+    await closeFilters(page);
+    await expect(announcer).toHaveText('');
+    await page.waitForTimeout(900);
+    expect(heard).toEqual([itemCount('en', 1)]);
+  });
 });

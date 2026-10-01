@@ -6,6 +6,7 @@ import { languages, translate, type Language, type MessageKey } from '../../src/
 import { manualEntry } from './ai-photo-first-support';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { accountMenu, accountTrigger, expectIdentity, expectSignedIn, openAccountMenu, settleShell, shellNav } from './shell-support';
+import { closeFilters, filterSheet, openFilters } from './wardrobe-support';
 
 const text = (key: MessageKey, language: Language = 'en') => translate(language, key);
 const zoom = 'html { font-size: 200%; } body { font-size: 32px; }';
@@ -256,9 +257,10 @@ test.describe('UX1 phone shell', () => {
     await expect(page.locator('#outfits-title')).toBeFocused();
     // A checkbox is not typing.
     await shellNav(page).getByRole('link', { name: text('nav.wardrobe'), exact: true }).click();
-    await page.locator('.wardrobe-filters summary').click();
-    await page.locator('.wardrobe-filters input[type="checkbox"]').first().focus();
+    await openFilters(page);
+    await filterSheet(page).locator('input[type="checkbox"]').first().focus();
     await expect(tabBar(page)).toBeVisible();
+    await closeFilters(page);
     // A browser without :has() keeps the bar; focus still lands clear of it and every tab works.
     await page.addStyleTag({ content: '@media (max-width: 650px) { .workspace .tab-bar { visibility: visible !important; } }' });
     await search.focus();
@@ -653,3 +655,178 @@ test.describe('bounded UX1 visual evidence', () => {
   }
 });
 
+
+test.describe('UX6 wardrobe filters sheet and sign-in page', () => {
+  const inSheet = (page: Page) => page.evaluate(() => {
+    const active = document.activeElement;
+    return !!active && active !== document.body && !!active.closest('dialog.filter-sheet');
+  });
+  for (const size of [{ width: 390, height: 844 }, { width: 1280, height: 800 }]) {
+    test(`${size.width}px: the sheet is a named modal that keeps focus inside and returns it with the page unchanged`, async ({ page }) => {
+      await start(page, { items: 3, ...size });
+      await page.locator('#wardrobe-search').fill('Synthetic');
+      await page.locator('#wardrobe-sort').selectOption('name');
+      await openFilters(page, 'keyboard');
+      await expect(page.getByRole('dialog', { name: text('common.filters'), exact: true })).toBeVisible();
+      expect(await filterSheet(page).evaluate(dialog => (dialog as HTMLDialogElement).open && dialog.matches(':modal'))).toBe(true);
+      await noViolations(page);
+      for (const key of ['Tab', 'Shift+Tab']) {
+        await page.locator('#filter-sheet-title').focus();
+        for (let step = 0; step < 24; step++) {
+          await page.keyboard.press(key);
+          expect(await inSheet(page), `${key} step ${step}`).toBe(true);
+        }
+      }
+      await page.keyboard.press('Escape');
+      await expect(filterSheet(page)).toHaveCount(0);
+      await expect(page.locator('.wardrobe-filter-button')).toBeFocused();
+      await expect(page.locator('#wardrobe-search')).toHaveValue('Synthetic');
+      await expect(page.locator('#wardrobe-sort')).toHaveValue('name');
+      // Choosing a filter, then "Show 3 items".
+      await openFilters(page);
+      await filterSheet(page).locator('input[name="category"][value="top"]').check();
+      await filterSheet(page).getByRole('button', { name: translate('en', 'wardrobe.showItems_other', { count: '3' }), exact: true }).click();
+      await expect(filterSheet(page)).toHaveCount(0);
+      await expect(page.locator('.wardrobe-filter-button')).toBeFocused();
+      await expect(page.locator('.wardrobe-filter-button')).toHaveText(translate('en', 'wardrobe.filtersActive', { count: '1' }));
+      await expect(page.locator('.filter-chip')).toHaveText([`${text('category.top')}×`]);
+      await expect(page.locator('.item-card')).toHaveCount(3);
+      // The backdrop closes it too.
+      await openFilters(page);
+      await page.mouse.click(8, 8);
+      await expect(filterSheet(page)).toHaveCount(0);
+      await expect(page.locator('.wardrobe-filter-button')).toBeFocused();
+      await expect(page.locator('input[name="category"]:checked')).toHaveCount(0);
+      await expect(page.locator('.filter-chip')).toHaveCount(1);
+    });
+  }
+
+  for (const view of [{ width: 320, height: 640, zoom: false }, { width: 390, height: 844, zoom: false }, { width: 1280, height: 800, zoom: true }]) {
+    test(`${view.width}px${view.zoom ? ' at 200%' : ''}: the sheet fits, scrolls inside and its actions can be reached`, async ({ page }) => {
+      await start(page, { items: 3, width: view.width, height: view.height });
+      if (view.zoom) await page.addStyleTag({ content: zoom });
+      await openFilters(page);
+      const fit = await filterSheet(page).evaluate(dialog => {
+        const box = dialog.getBoundingClientRect(), body = dialog.querySelector('.filter-sheet-body')!;
+        return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, sideways: body.scrollWidth > body.clientWidth + 1, page: document.documentElement.scrollWidth > innerWidth };
+      });
+      expect(fit.left).toBeGreaterThanOrEqual(-0.5);
+      expect(fit.right).toBeLessThanOrEqual(view.width + 0.5);
+      expect(fit.top).toBeGreaterThanOrEqual(-0.5);
+      expect(fit.bottom).toBeLessThanOrEqual(view.height + 0.5);
+      expect(fit.sideways).toBe(false);
+      expect(fit.page).toBe(false);
+      for (const control of [filterSheet(page).locator('.filter-sheet-header button'), filterSheet(page).locator('.filter-sheet-footer .button-primary')]) {
+        await control.scrollIntoViewIfNeeded();
+        await expect.poll(() => control.evaluate(element => {
+          const box = element.getBoundingClientRect(), hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return box.height >= 44 && (hit === element || element.contains(hit));
+        })).toBe(true);
+      }
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.wardrobe-filter-button')).toBeFocused();
+    });
+  }
+
+  test('Refresh is a named 44px icon button and is unavailable offline', async ({ page }) => {
+    await start(page, { items: 2, width: 320, height: 640 });
+    const refresh = page.getByRole('button', { name: text('wardrobe.refresh'), exact: true });
+    const box = (await refresh.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    await page.context().setOffline(true);
+    await expect(refresh).toBeDisabled();
+    await page.context().setOffline(false);
+    await expect(refresh).toBeEnabled();
+  });
+
+  test('forced colours: the sheet, chips and Refresh keep visible edges', async ({ page }) => {
+    await start(page, { items: 2 });
+    await page.emulateMedia({ forcedColors: 'active' });
+    await openFilters(page);
+    await filterSheet(page).locator('input[name="category"][value="top"]').check();
+    expect(await filterSheet(page).evaluate(dialog => getComputedStyle(dialog).borderTopStyle)).not.toBe('none');
+    await noViolations(page);
+    await page.keyboard.press('Escape');
+    const edges = await page.evaluate(() => [document.querySelector('.filter-chip')!, document.querySelector('.wardrobe-refresh')!]
+      .map(element => ({ style: getComputedStyle(element).borderTopStyle, width: parseFloat(getComputedStyle(element).borderTopWidth) })));
+    for (const edge of edges) { expect(edge.style).not.toBe('none'); expect(edge.width).toBeGreaterThan(0); }
+    await noViolations(page);
+  });
+
+  for (const size of [{ width: 320, height: 640 }, { width: 390, height: 844 }, { width: 1280, height: 800 }]) {
+    test(`${size.width}px sign-in page: the language choice sits below the sign-in card`, async ({ page }) => {
+      await page.setViewportSize(size);
+      await mockBackend(page);
+      await page.goto('/#/wardrobe');
+      const card = page.locator('.entry-card'), choice = page.locator('.entry-language .language-selector');
+      await expect(card).toBeVisible();
+      await expect(choice).toBeVisible();
+      await expect(page.locator('.entry-header .language-selector')).toHaveCount(0);
+      await expect.poll(() => page.evaluate(() => {
+        const cardBox = document.querySelector('.entry-card')?.getBoundingClientRect(), choiceBox = document.querySelector('.entry-language .language-selector')?.getBoundingClientRect();
+        return !!cardBox && !!choiceBox && choiceBox.top >= cardBox.bottom - 0.5;
+      })).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await noViolations(page);
+    });
+  }
+});
+
+test.describe('UX6 bounded synthetic captures', () => {
+  const scenes = [
+    { name: 'wardrobe-en-mobile', language: 'en', width: 390, height: 844, large: false, scene: 'grid' },
+    { name: 'chips-fi-mobile', language: 'fi', width: 390, height: 844, large: false, scene: 'chips' },
+    { name: 'filter-sheet-fi-mobile', language: 'fi', width: 390, height: 844, large: false, scene: 'sheet' },
+    { name: 'filter-sheet-sv-320-200', language: 'sv', width: 320, height: 800, large: true, scene: 'sheet' },
+    { name: 'filter-sheet-en-desktop', language: 'en', width: 1280, height: 800, large: false, scene: 'sheet' },
+    { name: 'sign-in-sv-320-200', language: 'sv', width: 320, height: 800, large: true, scene: 'sign-in' },
+  ] as const;
+  for (const scene of scenes) {
+    test(`${scene.name} retains functional assertions in every project`, async ({ page }, testInfo: TestInfo) => {
+      const language: Language = scene.language;
+      const write = testInfo.project.name === 'chromium';
+      const directory = path.resolve('test-results/ux6-visual');
+      if (write) {
+        await mkdir(directory, { recursive: true });
+        const info = await lstat(directory); expect(info.isDirectory() && !info.isSymbolicLink()).toBe(true);
+      }
+      if (scene.scene === 'sign-in') {
+        await page.setViewportSize({ width: scene.width, height: scene.height });
+        await mockBackend(page, { initialLanguage: language });
+        await page.goto('/#/wardrobe');
+        await page.locator(`.language-selector button[lang="${language}"]`).click();
+        await expect(page.locator('html')).toHaveAttribute('lang', language);
+        await expect(page.locator('.entry-language .language-selector')).toBeVisible();
+      } else {
+        await start(page, { language, width: scene.width, height: scene.height, items: 6 });
+        if (scene.scene !== 'grid') {
+          await openFilters(page);
+          for (const value of ['top', 'bottom', 'footwear']) await filterSheet(page).locator(`input[name="category"][value="${value}"]`).check();
+          if (scene.scene === 'chips') {
+            await page.keyboard.press('Escape');
+            await expect(page.locator('.filter-chip')).toHaveCount(3);
+          }
+        }
+        await expect(page.locator('.item-card').first()).toBeVisible();
+      }
+      if (scene.large) await page.addStyleTag({ content: zoom });
+      if (scene.scene === 'sheet') await expect(filterSheet(page).locator('.filter-sheet-footer .button-primary')).toBeVisible();
+      await noViolations(page);
+      expect(await page.evaluate(({ expectedLanguage, width, signIn }) => {
+        const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
+        const fields = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea')]
+          .filter((field) => field.getClientRects().length && field.type !== 'checkbox' && field.type !== 'radio').map((field) => field.value).join('');
+        return location.hostname === '127.0.0.1' && document.documentElement.lang === expectedLanguage && innerWidth === width
+          && document.documentElement.scrollWidth <= innerWidth && (signIn ? fields === '' : !document.querySelector('input[type=password],#email,#password'))
+          && !privatePattern.test(document.body.innerText) && !privatePattern.test(fields);
+      }, { expectedLanguage: language, width: scene.width, signIn: scene.scene === 'sign-in' })).toBe(true);
+      if (!write) return;
+      const png = await page.screenshot({ fullPage: false, animations: 'disabled', type: 'png', scale: 'css' });
+      expect(png.byteLength > 0 && png.byteLength <= 1048576).toBe(true);
+      expect(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && png.readUInt32BE(16) === scene.width).toBe(true);
+      const file = await open(path.join(directory, `${scene.name}.png`), 'wx');
+      try { await file.writeFile(png); } finally { await file.close(); }
+    });
+  }
+});
