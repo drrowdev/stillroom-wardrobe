@@ -112,8 +112,12 @@ test.describe('AD1b admin spending and limits', () => {
     await openScreen(page);
     await expect(page.locator('#admin-title')).toBeFocused();
     await expect(page.getByText('Spending recorded by the app. Some amounts are estimates. Calls made outside the app aren\'t included.', { exact: true })).toBeVisible();
-    // The plain summary: Used is confirmed plus estimated, Pending is still reserved, from the same month as the table.
-    await expect(summary(page, 1)).toHaveText([`${text('admin.used')}$1.779407`, `${text('admin.pending')}$4.586711`, `${text('admin.requests')}9`]);
+    // The plain summary: Used is confirmed plus estimated, Pending is still reserved, from the same month as the table,
+    // rounded to cents for display only (1.779407 and 4.586711); the exact amounts stay in Details.
+    await expect(summary(page, 1)).toHaveText([`${text('admin.used')}$1.78`, `${text('admin.pending')}$4.59`, `${text('admin.requests')}9`]);
+    for (const block of ['.admin-summary', '.admin-use']) for (const exact of ['$1.779407', '$4.586711', '$6.366118']) {
+      await expect(account(page, 1).locator(block)).not.toContainText(exact);
+    }
     await expect(summary(page, 2).nth(2)).toContainText(text('admin.requests'));
     for (const number of [1, 2] as const) await expect(details(page, number)).not.toHaveAttribute('open');
     await expect(account(page, 1).getByText(probe('admin.enhancement', '$0.26'), { exact: true })).toBeHidden();
@@ -128,7 +132,7 @@ test.describe('AD1b admin spending and limits', () => {
     await expect(row(page, 1, 'admin.enhancement').locator('td')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00', '0']);
     await expect(row(page, 1, 'admin.tryOn').locator('td')).toHaveText(['$0.24', '$0.00', '$0.36', '$0.60', '2']);
     await expect(row(page, 1, 'admin.total').locator('td')).toHaveText(['$1.474567', '$0.30484', '$4.586711', '$6.366118', '9']);
-    await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$6.366118', limit: '$20.00' }));
+    await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$6.37', limit: '$20.00' }));
     await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$0.60', limit: '$8.00' }));
     await details(page, 1).locator('summary').click();
     await expect(account(page, 1).locator('table').first()).toBeVisible();
@@ -158,8 +162,8 @@ test.describe('AD1b admin spending and limits', () => {
     // Nothing is reserved in that month, so Used is the whole total.
     await expect(row(page, 1, 'admin.total').locator('td').nth(2)).toHaveText('$0.00');
     await expect(row(page, 1, 'admin.total').locator('td').nth(3)).toHaveText('$2.732345');
-    await expect(summary(page, 1)).toHaveText([`${text('admin.used')}$2.732345`, `${text('admin.pending')}$0.00`, `${text('admin.requests')}10`]);
-    await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$6.366118', limit: '$20.00' }));
+    await expect(summary(page, 1)).toHaveText([`${text('admin.used')}$2.73`, `${text('admin.pending')}$0.00`, `${text('admin.requests')}10`]);
+    await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$6.37', limit: '$20.00' }));
     await axe(page);
     await button(page, 'admin.moreMonths').click();
     await expect(month.locator('option')).toHaveCount(12);
@@ -396,8 +400,9 @@ test.describe('AD1b admin spending and limits', () => {
     await page.goto('/#/admin'); await signIn(page);
     await openScreen(page);
     const use = account(page, 2).locator('.admin-use > div');
-    await expect(use.nth(0).locator('dd')).toContainText('$5.169475');
-    await expect(use.nth(2).locator('dd')).toHaveText(`$0.00484${text('admin.notSetUp')}`);
+    // Rounded to cents here (5.169475 and 0.00484); Details keeps the exact amounts.
+    await expect(use.nth(0).locator('dd')).toContainText('$5.17');
+    await expect(use.nth(2).locator('dd')).toHaveText(`$0.00${text('admin.notSetUp')}`);
     await expect(use.nth(3).locator('dd')).toHaveText(`$0.15${text('admin.notSetUp')}`);
     await expect(row(page, 2, 'admin.enhancement').locator('td')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00', '0']);
     await expect(account(page, 2)).toContainText(text('admin.notSetUp'));
