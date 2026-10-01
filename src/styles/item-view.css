@@ -1,0 +1,17 @@
+/* UX2 item detail view card, loaded with the item editor chunk. New class names only, so load order does not matter. */
+
+/* Item detail: the view card and the always-present recovery messages. */
+.item-view { display: grid; gap: 20px; min-width: 0; }
+.item-facts { display: grid; gap: 12px; margin: 0; min-width: 0; }
+.item-fact { display: grid; grid-template-columns: minmax(0, 10rem) minmax(0, 1fr); gap: 4px 16px; min-width: 0; }
+.item-fact dt { color: var(--secondary); }
+.item-fact dd { margin: 0; min-width: 0; overflow-wrap: anywhere; white-space: pre-line; }
+.item-view > .button { justify-self: start; }
+.item-edit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.item-edit-actions .text-button { min-height: 44px; }
+.item-recovery { display: grid; gap: 12px; min-width: 0; }
+.item-recovery:empty { display: none; }
+
+@media (max-width: 480px) {
+  .item-fact { grid-template-columns: minmax(0, 1fr); }
+}

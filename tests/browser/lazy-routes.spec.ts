@@ -66,6 +66,29 @@ test.describe('lazy routes', () => {
     await expectRoute(page, '#image-change-title');
   });
 
+  for (const mode of ['loading', 'failed'] as const) {
+    test(`item detail keeps its heading and Back while the item card code is ${mode}`, async ({ page }) => {
+      const editor = /\/src\/features\/wardrobe\/item-editor\.tsx/;
+      const held: Array<() => Promise<void>> = [];
+      await page.route(editor, route => mode === 'failed' ? route.abort() : new Promise<void>(resolve => { held.push(() => route.continue().then(resolve)); }));
+      const { saved } = await start(page);
+      await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+      await expect(page.locator('#item-detail-title')).toBeFocused();
+      await expect(page.locator(mode === 'failed' ? '.chunk-error[role=alert]' : '.chunk-loading [role=status]')).toBeVisible();
+      await expect(page.locator('#detail-edit')).toHaveCount(0);
+      if (mode === 'failed') {
+        await expect(page.locator('.chunk-error')).toContainText(translate('en', 'chunk.failed'));
+        await page.getByRole('button', { name: translate('en', 'common.back'), exact: true }).click();
+        await expectRoute(page, '#wardrobe-title');
+        return;
+      }
+      for (const release of held.splice(0)) await release();
+      await expect(page.locator('.chunk-loading')).toHaveCount(0);
+      await expect(page.locator('#detail-edit')).toBeVisible();
+      await expect(page.locator('#item-detail-title')).toBeFocused();
+    });
+  }
+
   test('page code preloads only after the workspace settles, and a reload right after sign-in works', async ({ page }) => {
     await page.addInitScript(() => { performance.setResourceTimingBufferSize(5000); });
     await start(page);

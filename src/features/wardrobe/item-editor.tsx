@@ -1,0 +1,334 @@
+// The item detail view card and edit form. Loaded as its own chunk (UX2), so it stays out of the start-up download;
+// item-detail.tsx starts loading it together with the item.
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { OwnerScope } from '../../auth/session';
+import type { AppClient } from '../../data/client';
+import { loadItemDetail, saveImageDescription, saveItemFields } from '../../data/item-details';
+import { errorKey, isAborted } from '../../data/errors';
+import {
+  confirmsDescription, confirmsItem, prepareDescriptionAttempt, prepareGarmentAttempt, validDescription,
+  type DescriptionAttempt, type ImageBaseline, type ItemAttempt, type ItemBaseline, type ItemDetail as Detail,
+} from '../../domain/item-details';
+import { editGarmentField, garmentDraftDirty, newGarmentDraft, sameValue } from '../../domain/garment-fields';
+import { ItemForm } from './item-form';
+import type { Language, MessageKey, Translate } from '../../i18n';
+import type { PrivateImages } from '../../images/private-images';
+import { DiscardDialog, type BeforeDiscard } from '../../app/dialog';
+import { Icon } from '../../app/icon';
+import type { ItemLifecycleClient } from '../../data/item-lifecycle';
+import type { LifecycleSnapshot } from '../../domain/item-lifecycle';
+import { TrashAction } from '../settings/trash';
+import type { AiClient } from '../../data/ai';
+import { LazyBoundary } from '../../app/lazy';
+import { lazyNamed } from '../../app/lazy-load';
+import { loadWearHistory, type WearSummary } from '../../data/wear-history';
+import { loadEditedImage } from '../../data/provenance';
+import { wearLineText } from '../statistics/wear-text';
+import { PhotoMenu } from './photo-actions';
+import { itemFacts } from './item-facts';
+import '../../styles/item-view.css';
+
+const ReplacePhoto = lazyNamed(() => import('./replace-photo'), 'ReplacePhoto');
+
+type Outcome = 'confirmed' | 'rejected' | 'unknown' | 'skipped';
+export type Shared = {
+  client: AppClient; scope: OwnerScope; online: boolean; t: Translate; language: Language; currency: string; onSaved: () => void;
+};
+function useSection<Base, Draft, Attempt>(initial: Base, initialDraft: (base: Base) => Draft,
+  prepare: (base: Base, draft: Draft, epoch: number) => Attempt,
+  save: (client: AppClient, scope: OwnerScope, attempt: Attempt) => Promise<Base>,
+  read: (detail: Detail) => Base, confirms: (row: Base, attempt: Attempt) => boolean,
+  itemId: string, props: Shared, onChecked: () => void, isDirty?: (base: Base, draft: Draft) => boolean) {
+  const [base, setBase] = useState(initial);
+  const [draft, setDraft] = useState(() => initialDraft(initial));
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const [error, setError] = useState<MessageKey | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [discard, setDiscard] = useState(false);
+  const latch = useRef(false);
+  const lifetime = useRef(new AbortController());
+  const summary = useRef<HTMLDivElement>(null);
+  const discardFocus = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    lifetime.current = new AbortController();
+    return () => lifetime.current.abort();
+  }, []);
+  const dirty = isDirty ? isDirty(base, draft) : JSON.stringify(draft) !== JSON.stringify(initialDraft(base));
+  let valid = true;
+  try { prepare(base, draft, props.scope.epoch); } catch { valid = false; }
+  useEffect(() => { if (error) summary.current?.focus(); }, [error, busy]);
+  // 'unknown' keeps the attempt frozen: only a read-only check or discard follows, never a resend.
+  async function run(action: 'save' | 'check' | 'reload', nextDraft?: Draft): Promise<Outcome> {
+    if (latch.current || !props.online || props.scope.signal.aborted
+      || action === 'save' && attempt !== null || action === 'check' && !attempt) return 'skipped';
+    const sending = nextDraft ?? draft;
+    let frozenAttempt = attempt;
+    if (action === 'save') {
+      try { frozenAttempt = prepare(base, sending, props.scope.epoch); } catch { return 'skipped'; }
+    }
+    const scope = { ...props.scope, signal: AbortSignal.any([props.scope.signal, lifetime.current.signal]) };
+    latch.current = true;
+    setBusy(true); setError(null);
+    try {
+      let row: Base;
+      if (action === 'save' && frozenAttempt) {
+        if (nextDraft !== undefined) setDraft(nextDraft);
+        setAttempt(frozenAttempt);
+        row = await save(props.client, scope, frozenAttempt);
+      } else {
+        row = read(await loadItemDetail(props.client, scope, itemId));
+        if (action === 'check' && frozenAttempt && !confirms(row, frozenAttempt)) {
+          if (!scope.signal.aborted) setError('detail.conflicting');
+          return 'rejected';
+        }
+      }
+      if (scope.signal.aborted) return 'skipped';
+      setBase(row); setDraft(initialDraft(row)); setAttempt(null); setError(null);
+      if (action !== 'reload') props.onSaved();
+      return action === 'reload' ? 'skipped' : 'confirmed';
+    } catch (problem) {
+      if (scope.signal.aborted || isAborted(problem)) return 'skipped';
+      const key = errorKey(problem);
+      setError(key);
+      return key === 'detail.unconfirmed' || key === 'error.unavailable' ? 'unknown' : 'rejected';
+    } finally {
+      if (!scope.signal.aborted) { latch.current = false; setBusy(false); }
+    }
+  }
+  return {
+    base, draft, setDraft, dirty, busy, error, valid, attempt, run,
+    locked: busy || attempt !== null,
+    controls: <>
+      {error && <div ref={summary} tabIndex={-1} role="alert" className="notice notice-error">
+        <p>{props.t(error)}</p>
+        {attempt !== null && <div className="settings-actions">
+          {(error === 'detail.unconfirmed' || error === 'detail.conflicting' || error === 'error.unavailable') &&
+            <button type="button" className="text-button" disabled={!props.online || busy} onClick={() => { void run('check').then((outcome) => { if (outcome === 'confirmed') onChecked(); }); }}>{props.t('detail.check')}</button>}
+          <button type="button" className="text-button" disabled={!props.online || busy} onClick={(event) => { discardFocus.current = event.currentTarget; setDiscard(true); }}>{props.t('detail.reload')}</button>
+        </div>}
+      </div>}
+      {discard && <DiscardDialog title={props.t('common.unsaved')} t={props.t} onCancel={() => {
+        setDiscard(false);
+        requestAnimationFrame(() => { if (discardFocus.current?.isConnected) discardFocus.current.focus(); });
+      }}
+        onConfirm={() => { setDiscard(false); void run('reload'); }}><p>{props.t('detail.discardSection')}</p></DiscardDialog>}
+    </>,
+  };
+}
+const itemDraft = (base: ItemBaseline) => newGarmentDraft(base.values.currency, 'en', base.values);
+const descriptionDraft = (base: ImageBaseline) => base.altText;
+const prepareFields = (base: ItemBaseline, draft: ReturnType<typeof itemDraft>, epoch: number) => prepareGarmentAttempt(base, draft, epoch);
+const dirtyFields = (base: ItemBaseline, draft: ReturnType<typeof itemDraft>) => garmentDraftDirty(draft, base.values, base.provenance);
+const readItem = (detail: Detail) => detail.item;
+const readImage = (detail: Detail) => detail.image;
+const lifecycleLabels: Record<string, MessageKey> = { donated: 'lifecycle.donated', sold: 'lifecycle.sold' };
+function focusFirstInvalid(form: HTMLFormElement | null) {
+  const input = form?.querySelector<HTMLElement>('[aria-invalid="true"]');
+  for (let ancestor = input?.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+  }
+  requestAnimationFrame(() => input?.focus());
+}
+function SavedPhoto({ image, images, t }: { image: ImageBaseline; images: PrivateImages; t: Translate }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setUrl(null); setFailed(false);
+    const unsubscribe = images.subscribe(paths => { if (paths.includes(image.mainPath)) { active = false; setUrl(null); setFailed(true); } });
+    void images.get(image.mainPath).then((value) => { if (active) setUrl(value); },
+      (problem: unknown) => { if (active && !isAborted(problem)) setFailed(true); });
+    return () => { active = false; unsubscribe(); };
+  }, [image.mainPath, images]);
+  return <div className="detail-photo">{url ? <img src={url} alt={image.altText} /> :
+    <p role="status">{failed ? <><Icon name="photo" />{t('photo.missing')}</> : t('common.loading')}</p>}</div>;
+}
+// A result is shown only for the owner scope and image it was read for; anything else is still loading.
+type EditedState = { key: string; value: 'labelled' | 'unlabelled' | 'failed' };
+function EditedLabel({ client, scope, imageId, online, t }: Pick<Shared, 'client' | 'scope' | 'online' | 't'> & { imageId: string }) {
+  const key = `${scope.ownerId}:${scope.epoch}:${imageId}`;
+  const [state, setState] = useState<EditedState | null>(null);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([scope.signal, controller.signal]);
+    void loadEditedImage(client, imageId, signal).then(value => { if (!signal.aborted) setState({ key, value: value ? 'labelled' : 'unlabelled' }); },
+      (problem: unknown) => { if (!signal.aborted && !isAborted(problem)) setState({ key, value: 'failed' }); });
+    return () => controller.abort();
+  }, [client, scope, imageId, key, reload]);
+  const value = state?.key === key ? state.value : 'loading';
+  if (value === 'labelled') return <p className="detail-edited">{t('detail.aiEdited')}</p>;
+  if (value === 'failed') return <p className="detail-edited" role="status">{t('detail.aiEditedUnavailable')} <button type="button"
+    className="text-button" disabled={!online} onClick={() => setReload(count => count + 1)}>{t('common.retry')}</button></p>;
+  return null;
+}
+// The same distinct-day count as Statistics and the wardrobe sorts.
+function WearLine({ client, scope, itemId, online, language, t }: Pick<Shared, 'client' | 'scope' | 'online' | 'language' | 't'> & { itemId: string }) {
+  const [wear, setWear] = useState<WearSummary | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setWear(null); setFailed(false);
+    void loadWearHistory(client, scope, [{ id: itemId, ownerId: scope.ownerId }], controller.signal, itemId).then(history => {
+      if (!controller.signal.aborted) setWear(history.items.get(itemId) ?? null);
+    }, (problem: unknown) => { if (!controller.signal.aborted && !isAborted(problem)) setFailed(true); });
+    return () => controller.abort();
+  }, [client, scope, itemId, reload]);
+  if (failed) return <p className="detail-wear" role="status">{t('wardrobe.historyUnavailable')} <button type="button" className="text-button" disabled={!online} onClick={() => setReload(value => value + 1)}>{t('common.retry')}</button></p>;
+  if (!wear) return <p className="detail-wear" role="status">{t('wardrobe.historyLoading')}</p>;
+  return <p className="detail-wear">{wearLineText(wear.count, wear.lastWorn, language, t)}</p>;
+}
+export function Editor(props: Shared & { detail: Detail; images: PrivateImages; lifecycle: ItemLifecycleClient; onTrashed: (item: LifecycleSnapshot) => void; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void;
+  ai: AiClient; onBeforeDiscard: (handler: BeforeDiscard | null) => void; onReload: () => void; onTitle: (title: string) => void }) {
+  const [outcome, setOutcome] = useState<'saved' | 'partial' | null>(null);
+  // A confirmed read-only check reports "Saved" only when the other section has nothing unsaved or outstanding.
+  const outstanding = useRef({ item: false, description: false });
+  const itemChecked = useCallback(() => { if (!outstanding.current.description) setOutcome('saved'); }, []);
+  const descriptionChecked = useCallback(() => { if (!outstanding.current.item) setOutcome('saved'); }, []);
+  const item = useSection<ItemBaseline, ReturnType<typeof itemDraft>, ItemAttempt>(
+    props.detail.item, itemDraft, prepareFields, saveItemFields, readItem, confirmsItem, props.detail.item.id, props, itemChecked, dirtyFields);
+  const description = useSection<ImageBaseline, string, DescriptionAttempt>(
+    props.detail.image, descriptionDraft, prepareDescriptionAttempt, saveImageDescription, readImage, confirmsDescription, props.detail.item.id, props, descriptionChecked);
+  const [lifecycleState, setLifecycleState] = useState({ busy: false, pending: false });
+  const [mode, setMode] = useState<'replacement' | 'recovery' | null>(null);
+  // View first: the facts card, with Edit revealing the form. Only this block switches; the section hooks, the recovery
+  // messages and the Archive/Trash row stay mounted in both modes.
+  const [editing, setEditing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const focusAfter = useRef<'detail-edit' | 'detail-title' | null>(null);
+  useEffect(() => {
+    const id = focusAfter.current;
+    focusAfter.current = null;
+    if (id) document.getElementById(id)?.focus();
+  }, [editing]);
+  const [photoState, setPhotoState] = useState({ dirty: false, incomplete: false, busy: false });
+  const [saving, setSaving] = useState(false);
+  const saveLatch = useRef(false);
+  const form = useRef<HTMLFormElement>(null);
+  const onPhotoState = useCallback((dirty: boolean, incomplete: boolean, busy: boolean) => setPhotoState({ dirty, incomplete, busy }), []);
+  const onLifecycleState = useCallback((busy: boolean, pending: boolean) => setLifecycleState({ busy, pending }), []);
+  const { onDirty, onTitle, t } = props;
+  const sectionsDirty = item.dirty || description.dirty || item.attempt !== null || description.attempt !== null;
+  const sectionsBusy = item.busy || description.busy || saving;
+  const itemOutstanding = item.dirty || item.attempt !== null, descriptionOutstanding = description.dirty || description.attempt !== null;
+  useEffect(() => { outstanding.current = { item: itemOutstanding, description: descriptionOutstanding }; }, [itemOutstanding, descriptionOutstanding]);
+  useEffect(() => {
+    onDirty(sectionsDirty || lifecycleState.pending || photoState.dirty,
+      photoState.incomplete, sectionsBusy || lifecycleState.busy || photoState.busy);
+    return () => onDirty(false, false, false);
+  }, [sectionsDirty, sectionsBusy, lifecycleState, photoState, onDirty]);
+  useEffect(() => { onTitle(item.base.title); }, [item.base.title, onTitle]);
+  const blocked = sectionsDirty || sectionsBusy || lifecycleState.busy || lifecycleState.pending;
+  const quickReady = props.online && !blocked;
+  const formattingOnly = !item.dirty && !item.locked && !item.error
+    && !sameValue(item.draft.raw, itemDraft(item.base).raw);
+  const invalidDescription = validDescription(description.draft) === null;
+  const canSave = props.online && !sectionsBusy && item.attempt === null && description.attempt === null && (item.dirty || description.dirty);
+  // One Save: the item goes first; the description is sent only after the item is confirmed. Nothing is ever resent.
+  async function saveAll() {
+    if (saveLatch.current || !canSave) return;
+    const itemDirty = item.dirty, descriptionDirty = description.dirty;
+    if (itemDirty && !item.valid || descriptionDirty && !description.valid) { focusFirstInvalid(form.current); return; }
+    const text = description.draft;
+    saveLatch.current = true; setSaving(true); setOutcome(null);
+    try {
+      if (itemDirty && await item.run('save') !== 'confirmed') return;
+      if (descriptionDirty && await description.run('save', text) !== 'confirmed') {
+        if (itemDirty) setOutcome('partial');
+        return;
+      }
+      setOutcome('saved');
+      focusAfter.current = 'detail-edit';
+      setEditing(false);
+    } finally { saveLatch.current = false; setSaving(false); }
+  }
+  async function quick(field: 'lifecycle', value: string) {
+    if (!quickReady || saveLatch.current) return;
+    saveLatch.current = true; setOutcome(null);
+    try { if (await item.run('save', editGarmentField(item.draft, field, value, props.language)) === 'confirmed') setOutcome('saved'); }
+    finally { saveLatch.current = false; }
+  }
+  function startEdit() {
+    if (sectionsBusy || item.attempt !== null || description.attempt !== null || lifecycleState.busy || lifecycleState.pending) return;
+    setOutcome(null);
+    focusAfter.current = 'detail-title';
+    setEditing(true);
+  }
+  // Back to the card with both drafts reset to their saved values; nothing is sent.
+  function leaveEdit() {
+    item.setDraft(itemDraft(item.base));
+    description.setDraft(descriptionDraft(description.base));
+    setOutcome(null);
+    focusAfter.current = 'detail-edit';
+    setEditing(false);
+  }
+  function cancelEdit() {
+    if (sectionsBusy || item.attempt !== null || description.attempt !== null) return;
+    if (item.dirty || description.dirty) setCancelling(true);
+    else leaveEdit();
+  }
+  if (mode) return <LazyBoundary t={t}><ReplacePhoto {...props} item={item.base} image={description.base} mode={mode} onDirty={onPhotoState}
+    onClose={() => { setMode(null); props.onReload(); }} /></LazyBoundary>;
+  const lifecycle = item.draft.raw.lifecycle;
+  const unresolved = item.attempt !== null || description.attempt !== null;
+  const facts = itemFacts(item.base.values, props.language, t);
+  return <div className="detail-layout">
+    <div className="detail-media">
+      <SavedPhoto image={description.base} images={props.images} t={t} />
+      <EditedLabel client={props.client} scope={props.scope} imageId={description.base.id} online={props.online} t={t} />
+      {!editing && <PhotoMenu t={t} disabled={blocked || !props.online}>
+        <button className="button button-quiet" type="button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('replacement'); }}>{t('imageChange.replace')}</button>
+        <button className="button button-quiet" type="button" disabled={blocked || !props.online} onClick={() => { if (!blocked) setMode('recovery'); }}>{t('imageChange.recover')}</button>
+      </PhotoMenu>}
+      <WearLine client={props.client} scope={props.scope} itemId={props.detail.item.id} online={props.online} language={props.language} t={t} />
+    </div>
+    <div className="detail-sections">
+      {editing ? <fieldset className="lifecycle-edit-lock" disabled={lifecycleState.busy || lifecycleState.pending}>
+        <section className="settings-card detail-name" aria-label={t('capture.detailsTitle')}>
+          <form ref={form} className="stack" onSubmit={(event) => { event.preventDefault(); void saveAll(); }}>
+            <ItemForm draft={item.draft} onChange={(next) => { item.setDraft(next); setOutcome(null); }} baseline={item.base.values} provenance={item.base.provenance}
+              language={props.language} t={t} prefix="detail" locked={item.locked || saving} currency={props.currency}>
+              <div className="field"><label htmlFor="detail-description">{t('item.altText')}</label>
+                <textarea id="detail-description" value={description.draft} rows={3} disabled={description.locked || saving}
+                  aria-invalid={invalidDescription} aria-describedby={invalidDescription ? 'detail-description-error' : undefined}
+                  onChange={(event) => { description.setDraft(event.target.value); setOutcome(null); }} />
+                {invalidDescription && <p id="detail-description-error" role="alert" className="notice notice-error">{t('detail.invalidDescription')}</p>}
+              </div>
+            </ItemForm>
+            <div className="item-edit-actions">
+              <button className="button button-primary" disabled={!canSave}>{t(sectionsBusy ? 'common.saving' : 'detail.saveChanges')}</button>
+              <button id="detail-cancel-edit" className="text-button" type="button" disabled={sectionsBusy || unresolved} onClick={cancelEdit}>{t('common.cancel')}</button>
+            </div>
+          </form>
+        </section>
+      </fieldset>
+      : <section className="item-view" aria-label={t('capture.detailsTitle')}>
+        <dl className="item-facts">{facts.map(fact => <div key={fact.field} className="item-fact"><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>
+        <button id="detail-edit" className="button button-primary" type="button" disabled={sectionsBusy || unresolved || lifecycleState.busy || lifecycleState.pending}
+          onClick={startEdit}>{t('common.edit')}</button>
+      </section>}
+      {/* Always mounted in both modes: an unresolved save, Archive or check keeps its message, Check and Reload here. */}
+      <div className="item-recovery">
+        {item.controls}
+        {outcome === 'partial' && <p role="alert" className="notice notice-error">{t('detail.descriptionFailed')}</p>}
+        {description.controls}
+        {editing && formattingOnly && <p role="status" className="notice">{t('detail.noChanges')}</p>}
+        {outcome === 'saved' && !sectionsDirty && <p role="status" className="settings-success">{t('detail.saved')}</p>}
+      </div>
+      {cancelling && <DiscardDialog title={t('common.unsaved')} t={t} onCancel={() => {
+        setCancelling(false);
+        requestAnimationFrame(() => document.getElementById('detail-cancel-edit')?.focus());
+      }} onConfirm={() => { setCancelling(false); leaveEdit(); }}><p>{t('detail.discardEdit')}</p></DiscardDialog>}
+      <div className="detail-item-actions">
+        <div className="detail-archive">
+          {lifecycle === 'active'
+            ? <button type="button" className="button button-secondary" disabled={!quickReady} onClick={() => { void quick('lifecycle', 'archived'); }}>{t('detail.archive')}</button>
+            : <><p>{t(lifecycleLabels[lifecycle] ?? 'detail.archived')}</p>
+              <button type="button" className="button button-secondary" disabled={!quickReady} onClick={() => { void quick('lifecycle', 'active'); }}>{t('detail.unarchive')}</button></>}
+        </div>
+        <TrashAction {...props} item={item.base} image={description.base} onState={onLifecycleState} blocked={sectionsDirty || sectionsBusy} />
+      </div>
+    </div>
+  </div>;
+}

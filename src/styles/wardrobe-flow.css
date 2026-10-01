@@ -1,4 +1,4 @@
-/* UX2 Add item and item detail. New class names only: app.css loads after this file and wins on equal selectors. */
+/* UX2 Add item and photo options. New class names only: app.css loads after this file and wins on equal selectors. */
 
 /* Step 1: the photo on its own, centred. */
 .capture-layout.capture-step-photo { grid-template-columns: minmax(0, 560px); justify-content: center; }
@@ -17,19 +17,3 @@
 }
 
 .crop-exact.crop-exact-after { margin-top: 12px; margin-bottom: 0; }
-
-/* Item detail: the view card and the always-present recovery messages. */
-.item-view { display: grid; gap: 20px; min-width: 0; }
-.item-facts { display: grid; gap: 12px; margin: 0; min-width: 0; }
-.item-fact { display: grid; grid-template-columns: minmax(0, 10rem) minmax(0, 1fr); gap: 4px 16px; min-width: 0; }
-.item-fact dt { color: var(--secondary); }
-.item-fact dd { margin: 0; min-width: 0; overflow-wrap: anywhere; white-space: pre-line; }
-.item-view > .button { justify-self: start; }
-.item-edit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.item-edit-actions .text-button { min-height: 44px; }
-.item-recovery { display: grid; gap: 12px; min-width: 0; }
-.item-recovery:empty { display: none; }
-
-@media (max-width: 480px) {
-  .item-fact { grid-template-columns: minmax(0, 1fr); }
-}
