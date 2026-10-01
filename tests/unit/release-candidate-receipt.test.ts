@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  APPLE_JOBS, CI_JOBS, REPOSITORY, WORKFLOWS, Blocked, checkBinding, evaluate, exitCode, gather, gitIn, jobNames, paginate, parseArguments,
+  APPLE_JOBS, CI_JOBS, REPOSITORY, WORKFLOWS, Blocked, checkBinding, evaluate, exitCode, gather, gitIn, verifierGit, jobNames, paginate, parseArguments,
 } from '../../scripts/release-candidate-receipt.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -259,6 +259,12 @@ describe('R1 release-candidate receipt: binding to C', () => {
       const inside = { scriptPath: path.join(withVerifier, 'scripts', 'release-candidate-receipt.mjs'), readScript: () => readFileSync(source) };
 
       expect(checkBinding({ sha: bound, git: gitIn(withVerifier), ...inside })).toBeNull();
+      // The command line runs git in the verifier's own directory, `scripts/`, exactly as in the repository.
+      const cli = verifierGit(inside.scriptPath);
+      expect(checkBinding({ sha: bound, git: cli, ...inside })).toBeNull();
+      const missing = path.join(withoutVerifier, 'scripts', 'release-candidate-receipt.mjs');
+      expect(checkBinding({ sha: unbound, git: verifierGit(missing), scriptPath: missing, readScript: () => readFileSync(source) }))
+        .toMatch(/not tracked/);
       // The caller's clean checkout at a C without the verifier does not bind an external executable.
       const external = { scriptPath: source, readScript: () => readFileSync(source) };
       expect(checkBinding({ sha: unbound, git: gitIn(path.dirname(source)), ...external })).not.toBeNull();
@@ -272,10 +278,21 @@ describe('R1 release-candidate receipt: binding to C', () => {
       const later = commit(withVerifier);
       git(withVerifier, 'checkout', '-q', bound);
       expect(checkBinding({ sha: later, git: gitIn(withVerifier), ...inside })).toMatch(/HEAD is not the candidate/);
+      expect(checkBinding({ sha: later, git: cli, ...inside })).toMatch(/HEAD is not the candidate/);
       git(withVerifier, 'checkout', '-q', later);
       expect(checkBinding({ sha: later, git: gitIn(withVerifier), ...inside })).toMatch(/differs from C/);
+      expect(checkBinding({ sha: later, git: cli, ...inside })).toMatch(/differs from C/);
       writeFileSync(path.join(withVerifier, 'notes.txt'), 'untracked\n');
       expect(checkBinding({ sha: later, git: gitIn(withVerifier), ...inside })).toMatch(/not clean/);
+      expect(checkBinding({ sha: later, git: cli, ...inside })).toMatch(/not clean/);
+      rmSync(path.join(withVerifier, 'notes.txt'));
+      writeFileSync(inside.scriptPath, readFileSync(source));
+      git(withVerifier, 'commit', '-q', '-am', 'restore');
+      const restored = git(withVerifier, 'rev-parse', 'HEAD').trim();
+      expect(checkBinding({ sha: restored, git: cli, ...inside })).toBeNull();
+      // An untracked file in `scripts/` is seen from there too.
+      writeFileSync(path.join(withVerifier, 'scripts', 'extra.mjs'), '');
+      expect(checkBinding({ sha: restored, git: cli, ...inside })).toMatch(/not clean/);
 
       // Through gather: a refusal happens before any API read.
       let apiCalls = 0;
@@ -286,7 +303,7 @@ describe('R1 release-candidate receipt: binding to C', () => {
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it('fails stale definitions at C: a renamed, added or removed CI job or shard, and a renamed Apple job', () => {
     const cases: Array<[keyof World['definitions'], (text: string) => string]> = [
