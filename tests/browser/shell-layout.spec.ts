@@ -464,6 +464,21 @@ test.describe('UX1 navigation chunk held or failing', () => {
 });
 
 test.describe('UX1 large text', () => {
+  // A size change shows the one-row bar for a frame before tab-fit.ts measures it. A word wider than its column in that
+  // frame (seen with Linux WebKit fonts at 320 px and 200 % text) must not widen the page, and the bar must then reflow.
+  test('a label word wider than its column never widens the page before the bar reflows', async ({ page }) => {
+    await start(page, { width: 320, height: 800 });
+    const before = await page.evaluate(() => {
+      const bar = document.querySelector<HTMLElement>('nav.tab-bar')!;
+      delete bar.dataset.reflow;
+      bar.querySelector<HTMLElement>('.tab-more .tab-label')!.textContent = 'Moremoremoremore';
+      return { scroll: document.documentElement.scrollWidth, width: innerWidth };
+    });
+    expect(before.scroll).toBeLessThanOrEqual(before.width);
+    await expect(tabBar(page)).toHaveAttribute('data-reflow', '');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+
   for (const language of ['fi', 'sv'] as const) {
     test(`320px with 200% text ${language}: whole tab labels, reflowed bar and unobscured focus`, async ({ page }) => {
       await start(page, { language, width: 320, height: 800, items: 4 });

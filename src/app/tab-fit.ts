@@ -12,7 +12,10 @@ export function fitTabBar(bar: HTMLElement | null): (() => void) | undefined {
       bar.dataset.measured = '';
       const labels = [...bar.querySelectorAll<HTMLElement>('.tab-label')];
       // In the one-row layout a label wraps only between words, so a word too wide for its column overflows the label.
-      if (labels.some(label => label.scrollWidth > label.clientWidth + 0.5)) bar.dataset.reflow = '';
+      // Measured from the text itself, since the label clips that overflow (shell.css).
+      const range = document.createRange();
+      const wide = (label: HTMLElement) => { range.selectNodeContents(label); return range.getBoundingClientRect().width > label.clientWidth + 0.5; };
+      if (labels.some(wide)) bar.dataset.reflow = '';
     }
     root.style.setProperty('--tab-bar-height', `${shown ? bar.getBoundingClientRect().height : 0}px`);
     if (shown) clear();

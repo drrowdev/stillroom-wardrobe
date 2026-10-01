@@ -43,6 +43,8 @@
   .tab-item .icon { width: 20px; height: 20px; flex: 0 0 auto; }
   /* Whole words only: a word wider than its column switches the bar to the reflow layout instead of splitting it. */
   .tab-label { display: block; max-width: 100%; min-width: 0; overflow-wrap: normal; word-break: normal; hyphens: manual; }
+  /* Until tab-fit.ts has switched to the reflow layout, a too-wide word stays inside its column instead of widening the page. */
+  .tab-bar[data-measured]:not([data-reflow]) .tab-label { overflow-x: clip; }
   .tab-bar[data-reflow] > ul { display: flex; flex-wrap: wrap; }
   .tab-bar[data-reflow] li { flex: 1 1 auto; min-width: max-content; }
   .tab-bar[data-reflow] .tab-item { flex-direction: row; gap: 6px; min-height: 44px; padding-inline: 10px; }
