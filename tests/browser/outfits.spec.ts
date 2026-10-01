@@ -43,10 +43,13 @@ function seedOutfit(api: Api, itemIds: string[], extra: Row = {}, account: 'a' |
   itemIds.forEach((itemId, position) => api.outfitItems.push({ owner_id: owner, outfit_id: id, item_id: itemId, position }));
   return id;
 }
-async function start(page: Page, language: Language = 'en', seed?: (api: Api, clothes: ReturnType<typeof seedClothes>) => void, hash = '') {
+async function start(page: Page, language: Language = 'en', seed?: (api: Api, clothes: ReturnType<typeof seedClothes>) => void, hash = '',
+  routes?: () => Promise<unknown>) {
   const api = await mockBackend(page, { initialLanguage: language });
   const clothes = seedClothes(api);
   seed?.(api, clothes);
+  // Extra routes go after the mock backend's, so they take precedence, and before the first page load.
+  await routes?.();
   await page.goto(`/${hash}`); await signIn(page);
   await expectSignedIn(page);
   return { api, clothes };
@@ -566,12 +569,12 @@ test.describe('I11 outfits follow garment changes (F3)', () => {
   });
   test('missing and denied photos show the placeholder', async ({ page }) => {
     let id = '', denied = '';
+    // Denied from the first load: the wardrobe shown after sign-in would otherwise load and cache this thumbnail first.
     await start(page, 'en', (api, clothes) => {
       id = seedOutfit(api, [clothes.top.id, clothes.trousers.id, clothes.shoes.id]);
       api.files.delete(String(api.images.find(image => image.item_id === clothes.top.id)!.thumb_path));
       denied = String(api.images.find(image => image.item_id === clothes.trousers.id)!.thumb_path);
-    });
-    await page.route(url => url.pathname === `/storage/v1/object/wardrobe/${denied}`, route => route.fulfill({ status: 400, json: { statusCode: '403', message: 'Denied' } }));
+    }, '', () => page.route(url => url.pathname === `/storage/v1/object/wardrobe/${denied}`, route => route.fulfill({ status: 400, json: { statusCode: '403', message: 'Denied' } })));
     await openOutfits(page);
     await page.locator(`a[href="#/outfits/${id}"]`).click();
     const composition = page.locator('.outfit-composition');
