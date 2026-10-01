@@ -66,6 +66,10 @@ async function navFits(page: Page, language: Language) {
 const innerWidthOf = (page: Page) => page.viewportSize()!.width;
 const monthName = (month: string, language: Language = 'en') => new Intl.DateTimeFormat(locales[language], { month: 'long', year: 'numeric', timeZone: 'UTC' })
   .format(new Date(`${month}-15T12:00:00Z`));
+const valueTile = (page: Page, language: Language = 'en') => page.locator('.stats-summary > div').filter({ hasText: text('stats.value', language) });
+const costRows = (page: Page) => card(page, 'stats-cost').locator('.stats-cost-list > li');
+const costLine = (title: string, price: string, count: number, cost: string) =>
+  `${title}${text('item.price')}${price}${text('stats.wearCount')}${count}${text('stats.costPerWear')}${cost}`;
 const spendLine = (label: string, amount: string, count: number, language: Language = 'en') =>
   `${label}${text('stats.spendLine', language, { amount, items: text(count === 1 ? 'stats.itemCount_one' : 'stats.itemCount_other', language, { count }) })}`;
 
@@ -75,8 +79,14 @@ test('spending: wardrobe value, average cost per wear, category and month totals
   await expect(spend.getByRole('heading', { level: 2 })).toHaveText(text('stats.spending'));
   // Active EUR items: coat 240, shirt 45.50, boots 150. Worn: coat 3 days and shirt 1 day, so (240 + 45.50) / 4.
   const figures = spend.locator('.stats-figures > div');
-  await expect(figures.nth(0)).toHaveText(`${text('stats.value')}${money(435.5, 'EUR')}`);
-  await expect(figures.nth(1)).toHaveText(`${text('stats.averageCostPerWear')}${money(71.38, 'EUR')}`);
+  await expect(valueTile(page)).toHaveText(`${text('stats.value')}${money(435.5, 'EUR')}`);
+  await expect(figures).toHaveText([`${text('stats.averageCostPerWear')}${money(71.38, 'EUR')}`]);
+  // The category bars are proportional to the largest amount and hidden from assistive technology; the text stays.
+  const bars = spend.locator('section[aria-labelledby="stats-by-category"] .stats-bar');
+  await expect(bars).toHaveCount(3);
+  for (const bar of await bars.all()) await expect(bar).toHaveAttribute('aria-hidden', 'true');
+  expect(await bars.locator('span').evaluateAll(spans => spans.map(span => (span as HTMLElement).style.width))).toEqual(['18.9%', '62.5%', '100%']);
+  await expect(page.locator('.stats-summary > div')).toHaveText([`${text('stats.worn')}4`, `${text('stats.neverWorn')}1`, `${text('stats.value')}${money(435.5, 'EUR')}`]);
   await expect(spend.locator('section[aria-labelledby="stats-by-category"] li')).toHaveText([
     spendLine(text('category.top'), money(45.5, 'EUR'), 1), spendLine(text('category.footwear'), money(150, 'EUR'), 1),
     spendLine(text('category.outerwear'), money(240, 'EUR'), 1),
@@ -85,17 +95,18 @@ test('spending: wardrobe value, average cost per wear, category and month totals
     spendLine(monthName('2026-09'), money(240, 'EUR'), 1), spendLine(monthName('2026-08'), money(45.5, 'EUR'), 1),
   ]);
   await expect(spend.locator('.stats-note')).toHaveText([
-    text('stats.undated_one', 'en', { count: 1 }), text('stats.onlyCurrency', 'en', { currency: 'EUR' }), text('stats.priced_other', 'en', { priced: 4, total: 5 }),
+    text('stats.undated_one', 'en', { count: 1 }), text('stats.pricedIn_other', 'en', { priced: 4, total: 5, currency: 'EUR' }),
   ]);
   await expect(spend).not.toContainText('USD');
   await expect(page.locator('main')).not.toContainText(money(999, 'EUR'));
   // The one currency choice switches both money cards together.
   await expect(page.getByLabel(text('stats.currency'))).toHaveCount(1);
   await page.getByLabel(text('stats.currency')).selectOption('USD');
-  await expect(figures.nth(0)).toHaveText(`${text('stats.value')}${money(80, 'USD')}`);
-  await expect(figures.nth(1)).toHaveText(`${text('stats.averageCostPerWear')}${money(80, 'USD')}`);
+  await expect(valueTile(page)).toHaveText(`${text('stats.value')}${money(80, 'USD')}`);
+  await expect(figures).toHaveText([`${text('stats.averageCostPerWear')}${money(80, 'USD')}`]);
   await expect(spend.locator('section[aria-labelledby="stats-by-month"] li')).toHaveText([spendLine(monthName('2026-07'), money(80, 'USD'), 1)]);
-  await expect(page.getByRole('table', { name: text('stats.costCaption', 'en', { currency: 'USD' }) })).toBeVisible();
+  await expect(spend.locator('.stats-priced')).toHaveText(text('stats.pricedIn_other', 'en', { priced: 4, total: 5, currency: 'USD' }));
+  await expect(costRows(page)).toHaveText([costLine('Blue jeans', money(80, 'USD'), 1, money(80, 'USD'))]);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
@@ -110,6 +121,8 @@ test('spending: without prices it says how many items have one, and shows no amo
   await expect(spend.locator('.stats-figures')).toHaveCount(0);
   await expect(spend.locator('.stats-priced')).toHaveText(text('stats.priced_other', 'en', { priced: 0, total: 5 }));
   await expect(page.getByLabel(text('stats.currency'))).toHaveCount(0);
+  await expect(valueTile(page)).toHaveCount(0);
+  await expect(card(page, 'stats-cost')).toContainText(text('stats.noPrices'));
 });
 
 test('I13: distinct-day counts, the lists and cost per wear kept in each currency', async ({ page }) => {
@@ -128,17 +141,15 @@ test('I13: distinct-day counts, the lists and cost per wear kept in each currenc
   await expect(most.nth(1)).toContainText(text('stats.wears_one', 'en', { count: 1 }));
   await expect(card(page, 'stats-unworn').getByRole('link')).toHaveText(['Leather boots']);
   // The profile currency comes first; the other currency is chosen, never added in.
-  const table = page.getByRole('table', { name: text('stats.costCaption', 'en', { currency: 'EUR' }) });
-  await expect(table.getByRole('row')).toHaveCount(4);
-  await expect(table.getByRole('row').nth(1)).toHaveText(`Wool coat${money(240, 'EUR')}3${money(80, 'EUR')}`);
-  await expect(table.getByRole('row').nth(2)).toHaveText(`Linen shirt${money(45.5, 'EUR')}1${money(45.5, 'EUR')}`);
-  await expect(table.getByRole('row').nth(3)).toHaveText(`Leather boots${money(150, 'EUR')}0${text('stats.neverWorn')}`);
-  await expect(page.locator('.stats-table')).not.toContainText('USD');
+  await expect(costRows(page)).toHaveText([
+    costLine('Wool coat', money(240, 'EUR'), 3, money(80, 'EUR')), costLine('Linen shirt', money(45.5, 'EUR'), 1, money(45.5, 'EUR')),
+    costLine('Leather boots', money(150, 'EUR'), 0, text('stats.neverWorn')),
+  ]);
+  await expect(costRows(page).first().getByRole('link', { name: 'Wool coat' })).toBeVisible();
+  await expect(card(page, 'stats-cost').locator('.stats-cost-list')).not.toContainText('USD');
   await expect(card(page, 'stats-cost').locator('.stats-note')).toHaveText(text('stats.unpriced_one', 'en', { count: 1 }));
   await page.getByLabel(text('stats.currency')).selectOption('USD');
-  const usd = page.getByRole('table', { name: text('stats.costCaption', 'en', { currency: 'USD' }) });
-  await expect(usd.getByRole('row')).toHaveCount(2);
-  await expect(usd.getByRole('row').nth(1)).toHaveText(`Blue jeans${money(80, 'USD')}1${money(80, 'USD')}`);
+  await expect(costRows(page)).toHaveText([costLine('Blue jeans', money(80, 'USD'), 1, money(80, 'USD'))]);
   await expect(page.locator('main')).not.toContainText('Robin private');
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
@@ -149,9 +160,9 @@ test('I13: with one priced currency there is no currency choice', async ({ page 
     w.jeans.purchase_price = null;
     return w;
   });
-  const table = page.getByRole('table', { name: text('stats.costCaption', 'en', { currency: 'EUR' }) });
-  await expect(table.getByRole('row')).toHaveCount(4);
+  await expect(costRows(page)).toHaveCount(3);
   await expect(page.getByLabel(text('stats.currency'))).toHaveCount(0);
+  await expect(card(page, 'stats-spending').locator('.stats-priced')).toHaveText(text('stats.priced_other', 'en', { priced: 3, total: 5 }));
   await expect(page.locator('.stats-currency')).toHaveCount(0);
   await expect(card(page, 'stats-cost').locator('.stats-note')).toHaveText(text('stats.unpriced_other', 'en', { count: 2 }));
 });
@@ -171,7 +182,8 @@ test('I13: an empty history points to the calendar; nothing else is shown', asyn
   await start(page, 'en', api => { seedLook(api, '2026-09-20', [api.seedSavedItem('a', 'Unworn tee').item as Row], 'planned'); });
   await expect(page.locator('.stats-empty')).toContainText(text('stats.empty'));
   await expect(page.locator('.stats-empty').getByRole('link', { name: text('nav.calendar') })).toHaveAttribute('href', '#/calendar');
-  await expect(page.locator('.stats-table')).toHaveCount(0);
+  await expect(page.locator('.stats-cost-list')).toHaveCount(0);
+  await expect(page.locator('.stats-summary > div')).toHaveText([`${text('stats.worn')}0`, `${text('stats.neverWorn')}1`]);
   // Spending does not depend on wear history, so it is still shown.
   await expect(card(page, 'stats-spending')).toContainText(text('stats.spendingNoPrices'));
   await expect(card(page, 'stats-spending').locator('.stats-priced')).toHaveText(text('stats.priced_one', 'en', { priced: 0, total: 1 }));
@@ -203,11 +215,12 @@ test('spending: archived and sold prices never count as wardrobe value', async (
   const spend = card(page, 'stats-spending');
   await expect(spend.locator('p').first()).toHaveText(text('stats.spendingNoPricesIn', 'en', { currency: 'EUR' }));
   await expect(spend.locator('.stats-figures')).toHaveCount(0);
-  await expect(spend.locator('.stats-priced')).toHaveText(text('stats.priced_other', 'en', { priced: 1, total: 4 }));
+  await expect(spend.locator('.stats-priced')).toHaveText(text('stats.pricedIn_other', 'en', { priced: 1, total: 4, currency: 'EUR' }));
   // The sold coat keeps its historical cost per wear.
-  await expect(page.getByRole('table', { name: text('stats.costCaption', 'en', { currency: 'EUR' }) }).getByRole('row').nth(1)).toContainText('Wool coat');
+  await expect(costRows(page).first()).toContainText('Wool coat');
+  await expect(valueTile(page)).toHaveCount(0);
   await page.getByLabel(text('stats.currency')).selectOption('USD');
-  await expect(spend.locator('.stats-figures > div').first()).toHaveText(`${text('stats.value')}${money(80, 'USD')}`);
+  await expect(valueTile(page)).toHaveText(`${text('stats.value')}${money(80, 'USD')}`);
 });
 
 test('spending: with only inactive prices it shows the no-price state', async ({ page }) => {
@@ -231,8 +244,8 @@ test('spending: genuinely zero-priced active items show a zero value, not the em
     return w;
   });
   const figures = card(page, 'stats-spending').locator('.stats-figures > div');
-  await expect(figures.nth(0)).toHaveText(`${text('stats.value')}${money(0, 'EUR')}`);
-  await expect(figures.nth(1)).toHaveText(`${text('stats.averageCostPerWear')}${money(0, 'EUR')}`);
+  await expect(valueTile(page)).toHaveText(`${text('stats.value')}${money(0, 'EUR')}`);
+  await expect(figures).toHaveText([`${text('stats.averageCostPerWear')}${money(0, 'EUR')}`]);
 });
 
 for (const language of ['fi', 'sv'] as const) {
@@ -240,8 +253,8 @@ for (const language of ['fi', 'sv'] as const) {
     await start(page, language);
     await expect(page.locator('#statistics-title')).toHaveText(text('nav.statistics', language));
     await expect(card(page, 'stats-most').locator('li').first()).toContainText(text('stats.wears_other', language, { count: 3 }));
-    await expect(page.locator('.stats-table tbody tr').first()).toContainText(money(80, 'EUR', language));
-    await expect(card(page, 'stats-spending').locator('.stats-figures > div').first()).toContainText(money(435.5, 'EUR', language));
+    await expect(costRows(page).first()).toContainText(money(80, 'EUR', language));
+    await expect(valueTile(page, language)).toContainText(money(435.5, 'EUR', language));
     await expect(card(page, 'stats-spending').locator('section[aria-labelledby="stats-by-month"] li').first()).toContainText(monthName('2026-09', language));
     await page.setViewportSize({ width: 320, height: 900 });
     await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' });

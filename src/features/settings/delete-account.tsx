@@ -5,37 +5,33 @@ import { deleteAccount } from '../../data/delete-account';
 import { isAborted } from '../../data/errors';
 import type { MessageKey, Translate } from '../../i18n';
 
-type Props = { client: AppClient; controller: SessionController; scope: OwnerScope; online: boolean; t: Translate };
+type Props = { client: AppClient; controller: SessionController; scope: OwnerScope; online: boolean; t: Translate; active: boolean;
+  onBusy: (busy: boolean) => void; onBackupFirst: () => void };
 const messages: Record<string, MessageKey> = {
   password: 'delete.wrongPassword', retry: 'delete.retry', in_progress: 'delete.inProgress', contact: 'delete.contact', failed: 'delete.failed',
 };
 
 // The password is held only while the request runs; it is never stored and is cleared after every attempt.
-export function DeleteAccountSettings({ client, controller, scope, online, t }: Props) {
+export function DeleteAccountSettings({ client, controller, scope, online, t, active, onBusy, onBackupFirst }: Props) {
   const [password, setPassword] = useState('');
   const [understood, setUnderstood] = useState(false);
   const [phrase, setPhrase] = useState('');
   const [working, setWorking] = useState(false);
   const [problem, setProblem] = useState<MessageKey | null>(null);
-  const [open, setOpen] = useState(false);
-  const field = useRef<HTMLInputElement>(null);
   const request = useRef<AbortController | null>(null);
   const alert = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
-    const clear = () => { request.current?.abort(); request.current = null; setPassword(''); setUnderstood(false); setPhrase(''); setWorking(false); setProblem(null); setOpen(false); };
+    const clear = () => { request.current?.abort(); request.current = null; setPassword(''); setUnderstood(false); setPhrase(''); setWorking(false); setProblem(null); };
     scope.signal.addEventListener('abort', clear, { once: true });
     return () => { scope.signal.removeEventListener('abort', clear); clear(); };
   }, [scope]);
   useEffect(() => { if (problem) alert.current?.focus(); }, [problem]);
-  useEffect(() => { if (open) field.current?.focus(); }, [open]);
-
-  function cancel() { setOpen(false); setPassword(''); setUnderstood(false); setPhrase(''); setProblem(null); }
-
-  function backupFirst() {
-    const target = document.querySelector<HTMLElement>('.backup-card button');
-    target?.scrollIntoView({ block: 'center' });
-    target?.focus();
-  }
+  useEffect(() => { onBusy(working); }, [working, onBusy]);
+  useEffect(() => () => onBusy(false), [onBusy]);
+  // Leaving the view, by Back or "Make a backup first", clears the password, the confirmation and the phrase.
+  useEffect(() => {
+    if (!active && !working) { setPassword(''); setUnderstood(false); setPhrase(''); setProblem(null); }
+  }, [active, working]);
   const expected = t('delete.phraseValue');
   const phraseMatches = phrase.trim().toLocaleLowerCase() === expected.toLocaleLowerCase();
   async function submit() {
@@ -58,18 +54,18 @@ export function DeleteAccountSettings({ client, controller, scope, online, t }: 
   }
 
   const ready = online && !working && password.length > 0 && understood && phraseMatches && problem !== 'delete.contact';
+  if (!active) return null;
   return <section className="settings-card delete-card" aria-labelledby="delete-heading">
-    <h3 id="delete-heading">{t('delete.title')}</h3>
+    <h2 id="delete-heading" tabIndex={-1}>{t('delete.title')}</h2>
     <p>{t('delete.body')}</p>
     <p className="muted fine">{t('delete.limits')}</p>
     <div className="stack delete-actions">
-      <button type="button" className="text-button" onClick={backupFirst}>{t('delete.backupFirst')}</button>
-      {!open && <button type="button" className="button button-danger" disabled={!online} onClick={() => { setOpen(true); }}>{t('delete.title')}</button>}
+      <button type="button" className="text-button" disabled={working} onClick={onBackupFirst}>{t('delete.backupFirst')}</button>
     </div>
-    {open && <form className="stack" noValidate onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+    <form className="stack" noValidate onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <div className="field">
         <label htmlFor="delete-password">{t('delete.password')}</label>
-        <input id="delete-password" ref={field} type="password" autoComplete="current-password" value={password} disabled={working}
+        <input id="delete-password" type="password" autoComplete="current-password" value={password} disabled={working}
           aria-invalid={problem === 'delete.wrongPassword' || undefined} onChange={(event) => { setPassword(event.target.value); }} />
       </div>
       <label className="check">
@@ -84,7 +80,6 @@ export function DeleteAccountSettings({ client, controller, scope, online, t }: 
       {problem && <p ref={alert} tabIndex={-1} role="alert" className="notice notice-error">{t(problem)}</p>}
       <button className="button button-danger" disabled={!ready} aria-busy={working || undefined}>{t('delete.button')}</button>
       {working && <p role="status">{t('delete.working')}</p>}
-      <button type="button" className="text-button" disabled={working} onClick={cancel}>{t('common.cancel')}</button>
-    </form>}
+    </form>
   </section>;
 }

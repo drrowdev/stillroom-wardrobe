@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile } from 'node:fs/promises';
@@ -11,6 +11,7 @@ import { findMarker, findMarkers, flatJpeg } from '../fixtures/restore-jpeg-fixt
 import { mockBackend, owners, signIn, type MockOptions } from './mock-backend';
 import { settled, trackRequests } from './settle';
 import { openAccountMenu } from './shell-support';
+import { closeDataTask, expectExitsHeld, openDataTask, settingsFromWardrobe, showDataTask } from './data-task-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -95,6 +96,7 @@ async function signOut(page: Page, language: Language = 'en') {
 }
 // Makes a real backup through the Backup card and returns its parts as files.
 async function backup(page: Page, language: Language = 'en'): Promise<Part[]> {
+  await showDataTask(page, 'backup');
   await settled(page, button(page, 'backup.create', language));
   await button(page, 'backup.create', language).click();
   // Opening the form moves focus to the passphrase. Checked here, so a form that doesn't open fails at once, not at the test limit.
@@ -117,6 +119,7 @@ async function backup(page: Page, language: Language = 'en'): Promise<Part[]> {
   return parts;
 }
 async function check(page: Page, parts: Part[], secret = passphrase, language: Language = 'en') {
+  await showDataTask(page, 'restore');
   if (await button(page, 'restore.open', language).isVisible()) await button(page, 'restore.open', language).click();
   await restoreCard(page).locator('#restore-files').setInputFiles(parts);
   await restoreCard(page).getByLabel(text('backup.passphrase', language), { exact: true }).fill(secret);
@@ -466,6 +469,7 @@ test('I20 restore: offline, signing out and accessibility at 320px and 200% text
   const parts = await backup(page);
   const card = restoreCard(page);
   const axe = async () => expect((await new AxeBuilder({ page }).include('.restore-card').analyze()).violations).toEqual([]);
+  await showDataTask(page, 'restore');
   await axe();
   await button(page, 'restore.open').click();
   await expect(card.locator('#restore-files')).toBeFocused();
@@ -486,9 +490,78 @@ test('I20 restore: offline, signing out and accessibility at 320px and 200% text
   }
   await signOut(page);
   await settings(page, 'b');
+  await expect(card).toHaveCount(0);
+  await showDataTask(page, 'restore');
   await expect(card.locator('#restore-files')).toHaveCount(0);
   await expect(button(page, 'restore.start')).toHaveCount(0);
   expect(own(api.items)).toHaveLength(0);
+});
+
+test('UX5 restore: while a backup is checked, every way out of Settings waits and is then followed', async ({ page }) => {
+  const { api, thumb } = await start(page);
+  seed(api, thumb, 'Fictional linen shirt');
+  await settings(page, 'a');
+  const parts = await backup(page);
+  await signOut(page);
+  await settings(page, 'b');
+  await settingsFromWardrobe(page);
+  let held: Route | undefined;
+  await page.route(/\/rest\/v1\/items\?/, async route => { if (!held && route.request().method() === 'GET' && route.request().url().includes('id=in.')) held = route; else await route.fallback(); });
+  await check(page, parts);
+  await expect.poll(() => Boolean(held), slow).toBe(true);
+  await expect(restoreCard(page).getByRole('status')).toHaveText(text('restore.checking'));
+  await expectExitsHeld(page, 'restore', () => held!.fallback());
+  expect(own(api.items)).toHaveLength(0);
+});
+
+test('UX5 restore: while a restore runs, every way out of Settings waits and is then followed', async ({ page }) => {
+  const { api, thumb } = await start(page);
+  seed(api, thumb, 'Fictional linen shirt');
+  await settings(page, 'a');
+  const parts = await backup(page);
+  await signOut(page);
+  await settings(page, 'b');
+  await settingsFromWardrobe(page);
+  await check(page, parts);
+  await expect(button(page, 'restore.start')).toBeVisible(slow);
+  let held: Route | undefined;
+  let reservations = 0;
+  await page.route('**/rest/v1/rpc/reserve_restored_item_save_v2', async route => {
+    reservations++;
+    if (!held) held = route; else await route.fallback();
+  });
+  await button(page, 'restore.start').click();
+  await expect.poll(() => Boolean(held), slow).toBe(true);
+  // None of the attempted exits sent anything again while the save was held.
+  await expectExitsHeld(page, 'restore', () => { expect(reservations).toBe(1); return held!.fulfill({ status: 503, json: { message: 'Unavailable' } }); });
+});
+
+test('UX5 restore: a stopped run keeps its message and Try again across views, with nothing sent meanwhile', async ({ page }) => {
+  const { api, urls, thumb } = await start(page);
+  const shirt = seed(api, thumb, 'Fictional linen shirt');
+  api.exportControl.attributions.set(String(shirt.item.id), [{ source_image_id: shirt.images[0]!.id, image_sha256: shirt.images[0]!.main_sha256,
+    model_id: 'fixture-model', prompt_version: 1, fields: { category: 'top' } }]);
+  await settings(page, 'a');
+  const parts = await backup(page);
+  await signOut(page);
+  await settings(page, 'b');
+  await check(page, parts);
+  await expect(button(page, 'restore.start')).toBeVisible(slow);
+  api.restoreControl.attributionReplies.push('busy', 'busy');
+  await button(page, 'restore.start').click();
+  await expect(restoreCard(page).getByRole('alert')).toHaveText(text('restore.stopped'), slow);
+  await expect(restoreCard(page).getByRole('alert')).toBeFocused();
+  const sent = urls.length;
+  await closeDataTask(page, 'restore');
+  await expect(page.locator('input[type=password], #delete-phrase, input[type=file]')).toHaveCount(0);
+  await openDataTask(page, 'restore');
+  await expect(restoreCard(page).getByRole('alert')).toHaveText(text('restore.stopped'));
+  await expect(button(page, 'restore.again')).toBeEnabled();
+  expect(urls.slice(sent).filter(url => !url.startsWith('GET'))).toEqual([]);
+  api.restoreControl.attributionReplies.push('kept');
+  await button(page, 'restore.again').click();
+  await expect(restoreCard(page).getByRole('status')).toHaveText(text('restore.done'), slow);
+  expect(own(api.items)).toHaveLength(1);
 });
 
 test.describe('bounded P6b visual evidence', () => {

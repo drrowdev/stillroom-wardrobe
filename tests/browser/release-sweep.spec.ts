@@ -131,12 +131,14 @@ for (const language of languages) {
   });
 }
 
-test('the backup card keeps a gap between Create backup and the JSON download', async ({ page }) => {
+test('the backup view keeps a gap between Create backup and the JSON download', async ({ page }) => {
   await start(page, 'en');
   await page.goto('/#/settings'); await signIn(page);
+  await page.locator('#data-row-backup').click();
   const card = page.locator('.backup-card');
   const create = card.getByRole('button', { name: text('en', 'backup.create'), exact: true });
   const json = card.getByRole('button', { name: text('en', 'backup.json'), exact: true });
+  await card.locator('details.backup-plain > summary').click();
   for (const width of [1280, 320]) {
     await page.setViewportSize({ width, height: 900 });
     const [top, bottom] = [await create.boundingBox(), await json.boundingBox()];

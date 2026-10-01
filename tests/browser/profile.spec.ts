@@ -5,7 +5,8 @@ import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { aiFixture } from './ai-photo-first-support';
-import { expectIdentity, openAccountMenu, settleShell } from './shell-support';
+import { expectIdentity, openAccountMenu, settleShell, signOutThroughMenu } from './shell-support';
+import { closeDataTask, dataRow, settingsBack, taskHeading, type DataTask } from './data-task-support';
 
 async function settings(page: Page, language: Language = 'en') {
   await openAccountMenu(page, language);
@@ -700,11 +701,11 @@ test('settings accessibility: 320px, keyboard, long text and 200% text', async (
   }), 'Selected time zone label fits the closed select at 320px').toBe(true);
   await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 2rem; }' });
   await settleShell(page);
-  // UI1: on a phone the section menu is a horizontally scrolling row, so its tabs may extend past the edge by design.
-  expect(await page.locator('.settings-nav ul').evaluate((row) => getComputedStyle(row).overflowX)).toBe('auto');
+  // UX5: on a phone the section menu pills wrap onto rows, so every pill stays inside the viewport.
+  expect(await page.locator('.settings-nav ul').evaluate((row) => getComputedStyle(row).flexWrap)).toBe('wrap');
   expect(await page.evaluate(() => ({
     viewport: innerWidth, width: document.documentElement.scrollWidth,
-    overflowing: [...document.querySelectorAll('body *')].filter((element) => !element.closest('.settings-nav ul')).filter((element) => element.getBoundingClientRect().right > 320.5
+    overflowing: [...document.querySelectorAll('body *')].filter((element) => element.getBoundingClientRect().right > 320.5
       || getComputedStyle(element).overflowX === 'visible' && [...element.childNodes].some((node) => {
         if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) return false;
         const range = document.createRange(); range.selectNodeContents(node);
@@ -744,7 +745,7 @@ test('synthetic settings visual evidence retains functional assertions in every 
       const visible = (element: Element) => element.getClientRects().length > 0
         && getComputedStyle(element).visibility === 'visible';
       const values = [...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea')]
-        .filter(visible).map((element) => element.value).join('\n');
+        .filter(visible).map((element) => element.value).join('\r\n');
       const credentialLike = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
       return location.origin === origin && location.hostname === '127.0.0.1'
         && location.hash === '#/settings' && document.documentElement.lang === language
@@ -781,3 +782,72 @@ test('synthetic settings visual evidence retains functional assertions in every 
     }
   }
 });
+
+test.describe('UX5 Data and privacy hub', () => {
+  const tools = ['backup', 'restore', 'delete'] as const satisfies readonly DataTask[];
+  const credentials = '#delete-password, #delete-phrase, input[type="password"], input[type="file"]';
+
+  test('each row opens its own view: heading focused, sections hidden, one h1, and Back returns to the row', async ({ page }) => {
+    await setup(page);
+    for (const tool of tools) {
+      await expect(page.locator(credentials)).toHaveCount(0);
+      await dataRow(page, tool).click();
+      await expect(taskHeading(page, tool)).toBeFocused();
+      await expect(page.locator('.settings-nav')).toBeHidden();
+      await expect(page.locator('#profile-display_name')).toBeHidden();
+      await expect(page.locator('h1')).toHaveCount(1);
+      for (const other of tools.filter((name) => name !== tool)) await expect(taskHeading(page, other)).toHaveCount(0);
+      await noViolations(page);
+      await closeDataTask(page, tool);
+      await expect(page.locator('#profile-display_name')).toBeVisible();
+    }
+  });
+
+  test('keyboard only: Enter opens a view, Tab stays inside it, and Back returns focus to the row', async ({ page }) => {
+    await setup(page, 'fi');
+    await dataRow(page, 'delete').focus();
+    await page.keyboard.press('Enter');
+    await expect(taskHeading(page, 'delete')).toBeFocused();
+    const reached: string[] = [];
+    for (let step = 0; step < 12; step += 1) {
+      await page.keyboard.press('Tab');
+      reached.push(await page.evaluate(() => {
+        const element = document.activeElement!;
+        return element.closest('.settings-sections, .settings-nav') ? 'hidden-section' : element.closest('.settings-task') ? 'task' : 'other';
+      }));
+    }
+    expect(reached).not.toContain('hidden-section');
+    await settingsBack(page).focus();
+    await page.keyboard.press('Enter');
+    await expect(dataRow(page, 'delete')).toBeFocused();
+  });
+
+  test('in the sections, Tab never reaches a tool control', async ({ page }) => {
+    await setup(page);
+    await page.locator('#profile-display_name').focus();
+    for (let step = 0; step < 60; step += 1) {
+      await page.keyboard.press('Tab');
+      expect(await page.evaluate(() => Boolean(document.activeElement?.closest('.settings-task')))).toBe(false);
+    }
+  });
+
+  test('signing out from inside a view clears it; after signing in the form starts empty', async ({ page }) => {
+    await setup(page);
+    await dataRow(page, 'delete').click();
+    await page.locator('#delete-password').fill('typed secret');
+    await page.locator('#delete-phrase').fill('half typed');
+    await signOutThroughMenu(page);
+    await expect(page.locator('#email')).toBeVisible();
+    await expect(page.locator('#delete-password, #delete-phrase')).toHaveCount(0);
+    await signIn(page);
+    await settings(page);
+    await expect(page.locator(credentials)).toHaveCount(0);
+    await dataRow(page, 'delete').click();
+    await expect(page.locator('#delete-password')).toHaveValue('');
+    await expect(page.locator('#delete-phrase')).toHaveValue('');
+  });
+});
+
+async function noViolations(page: Page) {
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+}

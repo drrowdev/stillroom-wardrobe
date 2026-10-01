@@ -8,7 +8,7 @@ export type SettingsSection = { id: string; label: MessageKey };
  * focuses the section heading; the section in view is marked `aria-current="location"`. A chosen section stays marked
  * until the user scrolls or it leaves the screen, so a short last section is not replaced by the one above it.
  */
-export function SettingsNav({ sections, t }: { sections: readonly SettingsSection[]; t: Translate }) {
+export function SettingsNav({ sections, t, hidden }: { sections: readonly SettingsSection[]; t: Translate; hidden?: boolean }) {
   const [current, setCurrent] = useState(sections[0]?.id ?? null);
   const chosen = useRef<string | null>(null);
   const ids = sections.map((section) => section.id).join(' ');
@@ -49,7 +49,7 @@ export function SettingsNav({ sections, t }: { sections: readonly SettingsSectio
     section?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
     document.getElementById(`${id}-heading`)?.focus({ preventScroll: true });
   }
-  return <nav className="settings-nav" aria-label={t('settings.sections')}>
+  return <nav className="settings-nav" aria-label={t('settings.sections')} hidden={hidden}>
     <ul>
       {sections.map((section) => <li key={section.id}>
         <button type="button" className="settings-nav-item" aria-current={current === section.id ? 'location' : undefined}

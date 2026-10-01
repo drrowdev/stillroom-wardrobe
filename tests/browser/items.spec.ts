@@ -92,6 +92,9 @@ test('I10b preparation stays reversible but an ambiguous authorization removes t
   await page.getByRole('dialog').getByRole('button', { name: messages['common.cancel'].en, exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(button(page, 'trash.restore')).toBeEnabled();
+  // UX5: Restore is the one primary action on a row; permanent deletion is a quieter text action.
+  await expect(button(page, 'trash.restore')).toHaveClass(/\bbutton-primary\b/);
+  await expect(button(page, 'deletion.prepare')).toHaveClass(/\btext-button\b/);
   await button(page, 'common.back').click();
   await expect(button(page, 'common.undo')).toBeVisible();
   await trashPage(page);

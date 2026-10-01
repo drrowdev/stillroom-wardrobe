@@ -6,7 +6,7 @@ import { buildPart, metadataFile, prepareExport, type PreparedExport } from '../
 import { BACKUP_LIMITS, partFileName } from '../../domain/export-format';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 
-type Props = { client: AppClient; scope: OwnerScope; language: Language; online: boolean; t: Translate };
+type Props = { client: AppClient; scope: OwnerScope; language: Language; online: boolean; t: Translate; active: boolean; onBusy: (busy: boolean) => void };
 type State = { kind: 'idle' } | { kind: 'preparing'; plain: boolean } | { kind: 'ready'; prepared: PreparedExport; done: ReadonlySet<number> }
   | { kind: 'failed'; message: MessageKey };
 
@@ -19,7 +19,7 @@ function save(blob: Blob, name: string) {
 }
 
 // The passphrase lives only in this component's memory while parts are being downloaded; it is never stored or sent.
-export function BackupSettings({ client, scope, language, online, t }: Props) {
+export function BackupSettings({ client, scope, language, online, t, active, onBusy }: Props) {
   const [state, setState] = useState<State>({ kind: 'idle' });
   const [passphrase, setPassphrase] = useState('');
   const [repeat, setRepeat] = useState('');
@@ -85,9 +85,17 @@ export function BackupSettings({ client, scope, language, online, t }: Props) {
   }
 
   const busy = state.kind === 'preparing' || working !== null;
+  useEffect(() => { onBusy(busy); }, [busy, onBusy]);
+  useEffect(() => () => onBusy(false), [onBusy]);
+  // Leaving the view drops an unsubmitted passphrase. Prepared parts stay, so a backup can be finished on return.
+  useEffect(() => {
+    if (active || busy) return;
+    setEntering(false); setPassphrase(current => state.kind === 'ready' ? current : ''); setRepeat(''); setInvalid(null);
+  }, [active, busy, state.kind]);
   const complete = state.kind === 'ready' && state.done.size === state.prepared.partCount;
+  if (!active) return null;
   return <section className="settings-card backup-card" aria-labelledby="backup-heading">
-    <h3 id="backup-heading">{t('backup.title')}</h3>
+    <h2 id="backup-heading" tabIndex={-1}>{t('backup.title')}</h2>
     <p className="muted fine">{t('backup.intro')}</p>
     <p className="muted fine">{t('backup.excluded')}</p>
     {(state.kind === 'idle' || state.kind === 'preparing') && <>
@@ -110,11 +118,14 @@ export function BackupSettings({ client, scope, language, online, t }: Props) {
         <button className="button button-primary" disabled={busy || !online} aria-busy={state.kind === 'preparing' && !state.plain || undefined}>{t('backup.create')}</button>
         <button type="button" className="text-button" disabled={busy} onClick={reset}>{t('common.cancel')}</button>
       </form>}
-      <div className="stack backup-plain">
-        <button type="button" className="button button-secondary" disabled={busy || !online} aria-describedby="backup-plain-note"
-          aria-busy={state.kind === 'preparing' && state.plain || undefined} onClick={() => { void prepare(true); }}>{t('backup.json')}</button>
-        <p className="fine muted" id="backup-plain-note">{t('backup.jsonNote')}</p>
-      </div>
+      <details className="backup-plain">
+        <summary>{t('backup.metadata')}</summary>
+        <div className="stack">
+          <button type="button" className="button button-secondary" disabled={busy || !online} aria-describedby="backup-plain-note"
+            aria-busy={state.kind === 'preparing' && state.plain || undefined} onClick={() => { void prepare(true); }}>{t('backup.json')}</button>
+          <p className="fine muted" id="backup-plain-note">{t('backup.jsonNote')}</p>
+        </div>
+      </details>
       {state.kind === 'preparing' && <p role="status">{t('backup.preparing')}</p>}
     </>}
     {state.kind === 'ready' && <div className="stack">

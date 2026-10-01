@@ -290,6 +290,7 @@ test.describe('ST1b stylist', () => {
     api.stylistControl.replies.push(reply(clothes));
     await ask(page, 'Before turning off');
     await expect(ideas(page)).toHaveCount(2);
+    await expect(clearButton).toHaveClass(/\btext-button\b/);
     await page.evaluate(() => { location.hash = '#/settings'; });
     await toggle(page, true).click();
     await expect(toggle(page, false)).toBeVisible();

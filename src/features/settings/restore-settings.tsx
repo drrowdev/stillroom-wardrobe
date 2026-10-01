@@ -5,7 +5,7 @@ import { errorKey, isAborted } from '../../data/errors';
 import { checkBackup, RestoreGarmentError, RestoreRecheckError, restoreReport, runRestore, type RestorePreview, type RestoreProgress, type RestoreResult } from '../../data/restore';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 
-type Props = { client: AppClient; scope: OwnerScope; language: Language; online: boolean; t: Translate };
+type Props = { client: AppClient; scope: OwnerScope; language: Language; online: boolean; t: Translate; active: boolean; onBusy: (busy: boolean) => void };
 // 'recheck' shows the form again after a photo changed since Check, without the preview it can no longer run; 'incomplete'
 // keeps the result when blocked items remain. `report` keeps what a run that stopped early did write.
 type State = { kind: 'idle'; recheck?: true; report?: RestoreResult | null } | { kind: 'checking' } | { kind: 'preview'; preview: RestorePreview }
@@ -14,7 +14,7 @@ type State = { kind: 'idle'; recheck?: true; report?: RestoreResult | null } | {
   | { kind: 'incomplete'; result: RestoreResult } | { kind: 'failed'; message: MessageKey; garment?: { item: number; total: number } };
 
 // The passphrase and chosen files stay in this component's memory only; they are never stored or sent.
-export function RestoreSettings({ client, scope, language, online, t }: Props) {
+export function RestoreSettings({ client, scope, language, online, t, active, onBusy }: Props) {
   const [state, setState] = useState<State>({ kind: 'idle' });
   const [files, setFiles] = useState<File[]>([]);
   const [passphrase, setPassphrase] = useState('');
@@ -84,9 +84,18 @@ export function RestoreSettings({ client, scope, language, online, t }: Props) {
   }
 
   const busy = state.kind === 'checking' || state.kind === 'restoring';
+  useEffect(() => { onBusy(busy); }, [busy, onBusy]);
+  useEffect(() => () => onBusy(false), [onBusy]);
+  // Leaving the view drops the chosen files and passphrase of a restore that hasn't started. A checked or stopped
+  // restore stays, so its result or Try again is still there on return.
+  useEffect(() => {
+    if (active || state.kind !== 'idle') return;
+    setFiles([]); setPassphrase(''); if (!state.recheck) setOpen(false);
+  }, [active, state]);
   const ready = files.length > 0 && passphrase.length > 0;
+  if (!active) return null;
   return <section className="settings-card restore-card" aria-labelledby="restore-heading">
-    <h3 id="restore-heading">{t('restore.title')}</h3>
+    <h2 id="restore-heading" tabIndex={-1}>{t('restore.title')}</h2>
     <p className="muted fine">{t('restore.intro')}</p>
     {state.kind === 'idle' && !open && <button type="button" className="button button-secondary" disabled={!online}
       onClick={() => { setOpen(true); }}>{t('restore.open')}</button>}

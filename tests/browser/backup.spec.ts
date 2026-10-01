@@ -1,4 +1,4 @@
-import { expect, test, type Download, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Download, type Page, type Route, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { lstat, mkdir, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import { assertSanitizedJpeg, readJpegHeader } from '../../src/images/jpeg';
 import { mockBackend, signIn } from './mock-backend';
 import { settled, trackRequests } from './settle';
 import { expectIdentity, openAccountMenu } from './shell-support';
+import { closeDataTask, dataRow, expectExitsHeld, openDataTask, settingsFromWardrobe } from './data-task-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -36,8 +37,16 @@ async function start(page: Page, options: { language?: Language; seed?: (api: Ap
   await page.goto('/#/settings'); await signIn(page);
   // Settings has finished opening once the page has moved focus to its heading.
   await expect(page.locator('#settings-title')).toBeFocused();
+  // Backup opens as a task view from the Data and privacy rows; its heading takes focus.
+  await openDataTask(page, 'backup');
+  await expect(page.locator('#backup-heading')).toHaveText(text('backup.title', options.language ?? 'en'));
   return { api, bodies };
 }
+const plainJson = async (page: Page, language: Language = 'en') => {
+  const disclosure = card(page).locator('details.backup-plain');
+  if (!await disclosure.evaluate(node => (node as HTMLDetailsElement).open)) await disclosure.locator('summary').click();
+  return button(page, 'backup.json', language);
+};
 async function fill(page: Page, first = passphrase, second = first, language: Language = 'en') {
   const field = card(page).getByLabel(text('backup.passphrase', language), { exact: true });
   if (!await field.isVisible()) {
@@ -126,12 +135,16 @@ test('I18 backup: passphrase checks, offline, and the plain JSON download', asyn
   await button(page, 'backup.create').click();
   await expect(card(page).getByRole('alert')).toHaveText(text('backup.mismatch'));
   expect(api.exportControl.manifests).toBe(0);
+  await expect(card(page).locator('details.backup-plain')).not.toHaveAttribute('open');
+  await expect(button(page, 'backup.json')).toBeHidden();
   await context.setOffline(true);
   await expect(button(page, 'backup.create')).toBeDisabled();
-  await expect(button(page, 'backup.json')).toBeDisabled();
+  await expect(await plainJson(page)).toBeDisabled();
+  await expect(button(page, 'backup.json')).toHaveAttribute('aria-describedby', 'backup-plain-note');
+  await expect(card(page).locator('#backup-plain-note')).toHaveText(text('backup.jsonNote'));
   await expect(card(page)).toContainText(text('backup.offline'));
   await context.setOffline(false);
-  const item = await download(page, () => button(page, 'backup.json').click());
+  const item = await download(page, async () => (await plainJson(page)).click());
   expect(item.suggestedFilename()).toMatch(/^stillroom-[0-9a-f-]{36}\.json$/);
   const plain = JSON.parse(await contents(item)) as { format: string; tables: Record<string, Row[]> };
   expect(plain.format).toBe('stillroom-saved');
@@ -151,8 +164,74 @@ test('I18 backup: signing out drops the prepared backup and the passphrase', asy
   await signIn(page, 'b');
   await page.evaluate(() => { location.hash = '#/settings'; });
   await expect(page.locator('#settings-title')).toBeVisible();
+  await expect(card(page)).toHaveCount(0);
+  await dataRow(page, 'backup').click();
   await expect(card(page).locator('.backup-parts')).toHaveCount(0);
+  await expect(button(page, 'backup.create', 'sv')).toBeVisible();
   await expect(card(page).getByLabel(text('backup.passphrase', 'sv'), { exact: true })).toHaveCount(0);
+});
+
+test('UX5 backup: prepared parts survive leaving the view, with no second export, and no passphrase field is left outside it', async ({ page }) => {
+  const { api } = await start(page, { seed: api => { add(api, 'Fictional linen shirt'); } });
+  await fill(page);
+  await button(page, 'backup.create').click();
+  const parts = card(page).locator('.backup-parts li');
+  await expect(parts).toHaveCount(2);
+  await download(page, () => button(page, 'backup.part', 'en', { n: 1, total: 2 }).click());
+  await expect(parts.nth(0)).toContainText(text('backup.partDone'));
+  const manifests = api.exportControl.manifests;
+  await closeDataTask(page, 'backup');
+  await expect(page.locator('h1')).toHaveCount(1);
+  await expect(page.locator('input[type=password], #delete-phrase, input[type=file]')).toHaveCount(0);
+  await openDataTask(page, 'backup');
+  await expect(parts).toHaveCount(2);
+  await expect(parts.nth(0)).toContainText(text('backup.partDone'));
+  expect(api.exportControl.manifests).toBe(manifests);
+  const item = await download(page, () => button(page, 'backup.part', 'en', { n: 2, total: 2 }).click());
+  expect(item.suggestedFilename()).toMatch(/-1\.json\.enc$/);
+  await expect(card(page).getByRole('status')).toHaveText(text('backup.done', 'en', { items: '1 item', photos: '1 photo' }));
+});
+
+test('UX5 backup: an unsubmitted passphrase is dropped on leaving the view', async ({ page }) => {
+  await start(page, { seed: api => { add(api, 'Fictional linen shirt'); } });
+  await fill(page);
+  await closeDataTask(page, 'backup');
+  await openDataTask(page, 'backup');
+  await expect(card(page).getByLabel(text('backup.passphrase'), { exact: true })).toHaveCount(0);
+  await expect(button(page, 'backup.create')).toBeVisible();
+});
+
+test('UX5 backup: while a backup is prepared, every way out of Settings waits and is then followed', async ({ page }) => {
+  const { api } = await start(page, { seed: api => { add(api, 'Fictional linen shirt'); } });
+  await closeDataTask(page, 'backup');
+  await settingsFromWardrobe(page);
+  await openDataTask(page, 'backup');
+  let held: Route | undefined;
+  await page.route('**/rest/v1/rpc/export_manifest*', async route => { if (!held) held = route; else await route.fallback(); });
+  await fill(page);
+  await button(page, 'backup.create').click();
+  await expect.poll(() => Boolean(held)).toBe(true);
+  await expect(card(page).getByRole('status')).toHaveText(text('backup.preparing'));
+  await expectExitsHeld(page, 'backup', () => held!.fallback());
+  await expect.poll(() => api.exportControl.manifests).toBeGreaterThan(0);
+});
+
+test('UX5 backup: while a part is built, every way out of Settings waits and is then followed', async ({ page }) => {
+  await start(page, { seed: api => { add(api, 'Fictional linen shirt'); } });
+  await closeDataTask(page, 'backup');
+  await settingsFromWardrobe(page);
+  await openDataTask(page, 'backup');
+  await fill(page);
+  await button(page, 'backup.create').click();
+  await expect(card(page).locator('.backup-parts li')).toHaveCount(2);
+  let held: Route | undefined;
+  const photos: string[] = [];
+  await page.route(/\/storage\/v1\/object\//, async route => { photos.push(route.request().url()); if (!held) held = route; else await route.fallback(); });
+  await button(page, 'backup.part', 'en', { n: 2, total: 2 }).click();
+  await expect.poll(() => Boolean(held)).toBe(true);
+  await expectExitsHeld(page, 'backup', () => held!.fallback());
+  // The part's photo and thumbnail, each read once.
+  expect(photos.map(url => url.split('/').pop()).sort()).toEqual(['main.jpg', 'thumb.jpg']);
 });
 
 test('I18 accessibility: axe, 320px and 200% text for the backup card', async ({ page }) => {
