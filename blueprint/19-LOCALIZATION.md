@@ -101,6 +101,14 @@ tillsammans. The calendar action is Plan / Suunnittele / Planera, and the Plan
 dialog names the chosen day with the app language's own date format, never the
 browser's.
 
+UX5 update, 1 October 2026 (owner-approved UX review, packet 5): the Settings
+section is Data and privacy / Tiedot ja yksityisyys / Data och integritet, with
+one row per task. Admin spending reads Used / Käytetty / Använt (confirmed plus
+estimated) and Pending / Odottaa / Väntande (held), with the exact figures under
+Details / Tiedot / Detaljer. Statistics uses Worn / Käytetty / Använt and a single
+note naming the currencies when prices differ. In Trash the row action is Restore /
+Palauta / Återställ.
+
 New or moved small copy is at least 14 px, with 44 px controls and normal-text
 contrast of at least 4.5:1. Check 320 px and 200% text without clipping. Preserve
 the brand and illustration; hide the textless entry illustration container on

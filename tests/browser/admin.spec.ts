@@ -31,7 +31,12 @@ async function openScreen(page: Page) {
   await expect(page.locator('#admin-title')).toBeVisible();
   await expect(account(page, 1)).toBeVisible();
 }
-const row = (page: Page, number: 1 | 2, label: MessageKey, index = 0) => account(page, number).locator('table').nth(index).locator('tr', { has: page.getByRole('rowheader', { name: text(label), exact: true }) });
+// The exact tables are inside each account's collapsed Details; their rows are read whether or not it is open.
+const row = (page: Page, number: 1 | 2, label: MessageKey, index = 0) => account(page, number).locator('table').nth(index)
+  .locator('tr', { has: page.getByRole('rowheader', { name: text(label), exact: true, includeHidden: true }) });
+const details = (page: Page, number: 1 | 2) => account(page, number).locator('details.admin-details');
+const summary = (page: Page, number: 1 | 2) => account(page, number).locator('.admin-summary > div');
+const probe = (feature: MessageKey, amount: string) => text('admin.probe', { feature: text(feature), amount });
 async function edit(page: Page, number: 1 | 2) {
   await button(account(page, number), 'admin.edit').click();
   await expect(account(page, number).locator('form')).toBeVisible();
@@ -107,6 +112,17 @@ test.describe('AD1b admin spending and limits', () => {
     await openScreen(page);
     await expect(page.locator('#admin-title')).toBeFocused();
     await expect(page.getByText('Spending recorded by the app. Some amounts are estimates. Calls made outside the app aren\'t included.', { exact: true })).toBeVisible();
+    // The plain summary: Used is confirmed plus estimated, Pending is still reserved, from the same month as the table.
+    await expect(summary(page, 1)).toHaveText([`${text('admin.used')}$1.779407`, `${text('admin.pending')}$4.586711`, `${text('admin.requests')}9`]);
+    await expect(summary(page, 2).nth(2)).toContainText(text('admin.requests'));
+    for (const number of [1, 2] as const) await expect(details(page, number)).not.toHaveAttribute('open');
+    await expect(account(page, 1).getByText(probe('admin.enhancement', '$0.26'), { exact: true })).toBeHidden();
+    await expect(account(page, 1).locator('table')).toHaveCount(2);
+    await expect(account(page, 1).locator('table').first()).toBeHidden();
+    // The bars beside the current use are decorative; the text says the same.
+    const bars = account(page, 1).locator('.admin-use .usage-bar');
+    await expect(bars.first()).toHaveAttribute('aria-hidden', 'true');
+    expect(await bars.first().locator('span').evaluate(span => (span as HTMLElement).style.width)).toBe('31.8%');
     await expect(row(page, 1, 'admin.tagging').locator('td')).toHaveText(['$1.234567', '$0.30', '$4.097351', '$5.631918', '5']);
     await expect(row(page, 1, 'admin.stylist').locator('td')).toHaveText(['$0.00', '$0.00484', '$0.12936', '$0.1342', '2']);
     await expect(row(page, 1, 'admin.enhancement').locator('td')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00', '0']);
@@ -114,12 +130,17 @@ test.describe('AD1b admin spending and limits', () => {
     await expect(row(page, 1, 'admin.total').locator('td')).toHaveText(['$1.474567', '$0.30484', '$4.586711', '$6.366118', '9']);
     await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$6.366118', limit: '$20.00' }));
     await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$0.60', limit: '$8.00' }));
-    await expect(account(page, 1)).toContainText('Test allowance, Photo clean-up: $0.26');
-    await expect(account(page, 1)).toContainText('Test allowance, Try-on: $1.80');
+    await details(page, 1).locator('summary').click();
+    await expect(account(page, 1).locator('table').first()).toBeVisible();
+    await expect(account(page, 1).getByText(probe('admin.enhancement', '$0.26'), { exact: true })).toBeVisible();
+    await expect(account(page, 1).getByText(probe('admin.tryOn', '$1.80'), { exact: true })).toBeVisible();
+    // Setup holds appear only inside Details, apart from this month's figures and the current use.
+    await expect(details(page, 1).locator('p.stats-note')).toHaveText([probe('admin.enhancement', '$0.26'), probe('admin.tryOn', '$1.80')]);
+    await expect(account(page, 1).locator('p.stats-note')).toHaveCount(3);
     await expect(row(page, 1, 'admin.tryOn', 1).locator('td')).toHaveText(['$8.00', '$0.36', '6']);
     await expect(row(page, 2, 'admin.tryOn', 1).locator('td')).toHaveText(['–', '–', '–']);
     await expect(account(page, 2).locator('.admin-use')).toContainText(text('admin.notSetUp'));
-    await expect(account(page, 2)).not.toContainText('Test allowance');
+    await expect(account(page, 2)).not.toContainText(probe('admin.enhancement', '').split(',')[0]!);
     // The shared per-request value is the tagging reservation, and says so at every width.
     await expect(row(page, 1, 'admin.allFeatures', 1).locator('td')).toHaveText(['$20.00', `$4.097351${text('admin.taggingReservation')}`, '30']);
     await expect(row(page, 1, 'admin.allFeatures', 1).getByText(text('admin.taggingReservation'), { exact: true })).toBeVisible();
@@ -134,6 +155,10 @@ test.describe('AD1b admin spending and limits', () => {
     await month.selectOption(earlier!);
     await expect(row(page, 1, 'admin.tagging').locator('td')).toHaveText(['$2.60', '$0.00', '$0.00', '$2.60', '8']);
     await expect(row(page, 1, 'admin.tryOn').locator('td')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00', '0']);
+    // Nothing is reserved in that month, so Used is the whole total.
+    await expect(row(page, 1, 'admin.total').locator('td').nth(2)).toHaveText('$0.00');
+    await expect(row(page, 1, 'admin.total').locator('td').nth(3)).toHaveText('$2.732345');
+    await expect(summary(page, 1)).toHaveText([`${text('admin.used')}$2.732345`, `${text('admin.pending')}$0.00`, `${text('admin.requests')}10`]);
     await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$6.366118', limit: '$20.00' }));
     await axe(page);
     await button(page, 'admin.moreMonths').click();
@@ -207,6 +232,18 @@ test.describe('AD1b admin spending and limits', () => {
     expect(api.adminControl.writes).toEqual([]);
   });
 
+  test('Cancel in the form returns focus to Edit limits, with Details still closed', async ({ page }) => {
+    const api = await start(page);
+    await openScreen(page);
+    await edit(page, 1);
+    await field(page, 1, 'shared', 'maxRequestsPerHour').fill('40');
+    await button(account(page, 1), 'common.cancel').click();
+    await expect(account(page, 1).locator('form')).toHaveCount(0);
+    await expect(button(account(page, 1), 'admin.edit')).toBeFocused();
+    await expect(details(page, 1)).not.toHaveAttribute('open');
+    expect(api.adminControl.writes).toEqual([]);
+  });
+
   test('checks the values before asking to confirm', async ({ page }) => {
     const api = await start(page);
     await openScreen(page);
@@ -277,6 +314,8 @@ test.describe('AD1b admin spending and limits', () => {
     await button(account(page, 2), 'admin.review').click();
     await button(dialog(page), 'admin.confirm').click();
     await expect(account(page, 2).getByRole('alert')).toHaveText(text('admin.conflict'));
+    await expect(account(page, 2).getByRole('alert')).toBeFocused();
+    await expect(details(page, 2)).not.toHaveAttribute('open');
     await expect(account(page, 2).locator('form')).toHaveCount(0);
     await expect(row(page, 2, 'admin.allFeatures', 1).locator('td')).toHaveText(['$12.00', `$4.097351${text('admin.taggingReservation')}`, '30']);
     await expect(button(account(page, 2), 'admin.edit')).toBeEnabled();
@@ -292,6 +331,8 @@ test.describe('AD1b admin spending and limits', () => {
     await button(account(page, 1), 'admin.review').click();
     await button(dialog(page), 'admin.confirm').click();
     await expect(account(page, 1).getByRole('alert')).toHaveText(text('admin.unknown'));
+    await expect(account(page, 1).getByRole('alert')).toBeFocused();
+    await expect(details(page, 1)).not.toHaveAttribute('open');
     await expect.poll(() => api.adminControl.spendingReads.length).toBe(2);
     await edit(page, 1);
     await field(page, 1, 'shared', 'maxRequestsPerHour').fill('31');
@@ -461,6 +502,8 @@ test.describe('bounded AD1b visual evidence', () => {
         const api = await start(page, { language });
         await openScreen(page);
         if (selected.zoom) await page.addStyleTag({ content: zoom });
+        // The narrow capture shows the exact tables, which must fit at 320 px and 200 % text.
+        if (selected.zoom) await details(page, 1).locator('summary').click();
         if (selected.scene === 'edit-confirm') {
           await button(account(page, 2), 'admin.edit', language).click();
           await field(page, 2, 'stylist', 'monthlyAllowanceMicro').fill('2,5');

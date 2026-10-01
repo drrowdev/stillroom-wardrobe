@@ -5,6 +5,7 @@ import { preparedDeletionIntent, reversibleDeletion, type PreparedDeletionIntent
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 import { Failure, type Shared } from './trash';
 import { useAction } from './use-action';
+import '../../styles/data-flow.css';
 
 function DeleteDialog({ preview, busy, t, language, returnFocus, onCancel, onConfirm }: {
   preview: DeletionStatus; busy: boolean; t: Translate; language: Language; returnFocus: HTMLButtonElement | null; onCancel: () => void; onConfirm: () => void;
@@ -138,7 +139,7 @@ export function Trash(props: Shared & { language: Language; onBack: () => void; 
           } else await prepare(signal, deletion);
         });
       }}>{t('lifecycle.check')}</button> : <div className="settings-actions">
-        <button type="button" className="button button-secondary" disabled={locked || !online} onClick={() => { void action.run(async signal => {
+        <button type="button" className="button button-primary" disabled={locked || !online} onClick={() => { void action.run(async signal => {
           setNotice(null);
           try {
             await lifecycle.change(row.id, false, row.version, setRestore, signal);
@@ -148,7 +149,7 @@ export function Trash(props: Shared & { language: Language; onBack: () => void; 
             throw problem;
           }
         }); }}>{t('trash.restore')}</button>
-        <button id={`deletion-review-${row.id}`} type="button" className="text-button" disabled={locked || !online} onClick={event => { deleteTrigger.current = event.currentTarget; void action.run(async signal => {
+        <button id={`deletion-review-${row.id}`} type="button" className="text-button trash-delete" disabled={locked || !online} onClick={event => { deleteTrigger.current = event.currentTarget; void action.run(async signal => {
           setNotice(null);
           const current = await lifecycle.statusOf(row.id, signal);
           if (current.request_id || !current.deleted_at) throw new LifecycleError('read', false, 'error.conflict');

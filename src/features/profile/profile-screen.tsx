@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppClient } from '../../data/client';
 import type { OwnerScope, SessionController, SessionState } from '../../auth/session';
 import type { ProfileRow } from '../../data/rows';
@@ -18,6 +18,8 @@ import { AvoidedPairs } from '../settings/avoided-pairs';
 import type { PrivateImages } from '../../images/private-images';
 import type { AiClient } from '../../data/ai';
 import { currencyOptions, timeZoneOptions } from './profile-options';
+import { DataHub, type DataTask } from '../settings/data-hub';
+import '../../styles/data-flow.css';
 
 // Style preferences stay stored but are not shown until suggestions use them (ADR20).
 type Props = { client: AppClient; ai: AiClient; stylist: StylistStore; images: PrivateImages; unresolved: boolean; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; language: Language; online: boolean; t: Translate; version: string; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void; onBack: () => void; onSignOut: () => void };
@@ -46,6 +48,37 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
   const [reading, setReading] = useState(false);
   const summary = useRef<HTMLDivElement>(null);
   useEffect(() => { if (error) summary.current?.focus(); }, [error]);
+  // Backup, restore and account deletion open as task views inside Settings. Each tool stays mounted, so a request in
+  // flight survives a change of view, but renders nothing while another view is shown.
+  const [task, setTask] = useState<DataTask | null>(null);
+  const [toolBusy, setToolBusy] = useState<Record<DataTask, boolean>>({ backup: false, restore: false, delete: false });
+  const working = toolBusy.backup || toolBusy.restore || toolBusy.delete;
+  const backupBusy = useCallback((value: boolean) => setToolBusy(current => current.backup === value ? current : { ...current, backup: value }), []);
+  const restoreBusy = useCallback((value: boolean) => setToolBusy(current => current.restore === value ? current : { ...current, restore: value }), []);
+  const deleteBusy = useCallback((value: boolean) => setToolBusy(current => current.delete === value ? current : { ...current, delete: value }), []);
+  const returnTo = useRef<DataTask | null>(null);
+  const focusTarget = useRef<string | null>(null);
+  useEffect(() => {
+    const target = focusTarget.current;
+    focusTarget.current = null;
+    if (target) document.getElementById(target)?.focus();
+  }, [task]);
+  function openTask(next: DataTask) {
+    if (working) return;
+    if (task === null) returnTo.current = next;
+    focusTarget.current = `${next}-heading`;
+    setTask(next);
+  }
+  function closeTask() {
+    if (working || task === null) return;
+    focusTarget.current = `data-row-${returnTo.current ?? task}`;
+    setTask(null);
+  }
+  useEffect(() => {
+    const reset = () => setTask(null);
+    scope.signal.addEventListener('abort', reset, { once: true });
+    return () => scope.signal.removeEventListener('abort', reset);
+  }, [scope]);
   const timezones = useMemo(() => timeZoneOptions(language, [base.timezone, fields.timezone]), [language, base.timezone, fields.timezone]);
   const currencies = useMemo(() => currencyOptions(language, [base.currency, fields.currency]), [language, base.currency, fields.currency]);
   const dirty = !sameProfileFields(fields, base);
@@ -60,10 +93,11 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
       && sameProfileFields(change.previous, base) && sameProfileFields(profile, base)
       && change.previous.ui_language === base.ui_language && profile.ui_language === base.ui_language) setBase(profile);
   }
+  // A running backup, restore or deletion holds every way out of Settings, as a profile save does.
   useEffect(() => {
-    onDirty(dirty, false, busy || reading);
+    onDirty(dirty, false, busy || reading || working);
     return () => onDirty(false, false, false);
-  }, [dirty, busy, reading, onDirty]);
+  }, [dirty, busy, reading, working, onDirty]);
   function fail(problem: unknown) {
     if (scope.signal.aborted || isAborted(problem)) return;
     setError(errorKey(problem));
@@ -87,11 +121,11 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
     finally { if (!scope.signal.aborted) setReading(false); }
   }
   return <div className="settings-page">
-    <button className="text-button" onClick={onBack}>{t('common.back')}</button>
+    <button className="text-button" disabled={task !== null && working} onClick={task === null ? onBack : closeTask}>{t('common.back')}</button>
     <header className="settings-heading"><h1 id="settings-title" tabIndex={-1}>{t('nav.settings')}</h1></header>
-    <div className="settings-layout">
-      <SettingsNav sections={sections} t={t} />
-      <div className="settings-sections">
+    <div className={task === null ? 'settings-layout' : 'settings-layout settings-layout-task'}>
+      <SettingsNav sections={sections} t={t} hidden={task !== null} />
+      <div className="settings-sections" hidden={task !== null}>
         <Section of={profileSection} t={t}>
           <div className="settings-group-card">
             <div className="settings-card profile-card">
@@ -134,22 +168,24 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
           </div>
         </Section>
         <Section of={dataSection} t={t}>
-          <div className="settings-group-card">
-            <BackupSettings client={client} scope={scope} language={language} online={online} t={t} />
-            <RestoreSettings client={client} scope={scope} language={language} online={online} t={t} />
-          </div>
+          <DataHub t={t} disabled={working} onOpen={openTask} />
         </Section>
         <Section of={accountSection} t={t}>
           <div className="settings-group-card">
             <InstallHint t={t} />
             <div className="settings-card account-sign-out">
               <button type="button" className="button button-secondary" onClick={onSignOut}>{t('auth.signOut')}</button>
+              <p className="fine muted app-version">{t('settings.version', { version })}</p>
             </div>
-            <DeleteAccountSettings client={client} controller={controller} scope={scope} online={online} t={t} />
           </div>
         </Section>
       </div>
+      <div className="settings-task" hidden={task === null}>
+        <BackupSettings client={client} scope={scope} language={language} online={online} t={t} active={task === 'backup'} onBusy={backupBusy} />
+        <RestoreSettings client={client} scope={scope} language={language} online={online} t={t} active={task === 'restore'} onBusy={restoreBusy} />
+        <DeleteAccountSettings client={client} controller={controller} scope={scope} online={online} t={t} active={task === 'delete'}
+          onBusy={deleteBusy} onBackupFirst={() => openTask('backup')} />
+      </div>
     </div>
-    <p className="fine muted app-version">{t('settings.version', { version })}</p>
   </div>;
 }

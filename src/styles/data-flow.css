@@ -1,0 +1,58 @@
+/* UX5: Settings data hub and task views, statistics summary, admin summary, trash rows. Loaded only by those lazy routes. */
+.settings-page [hidden] { display: none !important; }
+.settings-layout-task { grid-template-columns: minmax(0, 1fr); }
+.settings-task { min-width: 0; max-width: 44rem; }
+.settings-task > .settings-card > h2 { margin-bottom: 12px; }
+
+.data-hub { list-style: none; margin: 0; padding: 4px 0; }
+.data-hub li + li { border-top: 1px solid var(--border); }
+.data-row { width: 100%; min-height: 52px; padding: 12px 20px; border: 0; background: transparent; color: var(--ink); display: flex; align-items: center; justify-content: space-between; gap: 12px; text-align: start; font-size: 1rem; font-weight: 550; overflow-wrap: anywhere; }
+.data-row:hover:not(:disabled) { background: var(--well); }
+.data-row-danger { color: var(--error); }
+.data-row-chevron { flex: none; transform: rotate(-90deg); }
+.data-row:disabled { opacity: .6; }
+
+.backup-card details.backup-plain { margin-top: 20px; }
+.backup-card details.backup-plain > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--primary); font-weight: 550; font-size: .875rem; }
+.backup-card details.backup-plain > .stack { margin-top: 8px; }
+
+.account-sign-out .app-version { margin: 12px 0 0; }
+
+@media (max-width: 760px) {
+  .settings-nav ul { flex-wrap: wrap; overflow-x: visible; }
+  .settings-nav li { flex: 0 1 auto; max-width: 100%; }
+  .settings-nav-item { white-space: normal; overflow-wrap: anywhere; max-width: 100%; text-align: center; }
+}
+
+.stats-heading { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 24px; }
+.stats-heading .stats-currency { margin: 0; flex: 0 1 12rem; min-width: 0; }
+.stats-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr)); gap: 12px; margin: 0 0 24px; }
+.stats-summary > div { padding: 16px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); min-width: 0; }
+.stats-summary dt { color: var(--secondary); font-size: .875rem; }
+.stats-summary dd { margin: 4px 0 0; font-size: 1.5rem; font-weight: 550; overflow-wrap: anywhere; }
+.stats-bars li { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.stats-bars .stats-bar { grid-column: 1 / -1; order: 1; }
+.stats-bar, .usage-bar { display: block; height: 6px; border-radius: 3px; background: var(--well); overflow: hidden; }
+.stats-bar > span, .usage-bar > span { display: block; height: 100%; min-width: 2px; background: var(--primary); }
+.stats-cost-list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(15rem, 100%), 1fr)); gap: 12px; }
+.stats-cost-list li { padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.stats-cost-list a { color: var(--ink); font-weight: 550; overflow-wrap: anywhere; }
+.stats-cost-list dl { margin: 8px 0 0; display: grid; gap: 4px; font-size: .875rem; }
+.stats-cost-list dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; }
+.stats-cost-list dt { color: var(--secondary); }
+.stats-cost-list dd { margin: 0; }
+
+.admin-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr)); gap: 12px 24px; margin: 0; }
+.admin-summary dt { color: var(--secondary); font-size: .875rem; }
+.admin-summary dd { margin: 4px 0 0; font-size: 1.25rem; font-weight: 550; overflow-wrap: anywhere; }
+.admin-use .usage-bar { margin-top: 6px; max-width: 16rem; }
+.admin-details { margin-top: 22px; }
+.admin-details > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--primary); font-weight: 550; }
+.admin-details h4 { font-size: .9375rem; margin: 16px 0 8px; }
+
+.trash-list .trash-delete { color: var(--error); }
+
+@media (forced-colors: active) {
+  .stats-bar > span, .usage-bar > span { background: CanvasText; }
+  .stats-bar, .usage-bar { border: 1px solid CanvasText; }
+}

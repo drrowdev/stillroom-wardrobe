@@ -6,6 +6,7 @@ import { languages, messages, translate, type Language, type MessageKey } from '
 import { aiFixture, editItem, manualEntry } from './ai-photo-first-support';
 import { mockBackend, owners, recoveryHash, signIn } from './mock-backend';
 import { dismissKeyboard, expectIdentity, openAccountMenu, shellNav } from './shell-support';
+import { closeDataTask, dataRow, openDataTask } from './data-task-support';
 
 // I24: dialogs, editors and the P6c/service-worker surfaces in every language, at 320px and with 200% text.
 const text = (language: Language, key: MessageKey, parameters?: Record<string, string | number>) => translate(language, key, parameters);
@@ -30,9 +31,9 @@ async function layout(page: Page, scope: string): Promise<Check> {
     };
     const name = (element: Element) => `${element.tagName.toLowerCase()} "${(element.textContent ?? '').trim().slice(0, 30)}"`;
     // Text that does not fit its own box, or that reaches past the viewport, is clipped or overlaps. The Settings section
-    // menu is a horizontally scrolling row on narrow screens; settings-layout.spec checks every entry can be scrolled to.
+    // menu pills wrap onto rows on narrow screens (UX5), so they are checked like everything else.
     const clipped = [...root.querySelectorAll('button, label, a, summary, legend, h1, h2, h3, p, li, dt, dd, [role=alert], [role=status]')]
-      .filter((element) => shown(element) && getComputedStyle(element).display !== 'inline' && !element.closest('.settings-nav ul'))
+      .filter((element) => shown(element) && getComputedStyle(element).display !== 'inline')
       .filter((element) => element.scrollWidth > element.clientWidth + 1 || element.getBoundingClientRect().right > innerWidth + 1)
       .map(name);
     const small = [...root.querySelectorAll('button, a[href], input:not([type=hidden]), select, textarea, summary, [role=button]')]
@@ -169,6 +170,9 @@ async function focusOrder(page: Page, scope: string) {
     const stops = [...root.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, summary, [tabindex="0"]')].filter((element) => {
       if (element.matches(':disabled') || element.tabIndex < 0 || element.closest('[inert]')) return false;
       if (!element.getClientRects().length || getComputedStyle(element).visibility === 'hidden') return false;
+      // Content of a closed disclosure keeps layout boxes in Chromium but cannot be focused; only its summary can.
+      const closed = element.closest('details:not([open])');
+      if (closed && !(element.matches('summary') && element.parentElement === closed)) return false;
       if (element instanceof HTMLInputElement && element.type === 'radio') {
         const group = element.name;
         const checked = root.querySelector<HTMLInputElement>(`input[type=radio][name="${group}"]:checked`);
@@ -245,16 +249,23 @@ for (const language of languages) {
       expect(errors).toEqual([]);
     });
 
-    test('backup passphrase and the delete confirmation with its typed phrase and password check', async ({ page }, info) => {
+    test('the Data and privacy hub, the backup passphrase, the restore view and the delete confirmation', async ({ page }, info) => {
       await start(page, language, '#/settings');
       await page.route('http://127.0.0.1:54321/functions/v1/delete-account', (route) => route.fulfill({ status: 403, json: { code: 'PASSWORD' } }));
+      await dataRow(page, 'backup').scrollIntoViewIfNeeded();
+      await audit(page, language, '.settings-page');
+      await openDataTask(page, 'restore');
+      await audit(page, language, '.settings-page');
+      await closeDataTask(page, 'restore');
+      await openDataTask(page, 'backup');
       const backup = page.locator('.backup-card');
       await button(backup, language, 'backup.create').click();
       await expect(backup.getByLabel(text(language, 'backup.passphrase'), { exact: true })).toBeFocused();
       await audit(page, language, '.backup-card');
       await focusOrder(page, '.backup-card');
+      await closeDataTask(page, 'backup');
+      await openDataTask(page, 'delete');
       const card = page.locator('.delete-card');
-      await button(card, language, 'delete.title').click();
       await card.getByLabel(text(language, 'delete.password'), { exact: true }).fill(secret);
       await card.getByLabel(text(language, 'delete.confirm'), { exact: true }).check();
       await card.getByLabel(text(language, 'delete.phraseLabel', { phrase: text(language, 'delete.phraseValue') }), { exact: true })

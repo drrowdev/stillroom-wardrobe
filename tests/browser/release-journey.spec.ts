@@ -101,6 +101,7 @@ test('I26 release journey: the owner\'s ten steps on fictional data', async ({ p
   await test.step('7. create a backup and verify it', async () => {
     await page.evaluate(() => { location.hash = '#/settings'; });
     await expect(page.locator('#settings-title')).toBeVisible();
+    await page.locator('#data-row-backup').click();
     const card = page.locator('.backup-card');
     await button(page, 'backup.create').click();
     await card.getByLabel(text('backup.passphrase'), { exact: true }).fill(passphrase);

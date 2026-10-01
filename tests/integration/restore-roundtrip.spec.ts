@@ -366,6 +366,8 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     aBefore = opened;
     const card = page.locator('.restore-card');
     const checkBackup = async () => {
+      // UX5: Restore opens as its own view from the Data and privacy section of Settings.
+      if (!await card.count()) await page.locator('#data-row-restore').click();
       if (await button(page, 'restore.open').isVisible()) await button(page, 'restore.open').click();
       await card.locator('#restore-files').setInputFiles(files);
       await card.getByLabel(text('backup.passphrase'), { exact: true }).fill(PASSPHRASE);

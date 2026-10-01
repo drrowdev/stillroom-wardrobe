@@ -88,7 +88,7 @@ export function StylistScreen({ store, images, online, t, timeZone, weather, wea
     {wardrobe.failed && state.turns.length > 0 && <div className="notice notice-error" role="alert"><span>{t('stylist.wardrobeFailed')}</span>
       <button type="button" className="text-button" disabled={!online || wardrobe.loading} onClick={wardrobe.retry}>{t('common.retry')}</button></div>}
     {(view.kind !== 'on' || !usable) && clearable && <div className="stylist-actions">
-      <button type="button" className="button button-secondary" onClick={() => { clear(store); document.getElementById('stylist-title')?.focus(); }}>
+      <button type="button" className="text-button" onClick={() => { clear(store); document.getElementById('stylist-title')?.focus(); }}>
         {t('stylist.clear')}</button></div>}
     {view.kind === 'on' && <>
       {limitLine && <p className="notice">{t(limitLine)}</p>}
@@ -109,7 +109,7 @@ export function StylistScreen({ store, images, online, t, timeZone, weather, wea
           <div className="stylist-actions">
             <button type="submit" className="button button-primary" disabled={!online || pending || !canSend(state) || state.draft.trim() === ''}>
               {t(pending ? 'stylist.sending' : 'stylist.send')}</button>
-            {clearable && <button type="button" className="button button-secondary"
+            {clearable && <button type="button" className="text-button"
               onClick={() => { clear(store); field.current?.focus(); }}>{t('stylist.clear')}</button>}
           </div>
           <p className="muted fine">{t('stylist.notKept')}</p>

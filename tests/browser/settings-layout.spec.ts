@@ -118,17 +118,18 @@ test.describe('UI1 section layout', () => {
   });
 
   for (const width of [390, 320]) {
-    test(`at ${width}px the menu is a scrolling row and the page does not overflow`, async ({ page }) => {
+    test(`at ${width}px the menu pills wrap, all visible, and the page does not overflow`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 });
       await start(page);
       const list = page.locator('.settings-nav ul');
       await expect(list).toHaveCSS('flex-direction', 'row');
-      await expect(list).toHaveCSS('overflow-x', 'auto');
+      await expect(list).toHaveCSS('flex-wrap', 'wrap');
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      const last = page.locator('.settings-nav-item').last();
-      await last.scrollIntoViewIfNeeded();
-      const box = (await last.boundingBox())!;
-      expect(box.x >= 0 && box.x + box.width <= width + 1).toBe(true);
+      const items = page.locator('.settings-nav-item');
+      for (const box of await items.evaluateAll((all) => all.map((el) => { const r = el.getBoundingClientRect(); return { x: r.x, right: r.right }; }))) {
+        expect(box.x >= 0 && box.right <= width + 1).toBe(true);
+      }
+      const last = items.last();
       await last.click();
       await expect(page.locator('#settings-account-heading')).toBeFocused();
       await noViolations(page);
@@ -382,6 +383,10 @@ test.describe('bounded UI1 visual evidence', () => {
         await toggle(page, 'enhance').click();
         await expect(sheet(page, 'enhance')).toBeVisible();
       }
+      // UX5: Data and privacy is a hub of rows; the tools themselves are not in the page until a row is opened.
+      for (const task of ['backup', 'restore', 'delete']) await expect(page.locator(`#data-row-${task}`)).toBeVisible();
+      await expect(page.locator('.backup-card, .restore-card, .delete-card')).toHaveCount(0);
+      if (scene.width <= 390) await expect(page.locator('.settings-nav ul')).toHaveCSS('flex-wrap', 'wrap');
       expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
       await noViolations(page);
       expect(await page.evaluate(({ expectedLanguage, width }) => {

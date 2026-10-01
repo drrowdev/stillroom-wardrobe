@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile } from 'node:fs/promises';
@@ -11,6 +11,7 @@ import { findMarker, findMarkers, flatJpeg } from '../fixtures/restore-jpeg-fixt
 import { mockBackend, owners, signIn, type MockOptions } from './mock-backend';
 import { settled, trackRequests } from './settle';
 import { openAccountMenu } from './shell-support';
+import { closeDataTask, heldExits, openDataTask, settingsBack, settingsFromWardrobe, showDataTask, tryExitWhileHeld } from './data-task-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -95,6 +96,7 @@ async function signOut(page: Page, language: Language = 'en') {
 }
 // Makes a real backup through the Backup card and returns its parts as files.
 async function backup(page: Page, language: Language = 'en'): Promise<Part[]> {
+  await showDataTask(page, 'backup');
   await settled(page, button(page, 'backup.create', language));
   await button(page, 'backup.create', language).click();
   // Opening the form moves focus to the passphrase. Checked here, so a form that doesn't open fails at once, not at the test limit.
@@ -117,6 +119,7 @@ async function backup(page: Page, language: Language = 'en'): Promise<Part[]> {
   return parts;
 }
 async function check(page: Page, parts: Part[], secret = passphrase, language: Language = 'en') {
+  await showDataTask(page, 'restore');
   if (await button(page, 'restore.open', language).isVisible()) await button(page, 'restore.open', language).click();
   await restoreCard(page).locator('#restore-files').setInputFiles(parts);
   await restoreCard(page).getByLabel(text('backup.passphrase', language), { exact: true }).fill(secret);
@@ -466,6 +469,7 @@ test('I20 restore: offline, signing out and accessibility at 320px and 200% text
   const parts = await backup(page);
   const card = restoreCard(page);
   const axe = async () => expect((await new AxeBuilder({ page }).include('.restore-card').analyze()).violations).toEqual([]);
+  await showDataTask(page, 'restore');
   await axe();
   await button(page, 'restore.open').click();
   await expect(card.locator('#restore-files')).toBeFocused();
@@ -486,9 +490,134 @@ test('I20 restore: offline, signing out and accessibility at 320px and 200% text
   }
   await signOut(page);
   await settings(page, 'b');
+  await expect(card).toHaveCount(0);
+  await showDataTask(page, 'restore');
   await expect(card.locator('#restore-files')).toHaveCount(0);
   await expect(button(page, 'restore.start')).toHaveCount(0);
   expect(own(api.items)).toHaveLength(0);
+});
+
+// A backup of account A, checked in as account B from Settings reached through Wardrobe, so every way out has a page to go to.
+async function backupForB(page: Page) {
+  const { api, urls, thumb } = await start(page);
+  seed(api, thumb, 'Fictional linen shirt');
+  await settings(page, 'a');
+  const parts = await backup(page);
+  await signOut(page);
+  await settings(page, 'b');
+  await settingsFromWardrobe(page);
+  return { api, urls, parts };
+}
+const holdCheck = async (page: Page) => {
+  const held = { route: undefined as Route | undefined, count: 0 };
+  await page.route(/\/rest\/v1\/items\?/, async route => {
+    if (route.request().method() === 'GET' && route.request().url().includes('id=in.')) {
+      held.count++;
+      if (!held.route) { held.route = route; return; }
+    }
+    await route.fallback();
+  });
+  return held;
+};
+const holdReservation = async (page: Page) => {
+  const held = { route: undefined as Route | undefined, count: 0 };
+  await page.route('**/rest/v1/rpc/reserve_restored_item_save_v2', async route => {
+    held.count++;
+    if (!held.route) held.route = route; else await route.fallback();
+  });
+  return held;
+};
+
+for (const exit of heldExits) {
+  test(`UX5 restore: while a backup is checked, ${exit} waits and is then followed`, async ({ page }) => {
+    const { api, urls, parts } = await backupForB(page);
+    const held = await holdCheck(page);
+    const before = urls.length;
+    await check(page, parts);
+    await expect.poll(() => Boolean(held.route), slow).toBe(true);
+    await expect(restoreCard(page).getByRole('status')).toHaveText(text('restore.checking'));
+    const followed = await tryExitWhileHeld(page, 'restore', exit);
+    expect(held.count).toBe(1);
+    await held.route!.fallback();
+    await followed();
+    expect(held.count).toBe(1);
+    // Check writes nothing; the page it leads to only reads.
+    expect(urls.slice(before).filter(url => !/^(GET|HEAD|OPTIONS) /.test(url) && !/\/rpc\/[a-z_]*status\b|\/auth\/v1\//.test(url))).toEqual([]);
+    expect(own(api.items)).toHaveLength(0);
+  });
+
+  test(`UX5 restore: while a restore runs, ${exit} waits and is then followed`, async ({ page }) => {
+    const { api, parts } = await backupForB(page);
+    await check(page, parts);
+    await expect(button(page, 'restore.start')).toBeVisible(slow);
+    const held = await holdReservation(page);
+    await button(page, 'restore.start').click();
+    await expect.poll(() => Boolean(held.route), slow).toBe(true);
+    const followed = await tryExitWhileHeld(page, 'restore', exit);
+    // None of the attempted exits sent anything again while the save was held.
+    expect(held.count).toBe(1);
+    await held.route!.fallback();
+    await followed();
+    expect(held.count).toBe(1);
+    expect(own(api.items)).toHaveLength(1);
+  });
+}
+
+for (const held of ['check', 'run'] as const) {
+  test(`UX5 restore: signing out while the ${held} is held cancels it; the next account starts clean`, async ({ page }) => {
+    const { api, urls, parts } = await backupForB(page);
+    let request: { route: Route | undefined; count: number };
+    if (held === 'check') {
+      request = await holdCheck(page);
+      await check(page, parts);
+    } else {
+      await check(page, parts);
+      await expect(button(page, 'restore.start')).toBeVisible(slow);
+      request = await holdReservation(page);
+      await button(page, 'restore.start').click();
+    }
+    await expect.poll(() => Boolean(request.route), slow).toBe(true);
+    await signOut(page);
+    await expect(page.locator('#restore-passphrase, #restore-files')).toHaveCount(0);
+    await request.route!.fallback().catch(() => undefined);
+    await page.waitForTimeout(300);
+    const writes = writeUrls(urls).length;
+    const items = own(api.items).length;
+    await settings(page, 'a');
+    await openDataTask(page, 'restore');
+    await expect(restoreCard(page).locator('[role=alert], .restore-counts')).toHaveCount(0);
+    await expect(button(page, 'restore.open')).toBeVisible();
+    await expect(settingsBack(page)).toBeEnabled();
+    expect([request.count, writeUrls(urls).length, own(api.items).length]).toEqual([1, writes, items]);
+  });
+}
+
+test('UX5 restore: a stopped run keeps its message and Try again across views, with nothing sent meanwhile', async ({ page }) => {
+  const { api, urls, thumb } = await start(page);
+  const shirt = seed(api, thumb, 'Fictional linen shirt');
+  api.exportControl.attributions.set(String(shirt.item.id), [{ source_image_id: shirt.images[0]!.id, image_sha256: shirt.images[0]!.main_sha256,
+    model_id: 'fixture-model', prompt_version: 1, fields: { category: 'top' } }]);
+  await settings(page, 'a');
+  const parts = await backup(page);
+  await signOut(page);
+  await settings(page, 'b');
+  await check(page, parts);
+  await expect(button(page, 'restore.start')).toBeVisible(slow);
+  api.restoreControl.attributionReplies.push('busy', 'busy');
+  await button(page, 'restore.start').click();
+  await expect(restoreCard(page).getByRole('alert')).toHaveText(text('restore.stopped'), slow);
+  await expect(restoreCard(page).getByRole('alert')).toBeFocused();
+  const sent = urls.length;
+  await closeDataTask(page, 'restore');
+  await expect(page.locator('input[type=password], #delete-phrase, input[type=file]')).toHaveCount(0);
+  await openDataTask(page, 'restore');
+  await expect(restoreCard(page).getByRole('alert')).toHaveText(text('restore.stopped'));
+  await expect(button(page, 'restore.again')).toBeEnabled();
+  expect(urls.slice(sent).filter(url => !url.startsWith('GET'))).toEqual([]);
+  api.restoreControl.attributionReplies.push('kept');
+  await button(page, 'restore.again').click();
+  await expect(restoreCard(page).getByRole('status')).toHaveText(text('restore.done'), slow);
+  expect(own(api.items)).toHaveLength(1);
 });
 
 test.describe('bounded P6b visual evidence', () => {
@@ -1068,4 +1197,45 @@ test('BG2b-2 restore: after a lost save reply the resumed photo is still reporte
   await expect(card.getByRole('status')).toHaveText(text('restore.done'), slow);
   await expect(card).toContainText(text('restore.unlabelledEnhanced_one', 'en', { count: '1' }));
   expect(api.restoreControl.reservations).toBe(reservations);
+});
+
+test.describe('UX5 restore credentials', () => {
+  test('leaving a checked restore drops the passphrase and files; a later recheck asks for both again', async ({ page }) => {
+    await start(page);
+    await settings(page, 'b');
+    await driftEncoder(page, 'none');
+    await check(page, await v1Backup([q6(flatJpeg({ width: 1200, height: 900 }), 1200, 900)]));
+    await expect(button(page, 'restore.start')).toBeVisible(slow);
+    await closeDataTask(page, 'restore');
+    await expect(page.locator('input[type=password], input[type=file]')).toHaveCount(0);
+    await openDataTask(page, 'restore');
+    await expect(button(page, 'restore.start')).toBeEnabled();
+    await driftEncoder(page, 'thumbnail');
+    await button(page, 'restore.start').click();
+    const card = restoreCard(page);
+    await expect(card.getByRole('alert')).toHaveText(text('restore.recheck'), slow);
+    await expect(card.locator('#restore-passphrase')).toHaveValue('');
+    expect(await card.locator('#restore-files').evaluate(input => (input as HTMLInputElement).files?.length ?? 0)).toBe(0);
+    await expect(button(page, 'restore.check')).toBeDisabled();
+    await card.locator('#restore-files').setInputFiles(await v1Backup([q6(flatJpeg({ width: 40, height: 40 }), 40, 40)]));
+    await expect(button(page, 'restore.check')).toBeDisabled();
+    await card.locator('#restore-passphrase').fill(passphrase);
+    await expect(button(page, 'restore.check')).toBeEnabled();
+  });
+
+  test('leaving after a failed Check drops the passphrase and files and keeps the message', async ({ page }) => {
+    await start(page);
+    await settings(page, 'b');
+    await check(page, await v1Backup([q6(flatJpeg({ width: 40, height: 40 }), 40, 40)]), 'not the passphrase');
+    const card = restoreCard(page);
+    await expect(card.getByRole('alert')).toHaveText(text('restore.wrong'), slow);
+    await closeDataTask(page, 'restore');
+    await expect(page.locator('input[type=password], input[type=file]')).toHaveCount(0);
+    await openDataTask(page, 'restore');
+    await expect(card.getByRole('alert')).toHaveText(text('restore.wrong'));
+    await button(page, 'backup.startAgain').click();
+    await button(page, 'restore.open').click();
+    await expect(card.locator('#restore-passphrase')).toHaveValue('');
+    await expect(button(page, 'restore.check')).toBeDisabled();
+  });
 });

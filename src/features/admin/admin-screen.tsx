@@ -9,6 +9,8 @@ import {
   type LimitKey, type LimitReason, type Limits, type MonthSpend, type SpendPurpose,
 } from '../../domain/admin-limits';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
+import { monthSplit, usageShare } from './usage-share';
+import '../../styles/data-flow.css';
 
 type Props = { client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate; onBack: () => void };
 type Load = { kind: 'checking' } | { kind: 'denied' } | { kind: 'failed' } | { kind: 'ready'; spending: AdminSpending; failed: boolean; read: number };
@@ -129,8 +131,9 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
   const limits = account.limits;
   const canEdit = account.enabled && limits !== null;
   const reconcile = () => setAwaitRead(onReload());
-  const usedOf = (used: string, limit: string | null) => limit === null ? formatUsd(used, language)
-    : t('admin.usedOf', { used: formatUsd(used, language), limit: formatUsd(limit, language) });
+  const usedOf = (used: string, limit: string | null) => <>{limit === null ? formatUsd(used, language)
+    : t('admin.usedOf', { used: formatUsd(used, language), limit: formatUsd(limit, language) })}<UsageBar used={used} limit={limit} /></>;
+  const split = monthSplit(monthTotals(history));
   const open = () => {
     if (!limits || reconciling || saving) return;
     const initial = draftOf(limits, language);
@@ -183,15 +186,11 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
     <h2 id={id}>{t('admin.account', { number: account.admissionNo })}</h2>
     {!account.enabled && <p className="muted">{t('admin.accountOff')}</p>}
     <h3>{t('admin.spendIn', { month: monthName(month, language) })}</h3>
-    <table className="stats-table admin-table">
-      <caption className="sr-only">{t('admin.spendIn', { month: monthName(month, language) })}</caption>
-      <thead><tr><th scope="col">{t('admin.feature')}</th><th scope="col">{t('admin.confirmed')}</th><th scope="col">{t('admin.estimated')}</th>
-        <th scope="col">{t('admin.reserved')}</th><th scope="col">{t('admin.total')}</th><th scope="col">{t('admin.requests')}</th></tr></thead>
-      <tbody>
-        {SPEND_PURPOSES.map((purpose) => <SpendRow key={purpose} label={t(purposeKey[purpose])} spend={history[purpose]} language={language} t={t} />)}
-        <SpendRow label={t('admin.total')} spend={monthTotals(history)} language={language} t={t} total />
-      </tbody>
-    </table>
+    <dl className="admin-summary">
+      <div><dt>{t('admin.used')}</dt><dd>{formatUsd(split.usedMicro, language)}</dd></div>
+      <div><dt>{t('admin.pending')}</dt><dd>{formatUsd(split.pendingMicro, language)}</dd></div>
+      <div><dt>{t('admin.requests')}</dt><dd>{whole(split.requests, language)}</dd></div>
+    </dl>
     <h3>{t('admin.currentUse')}</h3>
     <dl className="admin-use">
       <div><dt>{t('admin.allFeatures')}</dt><dd>{usedOf(account.current.shared.usedMicro, limits?.shared.monthlyAllowanceMicro ?? null)}
@@ -202,11 +201,8 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
           {!account.features[feature].configured && <span className="stats-note">{t('admin.notSetUp')}</span>}</dd></div>)}
     </dl>
     <p className="stats-note">{t('admin.currentNote')}</p>
-    {account.probe.count > 0 && <p className="stats-note">{t('admin.probe', { feature: t('admin.enhancement'), amount: formatUsd(account.probe.allocationMicro, language) })}</p>}
-    {account.tryOnProbe.count > 0 && <p className="stats-note">{t('admin.probe', { feature: t('admin.tryOn'), amount: formatUsd(account.tryOnProbe.allocationMicro, language) })}</p>}
     <h3>{t('admin.limits')}</h3>
     {!limits ? <p>{t('admin.notSetUp')}</p> : !edit ? <>
-      <LimitsTable limits={limits} language={language} t={t} />
       {canEdit && <button ref={editButton} type="button" className="button button-secondary" disabled={!online || reconciling} onClick={open}>{t('admin.edit')}</button>}
     </> : <LimitsForm id={id} edit={edit} t={t} online={online} saving={saving} firstField={firstField} reviewButton={reviewButton}
       onChange={(draft) => setEdit({ ...edit, draft })} onReview={review} onCancel={() => { setMessage(null); close('edit'); }}
@@ -215,9 +211,31 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
       {t(message.key)}{message.belowUse ? ` ${t('admin.belowUse')}` : ''}</p>}
     {reconciling && readFailed && <div className="notice notice-error"><span>{t('admin.checkFailed')}</span>
       <button type="button" className="text-button" disabled={!online} onClick={reconcile}>{t('admin.checkAgain')}</button></div>}
+    <details className="admin-details">
+      <summary>{t('admin.details')}</summary>
+      <h4>{t('admin.spendIn', { month: monthName(month, language) })}</h4>
+      <table className="stats-table admin-table">
+        <caption className="sr-only">{t('admin.spendIn', { month: monthName(month, language) })}</caption>
+        <thead><tr><th scope="col">{t('admin.feature')}</th><th scope="col">{t('admin.confirmed')}</th><th scope="col">{t('admin.estimated')}</th>
+          <th scope="col">{t('admin.reserved')}</th><th scope="col">{t('admin.total')}</th><th scope="col">{t('admin.requests')}</th></tr></thead>
+        <tbody>
+          {SPEND_PURPOSES.map((purpose) => <SpendRow key={purpose} label={t(purposeKey[purpose])} spend={history[purpose]} language={language} t={t} />)}
+          <SpendRow label={t('admin.total')} spend={monthTotals(history)} language={language} t={t} total />
+        </tbody>
+      </table>
+      {limits && <><h4>{t('admin.limits')}</h4><LimitsTable limits={limits} language={language} t={t} /></>}
+      {account.probe.count > 0 && <p className="stats-note">{t('admin.probe', { feature: t('admin.enhancement'), amount: formatUsd(account.probe.allocationMicro, language) })}</p>}
+      {account.tryOnProbe.count > 0 && <p className="stats-note">{t('admin.probe', { feature: t('admin.tryOn'), amount: formatUsd(account.tryOnProbe.allocationMicro, language) })}</p>}
+    </details>
     {edit && confirm && <ConfirmDialog number={account.admissionNo} changes={confirm.changes} saving={saving} language={language} t={t}
       onCancel={() => { setConfirm(null); requestAnimationFrame(() => reviewButton.current?.focus()); }} onConfirm={(reason) => { void save(reason); }} />}
   </section>;
+}
+
+function UsageBar({ used, limit }: { used: string; limit: string | null }) {
+  const share = usageShare(used, limit);
+  if (share === null) return null;
+  return <span className="usage-bar" aria-hidden="true"><span style={{ width: `${Math.round(share * 1000) / 10}%` }} /></span>;
 }
 
 const valueText = (key: LimitKey, value: string | number | null, language: Language) => value === null ? '–'

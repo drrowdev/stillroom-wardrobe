@@ -1,10 +1,11 @@
-import { expect, test, type Page, type Request, type TestInfo } from '@playwright/test';
+import { expect, test, type Page, type Request, type Route, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { translate, type Language, type MessageKey } from '../../src/i18n';
 import { mockBackend, signIn } from './mock-backend';
-import { expectIdentity, expectNoIdentity } from './shell-support';
+import { expectIdentity, expectNoIdentity, signOutThroughMenu } from './shell-support';
+import { closeDataTask, dataRow, heldExits, openDataTask, settingsBack, settingsFromWardrobe, taskHeading, tryExitWhileHeld } from './data-task-support';
 
 type Reply = { status: number; json: Record<string, unknown> };
 const text = (key: MessageKey, language: Language = 'en', parameters?: Record<string, string>) => translate(language, key, parameters);
@@ -68,9 +69,11 @@ async function start(page: Page, replies: Reply[], language: Language = 'en', fr
   }
   return { bodies, status, auth };
 }
+// Account deletion opens as a task view from the Data and privacy rows, with its form shown and the heading focused.
 async function openForm(page: Page, language: Language = 'en') {
-  await button(page, 'delete.title', language).click();
-  await expect(card(page).getByLabel(text('delete.password', language), { exact: true })).toBeFocused();
+  await openDataTask(page, 'delete');
+  await expect(taskHeading(page, 'delete')).toHaveText(text('delete.title', language));
+  await expect(card(page).getByLabel(text('delete.password', language), { exact: true })).toBeVisible();
 }
 async function fill(page: Page, language: Language = 'en', password = secret) {
   await card(page).getByLabel(text('delete.password', language), { exact: true }).fill(password);
@@ -100,8 +103,10 @@ test('I22 the delete action needs the password, the confirmation and the typed p
   await expect(card(page).getByRole('alert')).toBeFocused();
   await expect(card(page).getByLabel(text('delete.password'), { exact: true })).toHaveValue('');
   expect(bodies).toEqual([JSON.stringify({ password: secret })]);
-  await button(page, 'common.cancel').click();
-  await expect(card(page).getByLabel(text('delete.password'), { exact: true })).toHaveCount(0);
+  await expect(card(page).locator('.button-danger')).toHaveCount(1);
+  await expect(card(page).locator('button')).toHaveText([text('delete.backupFirst'), text('delete.button')]);
+  await closeDataTask(page, 'delete');
+  await expect(card(page)).toHaveCount(0);
   await expect(page.locator('#settings-title')).toBeVisible();
 });
 
@@ -116,9 +121,12 @@ for (const language of ['en', 'fi', 'sv'] as const) test(`I22 the typed phrase i
   await expect(submit).toBeDisabled();
   await phraseField(page, language).fill(text('delete.phraseValue', language));
   await expect(submit).toBeEnabled();
-  await button(page, 'common.cancel', language).click();
+  await closeDataTask(page, 'delete');
   await openForm(page, language);
   await expect(phraseField(page, language)).toHaveValue('');
+  await expect(card(page).getByLabel(text('delete.password', language), { exact: true })).toHaveValue('');
+  await expect(card(page).getByLabel(text('delete.confirm', language), { exact: true })).not.toBeChecked();
+  await expect(submit).toBeDisabled();
 });
 
 test('I22 unfinished deletion replies explain what to do next', async ({ page }) => {
@@ -194,17 +202,97 @@ test('I22 a frozen account past its retry budget is told to contact the operator
   await expect(page.locator('#email')).toBeVisible();
 });
 
-test('I22 make a backup first moves focus to the backup card', async ({ page }) => {
+test('UX5 make a backup first opens the backup view and clears the deletion form', async ({ page }) => {
   await start(page, []);
+  await openForm(page);
+  await fill(page);
   await button(page, 'delete.backupFirst').click();
-  await expect(page.locator('.backup-card button').first()).toBeFocused();
+  await expect(taskHeading(page, 'backup')).toBeFocused();
+  await expect(card(page)).toHaveCount(0);
+  await expect(page.locator('#delete-password, #delete-phrase')).toHaveCount(0);
+  await expect(page.locator('h1')).toHaveCount(1);
+  await settingsBack(page).click();
+  await expect(dataRow(page, 'delete')).toBeFocused();
+  await openForm(page);
+  await expect(card(page).getByLabel(text('delete.password'), { exact: true })).toHaveValue('');
+  await expect(card(page).getByLabel(text('delete.confirm'), { exact: true })).not.toBeChecked();
+  await expect(phraseField(page)).toHaveValue('');
+});
+
+async function holdDeletion(page: Page) {
+  const held = { route: undefined as Route | undefined, sent: 0 };
+  await page.route(functionUrl, async route => {
+    if (route.request().method() !== 'POST') { await route.fallback(); return; }
+    held.sent++;
+    if (!held.route) held.route = route; else await route.fallback();
+  });
+  await fill(page);
+  await button(page, 'delete.button').click();
+  await expect.poll(() => Boolean(held.route)).toBe(true);
+  await expect(card(page).getByRole('status')).toHaveText(text('delete.working'));
+  return held;
+}
+
+for (const exit of heldExits) {
+  test(`UX5 while a deletion runs, ${exit} waits; after a lost reply it is followed with nothing sent again`, async ({ page }) => {
+    const { bodies } = await start(page, []);
+    await settingsFromWardrobe(page);
+    await openForm(page);
+    const held = await holdDeletion(page);
+    await expect(button(page, 'delete.backupFirst')).toBeDisabled();
+    const followed = await tryExitWhileHeld(page, 'delete', exit);
+    expect(held.sent).toBe(1);
+    await held.route!.abort('connectionreset');
+    await followed();
+    expect([held.sent, bodies.length]).toEqual([1, 0]);
+    // Returning shows a cleared form.
+    await page.evaluate(() => { location.hash = '#/settings'; });
+    await expect(page.locator('#settings-title')).toBeVisible();
+    await openForm(page);
+    await expect(card(page).getByLabel(text('delete.password'), { exact: true })).toHaveValue('');
+    expect(held.sent).toBe(1);
+  });
+}
+
+test('UX5 signing out while a deletion runs cancels the wait; the next account starts with an empty form', async ({ page }) => {
+  await start(page, []);
+  await openForm(page);
+  const held = await holdDeletion(page);
+  await signOutThroughMenu(page);
+  await expect(page.locator('#email')).toBeVisible();
+  await expect(page.locator('#delete-password, #delete-phrase')).toHaveCount(0);
+  await held.route!.abort('connectionreset').catch(() => undefined);
+  await signIn(page, 'b');
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await expect(page.locator('#settings-title')).toBeVisible();
+  await expect(card(page)).toHaveCount(0);
+  await dataRow(page, 'delete').click();
+  await expect(card(page).locator('[role=alert], [role=status]:not(:empty)')).toHaveCount(0);
+  await expect(page.locator('#delete-password')).toHaveValue('');
+  await expect(page.locator('#delete-phrase')).toHaveValue('');
+  await expect(settingsBack(page)).toBeEnabled();
+  expect(held.sent).toBe(1);
+});
+
+test('UX5 a lost deletion reply keeps its message and the form in the view, with nothing sent again', async ({ page }) => {
+  await start(page, []);
+  await openForm(page);
+  let sent = 0;
+  await page.route(functionUrl, async route => { if (route.request().method() === 'POST') { sent++; await route.abort('connectionreset'); } else await route.fallback(); });
+  await fill(page);
+  await button(page, 'delete.button').click();
+  await expect(card(page).getByRole('alert')).toHaveText(text('delete.failed'));
+  await expect(card(page).getByRole('alert')).toBeFocused();
+  await expect(settingsBack(page)).toBeEnabled();
+  await expect(card(page).getByLabel(text('delete.password'), { exact: true })).toHaveValue('');
+  expect(sent).toBe(1);
 });
 
 test('I22 accessibility: axe, 320px and 200% text for the delete card', async ({ page }) => {
   await start(page, [{ status: 503, json: { state: 'retry' } }]);
   const axe = async () => expect((await new AxeBuilder({ page }).include('.delete-card').analyze()).violations).toEqual([]);
-  await axe();
   await openForm(page);
+  await axe();
   await fill(page);
   await button(page, 'delete.button').click();
   await expect(card(page).getByRole('alert')).toBeFocused();
@@ -246,7 +334,8 @@ test.describe('bounded P6c visual evidence', () => {
       await button(page, 'delete.button', language).click();
       await expect(card(page).getByRole('alert')).toHaveText(text('delete.retry', language));
     } else {
-      await expect(button(page, 'delete.title', language)).toBeEnabled();
+      await openForm(page, language);
+      await expect(button(page, 'delete.button', language)).toBeDisabled();
     }
     if (!recovering) await card(page).scrollIntoViewIfNeeded();
     expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
