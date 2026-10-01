@@ -7,6 +7,7 @@ import { verifyParts, type JpegCheck } from '../../src/domain/export-format';
 import { assertSanitizedJpeg, readJpegHeader } from '../../src/images/jpeg';
 import { mockBackend, signIn } from './mock-backend';
 import { settled, trackRequests } from './settle';
+import { expectIdentity, openAccountMenu } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -144,7 +145,7 @@ test('I18 backup: signing out drops the prepared backup and the passphrase', asy
   await fill(page);
   await button(page, 'backup.create').click();
   await expect(card(page).locator('.backup-parts li')).toHaveCount(2);
-  await page.getByRole('button', { name: text('account.menu') }).click();
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await signIn(page, 'b');
@@ -199,7 +200,7 @@ test.describe('bounded P6a visual evidence', () => {
     }
     await card(page).scrollIntoViewIfNeeded();
     expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
-    await expect(page.locator('.workspace-identity')).toContainText('Alex');
+    await expectIdentity(page, 'Alex');
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     expect(await page.evaluate(({ expectedLanguage, width }) => {
       const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;

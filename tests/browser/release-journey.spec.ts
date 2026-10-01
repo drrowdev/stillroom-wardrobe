@@ -8,6 +8,7 @@ import { translate, type MessageKey } from '../../src/i18n';
 import { assertSanitizedJpeg, readJpegHeader } from '../../src/images/jpeg';
 import { addAiPhoto, aiFixture } from './ai-photo-first-support';
 import { owners } from './mock-backend';
+import { accountTrigger, dismissKeyboard, openAccountMenu, shellNav } from './shell-support';
 
 type Row = Record<string, unknown>;
 const lang = 'fi' as const;
@@ -15,7 +16,7 @@ const text = (key: MessageKey, parameters?: Record<string, string | number>) => 
 const button = (page: Page, key: MessageKey, parameters?: Record<string, string | number>) =>
   page.getByRole('button', { name: text(key, parameters), exact: true });
 const navLink = (page: Page, key: 'nav.today' | 'nav.wardrobe' | 'nav.outfits') =>
-  page.locator('.workspace-header nav').getByRole('link', { name: text(key), exact: true });
+  shellNav(page).getByRole('link', { name: text(key), exact: true });
 const passphrase = 'fictional release passphrase 10';
 const checkJpeg: JpegCheck = (bytes, _variant, width, height) => {
   const header = readJpegHeader(bytes);
@@ -41,11 +42,11 @@ test('I26 release journey: the owner\'s ten steps on fictional data', async ({ p
   });
 
   await test.step('2. set the language', async () => {
-    await page.getByRole('button', { name: translate('en', 'account.menu') }).click();
+    await openAccountMenu(page, 'en');
     await page.getByRole('button', { name: 'Suomi', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('lang', lang);
     await expect.poll(() => api.profiles[owners.a]?.ui_language).toBe(lang);
-    const menu = page.getByRole('button', { name: text('account.menu') });
+    const menu = accountTrigger(page);
     if (await menu.getAttribute('aria-expanded') === 'true') await menu.click();
     await expect(menu).toHaveAttribute('aria-expanded', 'false');
   });
@@ -73,6 +74,7 @@ test('I26 release journey: the owner\'s ten steps on fictional data', async ({ p
   });
 
   await test.step('5. create an outfit and reorder it', async () => {
+    await dismissKeyboard(page);
     await navLink(page, 'nav.outfits').click();
     await expect(page.locator('#outfits-title')).toBeFocused();
     await button(page, 'outfits.create').first().click();
@@ -128,7 +130,7 @@ test('I26 release journey: the owner\'s ten steps on fictional data', async ({ p
   });
 
   await test.step('9. sign out; nothing private is shown when the app is opened again', async () => {
-    await page.getByRole('button', { name: text('account.menu') }).click();
+    await openAccountMenu(page, lang);
     await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
     await expect(page.locator('#email')).toBeVisible();
     const leaks = async () => page.evaluate(values => {

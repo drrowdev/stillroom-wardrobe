@@ -4,6 +4,7 @@ import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { translate, type Language, type MessageKey } from '../../src/i18n';
 import { mockBackend, owners, signIn, type StylistSetup } from './mock-backend';
+import { expectIdentity, expectSignedIn, openAccountMenu } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -38,7 +39,7 @@ async function start(page: Page, options: StartOptions = {}) {
   if (options.setup !== undefined) api.stylistControl.setup[owners.a] = { configured: true, activated: true, ...options.setup };
   if (options.consent) api.stylistControl.consent[owners.a] = 1;
   await page.goto(options.hash ?? '/#/stylist'); await signIn(page);
-  await expect(page.locator('.workspace-identity')).toBeVisible();
+  await expectSignedIn(page);
   return { api, clothes: clothes! };
 }
 const reply = (clothes: Clothes, extra: Row = {}) => ({ status: 200, body: { code: 'OK', reply: 'Two ideas for Friday.', outfits: [
@@ -269,11 +270,11 @@ test.describe('ST1b stylist', () => {
     const second = held();
     api.stylistControl.replies.push({ ...reply(clothes), hold: second.hold });
     await ask(page, 'Question before signing out');
-    await page.getByRole('button', { name: text('account.menu') }).click();
+    await openAccountMenu(page, 'en');
     await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
     await expect(page.locator('#email')).toBeVisible();
     await signIn(page, 'b');
-    await expect(page.locator('.workspace-identity')).toContainText('Robin');
+    await expectIdentity(page, 'Robin');
     second.release();
     await page.evaluate(() => { location.hash = '#/stylist'; });
     await expect(page.locator('#stylist-message')).toBeVisible();
@@ -446,7 +447,7 @@ test.describe('bounded ST1b visual evidence', () => {
       }
       if (selected.zoom) await expect(page.locator('html')).toHaveCSS('font-size', '32px');
       expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
-      await expect(page.locator('.workspace-identity')).toContainText('Alex');
+      await expectIdentity(page, 'Alex');
       await axe(page);
       expect(await page.evaluate(({ expectedLanguage, width }) => {
         const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;

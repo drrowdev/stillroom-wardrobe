@@ -2,7 +2,7 @@ import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/tes
 
 // The production shell run fails unless every spec file actually executed at least one passing test.
 // The performance config names its own required file through the reporter options.
-const shellFiles = ['cache.spec.ts', 'update.spec.ts', 'visual.spec.ts'];
+const shellFiles = ['cache.spec.ts', 'shell-chunk.spec.ts', 'update.spec.ts', 'visual.spec.ts'];
 
 export default class ExecutedReporter implements Reporter {
   private readonly passed = new Map<string, number>();

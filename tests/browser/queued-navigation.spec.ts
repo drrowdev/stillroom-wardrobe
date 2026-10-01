@@ -1,11 +1,12 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { messages } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
+import { openAccountMenu } from './shell-support';
 
 const profileUrl = 'http://127.0.0.1:54321/rest/v1/profiles*';
 
 async function openSettings(page: Page) {
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.getByRole('link', { name: messages['nav.settings'].en, exact: true }).click();
   await expect(page.locator('#settings-title')).toBeVisible();
   await expect(page.locator('#profile-timezone')).toBeVisible();
@@ -114,7 +115,7 @@ test('signing out during a profile save drops the queued route', async ({ page }
   await page.goto('/'); await signIn(page); await openSettings(page);
   const held = await heldSave(page, 'Signed-out rename');
   await nav(page, 'nav.outfits').click();
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(page.locator('#login-title')).toBeVisible();
   await held().fallback();

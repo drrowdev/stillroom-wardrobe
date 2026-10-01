@@ -5,9 +5,10 @@ import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { aiFixture } from './ai-photo-first-support';
+import { expectIdentity, openAccountMenu, settleShell } from './shell-support';
 
 async function settings(page: Page, language: Language = 'en') {
-  await page.getByRole('button', { name: messages['account.menu'][language] }).click();
+  await openAccountMenu(page, language);
   await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
   await expect(page.locator('#settings-title')).toBeVisible();
   await expect(page.locator('#profile-timezone')).toBeVisible();
@@ -296,7 +297,7 @@ for (const action of ['save', 'reconcile'] as const) {
     await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
     await page.evaluate(async () => { await (window as AiProfileWindow).aiProfileWait!.release(); });
     await expect(page.locator('#profile-display_name')).toHaveValue('Alex');
-    await expect(page.locator('.workspace-identity')).not.toContainText('Late unconfirmed profile');
+    await expectIdentity(page, 'Alex');
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
     await expect(aiSwitch(page, true)).toHaveCount(0);
     await expect(page.getByText(messages['aiC.reconcile'].en, { exact: true }).first()).toBeVisible();
@@ -351,7 +352,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     const saveTraffic = trackSaveTraffic(page);
     await page.getByRole('button', { name: messages['settings.saveProfile'][language] }).click();
     await expect(page.getByText(messages['settings.profileSaved'][language], { exact: true })).toBeVisible();
-    await expect(page.locator('.workspace-identity')).toContainText('Åsa oma stil 🌿');
+    await expectIdentity(page, 'Åsa oma stil 🌿');
     await saveTraffic.settledReload();
     await expect(page.locator('#profile-display_name')).toHaveValue('Åsa oma stil 🌿');
     await expect(page.locator('#profile-timezone')).toHaveValue('Europe/Stockholm');
@@ -460,7 +461,7 @@ test('external focus refresh cannot advance a dirty baseline; explicit conflict 
   await page.locator('#profile-display_name').fill('My draft');
   Object.assign(api.profiles[owners.a]!, { display_name: 'External saved name', currency: 'SEK', version: 2 });
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(page.locator('.workspace-identity')).toContainText('External saved name');
+  await expectIdentity(page, 'External saved name');
   await expect(page.locator('#profile-display_name')).toHaveValue('My draft');
   await page.getByRole('button', { name: 'Save profile', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Keep my edits for a new save' })).toBeVisible();
@@ -492,7 +493,7 @@ test('older focus response cannot replace a newer profile save', async ({ page }
   await page.getByRole('button', { name: 'Save profile', exact: true }).click();
   await expect(page.getByText('Profile saved.', { exact: true })).toBeVisible();
   await held!.fulfill({ json: old });
-  await expect(page.locator('.workspace-identity')).toContainText('Newer saved name');
+  await expectIdentity(page, 'Newer saved name');
   await expect(page.locator('#profile-display_name')).toHaveValue('Newer saved name');
 });
 test('settings never reads or writes stored style preferences', async ({ page }) => {
@@ -620,7 +621,7 @@ test('language change preserves unsaved garment draft and owner epoch', async ({
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: api.fixture });
   await page.locator('#item-title').fill('My private garment');
   await page.locator('#item-category').selectOption('top');
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.getByRole('button', { name: 'Suomi', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
   await expect(page.locator('#item-title')).toHaveValue('My private garment');
@@ -663,11 +664,11 @@ test('logout drops dirty settings; lower-version owner and late replies cannot m
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect.poll(() => Boolean(held)).toBe(true);
   await page.locator('#profile-display_name').fill('Never show to Robin');
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await signIn(page, 'b');
-  await expect(page.locator('.workspace-identity')).toContainText('Robin');
+  await expectIdentity(page, 'Robin');
   await held!.fulfill({ json: old }).catch(() => {});
   await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
   await expect(page.locator('#profile-display_name')).toHaveValue('Robin');
@@ -698,11 +699,12 @@ test('settings accessibility: 320px, keyboard, long text and 200% text', async (
     return context.measureText(select.selectedOptions[0]!.text).width <= available;
   }), 'Selected time zone label fits the closed select at 320px').toBe(true);
   await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 2rem; }' });
+  await settleShell(page);
   // UI1: on a phone the section menu is a horizontally scrolling row, so its tabs may extend past the edge by design.
   expect(await page.locator('.settings-nav ul').evaluate((row) => getComputedStyle(row).overflowX)).toBe('auto');
   expect(await page.evaluate(() => ({
     viewport: innerWidth, width: document.documentElement.scrollWidth,
-    overflowing: [...document.querySelectorAll('body *')].filter((element) => !element.closest('.settings-nav ul')).filter((element) => element.getBoundingClientRect().right > 320
+    overflowing: [...document.querySelectorAll('body *')].filter((element) => !element.closest('.settings-nav ul')).filter((element) => element.getBoundingClientRect().right > 320.5
       || getComputedStyle(element).overflowX === 'visible' && [...element.childNodes].some((node) => {
         if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) return false;
         const range = document.createRange(); range.selectNodeContents(node);
@@ -737,6 +739,7 @@ test('synthetic settings visual evidence retains functional assertions in every 
       && api.requests.filter((request) => request.path.startsWith('/rest/'))
         .every((request) => request.owner === owners.a && (request.ownerFilter === `eq.${owners.a}`
           || ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status', '/rest/v1/rpc/admin_status', '/rest/v1/rpc/tryon_status'].includes(request.path) && request.ownerFilter === null))).toBe(true);
+    await expectIdentity(page, 'Alex');
     expect(await page.evaluate(({ origin, language }) => {
       const visible = (element: Element) => element.getClientRects().length > 0
         && getComputedStyle(element).visibility === 'visible';
@@ -746,7 +749,7 @@ test('synthetic settings visual evidence retains functional assertions in every 
       return location.origin === origin && location.hostname === '127.0.0.1'
         && location.hash === '#/settings' && document.documentElement.lang === language
         && Boolean(document.querySelector('#settings-title'))
-        && document.querySelector('.workspace-identity')?.textContent?.includes('Alex') === true
+        && document.querySelector('#account-trigger') !== null
         && document.querySelector<HTMLInputElement>('#profile-display_name')?.value === 'Alex'
         && document.querySelector<HTMLInputElement>('#profile-timezone')?.value === 'Europe/Helsinki'
         && document.querySelector<HTMLInputElement>('#profile-currency')?.value === 'EUR'

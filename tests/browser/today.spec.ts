@@ -5,13 +5,14 @@ import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { locales, translate, type Language, type MessageKey } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
+import { dismissKeyboard, expectIdentity, expectSignedIn, openAccountMenu, settleShell, shellNav } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
 const text = (key: MessageKey, language: Language = 'en', parameters?: Record<string, string | number>) => translate(language, key, parameters);
 const button = (page: Page, key: MessageKey, language: Language = 'en') => page.getByRole('button', { name: text(key, language), exact: true });
 const navLink = (page: Page, key: 'nav.today' | 'nav.wardrobe' | 'nav.outfits', language: Language = 'en') =>
-  page.locator('.workspace-header nav').getByRole('link', { name: text(key, language), exact: true });
+  shellNav(page).getByRole('link', { name: text(key, language), exact: true });
 const cards = (page: Page) => page.locator('.today-card');
 // Read names only once the card's pieces have rendered, so a capture is never an empty list.
 async function names(card: Locator) {
@@ -47,7 +48,7 @@ async function start(page: Page, language: Language = 'en', seed?: (api: Api, cl
   const clothes = options.clothes === false ? null : seedClothes(api);
   seed?.(api, clothes!);
   await page.goto('/#/today'); await signIn(page);
-  await expect(page.locator('.workspace-identity')).toBeVisible();
+  await expectSignedIn(page);
   await expect(page.locator('#today-title')).toHaveText(text('today.title', language));
   return { api, clothes: clothes! };
 }
@@ -270,10 +271,10 @@ test('I15 a held read for one account never shows after signing in as another', 
   let gate!: { held: () => number; release: () => void };
   const { api } = await start(page, 'en', api => { gate = api.holdFeedbackReads(); });
   await expect.poll(() => gate.held()).toBeGreaterThan(0);
-  await button(page, 'account.menu').click(); await button(page, 'auth.signOut').click();
+  await openAccountMenu(page, 'en'); await button(page, 'auth.signOut').click();
   const from = api.requests.length;
   await signIn(page, 'b');
-  await expect(page.locator('.workspace-identity')).toBeVisible();
+  await expectSignedIn(page);
   gate.release();
   await expect(cards(page).locator('.outfit-component-name')).toHaveText(['Robin private']);
   await page.waitForTimeout(500);
@@ -364,7 +365,7 @@ test('I15 offline keeps ideas visible but disables saving and choices; a languag
   for (const key of ['today.save', 'today.like', 'today.notForMe'] as const) await expect(cards(page).nth(0).getByRole('button', { name: text(key), exact: true })).toBeDisabled();
   const writes = paths.length;
   await page.context().setOffline(false);
-  await page.getByRole('button', { name: text('account.menu', 'en') }).click();
+  await openAccountMenu(page, 'en');
   await page.getByRole('button', { name: 'Suomi', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
   await expect(page.locator('#today-title')).toHaveText(text('today.title', 'fi'));
@@ -384,19 +385,21 @@ test('I15 accessibility: axe on every state, keyboard, 320px and 200% text with 
   await axe();
   await page.setViewportSize({ width: 320, height: 900 });
   for (const zoom of [false, true]) {
-    if (zoom) await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' });
+    if (zoom) { await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' }); await settleShell(page); }
     await expect(cards(page).first()).toBeVisible();
     expect(await page.evaluate(() => {
-      const nav = document.querySelector('.workspace-header nav')!, header = nav.parentElement!;
+      const nav = [...document.querySelectorAll('.top-nav, .tab-bar')].find(element => getComputedStyle(element).display !== 'none')!, header = nav.parentElement!;
       return document.documentElement.scrollWidth <= innerWidth && nav.scrollWidth <= nav.clientWidth
         && nav.getBoundingClientRect().right <= header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight) + 0.5;
     })).toBe(true);
     for (const key of ['nav.today', 'nav.wardrobe', 'nav.outfits'] as const) {
       const link = navLink(page, key);
+      await dismissKeyboard(page);
       await link.focus();
       await expect(link).toBeFocused();
       const box = await link.boundingBox();
-      expect(box !== null && box.x >= 0 && box.x + box.width <= 320 && box.height >= 44).toBe(true);
+      // WebKit can place a reflowed tab's edge one 1/64 px layout unit past the viewport; allow sub-pixel rounding.
+      expect(box !== null && box.x >= 0 && box.x + box.width <= 320.5 && box.height >= 44).toBe(true);
     }
     const save = cards(page).nth(0).getByRole('button', { name: text('today.save'), exact: true });
     await save.focus();
@@ -746,7 +749,8 @@ test('Avoided pairs shows a failed removal, checks a lost reply and fits 320px a
   await section.scrollIntoViewIfNeeded();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const box = await rows.nth(0).locator('button').boundingBox();
-  expect(box !== null && box.x >= 0 && box.x + box.width <= 320 && box.height >= 44).toBe(true);
+  // WebKit can place a reflowed tab's edge one 1/64 px layout unit past the viewport; allow sub-pixel rounding.
+  expect(box !== null && box.x >= 0 && box.x + box.width <= 320.5 && box.height >= 44).toBe(true);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 test.describe('bounded I15 visual evidence', () => {
@@ -763,7 +767,7 @@ test.describe('bounded I15 visual evidence', () => {
       }
       const capture = async () => {
         expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
-        await expect(page.locator('.workspace-identity')).toContainText('Alex');
+        await expectIdentity(page, 'Alex');
         expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
         expect(await page.evaluate(({ expectedLanguage, width }) => {
           const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
@@ -861,7 +865,7 @@ test.describe('bounded Don\'t pair visual evidence', () => {
         }
       }
       expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
-      await expect(page.locator('.workspace-identity')).toContainText('Alex');
+      await expectIdentity(page, 'Alex');
       expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
       expect(await page.evaluate(({ expectedLanguage, width }) => {
         const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;

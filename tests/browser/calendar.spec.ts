@@ -6,6 +6,7 @@ import path from 'node:path';
 import { locales, translate, type Language, type MessageKey } from '../../src/i18n';
 import { dayParts, formatMonth } from '../../src/domain/local-date';
 import { mockBackend, owners, signIn } from './mock-backend';
+import { expectSignedIn, shellNav } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -18,7 +19,7 @@ const day = (page: Page, date: string) => page.locator(`.calendar-day[data-date=
 const dialog = (page: Page) => page.locator('dialog.plan-dialog');
 const cards = (page: Page) => page.locator('.calendar-day-panel .look-card');
 const navLink = (page: Page, language: Language, key: 'nav.calendar' | 'nav.outfits' | 'nav.today' | 'nav.wardrobe') =>
-  page.locator('.workspace-header nav').getByRole('link', { name: text(key, language), exact: true });
+  shellNav(page).getByRole('link', { name: text(key, language), exact: true });
 
 function seedClothes(api: Api) {
   const top = api.seedSavedItem('a', 'Olive overshirt').item as Row;
@@ -48,7 +49,7 @@ async function start(page: Page, language: Language = 'en', seed?: (api: Api, cl
   const clothes = seedClothes(api);
   seed?.(api, clothes);
   await page.goto(`/${hash}`); await signIn(page, 'a');
-  await expect(page.locator('.workspace-identity')).toBeVisible();
+  await expectSignedIn(page);
   return { api, clothes };
 }
 function traffic(page: Page) {
@@ -406,7 +407,7 @@ test('I12 in Finnish and Swedish: Monday-first weeks, arrow keys, the agenda, an
 async function navFits(page: Page, language: Language) {
   await expect(page.locator('#calendar-title')).toHaveText(text('nav.calendar', language));
   expect(await page.evaluate(() => {
-    const nav = document.querySelector('.workspace-header nav')!, header = nav.parentElement!;
+    const nav = [...document.querySelectorAll('.top-nav, .tab-bar')].find(element => getComputedStyle(element).display !== 'none')!, header = nav.parentElement!;
     return nav.scrollWidth <= nav.clientWidth && document.documentElement.scrollWidth <= innerWidth
       && nav.getBoundingClientRect().right <= header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight) + 0.5;
   })).toBe(true);

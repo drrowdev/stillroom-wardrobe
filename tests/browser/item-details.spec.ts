@@ -6,6 +6,7 @@ import path from 'node:path';
 import { messages, type Language } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { aiFixture, editItem, openPhotoMenu } from './ai-photo-first-support';
+import { closeAccountMenu, expectIdentity, openAccountMenu } from './shell-support';
 
 async function imageChangeSetup(page: Page, language: Language = 'en', loss?: 'reservation' | 'finalizer') {
   const api = await aiFixture(page, language, true, undefined, false, loss);
@@ -545,10 +546,10 @@ test('language and offline changes preserve both drafts and disable offline writ
   await setup(page);
   await page.locator('#detail-title').fill('Oma nimi');
   await page.locator('#detail-description').fill('Egen beskrivning');
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.getByRole('button', { name: 'Suomi', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
-  await page.getByRole('button', { name: messages['account.menu'].fi }).click();
+  await closeAccountMenu(page);
   await expect(page.locator('#detail-title')).toHaveValue('Oma nimi');
   await expect(page.locator('#detail-description')).toHaveValue('Egen beskrivning');
   await context.setOffline(true);
@@ -737,11 +738,11 @@ test('pending writes are single-flight and block navigation, but logout clears t
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`#/items/${item.id}$`));
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await signIn(page, 'b');
-  await expect(page.locator('.workspace-identity')).toContainText('Robin');
+  await expectIdentity(page, 'Robin');
   await page.evaluate((id) => { location.hash = '#/items/' + id; }, foreign.item.id);
   await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue('Robin private');
@@ -815,7 +816,7 @@ for (const pending of ['read', 'description write'] as const) {
       const result = await client.auth.signInWithPassword({ email: 'user-b@example.test', password: 'fictional-test-password' });
       return !result.error;
     })).toBe(true);
-    await expect(page.locator('.workspace-identity')).toContainText('Robin');
+    await expectIdentity(page, 'Robin');
     await page.evaluate((id) => { location.hash = '#/items/' + id; }, foreign.item.id);
     await editItem(page);
     await expect(page.locator('#detail-title')).toHaveValue('Robin private');
@@ -848,15 +849,16 @@ test('synthetic saved detail visual evidence retains functional assertions in ev
   ] as const;
   for (const capture of captures) {
     if (capture.language === 'fi') {
-      await page.getByRole('button', { name: messages['account.menu'].en }).click();
+      await openAccountMenu(page, 'en');
       await page.getByRole('button', { name: 'Suomi', exact: true }).click();
       await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
-      await page.getByRole('button', { name: messages['account.menu'].fi }).click();
+      await closeAccountMenu(page);
     }
     await page.setViewportSize({ width: capture.width, height: 900 });
     expect(api.profiles[owners.a]?.owner_id === owners.a && api.profiles[owners.a]?.ui_language === capture.language
       && api.requests.filter((request) => request.path.startsWith('/rest/')).every((request) => request.owner === owners.a && (request.ownerFilter === `eq.${owners.a}`
         || request.path === '/rest/v1/rpc/image_provenance_v1' && request.ownerFilter === null))).toBe(true);
+    await expectIdentity(page, 'Alex');
     expect(await page.evaluate(({ origin, language, id }) => {
       const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility === 'visible';
       const values = [...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea')]
@@ -864,7 +866,7 @@ test('synthetic saved detail visual evidence retains functional assertions in ev
       const credentialLike = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
       return location.origin === origin && location.hostname === '127.0.0.1' && location.hash === '#/items/' + id
         && document.documentElement.lang === language && Boolean(document.querySelector('#item-detail-title'))
-        && document.querySelector('.workspace-identity')?.textContent?.includes('Alex') === true
+        && document.querySelector('#account-trigger') !== null
         && document.querySelector<HTMLInputElement>('#detail-title')?.value === 'Olive overshirt'
         && document.querySelector<HTMLSelectElement>('#detail-category')?.value === 'top'
         && document.querySelector<HTMLTextAreaElement>('#detail-description')?.value === 'An olive overshirt'

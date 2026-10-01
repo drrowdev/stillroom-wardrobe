@@ -9,6 +9,7 @@ import { parseAiStatus } from '../../src/domain/ai-controls';
 import { isLanguage, messages } from '../../src/i18n';
 import { assertSanitizedJpeg, readJpegHeader } from '../../src/images/jpeg';
 import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
+import { openAccountMenu } from '../browser/shell-support';
 
 function check(value: unknown): asserts value { if (!value) throw new Error('C ordinary-owner gate failed.'); }
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -138,7 +139,7 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         check(JSON.stringify(profile) === JSON.stringify({ ...originalProfile,
           ui_language: originalProfile.ui_language ?? 'en', version: originalProfile.version + initializationWrites }));
         progress('CONSENT', ownerIndex);
-        await page.getByRole('button', { name: messages['account.menu'][language] }).click();
+        await openAccountMenu(page, language);
         await page.getByRole('link', { name: messages['nav.settings'][language], exact: true }).click();
         // UI1: the analysis row's switch shows the server state; turning on goes through the consent sheet's Turn on.
         const analysisSwitch = (on: boolean) => page.locator(`section[aria-labelledby="ai-consent-title"] [role="switch"][aria-checked="${on}"]`);

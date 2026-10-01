@@ -8,6 +8,7 @@ import { messages, type Language } from '../../src/i18n';
 import { inspectJpegSegments } from '../fixtures/jpeg-helpers';
 import { mockBackend, owners, signIn, wireStages, type WireBackend, type WireStage } from './mock-backend';
 import { manualEntry } from './ai-photo-first-support';
+import { closeAccountMenu, expectIdentity, openAccountMenu } from './shell-support';
 
 function reserveWireImage(backend: Awaited<ReturnType<typeof mockBackend>>, owner = owners.a) {
   const item = randomUUID(), image = randomUUID();
@@ -692,7 +693,7 @@ test('discard and owner logout clear the invalid-photo alert and ignore late pho
   await expect(page.getByRole('alert')).toHaveCount(0);
   await input.setInputFiles({ name: 'invalid.jpg', mimeType: 'image/jpeg', buffer: backend.fixture.subarray(0, -2) });
   await expect(page.getByRole('alert')).toHaveText(messages['photo.invalid'].en);
-  await page.getByRole('button', { name: 'Account menu' }).click();
+  await openAccountMenu(page);
   await page.locator('.account-popover').getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
@@ -703,7 +704,7 @@ test('discard and owner logout clear the invalid-photo alert and ignore late pho
   await holdNextPhotoRead(page);
   await input.setInputFiles({ name: 'late.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
   await expect.poll(() => page.evaluate(() => (window as PhotoReadProbe).photoReadStarted)).toBe(true);
-  await page.getByRole('button', { name: messages['account.menu'].sv }).click();
+  await openAccountMenu(page, 'sv');
   await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].sv, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await page.evaluate(() => (window as PhotoReadProbe).releasePhotoRead?.());
@@ -802,14 +803,14 @@ test('logout clears private state before another owner signs in', async ({ page 
   await page.goto('/');
   await signIn(page);
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
-  await page.getByRole('button', { name: messages['account.menu'].fi }).click();
+  await openAccountMenu(page, 'fi');
   await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].fi }).click();
   await expect(page.locator('#email')).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.getByText('Alex', { exact: true })).toHaveCount(0);
   await signIn(page, 'b');
   await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
-  await expect(page.locator('.account-button')).toContainText('Robin');
+  await expectIdentity(page, 'Robin');
   expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('stillroom')))).toEqual([]);
   expect(await page.evaluate(() => caches.keys())).toEqual([]);
 });
@@ -848,7 +849,7 @@ test('sign-out is broadcast across tabs without sending account data', async ({ 
   await signIn(second);
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   await expect(second.locator('#wardrobe-title')).toBeVisible();
-  await page.getByRole('button', { name: 'Account menu' }).click();
+  await openAccountMenu(page);
   await page.locator('.account-popover').getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(second.locator('#email')).toBeVisible();
   await expect(second.getByText('Alex', { exact: true })).toHaveCount(0);
@@ -869,7 +870,7 @@ async function holdAuthRoute(page: Page, path: string, grant?: string) {
   return { received: received.promise, release: release.resolve };
 }
 async function signOutFromMenu(page: Page) {
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
 }
 type LateRefresh = Window & { lateRefresh?: Promise<'error' | 'ok'>; firstClient?: unknown };
@@ -935,7 +936,7 @@ test('a refresh answered after sign-out is never stored or sent', async ({ page 
   await page.evaluate(() => (window as LateRefresh).lateRefresh);
   expect(await storedAuthKeys(page)).toEqual([]);
   await signIn(page, 'b');
-  await expect(page.locator('.account-button')).toContainText('Robin');
+  await expectIdentity(page, 'Robin');
   expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('stillroom.auth') ?? '{}').access_token)).toMatch(/\.browser-fixture$/);
   expect(sent).toEqual([]);
 });
@@ -1055,8 +1056,7 @@ for (const firstOwner of ['a', 'b'] as const) {
     const assertOwn = async (owner: 'a' | 'b') => {
       const tab = tabs[owner], own = content[owner], foreign = content[other(owner)];
       await expect(tab.locator('html')).toHaveAttribute('lang', own.language);
-      await expect(tab.locator('.account-button')).toContainText(own.name);
-      await expect(tab.locator('.workspace-identity')).toContainText(own.name);
+      await expectIdentity(tab, own.name);
       await expect(tab.locator('#wardrobe-title')).toHaveText(messages['wardrobe.title'][own.language]);
       await expect(tab.locator('.item-caption h2')).toHaveText(own.title);
       await expect(tab.locator('.item-photo img')).toHaveAttribute('alt', own.alt);
@@ -1171,7 +1171,7 @@ for (const firstOwner of ['a', 'b'] as const) {
           .toEqual([{ sequence: 1, present: true, aborted: false, reason: 'other' }]);
       }
       const logoutTab = tabs[firstOwner], language = content[firstOwner].language;
-      await logoutTab.getByRole('button', { name: messages['account.menu'][language] }).click();
+      await openAccountMenu(logoutTab, language);
       await logoutTab.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'][language], exact: true }).click();
       for (const tab of Object.values(tabs)) await expect(tab.locator('#email')).toBeVisible();
       for (const pending of held) {
@@ -1324,10 +1324,10 @@ test('concise empty wardrobe and bounded synthetic evidence', async ({ page }, t
     const width = language === 'en' ? 1280 : 320;
     await expect(page.locator('.empty-copy')).toBeVisible();
     if (language !== previous) {
-      await page.getByRole('button', { name: messages['account.menu'][previous], exact: true }).click();
+      await openAccountMenu(page, previous);
       await page.getByRole('button', { name: messages[`language.${language}`][language], exact: true }).click();
       await expect(page.locator('html')).toHaveAttribute('lang', language);
-      await page.getByRole('button', { name: messages['account.menu'][language], exact: true }).click();
+      await closeAccountMenu(page);
     }
     previous = language;
     await page.setViewportSize({ width, height: 900 });
@@ -1342,17 +1342,20 @@ test('concise empty wardrobe and bounded synthetic evidence', async ({ page }, t
     expect(api.profiles[owners.a]?.ui_language).toBe(language);
     expect(api.requests.filter((request) => request.path.startsWith('/rest/'))
       .every((request) => request.owner === owners.a && request.ownerFilter === `eq.${owners.a}`)).toBe(true);
+    await expectIdentity(page, 'Alex');
     expect(await page.evaluate(({ origin, language, width }) => {
       const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
       const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
       return location.origin === origin && location.hostname === '127.0.0.1'
         && (location.hash === '' || location.hash === '#/wardrobe') && !location.search
         && document.documentElement.lang === language && innerWidth === width
-        && document.querySelector('.workspace-identity')?.textContent?.includes('Alex') === true
+        && document.querySelector('#account-trigger') !== null
         && !document.querySelector('input[type=password],#email,#password,.item-card')
         && !privatePattern.test(document.body.innerText)
-        && [...document.querySelectorAll('.privacy-note, .workspace-identity, .site-footer')].filter(visible)
+        && [...document.querySelectorAll('.privacy-note, .account-name')].filter(visible)
           .every((element) => parseFloat(getComputedStyle(element).fontSize) >= 14)
+        // Tab labels sit under their icons at the usual tab-bar size.
+        && [...document.querySelectorAll('.tab-label')].filter(visible).every((element) => parseFloat(getComputedStyle(element).fontSize) >= 12)
         && [...document.querySelectorAll('button')].filter(visible).every((button) => button.getBoundingClientRect().height >= 44)
         && document.documentElement.scrollWidth <= innerWidth;
     }, { origin, language, width }), 'Synthetic empty owner wardrobe and readable copy').toBe(true);

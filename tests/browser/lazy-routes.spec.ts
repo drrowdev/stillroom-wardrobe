@@ -4,6 +4,7 @@ import { mockBackend, signIn } from './mock-backend';
 import { aiFixture, addAiPhoto, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { codePreloaded } from './lazy-support';
 import { preloadDelayMs } from '../../src/app/lazy-load';
+import { expectSignedIn } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 
@@ -11,7 +12,7 @@ async function start(page: Page, language: Language = 'en') {
   const api = await mockBackend(page, { initialLanguage: language });
   const saved = api.seedSavedItem('a', 'Lazy route shirt');
   await page.goto('/#/wardrobe'); await signIn(page);
-  await expect(page.locator('.workspace-identity')).toBeVisible();
+  await expectSignedIn(page);
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   return { api, saved };
 }
@@ -160,7 +161,7 @@ test.describe('lazy routes', () => {
       const alert = page.locator('.chunk-error[role=alert]');
       await expect(alert).toContainText(translate(language, 'chunk.failed'));
       expect(blocked).toBeGreaterThan(0);
-      await expect(page.locator('.workspace-identity')).toBeVisible();
+      await expectSignedIn(page);
       await page.unroute(/\/src\/features\/today\/today-screen\.tsx/);
       const reload = alert.getByRole('button', { name: translate(language, 'chunk.reload'), exact: true });
       await Promise.all([page.waitForEvent('load'), reload.click()]);

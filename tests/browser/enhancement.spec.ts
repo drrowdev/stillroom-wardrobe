@@ -7,6 +7,7 @@ import { messages, type Language } from '../../src/i18n';
 import type { BackgroundTestHook } from '../../src/images/background/test-hook';
 import { aiFixture, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { enhanceServerNow, owners, type EnhanceReply, type EnhanceReplyValue, type EnhanceSetup } from './mock-backend';
+import { openAccountMenu } from './shell-support';
 
 // BG2b-2 photo enhancement in both photo flows, against the mocked backend; since BG2c-2 the "clean up photo" step:
 // a new photo is reviewed in the crop editor before anything is sent, H0 (the accepted crop's original pixels) is sent
@@ -571,7 +572,7 @@ for (const flow of ['add', 'replace'] as const) {
     await expect.poll(() => currentImage(api, saved ? String(saved.item.id) : undefined)?.main_sha256).toBe(h2);
     expect(analyses(api)).toBe(1);
     expect(sent(api)).toHaveLength(1);
-    await page.getByRole('button', { name: text('account.menu') }).click();
+    await openAccountMenu(page, 'en');
     await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
     await expect(page.locator('#email')).toBeVisible();
     const digests = await storedDigests(page);

@@ -3,6 +3,7 @@ import { messages } from '../../src/i18n';
 import { mockBackend, signIn } from '../browser/mock-backend';
 import { builds, readManifest } from './builds';
 import { cacheName, controlled, entryScripts, expectOnlyShell, loadedScripts, serve, updateAndSettle, type DistServer } from './helpers';
+import { expectIdentity } from '../browser/shell-support';
 
 let server: DistServer;
 test.beforeEach(async () => { server = await serve('a'); });
@@ -42,7 +43,7 @@ test('a new version waits for Reload, and another open tab keeps its input and i
   // A's lazy chunks are no longer precached; a route this tab has not opened yet either still loads (HTTP cache) or shows the chunk-error Reload, never a blank or signed-out screen.
   await second.evaluate(() => { location.hash = '#/outfits'; });
   await expect(second.locator('#outfits-title').or(second.getByText(messages['chunk.failed'].en))).toBeVisible();
-  await expect(second.locator('.workspace-identity')).toContainText('Alex');
+  await expectIdentity(second, 'Alex');
   await prompt(second).getByRole('button', { name: messages['update.reload'].en, exact: true }).click();
   await expect.poll(() => loadedScripts(second).catch(() => [])).toEqual(entryScripts('b'));
   expect(await second.evaluate(() => (window as Marked).marked)).toBeUndefined();
@@ -75,7 +76,7 @@ test('the controlling version serves every navigation, also offline, without ask
   await page.reload();
   expect(await loadedScripts(page)).toEqual(entryScripts('a'));
   await signIn(page);
-  await expect(page.locator('.workspace-identity')).toContainText('Alex');
+  await expectIdentity(page, 'Alex');
   await context.setOffline(true);
   for (const route of ['#/today', '#/outfits', '#/wardrobe', '#/settings', '#/trash']) {
     await page.evaluate((hash) => { location.hash = hash; }, route);
@@ -160,10 +161,10 @@ test('the emergency worker removes only Stillroom caches and itself while an ope
   await expect(page.locator('#email')).toHaveValue('kept@example.test');
   await page.locator('#email').fill('');
   await signIn(page);
-  await expect(page.locator('.workspace-identity')).toContainText('Alex');
+  await expectIdentity(page, 'Alex');
   // The kill-switch build's page registers nothing, so the next load stays uncontrolled.
   await page.reload();
-  await expect(page.locator('.workspace-identity, #email').first()).toBeVisible();
+  await expect(page.locator('#account-trigger, #email').first()).toBeVisible();
   expect(await page.evaluate(async () => ({
     controller: Boolean(navigator.serviceWorker.controller), registrations: (await navigator.serviceWorker.getRegistrations()).length,
   }))).toEqual({ controller: false, registrations: 0 });

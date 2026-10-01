@@ -4,6 +4,7 @@ import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { locales, translate, type Language, type MessageKey } from '../../src/i18n';
 import { mockBackend, owners, signIn } from './mock-backend';
+import { accountMenu, expectIdentity, expectSignedIn, openAccountMenu } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -121,7 +122,7 @@ async function start(page: Page, options: { language?: Language; weather?: Row; 
   const weather = await service(page);
   options.seed?.(api, weather);
   await page.goto(`/#/${options.route ?? 'today'}`); await signIn(page);
-  await expect(page.locator('.workspace-identity')).toBeVisible();
+  await expectSignedIn(page);
   if (options.route === 'settings') await settingsFocused(page);
   return { api, weather };
 }
@@ -136,7 +137,7 @@ async function goTo(page: Page, route: 'today' | 'settings') {
   if (route === 'settings' && changed) await settingsFocused(page);
 }
 async function signOut(page: Page, language: Language) {
-  await page.getByRole('button', { name: text('account.menu', language) }).click();
+  await openAccountMenu(page, language);
   await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut', language), exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
 }
@@ -227,10 +228,10 @@ test('I16 sends nothing until Search, then only the typed city; Use this city tu
   await page.locator('#weather-city').fill('Ou');
   await page.locator('#weather-city').focus();
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await page.getByRole('button', { name: text('account.menu') }).click();
-  await page.getByRole('banner').getByRole('button', { name: 'Suomi', exact: true }).click();
+  await openAccountMenu(page, 'en');
+  await accountMenu(page).getByRole('button', { name: 'Suomi', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
-  await page.getByRole('banner').getByRole('button', { name: 'English', exact: true }).click();
+  await accountMenu(page).getByRole('button', { name: 'English', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await goTo(page, 'today');
   await expect(cards(page).first()).toBeVisible();
@@ -264,11 +265,11 @@ test('I16 sends nothing until Search, then only the typed city; Use this city tu
   // Going back to Today, focus and a language change reuse the forecast held in memory.
   await goTo(page, 'settings'); await goTo(page, 'today');
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  if (!await page.getByRole('banner').getByRole('button', { name: 'Svenska', exact: true }).isVisible()) await page.getByRole('button', { name: text('account.menu') }).click();
-  await page.getByRole('banner').getByRole('button', { name: 'Svenska', exact: true }).click();
+  if (!await accountMenu(page).isVisible()) await openAccountMenu(page, 'en');
+  await accountMenu(page).getByRole('button', { name: 'Svenska', exact: true }).click();
   await expect(bar(page)).toContainText(await lowLine(page, 0, 'sv'));
   expect(weather.forecasts()).toHaveLength(1);
-  await page.getByRole('banner').getByRole('button', { name: 'English', exact: true }).click();
+  await accountMenu(page).getByRole('button', { name: 'English', exact: true }).click();
 
   await goTo(page, 'settings');
   await button(page, 'weather.changeCity').click();
@@ -637,7 +638,7 @@ test('I16 a held forecast or search is dropped after a city change, Turn off or 
   await expect.poll(() => weather.held.length).toBe(1);
   await signOut(page, 'en');
   await signIn(page, 'b');
-  await expect(page.locator('.workspace-identity')).toContainText('Robin');
+  await expectIdentity(page, 'Robin');
   await goTo(page, 'settings');
   await weather.release('search', { results: [places.oulu] });
   await expect(page.getByRole('radio')).toHaveCount(0);
@@ -650,8 +651,8 @@ test('I16 weather, language and profile saves interleave, and a stale weather sa
   await search(page, 'Oulu');
   await button(page, 'weather.useCity').click();
   await expect(page.getByText(text('weather.savedOn', 'en', { city: 'Oulu, Finland' }), { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: text('account.menu') }).click();
-  await page.getByRole('banner').getByRole('button', { name: 'Suomi', exact: true }).click();
+  await openAccountMenu(page, 'en');
+  await accountMenu(page).getByRole('button', { name: 'Suomi', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
   await page.locator('#profile-display_name').fill('Alex K');
   await button(page, 'settings.saveProfile', 'fi').click();
@@ -783,7 +784,7 @@ test.describe('bounded I16 visual evidence', () => {
       await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' });
       expect(await place(page, 'setting.outdoors', language).evaluate(element => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(27);
     }
-    await expect(page.locator('.workspace-identity')).toContainText('Alex');
+    await expectIdentity(page, 'Alex');
     if (selected.scene === 'today-indoors') await expect(bar(page).locator('.weather-line')).toHaveCount(0);
     // Indoors shows no weather line since UI1, so only the other Today scenes have one to place the choice against.
     else if (selected.scene.startsWith('today')) {

@@ -4,6 +4,7 @@ import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { translate, type Language, type MessageKey } from '../../src/i18n';
 import { adminStartLimits, mockBackend, owners, signIn } from './mock-backend';
+import { expectSignedIn, openAccountMenu } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Parameters = Record<string, string | number>;
@@ -23,7 +24,7 @@ async function start(page: Page, options: { language?: Language; admin?: boolean
   if (options.admin !== false) api.adminControl.admin = owners.a;
   if (options.now) api.adminControl.now = options.now;
   await page.goto(options.hash ?? '/#/admin'); await signIn(page);
-  await expect(page.locator('.workspace-identity')).toBeVisible();
+  await expectSignedIn(page);
   return api;
 }
 async function openScreen(page: Page) {
@@ -366,13 +367,13 @@ test.describe('AD1b admin spending and limits', () => {
     const api = await start(page);
     await openScreen(page);
     await edit(page, 1);
-    await page.getByRole('button', { name: text('account.menu') }).click();
+    await openAccountMenu(page, 'en');
     await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
     const discard = page.getByRole('button', { name: text('common.discard'), exact: true });
     if (await discard.isVisible().catch(() => false)) await discard.click();
     await expect(page.locator('#email')).toBeVisible();
     await signIn(page, 'b');
-    await expect(page.locator('.workspace-identity')).toBeVisible();
+    await expectSignedIn(page);
     await page.evaluate(() => { location.hash = '#/admin'; });
     // Account B reads its own profile language, which is Swedish in the fixture.
     await expect(page.getByText(text('admin.unavailable', 'sv'), { exact: true })).toBeVisible();

@@ -7,6 +7,7 @@ import { messages, type Language } from '../../src/i18n';
 import { CORNER_COLOURS, ORIENTATION_CORNERS } from '../fixtures/jpeg-helpers';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { manualEntry, openPhotoMenu } from './ai-photo-first-support';
+import { closeAccountMenu, expectIdentity, openAccountMenu } from './shell-support';
 
 type Format = 'png' | 'webp' | 'jpeg';
 
@@ -410,7 +411,7 @@ test('I07 cancel, reset, language and owner cleanup retain only accepted drafts'
   await expect(page.locator('.crop-stage')).toHaveCSS('aspect-ratio', '120 / 80');
   await expect(page.locator('#crop-width')).toHaveValue('100');
   await page.locator('#crop-width').fill('50');
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.getByRole('button', { name: 'Suomi', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
   await expect(page.locator('#crop-width')).toHaveValue('50');
@@ -432,10 +433,10 @@ test('I07 crop accessibility supports three languages, keyboard, narrow and enla
   await openExact(page);
   for (const language of ['en', 'fi', 'sv'] as const) {
     if (language !== 'en') {
-      await page.getByRole('button', { name: messages['account.menu'][language === 'fi' ? 'en' : 'fi'] }).click();
+      await openAccountMenu(page, language === 'fi' ? 'en' : 'fi');
       await page.getByRole('button', { name: language === 'fi' ? 'Suomi' : 'Svenska', exact: true }).click();
       await expect(page.locator('html')).toHaveAttribute('lang', language);
-      await page.getByRole('button', { name: messages['account.menu'][language] }).click();
+      await closeAccountMenu(page);
     }
     await page.setViewportSize({ width: 320, height: 900 });
     await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
@@ -562,7 +563,7 @@ test('I07 logout prevents a held preparation publishing into another owner', asy
   });
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'late.png', mimeType: 'image/png', buffer: Buffer.from(bytes) });
   await expect.poll(() => page.evaluate(() => (window as ProbeWindow).i07Decode.opened)).toBe(1);
-  await page.getByRole('button', { name: messages['account.menu'].en }).click();
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: messages['auth.signOut'].en, exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   await page.evaluate(() => (window as ProbeWindow).i07Decode.release());
@@ -589,10 +590,10 @@ test('I07 synthetic crop visual evidence retains functional assertions in every 
   ] as const;
   for (const capture of captures) {
     if (capture.language === 'fi') {
-      await page.getByRole('button', { name: messages['account.menu'].en }).click();
+      await openAccountMenu(page, 'en');
       await page.getByRole('button', { name: 'Suomi', exact: true }).click();
       await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
-      await page.getByRole('button', { name: messages['account.menu'].fi }).click();
+      await closeAccountMenu(page);
     }
     await page.setViewportSize({ width: capture.width, height: 900 });
     await expect(page.locator('.photo-panel img')).toHaveCount(1);
@@ -607,6 +608,7 @@ test('I07 synthetic crop visual evidence retains functional assertions in every 
     }), 'Coherent crop grid and action spacing').toBe(true);
     expect(api.profiles[owners.a]?.ui_language === capture.language && api.items.length === 0
       && api.images.length === 0 && api.files.size === 0).toBe(true);
+    await expectIdentity(page, 'Alex');
     expect(await page.evaluate(({ origin, language }) => {
       const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility === 'visible';
       const values = [...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea')]
@@ -615,7 +617,7 @@ test('I07 synthetic crop visual evidence retains functional assertions in every 
       const image = document.querySelector<HTMLImageElement>('.crop-stage img');
       return location.origin === origin && location.hostname === '127.0.0.1' && location.hash === '#/items/new'
         && document.documentElement.lang === language && Boolean(document.querySelector('#capture-title'))
-        && document.querySelector('.workspace-identity')?.textContent?.includes('Alex') === true
+        && document.querySelector('#account-trigger') !== null
         && document.querySelector<HTMLInputElement>('#item-title')?.value === 'Synthetic green garment'
         && image?.src.startsWith('blob:') === true && image.naturalWidth === 120 && image.naturalHeight === 80
         && !document.querySelector('input[type="password"], #email, #password')

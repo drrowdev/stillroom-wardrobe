@@ -7,6 +7,7 @@ import { classifyObjectDeletion, deleteWardrobeObject } from '../../src/data/sto
 import { parseProfile } from '../../src/data/profile';
 import { messages, translate } from '../../src/i18n';
 import { parseDeletionOperation, parseDeletionStatuses, parseDeletionTarget, parseTargetReconciliation, reversibleDeletion, type DeletionOperation } from '../../src/domain/item-lifecycle';
+import { openAccountMenu } from '../browser/shell-support';
 
 const root = 'http://127.0.0.1:5173/';
 const projection = 'owner_id,display_name,ui_language,timezone,currency,version';
@@ -119,7 +120,7 @@ async function journey(browser: Browser, resume: boolean) {
   const button = (key: keyof typeof messages) => page.getByRole('button', { name: messages[key].en, exact: true });
   async function goTrash() {
     start('menu.open');
-    await click(page, 'account.menu');
+    await openAccountMenu(page, 'en');
     complete(); start('menu.link');
     await page.locator('.account-popover').getByRole('link', { name: messages['nav.trash'].en, exact: true }).click();
     complete(); start('menu.heading');

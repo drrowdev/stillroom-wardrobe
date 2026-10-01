@@ -7,6 +7,7 @@ import { azureAiReviewExpires } from '../../src/domain/ai-controls';
 import { aiFixture, editItem } from './ai-photo-first-support';
 import { owners } from './mock-backend';
 import { utcPeriod } from '../../src/features/settings/ai-features-model';
+import { expectIdentity, isNarrow, openAccountMenu } from './shell-support';
 
 type StatusPatch = { code?: string; consent?: { enabled?: boolean; noticeRevision?: number | null };
   policy?: Record<string, unknown>; usage?: { accountedMicro?: string; warning?: boolean }; serverTimeMs?: number;
@@ -85,7 +86,7 @@ async function start(page: Page, language: Language = 'en', enabled = false) {
   return { api, traffic, setStatus: (next: StatusPatch | null) => { patch = next; } };
 }
 async function openSettings(page: Page, language: Language = 'en') {
-  await page.getByRole('button', { name: text('account.menu', language) }).click();
+  await openAccountMenu(page, language);
   await page.getByRole('link', { name: text('nav.settings', language), exact: true }).click();
   await expect(page.locator('#settings-title')).toBeVisible();
   // The screen moves focus to its title in an effect after it appears (50-150 ms later in WebKit). Typing before that
@@ -222,7 +223,7 @@ test('L2a a status reply that arrives after sign-out is discarded', async ({ pag
   const before = traffic.status();
   await openSettings(page);
   await expect.poll(() => traffic.status() - before).toBeGreaterThanOrEqual(1);
-  await page.getByRole('button', { name: text('account.menu') }).click();
+  await openAccountMenu(page, 'en');
   await page.locator('.account-popover').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
   release();
@@ -478,10 +479,10 @@ for (const availability of ['laundry', 'repair', 'lent'] as const) {
 for (const language of languages) {
   test(`L2a header ${language} shows the name without a Private badge`, async ({ page }) => {
     await aiFixture(page, language);
-    const identity = page.locator('.workspace-identity');
+    await expectIdentity(page, 'Alex');
+    const identity = isNarrow(page) ? (await openAccountMenu(page, language)).locator('.menu-identity') : page.locator('.account-name');
     await expect(identity).toHaveText('Alex');
-    await expect(identity).toHaveAttribute('aria-label', text('account.identity', language));
-    await expect(identity.locator('.identity-separator')).toHaveCount(0);
+    await expect(page.locator('.workspace-identity, .identity-separator')).toHaveCount(0);
     for (const other of languages) expect(await identity.innerText()).not.toContain(({ en: 'Private', fi: 'Yksityinen', sv: 'Privat' })[other]);
   });
 }
@@ -502,13 +503,14 @@ test.describe('bounded L2a visual evidence', () => {
       const capture = async (name: 'settings-off' | 'settings-details' | 'settings-on' | 'settings-unavailable') => {
         expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
         expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+        await expectIdentity(page, 'Alex');
         expect(await page.evaluate(({ expectedLanguage, width }) => {
           const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
           const fields = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea')]
             .filter((field) => field.getClientRects().length).map((field) => field.value).join('\n');
           return location.hostname === '127.0.0.1' && document.documentElement.lang === expectedLanguage && innerWidth === width
             && document.documentElement.scrollWidth <= innerWidth && !document.querySelector('input[type=password],#email,#password')
-            && document.querySelector('.workspace-identity')?.textContent?.includes('Alex') === true
+            && document.querySelector('#account-trigger') !== null
             && !privatePattern.test(document.body.innerText) && !privatePattern.test(fields);
         }, { expectedLanguage: language, width: selected.width })).toBe(true);
         if (!write) return;

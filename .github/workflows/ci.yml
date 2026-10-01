@@ -478,6 +478,18 @@ jobs:
             test-results/ui1-visual/consent-cleanup-en-mobile.png
           if-no-files-found: error
           retention-days: 1
+      - name: Preserve bounded synthetic UX1 shell visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ux1-shell-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/ux1-visual/shell-en-mobile.png
+            test-results/ux1-visual/shell-fi-mobile.png
+            test-results/ux1-visual/shell-sv-320-200.png
+            test-results/ux1-visual/shell-en-desktop.png
+            test-results/ux1-visual/dialog-fi-320-200.png
+          if-no-files-found: error
+          retention-days: 1
 
   pwa:
     name: PWA production contracts
