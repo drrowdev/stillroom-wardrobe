@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, open, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { messages, type Language } from '../../src/i18n';
+import { messages, type Language } from '../../src/i18n/all';
 import { provenanceFields } from '../../src/domain/attribute-provenance';
 import { moreFields, visibleFields } from '../../src/domain/item-details';
 import { colours } from '../../src/domain/preferences';

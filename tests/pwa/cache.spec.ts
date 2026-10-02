@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { messages, translate } from '../../src/i18n';
+import { messages, translate } from '../../src/i18n/all';
 import { mockBackend, owners, recoveryHash, signIn } from '../browser/mock-backend';
 import { readManifest } from './builds';
 import { cacheName, controlled, expectOnlyShell, serve, type DistServer } from './helpers';

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { connect } from 'node:net';
-import { messages, type Language } from '../../src/i18n';
+import { messages, type Language } from '../../src/i18n/all';
 import { aiFixture, addAiPhoto, openPhotoMenu } from './ai-photo-first-support';
 import { analysisPath, mockBackend, owners, signIn, type RawAnalysisObservation } from './mock-backend';
 import { openAccountMenu } from './shell-support';

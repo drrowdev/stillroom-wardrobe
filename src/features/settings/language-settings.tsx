@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { SessionController, OwnerScope } from '../../auth/session';
 import type { ProfileRow } from '../../data/rows';
 import { errorKey, isAborted } from '../../data/errors';
-import { LanguageSelector } from '../../i18n/language-selector';
+import { LanguageChooser } from '../../i18n/language-chooser';
 import type { Language, MessageKey, Translate } from '../../i18n';
 
 type Props = { controller: SessionController; scope: OwnerScope; profile: ProfileRow; language: Language; busy: boolean; online: boolean; t: Translate };
@@ -13,6 +13,8 @@ export function LanguageSettings({ controller, scope, profile, language, busy, o
   useEffect(() => { if (error) summary.current?.focus(); }, [error]);
   async function save(next: Language) {
     setError(null); setSaved(false);
+    // The chooser calls this only after the catalogue has loaded; a sign-out or account switch meanwhile sends nothing.
+    if (scope.signal.aborted) return;
     try {
       await controller.saveProfile(scope, profile, { kind: 'language', language: next });
       if (!scope.signal.aborted) setSaved(true);
@@ -23,7 +25,7 @@ export function LanguageSettings({ controller, scope, profile, language, busy, o
     }
   }
   return <div className="settings-language">
-    <LanguageSelector language={language} onChange={(next) => { void save(next); }} disabled={busy || !online} t={t} />
+    <LanguageChooser language={language} context={scope} onChange={(next) => { void save(next); }} disabled={busy || !online} t={t} />
     <p className="muted fine">{t('settings.languageHint')}</p>
     {!online && <p role="status">{t('common.offline')}</p>}
     {error && <p ref={summary} tabIndex={-1} className="notice notice-error" role="alert">{t(error)}</p>}

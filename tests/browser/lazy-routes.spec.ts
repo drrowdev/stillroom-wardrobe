@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { translate, type Language } from '../../src/i18n';
+import { translate, type Language } from '../../src/i18n/all';
 import { mockBackend, signIn } from './mock-backend';
 import { aiFixture, addAiPhoto, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { codePreloaded } from './lazy-support';

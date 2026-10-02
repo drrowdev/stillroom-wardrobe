@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { translate, type Language, type MessageKey } from '../../src/i18n';
+import { translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { canonical, decryptPart, encryptPart, metadataDigest, sha256Hex, toBase64, type SavedMetadata } from '../../src/domain/export-format';
 import { fitDimensions, JPEG_LIMITS, readJpegHeader } from '../../src/images/jpeg';
 import { exifSegment, joinBytes, jpegSegment, listJpegMarkers } from '../fixtures/jpeg-helpers';

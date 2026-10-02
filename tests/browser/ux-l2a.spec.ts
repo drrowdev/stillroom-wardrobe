@@ -2,7 +2,7 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open, lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { languages, locales, messages, translate, type Language, type MessageKey } from '../../src/i18n';
+import { languages, locales, messages, translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { azureAiReviewExpires } from '../../src/domain/ai-controls';
 import { aiFixture, editItem } from './ai-photo-first-support';
 import { owners } from './mock-backend';

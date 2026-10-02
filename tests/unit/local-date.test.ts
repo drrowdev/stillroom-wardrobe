@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addDays, addMonths, dayParts, firstWeekday, formatDay, formatMonth, monthGrid, monthOf, monthRange, todayIn, validMonth, weekday, weekdayNames,
 } from '../../src/domain/local-date';
-import { languages, locales, translate } from '../../src/i18n';
+import { languages, locales, translate } from '../../src/i18n/all';
 
 describe('local calendar dates', () => {
   it('builds day headings with a standalone weekday, leaving English and Swedish as the full Intl date', () => {

@@ -4,7 +4,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { assertLocalApi, validateSessionEnvironment } from '../../scripts/backend/local.mjs';
 import { parseProfile } from '../../src/data/profile';
-import { messages as catalogMessages } from '../../src/i18n';
+import { messages as catalogMessages } from '../../src/i18n/all';
 import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
 
 const root = 'http://127.0.0.1:5173/';

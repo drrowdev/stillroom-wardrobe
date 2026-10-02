@@ -6,7 +6,7 @@ import type { Database } from '../../src/data/database.types';
 import { isRecord, isUuid } from '../../src/domain/wardrobe';
 import { parseProfile } from '../../src/data/profile';
 import { parseAiStatus } from '../../src/domain/ai-controls';
-import { isLanguage, messages } from '../../src/i18n';
+import { isLanguage, messages } from '../../src/i18n/all';
 import { assertSanitizedJpeg, readJpegHeader } from '../../src/images/jpeg';
 import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
 import { openAccountMenu } from '../browser/shell-support';

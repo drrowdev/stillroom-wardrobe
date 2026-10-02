@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { translate, type Language, type MessageKey } from '../../src/i18n';
+import { translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { temperature, weatherChips } from '../../src/features/today/weather-chips';
 
 const createTranslator = (language: Language) => (key: MessageKey, parameters?: Record<string, string | number>) => translate(language, key, parameters);

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { messages } from '../../src/i18n';
+import { messages } from '../../src/i18n/all';
 import { modelAssets, modelCacheName } from '../../src/images/background/model-assets';
 import { checkDeployedAssets } from '../../scripts/check-deployed-assets.mjs';
 import { startDistServer } from '../../scripts/serve-dist.mjs';

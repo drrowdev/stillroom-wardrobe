@@ -2,7 +2,7 @@ import { expect, test, type Download, type Page, type Route, type TestInfo } fro
 import AxeBuilder from '@axe-core/playwright';
 import { lstat, mkdir, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { translate, type Language, type MessageKey } from '../../src/i18n';
+import { translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { verifyParts, type JpegCheck } from '../../src/domain/export-format';
 import { assertSanitizedJpeg, readJpegHeader } from '../../src/images/jpeg';
 import { mockBackend, signIn } from './mock-backend';

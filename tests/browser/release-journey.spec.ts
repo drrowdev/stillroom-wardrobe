@@ -4,7 +4,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { verifyParts, type JpegCheck } from '../../src/domain/export-format';
-import { translate, type MessageKey } from '../../src/i18n';
+import { translate, type MessageKey } from '../../src/i18n/all';
 import { assertSanitizedJpeg, readJpegHeader } from '../../src/images/jpeg';
 import { addAiPhoto, aiFixture } from './ai-photo-first-support';
 import { owners } from './mock-backend';

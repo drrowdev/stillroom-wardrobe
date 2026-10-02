@@ -8,7 +8,7 @@ import {
   STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_REVIEW_EXPIRES, conversationBytes, parseStylistBody, utf8Bytes,
 } from '../../src/domain/stylist';
 import type { WardrobeItem } from '../../src/domain/wardrobe';
-import { messages } from '../../src/i18n';
+import { messages } from '../../src/i18n/all';
 
 const owner = '00000000-0000-4000-8000-00000000000a';
 const REQUEST = '11111111-1111-4111-8111-111111111111';

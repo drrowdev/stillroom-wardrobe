@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingHttpHeaders, type IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
-import type { Language } from '../../src/i18n';
+import type { Language } from '../../src/i18n/all';
 import { retryWebKitInternalReload } from './webkit-reload';
 import { garmentFields, garmentPayload, parseGarmentValues, sameValue } from '../../src/domain/garment-fields';
 import { parseFieldProvenance, provenanceFields } from '../../src/domain/attribute-provenance';

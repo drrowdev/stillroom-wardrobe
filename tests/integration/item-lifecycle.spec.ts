@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { assertLocalApi, validateSessionEnvironment } from '../../scripts/backend/local.mjs';
 import { classifyObjectDeletion, deleteWardrobeObject } from '../../src/data/storage-delete';
 import { parseProfile } from '../../src/data/profile';
-import { messages, translate } from '../../src/i18n';
+import { messages, translate } from '../../src/i18n/all';
 import { parseDeletionOperation, parseDeletionStatuses, parseDeletionTarget, parseTargetReconciliation, reversibleDeletion, type DeletionOperation } from '../../src/domain/item-lifecycle';
 import { openAccountMenu } from '../browser/shell-support';
 

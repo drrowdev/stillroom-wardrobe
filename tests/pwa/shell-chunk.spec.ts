@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { messages, type MessageKey } from '../../src/i18n';
+import { messages, type MessageKey } from '../../src/i18n/all';
 import { mockBackend, signIn } from '../browser/mock-backend';
 import { expectIdentity, expectSignedIn, shellNav } from '../browser/shell-support';
 import { serve, type DistServer } from './helpers';

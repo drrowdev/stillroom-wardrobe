@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { languages, translate, type Language, type Translate } from '../../src/i18n';
+import { languages, translate, type Language, type Translate } from '../../src/i18n/all';
 import type { WardrobeItem } from '../../src/domain/wardrobe';
 import { emptyFacets, filterItems, type Facets } from '../../src/features/wardrobe/search';
 import { facetChips, facetGroups, toggled, withoutChip } from '../../src/features/wardrobe/facet-labels';

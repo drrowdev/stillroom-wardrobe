@@ -2,7 +2,7 @@ import { expect, test, type Page, type Request, type Route, type TestInfo } from
 import AxeBuilder from '@axe-core/playwright';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
-import { translate, type Language, type MessageKey } from '../../src/i18n';
+import { translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { mockBackend, signIn } from './mock-backend';
 import { expectIdentity, expectNoIdentity, signOutThroughMenu } from './shell-support';
 import { closeDataTask, dataRow, heldExits, openDataTask, settingsBack, settingsFromWardrobe, taskHeading, tryExitWhileHeld } from './data-task-support';

@@ -58,6 +58,8 @@
   "language.fi": {"en":"Suomi","fi":"Suomi","sv":"Suomi"},
   "language.sv": {"en":"Svenska","fi":"Svenska","sv":"Svenska"},
   "language.saved": {"en":"Language saved.","fi":"Kieli tallennettu.","sv":"Språket har sparats."},
+  "language.loading": {"en":"Changing language…","fi":"Vaihdetaan kieltä…","sv":"Byter språk…"},
+  "language.loadFailed": {"en":"Couldn't change the language. Check your connection and try again.","fi":"Kieltä ei voitu vaihtaa. Tarkista yhteys ja yritä uudelleen.","sv":"Det gick inte att byta språk. Kontrollera anslutningen och försök igen."},
   "nav.today": {"en":"Today","fi":"Tänään","sv":"Idag"},
   "nav.wardrobe": {"en":"Wardrobe","fi":"Vaatekaappi","sv":"Garderob"},
   "nav.outfits": {"en":"Outfits","fi":"Asut","sv":"Outfits"},

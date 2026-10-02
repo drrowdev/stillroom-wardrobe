@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
-import { locales, translate, type Language, type MessageKey } from '../../src/i18n';
+import { locales, translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { dayParts, formatMonth } from '../../src/domain/local-date';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { expectSignedIn, shellNav } from './shell-support';

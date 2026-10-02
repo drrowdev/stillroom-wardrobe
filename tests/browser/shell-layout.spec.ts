@@ -2,10 +2,11 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
-import { languages, translate, type Language, type MessageKey } from '../../src/i18n';
+import { languages, translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { manualEntry } from './ai-photo-first-support';
-import { mockBackend, owners, signIn } from './mock-backend';
-import { accountMenu, accountTrigger, expectIdentity, expectSignedIn, openAccountMenu, settleShell, shellNav } from './shell-support';
+import { controlCatalogues } from './catalogue-support';
+import { mockBackend, owners, recoveryHash, signIn } from './mock-backend';
+import { accountMenu, accountTrigger, expectIdentity, expectSignedIn, openAccountMenu, settleShell, shellNav, signOutThroughMenu } from './shell-support';
 import { closeFilters, filterSheet, openFilters } from './wardrobe-support';
 
 const text = (key: MessageKey, language: Language = 'en') => translate(language, key);
@@ -829,4 +830,184 @@ test.describe('UX6 bounded synthetic captures', () => {
       try { await file.writeFile(png); } finally { await file.close(); }
     });
   }
+});
+
+// LANG1: only the active language's catalogue is fetched. Startup and every change of language wait for it (plan rev3 §6).
+const recordTexts = () => {
+  const seen: string[] = [];
+  (window as unknown as { __texts: string[] }).__texts = seen;
+  new MutationObserver((records) => {
+    for (const record of records) {
+      if (record.type === 'characterData') seen.push(record.target.textContent ?? '');
+      for (const node of record.addedNodes) seen.push(node.textContent ?? '');
+    }
+  }).observe(document, { childList: true, subtree: true, characterData: true });
+};
+const recordedTexts = (page: Page) => page.evaluate(() => (window as unknown as { __texts: string[] }).__texts.join('\n'));
+const entryChooser = (page: Page) => page.locator('.entry-language .language-selector');
+const entryLanguage = (page: Page, language: Language) => page.locator(`.entry-language button[lang="${language}"]`);
+/** Lets a settled request's callbacks run, so a test can assert that they changed nothing. */
+const settle = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => { requestAnimationFrame(() => { setTimeout(resolve, 50); }); }));
+const catalogueSettled = (page: Page, language: Language, outcome: 'load' | 'fail') => outcome === 'load'
+  ? page.waitForEvent('requestfinished', (request) => request.url().includes(`/catalogue-${language}-`))
+  : page.waitForEvent('requestfailed', (request) => request.url().includes(`/catalogue-${language}-`));
+
+test.describe('LANG1 language catalogues on the entry screens', () => {
+  for (const [locale, language] of [['fi-FI', 'fi'], ['sv-SE', 'sv']] as const) {
+    test.describe(`${locale} device`, () => {
+      test.use({ locale });
+      test(`startup waits for the ${language} catalogue and never shows another language`, async ({ page }) => {
+        await page.addInitScript(recordTexts);
+        await mockBackend(page);
+        const catalogues = await controlCatalogues(page);
+        const release = catalogues.hold(language);
+        await page.goto('/');
+        await expect.poll(() => catalogues.count(language)).toBe(1);
+        await expect(page.locator('html')).toHaveAttribute('lang', language);
+        await expect(page.locator('#root')).toBeEmpty();
+        release();
+        await expect(page.getByRole('button', { name: text('auth.signIn', language), exact: true })).toBeVisible();
+        const seen = await recordedTexts(page);
+        expect(seen).toContain(text('auth.password', language));
+        for (const key of ['auth.signIn', 'auth.email', 'auth.password'] as const) expect(seen).not.toContain(text(key));
+        expect(catalogues.requested()).toEqual([language]);
+      });
+    });
+  }
+
+  test('sign-in: a chosen language waits for its catalogue; a failure keeps the page and Try again loads it', async ({ page }) => {
+    await mockBackend(page);
+    const catalogues = await controlCatalogues(page);
+    await page.goto('/');
+    const submit = page.locator('button[type="submit"]');
+    await expect(submit).toHaveText(text('auth.signIn'));
+    expect(catalogues.requested()).toEqual(['en']);
+    const height = async () => (await page.locator('.entry-language').boundingBox())!.height;
+    const before = await height();
+    const release = catalogues.hold('sv');
+    await entryLanguage(page, 'sv').click();
+    await expect(entryChooser(page)).toHaveAttribute('aria-busy', 'true');
+    await expect(entryLanguage(page, 'sv')).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.locator('.entry-language [aria-live="polite"]')).toHaveText(text('language.loading'));
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(submit).toHaveText(text('auth.signIn'));
+    expect(await height()).toBe(before);
+    await noViolations(page);
+    // Another choice while one loads is ignored.
+    await entryLanguage(page, 'fi').click({ force: true });
+    release();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
+    await expect(submit).toHaveText(text('auth.signIn', 'sv'));
+    await expect(entryChooser(page)).not.toHaveAttribute('aria-busy', 'true');
+    expect(catalogues.count('fi')).toBe(0);
+
+    catalogues.failNext('fi');
+    await entryLanguage(page, 'fi').click();
+    const alert = page.locator('.language-load-error');
+    await expect(alert).toHaveText(text('language.loadFailed', 'sv'));
+    await expect(alert).toBeFocused();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
+    await expect(submit).toHaveText(text('auth.signIn', 'sv'));
+    await noViolations(page);
+    await page.getByRole('button', { name: text('common.retry', 'sv'), exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
+    await expect(submit).toHaveText(text('auth.signIn', 'fi'));
+    await expect(alert).toHaveCount(0);
+    await expect(entryLanguage(page, 'fi')).toBeFocused();
+    const fi = catalogues.urls.filter((url) => url.includes('/catalogue-fi-'));
+    expect(fi).toHaveLength(2);
+    expect(fi[1]).toBe(fi[0]);
+    expect(new URL(fi[1]!).search).toBe('');
+  });
+
+  for (const outcome of ['load', 'fail'] as const) {
+    test(`a choice still loading at sign-in is never applied after sign-out (${outcome})`, async ({ page }) => {
+      await mockBackend(page);
+      const catalogues = await controlCatalogues(page);
+      await page.goto('/');
+      const release = catalogues.hold('sv');
+      await entryLanguage(page, 'sv').click();
+      await expect(entryChooser(page)).toHaveAttribute('aria-busy', 'true');
+      await signIn(page);
+      await expectSignedIn(page);
+      await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+      await signOutThroughMenu(page);
+      await expect(page.locator('#email')).toBeVisible();
+      await page.locator('#email').focus();
+      const settled = catalogueSettled(page, 'sv', outcome);
+      release(outcome);
+      await settled;
+      await settle(page);
+      await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+      await expect(page.locator('button[type="submit"]')).toHaveText(text('auth.signIn'));
+      await expect(entryChooser(page)).not.toHaveAttribute('aria-busy', 'true');
+      await expect(page.locator('.language-load-error')).toHaveCount(0);
+      await expect(page.locator('#email')).toBeFocused();
+    });
+  }
+
+  test('a choice still loading when the recovery screen is left is never applied to the sign-in screen', async ({ page }) => {
+    await mockBackend(page);
+    const catalogues = await controlCatalogues(page);
+    await page.goto('/' + recoveryHash());
+    await expect(page.getByText(translate('en', 'recovery.target', { email: 'user-a@example.test' }), { exact: true })).toBeVisible();
+    const release = catalogues.hold('fi');
+    await entryLanguage(page, 'fi').click();
+    await expect(entryChooser(page)).toHaveAttribute('aria-busy', 'true');
+    await page.getByRole('button', { name: text('recovery.notMine'), exact: true }).click();
+    await expect(page.locator('#email')).toBeVisible();
+    const settled = catalogueSettled(page, 'fi', 'load');
+    release();
+    await settled;
+    await settle(page);
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(page.locator('button[type="submit"]')).toHaveText(text('auth.signIn'));
+    await expect(page.locator('.language-load-error')).toHaveCount(0);
+  });
+
+  test('a failed startup catalogue keeps a password-recovery link: Try again opens the recovery form in place', async ({ page }) => {
+    const backend = await mockBackend(page);
+    const catalogues = await controlCatalogues(page);
+    catalogues.failNext('en');
+    await page.goto('/' + recoveryHash());
+    await expect(page.getByRole('heading', { name: text('common.errorTitle'), exact: true })).toBeVisible();
+    await expect(page.getByText(text('error.unavailable'), { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => location.hash)).toBe('#/recovery');
+    await page.evaluate(() => { (window as unknown as { __bootMarker: boolean }).__bootMarker = true; });
+    await page.getByRole('button', { name: text('common.retry'), exact: true }).click();
+    await expect(page.getByText(translate('en', 'recovery.target', { email: 'user-a@example.test' }), { exact: true })).toBeVisible();
+    // The same document: nothing reloaded, so the link captured in memory was kept.
+    expect(await page.evaluate(() => (window as unknown as { __bootMarker?: boolean }).__bootMarker)).toBe(true);
+    expect(await page.evaluate(() => `${location.href}\n${JSON.stringify({ ...localStorage })}\n${JSON.stringify({ ...sessionStorage })}`)).not.toMatch(/access_token|refresh_token|token=/);
+    expect(backend.requests.filter((request) => request.path === '/auth/v1/token')).toHaveLength(0);
+    expect(catalogues.count('en')).toBe(2);
+    await page.getByRole('checkbox').check();
+    await page.getByRole('button', { name: text('recovery.continue'), exact: true }).click();
+    await expect(page.locator('#recovery-password')).toBeVisible();
+  });
+
+  test.describe('fi-FI device at 320px', () => {
+    test.use({ locale: 'fi-FI' });
+    test('200% text: the failed-language line and Try again fit, with no axe violations', async ({ page }) => {
+      await page.setViewportSize({ width: 320, height: 640 });
+      await mockBackend(page);
+      const catalogues = await controlCatalogues(page);
+      await page.goto('/');
+      await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
+      await expect(page.locator('button[type="submit"]')).toHaveText(text('auth.signIn', 'fi'));
+      await page.addStyleTag({ content: zoom });
+      catalogues.failNext('sv');
+      await entryLanguage(page, 'sv').click();
+      await expect(page.locator('.language-load-error')).toHaveText(text('language.loadFailed', 'fi'));
+      const retry = page.getByRole('button', { name: text('common.retry', 'fi'), exact: true });
+      await retry.scrollIntoViewIfNeeded();
+      await expect(retry).toBeVisible();
+      const fit = await page.evaluate(() => {
+        const line = document.querySelector('.language-load-failed')!.getBoundingClientRect();
+        return { overflow: document.documentElement.scrollWidth > innerWidth, inside: line.left >= -0.5 && line.right <= innerWidth + 0.5 };
+      });
+      expect(fit).toEqual({ overflow: false, inside: true });
+      await noViolations(page);
+    });
+  });
 });

@@ -5,10 +5,12 @@ import path from 'node:path';
 import { CLEANUP_NOTICE_REVISION } from '../../src/domain/enhancement';
 import { TRYON_NOTICE_REVISION } from '../../src/domain/tryon';
 import { usdCents } from '../../src/domain/ai-presentation';
-import { languages, translate, type Language, type MessageKey } from '../../src/i18n';
+import { languages, translate, type Language, type MessageKey } from '../../src/i18n/all';
 import '../../src/i18n/tryon';
 import { aiFixture } from './ai-photo-first-support';
-import { owners } from './mock-backend';
+import { controlCatalogues } from './catalogue-support';
+import { mockBackend, owners, signIn } from './mock-backend';
+import { expectIdentity, shellNav } from './shell-support';
 
 // UI1: the grouped Settings page. Functional and axe checks run in chromium, mobile and webkit-photo; the four bounded
 // captures are written only in chromium.
@@ -403,6 +405,176 @@ test.describe('bounded UI1 visual evidence', () => {
       expect(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && png.readUInt32BE(16) === scene.width).toBe(true);
       const file = await open(path.join(directory, `${scene.name}.png`), 'wx');
       try { await file.writeFile(png); } finally { await file.close(); }
+    });
+  }
+});
+
+// LANG1: a language change in Settings, a saved profile language, a passive refresh and Auth changes while a language
+// catalogue loads (plan rev3 §6).
+test.describe('LANG1 language catalogues in the workspace', () => {
+  const recordTexts = () => {
+    const seen: string[] = [];
+    (window as unknown as { __texts: string[] }).__texts = seen;
+    new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === 'characterData') seen.push(record.target.textContent ?? '');
+        for (const node of record.addedNodes) seen.push(node.textContent ?? '');
+      }
+    }).observe(document, { childList: true, subtree: true, characterData: true });
+  };
+  const settle = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => { requestAnimationFrame(() => { setTimeout(resolve, 50); }); }));
+  const settled = (page: Page, language: Language, outcome: 'load' | 'fail') => outcome === 'load'
+    ? page.waitForEvent('requestfinished', (request) => request.url().includes(`/catalogue-${language}-`))
+    : page.waitForEvent('requestfailed', (request) => request.url().includes(`/catalogue-${language}-`));
+  const settingsLanguage = (page: Page, language: Language) => page.locator(`.settings-language button[lang="${language}"]`);
+  const navLink = (page: Page, language: Language) => shellNav(page).getByRole('link', { name: text('nav.wardrobe', language), exact: true });
+  async function begin(page: Page, initialLanguage: Language = 'en', hash = '#/settings') {
+    const api = await mockBackend(page, { initialLanguage });
+    const catalogues = await controlCatalogues(page);
+    const patches: Array<Record<string, unknown>> = [];
+    page.on('request', (request) => {
+      if (request.method() === 'PATCH' && new URL(request.url()).pathname === '/rest/v1/profiles') patches.push(request.postDataJSON() as Record<string, unknown>);
+    });
+    await page.goto(`/${hash}`);
+    return { api, catalogues, patches };
+  }
+  async function settings(page: Page, initialLanguage: Language = 'en') {
+    const started = await begin(page, initialLanguage);
+    await signIn(page);
+    await expect(page.locator('#settings-title')).toHaveText(text('nav.settings', initialLanguage));
+    return started;
+  }
+
+  test('Settings saves a new language only once its catalogue has arrived', async ({ page }) => {
+    const { api, catalogues, patches } = await settings(page);
+    const release = catalogues.hold('fi');
+    await settingsLanguage(page, 'fi').click();
+    await expect(page.locator('.settings-language .language-selector')).toHaveAttribute('aria-busy', 'true');
+    await expect(page.locator('.settings-language [aria-live="polite"]')).toHaveText(text('language.loading'));
+    await expect.poll(() => catalogues.count('fi')).toBe(1);
+    await settle(page);
+    expect(patches).toHaveLength(0);
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await noViolations(page);
+    release();
+    await expect(page.locator('#settings-title')).toHaveText(text('nav.settings', 'fi'));
+    await expect(page.getByText(text('language.saved', 'fi'), { exact: true })).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
+    expect(patches).toHaveLength(1);
+    expect(patches[0]).toMatchObject({ ui_language: 'fi' });
+    expect(api.profiles[owners.a]!.ui_language).toBe('fi');
+  });
+
+  test('a failed catalogue in Settings saves nothing; Try again loads it and saves once', async ({ page }) => {
+    const { catalogues, patches } = await settings(page);
+    catalogues.failNext('fi');
+    await settingsLanguage(page, 'fi').click();
+    const alert = page.locator('.settings-language .language-load-error');
+    await expect(alert).toHaveText(text('language.loadFailed'));
+    await expect(alert).toBeFocused();
+    expect(patches).toHaveLength(0);
+    await expect(page.locator('#settings-title')).toHaveText(text('nav.settings'));
+    await noViolations(page);
+    await page.locator('.settings-language').getByRole('button', { name: text('common.retry'), exact: true }).click();
+    await expect(page.locator('#settings-title')).toHaveText(text('nav.settings', 'fi'));
+    await expect(settingsLanguage(page, 'fi')).toBeFocused();
+    expect(patches).toHaveLength(1);
+    const urls = catalogues.urls.filter((url) => url.includes('/catalogue-fi-'));
+    expect(urls).toHaveLength(2);
+    expect(urls[1]).toBe(urls[0]);
+    expect(new URL(urls[1]!).search).toBe('');
+  });
+
+  for (const outcome of ['load', 'fail'] as const) {
+    test(`a saved profile language: the workspace waits for its catalogue (${outcome})`, async ({ page }) => {
+      await page.addInitScript(recordTexts);
+      const { catalogues } = await begin(page, 'sv', '#/wardrobe');
+      await expect(page.locator('#email')).toBeVisible();
+      const release = catalogues.hold('sv');
+      await page.evaluate(() => { (window as unknown as { __texts: string[] }).__texts.length = 0; });
+      await signIn(page);
+      await expect.poll(() => catalogues.count('sv')).toBe(1);
+      await expect(page.locator('.entry-card.connecting')).toBeVisible();
+      await expect(page.locator('.workspace-header')).toHaveCount(0);
+      release(outcome);
+      if (outcome === 'load') {
+        await expect(navLink(page, 'sv')).toBeVisible();
+        await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
+        const seen = await page.evaluate(() => (window as unknown as { __texts: string[] }).__texts.join('\n'));
+        for (const key of ['nav.today', 'nav.wardrobe', 'nav.calendar'] as const) expect(seen).not.toContain(text(key));
+        await expect(page.locator('.language-warning')).toHaveCount(0);
+        return;
+      }
+      await expect(navLink(page, 'en')).toBeVisible();
+      await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+      const banner = page.locator('.language-warning').filter({ hasText: text('language.loadFailed') });
+      await expect(banner).toBeVisible();
+      await noViolations(page);
+      await banner.getByRole('button', { name: text('common.retry'), exact: true }).click();
+      await expect(navLink(page, 'sv')).toBeVisible();
+      await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
+      await expect(page.locator('.language-warning')).toHaveCount(0);
+    });
+  }
+
+  test('a language changed elsewhere switches once, when its catalogue arrives', async ({ page }) => {
+    const { api, catalogues, patches } = await settings(page);
+    const release = catalogues.hold('fi');
+    const profile = api.profiles[owners.a]!;
+    Object.assign(profile, { ui_language: 'fi', version: Number(profile.version) + 1 });
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect.poll(() => catalogues.count('fi')).toBe(1);
+    await settle(page);
+    await expect(page.locator('#settings-title')).toHaveText(text('nav.settings'));
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    release();
+    await expect(page.locator('#settings-title')).toHaveText(text('nav.settings', 'fi'));
+    await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
+    expect(patches).toHaveLength(0);
+  });
+
+  test('signing out while a Settings language loads saves nothing and leaves the sign-in screen as it is', async ({ page }) => {
+    const { catalogues, patches } = await settings(page);
+    const release = catalogues.hold('fi');
+    await settingsLanguage(page, 'fi').click();
+    await expect(page.locator('.settings-language .language-selector')).toHaveAttribute('aria-busy', 'true');
+    await page.locator('.account-sign-out').getByRole('button', { name: text('auth.signOut'), exact: true }).click();
+    await expect(page.locator('#email')).toBeVisible();
+    const done = settled(page, 'fi', 'load');
+    release();
+    await done;
+    await settle(page);
+    expect(patches).toHaveLength(0);
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(page.locator('button[type="submit"]')).toHaveText(text('auth.signIn'));
+    await expect(page.locator('.language-load-error')).toHaveCount(0);
+  });
+
+  for (const outcome of ['load', 'fail'] as const) {
+    test(`an account switch while a Settings language loads (${outcome}) writes nothing for either owner`, async ({ page }) => {
+      const { api, catalogues, patches } = await settings(page);
+      const release = catalogues.hold('fi');
+      await settingsLanguage(page, 'fi').click();
+      await expect(page.locator('.settings-language .language-selector')).toHaveAttribute('aria-busy', 'true');
+      expect(await page.evaluate(async () => {
+        const modulePath = '/src/data/client.ts';
+        const { makeClient } = await import(modulePath) as typeof import('../../src/data/client');
+        const client = makeClient({ url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_browser_fixture_only', version: 'browser-fixture' });
+        const result = await client.auth.signInWithPassword({ email: 'user-b@example.test', password: 'fictional-test-password' });
+        return !result.error;
+      })).toBe(true);
+      await expectIdentity(page, 'Robin');
+      await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
+      const done = settled(page, 'fi', outcome);
+      release(outcome);
+      await done;
+      await settle(page);
+      expect(patches).toHaveLength(0);
+      expect(api.profiles[owners.a]!.ui_language).toBe('en');
+      expect(api.profiles[owners.b]!.ui_language).toBe('sv');
+      await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
+      await expect(page.locator('.language-load-error')).toHaveCount(0);
+      await expect(page.locator('.settings-language .language-selector')).not.toHaveAttribute('aria-busy', 'true');
     });
   }
 });

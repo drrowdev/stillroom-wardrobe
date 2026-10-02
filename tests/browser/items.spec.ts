@@ -3,7 +3,7 @@ import { codePreloaded } from './lazy-support';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdir, lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { messages, type Language } from '../../src/i18n';
+import { messages, type Language } from '../../src/i18n/all';
 import { mockBackend, owners, signIn, type MockOptions } from './mock-backend';
 import { editItem } from './ai-photo-first-support';
 import { closeAccountMenu, openAccountMenu } from './shell-support';

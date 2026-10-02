@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildStatistics, costPerWear, costTable, spending, wearSummaries, type StatisticsItem, type WearDay } from '../../src/domain/statistics';
 import { summarizeWear } from '../../src/data/wear-history';
 import { centsPerText, centsText, costPerWearText, lastWornText, wearCountText } from '../../src/features/statistics/wear-text';
-import { translate, type Language, type MessageKey } from '../../src/i18n';
+import { translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { categories } from '../../src/domain/wardrobe';
 
 const owner = '10000000-0000-4000-8000-000000000001';
