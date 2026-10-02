@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { translate, type Language, type MessageKey } from '../../src/i18n';
+import { translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { mockBackend, owners, signIn, type AuthControl } from './mock-backend';
 import { expectIdentity, expectSignedIn, openAccountMenu } from './shell-support';
 
