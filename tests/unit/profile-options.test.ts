@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { currencyOptions, timeZoneOptions, utcOffset } from '../../src/features/profile/profile-options';
 import { validTimezone } from '../../src/domain/preferences';
-import type { Language } from '../../src/i18n';
+import type { Language } from '../../src/i18n/all';
 
 const zoneName = (_locale: string, zone: string) => utcOffset(zone, new Date())!;
 

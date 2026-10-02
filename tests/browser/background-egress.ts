@@ -18,6 +18,8 @@ const shellFiles = new Set(['/', '/manifest.webmanifest', '/service-worker.js', 
 const appRules: ReadonlyArray<readonly [RegExp, RegExp]> = [
   [/^\/assets\/[\w-]+-[\w-]{8}\.(?:js|css)$/, /^$/],
   [/^\/@vite\/client$|^\/@react-refresh$|^\/node_modules\/vite\/dist\/client\/env\.mjs$/, /^$/],
+  // LANG1: the active language's catalogue (public build data) and, on the dev server, its descriptor module.
+  [/^\/assets\/catalogue-(?:en|fi|sv)-[\w-]{8}\.json$|^\/@id\/__x00__virtual:stillroom-catalogues$/, /^$/],
   [/^\/node_modules\/\.vite\/deps\/[\w@.-]+\.js$/, /^\?v=[0-9a-f]{8}$/],
   [/^\/src\/[\w/.-]+\.(?:ts|tsx|css)$/, /^$|^\?worker_file&type=module$/],
   [/^\/src\/[\w/.-]+\.json$/, /^\?import$/],

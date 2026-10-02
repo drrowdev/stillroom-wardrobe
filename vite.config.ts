@@ -7,6 +7,7 @@ import { loadEnv, type Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 import { artifactUrl, isExcludedArtifact, isShellArtifact, joinShellUrls, manifestPath, parsePrecacheManifest, workerPath } from './src/pwa/shell-policy.ts';
 import { appVersion } from './src/data/app-version.ts';
+import { cataloguePlugin } from './scripts/i18n-catalogues.mjs';
 import { checkOperatorTree, checkStaticTree, HARNESS_ENTRY, listTree, OPERATOR_TREE, readInventory, type InventoryFile } from './scripts/check-static-assets.mjs';
 
 const publicKeys = new Set([
@@ -168,6 +169,7 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
+      cataloguePlugin({ emit: !operator }),
       ...(operator ? [operatorProbe()] : [shellWorker(killSwitch)]),
       ortRuntimePath(runtime),
       backgroundAssets(mode),
@@ -224,6 +226,7 @@ export default defineConfig(({ mode }) => {
       include: ['tests/unit/**/*.test.ts'],
       environment: 'node',
       restoreMocks: true,
+      setupFiles: ['tests/unit/setup-i18n.ts'],
     },
   };
 });

@@ -40,6 +40,11 @@ a { color: inherit; text-decoration-color: var(--secondary); text-underline-offs
 .language-selector button { color: var(--secondary); padding: 10px 13px; min-width: 44px; min-height: 44px; border: 1px solid transparent; background: transparent; font-size: .875rem; }
 .language-selector button[aria-pressed="true"] { color: var(--primary); background: #E6EAE1; border-color: #D4DBCF; }
 .language-selector button:hover { background: var(--well); }
+.language-selector button[data-pending] { opacity: .55; }
+.language-selector[aria-busy="true"] button { cursor: progress; }
+.language-chooser { min-width: 0; max-width: 100%; }
+.language-load-failed { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 8px; min-width: 0; }
+.language-load-failed .notice { margin: 0; flex: 1 1 16rem; min-width: 0; overflow-wrap: anywhere; }
 .entry-main { width: min(1140px, 100%); margin: auto; padding: 34px 48px 60px; display: grid; grid-template-columns: 1.12fr 1fr; align-items: center; gap: 80px; }
 .intro { padding: 18px 0; }
 .wardrobe-illustration { width: 100%; max-width: 440px; height: auto; display: block; }

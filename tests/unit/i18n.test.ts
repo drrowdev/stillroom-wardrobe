@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isLanguage, itemCount, languages, messages, resolveLanguage, translate } from '../../src/i18n';
+import { isLanguage, itemCount, languages, messages, resolveLanguage, translate } from '../../src/i18n/all';
 import '../../src/i18n/tryon';
 import { canonicalPrice, formatDateOnly, formatMoney, parsePrice, priceForDatabase } from '../../src/i18n/format';
 

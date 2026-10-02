@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { checkDist, entryAssets } from '../../scripts/check-bundle-budget.mjs';
+import baseMessages from '../../src/i18n/messages.json' with { type: 'json' };
 import { startDistServer, type DistServer } from '../../scripts/serve-dist.mjs';
 import { mockBackend, signIn } from '../browser/mock-backend';
 import { engineBundle, perfApp } from './global-setup';
@@ -42,6 +43,8 @@ test.beforeAll(async () => {
   const initial = (await checkDist(perfApp)).initial.map((file) => `/assets/${file}`);
   expectedInitial = [...new Set(['/', assets.entry, ...assets.preloads, ...initial, ...assets.styles])];
   expect(expectedInitial.length).toBeGreaterThan(3);
+  catalogues = (await readdir(path.join(perfApp, 'assets'))).filter((file) => /^catalogue-(?:en|fi|sv)-.+\.json$/.test(file)).map((file) => `/assets/${file}`).sort();
+  expect(catalogues).toHaveLength(3);
 });
 test.afterAll(async () => {
   await server.close();
@@ -125,6 +128,8 @@ async function distBytes(directory: string): Promise<number> {
 // The first-install page must receive exactly what the build says it loads: the document, the entry script, its
 // static imports (from the emitted import graph) and the stylesheets.
 let expectedInitial: string[] = [];
+// LANG1: the build's three language catalogues; a first install fetches only the active (here English) one.
+let catalogues: string[] = [];
 const wireMs = (bytes: number) => (bytes / network.bytesPerSecond) * 1000;
 
 type ShellRun = {
@@ -156,6 +161,8 @@ async function shellRun(browser: Browser, index: number): Promise<ShellRun> {
     // The budget total is every page transfer in the window, including dynamic imports and prefetches.
     const startup = startupTransfer(windowTransfer, expectedInitial);
     const pageBytes = startup.total;
+    const fetchedCatalogues = startup.extra.filter((entry) => catalogues.includes(entry.pathname));
+    expect(fetchedCatalogues.map((entry) => entry.pathname), `run ${index}: only the active language catalogue`).toEqual(catalogues.filter((file) => file.startsWith('/assets/catalogue-en-')));
     // The shaping really applied to the page: readiness cannot beat the wire time of what it received.
     const lowerBoundMs = wireMs(pageBytes) + 2 * network.latencyMs;
     expect(firstMetrics.readyMs, `run ${index}: readiness ${firstMetrics.readyMs} ms vs wire time ${Math.round(lowerBoundMs)} ms`)
@@ -206,6 +213,13 @@ test('bundle budgets hold for the measured build', async ({ browserName }, info)
   const bundle = await checkDist(perfApp);
   report(info, 'bundle', { initialJsGzip: bundle.initialJsGzip, initial: bundle.initial, largestLazyGzip: Math.max(...bundle.report.filter((row) => row.kind === 'lazy').map((row) => row.gzip)) });
   expect(bundle.violations).toEqual([]);
+  // LANG1: no catalogue text ships in the initial scripts; each language arrives as its own JSON file.
+  for (const file of bundle.initial) {
+    const source = await readFile(path.join(perfApp, 'assets', file), 'utf8');
+    for (const key of ['enhanceC.noticeSent', 'wardrobe.emptyHint'] as const) {
+      for (const text of Object.values(baseMessages[key])) expect(source.includes(text), `catalogue text in ${file}`).toBe(false);
+    }
+  }
 });
 
 test('sign-in shell: first install, worker-controlled and offline reopen stay within budget', async ({ browser }, info) => {

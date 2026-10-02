@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { translate, type Language } from '../../src/i18n';
+import { translate, type Language } from '../../src/i18n/all';
 
 // UX1 shell: at 650 px and narrower the account menu is the More tab; wider, it is the account button in the header.
 export const NARROW_MAX_WIDTH = 650;

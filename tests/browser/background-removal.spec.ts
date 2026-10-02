@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
-import { locales, messages, type Language } from '../../src/i18n';
+import { locales, messages, type Language } from '../../src/i18n/all';
 import type { BackgroundTestHook } from '../../src/images/background/test-hook';
 import { modelAssetBytes, modelAssets } from '../../src/images/background/model-assets';
 import { aiFixture, editItem, openPhotoMenu } from './ai-photo-first-support';

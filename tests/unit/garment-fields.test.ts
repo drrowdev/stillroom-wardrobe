@@ -11,7 +11,7 @@ import { fieldAssertion, maximumFieldRevision, provenanceFields, type FieldProve
 import { confirmsItem, itemFactColumns, parseItemBaseline, prepareGarmentAttempt } from '../../src/domain/item-details';
 import { newSaveAttempt, saveItem } from '../../src/images/upload';
 import { canonicalPrice, parsePrice, priceForDatabase, validDateOnly } from '../../src/i18n/format';
-import { messages } from '../../src/i18n';
+import { messages } from '../../src/i18n/all';
 
 const owner = '10000000-0000-4000-8000-000000000001';
 const other = '10000000-0000-4000-8000-000000000002';

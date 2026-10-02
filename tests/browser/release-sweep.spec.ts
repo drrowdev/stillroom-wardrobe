@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { readFile } from 'node:fs/promises';
-import { languages, translate, type Language, type MessageKey } from '../../src/i18n';
+import { languages, translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { mockBackend, signIn } from './mock-backend';
 
 const text = (language: Language, key: MessageKey) => translate(language, key);

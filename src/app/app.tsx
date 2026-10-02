@@ -4,7 +4,9 @@ import { makeClient, retireClient, revokeSession } from '../data/client';
 import { SessionController, type OwnerScope, type SessionState } from '../auth/session';
 import { Login } from '../auth/login';
 import { translate, resolveLanguage, type Language, type MessageKey, type Translate } from '../i18n';
-import { LanguageSelector } from '../i18n/language-selector';
+import { LanguageChooser } from '../i18n/language-chooser';
+import { useDisplayLanguage } from '../i18n/display-language';
+import { bootMessages } from '../i18n/boot';
 import { Icon, WardrobeIllustration } from './icon';
 import { AddItem } from '../features/wardrobe/add-item';
 import { WardrobeScreen } from '../features/wardrobe/wardrobe-screen';
@@ -64,7 +66,7 @@ function useOnline() {
   }, []);
   return online;
 }
-function EntryLayout({ children, language, onLanguage, t }: { children: ReactNode; language: Language; onLanguage: (language: Language) => void; t: Translate }) {
+function EntryLayout({ children, language, onLanguage, t, context }: { children: ReactNode; language: Language; onLanguage: (language: Language) => void; t: Translate; context: object }) {
   return (
     <div className="entry-page">
       <header className="entry-header"><Brand /></header>
@@ -73,7 +75,7 @@ function EntryLayout({ children, language, onLanguage, t }: { children: ReactNod
         <div className="intro"><WardrobeIllustration /></div>
         <div className="entry-column">
           {children}
-          <div className="entry-language"><LanguageSelector language={language} onChange={onLanguage} t={t} /></div>
+          <div className="entry-language"><LanguageChooser language={language} onChange={onLanguage} t={t} context={context} /></div>
         </div>
       </main>
     </div>
@@ -83,7 +85,8 @@ function Unconfigured({ status }: { status: Configuration['status'] }) {
   const [language, setLanguage] = useState(resolveLanguage(browserLanguages));
   const t = useCallback<Translate>((key, parameters) => translate(language, key, parameters), [language]);
   useEffect(() => { document.documentElement.lang = language; }, [language]);
-  return <EntryLayout language={language} onLanguage={setLanguage} t={t}><section className="entry-card setup-card"><div className="small-mark"><Icon name="wardrobe" /></div><h1>{t('setup.title')}</h1><p className="muted">{t(status === 'invalid' ? 'setup.invalid' : 'setup.body')}</p><details className="copy-details"><summary>{t('setup.instructions')}</summary><ol className="setup-steps"><li>{t('setup.step1')}<code>npm run db:start</code></li><li>{t('setup.step2')}<code>.env.local</code></li><li>{t('setup.step3')}</li></ol></details><p className="privacy-note"><Icon name="lock" />{t('setup.note')}</p></section></EntryLayout>;
+  const [context] = useState(() => ({}));
+  return <EntryLayout language={language} onLanguage={setLanguage} t={t} context={context}><section className="entry-card setup-card"><div className="small-mark"><Icon name="wardrobe" /></div><h1>{t('setup.title')}</h1><p className="muted">{t(status === 'invalid' ? 'setup.invalid' : 'setup.body')}</p><details className="copy-details"><summary>{t('setup.instructions')}</summary><ol className="setup-steps"><li>{t('setup.step1')}<code>npm run db:start</code></li><li>{t('setup.step2')}<code>.env.local</code></li><li>{t('setup.step3')}</li></ol></details><p className="privacy-note"><Icon name="lock" />{t('setup.note')}</p></section></EntryLayout>;
 }
 type WorkspaceRoute = 'today' | 'stylist' | 'wardrobe' | 'add' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | 'calendar' | 'statistics' | 'admin' | `detail:${string}` | `outfit:${string}`;
 const routeHash = { today: '#/today', stylist: '#/stylist', wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new', calendar: '#/calendar', statistics: '#/statistics', admin: '#/admin' };
@@ -363,7 +366,10 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
     requestAnimationFrame(() => document.getElementById('login-title')?.focus());
   }, []);
   const online = useOnline();
-  const t = useCallback<Translate>((key, parameters) => translate(state.language, key, parameters), [state.language]);
+  // LANG1: everything renders in the displayed language, whose catalogue is loaded; a requested one that is still loading waits.
+  const display = useDisplayLanguage(state.language);
+  const language = display.shown;
+  const t = useCallback<Translate>((key, parameters) => translate(language, key, parameters), [language]);
   useEffect(() => controller.start(), [controller]);
   useEffect(() => {
     const { data } = client.auth.onAuthStateChange((event, session) => {
@@ -374,7 +380,15 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   // Every sign-out, including one from another tab, replaces the client; like any auth activity it clears the notice.
   const firstClient = useRef(client);
   useEffect(() => { if (client !== firstClient.current) clearRecoveryNotice(); }, [client]);
-  useEffect(() => { document.documentElement.lang = state.language; }, [state.language]);
+  useEffect(() => { document.documentElement.lang = language; }, [language]);
+  // A language choice made on an entry screen belongs to this client, phase and owner; any change cancels it.
+  const scopeEpoch = state.scope?.epoch, scopeOwner = state.scope?.ownerId;
+  const entryContext = useMemo(() => ({ client, phase: state.phase, epoch: scopeEpoch, owner: scopeOwner }), [client, state.phase, scopeEpoch, scopeOwner]);
+  // The first workspace render of an account waits for its profile language, so it never appears in another one.
+  const workspaceEpoch = useRef<number | null>(null);
+  const holding = state.phase === 'ready' && display.pending !== null && workspaceEpoch.current !== (scopeEpoch ?? null);
+  const workspace = state.phase === 'ready' && Boolean(state.profile) && Boolean(state.scope) && !holding;
+  useLayoutEffect(() => { if (workspace) workspaceEpoch.current = scopeEpoch ?? null; });
   useEffect(() => {
     if (state.phase === 'signed-out' && !requestPassword && callback.kind === 'none') document.getElementById('login-title')?.focus();
   }, [state.phase, requestPassword, callback.kind]);
@@ -402,11 +416,11 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
     setSignOutError(false);
     try { await controller.signOut(); } catch { setSignOutError(true); }
   };
-  if (state.phase !== 'ready' || !state.profile || !state.scope) {
-    return <EntryLayout language={state.language} onLanguage={(language) => controller.chooseLanguage(language)} t={t}>
+  if (state.phase !== 'ready' || !state.profile || !state.scope || holding) {
+    return <EntryLayout language={language} onLanguage={(next) => controller.chooseLanguage(next)} t={t} context={entryContext}>
       {refusal ? <RecoveryRefusal kind={refusal.kind} notice={refusal.notice} t={t} />
-        : state.phase === 'signed-out' && requestPassword ? <RecoveryRequest config={config} online={online} t={t} language={state.language} onReturn={returnFromRequest} />
-        : state.phase === 'loading' ? <section className="entry-card connecting" aria-busy="true"><span className="spinner" /><p role="status">{t('common.loading')}</p></section>
+        : state.phase === 'signed-out' && requestPassword ? <RecoveryRequest config={config} online={online} t={t} language={language} onReturn={returnFromRequest} />
+        : state.phase === 'loading' || holding ? <section className="entry-card connecting" aria-busy="true"><span className="spinner" /><p role="status">{t('common.loading')}</p></section>
         : state.phase === 'deleting' && state.scope && state.deletion ? <DeletionRecovery key={state.scope.epoch} client={client} controller={controller}
           scope={state.scope} deletion={state.deletion} online={online} t={t} onSignOut={() => { void signOut(); }} />
         : state.phase === 'locked' ? <section className="entry-card"><h1>{t('common.errorTitle')}</h1><p className="muted">{t('account.locked')}</p><div className="stack"><button className="button button-primary" onClick={() => { void controller.retry(); }} disabled={!online}>{t('common.retry')}</button><button className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div></section>
@@ -418,8 +432,8 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   const shellFallback = (failed: boolean) => <ShellFallback family={navFamily} page={menuPageFor(route)} failed={failed} t={t} onSignOut={() => { void signOut(); }} />;
   const nav = shell.module;
   const accountMenu = nav && <nav.AccountMenu narrow={narrow} open={menu} onOpen={setMenu} page={menuPageFor(route)} name={state.profile.display_name}
-    initial={state.profile.display_name.slice(0, 1).toLocaleUpperCase(state.language)} t={t} onSignOut={() => { void signOut(); }}
-    language={<LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={state.language} busy={Boolean(state.profileSaving)} online={online} t={t} />} />;
+    initial={state.profile.display_name.slice(0, 1).toLocaleUpperCase(language)} t={t} onSignOut={() => { void signOut(); }}
+    language={<LanguageSettings controller={controller} scope={state.scope} profile={state.profile} language={language} busy={Boolean(state.profileSaving)} online={online} t={t} />} />;
   return (
     <div className="workspace">
       {refusal && <aside className="notice" role="alert"><p>{t(refusal.notice ?? (refusal.kind === 'conflict' ? 'recovery.conflict' : 'recovery.invalid'))}</p><button type="button" className="text-button" onClick={() => leaveRecovery()}>{t('common.close')}</button></aside>}
@@ -432,8 +446,9 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
         </ShellBoundary>
       </header>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online || state.profileSaving} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}
+      {display.failed && <div className="language-warning notice" role="status"><span>{t('language.loadFailed')}</span><button className="text-button" onClick={display.retry}>{t('common.retry')}</button></div>}
       <UpdatePrompt t={t} />
-      <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={state.language} online={online} t={t} onRouteCommitted={setRoute} onSignOut={() => { void signOut(); }} />
+      <OwnedWardrobe key={state.scope.epoch} client={client} config={config} controller={controller} scope={state.scope} profile={state.profile} change={state.profileChange} busy={Boolean(state.profileSaving)} unresolved={Boolean(state.aiConsentUnresolved)} language={language} online={online} t={t} onRouteCommitted={setRoute} onSignOut={() => { void signOut(); }} />
       {nav && <ShellBoundary fallback={null}><nav.TabBar family={navFamily} more={narrow ? accountMenu : null} t={t} /></ShellBoundary>}
     </div>
   );
@@ -444,7 +459,7 @@ class AppBoundary extends Component<{ children: ReactNode }, { failed: boolean }
   render() {
     if (!this.state.failed) return this.props.children;
     const language = resolveLanguage(browserLanguages);
-    return <main className="fatal-error"><h1>{translate(language, 'common.errorTitle')}</h1><p>{translate(language, 'error.unavailable')}</p><button className="button button-primary" onClick={() => location.reload()}>{translate(language, 'common.retry')}</button></main>;
+    return <main className="fatal-error"><h1>{bootMessages['common.errorTitle'][language]}</h1><p>{bootMessages['error.unavailable'][language]}</p><button className="button button-primary" onClick={() => location.reload()}>{bootMessages['common.retry'][language]}</button></main>;
   }
 }
 export function App() {
@@ -462,7 +477,8 @@ function RecoveryEntry({ config, callback }: { config: PublicConfig; callback: R
   const online = useOnline();
   const t = useCallback<Translate>((key, parameters) => translate(language, key, parameters), [language]);
   useEffect(() => { document.documentElement.lang = language; }, [language]);
-  return <EntryLayout language={language} onLanguage={setLanguage} t={t}>
+  const context = useMemo(() => ({ kind: callback.kind }), [callback.kind]);
+  return <EntryLayout language={language} onLanguage={setLanguage} t={t} context={context}>
     {callback.kind === 'link' ? <PasswordRecovery config={config} link={callback.link} online={online} t={t} onReturn={leaveRecovery} />
       : <RecoveryRefusal kind={callback.kind === 'conflict' ? 'conflict' : 'invalid'} notice={callback.notice} t={t} />}
   </EntryLayout>;

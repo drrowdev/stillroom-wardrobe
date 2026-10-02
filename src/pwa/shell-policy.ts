@@ -10,11 +10,14 @@ export type PrecacheEntry = { url: string; sha256: string; bytes: number };
 export type PrecacheManifest = { version: 1; buildId: string; files: PrecacheEntry[] };
 
 const assetFile = /^assets\/[A-Za-z0-9_-]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/;
+// LANG1: the per-language startup catalogues, public JSON data fetched by the app (src/i18n/load.ts). Only these
+// exact names; no other JSON file is a shell artifact.
+const catalogueFile = /^assets\/catalogue-(?:en|fi|sv)-[A-Za-z0-9_-]{8}\.json$/;
 const iconFile = /^(?:icon(?:-[a-z0-9]+)*|apple-touch-icon)\.(?:png|svg)$/;
 
 // The public app shell: the same bytes for every user, already public on the static host.
 export function isShellArtifact(file: string): boolean {
-  return file === 'index.html' || file === 'manifest.webmanifest' || assetFile.test(file) || iconFile.test(file);
+  return file === 'index.html' || file === 'manifest.webmanifest' || assetFile.test(file) || catalogueFile.test(file) || iconFile.test(file);
 }
 
 // Files the host serves (or, for `_*` control files, never serves) that the worker never caches. The public
@@ -54,6 +57,8 @@ export function parsePrecacheManifest(value: unknown, buildId: string): Precache
 const destinations: ReadonlyArray<[RegExp, ReadonlySet<string>]> = [
   [/\.js$/, new Set(['script', 'worker'])], [/\.css$/, new Set(['style'])], [/\.(?:png|svg)$/, new Set(['image'])],
   [/\.webmanifest$/, new Set(['manifest'])],
+  // fetch() has the empty destination; a catalogue is never loaded as a script, style or document.
+  [/^\/assets\/catalogue-[^/]+\.json$/, new Set([''])],
 ];
 export type RoutedRequest = { method: string; url: string; mode: string; destination: string };
 

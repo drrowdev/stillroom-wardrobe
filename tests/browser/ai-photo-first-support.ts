@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import type { AiResult } from '../../src/domain/ai-analysis';
-import { messages, type Language } from '../../src/i18n';
+import { messages, type Language } from '../../src/i18n/all';
 import { mockBackend, owners, signIn, type MockOptions } from './mock-backend';
 
 export async function manualEntry(page: Page) {

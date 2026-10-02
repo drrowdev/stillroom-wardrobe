@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { lstat, mkdir, open, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { messages, type Language } from '../../src/i18n';
+import { messages, type Language } from '../../src/i18n/all';
 import { inspectJpegSegments } from '../fixtures/jpeg-helpers';
 import { mockBackend, owners, signIn, wireStages, type WireBackend, type WireStage } from './mock-backend';
 import { manualEntry } from './ai-photo-first-support';

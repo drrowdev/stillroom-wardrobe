@@ -2,7 +2,7 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open, lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { languages, locales, messages, translate, type Language, type MessageKey } from '../../src/i18n';
+import { languages, locales, messages, translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { aiFixture, addAiPhoto, editItem, openPhotoMenu } from './ai-photo-first-support';
 
 type Api = Awaited<ReturnType<typeof aiFixture>>;

@@ -2,7 +2,7 @@ import { expect, test, type Page, type Route, type TestInfo } from '@playwright/
 import AxeBuilder from '@axe-core/playwright';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
-import { locales, translate, type Language, type MessageKey } from '../../src/i18n';
+import { locales, translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { accountMenu, expectIdentity, expectSignedIn, openAccountMenu } from './shell-support';
 

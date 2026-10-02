@@ -1,24 +1,34 @@
-import baseMessages from './messages.json' with { type: 'json' };
-import phaseZeroMessages from './phase-zero.json' with { type: 'json' };
+import type baseMessages from './messages.json';
+import type phaseZeroMessages from './phase-zero.json';
 import type tryOnMessages from './tryon.json';
+import { bootMessages } from './boot';
 
-const startup = { ...baseMessages, ...phaseZeroMessages };
+// LANG1: this module holds no catalogue text. The app fetches the active language's startup table (./load) before
+// it renders; tests and tools install all three through ./all. Lazy screens register their own catalogues.
+type Startup = typeof baseMessages & typeof phaseZeroMessages;
 /** Catalogs loaded with a lazy screen rather than at startup; `registerMessages` adds them when their chunk loads. */
 type LazyCatalogs = typeof tryOnMessages;
-/**
- * Every message. The try-on catalog (./tryon.json) is not in the startup bundle: the try-on modules import
- * ./tryon, which registers it before they render. Until then its keys are absent and translate() fails closed.
- */
-export const messages = startup as typeof startup & LazyCatalogs;
-export type MessageKey = keyof typeof messages;
-export function registerMessages(catalog: Partial<LazyCatalogs>): void {
-  Object.assign(messages, catalog);
-}
+export type MessageKey = keyof (Startup & LazyCatalogs);
 export type Language = 'en' | 'fi' | 'sv';
 export const languages: readonly Language[] = ['en', 'fi', 'sv'];
 export const locales: Record<Language, string> = { en: 'en-GB', fi: 'fi-FI', sv: 'sv-FI' };
 export type Parameters = Readonly<Record<string, string | number>>;
 export type Translate = (key: MessageKey, parameters?: Parameters) => string;
+export type CatalogueTable = Readonly<Record<string, string>>;
+
+const tables: Partial<Record<Language, CatalogueTable>> = {};
+const extras = new Map<string, Readonly<Record<Language, string>>>();
+
+/** Installs one language's startup table. Catalogues are public build data, so they stay across sign-out and UID changes. */
+export function installCatalogue(language: Language, table: CatalogueTable): void {
+  tables[language] = table;
+}
+export function catalogueLoaded(language: Language): boolean {
+  return tables[language] !== undefined;
+}
+export function registerMessages(catalog: Partial<LazyCatalogs>): void {
+  for (const [key, entry] of Object.entries(catalog)) if (entry) extras.set(key, entry);
+}
 
 export function isLanguage(value: unknown): value is Language {
   return value === 'en' || value === 'fi' || value === 'sv';
@@ -38,17 +48,25 @@ export function resolveLanguage(
   return 'en';
 }
 
+function lookup(language: Language, key: string): string | undefined {
+  const table = tables[language];
+  return (table && Object.hasOwn(table, key) ? table[key] : undefined) || extras.get(key)?.[language] || undefined;
+}
+function unavailable(language: Language): string {
+  return tables[language]?.['error.unavailable'] ?? bootMessages['error.unavailable'][language];
+}
+
 export function translate(language: Language, key: MessageKey, parameters: Parameters = {}): string {
-  const entry = Object.hasOwn(messages, key) ? messages[key] : undefined;
-  const template = entry?.[language] || entry?.en;
+  // A language whose table is not installed has no fallback: rendering it would show another language.
+  const template = catalogueLoaded(language) ? lookup(language, key) ?? (language === 'en' ? undefined : lookup('en', key)) : undefined;
   if (!template) {
-    if (import.meta.env.DEV) throw new Error('Missing translation.');
-    return messages['error.unavailable'][language];
+    if (import.meta.env.DEV) throw new Error(catalogueLoaded(language) ? 'Missing translation.' : `The ${language} catalogue is not loaded.`);
+    return unavailable(language);
   }
   const required = [...template.matchAll(/\{([A-Za-z][A-Za-z0-9]*)\}/g)].map((match) => match[1]!);
   if (required.some((name) => !Object.hasOwn(parameters, name))) {
     if (import.meta.env.DEV) throw new Error('Missing translation parameter.');
-    return messages['error.unavailable'][language];
+    return unavailable(language);
   }
   return template.replace(/\{([A-Za-z][A-Za-z0-9]*)\}/g, (_, name: string) => String(parameters[name]));
 }

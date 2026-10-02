@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GarmentValues } from '../../src/domain/garment-fields';
 import { itemFacts } from '../../src/features/wardrobe/item-facts';
-import { languages, translate, type Language, type MessageKey } from '../../src/i18n';
+import { languages, translate, type Language, type MessageKey } from '../../src/i18n/all';
 
 const t = (language: Language) => (key: MessageKey, parameters?: Record<string, string | number>) => translate(language, key, parameters);
 

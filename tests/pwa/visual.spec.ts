@@ -2,7 +2,7 @@ import { devices, expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
-import { languages, messages, type Language } from '../../src/i18n';
+import { languages, messages, type Language } from '../../src/i18n/all';
 import { mockBackend, signIn } from '../browser/mock-backend';
 import { builds } from './builds';
 import { controlled, serve, updateAndSettle, type DistServer } from './helpers';

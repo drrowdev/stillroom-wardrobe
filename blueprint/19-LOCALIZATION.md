@@ -28,6 +28,16 @@ Use whole sentences with named parameters, never concatenated sentence fragments
 
 CI fails on a missing/empty language value, unknown message key, mismatched parameter names, invalid plural pair or raw user-facing string outside the catalog. At runtime an unexpectedly missing translation falls back to its English value, then a generic localized error; never display an internal key. Development should fail loudly so fallback does not hide incomplete translations. Public pages set `<html lang>` to the active `en`, `fi` or `sv` value; language changes update it immediately when the setting is applied.
 
+### Catalogue loading (LANG1, 2026)
+
+`src/i18n/messages.json` (and the other source catalogues) stay the single typed source; the app no longer ships all three languages in its startup bundle. The build (`scripts/i18n-catalogues.mjs`) emits one complete JSON catalogue per language, `/assets/catalogue-<language>-<hash>.json`, plus a descriptor with each file's URL, size and full SHA-256. A missing language value fails the build, so the English fallback above stays a safeguard, not a loading strategy.
+
+- **Startup.** The app picks the language as before (saved choice, then device) and loads only that catalogue before the first localized render, so no other language flashes. If it cannot load, a small built-in three-language error screen offers Try again, which retries in the same document; a captured password-recovery link survives in memory and is never stored or put back in the URL.
+- **Switching** (Settings and the sign-in/recovery chooser) keeps the current language while the new catalogue loads, marks the chooser busy and announces the change politely. A failure keeps the current language and shows an error with Try again. A pending choice is dropped on sign-in, sign-out, owner change and unmount; the owner's profile language is still written only after its catalogue has loaded, through the serialized I06 writes.
+- **Integrity.** The loader fetches the exact precached URL with no query, bounds the read, requires JSON, checks the SHA-256 and structure (language, every key, consent notice text) before installing it, and never evaluates it as code.
+- **Offline.** The service worker precaches all three catalogues with the shell, so switching and a cold offline start work offline.
+- **Tests.** Code and tests that need every language import `src/i18n/all`; the runtime uses `src/i18n` and the loader.
+
 ## Stable data and formatting
 
 * Keep schema/table/JSON keys, UUIDs, enum values, color/category identifiers, routes, error codes, signatures and export filenames language-neutral. Store `top`, not `yläosa` or `överdel`. Translate only the displayed label. Never add one set of wardrobe tables per language.

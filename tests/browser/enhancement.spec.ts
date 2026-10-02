@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { CLEANUP_NOTICE_REVISION } from '../../src/domain/enhancement';
-import { messages, type Language } from '../../src/i18n';
+import { messages, type Language } from '../../src/i18n/all';
 import type { BackgroundTestHook } from '../../src/images/background/test-hook';
 import { aiFixture, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { enhanceServerNow, owners, type EnhanceReply, type EnhanceReplyValue, type EnhanceSetup } from './mock-backend';

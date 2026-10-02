@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import { messages } from '../../src/i18n';
+import { messages } from '../../src/i18n/all';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { openAccountMenu } from './shell-support';
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { presentAiFacts, usdCents } from '../../src/domain/ai-presentation';
-import { languages, locales } from '../../src/i18n';
+import { languages, locales } from '../../src/i18n/all';
 
 describe('local presentation, not a second inference', () => {
   it.each(languages)('generates bounded supported text in %s without inventing facts', (language) => {

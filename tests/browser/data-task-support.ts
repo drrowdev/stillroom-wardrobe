@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { translate, type Language } from '../../src/i18n';
+import { translate, type Language } from '../../src/i18n/all';
 import { goTo, openAccountMenu, shellNav } from './shell-support';
 
 export type DataTask = 'backup' | 'restore' | 'delete';

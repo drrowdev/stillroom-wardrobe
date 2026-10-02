@@ -3,7 +3,7 @@ import { colours } from '../../src/domain/preferences';
 import { combinationKey, limits, pairKey, recommend, type EngineContext, type EngineItem } from '../../src/domain/recommendations';
 import { occasions } from '../../src/domain/outfits';
 import { categories, type Category } from '../../src/domain/wardrobe';
-import { translate, languages } from '../../src/i18n';
+import { translate, languages } from '../../src/i18n/all';
 
 const owner = '11111111-1111-4111-8111-111111111111';
 const other = '22222222-2222-4222-8222-222222222222';

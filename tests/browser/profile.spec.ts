@@ -2,7 +2,7 @@ import { expect, test, type Page, type Route, type Request as PlaywrightRequest,
 import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open, readdir, lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { messages, type Language } from '../../src/i18n';
+import { messages, type Language } from '../../src/i18n/all';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { aiFixture } from './ai-photo-first-support';
 import { expectIdentity, openAccountMenu, settleShell, signOutThroughMenu } from './shell-support';

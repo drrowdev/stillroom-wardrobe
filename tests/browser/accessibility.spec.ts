@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page, type TestInfo } from '@playwrigh
 import AxeBuilder from '@axe-core/playwright';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
-import { languages, messages, translate, type Language, type MessageKey } from '../../src/i18n';
+import { languages, messages, translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { aiFixture, editItem, manualEntry } from './ai-photo-first-support';
 import { mockBackend, owners, recoveryHash, signIn } from './mock-backend';
 import { dismissKeyboard, expectIdentity, openAccountMenu, shellNav } from './shell-support';

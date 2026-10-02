@@ -28,6 +28,11 @@ describe('shell artifact classification', () => {
       expect(isExcludedArtifact(file), file).toBe(true);
     }
     for (const file of ['models/u2netp-309c8469.onnx', 'models/ort-wasm-simd-threaded-3398c10d.wasm']) expect(isShellArtifact(file), file).toBe(false);
+    for (const file of ['assets/catalogue-en-AbC_d-12.json', 'assets/catalogue-fi-12345678.json', 'assets/catalogue-sv-zzzzzzzz.json']) expect(isShellArtifact(file), file).toBe(true);
+    for (const file of ['assets/catalogue-de-12345678.json', 'assets/catalogue-en-1234567.json', 'assets/catalogue-en-123456789.json',
+      'assets/catalogue-en-1234.678.json', 'catalogue-en-12345678.json', 'assets/x/catalogue-en-12345678.json']) {
+      expect(isShellArtifact(file), file).toBe(false);
+    }
     expect(isExcludedArtifact('robots.txt')).toBe(false);
     expect(artifactUrl('index.html')).toBe('/');
     expect(artifactUrl('assets/a-12345678.js')).toBe('/assets/a-12345678.js');
@@ -111,6 +116,17 @@ describe('worker routing', () => {
     for (const path of ['/rest/v1/items', '/_headers', '/precache-manifest.json', '/service-worker.js']) expect(route(path, 'cors', ''), path).toBeNull();
     expect(route('https://backend.example.test/assets/index-Bfi6nLlj.js', 'cors', 'script')).toBeNull();
     expect(route('/assets/index-Bfi6nLlj.js', 'cors', 'script', 'HEAD')).toBeNull();
+  });
+
+  it('answers a verified catalogue only as a plain same-origin fetch of its canonical URL (LANG1)', () => {
+    const catalogue = '/assets/catalogue-fi-AbCdEf12.json';
+    const routeIn = (path: string, mode: string, destination: string, method = 'GET') => routeRequest({ method, url: `${origin}${path}`, mode, destination }, origin, new Set([...files, catalogue]));
+    expect(routeIn(catalogue, 'same-origin', '')).toBe('file');
+    expect(routeIn(catalogue, 'cors', '')).toBe('file');
+    for (const query of ['?retry=1', '?token=synthetic']) expect(routeIn(`${catalogue}${query}`, 'same-origin', ''), query).toBeNull();
+    for (const destination of ['script', 'style', 'document', 'worker']) expect(routeIn(catalogue, 'same-origin', destination), destination).toBeNull();
+    expect(routeIn(catalogue, 'same-origin', '', 'POST')).toBeNull();
+    expect(routeIn('/assets/catalogue-fi-ZZZZZZZZ.json', 'same-origin', '')).toBeNull();
   });
 
   it('round-trips the stamped URL list', () => {

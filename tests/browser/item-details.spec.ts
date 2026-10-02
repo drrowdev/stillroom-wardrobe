@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { createHash } from 'node:crypto';
 import { mkdir, open, readdir, lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { messages, type Language } from '../../src/i18n';
+import { messages, type Language } from '../../src/i18n/all';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { aiFixture, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { closeAccountMenu, expectIdentity, openAccountMenu } from './shell-support';

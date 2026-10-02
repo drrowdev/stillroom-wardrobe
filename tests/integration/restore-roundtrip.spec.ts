@@ -23,7 +23,7 @@ import { buildGarmentWrite, editGarmentField, garmentPayload, newGarmentDraft, p
 import { itemDetailColumns, parseItemBaseline } from '../../src/domain/item-details';
 import { deletionIntent } from '../../src/domain/item-lifecycle';
 import { restoreId } from '../../src/domain/restore-plan';
-import { translate, type MessageKey } from '../../src/i18n';
+import { translate, type MessageKey } from '../../src/i18n/all';
 import { fitDimensions, JPEG_LIMITS } from '../../src/images/jpeg';
 import { ImageChangeClient } from '../../src/images/replace';
 import { newSaveAttempt, saveItem, type SaveAttempt } from '../../src/images/upload';

@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { lstat, mkdir, open, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { mockBackend, owners, recoveryHash, signIn } from './mock-backend';
-import { translate, type Language } from '../../src/i18n';
+import { translate, type Language } from '../../src/i18n/all';
 import { expectIdentity, openAccountMenu } from './shell-support';
 
 const password = 'fictional recovery password only';
