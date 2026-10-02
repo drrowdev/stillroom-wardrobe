@@ -638,6 +638,32 @@ describe('live expiry', () => {
     expect(scope?.signal.aborted).toBe(false);
   });
 
+  it('ends the old scope when a held renewal arrives after the deadline, before the deadline timer runs', async () => {
+    const renewal = deferred<Response>();
+    const { controller } = await readyA(() => renewal.promise);
+    const scope = controller.getSnapshot().scope;
+    // The renewal starts inside the SDK's margin, then its reply is held past the old deadline; no timer has fired.
+    vi.setSystemTime(Date.now() + HOUR - 30_000);
+    const renewing = controller.getSnapshot().client.auth.getSession();
+    await until(() => refreshGrants().length > 0);
+    vi.setSystemTime(Date.now() + 60_000);
+    const first: { aborted?: boolean; scope?: unknown; phase?: string } = {};
+    cleanups.push(controller.subscribe(() => {
+      if (!('aborted' in first)) Object.assign(first, { aborted: scope?.signal.aborted, scope: controller.getSnapshot().scope, phase: controller.getSnapshot().phase });
+    }));
+    renewal.resolve(json(sessionFor('token-a2', USER_A)));
+    await renewing;
+    await settle();
+    // The late renewal never carries the old scope on: it is aborted before anything else shows.
+    expect(first).toEqual({ aborted: true, scope: null, phase: 'loading' });
+    expect(scope?.signal.aborted).toBe(true);
+    await until(() => controller.getSnapshot().phase === 'ready');
+    const reopened = controller.getSnapshot().scope;
+    expect(reopened).not.toBe(scope);
+    expect(reopened?.epoch).toBeGreaterThan(scope?.epoch ?? Infinity);
+    expect(stored()?.access_token).toBe('token-a2');
+  });
+
   it('ends the scope at once when a page slept past expiry, then reopens with the renewed token', async () => {
     const { controller } = await readyA(() => json(sessionFor('token-a2', USER_A)));
     vi.setSystemTime(Date.now() + 2 * HOUR);

@@ -151,7 +151,10 @@ export class SessionController {
         this.publish({ phase: 'loading', language: resolveLanguage(this.browserLanguages, null, this.choice), profile: null, scope: null, languageUnsaved: false });
       } else if ((scope?.ownerId === owner && !scope.signal.aborted && (this.state.phase === 'ready' || this.state.phase === 'deleting'))
         || (this.opening === owner && !this.request.signal.aborted)) {
-        // The same owner's renewed credential: an open scope, or one still loading, carries on.
+        // The same owner's renewed credential carries an open or loading scope on, but only if it came before the old
+        // deadline. A renewal that arrives late (the page's timer was throttled) ends the old scope first; recovery
+        // then reopens with the renewed session under a new epoch.
+        if (this.checkExpiry()) return;
         this.arm(session);
         return;
       }
