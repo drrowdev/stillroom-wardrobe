@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- LANG1C-DIAG temporary */
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { lstat, mkdir, open } from 'node:fs/promises';
@@ -74,8 +75,34 @@ async function start(page: Page, options: Options = {}) {
   return { api, writes, consentWrites: (feature: Feature) => writes.filter((entry) => entry.path === consentPath[feature]) };
 }
 async function openSettings(page: Page) {
-  await page.evaluate(() => { location.hash = '#/settings'; });
-  await expect(page.locator('#settings-title')).toBeVisible();
+  // LANG1C-DIAG: temporary CI diagnostics, never merged.
+  const t0 = Date.now();
+  const events: string[] = [];
+  const pending = new Map<unknown, string>();
+  const stamp = () => String(Date.now() - t0);
+  page.on('request', (r) => { pending.set(r, r.url()); });
+  page.on('requestfinished', (r) => { pending.delete(r); });
+  page.on('requestfailed', (r) => { pending.delete(r); events.push(`${stamp()} requestfailed ${r.url()} ${r.failure()?.errorText}`); });
+  page.on('response', (r) => { if (r.status() >= 400) events.push(`${stamp()} status ${r.status()} ${r.url()}`); });
+  page.on('pageerror', (e) => { events.push(`${stamp()} pageerror ${e.message}`); });
+  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') events.push(`${stamp()} console.${m.type()} ${m.text().slice(0, 300)}`); });
+  page.on('crash', () => { events.push(`${stamp()} crash`); });
+  const pre = await page.evaluate(() => { const d: string[] = (window as any).__diag ??= []; d.push('test-set-hash ' + performance.now().toFixed(0)); location.hash = '#/settings'; return document.documentElement.lang; });
+  try {
+    await expect(page.locator('#settings-title')).toBeVisible();
+    console.log(`LANG1C-OK ${pre} ${Date.now() - t0}ms`);
+  } catch (error) {
+    let info: unknown;
+    try {
+      info = await page.evaluate(() => ({ now: performance.now().toFixed(0), hash: location.hash, lang: document.documentElement.lang, ready: document.readyState, visibility: document.visibilityState,
+        headings: [...document.querySelectorAll('h1,h2')].map((e) => `${e.id}:${e.textContent}`).slice(0, 6),
+        chunkLoading: document.querySelectorAll('.chunk-loading').length, chunkError: document.querySelectorAll('.chunk-error').length,
+        entry: document.querySelectorAll('.entry-card').length, workspace: document.querySelectorAll('.workspace').length,
+        diag: (window as any).__diag, body: document.body.innerText.slice(0, 400) }));
+    } catch (evaluateError) { info = `evaluate failed: ${String(evaluateError)}`; }
+    console.log('LANG1C-DIAG ' + JSON.stringify({ language: pre, elapsed: Date.now() - t0, info, events, pending: [...pending.values()] }));
+    throw error;
+  }
 }
 /** Holds the next consent write for a feature until `release` is called. */
 async function holdConsent(page: Page, feature: Feature) {

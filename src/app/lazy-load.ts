@@ -16,9 +16,12 @@ const loaders: (() => Promise<unknown>)[] = [];
 export function lazyNamed<M extends Record<K, AnyComponent>, K extends keyof M>(load: () => Promise<M>, name: K): Preloadable<M[K]> {
   let pending: Promise<M> | null = null;
   let loaded: M | null = null;
-  const fetch = () => pending ??= load().then(
-    (module) => { loaded = module; return module; },
-    (error: unknown) => { pending = null; throw new ChunkLoadError(error); },
+  const index = loaders.length;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LANG1C-DIAG temporary
+  const note = (what: string) => { ((globalThis as any).__diag ??= []).push(`chunk${index} ${what} ${performance.now().toFixed(0)}`); };
+  const fetch = () => pending ??= (note('start'), load()).then(
+    (module) => { note('done'); loaded = module; return module; },
+    (error: unknown) => { note(`failed ${String(error)}`); pending = null; throw new ChunkLoadError(error); },
   );
   loaders.push(fetch);
   // Once the code is here, resolve synchronously so React renders the page without a loading state.

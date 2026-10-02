@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- LANG1C-DIAG temporary */
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { readConfiguration, type Configuration, type PublicConfig } from '../data/config';
 import { makeClient, retireClient } from '../data/client';
@@ -114,6 +115,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   const [calendarSeed, setCalendarSeed] = useState<{ outfitId: string } | null>(null);
   const invalidateOutfits = useCallback(() => setOutfitsInvalidation(value => value + 1), []);
   useEffect(() => {
+    ((window as any).__diag ??= []).push(`route ${route} ${performance.now().toFixed(0)}`);
     onRouteCommitted(route);
     setOutfitNotice(current => current !== null && route !== `outfit:${current}` ? null : current);
     if (route !== 'outfit-new') setOutfitSeed(null);
@@ -192,6 +194,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
         return;
       }
       const next = currentRoute();
+      ((window as any).__diag ??= []).push('onHash ' + performance.now().toFixed(0) + ' ' + next + ' from ' + current.route);
       const position = typeof history.state?.wardrobePosition === 'number' ? history.state.wardrobePosition : current.position + 1;
       if (history.state?.wardrobePosition !== position) history.replaceState({ ...history.state, wardrobePosition: position }, '', location.href);
       if (next === current.route) { current.position = position; return; }
@@ -217,6 +220,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
       if (next) { event.preventDefault(); if (navigation.current.route.startsWith('detail:') || navigation.current.route.startsWith('outfit')) anchor?.focus(); changeRoute(next); }
     };
     const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty.current.dirty) { event.preventDefault(); event.returnValue = ''; } };
+    ((window as any).__diag ??= []).push('listen ' + performance.now().toFixed(0) + ' ' + location.hash);
     window.addEventListener('hashchange', onHash);
     window.addEventListener('popstate', onHash);
     document.addEventListener('click', onClick);
@@ -393,6 +397,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   const holding = state.phase === 'ready' && display.pending !== null && workspaceEpoch.current !== (scopeEpoch ?? null);
   const workspace = state.phase === 'ready' && Boolean(state.profile) && Boolean(state.scope) && !holding;
   useLayoutEffect(() => { if (workspace) workspaceEpoch.current = scopeEpoch ?? null; });
+  useEffect(() => { ((window as any).__diag ??= []).push(`conn ${performance.now().toFixed(0)} ph=${state.phase} req=${state.language} shown=${display.shown} pend=${display.pending} hold=${holding} ws=${workspace} ep=${scopeEpoch}`); }, [state.phase, state.language, display.shown, display.pending, holding, workspace, scopeEpoch]);
   useEffect(() => {
     if (state.phase === 'signed-out' && !requestPassword && callback.kind === 'none') document.getElementById('login-title')?.focus();
     if (state.phase === 'waiting' && callback.kind === 'none') document.getElementById('waiting-title')?.focus();

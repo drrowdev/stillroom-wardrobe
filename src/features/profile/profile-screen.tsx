@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- LANG1C-DIAG temporary */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppClient } from '../../data/client';
 import type { OwnerScope, SessionController, SessionState } from '../../auth/session';
@@ -79,8 +80,10 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
     scope.signal.addEventListener('abort', reset, { once: true });
     return () => scope.signal.removeEventListener('abort', reset);
   }, [scope]);
+  const tzStart = performance.now();
   const timezones = useMemo(() => timeZoneOptions(language, [base.timezone, fields.timezone]), [language, base.timezone, fields.timezone]);
   const currencies = useMemo(() => currencyOptions(language, [base.currency, fields.currency]), [language, base.currency, fields.currency]);
+  ((window as any).__diag ??= []).push(`profile-render ${tzStart.toFixed(0)} options=${(performance.now() - tzStart).toFixed(0)}`);
   const dirty = !sameProfileFields(fields, base);
   const shownError: MessageKey | null = error === 'settings.invalidTimezone' && !timezones ? 'settings.enterTimezone'
     : error === 'settings.invalidCurrency' && !currencies ? 'settings.enterCurrency' : error;
