@@ -139,6 +139,43 @@ test.describe('UI1 section layout', () => {
   }
 });
 
+test.describe('LANG1c route at the first workspace render', () => {
+  test('a hash change between the first workspace paint and its listeners still opens Settings, with one history entry', async ({ page }) => {
+    // Change the hash the moment the Wardrobe heading is inserted: after the DOM commit, before React's passive effects run.
+    await page.addInitScript(() => {
+      new MutationObserver((_, observer) => {
+        if (!document.getElementById('wardrobe-title')) return;
+        observer.disconnect();
+        (window as Window & { historyAtHash?: number }).historyAtHash = history.length + 1;
+        location.hash = '#/settings';
+      }).observe(document, { childList: true, subtree: true });
+    });
+    await mockBackend(page, { initialLanguage: 'fi' });
+    await page.goto('/');
+    await signIn(page);
+    await expect(page.locator('#settings-title')).toBeVisible();
+    await expect(page.locator('#settings-title')).toHaveText(text('nav.settings', 'fi'));
+    // The hash really changed as the Wardrobe first appeared, and catching up added no history entry.
+    expect(await page.evaluate(() => [location.hash, history.length === (window as Window & { historyAtHash?: number }).historyAtHash])).toEqual(['#/settings', true]);
+    await page.goBack();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+  });
+
+  test('on the normal path a hash change adds one history entry and Back returns', async ({ page }) => {
+    await mockBackend(page, { initialLanguage: 'fi' });
+    await page.goto('/');
+    await signIn(page);
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    const before = await page.evaluate(() => [location.hash, history.length] as const);
+    await page.evaluate(() => { location.hash = '#/settings'; });
+    await expect(page.locator('#settings-title')).toBeVisible();
+    expect(await page.evaluate(() => history.length)).toBe(before[1] + 1);
+    await page.goBack();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    expect(await page.evaluate(() => [location.hash, history.length])).toEqual([before[0], before[1] + 1]);
+  });
+});
+
 for (const feature of features) {
   test.describe(`UI1 ${feature} switch`, () => {
     for (const language of languages) {

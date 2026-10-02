@@ -222,6 +222,8 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
     window.addEventListener('popstate', onHash);
     document.addEventListener('click', onClick);
     window.addEventListener('beforeunload', beforeUnload);
+    // A hash change between this render and these listeners (the first workspace paint can land first) would otherwise be lost.
+    if (currentRoute() !== navigation.current.route) onHash();
     return () => {
       window.removeEventListener('hashchange', onHash); window.removeEventListener('popstate', onHash);
       document.removeEventListener('click', onClick); window.removeEventListener('beforeunload', beforeUnload);
