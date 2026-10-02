@@ -157,6 +157,7 @@ test.describe('AUTH1b remember on this device', () => {
     await open(second);
     await second.route('http://127.0.0.1:54321/**', (route) => route.abort('internetdisconnected'));
     await expect(second.getByRole('heading', { level: 1, name: text('auth.offlineTitle') })).toBeFocused();
+    await expect(second.getByRole('status').filter({ hasText: text('auth.offlineWaiting') })).toBeVisible();
     await second.getByRole('button', { name: text('auth.signOut'), exact: true }).click();
     await expect(second.locator('#email')).toBeVisible();
     expect(await slot(second)).toBeNull();
@@ -349,9 +350,19 @@ async function audit(page: Page, label: string) {
         .map((element) => ({ element, box: (element instanceof HTMLInputElement && element.type === 'checkbox' ? element.closest('label') ?? element : element).getBoundingClientRect() }))
         .filter(({ box }) => box.width < 44 || box.height < 44)
         .map(({ element, box }) => `${element.tagName} ${Math.round(box.width)}x${Math.round(box.height)}`);
-      return { overflow: document.documentElement.scrollWidth > innerWidth, small };
+      // The checkbox scales with the text and sits on the label's first line, not centred on a wrapped label.
+      const box = document.querySelector('main label.check input[type=checkbox]');
+      const misplaced = box && shown(box) ? (() => {
+        const input = box.getBoundingClientRect();
+        const text = document.createRange();
+        text.selectNodeContents(box.closest('label')!);
+        const first = [...text.getClientRects()].filter((rect) => rect.left >= input.right)[0];
+        const size = parseFloat(getComputedStyle(box).fontSize);
+        return input.height < size * 1.2 || !first || Math.abs((input.top + input.bottom) / 2 - (first.top + first.bottom) / 2) > size * 0.4;
+      })() : false;
+      return { overflow: document.documentElement.scrollWidth > innerWidth, small, misplaced };
     });
-    expect(check, `${label} ${large ? '200%' : '100%'}`).toEqual({ overflow: false, small: [] });
+    expect(check, `${label} ${large ? '200%' : '100%'}`).toEqual({ overflow: false, small: [], misplaced: false });
     expect((await new AxeBuilder({ page }).analyze()).violations, `${label} axe`).toEqual([]);
     await style?.evaluate((node) => { (node as HTMLStyleElement).remove(); });
   }

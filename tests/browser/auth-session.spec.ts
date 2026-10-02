@@ -54,7 +54,7 @@ async function expectNothingPrivate(page: Page) {
 }
 async function waitingCard(page: Page) {
   await expect(page.getByRole('heading', { level: 1, name: text('auth.offlineTitle') })).toBeFocused();
-  await expect(page.getByRole('status').filter({ hasText: text('common.offline') })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: text('auth.offlineWaiting') })).toBeVisible();
   await expect(page.getByRole('button', { name: text('auth.signOut'), exact: true })).toBeVisible();
   await expect(page.getByText('Alex')).toHaveCount(0);
   await expect(page.getByText('Synthetic linen shirt')).toHaveCount(0);

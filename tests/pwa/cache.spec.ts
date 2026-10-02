@@ -248,7 +248,7 @@ test('an offline reopen after private data loaded shows no private data, and the
   await page.reload();
   // The stored session cannot be opened offline, so the app waits for a connection without asking for private data.
   await expect(page.getByRole('heading', { level: 1, name: messages['auth.offlineTitle'].en })).toBeVisible({ timeout: 20000 });
-  await expect(page.getByText(messages['common.offline'].en)).toBeVisible();
+  await expect(page.getByText(messages['auth.offlineWaiting'].en)).toBeVisible();
   await expect.poll(() => refused).toContain('/auth/v1/user');
   expect(refused.filter((pathname) => pathname.startsWith('/rest/'))).toEqual([]);
   await expect(page.locator('.workspace')).toHaveCount(0);
@@ -284,7 +284,7 @@ test('a remembered session closed and reopened offline shows the cached shell an
   const before = server.requests.length;
   await reopened.goto(server.url);
   await expect(reopened.getByRole('heading', { level: 1, name: messages['auth.offlineTitle'].en })).toBeVisible({ timeout: 20000 });
-  await expect(reopened.getByText(messages['common.offline'].en)).toBeVisible();
+  await expect(reopened.getByText(messages['auth.offlineWaiting'].en)).toBeVisible();
   expect(refused.filter((pathname) => pathname.startsWith('/rest/') || pathname.startsWith('/storage/'))).toEqual([]);
   await expect(reopened.locator('.workspace')).toHaveCount(0);
   await expect(reopened.getByText(privateTitle)).toHaveCount(0);
