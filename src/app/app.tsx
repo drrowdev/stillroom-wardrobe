@@ -181,7 +181,9 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
     history.pushState({ ...history.state, wardrobePosition: navigation.current.position }, '', hashForRoute(next));
     setRoute(next);
   }, []);
-  useEffect(() => {
+  // A layout effect: the entry is stamped and the listeners attached in the commit that first shows the workspace, so a
+  // hash change right after that first paint is handled normally, with its own history position.
+  useLayoutEffect(() => {
     history.replaceState({ ...history.state, wardrobePosition: navigation.current.position }, '', location.href);
     const onHash = () => {
       const current = navigation.current;
