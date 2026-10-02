@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { readConfiguration, type Configuration, type PublicConfig } from '../data/config';
-import { makeClient, retireClient } from '../data/client';
+import { makeClient, releaseClient, retireClient } from '../data/client';
 import { SessionController, type OwnerScope, type SessionState } from '../auth/session';
 import { Login } from '../auth/login';
 import { translate, resolveLanguage, type Language, type MessageKey, type Translate } from '../i18n';
@@ -27,6 +27,7 @@ import { leaveDialogFor, navFamilyFor, outfitRouteId } from '../domain/outfits';
 import { OutfitLeaveDialog } from '../features/outfits/leave-dialog';
 import { LazyBoundary } from './lazy';
 import { PasswordRecovery } from '../auth/password-recovery';
+import { remembered } from '../auth/remembered';
 import { UpdatePrompt } from '../pwa/update-prompt';
 import { lazyNamed, preloadChunks } from './lazy-load';
 import { WeatherStore, weatherKey } from '../features/today/use-weather';
@@ -347,7 +348,9 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   const [controller] = useState(() => {
     markNormalAuthStarted();
     return new SessionController(makeClient(config), browserLanguages, {
-      make: () => makeClient(config), retire: retireClient, revoke: (record) => revokeSession(config, record),
+      make: (mode, user) => makeClient(config, mode, user), retire: retireClient, release: releaseClient, revoke: (record) => revokeSession(config, record),
+      // Eager: a tab left open across a deploy must still sign in after the old release's lazy chunks are gone.
+      remembered: () => Promise.resolve(remembered(config)),
     });
   });
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
@@ -395,7 +398,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   useLayoutEffect(() => { if (workspace) workspaceEpoch.current = scopeEpoch ?? null; });
   useEffect(() => {
     if (state.phase === 'signed-out' && !requestPassword && callback.kind === 'none') document.getElementById('login-title')?.focus();
-    if (state.phase === 'waiting' && callback.kind === 'none') document.getElementById('waiting-title')?.focus();
+    if ((state.phase === 'waiting' || state.phase === 'elsewhere') && callback.kind === 'none') document.getElementById('waiting-title')?.focus();
   }, [state.phase, requestPassword, callback.kind]);
   // The account menu closes on every route commit and account change.
   const epoch = state.scope?.epoch;
@@ -428,7 +431,8 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
         : state.phase === 'loading' || holding ? <section className="entry-card connecting" aria-busy="true"><span className="spinner" /><p role="status">{t('common.loading')}</p></section>
         : state.phase === 'deleting' && state.scope && state.deletion ? <LazyBoundary t={t} action={<button type="button" className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button>}><DeletionRecovery key={state.scope.epoch} client={client} controller={controller}
           scope={state.scope} deletion={state.deletion} online={online} t={t} onSignOut={() => { void signOut(); }} /></LazyBoundary>
-        : state.phase === 'waiting' ? <section className="entry-card"><h1 id="waiting-title" tabIndex={-1}>{t('auth.offlineTitle')}</h1><p role="status" className="notice notice-offline">{t('common.offline')}</p><button className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></section>
+        : state.phase === 'elsewhere' ? <section className="entry-card"><h1 id="waiting-title" tabIndex={-1}>{t('auth.otherWindow')}</h1><p className="muted">{t('auth.otherWindowHint')}</p></section>
+      : state.phase === 'waiting' ? <section className="entry-card"><h1 id="waiting-title" tabIndex={-1}>{t('auth.offlineTitle')}</h1><p role="status" className="notice notice-offline">{t('common.offline')}</p><button className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></section>
         : state.phase === 'locked' ? <section className="entry-card"><h1>{t('common.errorTitle')}</h1><p className="muted">{t('account.locked')}</p><div className="stack"><button className="button button-primary" onClick={() => { void controller.retry(); }} disabled={!online}>{t('common.retry')}</button><button className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div></section>
           : <div>{callback.kind === 'none' && callback.notice && <p role="status" className="notice">{t(callback.notice)}</p>}{!online && <p role="status" className="notice notice-offline">{t('common.offline')}</p>}{state.notice === 'delete.done' ? <p className="notice notice-success" role="status">{t('delete.done')}</p>
             : (signOutError || state.notice) && <p className="notice notice-error" role="alert">{t(state.notice ?? 'auth.localSignOut')}</p>}<Login controller={controller} online={online} t={t} onAuthActivity={clearRecoveryNotice} onRecovery={() => { clearRecoveryNotice(); setRequestPassword(true); }} /></div>}

@@ -503,6 +503,18 @@ jobs:
             test-results/ux6-visual/sign-in-sv-320-200.png
           if-no-files-found: error
           retention-days: 1
+      - name: Preserve bounded synthetic AUTH1 sign-in visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: auth1-sign-in-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/auth1-visual/sign-in-en-mobile.png
+            test-results/auth1-visual/sign-in-fi-mobile.png
+            test-results/auth1-visual/sign-in-sv-320-200.png
+            test-results/auth1-visual/waiting-en-mobile.png
+            test-results/auth1-visual/other-window-fi-mobile.png
+          if-no-files-found: error
+          retention-days: 1
 
   pwa:
     name: PWA production contracts

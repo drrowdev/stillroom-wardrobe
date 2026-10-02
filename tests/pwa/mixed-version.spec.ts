@@ -127,3 +127,118 @@ test('a full session record left by the baseline is cut down to the tokens and e
   const raw = await page.evaluate(() => JSON.stringify([{ ...sessionStorage }, { ...localStorage }]));
   for (const secret of ['user-a@example.test', 'Alex', 'user_metadata']) expect(raw).not.toContain(secret);
 });
+
+// T8 (AUTH1b): baseline and AUTH1b tabs. Under the deploy gate no AUTH1a-only bundle reaches a device, so the
+// baseline is the only older release a remembered session can meet. An older release's sign-out may sign out a newer
+// remembered session (fail-safe); it never brings one back or exposes it.
+const slot = (page: Page) => page.evaluate(() => localStorage.getItem('stillroom.auth'));
+const authKeys = (page: Page) => page.evaluate(() => [...Object.keys(localStorage), ...Object.keys(sessionStorage)].filter((key) => key.startsWith('stillroom.auth')));
+async function signInRemembered(page: Page, account: 'a' | 'b') {
+  await page.bringToFront();
+  await page.locator('#email').fill(`user-${account}@example.test`);
+  await page.locator('#password').fill('fictional-test-password');
+  await page.getByRole('checkbox', { name: messages['auth.remember'].en, exact: true }).check();
+  await page.locator('button[type="submit"]').click();
+}
+const logouts = (backend: Awaited<ReturnType<typeof mockBackend>>, owner: string) =>
+  backend.requests.filter((request) => request.path === '/auth/v1/logout' && request.owner === owner).length;
+const bearers = (backend: Awaited<ReturnType<typeof mockBackend>>) => backend.requests.map((request) => request.owner);
+
+test.describe('AUTH1b with the baseline', () => {
+  test('a remembered commit never signs out a baseline tab, and a baseline sign-out ends the holder with the slot gone', async ({ context }) => {
+    const baseline = await context.newPage();
+    const current = await context.newPage();
+    await open(baseline, 'baseline');
+    await open(current, 'current');
+    await baseline.bringToFront();
+    await signIn(baseline, 'a');
+    await signedIn(baseline, 'Alex');
+    await signInRemembered(current, 'b');
+    await signedIn(current, 'Robin');
+    await current.waitForTimeout(300);
+    await signedIn(baseline, 'Alex');
+    await signOut(baseline);
+    await expect(current.locator('#email')).toBeVisible();
+    await expect(current.getByText('Robin')).toHaveCount(0);
+    expect(await authKeys(current)).toEqual([]);
+  });
+
+  test('the baseline clears a remembered slot whose window has closed, and a later AUTH1b window does not bring it back', async ({ context }) => {
+    const baseline = await context.newPage();
+    const current = await context.newPage();
+    await open(baseline, 'baseline');
+    await open(current, 'current');
+    await signInRemembered(current, 'a');
+    await signedIn(current, 'Alex');
+    const remembered = JSON.parse(await slot(current) ?? '{}') as { refresh_token?: string };
+    expect(remembered.refresh_token).toBeTruthy();
+    await current.close();
+    await baseline.bringToFront();
+    await signIn(baseline, 'b');
+    await signedIn(baseline, 'Robin');
+    await signOut(baseline, 'sv');
+    expect(await authKeys(baseline)).toEqual([]);
+    const later = await context.newPage();
+    const backend = await open(later, 'current');
+    await later.waitForTimeout(1_500);
+    await expect(later.locator('#email')).toBeVisible();
+    expect(await authKeys(later)).toEqual([]);
+    // No request carries the old remembered tokens. A server revoke of them is not required (fail-safe guarantee).
+    expect(bearers(backend).filter((owner) => owner === owners.a)).toEqual([]);
+  });
+
+  for (const delivery of ['channel', 'storage'] as const) {
+    test(`a delayed unmarked legacy sign-out (${delivery}) after a newer remembered commit only signs out`, async ({ context }) => {
+      test.setTimeout(75_000);
+      const baseline = await context.newPage();
+      const current = await context.newPage();
+      await open(baseline, 'baseline');
+      const backend = await open(current, 'current');
+      await signInRemembered(current, 'a');
+      await signedIn(current, 'Alex');
+      await signOut(current);
+      await signInRemembered(current, 'b');
+      await signedIn(current, 'Robin');
+      // What a delayed delivery from the older release looks like.
+      await baseline.evaluate((kind) => {
+        if (kind === 'channel') new BroadcastChannel('stillroom.logout').postMessage('logout');
+        else { localStorage.setItem('stillroom.logout', String(Date.now())); localStorage.removeItem('stillroom.logout'); }
+      }, delivery);
+      await expect(current.locator('#email')).toBeVisible();
+      await expect(current.getByText('Robin')).toHaveCount(0);
+      expect(await authKeys(current)).toEqual([]);
+      await expect.poll(() => logouts(backend, owners.b)).toBe(1);
+      const before = backend.requests.length;
+      // Past a refresh tick nothing reappears, and nothing carries B's tokens again.
+      await current.waitForTimeout(31_000);
+      expect(await authKeys(current)).toEqual([]);
+      expect(backend.requests.slice(before).filter((request) => request.owner === owners.b)).toEqual([]);
+      await expect(current.locator('#email')).toBeVisible();
+    });
+  }
+
+  test('a baseline clear while the holder\'s renewal is in flight ends signed out with an empty slot', async ({ context }) => {
+    const baseline = await context.newPage();
+    const current = await context.newPage();
+    await open(baseline, 'baseline');
+    await open(current, 'current', { lifetime: 60 });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let renewals = 0;
+    await current.route('http://127.0.0.1:54321/auth/v1/token?grant_type=refresh_token', async (route) => {
+      if (++renewals === 1) await held;
+      await route.fallback();
+    });
+    await signInRemembered(current, 'a');
+    await expect.poll(() => renewals).toBe(1);
+    await baseline.bringToFront();
+    await signIn(baseline, 'b');
+    await signedIn(baseline, 'Robin');
+    await signOut(baseline, 'sv');
+    release();
+    await expect(current.locator('#email')).toBeVisible();
+    await current.waitForTimeout(1_000);
+    expect(await authKeys(current)).toEqual([]);
+    await expect(current.getByText('Alex')).toHaveCount(0);
+  });
+});

@@ -1084,12 +1084,13 @@ for (const firstOwner of ['a', 'b'] as const) {
     await assertOwn(firstOwner);
     const secondOwner = other(firstOwner);
     await signIn(tabs[secondOwner], secondOwner);
-    await expect.poll(() => tabs[firstOwner].evaluate(() => (window as AuthMarkers).authEvents))
-      .toContainEqual({ event: 'SIGNED_IN', owner: owners[secondOwner] });
+    // AUTH1b stages a sign-in on a client that shares no channel and then replaces the tab's client, so the SDK's
+    // SIGNED_IN broadcast is exercised by the reload below, observed on the second tab's new client.
+    await expectIdentity(tabs[secondOwner], content[secondOwner].name);
     await assertOwn(firstOwner);
     await assertOwn(secondOwner);
     // Recovery broadcasts a real SDK SIGNED_IN back to the already signed-in second owner.
-    await tabs[secondOwner].evaluate(() => { (window as AuthMarkers).authEvents = []; });
+    await observeSdkEvents(tabs[secondOwner]);
     await tabs[firstOwner].reload();
     await expect.poll(() => tabs[secondOwner].evaluate(() => (window as AuthMarkers).authEvents))
       .toContainEqual({ event: 'SIGNED_IN', owner: owners[firstOwner] });

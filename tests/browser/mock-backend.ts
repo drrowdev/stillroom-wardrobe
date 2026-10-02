@@ -639,6 +639,8 @@ export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits |
   return { code: 'OK', asOf: now.getTime(), months, accounts: [account(1), account(2)] };
 }
 
+// Issued refresh tokens are shared by every mocked page in this worker, as one server would hold them.
+const refreshTokens = new Map<string, { id: string; email: string; sessionId: string }>();
 export async function mockBackend(page: Page, options: MockOptions = {}) {
   retryWebKitInternalReload(page);
   const profiles: Record<string, JsonRow> = {
@@ -815,8 +817,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   let commitFailed = false, analyzedReserveReplyLost = false;
   const fixture = await readFile(new URL('../../blueprint/validation/fixture.jpg', import.meta.url));
   const tokens = new Map<string, string>();
-  const refreshTokens = new Map<string, { id: string; email: string; sessionId: string }>();
-  const statusProofs: StatusProof[] = [];
+    const statusProofs: StatusProof[] = [];
   const admitAiStatus = (request: Request) => {
     const url = new URL(request.url());
     if (url.origin !== 'http://127.0.0.1:54321' || url.pathname !== '/rest/v1/rpc/ai_status') return false;

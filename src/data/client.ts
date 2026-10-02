@@ -8,9 +8,11 @@ import { ClosableAuthStorage, MemoryUserStorage, clearAuthNamespace, migrateAuth
 
 export type AppClient = SupabaseClient<Database>;
 export const authStorageKey = 'stillroom.auth';
+/** `tab`: this tab's own session in sessionStorage. `device`: the remembered slot in localStorage, for the lock holder only. */
+export type AuthMode = 'tab' | 'device';
 type ClientContext = {
   signal?: AbortSignal; ownerId: string | null; retired: boolean; storage: ClosableAuthStorage; user: MemoryUserStorage;
-  identity: string; store: () => Storage;
+  identity: string; store: () => Storage; mode: AuthMode;
 };
 const requestContexts = new WeakMap<AppClient, ClientContext>();
 const clients = new Map<string, AppClient>();
@@ -24,16 +26,18 @@ function bearerOwner(input: RequestInfo | URL, init?: RequestInit): string | nul
   const match = /^Bearer (\S+)$/.exec(headers.get('authorization') ?? '');
   return match ? tokenClaims(match[1])?.sub ?? null : null;
 }
-export function makeClient(config: PublicConfig): AppClient {
-  const identity = `${config.url}|${config.publishableKey}`;
+/** `user` seeds the in-memory user object after a sign-in, so it never touches Web storage. */
+export function makeClient(config: PublicConfig, mode: AuthMode = 'tab', user?: unknown): AppClient {
+  const identity = `${config.url}|${config.publishableKey}|${mode}`;
   const existing = clients.get(identity);
   if (existing) return existing;
-  const store = () => window.sessionStorage;
+  const store = () => mode === 'device' ? window.localStorage : window.sessionStorage;
   // Before the SDK reads anything: an older release's full record becomes the allowlisted form, anything invalid goes.
   migrateAuthStore(store());
   const context: ClientContext = {
-    retired: false, ownerId: null, storage: new ClosableAuthStorage(store), user: new MemoryUserStorage(), identity, store,
+    retired: false, ownerId: null, storage: new ClosableAuthStorage(store, mode === 'device'), user: new MemoryUserStorage(), identity, store, mode,
   };
+  if (user) context.user.setItem(`${authStorageKey}-user`, JSON.stringify({ user }));
   const client = createClient<Database>(config.url, config.publishableKey, {
     auth: {
       storage: context.storage,
@@ -108,8 +112,9 @@ export function releaseClient(client: AppClient): void {
  */
 export function retireClient(client: AppClient): { record: AuthRecord | null } {
   const context = requestContexts.get(client);
-  const record = heldRecord(client);
-  if (context) clearAuthNamespace([context.store()]);
+  const record = heldRecord(client) ?? context?.storage.last ?? null;
+  // A per-tab client never touches localStorage; the holder's sign-out also clears its own tab's keys.
+  if (context) clearAuthNamespace(context.mode === 'device' ? [window.localStorage, window.sessionStorage] : [context.store()]);
   releaseClient(client);
   return { record };
 }

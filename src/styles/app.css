@@ -478,7 +478,7 @@ html { scroll-padding-top: env(safe-area-inset-top, 0px); scroll-padding-bottom:
 .season-set legend { display: flex; gap: 8px; align-items: baseline; padding: 0 0 8px; font-size: .875rem; font-weight: 550; }
 .check-row { display: flex; flex-wrap: wrap; gap: 4px 20px; }
 .check { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-weight: 400; }
-.garment-field .check input { width: 20px; height: 20px; min-height: 0; margin: 0; }
+.garment-field .check input, .login-form .check input { width: 20px; height: 20px; min-height: 0; margin: 0; }
 .outfit-editor .field .check { align-self: flex-start; }
 .outfit-editor .field .check input { flex: none; width: 20px; height: 20px; min-height: 0; margin: 0; padding: 0; }
 .tag-entry, .price-entry { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

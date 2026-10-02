@@ -9,13 +9,14 @@ export function Login({ controller, online, t, onRecovery, onAuthActivity }: { c
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [remember, setRemember] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!online || busy) return;
     onAuthActivity();
     setFailed(false);
     setBusy(true);
-    try { await controller.signIn(email, password); setPassword(''); }
+    try { await controller.signIn(email, password, remember && controller.canRemember); setPassword(''); }
     catch { setFailed(true); }
     finally { setBusy(false); }
   }
@@ -35,12 +36,14 @@ export function Login({ controller, online, t, onRecovery, onAuthActivity }: { c
             <button type="button" onClick={() => setVisible(!visible)} aria-pressed={visible}>{t(visible ? 'auth.hidePassword' : 'auth.showPassword')}</button>
           </div>
         </div>
+        {controller.canRemember && <label className="check"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} disabled={busy} />{t('auth.remember')}</label>}
         {failed && <p role="alert" className="notice notice-error">{t('auth.failed')}</p>}
         <button className="button button-primary button-wide" type="submit" disabled={!online || busy}>
           {busy ? <span className="spinner" /> : null}{t(busy ? 'auth.signingIn' : 'auth.signIn')}
         </button>
       </form>
       <button type="button" className="text-button" disabled={busy} onClick={onRecovery}>{t('recovery.forgot')}</button>
+      {controller.deviceSlot && <button type="button" className="button button-quiet" disabled={busy} onClick={() => { void controller.signOutDevice(); }}>{t('auth.signOutDevice')}</button>}
       <p className="fine muted">{t('auth.passwordHelp')}</p>
       <div className="entry-footer"><Icon name="lock" /><span>{t('auth.invited')}</span></div>
     </section>

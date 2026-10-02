@@ -401,7 +401,8 @@ test('concise entry copy, accessible recovery and bounded synthetic entry eviden
         .every((request) => request.owner === owners.a && request.ownerFilter === `eq.${owners.a}`)).toBe(true);
       expect(await page.evaluate(({ origin, language, surface, width }) => {
         const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
-        const fields = [...document.querySelectorAll<HTMLInputElement>('input')].filter(visible);
+        // A checkbox's value is always "on"; only text fields must be empty.
+        const fields = [...document.querySelectorAll<HTMLInputElement>('input')].filter((field) => visible(field) && field.type !== 'checkbox');
         const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
         const copy = [...document.querySelectorAll('.entry-footer, .fine, .password-input button, .site-footer')].filter(visible);
         return location.origin === origin && location.hostname === '127.0.0.1' && !location.search

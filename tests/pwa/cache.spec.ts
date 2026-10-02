@@ -261,6 +261,40 @@ test('an offline reopen after private data loaded shows no private data, and the
   await expectOnlyShell(page, 'a', privateMarkers);
 });
 
+test('a remembered session closed and reopened offline shows the cached shell and the waiting card, with no private data', async ({ page, context }) => {
+  const backend = await mockBackend(page, { initialLanguage: 'en' });
+  backend.seedSavedItem('a', privateTitle);
+  await page.goto(server.url);
+  await controlled(page);
+  await page.locator('#email').fill('user-a@example.test');
+  await page.locator('#password').fill('fictional-test-password');
+  await page.getByRole('checkbox', { name: messages['auth.remember'].en, exact: true }).check();
+  await page.locator('button[type="submit"]').click();
+  await expect(page.getByText(privateTitle).first()).toBeVisible();
+  const kept = await page.evaluate(() => localStorage.getItem('stillroom.auth'));
+  expect(Object.keys(JSON.parse(kept ?? '{}')).sort()).toEqual(['access_token', 'expires_at', 'refresh_token']);
+  await page.close();
+  await context.setOffline(true);
+  const reopened = await context.newPage();
+  const refused: string[] = [];
+  await reopened.route(`${backendUrl}/**`, async (route) => {
+    refused.push(new URL(route.request().url()).pathname);
+    await route.abort('internetdisconnected');
+  });
+  const before = server.requests.length;
+  await reopened.goto(server.url);
+  await expect(reopened.getByRole('heading', { level: 1, name: messages['auth.offlineTitle'].en })).toBeVisible({ timeout: 20000 });
+  await expect(reopened.getByText(messages['common.offline'].en)).toBeVisible();
+  expect(refused.filter((pathname) => pathname.startsWith('/rest/') || pathname.startsWith('/storage/'))).toEqual([]);
+  await expect(reopened.locator('.workspace')).toHaveCount(0);
+  await expect(reopened.getByText(privateTitle)).toHaveCount(0);
+  // The kept credential stays for when the connection returns; nothing else was written.
+  expect(await reopened.evaluate(() => localStorage.getItem('stillroom.auth'))).toBe(kept);
+  expect(server.requests.slice(before).filter((entry) => entry.dest !== 'serviceworker')).toEqual([]);
+  await context.setOffline(false);
+  await expectOnlyShell(reopened, 'a', privateMarkers);
+});
+
 test('the real fetch handler leaves private, control and unlisted paths to the network', async ({ page }) => {
   await mockBackend(page, { initialLanguage: 'en' });
   await page.goto(server.url);
