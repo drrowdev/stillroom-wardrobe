@@ -181,7 +181,9 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
     history.pushState({ ...history.state, wardrobePosition: navigation.current.position }, '', hashForRoute(next));
     setRoute(next);
   }, []);
-  useEffect(() => {
+  // A layout effect: the entry is stamped and the listeners attached in the commit that first shows the workspace, so a
+  // hash change right after that first paint is handled normally, with its own history position.
+  useLayoutEffect(() => {
     history.replaceState({ ...history.state, wardrobePosition: navigation.current.position }, '', location.href);
     const onHash = () => {
       const current = navigation.current;
@@ -222,8 +224,6 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
     window.addEventListener('popstate', onHash);
     document.addEventListener('click', onClick);
     window.addEventListener('beforeunload', beforeUnload);
-    // A hash change between this render and these listeners (the first workspace paint can land first) would otherwise be lost.
-    if (currentRoute() !== navigation.current.route) onHash();
     return () => {
       window.removeEventListener('hashchange', onHash); window.removeEventListener('popstate', onHash);
       document.removeEventListener('click', onClick); window.removeEventListener('beforeunload', beforeUnload);

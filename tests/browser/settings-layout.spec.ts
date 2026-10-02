@@ -10,7 +10,7 @@ import '../../src/i18n/tryon';
 import { aiFixture } from './ai-photo-first-support';
 import { controlCatalogues } from './catalogue-support';
 import { mockBackend, owners, signIn } from './mock-backend';
-import { expectIdentity, shellNav } from './shell-support';
+import { expectIdentity, shellNav, signOutThroughMenu } from './shell-support';
 
 // UI1: the grouped Settings page. Functional and axe checks run in chromium, mobile and webkit-photo; the four bounded
 // captures are written only in chromium.
@@ -140,25 +140,77 @@ test.describe('UI1 section layout', () => {
 });
 
 test.describe('LANG1c route at the first workspace render', () => {
-  test('a hash change between the first workspace paint and its listeners still opens Settings, with one history entry', async ({ page }) => {
-    // Change the hash the moment the Wardrobe heading is inserted: after the DOM commit, before React's passive effects run.
-    await page.addInitScript(() => {
+  type RaceWindow = Window & { historyAtHash?: number };
+  /** Sets `#/settings` the moment the Wardrobe heading is inserted: right after the commit that first shows the workspace. */
+  async function armHashRace(page: Page) {
+    await page.evaluate(() => {
       new MutationObserver((_, observer) => {
         if (!document.getElementById('wardrobe-title')) return;
         observer.disconnect();
-        (window as Window & { historyAtHash?: number }).historyAtHash = history.length + 1;
+        (window as RaceWindow).historyAtHash = history.length + 1;
         location.hash = '#/settings';
       }).observe(document, { childList: true, subtree: true });
     });
+  }
+  const leaveDialog = (page: Page) => page.locator('dialog[aria-labelledby="discard-title"]');
+  async function editSettings(page: Page, language: Language = 'fi') {
+    await expect(page.locator('#settings-title')).toHaveText(text('nav.settings', language));
+    await expect(page.locator('#profile-display_name')).toBeVisible();
+    await page.locator('#profile-display_name').fill('Unsaved name');
+  }
+  async function backDiscards(page: Page, language: Language = 'fi') {
+    await page.goBack();
+    await expect(leaveDialog(page)).toBeVisible();
+    await leaveDialog(page).getByRole('button', { name: text('common.discard', language), exact: true }).click();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    expect(await page.evaluate(() => location.hash)).toBe('');
+  }
+
+  test('a hash change between the first workspace paint and its listeners still opens Settings, with one history entry', async ({ page }) => {
     await mockBackend(page, { initialLanguage: 'fi' });
     await page.goto('/');
+    await armHashRace(page);
     await signIn(page);
     await expect(page.locator('#settings-title')).toBeVisible();
     await expect(page.locator('#settings-title')).toHaveText(text('nav.settings', 'fi'));
-    // The hash really changed as the Wardrobe first appeared, and catching up added no history entry.
-    expect(await page.evaluate(() => [location.hash, history.length === (window as Window & { historyAtHash?: number }).historyAtHash])).toEqual(['#/settings', true]);
+    // The hash really changed as the Wardrobe first appeared, and it added exactly its own history entry.
+    expect(await page.evaluate(() => [location.hash, history.length === (window as RaceWindow).historyAtHash])).toEqual(['#/settings', true]);
     await page.goBack();
     await expect(page.locator('#wardrobe-title')).toBeVisible();
+  });
+
+  test('after that race, Back from edited Settings asks first: Continue editing stays, Discard returns once', async ({ page }) => {
+    await mockBackend(page, { initialLanguage: 'fi' });
+    await page.goto('/');
+    await armHashRace(page);
+    await signIn(page);
+    await editSettings(page);
+    const length = await page.evaluate(() => history.length);
+    await page.goBack();
+    await expect(leaveDialog(page)).toBeVisible();
+    await leaveDialog(page).getByRole('button', { name: text('common.continueEditing', 'fi'), exact: true }).click();
+    await expect(leaveDialog(page)).toHaveCount(0);
+    await expect(page.locator('#settings-title')).toBeVisible();
+    await expect(page.locator('#profile-display_name')).toHaveValue('Unsaved name');
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe('#/settings');
+    await backDiscards(page);
+    expect(await page.evaluate(() => history.length)).toBe(length);
+    await page.goForward();
+    await expect(page.locator('#settings-title')).toBeVisible();
+  });
+
+  test('after an owner remount, the same race still gives Settings its own position, so Back from edits asks first', async ({ page }) => {
+    await mockBackend(page, { initialLanguage: 'fi' });
+    await page.goto('/');
+    await signIn(page);
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    // The Wardrobe entry now carries the first owner's position; the next owner (Swedish, not loaded yet) remounts on it.
+    await signOutThroughMenu(page, 'fi');
+    await expect(page.locator('#email')).toBeVisible();
+    await armHashRace(page);
+    await signIn(page, 'b');
+    await editSettings(page, 'sv');
+    await backDiscards(page, 'sv');
   });
 
   test('on the normal path a hash change adds one history entry and Back returns', async ({ page }) => {
