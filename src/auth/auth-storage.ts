@@ -32,16 +32,31 @@ const isVerifierKey = (key: string) => key.startsWith(`${sessionKey}-`) && key.e
 /**
  * The Web storage behind one auth client. It keeps the session only in the allowlisted form and the SDK's PKCE
  * verifiers; every other key (the user object included) is refused. Once closed it never touches real storage again.
+ *
+ * A `guarded` store (the remembered slot) also drops a write once the record it last saw has been changed or removed
+ * by someone else, such as an older release's sign-out, so a refresh can never put the record back.
  */
 export class ClosableAuthStorage {
   private live = true;
-  constructor(private readonly store: () => Storage) {}
+  private seen: string | null | undefined;
+  private lastSeen: AuthRecord | null = null;
+  constructor(private readonly store: () => Storage, private readonly guarded = false) {}
   get closed(): boolean { return !this.live; }
+  /** The last record this store read or wrote, kept so a removed slot can still be revoked. */
+  get last(): AuthRecord | null { return this.lastSeen; }
+  private note(raw: string | null): void {
+    if (this.guarded && this.seen !== undefined && this.seen !== raw) this.live = false;
+    else {
+      this.seen = raw;
+      this.lastSeen = readAuthRecord(raw) ?? this.lastSeen;
+    }
+  }
   getItem(key: string): string | null {
     if (!this.live) return null;
     if (key === sessionKey) {
       const raw = this.store().getItem(key);
-      return readAuthRecord(raw) ? raw : null;
+      this.note(raw);
+      return this.live && readAuthRecord(raw) ? raw : null;
     }
     return isVerifierKey(key) ? this.store().getItem(key) : null;
   }
@@ -49,13 +64,20 @@ export class ClosableAuthStorage {
     if (!this.live) return;
     if (key === sessionKey) {
       const record = authRecordFields(parse(value));
-      if (record) this.store().setItem(key, serialize(record));
+      if (!record) return;
+      this.note(this.store().getItem(key));
+      if (!this.live) return;
+      const raw = serialize(record);
+      this.store().setItem(key, raw);
+      this.seen = raw;
+      this.lastSeen = record;
       return;
     }
     if (isVerifierKey(key)) this.store().setItem(key, value);
   }
   removeItem(key: string): void {
     if (this.live && (key === sessionKey || key === `${sessionKey}-user` || isVerifierKey(key))) this.store().removeItem(key);
+    if (key === sessionKey) this.seen = null;
   }
   close(): void { this.live = false; }
 }

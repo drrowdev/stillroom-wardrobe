@@ -11,13 +11,13 @@ export const legacyChannelName = 'stillroom.logout';
 export const authChannelName = 'stillroom.auth.v2';
 export const markedLegacyMessage = 'sign-out:v2';
 const markedStoragePrefix = 'v2:';
-export type AuthCommand = 'sign-out' | 'end-remembered';
+export type AuthCommand = 'sign-out';
 type V2Message = { v: 2; type: AuthCommand; nonce: string };
 
 function parseV2(data: unknown): V2Message | null {
   if (typeof data !== 'object' || data === null) return null;
   const { v, type, nonce } = data as Record<string, unknown>;
-  if (v !== 2 || (type !== 'sign-out' && type !== 'end-remembered') || typeof nonce !== 'string' || nonce.length < 8 || nonce.length > 64) return null;
+  if (v !== 2 || type !== 'sign-out' || typeof nonce !== 'string' || nonce.length < 8 || nonce.length > 64) return null;
   return { v, type, nonce };
 }
 

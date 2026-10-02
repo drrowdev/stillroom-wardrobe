@@ -106,6 +106,7 @@
   "auth.failed": {"en":"Couldn't sign in. Check your email and password.","fi":"Kirjautuminen ei onnistunut. Tarkista sähköposti ja salasana.","sv":"Det gick inte att logga in. Kontrollera e-post och lösenord."},
   "auth.expired": {"en":"Your session has expired. Sign in again.","fi":"Istuntosi on vanhentunut. Kirjaudu uudelleen.","sv":"Din session har gått ut. Logga in igen."},
   "auth.offlineTitle": {"en":"Waiting for a connection","fi":"Odotetaan verkkoyhteyttä","sv":"Väntar på anslutning"},
+  "auth.offlineWaiting": {"en":"You're offline. Your wardrobe will open when you're back online.","fi":"Olet offline-tilassa. Vaatekaappisi avautuu, kun yhteys palaa.","sv":"Du är offline. Din garderob öppnas när du är online igen."},
   "auth.changePassword": {"en":"Change password","fi":"Vaihda salasana","sv":"Byt lösenord"},
   "auth.newPassword": {"en":"New password","fi":"Uusi salasana","sv":"Nytt lösenord"},
   "profile.myWardrobe": {"en":"My wardrobe","fi":"Oma vaatekaappi","sv":"Min garderob"},

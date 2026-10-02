@@ -84,6 +84,20 @@ describe('bounded recovery callback intent, not cryptographic provenance', () =>
   it('refuses any occupied or initialized normal page before identity lookup', () => {
     expect(parseRecoveryCallback(callback(), origin, true)).toEqual({ kind: 'conflict' });
   });
+  it.each(['{"access_token":"x","refresh_token":"y","expires_at":1}', 'not json', ''])('treats any remembered slot on the device as occupied: %s', async slot => {
+    vi.resetModules();
+    const replaced: string[] = [];
+    const empty = { getItem: () => null };
+    vi.stubGlobal('location', { href: callback(), origin, search: '', hash: new URL(callback()).hash });
+    vi.stubGlobal('history', { replaceState: (_state: unknown, _title: string, url: string) => { replaced.push(url); } });
+    vi.stubGlobal('sessionStorage', empty);
+    vi.stubGlobal('localStorage', { getItem: (key: string) => key === 'stillroom.auth' ? slot : null });
+    vi.stubGlobal('window', { addEventListener: () => undefined, removeEventListener: () => undefined });
+    const capture = await import('../../src/auth/recovery-callback');
+    capture.installRecoveryCapture(true);
+    expect(capture.recoverySnapshot()).toEqual({ kind: 'conflict' });
+    expect(replaced).toEqual(['/#/recovery']);
+  });
 });
 
 describe('password outcome follows actual guarded dispatch state', () => {

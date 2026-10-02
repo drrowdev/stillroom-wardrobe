@@ -127,6 +127,7 @@ value stays reported in the job log.
 | G1 Background removal quality on the owner's real garments (edges, light-on-light, patterns), and the BG2a framing (no trimmed sleeve or strap, no mis-centring from shadows) | ADR24 | Pending: owner. If u2netp fails, model selection is reopened. |
 | G2 Background removal on iPhone Safari and Android Chrome: tap to usable prepared photo under 10 s, measured separately from the first ~19 MB download; no tab termination | ADR24, R21 | Pending: owner device. |
 | G3 FI/SV wording of the background-removal lines | ADR24 | Pending: native speakers (row O3 in the ledger). |
+| AUTH1 "Keep me signed in on this device" on the owner's iPhone home-screen app: ticked, close and reopen opens signed in; unticked, reopen shows sign-in; Sign out empties both; offline reopen shows the waiting card with no wardrobe data; whether iOS keeps the slot after days unused | AUTH1 | Pending: owner device, after R2. CI covers Chromium and WebKit only. See [Keep me signed in](#keep-me-signed-in-auth1). |
 
 The owner runs these gates in one ordered session per owner: [owner-release-checklist.md](owner-release-checklist.md).
 
@@ -135,6 +136,36 @@ After each deploy that ships the background-removal binaries, the coordinator's 
 Backups, the restore drill and recovery steps are in [operations.md](operations.md).
 
 The status of every release gate, with evidence links, is in [release-gates.md](release-gates.md).
+
+## Keep me signed in (AUTH1)
+
+AUTH1a (#158) hardens the per-tab session; AUTH1b adds the opt-in "Keep me signed in on this device"
+(`blueprint/10-SECURITY-AND-PRIVACY.md`, line 34).
+
+- **What is stored.** Ticked, one localStorage slot, `stillroom.auth`, holds only the access token, the refresh
+  token and the access token's expiry. The user object stays in memory. No wardrobe, profile or image data is
+  stored on the device, and the service-worker caches are unchanged.
+- **One window.** The window that holds the remembered session keeps the `stillroom.remembered` Web Lock for its
+  lifetime and is the only one that reads, writes, refreshes or removes the slot. Another window gets the normal
+  sign-in without the checkbox and signs in for that tab only. Without Web Locks the checkbox is not offered, and a
+  slot left on the device is never adopted. A Sign out in any window is device-wide: it removes the slot too.
+- **Risk, stated plainly.** Any script that runs on this origin, in any tab, can read a remembered refresh token:
+  an XSS bug, a compromised dependency or a malicious extension. Remembering lengthens that window, both in time
+  (after the app is closed) and in reach (any tab, now or later). The default per-tab mode is not safe from such a
+  script either, only shorter-lived. The CSP is defence in depth only. Signing out does not end an access token
+  already issued; it stays valid at the API until it expires, as before. The lock orders honest code only.
+- **Stale sign-outs (narrowed guarantee, coordinator decision C).** A delayed or replayed sign-out, whether an
+  unmarked message from an older release or a v2 `sign-out`, may sign out a newer session,
+  including a remembered one. That is fail-safe: credentials are deleted, never restored or exposed, and the user
+  signs in again. No message ever writes or adopts a credential.
+  - A sign-out in a production `a4601925` tab clears every `stillroom.auth*` key, the slot included. It may not
+    revoke the remembered refresh token at the server; that copy expires on its own. This is accepted.
+- **Deploy gate.** AUTH1a is never deployed on its own. Production gets AUTH1a and AUTH1b together in one Pages
+  deploy, the next release candidate R2, after both have merged. The coordinator holds any Pages deploy of a main
+  that has AUTH1a without AUTH1b.
+- **Rollout note.** After R2 is deployed, the owner reloads or closes every open app window, the home-screen app
+  included, before ticking "Keep me signed in". Until then an older tab can still sign the new one out, which is
+  only a sign-out.
 
 ## Release candidate (R1)
 

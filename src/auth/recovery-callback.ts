@@ -72,7 +72,8 @@ export function leaveRecovery(notice?: MessageKey): void {
 function capture(): void {
   if (snapshot.kind !== 'none' && !location.search && location.hash === '#/recovery') return;
   let occupied = normalStarted;
-  try { occupied ||= Boolean(sessionStorage.getItem(authStorageKey)); } catch { occupied = true; }
+  // A remembered session on this device counts too; only the key's presence is checked.
+  try { occupied ||= Boolean(sessionStorage.getItem(authStorageKey)) || localStorage.getItem(authStorageKey) !== null; } catch { occupied = true; }
   const next = parseRecoveryCallback(location.href, location.origin, occupied);
   if (next.kind === 'none') {
     if (snapshot.kind !== 'none') leaveRecovery();

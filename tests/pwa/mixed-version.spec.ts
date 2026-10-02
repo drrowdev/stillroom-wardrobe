@@ -127,3 +127,33 @@ test('a full session record left by the baseline is cut down to the tokens and e
   const raw = await page.evaluate(() => JSON.stringify([{ ...sessionStorage }, { ...localStorage }]));
   for (const secret of ['user-a@example.test', 'Alex', 'user_metadata']) expect(raw).not.toContain(secret);
 });
+
+// J6 (AUTH1b): under the deploy gate no AUTH1a-only bundle reaches a device, so the baseline is the only older release
+// a remembered session can meet. Its sign-out may end a newer remembered session (fail-safe); nothing comes back.
+const authKeys = (page: Page) => page.evaluate(() => [...Object.keys(localStorage), ...Object.keys(sessionStorage)].filter((key) => key.startsWith('stillroom.auth')));
+
+test('a baseline sign-out ends an AUTH1b remembered holder, the slot is gone, and a reload stays signed out', async ({ context }) => {
+  const baseline = await context.newPage();
+  const current = await context.newPage();
+  await open(baseline, 'baseline');
+  await open(current, 'current');
+  await current.bringToFront();
+  await current.locator('#email').fill('user-a@example.test');
+  await current.locator('#password').fill('fictional-test-password');
+  await current.getByRole('checkbox', { name: messages['auth.remember'].en, exact: true }).check();
+  await current.locator('button[type="submit"]').click();
+  await signedIn(current, 'Alex');
+  await baseline.bringToFront();
+  await signIn(baseline, 'b');
+  await signedIn(baseline, 'Robin');
+  await signedIn(current, 'Alex');
+  await signOut(baseline, 'sv');
+  await expect(current.locator('#email')).toBeVisible();
+  await expect(current.getByText('Alex')).toHaveCount(0);
+  expect(await authKeys(current)).toEqual([]);
+  await current.reload();
+  await expect(current.locator('#email')).toBeVisible();
+  await current.waitForTimeout(1_000);
+  await expect(current.getByText('Alex')).toHaveCount(0);
+  expect(await authKeys(current)).toEqual([]);
+});

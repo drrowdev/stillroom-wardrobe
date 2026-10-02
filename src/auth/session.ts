@@ -1,6 +1,7 @@
 import type { Session } from '@supabase/supabase-js';
-import { authStorageKey, bindDataRequests, heldRecord, unbindDataRequests, type AppClient, type RevokeResult } from '../data/client';
-import { sessionOwner, tokenClaims, type AuthRecord } from './auth-storage';
+import { authStorageKey, bindDataRequests, heldRecord, unbindDataRequests, type AppClient, type AuthMode, type RevokeResult } from '../data/client';
+import { clearAuthNamespace, sessionOwner, tokenClaims, type AuthRecord } from './auth-storage';
+import { hasLocks, type HeldLock } from './device-lock';
 import { openAuthChannels } from './auth-channel';
 import { fetchProfile, saveInitialLanguage, updateProfile, type ProfileUpdate } from '../data/profile';
 import type { ProfileRow } from '../data/rows';
@@ -34,9 +35,18 @@ type PublishedState = Omit<SessionState, 'client'> & { client?: AppClient };
 export { legacyChannelName as logoutKey } from './auth-channel';
 /** Creates, retires and revokes auth clients. Each sign-in generation gets its own client. */
 export type SessionClients = {
-  make(): AppClient;
+  make(mode?: AuthMode, user?: unknown): AppClient;
   retire(client: AppClient): { record: AuthRecord | null };
   revoke(record: AuthRecord | null): Promise<RevokeResult>;
+  /** Closes a client without touching any stored credential. */
+  release?(client: AppClient): void;
+  /** Remembered mode: the lock claim and the staged sign-in. */
+  remembered?(): Promise<Remembered>;
+};
+/** Remembered mode: `src/auth/remembered.ts`. */
+export type Remembered = {
+  claim(controller: SessionController): Promise<void>;
+  signIn(controller: SessionController, email: string, password: string, remember: boolean): Promise<void>;
 };
 type Recovery = 'open' | 'waiting' | 'locked' | 'expired';
 
@@ -46,8 +56,9 @@ export class SessionController {
   private request = new AbortController();
   private epoch = 0;
   private choice: Language | null = null;
-  private allowSession = true;
-  private channels: ReturnType<typeof openAuthChannels> | null = null;
+  // Members marked internal are also driven by remembered.ts; nothing else uses them.
+  /** @internal */ allowSession = true;
+  /** @internal */ channels: ReturnType<typeof openAuthChannels> | null = null;
   private deadline: ReturnType<typeof setTimeout> | null = null;
   private expiresAt = 0;
   // Set while a lapsed scope recovers, so an SDK sign-out on a refused refresh shows why.
@@ -57,9 +68,14 @@ export class SessionController {
   private scheduled = new Set<ReturnType<typeof setTimeout>>();
   private aiAckFloor: bigint | null = null;
   private subscription: { unsubscribe(): void } | null = null;
-  private started = false;
+  /** @internal */ started = false;
+  private mode: AuthMode = 'tab';
+  /** @internal The remembered slot's lock: held by the remembered session, or by the sign-in screen that offers it. */
+  held: HeldLock | null = null;
+  /** @internal Bumped by every sign-in and sign-out, so a staged sign-in or lock claim that finishes late is discarded. */
+  generation = 0;
 
-  constructor(private client: AppClient, private browserLanguages: readonly string[], private clients?: SessionClients) {
+  constructor(private client: AppClient, private browserLanguages: readonly string[], /** @internal */ readonly clients?: SessionClients) {
     this.state = { phase: 'loading', language: resolveLanguage(browserLanguages), profile: null, scope: null, languageUnsaved: false, client };
   }
   getSnapshot = (): SessionState => this.state;
@@ -67,7 +83,8 @@ export class SessionController {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
-  private publish(next: PublishedState): void {
+  /** @internal */
+  publish(next: PublishedState): void {
     this.state = { ...next, client: this.client };
     for (const listener of this.listeners) listener();
   }
@@ -93,9 +110,14 @@ export class SessionController {
   }
   start(): () => void {
     // A received command only ends this tab's own session; it never sends anything on.
-    this.channels = openAuthChannels((command) => {
-      if (command === 'sign-out') void this.endOnCommand('sign-out');
-    });
+    this.channels = openAuthChannels((command) => { void this.endOnCommand(command); });
+    // An older release's sign-out clears the whole auth namespace; the holder then ends too, and never writes it back.
+    const onStorage = (event: StorageEvent) => {
+      if (this.mode === 'device' && event.storageArea === window.localStorage && (event.key === null || event.key === authStorageKey) && !event.newValue) {
+        void this.endOnCommand('sign-out');
+      }
+    };
+    window.addEventListener('storage', onStorage);
     const onFocus = () => {
       if (this.checkExpiry()) return;
       if (this.state.phase === 'ready' && isOnline()) void this.checkMembership();
@@ -111,9 +133,13 @@ export class SessionController {
     document.addEventListener('visibilitychange', onResume);
     document.addEventListener('resume', onResume);
     this.started = true;
-    this.watch(this.client);
+    // A tab with its own session keeps it; any other asks once for the remembered slot.
+    if (!this.claim()) this.watch(this.client);
     return () => {
       this.started = false;
+      // The remembered client is closed before the lock goes, so no refresh of it can write once another window holds it.
+      this.dropHolder();
+      window.removeEventListener('storage', onStorage);
       this.subscription?.unsubscribe();
       this.subscription = null;
       this.channels?.close();
@@ -127,6 +153,8 @@ export class SessionController {
     };
   }
   private watch(client: AppClient): void {
+    // A credential that was already past its expiry when this client started, which the SDK then could not renew.
+    const initial = heldRecord(client);
     const { data } = client.auth.onAuthStateChange((event, session) => {
       // A retired client's late events belong to a finished generation.
       if (client !== this.client) return;
@@ -137,8 +165,12 @@ export class SessionController {
           return;
         }
         // The SDK may drop a refused credential before this tab's own deadline fires.
-        const lapsed = this.lapsing || (this.expiresAt > 0 && Date.now() >= this.expiresAt);
+        const lapsed = this.lapsing || (this.expiresAt > 0 && Date.now() >= this.expiresAt) || (initial !== null && initial.expires_at * 1000 <= Date.now());
+        // The SDK removed the remembered session (a refused renewal): this window stops holding the slot.
+        const holder = this.mode === 'device';
+        if (holder) this.dropHolder();
         this.signedOut(lapsed ? 'auth.expired' : undefined);
+        if (holder && this.started) { this.watch(this.client); this.claim(); }
         return;
       }
       if (!this.allowSession || !this.holdsSession(session)) return;
@@ -170,10 +202,56 @@ export class SessionController {
     });
     this.subscription = data.subscription;
   }
-  // Sessions live in this tab's sessionStorage. The SDK also broadcasts sign-ins
+  /** @internal After a lock claim: watches this tab's client, or re-renders so the sign-in screen sees the lock. */
+  settle(): void {
+    if (!this.started) return;
+    if (this.subscription) this.publish({ ...this.state });
+    else this.watch(this.client);
+  }
+  /** Asks once for the remembered slot's lock, unless this tab has its own session. False when it doesn't ask. */
+  private claim(): boolean {
+    const clients = this.clients;
+    if (!this.started || !clients?.remembered || !hasLocks() || this.held || this.ownSession) return false;
+    void clients.remembered().then((remembered) => remembered.claim(this), () => this.settle());
+    return true;
+  }
+  /**
+   * The only way this window lets go of the lock. A remembered client is closed first, without touching the slot, so
+   * a refresh in flight can never write after another window holds it; this tab is left with an empty per-tab client.
+   * @internal
+   */
+  dropHolder(): void {
+    if (this.mode === 'device' && this.clients) {
+      this.subscription?.unsubscribe();
+      this.subscription = null;
+      (this.clients.release ?? this.clients.retire)(this.client);
+      this.mode = 'tab';
+      this.client = this.clients.make();
+    }
+    this.held?.release();
+    this.held = null;
+  }
+  /** @internal True while this tab has a session of its own, remembered or per-tab. */
+  get ownSession(): boolean {
+    return this.mode === 'device' || heldRecord(this.client) !== null;
+  }
+  /** @internal Replaces the live client without touching any stored credential; the new one reads its store afresh. */
+  switchClient(mode: AuthMode, user?: unknown): void {
+    const clients = this.clients!;
+    this.subscription?.unsubscribe();
+    this.subscription = null;
+    this.invalidate();
+    (clients.release ?? clients.retire)(this.client);
+    this.mode = mode;
+    this.client = clients.make(mode, user);
+    if (this.started) this.watch(this.client);
+  }
+  /** Shown on the sign-in screen: remember is offered only by the window holding the slot's lock. */
+  get canRemember(): boolean { return this.held !== null && this.mode === 'tab'; }
+  // Each client holds its session in its own store. The SDK also broadcasts sign-ins
   // and refreshes between tabs; a tab must ignore any session it does not hold.
   private holdsSession(session: Session): boolean {
-    return holdsStoredSession(window.sessionStorage.getItem(authStorageKey), session.access_token);
+    return holdsStoredSession((this.mode === 'device' ? window.localStorage : window.sessionStorage).getItem(authStorageKey), session.access_token);
   }
   /** The owner of the credential this tab's client holds right now. */
   private heldOwner(): string | null {
@@ -415,13 +493,18 @@ export class SessionController {
     this.choice = language;
     this.publish({ ...this.state, language });
   }
-  async signIn(email: string, password: string): Promise<void> {
-    const client = this.client;
-    this.allowSession = true;
-    const { error } = await client.auth.signInWithPassword({ email: email.trim(), password });
-    // Signed out while this was in flight: its result belongs to a retired client and is dropped.
-    if (client !== this.client) return;
-    if (error) throw new AppError('auth.failed');
+  async signIn(email: string, password: string, remember = false): Promise<void> {
+    const clients = this.clients;
+    if (!clients?.remembered) {
+      const client = this.client;
+      this.allowSession = true;
+      const { error } = await client.auth.signInWithPassword({ email: email.trim(), password });
+      // Signed out while this was in flight: its result belongs to a retired client and is dropped.
+      if (client !== this.client) return;
+      if (error) throw new AppError('auth.failed');
+      return;
+    }
+    await (await clients.remembered()).signIn(this, email, password, remember);
   }
   /** True while a continuation started for `client` at `epoch` still belongs to the current generation. */
   private current(client: AppClient, epoch: number): boolean {
@@ -468,16 +551,22 @@ export class SessionController {
   }
   private async end(broadcast: boolean, notice?: MessageKey, revoke = true): Promise<void> {
     this.allowSession = false;
+    this.generation++;
     this.subscription?.unsubscribe();
     this.subscription = null;
     let record: AuthRecord | null = null;
     if (this.clients) {
       record = this.clients.retire(this.client).record;
+      this.mode = 'tab';
       this.client = this.clients.make();
       if (this.started) this.watch(this.client);
     }
+    // A genuine sign-out is device-wide: a remembered slot left by a closed window goes too, offline as well.
+    if (broadcast) clearAuthNamespace([window.localStorage]);
+    this.dropHolder();
     this.signedOut(notice);
     if (broadcast) this.channels?.send('sign-out');
+    this.claim();
     if (!revoke) return;
     const client = this.client;
     const result = this.clients ? await this.clients.revoke(record) : 'ok';
