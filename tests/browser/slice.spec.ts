@@ -714,6 +714,60 @@ test('discard and owner logout clear the invalid-photo alert and ignore late pho
   expect(backend.files.size).toBe(0);
 });
 
+test('a photo chosen as the capture screen mounts for the next owner is prepared', async ({ page }) => {
+  const backend = await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto('/');
+  await signIn(page);
+  await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
+  await expect(page.locator('#capture-title')).toBeVisible();
+  await openAccountMenu(page);
+  await page.locator('.account-popover').getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.locator('#email')).toBeVisible();
+  // The file arrives before the capture screen's deferred mount effects run (and their dev StrictMode re-run).
+  await page.evaluate((bytes) => {
+    const observer = new MutationObserver(() => {
+      const input = document.querySelector<HTMLInputElement>('.capture-page input[type="file"]');
+      if (!input) return;
+      observer.disconnect();
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array(bytes)], 'early.jpg', { type: 'image/jpeg' }));
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }, [...backend.fixture]);
+  await signIn(page, 'b');
+  await expect(page.locator('#capture-title')).toHaveText(messages['capture.title'].sv);
+  await expect(page.locator('.capture-photo img')).toBeVisible();
+});
+
+test('leaving Add while a photo is being prepared abandons it', async ({ page }) => {
+  const backend = await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto('/');
+  await signIn(page);
+  await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
+  const input = page.locator('input[type="file"]').first();
+  await holdNextPhotoRead(page);
+  await input.setInputFiles({ name: 'held.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
+  await expect.poll(() => page.evaluate(() => (window as PhotoReadProbe).photoReadStarted)).toBe(true);
+  const before = backend.requests.length;
+  await page.evaluate(() => { location.hash = '#/wardrobe'; });
+  await page.getByRole('button', { name: 'Discard changes' }).click();
+  await expect(page.locator('#capture-title')).toHaveCount(0);
+  await page.evaluate(() => (window as PhotoReadProbe).releasePhotoRead?.());
+  await page.locator('.empty-copy').getByRole('button', { name: messages['wardrobe.add'].en, exact: true }).click();
+  await expect(page.locator('#capture-title')).toBeVisible();
+  await expect(page.locator('.capture-photo img')).toHaveCount(0);
+  const status = page.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url() === 'http://127.0.0.1:54321/rest/v1/rpc/ai_status');
+  await input.setInputFiles({ name: 'next.jpg', mimeType: 'image/jpeg', buffer: backend.fixture });
+  await expect(page.locator('.capture-photo img')).toBeVisible();
+  expect((await status).status()).toBe(200);
+  // Only the new photo reached analysis; the abandoned one started none.
+  expect(backend.requests.slice(before).filter((request) => request.path === '/rest/v1/rpc/ai_status')).toHaveLength(1);
+  expect(backend.items).toHaveLength(0); expect(backend.files.size).toBe(0);
+});
+
 test('discarding a prepared draft creates no library records', async ({ page }) => {
   const backend = await mockBackend(page, { initialLanguage: 'en' });
   await page.goto('/');

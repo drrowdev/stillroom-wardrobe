@@ -88,6 +88,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   const library = useRef<HTMLInputElement>(null);
   const camera = useRef<HTMLInputElement>(null);
   const preparation = useRef<AbortController | null>(null);
+  const mountedScope = useRef<OwnerScope | null>(null);
   const pendingCrop = useRef(false);
   const preparationWork = useRef<Promise<void>>(Promise.resolve());
   const original = useRef<Blob | null>(null);
@@ -147,7 +148,13 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
   useEffect(() => {
     const clear = () => { preparation.current?.abort(); original.current = null; setReview(null); };
     scope.signal.addEventListener('abort', clear, { once: true });
-    return () => { clear(); scope.signal.removeEventListener('abort', clear); };
+    mountedScope.current = scope;
+    return () => {
+      scope.signal.removeEventListener('abort', clear);
+      mountedScope.current = null;
+      // A real unmount or scope change still clears; a dev StrictMode re-mount re-runs setup first and keeps live work.
+      queueMicrotask(() => { if (mountedScope.current !== scope) clear(); });
+    };
   }, [scope]);
   useEffect(() => {
     if (!photo) { setPreview(null); return; }
