@@ -151,6 +151,29 @@ test.describe('AUTH1a per-tab sessions', () => {
     });
   }
 
+  test('a renewal that stalls online at expiry removes the wardrobe and its photos at once', async ({ page }) => {
+    const auth: AuthControl = {};
+    await page.addInitScript(() => {
+      const created: string[] = [], revoked: string[] = [];
+      const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = (object) => { const url = create(object); created.push(url); return url; };
+      URL.revokeObjectURL = (url) => { revoked.push(url); revoke(url); };
+      (window as unknown as { __urls: unknown }).__urls = { created, revoked };
+    });
+    await page.clock.install();
+    await start(page, auth);
+    await expect(page.getByText('Synthetic linen shirt')).toBeVisible();
+    await expect(page.locator('img[src^="blob:"]').first()).toBeVisible();
+    auth.refresh = 'stall';
+    await page.clock.fastForward('01:01:00');
+    await expect(page.getByText('Synthetic linen shirt')).toHaveCount(0);
+    await expect(page.locator('img[src^="blob:"]')).toHaveCount(0);
+    await expect(page.getByText('Alex')).toHaveCount(0);
+    const urls = await page.evaluate(() => (window as unknown as { __urls: { created: string[]; revoked: string[] } }).__urls);
+    expect(urls.created.length).toBeGreaterThan(0);
+    expect(urls.created.filter((url) => !urls.revoked.includes(url))).toEqual([]);
+  });
+
   test('a sign-out in one tab signs the other tabs out', async ({ page, context }) => {
     await start(page);
     const other = await context.newPage();

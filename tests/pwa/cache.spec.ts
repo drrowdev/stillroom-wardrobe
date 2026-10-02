@@ -124,6 +124,26 @@ test('an offline reopen loads the cached shell without private data', async ({ p
   await expectOnlyShell(page, 'a', privateMarkers);
 });
 
+test('a cold offline start opens the recovery screens from the installed shell', async ({ page, context }) => {
+  await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto(server.url);
+  await controlled(page);
+  // Nothing beyond the first install has run: the recovery modules were never requested by this page.
+  await context.setOffline(true);
+  await page.reload();
+  await page.getByRole('button', { name: messages['recovery.forgot'].en }).click();
+  await expect(page.locator('#recovery-email')).toBeVisible();
+  await expect(page.locator('.chunk-error')).toHaveCount(0);
+  await page.getByRole('button', { name: messages['recovery.return'].en }).click();
+  await expect(page.locator('#login-title')).toBeFocused();
+  await page.goto('about:blank');
+  await page.goto(`${server.url}/${recoveryHash()}`);
+  await expect(page.locator('.entry-card')).toBeVisible();
+  await expect(page.locator('.chunk-error')).toHaveCount(0);
+  await context.setOffline(false);
+  await expectOnlyShell(page, 'a', privateMarkers);
+});
+
 const backendUrl = 'http://127.0.0.1:54321';
 const accessToken = (page: Page) => page.evaluate(() => (JSON.parse(sessionStorage.getItem('stillroom.auth') ?? '{}') as { access_token?: string }).access_token ?? '');
 // A 1x1 PNG, returned as the "signed" Storage object so a cross-origin <img> really loads it.

@@ -623,17 +623,58 @@ describe('live expiry', () => {
     expect(controller.getSnapshot().phase).toBe('ready');
   });
 
-  it('keeps the open scope when a page that slept past expiry renews, with the renewed token held', async () => {
+  it('keeps the scope through a renewal that arrives before the deadline', async () => {
+    const { controller } = await readyA(() => json(sessionFor('token-a2', USER_A)));
+    const scope = controller.getSnapshot().scope;
+    // Inside the SDK's margin the renewal runs while the access token still works.
+    vi.setSystemTime(Date.now() + HOUR - 30_000);
+    await controller.getSnapshot().client.auth.getSession();
+    await until(() => stored()?.access_token === 'token-a2');
+    await settle();
+    // Past the old token's deadline, the renewed token's own deadline holds.
+    vi.setSystemTime(Date.now() + 60_000);
+    expect(internals(controller).checkExpiry()).toBe(false);
+    expect(controller.getSnapshot()).toMatchObject({ phase: 'ready', scope });
+    expect(scope?.signal.aborted).toBe(false);
+  });
+
+  it('ends the scope at once when a page slept past expiry, then reopens with the renewed token', async () => {
     const { controller } = await readyA(() => json(sessionFor('token-a2', USER_A)));
     vi.setSystemTime(Date.now() + 2 * HOUR);
     const { scope, first } = expire(controller);
-    await until(() => stored()?.access_token === 'token-a2');
+    // Nothing waits for the renewal: the scope's requests and private state are gone first.
+    expect(first).toEqual({ aborted: true, scope: null });
+    await until(() => controller.getSnapshot().phase === 'ready');
+    expect(controller.getSnapshot().scope).not.toBe(scope);
+    expect(stored()?.access_token).toBe('token-a2');
+  });
+
+  it('ends the scope at once when the renewal at expiry stalls while online', async () => {
+    const { controller } = await readyA(() => new Promise<Response>(() => undefined));
+    vi.setSystemTime(Date.now() + 2 * HOUR);
+    const { scope, first } = expire(controller);
+    expect(first).toEqual({ aborted: true, scope: null });
+    expect(scope?.signal.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(controller.getSnapshot()).toMatchObject({ phase: 'loading', scope: null, profile: null });
+  });
+
+  it('never shows a profile that arrives after the access token expired', async () => {
+    const setup = await controllerSetup();
+    const profile = deferred<Response>();
+    backend({ profileA: profile.promise });
+    const base = reply;
+    reply = (call) => call.grant === 'refresh_token' ? new Promise<Response>(() => undefined) : base(call);
+    await setup.controller.signIn('a@example.test', 'password');
+    await until(() => calls.some((call) => call.path === '/rest/v1/profiles'));
+    const phases: string[] = [];
+    cleanups.push(setup.controller.subscribe(() => phases.push(setup.controller.getSnapshot().phase)));
+    // The deadline's timer has not run yet, as on a throttled page, when the late profile arrives.
+    vi.setSystemTime(Date.now() + 2 * HOUR);
+    profile.resolve(json([profileFor(USER_A)]));
     await settle();
-    expect(first).toEqual({});
-    expect(controller.getSnapshot()).toMatchObject({ phase: 'ready', scope });
-    expect(scope?.signal.aborted).toBe(false);
-    // The renewed token's own deadline is armed.
-    expect(internals(controller).checkExpiry()).toBe(false);
+    expect(phases).not.toContain('ready');
+    expect(setup.controller.getSnapshot()).toMatchObject({ phase: 'loading', scope: null, profile: null });
   });
 
   it('lapses and reopens when the renewal at expiry is slow, then succeeds', async () => {
@@ -641,6 +682,7 @@ describe('live expiry', () => {
     const { controller } = await readyA(() => new Promise<Response>((resolve) => { answer = resolve; }));
     vi.setSystemTime(Date.now() + 2 * HOUR);
     const old = await lapse(controller);
+    await until(() => refreshGrants().length > 0);
     answer(json(sessionFor('token-a2', USER_A)));
     await until(() => controller.getSnapshot().phase === 'ready');
     expect(controller.getSnapshot().scope).not.toBe(old);

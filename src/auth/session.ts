@@ -52,8 +52,6 @@ export class SessionController {
   private expiresAt = 0;
   // Set while a lapsed scope recovers, so an SDK sign-out on a refused refresh shows why.
   private lapsing = false;
-  /** The scope whose renewal at expiry is in flight. */
-  private renewing: OwnerScope | null = null;
   /** The owner whose scope is opening or open, until the next invalidation. */
   private opening: string | null = null;
   private scheduled = new Set<ReturnType<typeof setTimeout>>();
@@ -192,28 +190,14 @@ export class SessionController {
     this.deadline = null;
     this.expiresAt = 0;
   }
-  /** True when the scope lapsed: its requests, private state and images are gone before anything else shows. */
+  /**
+   * True when the scope lapsed. The scope counts from the moment open() binds it, through loading, ready and an
+   * unfinished deletion. At the held access token's expiry its requests, private state and images end at once; only
+   * a renewal that arrived before the deadline (which re-arms it) keeps the scope.
+   */
   private checkExpiry(): boolean {
-    if (!this.expiresAt || Date.now() < this.expiresAt || !this.state.scope) return false;
-    if (this.renewing === this.state.scope) return true;
-    // A page that slept past its expiry may still renew; the SDK holds this scope's requests until that settles.
-    // Offline, or if renewal is refused or slow, the scope lapses.
-    if (!isOnline()) { this.lapse(); return true; }
-    const scope = this.state.scope, client = this.client, epoch = this.epoch;
-    this.renewing = scope;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), renewalWaitMs); });
-    void Promise.race([client.auth.getSession().then(({ data }) => data.session, () => null), late]).then((session) => {
-      clearTimeout(timer);
-      if (this.renewing === scope) this.renewing = null;
-      if (!this.current(client, epoch) || this.state.scope !== scope || scope.signal.aborted) return;
-      const expiry = session ? expiryOf(session) : null;
-      if (session && expiry !== null && expiry > Date.now() && sessionOwner(session) === scope.ownerId && this.heldOwner() === scope.ownerId) {
-        this.arm(session);
-        return;
-      }
-      this.lapse();
-    });
+    if (!this.expiresAt || Date.now() < this.expiresAt || this.opening === null) return false;
+    this.lapse();
     return true;
   }
   /** Ends the scope's requests, private state and images before anything else shows, then tries to recover. */
@@ -231,7 +215,8 @@ export class SessionController {
       const { data, error } = await client.auth.getSession();
       if (!this.current(client, epoch)) return;
       session = data.session;
-      outcome = session && !error ? 'open' : classify(error, heldRecord(client));
+      // A returned session that is already past its expiry would lapse again at once; it waits for a retry instead.
+      outcome = session && !error ? (expiryOf(session) ?? Infinity) > Date.now() ? 'open' : 'locked' : classify(error, heldRecord(client));
     } catch (error) {
       if (!this.current(client, epoch)) return;
       outcome = classify(error, heldRecord(client));
@@ -253,8 +238,9 @@ export class SessionController {
     if (ownerId === null) { await this.end(false); return; }
     const scope = { ownerId, epoch: this.epoch, signal: this.request.signal };
     const client = this.client;
-    // Every resume below drops its result once a sign-out, a newer sign-in or another owner's credential has taken over.
-    const stale = () => scope.signal.aborted || !this.current(client, scope.epoch) || this.heldOwner() !== scope.ownerId;
+    // Every resume below drops its result once a sign-out, a newer sign-in or another owner's credential has taken over,
+    // or once the access token has expired: a late answer never shows private state past the deadline.
+    const stale = () => scope.signal.aborted || !this.current(client, scope.epoch) || this.heldOwner() !== scope.ownerId || this.checkExpiry();
     bindDataRequests(client, scope.signal, scope.ownerId);
     this.opening = scope.ownerId;
     this.arm(session);
@@ -315,7 +301,7 @@ export class SessionController {
   }
   private publishProfile(scope: OwnerScope, profile: ProfileRow, kind: 'profile' | 'language' | 'weather' | 'ai' | 'refresh'): void {
     const current = this.state;
-    if (scope.signal.aborted || current.phase !== 'ready' || current.scope?.epoch !== scope.epoch
+    if (scope.signal.aborted || this.checkExpiry() || current.phase !== 'ready' || current.scope?.epoch !== scope.epoch
       || current.scope.ownerId !== scope.ownerId || profile.owner_id !== scope.ownerId || !current.profile
       || profile.version < current.profile.version || this.aiAckFloor !== null && BigInt(profile.version) < this.aiAckFloor) return;
     this.publish({ ...current, profile, language: profile.ui_language ?? current.language,
@@ -498,7 +484,6 @@ export class SessionController {
   }
 }
 
-const renewalWaitMs = 5_000;
 /**
  * When the held access token stops working, in this device's time: the SDK's own `expires_at`, which it renews by, so
  * the two never disagree about a skewed clock. A token without valid claims has none, and its owner check fails closed.

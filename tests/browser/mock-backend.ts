@@ -505,7 +505,7 @@ export type MockOptions = {
   /** image_provenance_v1 rows (owner-filtered by image). */
   provenance?: JsonRow[];
 };
-export type AuthControl = { lifetime?: number; refresh?: 'ok' | 'offline' | 400 | 503; refreshes?: number };
+export type AuthControl = { lifetime?: number; refresh?: 'ok' | 'offline' | 'stall' | 400 | 503; refreshes?: number };
 export function recoveryHash(owner = owners.a, seconds = 3600): string {
   const expires = Math.floor(Date.now() / 1000) + seconds;
   const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -917,6 +917,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         const body = request.postDataJSON() as { refresh_token?: string };
         const held = refreshTokens.get(body.refresh_token ?? '');
         if (control.refresh === 'offline') { await route.abort('internetdisconnected'); return; }
+        // A renewal that never answers while the browser still reports itself online.
+        if (control.refresh === 'stall') return;
         if (control.refresh === 503) { await json({ message: 'Service unavailable' }, 503); return; }
         if (!held || control.refresh === 400) { await json({ error: 'invalid_grant', error_code: 'refresh_token_not_found', error_description: 'Invalid Refresh Token' }, 400); return; }
         // Rotation: the used refresh token is spent; the session id stays.

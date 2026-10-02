@@ -1,7 +1,6 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { readConfiguration, type Configuration, type PublicConfig } from '../data/config';
 import { makeClient, retireClient } from '../data/client';
-import { revokeSession } from '../data/revoke';
 import { SessionController, type OwnerScope, type SessionState } from '../auth/session';
 import { Login } from '../auth/login';
 import { translate, resolveLanguage, type Language, type MessageKey, type Translate } from '../i18n';
@@ -26,6 +25,7 @@ import type { ProfileRow } from '../data/rows';
 import { leaveDialogFor, navFamilyFor, outfitRouteId } from '../domain/outfits';
 import { OutfitLeaveDialog } from '../features/outfits/leave-dialog';
 import { LazyBoundary } from './lazy';
+import { PasswordRecovery } from '../auth/password-recovery';
 import { UpdatePrompt } from '../pwa/update-prompt';
 import { lazyNamed, preloadChunks } from './lazy-load';
 import { WeatherStore, weatherKey } from '../features/today/use-weather';
@@ -50,9 +50,9 @@ const CalendarScreen = lazyNamed(() => import('../features/calendar/calendar'), 
 const StatisticsScreen = lazyNamed(() => import('../features/statistics/statistics-screen'), 'StatisticsScreen');
 const StylistScreen = lazyNamed(() => import('../features/stylist/stylist-screen'), 'StylistScreen');
 const AdminScreen = lazyNamed(() => import('../features/admin/admin-screen'), 'AdminScreen');
-// Recovery screens are rare entry points; they load on demand like the pages.
-const PasswordRecovery = lazyNamed(() => import('../auth/password-recovery'), 'PasswordRecovery');
-const RecoveryRequest = lazyNamed(() => import('../auth/password-recovery'), 'RecoveryRequest');
+// Rare screens load on demand; a way back stays available while they load or if they fail. The email-link recovery
+// screen is eager: its link exists only in memory, so it must never depend on a reload.
+const RecoveryRequest = lazyNamed(() => import('../auth/recovery-request'), 'RecoveryRequest');
 const DeletionRecovery = lazyNamed(() => import('../auth/deletion-recovery'), 'DeletionRecovery');
 const configuration = readConfiguration(import.meta.env);
 const browserLanguages = navigator.languages;
@@ -346,7 +346,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   const [controller] = useState(() => {
     markNormalAuthStarted();
     return new SessionController(makeClient(config), browserLanguages, {
-      make: () => makeClient(config), retire: retireClient, revoke: (record) => revokeSession(config, record),
+      make: () => makeClient(config), retire: retireClient, revoke: (record) => import('../data/revoke').then((module) => module.revokeSession(config, record), () => 'failed' as const),
     });
   });
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
@@ -423,9 +423,9 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   if (state.phase !== 'ready' || !state.profile || !state.scope || holding) {
     return <EntryLayout language={language} onLanguage={(next) => controller.chooseLanguage(next)} t={t} context={entryContext}>
       {refusal ? <RecoveryRefusal kind={refusal.kind} notice={refusal.notice} t={t} />
-        : state.phase === 'signed-out' && requestPassword ? <LazyBoundary t={t}><RecoveryRequest config={config} online={online} t={t} language={language} onReturn={returnFromRequest} /></LazyBoundary>
+        : state.phase === 'signed-out' && requestPassword ? <LazyBoundary t={t} action={<button type="button" className="button button-quiet" onClick={returnFromRequest}>{t('recovery.return')}</button>}><RecoveryRequest config={config} online={online} t={t} language={language} onReturn={returnFromRequest} /></LazyBoundary>
         : state.phase === 'loading' || holding ? <section className="entry-card connecting" aria-busy="true"><span className="spinner" /><p role="status">{t('common.loading')}</p></section>
-        : state.phase === 'deleting' && state.scope && state.deletion ? <LazyBoundary t={t}><DeletionRecovery key={state.scope.epoch} client={client} controller={controller}
+        : state.phase === 'deleting' && state.scope && state.deletion ? <LazyBoundary t={t} action={<button type="button" className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button>}><DeletionRecovery key={state.scope.epoch} client={client} controller={controller}
           scope={state.scope} deletion={state.deletion} online={online} t={t} onSignOut={() => { void signOut(); }} /></LazyBoundary>
         : state.phase === 'waiting' ? <section className="entry-card"><h1 id="waiting-title" tabIndex={-1}>{t('auth.offlineTitle')}</h1><p role="status" className="notice notice-offline">{t('common.offline')}</p><button className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></section>
         : state.phase === 'locked' ? <section className="entry-card"><h1>{t('common.errorTitle')}</h1><p className="muted">{t('account.locked')}</p><div className="stack"><button className="button button-primary" onClick={() => { void controller.retry(); }} disabled={!online}>{t('common.retry')}</button><button className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div></section>
@@ -484,7 +484,7 @@ function RecoveryEntry({ config, callback }: { config: PublicConfig; callback: R
   useEffect(() => { document.documentElement.lang = language; }, [language]);
   const context = useMemo(() => ({ kind: callback.kind }), [callback.kind]);
   return <EntryLayout language={language} onLanguage={setLanguage} t={t} context={context}>
-    {callback.kind === 'link' ? <LazyBoundary t={t}><PasswordRecovery config={config} link={callback.link} online={online} t={t} onReturn={leaveRecovery} /></LazyBoundary>
+    {callback.kind === 'link' ? <PasswordRecovery config={config} link={callback.link} online={online} t={t} onReturn={leaveRecovery} />
       : <RecoveryRefusal kind={callback.kind === 'conflict' ? 'conflict' : 'invalid'} notice={callback.notice} t={t} />}
   </EntryLayout>;
 }
