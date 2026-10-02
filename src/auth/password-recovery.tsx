@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import type { PublicConfig } from '../data/config';
 import type { MessageKey, Translate } from '../i18n';
 import { passwordProblem, recoveryAttempt, recoveryPasswordMinimum } from './recovery';
@@ -10,16 +10,21 @@ export function PasswordRecovery({ config, link, online, t, onReturn }: {
   const [attempt] = useState(() => recoveryAttempt(config, link));
   const state = useSyncExternalStore(attempt.subscribe, attempt.getSnapshot);
   const [confirmed, setConfirmed] = useState(false);
-  const [password, setPassword] = useState('');
-  const [confirmation, setConfirmation] = useState('');
+  // Uncontrolled, so a re-render while someone types (a language arriving) never writes an older value back.
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const confirmationRef = useRef<HTMLInputElement>(null);
+  const clearFields = useCallback(() => {
+    if (passwordRef.current) passwordRef.current.value = '';
+    if (confirmationRef.current) confirmationRef.current.value = '';
+  }, []);
   const [visible, setVisible] = useState(false);
   const [error, setError] = useState<MessageKey | null>(null);
   useEffect(() => attempt.retain(), [attempt]);
   useEffect(() => attempt.subscribe(() => {
     if (attempt.getSnapshot().phase === 'failed') {
-      setPassword(''); setConfirmation(''); setConfirmed(false); setVisible(false); setError(null);
+      clearFields(); setConfirmed(false); setVisible(false); setError(null);
     }
-  }), [attempt]);
+  }), [attempt, clearFields]);
   useEffect(() => {
     document.getElementById(state.phase === 'password' ? 'recovery-password' : 'recovery-title')?.focus();
     if (state.phase === 'success') onReturn(state.notice);
@@ -29,11 +34,12 @@ export function PasswordRecovery({ config, link, online, t, onReturn }: {
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!online || busy) return;
+    const password = passwordRef.current?.value ?? '', confirmation = confirmationRef.current?.value ?? '';
     const problem = passwordProblem(password, confirmation);
     setError(problem);
     if (problem) return;
-    try { await attempt.update(password, confirmation, () => { setPassword(''); setConfirmation(''); }); }
-    finally { setPassword(''); setConfirmation(''); }
+    try { await attempt.update(password, confirmation, clearFields); }
+    finally { clearFields(); }
   }
   const fieldError = error ? 'recovery-error' : undefined;
   return <section className="entry-card recovery-card" aria-labelledby="recovery-title">
@@ -54,17 +60,15 @@ export function PasswordRecovery({ config, link, online, t, onReturn }: {
       <div className="field">
         <label htmlFor="recovery-password">{t('recovery.newPassword')}</label>
         <div className="password-input">
-          <input id="recovery-password" type={visible ? 'text' : 'password'} autoComplete="new-password" required disabled={busy}
-            aria-invalid={Boolean(error)} aria-describedby={fieldError ?? 'recovery-password-hint'}
-            value={password} onChange={event => setPassword(event.target.value)} />
+          <input ref={passwordRef} id="recovery-password" type={visible ? 'text' : 'password'} autoComplete="new-password" required disabled={busy}
+            aria-invalid={Boolean(error)} aria-describedby={fieldError ?? 'recovery-password-hint'} />
           <button type="button" disabled={busy} aria-pressed={visible} onClick={() => setVisible(!visible)}>{t(visible ? 'auth.hidePassword' : 'auth.showPassword')}</button>
         </div>
       </div>
       <div className="field">
         <label htmlFor="recovery-confirm-password">{t('recovery.repeatPassword')}</label>
-        <input id="recovery-confirm-password" type={visible ? 'text' : 'password'} autoComplete="new-password" required disabled={busy}
-          aria-invalid={Boolean(error)} aria-describedby={fieldError ?? 'recovery-password-hint'}
-          value={confirmation} onChange={event => setConfirmation(event.target.value)} />
+        <input ref={confirmationRef} id="recovery-confirm-password" type={visible ? 'text' : 'password'} autoComplete="new-password" required disabled={busy}
+          aria-invalid={Boolean(error)} aria-describedby={fieldError ?? 'recovery-password-hint'} />
       </div>
       {error && <p id="recovery-error" role="alert" tabIndex={-1} className="notice notice-error">{t(error)}</p>}
       <p className="fine muted">{t('recovery.revocationHelp')}</p>

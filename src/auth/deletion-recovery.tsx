@@ -14,7 +14,9 @@ const notices: Record<Props['deletion'], MessageKey | null> = { retry: null, in_
 // Shown when a frozen account signs in with its deletion unfinished. It needs no profile or data access:
 // the password goes only to the deletion function, which continues the existing job.
 export function DeletionRecovery({ client, controller, scope, deletion, online, t, onSignOut }: Props) {
-  const [password, setPassword] = useState('');
+  // Uncontrolled, so a re-render while someone types (a language arriving) never writes an older value back.
+  const field = useRef<HTMLInputElement>(null);
+  const [filled, setFilled] = useState(false);
   const [working, setWorking] = useState(false);
   const [problem, setProblem] = useState<MessageKey | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -23,6 +25,7 @@ export function DeletionRecovery({ client, controller, scope, deletion, online, 
   useEffect(() => { if (problem) alert.current?.focus(); }, [problem]);
 
   async function submit() {
+    const password = field.current?.value ?? '';
     if (!password || working || deletion === 'contact') return;
     setWorking(true); setProblem(null);
     try {
@@ -36,12 +39,12 @@ export function DeletionRecovery({ client, controller, scope, deletion, online, 
     } catch (error) {
       if (!scope.signal.aborted && !isAborted(error)) setProblem('delete.failed');
     } finally {
-      if (!scope.signal.aborted) { setPassword(''); setWorking(false); }
+      if (!scope.signal.aborted) { if (field.current) field.current.value = ''; setFilled(false); setWorking(false); }
     }
   }
 
   const notice = notices[deletion];
-  const ready = online && !working && password.length > 0 && deletion !== 'contact';
+  const ready = online && !working && filled && deletion !== 'contact';
   return <section className="entry-card" aria-labelledby="deletion-recovery-title">
     <h1 id="deletion-recovery-title" ref={heading} tabIndex={-1}>{t('delete.recoveryTitle')}</h1>
     <p className="muted">{t('delete.recoveryBody')}</p>
@@ -50,8 +53,8 @@ export function DeletionRecovery({ client, controller, scope, deletion, online, 
     <form className="stack" noValidate onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       {deletion !== 'contact' && <div className="field">
         <label htmlFor="deletion-recovery-password">{t('delete.password')}</label>
-        <input id="deletion-recovery-password" type="password" autoComplete="current-password" value={password} disabled={working}
-          aria-invalid={problem === 'delete.wrongPassword' || undefined} onChange={(event) => { setPassword(event.target.value); }} />
+        <input ref={field} id="deletion-recovery-password" type="password" autoComplete="current-password" disabled={working}
+          aria-invalid={problem === 'delete.wrongPassword' || undefined} onChange={(event) => { setFilled(event.target.value.length > 0); }} />
       </div>}
       {problem && <p ref={alert} tabIndex={-1} role="alert" className="notice notice-error">{t(problem)}</p>}
       {deletion !== 'contact' && <button className="button button-danger" disabled={!ready} aria-busy={working || undefined}>{t('delete.finish')}</button>}
