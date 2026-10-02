@@ -986,6 +986,54 @@ test.describe('LANG1 language catalogues on the entry screens', () => {
     await expect(page.locator('#recovery-password')).toBeVisible();
   });
 
+  // LANG1b: typing while a chosen language loads, and while it arrives, keeps every value and the focus.
+  test('sign-in: values typed while a language loads survive its arrival and the form still signs in', async ({ page }) => {
+    await mockBackend(page);
+    const catalogues = await controlCatalogues(page);
+    await page.goto('/');
+    const email = page.locator('#email'), password = page.locator('#password');
+    await expect(email).toBeEditable();
+    const release = catalogues.hold('fi');
+    await entryLanguage(page, 'fi').click();
+    await expect(entryChooser(page)).toHaveAttribute('aria-busy', 'true');
+    await expect(email).toBeEditable();
+    await expect(password).toBeEditable();
+    await email.pressSequentially('user-a@example.test');
+    await password.click();
+    const typing = password.pressSequentially('fictional-test-password', { delay: 15 });
+    await expect.poll(() => password.inputValue()).toMatch(/^fict/);
+    release();
+    await typing;
+    await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
+    await expect(page.locator('button[type="submit"]')).toHaveText(text('auth.signIn', 'fi'));
+    await expect(email).toHaveValue('user-a@example.test');
+    await expect(password).toHaveValue('fictional-test-password');
+    await expect(password).toBeFocused();
+    await page.locator('button[type="submit"]').click();
+    await expectSignedIn(page);
+  });
+
+  test('password reset request: an email typed while a language loads survives its arrival', async ({ page }) => {
+    await mockBackend(page);
+    const catalogues = await controlCatalogues(page);
+    await page.goto('/');
+    await page.getByRole('button', { name: text('recovery.forgot'), exact: true }).click();
+    const email = page.locator('#recovery-email');
+    await expect(email).toBeEditable();
+    const release = catalogues.hold('sv');
+    await entryLanguage(page, 'sv').click();
+    await expect(entryChooser(page)).toHaveAttribute('aria-busy', 'true');
+    await email.click();
+    const typing = email.pressSequentially('user-a@example.test', { delay: 15 });
+    await expect.poll(() => email.inputValue()).toMatch(/^user/);
+    release();
+    await typing;
+    await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
+    await expect(page.locator('label[for="recovery-email"]')).toHaveText(text('auth.email', 'sv'));
+    await expect(email).toHaveValue('user-a@example.test');
+    await expect(email).toBeFocused();
+  });
+
   test.describe('fi-FI device at 320px', () => {
     test.use({ locale: 'fi-FI' });
     test('200% text: the failed-language line and Try again fit, with no axe violations', async ({ page }) => {

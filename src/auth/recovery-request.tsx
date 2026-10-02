@@ -7,7 +7,8 @@ import { logoutKey } from './session';
 export function RecoveryRequest({ config, t, language, online, onReturn }: {
   config: PublicConfig; t: Translate; language: Language; online: boolean; onReturn: () => void;
 }) {
-  const [email, setEmail] = useState('');
+  // Uncontrolled, so a re-render while someone types (a language arriving) never writes an older value back.
+  const emailRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const [error, setError] = useState<MessageKey | null>(null);
@@ -32,8 +33,8 @@ export function RecoveryRequest({ config, t, language, online, onReturn }: {
     if (busy || !online || recoveryRequestWait() || !signal || signal.aborted) return;
     setBusy(true); setError(null); setAcknowledged(false);
     try {
-      await requestRecovery(config, email, signal);
-      if (!signal.aborted) { setAcknowledged(true); setEmail(''); }
+      await requestRecovery(config, emailRef.current?.value ?? '', signal);
+      if (!signal.aborted) { setAcknowledged(true); if (emailRef.current) emailRef.current.value = ''; }
     } catch (problem) { if (!signal.aborted) setError(recoveryError(problem)); }
     finally { if (!signal.aborted) { setBusy(false); setWait(recoveryRequestWait()); } }
   }
@@ -44,9 +45,8 @@ export function RecoveryRequest({ config, t, language, online, onReturn }: {
     <form className="stack login-form" onSubmit={event => { void submit(event); }}>
       <div className="field">
         <label htmlFor="recovery-email">{t('auth.email')}</label>
-        <input id="recovery-email" type="email" autoComplete="username" required maxLength={320}
-          spellCheck={false} autoCapitalize="none" value={email} disabled={busy}
-          onChange={event => setEmail(event.target.value)} />
+        <input ref={emailRef} id="recovery-email" name="email" type="email" autoComplete="username" required maxLength={320}
+          spellCheck={false} autoCapitalize="none" disabled={busy} />
       </div>
       {error && <p id="recovery-error" tabIndex={-1} role="alert" className="notice notice-error">{t(error)}</p>}
       {acknowledged && <p role="status" className="notice notice-success">{t('recovery.acknowledgement')}</p>}

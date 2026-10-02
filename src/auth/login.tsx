@@ -1,11 +1,12 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import type { SessionController } from './session';
 import type { Translate } from '../i18n';
 import { Icon } from '../app/icon';
 
 export function Login({ controller, online, t, onRecovery, onAuthActivity }: { controller: SessionController; online: boolean; t: Translate; onRecovery: () => void; onAuthActivity: () => void }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  // Uncontrolled: a re-render (a language arriving while someone types) never writes an older value back over the field.
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -16,7 +17,10 @@ export function Login({ controller, online, t, onRecovery, onAuthActivity }: { c
     onAuthActivity();
     setFailed(false);
     setBusy(true);
-    try { await controller.signIn(email, password, remember && controller.canRemember); setPassword(''); }
+    try {
+      await controller.signIn(emailRef.current?.value ?? '', passwordRef.current?.value ?? '', remember && controller.canRemember);
+      if (passwordRef.current) passwordRef.current.value = '';
+    }
     catch { setFailed(true); }
     finally { setBusy(false); }
   }
@@ -27,12 +31,12 @@ export function Login({ controller, online, t, onRecovery, onAuthActivity }: { c
       <form className="stack login-form" onChange={onAuthActivity} onSubmit={(event) => { void submit(event); }}>
         <div className="field">
           <label htmlFor="email">{t('auth.email')}</label>
-          <input id="email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required disabled={busy} spellCheck={false} autoCapitalize="none" />
+          <input ref={emailRef} id="email" name="email" type="email" autoComplete="username" required disabled={busy} spellCheck={false} autoCapitalize="none" />
         </div>
         <div className="field">
           <label htmlFor="password">{t('auth.password')}</label>
           <div className="password-input">
-            <input id="password" type={visible ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required disabled={busy} />
+            <input ref={passwordRef} id="password" name="password" type={visible ? 'text' : 'password'} autoComplete="current-password" required disabled={busy} />
             <button type="button" onClick={() => setVisible(!visible)} aria-pressed={visible}>{t(visible ? 'auth.hidePassword' : 'auth.showPassword')}</button>
           </div>
         </div>
