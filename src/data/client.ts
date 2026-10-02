@@ -4,11 +4,14 @@ import type { PublicConfig } from './config';
 import type { RecoveryLink } from '../auth/recovery-callback';
 import { profileColumns } from './rows';
 import { DELETE_TIMEOUT_MS } from './delete-account';
-import { ClosableAuthStorage, clearAuthNamespace, storedAccessToken } from '../auth/auth-storage';
+import { ClosableAuthStorage, MemoryUserStorage, clearAuthNamespace, migrateAuthStore, readAuthRecord, tokenClaims, type AuthRecord } from '../auth/auth-storage';
 
 export type AppClient = SupabaseClient<Database>;
 export const authStorageKey = 'stillroom.auth';
-type ClientContext = { signal?: AbortSignal; retired: boolean; storage: ClosableAuthStorage; identity: string };
+type ClientContext = {
+  signal?: AbortSignal; ownerId: string | null; retired: boolean; storage: ClosableAuthStorage; user: MemoryUserStorage;
+  identity: string; store: () => Storage;
+};
 const requestContexts = new WeakMap<AppClient, ClientContext>();
 const clients = new Map<string, AppClient>();
 export const REQUEST_TIMEOUT_MS = 20_000;
@@ -16,14 +19,25 @@ export const REQUEST_TIMEOUT_MS = 20_000;
 export function requestTimeoutMs(pathname: string): number {
   return pathname.endsWith('/functions/v1/delete-account') ? DELETE_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
 }
+function bearerOwner(input: RequestInfo | URL, init?: RequestInit): string | null {
+  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+  const match = /^Bearer (\S+)$/.exec(headers.get('authorization') ?? '');
+  return match ? tokenClaims(match[1])?.sub ?? null : null;
+}
 export function makeClient(config: PublicConfig): AppClient {
   const identity = `${config.url}|${config.publishableKey}`;
   const existing = clients.get(identity);
   if (existing) return existing;
-  const context: ClientContext = { retired: false, storage: new ClosableAuthStorage(() => window.sessionStorage), identity };
+  const store = () => window.sessionStorage;
+  // Before the SDK reads anything: an older release's full record becomes the allowlisted form, anything invalid goes.
+  migrateAuthStore(store());
+  const context: ClientContext = {
+    retired: false, ownerId: null, storage: new ClosableAuthStorage(store), user: new MemoryUserStorage(), identity, store,
+  };
   const client = createClient<Database>(config.url, config.publishableKey, {
     auth: {
       storage: context.storage,
+      userStorage: context.user,
       storageKey: authStorageKey,
       persistSession: true,
       autoRefreshToken: true,
@@ -33,12 +47,17 @@ export function makeClient(config: PublicConfig): AppClient {
     global: {
       fetch: (input, init) => {
         // A signed-out client's late refreshes, retries and requests end here, off the network.
-        if (context.retired) return Promise.resolve(retiredResponse());
+        if (context.retired) return Promise.resolve(localRefusal('signed_out'));
         const address = input instanceof Request ? input.url : String(input);
         const pathname = new URL(address).pathname;
+        const auth = pathname.startsWith('/auth/v1/');
+        // Data requests go out only with a credential of the owner whose scope is open.
+        if (!auth && (context.ownerId === null || bearerOwner(input, init) !== context.ownerId)) {
+          return Promise.resolve(localRefusal('owner_mismatch'));
+        }
         const signals = [AbortSignal.timeout(requestTimeoutMs(pathname))];
         if (init?.signal) signals.push(init.signal);
-        if (context.signal && !pathname.startsWith('/auth/v1/')) signals.push(context.signal);
+        if (context.signal && !auth) signals.push(context.signal);
         return fetch(input, { ...init, cache: 'no-store', signal: AbortSignal.any(signals) });
       },
     },
@@ -47,34 +66,52 @@ export function makeClient(config: PublicConfig): AppClient {
   clients.set(identity, client);
   return client;
 }
-export function bindDataRequests(client: AppClient, signal: AbortSignal): void {
+/** Opens data requests for one owner scope. They end with the scope's signal; another owner's credential is refused. */
+export function bindDataRequests(client: AppClient, signal: AbortSignal, ownerId: string): void {
   const context = requestContexts.get(client);
-  if (context) context.signal = signal;
+  if (context) { context.signal = signal; context.ownerId = ownerId; }
+}
+export function unbindDataRequests(client: AppClient): void {
+  const context = requestContexts.get(client);
+  if (context) { context.signal = undefined; context.ownerId = null; }
+}
+/** The allowlisted record this client's own store holds, or null. */
+export function heldRecord(client: AppClient): AuthRecord | null {
+  const context = requestContexts.get(client);
+  return context && !context.storage.closed ? readAuthRecord(context.store().getItem(authStorageKey)) : null;
 }
 
-function retiredResponse(): Response {
-  return new Response(JSON.stringify({ code: 'signed_out', message: 'Signed out.' }), {
+function localRefusal(code: 'signed_out' | 'owner_mismatch'): Response {
+  return new Response(JSON.stringify({ code, message: code === 'signed_out' ? 'Signed out.' : 'Not available.' }), {
     status: 401, headers: { 'content-type': 'application/json' },
   });
 }
 
 /**
- * Signs a client out on this device, synchronously: the stored session is cleared and the client can no longer
- * read, write or send anything. The next `makeClient` call returns a fresh client. Returns the access token for a
- * best-effort server revoke.
+ * Closes a client without touching any stored credential: it can no longer read, write or send anything, and its
+ * in-memory user is dropped. The next `makeClient` call returns a fresh client, which reads the store afresh.
  */
-export function retireClient(client: AppClient): { token: string | null } {
+export function releaseClient(client: AppClient): void {
   const context = requestContexts.get(client);
-  const token = storedAccessToken(context && !context.storage.closed ? context.storage.getItem(authStorageKey) : null)
-    ?? storedAccessToken(window.localStorage.getItem(authStorageKey));
   if (context) {
     context.retired = true;
+    context.ownerId = null;
     context.storage.close();
+    context.user.clear();
     if (clients.get(context.identity) === client) clients.delete(context.identity);
   }
-  clearAuthNamespace([window.sessionStorage, window.localStorage]);
   void settleRetired(client);
-  return { token };
+}
+/**
+ * Signs a client out on this device, synchronously: its own store's auth keys are cleared and the client is
+ * released. Returns the captured record for a best-effort server revoke. Used only for a sign-out.
+ */
+export function retireClient(client: AppClient): { record: AuthRecord | null } {
+  const context = requestContexts.get(client);
+  const record = heldRecord(client);
+  if (context) clearAuthNamespace([context.store()]);
+  releaseClient(client);
+  return { record };
 }
 
 // dispose() is not a latch: an initialization still in flight re-registers its visibility listener and auto-refresh
@@ -88,18 +125,6 @@ async function settleRetired(client: AppClient): Promise<void> {
 }
 
 export type RevokeResult = 'ok' | 'failed';
-/** Best-effort server logout for a captured token. A missing account or an expired token also counts as done. */
-export async function revokeSession(config: PublicConfig, token: string | null): Promise<RevokeResult> {
-  if (!token) return 'ok';
-  try {
-    const response = await fetch(`${config.url}/auth/v1/logout?scope=local`, {
-      method: 'POST', headers: { apikey: config.publishableKey, authorization: `Bearer ${token}` },
-      cache: 'no-store', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    await response.body?.cancel().catch(() => undefined);
-    return response.ok || [401, 403, 404].includes(response.status) ? 'ok' : 'failed';
-  } catch { return 'failed'; }
-}
 
 export function makeRecoveryClient(config: PublicConfig, link: RecoveryLink | null, redirect: string) {
   const abort = new AbortController();

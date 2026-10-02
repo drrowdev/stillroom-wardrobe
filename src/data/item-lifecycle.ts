@@ -14,6 +14,7 @@ import type { AppClient } from './client';
 import { readConfiguration, type PublicConfig } from './config';
 import { AppError } from './errors';
 import { deleteWardrobeObject, deleteWardrobeTarget, wardrobeTargetDeleteRoute, type DeleteRequest } from './storage-delete';
+import { sessionOwner } from '../auth/auth-storage';
 
 export type LifecycleStage = 'read' | 'change' | 'begin' | 'bytes' | 'finish';
 export class LifecycleError extends AppError {
@@ -145,7 +146,7 @@ export class ItemLifecycleClient {
     return remove(async (route, options) => {
       const auth = await work.wait(() => this.client.auth.getSession());
       const session = auth.data.session;
-      if (auth.error || !session || session.user.id !== this.owner) throw new LifecycleError(work.stage, false, 'error.unavailable');
+      if (auth.error || !session || sessionOwner(session) !== this.owner) throw new LifecycleError(work.stage, false, 'error.unavailable');
       work.check();
       work.stage = 'bytes'; work.changed = true;
       if (work.dispatches !== undefined) {

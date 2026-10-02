@@ -10,6 +10,7 @@ import { wardrobeTargetDeleteRoute } from '../../src/data/storage-delete';
 import { ItemLifecycleClient } from '../../src/data/item-lifecycle';
 import type { Database } from '../../src/data/database.types';
 import { newGarmentDraft, editGarmentField, validateGarmentDraft } from '../../src/domain/garment-fields';
+import { testAccessToken } from './test-token';
 
 const owner = '10000000-0000-4000-8000-000000000001', id = '20000000-0000-4000-8000-000000000001';
 const imageId = '30000000-0000-4000-8000-000000000001', nonce = '40000000-0000-4000-8000-000000000001';
@@ -56,7 +57,7 @@ function harness(options: { deleteReply?: () => Promise<Response> | Response; lo
   const client = createClient<Database>('http://127.0.0.1:54321', 'sb_publishable_unit_fixture', {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }, global: { fetch: transport },
   });
-  const session: Session = { access_token: 'fictional', refresh_token: 'fictional', token_type: 'bearer', expires_in: 3600,
+  const session: Session = { access_token: testAccessToken(owner), refresh_token: 'fictional', token_type: 'bearer', expires_in: 3600,
     user: { id: owner, aud: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: now } };
   vi.spyOn(client.auth, 'getSession').mockResolvedValue({ data: { session }, error: null });
   vi.stubGlobal('fetch', transport);
@@ -247,7 +248,7 @@ describe('first production singular deletion adapter', () => {
     const deletes = h.requests.filter(request => request.method === 'DELETE');
     expect(deletes.map(request => request.url.pathname)).toEqual([image.main_path, image.thumb_path].map(path => `/storage/v1/object/wardrobe/${path}`));
     expect(deletes.every(request => request.url.origin === 'http://127.0.0.1:54321' && request.body === null
-      && request.headers.get('apikey') === 'sb_publishable_unit_fixture' && request.headers.get('authorization') === 'Bearer fictional'
+      && request.headers.get('apikey') === 'sb_publishable_unit_fixture' && request.headers.get('authorization') === `Bearer ${h.session.access_token}`
       && request.init.cache === 'no-store' && request.init.credentials === 'omit' && request.init.redirect === 'error')).toBe(true);
     expect(invalidated).toEqual([[image.main_path, image.thumb_path]]);
     expect(h.requests.at(-1)!.url.pathname).toBe('/rest/v1/rpc/finish_item_deletion');
@@ -334,7 +335,7 @@ describe('first production singular deletion adapter', () => {
       stage: 'read', uncertain: false, messageKey: 'error.unavailable',
     });
     expect(h.requests).toHaveLength(0);
-    vi.mocked(h.client.auth.getSession).mockResolvedValue({ data: { session: { ...h.session, user: { ...h.session.user, id: nonce } } }, error: null });
+    vi.mocked(h.client.auth.getSession).mockResolvedValue({ data: { session: { ...h.session, access_token: testAccessToken(nonce), user: { ...h.session.user, id: nonce } } }, error: null });
     await expect(h.api.delete(intent, true, () => {})).rejects.toMatchObject({
       stage: 'begin', uncertain: false, messageKey: 'error.unavailable',
     });

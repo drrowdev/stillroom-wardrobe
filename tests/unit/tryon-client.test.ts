@@ -10,6 +10,7 @@ import {
   RECONCILE_EVERY_MS, RECONCILE_FOR_MS, RUN_LIFETIME_MS, TryOnRun, failureAction, type RunEnvironment, type TryOnApi,
 } from '../../src/features/outfits/use-try-on';
 import { readTryOnStatus, TryOnStore, tryOnViewOf } from '../../src/features/settings/tryon-store';
+import { testAccessToken } from './test-token';
 
 const SERVER = Date.parse('2026-10-05T12:00:00Z');
 const OUTFIT = '10000000-0000-4000-8000-000000000001';
@@ -473,7 +474,7 @@ function supabase() {
   const client = createClient<Database>(config.url, config.publishableKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
-  const session: Session = { access_token: 'fictional-unit-only', refresh_token: 'fictional-unit-refresh', token_type: 'bearer',
+  const session: Session = { access_token: testAccessToken(owner), refresh_token: 'fictional-unit-refresh', token_type: 'bearer',
     expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600,
     user: { id: owner, aud: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: '2026-09-12T00:00:00Z' } };
   vi.spyOn(client.auth, 'getSession').mockResolvedValue({ data: { session }, error: null });

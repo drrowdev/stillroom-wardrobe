@@ -3,6 +3,7 @@ import { AuthError, createClient, type Session } from '@supabase/supabase-js';
 import type { Database } from '../../src/data/database.types';
 import { AiClient, AiError } from '../../src/data/ai';
 import { parseAiStatus, supportedAiPolicy, parseAnalysisReply } from '../../src/domain/ai-controls';
+import { testAccessToken } from './test-token';
 
 const owner = '10000000-0000-4000-8000-000000000001';
 const context = { ownerId: owner, epoch: 1, requestId: '30000000-0000-4000-8000-000000000001',
@@ -20,7 +21,7 @@ function fixture() {
   const client = createClient<Database>('http://127.0.0.1:54321', 'sb_publishable_test_only', {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
-  const session: Session = { access_token: 'fictional-unit-only', refresh_token: 'fictional-unit-refresh',
+  const session: Session = { access_token: testAccessToken(owner), refresh_token: 'fictional-unit-refresh',
     token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600,
     user: { id: owner, aud: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: '2026-09-12T00:00:00Z' } };
   const auth = vi.spyOn(client.auth, 'getSession').mockResolvedValue({ data: { session }, error: null });
@@ -142,7 +143,7 @@ describe('closed ordinary-auth AI boundary', () => {
     expect(url).toBe('http://127.0.0.1:54321/rest/v1/rpc/ai_set_consent');
     expect(JSON.parse(String(init?.body))).toEqual({ p_enabled: false, p_notice_revision: null, p_expected_version: 1 });
     expect(init).toMatchObject({ method: 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error' });
-    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer fictional-unit-only');
+    expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${f.session.access_token}`);
     expect(f.auth).toHaveBeenCalledTimes(1);
   });
   it('refreshes an expiring session, but does not retry a 401', async () => {
@@ -154,7 +155,7 @@ describe('closed ordinary-auth AI boundary', () => {
   });
   it('uses the selected refreshed session token with one proactive refresh', async () => {
     const f = fixture(); f.session.expires_at = 1;
-    const refreshed: Session = { ...f.session, access_token: 'fictional-refreshed-unit-only',
+    const refreshed: Session = { ...f.session, access_token: testAccessToken(owner, { label: 'refreshed' }),
       expires_at: Math.floor(Date.now() / 1000) + 3600 };
     f.refresh.mockResolvedValue({ data: { session: refreshed, user: refreshed.user }, error: null });
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(status()));
@@ -174,7 +175,7 @@ describe('closed ordinary-auth AI boundary', () => {
   });
   it('rejects a refreshed session belonging to another owner without dispatch', async () => {
     const f = fixture(); f.session.expires_at = 1;
-    const refreshed: Session = { ...f.session, user: { ...f.session.user, id: context.draftId } };
+    const refreshed: Session = { ...f.session, access_token: testAccessToken(context.draftId), user: { ...f.session.user, id: context.draftId } };
     f.refresh.mockResolvedValue({ data: { session: refreshed, user: refreshed.user }, error: null });
     const fetcher = vi.fn<typeof fetch>(); vi.stubGlobal('fetch', fetcher);
     await expect(f.ai.status()).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });

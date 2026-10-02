@@ -7,6 +7,7 @@ import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON
 import { isUuid } from '../domain/wardrobe';
 import type { AppClient } from './client';
 import { readConfiguration, type PublicConfig } from './config';
+import { sessionOwner } from '../auth/auth-storage';
 
 export const tryOnCodes = ['OK', 'INVALID_INPUT', 'UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRED', 'NOT_FOUND', 'TERMINAL',
   'CONFLICT', 'CHAIN_MISMATCH', 'WITHDRAWN', 'CANCELLED', 'EXPIRED', 'RESULTS_FULL', 'TOO_LARGE', 'UNSUPPORTED_MEDIA',
@@ -242,14 +243,14 @@ export class TryOnClient {
   }
   private async bearer(ms: number, wait: Wait): Promise<string> {
     const cached = await wait(this.client.auth.getSession());
-    if (cached.error || !cached.data.session || cached.data.session.user.id !== this.scope.ownerId) throw new TryOnError('UNAUTHENTICATED');
+    if (cached.error || !cached.data.session || sessionOwner(cached.data.session) !== this.scope.ownerId) throw new TryOnError('UNAUTHENTICATED');
     let session = cached.data.session;
     if ((session.expires_at ?? 0) * 1000 <= Date.now() + ms) {
       const refreshed = await wait(this.client.auth.refreshSession());
       if (refreshed.error || !refreshed.data.session) throw new TryOnError('UNAUTHENTICATED');
       session = refreshed.data.session;
     }
-    if (session.user.id !== this.scope.ownerId) throw new TryOnError('UNAUTHENTICATED');
+    if (sessionOwner(session) !== this.scope.ownerId) throw new TryOnError('UNAUTHENTICATED');
     return session.access_token;
   }
   private headers(token: string, extra: Record<string, string>) {

@@ -1,6 +1,7 @@
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import type { AppClient } from './client';
 import type { OwnerScope } from '../auth/session';
+import { sessionOwner } from '../auth/auth-storage';
 
 export type DeleteOutcome = 'complete' | 'in_progress' | 'retry' | 'contact' | 'password' | 'signed_out' | 'failed';
 const states = new Set<DeleteOutcome>(['complete', 'in_progress', 'retry', 'contact']);
@@ -31,7 +32,7 @@ export async function deletionStatus(client: AppClient, signal: AbortSignal): Pr
 /** Owner-confirmed account deletion. Only the password is sent; the server takes the owner from the session. */
 export async function deleteAccount(client: AppClient, scope: OwnerScope, password: string, signal: AbortSignal): Promise<DeleteOutcome> {
   const { data: current } = await client.auth.getSession();
-  if (current.session?.user.id !== scope.ownerId) return 'signed_out';
+  if (sessionOwner(current.session) !== scope.ownerId) return 'signed_out';
   const { data, error } = await client.functions.invoke('delete-account', {
     body: { password }, method: 'POST', signal: AbortSignal.any([signal, scope.signal]), timeout: DELETE_TIMEOUT_MS,
   });

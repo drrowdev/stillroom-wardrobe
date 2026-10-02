@@ -8,6 +8,7 @@ import type { PreparedPhoto } from '../images/process-jpeg';
 import type { AppClient } from './client';
 import { readConfiguration, type PublicConfig } from './config';
 import { AppError } from './errors';
+import { sessionOwner } from '../auth/auth-storage';
 
 export class AiError extends AppError {
   constructor(readonly code: AiCode) { super(code === 'TIMEOUT' ? 'aiC.uncertain' : 'aiC.unavailable'); }
@@ -52,14 +53,14 @@ export class AiClient {
     return this.bounded(ms, async (signal, wait) => {
       if (signal.aborted) throw new AiError('TIMEOUT');
       const cached = await wait(this.client.auth.getSession());
-      if (cached.error || !cached.data.session || cached.data.session.user.id !== this.scope.ownerId) throw new AiError('UNAUTHENTICATED');
+      if (cached.error || !cached.data.session || sessionOwner(cached.data.session) !== this.scope.ownerId) throw new AiError('UNAUTHENTICATED');
       let session = cached.data.session;
       if ((session.expires_at ?? 0) * 1000 <= Date.now() + ms) {
         const refreshed = await wait(this.client.auth.refreshSession());
         if (refreshed.error || !refreshed.data.session) throw new AiError('UNAUTHENTICATED');
         session = refreshed.data.session;
       }
-      if (session.user.id !== this.scope.ownerId || signal.aborted) throw new AiError('UNAUTHENTICATED');
+      if (sessionOwner(session) !== this.scope.ownerId || signal.aborted) throw new AiError('UNAUTHENTICATED');
       const response = await wait(fetch(`${this.config.url}${path}`, {
         method: 'POST', redirect: 'error', cache: 'no-store', credentials: 'omit', signal,
         headers: { apikey: this.config.publishableKey, Authorization: `Bearer ${session.access_token}`,

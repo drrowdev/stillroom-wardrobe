@@ -154,7 +154,7 @@ describe('CI workflow browser split', () => {
     expect(projects).toEqual(['chromium', 'mobile', 'webkit-photo', 'cleanup-timing', 'cleanup-timing-webkit']);
     expect(config).toContain("testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', "
       + "'item-details.spec.ts', 'garment-fields.spec.ts', 'ai-photo-first.spec.ts', 'items.spec.ts', 'ux-l1a.spec.ts', "
-      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts', 'enhancement.spec.ts', 'admin.spec.ts', 'tryon.spec.ts', 'settings-layout.spec.ts', 'shell-layout.spec.ts'],");
+      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts', 'enhancement.spec.ts', 'admin.spec.ts', 'tryon.spec.ts', 'settings-layout.spec.ts', 'shell-layout.spec.ts', 'auth-session.spec.ts'],");
     expect(config).toContain('  failOnFlakyTests: Boolean(process.env.CI),\n');
     expect(config).toContain('  forbidOnly: Boolean(process.env.CI),\n');
     const app = job('app-browser'), webkit = job('webkit-browser');
@@ -183,8 +183,10 @@ describe('CI workflow browser split', () => {
   });
 
   it('runs the production shell suite once, in its own minimal PWA job and Playwright config that fails when nothing ran', () => {
+    // The full history, so the mixed-version contracts can build the production baseline with git archive.
     expect(steps(ungated('pwa')).filter((step) => !step.includes(upload))).toEqual([
-      checkout, setupNode, '      - run: npm ci --no-fund\n', '      - run: npx playwright install --with-deps chromium\n',
+      '      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262\n        with:\n          persist-credentials: false\n          fetch-depth: 0\n',
+      setupNode, '      - run: npm ci --no-fund\n', '      - run: npx playwright install --with-deps chromium\n',
       '      - run: npm run test:pwa\n',
     ]);
     for (const forbidden of ['secrets.', 'env:', 'if:', 'permissions:']) expect(ungated('pwa')).not.toContain(forbidden);

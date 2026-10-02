@@ -28,8 +28,8 @@ export function DeletionRecovery({ client, controller, scope, deletion, online, 
     try {
       const result = await deleteAccount(client, scope, password, scope.signal);
       if (scope.signal.aborted) return;
-      if (result === 'complete') { await controller.signOut(true, 'delete.done'); return; }
-      if (result === 'signed_out') { await controller.signOut(true); return; }
+      if (result === 'complete') { await controller.signOut('delete.done'); return; }
+      if (result === 'signed_out') { await controller.signOut(); return; }
       if (result === 'in_progress' || result === 'retry' || result === 'contact') controller.deletionState(scope, result);
       setProblem(result === 'password' ? 'delete.wrongPassword' : result === 'retry' ? 'delete.retry'
         : result === 'in_progress' || result === 'contact' ? null : 'delete.failed');
