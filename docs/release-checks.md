@@ -146,16 +146,16 @@ AUTH1a (#158) hardens the per-tab session; AUTH1b adds the opt-in "Keep me signe
   token and the access token's expiry. The user object stays in memory. No wardrobe, profile or image data is
   stored on the device, and the service-worker caches are unchanged.
 - **One window.** The window that holds the remembered session keeps the `stillroom.remembered` Web Lock for its
-  lifetime and is the only one that reads, writes, refreshes or removes the slot. Another window shows
-  "Stillroom is open in another window" until the first one closes. Without Web Locks the checkbox is not
-  offered, and a slot left on the device is never adopted; "Sign out of this device" removes it.
+  lifetime and is the only one that reads, writes, refreshes or removes the slot. Another window gets the normal
+  sign-in without the checkbox and signs in for that tab only. Without Web Locks the checkbox is not offered, and a
+  slot left on the device is never adopted. A Sign out in any window is device-wide: it removes the slot too.
 - **Risk, stated plainly.** Any script that runs on this origin, in any tab, can read a remembered refresh token:
   an XSS bug, a compromised dependency or a malicious extension. Remembering lengthens that window, both in time
   (after the app is closed) and in reach (any tab, now or later). The default per-tab mode is not safe from such a
   script either, only shorter-lived. The CSP is defence in depth only. Signing out does not end an access token
   already issued; it stays valid at the API until it expires, as before. The lock orders honest code only.
 - **Stale sign-outs (narrowed guarantee, coordinator decision C).** A delayed or replayed sign-out, whether an
-  unmarked message from an older release or a v2 `sign-out` or `end-remembered`, may sign out a newer session,
+  unmarked message from an older release or a v2 `sign-out`, may sign out a newer session,
   including a remembered one. That is fail-safe: credentials are deleted, never restored or exposed, and the user
   signs in again. No message ever writes or adopts a credential.
   - A sign-out in a production `a4601925` tab clears every `stillroom.auth*` key, the slot included. It may not

@@ -7,7 +7,7 @@ import { mockBackend, owners, recoveryHash, signIn, type AuthControl } from './m
 import { expectIdentity, expectSignedIn, openAccountMenu } from './shell-support';
 
 // AUTH1b: "Keep me signed in on this device". One window holds the remembered session under a Web Lock; every other
-// window waits. Only the two tokens and the expiry are kept, and only in that one slot.
+// window signs in per tab. Only the two tokens and the expiry are kept, and only in that one slot.
 const text = (key: MessageKey, language: Language = 'en') => translate(language, key);
 const key = 'stillroom.auth';
 type Backend = Awaited<ReturnType<typeof mockBackend>>;
@@ -35,9 +35,9 @@ const claims = (raw: string | null) => {
 };
 const logouts = (api: Backend, owner?: string) => api.requests.filter((request) => request.path === '/auth/v1/logout' && (!owner || request.owner === owner));
 const authRequests = (api: Backend) => api.requests.filter((request) => request.path.startsWith('/auth/'));
-async function signOut(page: Page) {
-  const menu = await openAccountMenu(page, 'en');
-  await menu.getByRole('button', { name: text('auth.signOut'), exact: true }).click();
+async function signOut(page: Page, language: Language = 'en') {
+  const menu = await openAccountMenu(page, language);
+  await menu.getByRole('button', { name: text('auth.signOut', language), exact: true }).click();
   await expect(page.locator('#email')).toBeVisible();
 }
 /** Records every message this page posts on either auth channel, and its legacy storage fallback. */
@@ -58,13 +58,6 @@ async function recordChannels(page: Page) {
   });
 }
 const posts = (page: Page) => page.evaluate(() => (window as unknown as { __posts: unknown[] }).__posts);
-async function otherWindowCard(page: Page) {
-  await expect(page.getByRole('heading', { level: 1, name: text('auth.otherWindow') })).toBeFocused();
-  await expect(page.getByText(text('auth.otherWindowHint'), { exact: true })).toBeVisible();
-  await expect(page.locator('.entry-card button')).toHaveCount(0);
-  await expect(page.getByText('Alex')).toHaveCount(0);
-  await expect(page.getByText('Synthetic linen shirt')).toHaveCount(0);
-}
 /** Only the allowlisted slot, nothing private, no caches or databases. */
 async function expectOnlySlot(page: Page) {
   const state = await page.evaluate(async () => {
@@ -86,8 +79,12 @@ async function reopen(from: BrowserContext) {
   return from.browser()!.newContext({ ...test.info().project.use, storageState: state });
 }
 
+const offline = (page: Page) => page.addInitScript(() => Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get: () => false }));
+/** Whether another page could take the remembered lock right now. */
+const lockFree = (page: Page) => page.evaluate(() => navigator.locks.request('stillroom.remembered', { ifAvailable: true }, (lock) => lock !== null));
+
 test.describe('AUTH1b remember on this device', () => {
-  test('the checkbox starts unticked with a 44 px target, and a ticked sign-in keeps only the slot', async ({ page }) => {
+  test('J1: unticked by default with a 44 px target; ticked keeps only the slot, and a reload stays signed in', async ({ page }) => {
     const api = await open(page);
     await expect(remember(page)).not.toBeChecked();
     const box = await page.locator('label.check').filter({ has: remember(page) }).boundingBox();
@@ -102,13 +99,9 @@ test.describe('AUTH1b remember on this device', () => {
     await expectOnlySlot(page);
     // The sign-in client's teardown and the reload released the committed record: nothing revoked it.
     expect(logouts(api)).toEqual([]);
-    // Signed out and back to the screen: the checkbox is unticked again.
-    await signOut(page);
-    await expect(remember(page)).not.toBeChecked();
-    expect(await slot(page)).toBeNull();
   });
 
-  test('ticked: a new window after closing the old one, and a reopened app, open as the same owner', async ({ page, context }) => {
+  test('J1: a new window after closing the old one, and a reopened app, open as the same owner', async ({ page, context }) => {
     await open(page);
     await signInRemembered(page);
     await expectIdentity(page, 'Alex');
@@ -118,25 +111,79 @@ test.describe('AUTH1b remember on this device', () => {
     await open(second);
     await expectIdentity(second, 'Alex');
     expect(await slot(second)).toBe(record);
+    await second.close();
     const later = await reopen(context);
     try {
       const third = await later.newPage();
       await open(third);
       await expectIdentity(third, 'Alex');
       await expect(third.getByText('Synthetic linen shirt')).toBeVisible();
+      await expectOnlySlot(third);
     } finally { await later.close(); }
   });
 
-  test('unticked: a reload stays signed in, a new window and a reopened app show sign-in', async ({ page, context }) => {
+  test('J2: a reopened app offline waits without private data, then opens on reconnect', async ({ page, context }) => {
     await open(page);
+    await signInRemembered(page);
+    await expectIdentity(page, 'Alex');
+    await page.close();
+    const later = await reopen(context);
+    try {
+      const next = await later.newPage();
+      await next.addInitScript(() => {
+        (window as unknown as { __offline: boolean }).__offline = true;
+        Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get: () => !(window as unknown as { __offline: boolean }).__offline });
+      });
+      await open(next);
+      const down = (route: { abort(code: string): Promise<void> }) => route.abort('internetdisconnected');
+      await next.route('http://127.0.0.1:54321/**', down);
+      await expect(next.getByRole('heading', { level: 1, name: text('auth.offlineTitle') })).toBeFocused();
+      await expect(next.getByText('Alex')).toHaveCount(0);
+      await expect(next.locator('.workspace')).toHaveCount(0);
+      await next.unroute('http://127.0.0.1:54321/**', down);
+      await next.evaluate(() => { (window as unknown as { __offline: boolean }).__offline = false; window.dispatchEvent(new Event('online')); });
+      await expectIdentity(next, 'Alex');
+      await expect(next.getByText('Synthetic linen shirt')).toBeVisible();
+    } finally { await later.close(); }
+  });
+
+  test('J2: Sign out from the offline waiting card empties both stores without a connection', async ({ page, context }) => {
+    await open(page);
+    await signInRemembered(page);
+    await expectIdentity(page, 'Alex');
+    await page.close();
+    const second = await context.newPage();
+    await offline(second);
+    await open(second);
+    await second.route('http://127.0.0.1:54321/**', (route) => route.abort('internetdisconnected'));
+    await expect(second.getByRole('heading', { level: 1, name: text('auth.offlineTitle') })).toBeFocused();
+    await second.getByRole('button', { name: text('auth.signOut'), exact: true }).click();
+    await expect(second.locator('#email')).toBeVisible();
+    expect(await slot(second)).toBeNull();
+    expect(await own(second)).toBeNull();
+    const later = await reopen(context);
+    try {
+      const next = await later.newPage();
+      await offline(next);
+      await open(next);
+      await expect(next.locator('#email')).toBeVisible();
+      await expect(next.getByText('Alex')).toHaveCount(0);
+    } finally { await later.close(); }
+  });
+
+  test('J3: unticked stays in this tab, lets the lock go, and a new window or reopened app shows sign-in', async ({ page, context }) => {
+    await open(page);
+    await expect(remember(page)).toBeVisible();
     await signIn(page);
     await expectIdentity(page, 'Alex');
     await page.reload();
     await expectIdentity(page, 'Alex');
     expect(await slot(page)).toBeNull();
+    expect(await lockFree(page)).toBe(true);
     const second = await context.newPage();
     await open(second);
     await expect(second.locator('#email')).toBeVisible();
+    await expect(remember(second)).toBeVisible();
     const later = await reopen(context);
     try {
       const third = await later.newPage();
@@ -146,252 +193,81 @@ test.describe('AUTH1b remember on this device', () => {
     } finally { await later.close(); }
   });
 
-  test('a second window waits with no private data and no requests, then adopts when the first closes', async ({ page, context }) => {
-    await open(page);
-    await signInRemembered(page);
-    await expectIdentity(page, 'Alex');
-    const record = await slot(page);
-    const second = await context.newPage();
-    const api = await open(second);
-    await otherWindowCard(second);
-    expect(authRequests(api)).toEqual([]);
-    expect(api.requests.filter((request) => request.path.startsWith('/rest/'))).toEqual([]);
-    expect(await slot(second)).toBe(record);
-    await page.close();
-    await expectIdentity(second, 'Alex');
-    await expect(second.getByText('Synthetic linen shirt')).toBeVisible();
-    await expect(second.locator('#wardrobe-title')).toBeFocused();
-  });
-
-  test('a holder refresh in flight: the waiting window touches nothing, then adopts the rotated record', async ({ page, context }) => {
-    // A 60 s token is inside the SDK's renewal margin, so the holder renews at once; hold that first renewal.
-    const auth: AuthControl = { lifetime: 60 };
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    let renewals = 0;
-    await open(page, auth);
-    await page.route('http://127.0.0.1:54321/auth/v1/token?grant_type=refresh_token', async (route) => {
-      if (++renewals === 1) await held;
-      await route.fallback();
-    });
-    await signInRemembered(page);
-    // The renewal starts as soon as the session is committed; the holder waits on it.
-    await expect.poll(() => renewals).toBe(1);
-    const before = await slot(page);
-    const second = await context.newPage();
-    const api = await open(second);
-    await otherWindowCard(second);
-    expect(await slot(second)).toBe(before);
-    release();
-    await expectIdentity(page, 'Alex');
-    await expect.poll(() => slot(page)).not.toBe(before);
-    const rotated = await slot(page);
-    expect(Object.keys(JSON.parse(rotated ?? '{}') as object).sort()).toEqual(['access_token', 'expires_at', 'refresh_token']);
-    await otherWindowCard(second);
-    expect(authRequests(api)).toEqual([]);
-    await page.close();
-    // The first refresh token was spent by the rotation, so only the rotated record can open here.
-    await expectIdentity(second, 'Alex');
-    await expect(second.getByText('Synthetic linen shirt')).toBeVisible();
-  });
-
-  test('the holder signs out: the slot is gone before the waiting window gets the lock, which then shows sign-in', async ({ page, context }) => {
+  test('J3: the holder signs out: both stores empty, one revoke, and a reopened app offers remember again', async ({ page, context }) => {
     const api = await open(page);
     await signInRemembered(page);
     await expectIdentity(page, 'Alex');
-    const second = await context.newPage();
-    await open(second);
-    await otherWindowCard(second);
     await signOut(page);
-    await expect(second.locator('#email')).toBeVisible();
-    await expect(second.getByText('Alex')).toHaveCount(0);
-    expect(await slot(second)).toBeNull();
-    await expect.poll(() => logouts(api, owners.a).length).toBe(1);
-  });
-
-  test('a ticked sign-in while another window holds the slot takes nothing, revokes its own session once and waits', async ({ page, context }) => {
-    const second = await context.newPage();
-    const api = await open(second);
-    await expect(second.locator('#email')).toBeVisible();
-    await open(page);
-    await signInRemembered(page);
-    await expectIdentity(page, 'Alex');
-    const record = await slot(page);
-    await signInRemembered(second, 'b');
-    await otherWindowCard(second);
-    await expect(second.getByText('Robin')).toHaveCount(0);
-    expect(await slot(second)).toBe(record);
-    expect(await own(second)).toBeNull();
-    await expect.poll(() => logouts(api, owners.b).length).toBe(1);
-    expect(logouts(api, owners.a)).toEqual([]);
-    await expectIdentity(page, 'Alex');
-  });
-
-  test('D1: an unticked sign-in elsewhere signs the holder out once and keeps the new account signed in', async ({ page, context }) => {
-    const second = await context.newPage();
-    const apiB = await open(second);
-    await expect(second.locator('#email')).toBeVisible();
-    const apiA = await open(page);
-    await signInRemembered(page);
-    await expectIdentity(page, 'Alex');
-    await signIn(second, 'b');
-    await expectIdentity(second, 'Robin');
-    await expect(page.locator('#email')).toBeVisible();
-    await expect(page.getByText('Alex')).toHaveCount(0);
-    await expect.poll(() => logouts(apiA, owners.a).length + logouts(apiB, owners.a).length).toBe(1);
-    const record = await own(second);
-    // Let every message, revocation and timer settle: the 5 s lock wait, a refresh tick, the holder's release.
-    await second.waitForTimeout(6_000);
-    await expectIdentity(second, 'Robin');
-    expect(await own(second)).toBe(record);
-    expect(await slot(second)).toBeNull();
-    expect([...logouts(apiA, owners.b), ...logouts(apiB, owners.b)]).toEqual([]);
-    expect(logouts(apiA, owners.a).length + logouts(apiB, owners.a).length).toBe(1);
-    // The holder only received: it posted nothing on either channel.
-    expect(await posts(page)).toEqual([]);
-    const sent = await posts(second) as [string, unknown][];
-    expect(sent.map(([name, message]) => [name, (message as { type?: string }).type ?? message])).toEqual([['stillroom.auth.v2', 'end-remembered']]);
-  });
-
-  test('D1 with the holder closed: the unticked sign-in removes the slot under the lock and revokes it once', async ({ page, context }) => {
-    const second = await context.newPage();
-    const apiB = await open(second);
-    await expect(second.locator('#email')).toBeVisible();
-    const apiA = await open(page);
-    await signInRemembered(page);
-    await expectIdentity(page, 'Alex');
-    await page.close();
-    await signIn(second, 'b');
-    await expectIdentity(second, 'Robin');
-    await expect.poll(() => slot(second)).toBeNull();
-    await expect.poll(() => logouts(apiB, owners.a).length).toBe(1);
-    expect(logouts(apiA, owners.a)).toEqual([]);
-    await expectIdentity(second, 'Robin');
-  });
-
-  test('a sign-out in a per-tab window signs the holder out too and empties both stores', async ({ page, context }) => {
-    const second = await context.newPage();
-    await open(second);
-    await expect(second.locator('#email')).toBeVisible();
-    await open(page);
-    await signInRemembered(page);
-    await expectIdentity(page, 'Alex');
-    // The per-tab window signs in unticked as the same account would be D1; use the same account's per-tab session.
-    await signIn(second, 'a');
-    await expectIdentity(second, 'Alex');
-    await expect(page.locator('#email')).toBeVisible();
-    await signOut(second);
-    expect(await slot(second)).toBeNull();
-    expect(await own(second)).toBeNull();
+    expect(await slot(page)).toBeNull();
     expect(await own(page)).toBeNull();
-  });
-
-  test('A remembered, signed out, then B remembered: a reopened app shows Robin with only B\'s bearer', async ({ page, context }) => {
-    await open(page);
-    await signInRemembered(page);
-    await expectIdentity(page, 'Alex');
-    await signOut(page);
-    await signInRemembered(page, 'b');
-    await expectIdentity(page, 'Robin');
+    await expect.poll(() => logouts(api, owners.a).length).toBe(1);
+    await expect(remember(page)).not.toBeChecked();
     await page.close();
     const later = await reopen(context);
     try {
       const next = await later.newPage();
-      const api = await open(next);
-      await expectIdentity(next, 'Robin');
-      await expect(next.getByText('Alex')).toHaveCount(0);
-      expect(api.requests.filter((request) => request.owner !== null).every((request) => request.owner === owners.b)).toBe(true);
+      await open(next);
+      await expect(next.locator('#email')).toBeVisible();
+      await expect(remember(next)).toBeVisible();
     } finally { await later.close(); }
   });
 
-  test('a ticked B while A\'s window is closed displaces A and revokes it once', async ({ page, context }) => {
+  test('J4 and J3: a second window signs in per tab beside the holder, and its Sign out ends the holder too', async ({ page, context }) => {
+    const apiA = await open(page);
+    await signInRemembered(page);
+    await expectIdentity(page, 'Alex');
+    const record = await slot(page);
     const second = await context.newPage();
     const apiB = await open(second);
     await expect(second.locator('#email')).toBeVisible();
+    await expect(remember(second)).toHaveCount(0);
+    expect(await slot(second)).toBe(record);
+    expect(authRequests(apiB)).toEqual([]);
+    await signIn(second, 'b');
+    await expectIdentity(second, 'Robin');
+    await expectIdentity(page, 'Alex');
+    expect(await slot(second)).toBe(record);
+    expect(claims(await own(second)).sub).toBe(owners.b);
+    const data = (api: Backend) => api.requests.filter((request) => request.path.startsWith('/rest/') && request.owner !== null);
+    expect(data(apiA).every((request) => request.owner === owners.a)).toBe(true);
+    expect(data(apiB).every((request) => request.owner === owners.b)).toBe(true);
+    const before = (await posts(page)).length;
+    await signOut(second, 'sv');
+    await expect(page.locator('#email')).toBeVisible();
+    await expect(page.getByText('Alex')).toHaveCount(0);
+    expect(await slot(page)).toBeNull();
+    expect(await own(second)).toBeNull();
+    await expect.poll(() => logouts(apiA, owners.a).length).toBe(1);
+    await expect.poll(() => logouts(apiB, owners.b).length).toBe(1);
+    // The holder ended on the received command and sent nothing on.
+    await page.waitForTimeout(500);
+    expect((await posts(page)).slice(before)).toEqual([]);
+  });
+
+  test('J3: a per-tab Sign out removes a closed holder\'s slot, and a reopened app stays signed out', async ({ page, context }) => {
     await open(page);
     await signInRemembered(page);
     await expectIdentity(page, 'Alex');
-    await page.close();
-    await signInRemembered(second, 'b');
+    const second = await context.newPage();
+    await open(second);
+    await signIn(second, 'b');
     await expectIdentity(second, 'Robin');
-    expect(claims(await slot(second)).sub).toBe(owners.b);
-    await expect.poll(() => logouts(apiB, owners.a).length).toBe(1);
-    expect(apiB.requests.filter((request) => request.path.startsWith('/rest/') && request.owner === owners.a)).toEqual([]);
-    await expect(second.getByText('Alex')).toHaveCount(0);
-  });
-});
-
-/** Delivers a v2 command to every app channel, as another tab would; the injected nonces are told apart from the app's own posts. */
-async function deliver(page: Page, type: 'sign-out' | 'end-remembered', nonce: string) {
-  await page.evaluate(([kind, id]) => {
-    const channel = new BroadcastChannel('stillroom.auth.v2');
-    channel.postMessage({ v: 2, type: kind, nonce: id });
-    channel.close();
-  }, [type, nonce] as const);
-}
-const ownPosts = async (page: Page) => (await posts(page) as [string, { nonce?: string }][])
-  .filter(([, message]) => !String(message?.nonce ?? '').startsWith('injected-'));
-
-test.describe('AUTH1b replayed and out-of-order commands', () => {
-  for (const order of ['end-remembered first', 'sign-out first'] as const) {
-    test(`${order}, with replays: each window can only be signed out, and no receiver posts anything`, async ({ page, context }) => {
-      const tab = await context.newPage();
-      const apiTab = await open(tab);
-      await signIn(tab, 'b');
-      await expectIdentity(tab, 'Robin');
-      const apiHolder = await open(page);
-      await signInRemembered(page);
-      await expectIdentity(page, 'Alex');
-      await expectIdentity(tab, 'Robin');
-      const sequence: ['sign-out' | 'end-remembered', string][] = order === 'end-remembered first'
-        ? [['end-remembered', 'injected-0001'], ['end-remembered', 'injected-0001'], ['sign-out', 'injected-0002'], ['end-remembered', 'injected-0003'], ['sign-out', 'injected-0002']]
-        : [['sign-out', 'injected-0002'], ['end-remembered', 'injected-0001'], ['sign-out', 'injected-0002'], ['end-remembered', 'injected-0001']];
-      // Each window's own posts so far (the unticked sign-in's end-remembered); a receiver adds none.
-      const before = [(await ownPosts(page)).length, (await ownPosts(tab)).length];
-      const first = sequence[0]!;
-      await deliver(page, first[0], first[1]);
-      await expect(page.locator('#email')).toBeVisible();
-      if (first[0] === 'end-remembered') {
-        // The per-tab window ignores a command for the remembered session.
-        await tab.waitForTimeout(500);
-        await expectIdentity(tab, 'Robin');
-      } else await expect(tab.locator('#email')).toBeVisible();
-      for (const [type, nonce] of sequence.slice(1)) await deliver(page, type, nonce);
-      await expect(tab.locator('#email')).toBeVisible();
-      await expect(page.locator('#email')).toBeVisible();
-      const settled = [apiHolder.requests.length, apiTab.requests.length];
-      // A refresh tick and the release wait: nothing comes back and nothing is asked with an ended session.
-      await page.waitForTimeout(6_000);
-      expect((await ownPosts(page)).slice(before[0])).toEqual([]);
-      expect((await ownPosts(tab)).slice(before[1])).toEqual([]);
-      for (const window of [page, tab]) {
-        expect(await slot(window)).toBeNull();
-        expect(await own(window)).toBeNull();
-        await expect(window.getByText('Alex')).toHaveCount(0);
-        await expect(window.getByText('Robin')).toHaveCount(0);
-      }
-      const later = [...apiHolder.requests.slice(settled[0]), ...apiTab.requests.slice(settled[1])];
-      expect(later.filter((request) => request.owner !== null && request.path !== '/auth/v1/logout')).toEqual([]);
-      expect(logouts(apiHolder, owners.a).length + logouts(apiTab, owners.a).length).toBeLessThanOrEqual(1);
-      expect(logouts(apiHolder, owners.b).length + logouts(apiTab, owners.b).length).toBeLessThanOrEqual(1);
-    });
-  }
-});
-
-test.describe('AUTH1b reopening a remembered slot', () => {
-  test('a renewed record stays allowlisted', async ({ page }) => {
-    const auth: AuthControl = { lifetime: 60 };
-    await open(page, auth);
-    await signInRemembered(page);
-    await expectIdentity(page, 'Alex');
-    await expect.poll(() => auth.refreshes ?? 0).toBeGreaterThan(0);
-    await expectOnlySlot(page);
-    await page.reload();
-    await expectIdentity(page, 'Alex');
-    await expectOnlySlot(page);
+    await page.close();
+    expect(await slot(second)).not.toBeNull();
+    await signOut(second, 'sv');
+    expect(await slot(second)).toBeNull();
+    await second.close();
+    const later = await reopen(context);
+    try {
+      const next = await later.newPage();
+      await open(next);
+      await expect(next.locator('#email')).toBeVisible();
+      await expect(next.getByText('Alex')).toHaveCount(0);
+      expect(await slot(next)).toBeNull();
+    } finally { await later.close(); }
   });
 
-  test('a refused renewal at reopen shows the expired sign-in and removes the slot', async ({ page, context }) => {
+  test('J5: a refused renewal at reopen shows the expired sign-in, removes the slot and offers remember again', async ({ page, context }) => {
     await open(page);
     await signInRemembered(page);
     await expectIdentity(page, 'Alex');
@@ -407,6 +283,7 @@ test.describe('AUTH1b reopening a remembered slot', () => {
     await expect(second.getByText(text('auth.expired'))).toBeVisible();
     await expect.poll(() => slot(second)).toBeNull();
     await expect(second.getByText('Alex')).toHaveCount(0);
+    await expect(remember(second)).toBeVisible();
   });
 
   test('a malformed slot and its leftovers are removed at start-up and nothing is sent', async ({ page }) => {
@@ -422,38 +299,6 @@ test.describe('AUTH1b reopening a remembered slot', () => {
     expect(authRequests(api)).toEqual([]);
   });
 
-  test('an extra-field slot is rewritten to the allowlisted form and stays signed in', async ({ page, context }) => {
-    await open(page);
-    await signInRemembered(page);
-    await expectIdentity(page, 'Alex');
-    await page.evaluate((name) => {
-      const record = JSON.parse(localStorage.getItem(name)!) as Record<string, unknown>;
-      localStorage.setItem(name, JSON.stringify({ ...record, token_type: 'bearer', user: { email: 'user-a@example.test' } }));
-    }, key);
-    await page.close();
-    const second = await context.newPage();
-    await open(second);
-    await expectIdentity(second, 'Alex');
-    await expectOnlySlot(second);
-  });
-
-  test('offline reopen shows the waiting card; Sign out works offline', async ({ page, context }) => {
-    await open(page);
-    await signInRemembered(page);
-    await expectIdentity(page, 'Alex');
-    await page.close();
-    const second = await context.newPage();
-    await second.addInitScript(() => Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get: () => false }));
-    await open(second);
-    await second.route('http://127.0.0.1:54321/**', (route) => route.abort('internetdisconnected'));
-    await expect(second.getByRole('heading', { level: 1, name: text('auth.offlineTitle') })).toBeFocused();
-    await expect(second.getByText('Alex')).toHaveCount(0);
-    await expect(second.locator('.workspace')).toHaveCount(0);
-    await second.getByRole('button', { name: text('auth.signOut'), exact: true }).click();
-    await expect(second.locator('#email')).toBeVisible();
-    expect(await slot(second)).toBeNull();
-  });
-
   test('a recovery link on a device with a remembered slot is refused before any Auth start', async ({ page, context }) => {
     await open(page);
     await signInRemembered(page);
@@ -467,48 +312,7 @@ test.describe('AUTH1b reopening a remembered slot', () => {
   });
 });
 
-test.describe('AUTH1b lock states', () => {
-  test('without Web Locks: no checkbox, the slot is left as it is, and Sign out of this device removes and revokes it', async ({ page, context }) => {
-    await open(page);
-    await signInRemembered(page);
-    await expectIdentity(page, 'Alex');
-    const record = await slot(page);
-    await page.close();
-    const second = await context.newPage();
-    await second.addInitScript(() => Object.defineProperty(Navigator.prototype, 'locks', { configurable: true, get: () => undefined }));
-    const api = await open(second);
-    await expect(second.locator('#email')).toBeVisible();
-    await expect(remember(second)).toHaveCount(0);
-    expect(await slot(second)).toBe(record);
-    expect(authRequests(api)).toEqual([]);
-    await second.getByRole('button', { name: text('auth.signOutDevice'), exact: true }).click();
-    await expect.poll(() => second.evaluate(() => Object.keys(localStorage).filter((name) => name.startsWith('stillroom.auth')))).toEqual([]);
-    await expect.poll(() => logouts(api, owners.a).length).toBe(1);
-    await expect(second.getByRole('button', { name: text('auth.signOutDevice'), exact: true })).toHaveCount(0);
-  });
-
-  test('a refused lock request leaves everything; Sign out of this device asks the holder to sign out', async ({ page, context }) => {
-    await open(page);
-    await signInRemembered(page);
-    await expectIdentity(page, 'Alex');
-    const record = await slot(page);
-    const second = await context.newPage();
-    await second.addInitScript(() => {
-      LockManager.prototype.request = () => Promise.reject(new DOMException('Refused for this test.', 'SecurityError'));
-    });
-    const api = await open(second);
-    await expect(second.locator('#email')).toBeVisible();
-    await expect(remember(second)).toHaveCount(0);
-    expect(await slot(second)).toBe(record);
-    expect(authRequests(api)).toEqual([]);
-    await expectIdentity(page, 'Alex');
-    await second.getByRole('button', { name: text('auth.signOutDevice'), exact: true }).click();
-    await expect(page.locator('#email')).toBeVisible();
-    await expect.poll(() => slot(page)).toBeNull();
-  });
-});
-
-type Scene = 'sign-in' | 'device' | 'waiting' | 'other-window';
+type Scene = 'sign-in' | 'waiting';
 const zoom = 'html { font-size: 200%; } body { font-size: 32px; }';
 /** Brings `page` to one of the AUTH1b entry states in `language`, using a second window where the state needs one. */
 async function scene(page: Page, context: BrowserContext, state: Scene, language: Language) {
@@ -522,28 +326,15 @@ async function scene(page: Page, context: BrowserContext, state: Scene, language
     await expect(page.getByRole('checkbox', { name: text('auth.remember', language), exact: true })).toBeVisible();
     return page;
   }
-  if (state === 'device') {
-    await page.addInitScript(() => Object.defineProperty(Navigator.prototype, 'locks', { configurable: true, get: () => undefined }));
-    await page.addInitScript(() => { if (!localStorage.getItem('stillroom.auth')) localStorage.setItem('stillroom.auth', '{"left":"by another release"}'); });
-    await open(page);
-    await choose(page);
-    await expect(page.getByRole('button', { name: text('auth.signOutDevice', language), exact: true })).toBeVisible();
-    return page;
-  }
   await open(page);
   await signInRemembered(page);
   await expectIdentity(page, 'Alex');
+  await page.close();
   const second = await context.newPage();
-  if (state === 'waiting') {
-    await page.close();
-    await second.addInitScript(() => Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get: () => false }));
-    await open(second);
-    await second.route('http://127.0.0.1:54321/**', (route) => route.abort('internetdisconnected'));
-    await expect(second.getByRole('heading', { level: 1, name: text('auth.offlineTitle') })).toBeVisible();
-  } else {
-    await open(second);
-    await otherWindowCard(second);
-  }
+  await offline(second);
+  await open(second);
+  await second.route('http://127.0.0.1:54321/**', (route) => route.abort('internetdisconnected'));
+  await expect(second.getByRole('heading', { level: 1, name: text('auth.offlineTitle') })).toBeVisible();
   await choose(second);
   return second;
 }
@@ -567,7 +358,7 @@ async function audit(page: Page, label: string) {
 }
 
 test.describe('AUTH1b accessibility', () => {
-  for (const state of ['sign-in', 'device', 'waiting', 'other-window'] as const) {
+  for (const state of ['sign-in', 'waiting'] as const) {
     test(`${state}: axe, 44 px targets and no overflow, at 320 px with 200 % text in Finnish and Swedish`, async ({ page, context }) => {
       for (const language of ['en', 'fi', 'sv'] as const) {
         if (state !== 'sign-in' && language === 'en') continue;
@@ -576,6 +367,8 @@ test.describe('AUTH1b accessibility', () => {
         await audit(target, `${state} ${language}`);
         if (target !== page) await target.close();
         if (state !== 'sign-in') break;
+        // Each language gets a fresh device: an open sign-in window holds the lock, so a second one offers no checkbox.
+        context = await reopen(context);
         page = await context.newPage();
       }
     });
@@ -607,7 +400,6 @@ test.describe('AUTH1b bounded synthetic captures', () => {
     { name: 'sign-in-fi-mobile', state: 'sign-in', language: 'fi', width: 390, height: 844, large: false },
     { name: 'sign-in-sv-320-200', state: 'sign-in', language: 'sv', width: 320, height: 800, large: true },
     { name: 'waiting-en-mobile', state: 'waiting', language: 'en', width: 390, height: 844, large: false },
-    { name: 'other-window-fi-mobile', state: 'other-window', language: 'fi', width: 390, height: 844, large: false },
   ] as const;
   for (const shot of scenes) {
     test(`${shot.name} retains functional assertions in every project`, async ({ page, context }, testInfo) => {

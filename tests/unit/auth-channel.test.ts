@@ -89,15 +89,6 @@ describe('auth channels', () => {
     expect(receiver.received).toEqual(['sign-out', 'sign-out']);
   });
 
-  it('sends end-remembered only on the v2 channel, never as a legacy sign-out', async () => {
-    const sender = tab(), other = tab();
-    const legacy = raw(legacyChannelName);
-    sender.channels.send('end-remembered');
-    await settle();
-    expect(other.received).toEqual(['end-remembered']);
-    expect(legacy.messages).toEqual([]);
-  });
-
   it('reads the storage fallback: unmarked values are sign-outs, marked ones once each, removals nothing', () => {
     const receiver = tab();
     storageEvent(null);
@@ -120,15 +111,13 @@ describe('auth channels', () => {
 });
 
 describe('auth channels without BroadcastChannel', () => {
-  it('writes and removes a marked storage value for a sign-out only', () => {
+  it('writes and removes a marked storage value for a sign-out', () => {
     vi.stubGlobal('BroadcastChannel', undefined);
     const writes: [string, string][] = [];
     const store = (window as unknown as { localStorage: { setItem(key: string, value: string): void } }).localStorage;
     const setItem = store.setItem.bind(store);
     store.setItem = (key, value) => { writes.push([key, value]); setItem(key, value); };
     const sender = tab();
-    sender.channels.send('end-remembered');
-    expect(writes).toEqual([]);
     sender.channels.send('sign-out');
     expect(writes).toEqual([[legacyChannelName, expect.stringMatching(/^v2:[0-9a-f-]{36}$/)]]);
     expect(localValues.has(legacyChannelName)).toBe(false);

@@ -43,7 +43,6 @@ export function Login({ controller, online, t, onRecovery, onAuthActivity }: { c
         </button>
       </form>
       <button type="button" className="text-button" disabled={busy} onClick={onRecovery}>{t('recovery.forgot')}</button>
-      {controller.deviceSlot && <button type="button" className="button button-quiet" disabled={busy} onClick={() => { void controller.signOutDevice(); }}>{t('auth.signOutDevice')}</button>}
       <p className="fine muted">{t('auth.passwordHelp')}</p>
       <div className="entry-footer"><Icon name="lock" /><span>{t('auth.invited')}</span></div>
     </section>

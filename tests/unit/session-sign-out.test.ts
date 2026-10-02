@@ -125,8 +125,9 @@ describe('sign-out without the network', () => {
     await controller.signIn('a@example.test', 'password');
     expect(stored()?.access_token).toBe('token-a');
     sessionStore.setItem('stillroom.auth-flow-1-code-verifier', 'v');
-    // A per-tab sign-out clears only this tab's own store.
-    localStore.setItem('stillroom.auth-code-verifier', 'other');
+    // A genuine sign-out is device-wide: it also clears the remembered namespace (AUTH1 rev6.1 §9.4).
+    localStore.setItem('stillroom.auth', '{}');
+    localStore.setItem('stillroom.other', 'kept');
     const seen: string[][] = [];
     controller.subscribe(() => { if (controller.getSnapshot().phase === 'signed-out') seen.push(sessionStore.authKeys()); });
     const before = controller.getSnapshot().client;
@@ -137,7 +138,8 @@ describe('sign-out without the network', () => {
     const logout = calls.find((call) => call.path === '/auth/v1/logout');
     expect(logout?.scope).toBe('local');
     expect(labelOf(logout?.auth)).toBe('token-a');
-    expect(localStore.getItem('stillroom.auth-code-verifier')).toBe('other');
+    expect(localStore.getItem('stillroom.auth')).toBeNull();
+    expect(localStore.getItem('stillroom.other')).toBe('kept');
     // A reload now finds nothing to restore, even though the server has not answered.
     expect(sessionStore.authKeys()).toEqual([]);
     held.resolve(new Response(null, { status: 204 }));

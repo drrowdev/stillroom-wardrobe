@@ -19,30 +19,15 @@ class MemoryStorage implements Storage {
   raw() { return Object.fromEntries([...this.values.entries()].sort()); }
 }
 
-/** One exclusive lock, as `navigator.locks` grants it: in order, with `ifAvailable` and abortable waits. */
+/** One exclusive lock, as `navigator.locks` grants it with `ifAvailable`. */
 class Locks {
   holder = false;
-  queue: (() => void)[] = [];
   refuse = false;
-  request = vi.fn((_name: string, options: { ifAvailable?: boolean; signal?: AbortSignal }, callback: (lock: unknown) => unknown) => {
+  request = vi.fn((_name: string, _options: { ifAvailable?: boolean }, callback: (lock: unknown) => unknown) => {
     if (this.refuse) return Promise.reject(new DOMException('Refused.', 'SecurityError'));
-    const run = () => {
-      this.holder = true;
-      return Promise.resolve(callback({ name: 'stillroom.remembered' })).finally(() => {
-        this.holder = false;
-        this.queue.shift()?.();
-      });
-    };
-    if (!this.holder) return run();
-    if (options.ifAvailable) return Promise.resolve(callback(null));
-    return new Promise((resolve, reject) => {
-      const grant = () => { run().then(resolve, reject); };
-      this.queue.push(grant);
-      options.signal?.addEventListener('abort', () => {
-        this.queue = this.queue.filter((entry) => entry !== grant);
-        reject(new DOMException('Aborted.', 'AbortError'));
-      });
-    });
+    if (this.holder) return Promise.resolve(callback(null));
+    this.holder = true;
+    return Promise.resolve(callback({ name: 'stillroom.remembered' })).finally(() => { this.holder = false; });
   });
 }
 
@@ -68,36 +53,22 @@ afterEach(() => {
 });
 
 describe('device lock', () => {
-  it('grants a free lock, reports a held one as busy, and lets a waiter in on release', async () => {
-    const { acquireLock } = await import('../../src/auth/device-lock');
-    const first = await acquireLock(false);
+  it('grants a free lock once, and busy, refused or missing all resolve null without waiting', async () => {
+    const { acquireLock, hasLocks } = await import('../../src/auth/device-lock');
+    const first = await acquireLock();
     expect(first).not.toBeNull();
-    expect(await acquireLock(false)).toBeNull();
-    const waiting = acquireLock(true);
-    let granted = false;
-    void waiting.then(() => { granted = true; });
-    await tick();
-    expect(granted).toBe(false);
+    expect(await acquireLock()).toBeNull();
     first!.release();
-    const second = await waiting;
+    await tick();
+    const second = await acquireLock();
     expect(second).not.toBeNull();
     second!.release();
-  });
-
-  it('rejects when the API is missing or the request is refused, and a stopped wait never gets the lock', async () => {
-    const { acquireLock, hasLocks } = await import('../../src/auth/device-lock');
+    await tick();
     locks.refuse = true;
-    await expect(acquireLock(false)).rejects.toThrow();
-    locks.refuse = false;
-    const held = await acquireLock(false);
-    const stop = new AbortController();
-    const waiting = acquireLock(true, stop.signal);
-    stop.abort();
-    await expect(waiting).rejects.toThrow();
-    held!.release();
+    expect(await acquireLock()).toBeNull();
     vi.stubGlobal('navigator', {});
     expect(hasLocks()).toBe(false);
-    await expect(acquireLock(false)).rejects.toThrow('Web Locks unavailable.');
+    expect(await acquireLock()).toBeNull();
   });
 });
 
@@ -153,74 +124,74 @@ describe('releasing and retiring clients', () => {
 });
 
 type Fake = {
-  clients: { revoke: ReturnType<typeof vi.fn> }; generation: number; started: boolean; lock: 'available' | 'absent' | 'rejected';
-  allowSession: boolean; held: { release(): void } | null; deviceSlot: boolean;
-  channels: { send: ReturnType<typeof vi.fn> }; switchClient: ReturnType<typeof vi.fn>; publish: ReturnType<typeof vi.fn>;
-  getSnapshot(): object; settle: ReturnType<typeof vi.fn>; queue: AbortController;
+  clients: { revoke: ReturnType<typeof vi.fn> }; generation: number; started: boolean; allowSession: boolean;
+  held: { release(): void } | null; ownSession: boolean; canRemember: boolean;
+  switchClient: ReturnType<typeof vi.fn>; settle: ReturnType<typeof vi.fn>; dropHolder: ReturnType<typeof vi.fn>;
 };
-function controller(): Fake {
-  return {
-    clients: { revoke: vi.fn(async () => 'ok') }, generation: 0, started: true, lock: 'available', allowSession: false, held: null,
-    deviceSlot: false, channels: { send: vi.fn() }, switchClient: vi.fn(), publish: vi.fn(), getSnapshot: () => ({}), settle: vi.fn(),
-    queue: new AbortController(),
+function controller(held: { release(): void } | null = null): Fake {
+  const fake: Fake = {
+    clients: { revoke: vi.fn(async () => 'ok') }, generation: 0, started: true, allowSession: false, held, ownSession: false,
+    get canRemember() { return fake.held !== null; },
+    switchClient: vi.fn(), settle: vi.fn(), dropHolder: vi.fn(() => { fake.held?.release(); fake.held = null; }),
   };
+  return fake;
 }
-async function rememberedWith(staging: () => Promise<Staged>) {
+async function rememberedWith(staging: () => Promise<Staged> = async () => { throw new Error('not used'); }) {
   const { remembered } = await import('../../src/auth/remembered');
   return remembered(config, () => staging());
 }
 const revoked = (fake: Fake) => fake.clients.revoke.mock.calls.map(([value]) => (value as AuthRecord).refresh_token);
+async function holding() {
+  const { acquireLock } = await import('../../src/auth/device-lock');
+  return controller(await acquireLock());
+}
 
 describe('staged sign-in', () => {
-  it('a ticked commit writes only the allowlisted slot, empties this tab and revokes what it displaced', async () => {
+  it('a ticked commit by the holder writes only the allowlisted slot, empties this tab and revokes what it displaced', async () => {
     const left = record(USER_A, 'token-a');
     const own = record(USER_B, 'token-b');
     const next = record(USER_B, 'token-b2');
     local.setItem('stillroom.auth', raw(left));
     session.setItem('stillroom.auth', raw(own));
     session.setItem('stillroom.auth-code-verifier', 'v');
-    const fake = controller();
+    const fake = await holding();
     const mode = await rememberedWith(async () => ({ record: next, user: null }));
     await mode.signIn(fake as never, 'b@example.test', 'pw', true);
     expect(local.raw()).toEqual({ 'stillroom.auth': raw(next) });
     expect(session.raw()).toEqual({});
     expect(fake.switchClient).toHaveBeenCalledWith('device', null);
-    expect(fake.held).not.toBeNull();
+    expect(fake.dropHolder).not.toHaveBeenCalled();
+    expect(locks.holder).toBe(true);
     expect(revoked(fake).sort()).toEqual(['refresh-token-a', 'refresh-token-b']);
-    expect(fake.channels.send).not.toHaveBeenCalled();
     fake.held!.release();
   });
 
-  it('an unticked commit writes this tab only, asks a holder to end, then removes and revokes a left slot', async () => {
-    const left = record(USER_A, 'token-a');
+  it('an unticked commit writes this tab only, leaves the slot alone and lets the lock go', async () => {
+    const left = raw(record(USER_A, 'token-a'));
     const next = record(USER_B, 'token-b');
-    local.setItem('stillroom.auth', raw(left));
-    local.setItem('stillroom.auth-user', 'leftover');
-    local.setItem('stillroom.language', 'fi');
-    const fake = controller();
+    local.setItem('stillroom.auth', left);
+    const fake = await holding();
     const mode = await rememberedWith(async () => ({ record: next, user: null }));
     await mode.signIn(fake as never, 'b@example.test', 'pw', false);
     expect(session.raw()).toEqual({ 'stillroom.auth': raw(next) });
+    expect(local.raw()).toEqual({ 'stillroom.auth': left });
     expect(fake.switchClient).toHaveBeenCalledWith('tab', null);
-    expect(fake.channels.send.mock.calls).toEqual([['end-remembered']]);
-    await vi.waitFor(() => expect(local.raw()).toEqual({ 'stillroom.language': 'fi' }));
-    await vi.waitFor(() => expect(revoked(fake)).toEqual(['refresh-token-a']));
+    expect(fake.dropHolder).toHaveBeenCalledOnce();
+    await tick();
+    expect(locks.holder).toBe(false);
+    expect(revoked(fake)).toEqual([]);
   });
 
-  it('a ticked sign-in while another window holds the lock takes nothing, revokes its own record and waits', async () => {
-    const holder = record(USER_A, 'token-a');
-    local.setItem('stillroom.auth', raw(holder));
-    const { acquireLock } = await import('../../src/auth/device-lock');
-    const held = await acquireLock(false);
+  it('a ticked sign-in without the lock commits to this tab only and never touches the slot', async () => {
+    const slot = raw(record(USER_A, 'token-a'));
+    local.setItem('stillroom.auth', slot);
     const fake = controller();
     const mode = await rememberedWith(async () => ({ record: record(USER_B, 'token-b'), user: null }));
     await mode.signIn(fake as never, 'b@example.test', 'pw', true);
-    expect(local.raw()).toEqual({ 'stillroom.auth': raw(holder) });
-    expect(session.raw()).toEqual({});
-    expect(revoked(fake)).toEqual(['refresh-token-b']);
-    expect(fake.switchClient).not.toHaveBeenCalled();
-    fake.queue.abort();
-    held!.release();
+    expect(local.raw()).toEqual({ 'stillroom.auth': slot });
+    expect(session.raw()).toEqual({ 'stillroom.auth': raw(record(USER_B, 'token-b')) });
+    expect(fake.switchClient).toHaveBeenCalledWith('tab', null);
+    expect(revoked(fake)).toEqual([]);
   });
 
   it('discards a staged sign-in that finishes after a sign-out or another sign-in, and revokes it', async () => {
@@ -235,44 +206,79 @@ describe('staged sign-in', () => {
     expect(session.raw()).toEqual({});
     expect(fake.switchClient).not.toHaveBeenCalled();
     expect(revoked(fake)).toEqual(['refresh-token-late']);
-    expect(locks.holder).toBe(false);
-  });
-
-  it('a refused lock request falls back to this tab\'s own session', async () => {
-    locks.refuse = true;
-    const fake = controller();
-    const mode = await rememberedWith(async () => ({ record: record(USER_A, 'token-a'), user: null }));
-    await mode.signIn(fake as never, 'a@example.test', 'pw', true);
-    expect(fake.lock).toBe('rejected');
-    expect(session.raw()).toEqual({ 'stillroom.auth': raw(record(USER_A, 'token-a')) });
-    expect(local.raw()).toEqual({});
-    expect(fake.switchClient).toHaveBeenCalledWith('tab', null);
   });
 });
 
-describe('signing a slot out of the device', () => {
-  it('without the lock API: removes the slot and its leftovers, keeps other keys, revokes it and tells other tabs', async () => {
-    const left = record(USER_A, 'token-a');
-    local.setItem('stillroom.auth', JSON.stringify({ ...JSON.parse(raw(left)), user: { id: USER_A } }));
-    local.setItem('stillroom.auth-user', 'leftover');
-    local.setItem('stillroom.auth-orphan', 'x');
-    local.setItem('stillroom.language', 'sv');
-    const fake = { ...controller(), lock: 'absent' as const, deviceSlot: true };
-    const mode = await rememberedWith(async () => { throw new Error('not used'); });
-    await mode.signOutDevice(fake as never);
-    expect(local.raw()).toEqual({ 'stillroom.language': 'sv' });
-    expect(revoked(fake)).toEqual(['refresh-token-a']);
-    expect(fake.channels.send.mock.calls).toEqual([['sign-out']]);
+describe('claiming the slot', () => {
+  it('adopts a valid slot, rewriting extra fields to the allowlisted form', async () => {
+    const value = record(USER_A, 'token-a');
+    local.setItem('stillroom.auth', JSON.stringify({ ...JSON.parse(raw(value)), user: { id: USER_A } }));
+    const fake = controller();
+    await (await rememberedWith()).claim(fake as never);
+    expect(fake.held).not.toBeNull();
+    expect(fake.switchClient).toHaveBeenCalledWith('device');
+    expect(local.raw()).toEqual({ 'stillroom.auth': raw(value) });
+    fake.held!.release();
   });
 
-  it('after a refused lock request: asks the holder only, and touches nothing here', async () => {
+  it('removes an invalid slot and its leftovers, keeps other keys and the lock, and sends nothing', async () => {
+    local.setItem('stillroom.auth', '{"access_token":"x"}');
+    local.setItem('stillroom.auth-user', 'leftover');
+    local.setItem('stillroom.language', 'sv');
+    const fake = controller();
+    await (await rememberedWith()).claim(fake as never);
+    expect(local.raw()).toEqual({ 'stillroom.language': 'sv' });
+    expect(fake.held).not.toBeNull();
+    expect(fake.switchClient).not.toHaveBeenCalled();
+    expect(fake.settle).toHaveBeenCalledOnce();
+    expect(fake.clients.revoke).not.toHaveBeenCalled();
+    fake.held!.release();
+  });
+
+  it('busy or refused: leaves the slot byte for byte and settles without the lock', async () => {
     const slot = raw(record(USER_A, 'token-a'));
     local.setItem('stillroom.auth', slot);
-    const fake = { ...controller(), lock: 'rejected' as const, deviceSlot: true };
-    const mode = await rememberedWith(async () => { throw new Error('not used'); });
-    await mode.signOutDevice(fake as never);
+    const { acquireLock } = await import('../../src/auth/device-lock');
+    const other = await acquireLock();
+    for (const refuse of [false, true]) {
+      locks.refuse = refuse;
+      const fake = controller();
+      await (await rememberedWith()).claim(fake as never);
+      expect(fake.held).toBeNull();
+      expect(fake.settle).toHaveBeenCalledOnce();
+      expect(fake.switchClient).not.toHaveBeenCalled();
+      expect(local.raw()).toEqual({ 'stillroom.auth': slot });
+    }
+    other!.release();
+  });
+
+  it('a grant that arrives after this tab took a session or stopped is let go without reading the slot', async () => {
+    const slot = raw(record(USER_A, 'token-a'));
+    local.setItem('stillroom.auth', slot);
+    for (const change of [(fake: Fake) => { fake.ownSession = true; }, (fake: Fake) => { fake.started = false; }]) {
+      const fake = controller();
+      const pending = (await rememberedWith()).claim(fake as never);
+      change(fake);
+      await pending;
+      expect(fake.held).toBeNull();
+      expect(fake.switchClient).not.toHaveBeenCalled();
+      await tick();
+      expect(locks.holder).toBe(false);
+      expect(local.raw()).toEqual({ 'stillroom.auth': slot });
+    }
+  });
+
+  it('a grant that arrives after a sign-out or a sign-in began keeps the lock but adopts and cleans nothing', async () => {
+    const slot = raw(record(USER_A, 'token-a'));
+    local.setItem('stillroom.auth', slot);
+    const fake = controller();
+    const pending = (await rememberedWith()).claim(fake as never);
+    fake.generation++;
+    await pending;
+    expect(fake.held).not.toBeNull();
+    expect(fake.switchClient).not.toHaveBeenCalled();
+    expect(fake.settle).toHaveBeenCalledOnce();
     expect(local.raw()).toEqual({ 'stillroom.auth': slot });
-    expect(fake.clients.revoke).not.toHaveBeenCalled();
-    expect(fake.channels.send.mock.calls).toEqual([['end-remembered'], ['sign-out']]);
+    fake.held!.release();
   });
 });
