@@ -14,6 +14,7 @@ import { ItemDetail } from '../features/wardrobe/item-detail';
 import { detailRouteId } from '../domain/item-details';
 import { DiscardDialog, type BeforeDiscard } from './dialog';
 import { AiClient } from '../data/ai';
+import { revokeSession } from '../data/revoke';
 import type { AppClient } from '../data/client';
 import { useWardrobeBrowse } from '../features/wardrobe/use-wardrobe-browse';
 import { PrivateImages } from '../images/private-images';
@@ -346,7 +347,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   const [controller] = useState(() => {
     markNormalAuthStarted();
     return new SessionController(makeClient(config), browserLanguages, {
-      make: () => makeClient(config), retire: retireClient, revoke: (record) => import('../data/revoke').then((module) => module.revokeSession(config, record), () => 'failed' as const),
+      make: () => makeClient(config), retire: retireClient, revoke: (record) => revokeSession(config, record),
     });
   });
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
