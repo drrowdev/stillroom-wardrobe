@@ -1,7 +1,11 @@
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { expect, test, type Page, type Response } from '@playwright/test';
+import { startDistServer } from '../../scripts/serve-dist.mjs';
 import { messages, translate, type Language } from '../../src/i18n/all';
 import { mockBackend, recoveryHash } from '../browser/mock-backend';
-import { readManifest } from './builds';
+import { builds, readManifest } from './builds';
 import { cacheName, controlled, expectOnlyShell, serve, type DistServer } from './helpers';
 
 // LANG1: the language catalogues of a real production build, under its CSP and with the worker in control.
@@ -154,4 +158,43 @@ test('a failed startup catalogue keeps a recovery link: Try again opens the reco
   expect(backend.requests.some((entry) => entry.path.startsWith('/auth/v1/token'))).toBe(false);
   expect(server.requests.some((entry) => entry.pathname.includes('token'))).toBe(false);
   expect(await cspViolations(page)).toEqual([]);
+});
+
+test.describe('without a controlling worker', () => {
+  test.use({ serviceWorkers: 'block' });
+  // No page routes here: Playwright turns the HTTP cache off while any route is installed.
+  test('Try again bypasses an invalid catalogue the HTTP cache kept as immutable and loads the corrected bytes', async ({ page }) => {
+    const root = mkdtempSync(path.join(tmpdir(), 'stillroom-catalogue-'));
+    cpSync(builds.a, root, { recursive: true });
+    const file = path.join(root, catalogueUrl('fi').slice(1));
+    const correct = readFileSync(file);
+    writeFileSync(file, correct.toString('utf8').replace(translate('fi', 'common.retry'), 'Yritä uudestaan'));
+    const host = await startDistServer({ root });
+    try {
+      await instrument(page);
+      await page.goto(host.url);
+      await expectEntryIn(page, 'en');
+      expect(await page.evaluate(() => Boolean(navigator.serviceWorker?.controller))).toBe(false);
+      const fetched = () => host.requests.filter((entry) => entry.pathname === catalogueUrl('fi')).length;
+
+      await entryLanguage(page, 'fi').click();
+      await expect(page.locator('.language-load-error')).toHaveText(translate('en', 'language.loadFailed'));
+      await expectEntryIn(page, 'en');
+      expect(fetched()).toBe(1);
+      // The rejected 200 is in the HTTP cache: an ordinary request is answered from it without the server.
+      expect(await page.evaluate(async (url) => (await fetch(url)).text(), catalogueUrl('fi'))).toContain('Yritä uudestaan');
+      expect(fetched()).toBe(1);
+
+      writeFileSync(file, correct);
+      await page.locator('.language-load-failed').getByRole('button', { name: translate('en', 'common.retry'), exact: true }).click();
+      await expectEntryIn(page, 'fi');
+      await expect(page.locator('.language-load-error')).toHaveCount(0);
+      expect(fetched()).toBe(2);
+      expect(host.requests.filter((entry) => entry.pathname.startsWith('/assets/catalogue-')).every((entry) => entry.pathname === catalogueUrl('en') || entry.pathname === catalogueUrl('fi'))).toBe(true);
+      expect(await cspViolations(page)).toEqual([]);
+    } finally {
+      await host.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

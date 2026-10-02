@@ -2,7 +2,8 @@ import { catalogueDigests, catalogueKeyCount, catalogueUrls } from 'virtual:stil
 import { catalogueLoaded, installCatalogue, type CatalogueTable, type Language } from './index';
 
 // LANG1: fetches one language's startup catalogue as public JSON data, never as code. A retry is a plain new fetch of
-// the same canonical URL: a controlled page is answered from its own release's verified cache (offline too).
+// the same canonical URL: a controlled page is answered from its own release's verified cache (offline too). A retry
+// after a failure bypasses the HTTP cache, so a rejected response cached as immutable is not served again.
 export const maxCatalogueBytes = 256 * 1024;
 export type CatalogueDescriptor = {
   urls: Readonly<Record<Language, string>>;
@@ -44,8 +45,9 @@ export function parseCatalogue(text: string, keyCount: number): CatalogueTable {
   return Object.freeze(Object.fromEntries(entries) as Record<string, string>);
 }
 
-export async function fetchCatalogue(language: Language, descriptor: CatalogueDescriptor, dependencies: Pick<LoaderDependencies, 'fetch' | 'digest'>): Promise<CatalogueTable> {
-  const response = await dependencies.fetch(descriptor.urls[language], { credentials: 'same-origin', mode: 'same-origin' });
+export async function fetchCatalogue(language: Language, descriptor: CatalogueDescriptor, dependencies: Pick<LoaderDependencies, 'fetch' | 'digest'>,
+  retry = false): Promise<CatalogueTable> {
+  const response = await dependencies.fetch(descriptor.urls[language], { credentials: 'same-origin', mode: 'same-origin', ...(retry ? { cache: 'reload' as const } : {}) });
   if (!response.ok) throw new Error('Catalogue unavailable.');
   if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')) throw new Error('Catalogue type.');
   const bytes = await readBounded(response);
@@ -54,15 +56,16 @@ export async function fetchCatalogue(language: Language, descriptor: CatalogueDe
   return parseCatalogue(new TextDecoder('utf-8', { fatal: true }).decode(bytes), descriptor.keyCount);
 }
 
-/** One in-flight load per language; a failure is dropped so the next attempt fetches again. */
+/** One in-flight load per language; a failure is dropped so the next attempt fetches again, past the HTTP cache. */
 export function createCatalogueLoader(descriptor: CatalogueDescriptor, dependencies: LoaderDependencies): (language: Language) => Promise<void> {
   const inflight = new Map<Language, Promise<void>>();
+  const failed = new Set<Language>();
   return (language) => {
     if (dependencies.loaded(language)) return Promise.resolve();
     const pending = inflight.get(language);
     if (pending) return pending;
-    const load = fetchCatalogue(language, descriptor, dependencies)
-      .then((table) => { dependencies.install(language, table); })
+    const load = fetchCatalogue(language, descriptor, dependencies, failed.has(language))
+      .then((table) => { failed.delete(language); dependencies.install(language, table); }, (error: unknown) => { failed.add(language); throw error; })
       .finally(() => { inflight.delete(language); });
     inflight.set(language, load);
     return load;

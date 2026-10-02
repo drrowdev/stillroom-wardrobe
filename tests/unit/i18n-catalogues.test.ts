@@ -136,6 +136,26 @@ describe('catalogue loading', () => {
     await load('fi');
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  it('a retry after a rejected response bypasses the HTTP cache; the first attempt and a later language do not', async () => {
+    const tables: Partial<Record<Language, CatalogueTable>> = {};
+    // A browser cache that kept an invalid 200 for the immutable URL; the server has the correct bytes.
+    const fetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>((url, init) => Promise.resolve(
+      init.cache === 'reload' || url === descriptor.urls.sv ? json(built.catalogues[url === descriptor.urls.sv ? 'sv' : 'fi'].source)
+        : json(built.catalogues.fi.source.replace('Yritä uudelleen', 'Yritä uudestaan'))));
+    const load = createCatalogueLoader(descriptor, { fetch, digest, install: (language, table) => { tables[language] = table; }, loaded: (language) => tables[language] !== undefined });
+    await expect(load('fi')).rejects.toThrow('Catalogue digest.');
+    expect(tables.fi).toBeUndefined();
+    await load('fi');
+    expect(tables.fi?.['common.retry']).toBe('Yritä uudelleen');
+    await load('sv');
+    expect(fetch.mock.calls.map(([url, init]) => [url, init.cache])).toEqual([
+      [descriptor.urls.fi, undefined], [descriptor.urls.fi, 'reload'], [descriptor.urls.sv, undefined]]);
+    for (const [url, init] of fetch.mock.calls) {
+      expect(url).not.toContain('?');
+      expect(init).toMatchObject({ credentials: 'same-origin', mode: 'same-origin' });
+    }
+  });
 });
 
 describe('display language', () => {
