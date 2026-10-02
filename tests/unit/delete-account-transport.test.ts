@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { testAccessToken } from './test-token';
 
 // Exercises the real shared client wrapper: a deletion reply may take longer than the ordinary 20 s limit.
 const OWNER = '11111111-1111-4111-8111-111111111111';
@@ -40,13 +41,15 @@ describe('deletion request transport', () => {
   async function setup(delayMs: number, body: unknown) {
     const transport = delayedFetch(delayMs, body);
     vi.stubGlobal('fetch', transport.fetch);
-    const { makeClient } = await import('../../src/data/client');
+    const { makeClient, bindDataRequests } = await import('../../src/data/client');
     const { deleteAccount } = await import('../../src/data/delete-account');
     const client = makeClient(config);
     vi.spyOn(client.auth, 'getSession').mockResolvedValue({
-      data: { session: { user: { id: OWNER }, access_token: 'token' } }, error: null,
+      data: { session: { user: { id: OWNER }, access_token: testAccessToken(OWNER) } }, error: null,
     } as never);
     const scope = { ownerId: OWNER, epoch: 1, signal: new AbortController().signal };
+    // As in an open scope: data requests carry this owner's credential.
+    bindDataRequests(client, scope.signal, OWNER);
     return { client, scope, transport, deleteAccount };
   }
 

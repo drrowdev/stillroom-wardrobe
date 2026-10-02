@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { readConfiguration, type Configuration, type PublicConfig } from '../data/config';
-import { makeClient, retireClient, revokeSession } from '../data/client';
+import { makeClient, retireClient } from '../data/client';
 import { SessionController, type OwnerScope, type SessionState } from '../auth/session';
 import { Login } from '../auth/login';
 import { translate, resolveLanguage, type Language, type MessageKey, type Translate } from '../i18n';
@@ -14,6 +14,7 @@ import { ItemDetail } from '../features/wardrobe/item-detail';
 import { detailRouteId } from '../domain/item-details';
 import { DiscardDialog, type BeforeDiscard } from './dialog';
 import { AiClient } from '../data/ai';
+import { revokeSession } from '../data/revoke';
 import type { AppClient } from '../data/client';
 import { useWardrobeBrowse } from '../features/wardrobe/use-wardrobe-browse';
 import { PrivateImages } from '../images/private-images';
@@ -22,11 +23,10 @@ import { UndoNotice } from '../features/settings/trash';
 import { ItemLifecycleClient } from '../data/item-lifecycle';
 import { newUndo, type LifecycleSnapshot, type UndoItem } from '../domain/item-lifecycle';
 import type { ProfileRow } from '../data/rows';
-import { PasswordRecovery, RecoveryRequest } from '../auth/password-recovery';
-import { DeletionRecovery } from '../auth/deletion-recovery';
 import { leaveDialogFor, navFamilyFor, outfitRouteId } from '../domain/outfits';
 import { OutfitLeaveDialog } from '../features/outfits/leave-dialog';
 import { LazyBoundary } from './lazy';
+import { PasswordRecovery } from '../auth/password-recovery';
 import { UpdatePrompt } from '../pwa/update-prompt';
 import { lazyNamed, preloadChunks } from './lazy-load';
 import { WeatherStore, weatherKey } from '../features/today/use-weather';
@@ -51,6 +51,10 @@ const CalendarScreen = lazyNamed(() => import('../features/calendar/calendar'), 
 const StatisticsScreen = lazyNamed(() => import('../features/statistics/statistics-screen'), 'StatisticsScreen');
 const StylistScreen = lazyNamed(() => import('../features/stylist/stylist-screen'), 'StylistScreen');
 const AdminScreen = lazyNamed(() => import('../features/admin/admin-screen'), 'AdminScreen');
+// Rare screens load on demand; a way back stays available while they load or if they fail. The email-link recovery
+// screen is eager: its link exists only in memory, so it must never depend on a reload.
+const RecoveryRequest = lazyNamed(() => import('../auth/recovery-request'), 'RecoveryRequest');
+const DeletionRecovery = lazyNamed(() => import('../auth/deletion-recovery'), 'DeletionRecovery');
 const configuration = readConfiguration(import.meta.env);
 const browserLanguages = navigator.languages;
 function Brand() {
@@ -343,7 +347,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   const [controller] = useState(() => {
     markNormalAuthStarted();
     return new SessionController(makeClient(config), browserLanguages, {
-      make: () => makeClient(config), retire: retireClient, revoke: (token) => revokeSession(config, token),
+      make: () => makeClient(config), retire: retireClient, revoke: (record) => revokeSession(config, record),
     });
   });
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
@@ -391,6 +395,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   useLayoutEffect(() => { if (workspace) workspaceEpoch.current = scopeEpoch ?? null; });
   useEffect(() => {
     if (state.phase === 'signed-out' && !requestPassword && callback.kind === 'none') document.getElementById('login-title')?.focus();
+    if (state.phase === 'waiting' && callback.kind === 'none') document.getElementById('waiting-title')?.focus();
   }, [state.phase, requestPassword, callback.kind]);
   // The account menu closes on every route commit and account change.
   const epoch = state.scope?.epoch;
@@ -419,10 +424,11 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
   if (state.phase !== 'ready' || !state.profile || !state.scope || holding) {
     return <EntryLayout language={language} onLanguage={(next) => controller.chooseLanguage(next)} t={t} context={entryContext}>
       {refusal ? <RecoveryRefusal kind={refusal.kind} notice={refusal.notice} t={t} />
-        : state.phase === 'signed-out' && requestPassword ? <RecoveryRequest config={config} online={online} t={t} language={language} onReturn={returnFromRequest} />
+        : state.phase === 'signed-out' && requestPassword ? <LazyBoundary t={t} action={<button type="button" className="button button-quiet" onClick={returnFromRequest}>{t('recovery.return')}</button>}><RecoveryRequest config={config} online={online} t={t} language={language} onReturn={returnFromRequest} /></LazyBoundary>
         : state.phase === 'loading' || holding ? <section className="entry-card connecting" aria-busy="true"><span className="spinner" /><p role="status">{t('common.loading')}</p></section>
-        : state.phase === 'deleting' && state.scope && state.deletion ? <DeletionRecovery key={state.scope.epoch} client={client} controller={controller}
-          scope={state.scope} deletion={state.deletion} online={online} t={t} onSignOut={() => { void signOut(); }} />
+        : state.phase === 'deleting' && state.scope && state.deletion ? <LazyBoundary t={t} action={<button type="button" className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button>}><DeletionRecovery key={state.scope.epoch} client={client} controller={controller}
+          scope={state.scope} deletion={state.deletion} online={online} t={t} onSignOut={() => { void signOut(); }} /></LazyBoundary>
+        : state.phase === 'waiting' ? <section className="entry-card"><h1 id="waiting-title" tabIndex={-1}>{t('auth.offlineTitle')}</h1><p role="status" className="notice notice-offline">{t('common.offline')}</p><button className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></section>
         : state.phase === 'locked' ? <section className="entry-card"><h1>{t('common.errorTitle')}</h1><p className="muted">{t('account.locked')}</p><div className="stack"><button className="button button-primary" onClick={() => { void controller.retry(); }} disabled={!online}>{t('common.retry')}</button><button className="button button-quiet" onClick={() => { void signOut(); }}>{t('auth.signOut')}</button></div></section>
           : <div>{callback.kind === 'none' && callback.notice && <p role="status" className="notice">{t(callback.notice)}</p>}{!online && <p role="status" className="notice notice-offline">{t('common.offline')}</p>}{state.notice === 'delete.done' ? <p className="notice notice-success" role="status">{t('delete.done')}</p>
             : (signOutError || state.notice) && <p className="notice notice-error" role="alert">{t(state.notice ?? 'auth.localSignOut')}</p>}<Login controller={controller} online={online} t={t} onAuthActivity={clearRecoveryNotice} onRecovery={() => { clearRecoveryNotice(); setRequestPassword(true); }} /></div>}

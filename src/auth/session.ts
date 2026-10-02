@@ -1,5 +1,7 @@
 import type { Session } from '@supabase/supabase-js';
-import { authStorageKey, bindDataRequests, type AppClient, type RevokeResult } from '../data/client';
+import { authStorageKey, bindDataRequests, heldRecord, unbindDataRequests, type AppClient, type RevokeResult } from '../data/client';
+import { sessionOwner, tokenClaims, type AuthRecord } from './auth-storage';
+import { openAuthChannels } from './auth-channel';
 import { fetchProfile, saveInitialLanguage, updateProfile, type ProfileUpdate } from '../data/profile';
 import type { ProfileRow } from '../data/rows';
 import { isUuid } from '../domain/wardrobe';
@@ -14,7 +16,8 @@ import { deletionStatus } from '../data/delete-account';
 export type OwnerScope = { ownerId: string; epoch: number; signal: AbortSignal };
 export type SessionState = {
   // `deleting`: an unfinished account deletion. The owner scope stays open only for finishing it.
-  phase: 'loading' | 'signed-out' | 'ready' | 'locked' | 'deleting';
+  // `waiting`: credentials are kept but the wardrobe cannot open until the connection returns.
+  phase: 'loading' | 'signed-out' | 'ready' | 'locked' | 'deleting' | 'waiting';
   deletion?: 'in_progress' | 'retry' | 'contact';
   language: Language;
   profile: ProfileRow | null;
@@ -28,13 +31,14 @@ export type SessionState = {
   client: AppClient;
 };
 type PublishedState = Omit<SessionState, 'client'> & { client?: AppClient };
-export const logoutKey = 'stillroom.logout';
+export { legacyChannelName as logoutKey } from './auth-channel';
 /** Creates, retires and revokes auth clients. Each sign-in generation gets its own client. */
 export type SessionClients = {
   make(): AppClient;
-  retire(client: AppClient): { token: string | null };
-  revoke(token: string | null): Promise<RevokeResult>;
+  retire(client: AppClient): { record: AuthRecord | null };
+  revoke(record: AuthRecord | null): Promise<RevokeResult>;
 };
+type Recovery = 'open' | 'waiting' | 'locked' | 'expired';
 
 export class SessionController {
   private state: SessionState;
@@ -43,7 +47,13 @@ export class SessionController {
   private epoch = 0;
   private choice: Language | null = null;
   private allowSession = true;
-  private channel: BroadcastChannel | null = null;
+  private channels: ReturnType<typeof openAuthChannels> | null = null;
+  private deadline: ReturnType<typeof setTimeout> | null = null;
+  private expiresAt = 0;
+  // Set while a lapsed scope recovers, so an SDK sign-out on a refused refresh shows why.
+  private lapsing = false;
+  /** The owner whose scope is opening or open, until the next invalidation. */
+  private opening: string | null = null;
   private scheduled = new Set<ReturnType<typeof setTimeout>>();
   private aiAckFloor: bigint | null = null;
   private subscription: { unsubscribe(): void } | null = null;
@@ -65,6 +75,9 @@ export class SessionController {
     this.aiAckFloor = null;
     this.epoch++;
     this.request.abort();
+    this.opening = null;
+    unbindDataRequests(this.client);
+    this.disarm();
     for (const timer of this.scheduled) clearTimeout(timer);
     this.scheduled.clear();
   }
@@ -79,29 +92,37 @@ export class SessionController {
     });
   }
   start(): () => void {
-    this.channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel(logoutKey) : null;
-    const receiveLogout = () => {
-      void this.signOut(false).catch(() => this.publish({ ...this.state, notice: 'auth.localSignOut' }));
-    };
-    if (this.channel) this.channel.onmessage = receiveLogout;
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === logoutKey && event.newValue) receiveLogout();
-    };
+    // A received command only ends this tab's own session; it never sends anything on.
+    this.channels = openAuthChannels((command) => {
+      if (command === 'sign-out') void this.endOnCommand('sign-out');
+    });
     const onFocus = () => {
-      if (this.state.phase === 'ready' && navigator.onLine) void this.checkMembership();
+      if (this.checkExpiry()) return;
+      if (this.state.phase === 'ready' && isOnline()) void this.checkMembership();
     };
-    window.addEventListener('storage', onStorage);
+    const onResume = () => { this.checkExpiry(); };
+    const onOnline = () => {
+      if (this.checkExpiry()) return;
+      if (this.state.phase === 'waiting') void this.retry();
+    };
     window.addEventListener('focus', onFocus);
+    window.addEventListener('pageshow', onResume);
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onResume);
+    document.addEventListener('resume', onResume);
     this.started = true;
     this.watch(this.client);
     return () => {
       this.started = false;
       this.subscription?.unsubscribe();
       this.subscription = null;
-      this.channel?.close();
-      this.channel = null;
-      window.removeEventListener('storage', onStorage);
+      this.channels?.close();
+      this.channels = null;
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pageshow', onResume);
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onResume);
+      document.removeEventListener('resume', onResume);
       this.invalidate();
     };
   }
@@ -109,15 +130,41 @@ export class SessionController {
     const { data } = client.auth.onAuthStateChange((event, session) => {
       // A retired client's late events belong to a finished generation.
       if (client !== this.client) return;
-      if (event === 'SIGNED_OUT' || !session) { this.signedOut(); return; }
+      if (event === 'SIGNED_OUT' || !session) {
+        // The SDK relays other tabs' sign-outs; this tab ends only when its own store no longer holds a session.
+        if (heldRecord(client)) {
+          if (event === 'INITIAL_SESSION' && this.allowSession) this.unavailable(isOnline() ? 'locked' : 'waiting');
+          return;
+        }
+        // The SDK may drop a refused credential before this tab's own deadline fires.
+        const lapsed = this.lapsing || (this.expiresAt > 0 && Date.now() >= this.expiresAt);
+        this.signedOut(lapsed ? 'auth.expired' : undefined);
+        return;
+      }
       if (!this.allowSession || !this.holdsSession(session)) return;
-      if (this.state.scope?.ownerId === session.user.id && !this.state.scope.signal.aborted
-        && (this.state.phase === 'ready' || this.state.phase === 'deleting')) return;
+      const owner = sessionOwner(session);
+      if (owner === null) { void this.end(false); return; }
+      const scope = this.state.scope;
+      if (scope && scope.ownerId !== owner) {
+        // Another owner's credential: nothing of the old scope may run or show while the new one opens.
+        this.invalidate();
+        this.publish({ phase: 'loading', language: resolveLanguage(this.browserLanguages, null, this.choice), profile: null, scope: null, languageUnsaved: false });
+      } else if ((scope?.ownerId === owner && !scope.signal.aborted && (this.state.phase === 'ready' || this.state.phase === 'deleting'))
+        || (this.opening === owner && !this.request.signal.aborted)) {
+        // The same owner's renewed credential carries an open or loading scope on, but only if it came before the old
+        // deadline. A renewal that arrives late (the page's timer was throttled) ends the old scope first; recovery
+        // then reopens with the renewed session under a new epoch.
+        if (this.checkExpiry()) return;
+        this.arm(session);
+        return;
+      }
       // Supabase holds its auth lock during this callback; data requests must run after it returns.
       const epoch = this.epoch;
       const timer = setTimeout(() => {
         this.scheduled.delete(timer);
-        if (epoch === this.epoch && this.allowSession && client === this.client) void this.open(session);
+        // By now the store may hold another session; only the one still held may open.
+        if (epoch === this.epoch && this.allowSession && client === this.client && this.holdsSession(session)
+          && this.heldOwner() === owner) void this.open(session);
       }, 0);
       this.scheduled.add(timer);
     });
@@ -128,14 +175,80 @@ export class SessionController {
   private holdsSession(session: Session): boolean {
     return holdsStoredSession(window.sessionStorage.getItem(authStorageKey), session.access_token);
   }
+  /** The owner of the credential this tab's client holds right now. */
+  private heldOwner(): string | null {
+    return sessionOwner(heldRecord(this.client));
+  }
+  /** Lapses the open scope when the held access token's real expiry passes. */
+  private arm(session: Session): void {
+    this.disarm();
+    const expiry = expiryOf(session);
+    if (expiry === null) return;
+    this.expiresAt = expiry;
+    // Long delays are clamped by browsers; the resume checks cover a suspended page.
+    this.deadline = setTimeout(() => { this.deadline = null; this.checkExpiry(); }, Math.min(Math.max(0, this.expiresAt - Date.now()), 2_147_000_000));
+  }
+  private disarm(): void {
+    if (this.deadline) clearTimeout(this.deadline);
+    this.deadline = null;
+    this.expiresAt = 0;
+  }
+  /**
+   * True when the scope lapsed. The scope counts from the moment open() binds it, through loading, ready and an
+   * unfinished deletion. At the held access token's expiry its requests, private state and images end at once; only
+   * a renewal that arrived before the deadline (which re-arms it) keeps the scope.
+   */
+  private checkExpiry(): boolean {
+    if (!this.expiresAt || Date.now() < this.expiresAt || this.opening === null) return false;
+    this.lapse();
+    return true;
+  }
+  /** Ends the scope's requests, private state and images before anything else shows, then tries to recover. */
+  private lapse(): void {
+    this.invalidate();
+    this.publish({ phase: 'loading', language: this.state.language, profile: null, scope: null, languageUnsaved: false });
+    this.lapsing = true;
+    void this.recover().finally(() => { this.lapsing = false; });
+  }
+  private async recover(): Promise<void> {
+    const client = this.client, epoch = this.epoch;
+    let outcome: Recovery;
+    let session: Session | null = null;
+    try {
+      const { data, error } = await client.auth.getSession();
+      if (!this.current(client, epoch)) return;
+      session = data.session;
+      // A returned session that is already past its expiry would lapse again at once; it waits for a retry instead.
+      outcome = session && !error ? (expiryOf(session) ?? Infinity) > Date.now() ? 'open' : 'locked' : classify(error, heldRecord(client));
+    } catch (error) {
+      if (!this.current(client, epoch)) return;
+      outcome = classify(error, heldRecord(client));
+    }
+    if (outcome === 'open' && session) { await this.open(session); return; }
+    if (outcome === 'expired') { await this.end(false, 'auth.expired', false); return; }
+    this.unavailable(outcome === 'locked' ? 'locked' : 'waiting');
+  }
+  /** Credentials are kept for a retry; nothing private is shown. */
+  private unavailable(phase: 'locked' | 'waiting'): void {
+    this.invalidate();
+    this.publish({ phase: isOnline() ? phase : 'waiting', language: resolveLanguage(this.browserLanguages, null, this.choice),
+      profile: null, scope: null, languageUnsaved: false });
+  }
   private async open(session: Session): Promise<void> {
     this.invalidate();
     this.request = new AbortController();
-    const scope = { ownerId: session.user.id, epoch: this.epoch, signal: this.request.signal };
+    const ownerId = sessionOwner(session);
+    if (ownerId === null) { await this.end(false); return; }
+    const scope = { ownerId, epoch: this.epoch, signal: this.request.signal };
     const client = this.client;
-    // Every resume below drops its result once a sign-out or a newer sign-in has taken over.
-    const stale = () => scope.signal.aborted || !this.current(client, scope.epoch);
-    bindDataRequests(client, scope.signal);
+    // Every resume below drops its result once a sign-out, a newer sign-in or another owner's credential has taken over,
+    // or once the access token has expired: a late answer never shows private state past the deadline.
+    const stale = () => scope.signal.aborted || !this.current(client, scope.epoch) || this.heldOwner() !== scope.ownerId || this.checkExpiry();
+    bindDataRequests(client, scope.signal, scope.ownerId);
+    this.opening = scope.ownerId;
+    this.arm(session);
+    // Offline, the profile request would only retry; wait for the connection instead.
+    if (!isOnline()) { this.unavailable('waiting'); return; }
     this.publish({ phase: 'loading', language: resolveLanguage(this.browserLanguages, null, this.choice), profile: null, scope: null, languageUnsaved: false });
     try {
       if (!isUuid(scope.ownerId)) throw new AppError('account.locked');
@@ -160,14 +273,13 @@ export class SessionController {
       // A frozen account cannot read its profile. If its own deletion is unfinished, offer to finish it.
       const deletion = await deletionStatus(client, scope.signal).catch(() => null);
       if (stale()) return;
-      if (deletion === 'complete') { await this.signOut(true, 'delete.done'); return; }
+      if (deletion === 'complete') { await this.signOut('delete.done'); return; }
       if (deletion === 'in_progress' || deletion === 'retry' || deletion === 'contact') {
         this.publish({ phase: 'deleting', language: resolveLanguage(this.browserLanguages, null, this.choice), profile: null, scope,
           languageUnsaved: false, deletion });
         return;
       }
-      this.request.abort();
-      this.publish({ phase: 'locked', language: resolveLanguage(this.browserLanguages), profile: null, scope: null, languageUnsaved: false });
+      this.unavailable('locked');
     }
   }
   /** Records the latest answer from a recovery attempt; ignored once the scope has changed. */
@@ -192,7 +304,7 @@ export class SessionController {
   }
   private publishProfile(scope: OwnerScope, profile: ProfileRow, kind: 'profile' | 'language' | 'weather' | 'ai' | 'refresh'): void {
     const current = this.state;
-    if (scope.signal.aborted || current.phase !== 'ready' || current.scope?.epoch !== scope.epoch
+    if (scope.signal.aborted || this.checkExpiry() || current.phase !== 'ready' || current.scope?.epoch !== scope.epoch
       || current.scope.ownerId !== scope.ownerId || profile.owner_id !== scope.ownerId || !current.profile
       || profile.version < current.profile.version || this.aiAckFloor !== null && BigInt(profile.version) < this.aiAckFloor) return;
     this.publish({ ...current, profile, language: profile.ui_language ?? current.language,
@@ -299,7 +411,7 @@ export class SessionController {
     }
   }
   chooseLanguage(language: Language): void {
-    if (this.state.phase !== 'signed-out' && this.state.phase !== 'locked' && this.state.phase !== 'deleting') return;
+    if (this.state.phase !== 'signed-out' && this.state.phase !== 'locked' && this.state.phase !== 'deleting' && this.state.phase !== 'waiting') return;
     this.choice = language;
     this.publish({ ...this.state, language });
   }
@@ -320,8 +432,11 @@ export class SessionController {
     const { data, error } = await client.auth.getSession();
     // A sign-out or another sign-in while this was waiting: the answer belongs to an older generation.
     if (!this.current(client, epoch)) return;
-    if (error || !data.session) { this.signedOut(); return; }
-    await this.open(data.session);
+    if (!error && data.session) { await this.open(data.session); return; }
+    const outcome = classify(error, heldRecord(client));
+    // A refused refresh token: nothing left to revoke, and nothing kept for a reload to find.
+    if (outcome === 'expired' || outcome === 'open') { await this.end(false, 'auth.expired', false); return; }
+    this.unavailable(outcome);
   }
   async retryLanguage(): Promise<void> {
     const { scope, profile, language } = this.state;
@@ -340,32 +455,55 @@ export class SessionController {
   }
   /**
    * Signs out on this device without waiting for the network: the stored credentials are gone and the old client
-   * is retired before anything shows signed out. The server revoke that follows is best effort.
+   * is retired before anything shows signed out. The server revoke that follows is best effort. This is the only
+   * path that tells other tabs.
    */
-  async signOut(broadcast = true, notice?: MessageKey): Promise<void> {
+  async signOut(notice?: MessageKey): Promise<void> {
+    return this.end(true, notice);
+  }
+  /** Ends this tab's own session for a command received from another tab, and sends nothing on. */
+  async endOnCommand(command: 'sign-out'): Promise<void> {
+    if (command !== 'sign-out') return;
+    try { await this.end(false); } catch { this.publish({ ...this.state, notice: 'auth.localSignOut' }); }
+  }
+  private async end(broadcast: boolean, notice?: MessageKey, revoke = true): Promise<void> {
     this.allowSession = false;
     this.subscription?.unsubscribe();
     this.subscription = null;
-    let token: string | null = null;
+    let record: AuthRecord | null = null;
     if (this.clients) {
-      token = this.clients.retire(this.client).token;
+      record = this.clients.retire(this.client).record;
       this.client = this.clients.make();
       if (this.started) this.watch(this.client);
     }
     this.signedOut(notice);
-    try {
-      if (broadcast) {
-        if (this.channel) this.channel.postMessage('sign-out');
-        else {
-          window.localStorage.setItem(logoutKey, crypto.randomUUID());
-          window.localStorage.removeItem(logoutKey);
-        }
-      }
-    } catch { /* Other tabs notice on their next request. */ }
+    if (broadcast) this.channels?.send('sign-out');
+    if (!revoke) return;
     const client = this.client;
-    const result = this.clients ? await this.clients.revoke(token) : 'ok';
+    const result = this.clients ? await this.clients.revoke(record) : 'ok';
     if (result === 'failed' && client === this.client && this.state.phase === 'signed-out' && this.state.notice !== 'delete.done') {
       this.publish({ ...this.state, notice: 'auth.localSignOut' });
     }
   }
+}
+
+/**
+ * When the held access token stops working, in this device's time: the SDK's own `expires_at`, which it renews by, so
+ * the two never disagree about a skewed clock. A token without valid claims has none, and its owner check fails closed.
+ */
+function expiryOf(session: Session): number | null {
+  const claims = tokenClaims(session.access_token);
+  if (!claims) return null;
+  const at = session.expires_at;
+  return (typeof at === 'number' && Number.isSafeInteger(at) && at > 0 ? at : claims.exp) * 1000;
+}
+const isOnline = () => typeof navigator === 'undefined' || navigator.onLine !== false;
+/** Sorts a failed session recovery: kept credentials can retry; a refused refresh token means signing in again. */
+function classify(error: unknown, held: AuthRecord | null): Recovery {
+  if (!held) return 'expired';
+  const status = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : 0;
+  const retryable = typeof error === 'object' && error !== null && 'name' in error && error.name === 'AuthRetryableFetchError';
+  if (!isOnline() || retryable && status === 0) return 'waiting';
+  if (retryable || status >= 500) return 'locked';
+  return held.expires_at * 1000 > Date.now() ? 'locked' : 'expired';
 }

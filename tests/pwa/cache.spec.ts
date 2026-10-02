@@ -124,6 +124,26 @@ test('an offline reopen loads the cached shell without private data', async ({ p
   await expectOnlyShell(page, 'a', privateMarkers);
 });
 
+test('a cold offline start opens the recovery screens from the installed shell', async ({ page, context }) => {
+  await mockBackend(page, { initialLanguage: 'en' });
+  await page.goto(server.url);
+  await controlled(page);
+  // Nothing beyond the first install has run: the recovery modules were never requested by this page.
+  await context.setOffline(true);
+  await page.reload();
+  await page.getByRole('button', { name: messages['recovery.forgot'].en }).click();
+  await expect(page.locator('#recovery-email')).toBeVisible();
+  await expect(page.locator('.chunk-error')).toHaveCount(0);
+  await page.getByRole('button', { name: messages['recovery.return'].en }).click();
+  await expect(page.locator('#login-title')).toBeFocused();
+  await page.goto('about:blank');
+  await page.goto(`${server.url}/${recoveryHash()}`);
+  await expect(page.locator('.entry-card')).toBeVisible();
+  await expect(page.locator('.chunk-error')).toHaveCount(0);
+  await context.setOffline(false);
+  await expectOnlyShell(page, 'a', privateMarkers);
+});
+
 const backendUrl = 'http://127.0.0.1:54321';
 const accessToken = (page: Page) => page.evaluate(() => (JSON.parse(sessionStorage.getItem('stillroom.auth') ?? '{}') as { access_token?: string }).access_token ?? '');
 // A 1x1 PNG, returned as the "signed" Storage object so a cross-origin <img> really loads it.
@@ -184,12 +204,14 @@ test('a direct switch from owner A to owner B, without logout, clears A and stor
   await signIn(page);
   await expect(page.getByText(privateTitle).first()).toBeVisible();
   const tokenA = await accessToken(page);
-  // What the SDK does when another client in this tab signs in: store the new session and broadcast SIGNED_IN.
+  // What the SDK does when another client in this tab signs in: store the new session (in the allowlisted form this
+  // tab's storage keeps) and broadcast SIGNED_IN.
   const tokenB = await page.evaluate(async (backend) => {
     const response = await fetch(`${backend}/auth/v1/token?grant_type=password`, { method: 'POST', headers: { 'content-type': 'application/json', apikey: 'sb_publishable_browser_fixture_only' },
       body: JSON.stringify({ email: 'user-b@example.test', password: 'fictional-test-password' }) });
     const session: Record<string, unknown> = { ...await response.json() as Record<string, unknown>, expires_at: Math.floor(Date.now() / 1000) + 3600 };
-    sessionStorage.setItem('stillroom.auth', JSON.stringify(session));
+    const { access_token, refresh_token, expires_at } = session;
+    sessionStorage.setItem('stillroom.auth', JSON.stringify({ access_token, refresh_token, expires_at }));
     const channel = new BroadcastChannel('stillroom.auth');
     channel.postMessage({ event: 'SIGNED_IN', session });
     channel.close();
@@ -224,9 +246,11 @@ test('an offline reopen after private data loaded shows no private data, and the
   await context.setOffline(true);
   const before = server.requests.length;
   await page.reload();
-  // The stored session cannot reach its profile, so the app shows its own could-not-open state.
-  await expect(page.getByText(messages['account.locked'].en)).toBeVisible({ timeout: 20000 });
-  expect(refused).toContain('/rest/v1/profiles');
+  // The stored session cannot be opened offline, so the app waits for a connection without asking for private data.
+  await expect(page.getByRole('heading', { level: 1, name: messages['auth.offlineTitle'].en })).toBeVisible({ timeout: 20000 });
+  await expect(page.getByText(messages['common.offline'].en)).toBeVisible();
+  await expect.poll(() => refused).toContain('/auth/v1/user');
+  expect(refused.filter((pathname) => pathname.startsWith('/rest/'))).toEqual([]);
   await expect(page.locator('.workspace')).toHaveCount(0);
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
   await expect(page.getByText(privateTitle)).toHaveCount(0);

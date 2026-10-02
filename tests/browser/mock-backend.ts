@@ -495,6 +495,8 @@ export type MockOptions = {
   loseFinalizeReplyOnce?: boolean;
   loseAnalyzedReserveReplyOnce?: boolean;
   recoverStatus?: number; updateStatus?: number; logoutStatus?: number; recoveryUser?: string;
+  /** Scripts the access-token lifetime and the answer to refresh grants; counts the grants it saw. */
+  auth?: AuthControl;
   wireDiagnostic?: WireBackend;
   wireObservation?: WireBackend;
   aiResults?: Map<string, import('../../src/domain/ai-analysis').AiResult>;
@@ -503,6 +505,7 @@ export type MockOptions = {
   /** image_provenance_v1 rows (owner-filtered by image). */
   provenance?: JsonRow[];
 };
+export type AuthControl = { lifetime?: number; refresh?: 'ok' | 'offline' | 'stall' | 400 | 503; refreshes?: number };
 export function recoveryHash(owner = owners.a, seconds = 3600): string {
   const expires = Math.floor(Date.now() / 1000) + seconds;
   const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -812,6 +815,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   let commitFailed = false, analyzedReserveReplyLost = false;
   const fixture = await readFile(new URL('../../blueprint/validation/fixture.jpg', import.meta.url));
   const tokens = new Map<string, string>();
+  const refreshTokens = new Map<string, { id: string; email: string; sessionId: string }>();
   const statusProofs: StatusProof[] = [];
   const admitAiStatus = (request: Request) => {
     const url = new URL(request.url());
@@ -898,13 +902,34 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       return;
     }
     if (url.pathname === '/auth/v1/token') {
+      const control = options.auth ?? {};
+      const issue = async (id: string, email: string, sessionId: string) => {
+        const lifetime = control.lifetime ?? 3600;
+        const claims = { sub: id, role: 'authenticated', aud: 'authenticated', exp: Math.floor(Date.now() / 1000) + lifetime, session_id: sessionId, jti: randomUUID() };
+        const accessToken = `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.browser-fixture`;
+        const refreshToken = `fixture-${randomUUID()}`;
+        tokens.set('Bearer ' + accessToken, id);
+        refreshTokens.set(refreshToken, { id, email, sessionId });
+        await json({ access_token: accessToken, refresh_token: refreshToken, expires_in: lifetime, token_type: 'bearer', user: { id, email, aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: '2026-09-06T00:00:00Z' } });
+      };
+      if (url.searchParams.get('grant_type') === 'refresh_token') {
+        control.refreshes = (control.refreshes ?? 0) + 1;
+        const body = request.postDataJSON() as { refresh_token?: string };
+        const held = refreshTokens.get(body.refresh_token ?? '');
+        if (control.refresh === 'offline') { await route.abort('internetdisconnected'); return; }
+        // A renewal that never answers while the browser still reports itself online.
+        if (control.refresh === 'stall') return;
+        if (control.refresh === 503) { await json({ message: 'Service unavailable' }, 503); return; }
+        if (!held || control.refresh === 400) { await json({ error: 'invalid_grant', error_code: 'refresh_token_not_found', error_description: 'Invalid Refresh Token' }, 400); return; }
+        // Rotation: the used refresh token is spent; the session id stays.
+        refreshTokens.delete(body.refresh_token ?? '');
+        await issue(held.id, held.email, held.sessionId);
+        return;
+      }
       const body = request.postDataJSON() as { email?: string; password?: string };
       const id = body.email === 'user-a@example.test' ? owners.a : body.email === 'user-b@example.test' ? owners.b : null;
-      if (!id || body.password !== 'fictional-test-password') { await json({ error: 'invalid_grant', error_description: 'Invalid login credentials' }, 400); return; }
-      const claims = { sub: id, role: 'authenticated', aud: 'authenticated', exp: Math.floor(Date.now() / 1000) + 3600, jti: randomUUID() };
-      const accessToken = `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.browser-fixture`;
-      tokens.set('Bearer ' + accessToken, id);
-      await json({ access_token: accessToken, refresh_token: `fixture-${id}`, expires_in: 3600, token_type: 'bearer', user: { id, email: body.email, aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: '2026-09-06T00:00:00Z' } });
+      if (!id || !body.email || body.password !== 'fictional-test-password') { await json({ error: 'invalid_grant', error_description: 'Invalid login credentials' }, 400); return; }
+      await issue(id, body.email, randomUUID());
       return;
     }
     if (url.pathname === '/auth/v1/recover') { await json({}, options.recoverStatus ?? 200); return; }

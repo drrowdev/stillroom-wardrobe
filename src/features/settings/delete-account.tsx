@@ -42,8 +42,8 @@ export function DeleteAccountSettings({ client, controller, scope, online, t, ac
     try {
       const result = await deleteAccount(client, scope, password, controllerSignal.signal);
       if (controllerSignal.signal.aborted || scope.signal.aborted) return;
-      if (result === 'complete') { await controller.signOut(true, 'delete.done'); return; }
-      if (result === 'signed_out') { await controller.signOut(true); return; }
+      if (result === 'complete') { await controller.signOut('delete.done'); return; }
+      if (result === 'signed_out') { await controller.signOut(); return; }
       setProblem(messages[result] ?? 'delete.failed');
     } catch (error) {
       if (!scope.signal.aborted && !isAborted(error)) setProblem('delete.failed');

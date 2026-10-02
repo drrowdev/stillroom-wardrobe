@@ -8,6 +8,7 @@ import { isUuid } from '../domain/wardrobe';
 import type { CleanupSource } from '../images/process-jpeg';
 import type { AppClient } from './client';
 import { readConfiguration, type PublicConfig } from './config';
+import { sessionOwner } from '../auth/auth-storage';
 
 export const enhanceCodes = ['OK', 'INVALID_INPUT', 'UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRED', 'TERMINAL', 'TOO_LARGE',
   'UNSUPPORTED_MEDIA', 'FILTERED', 'OUTPUT_REJECTED', 'RATE_LIMIT', 'ALLOWANCE', 'FAILED', 'UNCONFIGURED', 'INACTIVE',
@@ -69,14 +70,14 @@ export class EnhancementClient {
   }
   private async bearer(ms: number, wait: Wait): Promise<string> {
     const cached = await wait(this.client.auth.getSession());
-    if (cached.error || !cached.data.session || cached.data.session.user.id !== this.scope.ownerId) throw new EnhanceError('UNAUTHENTICATED');
+    if (cached.error || !cached.data.session || sessionOwner(cached.data.session) !== this.scope.ownerId) throw new EnhanceError('UNAUTHENTICATED');
     let session = cached.data.session;
     if ((session.expires_at ?? 0) * 1000 <= Date.now() + ms) {
       const refreshed = await wait(this.client.auth.refreshSession());
       if (refreshed.error || !refreshed.data.session) throw new EnhanceError('UNAUTHENTICATED');
       session = refreshed.data.session;
     }
-    if (session.user.id !== this.scope.ownerId) throw new EnhanceError('UNAUTHENTICATED');
+    if (sessionOwner(session) !== this.scope.ownerId) throw new EnhanceError('UNAUTHENTICATED');
     return session.access_token;
   }
   private headers(token: string, extra: Record<string, string>) {

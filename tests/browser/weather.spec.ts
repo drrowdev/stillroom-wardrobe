@@ -117,8 +117,11 @@ function basics(api: Api, account: 'a' | 'b' = 'a', bottom: Row = { lower_covera
   add(api, account === 'a' ? 'Black boots' : 'Robin boots', { category: 'footwear', colours: ['black'] }, account);
 }
 
-async function start(page: Page, options: { language?: Language; weather?: Row; route?: string; seed?: (api: Api, weather: Service) => void; weatherB?: Row } = {}) {
-  const api = await mockBackend(page, { initialLanguage: options.language ?? 'en', weather: { ...options.weather && { a: options.weather }, ...options.weatherB && { b: options.weatherB } } });
+// The mock signs Auth tokens against the real time, while these tests pin the page clock to a fixed hour and move it
+// forward by hours. A long token keeps that session valid on the page clock, so only the forecast's age is tested.
+const twoDays = 2 * 24 * 3600;
+async function start(page: Page, options: { language?: Language; weather?: Row; route?: string; seed?: (api: Api, weather: Service) => void; weatherB?: Row; tokenSeconds?: number } = {}) {
+  const api = await mockBackend(page, { initialLanguage: options.language ?? 'en', ...options.tokenSeconds && { auth: { lifetime: options.tokenSeconds } }, weather: { ...options.weather && { a: options.weather }, ...options.weatherB && { b: options.weatherB } } });
   const weather = await service(page);
   options.seed?.(api, weather);
   await page.goto(`/#/${options.route ?? 'today'}`); await signIn(page);
@@ -349,22 +352,10 @@ test('I16 a failed forecast pauses before Try again, suggestions keep working, a
   await page.context().setOffline(false);
 });
 
-// Moving the page clock past an hour would expire the fixture sign-in; renew it as the same owner.
-async function keepSignedIn(page: Page) {
-  await page.route('http://127.0.0.1:54321/auth/v1/token**', async route => {
-    const request = route.request();
-    if (new URL(request.url()).searchParams.get('grant_type') !== 'refresh_token') { await route.fallback(); return; }
-    const token = (request.postDataJSON() as { refresh_token?: string }).refresh_token;
-    const email = token === `fixture-${owners.a}` ? 'user-a@example.test' : token === `fixture-${owners.b}` ? 'user-b@example.test' : 'unknown@example.test';
-    await route.fallback({ postData: JSON.stringify({ email, password: 'fictional-test-password' }) });
-  });
-}
-
 test('I16 a forecast stops counting after three hours; suggestions drop it and it is asked for again', async ({ page }) => {
   const at = Date.parse(`${new Date().toISOString().slice(0, 10)}T07:00:00Z`);
   await page.clock.install({ time: at });
-  const { weather } = await start(page, { weather: oulu, seed: (api, service) => { basics(api); service.clock.at = at; } });
-  await keepSignedIn(page);
+  const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => { basics(api); service.clock.at = at; } });
   await expect(bar(page)).toContainText(await lowLine(page, 0));
   await expect(cards(page).first()).toContainText(text('today.addCoat'));
   weather.hold.forecast.add('65.0');
@@ -384,7 +375,7 @@ test('I16 a forecast stops counting after three hours; suggestions drop it and i
 test('I16 a forecast stops counting at the city\'s midnight and the next day\'s is asked for', async ({ page }) => {
   const at = Date.parse(`${new Date().toISOString().slice(0, 10)}T20:50:00Z`);
   await page.clock.install({ time: at });
-  const { weather } = await start(page, { weather: oulu, seed: (api, service) => { basics(api); service.clock.at = at; } });
+  const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => { basics(api); service.clock.at = at; } });
   await expect(bar(page)).toContainText(await lowLine(page, 0));
   weather.clock.at = at + 11 * 60_000;
   weather.weather.set('65.0', { temperature: 4 });

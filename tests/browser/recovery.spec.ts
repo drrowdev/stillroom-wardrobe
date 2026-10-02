@@ -450,3 +450,52 @@ test('concise entry copy, accessible recovery and bounded synthetic entry eviden
     }
   }
 });
+
+test.describe('recovery screens with their module unavailable', () => {
+  const fail = (page: Page, file: string) => page.route(url => url.pathname === file, route => route.abort('failed'));
+
+  test('the request screen offers Return while loading and after its module fails', async ({ page }) => {
+    await mockBackend(page);
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    await page.route(url => url.pathname === '/src/auth/recovery-request.tsx', async route => { await held; await route.abort('failed'); });
+    await page.goto('/');
+    await page.getByRole('button', { name: translate('en', 'recovery.forgot') }).click();
+    await expect(page.locator('.chunk-loading')).toBeVisible();
+    await expect(page.locator('.chunk-loading').getByRole('button', { name: translate('en', 'recovery.return'), exact: true })).toBeVisible();
+    release();
+    const failed = page.locator('.chunk-error');
+    await expect(failed).toBeVisible();
+    await expect(failed.getByRole('button', { name: translate('en', 'chunk.reload'), exact: true })).toBeVisible();
+    await failed.getByRole('button', { name: translate('en', 'recovery.return'), exact: true }).click();
+    await expect(page.locator('#login-title')).toBeFocused();
+    await expect(page.locator('.chunk-error')).toHaveCount(0);
+  });
+
+  test('the deletion screen offers Sign out after its module fails', async ({ page }) => {
+    const backend = await mockBackend(page);
+    await fail(page, '/src/auth/deletion-recovery.tsx');
+    await page.route(/\/rest\/v1\/profiles(\?|$)/, (route) => route.fulfill({ status: 403, json: { code: '42501', message: 'permission denied' } }));
+    await page.route('http://127.0.0.1:54321/rest/v1/rpc/deletion_status', (route) => route.fulfill({ status: 200, json: { state: 'retry' } }));
+    await page.goto('/'); await signIn(page);
+    const failed = page.locator('.chunk-error');
+    await expect(failed).toBeVisible();
+    await failed.getByRole('button', { name: translate('en', 'auth.signOut'), exact: true }).click();
+    await expect(page.locator('#login-title')).toBeVisible();
+    // The server logout follows the local sign-out.
+    await expect.poll(() => backend.requests.filter(request => request.path === '/auth/v1/logout').length).toBe(1);
+    expect(await page.evaluate(() => !sessionStorage.getItem('stillroom.auth') && !localStorage.getItem('stillroom.auth'))).toBe(true);
+  });
+
+  test('an email recovery link works without the lazily loaded screens', async ({ page }) => {
+    const backend = await mockBackend(page);
+    await fail(page, '/src/auth/recovery-request.tsx');
+    await fail(page, '/src/auth/deletion-recovery.tsx');
+    await page.goto('/' + recoveryHash());
+    await confirm(page); await fillPasswords(page);
+    await page.getByRole('button', { name: 'Change password', exact: true }).click();
+    await expect(page.locator('#login-title')).toBeVisible();
+    await expect(page.locator('.chunk-error')).toHaveCount(0);
+    expect(backend.requests.filter(request => request.method === 'PUT')).toHaveLength(1);
+  });
+});
