@@ -49,6 +49,12 @@ Each step is on both phones unless it says otherwise.
    and `/service-worker.js`. Checklist:
    [#60 c5835812872](https://github.com/drrowdev/stillroom-wardrobe/pull/60#issuecomment-5835812872).
    Report PASS/FAIL per phone and the `content-type` and `cache-control` lines.
+   - **Status:** FAIL on 2 October on the iPhone (closing the app required a new
+     sign-in, so an offline reopen showed sign-in). "Keep me signed in" (AUTH1)
+     is live since R2; this step is pending your re-test after R2, with the box
+     ticked.
+   - **Rollout note:** after R2, reload or close every open window, the
+     home-screen app included, before ticking "Keep me signed in".
 
 2. **O8: the release journey**, in the order in
    [operations.md](operations.md#restore-drill-i26): sign in, language, add from a
