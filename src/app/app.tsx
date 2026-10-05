@@ -17,6 +17,7 @@ import { AiClient } from '../data/ai';
 import { revokeSession } from '../data/revoke';
 import type { AppClient } from '../data/client';
 import { useWardrobeBrowse } from '../features/wardrobe/use-wardrobe-browse';
+import { useBulkTrash } from '../features/wardrobe/use-bulk-trash';
 import { PrivateImages } from '../images/private-images';
 import { LanguageSettings } from '../features/settings/language-settings';
 import { UndoNotice } from '../features/settings/trash';
@@ -52,6 +53,7 @@ const CalendarScreen = lazyNamed(() => import('../features/calendar/calendar'), 
 const StatisticsScreen = lazyNamed(() => import('../features/statistics/statistics-screen'), 'StatisticsScreen');
 const StylistScreen = lazyNamed(() => import('../features/stylist/stylist-screen'), 'StylistScreen');
 const AdminScreen = lazyNamed(() => import('../features/admin/admin-screen'), 'AdminScreen');
+const BulkUndoNotice = lazyNamed(() => import('../features/wardrobe/bulk-bar'), 'BulkUndoNotice');
 // Rare screens load on demand; a way back stays available while they load or if they fail. The email-link recovery
 // screen is eager: its link exists only in memory, so it must never depend on a reload.
 const RecoveryRequest = lazyNamed(() => import('../auth/recovery-request'), 'RecoveryRequest');
@@ -164,6 +166,8 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
     writing.current = busy;
     if (was && !busy && queued.current) setSettled(value => value + 1);
   }, []);
+  const bulk = useBulkTrash({ lifecycle, scope, browse, images, online,
+    onChanged: () => { void refresh(); invalidateOutfits(); }, onNotice: () => { setUndo(null); setNotice(false); } });
   useEffect(() => { images.activate(); return () => images.clear(); }, [images]);
   useEffect(preloadChunks, []);
   const changeRoute = useCallback((next: WorkspaceRoute) => {
@@ -264,7 +268,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   function trashed(item: LifecycleSnapshot) {
     dirty.current = { dirty: false, incomplete: false, busy: false };
     browse.remove(item.id);
-    setUndo(newUndo(item)); setNotice(false);
+    setUndo(newUndo(item)); setNotice(false); bulk.clearNotice();
     changeRoute('wardrobe'); void refresh(); invalidateOutfits();
   }
   function saved() {
@@ -293,14 +297,16 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
         {!online && <div className="notice notice-offline" role="status">{t('common.offline')} {t('common.stale')}</div>}
         {undo && <UndoNotice key={`${undo.item.id}:${undo.item.version}`} undo={undo} visible={route === 'wardrobe'} routeSignal={routeSignal} lifecycle={lifecycle} scope={scope} online={online} t={t} images={images}
           onRestored={() => { setUndo(null); void refresh(); invalidateOutfits(); }} />}
+        {bulk.notice && route === 'wardrobe' && <LazyBoundary t={t}><BulkUndoNotice key={bulk.notice.kind === 'trashed' ? bulk.notice.expiresAt : 'failed'} notice={bulk.notice}
+          busy={bulk.busy !== null} online={online} onUndo={bulk.restore} language={language} t={t} /></LazyBoundary>}
         {notice && route === 'wardrobe' && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('item.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setNotice(false)}><Icon name="close" /></button></div>}
         {outfitNotice && route === `outfit:${outfitNotice}` && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('outfits.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setOutfitNotice(null)}><Icon name="close" /></button></div>}
         <LazyBoundary key={route} t={t} onReady={focusRouteWhenReady}>{route === 'add'
           ? <AddItem client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} />
           : route === 'settings' ? <ProfileScreen client={client} ai={ai} stylist={stylist} images={images} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} version={config.version} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} onSignOut={onSignOut} />
           : route === 'trash' ? <Trash lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
-            onDeleting={itemId => setUndo(current => current?.item.id === itemId ? null : current)}
-            onBack={() => changeRoute('wardrobe')} onChanged={() => { setUndo(null); void refresh(); invalidateOutfits(); }} />
+            onDeleting={itemId => { setUndo(current => current?.item.id === itemId ? null : current); bulk.forget(itemId); }}
+            onBack={() => changeRoute('wardrobe')} onChanged={itemId => { setUndo(null); bulk.forget(itemId); void refresh(); invalidateOutfits(); }} />
           : route.startsWith('detail:') ? <ItemDetail key={route} client={client} scope={scope} itemId={detailRouteId(route.slice(7))} images={images}
             lifecycle={lifecycle} onTrashed={trashed} ai={ai} onBeforeDiscard={onBeforeDiscard}
             t={t} language={language} currency={profile.currency} online={online} onDirty={onDirty} onSaved={() => { void refresh(); invalidateOutfits(); }} onBack={() => changeRoute('wardrobe')} />
@@ -324,7 +330,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
             weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')}
             onSettings={() => { weatherFocus.current = false; stylistFocus.current = true; changeRoute('settings'); }}
             onSave={(itemIds, occasion) => { setOutfitSeed({ itemIds, occasion }); changeRoute('outfit-new'); }} />
-          : <WardrobeScreen browse={browse} images={images} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={refresh} />}</LazyBoundary>
+          : <WardrobeScreen browse={browse} images={images} bulk={bulk} t={t} language={language} online={online} onAdd={() => changeRoute('add')} onRefresh={refresh} />}</LazyBoundary>
       </main>
       {discard && leaveDialogFor(route) === 'outfit' && <OutfitLeaveDialog unresolved={outfitUnresolved} t={t}
         onStay={() => { setDiscard(null); requestAnimationFrame(() => { if (discardFocus.current?.isConnected) discardFocus.current.focus(); }); }}

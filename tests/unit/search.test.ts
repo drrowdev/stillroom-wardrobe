@@ -10,7 +10,7 @@ const owner = '10000000-0000-4000-8000-000000000001';
 const uuid = (n: number) => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 function fixture(n: number, patch: Partial<WardrobeItem> = {}): WardrobeItem {
   return {
-    id: uuid(n), ownerId: owner, title: `Item ${n}`, category: 'top', createdAt: '2026-09-01T00:00:00Z',
+    id: uuid(n), ownerId: owner, title: `Item ${n}`, version: 1, category: 'top', createdAt: '2026-09-01T00:00:00Z',
     imageId: uuid(n + 1000), mainPath: `${owner}/${uuid(n)}/${uuid(n + 1000)}/main.jpg`,
     thumbPath: `${owner}/${uuid(n)}/${uuid(n + 1000)}/thumb.jpg`, altText: '',
     favourite: false, availability: 'ready', lifecycle: 'active', excludeSuggestions: false,
@@ -105,7 +105,7 @@ describe('owned wardrobe search and facets', () => {
 describe('strict paged wardrobe metadata', () => {
   function raw(n: number) {
     const item = fixture(n);
-    return { id: item.id, owner_id: owner, title: item.title, category: item.category, created_at: item.createdAt, deleted_at: null,
+    return { id: item.id, owner_id: owner, title: item.title, version: item.version, category: item.category, created_at: item.createdAt, deleted_at: null,
       favourite: false, availability: 'ready', lifecycle: 'active', exclude_suggestions: false, brand: null, tags: [], colours: [],
       seasons: [], formality: null, purchase_price: null, purchase_date: null, currency: 'EUR', warmth: null, lower_coverage: null, min_temp: null, max_temp: null, rain_rating: null, windproof: null, field_provenance: {} };
   }

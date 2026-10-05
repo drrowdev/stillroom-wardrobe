@@ -22,6 +22,8 @@ export type WardrobeItem = {
   id: string;
   ownerId: string;
   title: string;
+  // The row version, for owner- and version-checked lifecycle changes from the grid.
+  version: number;
   category: Category;
   createdAt: string;
   imageId: string;

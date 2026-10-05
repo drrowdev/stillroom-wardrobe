@@ -78,3 +78,13 @@ export function itemCount(language: Language, count: number): string {
     count: new Intl.NumberFormat(locales[language]).format(count),
   });
 }
+
+type PluralKey = { [K in MessageKey]: K extends `${infer Base}_one` ? (`${Base}_other` extends MessageKey ? Base : never) : never }[MessageKey];
+/** Picks `<base>_one` or `<base>_other` with the language's plural rules and formats `{count}`. */
+export function pluralText(language: Language, base: PluralKey, count: number): string {
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid count.');
+  const plural = new Intl.PluralRules(locales[language]).select(count);
+  return translate(language, `${base}_${plural === 'one' ? 'one' : 'other'}` as MessageKey, {
+    count: new Intl.NumberFormat(locales[language]).format(count),
+  });
+}

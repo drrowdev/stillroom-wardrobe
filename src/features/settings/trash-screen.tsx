@@ -30,7 +30,7 @@ function DeleteDialog({ preview, busy, t, language, returnFocus, onCancel, onCon
       <button type="button" className="button button-danger" disabled={busy} onClick={onConfirm}>{t('lifecycle.delete')}</button></div>
   </dialog>;
 }
-export function Trash(props: Shared & { language: Language; onBack: () => void; onChanged: () => void; onDeleting: (itemId: string) => void }) {
+export function Trash(props: Shared & { language: Language; onBack: () => void; onChanged: (itemId: string) => void; onDeleting: (itemId: string) => void }) {
   const { lifecycle, scope, images, online, t, language } = props;
   const action = useAction(scope, online);
   const { run } = action;
@@ -65,7 +65,7 @@ export function Trash(props: Shared & { language: Language; onBack: () => void; 
   function removeRow(id: string) {
     setRows(old => old.filter(row => row.id !== id)); setIntent(null); setRestore(null); setOperation(null); setUncertain(false);
     setOperations(old => old.filter(row => row.itemId !== id)); setDialog(false);
-    props.onChanged(); document.getElementById('trash-title')?.focus();
+    props.onChanged(id); document.getElementById('trash-title')?.focus();
   }
   function observed(receipt: DeletionOperation) {
     setUncertain(false); setOperation(receipt);

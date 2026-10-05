@@ -13,7 +13,7 @@ import { parseProfile } from '../../src/data/profile';
 const owner = '10000000-0000-4000-8000-000000000001';
 const itemId = '20000000-0000-4000-8000-000000000001';
 const imageId = '30000000-0000-4000-8000-000000000001';
-const row = { id: itemId, owner_id: owner, title: 'Olive shirt', category: 'top', created_at: '2026-09-06T08:00:00Z', deleted_at: null,
+const row = { id: itemId, owner_id: owner, title: 'Olive shirt', version: 1, category: 'top', created_at: '2026-09-06T08:00:00Z', deleted_at: null,
   favourite: false, availability: 'ready', lifecycle: 'active', exclude_suggestions: false,
   brand: null, tags: [], colours: [], seasons: [], formality: null, purchase_price: null, purchase_date: null, currency: 'EUR', warmth: null, lower_coverage: null, min_temp: null, max_temp: null, rain_rating: null, windproof: null, field_provenance: {} };
 const image = {
@@ -43,13 +43,13 @@ describe('private API boundaries', () => {
     expect(parseWardrobeRows([legacy], [image], owner)[0]).toMatchObject({
       brand: legacy.brand, colours: legacy.colours, tags: legacy.tags, seasons: legacy.seasons, formality: 0, purchasePrice: '0.00', purchaseDate: '2026-09-01',
     });
-    for (const field of ['brand', 'tags', 'colours', 'seasons', 'formality', 'purchase_price', 'purchase_date', 'currency']) {
+    for (const field of ['version', 'brand', 'tags', 'colours', 'seasons', 'formality', 'purchase_price', 'purchase_date', 'currency']) {
       const missing: Record<string, unknown> = { ...row }; delete missing[field];
       expect(() => parseWardrobeRows([missing], [image], owner)).toThrow();
     }
     for (const patch of [{ brand: 'x'.repeat(101) }, { tags: ['x'.repeat(513)] }, { colours: ['a', 'b', 'c', 'd'] },
       { seasons: ['invented'] }, { formality: 1.5 }, { purchase_price: 'NaN' }, { purchase_price: -1 }, { purchase_date: '2026-02-30' }, { purchase_date: 20260901 },
-      { currency: 'eur' }, { created_at: '2026-02-30T00:00:00Z' }]) {
+      { currency: 'eur' }, { created_at: '2026-02-30T00:00:00Z' }, { version: 0 }, { version: 1.5 }, { version: '1' }]) {
       expect(() => parseWardrobeRows([{ ...row, ...patch }], [image], owner)).toThrow();
     }
   });
