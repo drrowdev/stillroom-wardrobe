@@ -11,8 +11,10 @@ import { useCountAnnouncement } from './count-announcement';
 import type { WardrobeBrowse } from './use-wardrobe-browse';
 import { sorts, type WardrobeSort } from './search';
 import { formatMoney } from '../../i18n/format';
+import type { BulkTrash } from './use-bulk-trash';
 
 const FilterChips = lazyNamed(() => import('./filter-sheet'), 'FilterChips');
+const BulkBar = lazyNamed(() => import('./bulk-bar'), 'BulkBar');
 
 const sortKeys: Record<WardrobeSort, MessageKey> = {
   newest: 'wardrobe.newest', name: 'wardrobe.nameOrder', leastWorn: 'wardrobe.leastWorn',
@@ -28,15 +30,17 @@ function ItemPhoto({ item, images, t }: { item: WardrobeItem; images: PrivateIma
   );
 }
 type Props = {
-  browse: WardrobeBrowse; images: PrivateImages;
+  browse: WardrobeBrowse; images: PrivateImages; bulk: BulkTrash;
   onAdd: () => void; onRefresh: () => void; online: boolean; language: Language; t: Translate;
 };
-export function WardrobeScreen({ browse, images, onAdd, onRefresh, online, language, t }: Props) {
+export function WardrobeScreen({ browse, images, bulk, onAdd, onRefresh, online, language, t }: Props) {
   const { items, loading, error } = browse;
   const [sheetRequested, setSheet] = useState(false);
   if (sheetRequested && browse.initialized && !items.length) setSheet(false);
   const sheet = sheetRequested && items.length > 0;
   const filtersButton = useRef<HTMLButtonElement>(null);
+  const selectButton = useRef<HTMLButtonElement>(null);
+  const leaveSelection = () => { bulk.cancel(); selectButton.current?.focus(); };
   const { favourite, ...lists } = browse.facets;
   const active = Object.values(lists).reduce((sum, list) => sum + list.length, favourite === 'all' ? 0 : 1);
   const announced = useCountAnnouncement(browse.initialized ? browse.results.length : null, sheet ? 'sheet' : 'page', language);
@@ -54,10 +58,16 @@ export function WardrobeScreen({ browse, images, onAdd, onRefresh, online, langu
     else groups.push({ key, items: [item] });
   }
   return (
-    <section className="wardrobe-page" aria-labelledby="wardrobe-title">
+    <section className={`wardrobe-page${bulk.selecting ? ' selecting' : ''}`} aria-labelledby="wardrobe-title" onKeyDown={event => {
+      if (event.key === 'Escape' && bulk.selecting && !bulk.busy && !(event.target instanceof Element && event.target.closest('dialog, [role="dialog"]'))) leaveSelection();
+    }}>
       <div className="page-heading">
         <div><h1 id="wardrobe-title" tabIndex={-1}>{t('wardrobe.title')}</h1></div>
-        {!(browse.initialized && !items.length && !error) && <button type="button" className="button button-primary" onClick={onAdd}><Icon name="plus" />{t('wardrobe.add')}</button>}
+        <div className="page-actions">
+          {items.length > 0 && <button ref={selectButton} type="button" className="button button-secondary" aria-pressed={bulk.selecting}
+            disabled={bulk.busy !== null} onClick={bulk.toggleSelecting}>{t('wardrobe.select')}</button>}
+          {!(browse.initialized && !items.length && !error) && <button type="button" className="button button-primary" onClick={onAdd}><Icon name="plus" />{t('wardrobe.add')}</button>}
+        </div>
       </div>
       {error && <div className="notice notice-error" role="alert"><span>{t(error)}</span><button className="text-button" onClick={onRefresh} disabled={!online}>{t('common.retry')}</button></div>}
       {browse.historyError && <div role="alert" className="notice notice-error"><span>{t('wardrobe.historyUnavailable')}</span><button className="text-button" type="button" disabled={!online} onClick={browse.retryHistory}>{t('common.retry')}</button></div>}
@@ -83,6 +93,7 @@ export function WardrobeScreen({ browse, images, onAdd, onRefresh, online, langu
               <button type="button" className="icon-button wardrobe-refresh" onClick={onRefresh} disabled={!online} aria-label={t('wardrobe.refresh')} title={t('wardrobe.refresh')}><Icon name="refresh" /></button>
             </div>
           </div>
+          {bulk.selecting && <LazyBoundary t={t}><BulkBar bulk={bulk} online={online} onCancel={leaveSelection} language={language} t={t} /></LazyBoundary>}
           {active > 0 && <LazyBoundary t={t}><FilterChips items={items} value={browse.facets} onChange={browse.setFacets} filters={filtersButton} language={language} t={t} /></LazyBoundary>}
           {sheet && <FilterDialog items={items} value={browse.facets} onChange={browse.setFacets} count={browse.results.length}
             announcer={announcer} onClose={closeSheet} language={language} t={t} />}
@@ -91,13 +102,21 @@ export function WardrobeScreen({ browse, images, onAdd, onRefresh, online, langu
             aria-labelledby={browse.sort === 'price' ? `wardrobe-price-${group.key}` : undefined}>
           {browse.sort === 'price' && <p id={`wardrobe-price-${group.key}`} className="wardrobe-price-heading">{group.key === 'no-price' ? t('wardrobe.noPrice') : group.key}</p>}
           <ul className="item-grid">
-            {group.items.map((item) => <li className="item-card" key={item.id}><a className="item-detail-link" href={`#/items/${item.id}`}><ItemPhoto item={item} images={images} t={t} /><div className="item-caption"><h2>{item.title}</h2><span>{t(categoryKeys[item.category])}</span>
-              {browse.sort === 'price' && item.purchasePrice !== null && <p className="wardrobe-price">{formatMoney(item.purchasePrice, item.currency, language)}</p>}
-              <div className="item-status">{item.favourite && <span>{t('item.favourite')}</span>}
-                {item.availability !== 'ready' && <span>{t(`availability.${item.availability}`)}</span>}
-                {item.lifecycle !== 'active' && <span>{t(`lifecycle.${item.lifecycle}`)}</span>}
-                {item.excludeSuggestions && <span>{t('lifecycle.excluded')}</span>}</div>
-            </div></a></li>)}
+            {group.items.map((item) => {
+              const body = <><ItemPhoto item={item} images={images} t={t} /><div className="item-caption"><h2>{item.title}</h2><span>{t(categoryKeys[item.category])}</span>
+                {browse.sort === 'price' && item.purchasePrice !== null && <p className="wardrobe-price">{formatMoney(item.purchasePrice, item.currency, language)}</p>}
+                <div className="item-status">{item.favourite && <span>{t('item.favourite')}</span>}
+                  {item.availability !== 'ready' && <span>{t(`availability.${item.availability}`)}</span>}
+                  {item.lifecycle !== 'active' && <span>{t(`lifecycle.${item.lifecycle}`)}</span>}
+                  {item.excludeSuggestions && <span>{t('lifecycle.excluded')}</span>}</div>
+              </div></>;
+              // In selection mode a card is a toggle, never a link: a tap selects it and doesn't open the item.
+              return <li className="item-card" key={item.id}>{bulk.selecting
+                ? <button type="button" className="item-detail-link item-select" aria-pressed={bulk.selected.has(item.id)} disabled={bulk.busy !== null}
+                  aria-label={item.title ? undefined : t('wardrobe.selectItem', { title: t(categoryKeys[item.category]) })} onClick={() => bulk.toggle(item.id)}>
+                  <span className="select-mark" aria-hidden="true"><Icon name="check" /></span>{body}</button>
+                : <a className="item-detail-link" href={`#/items/${item.id}`}>{body}</a>}</li>;
+            })}
           </ul>
           </div>)}
           {browse.results.length > browse.visible.length && <div className="load-more"><button type="button" className="button button-secondary" onClick={browse.showMore}>{t('wardrobe.more')}</button></div>}

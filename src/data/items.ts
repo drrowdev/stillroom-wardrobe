@@ -6,6 +6,7 @@ import { availability, lifecycle, seasons, textLimits, collectionLimits, integer
 import { parseFieldProvenance, type FieldProvenance } from '../domain/attribute-provenance';
 import { confirmedWeather } from '../domain/weather';
 import { canonicalPrice, validDateOnly } from '../i18n/format';
+import { safeVersion } from '../domain/item-lifecycle';
 
 function text(value: unknown, maximum: number): value is string {
   return typeof value === 'string' && !value.includes('\0') && [...value].length <= maximum;
@@ -42,6 +43,7 @@ export function parseWardrobeRows(items: unknown, images: unknown, ownerId: stri
   return items.flatMap((item: unknown) => {
     if (!isRecord(item) || item.owner_id !== ownerId || !isUuid(item.id)
       || !isCategory(item.category) || !text(item.title, textLimits.title) || !item.title.length || typeof item.created_at !== 'string'
+      || !safeVersion(item.version)
       || seen.has(item.id)) {
       throw new AppError('error.unavailable');
     }
@@ -72,7 +74,7 @@ export function parseWardrobeRows(items: unknown, images: unknown, ownerId: stri
     const image = ready.get(item.id);
     if (!image) return [];
     return [{
-      id: item.id, ownerId, title: item.title, category: item.category, createdAt: item.created_at,
+      id: item.id, ownerId, title: item.title, version: item.version, category: item.category, createdAt: item.created_at,
       imageId: image.id, mainPath: image.mainPath, thumbPath: image.thumbPath, altText: image.altText,
       favourite: item.favourite, availability: available, lifecycle: state, excludeSuggestions: item.exclude_suggestions,
       brand: item.brand, tags: [...item.tags], colours: [...item.colours], seasons: [...item.seasons],
@@ -90,7 +92,7 @@ export async function loadWardrobe(client: AppClient, scope: OwnerScope, signal:
   let itemCursor: { createdAt: string; id: string } | null = null;
   for (;;) {
     throwIfAborted(lifetime);
-    let query = client.from('items').select('id,owner_id,title,category,created_at,deleted_at,favourite,availability,lifecycle,exclude_suggestions,brand,tags,colours,seasons,formality,purchase_price,purchase_date,currency,warmth,lower_coverage,min_temp,max_temp,rain_rating,windproof,field_provenance')
+    let query = client.from('items').select('id,owner_id,title,version,category,created_at,deleted_at,favourite,availability,lifecycle,exclude_suggestions,brand,tags,colours,seasons,formality,purchase_price,purchase_date,currency,warmth,lower_coverage,min_temp,max_temp,rain_rating,windproof,field_provenance')
       .eq('owner_id', scope.ownerId).is('deleted_at', null)
       .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(500);
     if (itemCursor) query = query.or(`created_at.lt.${itemCursor.createdAt},and(created_at.eq.${itemCursor.createdAt},id.lt.${itemCursor.id})`);

@@ -660,6 +660,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   const feedbackControl: { faults: FeedbackFault[]; hold: (() => void) | null } = { faults: [], hold: null };
   let feedbackReadGate: Promise<void> | null = null;
   let feedbackReadsHeld = 0;
+  // Records every set_item_trashed call; while hold is set, each call waits for its gate in held before it changes the item.
+  const trashControl: { hold: boolean; held: (() => void)[]; calls: { owner: string | undefined; id: string; version: unknown; trashed: unknown }[] } = { hold: false, held: [], calls: [] };
   // Faults for avoided-pair writes and read-backs, in the same shape as the feedback faults.
   const pairControl: { faults: FeedbackFault[] } = { faults: [] };
   const takePairFault = (method: string) => {
@@ -1528,6 +1530,10 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     if (['set_item_trashed', 'begin_item_deletion', 'finish_item_deletion'].some(name => url.pathname === `/rest/v1/rpc/${name}`)) {
       const body = request.postDataJSON() as JsonRow, id = String(body.p_item_id);
+      if (url.pathname.endsWith('/set_item_trashed')) {
+        trashControl.calls.push({ owner: owner ?? undefined, id, version: body.p_expected_version, trashed: body.p_trashed });
+        if (trashControl.hold) await new Promise<void>(release => trashControl.held.push(release));
+      }
       const item = items.find(row => row.owner_id === owner && row.id === id);
       const conflict = () => json({ code: '22023', message: 'Request conflict' }, 400);
       const claim = deletionClaims.get(id);
@@ -2123,7 +2129,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { provenance: provenanceRows, stylistControl, enhanceControl, tryonControl, adminControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, holdFeedbackReads, outfitControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { provenance: provenanceRows, stylistControl, enhanceControl, tryonControl, adminControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, trashControl, holdFeedbackReads, outfitControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

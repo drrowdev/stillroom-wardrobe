@@ -166,6 +166,10 @@ Reuse I29c's shared item form and its field/clear/Save contract rather than
 creating another editor. I29c's basic availability/lifecycle/flag controls are not
 I08 trash, undo, permanent deletion, bulk actions, filtering or eligibility logic.
 
+Bulk actions (owner decision, 5 October 2026, BULK1): the wardrobe offers bulk
+**Move to Trash** only, with one Undo, through the same per-item owner/version-checked
+`set_item_trashed` path. There is no permanent bulk delete and no other bulk action.
+
 Target files: `src/features/wardrobe/item-form.tsx`; `src/features/wardrobe/item-detail.tsx`; `src/features/settings/trash.tsx`.
 
 Test files: `tests/browser/items.spec.ts`; `tests/integration/item-lifecycle.test.ts`.
