@@ -32,6 +32,18 @@ const row = (api: Backend, id: string) => api.items.find(item => item.id === id)
 const trashCalls = (api: Backend, trashed: boolean) => api.trashControl.calls.filter(call => call.trashed === trashed);
 function hold(api: Backend) { api.trashControl.hold = true; }
 function release(api: Backend) { api.trashControl.hold = false; for (const gate of api.trashControl.held.splice(0)) gate(); }
+// Lets the oldest held write through while later writes are still held.
+function releaseOne(api: Backend) { api.trashControl.held.shift()!(); }
+async function switchToB(page: Page) {
+  expect(await page.evaluate(async () => {
+    const modulePath = '/src/data/client.ts';
+    const { makeClient } = await import(modulePath) as typeof import('../../src/data/client');
+    const client = makeClient({ url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_browser_fixture_only', version: 'browser-fixture' });
+    const result = await client.auth.signInWithPassword({ email: 'user-b@example.test', password: 'fictional-test-password' });
+    return !result.error;
+  })).toBe(true);
+  await expect(titles(page)).toHaveText(['Robin private']);
+}
 async function signOut(page: Page, language: Language = 'en') {
   await openAccountMenu(page, language); await button(page, 'auth.signOut', language).click();
   await expect(page.locator('#email')).toBeVisible();
@@ -80,6 +92,49 @@ test('a version conflict fails only that item: it stays selected and the others 
   expect(row(api, ids.Alpha!).deleted_at).not.toBeNull();
   expect(row(api, ids.Gamma!).deleted_at).not.toBeNull();
   expect(row(api, ids.Beta!).deleted_at).toBeNull();
+});
+
+test('when every item conflicts, the list refreshes and Try again uses the current versions', async ({ page }) => {
+  const { api, ids } = await open(page, ['Alpha', 'Beta', 'Gamma']);
+  await select(page, ['Alpha', 'Beta']);
+  row(api, ids.Alpha!).version = 4; row(api, ids.Beta!).version = 6;
+  const reread = page.waitForResponse(response => new URL(response.url()).pathname === '/rest/v1/items' && response.request().method() === 'GET');
+  await button(page, 'wardrobe.moveSelected').click();
+  await expect(bar(page).getByRole('alert')).toHaveText(pluralText('en', 'wardrobe.bulkFailed', 2));
+  await expect(bar(page).getByRole('status')).toHaveText(pluralText('en', 'wardrobe.selected', 2));
+  await expect(notice(page)).toHaveCount(0);
+  await (await reread).finished();
+  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))));
+  await button(page, 'wardrobe.moveSelected').click();
+  await expect(titles(page)).toHaveText(['Gamma']);
+  await expect(notice(page).getByRole('status')).toHaveText(pluralText('en', 'wardrobe.bulkTrashed', 2));
+  // The stale versions fail the pre-write check, so the only writes are the retry's, with the current versions.
+  expect(trashCalls(api, true).map(call => [call.id, call.version]).sort()).toEqual([[ids.Alpha, 4], [ids.Beta, 6]].sort());
+  expect(row(api, ids.Alpha!).deleted_at).not.toBeNull();
+  expect(row(api, ids.Beta!).deleted_at).not.toBeNull();
+});
+
+test('restoring one item in Trash keeps Undo for the others', async ({ page }) => {
+  const { api, ids } = await open(page, ['Alpha', 'Beta', 'Gamma', 'Delta']);
+  await select(page, ['Alpha', 'Beta', 'Gamma']);
+  await button(page, 'wardrobe.moveSelected').click();
+  await expect(titles(page)).toHaveText(['Delta']);
+  await notice(page).getByRole('link', { name: messages['nav.trash'].en, exact: true }).click();
+  await expect(page.locator('.trash-list li')).toHaveCount(3);
+  await page.locator('.trash-list li', { hasText: 'Alpha' }).getByRole('button', { name: messages['trash.restore'].en, exact: true }).click();
+  await expect(page.locator('.trash-list li')).toHaveCount(2);
+  expect(row(api, ids.Alpha!).deleted_at).toBeNull();
+  await page.evaluate(() => { location.hash = '#/wardrobe'; });
+  await expect(titles(page)).toHaveCount(2);
+  await expect(notice(page).getByRole('status')).toHaveText(pluralText('en', 'wardrobe.bulkTrashed', 3));
+  await page.locator('#bulk-undo').click();
+  await expect(titles(page)).toHaveCount(4);
+  await expect(notice(page)).toHaveCount(0);
+  // Trash restored Alpha; Undo then sent only the two items still in Trash.
+  const restores = trashCalls(api, false).map(call => call.id);
+  expect(restores[0]).toBe(ids.Alpha);
+  expect(restores.slice(1).sort()).toEqual([ids.Beta, ids.Gamma].sort());
+  for (const name of ['Alpha', 'Beta', 'Gamma']) expect(row(api, ids[name]!).deleted_at).toBeNull();
 });
 
 test('offline disables Move to Trash and shows the offline notice', async ({ page }) => {
@@ -229,6 +284,53 @@ test('a partial or interrupted Undo keeps what was restored; the rest can be res
   for (const name of ['Alpha', 'Beta', 'Gamma']) expect(row(api, ids[name]!).deleted_at).toBeNull();
 });
 
+test('a direct owner switch after one completed write sends no later write and publishes nothing', async ({ page }) => {
+  const { api, ids } = await open(page, ['Alpha', 'Beta', 'Gamma']);
+  await select(page, ['Alpha', 'Beta', 'Gamma']);
+  hold(api);
+  await button(page, 'wardrobe.moveSelected').click();
+  await expect.poll(() => api.trashControl.held.length).toBe(1);
+  releaseOne(api);
+  await expect.poll(() => api.trashControl.calls.length).toBe(2);
+  await expect.poll(() => api.trashControl.held.length).toBe(1);
+  await switchToB(page);
+  release(api);
+  const sent = api.trashControl.calls.map(call => call.id);
+  await expect.poll(() => sent.every(id => row(api, id).deleted_at !== null)).toBe(true);
+  await page.waitForTimeout(500);
+  expect(api.trashControl.calls).toHaveLength(2);
+  expect(api.trashControl.calls.every(call => call.owner === owners.a && call.trashed)).toBe(true);
+  const unsent = Object.values(ids).filter(id => !sent.includes(id));
+  expect(unsent).toHaveLength(1);
+  expect(row(api, unsent[0]!).deleted_at).toBeNull();
+  await expect(titles(page)).toHaveText(['Robin private']);
+  await expect(notice(page)).toHaveCount(0);
+  await expect(bar(page)).toHaveCount(0);
+  await expect(page.locator('button.item-select')).toHaveCount(0);
+});
+
+test('leaving the Wardrobe during Undo still restores every item for the same owner', async ({ page }) => {
+  const { api, ids } = await open(page, ['Alpha', 'Beta', 'Gamma', 'Delta']);
+  await select(page, ['Alpha', 'Beta', 'Gamma']);
+  await button(page, 'wardrobe.moveSelected').click();
+  await expect(titles(page)).toHaveText(['Delta']);
+  hold(api);
+  await page.locator('#bulk-undo').click();
+  await expect.poll(() => api.trashControl.held.length).toBe(1);
+  releaseOne(api);
+  await expect.poll(() => trashCalls(api, false).length).toBe(2);
+  await expect.poll(() => api.trashControl.held.length).toBe(1);
+  await page.evaluate(() => { location.hash = '#/outfits'; });
+  await expect(page.locator('#wardrobe-title')).toHaveCount(0);
+  release(api);
+  await expect.poll(() => ['Alpha', 'Beta', 'Gamma'].every(name => row(api, ids[name]!).deleted_at === null)).toBe(true);
+  expect(trashCalls(api, false).map(call => call.id).sort()).toEqual([ids.Alpha, ids.Beta, ids.Gamma].sort());
+  expect(trashCalls(api, false).every(call => call.owner === owners.a)).toBe(true);
+  await page.evaluate(() => { location.hash = '#/wardrobe'; });
+  await expect(titles(page)).toHaveCount(4);
+  await expect(notice(page)).toHaveCount(0);
+});
+
 test('the batch uses the selection frozen at submit, not later search or hidden items', async ({ page }) => {
   const { api, ids } = await open(page, ['Alpha linen', 'Beta linen', 'Gamma wool', 'Delta']);
   await select(page, ['Alpha linen', 'Beta linen', 'Gamma wool']);
@@ -246,6 +348,12 @@ test('the batch uses the selection frozen at submit, not later search or hidden 
   expect(api.trashControl.calls.map(call => [call.id, call.version]).sort())
     .toEqual([[ids['Alpha linen'], 1], [ids['Beta linen'], 1]].sort());
   expect(row(api, ids['Gamma wool']!).deleted_at).toBeNull();
+});
+
+test('the selected count reads naturally for one and several items', () => {
+  expect([1, 2].map(n => pluralText('en', 'wardrobe.selected', n))).toEqual(['1 selected', '2 selected']);
+  expect([1, 2].map(n => pluralText('fi', 'wardrobe.selected', n))).toEqual(['1 valittuna', '2 valittuna']);
+  expect([1, 2].map(n => pluralText('sv', 'wardrobe.selected', n))).toEqual(['1 vald', '2 valda']);
 });
 
 const scenes = [
@@ -268,6 +376,24 @@ for (const scene of scenes) {
     const small = await page.locator('.bulk-bar button, .page-actions button, button.item-select').evaluateAll(controls =>
       controls.filter(control => { const box = control.getBoundingClientRect(); return box.height < 44 || box.width < 44; }).length);
     expect(small).toBe(0);
+    // New labels wrap only between words: no word's glyphs may land on two lines.
+    const split = await page.locator('.bulk-bar button, .bulk-bar p, .page-actions button').evaluateAll(nodes => nodes.flatMap(node => {
+      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT), broken: string[] = [];
+      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+        for (const word of (text.textContent ?? '').matchAll(/\S+/g)) {
+          const range = document.createRange(); range.setStart(text, word.index); range.setEnd(text, word.index + word[0].length);
+          if (new Set([...range.getClientRects()].filter(rect => rect.width > 0).map(rect => Math.round(rect.top))).size > 1) broken.push(word[0]);
+        }
+      }
+      return broken;
+    }));
+    expect(split).toEqual([]);
+    if (scene.selected.length) {
+      const chosen = card(page, scene.selected[0]!);
+      await chosen.locator('button.item-select').hover();
+      expect(await chosen.locator('h2').evaluate(title => getComputedStyle(title).textDecorationLine)).toBe('none');
+      await page.mouse.move(0, 0);
+    }
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await expect.poll(() => page.locator('.item-photo').evaluateAll(photos => photos.every(photo => {
       const bounds = photo.getBoundingClientRect();

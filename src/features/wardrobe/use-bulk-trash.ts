@@ -72,7 +72,8 @@ export function useBulkTrash({ lifecycle, scope, browse, images, online, onChang
           setNotice({ kind: 'trashed', items: result.done, count: result.done.length, expiresAt: performance.now() + undoMs });
           onNotice();
         }
-        if (result.done.length || result.unconfirmed.length) onChanged();
+        // Failures refresh too, so Try again sends the current versions of the items still selected.
+        onChanged();
         refocus();
       } finally { finish(); }
     })();
@@ -106,7 +107,7 @@ export function useBulkTrash({ lifecycle, scope, browse, images, online, onChang
     },
     trash, restore,
     clearNotice() { setNotice(null); },
-    // Trash is deleting this item for good, so Undo can no longer restore it.
+    // Trash restored this item or is deleting it for good, so Undo leaves it out; the rest keep their Undo.
     forget(id: string) {
       setNotice(current => {
         if (current?.kind !== 'trashed') return current;

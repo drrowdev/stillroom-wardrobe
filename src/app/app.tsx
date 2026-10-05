@@ -306,7 +306,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           : route === 'settings' ? <ProfileScreen client={client} ai={ai} stylist={stylist} images={images} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} version={config.version} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} onSignOut={onSignOut} />
           : route === 'trash' ? <Trash lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
             onDeleting={itemId => { setUndo(current => current?.item.id === itemId ? null : current); bulk.forget(itemId); }}
-            onBack={() => changeRoute('wardrobe')} onChanged={() => { setUndo(null); bulk.clearNotice(); void refresh(); invalidateOutfits(); }} />
+            onBack={() => changeRoute('wardrobe')} onChanged={itemId => { setUndo(null); bulk.forget(itemId); void refresh(); invalidateOutfits(); }} />
           : route.startsWith('detail:') ? <ItemDetail key={route} client={client} scope={scope} itemId={detailRouteId(route.slice(7))} images={images}
             lifecycle={lifecycle} onTrashed={trashed} ai={ai} onBeforeDiscard={onBeforeDiscard}
             t={t} language={language} currency={profile.currency} online={online} onDirty={onDirty} onSaved={() => { void refresh(); invalidateOutfits(); }} onBack={() => changeRoute('wardrobe')} />
