@@ -1,0 +1,28 @@
+/* BULK2b bulk photo upload. Lazy with its screen. Buttons wrap only between words. */
+.bulk-pick { display: grid; justify-items: start; gap: 8px; padding: 24px; border: 2px dashed var(--border); border-radius: 16px; min-width: 0; }
+.bulk-pick .button, .bulk-header .button, .bulk-estimate .button { min-height: 44px; max-width: 100%; white-space: normal; }
+.bulk-drop { margin: 0; }
+.bulk-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 12px; min-width: 0; }
+.bulk-progress { margin: 0; font-weight: 650; }
+.bulk-header .bulk-actions, .bulk-estimate .bulk-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-inline-start: auto; min-width: 0; max-width: 100%; }
+.bulk-estimate .bulk-actions { margin-inline-start: 0; }
+.bulk-estimate { flex-wrap: wrap; }
+.bulk-lines .notice { margin: 0; }
+.bulk-lines { display: grid; gap: 8px; margin: 0 0 12px; }
+.bulk-lines:empty { display: none; }
+.bulk-lines p { margin: 0; }
+.bulk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 720px) { .bulk-list { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); } }
+.bulk-card { display: grid; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); min-width: 0; }
+.bulk-card-open { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 4px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; min-width: 0; }
+.bulk-card-open:hover { background: var(--well); }
+.bulk-thumb { flex: 0 0 72px; width: 72px; height: 72px; display: grid; place-items: center; border-radius: 8px; overflow: hidden; background: var(--well); }
+.bulk-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.bulk-card-text { display: grid; gap: 2px; min-width: 0; overflow-wrap: break-word; }
+.bulk-card-title { font-weight: 650; }
+.bulk-card-meta { color: var(--secondary); }
+.bulk-status-attention { font-weight: 650; }
+.bulk-status-ready::before { content: "✓ "; }
+.bulk-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.bulk-card-actions .button { min-height: 44px; max-width: 100%; white-space: normal; }
+.bulk-editor .save-actions .button, .bulk-editor .analysis-actions .button, .bulk-editor .text-button { min-height: 44px; }

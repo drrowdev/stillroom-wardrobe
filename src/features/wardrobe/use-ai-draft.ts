@@ -11,6 +11,7 @@ import {
 import { garmentFields, newGarmentDraft, sameValue, type GarmentDraft } from '../../domain/garment-fields';
 import { canAnalyze, type AiAnalysisReply, type AiCode } from '../../domain/ai-controls';
 import { defaultDescription } from '../../domain/item-details';
+import type { AnalysisGate, AnalysisTicket } from './bulk-add/bulk-queue';
 
 export type AiPhase = 'none' | 'off' | 'working' | 'stillWorking' | 'ready' | 'failed' | 'unclear' | 'limit' | 'needsCheck' | 'manual';
 export const terminalReasons = ['DISCARDED', 'EXPIRED', 'FAILED', 'UNAVAILABLE', 'INVALID_FACTS'] as const;
@@ -110,7 +111,12 @@ function mutable(state: AiDraftState): GarmentDraft {
 const reasonOf = (value: string | undefined): TerminalReason | null => terminalReasons.find((reason) => reason === value) ?? null;
 export const ambiguousCodes: readonly AiCode[] = ['TIMEOUT', 'UNAVAILABLE'];
 const implicitPhases: readonly AiPhase[] = ['off', 'stillWorking', 'failed', 'unclear', 'limit'];
-export function useAiDraft(ai: AiClient, currency: string, language: Language, baseline?: SavedAiBaseline) {
+/** Codes the server returns without holding a reservation: they prove the request's accounting is settled. */
+export const refusalCodes: readonly AiCode[] = ['RATE_LIMIT', 'ALLOWANCE', 'CONSENT_REQUIRED', 'UNCONFIGURED', 'INACTIVE',
+  'CONFIG_CHANGED', 'ACTIVE_DRAFT'];
+const gateCodes = { rate: 'RATE_LIMIT', allowance: 'ALLOWANCE', stopped: 'UNAVAILABLE', paused: 'UNAVAILABLE' } as const;
+// BULK2b: the optional gate bounds unresolved analysis requests across a batch (plan rev3 §C). Without it nothing changes.
+export function useAiDraft(ai: AiClient, currency: string, language: Language, baseline?: SavedAiBaseline, gate?: AnalysisGate) {
   const [view, setView] = useState<View>(() => ({ state: null, draft: newGarmentDraft(currency, language, baseline?.values),
     description: baseline ? defaultDescription(baseline.values.title, baseline.values.colours, language) : '',
     descriptionEdited: false, manual: false, working: false, checking: false, applied: false,
@@ -121,6 +127,28 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
   const poll = useRef({ stop: () => {}, token: 0 });
   const currentLanguage = useRef(language);
   useEffect(() => { currentLanguage.current = language; }, [language]);
+  const gateRef = useRef(gate);
+  useEffect(() => { gateRef.current = gate; }, [gate]);
+  // Tickets stay tracked after the UI stops caring about a request: a late reply can still prove its accounting settled.
+  const tickets = useRef(new Map<string, AnalysisTicket>());
+  const resolveTicket = (requestId: string, code?: AiCode) => {
+    const ticket = tickets.current.get(requestId);
+    if (!ticket) return;
+    tickets.current.delete(requestId);
+    ticket.resolved(code);
+  };
+  const abandonTicket = (requestId: string) => tickets.current.get(requestId)?.abandon();
+  const abandonAll = () => { for (const ticket of tickets.current.values()) ticket.abandon(); };
+  function observe(requestId: string, reply: AiAnalysisReply) {
+    if (reply.code === 'OK') { if (reply.status !== 'dispatched') resolveTicket(requestId); }
+    else if (refusalCodes.includes(reply.code)) resolveTicket(requestId, reply.code);
+    else abandonTicket(requestId);
+  }
+  function observeError(requestId: string, error: unknown) {
+    const code: AiCode = error instanceof AiError ? error.code : 'UNAVAILABLE';
+    if (refusalCodes.includes(code)) resolveTicket(requestId, code);
+    else if (!ambiguousCodes.includes(code)) abandonTicket(requestId);
+  }
   const put = (next: View) => { current.current = next; setView(next); };
   // A linked description follows the name and colours; any edit to it, including clearing it, unlinks it for this draft.
   const follow = (previous: GarmentDraft, next: View): View => next.descriptionEdited
@@ -139,7 +167,7 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
     poll.current = { stop: () => {}, token: poll.current.token + 1 };
   }
   useEffect(() => {
-    const clear = () => { work.current?.abort(); stopPolling(); };
+    const clear = () => { work.current?.abort(); stopPolling(); abandonAll(); };
     ai.scope.signal.addEventListener('abort', clear, { once: true });
     return () => { clear(); ai.scope.signal.removeEventListener('abort', clear); };
   }, [ai]);
@@ -184,22 +212,24 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
     put({ ...current.current, polling: 'active' });
     const stop = pollStatus(async (signal) => {
       const reply = await ai.analysisStatus(context, AbortSignal.any([signal, ai.scope.signal]));
+      observe(context.requestId, reply);
       if (signal.aborted || ai.scope.signal.aborted || !matches()) return 'done';
       receive(reply);
       return current.current.state?.status === 'pending' ? 'continue' : 'done';
     }, () => {
+      abandonTicket(context.requestId);
       if (!matches() || ai.scope.signal.aborted) return;
       poll.current = { stop: () => {}, token: token + 1 };
       put({ ...current.current, polling: 'exhausted' });
     });
     poll.current = { stop, token };
   }
-  async function commitPhoto(photo: PreparedPhoto) {
+  async function commitPhoto(photo: PreparedPhoto, manual = !!current.current.state?.context) {
     stopPolling();
     work.current?.abort();
+    abandonAll();
     const controller = new AbortController();
     work.current = controller;
-    const signal = AbortSignal.any([controller.signal, ai.scope.signal, AbortSignal.timeout(25000)]);
     const previous = current.current.state;
     const context = { ownerId: ai.scope.ownerId, epoch: ai.scope.epoch,
       draftId: previous?.context?.draftId ?? crypto.randomUUID(), requestId: crypto.randomUUID(),
@@ -211,8 +241,17 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
       if (!created.ok) { put({ ...current.current, working: false, code: 'UNAVAILABLE' }); return; }
       put({ ...current.current, state: created.state });
     }
-    let began = false;
+    let began = false, polling = false;
     try {
+      const admitted = gateRef.current ? await gateRef.current.admit(AbortSignal.any([controller.signal, ai.scope.signal]), manual) : null;
+      if (controller.signal.aborted || ai.scope.signal.aborted) { if (admitted && typeof admitted === 'object') admitted.abandon(); return; }
+      if (typeof admitted === 'string') {
+        if (previous?.context && previous.status !== 'idle' && previous.status !== 'cancelled') void ai.discard(previous.context).catch(() => undefined);
+        put({ ...current.current, code: gateCodes[admitted] });
+        return;
+      }
+      if (admitted) tickets.current.set(context.requestId, admitted);
+      const signal = AbortSignal.any([controller.signal, ai.scope.signal, AbortSignal.timeout(25000)]);
       if (previous?.context && previous.status !== 'idle' && previous.status !== 'cancelled') await ai.discard(previous.context, signal);
       const status = await ai.status(signal);
       if (signal.aborted) throw new AiError('TIMEOUT');
@@ -221,24 +260,29 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
       if (!state?.context) throw new AppError('aiC.unavailable');
       apply(beginAiAnalysis(state, context));
       began = true;
+      tickets.current.get(context.requestId)?.dispatched();
       const reply = await ai.analyze(context, photo, signal);
+      observe(context.requestId, reply);
       if (!signal.aborted && current.current.state?.context?.requestId === context.requestId) {
         receive(reply);
-        if (current.current.state?.status === 'pending') startPolling(context);
+        if (current.current.state?.status === 'pending') { startPolling(context); polling = true; }
       }
     } catch (error) {
+      observeError(context.requestId, error);
       if (!controller.signal.aborted && !ai.scope.signal.aborted && current.current.state?.context?.requestId === context.requestId) {
         const code: AiCode = error instanceof AiError ? error.code : 'UNAVAILABLE';
         const state = current.current.state;
         // A timeout, reset, truncated or malformed reply may follow an accepted POST: keep checking that same request
         // instead of offering a new analysis. Only definitive codes and terminal status replies end it.
-        if (began && ambiguousCodes.includes(code) && state?.status === 'pending') startPolling(context);
+        if (began && ambiguousCodes.includes(code) && state?.status === 'pending') { startPolling(context); polling = true; }
         else {
           if (state?.status === 'pending') apply(failAiAnalysis(state, state.context));
           put({ ...current.current, code });
         }
       }
     } finally {
+      // Not polled any further: a slot that sent nothing frees; a sent request stays uncertain for the rest of the batch.
+      if (!polling) abandonTicket(context.requestId);
       if (!controller.signal.aborted && !ai.scope.signal.aborted) put({ ...current.current, working: false });
     }
   }
@@ -254,6 +298,7 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
     put({ ...current.current, checking: true });
     try {
       const reply = await ai.analysisStatus(context, AbortSignal.any([controller.signal, ai.scope.signal]));
+      observe(context.requestId, reply);
       if (!controller.signal.aborted && poll.current.token === token && current.current.state?.context?.requestId === context.requestId) receive(reply);
     } catch { /* stays "still working"; the user can check again */ }
     finally { if (!controller.signal.aborted && !ai.scope.signal.aborted) put({ ...current.current, checking: false }); }
@@ -262,6 +307,7 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
   function manual() {
     stopPolling();
     work.current?.abort();
+    abandonAll();
     const state = current.current.state;
     if (!state?.context) return;
     apply(continueAiManually(state, state.context));
@@ -290,6 +336,7 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
     refuseSave: () => {
       stopPolling();
       work.current?.abort();
+      abandonAll();
       const latest = current.current.state;
       if (latest?.context) apply(refuseAiSave(latest, latest.context));
       put({ ...current.current, manual: false, working: false, checking: false, polling: null });
@@ -299,6 +346,7 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
     stop: () => {
       stopPolling();
       work.current?.abort();
+      abandonAll();
       put({ ...current.current, working: false, checking: false, polling: null });
     },
     canSave: phase === 'manual' || implicitManual

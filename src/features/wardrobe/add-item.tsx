@@ -31,6 +31,7 @@ type Props = {
   client: AppClient; scope: OwnerScope; currency: string; online: boolean; t: Translate; language: Language;
   onSaved: () => void; onBack: () => void; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void;
   ai: AiClient; onBeforeDiscard: (handler: BeforeDiscard | null) => void;
+  onSeveral?: () => void;
 };
 function CameraHelp({ t }: { t: Translate }) {
   return <details className="copy-details"><summary>{t('photo.cameraHelp')}</summary><p>{t('photo.cameraFallback')}</p></details>;
@@ -38,7 +39,7 @@ function CameraHelp({ t }: { t: Translate }) {
 const focusFor = (id: string, kind: 'element' | 'field') => {
   if (kind === 'field') focusGarmentField(id); else document.getElementById(id)?.focus();
 };
-export function AddItem({ client, scope, currency, online, t, language, onSaved, onBack, onDirty, ai, onBeforeDiscard }: Props) {
+export function AddItem({ client, scope, currency, online, t, language, onSaved, onBack, onDirty, ai, onBeforeDiscard, onSeveral }: Props) {
   const [cameraTrouble, setCameraTrouble] = useState(false);
   const photoDraft = usePhotoDraft({ client, scope, currency, online, language, ai, onSaved, onDirty, onBeforeDiscard,
     focus: focusFor, onCommitted: () => setCameraTrouble(false) });
@@ -95,6 +96,8 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           {/* Before a photo, and after a replacement fails, the two choices stay outside any disclosure. */}
           {!photo && !review && !editing && <PhotoChoice t={t} disabled={frozen || preparing} chooseId="choose-photo"
             onLibrary={() => library.current?.click()} onCamera={() => camera.current?.click()} />}
+          {!photo && !review && !editing && onSeveral && <button id="add-several" className="text-button capture-step-cancel" type="button"
+            disabled={frozen || preparing} onClick={onSeveral}>{t('bulk.entry')}</button>}
           {photo && !editing && <PhotoMenu t={t} disabled={frozen || preparing}>
             <button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => library.current?.click()}><Icon name="photo" />{t('capture.replace')}</button>
             <button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => camera.current?.click()}><Icon name="camera" />{t('capture.camera')}</button>

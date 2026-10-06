@@ -40,6 +40,8 @@ Implementation choices are proposed unless user-approved. On **2026-09-06**, the
 
 ## Explicit assumptions
 
+**6 October 2026 BULK2 owner decision:** Add offers "Add several photos": up to 50 per batch, each through the single-Add pipeline (on-device background removal, automatic clean-up, then one analysis of the final photo), with at most two unresolved analysis requests at a time; drafts stay in memory only and nothing enters the library until the owner saves (per item or Save all). The bulk flow skips the pre-upload crop review and keeps the bounded re-encoded photo; no schema, Edge or provider change.
+
 **22 September 2026 I10b decision:** the user deferred routine I10a maintenance
 and its blocked evidence tools, not replacement, recovery or explicit deletion.
 The approved compatibility-first schema locks the existing approved-account row;

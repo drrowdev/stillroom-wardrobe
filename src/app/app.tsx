@@ -54,6 +54,7 @@ const StatisticsScreen = lazyNamed(() => import('../features/statistics/statisti
 const StylistScreen = lazyNamed(() => import('../features/stylist/stylist-screen'), 'StylistScreen');
 const AdminScreen = lazyNamed(() => import('../features/admin/admin-screen'), 'AdminScreen');
 const BulkUndoNotice = lazyNamed(() => import('../features/wardrobe/bulk-bar'), 'BulkUndoNotice');
+const BulkAdd = lazyNamed(() => import('../features/wardrobe/bulk-add/bulk-add'), 'BulkAdd');
 // Rare screens load on demand; a way back stays available while they load or if they fail. The email-link recovery
 // screen is eager: its link exists only in memory, so it must never depend on a reload.
 const RecoveryRequest = lazyNamed(() => import('../auth/recovery-request'), 'RecoveryRequest');
@@ -95,11 +96,11 @@ function Unconfigured({ status }: { status: Configuration['status'] }) {
   const [context] = useState(() => ({}));
   return <EntryLayout language={language} onLanguage={setLanguage} t={t} context={context}><section className="entry-card setup-card"><div className="small-mark"><Icon name="wardrobe" /></div><h1>{t('setup.title')}</h1><p className="muted">{t(status === 'invalid' ? 'setup.invalid' : 'setup.body')}</p><details className="copy-details"><summary>{t('setup.instructions')}</summary><ol className="setup-steps"><li>{t('setup.step1')}<code>npm run db:start</code></li><li>{t('setup.step2')}<code>.env.local</code></li><li>{t('setup.step3')}</li></ol></details><p className="privacy-note"><Icon name="lock" />{t('setup.note')}</p></section></EntryLayout>;
 }
-type WorkspaceRoute = 'today' | 'stylist' | 'wardrobe' | 'add' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | 'calendar' | 'statistics' | 'admin' | `detail:${string}` | `outfit:${string}`;
-const routeHash = { today: '#/today', stylist: '#/stylist', wardrobe: '#/wardrobe', add: '#/items/new', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new', calendar: '#/calendar', statistics: '#/statistics', admin: '#/admin' };
+type WorkspaceRoute = 'today' | 'stylist' | 'wardrobe' | 'add' | 'add-several' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | 'calendar' | 'statistics' | 'admin' | `detail:${string}` | `outfit:${string}`;
+const routeHash = { today: '#/today', stylist: '#/stylist', wardrobe: '#/wardrobe', add: '#/items/new', 'add-several': '#/items/new/several', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new', calendar: '#/calendar', statistics: '#/statistics', admin: '#/admin' };
 const TRYON_ROUTE = '/try-on';
 function currentRoute(hash = location.hash): WorkspaceRoute {
-  return hash === '#/today' ? 'today' : hash === '#/stylist' ? 'stylist' : hash === '#/calendar' ? 'calendar' : hash === '#/statistics' ? 'statistics' : hash === '#/admin' ? 'admin' : hash === '#/items/new' ? 'add' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
+  return hash === '#/today' ? 'today' : hash === '#/stylist' ? 'stylist' : hash === '#/calendar' ? 'calendar' : hash === '#/statistics' ? 'statistics' : hash === '#/admin' ? 'admin' : hash === '#/items/new' ? 'add' : hash === '#/items/new/several' ? 'add-several' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
     : hash === '#/outfits' ? 'outfits' : hash === '#/outfits/new' ? 'outfit-new'
       : hash.startsWith('#/outfits/') ? `outfit:${hash.slice(10)}`
         : hash.startsWith('#/items/') ? `detail:${hash}` : 'wardrobe';
@@ -107,7 +108,7 @@ function currentRoute(hash = location.hash): WorkspaceRoute {
 function hashForRoute(route: WorkspaceRoute) {
   return route.startsWith('detail:') ? route.slice(7) : route.startsWith('outfit:') ? `#/outfits/${route.slice(7)}` : routeHash[route as keyof typeof routeHash];
 }
-const routeFocus: Partial<Record<WorkspaceRoute, string>> = { today: 'today-title', stylist: 'stylist-title', add: 'capture-title', settings: 'settings-title', trash: 'trash-title', outfits: 'outfits-title', 'outfit-new': 'outfit-editor-title', calendar: 'calendar-title', statistics: 'statistics-title', admin: 'admin-title' };
+const routeFocus: Partial<Record<WorkspaceRoute, string>> = { today: 'today-title', stylist: 'stylist-title', add: 'capture-title', 'add-several': 'bulk-title', settings: 'settings-title', trash: 'trash-title', outfits: 'outfits-title', 'outfit-new': 'outfit-editor-title', calendar: 'calendar-title', statistics: 'statistics-title', admin: 'admin-title' };
 function OwnedWardrobe({ client, config, controller, scope, profile, change, busy, unresolved, t, language, online, onRouteCommitted, onSignOut }: { client: AppClient; config: PublicConfig; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; unresolved: boolean; t: Translate; language: Language; online: boolean; onRouteCommitted: (route: string) => void; onSignOut: () => void }) {
   const [route, setRoute] = useState<WorkspaceRoute>(() => currentRoute());
   const [outfitUnresolved, setOutfitUnresolved] = useState(false);
@@ -302,7 +303,9 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
         {notice && route === 'wardrobe' && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('item.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setNotice(false)}><Icon name="close" /></button></div>}
         {outfitNotice && route === `outfit:${outfitNotice}` && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t('outfits.saved')}</span><button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setOutfitNotice(null)}><Icon name="close" /></button></div>}
         <LazyBoundary key={route} t={t} onReady={focusRouteWhenReady}>{route === 'add'
-          ? <AddItem client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} />
+          ? <AddItem client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} onSeveral={() => changeRoute('add-several')} />
+          : route === 'add-several' ? <BulkAdd client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online}
+            onDirty={onDirty} onSaved={() => { void refresh(); invalidateOutfits(); }} onBack={() => changeRoute('add')} />
           : route === 'settings' ? <ProfileScreen client={client} ai={ai} stylist={stylist} images={images} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} version={config.version} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} onSignOut={onSignOut} />
           : route === 'trash' ? <Trash lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
             onDeleting={itemId => { setUndo(current => current?.item.id === itemId ? null : current); bulk.forget(itemId); }}
@@ -339,16 +342,16 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           if (discard.position !== undefined) history.go(discard.position - navigation.current.position);
           else changeRoute(discard.next);
         }} />}
-      {discard && leaveDialogFor(route) === 'discard' && <DiscardDialog beforeConfirm={route === 'add' || route.startsWith('detail:')
-        ? async () => beforeDiscard.current ? beforeDiscard.current() : route === 'add' ? 'unresolved' : 'cancelled' : undefined}
-        title={t(route === 'settings' || route.startsWith('detail:') ? 'common.unsaved' : 'capture.discard')} t={t} onCancel={() => {
+      {discard && leaveDialogFor(route) === 'discard' && <DiscardDialog beforeConfirm={route === 'add' || route === 'add-several' || route.startsWith('detail:')
+        ? async () => beforeDiscard.current ? beforeDiscard.current() : route.startsWith('add') ? 'unresolved' : 'cancelled' : undefined}
+        title={t(route === 'settings' || route.startsWith('detail:') ? 'common.unsaved' : route === 'add-several' ? 'bulk.discard' : 'capture.discard')} t={t} onCancel={() => {
         setDiscard(null);
         requestAnimationFrame(() => { if (discardFocus.current?.isConnected) discardFocus.current.focus(); });
       }} onConfirm={() => {
         dirty.current = { dirty: false, incomplete: false, busy: false }; setDiscard(null);
         if (discard.position !== undefined) history.go(discard.position - navigation.current.position);
         else changeRoute(discard.next);
-      }}><p>{t(route === 'settings' ? 'settings.discardBody' : route.startsWith('detail:') ? 'detail.discardPage' : dirty.current.incomplete ? 'capture.incompleteDiscard' : 'capture.discardBody')}</p></DiscardDialog>}
+      }}><p>{t(route === 'settings' ? 'settings.discardBody' : route === 'add-several' ? 'bulk.discardBody' : route.startsWith('detail:') ? 'detail.discardPage' : dirty.current.incomplete ? 'capture.incompleteDiscard' : 'capture.discardBody')}</p></DiscardDialog>}
     </>
   );
 }
