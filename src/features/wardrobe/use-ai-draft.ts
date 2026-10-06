@@ -115,6 +115,8 @@ const implicitPhases: readonly AiPhase[] = ['off', 'stillWorking', 'failed', 'un
 export const refusalCodes: readonly AiCode[] = ['RATE_LIMIT', 'ALLOWANCE', 'CONSENT_REQUIRED', 'UNCONFIGURED', 'INACTIVE',
   'CONFIG_CHANGED', 'ACTIVE_DRAFT'];
 const gateCodes = { rate: 'RATE_LIMIT', allowance: 'ALLOWANCE', stopped: 'UNAVAILABLE', paused: 'UNAVAILABLE' } as const;
+/** BULK2b "Fill in again" after an expired clean-up: `sent` once the request goes out, `refused` when nothing was sent. */
+export type FillHold = Readonly<{ sent(): void; refused(code: AiCode): void }>;
 // BULK2b: the optional gate bounds unresolved analysis requests across a batch (plan rev3 §C). Without it nothing changes.
 export function useAiDraft(ai: AiClient, currency: string, language: Language, baseline?: SavedAiBaseline, gate?: AnalysisGate) {
   const [view, setView] = useState<View>(() => ({ state: null, draft: newGarmentDraft(currency, language, baseline?.values),
@@ -224,7 +226,11 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
     });
     poll.current = { stop, token };
   }
-  async function commitPhoto(photo: PreparedPhoto, manual = !!current.current.state?.context) {
+  /**
+   * `hold` (BULK2b expired clean-up, "Fill in again"): the reviewed values stay until the request is really sent. The
+   * gate, the status check and the send boundary come first; a refusal before or at the POST restores them.
+   */
+  async function commitPhoto(photo: PreparedPhoto, manual = !!current.current.state?.context, hold?: FillHold) {
     stopPolling();
     work.current?.abort();
     abandonAll();
@@ -234,43 +240,86 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
     const context = { ownerId: ai.scope.ownerId, epoch: ai.scope.epoch,
       draftId: previous?.context?.draftId ?? crypto.randomUUID(), requestId: crypto.randomUUID(),
       generation: (previous?.context?.generation ?? 0) + 1, imageSha256: photo.mainSha256 };
-    put({ ...current.current, manual: false, working: true, checking: false, applied: false, code: null, reason: null, polling: null });
-    if (previous?.context) apply(prepareAiGeneration(previous, previous.context, context));
-    else {
-      const created = createAiDraft(current.current.draft, context, baseline);
-      if (!created.ok) { put({ ...current.current, working: false, code: 'UNAVAILABLE' }); return; }
-      put({ ...current.current, state: created.state });
-    }
+    let before: View | null = null;
+    const start = (): boolean => {
+      before = current.current;
+      put({ ...current.current, manual: false, working: true, checking: false, applied: false, code: null, reason: null, polling: null });
+      if (previous?.context) apply(prepareAiGeneration(previous, previous.context, context));
+      else {
+        const created = createAiDraft(current.current.draft, context, baseline);
+        if (!created.ok) { put({ ...current.current, working: false, code: 'UNAVAILABLE' }); return false; }
+        put({ ...current.current, state: created.state });
+      }
+      return true;
+    };
+    // Nothing was sent: normally the code shows; with `hold` the reviewed values come back unchanged.
+    const refuse = (code: AiCode) => {
+      if (!hold) { put({ ...current.current, code }); return; }
+      if (before) put({ ...before, working: false });
+      hold.refused(code);
+    };
+    const gate = gateRef.current;
+    const scoped = () => AbortSignal.any([controller.signal, ai.scope.signal]);
+    const stale = () => controller.signal.aborted || ai.scope.signal.aborted;
+    if (!hold && !start()) return;
     let began = false, polling = false;
     try {
-      const admitted = gateRef.current ? await gateRef.current.admit(AbortSignal.any([controller.signal, ai.scope.signal]), manual) : null;
-      if (controller.signal.aborted || ai.scope.signal.aborted) { if (admitted && typeof admitted === 'object') admitted.abandon(); return; }
+      const admitted = gate ? await gate.admit(scoped(), manual) : null;
+      if (stale()) { if (admitted && typeof admitted === 'object') admitted.abandon(); return; }
       if (typeof admitted === 'string') {
-        if (previous?.context && previous.status !== 'idle' && previous.status !== 'cancelled') void ai.discard(previous.context).catch(() => undefined);
-        put({ ...current.current, code: gateCodes[admitted] });
+        if (!hold && previous?.context && previous.status !== 'idle' && previous.status !== 'cancelled') void ai.discard(previous.context).catch(() => undefined);
+        refuse(gateCodes[admitted]);
         return;
       }
       if (admitted) tickets.current.set(context.requestId, admitted);
-      const signal = AbortSignal.any([controller.signal, ai.scope.signal, AbortSignal.timeout(25000)]);
+      let signal = AbortSignal.any([scoped(), AbortSignal.timeout(25000)]);
+      const check = async () => {
+        const status = await ai.status(signal);
+        if (signal.aborted) throw new AiError('TIMEOUT');
+        return canAnalyze(status) ? null : status.code === 'OK' ? 'INACTIVE' : status.code;
+      };
+      if (hold) {
+        const unavailable = await check();
+        if (unavailable) { refuse(unavailable); return; }
+        if (!start()) return;
+      }
       if (previous?.context && previous.status !== 'idle' && previous.status !== 'cancelled') await ai.discard(previous.context, signal);
-      const status = await ai.status(signal);
+      if (!hold) {
+        const unavailable = await check();
+        if (unavailable) { refuse(unavailable); return; }
+      }
+      // The send boundary: Stop, a hidden page or a halt during the awaits above means this request is never sent.
+      for (let ticket = tickets.current.get(context.requestId); ticket;) {
+        const blocked = ticket.send();
+        if (blocked === null) break;
+        tickets.current.delete(context.requestId);
+        if (blocked !== 'hidden' || !gate) { refuse(gateCodes[blocked === 'hidden' ? 'paused' : blocked]); return; }
+        const again = await gate.admit(scoped(), manual);
+        if (stale()) { if (again && typeof again === 'object') again.abandon(); return; }
+        if (again === null) return;
+        if (typeof again === 'string') { refuse(gateCodes[again]); return; }
+        tickets.current.set(context.requestId, again);
+        ticket = again;
+        signal = AbortSignal.any([scoped(), AbortSignal.timeout(25000)]);
+      }
       if (signal.aborted) throw new AiError('TIMEOUT');
-      if (!canAnalyze(status)) { put({ ...current.current, code: status.code === 'OK' ? 'INACTIVE' : status.code }); return; }
       const state = current.current.state;
       if (!state?.context) throw new AppError('aiC.unavailable');
       apply(beginAiAnalysis(state, context));
       began = true;
-      tickets.current.get(context.requestId)?.dispatched();
+      hold?.sent();
       const reply = await ai.analyze(context, photo, signal);
       observe(context.requestId, reply);
       if (!signal.aborted && current.current.state?.context?.requestId === context.requestId) {
+        if (hold && reply.code !== 'OK' && refusalCodes.includes(reply.code)) { refuse(reply.code); return; }
         receive(reply);
         if (current.current.state?.status === 'pending') { startPolling(context); polling = true; }
       }
     } catch (error) {
       observeError(context.requestId, error);
-      if (!controller.signal.aborted && !ai.scope.signal.aborted && current.current.state?.context?.requestId === context.requestId) {
-        const code: AiCode = error instanceof AiError ? error.code : 'UNAVAILABLE';
+      const code: AiCode = error instanceof AiError ? error.code : 'UNAVAILABLE';
+      if (hold && !stale() && (!began || refusalCodes.includes(code))) refuse(code);
+      else if (!stale() && current.current.state?.context?.requestId === context.requestId) {
         const state = current.current.state;
         // A timeout, reset, truncated or malformed reply may follow an accepted POST: keep checking that same request
         // instead of offering a new analysis. Only definitive codes and terminal status replies end it.
@@ -283,7 +332,7 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
     } finally {
       // Not polled any further: a slot that sent nothing frees; a sent request stays uncertain for the rest of the batch.
       if (!polling) abandonTicket(context.requestId);
-      if (!controller.signal.aborted && !ai.scope.signal.aborted) put({ ...current.current, working: false });
+      if (!stale()) put({ ...current.current, working: false });
     }
   }
   // "Try again" while still working: one more status check for the same request, never a new analysis.

@@ -103,6 +103,8 @@ export type StageInput = {
   signal: AbortSignal;
   /** Aborted by "Skip". */
   skip: AbortSignal;
+  /** BULK2b: checked synchronously right before the request is sent (`hidden` defers, `refused` sends nothing). */
+  dispatchable?: () => 'hidden' | 'refused' | null;
 };
 export type StageDeps = {
   client: StageClient; session: EnhanceSession; imaging: StageImaging;
@@ -120,9 +122,10 @@ export type StageDeps = {
  * Why a sent request ended without a cleaned-up photo, for callers that schedule requests (BULK2). Separate from `line`,
  * which is the visible copy. Present only when a request was sent: `busy` is a taken provider slot (retryable), `rate`
  * and `allowance` are the hourly and monthly limits, `ambiguous` may have reached the provider (never resent
- * automatically), `skipped` is the user's Skip and `failed` covers every other definite failure.
+ * automatically), `skipped` is the user's Skip and `failed` covers every other definite failure. `deferred` is the one
+ * reason without a sent request: the page was hidden at the send boundary, so the caller may run again once visible.
  */
-export type StageReason = 'busy' | 'rate' | 'allowance' | 'ambiguous' | 'filtered' | 'skipped' | 'failed';
+export type StageReason = 'busy' | 'rate' | 'allowance' | 'ambiguous' | 'filtered' | 'skipped' | 'failed' | 'deferred';
 export type StageResult =
   | { kind: 'enhanced'; photo: PreparedPhoto; requestId: string; expireAt: number; metrics: CleanupMetrics }
   | { kind: 'available' }
@@ -198,6 +201,9 @@ export async function runEnhancementStage(input: StageInput, deps: StageDeps): P
     const source = input.source;
     if (!source) return outcome('generic');
     if (input.preflight) return { kind: 'available' };
+    const blocked = input.dispatchable?.() ?? null;
+    if (blocked === 'hidden') return { kind: 'skipped', line: 'none', requestId: null, reason: 'deferred' };
+    if (blocked) return outcome('none');
 
     requestId = (deps.newId ?? (() => crypto.randomUUID()))();
     deps.onDispatch?.(requestId);

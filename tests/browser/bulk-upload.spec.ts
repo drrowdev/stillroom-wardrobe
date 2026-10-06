@@ -5,7 +5,8 @@ import path from 'node:path';
 import { messages, pluralText, type Language } from '../../src/i18n/all';
 import { formatUsdCents } from '../../src/domain/admin-limits';
 import { aiFixture } from './ai-photo-first-support';
-import { signIn } from './mock-backend';
+import { enhanced, held, redraw, removals, start, syntheticPhoto } from './enhancement-support';
+import { enhanceServerNow, signIn } from './mock-backend';
 import { shellNav, signOutThroughMenu } from './shell-support';
 
 type Fixture = Awaited<ReturnType<typeof aiFixture>>;
@@ -13,19 +14,52 @@ const button = (page: Page, key: keyof typeof messages, language: Language = 'en
   page.getByRole('button', { name: messages[key][language], exact: true });
 const cards = (page: Page) => page.locator('.bulk-card');
 const cardNamed = (page: Page, name: string) => cards(page).filter({ has: page.locator('.bulk-card-title', { hasText: new RegExp(`^${name}$`) }) });
-const progress = (page: Page, ready: number, total: number, language: Language = 'en') =>
-  expect(page.locator('.bulk-progress')).toHaveText(messages['bulk.progress'][language].replace('{ready}', String(ready)).replace('{total}', String(total)));
+const progress = (page: Page, ready: number, total: number, language: Language = 'en', timeout?: number) =>
+  expect(page.locator('.bulk-progress')).toHaveText(messages['bulk.progress'][language].replace('{ready}', String(ready)).replace('{total}', String(total)), { timeout });
 const posts = (api: Fixture) => api.calls.filter(call => call.route.endsWith('/analyze-clothing'));
 const saves = (api: Fixture) => api.requests.filter(call => call.path.endsWith('/reserve_analyzed_item_save'));
 const editor = (page: Page) => page.locator('.bulk-editor');
 
-async function startBatch(page: Page, api: Fixture, count: number, language: Language = 'en') {
+const sent = (api: Fixture) => api.enhanceControl.requests;
+const engineOnly = () => test.skip(test.info().project.name === 'mobile', 'Behaviour is covered by the chromium and webkit-photo projects.');
+
+// `png`: synthetic photos that the stand-in clean-up accepts; `armed` runs just before the files are picked.
+async function startBatch(page: Page, api: Fixture, count: number, language: Language = 'en', options: { png?: Buffer; armed?: () => void } = {}) {
   await button(page, 'wardrobe.add', language).first().click();
   await page.locator('#add-several').click();
   await expect(page.locator('#bulk-title')).toBeFocused();
   expect(api.items).toHaveLength(0);
-  await page.locator('.bulk-pick input[type=file]').setInputFiles(Array.from({ length: count },
-    (_, n) => ({ name: `synthetic-${n + 1}.jpg`, mimeType: 'image/jpeg', buffer: api.fixture })));
+  options.armed?.();
+  await page.locator('.bulk-pick input[type=file]').setInputFiles(Array.from({ length: count }, (_, n) => options.png
+    ? { name: `synthetic-${n + 1}.png`, mimeType: 'image/png', buffer: options.png }
+    : { name: `synthetic-${n + 1}.jpg`, mimeType: 'image/jpeg', buffer: api.fixture }));
+}
+// Holds each analysis's status check (after the batch's one estimate read) until released.
+async function holdPreflight(page: Page) {
+  let armed = false, seen = 0, held = 0;
+  const waiting: Array<() => void> = [];
+  await page.route('**/rest/v1/rpc/ai_status', async (route) => {
+    if (!armed || route.request().method() === 'OPTIONS' || seen++ === 0) { await route.fallback(); return; }
+    held += 1;
+    await new Promise<void>((resolve) => waiting.push(resolve));
+    await route.fallback().catch(() => undefined);
+  });
+  return { arm: () => { armed = true; }, held: () => held, release: () => { armed = false; for (const go of waiting.splice(0)) go(); } };
+}
+async function setHidden(page: Page, hidden: boolean) {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, 'hidden', { value, configurable: true });
+    Object.defineProperty(document, 'visibilityState', { value: value ? 'hidden' : 'visible', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, hidden);
+}
+// The draft stays usable by hand: name it, pick a category and save it from its editor.
+async function saveByHand(page: Page, index: number, title: string) {
+  await page.locator('.bulk-card-open').nth(index).click();
+  await page.locator('#item-title').fill(title);
+  if (await page.locator('#item-category').inputValue() === '') await page.locator('#item-category').selectOption('top');
+  await editor(page).getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
+  await expect(page.locator('#bulk-title')).toBeVisible();
 }
 // While held, every status check answers "still working", so analyses stay in progress until released.
 async function holdStatus(page: Page) {
@@ -182,6 +216,168 @@ test('signing out mid-batch drops every draft and sends nothing more', async ({ 
   await expect(cards(page)).toHaveCount(0);
   expect(api.items).toHaveLength(0);
   expect(posts(api)).toHaveLength(sent);
+});
+
+test('a status check held across Stop sends no analysis, and the photo can still be saved', async ({ page }) => {
+  const api = await aiFixture(page);
+  const preflight = await holdPreflight(page);
+  await startBatch(page, api, 1, 'en', { armed: preflight.arm });
+  await expect.poll(preflight.held).toBe(1);
+  await button(page, 'bulk.stop').click();
+  preflight.release();
+  await expect(page.locator('.bulk-status-filling')).toHaveCount(0);
+  await page.waitForTimeout(500);
+  expect(posts(api)).toHaveLength(0);
+  await saveByHand(page, 0, 'Stopped top');
+  expect(api.items.map(item => item.title)).toEqual(['Stopped top']);
+  expect(posts(api)).toHaveLength(0);
+});
+
+test('a status check held while the page is hidden sends nothing until it is visible, then exactly one analysis', async ({ page }) => {
+  const api = await aiFixture(page);
+  const preflight = await holdPreflight(page);
+  await startBatch(page, api, 1, 'en', { armed: preflight.arm });
+  await expect.poll(preflight.held).toBe(1);
+  await setHidden(page, true);
+  preflight.release();
+  await page.waitForTimeout(800);
+  expect(posts(api)).toHaveLength(0);
+  await setHidden(page, false);
+  await progress(page, 1, 1);
+  expect(posts(api)).toHaveLength(1);
+});
+
+test('with clean-up on: the original file is dropped before clean-up, and the one analysis reads the final photo', async ({ page }) => {
+  engineOnly();
+  const api = await start(page);
+  const gate = held(enhanced(page));
+  api.enhanceControl.replies.push(gate.reply);
+  await startBatch(page, api, 1, 'en', { png: await syntheticPhoto(page) });
+  await expect.poll(() => sent(api).length, { timeout: 30_000 }).toBe(1);
+  await expect(page.locator('.bulk-status-cleaning')).toHaveCount(1);
+  expect(await removals(page)).toBeGreaterThan(0);
+  // Clean-up is deliberately held: only the bounded prepared photo is kept, not the picked file.
+  await expect(cards(page)).toHaveAttribute('data-source', 'photo');
+  expect(posts(api)).toHaveLength(0);
+  gate.release();
+  await progress(page, 1, 1, 'en', 30_000);
+  expect(posts(api)).toHaveLength(1);
+  expect(api.inputs[0]!.sha256).not.toBe(sent(api)[0]!.sha256);
+  await cards(page).getByRole('button', { name: messages['common.save'].en, exact: true }).click();
+  await expect(cards(page)).toHaveCount(0);
+  expect(api.images.map(image => String(image.main_sha256))).toEqual([api.inputs[0]!.sha256]);
+  expect(posts(api)).toHaveLength(1);
+});
+
+for (const expiry of ['local', 'server'] as const) {
+  test(`${expiry} clean-up expiry with AI unavailable: Fill in again keeps the reviewed details, and Keep saves`, async ({ page }) => {
+    engineOnly();
+    const api = await start(page);
+    // Local: 64 s of evidence less the 60 s margin lapses on the device in about 4 s. Server: Save finds it gone.
+    api.enhanceControl.replies.push(async (bytes) => ({ status: 200, image: await redraw(page, bytes),
+      usableUntilMs: enhanceServerNow({ serverOffsetMs: 0 }) + (expiry === 'local' ? 64_000 : 86_400_000) }));
+    await startBatch(page, api, 1, 'en', { png: await syntheticPhoto(page) });
+    if (expiry === 'local') await expect(page.locator('.bulk-status-attention')).toHaveCount(1, { timeout: 30_000 });
+    else {
+      await progress(page, 1, 1);
+      for (const output of api.enhanceControl.outputs) output.usableUntilMs = 0;
+      await cards(page).getByRole('button', { name: messages['common.save'].en, exact: true }).click();
+      await expect(page.locator('.bulk-status-attention')).toHaveCount(1);
+    }
+    expect(api.items).toHaveLength(0);
+    expect(posts(api)).toHaveLength(1);
+    await page.locator('.bulk-card-open').first().click();
+    await expect(page.locator('#cleanup-expired')).toBeVisible();
+    await page.locator('#item-title').fill('Reviewed shirt');
+    await expect(page.locator('#item-category')).toHaveValue('top');
+    await expect(page.locator('#item-material')).toHaveValue('Cotton');
+
+    api.policy({ activated: false });
+    await page.locator('#cleanup-expired').getByRole('button', { name: messages['bulk.fillAgain'].en, exact: true }).click();
+    await expect(page.locator('#cleanup-expired').getByText(messages['aiC.off'].en, { exact: true })).toBeVisible();
+    await expect(page.locator('#item-title')).toHaveValue('Reviewed shirt');
+    await expect(page.locator('#item-category')).toHaveValue('top');
+    await expect(page.locator('#item-material')).toHaveValue('Cotton');
+    expect(posts(api)).toHaveLength(1);
+
+    await page.locator('#cleanup-expired').getByRole('button', { name: messages['aiC.keep'].en, exact: true }).click();
+    await expect(page.locator('#cleanup-expired')).toHaveCount(0);
+    await editor(page).getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
+    await expect(page.locator('#bulk-title')).toBeVisible();
+    await expect(cards(page)).toHaveCount(0);
+    expect(api.items.map(item => [item.title, item.category])).toEqual([['Reviewed shirt', 'top']]);
+    expect(posts(api)).toHaveLength(1);
+    expect(sent(api)).toHaveLength(1);
+  });
+}
+
+test('a busy clean-up waiting to retry is cancelled by Stop: nothing more is sent, and the photo saves by hand', async ({ page }) => {
+  engineOnly();
+  const api = await start(page);
+  api.enhanceControl.replies.push({ status: 503, body: { code: 'BUSY' } });
+  await startBatch(page, api, 1, 'en', { png: await syntheticPhoto(page) });
+  await expect.poll(() => sent(api).length, { timeout: 30_000 }).toBe(1);
+  await button(page, 'bulk.stop').click();
+  await expect(page.locator('.bulk-status-cleaning, .bulk-status-filling')).toHaveCount(0);
+  await page.waitForTimeout(500);
+  expect(sent(api)).toHaveLength(1);
+  expect(posts(api)).toHaveLength(0);
+  await saveByHand(page, 0, 'Busy top');
+  expect(api.items.map(item => item.title)).toEqual(['Busy top']);
+  expect(sent(api)).toHaveLength(1);
+});
+
+test('hiding the page cancels a busy clean-up backoff; once visible one fresh request is sent, not after the wait', async ({ page }) => {
+  engineOnly();
+  const api = await start(page);
+  api.enhanceControl.replies.push({ status: 503, body: { code: 'BUSY' } }, enhanced(page));
+  await startBatch(page, api, 1, 'en', { png: await syntheticPhoto(page) });
+  await expect.poll(() => sent(api).length, { timeout: 30_000 }).toBe(1);
+  await setHidden(page, true);
+  await page.waitForTimeout(500);
+  expect(sent(api)).toHaveLength(1);
+  await setHidden(page, false);
+  // The 20 s backoff is gone: the fresh request goes out promptly.
+  await expect.poll(() => sent(api).length, { timeout: 8_000 }).toBe(2);
+  await progress(page, 1, 1);
+  expect(posts(api)).toHaveLength(1);
+  expect(api.inputs[0]!.sha256).not.toBe(sent(api)[1]!.sha256);
+});
+
+for (const code of ['RATE_LIMIT', 'ALLOWANCE'] as const) {
+  test(`clean-up ${code} mid-batch stops further clean-ups; every photo is still filled in and saves`, async ({ page }) => {
+    engineOnly();
+    const api = await start(page);
+    api.enhanceControl.replies.push(enhanced(page), { status: 429, body: { code } });
+    await startBatch(page, api, 3, 'en', { png: await syntheticPhoto(page) });
+    await progress(page, 3, 3, 'en', 45_000);
+    await page.waitForTimeout(500);
+    expect(sent(api)).toHaveLength(2);
+    expect(posts(api)).toHaveLength(3);
+    await page.locator('.bulk-card-open').first().click();
+    await expect(page.locator('#item-category')).toHaveValue('top');
+    await button(page, 'bulk.backToList').click();
+    await button(page, 'bulk.saveAll').click();
+    await expect(cards(page)).toHaveCount(0);
+    expect(api.items).toHaveLength(3);
+    expect(sent(api)).toHaveLength(2);
+  });
+}
+
+test('a refused clean-up keeps the cut-out with the usual note, analyses it once and saves', async ({ page }) => {
+  engineOnly();
+  const api = await start(page);
+  api.enhanceControl.replies.push({ status: 422, body: { code: 'FILTERED' } });
+  await startBatch(page, api, 1, 'en', { png: await syntheticPhoto(page) });
+  await progress(page, 1, 1);
+  expect(sent(api)).toHaveLength(1);
+  expect(posts(api)).toHaveLength(1);
+  expect(api.inputs[0]!.sha256).not.toBe(sent(api)[0]!.sha256);
+  await page.locator('.bulk-card-open').first().click();
+  await expect(editor(page).getByText(messages['enhance.fallback'].en, { exact: true }).first()).toBeVisible();
+  await editor(page).getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
+  await expect(cards(page)).toHaveCount(0);
+  expect(api.images.map(image => String(image.main_sha256))).toEqual([api.inputs[0]!.sha256]);
 });
 
 const scenes = [

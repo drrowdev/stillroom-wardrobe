@@ -58,7 +58,7 @@ export function useEnhancement(client: AppClient, scope: OwnerScope, onExpired: 
    * result. With `preflight` it only reads whether clean-up would be sent (the pre-upload review check) and sends nothing.
    */
   const run = useCallback(async (source: CleanupSource | null, options: { cutOut: boolean; online: boolean; signal: AbortSignal;
-    current: () => boolean; preflight?: boolean }): Promise<StageResult> => {
+    current: () => boolean; preflight?: boolean; dispatchable?: () => 'hidden' | 'refused' | null }): Promise<StageResult> => {
     const mine = ++token.current;
     skipper.current?.abort();
     const skip = new AbortController();
@@ -74,7 +74,7 @@ export function useEnhancement(client: AppClient, scope: OwnerScope, onExpired: 
       if (!store) return skipped;
       if (!current() || options.signal.aborted) return { kind: 'aborted' };
       return await stage.runEnhancementStage({ source, preflight: options.preflight, cutOut: options.cutOut, online: options.online,
-        current, signal: options.signal, skip: skip.signal }, { client: store.api, session: store.session,
+        current, signal: options.signal, skip: skip.signal, dispatchable: options.dispatchable }, { client: store.api, session: store.session,
         imaging: runtime.browserStageImaging, admit: runtime.admitProviderJpeg, compare: runtime.cleanupCheck,
         onDispatch: () => { if (current()) setView((value) => ({ ...value, working: true })); } });
     } catch {

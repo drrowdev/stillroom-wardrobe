@@ -49,7 +49,7 @@ export function BulkDraft({ take, client, scope, ai, currency, language, t, onli
     onBeforeDiscard: link.onBeforeDiscard, focus: focusField, bulk: pipeline });
   const { photo, preview, provisional, provisionalPreview, fullPhoto, fullPreview, editing, acceptedEdit, initialCurrency,
     analysis, background, enhancement, draft: values, altText, title, preparing, stage, error, invalid, attempt, busy, frozen,
-    expiredHold, cleanupReason } = draft;
+    expiredHold, cleanupReason, refilling, refillNote } = draft;
   const started = useRef(false);
   useEffect(() => {
     if (started.current) return;
@@ -62,8 +62,8 @@ export function BulkDraft({ take, client, scope, ai, currency, language, t, onli
   const running = useRef<Promise<void> | null>(null);
   const save = useRef(() => running.current ??= submit.current().finally(() => { running.current = null; }));
   const status: DraftStatus = stage || busy ? 'saving'
-    : background.state === 'working' || background.state === 'keeping' ? 'removing'
-      : enhancement.view.working || provisional ? 'cleaning'
+    : enhancement.view.working || provisional ? 'cleaning'
+      : background.state === 'working' || background.state === 'keeping' ? 'removing'
         : preparing || !photo && !error ? 'preparing'
           : analysis.phase === 'working' || analysis.phase === 'stillWorking' ? 'filling'
             : expiredHold || error || invalid || !photo || !attempt && !analysis.canSave ? 'attention' : 'ready';
@@ -77,7 +77,7 @@ export function BulkDraft({ take, client, scope, ai, currency, language, t, onli
 
   if (view === 'hidden' || view === 'editor' && !host) return null;
   if (view === 'card') {
-    return <li className="bulk-card">
+    return <li className="bulk-card" data-source={draft.holdsFile() ? 'file' : 'photo'}>
       <button id={cardId} type="button" className="bulk-card-open" onClick={onOpen}>
         <span className="bulk-thumb">{preview ? <img src={preview} alt="" /> : <span className="spinner" aria-hidden="true" />}</span>
         <span className="bulk-card-text">
@@ -86,6 +86,7 @@ export function BulkDraft({ take, client, scope, ai, currency, language, t, onli
           <span className={`bulk-status bulk-status-${status}`}>{status === 'saving' ? t('common.saving') : t(statusKey[status])}</span>
           {error && <span className="bulk-card-meta">{t('bulk.saveFailed')}</span>}
         </span>
+        <span className="bulk-card-edit">{t('common.edit')}<Icon name="chevron" /></span>
       </button>
       <div className="bulk-card-actions">
         <button type="button" className="button button-secondary" disabled={!saveable}
@@ -135,9 +136,10 @@ export function BulkDraft({ take, client, scope, ai, currency, language, t, onli
           {expiredHold && <div id="cleanup-expired" className="notice" tabIndex={-1} role="status">
             <p>{t('bulk.expired')}</p>
             <div className="analysis-actions">
-              <button type="button" className="button button-secondary" disabled={busy} onClick={draft.keepExpired}>{t('aiC.keep')}</button>
-              <button type="button" className="text-button" disabled={blocked || paused} onClick={draft.fillAgain}>{t('bulk.fillAgain')}</button>
+              <button type="button" className="button button-secondary" disabled={busy || refilling} onClick={draft.keepExpired}>{t('aiC.keep')}</button>
+              <button type="button" className="text-button" disabled={blocked || paused || refilling} onClick={draft.fillAgain}>{t('bulk.fillAgain')}</button>
             </div>
+            {refillNote && <p className="fine">{t(refillNote)}</p>}
           </div>}
           {!frozen && !expiredHold && <AnalysisStatus phase={analysis.phase} checking={analysis.checking} t={t}
             disabled={blocked} retryDisabled={paused}

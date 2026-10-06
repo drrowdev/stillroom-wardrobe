@@ -207,7 +207,7 @@ export function BulkAdd({ client, scope, ai, currency, language, t, online, onDi
         {ids.length > 0 && <div className="bulk-header">
           <p className="bulk-progress" role="status">{t('bulk.progress', { ready, total: ids.length })}</p>
           <div className="bulk-actions">
-            <button type="button" className="button button-secondary" disabled={snap.stopped || !processing} onClick={() => queue.stop()}>{t('bulk.stop')}</button>
+            {processing && !snap.stopped && <button type="button" className="button button-secondary" onClick={() => queue.stop()}>{t('bulk.stop')}</button>}
             <button type="button" className="button button-primary" disabled={!online || savingAll || !anySaveable}
               onClick={() => { void saveAll(); }}>{savingAll ? <span className="spinner" /> : <Icon name="check" />}{t('bulk.saveAll')}</button>
           </div>

@@ -20,7 +20,7 @@ describe('BulkQueue analysis bound', () => {
     void queue.analysis.admit(signal(), false).then(value => { third = value; });
     await flush();
     expect(third).toBe('waiting');
-    a.dispatched(); b.dispatched();
+    expect(a.send()).toBeNull(); expect(b.send()).toBeNull();
     a.resolved();
     await flush();
     expect(third).not.toBe('waiting');
@@ -33,7 +33,7 @@ describe('BulkQueue analysis bound', () => {
     const queue = new BulkQueue();
     const a = ticketOf(await queue.analysis.admit(signal(), false));
     const b = ticketOf(await queue.analysis.admit(signal(), false));
-    a.dispatched(); b.dispatched();
+    expect(a.send()).toBeNull(); expect(b.send()).toBeNull();
     a.abandon();
     expect(queue.analysisSlots()).toEqual({ occupied: 2, uncertain: 1 });
     expect(queue.snapshot().paused).toBe(false);
@@ -50,7 +50,7 @@ describe('BulkQueue analysis bound', () => {
     const a = ticketOf(await queue.analysis.admit(signal(), false));
     const b = ticketOf(await queue.analysis.admit(signal(), false));
     const waiting = queue.analysis.admit(signal(), false);
-    a.dispatched(); b.dispatched(); a.abandon(); b.abandon();
+    expect(a.send()).toBeNull(); expect(b.send()).toBeNull(); a.abandon(); b.abandon();
     expect(await waiting).toBe('paused');
   });
 
@@ -64,13 +64,38 @@ describe('BulkQueue analysis bound', () => {
   it('halts automatic analysis on rate or allowance outcomes but still admits a manual retry', async () => {
     const queue = new BulkQueue();
     const a = ticketOf(await queue.analysis.admit(signal(), false));
-    a.dispatched(); a.resolved('RATE_LIMIT');
+    expect(a.send()).toBeNull(); a.resolved('RATE_LIMIT');
     expect(queue.snapshot().halted.analysis).toBe('rate');
     expect(await queue.analysis.admit(signal(), false)).toBe('rate');
     expect(typeof await queue.analysis.admit(signal(), true)).toBe('object');
     const other = new BulkQueue();
     ticketOf(await other.analysis.admit(signal(), false)).resolved('ALLOWANCE');
     expect(await other.analysis.admit(signal(), false)).toBe('allowance');
+  });
+
+  it('checks the send boundary: a ticket admitted before Stop or a halt sends nothing and frees its slot', async () => {
+    for (const end of ['stop', 'halt'] as const) {
+      const queue = new BulkQueue();
+      const a = ticketOf(await queue.analysis.admit(signal(), false));
+      if (end === 'stop') queue.stop(); else queue.halt('analysis', 'rate');
+      expect(a.send()).toBe(end === 'stop' ? 'stopped' : 'rate');
+      expect(queue.analysisSlots().occupied).toBe(0);
+      a.abandon();
+      expect(queue.analysisSlots()).toEqual({ occupied: 0, uncertain: 0 });
+    }
+  });
+
+  it('a manual ticket still sends after Stop, but not while hidden or paused', async () => {
+    const queue = new BulkQueue();
+    const manual = ticketOf(await queue.analysis.admit(signal(), true));
+    queue.stop();
+    expect(manual.send()).toBeNull();
+    expect(manual.send()).toBeNull();
+    const hidden = new BulkQueue();
+    const held = ticketOf(await hidden.analysis.admit(signal(), true));
+    hidden.setHidden(true);
+    expect(held.send()).toBe('hidden');
+    expect(hidden.analysisSlots().occupied).toBe(0);
   });
 
   it('returns null for an aborted waiter and leaves the slot to the next', async () => {
@@ -143,6 +168,72 @@ describe('BulkQueue stages', () => {
     queue.stop();
     expect(await pending).toBe(busy);
     expect(runs).toBe(1);
+  });
+
+  it('hiding the page cancels a waiting busy backoff; once visible it sends again only if still eligible', async () => {
+    let sleeping!: AbortSignal;
+    const queue = new BulkQueue(false, [60_000], (_ms, sleep) => new Promise((_resolve, reject) => {
+      sleeping = sleep;
+      sleep.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    }));
+    let runs = 0;
+    const pending = queue.cleanup(async () => (++runs === 1 ? busy : done), signal(), false);
+    await flush();
+    queue.setHidden(true);
+    expect(sleeping.aborted).toBe(true);
+    await flush();
+    expect(runs).toBe(1);
+    queue.setHidden(false);
+    expect(await pending).toBe(done);
+    expect(runs).toBe(2);
+
+    const stopped = new BulkQueue(false, [60_000], (_ms, sleep) => new Promise((_resolve, reject) => {
+      sleep.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    }));
+    let again = 0;
+    const halted = stopped.cleanup(async () => { again++; return busy; }, signal(), false);
+    await flush();
+    stopped.setHidden(true);
+    await flush();
+    stopped.stop();
+    expect(await halted).toBe(busy);
+    expect(again).toBe(1);
+  });
+
+  it('a clean-up deferred at the send boundary runs once visible, and never after Stop while hidden', async () => {
+    const deferred = { kind: 'skipped', line: 'none', requestId: null, reason: 'deferred' } as StageResult;
+    const queue = new BulkQueue();
+    const seen: (string | null)[] = [];
+    queue.setHidden(true);
+    queue.setHidden(false);
+    const pending = queue.cleanup(async (dispatchable) => {
+      seen.push(dispatchable());
+      if (seen.length === 1) { queue.setHidden(true); return dispatchable() === 'hidden' ? deferred : done; }
+      return done;
+    }, signal(), false);
+    await flush();
+    expect(seen).toEqual([null]);
+    queue.setHidden(false);
+    expect(await pending).toBe(done);
+    expect(seen).toEqual([null, null]);
+
+    const other = new BulkQueue();
+    let runs = 0;
+    const dropped = other.cleanup(async (dispatchable) => {
+      runs++; other.setHidden(true);
+      return dispatchable() === 'hidden' ? deferred : done;
+    }, signal(), false);
+    await flush();
+    other.stop();
+    expect(await dropped).toEqual({ kind: 'skipped', line: 'none', requestId: null });
+    expect(runs).toBe(1);
+    expect(other.snapshot().stopped).toBe(true);
+  });
+
+  it('the clean-up send boundary refuses after Stop', async () => {
+    const queue = new BulkQueue();
+    const result = await queue.cleanup(async (dispatchable) => { queue.stop(); return dispatchable() === 'refused' ? busy : done; }, signal(), false);
+    expect(result).toBe(busy);
   });
 
   it('halts automatic clean-up on rate and allowance, without retrying', async () => {

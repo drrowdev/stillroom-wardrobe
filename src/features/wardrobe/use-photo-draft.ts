@@ -11,12 +11,12 @@ import { newSaveAttempt, saveItem, saveAnalyzedItem, type SaveStage } from '../.
 import { AnalyzedSaveRefusedError, EnhancementExpiredError, errorKey, isAborted } from '../../data/errors';
 import { newAnalyzedSaveAttempt, newUnverifiedSaveAttempt, type AnalyzedSaveAttempt } from '../../domain/analyzed-save';
 import type { AiClient } from '../../data/ai';
-import { useAiDraft } from './use-ai-draft';
+import { phaseForCode, useAiDraft } from './use-ai-draft';
 import type { BeforeDiscard } from '../../app/dialog';
 import { useBackground, type PreparedWithBackground } from './use-background';
 import { useEnhancement } from './use-enhancement';
 import type { StageReason, StageResult } from './enhancement-stage';
-import type { AnalysisGate } from './bulk-add/bulk-queue';
+import type { AnalysisGate, Dispatchable } from './bulk-add/bulk-queue';
 import { photoMenuId } from './photo-actions';
 
 export const loadImaging = preloadable(() => import('../../images/imaging'));
@@ -45,7 +45,7 @@ export type PhotoDraftOptions = {
 };
 export type BulkPipeline = Readonly<{
   prepare<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T>;
-  cleanup(run: () => Promise<StageResult>, signal: AbortSignal, manual: boolean): Promise<StageResult>;
+  cleanup(run: (dispatchable: Dispatchable) => Promise<StageResult>, signal: AbortSignal, manual: boolean): Promise<StageResult>;
   analysis: AnalysisGate;
 }>;
 /**
@@ -77,6 +77,9 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
   const [preparing, setPreparing] = useState(false);
   // BULK2b §E: an expired clean-up went back to the cut-out; Save waits for "Keep these details" or "Fill in again".
   const [expiredHold, setExpiredHold] = useState(false);
+  // "Fill in again" after an expired clean-up: the choice stays until the request is sent; a refusal leaves a note.
+  const [refilling, setRefilling] = useState(false);
+  const [refillNote, setRefillNote] = useState<MessageKey | null>(null);
   const [cleanupReason, setCleanupReason] = useState<StageReason | null>(null);
   const [stage, setStage] = useState<SaveStage | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
@@ -166,7 +169,7 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
     setPhoto(null);
     background.reset();
     enhancement.clear();
-    await prepare(file, ORIGINAL_EDIT, true, { review: !bulk, initial: true });
+    return prepare(file, ORIGINAL_EDIT, true, { review: !bulk, initial: true });
   }
   /**
    * `review` opens the pre-upload review when clean-up would be sent (a newly chosen photo only). `fromReview` is the
@@ -189,6 +192,8 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
     setPreparing(true);
     setError(null);
     const previous = preparationWork.current;
+    // Dropped once removal settles, so a bulk batch never keeps chosen files through clean-up (BULK2b).
+    let source: Blob | null = file;
     const work = (async () => {
       await previous;
       if (signal.aborted) return;
@@ -197,10 +202,13 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
         imaging = await loadImaging();
         // The first settled photo is analysed once: removal (or its fallback) finishes before commitPhoto.
         const loaded = imaging;
-        const removal = () => background.prepare(loaded, file, edit, signal, replacing && !how.fromReview,
+        const removal = () => background.prepare(loaded, source!, edit, signal, replacing && !how.fromReview,
           () => preparation.current === controller);
         const prepared = how.accepted ?? await (bulk ? bulk.prepare(removal, signal) : removal());
+        source = null;
         if (signal.aborted) return;
+        // Bulk keeps the bounded re-encoded whole photo for later crops, not the chosen file (plan rev3 Q3).
+        if (bulk && replacing) original.current = prepared.crop.main;
         const cutOut = prepared.state === 'removed';
         const current = () => preparation.current === controller;
         if (how.review && cutOut) {
@@ -217,7 +225,8 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
         if (cutOut) setProvisional({ photo: prepared.photo, crop: !replacing });
         let stage;
         try {
-          const run = () => enhancement.run(prepared.cleanup, { cutOut, online: onlineNow.current, signal, current });
+          const run = (dispatchable?: Dispatchable) =>
+            enhancement.run(prepared.cleanup, { cutOut, online: onlineNow.current, signal, current, dispatchable });
           stage = bulk && cutOut ? await bulk.cleanup(run, signal, !how.initial) : await run();
         } finally { if (cutOut) setProvisional(null); }
         // An aborted stage (crop cancel, discard, a newer photo, logout) commits nothing and starts no analysis.
@@ -240,7 +249,7 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
       } finally { if (!signal.aborted) setPreparing(false); }
     })();
     preparationWork.current = work;
-    await work;
+    return work;
   }
   /** `source` keeps an existing crop-editor source; otherwise a new photo takes this preparation's whole-photo crop. */
   function commit(prepared: PreparedWithBackground, stage: Exclude<StageResult, { kind: 'aborted' | 'available' }>, edit: PhotoEdit,
@@ -254,8 +263,6 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
     enhancement.commit(stage, prepared.photo);
     void analysis.commitPhoto(settled);
     if (replacing) setFullPhoto(source ?? prepared.crop);
-    // Bulk keeps the bounded re-encoded whole photo for later crops, not the chosen file (plan rev3 Q3).
-    if (bulk && replacing) original.current = (source ?? prepared.crop).main;
     pendingCrop.current = false;
     setAcceptedEdit(edit);
     setEditing(false);
@@ -371,6 +378,7 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
     if (!h1) return;
     setPhoto(h1);
     analysis.stop();
+    setRefillNote(null);
     setExpiredHold(true);
   }
   expiring.current = () => { if (bulk) holdExpiry(); else revertEnhancement('generic'); };
@@ -389,7 +397,9 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
   return {
     photo, preview, provisional, provisionalPreview, fullPhoto, fullPreview, editing, review, acceptedEdit, initialCurrency,
     analysis, background, enhancement, draft, altText, title, preparing, stage, error, invalid, attempt, busy, frozen,
-    advanced, focusTarget, expiredHold, cleanupReason,
+    advanced, focusTarget, expiredHold, cleanupReason, refilling, refillNote,
+    /** BULK2b: true while the picked file is still referenced (it is dropped once removal settles). */
+    holdsFile: () => original.current instanceof File,
     choose, submit, acceptReview, cancelReview, reviewOriginal, useOriginalBackground, cancelEdit,
     startEditing: () => setEditing(true),
     revert: () => revertEnhancement(),
@@ -399,12 +409,23 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
     keepExpired: () => {
       if (submitLatch.current || !expiredHold) return;
       analysis.continueManual();
+      setRefillNote(null);
       setExpiredHold(false);
     },
     fillAgain: () => {
-      if (submitLatch.current || !expiredHold || !photo) return;
-      setExpiredHold(false);
-      void analysis.commitPhoto(photo);
+      if (submitLatch.current || !expiredHold || !photo || refilling) return;
+      setRefilling(true);
+      setRefillNote(null);
+      // Availability and the send boundary come before any field changes; a refusal keeps the reviewed details.
+      void analysis.commitPhoto(photo, true, {
+        sent: () => { if (!scope.signal.aborted) { setRefilling(false); setExpiredHold(false); } },
+        refused: (code) => {
+          if (scope.signal.aborted) return;
+          setRefilling(false);
+          const phase = phaseForCode(code);
+          setRefillNote(phase === 'off' ? 'aiC.off' : phase === 'limit' ? 'aiC.limit' : 'aiC.fillFailed');
+        },
+      });
     },
     /** A clean-up that fell back (a busy provider or an uncertain reply) is tried again from the kept whole photo. */
     retryCleanup: () => { if (!frozen && !submitLatch.current && original.current) void prepare(original.current, acceptedEdit); },

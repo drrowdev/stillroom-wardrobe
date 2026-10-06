@@ -8,6 +8,7 @@ export const SLOTS = { prepare: 1, cleanup: 1, analysis: 2 } as const;
 export const BUSY_DELAYS_MS = [20_000, 40_000, 80_000] as const;
 /** Monthly allowance a photo may use: analysis and clean-up actuals (plan rev3, cost). */
 export const PHOTO_ESTIMATE_MICRO = 40_000n;
+const notSent: StageResult = Object.freeze({ kind: 'skipped', line: 'none', requestId: null });
 
 export type Halt = 'rate' | 'allowance';
 export type Refusal = 'stopped' | 'paused' | Halt;
@@ -16,11 +17,14 @@ export type QueueSnapshot = Readonly<{
   halted: Readonly<{ cleanup: Halt | null; analysis: Halt | null }>;
 }>;
 /**
- * One analysis request's hold on an A slot. `dispatched` is called just before the POST. Only `resolved` (a proven
- * accounting resolution) frees a sent request's slot; `abandon` frees a slot only when nothing was sent, and makes a
- * sent request uncertain, which keeps the slot for the rest of the batch.
+ * One analysis request's hold on an A slot. `send` is called synchronously at the send boundary, right before the
+ * POST: null means send now; otherwise nothing may be sent and the slot is freed (`hidden`: admit again once visible).
+ * Only `resolved` (a proven accounting resolution) frees a sent request's slot; `abandon` frees a slot only when
+ * nothing was sent, and makes a sent request uncertain, which keeps the slot for the rest of the batch.
  */
-export type AnalysisTicket = Readonly<{ dispatched(): void; resolved(code?: string): void; abandon(): void }>;
+export type AnalysisTicket = Readonly<{ send(): Refusal | 'hidden' | null; resolved(code?: string): void; abandon(): void }>;
+/** Clean-up's send boundary: null sends; `hidden` defers the run until visible; `refused` sends nothing. */
+export type Dispatchable = () => 'hidden' | 'refused' | null;
 export type AnalysisGate = Readonly<{
   /** A ticket, a refusal (nothing may be sent), or null when the signal aborted first. */
   admit(signal: AbortSignal, manual: boolean): Promise<AnalysisTicket | Refusal | null>;
@@ -46,10 +50,13 @@ export class BulkQueue {
   private listeners = new Set<() => void>();
   private stopController = new AbortController();
   private visibleWaiters = new Set<() => void>();
+  // Aborted whenever the page is hidden: a waiting busy backoff is cancelled, not resumed by itself.
+  private hideController = new AbortController();
   private state: QueueSnapshot;
   constructor(hidden = false, private readonly delays: readonly number[] = BUSY_DELAYS_MS,
     private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void> = wait) {
     this.state = Object.freeze({ stopped: false, paused: false, hidden, halted: Object.freeze({ cleanup: null, analysis: null }) });
+    if (hidden) this.hideController.abort();
   }
   snapshot = (): QueueSnapshot => this.state;
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -61,6 +68,7 @@ export class BulkQueue {
   }
   setHidden(hidden: boolean) {
     if (this.state.hidden === hidden) return;
+    if (hidden) this.hideController.abort(); else this.hideController = new AbortController();
     this.update({ hidden });
     if (!hidden) for (const resume of [...this.visibleWaiters]) resume();
   }
@@ -86,23 +94,32 @@ export class BulkQueue {
   /**
    * The clean-up slot around one stage run. A refused run sends nothing and keeps the cut-out. `busy` keeps the slot
    * and the same input through the bounded backoff; `rate` and `allowance` stop automatic clean-ups for the batch.
+   * `run` checks `dispatchable` right before it sends. Hiding the page cancels a waiting backoff; once visible, the
+   * same input is sent again only if the run is still eligible.
    */
-  async cleanup(run: () => Promise<StageResult>, signal: AbortSignal, manual: boolean): Promise<StageResult> {
+  async cleanup(run: (dispatchable: Dispatchable) => Promise<StageResult>, signal: AbortSignal, manual: boolean): Promise<StageResult> {
     const slot = await this.acquire('cleanup', signal, manual);
     if (slot === null) return { kind: 'aborted' };
-    if (typeof slot !== 'function') return { kind: 'skipped', line: 'none', requestId: null };
+    if (typeof slot !== 'function') return notSent;
+    const dispatchable: Dispatchable = () => this.state.hidden ? 'hidden' : this.refusal('cleanup', manual) ? 'refused' : null;
+    const waited = manual ? signal : AbortSignal.any([signal, this.stopController.signal]);
+    const resume = async (): Promise<boolean> => {
+      await this.whenVisible(waited);
+      return !this.refusal('cleanup', manual);
+    };
     try {
-      for (let attempt = 0; ; attempt++) {
-        const result = await run();
+      for (let attempt = 0; ;) {
+        const result = await run(dispatchable);
         if (result.kind !== 'skipped' || !result.reason) return result;
-        if (result.reason === 'rate' || result.reason === 'allowance') { this.halt('cleanup', result.reason); return result; }
-        const delay = this.delays[attempt];
-        if (result.reason !== 'busy' || delay === undefined) return result;
-        const waited = manual ? signal : AbortSignal.any([signal, this.stopController.signal]);
         try {
-          await this.sleep(delay, waited);
-          await this.whenVisible(waited);
-        } catch { return signal.aborted ? { kind: 'aborted' } : result; }
+          if (result.reason === 'deferred') { if (await resume()) continue; return notSent; }
+          if (result.reason === 'rate' || result.reason === 'allowance') { this.halt('cleanup', result.reason); return result; }
+          const delay = this.delays[attempt++];
+          if (result.reason !== 'busy' || delay === undefined) return result;
+          try { await this.sleep(delay, AbortSignal.any([waited, this.hideController.signal])); }
+          catch (error) { if (waited.aborted || !this.state.hidden) throw error; }
+          if (!await resume()) return result;
+        } catch { return signal.aborted ? { kind: 'aborted' } : result.reason === 'deferred' ? notSent : result; }
       }
     } finally { slot(); }
   }
@@ -157,7 +174,7 @@ export class BulkQueue {
       if (!this.free(waiter.kind)) { index++; continue; }
       this.waiters.splice(index, 1);
       waiter.drop();
-      waiter.grant(waiter.kind === 'analysis' ? this.ticket() : this.slot(waiter.kind));
+      waiter.grant(waiter.kind === 'analysis' ? this.ticket(waiter.manual) : this.slot(waiter.kind));
     }
   }
   private slot(kind: 'prepare' | 'cleanup'): () => void {
@@ -165,12 +182,18 @@ export class BulkQueue {
     let released = false;
     return () => { if (released) return; released = true; this.running[kind]--; this.pump(); };
   }
-  private ticket(): AnalysisTicket {
+  private ticket(manual: boolean): AnalysisTicket {
     const ticket: Ticket = { state: 'held' };
     this.tickets.add(ticket);
     const free = () => { ticket.state = 'done'; this.tickets.delete(ticket); this.recount(); };
     return Object.freeze({
-      dispatched: () => { if (ticket.state === 'held') ticket.state = 'dispatched'; },
+      send: () => {
+        if (ticket.state === 'dispatched') return null;
+        if (ticket.state !== 'held') return 'stopped';
+        const blocked = this.refusal('analysis', manual) ?? (this.state.hidden ? 'hidden' : null);
+        if (blocked) free(); else ticket.state = 'dispatched';
+        return blocked;
+      },
       resolved: (code?: string) => {
         if (code === 'RATE_LIMIT') this.halt('analysis', 'rate');
         else if (code === 'ALLOWANCE') this.halt('analysis', 'allowance');
