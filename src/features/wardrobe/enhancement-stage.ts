@@ -2,7 +2,7 @@
 // injected client and imaging: every await is followed by the token, epoch and abort checks, and any failure keeps H1.
 // BG2c (plan rev4 §3-§5): it sends the clean-up input H0, never H1, and checks H2 against H0 and R with `cleanupCheck`.
 // Nothing here authorises a request; the server's status and claim checks stay authoritative.
-import type { EnhanceResponse, EnhanceSample, EnhanceStatusRead } from '../../data/enhancement';
+import type { EnhanceCode, EnhanceResponse, EnhanceSample, EnhanceStatusRead } from '../../data/enhancement';
 import {
   emptyEnhanceMemory, forgetEnhanceOff, knownEnabled, lineWhenNotSent, observeEnhanceStatus, rememberEnhance,
   type EnhanceLine, type EnhanceMemory, type EnhanceObserved,
@@ -116,11 +116,28 @@ export type StageDeps = {
   /** Called once a request has been sent, so the UI can show "Cleaning up photo…" only for a real request. */
   onDispatch?: (requestId: string) => void;
 };
+/**
+ * Why a sent request ended without a cleaned-up photo, for callers that schedule requests (BULK2). Separate from `line`,
+ * which is the visible copy. Present only when a request was sent: `busy` is a taken provider slot (retryable), `rate`
+ * and `allowance` are the hourly and monthly limits, `ambiguous` may have reached the provider (never resent
+ * automatically), `skipped` is the user's Skip and `failed` covers every other definite failure.
+ */
+export type StageReason = 'busy' | 'rate' | 'allowance' | 'ambiguous' | 'filtered' | 'skipped' | 'failed';
 export type StageResult =
   | { kind: 'enhanced'; photo: PreparedPhoto; requestId: string; expireAt: number; metrics: CleanupMetrics }
   | { kind: 'available' }
-  | { kind: 'skipped'; line: EnhanceLine; requestId: string | null }
+  | { kind: 'skipped'; line: EnhanceLine; requestId: string | null; reason?: StageReason }
   | { kind: 'aborted' };
+function reasonForCode(code: Exclude<EnhanceCode, 'OK'>): StageReason {
+  switch (code) {
+    case 'BUSY': return 'busy';
+    case 'RATE_LIMIT': return 'rate';
+    case 'ALLOWANCE': return 'allowance';
+    case 'TIMEOUT': return 'ambiguous';
+    case 'FILTERED': return 'filtered';
+    default: return 'failed';
+  }
+}
 
 class Stop extends Error {
   constructor(readonly result: StageResult) { super('stop'); }
@@ -143,11 +160,12 @@ export async function runEnhancementStage(input: StageInput, deps: StageDeps): P
   const signal = AbortSignal.any([input.signal, input.skip, deadline.signal]);
   let requestId: string | null = null;
   const frames: DecodedFrame[] = [];
-  const outcome = (line: EnhanceLine): StageResult => ({ kind: 'skipped', line, requestId });
+  const outcome = (line: EnhanceLine, reason: StageReason = 'failed'): StageResult =>
+    requestId === null ? { kind: 'skipped', line, requestId } : { kind: 'skipped', line, requestId, reason };
   const check = () => {
     if (!input.current() || input.signal.aborted) throw new Stop({ kind: 'aborted' });
-    if (input.skip.aborted) throw new Stop(outcome('none'));
-    if (deadline.signal.aborted) throw new Stop(outcome('generic'));
+    if (input.skip.aborted) throw new Stop(outcome('none', 'skipped'));
+    if (deadline.signal.aborted) throw new Stop(outcome('generic', 'ambiguous'));
   };
   const after = async <T>(work: Promise<T>): Promise<T> => {
     try { const value = await work; check(); return value; }
@@ -188,12 +206,12 @@ export async function runEnhancementStage(input: StageInput, deps: StageDeps): P
     catch (error) {
       if (error instanceof Stop) { if (error.result.kind === 'skipped' && error.result.line === 'generic') session.failed(); throw error; }
       session.failed();
-      return outcome('generic');
+      return outcome('generic', 'ambiguous');
     }
     const receivedAt = session.now();
     if (response.kind === 'code') {
       if (response.code === 'FAILED' || response.code === 'TIMEOUT') session.failed();
-      return outcome(response.code === 'ALLOWANCE' ? 'allowance' : 'generic');
+      return outcome(response.code === 'ALLOWANCE' ? 'allowance' : 'generic', reasonForCode(response.code));
     }
     session.succeeded();
     const expireAt = expiryDeadline(anchor, response.usableUntilMs, receivedAt);

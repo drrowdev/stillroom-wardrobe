@@ -1,44 +1,23 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { AppClient } from '../../data/client';
 import type { OwnerScope } from '../../auth/session';
-import { garmentFields, validateGarmentDraft } from '../../domain/garment-fields';
 import { validDescription } from '../../domain/item-details';
 import { ItemForm } from './item-form';
 import { Icon } from '../../app/icon';
 import type { Language, MessageKey, Translate } from '../../i18n';
-import type { CropSource, ImagePreparationError, PreparedPhoto } from '../../images/process-jpeg';
-import { ORIGINAL_EDIT, type PhotoEdit } from '../../images/photo-edit';
 import { LazyBoundary } from '../../app/lazy';
-import { lazyNamed, preloadable } from '../../app/lazy-load';
-import { newSaveAttempt, saveItem, saveAnalyzedItem, type SaveStage } from '../../images/upload';
-import { AnalyzedSaveRefusedError, EnhancementExpiredError, errorKey, isAborted } from '../../data/errors';
-import { newAnalyzedSaveAttempt, newUnverifiedSaveAttempt, type AnalyzedSaveAttempt } from '../../domain/analyzed-save';
+import { lazyNamed } from '../../app/lazy-load';
 import type { AiClient } from '../../data/ai';
-import { useAiDraft } from './use-ai-draft';
 import { AnalysisStatus } from './analysis-status';
 import type { BeforeDiscard } from '../../app/dialog';
 import { BackgroundNote, BackgroundStatus, ReanalyseNote } from './background';
-import { preparingMessage, useBackground, type PreparedWithBackground } from './use-background';
-import { useEnhancement } from './use-enhancement';
-import type { StageResult } from './enhancement-stage';
+import { preparingMessage } from './use-background';
 import { EnhancementStatus } from './enhancement-status';
-import { PhotoChoice, PhotoMenu, photoMenuId } from './photo-actions';
+import { PhotoChoice, PhotoMenu } from './photo-actions';
+import { loadImaging, preparationErrors, usePhotoDraft } from './use-photo-draft';
 
-const loadImaging = preloadable(() => import('../../images/imaging'));
 const CropEditor = lazyNamed(() => import('../../images/crop-editor'), 'CropEditor');
-const preparationErrors: Record<ImagePreparationError['code'], MessageKey> = {
-  unsupported: 'photo.prepareUnsupported',
-  tooLarge: 'photo.prepareTooLarge',
-  invalid: 'photo.invalid',
-  unavailable: 'photo.prepareUnavailable',
-};
 const photoErrors = new Set<MessageKey>([...Object.values(preparationErrors), 'chunk.failed']);
-/**
- * BG2c pre-upload review (plan rev4 §3.1): a new photo whose clean-up would be sent, held in memory with its first-pass
- * H0 and R until the crop is accepted. Nothing is committed, analysed or sent while it is open.
- */
-type Review = { prepared: PreparedWithBackground; edit: PhotoEdit; controller: AbortController };
-const notSent = { kind: 'skipped', line: 'none', requestId: null } as const;
 function focusGarmentField(id: string): void {
   const input = document.getElementById(id);
   let ancestor = input?.parentElement;
@@ -56,76 +35,22 @@ type Props = {
 function CameraHelp({ t }: { t: Translate }) {
   return <details className="copy-details"><summary>{t('photo.cameraHelp')}</summary><p>{t('photo.cameraFallback')}</p></details>;
 }
+const focusFor = (id: string, kind: 'element' | 'field') => {
+  if (kind === 'field') focusGarmentField(id); else document.getElementById(id)?.focus();
+};
 export function AddItem({ client, scope, currency, online, t, language, onSaved, onBack, onDirty, ai, onBeforeDiscard }: Props) {
-  const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  // A3: the settled H1 while it is being enhanced. Shown, but not committed: the committed photo, the accepted crop and
-  // the settled background stay as they were until this preparation commits.
-  const [provisional, setProvisional] = useState<{ photo: PreparedPhoto; crop: boolean } | null>(null);
-  const [provisionalPreview, setProvisionalPreview] = useState<string | null>(null);
-  const [fullPhoto, setFullPhoto] = useState<CropSource | null>(null);
-  const [fullPreview, setFullPreview] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [review, setReview] = useState<Review | null>(null);
-  const [acceptedEdit, setAcceptedEdit] = useState<PhotoEdit>(ORIGINAL_EDIT);
-  const [initialCurrency] = useState(currency);
-  const analysis = useAiDraft(ai, currency, language);
-  const background = useBackground(scope);
-  const onlineNow = useRef(online);
-  useEffect(() => { onlineNow.current = online; }, [online]);
-  const expiring = useRef<() => void>(() => {});
-  const enhancement = useEnhancement(client, scope, () => expiring.current());
-  const { draft, description: altText } = analysis;
-  const title = draft.raw.title;
-  const [preparing, setPreparing] = useState(false);
-  const [stage, setStage] = useState<SaveStage | null>(null);
-  const [error, setError] = useState<MessageKey | null>(null);
-  const [invalid, setInvalid] = useState(false);
-  const [attempt, setAttempt] = useState<AnalyzedSaveAttempt | null>(null);
-  const receipt = useRef<{ attempt: AnalyzedSaveAttempt; fingerprint: string } | null>(null);
-  const manualTransport = useRef(false);
-  const [cancelling, setCancelling] = useState(false);
+  const [cameraTrouble, setCameraTrouble] = useState(false);
+  const photoDraft = usePhotoDraft({ client, scope, currency, online, language, ai, onSaved, onDirty, onBeforeDiscard,
+    focus: focusFor, onCommitted: () => setCameraTrouble(false) });
+  const {
+    photo, preview, provisional, provisionalPreview, fullPhoto, fullPreview, editing, review, acceptedEdit, initialCurrency,
+    analysis, background, enhancement, draft, altText, title, preparing, stage, error, invalid, attempt, busy, frozen,
+    advanced, focusTarget, choose, acceptReview, cancelReview, reviewOriginal, useOriginalBackground, cancelEdit,
+  } = photoDraft;
   const library = useRef<HTMLInputElement>(null);
   const camera = useRef<HTMLInputElement>(null);
-  const preparation = useRef<AbortController | null>(null);
-  const mountedScope = useRef<OwnerScope | null>(null);
-  const pendingCrop = useRef(false);
-  const preparationWork = useRef<Promise<void>>(Promise.resolve());
-  const original = useRef<Blob | null>(null);
-  // Where focus goes once a committed photo or a closed crop editor is on screen: the details after the first photo,
-  // then "Photo options".
-  const focusTarget = useRef<'capture-basics' | typeof photoMenuId | null>(null);
-  // The details appear once the first photo is ready and are never hidden again while the page is open.
-  const [advanced, setAdvanced] = useState(false);
-  const advancedNow = useRef(false);
-  const [cameraTrouble, setCameraTrouble] = useState(false);
   const lastSource = useRef<'library' | 'camera' | null>(null);
-  const submitLatch = useRef(false);
-  const busy = stage !== null || cancelling;
-  const frozen = attempt !== null;
-  const dirty = preparing || review !== null || photo !== null || Object.keys(draft.intent).length > 0 || Boolean(altText);
-  useEffect(() => { onDirty(dirty, frozen, busy); }, [dirty, frozen, busy, onDirty]);
   useEffect(() => { loadImaging().catch(() => undefined); CropEditor.preload().catch(() => undefined); }, []);
-  useEffect(() => {
-    onBeforeDiscard(async () => {
-      if (submitLatch.current || scope.signal.aborted) return 'unresolved';
-      submitLatch.current = true;
-      setCancelling(true);
-      analysis.stop();
-      try {
-        if (attempt) {
-          if (manualTransport.current || receipt.current?.attempt !== attempt) return 'unresolved';
-          await ai.cancel(attempt, receipt.current.fingerprint);
-        } else {
-          const state = analysis.snapshot().state;
-          if (state?.context && state.status !== 'idle' && state.status !== 'cancelled') await ai.discard(state.context);
-        }
-        return 'cancelled';
-      } catch { return 'unresolved'; }
-      finally { submitLatch.current = false; if (!scope.signal.aborted) setCancelling(false); }
-    });
-    return () => onBeforeDiscard(null);
-  }, [analysis, ai, attempt, onBeforeDiscard, scope]);
   useEffect(() => {
     if (!focusTarget.current || editing || preparing) return;
     const target = focusTarget.current;
@@ -134,7 +59,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     const active = document.activeElement;
     if (active && !active.closest('.photo-panel') && active.matches('input, select, textarea, button, summary, a[href], [contenteditable="true"]')) return;
     document.getElementById(target)?.focus();
-  }, [editing, preparing, advanced, photo]);
+  }, [editing, preparing, advanced, photo, focusTarget]);
   useEffect(() => {
     if (error && photoErrors.has(error) && lastSource.current === 'camera') setCameraTrouble(true);
   }, [error]);
@@ -145,250 +70,9 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
     input?.addEventListener('cancel', dismissed);
     return () => input?.removeEventListener('cancel', dismissed);
   }, []);
-  useEffect(() => {
-    const clear = () => { preparation.current?.abort(); original.current = null; setReview(null); };
-    scope.signal.addEventListener('abort', clear, { once: true });
-    mountedScope.current = scope;
-    return () => {
-      scope.signal.removeEventListener('abort', clear);
-      mountedScope.current = null;
-      // A real unmount or scope change still clears; a dev StrictMode re-mount re-runs setup first and keeps live work.
-      queueMicrotask(() => { if (mountedScope.current !== scope) clear(); });
-    };
-  }, [scope]);
-  useEffect(() => {
-    if (!photo) { setPreview(null); return; }
-    const url = URL.createObjectURL(photo.main);
-    setPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [photo]);
-  useEffect(() => {
-    if (!provisional) { setProvisionalPreview(null); return; }
-    const url = URL.createObjectURL(provisional.photo.main);
-    setProvisionalPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [provisional]);
-  useEffect(() => {
-    if (!fullPhoto) { setFullPreview(null); return; }
-    const url = URL.createObjectURL(fullPhoto.main);
-    setFullPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [fullPhoto]);
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
-
-  async function choose(file: File | undefined): Promise<void> {
-    if (!file || frozen || submitLatch.current || scope.signal.aborted) return;
-    original.current = file;
-    setEditing(false);
-    setFullPhoto(null);
-    setAcceptedEdit(ORIGINAL_EDIT);
-    setPhoto(null);
-    background.reset();
-    enhancement.clear();
-    await prepare(file, ORIGINAL_EDIT, true, { review: true });
-  }
-  /**
-   * `review` opens the pre-upload review when clean-up would be sent (a newly chosen photo only). `fromReview` is the
-   * review being accepted: its first pass keeps the crop editor's source (the whole oriented photo, whose coordinates
-   * every edit uses), so no new crop source is made. `accepted` is that first pass, accepted with an unchanged crop:
-   * it is sent as it is, without preparing again.
-   */
-  async function prepare(file: Blob, edit: PhotoEdit, replacing = false,
-    how: { review?: boolean; fromReview?: Review; accepted?: PreparedWithBackground } = {}): Promise<void> {
-    if (frozen || submitLatch.current || scope.signal.aborted) return;
-    if (!how.fromReview) setReview(null);
-    // Work that supersedes an unfinished new-photo preparation still owes that photo its crop preview.
-    replacing ||= pendingCrop.current;
-    pendingCrop.current = replacing;
-    analysis.stop();
-    preparation.current?.abort();
-    const controller = new AbortController();
-    preparation.current = controller;
-    const signal = AbortSignal.any([controller.signal, scope.signal]);
-    setPreparing(true);
-    setError(null);
-    const previous = preparationWork.current;
-    const work = (async () => {
-      await previous;
-      if (signal.aborted) return;
-      let imaging: Awaited<ReturnType<typeof loadImaging>> | null = null;
-      try {
-        imaging = await loadImaging();
-        // The first settled photo is analysed once: removal (or its fallback) finishes before commitPhoto.
-        const prepared = how.accepted ?? await background.prepare(imaging, file, edit, signal, replacing && !how.fromReview,
-          () => preparation.current === controller);
-        if (signal.aborted) return;
-        const cutOut = prepared.state === 'removed';
-        const current = () => preparation.current === controller;
-        if (how.review && cutOut) {
-          const check = await enhancement.run(prepared.cleanup, { cutOut, online: onlineNow.current, signal, current, preflight: true });
-          if (check.kind === 'aborted' || signal.aborted) return;
-          if (check.kind === 'available') {
-            setFullPhoto(prepared.crop);
-            setAcceptedEdit(edit);
-            setReview({ prepared, edit, controller });
-            setEditing(true);
-          } else commit(prepared, check, edit, replacing, null);
-          return;
-        }
-        if (cutOut) setProvisional({ photo: prepared.photo, crop: !replacing });
-        let stage;
-        try {
-          stage = await enhancement.run(prepared.cleanup, { cutOut, online: onlineNow.current, signal, current });
-        } finally { if (cutOut) setProvisional(null); }
-        // An aborted stage (crop cancel, discard, a newer photo, logout) commits nothing and starts no analysis.
-        if (stage.kind !== 'aborted' && stage.kind !== 'available' && !signal.aborted) {
-          commit(prepared, stage, edit, replacing, how.fromReview?.prepared.crop ?? null);
-        }
-      } catch (problem) {
-        if (!signal.aborted && !isAborted(problem) && how.fromReview) {
-          // A failed accepted crop leaves the review open and retryable: the original file, the whole-photo source and
-          // the first pass stay, and the review now belongs to this (current) preparation.
-          pendingCrop.current = false;
-          setReview({ ...how.fromReview, controller });
-          setError(!imaging ? 'chunk.failed' : problem instanceof imaging.ImagePreparationError ? preparationErrors[problem.code] : 'photo.invalid');
-        } else if (!signal.aborted && !isAborted(problem)) {
-          background.settle('none');
-          pendingCrop.current = false;
-          if (replacing) original.current = null;
-          setError(!imaging ? 'chunk.failed' : problem instanceof imaging.ImagePreparationError ? preparationErrors[problem.code] : 'photo.invalid');
-        }
-      } finally { if (!signal.aborted) setPreparing(false); }
-    })();
-    preparationWork.current = work;
-    await work;
-  }
-  /** `source` keeps an existing crop-editor source; otherwise a new photo takes this preparation's whole-photo crop. */
-  function commit(prepared: PreparedWithBackground, stage: Exclude<StageResult, { kind: 'aborted' | 'available' }>, edit: PhotoEdit,
-    replacing: boolean, source: CropSource | null) {
-    const settled = stage.kind === 'enhanced' ? stage.photo : prepared.photo;
-    setReview(null);
-    setPhoto(settled);
-    background.settle(prepared.state);
-    enhancement.commit(stage, prepared.photo);
-    void analysis.commitPhoto(settled);
-    if (replacing) setFullPhoto(source ?? prepared.crop);
-    pendingCrop.current = false;
-    setAcceptedEdit(edit);
-    setEditing(false);
-    focusTarget.current = advancedNow.current ? photoMenuId : 'capture-basics';
-    advancedNow.current = true;
-    setAdvanced(true);
-    setCameraTrouble(false);
-  }
-  /** Done in the review is the acceptance, also with an unchanged crop; a changed crop is prepared again and sent. */
-  function acceptReview(edit: PhotoEdit, unchanged: boolean) {
-    const current = review;
-    if (!current || preparation.current !== current.controller || !original.current) return;
-    focusTarget.current = photoMenuId;
-    void prepare(original.current, edit, true, { fromReview: current, ...(unchanged ? { accepted: current.prepared } : {}) });
-  }
-  /**
-   * Cancel editing in the review, also while an accepted changed crop is still being prepared, keeps the new photo's
-   * first pass without clean-up: no line, one analysis, nothing sent.
-   */
-  function cancelReview() {
-    const current = review;
-    if (!current) return;
-    if (preparation.current !== current.controller) { preparation.current?.abort(); setPreparing(false); }
-    focusTarget.current = photoMenuId;
-    commit(current.prepared, notSent, current.edit, true, null);
-  }
-  /** "Use original background" in the review: the original photo is prepared, with nothing sent. */
-  function reviewOriginal() {
-    const current = review;
-    if (!current || preparation.current !== current.controller || !original.current) return;
-    background.keep();
-    focusTarget.current = photoMenuId;
-    void prepare(original.current, current.edit, true);
-  }
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
-    if (editing || preparing) {
-      document.getElementById(editing ? 'crop-editor-title' : 'photo-pending')?.focus();
-      return;
-    }
-    if (submitLatch.current || busy || !online || scope.signal.aborted || !attempt && !analysis.canSave) return;
-    const validated = validateGarmentDraft(draft);
-    if (!photo || !validated.values || validDescription(altText) === null) {
-      setInvalid(true);
-      const first = garmentFields.find((field) => validated.errors[field]);
-      focusGarmentField(!photo ? 'choose-photo' : first ? `item-${first}` : 'item-alt');
-      return;
-    }
-    // An unreserved enhanced draft whose evidence has lapsed goes back to H1 first; Save is pressed again.
-    if (!attempt && enhancement.lapsed()) { expiring.current(); return; }
-    submitLatch.current = true;
-    setInvalid(false);
-    setError(null);
-    let saving: AnalyzedSaveAttempt | null = null;
-    try {
-      // With no AI values in the form, Save becomes a plain manual save: checking stops before anything is awaited.
-      if (!attempt && analysis.implicitManual) analysis.continueManual();
-      const state = analysis.snapshot();
-      if (!attempt) manualTransport.current = state.manual && !state.applied && state.state?.status !== 'invalidated'
-        && !state.state?.presentation && Object.keys(state.state?.derivation ?? {}).length === 0;
-      const current = attempt ?? (state.manual
-        ? manualTransport.current ? Object.freeze({ ...newSaveAttempt(state.draft, state.description, photo, scope), claim: null })
-          : newUnverifiedSaveAttempt(state.draft, state.description, photo, scope)
-        : state.state?.context ? newAnalyzedSaveAttempt(state.state, state.state.context, state.description, photo, scope, Date.now())
-          : null);
-      if (!current) return;
-      saving = current;
-      setAttempt(current);
-      enhancement.freeze();
-      if (manualTransport.current) await saveItem(client, scope, current, setStage);
-      else await saveAnalyzedItem(client, scope, current, setStage, (reserved, fingerprint) => {
-        if (reserved === current && !scope.signal.aborted) receipt.current = { attempt: reserved, fingerprint };
-      });
-      if (!scope.signal.aborted) {
-        original.current = null;
-        setPhoto(null);
-        setFullPhoto(null);
-        enhancement.clear();
-        onSaved();
-      }
-    } catch (problem) {
-      if (!scope.signal.aborted && !isAborted(problem)) {
-        if (problem instanceof AnalyzedSaveRefusedError && saving?.claim
-          && problem.itemId === saving.itemId && problem.imageId === saving.imageId && receipt.current === null) {
-          setAttempt(null);
-          analysis.refuseSave();
-          enhancement.thaw();
-        } else if (problem instanceof EnhancementExpiredError && saving && receipt.current?.attempt !== saving) {
-          // The admission refuses only a new reservation, so this attempt has none, also on a retry after a lost reply:
-          // it is cleared, the draft is unreserved again and goes back to H1 once, with one new analysis.
-          setAttempt(null);
-          enhancement.thaw();
-          revertEnhancement('generic', true);
-        } else setError(errorKey(problem));
-      }
-    } finally { if (!scope.signal.aborted) { submitLatch.current = false; setStage(null); } }
-  }
-  function revertEnhancement(line: 'none' | 'generic' = 'none', afterRefusal = false) {
-    if ((!afterRefusal && (frozen || submitLatch.current)) || preparing || scope.signal.aborted) return;
-    const h1 = enhancement.revert(line);
-    if (!h1) return;
-    setPhoto(h1);
-    void analysis.commitPhoto(h1);
-  }
-  expiring.current = () => revertEnhancement('generic');
-  function useOriginalBackground() {
-    if (frozen || submitLatch.current || scope.signal.aborted) return;
-    // After a finished removal this is a new photo generation, analysed again.
-    if (background.useOriginal() === 'again' && original.current) void prepare(original.current, acceptedEdit);
-  }
-  function cancelEdit() {
-    preparation.current?.abort();
-    setPreparing(false);
-    setEditing(false);
-    setError(null);
-    focusTarget.current = photoMenuId;
+    await photoDraft.submit();
   }
   return (
     <section className="capture-page" aria-labelledby="capture-title">
@@ -400,7 +84,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
             action={<button id="crop-leave" className="button button-quiet" type="button" onClick={review ? cancelReview : cancelEdit}>{t('photo.cancelCrop')}</button>}>
             <CropEditor preview={fullPreview} width={fullPhoto.width} height={fullPhoto.height}
               accepted={acceptedEdit} preparing={preparing} t={t}
-              onApply={(edit) => { if (original.current) void prepare(original.current, edit); }}
+              onApply={photoDraft.applyCrop}
               onCancel={review ? cancelReview : cancelEdit} onAccept={review ? acceptReview : undefined} /></LazyBoundary>
           : (!editing || provisional) && <div className={`capture-photo ${(provisionalPreview ?? preview) ? 'has-photo' : ''}`} aria-busy={preparing}>
             {provisionalPreview ? <img src={provisionalPreview} alt={altText || title || t('capture.photo')} />
@@ -415,11 +99,11 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
             <button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => library.current?.click()}><Icon name="photo" />{t('capture.replace')}</button>
             <button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => camera.current?.click()}><Icon name="camera" />{t('capture.camera')}</button>
             {fullPhoto && fullPreview && <button id="edit-photo" className="button button-quiet" type="button"
-              disabled={frozen || preparing} aria-expanded={editing} onClick={() => setEditing(true)}><Icon name="crop" />{t('photo.edit')}</button>}
+              disabled={frozen || preparing} aria-expanded={editing} onClick={photoDraft.startEditing}><Icon name="crop" />{t('photo.edit')}</button>}
             {!provisional && <BackgroundStatus placement="menu" state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
               disabled={frozen || preparing || busy} t={t} onUseOriginal={useOriginalBackground} />}
             <EnhancementStatus placement="menu" view={enhancement.view} disabled={frozen || preparing || busy} t={t}
-              onSkip={enhancement.skip} onRevert={() => revertEnhancement()} />
+              onSkip={enhancement.skip} onRevert={photoDraft.revert} />
             <ReanalyseNote t={t} show={(enhancement.view.enhanced && !enhancement.view.working) || (!provisional && background.state === 'removed' && analysis.phase !== 'off' && analysis.phase !== 'none')} />
             {cameraTrouble && <CameraHelp t={t} />}
           </PhotoMenu>}
@@ -427,7 +111,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           {!editing && !provisional && <BackgroundStatus state={background.state} analysed={analysis.phase !== 'off' && analysis.phase !== 'none'}
             disabled={frozen || preparing || busy} t={t} onUseOriginal={useOriginalBackground} />}
           {(!editing || provisional) && <EnhancementStatus view={enhancement.view} disabled={frozen || preparing || busy} t={t}
-            onSkip={enhancement.skip} onRevert={() => revertEnhancement()} onCancelCrop={provisional?.crop ? cancelEdit : undefined} />}
+            onSkip={enhancement.skip} onRevert={photoDraft.revert} onCancelCrop={provisional?.crop ? cancelEdit : undefined} />}
           {(editing || preparing) && !enhancement.view.working && <p id="photo-pending" tabIndex={-1} role="status" className="notice">{t(preparing ? 'photo.pendingPreparation' : 'photo.pendingCrop')}</p>}
           {invalid && !photo && <p className="field-error">{t('common.required')}</p>}
           {error && (!advanced || !photo) && <div className="notice notice-error" role="alert"><p>{t(error)}</p></div>}
@@ -438,13 +122,13 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           <div className="details-heading"><h2 id="capture-basics" tabIndex={-1}>{t('capture.detailsTitle')}</h2></div>
           {photo && !frozen && <AnalysisStatus phase={analysis.phase} checking={analysis.checking} t={t}
             disabled={!online || busy || preparing || editing}
-            onRetry={() => { if (!submitLatch.current) void analysis.commitPhoto(photo); }}
+            onRetry={photoDraft.retryAnalysis}
             onCheck={() => { void analysis.checkStatus(); }}
-            onKeep={() => { if (!submitLatch.current) analysis.continueManual(); }} />}
-          <ItemForm draft={draft} onChange={(next) => { if (!submitLatch.current && !frozen) analysis.edit(next); }} language={language} t={t} prefix="item" locked={frozen} currency={initialCurrency} showErrors={invalid}
+            onKeep={photoDraft.keepDetails} />}
+          <ItemForm draft={draft} onChange={photoDraft.editDraft} language={language} t={t} prefix="item" locked={frozen} currency={initialCurrency} showErrors={invalid}
             aiDerived={analysis.state?.status === 'ready' ? analysis.state.derivation : analysis.state ? {} : undefined}>
             <div className="field"><label htmlFor="item-alt">{t('item.altText')}</label>
-              <textarea id="item-alt" rows={3} value={altText} readOnly={frozen} onChange={(event) => { if (!submitLatch.current && !frozen) analysis.editDescription(event.target.value); }}
+              <textarea id="item-alt" rows={3} value={altText} readOnly={frozen} onChange={(event) => photoDraft.editDescription(event.target.value)}
                 aria-invalid={validDescription(altText) === null} aria-describedby={validDescription(altText) === null ? 'alt-error' : 'alt-help'} />
               <p className="fine muted" id="alt-help">{t('capture.descriptionHelp')}</p>
               {validDescription(altText) === null && <p id="alt-error" role="alert" className="notice notice-error">{t('detail.invalidDescription')}</p>}

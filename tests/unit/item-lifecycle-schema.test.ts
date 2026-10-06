@@ -1840,9 +1840,10 @@ it('keeps a generic upload failure unavailable, retains the draft/IDs and retrie
   expect(calls.filter(({ path }) => path.endsWith('/finalize_item_save'))).toHaveLength(1);
   expect(calls.some(({ path }) => /analy|ai_|\/items$/.test(path))).toBe(false);
   const capture = await read('src/features/wardrobe/add-item.tsx');
+  const photoDraft = await read('src/features/wardrobe/use-photo-draft.ts');
   expect(capture).toContain('capture.retryNote');
-  expect(capture).toContain('const current = attempt ??');
-  expect(capture).toContain('setAttempt(current)');
+  expect(photoDraft).toContain('const current = attempt ??');
+  expect(photoDraft).toContain('setAttempt(current)');
 });
 
 describe('I08 fixture failure precedence (mock-only; no Docker, SQL or network)', () => {
