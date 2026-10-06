@@ -7,10 +7,11 @@ export default defineConfig({
   testDir: './tests/browser',
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
-  failOnFlakyTests: Boolean(process.env.CI),
+  // PROC1: tests/flake-gate-reporter.ts fails the run for any flaky test not listed in tests/known-flakes.json.
+  failOnFlakyTests: false,
   retries: process.env.CI ? 1 : 0,
   workers: 2,
-  reporter: 'list',
+  reporter: [['list'], ['./tests/flake-gate-reporter.ts']],
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     trace: 'off',

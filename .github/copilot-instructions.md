@@ -72,7 +72,11 @@ integrity, CI infrastructure) gets ONE read-only GPT-6 Astra plan critique; the
 coordinator applies its findings as binding amendments and approves, with no
 re-review unless scope, authority or behaviour changes materially. Tier B (UI,
 copy, docs, tests, small features without schema changes) gets a short plan the
-coordinator approves directly. Every change gets ONE read-only GPT-6 Astra code
+coordinator approves directly. Small fixes ([owner decision 6 Oct 2026](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6021407660):
+about 150 or fewer changed lines of product code, no auth/sign-in/session, account
+or owner data, RLS/DB/Edge, AI cost/allowance/provider, privacy or storage rules,
+not a new feature) skip the separate plan critique; a short written approach and
+the code review are both recorded in the PR. Every change gets ONE read-only GPT-6 Astra code
 review before merge; a non-trivial repair gets a quick delta check.
 PR #2 comment `5559949209` approved the completed source packet after actual
 Anthropic Claude Opus 5 critique; `5559976584` records hosted structural results.
@@ -110,7 +114,7 @@ Evidence is the PR description (scope, validation, pending), the review verdict,
 green exact-head CI for all required jobs, coordinator visual review of UI
 captures and a short merge note; no release checksum files, per-file SHA256
 receipts or "stage exactly N files" instructions. Builders run lint, typecheck,
-`check:translations`, unit tests and affected browser specs; the full browser,
+`check:translations`, affected unit tests and affected browser specs; the full browser,
 integration and security suites run in CI. Prefer behaviour tests over pinned
 counts/lists/hashes; keep the consent notice hash, migration-body reproductions
 and secret scanning.

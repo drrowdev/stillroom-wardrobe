@@ -8,10 +8,11 @@ export default defineConfig({
   outputDir: './test-results/pwa-output',
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
-  failOnFlakyTests: Boolean(process.env.CI),
+  // PROC1: tests/flake-gate-reporter.ts fails the run for any flaky test not listed in tests/known-flakes.json.
+  failOnFlakyTests: false,
   retries: process.env.CI ? 1 : 0,
   workers: 2,
-  reporter: [['list'], ['./tests/pwa/executed-reporter.ts']],
+  reporter: [['list'], ['./tests/pwa/executed-reporter.ts'], ['./tests/flake-gate-reporter.ts']],
   globalSetup: './tests/pwa/global-setup.ts',
   use: {
     trace: 'off',

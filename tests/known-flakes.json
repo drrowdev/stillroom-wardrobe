@@ -1,0 +1,12 @@
+[
+  {"file": "background-removal.spec.ts", "title": "Replace photo: the saved item is unchanged until Save, crop editing uses the unsegmented photo, and discard keeps the stored image", "k2": "K2 background-removal.spec:557 (WebKit, #147 run 36821536620)"},
+  {"file": "delete-account.spec.ts", "title": "I22 unfinished deletion replies explain what to do next", "k2": "K2 delete-account.spec:132 (WebKit, run 37150402518)"},
+  {"file": "enhancement.spec.ts", "title": "replace: Cancel in the review keeps the new photo's cut-out with one analysis and sends nothing", "k2": "K2 enhancement.spec:476 (WebKit, R3 push run 37361234784)"},
+  {"file": "enhancement.spec.ts", "title": "replace: a failed enhancement keeps the cut-out and says so", "k2": "K2 enhancement.spec:679 (WebKit, #160 run 37047418008)"},
+  {"file": "enhancement.spec.ts", "title": "replace: a later edit of the cleaned-up photo, cancelled or with an unchanged Done, keeps it with no new request or analysis", "k2": "K2 enhancement.spec:534 (WebKit, #169 run 37498364052)"},
+  {"file": "item-details.spec.ts", "title": "UX L1b a changed replacement Done starts one new generation and ignores the old request", "k2": "K2 item-details.spec:292 (WebKit reload error)"},
+  {"file": "item-details.spec.ts", "title": "saved editor fi: one Save sends the item first, then the description; clear and persisted reload", "k2": "K2 item-details.spec:400 fi (WebKit, #164 run 37067798818)"},
+  {"file": "settings-layout.spec.ts", "title": "UI1 section layout › sections are in order; the menu focuses each heading and marks the section in view; desktop menu is sticky", "k2": "K2 settings-layout.spec:98 (mobile, push run 36927599390)"},
+  {"file": "ux-l1b.spec.ts", "title": "UX L1b T5 pointer cancel reverts, lost capture commits, and missing capture still ends the drag", "k2": "K2 ux-l1b.spec:316 (WebKit, #164 run 37067798818)"},
+  {"file": "ux-l2a.spec.ts", "title": "L2a saved item keeps stored availability laundry without showing or sending it", "k2": "K2 ux-l2a.spec:450 laundry (WebKit, run 37418518561)"}
+]

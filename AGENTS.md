@@ -55,7 +55,12 @@ Read `blueprint/00-INDEX.md`, `03-MVP-AND-NON-GOALS.md`, `05-ARCHITECTURE.md`, `
    findings as binding amendments and approves, with no re-review unless scope,
    authority or behaviour changes materially. **Tier B** (UI, copy, docs, tests,
    small features without schema changes): a short builder plan that the
-   coordinator approves directly, with no critique. Every change gets ONE
+   coordinator approves directly, with no critique. **Small fixes**
+   ([owner decision of 6 October 2026](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6021407660)): about 150 or fewer changed
+   lines of product code, touching no auth/sign-in/session, account or owner
+   data, RLS/DB/Edge, AI cost/allowance/provider, privacy or storage rules, and
+   not a new feature. They skip the separate plan critique; a short written
+   approach and the code review below are both recorded in the PR. Every change gets ONE
    read-only GPT-6 Astra code review before merge; a repair of its findings gets
    a quick delta check only when the fix is non-trivial, and the coordinator
    reviews routine CI fixes inside an approved packet. Self-review and automated
@@ -202,6 +207,6 @@ automatic production/previews remain off. Later deployments supersede the
 * Keep private data out of persistent caches/service-worker assets. Clear all state on UID change and logout. Do not log personal fields or tokens.
 * Each agent works on one approved issue/PR at a time. Advance in the agreed order after prerequisite engineering/normal-owner evidence is reviewed; track deferred/pending acceptance separately, never as a pass. No later packet is implicit in the current assignment. Trips are optional Phase 8 only after a later request.
 * Support English, Finnish and Swedish from Phase 0. Read `blueprint/19-LOCALIZATION.md`; use typed catalog keys/parameters and native Intl. Every new UI/error/aria string needs all three languages. Keep profile language owner-only, clear it on UID changes, and never translate identifiers or private user content. Run `npm run check:translations` in CI and with affected tests.
-* Commands: `npm ci`, `npm run lint`, `npm run typecheck`, `npm run test:unit`, `npm run db:reset`, `npm run test:integration`, `npm run test:security`, `npm run test:browser`, `npm run test:a11y`, `npm run build`, `npm run scan:secrets`, `npm run check:dependencies`. Exact contracts are in `13`. Builders run lint, typecheck, `check:translations`, unit tests and the browser specs their change affects; the full browser, integration and security suites run in CI. Report what you did not run.
+* Commands: `npm ci`, `npm run lint`, `npm run typecheck`, `npm run test:unit`, `npm run db:reset`, `npm run test:integration`, `npm run test:security`, `npm run test:browser`, `npm run test:a11y`, `npm run build`, `npm run scan:secrets`, `npm run check:dependencies`. Exact contracts are in `13`. Builders run lint, typecheck, `check:translations`, the affected unit tests and the browser specs their change affects (on 3 projects); the full browser, integration and security suites run in CI. Report what you did not run.
 
 Done means the issue's Given/When/Then checks pass, applicable ownership/negative tests pass using normal sessions, accessibility/error/offline states work, required schema/types/docs stay consistent, and no secret or personal fixture is committed. Report actual commands/results and any blocked external gate. Never report a skipped test or mock as a passing live integration test.

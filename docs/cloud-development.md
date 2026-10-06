@@ -25,6 +25,12 @@ PR, comment and receipt references stay as evidence.
 * **Tier B**: UI, copy, docs, tests and small features without schema changes.
   The builder writes a short plan; the coordinator approves it directly. No plan
   critique.
+* **Small fixes** ([owner decision of 6 October 2026](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6021407660)): about 150 or
+  fewer changed lines of product code, touching no auth/sign-in/session, account
+  or owner data, RLS/DB/Edge, AI cost/allowance/provider, privacy or storage
+  rules, and not a new feature. No separate plan critique: the builder writes a
+  short approach in the PR body, and the PR records it with the code review
+  below. Everything else is unchanged.
 
 **Code review.** Every change gets ONE read-only GPT-6 Astra code review before
 merge. A repair of its findings gets a quick delta check only when the fix is
@@ -38,10 +44,11 @@ checksums, per-file SHA256 receipts, publicly posted model attestations and
 still verifies the builder's actual model from session logs and notes it in the
 merge note.
 
-**Local validation.** Builders run `npm run lint`, `npm run typecheck`,
-`npm run check:translations`, `npm run test:unit` and the browser specs their
-change affects. The full browser, integration and security suites run in CI.
-Builders report honestly what they did not run.
+**Local validation.** Builders run only `npm run lint`, `npm run typecheck`,
+`npm run check:translations`, the affected unit tests and the affected browser
+specs on the 3 projects (chromium, mobile, webkit-photo). The full suite is CI's
+job ([owner decision of 6 October 2026](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6021407660)); `--repeat-each` is for flake
+work only. Builders report honestly what they did not run.
 
 **Tests.** Prefer behaviour checks over pinned counts, file lists or hashes.
 Keep pins that protect security or consent: the consent notice hash,
