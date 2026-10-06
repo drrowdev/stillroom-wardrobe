@@ -145,10 +145,10 @@ export function BulkDraft({ take, client, scope, ai, currency, language, t, onli
             disabled={blocked} retryDisabled={paused}
             onRetry={draft.retryAnalysis} onCheck={() => { void analysis.checkStatus(); }} onKeep={draft.keepDetails} />}
           {paused && <p className="fine muted">{t('bulk.paused')}</p>}
-          <ItemForm draft={values} onChange={draft.editDraft} language={language} t={t} prefix="item" locked={frozen} currency={initialCurrency} showErrors={invalid}
+          <ItemForm draft={values} onChange={draft.editDraft} language={language} t={t} prefix="item" locked={frozen || refilling} currency={initialCurrency} showErrors={invalid}
             aiDerived={analysis.state?.status === 'ready' ? analysis.state.derivation : analysis.state ? {} : undefined}>
             <div className="field"><label htmlFor="item-alt">{t('item.altText')}</label>
-              <textarea id="item-alt" rows={3} value={altText} readOnly={frozen} onChange={(event) => draft.editDescription(event.target.value)}
+              <textarea id="item-alt" rows={3} value={altText} readOnly={frozen || refilling} onChange={(event) => draft.editDescription(event.target.value)}
                 aria-invalid={validDescription(altText) === null} aria-describedby={validDescription(altText) === null ? 'alt-error' : 'alt-help'} />
               <p className="fine muted" id="alt-help">{t('capture.descriptionHelp')}</p>
               {validDescription(altText) === null && <p id="alt-error" role="alert" className="notice notice-error">{t('detail.invalidDescription')}</p>}

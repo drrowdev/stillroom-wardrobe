@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AiError, type AiClient } from '../../data/ai';
+import { AiError, AiNotSentError, type AiClient } from '../../data/ai';
 import { AppError } from '../../data/errors';
 import type { Language } from '../../i18n';
 import type { PreparedPhoto } from '../../images/process-jpeg';
@@ -11,7 +11,7 @@ import {
 import { garmentFields, newGarmentDraft, sameValue, type GarmentDraft } from '../../domain/garment-fields';
 import { canAnalyze, type AiAnalysisReply, type AiCode } from '../../domain/ai-controls';
 import { defaultDescription } from '../../domain/item-details';
-import type { AnalysisGate, AnalysisTicket } from './bulk-add/bulk-queue';
+import type { AnalysisGate, AnalysisTicket, Refusal } from './bulk-add/bulk-queue';
 
 export type AiPhase = 'none' | 'off' | 'working' | 'stillWorking' | 'ready' | 'failed' | 'unclear' | 'limit' | 'needsCheck' | 'manual';
 export const terminalReasons = ['DISCARDED', 'EXPIRED', 'FAILED', 'UNAVAILABLE', 'INVALID_FACTS'] as const;
@@ -115,8 +115,11 @@ const implicitPhases: readonly AiPhase[] = ['off', 'stillWorking', 'failed', 'un
 export const refusalCodes: readonly AiCode[] = ['RATE_LIMIT', 'ALLOWANCE', 'CONSENT_REQUIRED', 'UNCONFIGURED', 'INACTIVE',
   'CONFIG_CHANGED', 'ACTIVE_DRAFT'];
 const gateCodes = { rate: 'RATE_LIMIT', allowance: 'ALLOWANCE', stopped: 'UNAVAILABLE', paused: 'UNAVAILABLE' } as const;
-/** BULK2b "Fill in again" after an expired clean-up: `sent` once the request goes out, `refused` when nothing was sent. */
-export type FillHold = Readonly<{ sent(): void; refused(code: AiCode): void }>;
+/**
+ * BULK2b "Fill in again" after an expired clean-up: `sent` once the request goes out, `refused` when nothing was sent,
+ * `settled` when the attempt is over either way (editing stays locked until then).
+ */
+export type FillHold = Readonly<{ sent(): void; refused(code: AiCode): void; settled(): void }>;
 // BULK2b: the optional gate bounds unresolved analysis requests across a batch (plan rev3 §C). Without it nothing changes.
 export function useAiDraft(ai: AiClient, currency: string, language: Language, baseline?: SavedAiBaseline, gate?: AnalysisGate) {
   const [view, setView] = useState<View>(() => ({ state: null, draft: newGarmentDraft(currency, language, baseline?.values),
@@ -244,7 +247,9 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
     const start = (): boolean => {
       before = current.current;
       put({ ...current.current, manual: false, working: true, checking: false, applied: false, code: null, reason: null, polling: null });
-      if (previous?.context) apply(prepareAiGeneration(previous, previous.context, context));
+      // The latest state, not the one captured before any await: nothing the owner did meanwhile is overwritten.
+      const latest = current.current.state;
+      if (latest?.context) apply(prepareAiGeneration(latest, latest.context, context));
       else {
         const created = createAiDraft(current.current.draft, context, baseline);
         if (!created.ok) { put({ ...current.current, working: false, code: 'UNAVAILABLE' }); return false; }
@@ -258,11 +263,18 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
       if (before) put({ ...before, working: false });
       hold.refused(code);
     };
+    // Refused at the send boundary, after the analysis began locally: the pending state ends without a request.
+    const unsent = (code: AiCode) => {
+      if (hold) { refuse(code); return; }
+      const state = current.current.state;
+      if (state?.status === 'pending') apply(failAiAnalysis(state, state.context));
+      put({ ...current.current, code });
+    };
     const gate = gateRef.current;
     const scoped = () => AbortSignal.any([controller.signal, ai.scope.signal]);
     const stale = () => controller.signal.aborted || ai.scope.signal.aborted;
     if (!hold && !start()) return;
-    let began = false, polling = false;
+    let began = false, sent = false, polling = false;
     try {
       const admitted = gate ? await gate.admit(scoped(), manual) : null;
       if (stale()) { if (admitted && typeof admitted === 'object') admitted.abandon(); return; }
@@ -288,27 +300,37 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
         const unavailable = await check();
         if (unavailable) { refuse(unavailable); return; }
       }
-      // The send boundary: Stop, a hidden page or a halt during the awaits above means this request is never sent.
-      for (let ticket = tickets.current.get(context.requestId); ticket;) {
-        const blocked = ticket.send();
-        if (blocked === null) break;
-        tickets.current.delete(context.requestId);
-        if (blocked !== 'hidden' || !gate) { refuse(gateCodes[blocked === 'hidden' ? 'paused' : blocked]); return; }
-        const again = await gate.admit(scoped(), manual);
-        if (stale()) { if (again && typeof again === 'object') again.abandon(); return; }
-        if (again === null) return;
-        if (typeof again === 'string') { refuse(gateCodes[again]); return; }
-        tickets.current.set(context.requestId, again);
-        ticket = again;
-        signal = AbortSignal.any([scoped(), AbortSignal.timeout(25000)]);
-      }
       if (signal.aborted) throw new AiError('TIMEOUT');
       const state = current.current.state;
       if (!state?.context) throw new AppError('aiC.unavailable');
       apply(beginAiAnalysis(state, context));
       began = true;
-      hold?.sent();
-      const reply = await ai.analyze(context, photo, signal);
+      // The send boundary sits in the transport, after its own status check and auth, right before the POST: Stop, a
+      // hidden page or a halt during any of those awaits means this request is never sent and its ticket is freed.
+      let reply: Awaited<ReturnType<typeof ai.analyze>>;
+      for (;;) {
+        const ticket = tickets.current.get(context.requestId);
+        try {
+          reply = await ai.analyze(context, photo, signal, () => {
+            const blocked = ticket?.send() ?? null;
+            if (blocked === null) { sent = true; hold?.sent(); }
+            return blocked;
+          });
+          break;
+        } catch (error) {
+          if (!(error instanceof AiNotSentError)) throw error;
+          tickets.current.delete(context.requestId);
+          if (stale()) return;
+          const blocked = error.blocked as Refusal | 'hidden';
+          if (blocked !== 'hidden' || !gate) { unsent(gateCodes[blocked === 'hidden' ? 'paused' : blocked]); return; }
+          const again = await gate.admit(scoped(), manual);
+          if (stale()) { if (again && typeof again === 'object') again.abandon(); return; }
+          if (again === null) { unsent(gateCodes.stopped); return; }
+          if (typeof again === 'string') { unsent(gateCodes[again]); return; }
+          tickets.current.set(context.requestId, again);
+          signal = AbortSignal.any([scoped(), AbortSignal.timeout(25000)]);
+        }
+      }
       observe(context.requestId, reply);
       if (!signal.aborted && current.current.state?.context?.requestId === context.requestId) {
         if (hold && reply.code !== 'OK' && refusalCodes.includes(reply.code)) { refuse(reply.code); return; }
@@ -318,7 +340,7 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
     } catch (error) {
       observeError(context.requestId, error);
       const code: AiCode = error instanceof AiError ? error.code : 'UNAVAILABLE';
-      if (hold && !stale() && (!began || refusalCodes.includes(code))) refuse(code);
+      if (hold && !stale() && (!sent || refusalCodes.includes(code))) refuse(code);
       else if (!stale() && current.current.state?.context?.requestId === context.requestId) {
         const state = current.current.state;
         // A timeout, reset, truncated or malformed reply may follow an accepted POST: keep checking that same request
@@ -333,6 +355,7 @@ export function useAiDraft(ai: AiClient, currency: string, language: Language, b
       // Not polled any further: a slot that sent nothing frees; a sent request stays uncertain for the rest of the batch.
       if (!polling) abandonTicket(context.requestId);
       if (!stale()) put({ ...current.current, working: false });
+      hold?.settled();
     }
   }
   // "Try again" while still working: one more status check for the same request, never a new analysis.

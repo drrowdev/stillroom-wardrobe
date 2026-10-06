@@ -79,6 +79,8 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
   const [expiredHold, setExpiredHold] = useState(false);
   // "Fill in again" after an expired clean-up: the choice stays until the request is sent; a refusal leaves a note.
   const [refilling, setRefilling] = useState(false);
+  // Editing is locked for the whole refill attempt, so a held preflight can neither overwrite nor drop owner edits.
+  const refillingRef = useRef(false);
   const [refillNote, setRefillNote] = useState<MessageKey | null>(null);
   const [cleanupReason, setCleanupReason] = useState<StageReason | null>(null);
   const [stage, setStage] = useState<SaveStage | null>(null);
@@ -413,23 +415,24 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
       setExpiredHold(false);
     },
     fillAgain: () => {
-      if (submitLatch.current || !expiredHold || !photo || refilling) return;
+      if (submitLatch.current || !expiredHold || !photo || refillingRef.current) return;
+      refillingRef.current = true;
       setRefilling(true);
       setRefillNote(null);
       // Availability and the send boundary come before any field changes; a refusal keeps the reviewed details.
       void analysis.commitPhoto(photo, true, {
-        sent: () => { if (!scope.signal.aborted) { setRefilling(false); setExpiredHold(false); } },
+        sent: () => { if (!scope.signal.aborted) setExpiredHold(false); },
         refused: (code) => {
           if (scope.signal.aborted) return;
-          setRefilling(false);
           const phase = phaseForCode(code);
           setRefillNote(phase === 'off' ? 'aiC.off' : phase === 'limit' ? 'aiC.limit' : 'aiC.fillFailed');
         },
+        settled: () => { refillingRef.current = false; if (!scope.signal.aborted) setRefilling(false); },
       });
     },
     /** A clean-up that fell back (a busy provider or an uncertain reply) is tried again from the kept whole photo. */
     retryCleanup: () => { if (!frozen && !submitLatch.current && original.current) void prepare(original.current, acceptedEdit); },
-    editDraft: (next: GarmentDraft) => { if (!submitLatch.current && !frozen) analysis.edit(next); },
-    editDescription: (value: string) => { if (!submitLatch.current && !frozen) analysis.editDescription(value); },
+    editDraft: (next: GarmentDraft) => { if (!submitLatch.current && !frozen && !refillingRef.current) analysis.edit(next); },
+    editDescription: (value: string) => { if (!submitLatch.current && !frozen && !refillingRef.current) analysis.editDescription(value); },
   };
 }

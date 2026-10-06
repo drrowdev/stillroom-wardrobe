@@ -17,6 +17,10 @@ export type EnhanceCode = (typeof enhanceCodes)[number];
 export class EnhanceError extends Error {
   constructor(readonly code: EnhanceCode) { super(code); this.name = 'EnhanceError'; }
 }
+/** BULK2b: the caller's send check refused the POST after auth; nothing was sent. */
+export class EnhanceNotSentError extends EnhanceError {
+  constructor(readonly blocked: string) { super('UNAVAILABLE'); }
+}
 /** One status read with its timing: `t0`/`t1` are performance.now() just before the request and just after the reply. */
 export type EnhanceSample = { serverTimeMs: number; t0: number; t1: number };
 export type EnhanceStatusRead = { kind: 'missing' } | { kind: 'ready'; status: EnhanceStatus; sample: EnhanceSample | null };
@@ -152,13 +156,19 @@ export class EnhancementClient {
    * Sends the prepared photo once under `requestId`. The body is read with the 512,000-byte cap; the evidence headers
    * are returned for the caller's admission. A closed JSON code is returned as `code`; anything else is FAILED.
    */
-  /** Sends the clean-up input (H0, BG2c): the app-prepared JPEG of the accepted crop, never H1 or the raw file. */
-  async enhance(photo: Pick<CleanupSource, 'main'>, requestId: string, signal: AbortSignal): Promise<EnhanceResponse> {
+  /**
+   * Sends the clean-up input (H0, BG2c): the app-prepared JPEG of the accepted crop, never H1 or the raw file.
+   * `beforeSend` runs after auth, immediately before the POST; a non-null value sends nothing (EnhanceNotSentError).
+   */
+  async enhance(photo: Pick<CleanupSource, 'main'>, requestId: string, signal: AbortSignal,
+    beforeSend?: () => string | null): Promise<EnhanceResponse> {
     if (!isUuid(requestId) || photo.main.type !== 'image/jpeg' || photo.main.size < 1 || photo.main.size > ENHANCE_LIMITS.imageBytes) {
       throw new EnhanceError('INVALID_INPUT');
     }
     return this.bounded(ENHANCE_LIMITS.clientStageMs, signal, async (inner, wait) => {
       const token = await this.bearer(ENHANCE_LIMITS.requestMs, wait);
+      const blocked = beforeSend?.() ?? null;
+      if (blocked !== null) throw new EnhanceNotSentError(blocked);
       const response = await wait(fetch(`${this.config.url}/functions/v1/enhance-photo`, {
         method: 'POST', redirect: 'error', cache: 'no-store', credentials: 'omit', signal: inner,
         headers: this.headers(token, { Accept: 'image/jpeg, application/json', 'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': requestId }),

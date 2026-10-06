@@ -2,7 +2,7 @@
 // injected client and imaging: every await is followed by the token, epoch and abort checks, and any failure keeps H1.
 // BG2c (plan rev4 §3-§5): it sends the clean-up input H0, never H1, and checks H2 against H0 and R with `cleanupCheck`.
 // Nothing here authorises a request; the server's status and claim checks stay authoritative.
-import type { EnhanceCode, EnhanceResponse, EnhanceSample, EnhanceStatusRead } from '../../data/enhancement';
+import { EnhanceNotSentError, type EnhanceCode, type EnhanceResponse, type EnhanceSample, type EnhanceStatusRead } from '../../data/enhancement';
 import {
   emptyEnhanceMemory, forgetEnhanceOff, knownEnabled, lineWhenNotSent, observeEnhanceStatus, rememberEnhance,
   type EnhanceLine, type EnhanceMemory, type EnhanceObserved,
@@ -81,7 +81,7 @@ export type StageImaging<F extends DecodedFrame = DecodedFrame> = {
 };
 export type StageClient = {
   status(signal?: AbortSignal): Promise<EnhanceStatusRead>;
-  enhance(photo: Pick<CleanupSource, 'main'>, requestId: string, signal: AbortSignal): Promise<EnhanceResponse>;
+  enhance(photo: Pick<CleanupSource, 'main'>, requestId: string, signal: AbortSignal, beforeSend?: () => string | null): Promise<EnhanceResponse>;
 };
 export type StageInput = {
   /**
@@ -201,19 +201,28 @@ export async function runEnhancementStage(input: StageInput, deps: StageDeps): P
     const source = input.source;
     if (!source) return outcome('generic');
     if (input.preflight) return { kind: 'available' };
+    // A cheap early check; the authoritative one runs in the transport after auth, right before the POST.
     const blocked = input.dispatchable?.() ?? null;
     if (blocked === 'hidden') return { kind: 'skipped', line: 'none', requestId: null, reason: 'deferred' };
     if (blocked) return outcome('none');
 
-    requestId = (deps.newId ?? (() => crypto.randomUUID()))();
-    deps.onDispatch?.(requestId);
+    const id = (deps.newId ?? (() => crypto.randomUUID()))();
     let response: EnhanceResponse;
-    try { response = await after(deps.client.enhance(source, requestId, signal)); }
-    catch (error) {
+    try {
+      response = await after(deps.client.enhance(source, id, signal, () => {
+        const late = input.dispatchable?.() ?? null;
+        if (late === null) { requestId = id; deps.onDispatch?.(id); }
+        return late;
+      }));
+    } catch (error) {
       if (error instanceof Stop) { if (error.result.kind === 'skipped' && error.result.line === 'generic') session.failed(); throw error; }
+      if (error instanceof EnhanceNotSentError) {
+        return error.blocked === 'hidden' ? { kind: 'skipped', line: 'none', requestId: null, reason: 'deferred' } : outcome('none');
+      }
       session.failed();
       return outcome('generic', 'ambiguous');
     }
+    requestId = id;
     const receivedAt = session.now();
     if (response.kind === 'code') {
       if (response.code === 'FAILED' || response.code === 'TIMEOUT') session.failed();
@@ -251,7 +260,7 @@ export async function runEnhancementStage(input: StageInput, deps: StageDeps): P
     if (!verdict.accepted) return outcome('generic');
     const thumb = await after(deps.imaging.thumbnail(main, ENHANCE_LIMITS.outputWidth, ENHANCE_LIMITS.outputHeight, signal));
     if (session.now() >= expireAt) return outcome('generic');
-    return { kind: 'enhanced', requestId, expireAt, metrics: verdict.metrics, photo: Object.freeze({
+    return { kind: 'enhanced', requestId: id, expireAt, metrics: verdict.metrics, photo: Object.freeze({
       main, thumb: thumb.blob, width: ENHANCE_LIMITS.outputWidth, height: ENHANCE_LIMITS.outputHeight,
       mainSha256: response.sha256, thumbSha256: thumb.sha256 }) };
   } catch (error) {

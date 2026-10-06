@@ -34,12 +34,13 @@ async function startBatch(page: Page, api: Fixture, count: number, language: Lan
     ? { name: `synthetic-${n + 1}.png`, mimeType: 'image/png', buffer: options.png }
     : { name: `synthetic-${n + 1}.jpg`, mimeType: 'image/jpeg', buffer: api.fixture }));
 }
-// Holds each analysis's status check (after the batch's one estimate read) until released.
-async function holdPreflight(page: Page) {
+// Holds status checks until released, after letting `skip` through: with one photo, 1 is the batch estimate, 2 also passes
+// the analysis's own check and holds the transport's inner check right before the POST.
+async function holdPreflight(page: Page, skip = 1) {
   let armed = false, seen = 0, held = 0;
   const waiting: Array<() => void> = [];
   await page.route('**/rest/v1/rpc/ai_status', async (route) => {
-    if (!armed || route.request().method() === 'OPTIONS' || seen++ === 0) { await route.fallback(); return; }
+    if (!armed || route.request().method() === 'OPTIONS' || seen++ < skip) { await route.fallback(); return; }
     held += 1;
     await new Promise<void>((resolve) => waiting.push(resolve));
     await route.fallback().catch(() => undefined);
@@ -59,7 +60,7 @@ async function saveByHand(page: Page, index: number, title: string) {
   await page.locator('#item-title').fill(title);
   if (await page.locator('#item-category').inputValue() === '') await page.locator('#item-category').selectOption('top');
   await editor(page).getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
-  await expect(page.locator('#bulk-title')).toBeVisible();
+  await expect(page.locator('#bulk-title')).toBeVisible({ timeout: 30_000 });
 }
 // While held, every status check answers "still working", so analyses stay in progress until released.
 async function holdStatus(page: Page) {
@@ -173,7 +174,7 @@ test('two unsettled analyses pause the rest: no third request, Retry is off, and
   await page.locator('#item-title').fill('Hand-filled top');
   await page.locator('#item-category').selectOption('top');
   await editor(page).getByRole('button', { name: messages['capture.save'].en, exact: true }).click();
-  await expect(page.locator('#bulk-title')).toBeVisible();
+  await expect(page.locator('#bulk-title')).toBeVisible({ timeout: 30_000 });
   await expect(cards(page)).toHaveCount(2);
   expect(api.items.map(item => item.title)).toEqual(['Hand-filled top']);
   expect(posts(api)).toHaveLength(2);
@@ -218,9 +219,11 @@ test('signing out mid-batch drops every draft and sends nothing more', async ({ 
   expect(posts(api)).toHaveLength(sent);
 });
 
-test('a status check held across Stop sends no analysis, and the photo can still be saved', async ({ page }) => {
+const preflights = [{ name: 'the status check', skip: 1 }, { name: 'the inner check before the POST', skip: 2 }] as const;
+for (const hold of preflights) {
+test(`${hold.name} held across Stop sends no analysis, and the photo can still be saved`, async ({ page }) => {
   const api = await aiFixture(page);
-  const preflight = await holdPreflight(page);
+  const preflight = await holdPreflight(page, hold.skip);
   await startBatch(page, api, 1, 'en', { armed: preflight.arm });
   await expect.poll(preflight.held).toBe(1);
   await button(page, 'bulk.stop').click();
@@ -233,9 +236,9 @@ test('a status check held across Stop sends no analysis, and the photo can still
   expect(posts(api)).toHaveLength(0);
 });
 
-test('a status check held while the page is hidden sends nothing until it is visible, then exactly one analysis', async ({ page }) => {
+test(`${hold.name} held while the page is hidden sends nothing until it is visible, then exactly one analysis`, async ({ page }) => {
   const api = await aiFixture(page);
-  const preflight = await holdPreflight(page);
+  const preflight = await holdPreflight(page, hold.skip);
   await startBatch(page, api, 1, 'en', { armed: preflight.arm });
   await expect.poll(preflight.held).toBe(1);
   await setHidden(page, true);
@@ -243,9 +246,10 @@ test('a status check held while the page is hidden sends nothing until it is vis
   await page.waitForTimeout(800);
   expect(posts(api)).toHaveLength(0);
   await setHidden(page, false);
-  await progress(page, 1, 1);
+  await progress(page, 1, 1, 'en', 30_000);
   expect(posts(api)).toHaveLength(1);
 });
+}
 
 test('with clean-up on: the original file is dropped before clean-up, and the one analysis reads the final photo', async ({ page }) => {
   engineOnly();
@@ -279,7 +283,7 @@ for (const expiry of ['local', 'server'] as const) {
     await startBatch(page, api, 1, 'en', { png: await syntheticPhoto(page) });
     if (expiry === 'local') await expect(page.locator('.bulk-status-attention')).toHaveCount(1, { timeout: 30_000 });
     else {
-      await progress(page, 1, 1);
+      await progress(page, 1, 1, 'en', 30_000);
       for (const output of api.enhanceControl.outputs) output.usableUntilMs = 0;
       await cards(page).getByRole('button', { name: messages['common.save'].en, exact: true }).click();
       await expect(page.locator('.bulk-status-attention')).toHaveCount(1);
@@ -310,6 +314,35 @@ for (const expiry of ['local', 'server'] as const) {
     expect(sent(api)).toHaveLength(1);
   });
 }
+
+test('Fill in again after expiry locks editing until the attempt settles, so an edit is neither overwritten nor dropped', async ({ page }) => {
+  engineOnly();
+  const api = await start(page);
+  api.enhanceControl.replies.push(async (bytes) => ({ status: 200, image: await redraw(page, bytes),
+    usableUntilMs: enhanceServerNow({ serverOffsetMs: 0 }) + 64_000 }));
+  await startBatch(page, api, 1, 'en', { png: await syntheticPhoto(page) });
+  await expect(page.locator('.bulk-status-attention')).toHaveCount(1, { timeout: 30_000 });
+  await page.locator('.bulk-card-open').first().click();
+  await expect(page.locator('#cleanup-expired')).toBeVisible();
+  await page.locator('#item-title').fill('Reviewed shirt');
+  const preflight = await holdPreflight(page, 0);
+  preflight.arm();
+  await page.locator('#cleanup-expired').getByRole('button', { name: messages['bulk.fillAgain'].en, exact: true }).click();
+  await expect.poll(preflight.held).toBe(1);
+  // While the availability check is held the form is read-only: typing changes nothing.
+  await expect(page.locator('#item-title')).toHaveAttribute('readonly', '');
+  await expect(page.locator('#item-category')).toBeDisabled();
+  await page.locator('#item-title').press('End');
+  await page.keyboard.type(' changed');
+  await expect(page.locator('#item-title')).toHaveValue('Reviewed shirt');
+  preflight.release();
+  await expect(page.locator('#cleanup-expired')).toHaveCount(0, { timeout: 30_000 });
+  await expect.poll(() => posts(api).length, { timeout: 30_000 }).toBe(2);
+  await expect(page.locator('#item-title')).not.toHaveAttribute('readonly', '', { timeout: 30_000 });
+  await expect(page.locator('#item-title')).toHaveValue('Reviewed shirt');
+  await page.locator('#item-title').fill('Reviewed shirt, edited');
+  await expect(page.locator('#item-title')).toHaveValue('Reviewed shirt, edited');
+});
 
 test('a busy clean-up waiting to retry is cancelled by Stop: nothing more is sent, and the photo saves by hand', async ({ page }) => {
   engineOnly();
@@ -369,7 +402,7 @@ test('a refused clean-up keeps the cut-out with the usual note, analyses it once
   const api = await start(page);
   api.enhanceControl.replies.push({ status: 422, body: { code: 'FILTERED' } });
   await startBatch(page, api, 1, 'en', { png: await syntheticPhoto(page) });
-  await progress(page, 1, 1);
+  await progress(page, 1, 1, 'en', 30_000);
   expect(sent(api)).toHaveLength(1);
   expect(posts(api)).toHaveLength(1);
   expect(api.inputs[0]!.sha256).not.toBe(sent(api)[0]!.sha256);

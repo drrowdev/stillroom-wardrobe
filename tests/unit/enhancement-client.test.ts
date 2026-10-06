@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { EnhanceResponse, EnhanceStatusRead } from '../../src/data/enhancement';
+import { createClient, type Session } from '@supabase/supabase-js';
+import type { Database } from '../../src/data/database.types';
+import { EnhanceNotSentError, EnhancementClient, type EnhanceResponse, type EnhanceStatusRead } from '../../src/data/enhancement';
+import { testAccessToken } from './test-token';
 import {
   enhanceView, lineWhenNotSent, observeEnhanceStatus, parseEnhanceStatus, type EnhanceStatus,
 } from '../../src/domain/enhance-controls';
@@ -162,7 +165,9 @@ function harness(session: EnhanceSession, options: {
         if (options.read instanceof Error) throw options.read;
         return options.read ?? { kind: 'ready', status: status(), sample };
       },
-      enhance: async () => {
+      enhance: async (_photo, _id, _signal, beforeSend) => {
+        const blocked = beforeSend?.() ?? null;
+        if (blocked !== null) throw new EnhanceNotSentError(blocked);
         calls.enhance++;
         return options.response ? options.response(body)
           : { kind: 'image', body, sha256: 'c'.repeat(64), length: body.byteLength, usableUntilMs: SERVER + 3600_000 };
@@ -210,7 +215,7 @@ describe('the stage core', () => {
     const { deps, calls } = harness(new EnhanceSession(() => 100));
     const sent: Blob[] = [];
     const client = deps.client;
-    deps.client = { ...client, enhance: (photo, requestId, signal) => { sent.push(photo.main); return client.enhance(photo, requestId, signal); } };
+    deps.client = { ...client, enhance: (photo, requestId, signal, beforeSend) => { sent.push(photo.main); return client.enhance(photo, requestId, signal, beforeSend); } };
     const result = await runEnhancementStage(input({ source: source({ main: new Blob([bytes], { type: 'image/jpeg' }) }) }), deps);
     expect(result.kind).toBe('enhanced');
     expect(calls.enhance).toBe(1);
@@ -220,13 +225,28 @@ describe('the stage core', () => {
     const { deps, calls } = harness(new EnhanceSession(() => 100));
     const sent: Blob[] = [];
     const client = deps.client;
-    deps.client = { ...client, enhance: (photo, requestId, signal) => { sent.push(photo.main); return client.enhance(photo, requestId, signal); } };
+    deps.client = { ...client, enhance: (photo, requestId, signal, beforeSend) => { sent.push(photo.main); return client.enhance(photo, requestId, signal, beforeSend); } };
     const h0 = source();
     expect(await runEnhancementStage(input({ source: h0 }), deps)).toMatchObject({ kind: 'enhanced', metrics });
     expect(sent).toEqual([h0.main]);
     expect(calls.decoded[1]).toBe(h0.main);
     expect(calls.compared).toHaveLength(1);
     expect(calls.compared[0]![1]).toBe(h0.reference);
+  });
+  it('rechecks dispatch right before the POST: a late hide defers and a late refusal sends nothing', async () => {
+    for (const late of ['hidden', 'refused'] as const) {
+      const { deps, calls } = harness(new EnhanceSession(() => 100));
+      const dispatched: string[] = [];
+      deps.onDispatch = (id) => dispatched.push(id);
+      let checks = 0;
+      // The stage's early check passes; the transport's check after auth sees the change.
+      const result = await runEnhancementStage(input({ dispatchable: () => (++checks === 1 ? null : late) }), deps);
+      expect(checks).toBe(2);
+      expect(calls.enhance).toBe(0);
+      expect(dispatched).toEqual([]);
+      expect(result).toEqual(late === 'hidden' ? { kind: 'skipped', line: 'none', requestId: null, reason: 'deferred' }
+        : { kind: 'skipped', line: 'none', requestId: null });
+    }
   });
   it('the pre-upload check stops at "available" with no request and no request ID', async () => {
     const ids = vi.fn(() => '11111111-1111-4111-8111-111111111111');
@@ -309,7 +329,7 @@ describe('the stage core', () => {
   it('Skip keeps H1 with no line', async () => {
     const skip = new AbortController();
     const { deps } = harness(new EnhanceSession(() => 100));
-    deps.client.enhance = async () => { skip.abort(); return { kind: 'code', code: 'FAILED' }; };
+    deps.client.enhance = async (_p, _i, _s, beforeSend) => { beforeSend?.(); skip.abort(); return { kind: 'code', code: 'FAILED' }; };
     expect(await runEnhancementStage(input({ skip: skip.signal }), deps)).toMatchObject({ kind: 'skipped', line: 'none' });
   });
   // BG2c-3 §3.7: the check is awaited with the stage's combined signal, so Skip, the timeout and a discard reach it.
@@ -371,7 +391,7 @@ describe('stage outcome reasons', () => {
   });
   it('a thrown send is ambiguous', async () => {
     const { deps } = harness(new EnhanceSession(() => 100));
-    deps.client.enhance = async () => { throw new TypeError('network'); };
+    deps.client.enhance = async (_p, _i, _s, beforeSend) => { beforeSend?.(); throw new TypeError('network'); };
     expect(await runEnhancementStage(input(), deps)).toMatchObject({ kind: 'skipped', line: 'generic', reason: 'ambiguous' });
   });
   it('a rejected result after a reply is a definite failure', async () => {
@@ -381,14 +401,15 @@ describe('stage outcome reasons', () => {
   it('Skip after sending reads as skipped', async () => {
     const skip = new AbortController();
     const { deps } = harness(new EnhanceSession(() => 100));
-    deps.client.enhance = async () => { skip.abort(); return { kind: 'code', code: 'FAILED' }; };
+    deps.client.enhance = async (_p, _i, _s, beforeSend) => { beforeSend?.(); skip.abort(); return { kind: 'code', code: 'FAILED' }; };
     expect(await runEnhancementStage(input({ skip: skip.signal }), deps)).toMatchObject({ kind: 'skipped', line: 'none', reason: 'skipped' });
   });
   it('the stage timeout after sending is ambiguous', async () => {
     vi.useFakeTimers();
     try {
       const { deps } = harness(new EnhanceSession(() => 100));
-      deps.client.enhance = (_photo, _id, signal) => new Promise((_, reject) => {
+      deps.client.enhance = (_photo, _id, signal, beforeSend) => new Promise((_, reject) => {
+        beforeSend?.();
         signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
       });
       const result = runEnhancementStage(input(), deps);
@@ -403,5 +424,37 @@ describe('stage outcome reasons', () => {
     session.observe('ready');
     const { deps } = harness(session);
     expect(await runEnhancementStage(input({ online: false }), deps)).not.toHaveProperty('reason');
+  });
+});
+
+describe('the clean-up transport send boundary', () => {
+  it('checks the caller after auth and sends nothing when it refuses while auth was held', async () => {
+    const owner = '10000000-0000-4000-8000-000000000001';
+    const scope = { ownerId: owner, epoch: 1, signal: new AbortController().signal };
+    const client = createClient<Database>('http://127.0.0.1:54321', 'sb_publishable_test_only', {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const session: Session = { access_token: testAccessToken(owner), refresh_token: 'fictional-unit-refresh',
+      token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600,
+      user: { id: owner, aud: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: '2026-09-12T00:00:00Z' } };
+    let release = () => {};
+    vi.spyOn(client.auth, 'getSession').mockReturnValue(new Promise((resolve) => {
+      release = () => resolve({ data: { session }, error: null });
+    }));
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const enhancer = new EnhancementClient(client, { url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_test_only', version: 'test' }, scope);
+      let blocked: string | null = null;
+      const checks: (string | null)[] = [];
+      const sending = enhancer.enhance({ main: new Blob(['synthetic'], { type: 'image/jpeg' }) }, '11111111-1111-4111-8111-111111111111',
+        new AbortController().signal, () => { checks.push(blocked); return blocked; });
+      await vi.waitFor(() => expect(client.auth.getSession).toHaveBeenCalledTimes(1));
+      blocked = 'refused';
+      release();
+      await expect(sending).rejects.toBeInstanceOf(EnhanceNotSentError);
+      expect(checks).toEqual(['refused']);
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally { vi.restoreAllMocks(); vi.unstubAllGlobals(); }
   });
 });
