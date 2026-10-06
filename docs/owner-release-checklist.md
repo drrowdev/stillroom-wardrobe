@@ -62,6 +62,11 @@ Each step is on both phones unless it says otherwise.
    offline notice, sign out.
    - **BULK1 (since R3):** in the wardrobe, select a few items, choose Move to
      Trash, then Undo. The items come back unchanged; nothing is deleted for good.
+   - **BULK2 (since R4):** first raise the hourly limits to 150 requests and
+     60 clean-ups in the admin screen. Then add 5 photos at once with bulk
+     upload, and check each draft before Save. Then a large batch (up to 50) on
+     the iPhone and on the laptop: the app stays responsive, switching to another
+     app and back doesn't lose the batch, and note how long it takes.
    - **After sign-out**, reopen the app online and offline. No wardrobe item,
      photo, name or email may appear, and the browser Back button shows only the
      signed-out screen.
