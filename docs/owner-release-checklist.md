@@ -60,6 +60,8 @@ Each step is on both phones unless it says otherwise.
    [operations.md](operations.md#restore-drill-i26): sign in, language, add from a
    photo with Save, search, an outfit, Today, a backup with offline verify, the
    offline notice, sign out.
+   - **BULK1 (since R3):** in the wardrobe, select a few items, choose Move to
+     Trash, then Undo. The items come back unchanged; nothing is deleted for good.
    - **After sign-out**, reopen the app online and offline. No wardrobe item,
      photo, name or email may appear, and the browser Back button shows only the
      signed-out screen.
