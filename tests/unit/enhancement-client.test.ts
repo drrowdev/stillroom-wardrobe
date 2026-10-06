@@ -351,3 +351,57 @@ describe('the stage core', () => {
     }
   });
 });
+
+// BULK2a §B: a machine-readable reason for a sent request, separate from the unchanged visible line.
+describe('stage outcome reasons', () => {
+  const codes: [EnhanceResponse & { kind: 'code' }, string, string][] = [
+    [{ kind: 'code', code: 'BUSY' }, 'generic', 'busy'],
+    [{ kind: 'code', code: 'RATE_LIMIT' }, 'generic', 'rate'],
+    [{ kind: 'code', code: 'ALLOWANCE' }, 'allowance', 'allowance'],
+    [{ kind: 'code', code: 'TIMEOUT' }, 'generic', 'ambiguous'],
+    [{ kind: 'code', code: 'FILTERED' }, 'generic', 'filtered'],
+    [{ kind: 'code', code: 'FAILED' }, 'generic', 'failed'],
+    [{ kind: 'code', code: 'OUTPUT_REJECTED' }, 'generic', 'failed'],
+  ];
+  it.each(codes)('maps %o to the unchanged line and its reason', async (response, line, reason) => {
+    const { deps } = harness(new EnhanceSession(() => 100), { response: () => response });
+    const result = await runEnhancementStage(input(), deps);
+    expect(result).toMatchObject({ kind: 'skipped', line, reason });
+    expect(result).toHaveProperty('requestId', expect.any(String));
+  });
+  it('a thrown send is ambiguous', async () => {
+    const { deps } = harness(new EnhanceSession(() => 100));
+    deps.client.enhance = async () => { throw new TypeError('network'); };
+    expect(await runEnhancementStage(input(), deps)).toMatchObject({ kind: 'skipped', line: 'generic', reason: 'ambiguous' });
+  });
+  it('a rejected result after a reply is a definite failure', async () => {
+    const { deps } = harness(new EnhanceSession(() => 100), { accept: false });
+    expect(await runEnhancementStage(input(), deps)).toMatchObject({ kind: 'skipped', line: 'generic', reason: 'failed' });
+  });
+  it('Skip after sending reads as skipped', async () => {
+    const skip = new AbortController();
+    const { deps } = harness(new EnhanceSession(() => 100));
+    deps.client.enhance = async () => { skip.abort(); return { kind: 'code', code: 'FAILED' }; };
+    expect(await runEnhancementStage(input({ skip: skip.signal }), deps)).toMatchObject({ kind: 'skipped', line: 'none', reason: 'skipped' });
+  });
+  it('the stage timeout after sending is ambiguous', async () => {
+    vi.useFakeTimers();
+    try {
+      const { deps } = harness(new EnhanceSession(() => 100));
+      deps.client.enhance = (_photo, _id, signal) => new Promise((_, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+      const result = runEnhancementStage(input(), deps);
+      await vi.advanceTimersByTimeAsync(ENHANCE_LIMITS.clientStageMs);
+      expect(await result).toMatchObject({ kind: 'skipped', line: 'generic', reason: 'ambiguous' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('nothing sent carries no reason', async () => {
+    const session = new EnhanceSession(() => 0);
+    session.observe('ready');
+    const { deps } = harness(session);
+    expect(await runEnhancementStage(input({ online: false }), deps)).not.toHaveProperty('reason');
+  });
+});
