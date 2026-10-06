@@ -13,6 +13,12 @@ import { sessionOwner } from '../auth/auth-storage';
 export class AiError extends AppError {
   constructor(readonly code: AiCode) { super(code === 'TIMEOUT' ? 'aiC.uncertain' : 'aiC.unavailable'); }
 }
+/** BULK2b: the caller's send check refused the POST after every awaited preflight; nothing was sent. */
+export class AiNotSentError extends AiError {
+  constructor(readonly blocked: string) { super('UNAVAILABLE'); }
+}
+/** Called synchronously right before the POST, after status and auth: a non-null value means do not send. */
+export type BeforeSend = () => string | null;
 export type AiConsentWrite = Readonly<{ enabled: boolean; noticeRevision: number | null; expectedVersion: number }>;
 export class AiClient {
   private readonly identity: { ownerId: string; epoch: number };
@@ -49,7 +55,7 @@ export class AiClient {
   protected async request(path: '/rest/v1/rpc/ai_status' | '/rest/v1/rpc/ai_set_consent'
     | '/rest/v1/rpc/ai_analysis_status' | '/rest/v1/rpc/ai_request_control' | '/functions/v1/analyze-clothing'
     | '/rest/v1/rpc/stylist_status' | '/rest/v1/rpc/stylist_set_consent' | '/functions/v1/stylist-chat',
-    body: object | Blob, ms: number, extra: Record<string, string> = {}, outer?: AbortSignal) {
+    body: object | Blob, ms: number, extra: Record<string, string> = {}, outer?: AbortSignal, beforeSend?: BeforeSend) {
     return this.bounded(ms, async (signal, wait) => {
       if (signal.aborted) throw new AiError('TIMEOUT');
       const cached = await wait(this.client.auth.getSession());
@@ -61,6 +67,8 @@ export class AiClient {
         session = refreshed.data.session;
       }
       if (sessionOwner(session) !== this.scope.ownerId || signal.aborted) throw new AiError('UNAUTHENTICATED');
+      const blocked = beforeSend?.() ?? null;
+      if (blocked !== null) throw new AiNotSentError(blocked);
       const response = await wait(fetch(`${this.config.url}${path}`, {
         method: 'POST', redirect: 'error', cache: 'no-store', credentials: 'omit', signal,
         headers: { apikey: this.config.publishableKey, Authorization: `Bearer ${session.access_token}`,
@@ -116,7 +124,8 @@ export class AiClient {
     }
     return reply.value.profileVersion;
   }
-  async analyze(context: AiContext, photo: PreparedPhoto, signal?: AbortSignal) {
+  /** `beforeSend` runs after the status check and auth, immediately before the POST (BULK2b send boundary). */
+  async analyze(context: AiContext, photo: PreparedPhoto, signal?: AbortSignal, beforeSend?: BeforeSend) {
     if (context.ownerId !== this.scope.ownerId || context.epoch !== this.scope.epoch || !isUuid(context.requestId)
       || !isUuid(context.draftId) || !isAiCounter(context.generation) || !isImageSha256(context.imageSha256)
       || context.imageSha256 !== photo.mainSha256 || photo.main.type !== 'image/jpeg'
@@ -127,7 +136,7 @@ export class AiClient {
       const reply = await this.request('/functions/v1/analyze-clothing', photo.main, 25000, {
         'X-Stillroom-Request-Id': context.requestId, 'X-Stillroom-Draft-Id': context.draftId,
         'X-Stillroom-Generation': String(context.generation),
-      }, budget);
+      }, budget, beforeSend);
       const value = parseAnalysisReply(reply.value);
       if (!value) throw new AiError('UNAVAILABLE');
       if (value.code !== 'OK') throw new AiError(value.code);

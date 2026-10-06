@@ -35,6 +35,7 @@ const routes = [
   { name: 'Settings', hash: '#/settings', heading: '#settings-title' },
   { name: 'Trash', hash: '#/trash', heading: '#trash-title' },
   { name: 'Add item', hash: '#/items/new', heading: '#capture-title' },
+  { name: 'Add several photos', hash: '#/items/new/several', heading: '#bulk-title' },
 ];
 
 test.describe('lazy routes', () => {

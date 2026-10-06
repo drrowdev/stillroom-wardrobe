@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthError, createClient, type Session } from '@supabase/supabase-js';
 import type { Database } from '../../src/data/database.types';
-import { AiClient, AiError } from '../../src/data/ai';
+import { AiClient, AiError, AiNotSentError } from '../../src/data/ai';
 import { parseAiStatus, supportedAiPolicy, parseAnalysisReply } from '../../src/domain/ai-controls';
 import { testAccessToken } from './test-token';
 
@@ -242,6 +242,33 @@ describe('closed ordinary-auth AI boundary', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/ai_status') ? Response.json(status()) : new Promise<Response>(() => {})));
     const rejected = expect(f.ai.analyze(context, f.photo)).rejects.toThrow('aiC.uncertain');
     await vi.advanceTimersByTimeAsync(25001); await rejected;
+  });
+  it.each(['status', 'auth'] as const)('checks the caller only after the inner %s step and sends nothing when it refuses', async (step) => {
+    const f = fixture();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.endsWith('/ai_status')) { if (step === 'status') await held; return Response.json(status()); }
+      return Response.json({ code: 'TIMEOUT' }, { status: 504 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    if (step === 'auth') {
+      let calls = 0;
+      f.auth.mockImplementation(async () => { if (++calls === 2) await held; return { data: { session: f.session }, error: null }; });
+    }
+    let blocked: string | null = null;
+    const checks: (string | null)[] = [];
+    const sending = f.ai.analyze(context, f.photo, undefined, () => { checks.push(blocked); return blocked; });
+    if (step === 'status') await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    else await vi.waitFor(() => expect(f.auth).toHaveBeenCalledTimes(2));
+    expect(checks).toEqual([]);
+    blocked = 'stopped';
+    release();
+    const error = await sending.catch((value: unknown) => value);
+    expect(error).toBeInstanceOf(AiNotSentError);
+    expect((error as AiNotSentError).blocked).toBe('stopped');
+    expect(checks).toEqual(['stopped']);
+    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/analyze-clothing'))).toHaveLength(0);
   });
 });
 describe('status validation and current policy', () => {

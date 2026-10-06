@@ -2,7 +2,7 @@
 // injected client and imaging: every await is followed by the token, epoch and abort checks, and any failure keeps H1.
 // BG2c (plan rev4 §3-§5): it sends the clean-up input H0, never H1, and checks H2 against H0 and R with `cleanupCheck`.
 // Nothing here authorises a request; the server's status and claim checks stay authoritative.
-import type { EnhanceCode, EnhanceResponse, EnhanceSample, EnhanceStatusRead } from '../../data/enhancement';
+import { EnhanceNotSentError, type EnhanceCode, type EnhanceResponse, type EnhanceSample, type EnhanceStatusRead } from '../../data/enhancement';
 import {
   emptyEnhanceMemory, forgetEnhanceOff, knownEnabled, lineWhenNotSent, observeEnhanceStatus, rememberEnhance,
   type EnhanceLine, type EnhanceMemory, type EnhanceObserved,
@@ -81,7 +81,7 @@ export type StageImaging<F extends DecodedFrame = DecodedFrame> = {
 };
 export type StageClient = {
   status(signal?: AbortSignal): Promise<EnhanceStatusRead>;
-  enhance(photo: Pick<CleanupSource, 'main'>, requestId: string, signal: AbortSignal): Promise<EnhanceResponse>;
+  enhance(photo: Pick<CleanupSource, 'main'>, requestId: string, signal: AbortSignal, beforeSend?: () => string | null): Promise<EnhanceResponse>;
 };
 export type StageInput = {
   /**
@@ -103,6 +103,8 @@ export type StageInput = {
   signal: AbortSignal;
   /** Aborted by "Skip". */
   skip: AbortSignal;
+  /** BULK2b: checked synchronously right before the request is sent (`hidden` defers, `refused` sends nothing). */
+  dispatchable?: () => 'hidden' | 'refused' | null;
 };
 export type StageDeps = {
   client: StageClient; session: EnhanceSession; imaging: StageImaging;
@@ -120,9 +122,10 @@ export type StageDeps = {
  * Why a sent request ended without a cleaned-up photo, for callers that schedule requests (BULK2). Separate from `line`,
  * which is the visible copy. Present only when a request was sent: `busy` is a taken provider slot (retryable), `rate`
  * and `allowance` are the hourly and monthly limits, `ambiguous` may have reached the provider (never resent
- * automatically), `skipped` is the user's Skip and `failed` covers every other definite failure.
+ * automatically), `skipped` is the user's Skip and `failed` covers every other definite failure. `deferred` is the one
+ * reason without a sent request: the page was hidden at the send boundary, so the caller may run again once visible.
  */
-export type StageReason = 'busy' | 'rate' | 'allowance' | 'ambiguous' | 'filtered' | 'skipped' | 'failed';
+export type StageReason = 'busy' | 'rate' | 'allowance' | 'ambiguous' | 'filtered' | 'skipped' | 'failed' | 'deferred';
 export type StageResult =
   | { kind: 'enhanced'; photo: PreparedPhoto; requestId: string; expireAt: number; metrics: CleanupMetrics }
   | { kind: 'available' }
@@ -198,16 +201,28 @@ export async function runEnhancementStage(input: StageInput, deps: StageDeps): P
     const source = input.source;
     if (!source) return outcome('generic');
     if (input.preflight) return { kind: 'available' };
+    // A cheap early check; the authoritative one runs in the transport after auth, right before the POST.
+    const blocked = input.dispatchable?.() ?? null;
+    if (blocked === 'hidden') return { kind: 'skipped', line: 'none', requestId: null, reason: 'deferred' };
+    if (blocked) return outcome('none');
 
-    requestId = (deps.newId ?? (() => crypto.randomUUID()))();
-    deps.onDispatch?.(requestId);
+    const id = (deps.newId ?? (() => crypto.randomUUID()))();
     let response: EnhanceResponse;
-    try { response = await after(deps.client.enhance(source, requestId, signal)); }
-    catch (error) {
+    try {
+      response = await after(deps.client.enhance(source, id, signal, () => {
+        const late = input.dispatchable?.() ?? null;
+        if (late === null) { requestId = id; deps.onDispatch?.(id); }
+        return late;
+      }));
+    } catch (error) {
       if (error instanceof Stop) { if (error.result.kind === 'skipped' && error.result.line === 'generic') session.failed(); throw error; }
+      if (error instanceof EnhanceNotSentError) {
+        return error.blocked === 'hidden' ? { kind: 'skipped', line: 'none', requestId: null, reason: 'deferred' } : outcome('none');
+      }
       session.failed();
       return outcome('generic', 'ambiguous');
     }
+    requestId = id;
     const receivedAt = session.now();
     if (response.kind === 'code') {
       if (response.code === 'FAILED' || response.code === 'TIMEOUT') session.failed();
@@ -245,7 +260,7 @@ export async function runEnhancementStage(input: StageInput, deps: StageDeps): P
     if (!verdict.accepted) return outcome('generic');
     const thumb = await after(deps.imaging.thumbnail(main, ENHANCE_LIMITS.outputWidth, ENHANCE_LIMITS.outputHeight, signal));
     if (session.now() >= expireAt) return outcome('generic');
-    return { kind: 'enhanced', requestId, expireAt, metrics: verdict.metrics, photo: Object.freeze({
+    return { kind: 'enhanced', requestId: id, expireAt, metrics: verdict.metrics, photo: Object.freeze({
       main, thumb: thumb.blob, width: ENHANCE_LIMITS.outputWidth, height: ENHANCE_LIMITS.outputHeight,
       mainSha256: response.sha256, thumbSha256: thumb.sha256 }) };
   } catch (error) {

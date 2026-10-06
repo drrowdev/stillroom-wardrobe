@@ -52,7 +52,7 @@ export function navFamilyFor(route: string): NavFamily {
   if (route === 'today' || route === 'stylist') return 'today';
   if (route === 'calendar') return 'calendar';
   if (route === 'statistics') return 'statistics';
-  return isOutfitRoute(route) ? 'outfits' : route === 'wardrobe' || route === 'add' || route.startsWith('detail:') ? 'wardrobe' : null;
+  return isOutfitRoute(route) ? 'outfits' : route === 'wardrobe' || route === 'add' || route === 'add-several' || route.startsWith('detail:') ? 'wardrobe' : null;
 }
 // Outfit editors never use the shared discard dialog: there is nothing to cancel or refund.
 export function leaveDialogFor(route: string): 'outfit' | 'discard' {

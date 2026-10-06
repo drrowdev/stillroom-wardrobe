@@ -525,6 +525,17 @@ jobs:
             test-results/bulk1-visual/selected-sv-320-200.png
           if-no-files-found: error
           retention-days: 1
+      - name: Preserve bounded synthetic BULK2 bulk upload visual evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bulk2-upload-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            test-results/bulk2-visual/list-en-mobile.png
+            test-results/bulk2-visual/list-fi-mobile.png
+            test-results/bulk2-visual/list-sv-320-200.png
+            test-results/bulk2-visual/list-en-desktop.png
+          if-no-files-found: error
+          retention-days: 1
 
   pwa:
     name: PWA production contracts
