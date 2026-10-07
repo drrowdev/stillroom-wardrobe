@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  checkLimits, draftOf, formatUsd, formatUsdCents, inputToMicro, limitChanges, limitsFromDraft, microToInput, monthTotals, parseSpending, parseWriteResult,
-  sameLimits, type Limits,
+  checkLimits, draftOf, EDITABLE_KEYS, formatUsd, formatUsdCents, inputToMicro, limitChanges, limitsFromDraft, microToInput, monthTotals, parseSpending, parseWriteResult,
+  sameLimits, visibleErrors, type Limits,
 } from '../../src/domain/admin-limits';
 import { readAdminSpending, readAdminStatus, writeAdminLimits } from '../../src/data/admin';
 import type { AppClient } from '../../src/data/client';
@@ -217,6 +217,29 @@ describe('limits form', () => {
     expect(initial.tryOn).toEqual({ monthlyAllowanceMicro: '8', maxRequestMicro: '0,36', maxRequestsPerHour: '6' });
     const result = limitsFromDraft({ ...initial, tryOn: { ...initial.tryOn, monthlyAllowanceMicro: '6,5' } }, initial, current, 'fi');
     expect(limitChanges(current, result.limits!)).toEqual([{ feature: 'tryOn', key: 'monthlyAllowanceMicro', from: '8000000', to: '6500000' }]);
+  });
+  it('edits only the monthly and hourly limits and sends every per-request amount exactly as read', () => {
+    expect(EDITABLE_KEYS).toEqual(['monthlyAllowanceMicro', 'maxRequestsPerHour']);
+    const current = limits();
+    const initial = draftOf(current, 'en');
+    const draft = { ...initial, stylist: { ...initial.stylist, monthlyAllowanceMicro: '3' }, shared: { ...initial.shared, maxRequestsPerHour: '40' } };
+    const result = limitsFromDraft(draft, initial, current, 'en');
+    for (const feature of ['shared', 'stylist', 'enhancement', 'tryOn'] as const) {
+      expect(result.limits![feature].maxRequestMicro).toBe(current[feature].maxRequestMicro);
+    }
+    expect(limitChanges(current, result.limits!).map((change) => change.key)).toEqual(['maxRequestsPerHour', 'monthlyAllowanceMicro']);
+  });
+  it('shows a monthly limit below the hidden per-request amount on that limit, and any other hidden problem as a setup fix', () => {
+    expect(visibleErrors({ 'stylist.maxRequestMicro': 'ABOVE_MONTHLY' })).toEqual({ errors: { 'stylist.monthlyAllowanceMicro': 'BELOW_RESERVATION' }, setup: false });
+    // An unchanged per-request amount below the floor cannot be fixed by changing a visible limit.
+    expect(visibleErrors({ 'tryOn.maxRequestMicro': 'BELOW_RESERVATION' })).toEqual({ errors: {}, setup: true });
+    expect(visibleErrors({ 'shared.maxRequestMicro': 'NOT_POSITIVE', 'shared.maxRequestsPerHour': 'RANGE' }))
+      .toEqual({ errors: { 'shared.maxRequestsPerHour': 'RANGE' }, setup: true });
+    // The monthly limit's own problem comes first; other fields are unchanged.
+    expect(visibleErrors({ 'stylist.monthlyAllowanceMicro': 'ABOVE_SHARED', 'stylist.maxRequestMicro': 'ABOVE_MONTHLY', 'shared.maxRequestsPerHour': 'RANGE' }))
+      .toEqual({ errors: { 'stylist.monthlyAllowanceMicro': 'ABOVE_SHARED', 'shared.maxRequestsPerHour': 'RANGE' }, setup: false });
+    const lowered = limits(); lowered.stylist.monthlyAllowanceMicro = '100000';
+    expect(visibleErrors(checkLimits(lowered))).toEqual({ errors: { 'stylist.monthlyAllowanceMicro': 'BELOW_RESERVATION' }, setup: false });
   });
 });
 

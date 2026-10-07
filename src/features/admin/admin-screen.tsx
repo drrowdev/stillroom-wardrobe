@@ -4,7 +4,7 @@ import { ADMIN_REASONS, readAdminSpending, readAdminStatus, writeAdminLimits, ty
 import type { AppClient } from '../../data/client';
 import { isAborted } from '../../data/errors';
 import {
-  LIMIT_FEATURES, SPEND_PURPOSES, draftOf, formatUsd, formatUsdCents, limitChanges, limitsFromDraft, monthTotals, sameLimits,
+  EDITABLE_KEYS, LIMIT_FEATURES, SPEND_PURPOSES, draftOf, formatUsd, formatUsdCents, limitChanges, limitsFromDraft, monthTotals, sameLimits, visibleErrors,
   type AdminAccount, type AdminSpending, type FieldErrors, type LimitChange, type LimitDraft, type LimitFeature, type LimitField,
   type LimitKey, type LimitReason, type Limits, type MonthSpend, type SpendPurpose,
 } from '../../domain/admin-limits';
@@ -20,10 +20,9 @@ const featureKey: Record<LimitFeature, MessageKey> = { shared: 'admin.allFeature
 const reasonKey: Record<AdminReason, MessageKey> = { RAISE: 'admin.reasonRaise', LOWER: 'admin.reasonLower', PAUSE: 'admin.reasonPause',
   RESTORE: 'admin.reasonRestore', CORRECTION: 'admin.reasonCorrection' };
 const errorKey: Record<LimitReason, MessageKey> = { FORMAT: 'admin.errFormat', REQUIRED: 'admin.errFormat', NOT_POSITIVE: 'admin.errPositive',
-  RANGE: 'admin.errHour', APP_LIMIT: 'admin.overAppLimit', ABOVE_MONTHLY: 'admin.aboveMonthly', ABOVE_SHARED: 'admin.aboveShared',
+  RANGE: 'admin.errHour', APP_LIMIT: 'admin.overAppLimit', ABOVE_MONTHLY: 'admin.belowMinimum', ABOVE_SHARED: 'admin.aboveShared',
   BELOW_RESERVATION: 'admin.belowMinimum' };
-const keyLabel = (feature: LimitFeature, key: LimitKey): MessageKey => key === 'monthlyAllowanceMicro' ? 'admin.monthly'
-  : key === 'maxRequestsPerHour' ? 'admin.perHour' : feature === 'shared' ? 'admin.taggingReservation' : 'admin.perRequest';
+const keyLabel = (key: LimitKey): MessageKey => key === 'maxRequestsPerHour' ? 'admin.perHour' : 'admin.monthly';
 const whole = (value: number, language: Language) => new Intl.NumberFormat(locales[language]).format(value);
 const monthName = (month: string, language: Language) => new Intl.DateTimeFormat(locales[language], { month: 'long', year: 'numeric', timeZone: 'UTC' })
   .format(new Date(`${month}-15T12:00:00.000Z`));
@@ -98,6 +97,7 @@ function SpendRow({ label, spend, language, t, total }: { label: string; spend: 
 }
 
 type Message = { key: MessageKey; tone: 'status' | 'alert'; belowUse?: boolean };
+const formMessages = new Set<MessageKey>(['admin.invalid', 'admin.setupFix']);
 type Edit = { base: Limits; version: string; initial: LimitDraft; draft: LimitDraft; errors: FieldErrors };
 type Confirm = { limits: Limits; changes: LimitChange[] };
 
@@ -145,8 +145,9 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
   const review = () => {
     if (!edit) return;
     const { limits: next, errors } = limitsFromDraft(edit.draft, edit.initial, edit.base, language);
-    setEdit({ ...edit, errors });
-    if (!next) { setMessage({ key: 'admin.invalid', tone: 'alert' }); focusNext.current = 'summary'; return; }
+    const shown = visibleErrors(errors);
+    setEdit({ ...edit, errors: shown.errors });
+    if (!next) { setMessage({ key: shown.setup ? 'admin.setupFix' : 'admin.invalid', tone: 'alert' }); focusNext.current = 'summary'; return; }
     if (sameLimits(next, edit.base)) { setMessage({ key: 'admin.unchanged', tone: 'status' }); focusNext.current = 'message'; return; }
     setMessage(null);
     setConfirm({ limits: next, changes: limitChanges(edit.base, next) });
@@ -162,8 +163,9 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
       if (controller.signal.aborted) return;
       if (result.code === 'INVALID_LIMITS') {
         setConfirm(null);
-        setEdit({ ...edit, errors: { [result.field]: result.reason } });
-        setMessage({ key: 'admin.invalid', tone: 'alert' });
+        const shown = visibleErrors({ [result.field]: result.reason });
+        setEdit({ ...edit, errors: shown.errors });
+        setMessage({ key: shown.setup ? 'admin.setupFix' : 'admin.invalid', tone: 'alert' });
         focusNext.current = 'summary';
         return;
       }
@@ -206,8 +208,8 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
       {canEdit && <button ref={editButton} type="button" className="button button-secondary" disabled={!online || reconciling} onClick={open}>{t('admin.edit')}</button>}
     </> : <LimitsForm id={id} edit={edit} t={t} online={online} saving={saving} firstField={firstField} reviewButton={reviewButton}
       onChange={(draft) => setEdit({ ...edit, draft })} onReview={review} onCancel={() => { setMessage(null); close('edit'); }}
-      summary={message?.key === 'admin.invalid' ? <div ref={summary} tabIndex={-1} role="alert" className="notice notice-error"><p>{t('admin.invalid')}</p></div> : null} />}
-    {message && message.key !== 'admin.invalid' && <p ref={messageRef} tabIndex={-1} role={message.tone} className={message.tone === 'alert' ? 'notice notice-error' : 'settings-success'}>
+      summary={message && formMessages.has(message.key) ? <div ref={summary} tabIndex={-1} role="alert" className="notice notice-error"><p>{t(message.key)}</p></div> : null} />}
+    {message && !formMessages.has(message.key) && <p ref={messageRef} tabIndex={-1} role={message.tone} className={message.tone === 'alert' ? 'notice notice-error' : 'settings-success'}>
       {t(message.key)}{message.belowUse ? ` ${t('admin.belowUse')}` : ''}</p>}
     {reconciling && readFailed && <div className="notice notice-error"><span>{t('admin.checkFailed')}</span>
       <button type="button" className="text-button" disabled={!online} onClick={reconcile}>{t('admin.checkAgain')}</button></div>}
@@ -241,14 +243,11 @@ function UsageBar({ used, limit }: { used: string; limit: string | null }) {
 const valueText = (key: LimitKey, value: string | number | null, language: Language) => value === null ? '–'
   : key === 'maxRequestsPerHour' ? whole(Number(value), language) : formatUsd(String(value), language);
 function LimitsTable({ limits, language, t }: { limits: Limits; language: Language; t: Translate }) {
-  const keys: LimitKey[] = ['monthlyAllowanceMicro', 'maxRequestMicro', 'maxRequestsPerHour'];
   return <table className="stats-table admin-table">
     <caption className="sr-only">{t('admin.limits')}</caption>
-    <thead><tr><th scope="col">{t('admin.feature')}</th><th scope="col">{t('admin.monthly')}</th><th scope="col">{t('admin.perRequest')}</th>
-      <th scope="col">{t('admin.perHour')}</th></tr></thead>
+    <thead><tr><th scope="col">{t('admin.feature')}</th><th scope="col">{t('admin.monthly')}</th><th scope="col">{t('admin.perHour')}</th></tr></thead>
     <tbody>{LIMIT_FEATURES.map((feature) => <tr key={feature}><th scope="row">{t(featureKey[feature])}</th>
-      {keys.map((key) => <td key={key} data-label={t(key === 'maxRequestMicro' ? 'admin.perRequest' : keyLabel(feature, key))}>{valueText(key, limits[feature][key], language)}
-        {feature === 'shared' && key === 'maxRequestMicro' && <span className="stats-note admin-cell-note">{t('admin.taggingReservation')}</span>}</td>)}</tr>)}</tbody>
+      {EDITABLE_KEYS.map((key) => <td key={key} data-label={t(keyLabel(key))}>{valueText(key, limits[feature][key], language)}</td>)}</tr>)}</tbody>
   </table>;
 }
 
@@ -258,20 +257,19 @@ function LimitsForm({ id, edit, t, online, saving, firstField, reviewButton, sum
   onChange: (draft: LimitDraft) => void; onReview: () => void; onCancel: () => void;
 }) {
   const hint = useId();
-  const changed = LIMIT_FEATURES.some((feature) => (['monthlyAllowanceMicro', 'maxRequestMicro', 'maxRequestsPerHour'] as const)
-    .some((key) => edit.draft[feature][key] !== edit.initial[feature][key]));
+  const changed = LIMIT_FEATURES.some((feature) => EDITABLE_KEYS.some((key) => edit.draft[feature][key] !== edit.initial[feature][key]));
   let first = true;
   return <form className="admin-form" noValidate aria-describedby={hint} onSubmit={(event) => { event.preventDefault(); onReview(); }}>
     <p id={hint} className="muted">{t('admin.usdHint')}</p>
     {summary}
-    {LIMIT_FEATURES.filter((feature) => (['monthlyAllowanceMicro', 'maxRequestMicro', 'maxRequestsPerHour'] as const).some((key) => edit.base[feature][key] !== null))
+    {LIMIT_FEATURES.filter((feature) => EDITABLE_KEYS.some((key) => edit.base[feature][key] !== null))
       .map((feature) => <fieldset key={feature} className="admin-fieldset"><legend>{t(featureKey[feature])}</legend>
-        {(['monthlyAllowanceMicro', 'maxRequestMicro', 'maxRequestsPerHour'] as const).filter((key) => edit.base[feature][key] !== null).map((key) => {
+        {EDITABLE_KEYS.filter((key) => edit.base[feature][key] !== null).map((key) => {
           const field: LimitField = `${feature}.${key}`, input = `${id}-${feature}-${key}`, error = edit.errors[field];
           const ref = first ? firstField : undefined;
           first = false;
           return <div key={key} className="field">
-            <label htmlFor={input}>{t(keyLabel(feature, key))}</label>
+            <label htmlFor={input}>{t(keyLabel(key))}</label>
             <input ref={ref} id={input} inputMode={key === 'maxRequestsPerHour' ? 'numeric' : 'decimal'} autoComplete="off" value={edit.draft[feature][key]}
               aria-invalid={error ? true : undefined} aria-describedby={error ? `${input}-error` : undefined} disabled={saving}
               onChange={(event) => onChange({ ...edit.draft, [feature]: { ...edit.draft[feature], [key]: event.target.value } })} />
@@ -301,7 +299,7 @@ function ConfirmDialog({ number, changes, saving, language, t, onCancel, onConfi
     onCancel={(event) => { event.preventDefault(); if (!saving) onCancel(); }}>
     <h2 id={titleId}>{t('admin.confirmTitle', { number })}</h2>
     <ul className="admin-changes">{changes.map((change) => <li key={`${change.feature}.${change.key}`}>{t('admin.changeLine', {
-      label: `${t(featureKey[change.feature])}, ${t(keyLabel(change.feature, change.key))}`,
+      label: `${t(featureKey[change.feature])}, ${t(keyLabel(change.key))}`,
       from: valueText(change.key, change.from, language), to: valueText(change.key, change.to, language) })}</li>)}</ul>
     <div className="field"><label htmlFor={reasonId}>{t('admin.reason')}</label>
       <select id={reasonId} value={reason} disabled={saving} onChange={(event) => setReason(ADMIN_REASONS.find((entry) => entry === event.target.value) ?? '')}>
