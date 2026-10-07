@@ -5,6 +5,8 @@ isolated LOCAL implementation writers per approved packet, with one branch/PR
 each. The [owner model/lifecycle decision](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6036228105)
 supersedes older model pins and long-lived builder policy; see the
 [current policy](docs/cloud-development.md#model-and-session-policy---7-october-2026).
+This policy also supersedes the 1 October reviewer-model note in
+`docs/release-gates.md`; the ledger remains unedited as a historical record.
 The 24 Sep 2026 leaner process retains risk-tiered
 planning, one independent code review, simpler evidence and at most two
 implementation builders; see the

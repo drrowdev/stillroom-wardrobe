@@ -13,7 +13,9 @@ account credentials, photos, backups and local service state must never be publi
 The [owner decision on #84, comment 6036228105](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6036228105)
 controls model selection and session lifecycle. It supersedes older model pins
 and long-lived builder instructions in this guide and the root/Copilot
-instructions. Historical model names, decisions, reviews and receipts remain
+instructions. It also supersedes the 1 October reviewer-model note in
+[the release ledger](release-gates.md); the ledger remains unedited as a
+historical record. Historical model names, decisions, reviews and receipts remain
 evidence, not commands for new work. Other scope, authority, tooling, text-only,
 CI and merge gates remain unchanged.
 

@@ -9,6 +9,8 @@ builders), with one branch/PR each, under the
 [owner decision of 7 October 2026](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6036228105)
 and [current model/session policy](../docs/cloud-development.md#model-and-session-policy---7-october-2026).
 Older model pins and long-lived builder policy are superseded.
+This policy also supersedes the 1 October reviewer-model note in
+`docs/release-gates.md`; the ledger remains unedited as a historical record.
 Updated 24 Sep 2026 (owner decision): leaner
 process; see the [development guide](../docs/cloud-development.md#leaner-process---24-september-2026).
 No new cloud/native coding allocation, wrapper, retry
