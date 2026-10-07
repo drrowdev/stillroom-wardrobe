@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request, type Response, type TestInfo } from '@playwright/test';
 import { mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
@@ -14,6 +14,145 @@ import { openAccountMenu } from './shell-support';
 // and sampled pixel values read in the page. No image is looked at by the test author or the model.
 type Fixture = Awaited<ReturnType<typeof aiFixture>>;
 type Entry = Record<string, number | string>;
+type DiagnosticStage = 'seeded' | 'reloaded' | 'card-opened' | 'editor-ready' | 'finished';
+type DiagnosticTime = { elapsedMs: number; remainingBudgetEstimateMs: number };
+type DiagnosticEvent = DiagnosticTime & {
+  endpoint: 'collection-items' | 'detail-items' | 'item-images' | 'profile' | 'auth-user' | 'auth-token'
+    | 'other-fixture' | 'app-entry' | 'editor-module';
+  method: 'GET' | 'POST' | 'OPTIONS' | 'other';
+  lifecycle: 'requested' | 'responded' | 'finished' | 'failed';
+  status: 'none' | 'success' | 'client-error' | 'server-error' | 'other';
+};
+type DiagnosticSnapshot = DiagnosticTime & {
+  stage: DiagnosticStage; itemRows?: number; imageRows?: number;
+  route?: 'wardrobe' | 'detail' | 'other'; heading?: boolean; loading?: boolean; empty?: boolean; itemLink?: boolean;
+  detailLoading?: boolean; lazyLoading?: boolean; loadError?: boolean; edit?: boolean; input?: boolean;
+  login?: boolean; locked?: boolean; waiting?: boolean; captureError?: boolean; pageClosed?: boolean; sampleCompletedElapsedMs?: number;
+  sampleState: 'pending' | 'complete' | 'failed' | 'timed-out';
+};
+const replacementDiagnostics = new WeakMap<Page, ReturnType<typeof replacementDiagnostic>>();
+test.beforeEach(({ page }, info) => {
+  if (!info.title.startsWith('replace:') || info.project.name === 'mobile') return;
+  replacementDiagnostics.set(page, replacementDiagnostic(page, info));
+});
+function replacementDiagnostic(page: Page, info: TestInfo, sample?: () => Promise<{ heading: boolean }>) {
+  const events: DiagnosticEvent[] = [];
+  const snapshots: DiagnosticSnapshot[] = [], pending: Promise<void>[] = [];
+  const started = performance.now(), app = new URL(info.project.use.baseURL!).origin;
+  let truncated = 0, finalized = false, api: Fixture | undefined;
+  // This clock starts after Playwright's page fixture, not at the test's actual deadline.
+  const timing = (): DiagnosticTime => {
+    const elapsedMs = Math.round(performance.now() - started);
+    return { elapsedMs, remainingBudgetEstimateMs: Math.max(0, info.timeout - elapsedMs) };
+  };
+  const requestEvent = (request: Request, lifecycle: DiagnosticEvent['lifecycle'], status = 0) => {
+    const url = new URL(request.url());
+    const endpoint = url.origin === app
+      ? url.pathname === '/src/main.tsx' || request.isNavigationRequest() ? 'app-entry'
+        : url.pathname === '/src/features/wardrobe/item-editor.tsx' ? 'editor-module' : null
+      : url.origin !== 'http://127.0.0.1:54321' ? null
+        : url.pathname === '/rest/v1/items' ? url.searchParams.has('id') ? 'detail-items' : 'collection-items'
+          : url.pathname === '/rest/v1/item_images' ? 'item-images'
+            : url.pathname === '/rest/v1/profiles' ? 'profile'
+              : url.pathname === '/auth/v1/user' ? 'auth-user'
+                : url.pathname === '/auth/v1/token' ? 'auth-token' : 'other-fixture';
+    if (!endpoint) return;
+    const method = request.method();
+    if (events.length === 40) { events.shift(); truncated++; }
+    events.push({ ...timing(), endpoint, method: method === 'GET' || method === 'POST' || method === 'OPTIONS' ? method : 'other', lifecycle,
+      status: status === 0 ? 'none' : status >= 200 && status < 300 ? 'success'
+        : status >= 400 && status < 500 ? 'client-error' : status >= 500 && status < 600 ? 'server-error' : 'other' });
+  };
+  const requested = (request: Request) => requestEvent(request, 'requested');
+  const responded = (response: Response) => requestEvent(response.request(), 'responded', response.status());
+  const finished = (request: Request) => requestEvent(request, 'finished');
+  const failed = (request: Request) => requestEvent(request, 'failed');
+  page.on('request', requested); page.on('response', responded);
+  page.on('requestfinished', finished); page.on('requestfailed', failed);
+  return {
+    capture(stage: DiagnosticStage, fixture?: Fixture) {
+      if (finalized) return;
+      api = fixture ?? api;
+      if (snapshots.length === 10) { truncated++; return; }
+      const snapshot: DiagnosticSnapshot = { ...timing(), stage, sampleState: 'pending', itemRows: api?.items.length, imageRows: api?.images.length };
+      snapshots.push(snapshot);
+      pending.push((sample ? sample() : page.evaluate(() => {
+        const visible = (selector: string) => Array.from(document.querySelectorAll(selector))
+          .some(element => element.getClientRects().length > 0 && getComputedStyle(element).visibility === 'visible');
+        return {
+          route: location.hash.startsWith('#/items/') ? 'detail' as const
+            : location.hash === '' || location.hash === '#/' ? 'wardrobe' as const : 'other' as const,
+          heading: visible('#wardrobe-title'), loading: visible('.item-grid[aria-busy=true]'), empty: visible('.empty-wardrobe'),
+          itemLink: visible('.item-detail-link'), detailLoading: visible('.detail-page > p[role=status]'),
+          lazyLoading: visible('.chunk-loading'), loadError: visible('.notice-error,.chunk-error'),
+          edit: visible('#detail-edit'), input: visible('#detail-title'), login: visible('#email'),
+          locked: visible('.entry-card > .stack'), waiting: visible('#waiting-title'),
+        };
+      })).then(state => {
+        if (!finalized) Object.assign(snapshot, state, { sampleState: 'complete', sampleCompletedElapsedMs: timing().elapsedMs });
+      }, () => {
+        if (finalized) return;
+        snapshot.sampleState = 'failed'; snapshot.captureError = true;
+        snapshot.pageClosed = page.isClosed(); snapshot.sampleCompletedElapsedMs = timing().elapsedMs;
+      }));
+    },
+    async finish() {
+      page.off('request', requested); page.off('response', responded);
+      page.off('requestfinished', finished); page.off('requestfailed', failed);
+      const finalize = () => {
+        finalized = true;
+        const unsettledSamples = snapshots.filter(snapshot => snapshot.sampleState === 'pending').length;
+        for (const snapshot of snapshots) if (snapshot.sampleState === 'pending') snapshot.sampleState = 'timed-out';
+        const unsuccessful = info.status !== 'passed' && info.status !== 'skipped';
+        return {
+          budgetOrigin: 'diagnostic-start-estimate', ...timing(), truncated,
+          retainedNetworkEvents: events.length, retainedSnapshots: snapshots.length,
+          unavailableSnapshots: snapshots.filter(snapshot => snapshot.captureError).length,
+          sampleTimedOut: unsettledSamples > 0, unsettledSamples,
+          ...(unsuccessful || unsettledSamples > 0 ? { events: events.map(event => ({ ...event })), snapshots: snapshots.map(snapshot => ({ ...snapshot })) } : {}),
+        };
+      };
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let report: ReturnType<typeof finalize>;
+      try {
+        await Promise.race([
+          Promise.all(pending),
+          new Promise<void>(resolve => { timer = setTimeout(resolve, 2000); }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+        report = finalize();
+        console.log('Replacement startup diagnostic', JSON.stringify(report));
+      }
+      return report;
+    },
+  };
+}
+test.afterEach(async ({ page }) => {
+  const diagnostic = replacementDiagnostics.get(page);
+  if (!diagnostic) return;
+  diagnostic.capture('finished');
+  try { await diagnostic.finish(); } finally { replacementDiagnostics.delete(page); }
+});
+test('diagnostic collector: replacement teardown bounds stalled samples and seals late results', async ({ page }, info) => {
+  let resolveSample!: (state: { heading: boolean }) => void;
+  const stalled = replacementDiagnostic(page, info, () => new Promise(resolve => { resolveSample = resolve; }));
+  stalled.capture('finished');
+  const report = await stalled.finish();
+  expect(report).toMatchObject({ sampleTimedOut: true, unsettledSamples: 1, retainedSnapshots: 1, unavailableSnapshots: 0 });
+  expect(report.snapshots?.[0]).toMatchObject({ sampleState: 'timed-out' });
+  expect(report.snapshots?.[0]).not.toHaveProperty('heading');
+  const sealed = JSON.stringify(report);
+  resolveSample({ heading: true });
+  await Promise.resolve();
+  expect(JSON.stringify(report)).toBe(sealed);
+  const ready = replacementDiagnostic(page, info, () => Promise.resolve({ heading: true }));
+  ready.capture('finished');
+  expect(await ready.finish()).toMatchObject({ sampleTimedOut: false, unsettledSamples: 0, unavailableSnapshots: 0, retainedSnapshots: 1 });
+  const rejected = replacementDiagnostic(page, info, () => Promise.reject(new Error('Synthetic diagnostic sample failure.')));
+  rejected.capture('finished');
+  expect(await rejected.finish()).toMatchObject({ sampleTimedOut: false, unsettledSamples: 0, unavailableSnapshots: 1 });
+});
 const text = (key: keyof typeof messages, language: Language = 'en') => messages[key][language];
 const FILL = [246, 243, 237];
 
@@ -431,10 +570,14 @@ async function openFlow(page: Page, api: Fixture, flow: keyof typeof flows) {
   if (flow === 'add') { await openAdd(page); return null; }
   const saved = api.seedSavedItem();
   const before = { item: structuredClone(saved.item), image: structuredClone(saved.image), images: api.images.length };
+  replacementDiagnostics.get(page)?.capture('seeded', api);
   await page.reload();
+  replacementDiagnostics.get(page)?.capture('reloaded');
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+  replacementDiagnostics.get(page)?.capture('card-opened');
   await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
+  replacementDiagnostics.get(page)?.capture('editor-ready');
   await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
   await page.locator('#detail-cancel-edit').click();
   await openPhotoMenu(page);
