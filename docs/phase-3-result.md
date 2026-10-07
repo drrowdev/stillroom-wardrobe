@@ -1,5 +1,10 @@
 # Phase 3 — I11 outfits: create, name, edit and view
 
+The I11 implementation report below preserves its original source-worker
+observations and then-pending gates. Later merged/deployed evidence is in
+[the release ledger](release-gates.md) (E10/D2); the dated OUTFIT1 completion
+update at the end records the current extension without rewriting that history.
+
 **Implemented locally and left unstaged for coordinator review. This is not a
 merge, deployment or user acceptance.** The browser, unit and static checks
 listed below passed on the local machine. The real local Supabase integration
@@ -173,6 +178,10 @@ native-device claim.
 
 ## OUTFIT1 - outfit Trash lifecycle, 7 October 2026
 
+The source-worker report and pending observations in this section are retained
+as dated history. See [the completion update](#outfit1-completion-update---7-october-2026)
+for subsequent review, CI, installation and publication evidence.
+
 This source packet extends the historical I11 result above; it is not a
 merge, hosted installation, deployment, visual approval or owner acceptance.
 The owner requested both individual and multi-select removal, with Undo and
@@ -313,3 +322,52 @@ lost-wear/navigation, confirmed-missing Start over, Trash Restore/delete
 guards and label-layout assertions, passed51 tests.
 Final committed-head regeneration, actual visual re-review, the same
 reviewer's bounded delta check and full fresh CI remain required.
+
+### OUTFIT1 completion update - 7 October 2026
+
+**Engineering merged, hosted structure installed and app published; normal-owner
+acceptance remains open.** [PR #174](https://github.com/drrowdev/stillroom-wardrobe/pull/174)
+final head `598b50819ca7e458072c40c79122676543f89920` was guarded-squash merged
+as `eedc4d008e68aa2ce412a07258008148bb73fe15`.
+The [coordinator merge receipt](https://github.com/drrowdev/stillroom-wardrobe/pull/174#issuecomment-6038632703)
+records independent Opus 5.5/high full review plus the same reviewer's bounded
+repair check APPROVE, actual review of all ten final-head synthetic captures
+PASS, exact-head [CI 37623795382](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/37623795382)
+and [Apple 37623795309](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/37623795309)
+SUCCESS. CI includes real local integration/security, genuine type parity and
+the running/expired try-on fixture probe. Documentation checks was intentionally
+skipped, not run. The original local failures and not-run backend checks above
+remain historical evidence, not silently converted to local passes.
+
+The separately [owner-approved hosted installation](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6039023712)
+maps source `20261007090000_outfit_lifecycle.sql` to hosted
+`20261007132943_outfit_lifecycle` (ledger 30). Stored migration/function bodies,
+authenticated-only grants, security definer, empty search path and two-second
+lock timeout matched Git. Structural verification did not read private rows
+or invoke hosted lifecycle RPCs; it is not normal-owner acceptance.
+
+R5 subsequently included test-only #175, making candidate
+`e0399184f1351c4c39b990a1c61c1940437d2c79`. It changes two browser specs,
+not outfit product behavior. Its bounded diagnostics and held-response
+regressions are maintained coverage, **not a causal fix** for the earlier
+WebKit stalls. The full Opus review requested a collector watchdog repair;
+a distinct bounded delta reviewer approved that repair and later merge as
+coverage because the synchronous full reviewer could not resume.
+The [review/merge receipts](https://github.com/drrowdev/stillroom-wardrobe/pull/175#issuecomment-6041666258)
+preserve that attribution and the owner's explicit acceptance of unexplained
+risk with strict normal release checks.
+
+The [R5 engineering receipt](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6042149672)
+records exact-C main CI 37648354775 and Apple 37648452447, attempt 1 SUCCESS.
+After separate publication approval, the owner published D20,
+`8786abdf-d020-45a9-b0d2-8962efc6ecb3`, reported at 17:24:36 UTC.
+[Public readback](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6043247098)
+verified served app `e0399184`, assets/catalogues, security/cache headers
+and approved binaries. No Edge redeploy or provider call occurred.
+The R5-only comparison establishes deployed source equivalence, not unknown
+hosted-settings history. Documentation-only updates leave that app deployed.
+
+Remaining: normal-owner individual/bulk outfit Trash and Undo, reload/Restore,
+permanent deletion and retained calendar/wear history checks (ledger O14).
+Other pending owner/device acceptance, including BULK2, BULK1 and O1, is not
+closed by CI, synthetic visual review, structural installation or publication.
