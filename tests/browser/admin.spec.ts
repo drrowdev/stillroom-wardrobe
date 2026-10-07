@@ -141,15 +141,17 @@ test.describe('AD1b admin spending and limits', () => {
     // Setup holds appear only inside Details, apart from this month's figures and the current use.
     await expect(details(page, 1).locator('p.stats-note')).toHaveText([probe('admin.enhancement', '$0.26'), probe('admin.tryOn', '$1.80')]);
     await expect(account(page, 1).locator('p.stats-note')).toHaveCount(3);
-    await expect(row(page, 1, 'admin.tryOn', 1).locator('td')).toHaveText(['$8.00', '$0.36', '6']);
-    await expect(row(page, 2, 'admin.tryOn', 1).locator('td')).toHaveText(['–', '–', '–']);
+    // The limits show only the monthly limit and requests per hour; the per-request amounts are not shown anywhere.
+    await expect(account(page, 1).locator('table').nth(1).locator('thead th')).toHaveText([text('admin.feature'), text('admin.monthly'), text('admin.perHour')]);
+    await expect(account(page, 1).locator('table').first().locator('thead th').nth(3)).toHaveText('In progress');
+    await expect(row(page, 1, 'admin.tryOn', 1).locator('td')).toHaveText(['$8.00', '6']);
+    await expect(row(page, 2, 'admin.tryOn', 1).locator('td')).toHaveText(['–', '–']);
     await expect(account(page, 2).locator('.admin-use')).toContainText(text('admin.notSetUp'));
     await expect(account(page, 2)).not.toContainText(probe('admin.enhancement', '').split(',')[0]!);
-    // The shared per-request value is the tagging reservation, and says so at every width.
-    await expect(row(page, 1, 'admin.allFeatures', 1).locator('td')).toHaveText(['$20.00', `$4.097351${text('admin.taggingReservation')}`, '30']);
-    await expect(row(page, 1, 'admin.allFeatures', 1).getByText(text('admin.taggingReservation'), { exact: true })).toBeVisible();
-    await expect(row(page, 1, 'admin.stylist', 1).locator('td')).toHaveText(['$5.00', '$0.12936', '20']);
-    await expect(row(page, 2, 'admin.enhancement', 1).locator('td')).toHaveText(['–', '–', '–']);
+    await expect(row(page, 1, 'admin.allFeatures', 1).locator('td')).toHaveText(['$20.00', '30']);
+    await expect(row(page, 1, 'admin.stylist', 1).locator('td')).toHaveText(['$5.00', '20']);
+    await expect(row(page, 2, 'admin.enhancement', 1).locator('td')).toHaveText(['–', '–']);
+    for (const hidden of ['$4.097351', '$0.12936', '$0.36']) await expect(account(page, 1).locator('table').nth(1)).not.toContainText(hidden);
     const body = await page.locator('body').innerText();
     expect(body).not.toMatch(/@example|user-[ab]|10000000-0000|a{63}|b{63}/);
     // An earlier month shows that month only; the current block stays on this month.
@@ -177,8 +179,10 @@ test.describe('AD1b admin spending and limits', () => {
     await openScreen(page);
     await edit(page, 2);
     await expect(field(page, 2, 'shared', 'monthlyAllowanceMicro')).toBeFocused();
-    await expect(field(page, 2, 'shared', 'maxRequestMicro')).toHaveValue('4.097351');
-    await expect(field(page, 2, 'stylist', 'maxRequestMicro')).toHaveValue('0.12936');
+    // Only the monthly limit and requests per hour are offered; the per-request amounts are not fields.
+    await expect(account(page, 2).locator('form label')).toHaveText([text('admin.monthly'), text('admin.perHour'), text('admin.monthly'), text('admin.perHour')]);
+    await expect(account(page, 2).locator('form input[id$="-maxRequestMicro"]')).toHaveCount(0);
+    await expect(account(page, 2).locator('form')).not.toContainText(/4[.,]097351|0[.,]12936/);
     await expect(field(page, 2, 'enhancement', 'monthlyAllowanceMicro')).toHaveCount(0);
     await expect(button(account(page, 2), 'admin.review')).toBeDisabled();
     await axe(page);
@@ -192,11 +196,13 @@ test.describe('AD1b admin spending and limits', () => {
     await button(dialog(page), 'admin.confirm').click();
     await expect(page.getByText(text('admin.saved'), { exact: true })).toBeVisible();
     await expect(page.getByText(text('admin.saved'), { exact: true })).toBeFocused();
+    // Every per-request value is sent exactly as read.
     const initial = adminStartLimits()[2]!;
     expect(api.adminControl.writes).toEqual([{ owner: owners.a, body: {
       p_admission_no: 2, p_account_version: `${'b'.repeat(63)}1`, p_expected: initial,
       p_limits: { ...initial, stylist: { ...initial.stylist, monthlyAllowanceMicro: '3000000' } }, p_reason_code: 'RAISE' } }]);
-    await expect(row(page, 2, 'admin.stylist', 1).locator('td')).toHaveText(['$3.00', '$0.12936', '20']);
+    expect(api.adminControl.writes[0]!.body.p_limits).toMatchObject({ shared: { maxRequestMicro: '4097351' }, stylist: { maxRequestMicro: '129360' } });
+    await expect(row(page, 2, 'admin.stylist', 1).locator('td')).toHaveText(['$3.00', '20']);
     await expect(account(page, 2).locator('form')).toHaveCount(0);
   });
 
@@ -204,7 +210,6 @@ test.describe('AD1b admin spending and limits', () => {
     const api = await start(page);
     await openScreen(page);
     await edit(page, 1);
-    await expect(field(page, 1, 'tryOn', 'maxRequestMicro')).toHaveValue('0.36');
     await expect(account(page, 1).getByRole('group', { name: text('admin.tryOn'), exact: true })).toBeVisible();
     await field(page, 1, 'tryOn', 'monthlyAllowanceMicro').fill('21');
     await button(account(page, 1), 'admin.review').click();
@@ -220,7 +225,7 @@ test.describe('AD1b admin spending and limits', () => {
     expect(api.adminControl.writes).toEqual([{ owner: owners.a, body: {
       p_admission_no: 1, p_account_version: `${'a'.repeat(63)}1`, p_expected: initial,
       p_limits: { ...initial, tryOn: { monthlyAllowanceMicro: '6000000', maxRequestMicro: '360000', maxRequestsPerHour: 4 } } } }]);
-    await expect(row(page, 1, 'admin.tryOn', 1).locator('td')).toHaveText(['$6.00', '$0.36', '4']);
+    await expect(row(page, 1, 'admin.tryOn', 1).locator('td')).toHaveText(['$6.00', '4']);
   });
 
   test('cancelling the confirmation returns to the form and sends nothing', async ({ page }) => {
@@ -254,13 +259,18 @@ test.describe('AD1b admin spending and limits', () => {
     await edit(page, 1);
     await field(page, 1, 'shared', 'monthlyAllowanceMicro').fill('50.000001');
     await field(page, 1, 'stylist', 'maxRequestsPerHour').fill('1001');
-    await field(page, 1, 'enhancement', 'maxRequestMicro').fill('1,5');
+    await field(page, 1, 'enhancement', 'monthlyAllowanceMicro').fill('1,5');
     await button(account(page, 1), 'admin.review').click();
     await expect(account(page, 1).getByRole('alert')).toHaveText(text('admin.invalid'));
     await expect(account(page, 1).getByRole('alert')).toBeFocused();
-    await expect(field(page, 1, 'enhancement', 'maxRequestMicro')).toHaveAttribute('aria-invalid', 'true');
-    await expect(page.locator('#admin-account-1-enhancement-maxRequestMicro-error')).toHaveText(text('admin.errFormat'));
-    await field(page, 1, 'enhancement', 'maxRequestMicro').fill('0.15');
+    await expect(field(page, 1, 'enhancement', 'monthlyAllowanceMicro')).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.locator('#admin-account-1-enhancement-monthlyAllowanceMicro-error')).toHaveText(text('admin.errFormat'));
+    // A monthly limit below the hidden per-request amount (0.15) is reported on the monthly limit.
+    await field(page, 1, 'enhancement', 'monthlyAllowanceMicro').fill('0.1');
+    await button(account(page, 1), 'admin.review').click();
+    await expect(page.locator('#admin-account-1-enhancement-monthlyAllowanceMicro-error')).toHaveText(text('admin.belowMinimum'));
+    await expect(field(page, 1, 'enhancement', 'monthlyAllowanceMicro')).toHaveAttribute('aria-invalid', 'true');
+    await field(page, 1, 'enhancement', 'monthlyAllowanceMicro').fill('2');
     await button(account(page, 1), 'admin.review').click();
     await expect(page.locator('#admin-account-1-shared-monthlyAllowanceMicro-error')).toHaveText(text('admin.overAppLimit'));
     await expect(page.locator('#admin-account-1-stylist-maxRequestsPerHour-error')).toHaveText(text('admin.errHour'));
@@ -283,16 +293,32 @@ test.describe('AD1b admin spending and limits', () => {
   test('shows the server refusal against its field', async ({ page }) => {
     const api = await start(page);
     await openScreen(page);
-    api.adminControl.writeReplies.push({ status: 200, body: { code: 'INVALID_LIMITS', field: 'stylist.maxRequestMicro', reason: 'BELOW_RESERVATION' } });
+    api.adminControl.writeReplies.push({ status: 200, body: { code: 'INVALID_LIMITS', field: 'stylist.maxRequestsPerHour', reason: 'RANGE' } });
     await edit(page, 1);
-    await field(page, 1, 'stylist', 'maxRequestMicro').fill('0.1');
+    await field(page, 1, 'stylist', 'maxRequestsPerHour').fill('25');
     await button(account(page, 1), 'admin.review').click();
     await button(dialog(page), 'admin.confirm').click();
-    await expect(page.locator('#admin-account-1-stylist-maxRequestMicro-error')).toHaveText(text('admin.belowMinimum'));
-    await expect(field(page, 1, 'stylist', 'maxRequestMicro')).toHaveAttribute('aria-invalid', 'true');
-    await expect(field(page, 1, 'stylist', 'maxRequestMicro')).toHaveValue('0.1');
+    await expect(page.locator('#admin-account-1-stylist-maxRequestsPerHour-error')).toHaveText(text('admin.errHour'));
+    await expect(field(page, 1, 'stylist', 'maxRequestsPerHour')).toHaveAttribute('aria-invalid', 'true');
+    await expect(field(page, 1, 'stylist', 'maxRequestsPerHour')).toHaveValue('25');
     await expect(account(page, 1).getByRole('alert')).toBeFocused();
     await writes(api, 1);
+  });
+
+  test('a server refusal of the hidden per-request amount is shown on the monthly limit', async ({ page }) => {
+    const api = await start(page);
+    await openScreen(page);
+    api.adminControl.writeReplies.push({ status: 200, body: { code: 'INVALID_LIMITS', field: 'stylist.maxRequestMicro', reason: 'BELOW_RESERVATION' } });
+    await edit(page, 1);
+    await field(page, 1, 'stylist', 'monthlyAllowanceMicro').fill('0.2');
+    await button(account(page, 1), 'admin.review').click();
+    await button(dialog(page), 'admin.confirm').click();
+    await expect(page.locator('#admin-account-1-stylist-monthlyAllowanceMicro-error')).toHaveText(text('admin.belowMinimum'));
+    await expect(field(page, 1, 'stylist', 'monthlyAllowanceMicro')).toHaveAttribute('aria-invalid', 'true');
+    await expect(field(page, 1, 'stylist', 'monthlyAllowanceMicro')).toHaveValue('0.2');
+    await expect(account(page, 1).getByRole('alert')).toBeFocused();
+    await writes(api, 1);
+    expect(api.adminControl.writes[0]!.body.p_limits).toMatchObject({ stylist: { monthlyAllowanceMicro: '200000', maxRequestMicro: '129360' } });
   });
 
   test('warns when the new limit is below this month\'s use', async ({ page }) => {
@@ -321,7 +347,7 @@ test.describe('AD1b admin spending and limits', () => {
     await expect(account(page, 2).getByRole('alert')).toBeFocused();
     await expect(details(page, 2)).not.toHaveAttribute('open');
     await expect(account(page, 2).locator('form')).toHaveCount(0);
-    await expect(row(page, 2, 'admin.allFeatures', 1).locator('td')).toHaveText(['$12.00', `$4.097351${text('admin.taggingReservation')}`, '30']);
+    await expect(row(page, 2, 'admin.allFeatures', 1).locator('td')).toHaveText(['$12.00', '30']);
     await expect(button(account(page, 2), 'admin.edit')).toBeEnabled();
     expect(api.adminControl.limits[2]?.shared.maxRequestsPerHour).toBe(30);
   });
@@ -355,7 +381,7 @@ test.describe('AD1b admin spending and limits', () => {
     await expect(account(page, 1).getByRole('alert')).toHaveText(text('admin.unknown'));
     expect(api.adminControl.limits[1]!.shared.maxRequestsPerHour).toBe(31);
   }
-  const hourCell = (page: Page) => row(page, 1, 'admin.allFeatures', 1).locator('td').nth(2);
+  const hourCell = (page: Page) => row(page, 1, 'admin.allFeatures', 1).locator('td').nth(1);
 
   test('after a lost reply, editing waits until a fresh read has arrived', async ({ page }) => {
     const api = await start(page);
