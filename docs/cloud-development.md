@@ -1,25 +1,53 @@
 # GitHub Copilot cloud development
 
-Development now uses persistent isolated LOCAL implementation writers (at most
-two builders, one writer per branch; updated 24 September 2026) against
+Development now uses fresh isolated LOCAL implementation writers per approved
+packet (at most two builders, one writer per branch; updated 7 October 2026) against
 `drrowdev/stillroom-wardrobe`. No new cloud/native coding
 allocation, wrapper, retry or automatic fallback is authorized. GitHub Actions
 remains CI, not a coding agent. This historical title/path and all existing
 headings/anchors remain for evidence-link compatibility. Source is public;
 account credentials, photos, backups and local service state must never be published.
 
+## Model and session policy - 7 October 2026
+
+The [owner decision on #84, comment 6036228105](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6036228105)
+controls model selection and session lifecycle. It supersedes older model pins
+and long-lived builder instructions in this guide and the root/Copilot
+instructions. Historical model names, decisions, reviews and receipts remain
+evidence, not commands for new work. Other scope, authority, tooling, text-only,
+CI and merge gates remain unchanged.
+
+* **Coordinator:** OpenAI GPT-6.1 Sol (`gpt-6.1-sol`), with compact context below
+  272K tokens. Before context grows too large, publish a compact handover on #84
+  and ask the owner for a fresh coordinator session.
+* **Builders:** a fresh isolated LOCAL OpenAI GPT-6.1 Sol (`gpt-6.1-sol`) session
+  per approved packet, with `reasoning_effort: medium`; at most two concurrent.
+  Start read-only in plan mode; coordinator approval permits autopilot. Keep the
+  same session/model/source for routine scoped corrections. After the packet's
+  PR merges, the coordinator archives its builder; do not reuse it for another
+  packet. Retired long-lived builders stay retired.
+* **Reviewers:** read-only Anthropic Claude Opus 5.5 (`claude-opus-5.5`) task
+  agents with high reasoning, a different provider from the builders.
+  Use `rubber-duck` for required plan critiques and `code-review` for code
+  reviews. The coordinator obtains the independent review; writers never
+  launch agents or review themselves.
+* **Never use GPT-6 Astra for new work.** Its historical reviews remain
+  evidence. Required models must be available and verified; no Auto or fallback.
+
 ## Leaner process - 24 September 2026
 
 Updated 24 Sep 2026 (owner decision): leaner process. The owner approved it in
 the coordinator session on 24 September 2026 at about 18:10Z. Where older text
-in this guide or the root instructions conflicts, this section wins. Historical
+in this guide or the root instructions conflicts, this section wins except for
+the controlling 7 October model/session policy above. Historical
 PR, comment and receipt references stay as evidence.
 
 **Planning by risk tier.**
 
 * **Tier A**: database schema or hosted database changes, AI/provider/cost/consent,
   auth/security/privacy, deletion/data integrity, and CI infrastructure. Write a
-  plan and get ONE read-only GPT-6 Astra plan critique. The coordinator applies
+  plan and get ONE read-only Anthropic Claude Opus 5.5 plan critique using a
+  `rubber-duck` task agent with high reasoning. The coordinator applies
   its findings as binding amendments and approves. There is no second review
   round unless scope, authority or behaviour changes materially.
 * **Tier B**: UI, copy, docs, tests and small features without schema changes.
@@ -32,8 +60,9 @@ PR, comment and receipt references stay as evidence.
   short approach in the PR body, and the PR records it with the code review
   below. Everything else is unchanged.
 
-**Code review.** Every change gets ONE read-only GPT-6 Astra code review before
-merge. A repair of its findings gets a quick delta check only when the fix is
+**Code review.** Every change gets ONE read-only Anthropic Claude Opus 5.5 code
+review using a `code-review` task agent with high reasoning before merge.
+A repair of its findings gets a quick delta check only when the fix is
 non-trivial. The coordinator reviews routine CI fixes inside an approved packet.
 
 **Evidence.** Keep the PR description (scope, validation, what is pending), the
@@ -64,9 +93,10 @@ AI and provider changes still need their own owner approval.
 **Unchanged.** Owner isolation and privacy rules; no secrets in the app, bundle
 or logs; hosted mutations only with owner approval; merge guards
 (`--match-head-commit`, no `--auto` or `--admin`, no self-approval); one writer
-per branch; at most two implementation builders; model policy: Claude Opus 5.5
-builds, GPT-6 Astra critiques and reviews
-([PR #32 comment 5795033115](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5795033115)).
+per branch; at most two implementation builders. Model/session policy follows
+the controlling 7 October section above; the
+[23 September model decision](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5795033115)
+is superseded historical evidence.
 Text-only builders, local tooling rules and no cloud coding allocation also
 stay as below.
 
@@ -76,21 +106,25 @@ The [user decision at 2026-09-11T12:49:58.200Z](https://github.com/drrowdev/stil
 and [actual different-provider critique/coordinator-approved cutover](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634938691)
 supersede the former cloud default and two-cloud-builder allowance. Keep one
 approved packet/branch/PR and one writer per workspace. Routine scoped repairs
-stay in the same persistent local session. Genuine read-only review remains
+stay in the same packet's local session; fresh sessions per packet and archival
+after merge follow the 7 October policy above. Genuine read-only review remains
 separate; workers never launch another agent or packet. Never implement in the
 main checkout or the coordinator's old read-only checkout. The coordinator
 records owned files, dependencies and shared-resource owners before assignment;
 do not stop, reset or mutate unrelated services.
 
-Explicitly select **Anthropic Claude Opus 5.5 (`claude-opus-5.5`)** for each new
-local implementation builder, per the
-[owner decision of 23 September 2026](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5795033115).
-Required different-provider critique, rubber-duck and review work uses **OpenAI
-GPT-6 Astra (`gpt-6-astra`)**, read-only. Sessions held before that decision keep
-their recorded models and results; for example, PR #32's GPT-6 Astra writer keeps
-its Anthropic Claude Opus 5 review. A model name in a prompt is not proof. The
-owner reconfirmed GPT-6 Astra for critique and rubber-duck work in the
-coordinator session on 23 September 2026 at about 12:49Z; public copy in
+Explicitly select **OpenAI GPT-6.1 Sol (`gpt-6.1-sol`)** with
+`reasoning_effort: medium` for each fresh isolated LOCAL builder session per
+approved packet. Required different-provider review uses **Anthropic Claude
+Opus 5.5 (`claude-opus-5.5`)**, high reasoning, read-only task agents:
+`rubber-duck` for required plan critiques and `code-review` for code reviews.
+Never use GPT-6 Astra for new work.
+The [23 September model decision](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5795033115)
+is superseded by the 7 October policy. Historical sessions retain their recorded
+models and results; for example, PR #32's GPT-6 Astra writer and Anthropic Claude
+Opus 5 review remain evidence, not reusable builders. A model name in a prompt
+is not proof. The owner's 23 September reconfirmation of GPT-6 Astra for critique
+and rubber-duck work is also superseded historical evidence; public copy in
 [`5815445262`](https://github.com/drrowdev/stillroom-wardrobe/pull/37#issuecomment-5815445262).
 Start each local implementation
 session read-only (plan mode) for the planning step; the coordinator's plan
@@ -147,7 +181,7 @@ They prove only that fixture scope. Real recovery through integration and
 `playwright.local.config.ts`, or other real-backend browser selections, need the
 owned working stack. Inspect intended daemon/project/port ownership before setup.
 
-The tiered plan critique and the one GPT-6 Astra code review (leaner process
+The tiered plan critique and the one Anthropic Claude Opus 5.5 code review (leaner process
 above), all required exact-head CI jobs, coordinator visual review of UI
 captures and normal merge protections remain mandatory. Builders run the local
 subset listed above; the full suites run in CI. Unavailable review is not a pass.
@@ -1464,7 +1498,7 @@ I10a-D maintenance is deferred, not passed; I22 owner-prefix deletion is still
 required in Phase 6. Deletion promises logical native removal/reconciliation and
 durable publication fencing, not physical erasure or provider-remnant deadlines.
 
-Delivery uses the persistent isolated local writers and the model-check contract
+Delivery uses fresh isolated local writers per approved packet and the model-check contract
 above, not cloud/native allocation or historical setup/intake authority.
 The dated PR #2 handoff, PR #3 recovery and completed I06/PR #7 restrictions
 remain historical evidence. Current ordered development follows the specific
@@ -1498,8 +1532,9 @@ Before every implementation packet:
    PR body/discussion/diff/reviews and CI job logs. Record exact base/head,
    files actually consulted and unresolved gates.
 2. Write a plan before edits, tiered as in the leaner process above (updated
-   24 September 2026). Tier A gets ONE read-only OpenAI GPT-6 Astra
-   (`gpt-6-astra`) plan critique; record provider/model and findings, which the
+   24 September 2026, model policy updated 7 October). Tier A gets ONE read-only
+   Anthropic Claude Opus 5.5 (`claude-opus-5.5`) plan critique using a
+   `rubber-duck` task agent with high reasoning; record provider/model and findings, which the
    coordinator applies as binding amendments before approving. Tier B gets a
    short plan approved directly by the coordinator. The
    historical I06 plan/amendment and actual **Anthropic Claude Opus 5** critiques
@@ -1507,9 +1542,10 @@ Before every implementation packet:
    `5560449572`/`5560847183` also remain
    historical evidence, not current-packet approval. Automated validation/self-review is
    supplemental, not that prereview; do not invent a native review tool.
-3. Explicitly select **Anthropic Claude Opus 5.5 (`claude-opus-5.5`)** and enter
-   each new local implementation session read-only (plan mode) for planning
-   only (owner decision `5795033115`). The coordinator's plan approval is the
+3. Explicitly select **OpenAI GPT-6.1 Sol (`gpt-6.1-sol`)** with
+   `reasoning_effort: medium` and enter each fresh isolated LOCAL implementation
+   session per approved packet read-only (plan mode) for planning
+   only (owner decision `6036228105`). The coordinator's plan approval is the
    edit permission; the builder then runs in autopilot. The coordinator checks
    the builder's OWN actual model usage in session logs against the
    app/CLI/repo/workspace/branch, base head and scope and notes it in the merge
@@ -1519,12 +1555,13 @@ Before every implementation packet:
    unverified implementation. A material amendment to a Tier A plan (scope,
    allowed files, authority or behaviour) gets another critique; routine
    corrections do not. Stop if the required model or reviewer is unavailable.
-4. Keep persistent isolated LOCAL implementation writers: at most two
+4. Use fresh isolated LOCAL implementation writers per approved packet: at most two
    implementation builders, one writer per workspace/branch/PR and one focused
    approved packet per writer, with genuine on-demand read-only review. The
    former two-cloud-builder allowance is superseded historical policy. Routine
    scoped failures stay in
-   the same session; no main/coordinator-checkout implementation. Before
+   the same session; after its PR merges, the coordinator archives the builder.
+   Retired long-lived builders stay retired. No main/coordinator-checkout implementation. Before
    assignment, the coordinator names the packet/branch, owned files, dependencies
    and shared mutable-resource owners. Never concurrently mutate the same branch
    or unrelated/shared host resources. The corrected common-base prerequisite
@@ -1538,7 +1575,8 @@ Before every implementation packet:
 5. Report exact validation commands/results, what was not run, and fresh-head
    CI status. Builders run lint, typecheck, check:translations, unit tests and
    affected browser specs; CI runs the full suites. Every change gets one
-   read-only GPT-6 Astra code review before merge.
+   read-only Anthropic Claude Opus 5.5 code review using a `code-review` task
+   agent with high reasoning before merge.
    Coordinator authorization governs CI reruns/approval; do not bypass it.
    Physical-phone/Safari, camera/library, VoiceOver and TalkBack acceptance
    remains a human gate, not something Chromium emulation or axe proves.
